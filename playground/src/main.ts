@@ -45,6 +45,10 @@ const snippetDescriptionInput = document.getElementById("snippetDescription") as
 const snippetTagsInput = document.getElementById("snippetTags") as HTMLInputElement;
 const toastEl = document.getElementById("toast") as HTMLElement;
 const openFullBtn = document.getElementById("openFullBtn") as HTMLAnchorElement;
+const menuBtn = document.getElementById("menuBtn") as HTMLButtonElement;
+const actionsMenu = document.getElementById("actionsMenu") as HTMLElement;
+const modeCodeBtn = document.getElementById("modeCodeBtn") as HTMLButtonElement;
+const modeSceneBtn = document.getElementById("modeSceneBtn") as HTMLButtonElement;
 
 // Embed mode (`?embed=runner|split`) hosts the playground inside another page and
 // exposes a postMessage API. `null` when running as the standalone app.
@@ -323,6 +327,59 @@ examplesEl.addEventListener("change", () => {
 });
 
 runBtn.addEventListener("click", () => void run());
+
+// --- Mobile chrome: hamburger menu + Code/Scene view toggle ------------------
+// On narrow screens the toolbar actions collapse into a dropdown, and the
+// side-by-side split becomes a single pane that switches between editing the
+// code and viewing the scene. Both are driven by classes on <body>; the CSS
+// media query decides whether they have any visual effect.
+
+const MODE_KEY = "bl-pg-mode";
+
+function closeMenu(): void {
+    document.body.classList.remove("menu-open");
+    menuBtn.setAttribute("aria-expanded", "false");
+}
+
+function toggleMenu(): void {
+    const open = document.body.classList.toggle("menu-open");
+    menuBtn.setAttribute("aria-expanded", String(open));
+}
+
+menuBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleMenu();
+});
+
+// Close the menu after picking an action, or when tapping outside it.
+actionsMenu.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest(".btn, a")) {
+        closeMenu();
+    }
+});
+actionsMenu.addEventListener("change", closeMenu);
+document.addEventListener("click", (event) => {
+    if (document.body.classList.contains("menu-open") && !(event.target as HTMLElement).closest(".toolbar")) {
+        closeMenu();
+    }
+});
+
+function setMode(mode: "code" | "scene"): void {
+    document.body.classList.toggle("mode-code", mode === "code");
+    document.body.classList.toggle("mode-scene", mode === "scene");
+    modeCodeBtn.setAttribute("aria-selected", String(mode === "code"));
+    modeSceneBtn.setAttribute("aria-selected", String(mode === "scene"));
+    try {
+        localStorage.setItem(MODE_KEY, mode);
+    } catch {
+        // Best-effort persistence; ignore storage failures.
+    }
+}
+
+modeCodeBtn.addEventListener("click", () => setMode("code"));
+modeSceneBtn.addEventListener("click", () => setMode("scene"));
+
+setMode(localStorage.getItem(MODE_KEY) === "code" ? "code" : "scene");
 
 // New: discard the current project (with a guard if there are unsaved edits) and
 // load a clean starter scene.

@@ -88,6 +88,45 @@ body {
     gap: 0.5rem;
 }
 
+/* Text labels inside the (otherwise icon-only) action buttons. Hidden on desktop,
+   revealed when the actions collapse into the mobile dropdown menu. */
+.action-label {
+    display: none;
+}
+
+/* Mobile-only chrome: the Code/Scene segmented toggle and the hamburger button.
+   Hidden on desktop; the mobile media query reveals them. The hamburger uses a
+   `.btn.menu-btn` selector so it outranks the `.btn-icon { display: inline-flex }`
+   rule defined further down. */
+.mode-toggle,
+.btn.menu-btn {
+    display: none;
+}
+
+.mode-toggle {
+    flex: 0 0 auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--bg);
+}
+
+.mode-btn {
+    font: inherit;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    background: transparent;
+    border: none;
+    padding: 0.4rem 0.8rem;
+    cursor: pointer;
+}
+
+.mode-btn[aria-selected="true"] {
+    background: var(--accent-strong);
+    color: #fff;
+    font-weight: 600;
+}
+
 .select {
     font: inherit;
     font-size: 0.85rem;
@@ -633,4 +672,124 @@ body.embed-runner .splitter {
 
 body.embed-runner .split {
     grid-template-columns: 1fr;
+}
+
+/* Runner embed has no editor, so the Code/Scene toggle would have nothing to
+   switch to — hide it even on mobile. */
+body.embed-runner .mode-toggle {
+    display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Mobile layout (<= 768px)
+
+   The desktop side-by-side split doesn't work on a narrow screen, so we:
+   - collapse the toolbar actions into a hamburger dropdown menu,
+   - swap the row of icon buttons for a centered Code/Scene segmented toggle,
+   - stack both panes in a single full-screen cell and show one at a time.
+
+   The editor and preview overlap in the same grid cell and are toggled with
+   `visibility` (not `display`), so the preview iframe keeps its full size and
+   the WebGPU canvas never has to re-layout when switching back to Scene.
+--------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+    .toolbar {
+        position: relative;
+        padding: 0.5rem 0.75rem;
+        gap: 0.5rem;
+    }
+
+    /* Pare the brand back to just the logo to free up horizontal space. */
+    .brand-text,
+    .brand .beta-badge {
+        display: none;
+    }
+
+    .mode-toggle {
+        display: inline-flex;
+    }
+
+    .btn.menu-btn {
+        display: inline-flex;
+    }
+
+    /* Actions become a dropdown panel anchored under the hamburger button. */
+    .actions {
+        position: absolute;
+        top: calc(100% + 0.4rem);
+        right: 0.5rem;
+        z-index: 20;
+        flex-direction: column;
+        align-items: stretch;
+        min-width: 13rem;
+        padding: 0.5rem;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 12px 28px rgba(1, 4, 9, 0.55);
+    }
+
+    body:not(.menu-open) .actions {
+        display: none;
+    }
+
+    /* In the menu, icon buttons become full-width rows with a visible label. */
+    .actions .action-label {
+        display: inline;
+    }
+
+    .actions .btn-icon {
+        width: 100%;
+        height: auto;
+        justify-content: flex-start;
+        gap: 0.6rem;
+        padding: 0.55rem 0.65rem;
+    }
+
+    .actions .select {
+        width: 100%;
+    }
+
+    .actions .save-group {
+        width: 100%;
+    }
+
+    .actions .save-group .btn:first-child {
+        flex: 1 1 auto;
+    }
+
+    .actions .btn-caret {
+        flex: 0 0 auto;
+        width: auto;
+        justify-content: center;
+    }
+
+    /* Single full-screen pane; both panes share one grid cell and overlap. */
+    .split {
+        grid-template-columns: 1fr !important;
+        grid-template-rows: 1fr;
+    }
+
+    .splitter {
+        display: none;
+    }
+
+    .pane-editor,
+    .pane-preview {
+        grid-column: 1;
+        grid-row: 1;
+    }
+
+    .pane-editor {
+        border-right: none;
+    }
+
+    /* Show exactly one pane based on the active mode. */
+    body.mode-scene .pane-editor {
+        visibility: hidden;
+    }
+
+    body.mode-code .pane-preview {
+        visibility: hidden;
+    }
 }
