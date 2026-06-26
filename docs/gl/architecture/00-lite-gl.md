@@ -1254,8 +1254,8 @@ verbatim rewrites applied IN ORDER to each `*.glsl` source. Conditional
 preprocessor blocks (`#ifdef LANDSCAPE`, etc.) are preserved unchanged.
 
 | #   | Rule (regex)                                                                                      | Replacement                                                                                    |
-| --- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | --- | --- | ------------------------------------- |
-| 1   | (vertex only) `^attribute\s+(\w[\w ]*)\s+(\w+)\s*;`                                               | `layout(location = <0                                                                          | 1   | 2   | …in order of declaration>) in $1 $2;` |
+| --- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 1   | (vertex only) `^attribute\s+(\w[\w ]*)\s+(\w+)\s*;`                                               | `layout(location = <0 \| 1 \| 2 \| …in order of declaration>) in $1 $2;`                       |
 | 2   | (vertex) `^varying\s+(\w+)\s+(\w+)\s*;`                                                           | `out $1 $2;`                                                                                   |
 | 3   | (fragment) `^varying\s+(\w+)\s+(\w+)\s*;`                                                         | `in $1 $2;`                                                                                    |
 | 4   | (both) `\btexture2D\s*\(`                                                                         | `texture(`                                                                                     |
