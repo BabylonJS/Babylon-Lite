@@ -395,6 +395,18 @@ function matchChunk(id: string, table: ReadonlyArray<readonly [RegExp, string]>)
     return undefined;
 }
 
+/**
+ * Browser-safe aliases for Node built-ins that bundled vendor runtimes pull in behind
+ * their own environment guards. `manifold-3d`'s Emscripten glue imports `createRequire`
+ * from `node:module`; left to Vite it becomes a `__vite-browser-external` stub chunk
+ * which, in the module-granular `lib` build, both breaks browser ESM linking and absorbs
+ * unrelated shared modules via Rollup chunking. Pointing the builtin at a real shim keeps
+ * it bundled normally so no stub chunk is emitted (the Node-only code path never runs in
+ * the browser anyway). Shared by the `lib` and `dist` passes for parity.
+ */
+const NODE_BUILTIN_BROWSER_ALIASES = [{ find: /^(?:node:)?module$/, replacement: resolve(__dirname, "scripts/shims/node-module.mjs") }];
+
+
 export default defineConfig(({ mode }) => {
     const isDist = mode === "dist";
     const isWatch = process.argv.includes("--watch");
@@ -442,6 +454,7 @@ export default defineConfig(({ mode }) => {
                     },
                 },
             },
+            resolve: { alias: NODE_BUILTIN_BROWSER_ALIASES },
             // Minify inlined `?worker&inline` blobs (opaque to downstream bundlers).
             worker: {
                 format: "es" as const,
@@ -480,6 +493,7 @@ export default defineConfig(({ mode }) => {
         define: {
             __BL_VERSION__: JSON.stringify(resolveReleaseVersion()),
         },
+        resolve: { alias: NODE_BUILTIN_BROWSER_ALIASES },
         build: {
             outDir: LIB_OUT_DIR,
             emptyOutDir: true,
