@@ -1,5 +1,5 @@
 {
-  "rawKB": 108.9,
+  "rawKB": 109,
   "gzipKB": 44.5,
   "ignoredRawKB": 6.8,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene149-generate-mipmaps-D6ALG8gN.js",
     "scene149-geometry-texture-output-BfeQftmX.js",
     "scene149-gltf-feature-lights-punctual-w2wC-7RK.js",
-    "scene149-gltf-feature-registry-CWjr5Tfp.js",
+    "scene149-gltf-feature-registry-DsFEMG34.js",
     "scene149-gltf-glb-parser-Cwf9MN9N.js",
     "scene149-gltf-light-pointer-state-B7kFTRxK.js",
     "scene149-input-block-DAEnTkZz.js",

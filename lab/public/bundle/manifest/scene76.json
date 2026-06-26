@@ -1,6 +1,6 @@
 {
   "rawKB": 9.7,
-  "gzipKB": 4,
+  "gzipKB": 4.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene76.js"

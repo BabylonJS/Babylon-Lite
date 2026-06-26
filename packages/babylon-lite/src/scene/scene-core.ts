@@ -8,6 +8,7 @@ import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { registerMeshScene, unregisterMeshScene, enqueueMaterialSwap } from "./mesh-scene-registry.js";
 import { processMaterialSwaps } from "./scene-material-swap.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
+import { tickAnimation } from "../animation/animation-tick.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { FogConfig } from "../material/standard/standard-material.js";
 import type { Renderable, PrePassRenderable, SceneUniformUpdater, MeshGroupBuilder } from "../render/renderable.js";
@@ -303,9 +304,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             ctx.animationGroups.push(...groups);
             ctx._beforeRender.push((deltaMs: number) => {
                 for (const g of groups) {
-                    if (!g._stopped && g._ctrl) {
-                        g._ctrl.tick(deltaMs, engine);
-                    }
+                    tickAnimation(g, deltaMs, engine);
                 }
             });
         }
