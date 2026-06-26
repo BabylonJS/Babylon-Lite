@@ -125,9 +125,23 @@ packages are imported together (as NeonBrush does).
    re-export here; when you add an internal helper, tag it `@internal` and leave it
    out.
 
+5. **Options vs. separate export (the tree-shaking heuristic).** A boolean/enum
+   **`option` is allowed only if it toggles a GL parameter already on the core
+   path** (`minFilter` / `magFilter` / `wrapS` / `wrapT` / `invertY` /
+   `generateDepthBuffer`). A feature instead becomes a **separate, tree-shakeable
+   export** (NOT a create-option) the moment supporting it would pull in a distinct
+   code path or lookup table that non-users would otherwise ship — HDR sized-format
+   resolution, stencil renderbuffers, mipmap pyramids, MRT, pixel readback,
+   compressed/cube formats, dynamic (canvas) uploads, sub-image updates. This is
+   why `generateRenderTargetMipMaps` / `generateRenderTargetStencil` /
+   `createFloatRenderTarget` are standalone functions rather than
+   `createRenderTarget` options: the RGBA8 core stays branch-free and a consumer
+   pays only for what it imports.
+
 Any **new** export MUST follow rules 1–2 and 4 (GL-prefixed type, engine-first
 `engine` parameter, lite-matching verb, explicit named re-export from the barrel)
-unless a backend difference forces a documented divergence under rule 3.
+unless a backend difference forces a documented divergence under rule 3; rule 5
+governs whether a new feature should be an export at all.
 
 ### 3.1 Context
 
