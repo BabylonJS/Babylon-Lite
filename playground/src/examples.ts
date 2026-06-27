@@ -14,6 +14,9 @@ import TORUS_STATES from "../examples/torus-states.ts?raw";
 import NEON_RIBBONS from "../examples/neon-ribbons.ts?raw";
 import MOSQUITO_AMBER from "../examples/mosquito-amber.ts?raw";
 import HAVOK_PHYSICS from "../examples/havok-physics.ts?raw";
+import PBR_MATERIAL_GRID from "../examples/pbr-material-grid.ts?raw";
+import SPINNING_POLYHEDRA from "../examples/spinning-polyhedra.ts?raw";
+import GRID_STUDIO from "../examples/grid-studio.ts?raw";
 
 const BOOMBOX = `import {
     addToScene,
@@ -162,6 +165,9 @@ export function buildScene(engine: EngineContext, scene: SceneContext) {
 export const EXAMPLES: Example[] = [
     { id: "boombox", label: "glTF — BoomBox (PBR + environment)", code: BOOMBOX },
     { id: "primitives", label: "Primitives — box + ground", code: PRIMITIVES },
+    { id: "spinning-polyhedra", label: "Animation — Spinning Polyhedra", code: SPINNING_POLYHEDRA },
+    { id: "pbr-material-grid", label: "PBR — Metalness × Roughness grid", code: PBR_MATERIAL_GRID },
+    { id: "grid-studio", label: "Grid material — Studio staging", code: GRID_STUDIO },
     {
         id: "multifile",
         label: "Multi-file — index + scene module",

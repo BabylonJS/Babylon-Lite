@@ -103,6 +103,8 @@ export { createBloomPostProcessTask } from "./post-process/bloom.js";
 export type { BloomPostProcessTask, BloomPostProcessTaskConfig } from "./post-process/bloom.js";
 export { createDepthOfFieldPostProcessTask, DepthOfFieldBlurLevel } from "./post-process/depth-of-field.js";
 export type { DepthOfFieldPostProcessTask, DepthOfFieldPostProcessTaskConfig } from "./post-process/depth-of-field.js";
+export { createTaaPostProcessTask } from "./post-process/taa.js";
+export type { TaaPostProcessTask, TaaPostProcessTaskConfig } from "./post-process/taa.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
@@ -500,9 +502,10 @@ export {
     clearSprite2DLayer,
     setSprite2DFrameIndex,
     setSprite2DShaderParams,
-    setSprite2DUvOffset,
 } from "./sprite/sprite-2d.js";
 export type { CustomShaderTexture } from "./sprite/custom-shader-core.js";
+export { setSprite2DCoverageGamma } from "./sprite/sprite-2d-coverage-gamma.js";
+export { setSprite2DUvOffset } from "./sprite/sprite-2d-uvscroll.js";
 export type { Sprite2DCustomShader, Sprite2DCustomShaderOptions, Sprite2DCustomTexture } from "./sprite/sprite-custom-shader.js";
 export { createSprite2DCustomShader } from "./sprite/sprite-custom-shader.js";
 export type { Sprite2DHandle } from "./sprite/sprite-2d-handle.js";

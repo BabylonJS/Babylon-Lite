@@ -1,13 +1,10 @@
-import { createGLEngine, resizeGLEngine, runRenderLoop, stopRenderLoop } from "babylon-lite-gl";
-import { disableScissor, setScissor } from "babylon-lite-gl/scissor";
-import { clearEngine } from "babylon-lite-gl/depth-stencil";
+import { createGLEngine, resizeGLEngine, runRenderLoop, stopRenderLoop, disableScissor, setScissor, clearEngine } from "babylon-lite-gl";
 
 /**
  * Scene 12 — Scissor Rectangles.
  *
- * Exercises the @babylonjs/lite-gl/scissor sub-entry (`setScissor` /
- * `disableScissor`) together with `clearEngine` from
- * @babylonjs/lite-gl/depth-stencil. The canvas is tiled into a `COLS × ROWS`
+ * Exercises scissor rectangles (`setScissor` / `disableScissor`) together with
+ * `clearEngine`. The canvas is tiled into a `COLS × ROWS`
  * grid: for each cell we set the scissor box to that cell's integer rectangle
  * and clear the (default) framebuffer to a solid color, so every region is
  * painted by an independent scissor-clipped clear. `disableScissor` restores the

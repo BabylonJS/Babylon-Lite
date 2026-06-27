@@ -4,6 +4,9 @@
         "outDir": "./dist",
         "rootDir": "src",
         "composite": true,
+        "stripInternal": true,
+        "inlineSources": true,
+        "declarationMap": false,
         "types": []
     },
     "include": ["src"]

@@ -1,9 +1,9 @@
 /**
- * Sub-entry: HTML element textures.
+ * HTML element textures.
  *
- * Dynamic-importable via `import { ... } from "@babylonjs/lite-gl/html-texture"`
- * so consumers that don't need it (everything except NeonBrush's `InputGlow`)
- * don't pull it into their bundles.
+ * Part of the public API via the `@babylonjs/lite-gl` barrel. The package is
+ * `sideEffects: false`, so consumers that don't need it (everything except
+ * NeonBrush's `InputGlow`) tree-shake it out.
  */
 import type { GLEngineContext } from "./context.js";
 import { bindTextureForUpload, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";

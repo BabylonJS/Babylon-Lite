@@ -160,6 +160,62 @@ export {
     ActionManagerTriggers,
 } from "./actions/actions.js";
 
+// ─── Audio (AudioV2) ─────────────────────────────────────────────────
+export { SoundState, AudioParameterRampShape, SpatialAudioAttachmentType } from "./audio/audio-enums.js";
+export type { AudioAnalyzerFFTSizeType, AudioEngineV2State, IAudioParameterRampOptions } from "./audio/audio-enums.js";
+export {
+    AbstractAudioNode,
+    AbstractNamedAudioNode,
+    AbstractAudioOutNode,
+    AbstractAudioBus,
+    AudioBus,
+    MainAudioBus,
+    AbstractSoundSource,
+    SoundSource,
+    AbstractSound,
+    StaticSound,
+    StreamingSound,
+    StaticSoundBuffer,
+    AudioEngineV2,
+    AbstractSpatialAudio,
+    AbstractSpatialAudioListener,
+    AbstractStereoAudio,
+    AbstractAudioAnalyzer,
+    CreateAudioEngineAsync,
+    CreateSoundAsync,
+    CreateSoundBufferAsync,
+    CreateStreamingSoundAsync,
+    CreateAudioBusAsync,
+    CreateMainAudioBusAsync,
+    CreateSoundSourceAsync,
+    CreateMicrophoneSoundSourceAsync,
+    LastCreatedAudioEngine,
+    OnAudioEngineV2CreatedObservable,
+} from "./audio/audio.js";
+export type {
+    PrimaryAudioBus,
+    StaticSoundSource,
+    SpatialNodeLike,
+    IAudioNodeNameChange,
+    IAudioEngineV2Options,
+    IWebAudioEngineOptions,
+    IVolumeAudioOptions,
+    IAudioAnalyzerOptions,
+    IStereoAudioOptions,
+    ISpatialAudioOptions,
+    IStaticSoundBufferOptions,
+    IAbstractSoundOptions,
+    IStaticSoundOptions,
+    IStaticSoundPlayOptions,
+    IStaticSoundStopOptions,
+    IStaticSoundCloneOptions,
+    IStreamingSoundOptions,
+    IStreamingSoundPlayOptions,
+    IAudioBusOptions,
+    IMainAudioBusOptions,
+    ISoundSourceOptions,
+} from "./audio/audio.js";
+
 // ─── Known but unsupported (throw LiteCompatError on use) ─────────────
 export {
     MultiMaterial,

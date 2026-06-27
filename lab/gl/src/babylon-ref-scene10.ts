@@ -5,7 +5,7 @@ import type { InstancingAttributeInfo } from "@babylonjs/core/Engines/instancing
 /**
  * Babylon.js reference for GL Scene 10 — Indexed Mesh + Instancing.
  *
- * Reproduces lab/gl/src/scene10.ts (which uses @babylonjs/lite-gl/mesh's
+ * Reproduces lab/gl/src/scene10.ts (which uses lite-gl's
  * createVertexBuffer / createIndexBuffer / bindAttributes / drawIndexed) with
  * Babylon's ThinEngine RAW geometry API, so the parity harness can diff the two
  * pixel-for-pixel:

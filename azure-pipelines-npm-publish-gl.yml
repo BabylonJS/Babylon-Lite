@@ -95,18 +95,25 @@ stages:
                 - script: pnpm test:parity:gl
                   displayName: "Run lite-gl parity tests"
 
-                - script: pnpm build:gl
-                  displayName: "Build package"
-
+                # Resolve the next published version BEFORE building, so build.mjs can
+                # bake it into the emitted dist `package.json` (consumed via the
+                # PACKAGE_VERSION env on the build step below). The script reads the
+                # SOURCE manifest — dist does not exist yet — and sets the
+                # PACKAGE_VERSION pipeline variable.
                 - script: npx tsx scripts/prepare-npm-release.ts
                   displayName: "Resolve npm package version"
                   env:
                       RELEASE_TYPE: ${{ parameters.releaseType }}
                       RELEASE_PACKAGE_NAME: "@babylonjs/lite-gl"
-                      RELEASE_SOURCE_PACKAGE_NAME: "@babylonjs/lite-gl"
-                      RELEASE_SOURCE_PACKAGE_JSON: packages/babylon-lite-gl/dist/package.json
+                      RELEASE_SOURCE_PACKAGE_NAME: "babylon-lite-gl"
+                      RELEASE_SOURCE_PACKAGE_JSON: packages/babylon-lite-gl/package.json
                       RELEASE_CONFIG_PATH: config/release-gl.json
                       RELEASE_TAG_PATTERN: "npm-lite-gl-v*"
+
+                - script: pnpm build:gl
+                  displayName: "Build package"
+                  env:
+                      PACKAGE_VERSION: $(PACKAGE_VERSION)
 
                 - script: npm pack --dry-run ./packages/babylon-lite-gl/dist
                   displayName: "Validate npm package contents"

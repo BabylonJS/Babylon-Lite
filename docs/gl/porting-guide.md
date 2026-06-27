@@ -43,7 +43,7 @@ style port.
 4. **Rewrite each effect** mechanically (§11.3). **Order is law:** `applyEffectWrapper(wrapper)` **first**, *then* the `setEffect*` setters — uniforms write to the currently-bound program (§4.3.1). Reversing it writes to the wrong program and silently corrupts output.
 5. **Map Babylon constants → WebGL2 constants** for `createRawTexture` (Babylon `Constants.TEXTUREFORMAT_*` / `TEXTURETYPE_*` integers → `gl.RGBA` / `gl.UNSIGNED_BYTE` / …). See §11.4.
 6. **Handle context loss/restore** for anything *you* own (see §4 below). lite-gl auto-replays its own effects/textures/sprite buffers; consumer-owned GL state does not.
-7. **Sprites / particles** (if used) → the `/sprites` sub-entry.
+7. **Sprites / particles** (if used) → `createSpriteRenderer` (from the barrel).
 
 The full method-by-method mapping is §8 — keep it open while porting.
 
@@ -102,7 +102,7 @@ bit us:
   `blendFuncSeparate` tuples are verified byte-for-byte against Babylon's
   `alphaCullingState` (ADD / ALPHA(COMBINE) / PREMULTIPLIED). The renderer resets
   blending to DISABLE after each sprite batch.
-- **Sprites/particles.** `SpriteRenderer` → `createSpriteRenderer` (sub-entry);
+- **Sprites/particles.** `SpriteRenderer` → `createSpriteRenderer`;
   `ThinSprite` → the plain `GLSprite` data object (same fields). When you author
   the **Babylon parity reference** for a sprite scene, set
   **`disableDepthWrite = true`** on the Babylon `SpriteRenderer` so its depth
@@ -147,21 +147,23 @@ In-repo, this harness is `tests/gl/parity/` driven by `scene-config-webgl.json`
 
 ## 6. Consuming the package (dev loop & bundle size)
 
-- **Consume the built tarball during development.** Point the consumer at
-  `file:…/packages/babylon-lite-gl/dist/prod/babylonjs-lite-gl-0.1.0.tgz`.
-- **npm caches by version — sync manually after a rebuild.** Because the version
-  stays `0.1.0`, `npm install` will **not** re-fetch a freshly rebuilt tarball;
-  copy the new `dist/prod` output into the consumer's
-  `node_modules/@babylonjs/lite-gl` by hand (or bump the version) after each
+- **Consume the built package during development.** `pnpm build:gl` emits the
+  publishable tree at `packages/babylon-lite-gl/dist/` (with its own
+  `package.json`). Point the consumer at `file:…/packages/babylon-lite-gl/dist`,
+  or `npm pack ./packages/babylon-lite-gl/dist` and install the generated
+  `babylonjs-lite-gl-<version>.tgz`.
+- **npm caches by version — sync manually after a rebuild.** Local builds report
+  the source version (`0.1.0`; the release pipeline injects the real version via
+  `PACKAGE_VERSION`), so `npm install` will **not** re-fetch a freshly rebuilt
+  tarball; reinstall from the rebuilt `dist/` (or bump the version) after each
   package rebuild, or you'll test stale code.
-- **Sprites & HTML-element textures are tree-shakeable either way.** Import them
-  from the main barrel (`import { createSpriteRenderer } from "@babylonjs/lite-gl"`)
-  or from their dedicated sub-entries (`@babylonjs/lite-gl/sprites`,
-  `.../html-texture`) — a consumer that doesn't use them drops them regardless,
-  because the package is `sideEffects: false`. lite-gl's own `src/index.ts`
-  re-exports **explicitly by name** (never `export *`); if you re-wrap lite-gl
-  behind your own barrel, do the same so a stray `export *` over a side-effecting
-  module can't defeat tree-shaking (see [`00-lite-gl.md` §3.0](./architecture/00-lite-gl.md)).
+- **Sprites & HTML-element textures are tree-shakeable.** Import them from the
+  `@babylonjs/lite-gl` barrel (`import { createSpriteRenderer } from "@babylonjs/lite-gl"`);
+  a consumer that doesn't use them drops them regardless, because the package is
+  `sideEffects: false`. lite-gl's own `src/index.ts` re-exports **explicitly by
+  name** (never `export *`); if you re-wrap lite-gl behind your own barrel, do the
+  same so a stray `export *` over a side-effecting module can't defeat tree-shaking
+  (see [`00-lite-gl.md` §3.0](./architecture/00-lite-gl.md)).
 - **Measure before/after.** The swap should drop the per-page `@babylonjs/core`
   footprint by ~10×+. The lab "Bundle" tab and the `gl-build` bundle-size test
   (`maxRawKB` ceilings in `scene-config-webgl.json`) enforce this for the lab
@@ -181,4 +183,4 @@ In-repo, this harness is `tests/gl/parity/` driven by `scene-config-webgl.json`
 - [ ] Babylon sprite reference uses `disableDepthWrite = true`.
 - [ ] Consumer-owned GL state rebuilt in `onContextRestored`.
 - [ ] Every ported feature has a deterministic Babylon-vs-lite-gl parity test (MAD ≤ threshold).
-- [ ] Tarball re-synced after each package rebuild; sub-entries imported lazily; bundle size measured.
+- [ ] Tarball re-synced after each package rebuild; bundle size measured.

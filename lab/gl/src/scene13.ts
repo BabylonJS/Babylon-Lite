@@ -1,10 +1,9 @@
-import { applyEffectWrapper, createEffectWrapper, createGLEngine, drawEffect, isEffectReady, resizeGLEngine, runRenderLoop, setEffectTexture, setViewport, stopRenderLoop } from "babylon-lite-gl";
-import { createDynamicTexture, updateDynamicTexture } from "babylon-lite-gl/dynamic-texture";
+import { applyEffectWrapper, createEffectWrapper, createGLEngine, createDynamicTexture, drawEffect, isEffectReady, resizeGLEngine, runRenderLoop, setEffectTexture, setViewport, stopRenderLoop, updateDynamicTexture } from "babylon-lite-gl";
 
 /**
  * Scene 13 — Dynamic Texture.
  *
- * Demonstrates the `babylon-lite-gl/dynamic-texture` sub-entry:
+ * Demonstrates dynamic textures:
  *   - An offscreen 2D `<canvas>` is repainted every frame with the Canvas 2D API
  *     using ONLY platform-deterministic primitives (filled `fillRect`s, `arc`
  *     discs and a `createLinearGradient`) — NO text, whose rasterisation varies

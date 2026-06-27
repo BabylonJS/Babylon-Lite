@@ -391,7 +391,7 @@ function flushColorMask(engine: GLEngineContext): void {
  * stencil-only **`STENCIL_INDEX8`** buffer.
  *
  * Stencil is intentionally NOT a {@link createRenderTarget} option: keeping this
- * helper in the `/depth-stencil` sub-entry means the stencil/packed renderbuffer
+ * helper in the depth-stencil module means the stencil/packed renderbuffer
  * code tree-shakes out of every bundle that only needs a color (and optional
  * depth) target.
  *

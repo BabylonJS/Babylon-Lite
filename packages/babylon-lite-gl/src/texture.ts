@@ -82,7 +82,7 @@ export interface GLTexture {
     _updateRaw?: (engine: GLEngineContext, data: ArrayBufferView | null, width: number, height: number, unpackAlignment: number) => void;
     /**
      * Dynamic-texture source captured by `updateDynamicTexture`
-     * (`@babylonjs/lite-gl/dynamic-texture`) and replayed into the fresh handle
+     * (`@babylonjs/lite-gl`) and replayed into the fresh handle
      * on `webglcontextrestored`. Null/absent on non-dynamic textures.
      * @internal
      */

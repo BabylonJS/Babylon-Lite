@@ -1,8 +1,8 @@
 /**
- * Sub-entry: sprite / instanced-quad renderer.
+ * Sprite / instanced-quad renderer.
  *
- * Dynamic-importable via `import { ... } from "@babylonjs/lite-gl/sprites"` so
- * consumers that don't render sprites don't pull it into their bundles.
+ * Part of the public API via the `@babylonjs/lite-gl` barrel. The package is
+ * `sideEffects: false`, so consumers that don't render sprites tree-shake it out.
  *
  * This is the lite-gl equivalent of Babylon's `SpriteRenderer` + `ThinSprite`
  * (`Sprites/spriteRenderer.js`, `Sprites/thinSprite.js`). The vertex layout,

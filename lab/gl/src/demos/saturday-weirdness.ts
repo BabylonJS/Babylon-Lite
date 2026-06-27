@@ -10,9 +10,10 @@
  *     — this recursive surface texture is the signature "weirdness".
  *   - Image: an FXAA pass over Buffer A, presented to the screen.
  *
- * This is reproduced here to exercise lite-gl's render-target (FBO) + ping-pong
- * feedback API. Buffer A renders into a ping-pong render target (reading the
- * previous frame as `iChannel0`); the Image pass FXAA-resolves it to the canvas.
+ * This is reproduced here to exercise lite-gl's render-target (FBO) API via a
+ * ping-pong feedback pair (a lab helper). Buffer A renders into the pair's `write`
+ * target (reading the previous frame as `iChannel0`); the Image pass FXAA-resolves
+ * it to the canvas.
  *
  * Original shader: CC0 (public domain) by mrange. The GLSL below is adapted
  * essentially verbatim with a thin lite-gl bridge (Shadertoy `mainImage` →
@@ -29,8 +30,9 @@ import {
     setEffectFloat,
     setEffectFloat3,
     setEffectTexture,
+    bindRenderTarget,
 } from "babylon-lite-gl";
-import { bindRenderTarget, createPingPong, resizePingPong } from "babylon-lite-gl/render-target";
+import { createPingPong } from "../ping-pong";
 
 // ── Shadertoy "common" tab (defines shared by both passes) ──────────────────
 const COMMON = `
@@ -337,7 +339,7 @@ runRenderLoop(engine, () => {
     const w = canvas.width;
     const h = canvas.height;
     if (w !== rtW || h !== rtH) {
-        resizePingPong(engine, pingpong, w, h);
+        pingpong.resize(w, h);
         rtW = w;
         rtH = h;
     }

@@ -1,9 +1,9 @@
 /**
- * Sub-entry: render-to-texture (offscreen framebuffer) support.
+ * Render-to-texture (offscreen framebuffer) support.
  *
- * Dynamic-importable via `import { ... } from "@babylonjs/lite-gl/render-target"`
- * so consumers that only render fullscreen effects to the canvas don't pull the
- * FBO code into their bundles.
+ * Part of the public API via the `@babylonjs/lite-gl` barrel. The package is
+ * `sideEffects: false`, so consumers that only render fullscreen effects to the
+ * canvas tree-shake the FBO code out.
  *
  * This is the lite-gl equivalent of Babylon's `RenderTargetWrapper` +
  * `ThinEngine.createRenderTargetTexture` / `bindFramebuffer` /
@@ -55,7 +55,7 @@ export interface GLRenderTargetOptions {
     /** Allocate a depth renderbuffer (`DEPTH_COMPONENT16`). Default `false`.
      *  Stencil is NOT a create option — opt in (packed depth+stencil, or
      *  stencil-only) via `generateRenderTargetStencil`
-     *  (`@babylonjs/lite-gl/depth-stencil`), which keeps the stencil/packed
+     *  (`@babylonjs/lite-gl`), which keeps the stencil/packed
      *  renderbuffer code out of the render-target core bundle. */
     generateDepthBuffer?: boolean;
     /** Color texture minification filter. Default `gl.LINEAR`. */
@@ -125,7 +125,7 @@ export interface GLRenderTarget {
     _depthStencil: WebGLRenderbuffer | null;
     /**
      * @internal Optional stencil rebuild hook installed by
-     * `generateRenderTargetStencil` (`@babylonjs/lite-gl/depth-stencil`). When
+     * `generateRenderTargetStencil` (`@babylonjs/lite-gl`). When
      * present it OWNS the depth/stencil renderbuffer (replacing the core
      * depth-only buffer) and is re-invoked after every FBO rebuild
      * (create-via-helper, resize, context-restore) so the attachment survives.
@@ -143,29 +143,6 @@ export interface GLRenderTarget {
     /** @internal Rebuild the FBO + renderbuffer (+ owned color texture) into
      *  fresh handles after `webglcontextrestored`. */
     _restore: (engine: GLEngineContext) => void;
-}
-
-/**
- * A pair of {@link GLRenderTarget}s for self-feedback effects: SAMPLE the
- * {@link GLPingPong.read | read} target (last frame's output) while RENDERING
- * into the {@link GLPingPong.write | write} target, then {@link GLPingPong.swap}.
- */
-export interface GLPingPong {
-    /** The target to SAMPLE this frame (the previous frame's output). */
-    readonly read: GLRenderTarget;
-    /** The target to RENDER into this frame. */
-    readonly write: GLRenderTarget;
-    /** Exchange `read` and `write`. Call after rendering the `write` target each
-     *  frame. Allocation-free — flips an internal index, no objects created. */
-    swap(): void;
-    /** @internal */
-    _a: GLRenderTarget;
-    /** @internal */
-    _b: GLRenderTarget;
-    /** @internal */
-    _readIsA: boolean;
-    /** @internal */
-    _disposed: boolean;
 }
 
 /**
@@ -394,76 +371,6 @@ export function disposeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget 
     }
 }
 
-/**
- * Create a {@link GLPingPong}: two same-sized {@link GLRenderTarget}s for
- * self-feedback effects. `read` starts as the first target and `write` the
- * second; {@link GLPingPong.swap} exchanges them allocation-free.
- *
- * @param engine - The engine to create GL resources on.
- * @param options - Applied identically to both targets.
- * @returns The new {@link GLPingPong}.
- * @throws As {@link createRenderTarget}. If the second target fails to build the
- *  first is disposed before rethrowing (no leak).
- */
-export function createPingPong(engine: GLEngineContext, options: GLRenderTargetOptions): GLPingPong {
-    const a = createRenderTarget(engine, options);
-    let b: GLRenderTarget;
-    try {
-        b = createRenderTarget(engine, options);
-    } catch (e) {
-        disposeRenderTarget(engine, a);
-        throw e;
-    }
-    const pp: GLPingPong = {
-        _a: a,
-        _b: b,
-        _readIsA: true,
-        _disposed: false,
-        get read(): GLRenderTarget {
-            return pp._readIsA ? pp._a : pp._b;
-        },
-        get write(): GLRenderTarget {
-            return pp._readIsA ? pp._b : pp._a;
-        },
-        swap(): void {
-            pp._readIsA = !pp._readIsA;
-        },
-    };
-    return pp;
-}
-
-/**
- * Resize both targets of a {@link GLPingPong}. No-op when disposed.
- *
- * @param engine - The engine that owns `pp`.
- * @param pp - The ping-pong pair to resize.
- * @param width - New width in texels (positive integer).
- * @param height - New height in texels (positive integer).
- */
-export function resizePingPong(engine: GLEngineContext, pp: GLPingPong, width: number, height: number): void {
-    if (pp._disposed) {
-        return;
-    }
-    resizeRenderTarget(engine, pp._a, width, height);
-    resizeRenderTarget(engine, pp._b, width, height);
-}
-
-/**
- * Release both targets of a {@link GLPingPong}. Idempotent, and a no-op for
- * `null`/`undefined` (matching {@link disposeRenderTarget}).
- *
- * @param engine - The engine that owns `pp`.
- * @param pp - The ping-pong pair to release, or `null`/`undefined` for a no-op.
- */
-export function disposePingPong(engine: GLEngineContext, pp: GLPingPong | null | undefined): void {
-    if (pp === null || pp === undefined || pp._disposed) {
-        return;
-    }
-    pp._disposed = true;
-    disposeRenderTarget(engine, pp._a);
-    disposeRenderTarget(engine, pp._b);
-}
-
 /* ────────────────────────────  internal helpers  ──────────────────────────── */
 
 /** Shared private constructor. Validates size, resolves the config (given the
@@ -627,7 +534,7 @@ function allocateRenderTargetGpu(engine: GLEngineContext, rt: GLRenderTarget): v
         // ── Depth (core, DEPTH-ONLY) ─────────────────────────────────────────
         // The core only ever builds a DEPTH_COMPONENT16 depth buffer. Stencil /
         // packed depth-stencil is an opt-in installed by
-        // `generateRenderTargetStencil` (`@babylonjs/lite-gl/depth-stencil`),
+        // `generateRenderTargetStencil` (`@babylonjs/lite-gl`),
         // which sets `_rebuildDepthStencil` to a closure that REPLACES the
         // depth-only buffer below with its own packed/stencil renderbuffer. That
         // hook is re-run here on every rebuild (create / resize / context-restore)
@@ -683,7 +590,7 @@ function allocateRenderTargetGpu(engine: GLEngineContext, rt: GLRenderTarget): v
     }
 }
 
-/** Inline cached `gl.viewport` — kept local so the render-target sub-entry has
+/** Inline cached `gl.viewport` — kept local so the render-target module has
  *  no runtime dependency on the effect-renderer module. */
 function setViewportCached(engine: GLEngineContext, x: number, y: number, w: number, h: number): void {
     const s = engine._state;

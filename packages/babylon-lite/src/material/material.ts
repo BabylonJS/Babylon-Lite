@@ -23,6 +23,14 @@ export interface Material {
     _renderFeatures?: MaterialRenderFeatures;
     /** @internal Monotonic material UBO version. Renderables track their last seen value independently. */
     _uboVersion: number;
+    /** @internal Optional ALTERNATE material the shadow caster pass renders this material's mesh with, instead of
+     *  deriving a no-colour view from this (receive) material. Use when this material samples the shadow map it would
+     *  cast into (a CSM-receiving custom ShaderMaterial): its own no-colour view would bind that depth texture WHILE it
+     *  is the shadow render target → a read/write aliasing error. Point this at a sampler-free depth-only caster
+     *  material and the SAME mesh (same geometry + thin instances) casts through it — no twin caster mesh, no instance
+     *  mirror. The shadow pass takes the override's own no-colour view (so an alpha-clip caster can still set
+     *  depthOnlyFragment). Honoured by the CSM + PCF caster passes (the ESM exponential path has its own shadow views). */
+    _shadowCasterMaterial?: Material;
 }
 
 /** Exact material render-feature override used by MaterialView.

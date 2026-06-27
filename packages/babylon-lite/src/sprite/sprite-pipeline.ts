@@ -5,18 +5,13 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
-import { DEPTH_INSTANCE_STRIDE_BYTES, DEPTH_UVSCROLL_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES, PURE_2D_UVSCROLL_STRIDE_BYTES } from "./sprite-2d.js";
+import { _getSpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.js";
+import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
 
 /** @internal */
 export interface SpritePipelineDeviceCache {
-    /** @internal */
-    _shaderModule: GPUShaderModule | null;
-    /** @internal */
-    _sceneShaderModule: GPUShaderModule | null;
-    /** @internal */
-    _shaderModuleUv: GPUShaderModule | null;
-    /** @internal */
-    _sceneShaderModuleUv: GPUShaderModule | null;
+    /** @internal Shader modules keyed by `${hasDepth}:${uvScroll}` permutation. */
+    _shaderModules: Map<string, GPUShaderModule>;
     /** @internal */
     _pipelines: Map<string, GPURenderPipeline>;
 }
@@ -34,14 +29,11 @@ const SPRITE_UV_MAX_OFFSET_BYTES = 24;
 const SPRITE_ROTATION_OFFSET_BYTES = 32;
 const SPRITE_COLOR_OFFSET_BYTES = 36;
 const SPRITE_DEPTH_OFFSET_BYTES = 52;
-/** uvOffset.xy byte offset: appended after the base layout (52 pure-2D, 56 depth-hosted). */
-const SPRITE_UVOFFSET_OFFSET_PURE_2D_BYTES = 52;
-const SPRITE_UVOFFSET_OFFSET_DEPTH_BYTES = 56;
 
 function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean): string {
     return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 @fragment
-fn fs(in: VOut) -> @location(0) vec4<f32> {
+fn fs(in: O) -> @location(0) vec4f {
 let s = textureSample(atlasTex, atlasSamp, in.uv);
 return s * in.tint * L.opacityMul;
 }`;
@@ -57,58 +49,53 @@ return s * in.tint * L.opacityMul;
  */
 export function makeSpritePrologueWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll = false): string {
     const group = `@group(${spriteGroupIndex})`;
-    const zAttribute = hasDepth ? `,\n@location(6) iZ: f32` : "";
-    const uvOffsetAttribute = uvScroll ? `,\n@location(7) iUvOffset: vec2<f32>` : "";
-    const zPosition = hasDepth ? "1.0 - in.iZ" : "0.0";
-    return `struct Layer {
-viewPos: vec2<f32>,
+    const zAttribute = hasDepth ? `,\n@location(6) z: f32` : "";
+    const uvOffsetAttribute = uvScroll ? `,\n@location(7) o: vec2f` : "";
+    const zPosition = hasDepth ? "1 - in.z" : "0";
+    return `struct Lr {
+viewPos: vec2f,
 viewScale: f32,
 viewRot: f32,
-screenSize: vec2<f32>,
-pivot: vec2<f32>,
-// Per-layer opacity, pre-shaped for the layer's blend mode (CPU-side):
-//   straight-alpha:  (1, 1, 1, opacity)  — only alpha is scaled
-//   premultiplied:   (opacity, opacity, opacity, opacity) — RGB and A scale together
-// One uniform, no shader branch.
-opacityMul: vec4<f32>,
+screenSize: vec2f,
+pivot: vec2f,
+opacityMul: vec4f,
+aa: vec4f,
 };
-${group} @binding(0) var<uniform> L: Layer;
+${group} @binding(0) var<uniform> L: Lr;
 ${group} @binding(1) var atlasTex: texture_2d<f32>;
 ${group} @binding(2) var atlasSamp: sampler;
-struct VIn {
+struct I {
 @builtin(vertex_index) vid: u32,
-@location(0) iPos: vec2<f32>,
-@location(1) iSize: vec2<f32>,
-@location(2) iUvMin: vec2<f32>,
-@location(3) iUvMax: vec2<f32>,
-@location(4) iRot: f32,
-@location(5) iColor: vec4<f32>${zAttribute}${uvOffsetAttribute}
+@location(0) p: vec2f,
+@location(1) s: vec2f,
+@location(2) a: vec2f,
+@location(3) b: vec2f,
+@location(4) r: f32,
+@location(5) c: vec4f${zAttribute}${uvOffsetAttribute}
 };
-struct VOut {
-@builtin(position) pos: vec4<f32>,
-@location(0) uv: vec2<f32>,
-@location(1) tint: vec4<f32>,
+struct O {
+@builtin(position) p: vec4f,
+@location(0) uv: vec2f,
+@location(1) tint: vec4f,
 };
 @vertex
-fn vs(in: VIn) -> VOut {
-var corners = array<vec2<f32>, 4>(vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0), vec2<f32>(0.0, 1.0));
-let c = corners[in.vid];
-let local = (c - L.pivot) * in.iSize;
-let cr = cos(in.iRot);
-let sr = sin(in.iRot);
-let rotated = vec2<f32>(local.x * cr - local.y * sr, local.x * sr + local.y * cr);
-let layerPx = in.iPos + rotated;
-let centered = layerPx - L.viewPos;
+fn vs(in: I) -> O {
+var q = array<vec2f, 4>(vec2f(0, 0), vec2f(1, 0), vec2f(1, 1), vec2f(0, 1));
+let c = q[in.vid];
+let l = (c - L.pivot) * in.s;
+let cr = cos(in.r);
+let sr = sin(in.r);
+let r = vec2f(l.x * cr - l.y * sr, l.x * sr + l.y * cr);
+let p = in.p + r - L.viewPos;
 let lc = cos(L.viewRot);
 let ls = sin(L.viewRot);
-let viewRot = vec2<f32>(centered.x * lc - centered.y * ls, centered.x * ls + centered.y * lc);
-let screenPx = viewRot * L.viewScale;
-let ndc = vec2<f32>(screenPx.x / L.screenSize.x * 2.0 - 1.0, 1.0 - screenPx.y / L.screenSize.y * 2.0);
-let uv = mix(in.iUvMin, in.iUvMax, c)${uvScroll ? " + in.iUvOffset" : ""};
-var out: VOut;
-out.pos = vec4<f32>(ndc, ${zPosition}, 1.0);
+let v = vec2f(p.x * lc - p.y * ls, p.x * ls + p.y * lc) * L.viewScale;
+let n = vec2f(v.x / L.screenSize.x * 2 - 1, 1 - v.y / L.screenSize.y * 2);
+let uv = mix(in.a, in.b, c)${uvScroll ? " + in.o" : ""};
+var out: O;
+out.p = vec4f(n, ${zPosition}, 1);
 out.uv = uv;
-out.tint = in.iColor;
+out.tint = in.c;
 return out;
 }`;
 }
@@ -181,10 +168,7 @@ function getSpritePipelineDeviceCache(engine: EngineContext, cache: SpritePipeli
     let deviceCache = cache._devices.get(engine._device);
     if (!deviceCache) {
         deviceCache = {
-            _shaderModule: null,
-            _sceneShaderModule: null,
-            _shaderModuleUv: null,
-            _sceneShaderModuleUv: null,
+            _shaderModules: new Map(),
             _pipelines: new Map(),
         };
         cache._devices.set(engine._device, deviceCache);
@@ -212,8 +196,9 @@ function spritePipelineKey(
     layer?: Sprite2DLayer
 ): string {
     const customKey = layer ? (_getSpriteFxHook()?.pipelineKeyPart(layer) ?? "") : "";
-    const uvKey = layer?._uvScroll ? "1" : "0";
-    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}:uv${uvKey}`;
+    const uvKey = layer?._uvScrollAttr ? "1" : "0";
+    const cgKey = layer ? (_getSpriteCoverageGammaHook()?.pipelineKeyPart(layer) ?? "0") : "0";
+    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}:uv${uvKey}:cg${cgKey}`;
 }
 
 function getShaderModule(engine: EngineContext, cache: SpritePipelineDeviceCache, hasDepth: boolean, layer?: Sprite2DLayer): GPUShaderModule {
@@ -221,21 +206,20 @@ function getShaderModule(engine: EngineContext, cache: SpritePipelineDeviceCache
     if (customModule) {
         return customModule;
     }
-    const uvScroll = layer?._uvScroll === true;
-    if (hasDepth) {
-        if (uvScroll) {
-            cache._sceneShaderModuleUv ??= engine._device.createShaderModule({ code: makeSpriteWgsl(true, 1, true) });
-            return cache._sceneShaderModuleUv;
-        }
-        cache._sceneShaderModule ??= engine._device.createShaderModule({ code: makeSpriteWgsl(true, 1, false) });
-        return cache._sceneShaderModule;
+    const gammaModule = layer ? _getSpriteCoverageGammaHook()?.shaderModule(engine, hasDepth, layer) : null;
+    if (gammaModule) {
+        return gammaModule;
     }
-    if (uvScroll) {
-        cache._shaderModuleUv ??= engine._device.createShaderModule({ code: makeSpriteWgsl(false, 0, true) });
-        return cache._shaderModuleUv;
+    const uvScroll = layer?._uvScrollAttr != null;
+    const key = `${hasDepth ? 1 : 0}:${uvScroll ? 1 : 0}`;
+    let module = cache._shaderModules.get(key);
+    if (!module) {
+        module = engine._device.createShaderModule({
+            code: makeSpriteWgsl(hasDepth, hasDepth ? 1 : 0, uvScroll),
+        });
+        cache._shaderModules.set(key, module);
     }
-    cache._shaderModule ??= engine._device.createShaderModule({ code: makeSpriteWgsl(false, 0, false) });
-    return cache._shaderModule;
+    return module;
 }
 
 function buildSpritePipeline(
@@ -279,21 +263,14 @@ function buildSpritePipeline(
     if (hasDepth) {
         instanceAttributes.push({ shaderLocation: 6, offset: SPRITE_DEPTH_OFFSET_BYTES, format: "float32" });
     }
-    const uvScroll = layer?._uvScroll === true;
-    if (uvScroll) {
-        instanceAttributes.push({
-            shaderLocation: 7,
-            offset: hasDepth ? SPRITE_UVOFFSET_OFFSET_DEPTH_BYTES : SPRITE_UVOFFSET_OFFSET_PURE_2D_BYTES,
-            format: "float32x2",
-        });
+    // uvScroll (opt-in via setSprite2DUvOffset) appends a `uvOffset.xy` attribute after the base
+    // layout, like `hasDepth` appends `@location(6)`. The attribute is precomputed by the opt-in
+    // module and stashed on the layer as plain data — so the always-loaded path ships none of the
+    // attribute-building, just this data consume. The widened stride is likewise already on the layer.
+    if (layer?._uvScrollAttr) {
+        instanceAttributes.push(layer._uvScrollAttr);
     }
-    const arrayStride = uvScroll
-        ? hasDepth
-            ? DEPTH_UVSCROLL_STRIDE_BYTES
-            : PURE_2D_UVSCROLL_STRIDE_BYTES
-        : hasDepth
-          ? DEPTH_INSTANCE_STRIDE_BYTES
-          : PURE_2D_INSTANCE_STRIDE_BYTES;
+    const arrayStride = layer?._instanceStrideBytes ?? (hasDepth ? DEPTH_INSTANCE_STRIDE_BYTES : PURE_2D_INSTANCE_STRIDE_BYTES);
     const descriptor: GPURenderPipelineDescriptor = {
         layout: device.createPipelineLayout({ bindGroupLayouts }),
         vertex: {
@@ -333,8 +310,8 @@ function buildSpritePipeline(
 // "grow instance buffer if needed", "upload dirty instance range",
 // "build the 12-float UBO", "writeBuffer only if changed" — is identical.
 
-/** Per-layer UBO size in bytes. 12 floats; struct alignment forced to 16 by `vec4<f32>` fields. */
-export const LAYER_UBO_BYTES = 48;
+/** Per-layer UBO size in bytes. 16 floats; struct alignment forced to 16 by `vec4<f32>` fields. */
+export const LAYER_UBO_BYTES = 64;
 /** Number of floats in the per-layer UBO scratch / lastUbo arrays. */
 export const LAYER_UBO_FLOATS = LAYER_UBO_BYTES / 4;
 
@@ -351,9 +328,11 @@ export function createSpriteInstanceBuffer(device: GPUDevice, layer: Sprite2DLay
 }
 
 /**
- * Reallocate the instance buffer if `layer._capacity` outgrew the current GPU buffer.
- * Returns the (possibly new) buffer + the new capacity, plus a `reallocated` flag the
- * caller uses to invalidate per-buffer caches (render bundles, `uploadedVersion`, etc).
+ * Reallocate the instance buffer if it can no longer hold `layer._capacity` sprites at the layer's
+ * current per-sprite stride. The comparison is **byte-based** (`currentBuffer.size` vs the required
+ * byte size) so it triggers both on capacity growth *and* on a stride change — e.g. when the opt-in
+ * `setSprite2DUvOffset` widens a previously narrow layer in place. Returns the (possibly new) buffer
+ * plus a `reallocated` flag the caller uses to invalidate per-buffer caches (render bundles, etc).
  */
 export function ensureSpriteInstanceBuffer(
     device: GPUDevice,
@@ -362,7 +341,8 @@ export function ensureSpriteInstanceBuffer(
     currentCapacity: number,
     label?: string
 ): { buffer: GPUBuffer; capacity: number; reallocated: boolean } {
-    if (currentCapacity >= layer._capacity) {
+    const neededBytes = layer._capacity * layer._instanceStrideBytes;
+    if (currentBuffer.size >= neededBytes) {
         return { buffer: currentBuffer, capacity: currentCapacity, reallocated: false };
     }
     currentBuffer.destroy();
@@ -408,11 +388,12 @@ export function uploadSpriteInstances(device: GPUDevice, layer: Sprite2DLayer, i
 }
 
 /**
- * Fill `ubo` (12 floats) with the per-layer UBO contents from `layer` at the given
- * render-target dims. Layout matches the WGSL `Layer` struct (48 bytes total):
+ * Fill `ubo` (16 floats) with the per-layer UBO contents from `layer` at the given
+ * render-target dims. Layout matches the WGSL `Layer` struct (64 bytes total):
  *   [0..1]  viewPos.xy   [2] viewScale   [3] viewRot
  *   [4..5]  screenSize.xy   [6..7] pivot.xy
  *   [8..11] opacityMul.rgba (pre-shaped per blend mode)
+ *   [12]    1/coverageGamma (coverage-gamma layers only)   [13..15] reserved
  *
  * Depth-hosted layers keep per-sprite NDC depth on the per-instance vertex buffer
  * (slot [13] of `Sprite2DLayer._instanceData`), not in this UBO — a single
@@ -443,6 +424,10 @@ export function buildSpriteLayerUbo(layer: Sprite2DLayer, screenWidth: number, s
         ubo[10] = 1;
         ubo[11] = op;
     }
+    // Coverage gamma (opt-in via setSprite2DCoverageGamma): the hook writes aa.x = 1/coverageGamma
+    // for gamma layers and 0 otherwise. Absent when no gamma layer exists, so non-gamma scenes ship
+    // no gamma bytes here; aa.yzw stay 0 (scratch UBO is zero-initialized and reused).
+    _getSpriteCoverageGammaHook()?.writeUbo(layer, ubo);
 }
 
 /**

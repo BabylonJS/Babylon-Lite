@@ -381,10 +381,10 @@ describe("addFacingBillboardSystem", () => {
         expect((vertexBuffer.attributes as GPUVertexAttribute[]).map((attribute) => attribute.shaderLocation)).toEqual([0, 1, 2, 3, 4, 5, 6]);
 
         const shaderDescriptor = device.createShaderModule.mock.calls.find((call) =>
-            (call[0] as GPUShaderModuleDescriptor).code.includes("cameraRight")
+            (call[0] as GPUShaderModuleDescriptor).code.includes("basis")
         )![0] as GPUShaderModuleDescriptor;
         expect(shaderDescriptor.code).toContain("scene.viewProjection");
-        expect(shaderDescriptor.code).toContain("getBillboardBasis");
+        expect(shaderDescriptor.code).toContain("basis");
         expect(shaderDescriptor.code).toContain("scene.view[0][0]");
 
         device.queue.writeBuffer.mockClear();
@@ -422,7 +422,7 @@ describe("addFacingBillboardSystem", () => {
         const shaderDescriptor = device.createShaderModule.mock.calls.find((call) =>
             (call[0] as GPUShaderModuleDescriptor).code.includes("discard")
         )![0] as GPUShaderModuleDescriptor;
-        expect(shaderDescriptor.code).toContain("sampleColor.a < billboards.axisAndCutoff.w");
+        expect(shaderDescriptor.code).toContain("s.a < billboards.axisAndCutoff.w");
         expect(shaderDescriptor.code).toContain("discard");
 
         device.queue.writeBuffer.mockClear();
@@ -595,7 +595,7 @@ describe("AxisLockedBillboardSpriteSystem", () => {
         expect(scene._renderables[0]!.isTransparent).toBe(true);
     });
 
-    it("generates axis-locked shader with billboards.axisAndCutoff and projectedRight", async () => {
+    it("generates axis-locked shader with billboards.axisAndCutoff and projected right basis", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
         const system = createAxisLockedBillboardSystem(makeMockAtlas(), [0, 1, 0], { capacity: 1 });
@@ -618,9 +618,9 @@ describe("AxisLockedBillboardSpriteSystem", () => {
             (call[0] as GPUShaderModuleDescriptor).code.includes("billboards.axisAndCutoff")
         )![0] as GPUShaderModuleDescriptor;
         expect(shaderDescriptor.code).toContain("billboards.axisAndCutoff");
-        expect(shaderDescriptor.code).toContain("projectedRight");
-        expect(shaderDescriptor.code).toContain("lockAxis");
-        expect(shaderDescriptor.code).toContain("getBillboardBasis");
+        expect(shaderDescriptor.code).toContain("let pr = cr - a * dot(cr, a)");
+        expect(shaderDescriptor.code).toContain("cross(a, f)");
+        expect(shaderDescriptor.code).toContain("basis");
     });
 
     it("writes axis data to UBO after opacity", async () => {
@@ -677,18 +677,18 @@ return vec4<f32>(base.rgb * (0.5 + 0.5 * sin(fx.time + fx.params.x)), base.a);`;
 
         const facing = cs._composeWgsl("facing", "transparent");
         expect(facing).toContain("@group(1) @binding(3) var<uniform> fx: SpriteFx");
-        expect(facing).toContain("fn fs(in: VOut) -> @location(0) vec4<f32>");
+        expect(facing).toContain("fn fs(in: O) -> @location(0) vec4f");
         expect(facing).toContain(FX_FRAGMENT);
-        expect(facing).toContain("@location(3) vWorldPos: vec3<f32>");
-        expect(facing).toContain("out.vWorldPos = worldPos;");
-        expect(facing).toContain("getBillboardBasis");
-        expect(facing).toContain("cameraRight");
+        expect(facing).toContain("@location(3) vWorldPos: vec3f");
+        expect(facing).toContain("out.vWorldPos = wp;");
+        expect(facing).toContain("basis");
+        expect(facing).toContain("scene.view[0][0]");
 
         // Axis-locked uses a different basis but the same fragment contract.
         const axisLocked = cs._composeWgsl("axis-locked", "transparent");
-        expect(axisLocked).toContain("projectedRight");
-        expect(axisLocked).toContain("lockAxis");
-        expect(axisLocked).toContain("@location(3) vWorldPos: vec3<f32>");
+        expect(axisLocked).toContain("let pr = cr - a * dot(cr, a)");
+        expect(axisLocked).toContain("cross(a, f)");
+        expect(axisLocked).toContain("@location(3) vWorldPos: vec3f");
     });
 
     it("places the fx UBO after extra textures and binds them at group 1", () => {

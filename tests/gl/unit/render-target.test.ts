@@ -3,13 +3,10 @@ import { bindTexture, createGLEngine, disposeGLEngine, type GLEffect } from "../
 import {
     bindRenderTarget,
     createFloatRenderTarget,
-    createPingPong,
     createRenderTarget,
-    disposePingPong,
     disposeRenderTarget,
     generateRenderTargetMipMaps,
     readRenderTargetPixels,
-    resizePingPong,
     resizeRenderTarget,
 } from "../../../packages/babylon-lite-gl/src/render-target";
 import { createRawTexture } from "../../../packages/babylon-lite-gl/src/texture";
@@ -586,60 +583,6 @@ describe("lite-gl render-target: BYO (bring-your-own) color texture", () => {
     });
 });
 
-describe("lite-gl render-target: ping-pong", () => {
-    it("creates two distinct targets; read starts as A, write as B", () => {
-        const { engine } = setup();
-        const pp = createPingPong(engine, { width: 64, height: 64 });
-        expect(pp.read).toBe(pp._a);
-        expect(pp.write).toBe(pp._b);
-        expect(pp.read).not.toBe(pp.write);
-    });
-
-    it("swap flips read/write and is allocation-free (same two target instances)", () => {
-        const { engine } = setup();
-        const pp = createPingPong(engine, { width: 64, height: 64 });
-        const a = pp.read;
-        const b = pp.write;
-        pp.swap();
-        expect(pp.read).toBe(b);
-        expect(pp.write).toBe(a);
-        pp.swap();
-        expect(pp.read).toBe(a);
-        expect(pp.write).toBe(b);
-    });
-
-    it("resizePingPong resizes both targets", () => {
-        const { engine } = setup();
-        const pp = createPingPong(engine, { width: 32, height: 32 });
-        resizePingPong(engine, pp, 128, 64);
-        expect(pp._a.width).toBe(128);
-        expect(pp._a.height).toBe(64);
-        expect(pp._b.width).toBe(128);
-        expect(pp._b.height).toBe(64);
-    });
-
-    it("disposePingPong disposes both targets and is idempotent", () => {
-        const { mock, engine } = setup();
-        const pp = createPingPong(engine, { width: 32, height: 32 });
-        disposePingPong(engine, pp);
-        expect(pp._a._disposed).toBe(true);
-        expect(pp._b._disposed).toBe(true);
-        expect(pp._disposed).toBe(true);
-        mock.clear();
-        expect(() => disposePingPong(engine, pp)).not.toThrow();
-        expect(mock.count("deleteFramebuffer")).toBe(0);
-    });
-
-    it("both targets survive a context restore", () => {
-        const { canvas, engine } = setup();
-        const pp = createPingPong(engine, { width: 64, height: 64 });
-        fireLost(canvas);
-        fireRestored(canvas);
-        expect(pp._a._framebuffer).not.toBeNull();
-        expect(pp._b._framebuffer).not.toBeNull();
-    });
-});
-
 describe("lite-gl render-target: atomic failure cleanup", () => {
     // FRAMEBUFFER_UNSUPPORTED (≠ FRAMEBUFFER_COMPLETE) — forces the completeness
     // check to report an incomplete framebuffer.
@@ -687,28 +630,6 @@ describe("lite-gl render-target: atomic failure cleanup", () => {
         expect(mock.count("deleteTexture")).toBe(1);
         expect(engine._state.boundFramebuffer).toBe(sentinel._framebuffer);
     });
-
-    it("disposes the FIRST ping-pong target when the SECOND one fails to build", () => {
-        const { mock, engine } = setup();
-        const rtCountBefore = engine._renderTargets.length;
-        let builds = 0;
-        const realCheck = engine.gl.checkFramebufferStatus;
-        (engine.gl as unknown as { checkFramebufferStatus: (t: number) => number }).checkFramebufferStatus = (t: number): number => {
-            builds += 1;
-            return builds >= 2 ? FRAMEBUFFER_UNSUPPORTED : realCheck(t);
-        };
-        mock.clear();
-
-        expect(() => createPingPong(engine, { width: 32, height: 32 })).toThrow(/incomplete/);
-
-        // Both color textures + both FBOs were created and then freed — the first
-        // target was released by createPingPong's cleanup path.
-        expect(mock.count("createTexture")).toBe(2);
-        expect(mock.count("deleteTexture")).toBe(2);
-        expect(mock.count("createFramebuffer")).toBe(2);
-        expect(mock.count("deleteFramebuffer")).toBe(2);
-        expect(engine._renderTargets.length).toBe(rtCountBefore);
-    });
 });
 
 describe("lite-gl render-target: null-safe dispose", () => {
@@ -719,13 +640,5 @@ describe("lite-gl render-target: null-safe dispose", () => {
         expect(() => disposeRenderTarget(engine, undefined)).not.toThrow();
         expect(mock.count("deleteFramebuffer")).toBe(0);
         expect(mock.count("deleteTexture")).toBe(0);
-    });
-
-    it("disposePingPong(engine, null | undefined) is a no-op and does not throw", () => {
-        const { mock, engine } = setup();
-        mock.clear();
-        expect(() => disposePingPong(engine, null)).not.toThrow();
-        expect(() => disposePingPong(engine, undefined)).not.toThrow();
-        expect(mock.count("deleteFramebuffer")).toBe(0);
     });
 });

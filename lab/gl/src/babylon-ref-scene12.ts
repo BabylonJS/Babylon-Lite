@@ -3,7 +3,7 @@ import { ThinEngine } from "@babylonjs/core/Engines/thinEngine.js";
 /**
  * Babylon.js reference for GL Scene 12 — Scissor Rectangles.
  *
- * Reproduces lab/gl/src/scene12.ts (which uses @babylonjs/lite-gl/scissor's
+ * Reproduces lab/gl/src/scene12.ts (which uses lite-gl's
  * `setScissor` / `disableScissor` + `clearEngine`) with Babylon's ThinEngine
  * driven through its raw WebGL2 context (`engine._gl`). lite-gl's `setScissor` is
  * a thin cache over `gl.enable(SCISSOR_TEST)` + `gl.scissor`, and `clearEngine`

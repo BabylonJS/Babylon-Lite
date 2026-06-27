@@ -1,9 +1,9 @@
 /**
- * Sub-entry: dynamic (canvas-/bitmap-backed) textures.
+ * Dynamic (canvas-/bitmap-backed) textures.
  *
- * Dynamic-importable via `import { ... } from "@babylonjs/lite-gl/dynamic-texture"`
- * so consumers that never push 2D pixel sources into a texture don't pull this
- * code into their bundles.
+ * Part of the public API via the `@babylonjs/lite-gl` barrel. The package is
+ * `sideEffects: false`, so consumers that never push 2D pixel sources into a
+ * texture tree-shake this code out.
  *
  * The WebGL counterpart of Babylon's `ThinEngine.createDynamicTexture` +
  * `updateDynamicTexture`. A dynamic texture is a blank RGBA8 allocation whose

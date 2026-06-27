@@ -169,10 +169,10 @@ with additive atmosphere. Big visual payoff, tiny code.
 **How (Lite APIs).**
 
 - For each band, a wide sprite (or a few wrapping tiles) on a layer created with
-  `createSprite2DLayer(atlas, { uvScroll: true, order })`. Each frame, advance
-  `setSprite2DUvOffset(layer, idx, [cameraX * factorBand, 0])` with a smaller
-  `factor` for farther bands → parallax depth.
-- Clouds: a second `uvScroll` band advancing on its own slow timer independent of
+  `createSprite2DLayer(atlas, { order })`. Each frame, advance
+  `setSprite2DUvOffset(layer, idx, [cameraX * factorBand, 0])` (the first call opts the
+  layer into uvScroll) with a smaller `factor` for farther bands → parallax depth.
+- Clouds: a second uvScroll band advancing on its own slow timer independent of
   the camera.
 - Sun glow / god-rays / atmospheric haze: an **additive** sprite
   (`blendMode: spriteBlendAdditive`) pulsing via a custom shader's `fx.time`.

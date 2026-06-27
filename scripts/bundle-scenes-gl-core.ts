@@ -46,21 +46,11 @@ export interface BundleManifestEntry {
     bjsGzipKB?: number;
 }
 
-// Map every `babylon-lite-gl` import specifier the scenes use to its TS source
+// Map the `babylon-lite-gl` import specifier the scenes use to its TS source
 // entry, mirroring the package.json `exports` map. Aliasing to source (not the
 // built barrel) is what makes the measured size reflect real tree-shaken cost.
-// Keys are matched by esbuild as an exact path OR a prefix followed by `/`, and
-// esbuild prefers the longest matching alias — so the bare-package alias and the
-// sub-path aliases coexist correctly (verified against scene4 / scene6).
 export const liteGlAlias: Record<string, string> = {
     "babylon-lite-gl": resolve(pkgSrc, "index.ts"),
-    "babylon-lite-gl/sprites": resolve(pkgSrc, "sprites.ts"),
-    "babylon-lite-gl/html-texture": resolve(pkgSrc, "html-texture.ts"),
-    "babylon-lite-gl/render-target": resolve(pkgSrc, "render-target.ts"),
-    "babylon-lite-gl/mesh": resolve(pkgSrc, "mesh.ts"),
-    "babylon-lite-gl/depth-stencil": resolve(pkgSrc, "depth-stencil.ts"),
-    "babylon-lite-gl/scissor": resolve(pkgSrc, "scissor.ts"),
-    "babylon-lite-gl/dynamic-texture": resolve(pkgSrc, "dynamic-texture.ts"),
 };
 
 /** rawKB / gzipKB rounding identical to the lite bundler's bytesToRoundedKB. */

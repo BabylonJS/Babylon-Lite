@@ -1,12 +1,10 @@
-import { createGLEngine, createEffect, isEffectReady, resizeGLEngine, runRenderLoop, setViewport, stopRenderLoop, useEffect } from "babylon-lite-gl";
-import { createIndexBuffer, createMeshVao, createVertexBuffer, drawMesh, type GLAttributeDescriptor, type GLMeshVao } from "babylon-lite-gl/mesh";
-import { clearEngine, setCullState, setDepthState } from "babylon-lite-gl/depth-stencil";
+import { createGLEngine, createEffect, isEffectReady, resizeGLEngine, runRenderLoop, setViewport, stopRenderLoop, useEffect, createIndexBuffer, createMeshVao, createVertexBuffer, drawMesh, type GLAttributeDescriptor, type GLMeshVao, clearEngine, setCullState, setDepthState } from "babylon-lite-gl";
 
 /**
  * Scene 10 — Indexed Mesh + Instancing (the first lite-gl scene with REAL
  * geometry rather than a fullscreen quad).
  *
- * Exercises the @babylonjs/lite-gl/mesh sub-entry end-to-end, using the
+ * Exercises the mesh API end-to-end, using the
  * VAO-cached static-mesh path:
  *   - `createVertexBuffer` uploads an interleaved (position + colour) base quad.
  *   - `createIndexBuffer` uploads the two-triangle index list.
@@ -19,7 +17,7 @@ import { clearEngine, setCullState, setDepthState } from "babylon-lite-gl/depth-
  *     per-frame `vertexAttribPointer`/`vertexAttribDivisor` and no
  *     `unbindInstanceAttributes` (the VAO isolates the divisors).
  *
- * Depth + cull (from @babylonjs/lite-gl/depth-stencil) are the visible proof
+ * Depth + cull are the visible proof
  * that depth-testing and instancing work: the five instances march diagonally
  * with a DECREASING clip-space z (0.50 → −0.30), so each upper-right instance
  * is nearer and OCCLUDES the lower-left ones. `setDepthState` enables the
