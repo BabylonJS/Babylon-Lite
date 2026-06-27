@@ -8,7 +8,7 @@ updated by the `update-compat-layer` skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
 - **Last synced BJS commit:** `c729b94f2e36f2d915415620857452f7ad0ff731`
-- **Last sync date:** 2026-06-25
+- **Last sync date:** 2026-06-26
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -176,7 +176,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `mesh.thinInstanceSetBuffer`                                                                                    | ⚡ Partial         | meshes (`matrix` + `color` → Lite thin instances)                                                                                                                                                                                          |
 | `mesh.clone` / `createInstance`                                                                                 | ⚡ Partial         | throwing stub                                                                                                                                                                                                                              |
 | `TransformNode`                                                                                                 | ✅ Full            | meshes                                                                                                                                                                                                                                     |
-| `mesh.getBoundingInfo`                                                                                          | 🔧 Needs Lite core | bounds accessor                                                                                                                                                                                                                            |
+| `mesh.getBoundingInfo`                                                                                          | ✅ Full            | meshes (local-space `BoundingInfo` from Lite mesh `boundMin`/`boundMax`, with a `computeAabb` fold of the retained CPU positions as fallback — matches `LoadedMesh.getBoundingInfo`)                                                        |
 | LOD / `EdgesRenderer` / `OutlineRenderer`                                                                       | ❌ Not supported   | throwing stub; not in Lite                                                                                                                                                                                                                 |
 | `CSG` / `CSG2` (+ `InitializeCSG2Async`)                                                                        | ✅ Full            | [meshes/csg.ts](src/meshes/csg.ts) over Lite `createCsgFromMesh`/`createMeshFromCsg` and `createCsg2FromMesh`/`createMeshesFromCsg2` (CSG2 preserves per-source materials)                                                                 |
 
@@ -466,3 +466,9 @@ large-world-rendering scenes are now resolved.
 > (`PhysicsAggregate` not yet wrapped), not a Lite-core unblock; and audio scenes
 > have no pixel oracle. So no scene moved into the working list this run — Task 2 is
 > dormant, as expected when no Lite change unblocks a scene.
+>
+> **Task 2 re-check (2026-06-26):** the only commit to land since the last sync
+> (#313, "Move Lite gl ping pong out of the package") touches `packages/babylon-lite-gl/`
+> and the `lab/gl` WebGL track only — **nothing under `packages/babylon-lite/src/**`**,
+> so no new Lite capability came online. No previously-skipped scene is newly
+> unblocked; Task 2 stays dormant this run.
