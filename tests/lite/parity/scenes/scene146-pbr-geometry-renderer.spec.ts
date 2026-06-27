@@ -14,7 +14,7 @@ test("Scene 146 — PBR geometry renderer task matches Babylon.js reference", as
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 146, timeout: 120_000, settleMs: 5_000 });
 
-    await page.goto("/scene146.html");
+    await page.goto("scene146.html");
     await waitForCanvasReady(page, { timeout: 120_000, label: "Scene 146 Lite" });
     await page.waitForTimeout(500);
 

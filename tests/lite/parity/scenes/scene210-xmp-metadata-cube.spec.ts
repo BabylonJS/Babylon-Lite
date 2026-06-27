@@ -12,7 +12,7 @@ test("Scene 210 — glTF KHR_xmp_json_ld matches Babylon.js reference", async ({
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 210 });
 
-    await page.goto("/scene210.html");
+    await page.goto("scene210.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 

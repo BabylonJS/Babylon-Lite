@@ -12,7 +12,7 @@ test("Scene 95 - billboard custom shader (palette remap) matches Babylon.js refe
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 95, settleMs: 500 });
 
-    await page.goto("/scene95.html");
+    await page.goto("scene95.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

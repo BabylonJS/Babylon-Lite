@@ -15,7 +15,7 @@ const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 test.skip(!!sceneConfig.skipParity, "Scene 111 skipped via skipParity in scene-config.json");
 
 test("Scene 111 — Light Selection Stress Test matches Babylon.js reference", async ({ page }, testInfo) => {
-    await page.goto("/scene111.html");
+    await page.goto("scene111.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(1000);
 

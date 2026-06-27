@@ -14,7 +14,7 @@ test("Scene 125 — GS bakeCurrentTransformIntoVertices matches Babylon.js refer
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 125, timeout: 150_000, settleMs: 800 });
 
-    await page.goto("/scene125.html");
+    await page.goto("scene125.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 150_000 });
     await page.waitForFunction(() => !document.getElementById("loader-overlay"), { timeout: 5_000 }).catch(() => undefined);
     await page.waitForTimeout(500);

@@ -23,7 +23,7 @@ test("Scene 1 — BoomBox PBR matches Babylon.js reference", async ({ page }, te
     await captureGolden(browser, { sceneId: 1 });
 
     // Navigate to our renderer
-    await page.goto("/scene1.html");
+    await page.goto("scene1.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     // Extra frame to ensure GPU has flushed
     await page.waitForTimeout(500);

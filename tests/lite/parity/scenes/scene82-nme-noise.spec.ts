@@ -12,7 +12,7 @@ test("Scene 82 — NME procedural noise blocks match Babylon.js reference", asyn
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 82 });
 
-    await page.goto("/scene82.html");
+    await page.goto("scene82.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

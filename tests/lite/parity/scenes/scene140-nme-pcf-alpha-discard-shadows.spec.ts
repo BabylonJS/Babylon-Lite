@@ -84,7 +84,7 @@ test("Scene 140 — NME PCF alpha discard shadows match Babylon.js reference", a
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 140, queryParams: "freeze=1", timeout: 120_000 });
 
-    await page.goto("/scene140.html?freeze=1");
+    await page.goto("scene140.html?freeze=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     await page.waitForTimeout(500);
 
@@ -99,7 +99,7 @@ test("Scene 140 — NME PCF alpha discard shadows match Babylon.js reference", a
 });
 
 test("Scene 140 — morphing sphere updates its PCF shadow on the ground", async ({ page }) => {
-    await page.goto("/scene140.html?manualMorph=1");
+    await page.goto("scene140.html?manualMorph=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
 
     const canvas = page.locator("canvas");
@@ -119,11 +119,11 @@ test("Scene 140 — morphing sphere updates its PCF shadow on the ground", async
 });
 
 test("Scene 140 — cube final-alpha discard cuts holes in its PCF ground shadow", async ({ page }) => {
-    await page.goto("/scene140.html?freeze=1&shadowHoleProbe=1");
+    await page.goto("scene140.html?freeze=1&shadowHoleProbe=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     const cutoutCaster = await page.locator("canvas").screenshot();
 
-    await page.goto("/scene140.html?freeze=1&shadowHoleProbe=1&solidShadowCaster=1");
+    await page.goto("scene140.html?freeze=1&shadowHoleProbe=1&solidShadowCaster=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     const solidCaster = await page.locator("canvas").screenshot();
 
@@ -137,11 +137,11 @@ test("Scene 140 — cube final-alpha discard cuts holes in its PCF ground shadow
 });
 
 test("Scene 140 — BJS reference cube final-alpha discard cuts holes in its PCF ground shadow", async ({ page }) => {
-    await page.goto("/babylon-ref-scene140.html?freeze=1&shadowHoleProbe=1");
+    await page.goto("babylon-ref-scene140.html?freeze=1&shadowHoleProbe=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     const cutoutCaster = await page.locator("canvas").screenshot();
 
-    await page.goto("/babylon-ref-scene140.html?freeze=1&shadowHoleProbe=1&solidShadowCaster=1");
+    await page.goto("babylon-ref-scene140.html?freeze=1&shadowHoleProbe=1&solidShadowCaster=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     const solidCaster = await page.locator("canvas").screenshot();
 

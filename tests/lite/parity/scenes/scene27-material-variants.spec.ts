@@ -23,7 +23,7 @@ test("Scene 27 — Material Variants matches Babylon.js reference", async ({ pag
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 27, timeout: 120_000, settleMs: 3000 });
 
-    await page.goto("/scene27.html");
+    await page.goto("scene27.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

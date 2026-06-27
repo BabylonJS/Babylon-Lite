@@ -93,7 +93,7 @@ async function readBjsPickState(browser: Browser): Promise<PickState> {
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const bjsPage = await context.newPage();
     try {
-        await bjsPage.goto(`/babylon-ref-scene${SCENE_ID}.html?seekTime=${SEEK_TIME}`);
+        await bjsPage.goto(`babylon-ref-scene${SCENE_ID}.html?seekTime=${SEEK_TIME}`);
         return await readPickState(bjsPage);
     } finally {
         await bjsPage.close();
@@ -119,7 +119,7 @@ test("Scene 115 - Alien precise picking at frame 100 matches Babylon.js referenc
     const bjsState = await readBjsPickState(browser);
     expectMarkerState(bjsState, "Babylon.js");
 
-    await page.goto(`/scene${SCENE_ID}.html?seekTime=${SEEK_TIME}`);
+    await page.goto(`scene${SCENE_ID}.html?seekTime=${SEEK_TIME}`);
     const liteState = await readPickState(page);
     expectMarkerState(liteState, "Lite");
     expectPickInfoClose(liteState, bjsState);

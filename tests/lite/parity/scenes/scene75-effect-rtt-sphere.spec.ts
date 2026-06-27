@@ -12,7 +12,7 @@ test("Scene 75 — EffectRenderer RTT sphere matches Babylon.js reference", asyn
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 75, timeout: 30_000, settleMs: 500 });
 
-    await page.goto("/scene75.html");
+    await page.goto("scene75.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(600);
 

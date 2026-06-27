@@ -20,7 +20,7 @@ test("Scene 50 — Sprite Grid matches Babylon.js reference", async ({ page }, t
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 50 });
 
-    await page.goto("/scene50.html");
+    await page.goto("scene50.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

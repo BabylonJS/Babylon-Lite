@@ -74,14 +74,14 @@ test("Scene 104 — Character controller level walk + collision detection matche
     // ── Babylon.js reference (live DATA) at the collision frame ──
     const bjsContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const bjsPage = await bjsContext.newPage();
-    const bjs = await capture(bjsPage, "/babylon-ref-scene104.html", COLLISION_FRAME, "Scene 104 BJS reference (collisions)");
+    const bjs = await capture(bjsPage, "babylon-ref-scene104.html", COLLISION_FRAME, "Scene 104 BJS reference (collisions)");
     await bjsPage.close();
     await bjsContext.close();
 
     // ── Lite: collision frame (data) + pre-contact frame (visual) ──
-    const lite = await capture(page, "/scene104.html", COLLISION_FRAME, "Scene 104 Lite (collisions)");
+    const lite = await capture(page, "scene104.html", COLLISION_FRAME, "Scene 104 Lite (collisions)");
     const visualPath = path.join(REFERENCE_DIR, "test-actual.png");
-    await capture(page, "/scene104.html", VISUAL_FRAME, "Scene 104 Lite (visual)", visualPath);
+    await capture(page, "scene104.html", VISUAL_FRAME, "Scene 104 Lite (visual)", visualPath);
 
     // ── 1. Character trajectory ──
     console.log(`Scene 104 charPos — BJS: ${bjs.charPos}`);

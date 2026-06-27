@@ -27,7 +27,7 @@ test("Scene 213 — GridMaterial matches Babylon.js reference", async ({ page },
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 213, force: true, settleMs: 500 });
 
-    await page.goto("/scene213.html");
+    await page.goto("scene213.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

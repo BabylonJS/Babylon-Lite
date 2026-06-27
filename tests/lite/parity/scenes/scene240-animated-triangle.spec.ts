@@ -15,7 +15,7 @@ test("Scene 240 — AnimatedTriangle matches Babylon.js reference", async ({ pag
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 240, seekTime: 0.5, timeout: 90_000 });
 
-    await page.goto("/scene240.html?seekTime=0.5");
+    await page.goto("scene240.html?seekTime=0.5");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);

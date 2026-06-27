@@ -12,7 +12,7 @@ test("Scene 178 — glTF KHR_materials_iridescence matches Babylon.js reference"
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 178 });
 
-    await page.goto("/scene178.html");
+    await page.goto("scene178.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 

@@ -45,7 +45,7 @@ test("Scene 106 — Prestep × motion-type grid matches Babylon.js", async ({ pa
 
     // ── Lite at the same frame ──
     const visualPath = path.join(REFERENCE_DIR, "test-actual.png");
-    await capture(page, "/scene106.html", VISUAL_FRAME, "Scene 106 Lite", visualPath);
+    await capture(page, "scene106.html", VISUAL_FRAME, "Scene 106 Lite", visualPath);
 
     // ── Rendered-frame parity ──
     const full = compareImages(visualPath, goldenPath);

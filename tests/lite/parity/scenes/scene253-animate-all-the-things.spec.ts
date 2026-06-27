@@ -15,7 +15,7 @@ test("Scene 253 — AnimateAllTheThings matches Babylon.js reference", async ({ 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 253, seekTime: 1, timeout: 120_000 });
 
-    await page.goto("/scene253.html?seekTime=1");
+    await page.goto("scene253.html?seekTime=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 90_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 90_000 });
     await page.waitForTimeout(500);

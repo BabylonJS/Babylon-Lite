@@ -25,7 +25,7 @@ test("Scene 23 — PBR Anisotropy matches Babylon.js reference", async ({ page }
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 23, seekTime: 0, timeout: 60_000 });
 
-    await page.goto("/scene23.html?seekTime=0");
+    await page.goto("scene23.html?seekTime=0");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 10_000 });
     await page.waitForTimeout(500);

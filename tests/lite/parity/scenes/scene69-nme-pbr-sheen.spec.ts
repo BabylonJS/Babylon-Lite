@@ -18,7 +18,7 @@ test("Scene 69 — NME PBR Sheen matches Babylon.js reference", async ({ page },
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 69 });
 
-    await page.goto("/scene69.html");
+    await page.goto("scene69.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

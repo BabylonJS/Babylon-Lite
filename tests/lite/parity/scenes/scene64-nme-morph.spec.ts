@@ -19,7 +19,7 @@ test("Scene 64 — NME morph targets matches Babylon.js reference", async ({ pag
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 64, queryParams: "freeze=1" });
 
-    await page.goto("/scene64.html?freeze=1");
+    await page.goto("scene64.html?freeze=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

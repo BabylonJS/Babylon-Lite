@@ -21,7 +21,7 @@ test("Scene 252 — StandardMaterial morph target matches Babylon.js reference",
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 252 });
 
-    await page.goto("/scene252.html");
+    await page.goto("scene252.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

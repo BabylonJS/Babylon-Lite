@@ -19,7 +19,7 @@ test("Scene 110 — RTT with material override matches Babylon.js reference", as
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 110 });
 
-    await page.goto("/scene110.html");
+    await page.goto("scene110.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 50_000 });
     await page.waitForTimeout(500);
 

@@ -23,7 +23,7 @@ test("Scene 206 — Floating-origin cutout billboards match Babylon.js reference
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 206, settleMs: 500 });
 
-    await page.goto("/scene206.html");
+    await page.goto("scene206.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
 

@@ -19,7 +19,7 @@ test("Scene 211 — glTF EXT_meshopt_compression matches Babylon.js reference", 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 211, seekTime: 0.5 });
 
-    await page.goto("/scene211.html?seekTime=0.5");
+    await page.goto("scene211.html?seekTime=0.5");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
     await page.waitForTimeout(200);

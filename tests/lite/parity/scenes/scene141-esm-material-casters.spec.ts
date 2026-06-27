@@ -12,7 +12,7 @@ test("Scene 141 - ESM shadow casters with NME, Standard, and PBR materials match
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 141 });
 
-    await page.goto("/scene141.html");
+    await page.goto("scene141.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

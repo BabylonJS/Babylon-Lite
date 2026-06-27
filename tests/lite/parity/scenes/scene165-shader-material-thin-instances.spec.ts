@@ -31,7 +31,7 @@ test.describe.serial("Scene 165 — ShaderMaterial thin instances", () => {
     });
 
     test("thin instances matches Babylon.js reference", async ({ page }, testInfo) => {
-        await page.goto("/scene165.html");
+        await page.goto("scene165.html");
         await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await page.waitForTimeout(1000);
 
@@ -47,7 +47,7 @@ test.describe.serial("Scene 165 — ShaderMaterial thin instances", () => {
     });
 
     test("GPU culling renders identically to non-culled golden", async ({ page }, testInfo) => {
-        await page.goto("/scene165.html?culling");
+        await page.goto("scene165.html?culling");
         await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await page.waitForTimeout(1000);
 

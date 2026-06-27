@@ -1,0 +1,51 @@
+# Reusable step template: enable pnpm, restore the dependency cache, install.
+#
+# Every CI job needs the same dependency bootstrap (corepack + pnpm install).
+# Centralizing it here removes the copy-pasted blocks across jobs and, more
+# importantly, adds a cross-run pnpm store cache so the install is fast on the
+# common case where pnpm-lock.yaml is unchanged. (Azure caches are restored from
+# previously-completed runs and saved at job end, so this speeds up subsequent
+# pipeline runs rather than parallel jobs within a single run.)
+#
+# Parameters:
+#   playwright - also install + cache the Playwright browser binaries (only the
+#                jobs that run local browser tests need this).
+#
+# Required pipeline variables:
+#   PNPM_VERSION              - pnpm version to activate via corepack
+#   PLAYWRIGHT_BROWSERS_PATH  - deterministic browser install dir (for caching)
+
+parameters:
+    - name: playwright
+      type: boolean
+      default: false
+
+steps:
+    - script: |
+          corepack enable
+          corepack prepare pnpm@$(PNPM_VERSION) --activate
+      displayName: "Enable pnpm via corepack"
+
+    - script: echo "##vso[task.setvariable variable=PNPM_STORE_PATH]$(pnpm store path --silent)"
+      displayName: "Resolve pnpm store path"
+
+    - task: Cache@2
+      inputs:
+          key: 'pnpm | "$(Agent.OS)" | pnpm-lock.yaml'
+          restoreKeys: |
+              pnpm | "$(Agent.OS)"
+          path: $(PNPM_STORE_PATH)
+      displayName: "Cache pnpm store"
+
+    - script: pnpm install --frozen-lockfile
+      displayName: "Install dependencies"
+
+    - ${{ if eq(parameters.playwright, true) }}:
+          - task: Cache@2
+            inputs:
+                key: 'playwright | "$(Agent.OS)" | pnpm-lock.yaml'
+                path: $(PLAYWRIGHT_BROWSERS_PATH)
+            displayName: "Cache Playwright browsers"
+
+          - script: pnpm exec playwright install chromium
+            displayName: "Install Playwright browsers"

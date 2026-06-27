@@ -22,7 +22,7 @@ test("Scene 171 — Navigation Crowd Path matches Babylon.js reference", async (
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 171, queryParams: "freeze=1", timeout: 180_000 });
 
-    await page.goto(`/scene171.html?freeze=1`);
+    await page.goto(`scene171.html?freeze=1`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

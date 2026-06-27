@@ -42,7 +42,7 @@ export function captureGolden(browser: Browser, opts: CaptureGoldenOptions): Pro
     return captureGoldenCore(browser, opts, {
         refBaseDir: path.resolve(__dirname, "../../../reference/lite"),
         slugForScene: (id) => getSceneConfig(id).slug,
-        refUrl: (id, query) => `/babylon-ref-scene${id}.html${query}`,
+        refUrl: (id, query) => `babylon-ref-scene${id}.html${query}`,
         waitForBabylonLoadingScreen: true,
     });
 }

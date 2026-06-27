@@ -19,7 +19,7 @@ test("Scene 52 — HUD on 3D matches Babylon.js reference", async ({ page }, tes
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 52, settleMs: 500 });
 
-    await page.goto("/scene52.html");
+    await page.goto("scene52.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

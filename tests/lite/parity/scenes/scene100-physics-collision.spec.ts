@@ -25,7 +25,7 @@ test("Scene 100 — Physics + collision event matches Babylon.js reference", asy
     const browser = page.context().browser()!;
     const goldenPath = await captureGolden(browser, { sceneId: 100, queryParams: `captureFrame=${CAPTURE_FRAME}`, waitFlag: "captureReady" });
 
-    await page.goto(`/scene100.html${CAPTURE_QUERY}`);
+    await page.goto(`scene100.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(page, { timeout: 50_000, label: "Scene 100 Lite" });
     await waitForCanvasReady(page, { timeout: 50_000, label: `Scene 100 Lite at frame ${CAPTURE_FRAME}`, flag: "captureReady", pollMs: 100 });
 

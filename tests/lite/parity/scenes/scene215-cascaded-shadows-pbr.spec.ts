@@ -13,7 +13,7 @@ test("Scene 215 - Cascaded shadow maps on PBR receivers match Babylon.js referen
     // Regenerate the BJS CSM oracle on the same machine so cascade fits match exactly.
     await captureGolden(browser, { sceneId: 215, force: true });
 
-    await page.goto("/scene215.html");
+    await page.goto("scene215.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
 

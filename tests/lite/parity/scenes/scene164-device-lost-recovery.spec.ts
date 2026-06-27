@@ -12,7 +12,7 @@ test("Scene 164 — device-lost recovery restores Alien rendering", async ({ pag
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 164, seekTime: 2, force: true, timeout: 60_000, settleMs: 500 });
 
-    await page.goto("/scene164.html?seekTime=2");
+    await page.goto("scene164.html?seekTime=2");
 
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.deviceLost === "true", { timeout: 30_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.deviceRecovered === "true", { timeout: 30_000 });

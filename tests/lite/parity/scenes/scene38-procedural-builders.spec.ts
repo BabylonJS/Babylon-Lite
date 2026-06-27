@@ -19,7 +19,7 @@ test("Scene 38 — Procedural Builders matches Babylon.js reference", async ({ p
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 38 });
 
-    await page.goto("/scene38.html");
+    await page.goto("scene38.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
 

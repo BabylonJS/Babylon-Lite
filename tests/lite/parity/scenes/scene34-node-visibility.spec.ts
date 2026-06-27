@@ -23,7 +23,7 @@ test("Scene 34 — KHR_node_visibility + KHR_animation_pointer matches Babylon.j
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 34, seekTime: 0, timeout: 60_000 });
 
-    await page.goto("/scene34.html?seekTime=0");
+    await page.goto("scene34.html?seekTime=0");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);

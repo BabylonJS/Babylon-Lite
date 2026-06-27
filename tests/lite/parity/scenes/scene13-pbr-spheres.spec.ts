@@ -23,7 +23,7 @@ test("Scene 13 — PBR Spheres grid matches Babylon.js reference", async ({ page
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 13, timeout: 120_000 });
 
-    await page.goto("/scene13.html");
+    await page.goto("scene13.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

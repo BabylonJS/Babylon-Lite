@@ -14,7 +14,7 @@ test("Scene 144 — Bloom frame-graph post-process matches Babylon.js reference"
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 144, timeout: 120_000, settleMs: 5_000 });
 
-    await page.goto("/scene144.html");
+    await page.goto("scene144.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     await page.waitForTimeout(500);
 

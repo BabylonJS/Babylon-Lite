@@ -44,10 +44,12 @@ const ROOT_RELATIVE_PREFIXES = [
     "gl",
     "lite",
     "loader.js",
+    "meshopt_decoder.js",
     "models",
     "pages",
     "perf-manifest.json",
     "perf-regression-manifest.json",
+    "recast-navigation.wasm",
     "reference",
     "scene",
     "scene-config.json",
@@ -218,9 +220,38 @@ function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function rewriteRootRelativeUrls(text: string, basePath: string): string {
+function rewriteRootRelativeUrls(text: string, basePath: string, ext: string): string {
     const prefixes = ROOT_RELATIVE_PREFIXES.map(escapeRegExp).join("|");
-    return text.replace(new RegExp(`(["'=(:\\s])/((${prefixes})(?=[/"'.?#)\\s]|[0-9A-Za-z_-]))`, "g"), `$1${basePath}$2`);
+    // Vite-bundled JS/JSON must be rewritten conservatively. The minified
+    // Babylon.js engine chunks contain regex literals (e.g.
+    // `.replace(/gl_FragColor/g, ...)`) and glTF JSON pointers (e.g.
+    // `m.Get("/scene", ...)`) that look like root-relative URLs. Matching after
+    // `(`, `=`, `:` or whitespace would mangle regex literals into invalid
+    // regular expressions, crashing the whole chunk. So for code files we only
+    // rewrite inside quoted string literals and only when the token actually
+    // looks like an asset URL (has a file extension or a sub-path).
+    const isCode = ext === ".js" || ext === ".json";
+    const delims = isCode ? "[\"'`]" : "[\"'=(:\\s]";
+    const re = new RegExp(`(${delims})/((${prefixes})(?=[/"'\`.?#)\\s]|[0-9A-Za-z_-]))`, "g");
+    return text.replace(re, (match, delim: string, rest: string, _prefix: string, offset: number, full: string) => {
+        // Skip URLs Vite already prefixed (e.g. its bundled asset references). The
+        // base path itself can begin with a reserved prefix (e.g. "/lite/<build>/..."),
+        // so without this guard those URLs would be prefixed a second time.
+        const urlStart = offset + delim.length;
+        if (full.startsWith(basePath, urlStart)) {
+            return match;
+        }
+        if (isCode) {
+            const tokenMatch = /^[^"'`)\s]*/.exec(full.slice(urlStart));
+            const token = tokenMatch ? tokenMatch[0] : "";
+            const hasExtension = /\.[a-zA-Z0-9]+$/.test(token);
+            const hasSubPath = token.slice(1).includes("/");
+            if (!hasExtension && !hasSubPath) {
+                return match;
+            }
+        }
+        return `${delim}${basePath}${rest}`;
+    });
 }
 
 function rewriteFilesForBasePath(dir: string, basePath: string): void {
@@ -237,7 +268,7 @@ function rewriteFilesForBasePath(dir: string, basePath: string): void {
         }
 
         const before = readFileSync(path, "utf-8");
-        const after = rewriteRootRelativeUrls(before, basePath);
+        const after = rewriteRootRelativeUrls(before, basePath, extname(path));
         if (after !== before) {
             writeFileSync(path, after);
         }

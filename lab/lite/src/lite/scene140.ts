@@ -26,6 +26,7 @@ import {
 import type { Mesh } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE66_MORPH_PERIOD_MS, createScene66FinalAlphaDiscardJson, getScene66Nme, sanitizeName, sphereScrambleDeltas } from "../shared/scene66-nme.js";
+import { rebaseRootUrl } from "../shared/asset-url.js";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -80,7 +81,7 @@ async function main(): Promise<void> {
     const textureOverrides: Record<string, Awaited<ReturnType<typeof loadTexture2D>>> = {};
     for (const t of textures) {
         const key = sanitizeName(t.name);
-        textureOverrides[key] = await loadTexture2D(engine, t.url, {
+        textureOverrides[key] = await loadTexture2D(engine, rebaseRootUrl(t.url), {
             invertY: t.invertY ?? true,
             srgb: false,
         });

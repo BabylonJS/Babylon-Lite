@@ -12,7 +12,7 @@ test("Scene 57 - Cutout billboards match Babylon.js alpha-test reference", async
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 57, settleMs: 500 });
 
-    await page.goto("/scene57.html");
+    await page.goto("scene57.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

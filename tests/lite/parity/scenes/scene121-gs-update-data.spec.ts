@@ -21,7 +21,7 @@ test("Scene 121 — Gaussian Splatting updateData matches Babylon.js reference",
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 121, timeout: 150_000, settleMs: 800 });
 
-    await page.goto("/scene121.html");
+    await page.goto("scene121.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 150_000 });
     await page.waitForFunction(() => !document.getElementById("loader-overlay"), { timeout: 5_000 }).catch(() => undefined);
     await page.waitForTimeout(500);

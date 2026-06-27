@@ -21,7 +21,7 @@ test("Scene 72 — NME PBR Full (D8AK3Z) matches Babylon.js reference", async ({
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 72 });
 
-    await page.goto("/scene72.html");
+    await page.goto("scene72.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
 

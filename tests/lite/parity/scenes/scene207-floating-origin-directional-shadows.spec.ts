@@ -24,7 +24,7 @@ test("Scene 207 — Floating-origin directional shadows match Babylon.js referen
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 207, settleMs: 500 });
 
-    await page.goto("/scene207.html");
+    await page.goto("scene207.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
 

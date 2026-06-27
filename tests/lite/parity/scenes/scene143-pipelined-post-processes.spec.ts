@@ -14,7 +14,7 @@ test("Scene 143 — Pipelined frame-graph post-processes match Babylon.js refere
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 143, timeout: 120_000 });
 
-    await page.goto("/scene143.html");
+    await page.goto("scene143.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     await page.waitForTimeout(500);
 

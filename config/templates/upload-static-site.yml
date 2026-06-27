@@ -18,6 +18,9 @@ parameters:
       type: string
     - name: siteName
       type: string
+    - name: postComment
+      type: boolean
+      default: true
 
 steps:
     - script: |
@@ -44,17 +47,18 @@ steps:
       continueOnError: true
       displayName: "Upload ${{ parameters.siteName }} static site"
 
-    - task: GitHubComment@0
-      condition: succeeded()
-      continueOnError: true
-      displayName: "Post ${{ parameters.siteName }} site link to PR"
-      inputs:
-          gitHubConnection: "BabylonBotPAT"
-          repositoryName: "$(Build.Repository.Name)"
-          id: "$(System.PullRequest.PullRequestNumber)"
-          comment: |
-              ### ${{ parameters.siteName }} - Static Site
+    - ${{ if ne(parameters.postComment, false) }}:
+          - task: GitHubComment@0
+            condition: succeeded()
+            continueOnError: true
+            displayName: "Post ${{ parameters.siteName }} site link to PR"
+            inputs:
+                gitHubConnection: "BabylonBotPAT"
+                repositoryName: "$(Build.Repository.Name)"
+                id: "$(System.PullRequest.PullRequestNumber)"
+                comment: |
+                    ### ${{ parameters.siteName }} - Static Site
 
-              [Open deployed site]($(SERVE_DOMAIN)/${{ parameters.deployPath }}/index.html)
+                    [Open deployed site]($(SERVE_DOMAIN)/${{ parameters.deployPath }}/index.html)
 
-              <sub>Build $(Build.BuildNumber) - $(Build.SourceBranchName) @ $(Build.SourceVersion)</sub>
+                    <sub>Build $(Build.BuildNumber) - $(Build.SourceBranchName) @ $(Build.SourceVersion)</sub>

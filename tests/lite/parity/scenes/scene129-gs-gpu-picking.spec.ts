@@ -14,7 +14,7 @@ test("Scene 129 — GS GPU picking matches Babylon.js reference", async ({ page 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 129, timeout: 150_000, settleMs: 800 });
 
-    await page.goto("/scene129.html");
+    await page.goto("scene129.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 150_000 });
     await page.waitForFunction(() => !document.getElementById("loader-overlay"), { timeout: 5_000 }).catch(() => undefined);
     await page.waitForTimeout(500);

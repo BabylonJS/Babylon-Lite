@@ -22,7 +22,7 @@ test("Scene 18 — Spotlight Hard Shadows (PCF) matches Babylon.js reference", a
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 18 });
 
-    await page.goto("/scene18.html");
+    await page.goto("scene18.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 
