@@ -1,6 +1,6 @@
 {
-  "rawKB": 88.9,
-  "gzipKB": 36.2,
+  "rawKB": 89,
+  "gzipKB": 36.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene145-bake-local-matrix-67U-IT8C.js",
