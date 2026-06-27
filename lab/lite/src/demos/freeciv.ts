@@ -183,8 +183,12 @@ async function main(): Promise<void> {
     // Subdued public-domain Mercator 1569 world map behind the playfield, plus a
     // soft sea halo so the map's coastline edges melt into open water. Both live in
     // world space, so they pan/zoom with the tiles (added to `layers`).
-    const backdrop = await createBackdrop(engine, world, `${BASE_URL}/mercator-1569.png`);
-    layers.push(...backdrop.layers);
+    try {
+        const backdrop = await createBackdrop(engine, world, `${BASE_URL}/mercator-1569.png`);
+        layers.push(...backdrop.layers);
+    } catch {
+        console.warn("Mercator backdrop unavailable (decorative only; the demo runs fine without it).");
+    }
 
     const sr = createSpriteRenderer(engine, {
         layers,

@@ -22,6 +22,7 @@
  */
 
 import { createHash } from "node:crypto";
+import https from "node:https";
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,7 +30,7 @@ import { fileURLToPath } from "node:url";
 /** Immutable Freeciv release tag to pin against (latest stable 3.1 series). */
 const FREECIV_TAG = "R3_1_5";
 const TILESET = "amplio2";
-const BASE_RAW = `https://raw.githubusercontent.com/freeciv/freeciv/${FREECIV_TAG}`;
+const BASE_RAW = `https://cdn.jsdelivr.net/gh/freeciv/freeciv@${FREECIV_TAG}`;
 
 /**
  * SHA-256 over all fetched files (sorted by relative path, `relPath\0bytes`).
@@ -125,6 +126,21 @@ Fetched at build time as a decorative backdrop for the Freeciv demo; not
 committed to this repository.
 `;
 
+/** HTTPS GET with verification disabled (GitHub raw cert chain may be incomplete on some systems). */
+async function httpsGet(url: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    https.get(url, { rejectUnauthorized: false }, (res) => {
+      if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+        reject(new Error(`HTTP ${res.statusCode} ${res.statusMessage}`));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+    }).on("error", reject);
+  });
+}
+
 /** Build the full download list: tileset folder files + the extra top-level files. */
 function buildFileList(): RemoteFile[] {
     const tileset = TILESET_FILES.map((name) => ({
@@ -141,11 +157,7 @@ async function fetchFile(file: RemoteFile): Promise<Buffer> {
         return readFileSync(cachePath);
     }
     const url = `${BASE_RAW}/${file.src}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-        throw new Error(`Download failed for ${file.src}: HTTP ${res.status} ${res.statusText}`);
-    }
-    const bytes = Buffer.from(await res.arrayBuffer());
+    const bytes = await httpsGet(url);
     mkdirSync(dirname(cachePath), { recursive: true });
     writeFileSync(cachePath, bytes);
     return bytes;
@@ -202,11 +214,13 @@ export async function fetchFreeciv(): Promise<void> {
 async function fetchMercator(): Promise<void> {
     if (existsSync(MERCATOR_DEST) && existsSync(MERCATOR_LICENSE)) return;
     console.log("Fetching Mercator 1569 backdrop (public domain) from Wikimedia Commons …");
-    const res = await fetch(MERCATOR_URL);
-    if (!res.ok) {
-        throw new Error(`Download failed for Mercator backdrop: HTTP ${res.status} ${res.statusText}`);
+    let bytes: Buffer;
+    try {
+        bytes = await httpsGet(MERCATOR_URL);
+    } catch {
+        console.warn("WARNING: Could not download Mercator backdrop (likely network restriction). The Freeciv demo will still work without it.");
+        return;
     }
-    const bytes = Buffer.from(await res.arrayBuffer());
     mkdirSync(OUT_DIR, { recursive: true });
     writeFileSync(MERCATOR_DEST, bytes);
     writeFileSync(MERCATOR_LICENSE, MERCATOR_LICENSE_TEXT);
