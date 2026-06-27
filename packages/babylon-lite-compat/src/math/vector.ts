@@ -334,6 +334,44 @@ export class Vector3 {
         return result;
     }
 
+    /** Babylon.js `Vector3.Hermite` — cubic Hermite interpolation between `value1` and `value2` with the given tangents. */
+    public static Hermite(value1: Vector3, tangent1: Vector3, value2: Vector3, tangent2: Vector3, amount: number): Vector3 {
+        const squared = amount * amount;
+        const cubed = amount * squared;
+        const part1 = 2 * cubed - 3 * squared + 1;
+        const part2 = -2 * cubed + 3 * squared;
+        const part3 = cubed - 2 * squared + amount;
+        const part4 = cubed - squared;
+        return new Vector3(
+            value1.x * part1 + value2.x * part2 + tangent1.x * part3 + tangent2.x * part4,
+            value1.y * part1 + value2.y * part2 + tangent1.y * part3 + tangent2.y * part4,
+            value1.z * part1 + value2.z * part2 + tangent1.z * part3 + tangent2.z * part4
+        );
+    }
+
+    /** Babylon.js `Vector3.CatmullRom` — Catmull-Rom interpolation through the four control points. */
+    public static CatmullRom(value1: Vector3, value2: Vector3, value3: Vector3, value4: Vector3, amount: number): Vector3 {
+        const squared = amount * amount;
+        const cubed = squared * amount;
+        return new Vector3(
+            0.5 *
+                (2 * value2.x +
+                    (-value1.x + value3.x) * amount +
+                    (2 * value1.x - 5 * value2.x + 4 * value3.x - value4.x) * squared +
+                    (-value1.x + 3 * value2.x - 3 * value3.x + value4.x) * cubed),
+            0.5 *
+                (2 * value2.y +
+                    (-value1.y + value3.y) * amount +
+                    (2 * value1.y - 5 * value2.y + 4 * value3.y - value4.y) * squared +
+                    (-value1.y + 3 * value2.y - 3 * value3.y + value4.y) * cubed),
+            0.5 *
+                (2 * value2.z +
+                    (-value1.z + value3.z) * amount +
+                    (2 * value1.z - 5 * value2.z + 4 * value3.z - value4.z) * squared +
+                    (-value1.z + 3 * value2.z - 3 * value3.z + value4.z) * cubed)
+        );
+    }
+
     /** Midpoint between two vectors. */
     public static Center(a: Vector3, b: Vector3): Vector3 {
         return Vector3.CenterToRef(a, b, new Vector3());

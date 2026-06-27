@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `c729b94f2e36f2d915415620857452f7ad0ff731`
-- **Last sync date:** 2026-06-25
+- **Last synced BJS commit:** `4a4481e911bee11cb4b9e92689f65c69edb474b8`
+- **Last sync date:** 2026-06-27
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -68,7 +68,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | -------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Vector2` / `Vector3` / `Vector4`                  | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
 | `Color3` / `Color4`                                | ✅ Full    | [math/color.ts](src/math/color.ts)                                                                                                                              |
-| `Quaternion`                                       | ✅ Full    | [math/quaternion.ts](src/math/quaternion.ts) (incl. `FromRotationMatrix` / `FromRotationMatrixToRef` / `fromRotationMatrix` over Lite `quatFromRotationMatrix`) |
+| `Quaternion`                                       | ✅ Full    | [math/quaternion.ts](src/math/quaternion.ts) (incl. `FromRotationMatrix` / `FromRotationMatrixToRef` / `fromRotationMatrix` over Lite `quatFromRotationMatrix`, plus `RotationQuaternionFromAxis` / `RotationQuaternionFromAxisToRef` / `toRotationMatrix`) |
 | `Matrix`                                           | ✅ Full    | [math/matrix.ts](src/math/matrix.ts) (incl. `decompose` — BJS-accurate scale/negative-determinant handling, rotation via Lite `quatFromRotationMatrix`)         |
 | `Vector3.TransformCoordinates` / `TransformNormal` | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
 | `Vector3.Center` / `CenterToRef`                   | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
@@ -77,8 +77,10 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `Axis` / `Space` / `Epsilon`                       | ✅ Full    | [math/constants.ts](src/math/constants.ts)                                                                                                                      |
 | `Plane` / `Ray` / `Frustum`                        | ✅ Full    | [math/plane.ts](src/math/plane.ts), [ray.ts](src/math/ray.ts), [frustum.ts](src/math/frustum.ts)                                                                |
 | `Size` / `Viewport`                                | ✅ Full    | [math/size.ts](src/math/size.ts)                                                                                                                                |
-| `Angle` / `Curve3` / `Path3D`                      | ⚡ Partial | [math/curve.ts](src/math/curve.ts)                                                                                                                              |
-| `Curve3` / `Path3D` / easing curves on math        | ⚡ Partial | curve + easing                                                                                                                                                  |
+| `Vector3.Hermite` / `Vector3.CatmullRom`           | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
+| `Angle`                                            | ✅ Full    | [math/curve.ts](src/math/curve.ts)                                                                                                                             |
+| `Curve3` (`CreateQuadraticBezier` / `CreateCubicBezier` / `CreateHermiteSpline` / `CreateCatmullRomSpline`, `length` / `continue`) | ✅ Full    | [math/curve.ts](src/math/curve.ts)                                                                                                                             |
+| `Path3D` (Frenet frames: `getTangents`/`getNormals`/`getBinormals`/`getDistances`; `getPointAt`/`getTangentAt`/`getNormalAt`/`getBinormalAt`/`getDistanceAt`/`getPreviousPointIndexAt`/`getSubPositionAt`/`getClosestPositionTo`/`slice`/`update`) | ✅ Full    | [math/curve.ts](src/math/curve.ts) (BJS-exact port; interpolated TNB via `Quaternion.RotationQuaternionFromAxis` + `Slerp`)                                     |
 
 ## Core
 
