@@ -7,7 +7,7 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `c729b94f2e36f2d915415620857452f7ad0ff731`
+- **Last synced BJS commit:** `bc9a90482c2ca50194ef1b4869795ff77409c1dc`
 - **Last sync date:** 2026-06-25
 - **Lite compat package version:** 0.0.1
 
@@ -245,6 +245,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `HDRCubeTexture`                                                           | ❌ Not supported | throwing stub; use native `loadHdrEnvironment`                                                                                                                                                                                                                 |
 | `RenderTargetTexture`                                                      | ❌ Not supported | throwing stub; use native frame-graph RTT                                                                                                                                                                                                                      |
 | `MirrorTexture`                                                            | ❌ Not supported | throwing stub                                                                                                                                                                                                                                                  |
+| `HtmlTexture` / `HtmlInteractionManager` / `HtmlRaycastInteractionManager` (+ `IsHtmlInCanvasUploadSupported`, `UploadHtmlElementToTexture`, `ComputeOverlayCssTransform`, `GetElementPixelFromUv`, `IsHtmlInCanvasSupportedNatively`, `InstallHtmlInCanvasPolyfill`, `UninstallHtmlInCanvasPolyfill`) | ❌ Not supported | throwing stubs ([unsupported-apis.ts](src/unsupported/unsupported-apis.ts)); new BJS `Materials/Textures/HTML/*` — a DOM/CSS overlay-interop feature (live HTML element → texture + pointer/raycast forwarding) with no equivalent in Babylon Lite's WebGPU renderer |
 
 ## Loaders
 
