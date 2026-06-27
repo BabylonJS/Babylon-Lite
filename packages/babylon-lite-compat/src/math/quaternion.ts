@@ -9,7 +9,7 @@ import { quatFromRotationMatrix } from "babylon-lite";
 import type { Mat4 } from "babylon-lite";
 
 import { Vector3 } from "./vector.js";
-import type { Matrix } from "./matrix.js";
+import { Matrix } from "./matrix.js";
 
 export class Quaternion {
     public constructor(
@@ -81,6 +81,40 @@ export class Quaternion {
         return new Quaternion(this.x, this.y, this.z, this.w);
     }
 
+    /**
+     * Babylon.js `Quaternion.toRotationMatrix` — write this quaternion's rotation
+     * into `result` (row-major, matching the compat `Matrix` storage convention).
+     */
+    public toRotationMatrix(result: Matrix): Matrix {
+        const xx = this.x * this.x;
+        const yy = this.y * this.y;
+        const zz = this.z * this.z;
+        const xy = this.x * this.y;
+        const zw = this.z * this.w;
+        const zx = this.z * this.x;
+        const yw = this.y * this.w;
+        const yz = this.y * this.z;
+        const xw = this.x * this.w;
+        const m = result.m;
+        m[0] = 1 - 2 * (yy + zz);
+        m[1] = 2 * (xy + zw);
+        m[2] = 2 * (zx - yw);
+        m[3] = 0;
+        m[4] = 2 * (xy - zw);
+        m[5] = 1 - 2 * (zz + xx);
+        m[6] = 2 * (yz + xw);
+        m[7] = 0;
+        m[8] = 2 * (zx + yw);
+        m[9] = 2 * (yz - xw);
+        m[10] = 1 - 2 * (yy + xx);
+        m[11] = 0;
+        m[12] = 0;
+        m[13] = 0;
+        m[14] = 0;
+        m[15] = 1;
+        return result;
+    }
+
     public equals(other: Quaternion): boolean {
         return this.x === other.x && this.y === other.y && this.z === other.z && this.w === other.w;
     }
@@ -146,6 +180,24 @@ export class Quaternion {
         result.z = q.z;
         result.w = q.w;
         return result;
+    }
+
+    /**
+     * Babylon.js `Quaternion.RotationQuaternionFromAxis` — create a rotation quaternion
+     * from three orthonormal axes (normalized in place, matching Babylon.js).
+     */
+    public static RotationQuaternionFromAxis(axis1: Vector3, axis2: Vector3, axis3: Vector3, ref?: Quaternion): Quaternion {
+        const result = ref ?? new Quaternion(0, 0, 0, 0);
+        return Quaternion.RotationQuaternionFromAxisToRef(axis1, axis2, axis3, result);
+    }
+
+    /**
+     * Babylon.js `Quaternion.RotationQuaternionFromAxisToRef` — write a rotation
+     * quaternion built from three orthonormal axes into `ref`.
+     */
+    public static RotationQuaternionFromAxisToRef(axis1: Vector3, axis2: Vector3, axis3: Vector3, ref: Quaternion): Quaternion {
+        const rotMat = Matrix.FromXYZAxesToRef(axis1.normalize(), axis2.normalize(), axis3.normalize(), Matrix.Identity());
+        return Quaternion.FromRotationMatrixToRef(rotMat, ref);
     }
 
     public static FromEulerAngles(x: number, y: number, z: number): Quaternion {
