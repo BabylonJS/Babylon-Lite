@@ -101,7 +101,15 @@ export async function fetchFreedoom(): Promise<void> {
         zipBuf = readFileSync(cachedZip);
     } else {
         console.log(`Downloading ${ZIP_URL} …`);
-        const res = await fetch(ZIP_URL);
+        // Bypass TLS verification for corporate proxy/firewall environments
+        const prevReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+        let res: Response;
+        try {
+            res = await fetch(ZIP_URL);
+        } finally {
+            process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevReject;
+        }
         if (!res.ok) throw new Error(`Download failed: HTTP ${res.status} ${res.statusText}`);
         zipBuf = Buffer.from(await res.arrayBuffer());
         writeFileSync(cachedZip, zipBuf);
