@@ -22,6 +22,14 @@ import { buildLightViewMatrix, casterVersionSum, createShadowCamera, multiply4x4
 import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 
+/** Generation of the material that ACTUALLY casts this caster mesh's shadow — the explicit
+ *  `_shadowCasterMaterial` override when set, else the mesh's own material. Lets the caster-set diff detect a
+ *  rebuild of the override caster material (which would otherwise be invisible to a check on the receive material). */
+function effectiveCasterGen(material: Material): number {
+    const eff = material._shadowCasterMaterial ?? material;
+    return (eff as { _csmGen?: number })._csmGen ?? 0;
+}
+
 /** CSM configuration captured by the generator and consumed by these hooks. */
 export interface CsmConfig {
     /** @internal */
@@ -132,7 +140,7 @@ export function ensureCsmShadowTaskState(
                 continue;
             }
             const stored = existing._casterMatGens.get(mat);
-            if (stored !== undefined && stored !== ((mat as { _csmGen?: number })._csmGen ?? 0)) {
+            if (stored !== undefined && stored !== effectiveCasterGen(mat)) {
                 casterMatChanged = true;
                 break;
             }
@@ -155,7 +163,7 @@ export function ensureCsmShadowTaskState(
                     for (const t of existing._tasks) {
                         t.addMesh(m, { material: view });
                     }
-                    gens.set(m.material, (m.material as { _csmGen?: number })._csmGen ?? 0);
+                    gens.set(m.material, effectiveCasterGen(m.material));
                 }
             }
             // Force each cascade to re-resolve its newly-added pending casters + re-bucket its binding lists.
@@ -247,7 +255,7 @@ export function ensureCsmShadowTaskState(
     const casterMatGens = new Map<Material, number>();
     for (const m of casterMeshes) {
         if (m.material) {
-            casterMatGens.set(m.material, (m.material as { _csmGen?: number })._csmGen ?? 0);
+            casterMatGens.set(m.material, effectiveCasterGen(m.material));
         }
     }
     return {

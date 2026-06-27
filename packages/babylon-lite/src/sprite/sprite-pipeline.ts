@@ -5,11 +5,12 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
-import { DEPTH_INSTANCE_STRIDE_BYTES, DEPTH_UVSCROLL_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES, PURE_2D_UVSCROLL_STRIDE_BYTES } from "./sprite-2d.js";
+import { _getSpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.js";
+import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
 
 /** @internal */
 export interface SpritePipelineDeviceCache {
-    /** @internal Shader modules keyed by `${hasDepth}:${uvScroll}:${coverageGamma}` permutation. */
+    /** @internal Shader modules keyed by `${hasDepth}:${uvScroll}` permutation. */
     _shaderModules: Map<string, GPUShaderModule>;
     /** @internal */
     _pipelines: Map<string, GPURenderPipeline>;
@@ -28,19 +29,13 @@ const SPRITE_UV_MAX_OFFSET_BYTES = 24;
 const SPRITE_ROTATION_OFFSET_BYTES = 32;
 const SPRITE_COLOR_OFFSET_BYTES = 36;
 const SPRITE_DEPTH_OFFSET_BYTES = 52;
-/** uvOffset.xy byte offset: appended after the base layout (52 pure-2D, 56 depth-hosted). */
-const SPRITE_UVOFFSET_OFFSET_PURE_2D_BYTES = 52;
-const SPRITE_UVOFFSET_OFFSET_DEPTH_BYTES = 56;
 
-function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean, coverageGamma = false): string {
-    // Coverage gamma (opt-in, text layers): raise sampled alpha to 1/coverageGamma (L.aa.x) so
-    // anti-aliased glyph edges composite heavier, mimicking gamma-space stem darkening. Gated at
-    // shader-build time — non-gamma layers ship the trivial textured fragment with no `pow`.
-    const coverageLine = coverageGamma ? `\nlet a = pow(s.a, L.aa.x);\nreturn vec4f(s.rgb, a) * in.tint * L.opacityMul;` : `\nreturn s * in.tint * L.opacityMul;`;
+function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean): string {
     return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 @fragment
 fn fs(in: O) -> @location(0) vec4f {
-let s = textureSample(atlasTex, atlasSamp, in.uv);${coverageLine}
+let s = textureSample(atlasTex, atlasSamp, in.uv);
+return s * in.tint * L.opacityMul;
 }`;
 }
 
@@ -201,8 +196,8 @@ function spritePipelineKey(
     layer?: Sprite2DLayer
 ): string {
     const customKey = layer ? (_getSpriteFxHook()?.pipelineKeyPart(layer) ?? "") : "";
-    const uvKey = layer?._uvScroll ? "1" : "0";
-    const cgKey = layer?._coverageGamma ? "1" : "0";
+    const uvKey = layer?._uvScrollAttr ? "1" : "0";
+    const cgKey = layer ? (_getSpriteCoverageGammaHook()?.pipelineKeyPart(layer) ?? "0") : "0";
     return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}:uv${uvKey}:cg${cgKey}`;
 }
 
@@ -211,13 +206,16 @@ function getShaderModule(engine: EngineContext, cache: SpritePipelineDeviceCache
     if (customModule) {
         return customModule;
     }
-    const uvScroll = layer?._uvScroll === true;
-    const coverageGamma = layer?._coverageGamma === true;
-    const key = `${hasDepth ? 1 : 0}:${uvScroll ? 1 : 0}:${coverageGamma ? 1 : 0}`;
+    const gammaModule = layer ? _getSpriteCoverageGammaHook()?.shaderModule(engine, hasDepth, layer) : null;
+    if (gammaModule) {
+        return gammaModule;
+    }
+    const uvScroll = layer?._uvScrollAttr != null;
+    const key = `${hasDepth ? 1 : 0}:${uvScroll ? 1 : 0}`;
     let module = cache._shaderModules.get(key);
     if (!module) {
         module = engine._device.createShaderModule({
-            code: makeSpriteWgsl(hasDepth, hasDepth ? 1 : 0, uvScroll, coverageGamma),
+            code: makeSpriteWgsl(hasDepth, hasDepth ? 1 : 0, uvScroll),
         });
         cache._shaderModules.set(key, module);
     }
@@ -265,21 +263,14 @@ function buildSpritePipeline(
     if (hasDepth) {
         instanceAttributes.push({ shaderLocation: 6, offset: SPRITE_DEPTH_OFFSET_BYTES, format: "float32" });
     }
-    const uvScroll = layer?._uvScroll === true;
-    if (uvScroll) {
-        instanceAttributes.push({
-            shaderLocation: 7,
-            offset: hasDepth ? SPRITE_UVOFFSET_OFFSET_DEPTH_BYTES : SPRITE_UVOFFSET_OFFSET_PURE_2D_BYTES,
-            format: "float32x2",
-        });
+    // uvScroll (opt-in via setSprite2DUvOffset) appends a `uvOffset.xy` attribute after the base
+    // layout, like `hasDepth` appends `@location(6)`. The attribute is precomputed by the opt-in
+    // module and stashed on the layer as plain data — so the always-loaded path ships none of the
+    // attribute-building, just this data consume. The widened stride is likewise already on the layer.
+    if (layer?._uvScrollAttr) {
+        instanceAttributes.push(layer._uvScrollAttr);
     }
-    const arrayStride = uvScroll
-        ? hasDepth
-            ? DEPTH_UVSCROLL_STRIDE_BYTES
-            : PURE_2D_UVSCROLL_STRIDE_BYTES
-        : hasDepth
-          ? DEPTH_INSTANCE_STRIDE_BYTES
-          : PURE_2D_INSTANCE_STRIDE_BYTES;
+    const arrayStride = layer?._instanceStrideBytes ?? (hasDepth ? DEPTH_INSTANCE_STRIDE_BYTES : PURE_2D_INSTANCE_STRIDE_BYTES);
     const descriptor: GPURenderPipelineDescriptor = {
         layout: device.createPipelineLayout({ bindGroupLayouts }),
         vertex: {
@@ -337,9 +328,11 @@ export function createSpriteInstanceBuffer(device: GPUDevice, layer: Sprite2DLay
 }
 
 /**
- * Reallocate the instance buffer if `layer._capacity` outgrew the current GPU buffer.
- * Returns the (possibly new) buffer + the new capacity, plus a `reallocated` flag the
- * caller uses to invalidate per-buffer caches (render bundles, `uploadedVersion`, etc).
+ * Reallocate the instance buffer if it can no longer hold `layer._capacity` sprites at the layer's
+ * current per-sprite stride. The comparison is **byte-based** (`currentBuffer.size` vs the required
+ * byte size) so it triggers both on capacity growth *and* on a stride change — e.g. when the opt-in
+ * `setSprite2DUvOffset` widens a previously narrow layer in place. Returns the (possibly new) buffer
+ * plus a `reallocated` flag the caller uses to invalidate per-buffer caches (render bundles, etc).
  */
 export function ensureSpriteInstanceBuffer(
     device: GPUDevice,
@@ -348,7 +341,8 @@ export function ensureSpriteInstanceBuffer(
     currentCapacity: number,
     label?: string
 ): { buffer: GPUBuffer; capacity: number; reallocated: boolean } {
-    if (currentCapacity >= layer._capacity) {
+    const neededBytes = layer._capacity * layer._instanceStrideBytes;
+    if (currentBuffer.size >= neededBytes) {
         return { buffer: currentBuffer, capacity: currentCapacity, reallocated: false };
     }
     currentBuffer.destroy();
@@ -430,10 +424,10 @@ export function buildSpriteLayerUbo(layer: Sprite2DLayer, screenWidth: number, s
         ubo[10] = 1;
         ubo[11] = op;
     }
-    const g = layer.coverageGamma;
-    // aa.x = 1/coverageGamma; aa.yzw reserved (scratch UBO is zero-initialized and reused, so
-    // 13..15 stay 0 without explicit writes).
-    ubo[12] = g > 0 ? 1 / g : 1;
+    // Coverage gamma (opt-in via setSprite2DCoverageGamma): the hook writes aa.x = 1/coverageGamma
+    // for gamma layers and 0 otherwise. Absent when no gamma layer exists, so non-gamma scenes ship
+    // no gamma bytes here; aa.yzw stay 0 (scratch UBO is zero-initialized and reused).
+    _getSpriteCoverageGammaHook()?.writeUbo(layer, ubo);
 }
 
 /**

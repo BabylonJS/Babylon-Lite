@@ -95,7 +95,7 @@ const SPRITE_FX_HOOK: SpriteFxHook = {
         return layer.customShader?._key ?? "";
     },
     shaderModule(engine, hasDepth, layer) {
-        return layer.customShader?._getShaderModule(engine, hasDepth, layer._uvScroll === true) ?? null;
+        return layer.customShader?._getShaderModule(engine, hasDepth, layer._uvScrollAttr != null) ?? null;
     },
     layoutEntries(layer, startBinding) {
         return layer.customShader?._layoutEntries(startBinding) ?? null;

@@ -11,15 +11,21 @@
         <div id="app">
             <header class="toolbar">
                 <div class="brand"><img class="brand-logo" src="/favicon.svg" alt="" width="28" height="28" /><span class="brand-text">Babylon <span>Lite</span> Playground</span><span class="beta-badge" title="This playground is in beta — expect rough edges">Beta</span></div>
-                <div class="actions">
+                <div class="mode-toggle" id="modeToggle" role="tablist" aria-label="View mode">
+                    <button id="modeCodeBtn" class="mode-btn" type="button" role="tab" aria-selected="false" tabindex="-1">Code</button>
+                    <button id="modeSceneBtn" class="mode-btn" type="button" role="tab" aria-selected="true" tabindex="0">Scene</button>
+                </div>
+                <div class="actions" id="actionsMenu">
                     <button id="newBtn" class="btn btn-icon" title="New project" aria-label="New project">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                        <span class="action-label">New</span>
                     </button>
                     <select id="examples" class="select" title="Load an example" aria-label="Examples"></select>
                     <select id="versionSelect" class="select" title="Engine version" aria-label="Engine version"></select>
                     <div class="save-group">
                         <button id="saveBtn" class="btn btn-icon" title="Save &amp; copy link" aria-label="Save and copy link">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                            <span class="action-label">Save &amp; copy link</span>
                         </button>
                         <button id="saveDetailsBtn" class="btn btn-icon btn-caret" title="Save with details…" aria-label="Save with details">
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
@@ -27,14 +33,20 @@
                     </div>
                     <button id="downloadBtn" class="btn btn-icon" title="Download as a runnable zip" aria-label="Download as zip">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        <span class="action-label">Download</span>
                     </button>
                     <button id="runBtn" class="btn btn-icon btn-primary" title="Run (Ctrl/Cmd+Enter)" aria-label="Run">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+                        <span class="action-label">Run</span>
                     </button>
                     <a id="openFullBtn" class="btn btn-icon" href="#" title="Open this code in the full Lite Playground" aria-label="Open in Lite Playground">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        <span class="action-label">Open in Playground</span>
                     </a>
                 </div>
+                <button id="menuBtn" class="btn btn-icon menu-btn" type="button" title="Menu" aria-label="Menu" aria-expanded="false" aria-controls="actionsMenu">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
             </header>
             <main class="split" id="split">
                 <section class="pane pane-editor">
