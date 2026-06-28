@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `c729b94f2e36f2d915415620857452f7ad0ff731`
-- **Last sync date:** 2026-06-25
+- **Last synced BJS commit:** `4a4481e911bee11cb4b9e92689f65c69edb474b8`
+- **Last sync date:** 2026-06-28
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -68,17 +68,18 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | -------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Vector2` / `Vector3` / `Vector4`                  | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
 | `Color3` / `Color4`                                | ✅ Full    | [math/color.ts](src/math/color.ts)                                                                                                                              |
-| `Quaternion`                                       | ✅ Full    | [math/quaternion.ts](src/math/quaternion.ts) (incl. `FromRotationMatrix` / `FromRotationMatrixToRef` / `fromRotationMatrix` over Lite `quatFromRotationMatrix`) |
+| `Quaternion`                                       | ✅ Full    | [math/quaternion.ts](src/math/quaternion.ts) (incl. `FromRotationMatrix` / `FromRotationMatrixToRef` / `fromRotationMatrix` over Lite `quatFromRotationMatrix`, `toRotationMatrix`, `RotationQuaternionFromAxis` / `RotationQuaternionFromAxisToRef`, `Slerp`) |
 | `Matrix`                                           | ✅ Full    | [math/matrix.ts](src/math/matrix.ts) (incl. `decompose` — BJS-accurate scale/negative-determinant handling, rotation via Lite `quatFromRotationMatrix`)         |
 | `Vector3.TransformCoordinates` / `TransformNormal` | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
 | `Vector3.Center` / `CenterToRef`                   | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
+| `Vector3.Hermite` / `Vector3.CatmullRom`           | ✅ Full    | [math/vector.ts](src/math/vector.ts) (spline sample helpers used by `Curve3` / `Path3D`)                                                                        |
 | `Matrix.copyToArray`                               | ✅ Full    | [math/matrix.ts](src/math/matrix.ts)                                                                                                                            |
 | `Scalar`                                           | ✅ Full    | [math/scalar.ts](src/math/scalar.ts)                                                                                                                            |
 | `Axis` / `Space` / `Epsilon`                       | ✅ Full    | [math/constants.ts](src/math/constants.ts)                                                                                                                      |
 | `Plane` / `Ray` / `Frustum`                        | ✅ Full    | [math/plane.ts](src/math/plane.ts), [ray.ts](src/math/ray.ts), [frustum.ts](src/math/frustum.ts)                                                                |
 | `Size` / `Viewport`                                | ✅ Full    | [math/size.ts](src/math/size.ts)                                                                                                                                |
-| `Angle` / `Curve3` / `Path3D`                      | ⚡ Partial | [math/curve.ts](src/math/curve.ts)                                                                                                                              |
-| `Curve3` / `Path3D` / easing curves on math        | ⚡ Partial | curve + easing                                                                                                                                                  |
+| `Angle` / `Curve3` / `Path3D`                      | ✅ Full    | [math/curve.ts](src/math/curve.ts)                                                                                                                              |
+| `Curve3` spline builders + `Path3D` frames         | ✅ Full    | curve — `Create{Quadratic,Cubic}Bezier` / `CreateHermiteSpline` / `CreateCatmullRomSpline` (open+closed) / `ArcThru3Points` / `continue`; `Path3D` tangents/normals/binormals, `getPointAt` / `getTangentAt`(interp) / `getNormalAt` / `getBinormalAt` / `getDistanceAt` / `getSubPositionAt` / `getClosestPositionTo` / `slice` / `update`; `Angle.BetweenTwoPoints` / `BetweenTwoVectors` |
 
 ## Core
 
@@ -466,3 +467,18 @@ large-world-rendering scenes are now resolved.
 > (`PhysicsAggregate` not yet wrapped), not a Lite-core unblock; and audio scenes
 > have no pixel oracle. So no scene moved into the working list this run — Task 2 is
 > dormant, as expected when no Lite change unblocks a scene.
+
+> **Task 2 re-check (2026-06-28):** the Lite changes landed since the 2026-06-25 sync —
+> the MSAA depth/colour resolve frame-graph task (`createDepthResolveTask` /
+> `DepthResolveTaskConfig`, #326), the `_shadowCasterMaterial` caster override + a
+> mid-`buildScene` group-renderable fix (#320), and the sprite refactor that makes
+> `coverageGamma` and per-sprite `uvOffset` opt-in/import-triggered
+> (`setSprite2DCoverageGamma` / `setSprite2DUvOffset`, #314) — were cross-referenced
+> against the blocker table above. **None clears a previously-skipped scene's
+> blocker:** the new depth-resolve task is a frame-graph internal (the
+> `PostProcess` / RTT scenes 116/142–146 are deferred _by design_, not for lack of a
+> depth-resolve primitive); the shadow caster override and group-renderable fix do
+> not touch any blocked scene's chain; and the sprite changes only make already-working
+> sprite features (scenes 50–58, 92–97) opt-in, with their compat ports unchanged. So
+> no scene moved into the working list this run — Task 2 is dormant, as expected when
+> no Lite change unblocks a scene.

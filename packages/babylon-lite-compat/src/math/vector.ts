@@ -399,6 +399,46 @@ export class Vector3 {
         result.set(x * m[0]! + y * m[4]! + z * m[8]!, x * m[1]! + y * m[5]! + z * m[9]!, x * m[2]! + y * m[6]! + z * m[10]!);
         return result;
     }
+
+    /** Babylon.js `Vector3.Hermite` — point on the Hermite spline at `amount`. */
+    public static Hermite(value1: Vector3, tangent1: Vector3, value2: Vector3, tangent2: Vector3, amount: number): Vector3 {
+        const squared = amount * amount;
+        const cubed = amount * squared;
+        const part1 = 2.0 * cubed - 3.0 * squared + 1.0;
+        const part2 = -2.0 * cubed + 3.0 * squared;
+        const part3 = cubed - 2.0 * squared + amount;
+        const part4 = cubed - squared;
+        return new Vector3(
+            value1.x * part1 + value2.x * part2 + tangent1.x * part3 + tangent2.x * part4,
+            value1.y * part1 + value2.y * part2 + tangent1.y * part3 + tangent2.y * part4,
+            value1.z * part1 + value2.z * part2 + tangent1.z * part3 + tangent2.z * part4
+        );
+    }
+
+    /** Babylon.js `Vector3.CatmullRom` — point on the Catmull-Rom spline at `amount`. */
+    public static CatmullRom(value1: Vector3, value2: Vector3, value3: Vector3, value4: Vector3, amount: number): Vector3 {
+        const squared = amount * amount;
+        const cubed = amount * squared;
+        const x =
+            0.5 *
+            (2.0 * value2.x +
+                (-value1.x + value3.x) * amount +
+                (2.0 * value1.x - 5.0 * value2.x + 4.0 * value3.x - value4.x) * squared +
+                (-value1.x + 3.0 * value2.x - 3.0 * value3.x + value4.x) * cubed);
+        const y =
+            0.5 *
+            (2.0 * value2.y +
+                (-value1.y + value3.y) * amount +
+                (2.0 * value1.y - 5.0 * value2.y + 4.0 * value3.y - value4.y) * squared +
+                (-value1.y + 3.0 * value2.y - 3.0 * value3.y + value4.y) * cubed);
+        const z =
+            0.5 *
+            (2.0 * value2.z +
+                (-value1.z + value3.z) * amount +
+                (2.0 * value1.z - 5.0 * value2.z + 4.0 * value3.z - value4.z) * squared +
+                (-value1.z + 3.0 * value2.z - 3.0 * value3.z + value4.z) * cubed);
+        return new Vector3(x, y, z);
+    }
 }
 
 /** Minimal live 3-component backing (Babylon Lite's `ObservableVec3`). */

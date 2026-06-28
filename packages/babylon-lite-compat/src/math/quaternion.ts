@@ -89,6 +89,45 @@ export class Quaternion {
         return [this.x, this.y, this.z, this.w];
     }
 
+    /**
+     * Babylon.js `Quaternion.toRotationMatrix(result)` — write this quaternion's
+     * rotation into `result` (a 4×4 row-major matrix, translation cleared).
+     */
+    public toRotationMatrix(result: Matrix): Matrix {
+        const x = this.x,
+            y = this.y,
+            z = this.z,
+            w = this.w;
+        const xx = x * x,
+            yy = y * y,
+            zz = z * z,
+            xy = x * y,
+            zw = z * w,
+            zx = z * x,
+            yw = y * w,
+            yz = y * z,
+            xw = x * w;
+        const m = result.m;
+        m[0] = 1.0 - 2.0 * (yy + zz);
+        m[1] = 2.0 * (xy + zw);
+        m[2] = 2.0 * (zx - yw);
+        m[3] = 0;
+        m[4] = 2.0 * (xy - zw);
+        m[5] = 1.0 - 2.0 * (zz + xx);
+        m[6] = 2.0 * (yz + xw);
+        m[7] = 0;
+        m[8] = 2.0 * (zx + yw);
+        m[9] = 2.0 * (yz - xw);
+        m[10] = 1.0 - 2.0 * (yy + xx);
+        m[11] = 0;
+        m[12] = 0;
+        m[13] = 0;
+        m[14] = 0;
+        m[15] = 1.0;
+        result.markAsUpdated();
+        return result;
+    }
+
     public toEulerAngles(): Vector3 {
         const result = new Vector3();
         const qz = this.z;
@@ -176,6 +215,34 @@ export class Quaternion {
         const sin = Math.sin(angle / 2);
         const len = axis.length() || 1;
         return new Quaternion((axis.x / len) * sin, (axis.y / len) * sin, (axis.z / len) * sin, Math.cos(angle / 2));
+    }
+
+    /**
+     * Babylon.js `Quaternion.RotationQuaternionFromAxis(axis1, axis2, axis3)` — build a
+     * rotation quaternion from three orthonormal-ish axes (X, Y, Z). The axes are
+     * normalized, assembled into a rotation matrix, then converted to a quaternion.
+     */
+    public static RotationQuaternionFromAxis(axis1: Vector3, axis2: Vector3, axis3: Vector3): Quaternion {
+        const result = new Quaternion();
+        Quaternion.RotationQuaternionFromAxisToRef(axis1, axis2, axis3, result);
+        return result;
+    }
+
+    /**
+     * Babylon.js `Quaternion.RotationQuaternionFromAxisToRef` — like
+     * {@link Quaternion.RotationQuaternionFromAxis} but writes into `ref`.
+     */
+    public static RotationQuaternionFromAxisToRef(axis1: Vector3, axis2: Vector3, axis3: Vector3, ref: Quaternion): Quaternion {
+        const a1 = Vector3.Normalize(axis1);
+        const a2 = Vector3.Normalize(axis2);
+        const a3 = Vector3.Normalize(axis3);
+        const rotMat = new Float32Array([a1.x, a1.y, a1.z, 0, a2.x, a2.y, a2.z, 0, a3.x, a3.y, a3.z, 0, 0, 0, 0, 1]);
+        const q = quatFromRotationMatrix(rotMat as unknown as Mat4);
+        ref.x = q.x;
+        ref.y = q.y;
+        ref.z = q.z;
+        ref.w = q.w;
+        return ref;
     }
 
     public static Slerp(left: Quaternion, right: Quaternion, amount: number): Quaternion {
