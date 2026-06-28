@@ -120,6 +120,24 @@ stages:
                 - script: npm pack --dry-run ./packages/babylon-lite/build
                   displayName: "Validate npm package contents"
 
+                # Generate release-notes Markdown from the Conventional-Commit
+                # history between the previous npm-lite-v* tag and HEAD. This must
+                # run BEFORE the new release tag is created below, so that the
+                # auto-detected "previous tag" is the prior release rather than
+                # the tag we are about to push. The output feeds the GitHub
+                # release notes and is archived as a build artifact.
+                - script: |
+                      set -euo pipefail
+                      mkdir -p "$(Build.ArtifactStagingDirectory)"
+                      npx tsx scripts/generate-changelog.ts
+                  displayName: "Generate release changelog"
+                  env:
+                      PACKAGE_VERSION: $(PACKAGE_VERSION)
+                      PACKAGE_NAME: $(PACKAGE_NAME)
+                      CHANGELOG_OUTPUT: $(Build.ArtifactStagingDirectory)/release-notes.md
+                      GITHUB_REPOSITORY: $(Build.Repository.Name)
+                      BUILD_REPOSITORY_URI: $(Build.Repository.Uri)
+
                 - script: |
                       set -euo pipefail
 
@@ -178,8 +196,8 @@ stages:
                       tagSource: "userSpecifiedTag"
                       tag: "npm-lite-v$(PACKAGE_VERSION)"
                       title: "@babylonjs/lite v$(PACKAGE_VERSION)"
-                      releaseNotesSource: "inline"
-                      releaseNotesInline: "Automated release of @babylonjs/lite v$(PACKAGE_VERSION)."
+                      releaseNotesSource: "filePath"
+                      releaseNotesFilePath: "$(Build.ArtifactStagingDirectory)/release-notes.md"
                       assets: "$(Build.ArtifactStagingDirectory)/babylonjs-lite-$(PACKAGE_VERSION).zip"
                       addChangeLog: false
 
