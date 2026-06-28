@@ -48,7 +48,11 @@ const publicBaseUrl = rawBaseUrl ? (rawBaseUrl.endsWith("/") ? rawBaseUrl : `${r
 // the remote BrowserStack browser cannot reach localhost (no Local tunnel), so it
 // would grab a cloud session and then time out. Error before claiming any session.
 if (useBrowserStack && !publicBaseUrl) {
-    throw new Error("[parity-cloud] BROWSERSTACK credentials are set but PARITY_BASE_URL is not. " + "Cloud runs need a public site URL (the remote browser cannot reach localhost). " + "Set PARITY_BASE_URL to the deployed parity site, or run `pnpm test:parity` for local Chrome.");
+    throw new Error(
+        "[parity-cloud] BROWSERSTACK credentials are set but PARITY_BASE_URL is not. " +
+            "Cloud runs need a public site URL (the remote browser cannot reach localhost). " +
+            "Set PARITY_BASE_URL to the deployed parity site, or run `pnpm test:parity` for local Chrome."
+    );
 }
 
 // Number of parallel BrowserStack sessions / Playwright workers. Set by the

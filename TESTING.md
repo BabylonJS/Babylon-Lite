@@ -284,10 +284,10 @@ pnpm test:bundle-size
 
 Two jobs use BrowserStack with **different connection models**:
 
-| Job             | Connection                              | Parallelism                  | Tunnel |
-| --------------- | --------------------------------------- | ---------------------------- | ------ |
-| Parity (Cloud)  | Direct CDP (`connectOptions.wsEndpoint`) | Sharded (`CIWORKERS` sessions) | None   |
-| Perf Regression | `browserstack-node-sdk` + `browserstack.yml` | Serial (1 session)           | Local  |
+| Job             | Connection                                   | Parallelism                    | Tunnel |
+| --------------- | -------------------------------------------- | ------------------------------ | ------ |
+| Parity (Cloud)  | Direct CDP (`connectOptions.wsEndpoint`)     | Sharded (`CIWORKERS` sessions) | None   |
+| Perf Regression | `browserstack-node-sdk` + `browserstack.yml` | Serial (1 session)             | Local  |
 
 **Parity (Cloud)** connects straight to a remote Chrome over CDP — no SDK and no
 `browserstack.yml`. Capabilities (macOS Sonoma, Chrome latest, real WebGPU) are
@@ -407,15 +407,15 @@ entry specifies:
 
 ## Environment Variables Reference
 
-| Variable                  | Scope  | Default | Description                             |
-| ------------------------- | ------ | ------- | --------------------------------------- |
-| `PERF_REGRESSION_PCT`     | Perf   | `5`     | Max allowed regression %                |
-| `PERF_FRAMES`             | Perf   | `300`   | Measured frames per run                 |
-| `PERF_RUNS`               | Perf   | `5`     | Runs per version (takes median)         |
-| `PERF_WARMUP`             | Perf   | `60`    | Warmup frames before each run           |
-| `PERF_SCENES`             | Perf   | all     | Comma-separated scene IDs               |
-| `BUNDLE_DELTA_PCT`        | Bundle | —       | Max allowed bundle size growth %        |
-| `RECAPTURE_GOLDEN`        | Parity | —       | Set to `true` to force golden recapture |
+| Variable                  | Scope  | Default | Description                                                               |
+| ------------------------- | ------ | ------- | ------------------------------------------------------------------------- |
+| `PERF_REGRESSION_PCT`     | Perf   | `5`     | Max allowed regression %                                                  |
+| `PERF_FRAMES`             | Perf   | `300`   | Measured frames per run                                                   |
+| `PERF_RUNS`               | Perf   | `5`     | Runs per version (takes median)                                           |
+| `PERF_WARMUP`             | Perf   | `60`    | Warmup frames before each run                                             |
+| `PERF_SCENES`             | Perf   | all     | Comma-separated scene IDs                                                 |
+| `BUNDLE_DELTA_PCT`        | Bundle | —       | Max allowed bundle size growth %                                          |
+| `RECAPTURE_GOLDEN`        | Parity | —       | Set to `true` to force golden recapture                                   |
 | `PARITY_REQUIRE_GOLDEN`   | Parity | —       | Set to `true` to fail (not live-capture) when a scene's golden is missing |
-| `BROWSERSTACK_USERNAME`   | Cloud  | —       | BrowserStack credentials                |
-| `BROWSERSTACK_ACCESS_KEY` | Cloud  | —       | BrowserStack credentials                |
+| `BROWSERSTACK_USERNAME`   | Cloud  | —       | BrowserStack credentials                                                  |
+| `BROWSERSTACK_ACCESS_KEY` | Cloud  | —       | BrowserStack credentials                                                  |
