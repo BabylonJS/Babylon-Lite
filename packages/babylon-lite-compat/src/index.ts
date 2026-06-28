@@ -233,8 +233,25 @@ export {
     EdgesRenderer,
     OutlineRenderer,
     MirrorTexture,
+    HtmlTexture,
+    HtmlInteractionManager,
+    HtmlRaycastInteractionManager,
+    IsHtmlInCanvasUploadSupported,
+    UploadHtmlElementToTexture,
+    ComputeOverlayCssTransform,
+    GetElementPixelFromUv,
+    IsHtmlInCanvasSupportedNatively,
+    InstallHtmlInCanvasPolyfill,
+    UninstallHtmlInCanvasPolyfill,
     Sound,
     SceneSerializer,
+} from "./unsupported/unsupported-apis.js";
+export type {
+    IHtmlTextureOptions,
+    IHtmlInteractionManagerOptions,
+    IHtmlRaycastInteractionManagerOptions,
+    IHtmlInCanvasPolyfillModule,
+    IInstallHtmlInCanvasPolyfillOptions,
 } from "./unsupported/unsupported-apis.js";
 export {
     Skeleton,

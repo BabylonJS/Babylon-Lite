@@ -110,6 +110,91 @@ export class MirrorTexture {
     }
 }
 
+// ─── HTML textures (DOM/CSS overlay interop) ─────────────────────────
+// New in BJS: `Materials/Textures/HTML/*` — uploads a live DOM element into a
+// texture and forwards pointer/raycast interaction onto an overlaid HTML layer.
+// This is a DOM-driven, host-page feature with no Babylon Lite equivalent (Lite
+// is a WebGPU renderer with no HTML overlay / interaction subsystem),
+// so every entry throws.
+
+/** Options accepted by Babylon.js `HtmlTexture` (shape-only stub for type parity). */
+export interface IHtmlTextureOptions {
+    [key: string]: unknown;
+}
+
+/** Options accepted by Babylon.js `HtmlInteractionManager` (shape-only stub). */
+export interface IHtmlInteractionManagerOptions {
+    [key: string]: unknown;
+}
+
+/** Options accepted by Babylon.js `HtmlRaycastInteractionManager` (shape-only stub). */
+export interface IHtmlRaycastInteractionManagerOptions {
+    [key: string]: unknown;
+}
+
+/** Module shape of an HTML-in-canvas polyfill (shape-only stub). */
+export interface IHtmlInCanvasPolyfillModule {
+    [key: string]: unknown;
+}
+
+/** Options accepted by `InstallHtmlInCanvasPolyfill` (shape-only stub). */
+export interface IInstallHtmlInCanvasPolyfillOptions {
+    [key: string]: unknown;
+}
+
+export class HtmlTexture {
+    public constructor() {
+        unsupported("HtmlTexture", "Rendering a live DOM element into a texture is a host-page/DOM feature with no Babylon Lite equivalent.");
+    }
+}
+
+export class HtmlInteractionManager {
+    public constructor() {
+        unsupported("HtmlInteractionManager", "HTML overlay interaction is not part of Babylon Lite's WebGPU renderer.");
+    }
+}
+
+export class HtmlRaycastInteractionManager {
+    public constructor() {
+        unsupported("HtmlRaycastInteractionManager", "HTML overlay raycast interaction is not part of Babylon Lite's WebGPU renderer.");
+    }
+}
+
+/** Babylon.js `IsHtmlInCanvasUploadSupported` — HTML texture upload is unsupported by the compat layer. */
+export function IsHtmlInCanvasUploadSupported(): never {
+    return unsupported("IsHtmlInCanvasUploadSupported", "HTML-element texture upload is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `UploadHtmlElementToTexture` — HTML texture upload is unsupported by the compat layer. */
+export function UploadHtmlElementToTexture(): never {
+    return unsupported("UploadHtmlElementToTexture", "HTML-element texture upload is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `ComputeOverlayCssTransform` — HTML overlay interaction is unsupported by the compat layer. */
+export function ComputeOverlayCssTransform(): never {
+    return unsupported("ComputeOverlayCssTransform", "HTML overlay interaction is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `GetElementPixelFromUv` — HTML overlay raycast interaction is unsupported by the compat layer. */
+export function GetElementPixelFromUv(): never {
+    return unsupported("GetElementPixelFromUv", "HTML overlay raycast interaction is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `IsHtmlInCanvasSupportedNatively` — the HTML-in-canvas feature is unsupported by the compat layer. */
+export function IsHtmlInCanvasSupportedNatively(): never {
+    return unsupported("IsHtmlInCanvasSupportedNatively", "The HTML-in-canvas feature is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `InstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
+export function InstallHtmlInCanvasPolyfill(): never {
+    return unsupported("InstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `UninstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
+export function UninstallHtmlInCanvasPolyfill(): never {
+    return unsupported("UninstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
+}
+
 // ─── Audio ───────────────────────────────────────────────────────────
 export class Sound {
     public constructor() {
