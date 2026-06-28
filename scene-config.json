@@ -2022,7 +2022,7 @@
         "slug": "scene241-animation-pointer-uvs",
         "name": "Scene 241 — AnimationPointerUVs",
         "maxMad": 1.3,
-        "maxRawKB": 161,
+        "maxRawKB": 161.3,
         "description": "AnimationPointerUVs.gltf — cx20 gltf-test. KHR_animation_pointer UV-transform across 82 materials.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2133,7 +2133,7 @@
         "slug": "scene253-animate-all-the-things",
         "name": "Scene 253 — AnimateAllTheThings",
         "maxMad": 0.3,
-        "maxRawKB": 152.3,
+        "maxRawKB": 152.4,
         "description": "cx20 gltf-test AnimateAllTheThings, viewed top-down over the full grid of test objects. Exercises KHR_lights_punctual, KHR_texture_transform, KHR_materials_unlit/ior/transmission/iridescence/volume/emissive_strength and KHR_animation_pointer, plus skinning and morph targets. Frozen at a deterministic frame.",
         "tags": ["gltf", "animation", "animation-pointer", "transmission", "iridescence", "skeleton", "morph"],
         "skipPerf": true

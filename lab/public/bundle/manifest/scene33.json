@@ -1,6 +1,6 @@
 {
   "rawKB": 103.2,
-  "gzipKB": 42.3,
+  "gzipKB": 42.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene33-generate-mipmaps-Z_0Gnbub.js",
@@ -13,9 +13,9 @@
     "scene33-ibl-fragment-CeRrvT96.js",
     "scene33-light-base-SJy-sLMD.js",
     "scene33-multilight-wgsl-D3rF1wIQ.js",
-    "scene33-pbr-refraction-D471wMEc.js",
-    "scene33-pbr-renderable-CpYcrUy7.js",
-    "scene33-pbr-transmission-ext-BYr3YXsr.js",
+    "scene33-pbr-refraction-DzC3Ttlq.js",
+    "scene33-pbr-renderable-B9SUKRSa.js",
+    "scene33-pbr-transmission-ext-CoN2KaUA.js",
     "scene33-point-light-CcVWqAnQ.js",
     "scene33-rgbd-decode-3bEbw5la.js",
     "scene33-scene-uniforms-FTYH6Ct0.js",

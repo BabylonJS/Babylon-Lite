@@ -1,5 +1,5 @@
 {
-  "rawKB": 103.3,
+  "rawKB": 103.4,
   "gzipKB": 41.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,9 +10,9 @@
     "scene176-gltf-json-asset-CVMNQwdq.js",
     "scene176-ibl-fragment-CeRrvT96.js",
     "scene176-ibl-skybox-wgsl-CFIBOHHx.js",
-    "scene176-pbr-refraction-DLWawNkw.js",
-    "scene176-pbr-renderable-CkwhIeOb.js",
-    "scene176-pbr-transmission-ext-lluOVxbD.js",
+    "scene176-pbr-refraction-GApfgrK0.js",
+    "scene176-pbr-renderable-C31r5S2T.js",
+    "scene176-pbr-transmission-ext-DzIJH-DG.js",
     "scene176-reflectance-fragment-ByFw6ejH.js",
     "scene176-rgbd-decode-BNh5jH-x.js",
     "scene176-scene-uniforms-FTYH6Ct0.js",
