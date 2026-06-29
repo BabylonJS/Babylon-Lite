@@ -541,9 +541,23 @@ function _computeCsmCascades(engine: EngineContext, camera: Camera, light: Direc
         let aClipY = transform[13]!;
         if (cfg._stabilizeCascades && stableRadius > 0) {
             const texelWorld = (2 * stableRadius) / cfg._mapSize;
-            const ax = Math.round(cx / texelWorld) * texelWorld;
-            const ay = Math.round(cy / texelWorld) * texelWorld;
-            const az = Math.round(cz / texelWorld) * texelWorld;
+            // Align the world anchor grid to the LIGHT's right/up axes (R,U), not world x/y/z. A translating camera then
+            // switches cells by exactly ONE texel along R/U -> an integer texel shift in clip space (no crawl). The old
+            // world-axis grid jumped texelWorld along a world axis, which projects to a NON-integer texel count (R,U are
+            // not the world axes) -> the sub-texel wiggle that crawled during translation. R,U = view rows 0,1.
+            const rX = view[0]!,
+                rY = view[4]!,
+                rZ = view[8]!;
+            const uX = view[1]!,
+                uY = view[5]!,
+                uZ = view[9]!;
+            // Project the centre onto R,U, round to the texel grid, rebuild the world anchor in the R-U plane (the
+            // light-dir component only affects clip Z, so dropping it leaves clip X/Y, which depend on R,U, exact).
+            const sr = Math.round((rX * cx + rY * cy + rZ * cz) / texelWorld) * texelWorld;
+            const tr = Math.round((uX * cx + uY * cy + uZ * cz) / texelWorld) * texelWorld;
+            const ax = sr * rX + tr * uX;
+            const ay = sr * rY + tr * uY;
+            const az = sr * rZ + tr * uZ;
             aClipX = transform[0]! * ax + transform[4]! * ay + transform[8]! * az + transform[12]!;
             aClipY = transform[1]! * ax + transform[5]! * ay + transform[9]! * az + transform[13]!;
         }
