@@ -34,13 +34,14 @@ import {
     resizeMeshGeometry,
     updateMeshUvs,
     createGroundFromHeightMap,
+    computeAabb,
 } from "babylon-lite";
 import type { Mesh as LiteMesh, SceneNode, EngineContext } from "babylon-lite";
 
-import type { Vector3 } from "../math/vector.js";
-import { liteBackedVector3 } from "../math/vector.js";
+import { Vector3, liteBackedVector3 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
 import { Matrix } from "../math/matrix.js";
+import { BoundingInfo } from "../culling/bounding.js";
 import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
@@ -274,9 +275,27 @@ export class AbstractMesh extends TransformNode {
         this.isVisible = enabled;
     }
 
-    /** Bounding info accessor — needs a public Lite bounds accessor that does not yet exist. */
-    public getBoundingInfo(): never {
-        return unsupported("AbstractMesh.getBoundingInfo", "Babylon Lite does not expose a public mesh bounding-info accessor yet.");
+    /**
+     * Babylon.js `mesh.getBoundingInfo()` — local-space AABB of this mesh. Babylon
+     * Lite stores `boundMin`/`boundMax` (local space) on factory- and loader-built
+     * meshes; when absent (e.g. a placeholder mesh whose bounds were never computed)
+     * we fold the retained CPU positions through Lite's `computeAabb`. A mesh with
+     * no geometry returns a degenerate zero-size box.
+     */
+    public getBoundingInfo(): BoundingInfo {
+        const lo = this._lite.boundMin;
+        const hi = this._lite.boundMax;
+        if (lo && hi) {
+            return new BoundingInfo(new Vector3(lo[0], lo[1], lo[2]), new Vector3(hi[0], hi[1], hi[2]));
+        }
+        const positions = this._lite._cpuPositions;
+        if (positions && positions.length >= 3) {
+            const [min, max] = computeAabb(positions);
+            if (Number.isFinite(min[0])) {
+                return new BoundingInfo(new Vector3(min[0], min[1], min[2]), new Vector3(max[0], max[1], max[2]));
+            }
+        }
+        return new BoundingInfo(new Vector3(0, 0, 0), new Vector3(0, 0, 0));
     }
 
     /**
