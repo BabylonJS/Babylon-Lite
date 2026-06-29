@@ -225,12 +225,16 @@ function readAndConsumePrTitle(): string | undefined {
  */
 function composePrTitle(summary?: string): string {
     const PREFIX = "[compat-sync]";
+    const fallback = `${PREFIX} Babylon.js compat-layer sync`;
     if (!summary) {
-        return `${PREFIX} Babylon.js compat-layer sync`;
+        return fallback;
     }
     // Strip any prefix the summary may already carry (case-insensitive, with any
     // trailing whitespace) so we never emit "[compat-sync] [compat-sync] ...".
     const bare = summary.replace(/^\s*\[compat-sync\]\s*/i, "").trim();
+    if (!bare) {
+        return fallback;
+    }
     return `${PREFIX} ${bare}`;
 }
 
