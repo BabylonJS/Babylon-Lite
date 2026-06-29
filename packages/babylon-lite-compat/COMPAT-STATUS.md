@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `c729b94f2e36f2d915415620857452f7ad0ff731`
-- **Last sync date:** 2026-06-25
+- **Last synced BJS commit:** `4a4481e911bee11cb4b9e92689f65c69edb474b8`
+- **Last sync date:** 2026-06-29
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -176,7 +176,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `mesh.thinInstanceSetBuffer`                                                                                    | ⚡ Partial         | meshes (`matrix` + `color` → Lite thin instances)                                                                                                                                                                                          |
 | `mesh.clone` / `createInstance`                                                                                 | ⚡ Partial         | throwing stub                                                                                                                                                                                                                              |
 | `TransformNode`                                                                                                 | ✅ Full            | meshes                                                                                                                                                                                                                                     |
-| `mesh.getBoundingInfo`                                                                                          | 🔧 Needs Lite core | bounds accessor                                                                                                                                                                                                                            |
+| `mesh.getBoundingInfo`                                                                                          | ✅ Full            | meshes — local-space `BoundingInfo` from Lite `boundMin`/`boundMax` (factory/loader meshes), falling back to `computeAabb` over the retained CPU positions                                                                                  |
 | LOD / `EdgesRenderer` / `OutlineRenderer`                                                                       | ❌ Not supported   | throwing stub; not in Lite                                                                                                                                                                                                                 |
 | `CSG` / `CSG2` (+ `InitializeCSG2Async`)                                                                        | ✅ Full            | [meshes/csg.ts](src/meshes/csg.ts) over Lite `createCsgFromMesh`/`createMeshFromCsg` and `createCsg2FromMesh`/`createMeshesFromCsg2` (CSG2 preserves per-source materials)                                                                 |
 
