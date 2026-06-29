@@ -113,7 +113,7 @@ export class HavokPlugin {
         this._hknp = hpInjection;
         // Babylon.js treats a still-pending `HavokPhysics()` promise factory (a
         // function) as "not ready". Mirror that: a function injection is unusable.
-        this._supported = hpInjection !== undefined && typeof hpInjection !== "function";
+        this._supported = hpInjection != null && typeof hpInjection !== "function";
     }
 
     /** Whether the plugin has a usable Havok module. */
@@ -178,22 +178,22 @@ export class HavokPlugin {
     }
 
     /**
-     * @internal Create the native Lite world for `liteScene` and wire delta
-     * stepping. The timestep-updating before-render callback is registered
-     * *before* `createHavokWorld` installs its own step callback, so each frame the
-     * timestep is refreshed from the frame delta and is then consumed by Lite's
-     * step (callbacks fire in registration order).
+     * @internal Create the native Lite world for `liteScene` and wire delta stepping.
+     *
+     * Note: Lite's `onBeforeRender` uses `unshift`, so the *last* registered callback runs first.
+     * Register the timestep-updating callback *after* `createHavokWorld` so it executes before
+     * Lite's own per-frame physics step.
      */
     public _attachToLiteScene(liteScene: SceneContext, gravity?: Vec3Like): void {
         if (!this._supported) {
-            unsupported("HavokPlugin", "The Havok module is not ready. `await HavokPhysics()` before constructing the plugin.");
+            return unsupported("HavokPlugin", "The Havok module is not ready. `await HavokPhysics()` before constructing the plugin.");
         }
+        this.world = createHavokWorld(liteScene, this._hknp, gravity);
         onBeforeRender(liteScene, (deltaMs: number) => {
             if (this.world) {
                 setPhysicsTimestep(this.world, this._computeTimestep(deltaMs));
             }
         });
-        this.world = createHavokWorld(liteScene, this._hknp, gravity);
     }
 }
 
