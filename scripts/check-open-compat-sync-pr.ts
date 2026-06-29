@@ -68,7 +68,7 @@ async function main(): Promise<void> {
         return;
     }
 
-    const resolved = await resolveGithubToken(REPO);
+    const resolved = await resolveGithubToken(REPO, "read");
     const redact = makeRedactor(resolved.secrets);
     console.log(`Auth: ${resolved.source}.`);
 

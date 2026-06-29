@@ -19,9 +19,16 @@
  *
  * Every secret the resolver touches (PAT, private key, minted token) is returned
  * in `secrets` so callers can redact them from logs via `makeRedactor`.
+ *
+ * Callers pass a least-privilege `access` level ("read" for the guard, "write" for
+ * the PR driver) so the minted App token only carries the permissions that script
+ * actually needs.
  */
 
 import { createSign } from "crypto";
+
+/** Access level for a minted GitHub App installation token (least-privilege). */
+export type TokenAccess = "read" | "write";
 
 export interface ResolvedToken {
     /** Bearer token usable for `git push` and the GitHub REST API. */
@@ -36,8 +43,13 @@ export interface ResolvedToken {
  * Resolve the GitHub token for `repo` ("owner/name"). Uses a GitHub App
  * installation token when GH_APP_ID/GH_APP_PRIVATE_KEY are configured, otherwise
  * the GITHUB_TOKEN PAT. Throws if neither is available.
+ *
+ * `access` requests least-privilege permissions on the minted App token: "read"
+ * (PR metadata only — for the preflight guard) or "write" (contents + PRs + issues —
+ * for the PR driver that pushes a branch and opens/labels a PR). It only affects the
+ * App path; a fallback PAT carries whatever scope it was created with.
  */
-export async function resolveGithubToken(repo: string): Promise<ResolvedToken> {
+export async function resolveGithubToken(repo: string, access: TokenAccess = "write"): Promise<ResolvedToken> {
     const appId = cleanEnv(process.env.GH_APP_ID);
     const privateKeyRaw = cleanEnv(process.env.GH_APP_PRIVATE_KEY);
     const secrets: string[] = [];
@@ -45,12 +57,12 @@ export async function resolveGithubToken(repo: string): Promise<ResolvedToken> {
     if (appId && privateKeyRaw) {
         const privateKey = decodePrivateKey(privateKeyRaw);
         secrets.push(privateKey);
-        const token = await mintInstallationToken(appId, privateKey, repo);
+        const token = await mintInstallationToken(appId, privateKey, repo, access);
         secrets.push(token);
         return {
             token,
             secrets,
-            source: "GitHub App installation token (PRs authored by the app bot, reviewable)",
+            source: `GitHub App installation token, ${access}-scoped (PRs authored by the app bot, reviewable)`,
         };
     }
 
@@ -172,9 +184,11 @@ function makeAppJwt(appId: string, privateKey: string): string {
  * Exchange the App's private key for an installation access token scoped to `repo`.
  * Discovers the installation id from the repo automatically (so no separate
  * installation-id secret is needed), then requests a token restricted to that one
- * repository with the permissions the pipeline uses.
+ * repository with least-privilege permissions: "read" grants `pull_requests: read`
+ * (all the preflight guard needs); "write" grants `contents`/`pull_requests`/`issues`
+ * write (what the PR driver needs to push a branch and open/label a PR).
  */
-async function mintInstallationToken(appId: string, privateKey: string, repo: string): Promise<string> {
+async function mintInstallationToken(appId: string, privateKey: string, repo: string, access: TokenAccess): Promise<string> {
     const jwt = makeAppJwt(appId, privateKey);
 
     const instResponse = await fetch(`https://api.github.com/repos/${repo}/installation`, {
@@ -188,13 +202,14 @@ async function mintInstallationToken(appId: string, privateKey: string, repo: st
         throw new Error(`GitHub App installation lookup for ${repo} returned no id.`);
     }
 
+    const permissions = access === "read" ? { pull_requests: "read" } : { contents: "write", pull_requests: "write", issues: "write" };
     const [owner, name] = repo.split("/");
     const tokenResponse = await fetch(`https://api.github.com/app/installations/${installation.id}/access_tokens`, {
         method: "POST",
         headers: { ...githubHeaders(jwt), "Content-Type": "application/json" },
         body: JSON.stringify({
             repositories: name ? [name] : undefined,
-            permissions: { contents: "write", pull_requests: "write", issues: "write" },
+            permissions,
         }),
     });
     if (!tokenResponse.ok) {

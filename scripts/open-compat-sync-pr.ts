@@ -71,8 +71,9 @@ const PR_TITLE_FILE = ".compat-sync-pr-title.txt";
 async function main(): Promise<void> {
     // 0a. Resolve the auth token (GitHub App installation token when configured,
     //     else the PAT). Done first so every downstream push/API call is attributed
-    //     to the right identity.
-    const resolved = await resolveGithubToken(REPO);
+    //     to the right identity. The PR driver pushes a branch and opens/labels a PR,
+    //     so it needs write access.
+    const resolved = await resolveGithubToken(REPO, "write");
     TOKEN = resolved.token;
     redactToken = makeRedactor(resolved.secrets);
     console.log(`Auth: ${resolved.source}.`);
@@ -230,7 +231,9 @@ function composePrTitle(summary?: string): string {
         return fallback;
     }
     // Strip any prefix the summary may already carry (case-insensitive, with any
-    // trailing whitespace) so we never emit "[compat-sync] [compat-sync] ...".
+    // trailing whitespace) so we never emit "[compat-sync] [compat-sync] ...". If
+    // that leaves nothing (the summary was only the prefix/whitespace), fall back to
+    // the generic title rather than emitting a bare "[compat-sync] ".
     const bare = summary.replace(/^\s*\[compat-sync\]\s*/i, "").trim();
     if (!bare) {
         return fallback;
