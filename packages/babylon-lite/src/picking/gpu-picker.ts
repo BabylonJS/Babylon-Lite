@@ -6,7 +6,9 @@ import type { PickingInfo } from "./picking-info.js";
 import type { EngineContext } from "../engine/engine.js";
 import type * as DeformedGeometry from "./deformed-geometry.js";
 import type * as GsPickingPipeline from "./gs-picking-pipeline.js";
+import type * as BillboardPickPipeline from "./billboard-pick-pipeline.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
+import type { BillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 import { createEmptyPickingInfo } from "./picking-info.js";
 import { createPickingRay } from "./ray.js";
 import { mat4Invert } from "../math/mat4-invert.js";
@@ -42,6 +44,8 @@ export interface GpuPicker {
     _sceneBG: GPUBindGroup | null;
     /** @internal Per-GS-mesh picking resources (created on demand). */
     _gsMeshResources: Map<GaussianSplattingMesh, GsPickingPipeline.GsPickMeshResources> | null;
+    /** @internal Per-billboard-system picking resources (created on demand). */
+    _billboardResources: Map<BillboardSpriteSystem, BillboardPickPipeline.BillboardPickResources> | null;
 }
 
 interface PickTargets1x1 {
@@ -64,6 +68,7 @@ export function createGpuPicker(scene: SceneContext): GpuPicker {
         _sceneUbo: null,
         _sceneBG: null,
         _gsMeshResources: null,
+        _billboardResources: null,
     };
 }
 
@@ -366,6 +371,19 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number, options
             nextId++;
         }
     }
+
+    // ── Billboard sprite systems ─────────────────────────────────────
+    // Drawn from the same pass against the same depth target, so billboards depth-sort against
+    // meshes (and each other) — a billboard occluded by a wall loses the pick. The entire billboard
+    // pass (draw loop, resolve scan, per-system resources, view math) lives in the dynamic-imported
+    // pick module, so a picker scene with no billboards never fetches it; the shared entry keeps only
+    // this guarded dispatch plus a numeric id-range compare at resolve time.
+    const billboardIdStart = nextId;
+    let bbPick: typeof BillboardPickPipeline | null = null;
+    if ((scene as unknown as { _billboardSystems: readonly unknown[] })._billboardSystems.length > 0) {
+        bbPick = await import("./billboard-pick-pipeline.js");
+        nextId = bbPick.drawBillboardsForPicking(picker, pass, engine, scene, camera, nextId, picker._sceneBG!);
+    }
     pass.end();
 
     // ── Readback (both 1×1 — trivially small) ────────────────────────
@@ -438,7 +456,12 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number, options
             hitIsGs = true;
         }
     }
-    if (!hitMesh) {
+    // Billboard sprite resolve. The billboard id range is [billboardIdStart, nextId); since the GPU
+    // only writes ids it drew and meshes/GS own every id below billboardIdStart, a non-mesh id at or
+    // above that start is necessarily a billboard hit — a numeric compare, no module call. The
+    // system+index lookup and payload attach are deferred to resolveAndAttachBillboard below.
+    const hitBillboard = !hitMesh && pickId >= billboardIdStart;
+    if (!hitMesh && !hitBillboard) {
         if (debugLabel) {
             console.trace("pick-debug", {
                 label: debugLabel,
@@ -477,7 +500,13 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number, options
         info.distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    if (picker._detailedPick && !hitIsGs) {
+    if (hitBillboard) {
+        // Resolve which system/sprite owns the id and attach the payload (pickBillboardSprite reads
+        // it). No mesh, no detailed CPU pick — picked point/distance come from the pick-depth readback.
+        bbPick!.resolveAndAttachBillboard(info, scene, pickId, billboardIdStart);
+    }
+
+    if (picker._detailedPick && hitMesh && !hitIsGs) {
         const ray = createPickingRay(pickX - viewport.x, pickY - viewport.y, vp, w, h);
         if (ray) {
             info.ray = ray;
@@ -492,7 +521,7 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number, options
             pickId,
             depth,
             hit: true,
-            mesh: (hitMesh as Mesh).name ?? "(unnamed)",
+            mesh: hitMesh ? ((hitMesh as Mesh).name ?? "(unnamed)") : "(billboard-sprite)",
             thinInstanceIndex: hitThinIdx,
             pickedPoint: info.pickedPoint,
             distance: info.distance,
@@ -530,5 +559,10 @@ export function disposePicker(picker: GpuPicker): void {
             }
             picker._gsMeshResources = null;
         });
+    }
+    if (picker._billboardResources) {
+        // The dispose helper lives in the dynamic-imported pick module, so a billboard-free scene
+        // never fetches it (mirrors the GS dispose path).
+        void import("./billboard-pick-pipeline.js").then((m) => m.disposeBillboardResources(picker));
     }
 }

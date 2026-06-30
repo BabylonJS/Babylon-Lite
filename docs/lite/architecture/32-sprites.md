@@ -730,7 +730,7 @@ export interface Sprite2DProps {
     flipX?: boolean;
     flipY?: boolean;
     visible?: boolean;
-    /** Reserved for picking (PR 5). Accepted but unused today. */
+    /** Accepted for API compatibility but not yet consulted by `pickSprite2D` (every visible sprite is pickable). */
     pickable?: boolean;
     /** Reserved for clip animation (later PR). Accepted but unused today. */
     clip?: unknown;
@@ -1125,9 +1125,10 @@ rather than `_transmissive`.
 Yaw-locked billboards (world-Y axis constraint) are created via
 `createAxisLockedBillboardSystem(atlas, [0, 1, 0], opts)`.
 
-### Roadmap — Picking
+### Picking
 
-The picking APIs below are not part of the current root exports.
+The picking APIs below are exported from the package root (`pickSprite2D`,
+`pickBillboardSprite`, and the `SpritePickInfo` / `BillboardPickInfo` result types).
 
 ```typescript
 // src/sprite/picking/pick-sprite-2d.ts — handles every Sprite2DLayer
@@ -1136,7 +1137,7 @@ The picking APIs below are not part of the current root exports.
 export function pickSprite2D(layers: ReadonlyArray<Sprite2DLayer>, xPx: number, yPx: number): SpritePickInfo | null;
 
 // src/sprite/picking/pick-billboard.ts — GPU contributor.
-export function pickBillboardSprite(scene: SceneContext, xPx: number, yPx: number): Promise<SpritePickInfo | null>;
+export function pickBillboardSprite(scene: SceneContext, xPx: number, yPx: number): Promise<BillboardPickInfo | null>;
 ```
 
 `pickSprite2D` is the pure-2D picker: the caller passes whichever
@@ -1751,6 +1752,18 @@ the sort and upload dirty ranges in logical insertion order.
 
 ## Picking
 
+> **Implementation note (shipped).** The billboard picker ships as a _single-pass_
+> contributor integrated directly into `gpu-picker.ts`, mirroring the existing
+> Gaussian-splatting picking path rather than the generic two-pass `PickContributor`
+> abstraction sketched below: billboard systems are drawn into the **same** 1×1 pick
+> pass as meshes (after them), the whole billboard pass lives in the dynamic-imported
+> `picking/billboard-pick-pipeline.ts` (so mesh-only picker scenes fetch zero billboard
+> bytes), and `scene._billboardSystems` is the registry the picker walks. The per-pick
+> UBO is 48 bytes (`camRight` + `baseId`, `camUp` + `cutoff`, `axis`). `pickBillboardSprite`
+> returns `BillboardPickInfo { system, spriteIndex, pickedPoint, distance }`; per-hit UV
+> reconstruction is deferred (not in the v1 result). The `pickSprite2D` design below
+> matches the shipped CPU picker; `SpritePickInfo` is `{ layer, spriteIndex, u, v }`.
+
 ### `pickSprite2D` — CPU contributor
 
 `pickSprite2D(layers, xPx, yPx)` takes the caller's `Sprite2DLayer` array
@@ -2171,7 +2184,7 @@ never reaches into layer internals.
 | Custom `ShaderMaterial` on a sprite               | `createSprite2DCustomShader` / `createBillboardCustomShader`          | WGSL fragment body + `fx.time` / `fx.params` / extra textures                     |
 | Animated/scrolling texture (`uOffset`/`vOffset`)  | `Sprite2DLayerOptions.uvScroll` + per-sprite `uvOffset`               | Opt-in per-sprite UV offset (parallax)                                            |
 | `AdvancedDynamicTexture` + `Image`                | `Sprite2DLayer` overlay on a 3D `SceneContext`                        | Different scope — no GUI tree                                                     |
-| `scene.pickSprite(x, y)`                          | Roadmap `pickSprite2D` / `pickBillboardSprite`                        | Picking is not in the current root exports                                        |
+| `scene.pickSprite(x, y)`                          | `pickSprite2D` (CPU) / `pickBillboardSprite` (GPU)                    | Shipped; exported from the package root                                           |
 | `SpriteMap` (tile maps)                           | Out of scope                                                          | Future module                                                                     |
 | `SpriteManager` `epsilon` arg                     | _no equivalent_                                                       | Atlases must have transparent border / NPOT / padded sub-rects when bleed matters |
 | Quad VBO                                          | Vertexless (`vertex_index`)                                           | Eliminates the static quad buffer                                                 |

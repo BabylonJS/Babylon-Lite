@@ -159,6 +159,7 @@ function makePickScene(engine: EngineContext): { scene: Parameters<typeof create
             },
             meshes: [mesh],
             _gsMeshes: [],
+            _billboardSystems: [],
         } as unknown as Parameters<typeof createGpuPicker>[0],
     };
 }

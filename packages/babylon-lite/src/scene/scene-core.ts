@@ -22,6 +22,7 @@ import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
 import type { ClusteredLightContainer } from "../light/clustered.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
+import type { BillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -84,6 +85,12 @@ export interface SceneContext extends RenderingContext {
      *  scanning `_renderables`). */
     /** @internal */
     _gsMeshes: GaussianSplattingMesh[];
+    /** Billboard sprite systems attached to this scene.  Populated by
+     *  `addFacingBillboardSystem` / `addAxisLockedBillboardSystem`.  Scene-core stays
+     *  billboard-agnostic apart from this opaque registry (used by `gpu-picker` to iterate
+     *  billboard systems for sprite picking without scanning `_renderables`). */
+    /** @internal */
+    _billboardSystems: BillboardSpriteSystem[];
     /** @internal Scene uniform updaters (one per shared UBO). */
     _uniformUpdaters: SceneUniformUpdater[];
     /** @internal Opt-in feature writers for the SceneUniforms UBO (fog, clip plane, env SH).
@@ -170,6 +177,7 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         _renderables: [],
         _prePasses: [],
         _gsMeshes: [],
+        _billboardSystems: [],
         _uniformUpdaters: [],
         fixedDeltaMs: 0,
         _beforeRender: [],
@@ -386,6 +394,7 @@ export function disposeScene(scene: SceneContext): void {
     ctx._renderables.length = 0;
     ctx._prePasses.length = 0;
     ctx._gsMeshes.length = 0;
+    ctx._billboardSystems.length = 0;
     ctx._uniformUpdaters.length = 0;
     ctx._beforeRender.length = 0;
     ctx._deferredBuilders.length = 0;

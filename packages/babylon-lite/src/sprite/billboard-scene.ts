@@ -3,6 +3,9 @@ import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { AxisLockedBillboardSpriteSystem, BillboardSpriteSystem, FacingBillboardSpriteSystem } from "./billboard-sprite.js";
 
 function addBillboardSystem(scene: SceneContext, system: BillboardSpriteSystem): void {
+    // Track the system on the scene so `gpu-picker` can iterate billboard systems for sprite
+    // picking without scanning `_renderables`. Mirrors the GS `_gsMeshes` registry.
+    scene._billboardSystems.push(system);
     addDeferredSceneRenderables(scene, async (engine) => {
         const { buildBillboardRenderable } = await import("./billboard-renderable.js");
         const built = buildBillboardRenderable(engine, system);
