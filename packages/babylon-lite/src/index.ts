@@ -383,6 +383,8 @@ export type { PixelViewport } from "./camera/viewport.js";
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { disposeMeshGpu } from "./mesh/mesh-dispose.js";
+export { computeMaxExtents } from "./mesh/compute-max-extents.js";
+export type { MeshExtent } from "./mesh/compute-max-extents.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";
 export { ObservableQuat } from "./math/observable-quat.js";
 export type { StandardMaterialProps, FogConfig } from "./material/standard/standard-material.js";
