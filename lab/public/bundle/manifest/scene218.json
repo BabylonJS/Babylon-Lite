@@ -1,6 +1,6 @@
 {
   "rawKB": 92.3,
-  "gzipKB": 38.4,
+  "gzipKB": 38.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene218-create-skeleton-Dzggqla-.js",
@@ -13,7 +13,7 @@
     "scene218-gltf-feature-skeleton-D09Z9z9B.js",
     "scene218-gltf-glb-parser-BXHcqEF1.js",
     "scene218-gltf-sampler-desc-CS2bAJuk.js",
-    "scene218-pbr-renderable-C06olBeM.js",
+    "scene218-pbr-renderable-B3X7Xdm4.js",
     "scene218-singlelight-hemispheric-wgsl-D4ReIS7e.js",
     "scene218.js"
   ]

@@ -45,6 +45,10 @@ const snippetDescriptionInput = document.getElementById("snippetDescription") as
 const snippetTagsInput = document.getElementById("snippetTags") as HTMLInputElement;
 const toastEl = document.getElementById("toast") as HTMLElement;
 const openFullBtn = document.getElementById("openFullBtn") as HTMLAnchorElement;
+const menuBtn = document.getElementById("menuBtn") as HTMLButtonElement;
+const actionsMenu = document.getElementById("actionsMenu") as HTMLElement;
+const modeCodeBtn = document.getElementById("modeCodeBtn") as HTMLButtonElement;
+const modeSceneBtn = document.getElementById("modeSceneBtn") as HTMLButtonElement;
 
 // Embed mode (`?embed=runner|split`) hosts the playground inside another page and
 // exposes a postMessage API. `null` when running as the standalone app.
@@ -323,6 +327,105 @@ examplesEl.addEventListener("change", () => {
 });
 
 runBtn.addEventListener("click", () => void run());
+
+// --- Mobile chrome: hamburger menu + Code/Scene view toggle ------------------
+// On narrow screens the toolbar actions collapse into a dropdown, and the
+// side-by-side split becomes a single pane that switches between editing the
+// code and viewing the scene. Both are driven by classes on <body>; the CSS
+// media query decides whether they have any visual effect.
+
+const MODE_KEY = "bl-pg-mode";
+
+function closeMenu(): void {
+    document.body.classList.remove("menu-open");
+    menuBtn.setAttribute("aria-expanded", "false");
+}
+
+function toggleMenu(): void {
+    const open = document.body.classList.toggle("menu-open");
+    menuBtn.setAttribute("aria-expanded", String(open));
+}
+
+menuBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleMenu();
+});
+
+// Close the menu after picking an action, or when tapping outside it.
+actionsMenu.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest(".btn, a")) {
+        closeMenu();
+    }
+});
+actionsMenu.addEventListener("change", closeMenu);
+document.addEventListener("click", (event) => {
+    if (document.body.classList.contains("menu-open") && !(event.target as HTMLElement).closest(".toolbar")) {
+        closeMenu();
+    }
+});
+
+// The two mode tabs, in DOM order, for roving-tabindex keyboard navigation.
+const modeTabs = [modeCodeBtn, modeSceneBtn];
+
+function setMode(mode: "code" | "scene"): void {
+    document.body.classList.toggle("mode-code", mode === "code");
+    document.body.classList.toggle("mode-scene", mode === "scene");
+    // ARIA tab semantics: the selected tab is the single roving tab stop; the
+    // other is removed from the tab order and reached via arrow keys.
+    for (const tab of modeTabs) {
+        const isActive = (tab === modeCodeBtn) === (mode === "code");
+        tab.setAttribute("aria-selected", String(isActive));
+        tab.tabIndex = isActive ? 0 : -1;
+    }
+    try {
+        localStorage.setItem(MODE_KEY, mode);
+    } catch {
+        // Best-effort persistence; ignore storage failures.
+    }
+}
+
+modeCodeBtn.addEventListener("click", () => setMode("code"));
+modeSceneBtn.addEventListener("click", () => setMode("scene"));
+
+// Arrow/Home/End move selection between the tabs (WAI-ARIA tabs pattern).
+function onModeKeydown(event: KeyboardEvent): void {
+    const index = modeTabs.indexOf(event.currentTarget as HTMLButtonElement);
+    let next: number;
+    switch (event.key) {
+        case "ArrowRight":
+        case "ArrowDown":
+            next = (index + 1) % modeTabs.length;
+            break;
+        case "ArrowLeft":
+        case "ArrowUp":
+            next = (index - 1 + modeTabs.length) % modeTabs.length;
+            break;
+        case "Home":
+            next = 0;
+            break;
+        case "End":
+            next = modeTabs.length - 1;
+            break;
+        default:
+            return;
+    }
+    event.preventDefault();
+    setMode(next === 0 ? "code" : "scene");
+    modeTabs[next]?.focus();
+}
+
+for (const tab of modeTabs) {
+    tab.addEventListener("keydown", onModeKeydown);
+}
+
+// Restore the persisted mode (storage may be unavailable / throw — fall back to scene).
+let storedMode: string | null = null;
+try {
+    storedMode = localStorage.getItem(MODE_KEY);
+} catch {
+    // Storage blocked (private mode / third-party iframe); use the default.
+}
+setMode(storedMode === "code" ? "code" : "scene");
 
 // New: discard the current project (with a guard if there are unsaved edits) and
 // load a clean starter scene.

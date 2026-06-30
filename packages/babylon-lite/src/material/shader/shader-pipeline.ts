@@ -37,8 +37,6 @@ interface ShaderMaterialPipelineState extends ShaderMaterial {
     _shaderCustomVersion?: number;
 }
 
-const SHADER_STAGE_ALL = SS.VERTEX | SS.FRAGMENT;
-
 export function getOrCreateShaderPipelineBindings(engine: EngineContext, material: ShaderMaterial): ShaderPipelineBindings {
     const state = material as ShaderMaterialPipelineState;
     if (state._shaderBindings && state._shaderDevice === engine._device) {
@@ -155,6 +153,9 @@ function buildBindGroupLayoutEntries(
     storageBuffers: readonly { name: string; type: string }[],
     hasCustomUbo: boolean
 ): GPUBindGroupLayoutEntry[] {
+    // Local (not module-level): reading the WebGPU flag globals must be deferred until
+    // first device/pipeline use so importing the engine never requires them to exist.
+    const SHADER_STAGE_ALL = SS.VERTEX | SS.FRAGMENT;
     const entries: GPUBindGroupLayoutEntry[] = [{ binding: 0, visibility: SHADER_STAGE_ALL, buffer: { type: "uniform" } }];
     let nextBinding = 1;
     if (hasCustomUbo) {
@@ -197,7 +198,12 @@ function attributeLayout(name: ShaderAttributeName, shaderLocation: number): GPU
             return { arrayStride: 8, attributes: [{ shaderLocation, offset: 0, format: "float32x2" }] };
         case "tangent":
         case "color":
+        case "weights":
+        case "weights1":
             return { arrayStride: 16, attributes: [{ shaderLocation, offset: 0, format: "float32x4" }] };
+        case "joints":
+        case "joints1":
+            return { arrayStride: 16, attributes: [{ shaderLocation, offset: 0, format: "uint32x4" }] };
     }
 }
 
@@ -266,6 +272,11 @@ function attributeWgslType(name: ShaderAttributeName): string {
             return "vec2<f32>";
         case "tangent":
         case "color":
+        case "weights":
+        case "weights1":
             return "vec4<f32>";
+        case "joints":
+        case "joints1":
+            return "vec4<u32>";
     }
 }

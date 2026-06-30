@@ -1,5 +1,5 @@
 {
-  "rawKB": 76.7,
+  "rawKB": 76.8,
   "gzipKB": 31.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene210-gltf-glb-parser-fJOQf1ny.js",
     "scene210-gltf-interleave-DEtV3KE6.js",
     "scene210-gltf-normals-DYhLwXNX.js",
-    "scene210-pbr-renderable-CbegLEET.js",
+    "scene210-pbr-renderable-DvpOpEva.js",
     "scene210-singlelight-hemispheric-wgsl-CBBkrTfR.js",
     "scene210.js"
   ]

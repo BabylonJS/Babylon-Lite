@@ -32,6 +32,11 @@ const SOURCE_PACKAGE_JSON = resolve(process.cwd(), process.env.RELEASE_SOURCE_PA
 const RELEASE_CONFIG_PATH = resolve(process.cwd(), process.env.RELEASE_CONFIG_PATH ?? "config/release.json");
 const RELEASE_TAG_PATTERN = process.env.RELEASE_TAG_PATTERN ?? "npm-lite-v*";
 const RELEASE_TAG_PREFIX = RELEASE_TAG_PATTERN.replace(/\*$/, "");
+// Opt-in: also consider existing release git tags when resolving the next
+// version (see getHighestReleasedTagVersion). Off by default so the established
+// @babylonjs/lite pipeline keeps its exact prior behaviour; only pipelines that
+// set this env (currently @babylonjs/lite-gl) get tag-aware resolution.
+const RELEASE_TAG_AWARE_RESOLUTION = (process.env.RELEASE_TAG_AWARE_RESOLUTION ?? "false").toLowerCase() === "true";
 
 function run(command: string, args: string[], options: { allowFailure?: boolean } = {}): string {
     try {
@@ -98,6 +103,25 @@ function parseVersion(version: string): [number, number, number] {
     return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
+function compareVersions(a: [number, number, number], b: [number, number, number]): number {
+    for (let i = 0; i < 3; i++) {
+        if (a[i] !== b[i]) {
+            return a[i] - b[i];
+        }
+    }
+    return 0;
+}
+
+function maxVersion(a: string, b: string): string {
+    if (!a) {
+        return b;
+    }
+    if (!b) {
+        return a;
+    }
+    return compareVersions(parseVersion(a), parseVersion(b)) >= 0 ? a : b;
+}
+
 function bumpVersion(version: string, releaseType: ResolvedReleaseType): string {
     const [major, minor, patch] = parseVersion(version);
     if (releaseType === "major") {
@@ -112,6 +136,36 @@ function bumpVersion(version: string, releaseType: ResolvedReleaseType): string 
 function getLatestPublishedVersion(fallbackVersion: string): string {
     const publishedVersion = run("npm", ["view", PACKAGE_NAME, "version", "--registry", "https://registry.npmjs.org/"], { allowFailure: true });
     return publishedVersion || fallbackVersion;
+}
+
+// Git tags are the authoritative, push-once record of what has already been
+// released. When tag-aware resolution is enabled (RELEASE_TAG_AWARE_RESOLUTION),
+// version resolution considers them in addition to npm: if npm's reported
+// version and the tags drift out of sync — e.g. `npm view` returns empty
+// (transient registry/auth failure) so we fall back to the source manifest, or
+// an npm version was unpublished — bumping from npm alone can land on a version
+// whose tag already exists. The tag-push step then fails fatally (`git tag`
+// refuses to overwrite), wedging every subsequent run. Basing the bump on the
+// highest existing tag as well guarantees the next version is strictly greater
+// than every released tag, so the tag can never collide.
+function getHighestReleasedTagVersion(): string {
+    const tagList = run("git", ["tag", "--list", RELEASE_TAG_PATTERN], { allowFailure: true });
+    if (!tagList) {
+        return "";
+    }
+    let highest = "";
+    for (const line of tagList.split(/\r?\n/)) {
+        const tag = line.trim();
+        if (!tag.startsWith(RELEASE_TAG_PREFIX)) {
+            continue;
+        }
+        const versionPart = tag.slice(RELEASE_TAG_PREFIX.length);
+        if (!/^\d+\.\d+\.\d+$/.test(versionPart)) {
+            continue;
+        }
+        highest = maxVersion(highest, versionPart);
+    }
+    return highest;
 }
 
 function getPublishedBuildId(version: string): string {
@@ -150,6 +204,13 @@ if (!pkg.version) {
 }
 
 const latestPublishedVersion = getLatestPublishedVersion(pkg.version);
+// Tag-aware resolution is opt-in (lite-gl only). When disabled, the base is the
+// npm-reported latest exactly as before, so @babylonjs/lite is byte-for-byte
+// unaffected. When enabled, bump from whichever is greater: npm's reported
+// latest or the highest existing release tag, keeping the next version strictly
+// ahead of every released tag so the tag-push step can never collide.
+const highestReleasedTagVersion = RELEASE_TAG_AWARE_RESOLUTION ? getHighestReleasedTagVersion() : "";
+const resolutionBaseVersion = RELEASE_TAG_AWARE_RESOLUTION ? maxVersion(latestPublishedVersion, highestReleasedTagVersion) : latestPublishedVersion;
 const currentBuildId = process.env.BUILD_BUILDID;
 const latestPublishedBuildId = getPublishedBuildId(latestPublishedVersion);
 
@@ -157,7 +218,7 @@ if (currentBuildId && latestPublishedBuildId === currentBuildId) {
     throw new Error(`Azure build ${currentBuildId} already published ${PACKAGE_NAME}@${latestPublishedVersion}. Refusing to publish another version from the same build rerun.`);
 }
 
-const previousReleaseTag = getPreviousReleaseTag(latestPublishedVersion);
+const previousReleaseTag = getPreviousReleaseTag(resolutionBaseVersion);
 const breakingChangesDetected = hasBreakingChanges(previousReleaseTag);
 
 if (breakingChangesDetected && requestedReleaseType !== "auto" && requestedReleaseType !== "major") {
@@ -171,7 +232,7 @@ if (breakingChangesDetected && requestedReleaseType !== "auto" && requestedRelea
 }
 
 const resolvedReleaseType: ResolvedReleaseType = requestedReleaseType === "auto" ? (breakingChangesDetected ? "major" : "minor") : requestedReleaseType;
-const nextVersion = bumpVersion(latestPublishedVersion, resolvedReleaseType);
+const nextVersion = bumpVersion(resolutionBaseVersion, resolvedReleaseType);
 
 if (isVersionPublished(nextVersion)) {
     throw new Error(`${PACKAGE_NAME}@${nextVersion} is already published. Refusing to overwrite an existing npm version.`);
@@ -183,6 +244,10 @@ if (isVersionPublished(nextVersion)) {
 // provenance from `BUILD_BUILDID` / `BUILD_SOURCEVERSION`. Nothing is written here.
 console.log(`Package: ${PACKAGE_NAME}`);
 console.log(`Latest published version: ${latestPublishedVersion}`);
+if (RELEASE_TAG_AWARE_RESOLUTION) {
+    console.log(`Highest released tag version: ${highestReleasedTagVersion || "<none>"}`);
+    console.log(`Resolution base version: ${resolutionBaseVersion}`);
+}
 console.log(`Previous release tag: ${previousReleaseTag || "<none>"}`);
 console.log(`Requested release type: ${requestedReleaseType}`);
 console.log(`Release type source: ${requested.source}`);

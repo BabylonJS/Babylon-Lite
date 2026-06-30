@@ -85,6 +85,42 @@ describe("API report breaking-change classifier", () => {
         expect(breakingApiLines(diff)).toEqual(["readonly weights: Float32Array<ArrayBuffer>;"]);
     });
 
+    it("treats a union type alias gaining members as additive", () => {
+        const diff = apiDiff(
+            'export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangent" | "color";',
+            'export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangent" | "color" | "joints" | "weights" | "joints1" | "weights1";'
+        );
+
+        expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("treats a `declare type` union gaining members as additive", () => {
+        const diff = apiDiff('export declare type Mode = "a" | "b";', 'export declare type Mode = "a" | "b" | "c";');
+
+        expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("flags a union that drops a member as breaking", () => {
+        const removed = 'export type Mode = "a" | "b" | "c";';
+        const diff = apiDiff(removed, 'export type Mode = "a" | "b";');
+
+        expect(breakingApiLines(diff)).toEqual([removed]);
+    });
+
+    it("flags a union that renames a member as breaking", () => {
+        const removed = 'export type Mode = "a" | "b";';
+        const diff = apiDiff(removed, 'export type Mode = "a" | "c";');
+
+        expect(breakingApiLines(diff)).toEqual([removed]);
+    });
+
+    it("flags a renamed union alias as breaking even when it gains members", () => {
+        const removed = 'export type Mode = "a" | "b";';
+        const diff = apiDiff(removed, 'export type Kind = "a" | "b" | "c";');
+
+        expect(breakingApiLines(diff)).toEqual([removed]);
+    });
+
     it("does not flag purely added API lines", () => {
         const diff = [
             "diff --git a/target.api.md b/current.api.md",

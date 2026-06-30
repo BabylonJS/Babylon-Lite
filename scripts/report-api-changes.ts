@@ -422,6 +422,52 @@ function isNonBreakingConstLiteralWidening(removedLine: string, addedLine: strin
     return widenLiteralType(removed[2]!) === added[2]!.trim();
 }
 
+const TYPE_ALIAS_PATTERN = /^export (?:declare )?type ([A-Za-z_$][\w$]*) = (.+);$/;
+
+/** Split a union type's right-hand side into its top-level members (by ` | `), ignoring `|`
+ *  nested inside `<>`, `()`, `[]`, or `{}` so e.g. `Array<A | B> | C` splits into two members. */
+function splitUnionMembers(rhs: string): string[] {
+    const members: string[] = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < rhs.length; i += 1) {
+        const ch = rhs[i]!;
+        if (ch === "<" || ch === "(" || ch === "[" || ch === "{") {
+            depth += 1;
+        } else if (ch === ">" || ch === ")" || ch === "]" || ch === "}") {
+            depth -= 1;
+        } else if (ch === "|" && depth === 0) {
+            members.push(rhs.slice(start, i).trim());
+            start = i + 1;
+        }
+    }
+    members.push(rhs.slice(start).trim());
+    return members.filter((m) => m.length > 0);
+}
+
+/**
+ * Treat an exported type alias whose only change is a UNION GAINING members (none removed,
+ * none re-spelled) as non-breaking — e.g.
+ * `export type Attr = "a" | "b";` → `export type Attr = "a" | "b" | "c";`. Adding members to
+ * a union that callers pass IN (e.g. the attribute names a ShaderMaterial accepts) is additive:
+ * existing code that passes the old members still compiles. Mirrors the const-literal and
+ * typed-array widening cases already classified as additive. A removed/renamed member makes the
+ * removed-set no longer a subset of the added-set, so it stays breaking.
+ */
+function isNonBreakingUnionWidening(removedLine: string, addedLine: string): boolean {
+    const removed = TYPE_ALIAS_PATTERN.exec(removedLine);
+    const added = TYPE_ALIAS_PATTERN.exec(addedLine);
+    if (!removed || !added || removed[1] !== added[1]) {
+        return false;
+    }
+    const removedMembers = splitUnionMembers(removed[2]!);
+    const addedMembers = new Set(splitUnionMembers(added[2]!));
+    if (removedMembers.length < 2 || addedMembers.size <= removedMembers.length) {
+        return false; // not a union, or nothing was added
+    }
+    return removedMembers.every((member) => addedMembers.has(member));
+}
+
 /**
  * The TypedArray / buffer-view types that TypeScript 5.7 made generic over their
  * backing buffer (`Float32Array` → `Float32Array<TArrayBuffer extends ArrayBufferLike>`).
@@ -483,6 +529,7 @@ export function breakingApiLines(diff: string): string[] {
                 (addedLine) =>
                     isNonBreakingOptionalParameterExpansion(removedLine, addedLine) ||
                     isNonBreakingConstLiteralWidening(removedLine, addedLine) ||
+                    isNonBreakingUnionWidening(removedLine, addedLine) ||
                     isNonBreakingTypedArrayGenericWidening(removedLine, addedLine)
             )
     );

@@ -292,7 +292,12 @@ function disposeRenderTaskTransmission(state: RenderTaskTransmissionState | null
 export function executePassWithTransmission(task: RenderTask, engine: EngineContext, state: RenderTaskTransmissionState, sampleCount: number): number {
     state._copies = 0;
     const transparent = task._transparentBindings;
-    let pass = beginTaskPass(task, null, sampleCount, false);
+    // MSAA: resolve the FINAL scene colour into the task's single-sample resolve target (`rst`) so downstream
+    // passes that SAMPLE the scene RTT (e.g. a custom DoF/present stack) get a resolved image. The multisampled
+    // colour is preserved across the split segments (store/load), so resolving on every segment leaves the LAST
+    // (complete) resolve in `rst`. No-op when single-sample (resolveView stays null) — existing scenes unchanged.
+    const resolveView = sampleCount > 1 ? (task._config.rst?._colorView ?? null) : null;
+    let pass = beginTaskPass(task, resolveView, sampleCount, false);
     let draws = drawBaseTask(task, pass);
     let lastPipeline: GPURenderPipeline | null = null;
     let overlay: DrawBinding[] | null = null;
@@ -308,7 +313,7 @@ export function executePassWithTransmission(task: RenderTask, engine: EngineCont
         if (transmissive && canUpdateTransmission(state)) {
             pass.end();
             updateTransmissionTexture(state, engine);
-            pass = beginTaskPass(task, null, sampleCount, true);
+            pass = beginTaskPass(task, resolveView, sampleCount, true);
             setPassState(task, pass);
             lastPipeline = null;
         }

@@ -206,6 +206,16 @@ export function getNoColorView(material: Material, cache: Map<Material, Material
     if (cached) {
         return cached;
     }
+    // Explicit caster override: this (receive) material casts its shadow through an ALTERNATE material (see
+    // Material._shadowCasterMaterial). Take the override's OWN no-colour view (recurse) so the same mesh casts
+    // with a sampler-free / alpha-clip caster instead of this material's shadow-map-aliasing view. Cache under
+    // THIS material so the lookup at the call site (keyed by the receive material) hits.
+    const override = material._shadowCasterMaterial;
+    if (override) {
+        const overrideView = getNoColorView(override, cache);
+        cache.set(material, overrideView);
+        return overrideView;
+    }
     const family = material._buildGroup._materialFamily;
     let view: MaterialView;
     if (family === "standard") {

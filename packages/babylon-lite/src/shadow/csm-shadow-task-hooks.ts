@@ -22,6 +22,14 @@ import { buildLightViewMatrix, casterVersionSum, createShadowCamera, multiply4x4
 import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 
+/** Generation of the material that ACTUALLY casts this caster mesh's shadow — the explicit
+ *  `_shadowCasterMaterial` override when set, else the mesh's own material. Lets the caster-set diff detect a
+ *  rebuild of the override caster material (which would otherwise be invisible to a check on the receive material). */
+function effectiveCasterGen(material: Material): number {
+    const eff = material._shadowCasterMaterial ?? material;
+    return (eff as { _csmGen?: number })._csmGen ?? 0;
+}
+
 /** CSM configuration captured by the generator and consumed by these hooks. */
 export interface CsmConfig {
     /** @internal */
@@ -132,7 +140,7 @@ export function ensureCsmShadowTaskState(
                 continue;
             }
             const stored = existing._casterMatGens.get(mat);
-            if (stored !== undefined && stored !== ((mat as { _csmGen?: number })._csmGen ?? 0)) {
+            if (stored !== undefined && stored !== effectiveCasterGen(mat)) {
                 casterMatChanged = true;
                 break;
             }
@@ -155,7 +163,7 @@ export function ensureCsmShadowTaskState(
                     for (const t of existing._tasks) {
                         t.addMesh(m, { material: view });
                     }
-                    gens.set(m.material, (m.material as { _csmGen?: number })._csmGen ?? 0);
+                    gens.set(m.material, effectiveCasterGen(m.material));
                 }
             }
             // Force each cascade to re-resolve its newly-added pending casters + re-bucket its binding lists.
@@ -247,7 +255,7 @@ export function ensureCsmShadowTaskState(
     const casterMatGens = new Map<Material, number>();
     for (const m of casterMeshes) {
         if (m.material) {
-            casterMatGens.set(m.material, (m.material as { _csmGen?: number })._csmGen ?? 0);
+            casterMatGens.set(m.material, effectiveCasterGen(m.material));
         }
     }
     return {
@@ -533,9 +541,23 @@ function _computeCsmCascades(engine: EngineContext, camera: Camera, light: Direc
         let aClipY = transform[13]!;
         if (cfg._stabilizeCascades && stableRadius > 0) {
             const texelWorld = (2 * stableRadius) / cfg._mapSize;
-            const ax = Math.round(cx / texelWorld) * texelWorld;
-            const ay = Math.round(cy / texelWorld) * texelWorld;
-            const az = Math.round(cz / texelWorld) * texelWorld;
+            // Align the world anchor grid to the LIGHT's right/up axes (R,U), not world x/y/z. A translating camera then
+            // switches cells by exactly ONE texel along R/U -> an integer texel shift in clip space (no crawl). The old
+            // world-axis grid jumped texelWorld along a world axis, which projects to a NON-integer texel count (R,U are
+            // not the world axes) -> the sub-texel wiggle that crawled during translation. R,U = view rows 0,1.
+            const rX = view[0]!,
+                rY = view[4]!,
+                rZ = view[8]!;
+            const uX = view[1]!,
+                uY = view[5]!,
+                uZ = view[9]!;
+            // Project the centre onto R,U, round to the texel grid, rebuild the world anchor in the R-U plane (the
+            // light-dir component only affects clip Z, so dropping it leaves clip X/Y, which depend on R,U, exact).
+            const sr = Math.round((rX * cx + rY * cy + rZ * cz) / texelWorld) * texelWorld;
+            const tr = Math.round((uX * cx + uY * cy + uZ * cz) / texelWorld) * texelWorld;
+            const ax = sr * rX + tr * uX;
+            const ay = sr * rY + tr * uY;
+            const az = sr * rZ + tr * uZ;
             aClipX = transform[0]! * ax + transform[4]! * ay + transform[8]! * az + transform[12]!;
             aClipY = transform[1]! * ax + transform[5]! * ay + transform[9]! * az + transform[13]!;
         }

@@ -235,15 +235,20 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
     writeSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, context._camera ?? scene.camera, context.targetWidth, context.targetHeight);
     engine._device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);
     if (packet._lastResourceVersion !== material._resourceVersion) {
+        // Acquire the NEW bound textures BEFORE releasing the old set: a texture present in both (e.g. a material
+        // that only swapped ONE of its textures) must never transiently drop to ref-count 0, or releaseTexture
+        // would destroy a GPUTexture that the new bind group still uses. (Releasing first destroys a unique
+        // ref-count-1 texture — exposed by a custom material binding a per-material texture nothing else shares.)
+        const newTextures = collectShaderTextures(material);
+        for (const tex of newTextures) {
+            acquireTexture(tex);
+        }
         for (const tex of packet._boundTextures) {
             releaseTexture(tex);
         }
         packet._bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
-        packet._boundTextures = collectShaderTextures(material);
+        packet._boundTextures = newTextures;
         packet._boundStorageBuffers = collectShaderStorageBuffers(material);
-        for (const tex of packet._boundTextures) {
-            acquireTexture(tex);
-        }
         packet._lastResourceVersion = material._resourceVersion;
     }
 }
@@ -251,7 +256,7 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
 function drawPacket(pass: ShaderRenderPass, engine: EngineContext, material: ShaderMaterial, packet: ShaderPacket): void {
     const gpu = packet.mesh._gpu;
     for (let i = 0; i < material.attributes.length; i++) {
-        pass.setVertexBuffer(i, getAttrBuffer(engine, gpu, material.attributes[i]!));
+        pass.setVertexBuffer(i, getAttrBuffer(engine, packet.mesh, material.attributes[i]!));
     }
     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
     pass.setBindGroup(1, packet._bindGroup);
@@ -465,7 +470,14 @@ function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): G
     return buffer;
 }
 
-function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: ShaderAttributeName): GPUBuffer {
+/** Skinning vertex buffers live on the mesh's `skeleton` (live skinning) or `vat` (baked vertex
+ *  animation, which moves them off the dropped skeleton) — not on `MeshGPU`. */
+function getSkinBuffer(mesh: Mesh, field: "jointsBuffer" | "weightsBuffer" | "joints1Buffer" | "weights1Buffer"): GPUBuffer | null {
+    return mesh.vat?.[field] ?? mesh.skeleton?.[field] ?? null;
+}
+
+function getAttrBuffer(engine: EngineContext, mesh: Mesh, name: ShaderAttributeName): GPUBuffer {
+    const gpu = mesh._gpu;
     switch (name) {
         case "position":
             return gpu.positionBuffer;
@@ -479,5 +491,13 @@ function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: ShaderAttribut
             return gpu.tangentBuffer ?? getZeroAttrBuffer(engine, gpu, "tangent");
         case "color":
             return gpu.colorBuffer ?? getZeroAttrBuffer(engine, gpu, "color");
+        case "joints":
+            return getSkinBuffer(mesh, "jointsBuffer") ?? getZeroAttrBuffer(engine, gpu, "joints");
+        case "weights":
+            return getSkinBuffer(mesh, "weightsBuffer") ?? getZeroAttrBuffer(engine, gpu, "weights");
+        case "joints1":
+            return getSkinBuffer(mesh, "joints1Buffer") ?? getZeroAttrBuffer(engine, gpu, "joints1");
+        case "weights1":
+            return getSkinBuffer(mesh, "weights1Buffer") ?? getZeroAttrBuffer(engine, gpu, "weights1");
     }
 }
