@@ -16,7 +16,7 @@
  * no Lite-core change is required.
  */
 
-import { createHavokWorld, onBeforeRender, setPhysicsTimestep, setPhysicsGravity, disposePhysics } from "babylon-lite";
+import { createHavokWorld, setPhysicsTimestep, setPhysicsTimestepProvider, setPhysicsGravity, disposePhysics } from "babylon-lite";
 import type { PhysicsWorld, SceneContext } from "babylon-lite";
 
 import { unsupported } from "../error.js";
@@ -180,20 +180,17 @@ export class HavokPlugin {
     /**
      * @internal Create the native Lite world for `liteScene` and wire delta stepping.
      *
-     * Note: Lite's `onBeforeRender` uses `unshift`, so the *last* registered callback runs first.
-     * Register the timestep-updating callback *after* `createHavokWorld` so it executes before
-     * Lite's own per-frame physics step.
+     * Delta stepping is installed as a timestep *provider* on the native world (not as a separate
+     * scene before-render callback): the world advances by {@link _computeTimestep} of the frame
+     * delta from inside its own per-frame step. Because the provider lives on the world, it is torn
+     * down together with the world in {@link dispose} — nothing lingers on the scene after disposal.
      */
     public _attachToLiteScene(liteScene: SceneContext, gravity?: Vec3Like): void {
         if (!this._supported) {
             return unsupported("HavokPlugin", "The Havok module is not ready. `await HavokPhysics()` before constructing the plugin.");
         }
         this.world = createHavokWorld(liteScene, this._hknp, gravity);
-        onBeforeRender(liteScene, (deltaMs: number) => {
-            if (this.world) {
-                setPhysicsTimestep(this.world, this._computeTimestep(deltaMs));
-            }
-        });
+        setPhysicsTimestepProvider(this.world, (deltaMs: number) => this._computeTimestep(deltaMs));
     }
 }
 

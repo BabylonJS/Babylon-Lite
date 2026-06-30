@@ -16,7 +16,6 @@ import type { SceneNode } from "../scene/scene-node.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { HavokFloatingOriginContext, WorldRegion } from "./havok-floating-origin.js";
-import { onBeforeRender } from "../scene/scene-core.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import { mat4Multiply } from "../math/mat4-multiply.js";
 import { mat4Scale } from "../math/mat4-scale.js";
@@ -204,6 +203,12 @@ export interface PhysicsWorld {
     _afterStep?: ((timestep: number) => void)[];
     /** @internal Lazily-created Havok query collector, cached by the standalone `physics/havok-queries.ts` module. */
     _queryCollector?: any;
+    /** @internal Unsubscribe handle for the per-frame step callback; invoked by `disposePhysics` so a still-running scene never steps a released world. */
+    _stopStep?: () => void;
+    /** @internal Optional per-frame timestep policy. When set, each world step advances by
+     *  `_timestepProvider(deltaMs)` seconds (derived from the frame's elapsed time) instead of the
+     *  fixed `_timestep`, making simulation speed independent of the display refresh rate. */
+    _timestepProvider?: (deltaMs: number) => number;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
@@ -235,10 +240,20 @@ export function createHavokWorld(scene: SceneContext, hknp: any, gravity?: Vec3)
         _gravity: [g.x, g.y, g.z],
     };
 
-    // Register per-frame physics step
-    onBeforeRender(scene, (deltaMs: number) => {
+    // Register the per-frame physics step directly on the scene (mirrors
+    // physics-viewer.ts). Keep a remover so disposePhysics can stop stepping
+    // before the native world is released — otherwise a still-running scene
+    // would step a freed world (use-after-free in Havok WASM).
+    const stepCb = (deltaMs: number): void => {
         _stepWorld(world, deltaMs);
-    });
+    };
+    scene._beforeRender.unshift(stepCb);
+    world._stopStep = () => {
+        const i = scene._beforeRender.indexOf(stepCb);
+        if (i >= 0) {
+            scene._beforeRender.splice(i, 1);
+        }
+    };
 
     return world;
 }
@@ -270,6 +285,14 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     const dt = Math.min(deltaMs / 1000, 0.1);
     if (dt <= 0) {
         return;
+    }
+
+    // A timestep provider (e.g. the compat HavokPlugin's delta-stepping policy for issue #332)
+    // drives the per-step slice from the frame delta, so simulation speed is display-rate
+    // independent. Updated here, inside the world's own step, so delta stepping needs no extra
+    // per-frame scene subscription that could outlive the world.
+    if (world._timestepProvider) {
+        world._timestep = world._timestepProvider(deltaMs);
     }
 
     // Floating-origin worlds run a multi-region step (loaded on demand).
@@ -398,6 +421,19 @@ export function getPhysicsGravity(world: PhysicsWorld, worldPosition?: Vec3): Ve
  */
 export function setPhysicsTimestep(world: PhysicsWorld, dt: number): void {
     world._timestep = dt;
+}
+
+/**
+ * Installs a per-frame timestep provider on the world. When set, each world step advances by
+ * `provider(deltaMs)` seconds (derived from the frame's elapsed time) instead of the fixed
+ * timestep, so simulation speed becomes independent of the display refresh rate. The provider is
+ * invoked from within the world's own per-frame step, so it is torn down together with the world
+ * (no separate scene subscription to unregister). Pass `undefined` to revert to fixed stepping.
+ * @param world - The physics world.
+ * @param provider - Maps the frame delta (ms) to a step size (seconds), or `undefined` to clear.
+ */
+export function setPhysicsTimestepProvider(world: PhysicsWorld, provider: ((deltaMs: number) => number) | undefined): void {
+    world._timestepProvider = provider;
 }
 
 /**
@@ -1270,6 +1306,11 @@ export function getPhysicsBodyDebugGeometry(world: PhysicsWorld, body: PhysicsBo
  * @param world - The physics world to dispose.
  */
 export function disposePhysics(world: PhysicsWorld): void {
+    // Stop per-frame stepping before releasing anything so a still-running scene
+    // never steps a freed world (use-after-free in Havok WASM).
+    world._stopStep?.();
+    world._stopStep = undefined;
+
     if (world._fo) {
         world._fo.dispose(world);
         return;

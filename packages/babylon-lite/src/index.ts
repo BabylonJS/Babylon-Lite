@@ -621,6 +621,7 @@ export {
     setPhysicsGravity,
     getPhysicsGravity,
     setPhysicsTimestep,
+    setPhysicsTimestepProvider,
     getPhysicsTimestep,
     onPhysicsAfterStep,
     setPhysicsVelocityLimits,
