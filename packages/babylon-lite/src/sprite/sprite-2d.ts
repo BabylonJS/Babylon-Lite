@@ -169,8 +169,6 @@ export interface Sprite2DProps {
     flipX?: boolean;
     flipY?: boolean;
     visible?: boolean;
-    /** Reserved for picking. Accepted but unused today. */
-    pickable?: boolean;
     /** Reserved for clip animation. Accepted but unused today. */
     clip?: unknown;
     /**

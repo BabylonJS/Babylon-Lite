@@ -134,13 +134,16 @@ async function main(): Promise<void> {
         canvas.style.cursor = on ? "crosshair" : "";
         sim.setScoutSelected(on); // selected scout sprite pulses
     };
-    const onMapClick = (tx: number, ty: number): void => {
+    const onMapClick = (tx: number, ty: number, wx: number, wy: number): void => {
         const [stx, sty] = sim.scoutTile();
+        // Selecting the scout is a sprite-pick, not a tile match: click the explorer sprite
+        // itself (it overhangs its tile and slides between tiles mid-hop). Choosing where to
+        // SEND it stays analytic tile inversion (tx, ty) — each picking style used where it fits.
         if (!unitSelected) {
-            if (tx === stx && ty === sty) setArmed(true); // selected the scout
+            if (sim.hitScout(wx, wy)) setArmed(true); // clicked the scout sprite → select it
             return;
         }
-        if (tx === stx && ty === sty) {
+        if (sim.hitScout(wx, wy)) {
             setArmed(false); // clicked the scout again → deselect
             return;
         }
@@ -581,7 +584,13 @@ interface ZoomCtl {
     sy: number;
 }
 
-function installControls(engine: EngineContext, view: View, zoomCtl: ZoomCtl, onHover?: HoverFn, onClick?: (tileX: number, tileY: number) => void): void {
+function installControls(
+    engine: EngineContext,
+    view: View,
+    zoomCtl: ZoomCtl,
+    onHover?: HoverFn,
+    onClick?: (tileX: number, tileY: number, worldX: number, worldY: number) => void
+): void {
     const canvas = engine.canvas as HTMLCanvasElement;
     const dpr = (): number => (canvas.width || 1) / (canvas.clientWidth || 1);
     let dragging = false;
@@ -620,11 +629,14 @@ function installControls(engine: EngineContext, view: View, zoomCtl: ZoomCtl, on
     canvas.addEventListener("pointerup", (e) => {
         const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
         endDrag(e);
-        // A press that didn't pan is a click → resolve the tile and dispatch it.
+        // A press that didn't pan is a click → resolve the tile (for movement) and the world
+        // point under the cursor (for sprite-picking the scout), then dispatch both.
         if (moved < 5 && onClick) {
             const rect = canvas.getBoundingClientRect();
-            const [tx, ty] = screenToTile(view, (e.clientX - rect.left) * dpr(), (e.clientY - rect.top) * dpr());
-            onClick(tx, ty);
+            const sxDevice = (e.clientX - rect.left) * dpr();
+            const syDevice = (e.clientY - rect.top) * dpr();
+            const [tx, ty] = screenToTile(view, sxDevice, syDevice);
+            onClick(tx, ty, view.x + sxDevice / view.zoom, view.y + syDevice / view.zoom);
         }
     });
     canvas.addEventListener("pointercancel", endDrag);

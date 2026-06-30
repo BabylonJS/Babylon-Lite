@@ -1188,7 +1188,7 @@
         "slug": "scene115-alien-picking-frame100",
         "name": "Scene 115 — Alien Picking Frame 100",
         "maxMad": 0.01,
-        "maxRawKB": 126.3,
+        "maxRawKB": 126.5,
         "description": "Precise picking validation on the animated Alien glTF at frame 100: BJS and Lite CPU PickInfo values drive a surface sphere and normal marker.",
         "tags": ["pbr", "gltf", "anim", "skeleton", "picking"],
         "skipPerf": true
@@ -1204,6 +1204,26 @@
         "skipParityOnCI": true,
         "skipPerf": true,
         "skipNotes": "Scene 116 parity is skipped on CI because the BJS reference capture is flaky on CI/BrowserStack: the shadow-depth RTT observables can complete and the page can mark ready while the preview planes still occasionally sample an empty depth texture, producing a bad live reference image rather than a Babylon Lite regression. Local parity still runs and force-recaptures the golden on each test run. The scene remains in the lab/bundle config and can be re-enabled once the BJS reference readiness signal is reliable on CI."
+    },
+    {
+        "id": 117,
+        "slug": "scene117-sprite-2d-picking",
+        "name": "Scene 117 — 2D Sprite Picking",
+        "maxMad": 0.05,
+        "maxRawKB": 16.6,
+        "description": "Visual 2D sprite-picking validation: pickSprite2D resolves the centre sprite of a deterministic 5×3 HUD grid and the hit is highlighted with a gold tint. The BJS oracle replicates the same highlight via ThinSprite.",
+        "tags": ["sprite", "2d", "picking"],
+        "skipPerf": true
+    },
+    {
+        "id": 118,
+        "slug": "scene118-billboard-picking",
+        "name": "Scene 118 — Billboard Sprite Picking",
+        "maxMad": 0.15,
+        "maxRawKB": 76.8,
+        "description": "Visual billboard-picking validation: pickBillboardSprite resolves the centre camera-facing billboard and a small marker mesh floats in front of it. The BJS oracle does the same with scene.pickSprite.",
+        "tags": ["sprite", "billboard", "picking"],
+        "skipPerf": true
     },
     {
         "id": 120,
@@ -1926,7 +1946,7 @@
         "slug": "scene221-pointer-drags",
         "name": "Scene 221 — Pointer Drags",
         "maxMad": 2.5,
-        "maxRawKB": 100.6,
+        "maxRawKB": 100.9,
         "description": "Four cubes over a ground, each driven by a different gizmo: axisDragGizmo (X), planeRotationGizmo (Y) with rotation sector camembert, planeDragGizmo (Y normal), axisScaleGizmo (Y). UtilityLayer overlay + scripted pointer-drag interaction.",
         "tags": ["std", "gizmo", "interactive"],
         "skipPerf": true,
@@ -1937,7 +1957,7 @@
         "slug": "scene222-composite-gizmos",
         "name": "Scene 222 — Composite Gizmos",
         "maxMad": 1.5,
-        "maxRawKB": 111.7,
+        "maxRawKB": 112.0,
         "description": "Three cubes each parented to a TransformNode with non-null rotation and translation, driven by composite PositionGizmo / RotationGizmo / ScaleGizmo. Scripted manipulation in LOCAL coords, then switches to WORLD coords (where supported) and re-manipulates before parity comparison.",
         "tags": ["std", "gizmo", "interactive", "composite"],
         "skipPerf": true,

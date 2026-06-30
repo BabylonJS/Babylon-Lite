@@ -14,7 +14,7 @@
  * Everything is seeded off the world so the demo replays identically.
  */
 
-import { addSprite2DIndex, updateSprite2DIndex } from "babylon-lite";
+import { addSprite2DIndex, pickSprite2D, updateSprite2DIndex } from "babylon-lite";
 import { DIR8, DIR_DELTA, TILE_H, isoCentre } from "./iso.js";
 import type { TileLayers, TileSheets } from "./tilemap.js";
 import type { GameMap } from "./worldgen.js";
@@ -70,6 +70,12 @@ export interface LiveSim {
     /** Mark the scout selected/deselected. While selected the scout sprite gently blinks
      * (its alpha oscillates) so the player can see it's the unit under their command. */
     setScoutSelected: (selected: boolean) => void;
+    /**
+     * Is the given world-pixel point on the scout's sprite? A `pickSprite2D` hit-test against
+     * the unit layer, so the player selects the explorer by clicking the sprite itself — which
+     * overhangs its tile and slides between tiles mid-hop — instead of matching its tile.
+     */
+    hitScout: (worldX: number, worldY: number) => boolean;
 }
 
 /** Mulberry32 — tiny deterministic RNG. */
@@ -280,6 +286,11 @@ export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLa
         },
         setScoutSelected(selected: boolean): void {
             scoutSelected = selected;
+        },
+        hitScout(worldX: number, worldY: number): boolean {
+            // Sprite-pick the explorer: true when the cursor's world point lands on the scout
+            // sprite, exactly as the GPU draws it (pivot- and position-correct, mid-hop included).
+            return pickSprite2D([layers.unit], worldX, worldY)?.spriteIndex === scout.index;
         },
     };
 }

@@ -1,6 +1,7 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import type { Ray } from "./ray.js";
+import type { BillboardPickInfo } from "./billboard-pick-pipeline.js";
 
 /** Result of a GPU pick operation. */
 export interface PickingInfo {
@@ -21,6 +22,9 @@ export interface PickingInfo {
     subMeshId: number;
     thinInstanceIndex: number;
     ray: Ray | null;
+    /** @internal Billboard sprite hit payload, set by the billboard pick contributor when a
+     *  `BillboardSpriteSystem` sprite was the closest hit. Extracted by `pickBillboardSprite`. */
+    _spritePick?: BillboardPickInfo;
 }
 
 /** Create an empty (miss) picking result. */

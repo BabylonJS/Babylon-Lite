@@ -730,8 +730,6 @@ export interface Sprite2DProps {
     flipX?: boolean;
     flipY?: boolean;
     visible?: boolean;
-    /** Reserved for picking (PR 5). Accepted but unused today. */
-    pickable?: boolean;
     /** Reserved for clip animation (later PR). Accepted but unused today. */
     clip?: unknown;
     /**
@@ -1125,9 +1123,10 @@ rather than `_transmissive`.
 Yaw-locked billboards (world-Y axis constraint) are created via
 `createAxisLockedBillboardSystem(atlas, [0, 1, 0], opts)`.
 
-### Roadmap — Picking
+### Picking
 
-The picking APIs below are not part of the current root exports.
+The picking APIs below are exported from the package root (`pickSprite2D`,
+`pickBillboardSprite`, and the `SpritePickInfo` / `BillboardPickInfo` result types).
 
 ```typescript
 // src/sprite/picking/pick-sprite-2d.ts — handles every Sprite2DLayer
@@ -1135,8 +1134,8 @@ The picking APIs below are not part of the current root exports.
 // AND the layers of any SpriteRenderer the caller hands in.
 export function pickSprite2D(layers: ReadonlyArray<Sprite2DLayer>, xPx: number, yPx: number): SpritePickInfo | null;
 
-// src/sprite/picking/pick-billboard.ts — GPU contributor.
-export function pickBillboardSprite(scene: SceneContext, xPx: number, yPx: number): Promise<SpritePickInfo | null>;
+// src/sprite/picking/pick-billboard.ts — GPU picker into the shared mesh pick pass.
+export function pickBillboardSprite(scene: SceneContext, xPx: number, yPx: number): Promise<BillboardPickInfo | null>;
 ```
 
 `pickSprite2D` is the pure-2D picker: the caller passes whichever
@@ -1149,8 +1148,8 @@ For anchored layers `positionPx` has already been projected CPU-side
 this frame, so the picker hits the same screen rectangle the GPU draws.
 No GPU pick pass for Sprite2D.
 
-`pickBillboardSprite` is a GPU pick contributor; the full design is
-specified under [Picking](#picking) below.
+`pickBillboardSprite` draws into the shared mesh pick pass on the GPU; the full
+design is specified under [Picking](#picking) below.
 
 ### Pure-2D usage — no scene
 
@@ -1328,17 +1327,17 @@ to a storage buffer at `@group(1) @binding(3)` (not a vertex buffer — 3D
 sprite families read sprite data through a storage buffer indexed by a
 sort-indirection vertex attribute, see below). The 24-float layout:
 
-| Offset (floats) | Field         | Notes                                               |
-| --------------- | ------------- | --------------------------------------------------- |
-| 0..2            | `worldPos`    | xyz — anchor position in world space                |
-| 3               | `_reserved`   | 0 (anchored layers use this slot for `depthBias`)   |
-| 4..5            | `_reserved`   | (0,0) (anchored layers use these for `offsetPx`)    |
-| 6..7            | `sizeWorld`   | width/height in world units                         |
-| 8..9            | `pivot`       | normalized [0,1]                                    |
-| 10..11          | `sinCos`      | precomputed sin/cos of rotation                     |
-| 12..15          | `uvRect`      | uvMin.xy, uvMax.xy                                  |
-| 16..19          | `color`       | RGBA tint                                           |
-| 20..23          | `flagsAndPad` | float-encoded `[flipX, flipY, pickable, _reserved]` |
+| Offset (floats) | Field         | Notes                                                |
+| --------------- | ------------- | ---------------------------------------------------- |
+| 0..2            | `worldPos`    | xyz — anchor position in world space                 |
+| 3               | `_reserved`   | 0 (anchored layers use this slot for `depthBias`)    |
+| 4..5            | `_reserved`   | (0,0) (anchored layers use these for `offsetPx`)     |
+| 6..7            | `sizeWorld`   | width/height in world units                          |
+| 8..9            | `pivot`       | normalized [0,1]                                     |
+| 10..11          | `sinCos`      | precomputed sin/cos of rotation                      |
+| 12..15          | `uvRect`      | uvMin.xy, uvMax.xy                                   |
+| 16..19          | `color`       | RGBA tint                                            |
+| 20..23          | `flagsAndPad` | float-encoded `[flipX, flipY, _reserved, _reserved]` |
 
 The lock axis (axis-locked variant only) lives in the **system UBO**, not
 per-sprite. The reserved slots at floats 3..5 stay in the layout because
@@ -1386,7 +1385,7 @@ struct SpriteData {
     sinCos: vec2<f32>,
     uvRect: vec4<f32>,
     color: vec4<f32>,
-    flagsAndPad: vec4<f32>,            // .x flipX, .y flipY, .z pickable, .w reserved
+    flagsAndPad: vec4<f32>,            // .x flipX, .y flipY, .z reserved, .w reserved
 };
 @group(1) @binding(3) var<storage, read> sprites: array<SpriteData>;
 
@@ -1751,116 +1750,104 @@ the sort and upload dirty ranges in logical insertion order.
 
 ## Picking
 
-### `pickSprite2D` — CPU contributor
+Two pickers cover the two families, each matched to where its family lives:
+
+- `pickSprite2D` is **pure CPU**. `Sprite2DLayer` sprites are screen-space
+  rectangles, and pure-2D apps have no scene, camera, or depth target for a GPU
+  pass to hook into.
+- `pickBillboardSprite` is **GPU**. Billboards live in the scene's 3D depth
+  buffer, so picking one must respect occlusion by meshes and nearer billboards;
+  it draws into the same `gpu-picker.ts` 1×1 pick pass the mesh picker uses.
+
+### `pickSprite2D` — CPU rectangle test
 
 `pickSprite2D(layers, xPx, yPx)` takes the caller's `Sprite2DLayer` array
-(typically `spriteRenderer.layers` for HUD overlays or
-`scene._renderables` filtered to the Sprite2D `Renderable`s that
-`addToScene` pushed there) and walks them in
-reverse insertion order. For each candidate sprite it rotates the screen
-point into the sprite's pivot-aware local rectangle. Anchored sprites are
-read at their already-projected `positionPx` — no extra projection at
-pick time. Returns the first hit (last layer, last sprite within that
-layer), or `null`. The caller chooses what to pick by passing the right
-layer array; there is no global registry of sprite layers to walk.
+(`spriteRenderer.layers` for HUD overlays, or the Sprite2D `Renderable`s a scene
+holds) and walks it in reverse draw order: last layer first, and within a layer
+the most-recently-added sprite first, so the topmost-drawn sprite wins. Hidden
+sprites (`visible: false`, stored as a zero-size quad) are skipped. For each
+candidate it rotates the query point into the sprite's pivot-aware local
+rectangle — inverting the vertex shader's pivot offset and rotation — and a point
+that lands in `[0, 1]²` is a hit. It returns the first hit as
+`SpritePickInfo { layer, spriteIndex, u, v }`, where `(u, v)` is the within-quad
+fraction at the hit point, or `null`. `(xPx, yPx)` are in the layers' shared
+local space (the same space as each sprite's `positionPx`); for a panned/zoomed
+layer the caller maps the pointer into that space first. There is no global
+registry — the caller chooses what to pick by passing the right layer array.
 
-### `PickContributor` interface
+### `pickBillboardSprite` — GPU pick into the shared mesh pass
 
-A generic per-scene contributor pattern lives in
-`picking/picking-contributors.ts`:
+`pickBillboardSprite(scene, xPx, yPx)` creates a transient `GpuPicker`, runs one
+`pickAsync`, and returns the billboard payload that pass attaches on a hit, or
+`null`. Billboards are drawn into the **same** 1×1 pick render pass as meshes —
+after the mesh and Gaussian-splatting draws, sharing the pick-ID colour target,
+the `r32float` depth target, and the `greater` reverse-Z depth test — so a
+billboard occluded by a mesh or a nearer billboard loses the pick. This mirrors
+the Gaussian-splatting picking integration.
 
-```typescript
-export interface PickContributor {
-    /** Issue draw commands into the shared pick pass. Returns the next free pick ID. */
-    draw(ctx: PickPassContext, nextPickId: number): number;
-    /** Try to resolve a pick ID returned by the GPU. Returns the domain-specific
-     *  PickingInfo if this contributor owns the ID, or null otherwise. */
-    resolve(pickId: number, worldPoint: [number, number, number] | null, depth: number): PickingInfo | null;
-}
-```
+All billboard pick machinery lives in `picking/billboard-pick-pipeline.ts`, which
+`gpu-picker.ts` dynamic-imports only when the scene holds billboard systems.
+`gpu-picker.ts` itself carries a single guarded dispatch
+(`if (scene._billboardSystems.length > 0) …`), so a mesh-only or billboard-free
+picker scene fetches zero billboard-pick bytes.
 
-`gpu-picker.ts` runs all mesh draws first into the 1×1 ID pass (consuming
-IDs `1..M`), ends that pass, then opens a second render pass that loads
-the same color/depth attachments and dispatches each registered
-contributor with the next free pick ID. Each contributor returns the next
-free ID after its draws; the picker accumulates and uses the result to
-bound mesh-vs-contributor ID dispatch. The depth-test contract (`greater`)
-carries across the pass boundary because the second pass loads the
-previous depth, so closest-hit semantics are preserved across mesh +
-contributor draws.
+**Registry.** Billboard systems are tracked in `scene._billboardSystems`, an
+opaque array populated by `addFacingBillboardSystem` /
+`addAxisLockedBillboardSystem` (mirroring the `scene._gsMeshes` registry the GS
+picker walks). Scene-core stays billboard-agnostic apart from this array.
 
-### Per-system contributor (Billboard)
+**Draw + pick-ID ranges.** `drawBillboardsForPicking(picker, pass, engine, scene,
+camera, nextId, sceneBG)` rebinds `@group(0)` to the shared pick scene UBO (the
+pick-zoomed view-projection — the GS pass may have rebound it), then walks
+`scene._billboardSystems`. Each system consumes a contiguous ID range
+`[baseId, baseId + count)`; `nextId` advances by `count` even for a hidden or
+empty system so the resolve scan stays positional. Per-system GPU resources are
+created on demand and cached on `picker._billboardResources`.
 
-Each `BillboardSpriteSystem` registers exactly one contributor.
-Registration is idempotent (guarded by a `_pickContributorRegistered`
-flag on the system) and lives in the system's renderable build path —
-the contributor module is dynamic-imported only when a billboard
-renderable is actually built, so mesh-only scenes pay zero bytes for
-sprite picking code.
+**Per-system 48-byte pick UBO** (`BILLBOARD_PICK_UBO_BYTES = 48`), packed by
+`packBillboardPickUbo`; the float layout matches the WGSL `BB` struct (`vec3` +
+scalar interleave):
 
-**Per-system 80-byte pick UBO**
-(`BILLBOARD_PICK_UBO_BYTES = 80`, layout matches the WGSL struct in
-`billboard-pick-pipeline.ts`):
+| Floats | Field      | Notes                                                     |
+| ------ | ---------- | --------------------------------------------------------- |
+| 0..2   | `camRight` | row 0 of the column-major view matrix (`view[0,4,8]`)     |
+| 3      | `baseId`   | `u32` — first pick ID assigned to this system             |
+| 4..6   | `camUp`    | row 1 of the view matrix (`view[1,5,9]`)                  |
+| 7      | `cutoff`   | `f32` — alpha cutoff (cutout systems only; `0` otherwise) |
+| 8..10  | `axis`     | normalized lock axis (axis-locked only; zero for facing)  |
+| 11     | `_pad`     | trailing pad                                              |
 
-| Offset | Field           | Notes                                                            |
-| ------ | --------------- | ---------------------------------------------------------------- |
-| 0..15  | `cameraRight`   | `vec4<f32>` — xyz from camera world matrix; `w` packs `camPos.x` |
-| 16..31 | `cameraUp`      | `vec4<f32>` — xyz; `w` packs `camPos.y`                          |
-| 32..47 | `cameraForward` | `vec4<f32>` — xyz; `w` packs `camPos.z`                          |
-| 48..63 | `lockAxis`      | `vec4<f32>` — axis variant only; xyz; `w` unused                 |
-| 64..67 | `baseId`        | `u32` — first pick ID assigned to instance 0 in this system      |
-| 68..71 | `alphaCutoff`   | `f32` — used only when cutout pipeline is selected               |
-| 72..79 | `_pad`          | 8 B trailing pad                                                 |
+`camRight` / `camUp` are the camera basis rows, reproducing the render shader's
+`normalize(view rowN)` so the picked pixel matches the drawn quad. No separate
+billboard scene UBO is bound in the pick pass.
 
-Packing the camera position into the basis vectors' `w` channels keeps
-the UBO at 80 B and avoids binding any separate billboard scene UBO in the
-pick pass.
+**Bind groups.** `@group(0)` = the shared pick scene UBO (the same one mesh
+picking uses). `@group(1) @binding(0)` = the per-system pick UBO; cutout systems
+additionally bind the atlas `texture@1` + `sampler@2` for the alpha-test discard.
+Per-instance data is uploaded to a **vertex** buffer in logical (un-sorted) order,
+so `pickId − baseId` is the sprite index directly; a shared two-triangle index
+buffer (`[0, 1, 2, 0, 2, 3]`) draws each quad. A system's instance buffer grows if
+the system outgrows it between picks.
 
-**Bind groups.** `@group(0)` = scene UBO (the pick-zoomed VP — same one
-mesh picking uses). `@group(1)` = `tex@0`, `samp@1`, system pick UBO at
-`@2`, packed sprite storage buffer at `@3` (the same buffer used for
-rendering). The bind group is rebuilt lazily — only when
-`system._storage.gpuBuffer` (the JS pointer) changes between picks.
+**Pipeline cache.** Keyed `"${orientation}|${isCutout ? 1 : 0}"` — at most four
+entries (`facing` / `axis-locked` × cutout flag). Each pipeline bakes the
+variant's basis math in WGSL: `facing` uses `normalize(camRight)` /
+`normalize(camUp)`; `axis-locked` projects `camRight` off the normalized lock
+axis. The fragment writes the pick ID as RGB at `@location(0)` and NDC depth at
+`@location(1)`, matching the mesh picker's two-attachment contract; cutout
+pipelines `discard` below `cutoff`. Depth state is `depth24plus`, compare
+`greater`, write enabled.
 
-**Per-(variant, isCutout) pipeline cache** (`billboard-pick-pipeline.ts`).
-Cache key is `"${variant}|${isCutout ? 1 : 0}"`. Six entries maximum
-(3 variants × 2 cutout flags). Each pipeline embeds the variant's basis
-math (Facing reads `cameraRight.xyz` / `cameraUp.xyz`; Yaw reconstructs
-`camPos` from the basis `w` channels and computes
-`cross(worldUp, toCam)`; Axis does the same with the lock axis). The
-fragment shader writes the pick ID as RGB and depth as `@location(1)`
-matching the mesh picker's two-color-attachment contract.
-
-**Pick ID assignment.** Each contributor's `draw` is given `nextPickId`,
-draws its sprites with consecutive IDs `[baseId, baseId + count)` (the
-WGSL emits `baseId + sortIndex`), and returns `baseId + count` for the
-next contributor. Contributors track their own `rangeStart` / `rangeEnd`
-for resolve.
-
-**Resolution.** When the GPU picker reads back a pick ID, it iterates
-contributors in registration order; the first one whose range contains
-the ID returns a `PickingInfo`. The billboard contributor smuggles a
-`_spritePick: SpritePickInfo` payload onto the `PickingInfo` object;
-`pickBillboardSprite()` extracts it.
-
-**UV reconstruction at resolve time.** Given the engine's reconstructed
-world hit point `worldPoint` and the camera's world matrix:
-
-1. Look up `meta = system._meta[localIndex]` for `rotation`, `pivot`, `sizeWorld`.
-2. Call `basis = system._basisFn(worldPos, camRight, camUp, camPos)` (no variant branching).
-3. Project `worldPoint - worldPos` onto `basis.right` / `basis.up` to get local-plane `(localX, localY)`.
-4. Inverse-rotate by `meta.rotation` (positive sin/cos rotation in the shader → negate sin here).
-5. Divide by `meta.sizeWorld`, add `meta.pivot`, clamp to `[0, 1]`.
-
-This matches the shader's `(corner - pivot) * sizeWorld` plane definition
-exactly.
-
-Each picker lives in its own file (`pick-sprite-2d.ts`,
-`pick-billboard.ts`) and is imported only when the corresponding `pick*`
-function is called. Apps that never pick a sprite pay zero bytes for the
-picker. Mesh-only scenes additionally pay zero bytes for
-`picking-contributors.ts`'s body — only the lazy `getPickContributors`
-dispatch in `gpu-picker.ts` references it.
+**Resolution.** The picker reads back one pick ID. Meshes and GS meshes own every
+ID below the billboard range start, so a non-mesh ID at or above that start is
+necessarily a billboard hit — a numeric range compare, no module call.
+`resolveAndAttachBillboard(info, scene, pickId, startId)` then scans the systems'
+ID ranges (advancing by `count` exactly as the draw loop did) to find the owning
+system and sprite index, and attaches
+`info._spritePick = { system, spriteIndex, pickedPoint, distance }`. The picked
+point and distance come from the shared pick-depth readback (the same world-point
+reconstruction the mesh picker performs); there is no per-billboard CPU ray test
+and no per-hit UV reconstruction.
 
 ---
 
@@ -2038,7 +2025,6 @@ maps.
 | `rotation` | (via `updateSprite2DIndex` patch — sin/cos at `[off+6..7]`)           | Marks worldMatrix2D dirty                                                    |
 | `frame`    | UV at `[off+8..11]`                                                   | Calls `setSprite2DFrameIndex`                                                |
 | `visible`  | Toggles packed sizePx between value and 0                             | Calls `writeSizePx`                                                          |
-| `pickable` | Updates `_meta[i].pickable`                                           | —                                                                            |
 | `layerZ`   | `[off+16]`                                                            | Clamped to `[0, 1]`                                                          |
 | `parent`   | (only `IParentable2D`; doesn't touch slot directly)                   | Adds/removes from `_parentedHandles`; installs walker on first parent        |
 | `anchor`   | (none directly; CPU projection writes positionPx + layerZ each frame) | Setting `AnchorSource` adds to layer `_anchored` map; setting `null` removes |
@@ -2171,7 +2157,7 @@ never reaches into layer internals.
 | Custom `ShaderMaterial` on a sprite               | `createSprite2DCustomShader` / `createBillboardCustomShader`          | WGSL fragment body + `fx.time` / `fx.params` / extra textures                     |
 | Animated/scrolling texture (`uOffset`/`vOffset`)  | `Sprite2DLayerOptions.uvScroll` + per-sprite `uvOffset`               | Opt-in per-sprite UV offset (parallax)                                            |
 | `AdvancedDynamicTexture` + `Image`                | `Sprite2DLayer` overlay on a 3D `SceneContext`                        | Different scope — no GUI tree                                                     |
-| `scene.pickSprite(x, y)`                          | Roadmap `pickSprite2D` / `pickBillboardSprite`                        | Picking is not in the current root exports                                        |
+| `scene.pickSprite(x, y)`                          | `pickSprite2D` (CPU) / `pickBillboardSprite` (GPU)                    | CPU rect test for layers; GPU pick into the shared mesh pass for billboards       |
 | `SpriteMap` (tile maps)                           | Out of scope                                                          | Future module                                                                     |
 | `SpriteManager` `epsilon` arg                     | _no equivalent_                                                       | Atlases must have transparent border / NPOT / padded sub-rects when bleed matters |
 | Quad VBO                                          | Vertexless (`vertex_index`)                                           | Eliminates the static quad buffer                                                 |
