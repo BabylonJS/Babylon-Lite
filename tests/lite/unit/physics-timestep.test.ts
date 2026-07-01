@@ -5,8 +5,9 @@
  * from the scene's `fixedDeltaMs`, so physics advances in lockstep with the scene's deterministic
  * clock. `_stepWorld` converts that to seconds for `HP_World_Step`, falling back to the real
  * per-frame delta when the world's step is `0` (frame-delta mode) — mirroring
- * `SceneContext.fixedDeltaMs` (`> 0 ? fixed : real`). {@link setPhysicsTimestep} /
- * {@link getPhysicsTimestep} let callers read and override the step after creation.
+ * `SceneContext.fixedDeltaMs` (`> 0 ? fixed : real`). {@link setPhysicsTimestepMs} /
+ * {@link getPhysicsTimestepMs} let callers read and override the step after creation (with
+ * seconds-based {@link setPhysicsTimestep} / {@link getPhysicsTimestep} retained for compatibility).
  *
  * These tests run against a minimal mock of the Havok (`hknp`) backend and a bare scene, so they
  * assert the timestep bookkeeping directly (in milliseconds) and the exact per-step value handed to
@@ -15,7 +16,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
-import { applyPhysicsBodyForce, createHavokWorld, getPhysicsTimestep, setPhysicsTimestep } from "../../../packages/babylon-lite/src/physics/havok";
+import {
+    applyPhysicsBodyForce,
+    createHavokWorld,
+    getPhysicsTimestep,
+    getPhysicsTimestepMs,
+    setPhysicsTimestep,
+    setPhysicsTimestepMs,
+} from "../../../packages/babylon-lite/src/physics/havok";
 import type { PhysicsBody } from "../../../packages/babylon-lite/src/physics/havok";
 import type { Vec3 } from "../../../packages/babylon-lite/src/math/types";
 
@@ -57,7 +65,7 @@ describe("physics world timestep", () => {
         const world = createHavokWorld(scene, hknp);
 
         // The accessor reports the scene's step (in milliseconds).
-        expect(getPhysicsTimestep(world)).toBe(1000 / 60);
+        expect(getPhysicsTimestepMs(world)).toBe(1000 / 60);
     });
 
     it("steps the native world at the scene's fixed delta (converted to seconds)", () => {
@@ -78,7 +86,7 @@ describe("physics world timestep", () => {
         const scene = makeScene(0);
         const world = createHavokWorld(scene, hknp);
 
-        expect(getPhysicsTimestep(world)).toBe(0);
+        expect(getPhysicsTimestepMs(world)).toBe(0);
 
         // With no fixed step, the world advances by whatever per-frame delta it is given.
         stepFrame(scene, 20);
@@ -86,16 +94,31 @@ describe("physics world timestep", () => {
         expect(lastStepSeconds(hknp)).toBeCloseTo(20 / 1000, 10);
     });
 
-    it("can be overridden via setPhysicsTimestep after creation", () => {
+    it("can be overridden via setPhysicsTimestepMs after creation", () => {
         const hknp = makeMockHknp();
         const scene = makeScene(1000 / 60);
         const world = createHavokWorld(scene, hknp);
 
         // Override the scene-seeded step with a coarser 30 fps step.
-        setPhysicsTimestep(world, 1000 / 30);
-        expect(getPhysicsTimestep(world)).toBe(1000 / 30);
+        setPhysicsTimestepMs(world, 1000 / 30);
+        expect(getPhysicsTimestepMs(world)).toBe(1000 / 30);
 
         // Even though the frame is driven with the scene's 1/60 delta, the world uses its override.
+        stepFrame(scene, 1000 / 60);
+        expect(lastStepSeconds(hknp)).toBeCloseTo(1 / 30, 10);
+    });
+
+    it("exposes a seconds-based accessor (setPhysicsTimestep / getPhysicsTimestep)", () => {
+        const hknp = makeMockHknp();
+        const scene = makeScene(1000 / 60);
+        const world = createHavokWorld(scene, hknp);
+
+        // The seconds API writes the same underlying millisecond step…
+        setPhysicsTimestep(world, 1 / 30);
+        expect(getPhysicsTimestep(world)).toBeCloseTo(1 / 30, 10); // seconds view
+        expect(getPhysicsTimestepMs(world)).toBeCloseTo(1000 / 30, 10); // milliseconds view
+
+        // …and drives the native step identically to the millisecond API.
         stepFrame(scene, 1000 / 60);
         expect(lastStepSeconds(hknp)).toBeCloseTo(1 / 30, 10);
     });
@@ -105,8 +128,8 @@ describe("physics world timestep", () => {
         const scene = makeScene(1000 / 60);
         const world = createHavokWorld(scene, hknp);
 
-        setPhysicsTimestep(world, 0);
-        expect(getPhysicsTimestep(world)).toBe(0);
+        setPhysicsTimestepMs(world, 0);
+        expect(getPhysicsTimestepMs(world)).toBe(0);
 
         stepFrame(scene, 25);
         expect(lastStepSeconds(hknp)).toBeCloseTo(25 / 1000, 10);
@@ -163,7 +186,7 @@ describe("applyPhysicsBodyForce timestep selection", () => {
         const world = createHavokWorld(makeScene(1000 / 30), hknp);
         const body = { _hkBody: { __body: true }, _world: world } as unknown as PhysicsBody;
 
-        setPhysicsTimestep(world, 0);
+        setPhysicsTimestepMs(world, 0);
         applyPhysicsBodyForce(world, body, FORCE, AT);
 
         // world step 0 → scene.fixedDeltaMs (1000/30 ms → 1/30 s) → impulse.x = 10 × 1/30.

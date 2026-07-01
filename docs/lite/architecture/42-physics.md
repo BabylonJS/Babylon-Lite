@@ -123,14 +123,19 @@ after-step callbacks (`onPhysicsAfterStep`) receive this per-step `dt` in second
 
 ### Overriding the step
 
-`setPhysicsTimestep(world, fixedDeltaMs)` / `getPhysicsTimestep(world)` read and
-write `_fixedDeltaMs` in **milliseconds**. Pass `0` to detach physics from a fixed
-step and follow the real frame delta:
+`setPhysicsTimestepMs(world, fixedDeltaMs)` / `getPhysicsTimestepMs(world)` read and
+write `_fixedDeltaMs` in **milliseconds**, matching `SceneContext.fixedDeltaMs`. Pass
+`0` to detach physics from a fixed step and follow the real frame delta:
 
 ```ts
-setPhysicsTimestep(world, 1000 / 30);   // force a 30 fps physics step
-setPhysicsTimestep(world, 0);           // back to real per-frame delta
+setPhysicsTimestepMs(world, 1000 / 30);   // force a 30 fps physics step
+setPhysicsTimestepMs(world, 0);           // back to real per-frame delta
 ```
+
+`setPhysicsTimestep(world, seconds)` / `getPhysicsTimestep(world)` are the equivalent
+**seconds-based** accessors (`setPhysicsTimestep(world, 1 / 30)` is the same as
+`setPhysicsTimestepMs(world, 1000 / 30)`); the millisecond accessors are preferred in
+new code so units line up with the rest of the engine's delta convention.
 
 This is the physics analogue of assigning `manager.fixedDeltaMs` on an animation
 or sprite manager. See `tests/lite/unit/physics-timestep.test.ts`.

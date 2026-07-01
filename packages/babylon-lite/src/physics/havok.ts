@@ -285,6 +285,12 @@ export async function enableHavokFloatingOrigin(world: PhysicsWorld, floatingOri
 
 // ─── Per-frame stepping ──────────────────────────────────────────────
 
+/** Hard ceiling on a single physics step (100 ms = a 10 fps floor). A long hitch — backgrounded tab,
+ *  GC pause, hit breakpoint — otherwise hands Havok a huge dt, which tunnels fast bodies through thin
+ *  geometry and can destabilise the constraint solver. Shared by the per-frame step and the
+ *  out-of-loop callers (`worldStepSeconds`) so every physics consumer agrees on the effective step. */
+const MAX_STEP_MS = 100;
+
 function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     const { _hknp: hknp, _hkWorld: hkWorld, _bodies: bodies } = world;
     // Step size in ms: the world's fixed step when set, otherwise the real per-frame delta
@@ -295,11 +301,9 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     if (!Number.isFinite(stepMs) || stepMs <= 0) {
         return;
     }
-    // Clamp the step to 100 ms (a 10 fps floor). A long hitch — backgrounded tab, GC pause, hit
-    // breakpoint — otherwise hands Havok a huge dt, which tunnels fast bodies through thin geometry
-    // and can destabilise the constraint solver. Capping degrades a stall into a brief slow-motion
-    // rather than an explosion (Babylon.js caps its physics substep the same way).
-    const dt = Math.min(stepMs / 1000, 0.1);
+    // Clamp the step (see MAX_STEP_MS): capping degrades a stall into a brief slow-motion rather than
+    // an explosion (Babylon.js caps its physics substep the same way).
+    const dt = Math.min(stepMs, MAX_STEP_MS) / 1000;
 
     // Floating-origin worlds run a multi-region step (loaded on demand).
     if (world._fo) {
@@ -421,24 +425,45 @@ export function getPhysicsGravity(world: PhysicsWorld, worldPosition?: Vec3): Ve
 // ─── Timestep ────────────────────────────────────────────────────────
 
 /**
- * Sets the fixed simulation timestep used by each world step.
+ * Sets the fixed simulation timestep used by each world step, in **seconds**.
  *
- * The value is in **milliseconds**, matching {@link SceneContext.fixedDeltaMs}. Pass `0` to make the
- * world step at the real per-frame delta instead of a fixed step.
+ * Pass `0` to make the world step at the real per-frame delta instead of a fixed step.
+ * See {@link setPhysicsTimestepMs} for the millisecond-based equivalent.
+ * @param world - The physics world.
+ * @param fixedTimestepSeconds - Fixed step in seconds (e.g. `1 / 60`), or `0` to use the frame delta.
+ */
+export function setPhysicsTimestep(world: PhysicsWorld, fixedTimestepSeconds: number): void {
+    world._fixedDeltaMs = fixedTimestepSeconds * 1000;
+}
+
+/**
+ * Returns the world's fixed simulation timestep in **seconds** (`0` means the real per-frame delta
+ * is used). See {@link getPhysicsTimestepMs} for the millisecond-based equivalent.
+ * @param world - The physics world.
+ * @returns The fixed step in seconds.
+ */
+export function getPhysicsTimestep(world: PhysicsWorld): number {
+    return world._fixedDeltaMs / 1000;
+}
+
+/**
+ * Sets the fixed simulation timestep used by each world step, in **milliseconds** (matching
+ * {@link SceneContext.fixedDeltaMs}). Pass `0` to make the world step at the real per-frame delta
+ * instead of a fixed step. See {@link setPhysicsTimestep} for the seconds-based equivalent.
  * @param world - The physics world.
  * @param fixedDeltaMs - Fixed step in milliseconds (e.g. `1000 / 60`), or `0` to use the frame delta.
  */
-export function setPhysicsTimestep(world: PhysicsWorld, fixedDeltaMs: number): void {
+export function setPhysicsTimestepMs(world: PhysicsWorld, fixedDeltaMs: number): void {
     world._fixedDeltaMs = fixedDeltaMs;
 }
 
 /**
- * Returns the world's fixed simulation timestep in milliseconds (`0` means the real per-frame delta
- * is used).
+ * Returns the world's fixed simulation timestep in **milliseconds** (`0` means the real per-frame
+ * delta is used). See {@link getPhysicsTimestep} for the seconds-based equivalent.
  * @param world - The physics world.
  * @returns The fixed step in milliseconds.
  */
-export function getPhysicsTimestep(world: PhysicsWorld): number {
+export function getPhysicsTimestepMs(world: PhysicsWorld): number {
     return world._fixedDeltaMs;
 }
 
@@ -446,17 +471,19 @@ export function getPhysicsTimestep(world: PhysicsWorld): number {
  * Effective physics step in **seconds** for callers that run outside the per-frame step loop
  * (force→impulse application, the character controller): the world's fixed step when set, otherwise
  * the owning scene's current per-frame delta — its own `fixedDeltaMs`, else the engine's real frame
- * delta — mirroring how `_stepWorld` resolves the delta the scene feeds it. May be `0` on a frame
- * with no delta yet (e.g. before the first render); callers guard against that.
+ * delta — mirroring how `_stepWorld` resolves the delta the scene feeds it. Applies the same
+ * finite/positive guard and {@link MAX_STEP_MS} clamp as `_stepWorld`, so every physics caller agrees
+ * on the effective step. Returns `0` on a frame with no delta yet (e.g. before the first render);
+ * callers guard against that.
  * @internal
  */
 export function worldStepSeconds(world: PhysicsWorld): number {
-    if (world._fixedDeltaMs > 0) {
-        return world._fixedDeltaMs / 1000;
-    }
     const scene = world._scene;
-    const sceneMs = scene.fixedDeltaMs > 0 ? scene.fixedDeltaMs : scene.surface.engine._currentDelta;
-    return sceneMs / 1000;
+    const stepMs = world._fixedDeltaMs > 0 ? world._fixedDeltaMs : scene.fixedDeltaMs > 0 ? scene.fixedDeltaMs : scene.surface.engine._currentDelta;
+    if (!Number.isFinite(stepMs) || stepMs <= 0) {
+        return 0;
+    }
+    return Math.min(stepMs, MAX_STEP_MS) / 1000;
 }
 
 // ─── Velocity limits ─────────────────────────────────────────────────

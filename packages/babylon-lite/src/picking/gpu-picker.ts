@@ -408,14 +408,21 @@ async function pickImpl(picker: GpuPicker, x: number, y: number, options?: PickO
     encoder.copyTextureToBuffer({ texture: rt.depthColorTex }, { buffer: rt.depthStaging, bytesPerRow: 256 }, { width: 1, height: 1 });
     device.queue.submit([encoder.finish()]);
 
-    // Map → read → unmap inside try/finally so the shared staging buffers are ALWAYS
-    // unmapped, even if a read throws or one map settles while the other rejects. A
-    // buffer left mapped would make every subsequent pickAsync reject at mapAsync
-    // ("already mapped"), permanently breaking picking on this picker (see #328).
+    // Map → read → unmap so the shared staging buffers are ALWAYS unmapped, even if a read throws or
+    // one map settles while the other rejects. `Promise.allSettled` (not `Promise.all`) waits for BOTH
+    // maps to settle before we proceed: with `Promise.all`, a rejection would jump to `finally` while
+    // the other map is still pending, then fulfil later and leave its buffer mapped — permanently
+    // breaking picking ("already mapped") on the next pickAsync (see #328).
     let pickId: number;
     let depth: number;
+    const [colorMap, depthMap] = await Promise.allSettled([rt.colorStaging.mapAsync(GPUMapMode.READ), rt.depthStaging.mapAsync(GPUMapMode.READ)]);
     try {
-        await Promise.all([rt.colorStaging.mapAsync(GPUMapMode.READ), rt.depthStaging.mapAsync(GPUMapMode.READ)]);
+        if (colorMap.status === "rejected") {
+            throw colorMap.reason;
+        }
+        if (depthMap.status === "rejected") {
+            throw depthMap.reason;
+        }
         const colorData = new U8(rt.colorStaging.getMappedRange());
         pickId = (colorData[0]! << 16) | (colorData[1]! << 8) | colorData[2]!;
         depth = new F32(rt.depthStaging.getMappedRange())[0]!;
