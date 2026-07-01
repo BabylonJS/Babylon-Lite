@@ -20,6 +20,8 @@ const CTX_SIZE = 0x0019;
 const CTX_DIRECTION_SCALE = 0x0020;
 
 // System source ids (Babylon.js `NodeParticleSystemSources`).
+const SYS_TIME = 1;
+const SYS_DELTA = 2;
 const SYS_EMITTER = 3;
 
 /**
@@ -76,7 +78,12 @@ export function getContextualValue(state: NpeBuildState, source: number): Partic
 
 /** Resolve a system source (mirrors BJS `NodeParticleBuildState.getSystemValue`). */
 export function getSystemValue(state: NpeBuildState, source: number): ParticleValue {
+    const system = state.system;
     switch (source) {
+        case SYS_TIME:
+            return system ? system._actualFrame : 0;
+        case SYS_DELTA:
+            return system ? system._scaledUpdateSpeed : 0;
         case SYS_EMITTER:
             return state.emitter;
         default:

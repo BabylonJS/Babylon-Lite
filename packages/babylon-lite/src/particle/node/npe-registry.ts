@@ -33,6 +33,10 @@ export async function loadParticleBlockEvaluator(className: string): Promise<Par
             return (await import("./blocks/update-position-block.js")).updatePositionBlock;
         case "UpdateColorBlock":
             return (await import("./blocks/update-color-block.js")).updateColorBlock;
+        case "UpdateAngleBlock":
+            return (await import("./blocks/update-angle-block.js")).updateAngleBlock;
+        case "UpdateDirectionBlock":
+            return (await import("./blocks/update-direction-block.js")).updateDirectionBlock;
         default:
             throw new Error(`NodeParticle: unsupported block class "${className}"`);
     }
