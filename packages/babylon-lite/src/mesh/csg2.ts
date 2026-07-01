@@ -57,8 +57,18 @@ async function getRuntimeAsync(): Promise<Csg2Runtime> {
 
     csg2RuntimePromise = (async () => {
         const [module, wasm] = await Promise.all([import("manifold-3d"), import("manifold-3d/manifold.wasm?url")]);
+        // Alias `import.meta.url` to a local before the `new URL(...)` below. Webpack's URL parser
+        // only resolves `new URL(<literal>, import.meta.url)` to an emitted asset; with our runtime
+        // first arg (`wasm.default`) it can't, so it emits a "Critical dependency: the request of a
+        // dependency is an expression" warning (fatal for consumers that treat warnings as errors).
+        // The alias hides that literal pattern from the heuristic. Nothing is lost: no bundler can
+        // statically resolve the runtime arg, so none was emitting an asset here — the wasm URL comes
+        // from the `?url` import above. `import.meta.url` is still substituted normally (it's a
+        // meta-property rewrite, not gated on the `new URL` position), so runtime behavior and
+        // relative-URL resolution are identical under webpack, Vite/Rollup, esbuild, and Parcel.
+        const moduleUrl = import.meta.url;
         const manifoldModule: ManifoldToplevel = await module.default({
-            locateFile: () => new URL(wasm.default, import.meta.url).href,
+            locateFile: () => new URL(wasm.default, moduleUrl).href,
         });
         manifoldModule.setup();
         const runtime = {
