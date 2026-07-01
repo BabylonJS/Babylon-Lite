@@ -202,7 +202,7 @@ Any bare import other than `@babylonjs/lite` is rewritten to the active ESM CDN
 with no configuration:
 
 ```ts
-import seedrandom from "seedrandom"; // → https://esm.sh/seedrandom at run time
+import seedrandom from "seedrandom"; // → the active CDN's seedrandom URL at run time
 ```
 
 `@babylonjs/lite` is special-cased: it stays on the selected engine (self-hosted
