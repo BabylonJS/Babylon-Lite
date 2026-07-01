@@ -3,8 +3,11 @@
 // The runner resolves the bare `@babylonjs/lite` import to an engine bundle URL
 // chosen here: the self-hosted "nightly" bundle (built from workspace source and
 // served alongside the app) by default, or a specific published release loaded on
-// demand from the esm.sh CDN. Switching versions only changes the import URL — no
-// redeploy is needed to target a released version.
+// demand from a public ESM CDN. Switching versions only changes the import URL — no
+// redeploy is needed to target a released version. The CDN (esm.sh, with an automatic
+// jsDelivr fallback) is selected by `./cdn`.
+
+import { getCdn } from "./cdn";
 
 /** Sentinel value for the self-hosted, source-tracking engine build. */
 export const NIGHTLY = "nightly";
@@ -18,20 +21,23 @@ const REGISTRY_URL = "https://registry.npmjs.org/@babylonjs/lite";
 const MAX_VERSIONS = 20;
 
 /** Resolve the engine bundle URL for a selected version (`"nightly"` or a semver). */
-export function engineUrlForVersion(version: string): string {
+export async function engineUrlForVersion(version: string): Promise<string> {
     if (version === NIGHTLY) {
         return NIGHTLY_ENGINE_URL;
     }
-    return `https://esm.sh/@babylonjs/lite@${version}`;
+    const cdn = await getCdn();
+    return cdn.engineUrl(version);
 }
 
 /**
  * The CDN specifier baked into a *downloaded* project's import map. The self-hosted
  * nightly bundle isn't reachable outside the playground, so a download targeting
- * nightly pins to esm.sh's latest published release; an explicit version pins to it.
+ * nightly pins to the CDN's latest published release; an explicit version pins to it.
+ * The CDN is whichever one the playground resolved (esm.sh or its jsDelivr fallback).
  */
-export function downloadEngineUrl(version: string): string {
-    return version === NIGHTLY ? "https://esm.sh/@babylonjs/lite" : `https://esm.sh/@babylonjs/lite@${version}`;
+export async function downloadEngineUrl(version: string): Promise<string> {
+    const cdn = await getCdn();
+    return version === NIGHTLY ? cdn.engineUrl() : cdn.engineUrl(version);
 }
 
 /**

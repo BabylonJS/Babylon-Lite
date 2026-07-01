@@ -4,6 +4,9 @@
 // it every few seconds, launching each one with an initial velocity so the wall
 // progressively collapses. Orbit with the mouse to watch from any angle.
 import HavokPhysics from "@babylonjs/havok";
+// The `?url` suffix yields the wasm's URL on the active CDN (esm.sh, or its jsDelivr
+// fallback) as a string, so the binary loads from wherever the engine itself did.
+import havokWasmUrl from "@babylonjs/havok/lib/esm/HavokPhysics.wasm?url";
 import {
     addToScene,
     attachControl,
@@ -48,7 +51,7 @@ async function main(): Promise<void> {
     addToScene(scene, createDirectionalLight([-0.4, -1, -0.5], 1.1));
 
     const havok = await HavokPhysics({
-        locateFile: () => "https://esm.sh/@babylonjs/havok/lib/esm/HavokPhysics.wasm",
+        locateFile: () => havokWasmUrl,
     });
     const world = createHavokWorld(scene, havok, { x: 0, y: -9.81, z: 0 });
 

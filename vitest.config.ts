@@ -25,6 +25,20 @@ export default defineConfig({
                 },
             },
             {
+                // Imports the package with NO WebGPU globals present (Node/SSR/Jest
+                // baseline). Overrides setupFiles so `setup-webgpu-globals.ts` does
+                // not pre-install GPUShaderStage/GPUTextureUsage/etc, reproducing the
+                // crash environment. Guards against module top-level dereferencing
+                // WebGPU flag namespaces at import time.
+                extends: true,
+                test: {
+                    name: "no-webgpu",
+                    include: ["tests/lite/no-webgpu/**/*.test.ts"],
+                    setupFiles: [],
+                    testTimeout: 120_000,
+                },
+            },
+            {
                 extends: true,
                 test: {
                     name: "gl-unit",

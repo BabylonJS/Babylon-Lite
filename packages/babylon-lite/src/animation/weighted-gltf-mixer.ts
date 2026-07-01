@@ -1,5 +1,5 @@
 import { F32, I32, U8 } from "../engine/typed-arrays.js";
-import { tickAnimation } from "./animation-group.js";
+import { tickAnimation } from "./animation-tick.js";
 import type { AnimationGltfMixer, AnimationGroup } from "./animation-group.js";
 import { ANIMATION_GROUP_TASK_CATEGORY, getAnimationGroupOwner, getAnimationGroups } from "./animation-group-task.js";
 import { setAnimationTaskCategoryHandler } from "./animation-manager.js";

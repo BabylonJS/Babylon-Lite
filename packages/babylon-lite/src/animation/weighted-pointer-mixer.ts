@@ -1,5 +1,5 @@
 import { F32 } from "../engine/typed-arrays.js";
-import { tickAnimation } from "./animation-group.js";
+import { tickAnimation } from "./animation-tick.js";
 import type { AnimationGroup, AnimationPropertyMixer, AnimationPropertyRuntimeTrack } from "./animation-group.js";
 import { ANIMATION_GROUP_TASK_CATEGORY, getAnimationGroups } from "./animation-group-task.js";
 import { setAnimationTaskCategoryHandler } from "./animation-manager.js";

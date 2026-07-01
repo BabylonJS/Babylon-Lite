@@ -1,6 +1,6 @@
 {
-  "rawKB": 94.8,
-  "gzipKB": 39.6,
+  "rawKB": 95,
+  "gzipKB": 39.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene219-create-skeleton-DNC_UZif.js",

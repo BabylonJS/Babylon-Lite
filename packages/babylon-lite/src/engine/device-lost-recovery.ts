@@ -237,6 +237,7 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
     scene._renderables.length = 0;
     scene._uniformUpdaters.length = 0;
     scene._meshDisposables.clear();
+    scene._meshAuxDisposables.clear();
     if (scene._lightGpuState) {
         scene._lightGpuState = undefined;
     }
