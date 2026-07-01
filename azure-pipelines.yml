@@ -112,7 +112,7 @@ stages:
                   parameters:
                       playwright: true
 
-                - script: npx vitest run --project unit --project gl-unit
+                - script: npx vitest run --project unit --project gl-unit --project no-webgpu
                   displayName: "Run vitest unit tests"
                   env:
                       CI: "true"

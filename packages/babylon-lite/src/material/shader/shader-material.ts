@@ -4,8 +4,10 @@ import type { Texture2D } from "../../texture/texture-2d.js";
 import type { Mat4 } from "../../math/types.js";
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
 
-/** Vertex attribute names a ShaderMaterial can bind. */
-export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangent" | "color";
+/** Vertex attribute names a ShaderMaterial can bind. `joints`/`weights` (and `joints1`/`weights1`
+ *  for \>4 bones/vertex) are the skinning attributes — bound from the mesh's skeleton/VAT buffers,
+ *  letting a custom material do vertex skinning (e.g. baked vertex-animation). */
+export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangent" | "color" | "joints" | "weights" | "joints1" | "weights1";
 /** WGSL scalar/vector/matrix types supported for ShaderMaterial uniforms. */
 export type ShaderUniformType = "f32" | "u32" | "i32" | "vec2<f32>" | "vec3<f32>" | "vec4<f32>" | "mat4x4<f32>";
 /** Built-in uniform names automatically populated by the renderer each frame
@@ -160,7 +162,18 @@ function assertIdentifier(kind: string, name: string): void {
 }
 
 function isSupportedAttribute(name: string): name is ShaderAttributeName {
-    return name === "position" || name === "normal" || name === "uv" || name === "uv2" || name === "tangent" || name === "color";
+    return (
+        name === "position" ||
+        name === "normal" ||
+        name === "uv" ||
+        name === "uv2" ||
+        name === "tangent" ||
+        name === "color" ||
+        name === "joints" ||
+        name === "weights" ||
+        name === "joints1" ||
+        name === "weights1"
+    );
 }
 
 function isSystemUniform(name: string): name is ShaderSystemUniformName {
@@ -206,7 +219,9 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
     const seenAttributes = new Set<string>();
     for (const attr of options.attributes) {
         if (!isSupportedAttribute(attr)) {
-            throw new Error(`ShaderMaterial: unsupported attribute "${String(attr)}". Supported attributes: position, normal, uv, uv2, tangent, color.`);
+            throw new Error(
+                `ShaderMaterial: unsupported attribute "${String(attr)}". Supported attributes: position, normal, uv, uv2, tangent, color, joints, weights, joints1, weights1.`
+            );
         }
         if (seenAttributes.has(attr)) {
             throw new Error(`ShaderMaterial: duplicate attribute "${attr}".`);

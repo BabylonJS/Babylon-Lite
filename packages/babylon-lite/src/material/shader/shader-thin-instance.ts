@@ -17,7 +17,7 @@
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Material } from "../material.js";
-import type { Mesh, MeshGPU } from "../../mesh/mesh.js";
+import type { Mesh } from "../../mesh/mesh.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
 import type { DrawUpdateContext, MeshGroupBuildResult, Renderable } from "../../render/renderable.js";
@@ -34,7 +34,7 @@ interface ShaderHelpers {
     createPacket: (scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh) => ShaderPacket;
     updatePacket: (scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext) => void;
     updateCustomUbo: (engine: EngineContext, material: ShaderMaterial) => void;
-    getAttrBuffer: (engine: EngineContext, gpu: MeshGPU, name: ShaderAttributeName) => GPUBuffer;
+    getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName) => GPUBuffer;
     getOrCreateShaderPipeline: (
         engine: EngineContext,
         sig: RenderTargetSignature,
@@ -136,7 +136,7 @@ function createShaderInstancedRenderable(
         const gpu = mesh._gpu;
         let slot = 0;
         for (let i = 0; i < material.attributes.length; i++) {
-            pass.setVertexBuffer(slot++, h.getAttrBuffer(engine, gpu, material.attributes[i]!));
+            pass.setVertexBuffer(slot++, h.getAttrBuffer(engine, mesh, material.attributes[i]!));
         }
         slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasColor, cullBinding?.cullDrawBufs);
         pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);

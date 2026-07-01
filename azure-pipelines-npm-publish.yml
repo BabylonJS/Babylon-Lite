@@ -117,6 +117,25 @@ stages:
                   env:
                       PACKAGE_VERSION: $(PACKAGE_VERSION)
 
+                # Generate the changelog from the Conventional-Commit history.
+                # This must run BEFORE the new release tag is created below, so the
+                # auto-detected "previous tag" is the prior release rather than the
+                # tag we are about to push. Two artefacts: the full cumulative
+                # CHANGELOG.md ships inside the npm tarball (build root), and the
+                # single latest section feeds the GitHub release notes.
+                - script: |
+                      set -euo pipefail
+                      mkdir -p "$(Build.ArtifactStagingDirectory)"
+                      npx tsx scripts/generate-changelog.ts
+                  displayName: "Generate release changelog"
+                  env:
+                      PACKAGE_VERSION: $(PACKAGE_VERSION)
+                      PACKAGE_NAME: $(PACKAGE_NAME)
+                      CHANGELOG_OUTPUT: packages/babylon-lite/build/CHANGELOG.md
+                      RELEASE_NOTES_OUTPUT: $(Build.ArtifactStagingDirectory)/release-notes.md
+                      GITHUB_REPOSITORY: $(Build.Repository.Name)
+                      BUILD_REPOSITORY_URI: $(Build.Repository.Uri)
+
                 - script: npm pack --dry-run ./packages/babylon-lite/build
                   displayName: "Validate npm package contents"
 
@@ -178,8 +197,8 @@ stages:
                       tagSource: "userSpecifiedTag"
                       tag: "npm-lite-v$(PACKAGE_VERSION)"
                       title: "@babylonjs/lite v$(PACKAGE_VERSION)"
-                      releaseNotesSource: "inline"
-                      releaseNotesInline: "Automated release of @babylonjs/lite v$(PACKAGE_VERSION)."
+                      releaseNotesSource: "filePath"
+                      releaseNotesFilePath: "$(Build.ArtifactStagingDirectory)/release-notes.md"
                       assets: "$(Build.ArtifactStagingDirectory)/babylonjs-lite-$(PACKAGE_VERSION).zip"
                       addChangeLog: false
 

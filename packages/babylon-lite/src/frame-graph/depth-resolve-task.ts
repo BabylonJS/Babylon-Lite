@@ -101,8 +101,22 @@ export function createDepthResolveTask(config: DepthResolveTaskConfig, engine: E
         if ((source._descriptor.samples ?? 1) < 2) {
             throw new Error(`DepthResolveTask "${config.name}": sourceTexture must be multisampled (sampleCount > 1).`);
         }
-        if (!target._depthTexture) {
-            buildRenderTarget(target, eng); // auto-build an offscreen destination that no render task owns
+        if (!target._depthTexture || target._width !== (source._width || 0) || target._height !== (source._height || 0)) {
+            // Build (or REBUILD) the offscreen destination so it tracks the source size. No render task owns this
+            // target, so the frame graph never resizes it on its own — without this, a window resize leaves the
+            // resolved depth stuck at the OLD size, and every depth-reconstruction consumer (SSCS, SSAO, the
+            // shadow-TAA stabiliser) then samples a mismatched-size depth → screen-space streaks until reload.
+            buildRenderTarget(target, eng);
+            // buildRenderTarget sizes the target from its OWN descriptor (resolveSize), not the source. The whole
+            // point of this task is a 1:1 depth copy, so the target descriptor MUST resolve to the source size
+            // (e.g. both `size: surface`). Fail fast on a mismatch instead of silently thrashing — otherwise this
+            // branch's condition would stay true and rebuild/destroy the target on every build() call.
+            if (target._width !== source._width || target._height !== source._height) {
+                throw new Error(
+                    `DepthResolveTask "${config.name}": targetTexture size ${target._width}×${target._height} must match ` +
+                        `sourceTexture size ${source._width}×${source._height} (size the target's descriptor like the source, e.g. both \`size: surface\`).`
+                );
+            }
         }
         const depthFormat = target._descriptor.dFormat;
         if (!depthFormat) {
