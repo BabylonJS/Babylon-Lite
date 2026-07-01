@@ -2,7 +2,18 @@ import { defineConfig, type Plugin } from "vite";
 import { resolve } from "path";
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { spawn } from "child_process";
+import basicSsl from "@vitejs/plugin-basic-ssl";
 import { mapBabylonImport, type CompatTarget } from "../packages/babylon-lite-compat/src/bundler-resolve.js";
+
+/**
+ * On-device WebXR testing (e.g. Quest 3) requires a secure context, which for any
+ * non-localhost origin means HTTPS. Set `LAB_HTTPS=1` to serve the lab over HTTPS
+ * with a self-signed cert (via @vitejs/plugin-basic-ssl) and bind to all network
+ * interfaces so the headset can reach `https://<this-machine-ip>:5174` over the
+ * LAN — accept the one-time cert warning in the Quest Browser. Left off by
+ * default so the normal `pnpm dev:lab` flow stays plain HTTP on localhost.
+ */
+const LAB_HTTPS = !!process.env.LAB_HTTPS;
 
 interface DemoConfigEntry {
     slug: string;
@@ -713,7 +724,7 @@ function compatScenesPlugin(): Plugin {
 }
 
 export default defineConfig({
-    plugins: [pagesDemoPlugin(), compatScenesPlugin(), serveReferenceImages(), apiDocsPlugin(), tabContentPlugin()],
+    plugins: [pagesDemoPlugin(), compatScenesPlugin(), serveReferenceImages(), apiDocsPlugin(), tabContentPlugin(), ...(LAB_HTTPS ? [basicSsl()] : [])],
     optimizeDeps: {
         // BJS uses prototype-patching side-effect imports (e.g. abstractEngine.dom.js).
         // babylon-lite uses ?raw WGSL imports that esbuild can't handle.
@@ -742,6 +753,9 @@ export default defineConfig({
         // interactive dev server keeps Vite's default auto-increment behavior.
         port: Number(process.env.LAB_DEV_PORT) || 5174,
         strictPort: !!process.env.LAB_DEV_PORT,
+        // With LAB_HTTPS, expose the server on the LAN so an XR headset can reach
+        // it by IP; @vitejs/plugin-basic-ssl supplies the self-signed cert.
+        ...(LAB_HTTPS ? { host: true } : {}),
         watch: {
             // On-demand tab generation writes many files under the Vite root that
             // would otherwise churn the single-threaded dev server (stalling the

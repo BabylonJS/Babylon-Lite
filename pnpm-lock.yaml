@@ -132,6 +132,9 @@ importers:
       '@recast-navigation/wasm':
         specifier: 0.43.0
         version: 0.43.0
+      '@vitejs/plugin-basic-ssl':
+        specifier: ^2.1.0
+        version: 2.3.0(vite@6.4.3(@types/node@25.9.1)(terser@5.46.1)(tsx@4.22.4)(yaml@2.9.0))
       '@webgpu/types':
         specifier: ^0.1.52
         version: 0.1.69
@@ -1437,6 +1440,12 @@ packages:
   '@typescript-eslint/visitor-keys@8.57.2':
     resolution: {integrity: sha512-zhahknjobV2FiD6Ee9iLbS7OV9zi10rG26odsQdfBO/hjSzUQbkIYgda+iNKK1zNiW2ey+Lf8MU5btN17V3dUw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+
+  '@vitejs/plugin-basic-ssl@2.3.0':
+    resolution: {integrity: sha512-bdyo8rB3NnQbikdMpHaML9Z1OZPBu6fFOBo+OtxsBlvMJtysWskmBcnbIDhUqgC8tcxNv/a+BcV5U+2nQMm1OQ==}
+    engines: {node: ^18.0.0 || ^20.0.0 || >=22.0.0}
+    peerDependencies:
+      vite: ^6.0.0 || ^7.0.0 || ^8.0.0
 
   '@vitest/expect@4.1.0':
     resolution: {integrity: sha512-EIxG7k4wlWweuCLG9Y5InKFwpMEOyrMb6ZJ1ihYu02LVj/bzUwn2VMU+13PinsjRW75XnITeFrQBMH5+dLvCDA==}
@@ -4972,6 +4981,10 @@ snapshots:
     dependencies:
       '@typescript-eslint/types': 8.57.2
       eslint-visitor-keys: 5.0.1
+
+  '@vitejs/plugin-basic-ssl@2.3.0(vite@6.4.3(@types/node@25.9.1)(terser@5.46.1)(tsx@4.22.4)(yaml@2.9.0))':
+    dependencies:
+      vite: 6.4.3(@types/node@25.9.1)(terser@5.46.1)(tsx@4.22.4)(yaml@2.9.0)
 
   '@vitest/expect@4.1.0':
     dependencies:

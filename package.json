@@ -6,6 +6,7 @@
     "scripts": {
         "dev": "pnpm --filter @babylon-lite/parity-harness dev",
         "dev:lab": "pnpm build:bundle-scenes && tsx scripts/build-bundle-demos.ts && pnpm --filter @babylon-lite/lab dev",
+        "dev:lab:https": "pnpm build:bundle-scenes && tsx scripts/build-bundle-demos.ts && LAB_HTTPS=1 pnpm --filter @babylon-lite/lab dev",
         "build": "pnpm --filter babylon-lite build",
         "build:lib": "pnpm --filter babylon-lite build:lib",
         "build:lab-site": "tsx scripts/build-lab-site.ts",
