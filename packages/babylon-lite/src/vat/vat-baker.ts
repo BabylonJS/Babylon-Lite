@@ -19,6 +19,8 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import { goToFrame, stopAnimation } from "../animation/animation-group.js";
 import type { SkeletonBinding, VatData } from "../animation/types.js";
+import { mat4Invert } from "../math/mat4-invert.js";
+import type { Mat4 } from "../math/types.js";
 import { _registerPbrExt } from "../material/pbr/pbr-flags.js";
 import { pbrExt as vatPbrExt } from "../material/pbr/fragments/vat-fragment.js";
 
@@ -29,6 +31,14 @@ export interface VatClip {
     readonly fps: number;
 }
 
+/** Optional extras to capture while baking (nothing is captured unless requested). */
+export interface VatBakeOptions {
+    /** Bone indices whose posed ORIGIN should be sampled per baked frame (e.g. a hand joint for a held
+     *  item, a muzzle, an FX socket). Bone index = position in the skeleton's joint list = the bone's row
+     *  block in the baked texture. See {@link VatBakeResult.boneOrigins}. */
+    readonly captureBoneOrigins?: readonly number[];
+}
+
 /** Result of baking — the GPU texture plus a per-clip row map for choosing playback params. */
 export interface VatBakeResult {
     readonly texture: GPUTexture;
@@ -36,6 +46,13 @@ export interface VatBakeResult {
     readonly frameCount: number;
     /** Clip name → row range, for building the per-mesh/per-instance (fromRow,toRow,offset,fps) params. */
     readonly clips: Record<string, VatClip>;
+    /** Present only when `captureBoneOrigins` was passed: bone index → the bone's posed origin per baked
+     *  frame, as `frameCount * 3` xyz floats (frame `row` at offset `row*3`, matching the texture rows /
+     *  `clips[].fromRow`). The point is in the mesh's SKIN output space — i.e. the space the VAT vertex path
+     *  produces before the `world` uniform — so a consumer gets world space with `instance · mesh.world · p`.
+     *  Lets a caller attach geometry to a moving joint (a carried prop, a socketed effect) without a live
+     *  skeleton. */
+    readonly boneOrigins?: Record<number, Float32Array>;
 }
 
 const DEFAULT_FRAME_RATE = 60;
@@ -58,8 +75,9 @@ function bindingsOf(group: AnimationGroup): readonly SkeletonBinding[] | undefin
  * @param engine - Engine context.
  * @param mesh   - The skinned source mesh (must have `mesh.skeleton`).
  * @param groups - The animation clips to bake (e.g. a creature's gait clips).
+ * @param opts   - Optional extras to capture during the bake (e.g. per-frame bone origins).
  */
-export function bakeVat(engine: EngineContext, mesh: Mesh, groups: AnimationGroup[]): VatBakeResult {
+export function bakeVat(engine: EngineContext, mesh: Mesh, groups: AnimationGroup[], opts?: VatBakeOptions): VatBakeResult {
     const skel = mesh.skeleton;
     if (!skel) {
         throw new Error("bakeVat: mesh has no skeleton to bake.");
@@ -77,17 +95,42 @@ export function bakeVat(engine: EngineContext, mesh: Mesh, groups: AnimationGrou
     const data = new Float32Array(frameCount * floatsPerFrame);
     const clips: Record<string, VatClip> = {};
 
+    // Optional per-frame bone-origin capture. Each bone matrix Lite bakes is `invMeshWorld · jointWorld · IBM`
+    // (skeleton-pose.ts), so a bone's posed origin in skin-output space is `boneMatrix · restOrigin`, where
+    // `restOrigin = translation(inverse(IBM))`. We capture rest origins lazily from the first binding, then
+    // transform them each frame — the result lines up with the texture rows.
+    const captureBones = opts?.captureBoneOrigins;
+    const boneOrigins: Record<number, Float32Array> | undefined = captureBones ? {} : undefined;
+    let restOrigins: Map<number, [number, number, number]> | null = null;
+    if (captureBones && boneOrigins) {
+        for (const b of captureBones) {
+            boneOrigins[b] = new Float32Array(frameCount * 3);
+        }
+    }
+
     let row = 0;
     for (const g of groups) {
         const frames = clipFrameCount(g);
         const fps = g.frameRate || DEFAULT_FRAME_RATE;
         clips[g.name] = { fromRow: row, frameCount: frames, fps };
         const binding = bindingsOf(g)?.[0];
+        if (captureBones && !restOrigins && binding) {
+            restOrigins = computeRestOrigins(captureBones, binding.inverseBindMatrices, boneCount);
+        }
         for (let f = 0; f < frames; f++) {
             goToFrame(g, f, engine); // evaluates the pose → binding.boneMatrices holds this frame's matrices
             const m = binding?.boneMatrices;
             if (m) {
                 data.set(m.subarray(0, floatsPerFrame), row * floatsPerFrame);
+                if (captureBones && boneOrigins && restOrigins) {
+                    for (const b of captureBones) {
+                        const o = restOrigins.get(b);
+                        const dst = boneOrigins[b];
+                        if (o && dst && b < boneCount) {
+                            transformPointInto(dst, row * 3, m, b * 16, o[0], o[1], o[2]);
+                        }
+                    }
+                }
             }
             row++;
         }
@@ -102,7 +145,30 @@ export function bakeVat(engine: EngineContext, mesh: Mesh, groups: AnimationGrou
     });
     device.queue.writeTexture({ texture }, data.buffer, { bytesPerRow: texWidth * 16, rowsPerImage: frameCount }, { width: texWidth, height: frameCount });
 
-    return { texture, boneCount, frameCount, clips };
+    return boneOrigins ? { texture, boneCount, frameCount, clips, boneOrigins } : { texture, boneCount, frameCount, clips };
+}
+
+/** Rest origin of each requested bone = translation of `inverse(IBM_bone)` (its bind-pose world origin, in
+ *  the skinned mesh's local space). Column-major, so translation is elements 12/13/14. */
+function computeRestOrigins(bones: readonly number[], ibm: Float32Array, boneCount: number): Map<number, [number, number, number]> {
+    const out = new Map<number, [number, number, number]>();
+    for (const b of bones) {
+        if (b < 0 || b >= boneCount) {
+            continue;
+        }
+        const inv = mat4Invert(ibm.subarray(b * 16, b * 16 + 16) as unknown as Mat4);
+        if (inv) {
+            out.set(b, [inv[12]!, inv[13]!, inv[14]!]);
+        }
+    }
+    return out;
+}
+
+/** Transform a point (px,py,pz,1) by the column-major mat4 stored in `m` at `mo`, writing xyz to `dst[di..]`. */
+function transformPointInto(dst: Float32Array, di: number, m: Float32Array, mo: number, px: number, py: number, pz: number): void {
+    dst[di] = m[mo]! * px + m[mo + 4]! * py + m[mo + 8]! * pz + m[mo + 12]!;
+    dst[di + 1] = m[mo + 1]! * px + m[mo + 5]! * py + m[mo + 9]! * pz + m[mo + 13]!;
+    dst[di + 2] = m[mo + 2]! * px + m[mo + 6]! * py + m[mo + 10]! * pz + m[mo + 14]!;
 }
 
 /** Runtime VAT playback handle for one mesh (the analogue of BJS BakedVertexAnimationManager + the

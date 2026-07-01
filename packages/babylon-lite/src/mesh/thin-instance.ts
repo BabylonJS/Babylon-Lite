@@ -55,6 +55,10 @@ export interface ThinInstanceData {
 
     /** @internal Opt-in flag for GPU frustum culling + indirect drawing. */
     _gpuCullingEnabled: boolean;
+
+    /** @internal Extra world-space radius added to every instance's culling sphere
+     *  (see `setThinInstanceCullBoundsPad`). Undefined reads as 0. */
+    _cullBoundsPad?: number;
 }
 
 /** Set all instances from a pre-built matrix array. */
@@ -224,4 +228,24 @@ export function enableThinInstanceGpuCulling(mesh: Mesh, enabled = true): void {
     ti._gpuCullingEnabled = enabled;
     ti._gpuVersion = -1;
     ti._colorGpuVersion = -1;
+}
+
+/** Set an extra WORLD-SPACE radius added to every instance's GPU-culling sphere.
+ *
+ * The culler derives each instance's sphere from the prototype's authored vertex bounds, so a
+ * vertex shader that DISPLACES geometry beyond them — terrain-following height offsets, tall wind
+ * sway, growth animations — can move a visible instance outside its sphere and pop it at the
+ * screen edge. The usual workaround is disabling culling for the whole mesh; padding the sphere
+ * by the maximum shader displacement instead keeps culling both correct and enabled.
+ *
+ * The pad is in world units, applied after per-instance scaling. 0 restores the exact authored
+ * bounds. Takes effect on the next culled pass (the culler reads it when writing its per-pass
+ * params), so it can be changed live.
+ */
+export function setThinInstanceCullBoundsPad(mesh: Mesh, pad: number): void {
+    const ti = mesh.thinInstances;
+    if (!ti) {
+        throw new Error("setThinInstanceCullBoundsPad requires mesh.thinInstances");
+    }
+    ti._cullBoundsPad = pad;
 }
