@@ -27,7 +27,7 @@
         "slug": "scene3-fog",
         "name": "Scene 3 — Fog + Skybox",
         "maxMad": 0.01,
-        "maxRawKB": 54,
+        "maxRawKB": 54.3,
         "description": "Exponential² fog, multiple colored boxes, skybox, ground plane.",
         "tags": ["fog", "procedural", "std"],
         "skipPerf": true
@@ -37,7 +37,7 @@
         "slug": "scene4-shadows",
         "name": "Scene 4 — Shadows",
         "maxMad": 0.08,
-        "maxRawKB": 72.8,
+        "maxRawKB": 73,
         "description": "DirectionalLight, ESM shadow map with blur, heightmap ground, torus caster.",
         "tags": ["shadow", "procedural", "std"],
         "compatParity": true
@@ -165,7 +165,7 @@
         "slug": "scene16-thin-instances",
         "name": "Scene 16 — Thin Instances",
         "maxMad": 0.01,
-        "maxRawKB": 49,
+        "maxRawKB": 49.2,
         "description": "64,000 colored cubes via thin instances. Per-instance color, disableLighting, emissive-only rendering.",
         "tags": ["std", "procedural"],
         "compatParity": true
@@ -340,7 +340,7 @@
         "slug": "scene33-lights-punctual",
         "name": "Scene 33 — KHR_lights_punctual",
         "maxMad": 0.07,
-        "maxRawKB": 103.5,
+        "maxRawKB": 103.7,
         "description": "LightsPunctualLamp.glb (KHR_lights_punctual point lights + KHR_materials_transmission) with default IBL environment. Matches PG #YG3BBF#54.",
         "tags": ["pbr", "gltf", "env", "lights-punctual", "transmission"],
         "skipPerf": true,
@@ -383,7 +383,7 @@
         "slug": "scene37-sheen-sofa",
         "name": "Scene 37 — Sheen Wood Leather Sofa",
         "maxMad": 0.02,
-        "maxRawKB": 97,
+        "maxRawKB": 97.3,
         "description": "SheenWoodLeatherSofa.glb (KHR_materials_sheen + KHR_materials_specular + KHR_texture_transform + EXT_texture_webp) with default IBL environment (no skybox, no ground). Matches PG #YG3BBF#58.",
         "tags": ["pbr", "gltf", "env", "sheen", "specular", "texture-transform", "webp"],
         "compatParity": true
@@ -1210,7 +1210,7 @@
         "slug": "scene120-gaussian-splatting",
         "name": "Scene 120 — Gaussian Splatting",
         "maxMad": 1,
-        "maxRawKB": 35.5,
+        "maxRawKB": 35.8,
         "description": "Loads Halo_Believe.ply via loadSplat(); renders the splat cloud with a back-to-front sort produced by an inline worker thread.",
         "tags": ["gaussian-splatting", "ply"],
         "compatParity": true
@@ -1275,7 +1275,7 @@
         "slug": "scene126-gs-material-plugin",
         "name": "Scene 126 — Gaussian Splatting Material Plugin",
         "maxMad": 0.5,
-        "maxRawKB": 35.7,
+        "maxRawKB": 36,
         "description": "Loads Halo_Believe.splat and applies a GsShaderFragment that overrides finalColor at GS_FRAGMENT_MAIN_END (parity with BJS MaterialPluginBase CUSTOM_FRAGMENT_MAIN_END).",
         "tags": ["gaussian-splatting", "material-plugin"]
     },
@@ -1542,7 +1542,7 @@
         "slug": "scene162-shader-material-defines",
         "name": "Scene 162 - ShaderMaterial Defines",
         "maxMad": 0.02,
-        "maxRawKB": 38,
+        "maxRawKB": 38.2,
         "description": "WGSL ShaderMaterial emits defines as const pipeline variants.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -2052,7 +2052,7 @@
         "slug": "scene244-pot-of-coals-animation-pointer",
         "name": "Scene 244 — PotOfCoalsAnimationPointer",
         "maxMad": 0.2,
-        "maxRawKB": 133,
+        "maxRawKB": 133.3,
         "description": "PotOfCoalsAnimationPointer.gltf — cx20 gltf-test. KHR_animation_pointer texture-transform rotation.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2102,7 +2102,7 @@
         "slug": "scene249-vertex-color-alpha-clip-test",
         "name": "Scene 249 — VertexColorAlphaClipTest",
         "maxMad": 0.2,
-        "maxRawKB": 78.5,
+        "maxRawKB": 78.8,
         "description": "VertexColorAlphaClipTest.gltf — cx20 gltf-test. Vertex-color alpha with alpha-clip.",
         "tags": ["gltf"],
         "skipPerf": true

@@ -120,6 +120,9 @@ export interface RenderTask extends Task {
     _lastVersion: number;
     /** @internal */
     _lastVis: number;
+    /** @internal True once `record()` has run — the task is "live" (GPU target allocated, material batch builders
+     *  present). A runtime `addMesh` after this resolves + re-buckets THIS task immediately (no frame-graph rebuild). */
+    _recorded: boolean;
 
     /** @internal */
     _renderPassDescriptor: GPURenderPassDescriptor;
@@ -152,10 +155,11 @@ export interface RenderTask extends Task {
     /** @internal */
     _targetSignature: RenderTargetSignature;
 
-    /** Add a mesh to this task's explicit render list with an optional per-pass material override.
-     *  Resolved at `record()` time via `material._buildGroup._rebuildSingle`,
-     *  so the mesh's material family must already have been registered with
-     *  the scene (so its batch builder has run). */
+    /** Add a mesh to this task's explicit render list with an optional per-pass material override. Resolved via
+     *  `material._buildGroup._rebuildSingle`, so the mesh's material family must already have been registered with the
+     *  scene (its batch builder has run). BEFORE the first `record()` the add is QUEUED and drained at record() time;
+     *  AFTER (a live/runtime add) it is resolved + re-bucketed into THIS task immediately, so the mesh renders on the
+     *  next frame without a `frameGraph.build()` (which would re-allocate shared GPU resources across all tasks). */
     addMesh(mesh: Mesh, opts?: { material?: Material }): void;
     /** @internal */
     _pendingMeshes: { mesh: Mesh; material: Material }[];
@@ -212,6 +216,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _opaqueBundles: [],
         _lastVersion: -1,
         _lastVis: 0,
+        _recorded: false,
         _renderPassDescriptor: { colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
         _depthSrc: config.depth,
@@ -229,6 +234,17 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
                 return;
             }
             task._pendingMeshes.push({ mesh, material });
+            if (task._recorded) {
+                // Live (post-record) add: resolve + re-bucket THIS task now — buildBindings clears its bundle cache
+                // so it re-records on the next execute. Deliberately NOT a frame-graph rebuild (that re-allocates the
+                // shared scene UBO + every task's render target mid-frame and crashes the in-flight submit).
+                resolvePendingMeshes(task, sc);
+                // A live add makes the render list explicit (mirrors record(), where a pending mesh forces
+                // _autoFromScene = false). Without this, an auto-mirroring task's next scene-version resync in
+                // prepareRenderTaskPass would clear _renderables and drop the just-added mesh.
+                task._autoFromScene = false;
+                buildBindings(task, engine, targetSignature);
+            }
         },
         record(): void {
             if (task._autoFromScene) {
@@ -258,6 +274,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             refreshTaskSceneBindGroup(task, engine);
             buildBindings(task, engine, targetSignature);
             buildRenderPassDescriptor(task, rt);
+            task._recorded = true; // task is now live — a subsequent addMesh resolves + re-buckets immediately
         },
         execute(): number {
             return executePass(task, engine, targetSignature, updateContext);
