@@ -60,6 +60,8 @@ Pages are ordered by how commonly Babylon Lite users reach for them — start wi
 | [38-bundle-size-tooling.md](/lite/architecture/38-bundle-size-tooling)             | Bundle Size Tooling      | Per-scene bundle analysis, ceilings, treemaps                                                          |
 | [39-animation-parity-testing.md](/lite/architecture/39-animation-parity-testing)   | Animation Parity         | Animated scene test methodology                                                                        |
 | [40-material-stencil.md](/lite/architecture/40-material-stencil)                   | Material Stencil         | Opt-in `enableMaterialStencil` per-material stencil mask/test on Standard/PBR/Shader, zero-impact hook |
+| [41-audio-engine.md](/lite/architecture/41-audio-engine)                           | Audio Engine             | Web Audio playback, buses, 3D spatial, panning, analyser, microphone, unmute UI                       |
+| [42-physics.md](/lite/architecture/42-physics)                                     | Physics                  | Havok V2 world, bodies/shapes/aggregates, timestep & delta propagation, collision/trigger/query/character |
 
 ---
 

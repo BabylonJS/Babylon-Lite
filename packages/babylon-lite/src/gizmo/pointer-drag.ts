@@ -20,6 +20,7 @@ import type { Vec3 } from "../math/types.js";
 import { createPickingRay } from "../picking/ray.js";
 import { createGpuPicker, disposePicker, pickAsync } from "../picking/gpu-picker.js";
 import type { GpuPicker } from "../picking/gpu-picker.js";
+import type { PickingInfo } from "../picking/picking-info.js";
 import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js";
 import { resolveCameraViewport } from "../camera/viewport.js";
 import { rayPlaneIntersect, normalizeVec3Obj } from "./gizmo-math.js";
@@ -142,6 +143,12 @@ interface DispatcherState {
     /** Async pick token — if the latest pointer-move arrives before the
      *  previous pick resolves, the older result is discarded. */
     hoverToken: number;
+    /** Latest un-picked pointer position for hover (CSS px), or null. The hover-pick
+     *  runner coalesces to this, so fast motion never queues a backlog of GPU picks. */
+    hoverPending: { x: number; y: number } | null;
+    /** True while the serialized hover-pick loop is running, so concurrent pointer-moves
+     *  only update `hoverPending` instead of starting an overlapping pick (#328). */
+    hoverPickActive: boolean;
     /** True while a pointer-down GPU pick is in flight (between the press and
      *  the async pick resolving).  Camera controls consult this so they defer
      *  starting an orbit until it's known whether the press hit a gizmo. */
@@ -236,6 +243,8 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
         active: null,
         hovered: null,
         hoverToken: 0,
+        hoverPending: null,
+        hoverPickActive: false,
         pickPending: false,
         cleanup: () => undefined,
     };
@@ -255,11 +264,12 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
             handlePointerMove(state, event);
             return;
         }
-        // Idle pointer-move: GPU-pick to determine hover target so gizmos can
-        // swap to their hover material before the user starts dragging.  Picks
-        // are tagged with a monotonically-increasing token so a stale result
-        // can't overwrite the latest hover decision.
-        void handleHoverMove(state, event);
+        // Idle pointer-move: record the latest position and (re)start the serialized
+        // hover-pick runner. Serialization + coalescing keep exactly one GPU pick in
+        // flight, so overlapping picks never map the shared staging buffer twice (#328),
+        // and fast motion collapses to the most recent position instead of a backlog.
+        state.hoverPending = { x: event.offsetX, y: event.offsetY };
+        void runHoverPicks(state);
     };
 
     const onPointerUp = (event: PointerEvent): void => {
@@ -296,12 +306,8 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
     return state;
 }
 
-async function handleHoverMove(state: DispatcherState, event: PointerEvent): Promise<void> {
-    const token = ++state.hoverToken;
-    const info = await pickAsync(state.picker, event.offsetX, event.offsetY);
-    if (token !== state.hoverToken || state.active) {
-        return;
-    }
+/** Apply a resolved hover pick: swap hover state/materials for the hit collider (if any). */
+function applyHoverResult(state: DispatcherState, info: PickingInfo): void {
     const drag = info.hit && info.pickedMesh ? findDragForMesh(state.drags, info.pickedMesh as Mesh) : null;
     const next = drag && drag.enabled ? drag : null;
     if (next === state.hovered) {
@@ -315,6 +321,43 @@ async function handleHoverMove(state: DispatcherState, event: PointerEvent): Pro
     if (next) {
         next.hovering = true;
         next.onHoverStart.notify();
+    }
+}
+
+/**
+ * Serialized, coalescing hover-pick runner. Only ONE hover pick runs at a time: concurrent
+ * pointer-moves just overwrite `state.hoverPending`, and the loop always processes the most
+ * recent position (dropping intermediate ones) once the current pick resolves. This keeps the
+ * final resting position resolved while never starting an overlapping GPU pick (which would map
+ * the shared 1×1 staging buffer twice — the #328 crash) and never queuing a pick backlog.
+ *
+ * `hoverToken` still discards a result the moment a newer pick starts or the dispatcher is torn
+ * down. The `finally` guarantees `hoverPickActive` is cleared even if a pick rejects, and a
+ * rejected pick is swallowed, so a single failure can never permanently stop hover updates.
+ */
+async function runHoverPicks(state: DispatcherState): Promise<void> {
+    if (state.hoverPickActive) {
+        return;
+    }
+    state.hoverPickActive = true;
+    try {
+        while (state.hoverPending && !state.active) {
+            const { x, y } = state.hoverPending;
+            state.hoverPending = null;
+            const token = ++state.hoverToken;
+            let info: PickingInfo;
+            try {
+                info = await pickAsync(state.picker, x, y);
+            } catch {
+                continue; // a failed pick must not wedge the loop
+            }
+            if (token !== state.hoverToken || state.active) {
+                continue;
+            }
+            applyHoverResult(state, info);
+        }
+    } finally {
+        state.hoverPickActive = false;
     }
 }
 

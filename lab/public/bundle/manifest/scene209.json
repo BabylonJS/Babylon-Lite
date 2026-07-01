@@ -1,11 +1,11 @@
 {
-  "rawKB": 54.4,
+  "rawKB": 54.5,
   "gzipKB": 22.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene209-_mat4-storage-f64-3NavC9Rv.js",
     "scene209-floating-origin-DMyB87f5.js",
-    "scene209-havok-floating-origin-CkalwAjY.js",
+    "scene209-havok-floating-origin-CVYBGBaG.js",
     "scene209-pack-mat4-with-offset-BS-Lz8k7.js",
     "scene209-standard-renderable-BhttRL8q.js",
     "scene209-wgsl-helpers-CwHFFXvt.js",

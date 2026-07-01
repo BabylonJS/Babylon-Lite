@@ -34,8 +34,8 @@ import {
     registerScene,
     setPhysicsBodyMass,
     setPhysicsBodyShape,
+    setPhysicsGravity,
     setPhysicsShapeMaterial,
-    setPhysicsTimestep,
     showPhysicsBody,
     startEngine,
     stopEngine,
@@ -43,6 +43,7 @@ import {
 import type { AssetContainer, EngineContext, Mesh, PhysicsShapeParameters, PhysicsViewer, PhysicsWorld, SceneNode } from "babylon-lite";
 
 const PHYSICS_FPS = 60;
+const GRAVITY = { x: 0, y: -9.8, z: 0 };
 const HEIGHTMAP_URL = "https://playground.babylonjs.com/textures/heightMap.png";
 const SEAGULL_URL = "https://playground.babylonjs.com/scenes/seagulf.glb";
 const SEAGULL_SCALE = 0.63695717914937;
@@ -229,16 +230,16 @@ async function main(): Promise<void> {
     const seagull = findPrimaryMesh(await loadGltf(engine, SEAGULL_URL));
 
     const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
-    const world = createHavokWorld(scene, hknp, { x: 0, y: -9.8, z: 0 });
+    const world = createHavokWorld(scene, hknp, { x: 0, y: 0, z: 0 });
     const viewer = createPhysicsViewer(scene, world, { color: [1, 1, 1, 1] });
 
-    // Robust capture gate: keep physics paused (timestep 0) during the warm-up frames so the
-    // debug wireframe overlay is fully rendered before any motion, then count ACTUAL physics
-    // steps. This decouples the parity capture from GPU pipeline warm-up timing (the BJS
-    // reference renders its PhysicsViewer overlay through an async-compiled utility layer that
-    // is blank on the very first frames). Both scenes start physics from the identical settled
-    // drop-height state and step the same number of times, so the captured frame matches.
-    setPhysicsTimestep(world, 0);
+    // Robust capture gate: the world starts with ZERO gravity, so bodies stay frozen at their settled
+    // drop-height state during the warm-up frames (physics steps every frame at scene.fixedDeltaMs, but
+    // with no gravity and no initial velocity nothing moves). The debug wireframe overlay is thus fully
+    // rendered before any motion, then we enable gravity and count ACTUAL physics steps. This decouples
+    // the parity capture from GPU pipeline warm-up timing (the BJS reference renders its PhysicsViewer
+    // overlay through an async-compiled utility layer that is blank on the very first frames). Both
+    // scenes start from the identical settled drop-height state, so the captured frame matches.
     let physStep = 0;
     onPhysicsAfterStep(world, () => {
         if (!physicsRunning) {
@@ -320,9 +321,10 @@ async function main(): Promise<void> {
     await registerScene(scene);
     await startEngine(engine);
     // The first rendered frame has drawn the inline wireframe overlay (Lite compiles its
-    // pipelines synchronously, so the overlay is present immediately). Start stepping physics now.
+    // pipelines synchronously, so the overlay is present immediately). Enable gravity now so bodies
+    // begin falling from the settled drop-height state.
     physicsRunning = true;
-    setPhysicsTimestep(world, 1 / PHYSICS_FPS);
+    setPhysicsGravity(world, GRAVITY);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 }

@@ -35,6 +35,7 @@ import {
     setPhysicsBodyMassProperties,
     setPhysicsBodyPreStep,
     setPhysicsBodyShape,
+    worldStepSeconds,
 } from "./havok.js";
 import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
 
@@ -382,7 +383,10 @@ export class PhysicsCharacterController {
      * @param displacement - Requested world-space displacement for this step.
      */
     public moveWithCollisions(displacement: Vec3): void {
-        const deltaTime = this._world._timestep;
+        // Physics step in seconds: the world's fixed step, or the scene's current per-frame delta when
+        // no fixed step is set (see `worldStepSeconds`). If that is 0 (e.g. the first frame) the guard
+        // below skips the move.
+        const deltaTime = worldStepSeconds(this._world);
         if (!deltaTime || deltaTime <= 0) {
             return;
         }

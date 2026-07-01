@@ -1,6 +1,6 @@
 {
-  "rawKB": 111.5,
-  "gzipKB": 41,
+  "rawKB": 111.9,
+  "gzipKB": 41.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene222-gpu-pool-CHlSfwGp.js",
