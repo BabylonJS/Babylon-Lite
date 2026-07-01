@@ -257,7 +257,6 @@ export {
     ParticleHelper,
     ParticleSystemSet,
     PointsCloudSystem,
-    HavokPlugin,
     PhysicsAggregate,
     PhysicsBody,
     PhysicsShape,
@@ -275,3 +274,5 @@ export {
     VirtualJoystick,
     SceneOptimizer,
 } from "./unsupported/unsupported-extended.js";
+
+export { HavokPlugin, PhysicsEngine, PhysicsShapeType, PhysicsMotionType, PhysicsPrestepType, PhysicsConstraintType } from "./physics/physics.js";

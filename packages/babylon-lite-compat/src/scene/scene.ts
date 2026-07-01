@@ -31,6 +31,7 @@ import type { SceneContext, Camera as LiteCamera, ArcRotateCamera as LiteArcRota
 
 import { Color3, Color4 } from "../math/color.js";
 import type { Plane } from "../math/plane.js";
+import { HavokPlugin, PhysicsEngine } from "../physics/physics.js";
 import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
 import type { Camera } from "../cameras/cameras.js";
@@ -694,6 +695,51 @@ export class Scene extends AbstractScene {
     /** Synchronous ray picking — unsupported. */
     public pickWithRay(): never {
         return unsupported("Scene.pickWithRay", "Synchronous CPU ray-mesh intersection is not implemented in Babylon Lite.");
+    }
+
+    /** @internal The active Physics V2 engine, once `enablePhysics` has wired one. */
+    private _physicsEngine: PhysicsEngine | null = null;
+
+    /**
+     * Babylon.js `scene.enablePhysics(gravity, plugin)`. Wires the given Havok V2
+     * {@link HavokPlugin} to this scene, creating the native Lite physics world and
+     * registering per-frame stepping. The plugin's `useDeltaForWorldStep` flag
+     * controls whether the world advances by elapsed frame time (refresh-rate
+     * independent — issue #332) or a fixed `1/60` step.
+     *
+     * Bodies are created with the native `createPhysicsAggregate` /
+     * `createPhysicsBody` API against `scene.getPhysicsEngine().getPhysicsPlugin().world`.
+     * @returns `true` once physics is enabled.
+     */
+    public enablePhysics(gravity?: { x: number; y: number; z: number } | null, plugin?: HavokPlugin): boolean {
+        if (this._headless) {
+            return unsupported("Scene.enablePhysics", "A headless (NullEngine) scene has no render loop to step physics.");
+        }
+        if (!(plugin instanceof HavokPlugin)) {
+            return unsupported("Scene.enablePhysics", "Pass a `HavokPlugin` instance (Babylon Lite physics is Havok-V2 only).");
+        }
+        const g = gravity ?? { x: 0, y: -9.81, z: 0 };
+        plugin._attachToLiteScene(this._lite, g);
+        this._physicsEngine = new PhysicsEngine(plugin, g);
+        return true;
+    }
+
+    /** Babylon.js `scene.getPhysicsEngine()` — the active Physics V2 engine, or `null`. */
+    public getPhysicsEngine(): PhysicsEngine | null {
+        return this._physicsEngine;
+    }
+
+    /** Babylon.js `scene.isPhysicsEnabled()`. */
+    public isPhysicsEnabled(): boolean {
+        return this._physicsEngine !== null;
+    }
+
+    /** Babylon.js `scene.disablePhysicsEngine()` — release the active physics world. */
+    public disablePhysicsEngine(): void {
+        if (this._physicsEngine) {
+            this._physicsEngine.dispose();
+            this._physicsEngine = null;
+        }
     }
 
     /**
