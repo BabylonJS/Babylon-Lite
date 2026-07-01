@@ -31,6 +31,27 @@ export const createParticleBlock: ParticleBlockEvaluator = {
             sys._emitPower = emitPowerGetter(state) as number;
         };
 
+        system._createEmitPower = (particle, sys) => {
+            state.particle = particle;
+            state.system = sys;
+            // Mirrors BJS `_CreateEmitPowerData`: scale the (unit) emission direction by the emit power so a
+            // particle's velocity magnitude equals its emit power. A zero emit power parks the particle and
+            // stashes its facing in `_initialDirection`. (Lite has no inherited-velocity offset to add.)
+            const emitPower = sys._emitPower;
+            if (emitPower === 0) {
+                particle._initialDirection.x = particle.direction.x;
+                particle._initialDirection.y = particle.direction.y;
+                particle._initialDirection.z = particle.direction.z;
+                particle.direction.x = 0;
+                particle.direction.y = 0;
+                particle.direction.z = 0;
+            } else {
+                particle.direction.x *= emitPower;
+                particle.direction.y *= emitPower;
+                particle.direction.z *= emitPower;
+            }
+        };
+
         system._createSize = (particle, sys) => {
             state.particle = particle;
             state.system = sys;

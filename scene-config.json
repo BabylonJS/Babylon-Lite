@@ -2225,5 +2225,16 @@
         "tags": ["npe", "particles", "billboards"],
         "skipPerf": true,
         "compatParity": true
+    },
+    {
+        "id": 263,
+        "slug": "scene263-npe-sphere",
+        "name": "Scene 263 — NPE Particles: Emitters - Sphere",
+        "maxMad": 0.5,
+        "maxRawKB": 45,
+        "description": "Node Particle Editor graph (a classic ParticleSystem with a sphere emitter — createSphereEmitter(3) — converted to NPE via ConvertToNodeParticleSystemSetAsync, mirroring Babylon.js visual test 'Particles - Emitters - Sphere', playground #O9966G#0) rendered as camera-facing additive billboards. Adds SphereShapeBlock (uniform spherical-coordinate emission with radial outward direction) to the NPE block set, alongside SystemBlock, CreateParticleBlock, ParticleRandomBlock, ParticleInputBlock, ParticleMathBlock, ParticleLerpBlock, ParticleConverterBlock, UpdatePositionBlock, UpdateColorBlock, and ParticleTextureSourceBlock with a deterministic seeded RNG and a frozen frame.",
+        "tags": ["npe", "particles", "billboards"],
+        "skipPerf": true,
+        "compatParity": true
     }
 ]

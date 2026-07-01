@@ -1,11 +1,11 @@
 {
-  "rawKB": 36.8,
-  "gzipKB": 22.8,
+  "rawKB": 37.2,
+  "gzipKB": 22.9,
   "ignoredRawKB": 28.6,
   "runtimeChunks": [
     "scene262-billboard-renderable-q1v61uze.js",
     "scene262-box-shape-block-BGUJgZxl.js",
-    "scene262-create-particle-block-BNXmEFse.js",
+    "scene262-create-particle-block-DKPiUU-Z.js",
     "scene262-generate-mipmaps-Ka9O_fxT.js",
     "scene262-particle-converter-block-oStUKUGD.js",
     "scene262-particle-input-block-CGs_d8UR.js",

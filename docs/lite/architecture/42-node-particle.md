@@ -192,6 +192,17 @@ The **order and count** of `Math.random()` calls during creation must match BJS 
 shape block is normally the only creation step that consumes random values (e.g. `PointShapeBlock`
 calls `RandomRange` three times: X, Y, Z of the start direction). `RandomRange(min,max) = min + (max-min)*Math.random()`.
 
+Creation runs a fixed slot order — lifeTime (which also draws `_emitPower`), position, direction,
+**emitPower**, size, angle, colour, colourDead — and each slot must draw the same randoms in the same
+order as BJS. The **emitPower slot scales the (unit) emission direction by `_emitPower`** so a particle's
+velocity magnitude equals its emit power, mirroring BJS `_CreateEmitPowerData` (a zero emit power parks the
+particle and stashes its facing in `_initialDirection`). This is silent when `minEmitPower === maxEmitPower
+=== 1` (the direction is unit either way) but parity-critical once emit power varies, e.g. the sphere scene.
+
+Shape blocks implemented so far: `BoxShapeBlock` (uniform point in `[minEmitBox, maxEmitBox]`, direction
+`RandomRange(direction1, direction2)`) and `SphereShapeBlock` (uniform spherical-coordinate point of
+`radius`/`radiusRange`, direction radially outward from the emitter with optional `directionRandomizer`).
+
 ---
 
 ## Node Graph Layer
