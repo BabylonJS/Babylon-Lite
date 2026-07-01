@@ -1,6 +1,6 @@
 {
-  "rawKB": 89,
-  "gzipKB": 37.1,
+  "rawKB": 89.1,
+  "gzipKB": 37.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene1-background-dds-skybox-CCuisDEl.js",

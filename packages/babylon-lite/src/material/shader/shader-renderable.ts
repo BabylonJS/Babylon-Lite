@@ -112,7 +112,10 @@ function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial,
     const engine = scene.surface.engine;
     const bindings = getOrCreateShaderPipelineBindings(engine, material);
     ensureCustomUbo(engine, material, bindings.customSpec);
-    const packets = meshes.map((mesh) => createPacket(scene, material, bindings.systemSpec, mesh));
+    // `isOverride` marks an AUX view packet (a material-override registered into an explicit task, e.g. a
+    // depth/SSAO no-colour view) — route its disposer to `_meshAuxDisposables` so a MAIN-material swap of this
+    // same mesh does not tear it down out from under that task.
+    const packets = meshes.map((mesh) => createPacket(scene, material, bindings.systemSpec, mesh, isOverride));
     const isTransparent = material.needAlphaBlending;
     if (isTransparent) {
         return packets.map((packet) => createTransparentRenderable(scene, material, packet, isOverride));
@@ -120,7 +123,7 @@ function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial,
     return [createOpaqueRenderable(scene, material, packets, isOverride)];
 }
 
-function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh): ShaderPacket {
+function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, aux = false): ShaderPacket {
     const engine = scene.surface.engine;
     const systemUBO = createEmptyUniformBuffer(engine, systemSpec._totalBytes, "shader-system-ubo");
     const systemData = new F32(systemSpec._totalBytes / 4);
@@ -138,7 +141,7 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
     for (const tex of packet._boundTextures) {
         acquireTexture(tex);
     }
-    registerMeshTextureDisposer(scene, mesh, packet);
+    registerMeshTextureDisposer(scene, mesh, packet, aux);
     return packet;
 }
 
@@ -363,8 +366,11 @@ function collectShaderStorageBuffers(material: ShaderMaterial): GPUBuffer[] {
     return buffers;
 }
 
-function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: ShaderPacket): void {
-    const list = scene._meshDisposables.get(mesh) ?? [];
+function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: ShaderPacket, aux = false): void {
+    // Aux (override) view packets go in `_meshAuxDisposables` so a main-material swap leaves them alone; main
+    // packets stay in `_meshDisposables` (torn down + rebuilt by the swap drain). Both are drained on real removal.
+    const map = aux ? scene._meshAuxDisposables : scene._meshDisposables;
+    const list = map.get(mesh) ?? [];
     list.push(() => {
         packet._disposed = true;
         if (packet._owner) {
@@ -381,7 +387,7 @@ function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: Sh
         packet._boundTextures = [];
         packet._boundStorageBuffers = [];
     });
-    scene._meshDisposables.set(mesh, list);
+    map.set(mesh, list);
 }
 
 function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: ShaderMaterial, mesh: Mesh, camera: Camera | null, targetWidth: number, targetHeight: number): void {

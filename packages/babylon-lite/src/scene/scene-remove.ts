@@ -20,6 +20,16 @@ export function removeFromScene(scene: SceneContext, mesh: Mesh): void {
         }
         scene._meshDisposables.delete(mesh);
     }
+    // AUX (override) view packets — depth/SSAO no-colour views another task registered on this mesh. A material
+    // swap deliberately leaves these alone (see `_meshAuxDisposables`); a real removal must still free them.
+    const auxFns = scene._meshAuxDisposables.get(mesh);
+    if (auxFns) {
+        didMutate = true;
+        for (const fn of auxFns) {
+            fn();
+        }
+        scene._meshAuxDisposables.delete(mesh);
+    }
     const mi2 = scene.meshes.indexOf(mesh);
     if (mi2 >= 0) {
         scene.meshes.splice(mi2, 1);

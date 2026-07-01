@@ -1,6 +1,6 @@
 {
   "rawKB": 95.4,
-  "gzipKB": 38.9,
+  "gzipKB": 39,
   "ignoredRawKB": 1485.2,
   "runtimeChunks": [
     "scene175-generate-mipmaps-B-d91NI_.js",

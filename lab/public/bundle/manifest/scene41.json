@@ -1,6 +1,6 @@
 {
-  "rawKB": 92.9,
-  "gzipKB": 36.9,
+  "rawKB": 93,
+  "gzipKB": 37,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene41-generate-mipmaps-BWxJCIcc.js",

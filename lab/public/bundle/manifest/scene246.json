@@ -1,6 +1,6 @@
 {
-  "rawKB": 99.1,
-  "gzipKB": 42,
+  "rawKB": 99.2,
+  "gzipKB": 42.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene246-create-skeleton-COkERfCM.js",

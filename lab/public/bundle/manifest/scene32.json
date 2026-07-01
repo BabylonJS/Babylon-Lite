@@ -1,6 +1,6 @@
 {
-  "rawKB": 79.9,
-  "gzipKB": 32.8,
+  "rawKB": 80,
+  "gzipKB": 32.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene32-generate-mipmaps-DdnhjgK3.js",

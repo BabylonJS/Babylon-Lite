@@ -102,6 +102,13 @@ export interface SceneContext extends RenderingContext {
     _disposables: (() => void)[];
     /** @internal Per-mesh cleanup callbacks (mesh UBOs, bind groups). For material swap + dispose. */
     _meshDisposables: Map<Mesh, (() => void)[]>;
+    /** @internal Per-mesh cleanup callbacks for AUX (material-OVERRIDE) view packets that an explicit render
+     *  task registered on a mesh it does not own — e.g. a depth-prepass / SSAO no-colour view of a wall. Kept
+     *  SEPARATE from `_meshDisposables` because a MAIN-material swap (`processMaterialSwaps`, which rebuilds
+     *  only the main renderable) must NOT tear these down: they belong to another task, whose cached bundle
+     *  would then replay a destroyed system UBO ("used in submit while destroyed"). Drained only on a real mesh
+     *  removal (`removeFromScene`) and scene dispose, exactly like `_meshDisposables` minus the swap path. */
+    _meshAuxDisposables: Map<Mesh, (() => void)[]>;
     /** @internal Meshes whose material was changed via setter — drained before each render frame. */
     _materialSwapQueue: Mesh[];
     /** @internal Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
@@ -178,6 +185,7 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         _groups: new Map(),
         _disposables: [],
         _meshDisposables: new Map(),
+        _meshAuxDisposables: new Map(),
         _materialSwapQueue: [],
         _renderableVersion: 0,
         _materialEpoch: 0,
@@ -375,6 +383,12 @@ export function disposeScene(scene: SceneContext): void {
         }
     }
     ctx._meshDisposables.clear();
+    for (const fns of ctx._meshAuxDisposables.values()) {
+        for (const fn of fns) {
+            fn();
+        }
+    }
+    ctx._meshAuxDisposables.clear();
     for (const mesh of ctx.meshes) {
         // Free the mesh's shared GPU buffers only when this was its LAST owning scene.
         if (unregisterMeshScene(ctx, mesh)) {
