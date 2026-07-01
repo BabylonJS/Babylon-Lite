@@ -51,7 +51,7 @@ if (isUpToDate()) {
 
 if (!existsSync(generatedDts) || statSync(generatedDts).mtimeMs < newestMtime(engineSrcDir)) {
     console.log("[engine-types] generating rolled-up d.ts via babylon-lite build:dist (~10s)…");
-    execFileSync("pnpm", ["--filter", "babylon-lite", "build:dist"], { cwd: repoRoot, stdio: "inherit" });
+    execFileSync("pnpm", ["--filter", "babylon-lite", "build:dist"], { cwd: repoRoot, stdio: "inherit", shell: true });
 }
 
 mkdirSync(outDir, { recursive: true });
