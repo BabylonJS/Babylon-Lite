@@ -38,7 +38,7 @@ flowchart LR
     editor["Monaco editor<br/>(one model per file)"] -->|getFiles + entry| transpile["esbuild-wasm<br/>bundle → ESM"]
     transpile -->|module code| runner["Runner (main.ts)"]
     runner -->|new iframe + code| frame["runner.html<br/>sandboxed iframe"]
-    frame -->|import map| engine["@babylonjs/lite<br/>(nightly or esm.sh)"]
+    frame -->|import map| engine["@babylonjs/lite<br/>(nightly or CDN)"]
     frame -->|"postMessage:<br/>console / error / stats / ran"| runner
     runner --> consolePane["Console panel"]
     snippets["snippet.babylonjs.com"] <-->|save / load| main["main.ts"]
@@ -55,23 +55,24 @@ flowchart LR
 - **Transpile** (`src/transpile.ts`) — `esbuild-wasm` bundles the project's files
   in-browser, starting from the entry file and resolving relative imports from an
   in-memory file map while keeping `@babylonjs/lite` external. Any _other_ bare
-  package import is rewritten to an `https://esm.sh/<pkg>` CDN URL so external npm
-  packages work without configuration. An inline source map keeps runtime stacks
-  mapped to the original files.
+  package import is rewritten to an active-CDN URL (`https://esm.sh/<pkg>`, or its
+  jsDelivr fallback) so external npm packages work without configuration. An inline
+  source map keeps runtime stacks mapped to the original files.
 - **Runner** (`src/runner.ts` + `public/runner.html`) — a sandboxed iframe hosts the
   WebGPU canvas and an import map resolving `@babylonjs/lite` to the chosen engine
   bundle. Each run recreates the iframe (clean teardown); it relays `console` /
   `error` / `stats` (FPS) / `ran` back over `postMessage`.
 - **Engine** (`vite.engine.config.ts` → `src/engine-entry.ts`) — builds the workspace
   engine source into a self-contained ESM under `public/engine/dev/` ("nightly"). The
-  version selector can instead load any published release on demand from the esm.sh
-  CDN — no redeploy needed.
+  version selector can instead load any published release on demand from the active
+  ESM CDN (esm.sh, or its jsDelivr fallback) — no redeploy needed.
 - **Resizable layout** (`src/split.ts`) — a draggable divider between the editor and
   preview panes; the chosen ratio is persisted in `localStorage` and arrow keys nudge
   it for keyboard users.
 - **Download** (`src/download.ts`) — exports the current project as a runnable zip
   (`index.html` + bundled `main.js` + any same-origin assets it references), with the
-  engine resolved from esm.sh via an import map.
+  engine resolved from the active CDN (esm.sh, or its jsDelivr fallback) via an
+  import map.
 - **Glue** (`src/main.ts`) — wires the icon toolbar (examples, version selector,
   save, download, run), the run loop, snippet save/load + deep links, and embed mode.
 
@@ -97,13 +98,14 @@ playground/
    ├─ editor.ts              # Monaco multi-model setup + engine-typed IntelliSense
    ├─ file-tabs.ts           # Horizontal file-tab bar (add/rename/delete/entry)
    ├─ split.ts               # Draggable editor/preview divider (persisted ratio)
-   ├─ transpile.ts           # esbuild-wasm multi-file bundle → ESM (esm.sh externals)
+   ├─ transpile.ts           # esbuild-wasm multi-file bundle → ESM (CDN externals)
    ├─ download.ts            # Export the project as a runnable zip
    ├─ runner.ts              # Owns/recreates the runner iframe
    ├─ examples.ts            # Example registry (inline snippets + ?raw imports)
    ├─ snippets.ts            # Save/load against the Babylon snippet server
    ├─ embed.ts               # ?embed modes + postMessage host bridge + deep links
-   ├─ versions.ts            # Engine version list + esm.sh URL resolution
+   ├─ versions.ts            # Engine version list + CDN URL resolution
+   ├─ cdn.ts                 # CDN selection with esm.sh → jsDelivr fallback probe
    └─ engine-entry.ts        # Re-exports the engine for the nightly bundle build
 ```
 
@@ -146,10 +148,27 @@ The toolbar's version selector chooses which engine the runner loads:
 - **Nightly (latest source)** — the self-hosted bundle built from this workspace.
   Its reported `VERSION` is stamped as `<latest>-nightly` (e.g. `1.4.0-nightly`),
   resolved from the newest `npm-lite-v*` git tag (overridable with `PACKAGE_VERSION`).
-- **A published version** — fetched from `https://esm.sh/@babylonjs/lite@<version>`
-  and applied via the runner's import map. The list is read from the npm registry.
+- **A published version** — fetched from the active ESM CDN (`https://esm.sh/@babylonjs/lite@<version>`,
+  or its jsDelivr fallback) and applied via the runner's import map. The list is
+  read from the npm registry.
 
 `public/engine/dev/` and `dist/` are generated and git-ignored.
+
+### CDN fallback (esm.sh → jsDelivr)
+
+External packages and pinned engine releases load from a public ESM CDN. The
+primary CDN is **esm.sh**, but it is unreachable in some regions (e.g. Russia).
+On first use the playground runs a one-time reachability probe against esm.sh; if
+it fails (or times out), the whole session falls back to **jsDelivr**
+(`https://cdn.jsdelivr.net/npm/<pkg>/+esm`). The chosen CDN is then used
+consistently for the engine import map, esbuild's bare-import rewrite, and
+downloads, so a project's entire dependency graph stays on one reachable CDN.
+The selection lives in `src/cdn.ts`.
+
+> Browsers can't natively retry a failed static `import` against a second URL, so
+> this is a host-level fallback (one probe up front), not a per-package retry. The
+> realistic failure mode — esm.sh blocked for the whole region — is exactly what a
+> single probe captures.
 
 ## Multiple files
 
@@ -178,21 +197,33 @@ loading round-trips the whole project.
 
 ### Importing npm packages
 
-Any bare import other than `@babylonjs/lite` is rewritten to an
-`https://esm.sh/<pkg>` URL at bundle time, so external ESM packages work with no
-configuration:
+Any bare import other than `@babylonjs/lite` is rewritten to the active ESM CDN
+(esm.sh, or its jsDelivr fallback) at bundle time, so external ESM packages work
+with no configuration:
 
 ```ts
-import seedrandom from "seedrandom"; // → https://esm.sh/seedrandom at run time
+import seedrandom from "seedrandom"; // → the active CDN's seedrandom URL at run time
 ```
 
 `@babylonjs/lite` is special-cased: it stays on the selected engine (self-hosted
-nightly or the pinned esm.sh release). Absolute `https://` imports are left as-is.
+nightly or the pinned CDN release). Absolute `https://` imports are left as-is.
 
 The built-in **Physics — Havok wrecking ball** example shows this end to end: it
-imports `@babylonjs/havok` (rewritten to esm.sh) and loads the Havok WebAssembly
-binary from the same CDN via `locateFile`, with no local copy of the package or
-`.wasm`.
+imports `@babylonjs/havok` (rewritten to the active CDN) and loads the Havok
+WebAssembly binary via `locateFile`, with no local copy of the package or `.wasm`.
+Its wasm URL comes from a `?url` import, so it follows the same CDN fallback:
+
+```ts
+import HavokPhysics from "@babylonjs/havok";
+import havokWasmUrl from "@babylonjs/havok/lib/esm/HavokPhysics.wasm?url";
+// → https://esm.sh/...HavokPhysics.wasm (or the jsDelivr equivalent)
+const havok = await HavokPhysics({ locateFile: () => havokWasmUrl });
+```
+
+A `?url` suffix on a bare specifier resolves to that package asset's **raw-file**
+URL on the active CDN (as a string), rather than importing it as a module — the
+right shape for a non-module asset like a `.wasm` binary handed to `locateFile`.
+It is baked into downloads too, so an exported Havok project stays self-contained.
 
 ## Adding examples
 
@@ -316,16 +347,17 @@ playground reject snippets authored for the classic engine.
 The **Download** button exports the current project as a self-contained zip:
 
 - `index.html` — a minimal host with the canvas and an import map resolving
-  `@babylonjs/lite` to esm.sh (the selected version, or latest for nightly).
+  `@babylonjs/lite` to the active CDN (the selected version, or latest for nightly).
 - `main.js` — the esbuild bundle (relative imports inlined; other npm packages
-  already pointing at esm.sh URLs).
+  already pointing at that CDN's URLs).
 - Any **same-origin assets** the scene references by a root-absolute path
   (e.g. `/brdf-lut.png`) are fetched and bundled, with the reference rewritten to a
   relative path.
 
 Serve the folder (e.g. `npx serve`) and open `index.html` — it runs the scene
 exactly as in the playground. An internet connection is still needed for the engine
-(esm.sh) and any remote `https://` assets.
+(esm.sh or its jsDelivr fallback, fixed to whichever was reachable at download time)
+and any remote `https://` assets.
 
 ## Embedding
 

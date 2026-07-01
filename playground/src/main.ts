@@ -187,7 +187,7 @@ async function run(): Promise<void> {
         setLoading(true, "Running…");
         appendConsole("system", "Running…");
         runStartedAt = performance.now();
-        await runner.run(code, engineUrlForVersion(currentVersion));
+        await runner.run(code, await engineUrlForVersion(currentVersion));
     } catch (err) {
         setLoading(false);
         runStartedAt = null;
