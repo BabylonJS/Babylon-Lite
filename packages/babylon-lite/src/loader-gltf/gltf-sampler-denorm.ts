@@ -7,22 +7,37 @@ import { F32, U8, I8, I16 } from "../engine/typed-arrays.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import { _installSamplerConverter } from "./gltf-animation.js";
 
-_installSamplerConverter((src, length, normalized) => {
-    // Aligned Float32 fast path (also covers the misaligned-reinterpret case the default handled).
-    if (src instanceof F32) {
-        return new F32(src.buffer, src.byteOffset, length);
-    }
-    const out = new F32(length);
-    const div = src instanceof I8 ? 127 : src instanceof I16 ? 32767 : src instanceof U8 ? 255 : 65535;
-    const signed = src instanceof I8 || src instanceof I16;
-    const s = src as unknown as { [i: number]: number };
-    for (let i = 0; i < length; i++) {
-        out[i] = normalized ? (signed ? Math.max(s[i]! / div, -1) : s[i]! / div) : s[i]!;
-    }
-    return out;
-});
+let _installed = false;
 
-// Hookless feature: registered in the registry so loadGltfFeatures imports this module (installing
-// the converter above as a side effect). The empty default keeps `mods.map(m => m.default)` valid.
+/** Install the non-Float32 / normalized animation-sampler converter. Called (not bare-imported) by
+ *  the registry trigger and KHR_animation_pointer so the reference survives Rollup's tree-shaking
+ *  under the engine's `"sideEffects": false` — a bare side-effect import would be dropped from
+ *  production bundles, silently reverting non-float samplers to the fast-path Float32 reinterpret.
+ *  Idempotent so the registry + animation-pointer paths can both call it. */
+export function installSamplerDenorm(): void {
+    if (_installed) {
+        return;
+    }
+    _installed = true;
+
+    _installSamplerConverter((src, length, normalized) => {
+        // Aligned Float32 fast path (also covers the misaligned-reinterpret case the default handled).
+        if (src instanceof F32) {
+            return new F32(src.buffer, src.byteOffset, length);
+        }
+        const out = new F32(length);
+        const div = src instanceof I8 ? 127 : src instanceof I16 ? 32767 : src instanceof U8 ? 255 : 65535;
+        const signed = src instanceof I8 || src instanceof I16;
+        const s = src as unknown as { [i: number]: number };
+        for (let i = 0; i < length; i++) {
+            out[i] = normalized ? (signed ? Math.max(s[i]! / div, -1) : s[i]! / div) : s[i]!;
+        }
+        return out;
+    });
+}
+
+// Hookless feature: registered in the registry so loadGltfFeatures imports this module and installs
+// the converter above. The empty default keeps `mods.map(m => m.default)` valid.
 const feature: GltfFeature = { id: "_sampler_denorm" };
+installSamplerDenorm();
 export default feature;
