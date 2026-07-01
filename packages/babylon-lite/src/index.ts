@@ -587,6 +587,17 @@ export {
     disposeSpriteRenderer,
 } from "./sprite/sprite-renderer.js";
 
+// ─── Node Particles (NPE) ────────────────────────────────────────────
+export type { Particle, ParticleScale } from "./particle/particle.js";
+export type { ParticleSystem } from "./particle/particle-system.js";
+export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
+export type { NodeParticleSet } from "./particle/node/npe-build.js";
+export type { ParseNodeParticleOptions } from "./particle/node/node-particle.js";
+export { parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
+export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
+export { registerNodeParticleSet } from "./particle/particle-scene.js";
+export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
+
 // ─── Text ────────────────────────────────────────────────────────────
 export type { Font } from "./text/font.js";
 export { loadFont, createFontFromBuffer } from "./text/font.js";

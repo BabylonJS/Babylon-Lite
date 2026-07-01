@@ -2214,5 +2214,27 @@
         "description": "Three rotated boxes with sharp diagonal silhouette edges, anti-aliased with a frame-graph Temporal Anti-Aliasing (TAA) post-process. The Lite TAA is a pure frame-graph node that accumulates sub-pixel-jittered frames (Halton base 2/3) into a converged supersampled image and drives the projection jitter into the source render task, so it can be injected into any frame-graph chain. Matches Babylon.js' TAARenderingPipeline.",
         "tags": ["post-process", "frame-graph", "taa", "anti-aliasing"],
         "skipPerf": true
+    },
+    {
+        "id": 262,
+        "slug": "scene262-npe-size",
+        "name": "Scene 262 — NPE Particles: Basic Properties - Size",
+        "maxMad": 0.5,
+        "maxRawKB": 45,
+        "description": "Node Particle Editor graph (a classic ParticleSystem converted to NPE via ConvertToNodeParticleSystemSetAsync, mirroring Babylon.js visual test #MP4MLC#0) rendered as camera-facing additive billboards. Covers SystemBlock, CreateParticleBlock, BoxShapeBlock, ParticleRandomBlock, ParticleInputBlock, ParticleMathBlock, ParticleLerpBlock, ParticleConverterBlock, UpdatePositionBlock, UpdateColorBlock, and ParticleTextureSourceBlock with a deterministic seeded RNG and a frozen frame.",
+        "tags": ["npe", "particles", "billboards"],
+        "skipPerf": true,
+        "compatParity": true
+    },
+    {
+        "id": 263,
+        "slug": "scene263-npe-sphere",
+        "name": "Scene 263 — NPE Particles: Emitters - Sphere",
+        "maxMad": 0.5,
+        "maxRawKB": 45,
+        "description": "Node Particle Editor graph (a classic ParticleSystem with a sphere emitter — createSphereEmitter(3) — converted to NPE via ConvertToNodeParticleSystemSetAsync, mirroring Babylon.js visual test 'Particles - Emitters - Sphere', playground #O9966G#0) rendered as camera-facing additive billboards. Adds SphereShapeBlock (uniform spherical-coordinate emission with radial outward direction) to the NPE block set, alongside SystemBlock, CreateParticleBlock, ParticleRandomBlock, ParticleInputBlock, ParticleMathBlock, ParticleLerpBlock, ParticleConverterBlock, UpdatePositionBlock, UpdateColorBlock, and ParticleTextureSourceBlock with a deterministic seeded RNG and a frozen frame.",
+        "tags": ["npe", "particles", "billboards"],
+        "skipPerf": true,
+        "compatParity": true
     }
 ]

@@ -3,7 +3,7 @@ import { resolve } from "path";
 import { gzipSync } from "zlib";
 
 /** Human-readable label for the ignored-module set used in test/log output. */
-export const IGNORED_BUNDLE_MODULE_PATTERN = "*-nme.ts + vendor runtimes (text-shaper, manifold, recast-navigation)";
+export const IGNORED_BUNDLE_MODULE_PATTERN = "*-nme.ts, *-npe.ts + vendor runtimes (text-shaper, manifold, recast-navigation)";
 
 export interface RuntimeJsPayload {
     file: string;
@@ -39,8 +39,9 @@ export interface RuntimeBundleSummary {
 }
 
 /** A module is excluded from the runtime-code measurement when it is either:
- *    1. A scene-specific NME data payload (`*-nme.ts`) — checked-in scene data,
- *       not engine code, so ceiling drift should not track it.
+ *    1. A scene-specific node-graph data payload (`*-nme.ts` for Node Materials,
+ *       `*-npe.ts` for Node Particles) — checked-in scene data, not engine code,
+ *       so ceiling drift should not track it.
  *    2. A bundled third-party WASM/shaping runtime — `text-shaper` (default-layout
  *       text), `manifold-3d` (CSG), or `@recast-navigation` (navmesh). These are
  *       upstream vendor blobs loaded only by the feature that needs them, not Lite
@@ -50,7 +51,7 @@ export interface RuntimeBundleSummary {
  *       pre-bundled each runtime into `build/lib/_chunks/vendor/<name>-<hash>.js`. */
 function isIgnoredBundleModule(id: string): boolean {
     const clean = id.replace(/\\/g, "/").split("?")[0]!;
-    if (/(?:^|\/)[^/]+-nme\.ts$/.test(clean)) {
+    if (/(?:^|\/)[^/]+-(?:nme|npe)\.ts$/.test(clean)) {
         return true;
     }
     // `<name>-<hash>.js` is the built-package vendor-chunk form; `<name>/…` is the
