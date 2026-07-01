@@ -54,6 +54,34 @@ export {
     WebXRCamera,
     AnaglyphArcRotateCamera,
 } from "./cameras/cameras.js";
+// Camera input handlers (`camera.inputs` family) — Babylon Lite attaches a
+// single control impl per camera (compat `attachControl`), so these throw.
+export {
+    CameraInputsManager,
+    BaseCameraMouseWheelInput,
+    BaseCameraPointersInput,
+    ArcRotateCameraGamepadInput,
+    ArcRotateCameraKeyboardMoveInput,
+    ArcRotateCameraMouseWheelInput,
+    ArcRotateCameraPointersInput,
+    ArcRotateCameraVRDeviceOrientationInput,
+    FlyCameraKeyboardInput,
+    FlyCameraMouseInput,
+    FollowCameraKeyboardMoveInput,
+    FollowCameraMouseWheelInput,
+    FollowCameraPointersInput,
+    FreeCameraDeviceOrientationInput,
+    FreeCameraGamepadInput,
+    FreeCameraKeyboardMoveInput,
+    FreeCameraMouseInput,
+    FreeCameraMouseWheelInput,
+    FreeCameraTouchInput,
+    FreeCameraVirtualJoystickInput,
+    GeospatialCameraPointersInput,
+    GeospatialCameraMouseWheelInput,
+    GeospatialCameraKeyboardInput,
+} from "./unsupported/camera-inputs.js";
+export type { ICameraInput } from "./unsupported/camera-inputs.js";
 
 // ─── Lights ──────────────────────────────────────────────────────────
 export { Light, HemisphericLight, DirectionalLight, PointLight, SpotLight } from "./lights/lights.js";

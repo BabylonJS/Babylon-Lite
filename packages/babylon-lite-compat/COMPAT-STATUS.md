@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `c729b94f2e36f2d915415620857452f7ad0ff731`
-- **Last sync date:** 2026-06-26
+- **Last synced BJS commit:** `116b262fb30998b04ad3186b5e483697e318503b`
+- **Last sync date:** 2026-07-01
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -131,6 +131,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `GeospatialCamera`                                | ✅ Full          | cameras (over Lite `createGeospatialCamera` / `setGeospatialOrientation` / `attachGeospatialControls`) |
 | `DeviceOrientationCamera` / `WebXRCamera`         | ❌ Not supported | throwing stub; no XR/orientation in Lite                                                               |
 | `AnaglyphArcRotateCamera` / stereoscopic rigs     | ❌ Not supported | throwing stub                                                                                          |
+| `CameraInputsManager` + `Cameras/Inputs` handler family (`Free`/`ArcRotate`/`Fly`/`Follow`/`Geospatial` `*KeyboardMoveInput`/`*MouseInput`/`*MouseWheelInput`/`*PointersInput`/`*GamepadInput`/`*TouchInput`/`*DeviceOrientationInput`/`*VirtualJoystickInput`, `BaseCameraMouseWheelInput`, `BaseCameraPointersInput`) | ❌ Not supported | [unsupported/camera-inputs.ts](src/unsupported/camera-inputs.ts) — throwing stubs. Babylon Lite attaches a single control impl per camera (compat `attachControl`/`detachControl`), with no per-input `camera.inputs` handlers to configure; `ICameraInput` exported as a type for parity |
 
 ## Lights
 
@@ -472,3 +473,20 @@ large-world-rendering scenes are now resolved.
 > and the `lab/gl` WebGL track only — **nothing under `packages/babylon-lite/src/**`**,
 > so no new Lite capability came online. No previously-skipped scene is newly
 > unblocked; Task 2 stays dormant this run.
+>
+> **Task 2 re-check (2026-07-01):** the Lite changes since the last sync — the
+> frame-graph Hi-Z depth pyramid + `addTaskAfter` + runtime `addMesh` (#343), the
+> animation controller tick/`currentFrame` write-back fix (#254), and the
+> WebGPU-globals-free import path (#334) — were cross-referenced against the
+> blocker table. The depth-pyramid / `addTaskAfter` exports are Lite-only
+> frame-graph internals (no `@babylonjs/core` facade to wrap and out of the
+> PostProcess/frame-graph bucket that stays deferred by design); the animation and
+> import fixes harden existing behaviour without exposing a new capability. **None
+> clears a previously-skipped scene's blocker**, so no scene moved into the working
+> list — Task 2 is dormant, as expected when no Lite change unblocks a scene. On
+> the BJS side, the diff since the last sync is internal `.pure.ts` refactors, a
+> diagonal-keyboard-movement normalization for the `Free`/`Fly`/`ArcRotate` camera
+> keyboard inputs (#18634), and glTF object-model doc/type tweaks — no new public
+> symbol. The camera-keyboard PR did surface that the whole `Cameras/Inputs`
+> handler family + `CameraInputsManager` were an uncovered gap; they are now
+> covered as throwing stubs (Task 3).
