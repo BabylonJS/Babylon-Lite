@@ -1,6 +1,6 @@
 {
-  "rawKB": 64,
-  "gzipKB": 24.4,
+  "rawKB": 64.8,
+  "gzipKB": 24.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene223-standard-renderable-DnE_HU3_.js",

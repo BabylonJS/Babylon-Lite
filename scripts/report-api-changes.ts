@@ -468,6 +468,66 @@ function isNonBreakingUnionWidening(removedLine: string, addedLine: string): boo
     return removedMembers.every((member) => addedMembers.has(member));
 }
 
+/** Split a single parameter declaration into its optional flag and type, ignoring the
+ *  parameter name. Returns `undefined` for rest params (`...x: T[]`) and anything that
+ *  doesn't look like `name: Type` — those are left to other classifiers / stay breaking. */
+function splitParameterType(parameter: string): { optional: boolean; type: string } | undefined {
+    if (parameter.startsWith("...")) {
+        return undefined;
+    }
+    const match = /^[A-Za-z_$][\w$]*(\?)?\s*:\s*([\s\S]+)$/.exec(parameter);
+    if (!match) {
+        return undefined;
+    }
+    return { optional: match[1] === "?", type: match[2]!.trim() };
+}
+
+/**
+ * Treat a function/method whose only change is one or more parameters WIDENING their
+ * type to a union superset — every previous top-level union member is still accepted —
+ * as non-breaking. Widening an input parameter is backward-compatible: existing callers
+ * that passed the old type still type-check (TypeScript parameter bivariance/contravariance).
+ *
+ * Example: `removeFromScene(scene: SceneContext, mesh: Mesh)` →
+ * `removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera)` — `Mesh` is
+ * still in the accepted set, so old calls keep compiling. The parameter NAME may change
+ * (names are not part of a positional call contract). A genuine type REPLACEMENT
+ * (`string` → `Color3`, where `string` is not a member of the new type) keeps the old
+ * member out of the new set and so stays breaking. Mirrors {@link isNonBreakingUnionWidening}
+ * for type aliases.
+ */
+function isNonBreakingParameterWidening(removedLine: string, addedLine: string): boolean {
+    const removedSignature = parseCallableSignature(removedLine);
+    const addedSignature = parseCallableSignature(addedLine);
+    if (!removedSignature || !addedSignature) {
+        return false;
+    }
+    if (removedSignature.prefix !== addedSignature.prefix || removedSignature.suffix !== addedSignature.suffix) {
+        return false;
+    }
+    if (removedSignature.parameters.length === 0 || removedSignature.parameters.length !== addedSignature.parameters.length) {
+        return false;
+    }
+    let widenedAtLeastOne = false;
+    for (let index = 0; index < removedSignature.parameters.length; index += 1) {
+        const removedParam = splitParameterType(removedSignature.parameters[index]!);
+        const addedParam = splitParameterType(addedSignature.parameters[index]!);
+        if (!removedParam || !addedParam || removedParam.optional !== addedParam.optional) {
+            return false;
+        }
+        if (removedParam.type === addedParam.type) {
+            continue;
+        }
+        const addedMembers = new Set(splitUnionMembers(addedParam.type));
+        if (!splitUnionMembers(removedParam.type).every((member) => addedMembers.has(member))) {
+            return false; // a member was dropped/replaced → genuine breaking type change
+        }
+        widenedAtLeastOne = true;
+    }
+    // Require an actual widening so a pure parameter rename isn't silently reclassified.
+    return widenedAtLeastOne;
+}
+
 /**
  * The TypedArray / buffer-view types that TypeScript 5.7 made generic over their
  * backing buffer (`Float32Array` → `Float32Array<TArrayBuffer extends ArrayBufferLike>`).
@@ -528,6 +588,7 @@ export function breakingApiLines(diff: string): string[] {
             !addedLines.some(
                 (addedLine) =>
                     isNonBreakingOptionalParameterExpansion(removedLine, addedLine) ||
+                    isNonBreakingParameterWidening(removedLine, addedLine) ||
                     isNonBreakingConstLiteralWidening(removedLine, addedLine) ||
                     isNonBreakingUnionWidening(removedLine, addedLine) ||
                     isNonBreakingTypedArrayGenericWidening(removedLine, addedLine)

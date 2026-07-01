@@ -317,11 +317,13 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             const engine = ctx.surface.engine;
             const groups = result.animationGroups;
             ctx.animationGroups.push(...groups);
-            ctx._beforeRender.push((deltaMs: number) => {
+            const hook = (deltaMs: number): void => {
                 for (const g of groups) {
                     tickAnimation(g, deltaMs, engine);
                 }
-            });
+            };
+            result._beforeRenderHook = hook;
+            ctx._beforeRender.push(hook);
         }
         return;
     }

@@ -30,6 +30,33 @@ describe("API report breaking-change classifier", () => {
         expect(breakingApiLines(diff)).toEqual(["export declare function setColor(color: string): void;"]);
     });
 
+    it("treats a parameter widening to a union superset as additive", () => {
+        const diff = apiDiff(
+            "export declare function removeFromScene(scene: SceneContext, mesh: Mesh): void;",
+            "export declare function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera): void;"
+        );
+
+        expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("treats a non-union parameter widening into a union as additive", () => {
+        const diff = apiDiff("export declare function add(entity: Mesh): void;", "export declare function add(entity: Mesh | LightBase): void;");
+
+        expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("flags a parameter union that drops the original type as breaking", () => {
+        const diff = apiDiff("export declare function add(entity: Mesh): void;", "export declare function add(entity: LightBase | Camera): void;");
+
+        expect(breakingApiLines(diff)).toEqual(["export declare function add(entity: Mesh): void;"]);
+    });
+
+    it("flags a pure parameter rename (no widening) as breaking", () => {
+        const diff = apiDiff("export declare function add(mesh: Mesh): void;", "export declare function add(entity: Mesh): void;");
+
+        expect(breakingApiLines(diff)).toEqual(["export declare function add(mesh: Mesh): void;"]);
+    });
+
     it("flags return type changes as breaking", () => {
         const diff = apiDiff("export declare function createMesh(name: string): Mesh;", "export declare function createMesh(name: string): Promise<Mesh>;");
 

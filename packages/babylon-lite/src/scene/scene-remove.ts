@@ -1,13 +1,112 @@
 import type { SceneContext } from "./scene-core.js";
 import { unregisterMeshScene } from "./mesh-scene-registry.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { LightBase } from "../light/types.js";
+import type { Camera } from "../camera/camera.js";
+import type { ShadowGenerator } from "../shadow/shadow-generator.js";
+import type { TransformNode } from "./transform-node.js";
+import type { SceneNode } from "./scene-node.js";
+import type { AssetContainer } from "../asset-container.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { removeMeshFromTask } from "../frame-graph/render-task.js";
 import type { RenderTask } from "../frame-graph/render-task.js";
 
-/** Remove a mesh from the scene and destroy its GPU resources.
+/** Remove an entity from the scene, undoing what `addToScene` did. Accepts the same
+ *  union as {@link addToScene}: a Mesh, light, camera, shadow generator, transform node,
+ *  or a whole AssetContainer. Safe to call more than once (idempotent).
+ *
  *  Standalone function for tree-shaking — only included when actually used. */
-export function removeFromScene(scene: SceneContext, mesh: Mesh): void {
+export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
+    // AssetContainer — undo addToScene(scene, container) field by field.
+    if ("entities" in entity) {
+        const container = entity as AssetContainer;
+        for (const e of container.entities) {
+            removeFromScene(scene, e as Mesh | LightBase | TransformNode);
+        }
+        if (container.camera && scene.camera === container.camera) {
+            scene.camera = null;
+        }
+        const groups = container.animationGroups;
+        if (groups?.length) {
+            for (const g of groups) {
+                spliceOut(scene.animationGroups, g);
+            }
+        }
+        const hook = container._beforeRenderHook;
+        if (hook) {
+            spliceOut(scene._beforeRender, hook);
+            container._beforeRenderHook = undefined;
+        }
+        return;
+    }
+    // Mesh — carries GPU geometry + material. Owns the only heavy removal path.
+    if ("_gpu" in entity && "material" in entity) {
+        removeMeshFromScene(scene, entity as unknown as Mesh);
+        removeChildren(scene, entity as unknown as SceneNode);
+        return;
+    }
+    // Non-mesh scene nodes (light, camera, shadow generator, transform node) share a
+    // detach-parent + unwind-children tail; only the scene-list bookkeeping differs.
+    if ("lightType" in entity) {
+        // Light — drop from the scene list and remove its shadow generator with it.
+        spliceOut(scene.lights, entity as LightBase);
+        const sg = (entity as LightBase).shadowGenerator;
+        if (sg) {
+            disposeShadowGenerator(scene, sg);
+        }
+    } else if ("fov" in entity && "nearPlane" in entity) {
+        // Camera — clear the scene reference if this camera is the active one.
+        if (scene.camera === (entity as Camera)) {
+            scene.camera = null;
+        }
+    } else if ("_shadowType" in entity && "_light" in entity) {
+        // Shadow generator removed on its own (not via its light).
+        disposeShadowGenerator(scene, entity as ShadowGenerator);
+    }
+    // TransformNode / any other scene-graph node needs no bookkeeping of its own.
+    detachParent(entity);
+    removeChildren(scene, entity as unknown as SceneNode);
+}
+
+/** Drop a shadow generator from the scene and dispose its task resources exactly once.
+ *  The disposable render task lives on the lazily-created task state, not the generator
+ *  itself; nulling the state afterwards keeps repeat removals a safe no-op. */
+function disposeShadowGenerator(scene: SceneContext, sg: ShadowGenerator): void {
+    spliceOut(scene.shadowGenerators, sg);
+    if (sg._shadowTaskState) {
+        sg._shadowTaskState._task.dispose();
+        sg._shadowTaskState = undefined;
+    }
+}
+
+/** Remove the first occurrence of `item` from `arr` if present. */
+function spliceOut<T>(arr: T[], item: T): void {
+    const i = arr.indexOf(item);
+    if (i >= 0) {
+        arr.splice(i, 1);
+    }
+}
+
+/** Clear an entity's `parent` link when it has one, so the world-matrix child registry
+ *  stops retaining/walking a removed node during parent invalidation. */
+function detachParent(node: unknown): void {
+    if (node && typeof node === "object" && "parent" in node) {
+        (node as { parent: unknown }).parent = null;
+    }
+}
+
+function removeChildren(scene: SceneContext, node: SceneNode): void {
+    const kids = node.children;
+    if (kids?.length) {
+        for (const child of [...kids]) {
+            removeFromScene(scene, child as Mesh);
+        }
+    }
+}
+
+/** Remove a mesh from the scene and destroy its GPU resources.
+ *  Internal helper — `removeFromScene` dispatches here for the Mesh case. */
+function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     const fns = scene._meshDisposables.get(mesh);
     // Whether this call actually mutated scene state — used to gate the renderable
     // version bump so a no-op removal (mesh never registered) doesn't needlessly
