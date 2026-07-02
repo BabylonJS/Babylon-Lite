@@ -291,14 +291,7 @@ export class AbstractMesh extends TransformNode {
         const positions = this._lite._cpuPositions;
         if (positions && positions.length >= 3 && positions.length % 3 === 0) {
             const [min, max] = computeAabb(positions);
-            if (
-                Number.isFinite(min[0]) &&
-                Number.isFinite(min[1]) &&
-                Number.isFinite(min[2]) &&
-                Number.isFinite(max[0]) &&
-                Number.isFinite(max[1]) &&
-                Number.isFinite(max[2])
-            ) {
+            if (Number.isFinite(min[0]) && Number.isFinite(min[1]) && Number.isFinite(min[2]) && Number.isFinite(max[0]) && Number.isFinite(max[1]) && Number.isFinite(max[2])) {
                 return new BoundingInfo(new Vector3(min[0], min[1], min[2]), new Vector3(max[0], max[1], max[2]));
             }
         }
