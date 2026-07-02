@@ -1,6 +1,6 @@
 {
-  "rawKB": 59.9,
-  "gzipKB": 27,
+  "rawKB": 60,
+  "gzipKB": 27.1,
   "ignoredRawKB": 7.6,
   "runtimeChunks": [
     "scene89-_math-factory-DFVyS8gB.js",

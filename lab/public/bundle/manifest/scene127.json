@@ -1,6 +1,6 @@
 {
-  "rawKB": 58.3,
-  "gzipKB": 22.1,
+  "rawKB": 58.5,
+  "gzipKB": 22.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene127-shader-renderable-D-mlf3g2.js",

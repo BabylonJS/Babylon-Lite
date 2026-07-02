@@ -163,5 +163,12 @@ export function updateShadowCameraBase(camera: Camera, cameraVersion: number, ne
     camera._vpCache = viewProj;
     camera._vpVer = cameraVersion;
     camera._vpAspect = 1;
+    // The shadow view-projection is injected directly (a custom light-space
+    // projection, not the perspective built by getProjectionMatrix). Mirror the
+    // camera's projection inputs into the vp cache key so getViewProjectionMatrix
+    // treats the injected matrix as valid instead of recomputing a perspective vp.
+    camera._vpFov = camera.fov;
+    camera._vpNear = near;
+    camera._vpFar = far;
     (camera as Camera & { _shadowCameraVersion?: number })._shadowCameraVersion = cameraVersion;
 }

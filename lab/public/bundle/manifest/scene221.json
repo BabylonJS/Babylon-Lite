@@ -1,6 +1,6 @@
 {
-  "rawKB": 100.9,
-  "gzipKB": 38.1,
+  "rawKB": 101,
+  "gzipKB": 38.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene221-shader-renderable-BwWfZ-Ps.js",

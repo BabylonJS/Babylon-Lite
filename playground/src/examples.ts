@@ -17,6 +17,7 @@ import HAVOK_PHYSICS from "../examples/havok-physics.ts?raw";
 import PBR_MATERIAL_GRID from "../examples/pbr-material-grid.ts?raw";
 import SPINNING_POLYHEDRA from "../examples/spinning-polyhedra.ts?raw";
 import GRID_STUDIO from "../examples/grid-studio.ts?raw";
+import CAMERA_FOV_INVALIDATION from "../examples/camera-fov-invalidation.ts?raw";
 
 const BOOMBOX = `import {
     addToScene,
@@ -166,6 +167,7 @@ export const EXAMPLES: Example[] = [
     { id: "boombox", label: "glTF — BoomBox (PBR + environment)", code: BOOMBOX },
     { id: "primitives", label: "Primitives — box + ground", code: PRIMITIVES },
     { id: "spinning-polyhedra", label: "Animation — Spinning Polyhedra", code: SPINNING_POLYHEDRA },
+    { id: "camera-fov-invalidation", label: "Camera — FOV cache invalidation (#271)", code: CAMERA_FOV_INVALIDATION },
     { id: "pbr-material-grid", label: "PBR — Metalness × Roughness grid", code: PBR_MATERIAL_GRID },
     { id: "grid-studio", label: "Grid material — Studio staging", code: GRID_STUDIO },
     {
