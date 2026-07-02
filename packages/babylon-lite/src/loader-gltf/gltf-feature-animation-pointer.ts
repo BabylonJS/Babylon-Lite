@@ -15,7 +15,7 @@
  *  resolved by `resolveAnimationPointer` in animation-pointer.ts, invoked from
  *  the pointer-channel parser installed below. */
 
-import "./gltf-sampler-denorm.js";
+import { installSamplerDenorm } from "./gltf-sampler-denorm.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { AnimationChannel, TargetPath } from "../animation/types.js";
@@ -23,6 +23,11 @@ import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS
 import type { PointerMaterial } from "./animation-pointer.js";
 import { resolveAnimationPointer } from "./animation-pointer.js";
 import { _installPointerHandlers } from "./gltf-animation.js";
+
+// Install the non-Float32 sampler converter (KHR_animation_pointer can drive normalized/misaligned
+// accessors, e.g. CubeVisibility's 11-byte UNSIGNED_BYTE flags). Calling the imported binding keeps
+// it alive through tree-shaking under the engine's `"sideEffects": false`.
+installSamplerDenorm();
 
 // Node TRS/weights pointer targets map 1:1 onto the standard glTF channel paths.
 const NODE_TRS_PATH: Record<string, TargetPath> = {

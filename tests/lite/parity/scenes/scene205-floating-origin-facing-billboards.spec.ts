@@ -23,7 +23,7 @@ test("Scene 205 — Floating-origin facing billboards match Babylon.js reference
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 205, settleMs: 500 });
 
-    await page.goto("/scene205.html");
+    await page.goto("scene205.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
 

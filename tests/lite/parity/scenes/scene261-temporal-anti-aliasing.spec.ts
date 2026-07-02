@@ -20,7 +20,7 @@ test("Scene 261 — Frame-graph TAA matches Babylon.js TAARenderingPipeline refe
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 261, timeout: 120_000 });
 
-    await page.goto("/scene261.html");
+    await page.goto("scene261.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     await page.waitForTimeout(500);
 

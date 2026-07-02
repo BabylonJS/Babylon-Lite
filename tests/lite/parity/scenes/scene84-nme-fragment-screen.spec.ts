@@ -12,7 +12,7 @@ test("Scene 84 — NME fragment/screen/depth blocks match Babylon.js reference",
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 84 });
 
-    await page.goto("/scene84.html");
+    await page.goto("scene84.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

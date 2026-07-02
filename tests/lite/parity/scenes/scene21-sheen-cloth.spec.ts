@@ -23,7 +23,7 @@ test("Scene 21 — PBR Sheen Cloth matches Babylon.js reference", async ({ page 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 21, timeout: 120_000 });
 
-    await page.goto("/scene21.html");
+    await page.goto("scene21.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

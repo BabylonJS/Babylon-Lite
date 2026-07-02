@@ -15,7 +15,7 @@ test("Scene 244 — PotOfCoalsAnimationPointer matches Babylon.js reference", as
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 244, seekTime: 1, timeout: 90_000 });
 
-    await page.goto("/scene244.html?seekTime=1");
+    await page.goto("scene244.html?seekTime=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);

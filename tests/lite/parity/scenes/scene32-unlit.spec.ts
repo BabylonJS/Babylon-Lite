@@ -18,7 +18,7 @@ test("Scene 32 — Unlit glTF matches Babylon.js reference", async ({ page }, te
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 32 });
 
-    await page.goto("/scene32.html");
+    await page.goto("scene32.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 

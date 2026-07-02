@@ -22,7 +22,7 @@ test("Scene 36 — Basis Universal Texture matches Babylon.js reference", async 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 36, timeout: 120_000 });
 
-    await page.goto("/scene36.html");
+    await page.goto("scene36.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 90_000 });
     await page.waitForTimeout(1000);
 

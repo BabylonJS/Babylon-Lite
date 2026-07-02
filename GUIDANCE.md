@@ -207,7 +207,7 @@ Hard-won gotchas that have each caused multiple parity failures. Check these fir
     1. Create `lab/lite/sceneN.html` + `lab/lite/src/lite/sceneN.ts`
     2. Add the entry to `lab/vite.config.ts` rollup inputs
     3. Add a Playwright parity test in `tests/lite/parity/scenes/sceneN-*.spec.ts`
-    4. Add a reference screenshot to `reference/lite/sceneN-*/babylon-ref-golden.png`
+    4. Generate and commit the golden reference at `reference/lite/sceneN-*/babylon-ref-golden.png`. Capture it **on a Mac** (BrowserStack CI renders on macOS WebGPU/Metal — capturing on Windows/Linux won't match) with `RECAPTURE_GOLDEN=true pnpm exec playwright test tests/lite/parity/scenes/sceneN-*.spec.ts`, eyeball the result, and commit it **in the same PR**. Goldens are tracked in git (no `git add -f` needed). A missing golden is not harmless: the harness silently falls back to rendering a full Babylon.js reference page live on every CI run (a second engine boot + asset download), making that scene ~10× slower and network-flaky. Every scene must ship its golden.
     5. Save a downscaled JPG thumbnail (≤720p, e.g. 1280×720) of the golden to `lab/public/thumbnails/sceneN.jpg`
     6. Add a card to `lab/index.html` (the scene gallery)
     7. Add a bundle-size ceiling test in `tests/lite/parity/bundle-size.spec.ts`
@@ -217,7 +217,8 @@ Hard-won gotchas that have each caused multiple parity failures. Check these fir
 ### 2b. Reference Image Convention (Mandatory)
 
 - **All golden and test images live under `reference/lite/sceneN-<slug>/`** — never in `tests/lite/` or anywhere else.
-- **Golden reference:** `babylon-ref-golden.png` (every scene, no exceptions).
+- **Golden reference:** `babylon-ref-golden.png` (every scene, no exceptions). It is **committed** to git and is the ground truth the Lite render is diffed against. Capture/recapture it on macOS (to match the cloud WebGPU renderer) via `RECAPTURE_GOLDEN=true pnpm test:parity` (all scenes) or per-scene with a single-spec invocation; see TESTING.md → "Golden References".
+- **Only commit goldens that actually changed.** WebGPU re-rendering is not bit-deterministic, so a blanket `RECAPTURE_GOLDEN=true` run rewrites every golden — including ones with no visual change — churning large binary PNGs for nothing. Before committing a recapture, `git checkout --` any golden whose diff is within the scene's `maxMad` (i.e. not a real, intended visual change) and commit only **new** scenes or **genuine** visual updates. Normal CI never overwrites an existing golden, so this churn only comes from committing a manual blanket recapture wholesale.
 - **Test actual output:** `test-actual.png` (written by the parity test).
 - **Live reference (optional):** `live-ref.png` (captured at test time from Babylon.js; falls back to golden if capture fails).
 - **Thumbnail:** A downscaled JPG of the golden lives at `lab/public/thumbnails/sceneN.jpg` — see **§2b″ Thumbnail Convention**.

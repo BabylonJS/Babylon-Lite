@@ -19,7 +19,7 @@ test("Scene 29 — Sheen Cloth glTF matches Babylon.js reference", async ({ page
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 29 });
 
-    await page.goto("/scene29.html");
+    await page.goto("scene29.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 

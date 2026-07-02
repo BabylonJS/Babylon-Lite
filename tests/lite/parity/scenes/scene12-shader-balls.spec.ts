@@ -25,7 +25,7 @@ test("Scene 12 — PBR Shader Balls matches Babylon.js reference", async ({ page
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 12, seekTime: 0.5, timeout: 120_000 });
 
-    await page.goto("/scene12.html?seekTime=0.5");
+    await page.goto("scene12.html?seekTime=0.5");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);

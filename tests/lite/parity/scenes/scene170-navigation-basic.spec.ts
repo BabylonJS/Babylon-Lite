@@ -17,7 +17,7 @@ test("Scene 170 - Navigation Basic matches Babylon.js reference", async ({ page 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 170, timeout: 180_000 });
 
-    await page.goto("/scene170.html");
+    await page.goto("scene170.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

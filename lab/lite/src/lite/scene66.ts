@@ -26,6 +26,7 @@ import {
 import type { Mesh } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE66_MORPH_PERIOD_MS, getScene66Nme, sanitizeName, sphereScrambleDeltas } from "../shared/scene66-nme.js";
+import { rebaseRootUrl } from "../shared/asset-url.js";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -84,7 +85,7 @@ async function main(): Promise<void> {
         // ambient/light/reflection) and — in this snippet — for every TextureBlock.
         // We forward it verbatim so sampling matches BJS's sRGB-decoded values;
         // the graph was authored assuming that interpretation.
-        textureOverrides[key] = await loadTexture2D(engine, t.url, {
+        textureOverrides[key] = await loadTexture2D(engine, rebaseRootUrl(t.url), {
             invertY: t.invertY ?? true,
             srgb: false, // NME textures work in gamma space, not linear
         });

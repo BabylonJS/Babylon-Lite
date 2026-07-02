@@ -12,7 +12,7 @@ test("Scene 74 — Effect Renderer fullscreen pass matches Babylon.js reference"
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 74, timeout: 30_000, settleMs: 500 });
 
-    await page.goto("/scene74.html");
+    await page.goto("scene74.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(600);
 

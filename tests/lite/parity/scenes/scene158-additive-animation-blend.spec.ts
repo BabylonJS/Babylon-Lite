@@ -15,7 +15,7 @@ test("Scene 158 — additive animation blend matches Babylon.js reference", asyn
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 158, seekTime: SEEK_TIME, timeout: 120_000, settleMs: 500 });
 
-    await page.goto(`/scene158.html?seekTime=${SEEK_TIME}`);
+    await page.goto(`scene158.html?seekTime=${SEEK_TIME}`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);

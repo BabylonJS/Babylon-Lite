@@ -12,7 +12,7 @@ test("Scene 162 - ShaderMaterial defines match Babylon.js reference", async ({ p
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 162, settleMs: 500 });
 
-    await page.goto("/scene162.html");
+    await page.goto("scene162.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

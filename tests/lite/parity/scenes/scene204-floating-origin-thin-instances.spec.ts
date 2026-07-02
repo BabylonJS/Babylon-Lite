@@ -22,7 +22,7 @@ test("Scene 204 — Floating-origin thin instances match Babylon.js reference", 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 204 });
 
-    await page.goto("/scene204.html");
+    await page.goto("scene204.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
 

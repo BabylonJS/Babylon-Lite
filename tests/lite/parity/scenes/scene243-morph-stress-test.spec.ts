@@ -15,7 +15,7 @@ test("Scene 243 — MorphStressTest matches Babylon.js reference", async ({ page
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 243, seekTime: 1, timeout: 90_000 });
 
-    await page.goto("/scene243.html?seekTime=1");
+    await page.goto("scene243.html?seekTime=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);

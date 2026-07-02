@@ -16,12 +16,37 @@
 import { F32, U32, I32, U8 } from "../engine/typed-arrays.js";
 import type { DecodedPrimitive } from "./gltf-feature.js";
 
-// Public base URL where the decoder JS + WASM are hosted. Defaults to site root.
-let dracoBaseUrl = "/";
+// Public base URL where the decoder JS + WASM are hosted.
+//
+// Resolution order (highest precedence first):
+//   1. An explicit setDracoBaseUrl() override.
+//   2. The global `__babylonLiteDecoderBase__`, which lets a host that serves
+//      the decoder scripts off a non-root path (e.g. the parity lab under a
+//      per-build base path) point the decoder at the right URL *without*
+//      statically importing this module.
+//   3. The site root ("/").
+//
+// The global is read lazily at point of use rather than baked in via an eager
+// import, so this module stays at zero bytes for scenes that never load
+// Draco-compressed assets.
+const DECODER_BASE_GLOBAL = "__babylonLiteDecoderBase__";
+let explicitBaseUrl: string | null = null;
+
+function normalizeBase(url: string): string {
+    return url.endsWith("/") ? url : url + "/";
+}
+
+function dracoBaseUrl(): string {
+    if (explicitBaseUrl !== null) {
+        return explicitBaseUrl;
+    }
+    const fromGlobal = (globalThis as Record<string, unknown>)[DECODER_BASE_GLOBAL];
+    return normalizeBase(typeof fromGlobal === "string" && fromGlobal.length > 0 ? fromGlobal : "/");
+}
 
 /** Override the base URL where draco_decoder.js and draco_decoder.wasm are hosted. */
 export function setDracoBaseUrl(url: string): void {
-    dracoBaseUrl = url.endsWith("/") ? url : url + "/";
+    explicitBaseUrl = normalizeBase(url);
 }
 
 interface DracoModule {
@@ -59,7 +84,7 @@ function loadDracoScript(): Promise<DracoFactory> {
             return;
         }
         const script = document.createElement("script");
-        script.src = dracoBaseUrl + "draco_decoder.js";
+        script.src = dracoBaseUrl() + "draco_decoder.js";
         script.onload = () => {
             const factory = (globalThis as { DracoDecoderModule?: DracoFactory }).DracoDecoderModule;
             if (!factory) {
@@ -80,7 +105,7 @@ async function getDracoModule(): Promise<DracoModule> {
     }
     modulePromise = (async () => {
         const factory = await loadDracoScript();
-        return factory({ locateFile: (f: string) => dracoBaseUrl + f });
+        return factory({ locateFile: (f: string) => dracoBaseUrl() + f });
     })();
     return modulePromise;
 }

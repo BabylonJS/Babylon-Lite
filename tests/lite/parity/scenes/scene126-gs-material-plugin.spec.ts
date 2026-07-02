@@ -14,7 +14,7 @@ test("Scene 126 — GS material plugin matches Babylon.js reference", async ({ p
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 126, timeout: 150_000, settleMs: 800 });
 
-    await page.goto("/scene126.html");
+    await page.goto("scene126.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 150_000 });
     await page.waitForFunction(() => !document.getElementById("loader-overlay"), { timeout: 5_000 }).catch(() => undefined);
     await page.waitForTimeout(500);

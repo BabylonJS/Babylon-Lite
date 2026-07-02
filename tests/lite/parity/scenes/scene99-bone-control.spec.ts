@@ -25,7 +25,7 @@ test("Scene 99 — bone control (hide skinned sub-tree) matches Babylon.js refer
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 99, timeout: 120_000, settleMs: 500 });
 
-    await page.goto("/scene99.html");
+    await page.goto("scene99.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     await page.waitForTimeout(500);
 

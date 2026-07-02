@@ -12,7 +12,7 @@ test("Scene 78 — NME scalar/vector math blocks match Babylon.js reference", as
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 78 });
 
-    await page.goto("/scene78.html");
+    await page.goto("scene78.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

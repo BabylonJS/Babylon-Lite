@@ -13,7 +13,7 @@ test("Scene 225 - Geospatial camera matches Babylon.js reference", async ({ page
     // Regenerate the BJS GeospatialCamera oracle on the same machine so the view matrix matches exactly.
     await captureGolden(browser, { sceneId: 225, force: true });
 
-    await page.goto("/scene225.html");
+    await page.goto("scene225.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
 

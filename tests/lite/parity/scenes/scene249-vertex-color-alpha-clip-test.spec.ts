@@ -15,7 +15,7 @@ test("Scene 249 — VertexColorAlphaClipTest matches Babylon.js reference", asyn
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 249, timeout: 90_000 });
 
-    await page.goto("/scene249.html");
+    await page.goto("scene249.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

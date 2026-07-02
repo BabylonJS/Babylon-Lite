@@ -12,7 +12,7 @@ test("Scene 159 - ShaderMaterial basic color matches Babylon.js reference", asyn
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 159, settleMs: 500 });
 
-    await page.goto("/scene159.html");
+    await page.goto("scene159.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

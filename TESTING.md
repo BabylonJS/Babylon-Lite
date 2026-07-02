@@ -59,7 +59,7 @@ pnpm exec playwright test tests/lite/plumbing/
 ## 3. Parity Tests (Pixel Comparison)
 
 **Runner:** Playwright  
-**Location:** `tests/lite/parity/scenes/` (25 scene spec files)  
+**Location:** `tests/lite/parity/scenes/` (one spec file per scene)  
 **Configs:**
 
 - Local: `playwright.config.ts`
@@ -71,10 +71,10 @@ as the error metric; thresholds are defined per-scene in `scene-config.json`.
 
 ### How it works
 
-1. Opens the Lite bundle page (`bundle-scene{N}.html`)
+1. Opens the Lite scene page (`sceneN.html`)
 2. Waits for `canvas[data-ready="true"]`
 3. Takes a screenshot
-4. Compares pixel-by-pixel against the golden reference
+4. Compares pixel-by-pixel against the committed golden reference
 5. Asserts MAD ≤ scene threshold
 
 ### Running locally
@@ -95,17 +95,80 @@ pnpm build:bundle-scenes
 pnpm test:parity-cloud
 ```
 
+In CI, parity runs on BrowserStack over a direct CDP connection
+(`connectOptions.wsEndpoint`, no SDK) and is **sharded across parallel cloud
+sessions**: `scripts/browserstack-wait.sh` grabs up to `BSTACK_SESSIONS_REQUIRED`
+sessions (falling back to fewer when the plan is busy) and exports `CIWORKERS` so
+Playwright shards to match. Pages are served from a public, build-isolated static
+site (`pnpm build:lab-site` + upload) and loaded directly via `PARITY_BASE_URL` —
+no Local tunnel. Run `pnpm test:parity` (local Chrome) for day-to-day dev.
+
 ### Golden References
 
-Golden images are committed in `reference/lite/` and compared against Lite renders.
-`captureGolden()` skips BJS page capture when the golden file already exists
-on disk, which significantly speeds up test runs.
+Every parity scene **must have a committed golden** at
+`reference/lite/<scene-slug>/babylon-ref-golden.png`. The golden is a Babylon.js
+reference render — the ground truth the Lite render is pixel-diffed against — and
+it is **tracked in git** (the `.gitignore` filters out transient `babylon-ref-*`
+artifacts but explicitly allows `babylon-ref-golden.png`, so no `git add -f` is
+needed).
 
-To force recapture of all golden references (e.g., after a Babylon.js update):
+**Why a committed golden matters (performance).** `captureGolden()` skips capture
+when the golden already exists on disk, so the test renders Lite once and finishes
+in ~6 s. When the golden is **missing**, the harness falls back to rendering a full
+Babylon.js reference page **live on every run** — a second engine boot plus asset
+download over the network — which pushes the test to 30–70 s and adds flakiness.
+A single missing golden makes that scene roughly **10× slower** in CI. This is the
+difference between the parity job finishing quickly and taking hours.
+
+**Capturing / recapturing.** Goldens must be captured on the **same WebGPU
+renderer** they are compared against in CI — BrowserStack macOS (Metal). Run the
+capture on a **Mac** so the local render matches; Windows/Linux CI agents lack
+WebGPU and cannot capture:
 
 ```sh
+# macOS, real WebGPU — recapture ALL goldens (e.g. after a Babylon.js bump)
 RECAPTURE_GOLDEN=true pnpm test:parity
+git add 'reference/lite/**/babylon-ref-golden.png'
 ```
+
+```sh
+# capture a SINGLE new scene's golden
+RECAPTURE_GOLDEN=true pnpm exec playwright test tests/lite/parity/scenes/sceneN-<slug>.spec.ts
+```
+
+After capturing, open the PNG and confirm it looks correct before committing.
+
+> **Only commit goldens that actually changed.** Re-rendering WebGPU is not
+> bit-deterministic — anti-aliasing, floating-point order, GPU/driver, and frame
+> timing make every recapture produce slightly different bytes. A blanket
+> `RECAPTURE_GOLDEN=true pnpm test:parity` therefore rewrites **every** golden,
+> even ones with no visual change, churning large binary PNGs for nothing. Before
+> committing a recapture, drop the noise-only diffs and keep only goldens that are
+> **new** or have a **real visual change** (a diff above the scene's `maxMad`, or
+> an intended scene/Babylon.js change). A quick filter:
+>
+> ```sh
+> # restore any golden whose change is within tolerance / not intended
+> git checkout -- reference/lite/<scene-slug>/babylon-ref-golden.png
+> ```
+>
+> Normal CI runs never overwrite an existing golden (`captureGolden()` only
+> recaptures when `RECAPTURE_GOLDEN` is set), so this churn only ever comes from a
+> manual blanket recapture being committed wholesale.
+
+### Adding a new scene
+
+When you add a parity scene you **must generate and commit its golden in the same
+PR** (see `GUIDANCE.md` §2 for the full new-scene checklist). The short version:
+
+1. Add the scene, its `tests/lite/parity/scenes/sceneN-<slug>.spec.ts` spec, and a
+   `scene-config.json` entry (`id`, `slug`, `name`, `maxMad`).
+2. On a Mac, capture the golden:
+   `RECAPTURE_GOLDEN=true pnpm exec playwright test tests/lite/parity/scenes/sceneN-<slug>.spec.ts`
+3. Verify `reference/lite/sceneN-<slug>/babylon-ref-golden.png` was written and
+   looks right.
+4. Commit the golden alongside the scene. **Never** rely on CI to capture it — an
+   uncommitted golden silently triggers the slow live-capture path on every run.
 
 ### Timeouts
 
@@ -219,14 +282,23 @@ pnpm test:bundle-size
 
 ## BrowserStack Configuration
 
-**Config file:** `config/browserstack.yml`
+Two jobs use BrowserStack with **different connection models**:
 
-| Setting           | Value                                |
-| ----------------- | ------------------------------------ |
-| Platform          | macOS Sonoma                         |
-| Browser           | Chrome latest                        |
-| Parallel sessions | 1                                    |
-| Local tunnel      | Enabled (tests hit `localhost:5174`) |
+| Job             | Connection                                   | Parallelism                    | Tunnel |
+| --------------- | -------------------------------------------- | ------------------------------ | ------ |
+| Parity (Cloud)  | Direct CDP (`connectOptions.wsEndpoint`)     | Sharded (`CIWORKERS` sessions) | None   |
+| Perf Regression | `browserstack-node-sdk` + `browserstack.yml` | Serial (1 session)             | Local  |
+
+**Parity (Cloud)** connects straight to a remote Chrome over CDP — no SDK and no
+`browserstack.yml`. Capabilities (macOS Sonoma, Chrome latest, real WebGPU) are
+built in `config/playwright.parity-cloud.config.ts`. The ~198 specs are sharded
+across parallel cloud sessions; `scripts/browserstack-wait.sh` grabs sessions and
+exports `CIWORKERS`. Pages load from a public static site (`PARITY_BASE_URL`), so
+no Local tunnel is used.
+
+**Perf Regression** still uses `browserstack-node-sdk` with `config/browserstack.yml`
+(`browserstackLocal: true`) because it compares current vs baseline on a single
+shared VM reached through the Local tunnel (`localhost:5174`).
 
 Credentials are read from environment variables:
 
@@ -335,14 +407,15 @@ entry specifies:
 
 ## Environment Variables Reference
 
-| Variable                  | Scope  | Default | Description                             |
-| ------------------------- | ------ | ------- | --------------------------------------- |
-| `PERF_REGRESSION_PCT`     | Perf   | `5`     | Max allowed regression %                |
-| `PERF_FRAMES`             | Perf   | `300`   | Measured frames per run                 |
-| `PERF_RUNS`               | Perf   | `5`     | Runs per version (takes median)         |
-| `PERF_WARMUP`             | Perf   | `60`    | Warmup frames before each run           |
-| `PERF_SCENES`             | Perf   | all     | Comma-separated scene IDs               |
-| `BUNDLE_DELTA_PCT`        | Bundle | —       | Max allowed bundle size growth %        |
-| `RECAPTURE_GOLDEN`        | Parity | —       | Set to `true` to force golden recapture |
-| `BROWSERSTACK_USERNAME`   | Cloud  | —       | BrowserStack credentials                |
-| `BROWSERSTACK_ACCESS_KEY` | Cloud  | —       | BrowserStack credentials                |
+| Variable                  | Scope  | Default | Description                                                               |
+| ------------------------- | ------ | ------- | ------------------------------------------------------------------------- |
+| `PERF_REGRESSION_PCT`     | Perf   | `5`     | Max allowed regression %                                                  |
+| `PERF_FRAMES`             | Perf   | `300`   | Measured frames per run                                                   |
+| `PERF_RUNS`               | Perf   | `5`     | Runs per version (takes median)                                           |
+| `PERF_WARMUP`             | Perf   | `60`    | Warmup frames before each run                                             |
+| `PERF_SCENES`             | Perf   | all     | Comma-separated scene IDs                                                 |
+| `BUNDLE_DELTA_PCT`        | Bundle | —       | Max allowed bundle size growth %                                          |
+| `RECAPTURE_GOLDEN`        | Parity | —       | Set to `true` to force golden recapture                                   |
+| `PARITY_REQUIRE_GOLDEN`   | Parity | —       | Set to `true` to fail (not live-capture) when a scene's golden is missing |
+| `BROWSERSTACK_USERNAME`   | Cloud  | —       | BrowserStack credentials                                                  |
+| `BROWSERSTACK_ACCESS_KEY` | Cloud  | —       | BrowserStack credentials                                                  |

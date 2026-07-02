@@ -20,7 +20,7 @@ test("Scene 200 — HPM Jitter (HPM off) matches Babylon.js reference", async ({
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 200 });
 
-    await page.goto("/scene200.html");
+    await page.goto("scene200.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
 

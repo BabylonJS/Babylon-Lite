@@ -28,6 +28,8 @@ variables:
       value: "true"
     - name: HEADLESS
       value: "true"
+    - name: PLAYWRIGHT_BROWSERS_PATH
+      value: "$(Pipeline.Workspace)/.playwright-browsers"
 
 stages:
     - stage: CI
@@ -48,13 +50,7 @@ stages:
                   inputs:
                       version: $(NODE_VERSION)
 
-                - script: |
-                      corepack enable
-                      corepack prepare pnpm@$(PNPM_VERSION) --activate
-                  displayName: "Enable pnpm via corepack"
-
-                - script: pnpm install --frozen-lockfile
-                  displayName: "Install dependencies"
+                - template: config/templates/install-deps.yml
 
                 - script: pnpm validate:release-markers
                   displayName: "Validate breaking-change markers"
@@ -79,13 +75,7 @@ stages:
                   inputs:
                       version: $(NODE_VERSION)
 
-                - script: |
-                      corepack enable
-                      corepack prepare pnpm@$(PNPM_VERSION) --activate
-                  displayName: "Enable pnpm via corepack"
-
-                - script: pnpm install --frozen-lockfile
-                  displayName: "Install dependencies"
+                - template: config/templates/install-deps.yml
 
                 - script: pnpm report:api-changes
                   displayName: "Generate API report diff"
@@ -118,16 +108,9 @@ stages:
                   inputs:
                       version: $(NODE_VERSION)
 
-                - script: |
-                      corepack enable
-                      corepack prepare pnpm@$(PNPM_VERSION) --activate
-                  displayName: "Enable pnpm via corepack"
-
-                - script: pnpm install --frozen-lockfile
-                  displayName: "Install dependencies"
-
-                - script: pnpm exec playwright install chromium
-                  displayName: "Install Playwright browsers"
+                - template: config/templates/install-deps.yml
+                  parameters:
+                      playwright: true
 
                 - script: npx vitest run --project unit --project gl-unit --project no-webgpu
                   displayName: "Run vitest unit tests"
@@ -207,16 +190,9 @@ stages:
                   inputs:
                       version: $(NODE_VERSION)
 
-                - script: |
-                      corepack enable
-                      corepack prepare pnpm@$(PNPM_VERSION) --activate
-                  displayName: "Enable pnpm via corepack"
-
-                - script: pnpm install --frozen-lockfile
-                  displayName: "Install dependencies"
-
-                - script: pnpm exec playwright install chromium
-                  displayName: "Install Playwright browsers"
+                - template: config/templates/install-deps.yml
+                  parameters:
+                      playwright: true
 
                 - script: |
                       TARGET_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-refs/heads/master}"
@@ -299,13 +275,7 @@ stages:
                   inputs:
                       version: $(NODE_VERSION)
 
-                - script: |
-                      corepack enable
-                      corepack prepare pnpm@$(PNPM_VERSION) --activate
-                  displayName: "Enable pnpm via corepack"
-
-                - script: pnpm install --frozen-lockfile
-                  displayName: "Install dependencies"
+                - template: config/templates/install-deps.yml
 
                 # Build current bundle scenes (skip size measurement — not needed for perf)
                 - script: pnpm build:bundle-scenes
@@ -416,13 +386,7 @@ stages:
                   inputs:
                       version: $(NODE_VERSION)
 
-                - script: |
-                      corepack enable
-                      corepack prepare pnpm@$(PNPM_VERSION) --activate
-                  displayName: "Enable pnpm via corepack"
-
-                - script: pnpm install --frozen-lockfile
-                  displayName: "Install dependencies"
+                - template: config/templates/install-deps.yml
 
                 - script: pnpm build:bundle-scenes
                   displayName: "Build bundle scenes"
@@ -430,14 +394,56 @@ stages:
                       SKIP_BJS: "true"
                       SKIP_MEASURE: "true"
 
-                # Run parity tests via BrowserStack (macOS Chrome with real WebGPU)
-                # browserstack-node-sdk handles connection & local tunnel
-                # Requires BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY
-                # from the BabylonJS-BrowserStack variable group
-                - script: pnpm test:parity-cloud
-                  displayName: "Run parity tests (BrowserStack)"
+                # Build a self-contained static parity site (scene pages with
+                # bundled JS). Deployed to a build-isolated public path so the
+                # remote BrowserStack browser can load pages directly — no Local
+                # tunnel, removing the dominant source of parity-run variance.
+                - script: pnpm build:lab-site
+                  displayName: "Build static parity site"
+                  env:
+                      LAB_BASE_PATH: "/lite/$(Build.BuildNumber)/parity-lab/"
+
+                - template: config/templates/upload-static-site.yml
+                  parameters:
+                      siteDir: $(System.DefaultWorkingDirectory)/lab/dist
+                      deployPath: lite/$(Build.BuildNumber)/parity-lab
+                      siteName: "Parity"
+                      postComment: false
+
+                # Run parity tests on BrowserStack via direct CDP (connectOptions),
+                # sharded across parallel cloud sessions. browserstack-wait.sh grabs
+                # up to BSTACK_SESSIONS_REQUIRED sessions (falling back to fewer when
+                # the plan is busy) and exports CIWORKERS so Playwright shards to
+                # match. PARITY_BASE_URL points the remote browsers at the public
+                # static site above — no Local tunnel. Requires BROWSERSTACK_USERNAME
+                # and BROWSERSTACK_ACCESS_KEY from the BabylonJS-BrowserStack group.
+                - script: bash scripts/browserstack-wait.sh pnpm test:parity-cloud
+                  displayName: "Run parity tests (BrowserStack, sharded)"
                   env:
                       HEADLESS: "true"
+                      PARITY_BASE_URL: "$(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/parity-lab/lite/"
+                      # Strict golden enforcement: when "true", a scene with no
+                      # committed golden fails loudly instead of live-capturing a
+                      # Babylon.js reference page at runtime (slow, forbidden by
+                      # GUIDANCE §2c). Keep "false" until every scene's golden is
+                      # committed (144 still missing); flip to "true" afterwards to
+                      # lock it in and keep the parity job fast.
+                      PARITY_REQUIRE_GOLDEN: "false"
+                      BSTACK_SESSIONS_REQUIRED: "3"
+                      BSTACK_SESSIONS_MIN: "1"
+                      BSTACK_MAX_SESSIONS: "3"
+                      BSTACK_BUILD_NAME: "Babylon-Lite Parity $(Build.BuildNumber)"
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+
+                # Redact BrowserStack credentials from artifacts before they are
+                # published. The CDP wsEndpoint embeds the access key, which can be
+                # echoed into the report/JUnit on a connection failure.
+                - script: npx tsx scripts/redact-secrets.ts test-results
+                  condition: always()
+                  continueOnError: true
+                  displayName: "Redact credentials from artifacts"
+                  env:
                       BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
                       BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
 
@@ -474,13 +480,7 @@ stages:
                   inputs:
                       version: $(NODE_VERSION)
 
-                - script: |
-                      corepack enable
-                      corepack prepare pnpm@$(PNPM_VERSION) --activate
-                  displayName: "Enable pnpm via corepack"
-
-                - script: pnpm install --frozen-lockfile
-                  displayName: "Install dependencies"
+                - template: config/templates/install-deps.yml
 
                 - script: npx eslint . --format ./scripts/eslint-vso-formatter.cjs
                   displayName: "ESLint"
@@ -536,13 +536,7 @@ stages:
                   inputs:
                       version: $(NODE_VERSION)
 
-                - script: |
-                      corepack enable
-                      corepack prepare pnpm@$(PNPM_VERSION) --activate
-                  displayName: "Enable pnpm via corepack"
-
-                - script: pnpm install --frozen-lockfile
-                  displayName: "Install dependencies"
+                - template: config/templates/install-deps.yml
 
                 - script: |
                       npx tsc -p packages/babylon-lite-compat/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'

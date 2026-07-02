@@ -37,7 +37,7 @@ async function captureBjsData(browser: Browser): Promise<string | undefined> {
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const bjsPage = await context.newPage();
 
-    await bjsPage.goto(`/babylon-ref-scene103.html${CAPTURE_QUERY}`);
+    await bjsPage.goto(`babylon-ref-scene103.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 103 BJS reference" });
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: `Scene 103 BJS reference at frame ${CAPTURE_FRAME}`, flag: "captureReady", pollMs: 100 });
     const rayHits = await readRayHits(bjsPage);
@@ -52,7 +52,7 @@ test("Scene 103 — Thin-instance raycast picking matches Babylon.js reference",
     const goldenPath = await captureGolden(browser, { sceneId: 103, queryParams: `captureFrame=${CAPTURE_FRAME}`, waitFlag: "captureReady" });
     const bjsRayHits = await captureBjsData(browser);
 
-    await page.goto(`/scene103.html${CAPTURE_QUERY}`);
+    await page.goto(`scene103.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(page, { timeout: 50_000, label: "Scene 103 Lite" });
     await waitForCanvasReady(page, { timeout: 50_000, label: `Scene 103 Lite at frame ${CAPTURE_FRAME}`, flag: "captureReady", pollMs: 100 });
     const liteRayHits = await readRayHits(page);

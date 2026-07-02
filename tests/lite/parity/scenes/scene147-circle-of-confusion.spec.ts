@@ -14,7 +14,7 @@ test("Scene 147 — Circle of Confusion post-process matches Babylon.js referenc
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 147, timeout: 120_000, settleMs: 5_000 });
 
-    await page.goto("/scene147.html");
+    await page.goto("scene147.html");
     await waitForCanvasReady(page, { timeout: 120_000, label: "Scene 147 Lite" });
     await page.waitForTimeout(500);
 

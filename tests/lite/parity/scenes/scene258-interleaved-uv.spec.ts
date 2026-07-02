@@ -30,7 +30,7 @@ test("Scene 258 — interleaved normalized-byte UVs match Babylon.js reference",
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 258, timeout: 120_000 });
 
-    await page.goto("/scene258.html");
+    await page.goto("scene258.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

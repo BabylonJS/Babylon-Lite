@@ -41,7 +41,7 @@
         "test:all": "npx playwright test && npx playwright test --config playwright.perf.config.ts",
         "test:perf-regression": "npx playwright test --config playwright.perf.config.ts tests/lite/perf/perf-regression.spec.ts",
         "test:perf-regression:gl": "npx playwright test --config playwright.perf.gl.config.ts tests/gl/perf/gl-perf-regression.spec.ts",
-        "test:parity-cloud": "tsx scripts/run-browserstack.ts playwright test --config config/playwright.parity-cloud.config.ts",
+        "test:parity-cloud": "npx playwright test --config config/playwright.parity-cloud.config.ts",
         "test:perf-cloud": "tsx scripts/run-browserstack.ts playwright test --config config/playwright.perf-cloud.config.ts tests/lite/perf/perf-regression.spec.ts",
         "validate:release-markers": "tsx scripts/validate-pr-release-markers.ts",
         "gen:changelog": "tsx scripts/generate-changelog.ts",

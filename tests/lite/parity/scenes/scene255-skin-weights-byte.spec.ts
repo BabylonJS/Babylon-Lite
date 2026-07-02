@@ -28,7 +28,7 @@ test("Scene 255 — normalized-byte skin weights match Babylon.js reference", as
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 255, seekTime: 1.0, timeout: 120_000 });
 
-    await page.goto("/scene255.html?seekTime=1.0");
+    await page.goto("scene255.html?seekTime=1.0");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);

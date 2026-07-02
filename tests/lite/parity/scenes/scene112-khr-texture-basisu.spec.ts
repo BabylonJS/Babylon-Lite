@@ -18,7 +18,7 @@ test("Scene 112 — KHR_texture_basisu Flight Helmet matches Babylon.js referenc
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 112, timeout: 180_000, settleMs: 2_000 });
 
-    await page.goto("/scene112.html");
+    await page.goto("scene112.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 180_000 });
     await page.waitForTimeout(500);
 

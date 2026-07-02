@@ -53,7 +53,7 @@ test("Scene 113 — Picking Precision matches Babylon.js reference", async ({ pa
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 113, timeout: 90_000, settleMs: 1_000 });
 
-    await page.goto("/scene113.html");
+    await page.goto("scene113.html");
     expectScene113State(await readScene113State(page));
     await page.waitForTimeout(500);
 

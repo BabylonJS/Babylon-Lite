@@ -22,7 +22,7 @@ test("Scene 19 — PBR Clearcoat matches Babylon.js reference", async ({ page },
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 19 });
 
-    await page.goto("/scene19.html");
+    await page.goto("scene19.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 

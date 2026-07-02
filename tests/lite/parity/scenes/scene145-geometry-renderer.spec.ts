@@ -14,7 +14,7 @@ test("Scene 145 — Geometry renderer task matches Babylon.js reference", async 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 145, timeout: 120_000, settleMs: 5_000 });
 
-    await page.goto("/scene145.html");
+    await page.goto("scene145.html");
     await waitForCanvasReady(page, { timeout: 120_000, label: "Scene 145 Lite" });
     await page.waitForTimeout(500);
 

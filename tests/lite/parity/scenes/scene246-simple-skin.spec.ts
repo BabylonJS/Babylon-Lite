@@ -15,7 +15,7 @@ test("Scene 246 — SimpleSkin matches Babylon.js reference", async ({ page }, t
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 246, seekTime: 1, timeout: 90_000 });
 
-    await page.goto("/scene246.html?seekTime=1");
+    await page.goto("scene246.html?seekTime=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);

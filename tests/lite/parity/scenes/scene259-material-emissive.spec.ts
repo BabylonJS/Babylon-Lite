@@ -30,7 +30,7 @@ test("Scene 259 — emissive material matches Babylon.js reference", async ({ pa
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 259, timeout: 120_000 });
 
-    await page.goto("/scene259.html");
+    await page.goto("scene259.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

@@ -21,41 +21,57 @@ const MSH_TOPOLOGY_SHIFT = 12;
  *  pipeline's `stripIndexFormat` to match the index buffer for indexed strip draws. */
 const MSH_INDEX_U32 = 1 << 15;
 
-// Encode the topology + negative-winding bits from the per-mesh flags set by the loader/feature.
-_installMeshFeatureExtra((mesh: Mesh): number => {
-    let f = 0;
-    if ((mesh as { _reverseWinding?: boolean })._reverseWinding) {
-        f |= MSH_REVERSE_WINDING;
-    }
-    const topo = (mesh as { _topology?: number })._topology;
-    if (topo) {
-        f |= topo << MSH_TOPOLOGY_SHIFT;
-        // Strips need the pipeline stripIndexFormat to match the index buffer; flag uint32 so the
-        // pipeline picks the right format. Lite always draws indexed.
-        if (topo >= 3 && mesh._gpu.indexFormat === "uint32") {
-            f |= MSH_INDEX_U32;
-        }
-    }
-    return f;
-});
+let _installed = false;
 
-_installPbrPrimitiveResolver((meshFeatures, hasDoubleSided): GPUPrimitiveState => {
-    // A mirrored mesh (positive world determinant, e.g. KHR negative node scale) has reversed
-    // triangle winding, so back-face culling must cull the FRONT face instead. Matches BJS, which
-    // flips sideOrientation when the world matrix determinant is negative.
-    const reverseWinding = (meshFeatures & MSH_REVERSE_WINDING) !== 0;
-    // Non-triangle-list primitive topology. Points and lines have no faces to cull; for a strip the
-    // material's culling still applies.
-    const topoIdx = (meshFeatures >> MSH_TOPOLOGY_SHIFT) & 7;
-    const topology: GPUPrimitiveTopology =
-        topoIdx === 1 ? "point-list" : topoIdx === 2 ? "line-list" : topoIdx === 3 ? "line-strip" : topoIdx === 4 ? "triangle-strip" : "triangle-list";
-    const noCull = topoIdx >= 1 && topoIdx <= 3;
-    // Indexed strip draws need stripIndexFormat to match the index buffer.
-    const stripIndexFormat: GPUIndexFormat | undefined = topoIdx >= 3 ? (meshFeatures & MSH_INDEX_U32 ? "uint32" : "uint16") : undefined;
-    return {
-        topology,
-        ...(stripIndexFormat ? { stripIndexFormat } : undefined),
-        cullMode: noCull || hasDoubleSided ? "none" : reverseWinding ? "front" : "back",
-        frontFace: "ccw",
-    };
-});
+/** Install the PBR pipeline's primitive-state resolver and the mesh-feature encoder.
+ *
+ *  Called (not bare-imported) by the glTF primitive feature so the reference survives Rollup's
+ *  tree-shaking under the engine's `"sideEffects": false`. A bare `import "./pbr-primitive-resolver"`
+ *  is treated as side-effect-free and dropped from production bundles, which silently reverted
+ *  non-triangle topologies + negative-winding meshes to the plain triangle-list fallback. Idempotent
+ *  so repeated feature loads are harmless. */
+export function installPbrPrimitiveResolver(): void {
+    if (_installed) {
+        return;
+    }
+    _installed = true;
+
+    // Encode the topology + negative-winding bits from the per-mesh flags set by the loader/feature.
+    _installMeshFeatureExtra((mesh: Mesh): number => {
+        let f = 0;
+        if ((mesh as { _reverseWinding?: boolean })._reverseWinding) {
+            f |= MSH_REVERSE_WINDING;
+        }
+        const topo = (mesh as { _topology?: number })._topology;
+        if (topo) {
+            f |= topo << MSH_TOPOLOGY_SHIFT;
+            // Strips need the pipeline stripIndexFormat to match the index buffer; flag uint32 so the
+            // pipeline picks the right format. Lite always draws indexed.
+            if (topo >= 3 && mesh._gpu.indexFormat === "uint32") {
+                f |= MSH_INDEX_U32;
+            }
+        }
+        return f;
+    });
+
+    _installPbrPrimitiveResolver((meshFeatures, hasDoubleSided): GPUPrimitiveState => {
+        // A mirrored mesh (positive world determinant, e.g. KHR negative node scale) has reversed
+        // triangle winding, so back-face culling must cull the FRONT face instead. Matches BJS, which
+        // flips sideOrientation when the world matrix determinant is negative.
+        const reverseWinding = (meshFeatures & MSH_REVERSE_WINDING) !== 0;
+        // Non-triangle-list primitive topology. Points and lines have no faces to cull; for a strip the
+        // material's culling still applies.
+        const topoIdx = (meshFeatures >> MSH_TOPOLOGY_SHIFT) & 7;
+        const topology: GPUPrimitiveTopology =
+            topoIdx === 1 ? "point-list" : topoIdx === 2 ? "line-list" : topoIdx === 3 ? "line-strip" : topoIdx === 4 ? "triangle-strip" : "triangle-list";
+        const noCull = topoIdx >= 1 && topoIdx <= 3;
+        // Indexed strip draws need stripIndexFormat to match the index buffer.
+        const stripIndexFormat: GPUIndexFormat | undefined = topoIdx >= 3 ? (meshFeatures & MSH_INDEX_U32 ? "uint32" : "uint16") : undefined;
+        return {
+            topology,
+            ...(stripIndexFormat ? { stripIndexFormat } : undefined),
+            cullMode: noCull || hasDoubleSided ? "none" : reverseWinding ? "front" : "back",
+            frontFace: "ccw",
+        };
+    });
+}

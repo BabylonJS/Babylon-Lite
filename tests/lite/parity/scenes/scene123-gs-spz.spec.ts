@@ -24,7 +24,7 @@ test("Scene 123 — Gaussian Splatting SPZ matches Babylon.js reference", async 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 123, timeout: 150_000, settleMs: 800 });
 
-    await page.goto("/scene123.html");
+    await page.goto("scene123.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 150_000 });
     await page.waitForFunction(() => !document.getElementById("loader-overlay"), { timeout: 5_000 }).catch(() => undefined);
     await page.waitForTimeout(500);

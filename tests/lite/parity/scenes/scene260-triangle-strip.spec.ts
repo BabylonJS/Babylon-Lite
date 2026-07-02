@@ -31,7 +31,7 @@ test("Scene 260 — triangle-strip topology matches Babylon.js reference", async
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 260, timeout: 120_000 });
 
-    await page.goto("/scene260.html");
+    await page.goto("scene260.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

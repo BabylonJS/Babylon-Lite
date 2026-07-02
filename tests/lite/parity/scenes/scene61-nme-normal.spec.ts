@@ -18,7 +18,7 @@ test("Scene 61 — NME normal-as-color matches Babylon.js reference", async ({ p
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 61 });
 
-    await page.goto("/scene61.html");
+    await page.goto("scene61.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

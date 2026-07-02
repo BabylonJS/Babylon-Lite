@@ -29,7 +29,7 @@ test("Scene 39 — KHR_animation_pointer (Animated Waterfall) matches Babylon.js
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 39, seekTime: SEEK_TIME, timeout: 90_000 });
 
-    await page.goto(`/scene39.html?seekTime=${SEEK_TIME}`);
+    await page.goto(`scene39.html?seekTime=${SEEK_TIME}`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);

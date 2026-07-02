@@ -12,8 +12,8 @@ test-actual*.png
 diff-map.png
 capture.json
 capture-full.json
-reference/**/babylon-ref-golden.png
 reference/**/babylon-ref-*.png
+!reference/**/babylon-ref-golden.png
 reference/**/test-actual*.png
 reference/**/live-ref.png
 reference/**/shd_*.wgsl

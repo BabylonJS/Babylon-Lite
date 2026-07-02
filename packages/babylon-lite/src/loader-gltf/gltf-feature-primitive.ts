@@ -5,8 +5,13 @@
  *  affected mesh and installs the PBR pipeline's primitive resolver (topology + stripIndexFormat +
  *  culling). The common triangle-list positive-winding case never loads this module, so the core
  *  loader + pipeline chunks stay byte-identical. */
-import "../material/pbr/pbr-primitive-resolver.js";
+import { installPbrPrimitiveResolver } from "../material/pbr/pbr-primitive-resolver.js";
 import type { GltfFeature } from "./gltf-feature.js";
+
+// Install the pipeline's primitive-state resolver. Calling an imported binding (rather than a bare
+// `import "...pbr-primitive-resolver"`) keeps this alive through Rollup's tree-shaking under the
+// engine's `"sideEffects": false`; a bare side-effect import is dropped from production bundles.
+installPbrPrimitiveResolver();
 
 const feature: GltfFeature = {
     id: "_primitive",

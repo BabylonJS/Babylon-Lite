@@ -18,7 +18,7 @@ test("Scene 63 — NME directional light matches Babylon.js reference", async ({
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 63 });
 
-    await page.goto("/scene63.html");
+    await page.goto("scene63.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

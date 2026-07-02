@@ -82,14 +82,14 @@ test("Scene 105 — Character controller + moving platform matches Babylon.js", 
     // ── Babylon.js reference (live DATA) at the collision frame ──
     const bjsContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const bjsPage = await bjsContext.newPage();
-    const bjs = await capture(bjsPage, "/babylon-ref-scene105.html", COLLISION_FRAME, "Scene 105 BJS reference (collisions)");
+    const bjs = await capture(bjsPage, "babylon-ref-scene105.html", COLLISION_FRAME, "Scene 105 BJS reference (collisions)");
     await bjsPage.close();
     await bjsContext.close();
 
     // ── Lite: collision frame (data) + pre-contact frame (visual) ──
-    const lite = await capture(page, "/scene105.html", COLLISION_FRAME, "Scene 105 Lite (collisions)");
+    const lite = await capture(page, "scene105.html", COLLISION_FRAME, "Scene 105 Lite (collisions)");
     const visualPath = path.join(REFERENCE_DIR, "test-actual.png");
-    await capture(page, "/scene105.html", VISUAL_FRAME, "Scene 105 Lite (visual)", visualPath);
+    await capture(page, "scene105.html", VISUAL_FRAME, "Scene 105 Lite (visual)", visualPath);
 
     // ── 1. Character trajectory ──
     console.log(`Scene 105 charPos — BJS: ${bjs.charPos}`);

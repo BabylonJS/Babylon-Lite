@@ -28,7 +28,7 @@ test("Scene 254 — signed BYTE accessor animation matches Babylon.js reference"
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 254, seekTime: 2.0, timeout: 120_000 });
 
-    await page.goto("/scene254.html?seekTime=2.0");
+    await page.goto("scene254.html?seekTime=2.0");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);

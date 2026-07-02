@@ -12,7 +12,7 @@ test("Scene 92 - sprite custom shader (params tint) matches Babylon.js reference
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 92, settleMs: 500 });
 
-    await page.goto("/scene92.html");
+    await page.goto("scene92.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

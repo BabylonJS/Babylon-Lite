@@ -28,6 +28,7 @@ import {
 import type { Mesh, Texture2D } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 import { getScene72Nme } from "../shared/scene72-nme.js";
+import { rebaseRootUrl } from "../shared/asset-url.js";
 
 function sanitize(name: string): string {
     return name.replace(/[^A-Za-z0-9_]/g, "_");
@@ -51,7 +52,7 @@ async function loadSnippetTextures(engine: Parameters<typeof loadTexture2D>[0], 
         // honor this flips bump/albedo/etc. upside down vs BJS reference).
         const invertY = tex?.invertY ?? true;
         try {
-            out[key] = await loadTexture2D(engine, url, { invertY });
+            out[key] = await loadTexture2D(engine, rebaseRootUrl(url), { invertY });
         } catch (e) {
             console.warn("scene72: failed to load", key, e);
         }

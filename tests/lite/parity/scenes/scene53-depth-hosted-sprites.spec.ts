@@ -19,7 +19,7 @@ test("Scene 53 — Depth-hosted sprites mixed with 3D matches Babylon.js referen
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 53, settleMs: 500 });
 
-    await page.goto("/scene53.html");
+    await page.goto("scene53.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 
