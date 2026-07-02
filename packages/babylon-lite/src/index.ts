@@ -689,6 +689,7 @@ export {
     createNavMeshFromSources,
     createDebugNavMeshGeometry,
     getClosestPoint,
+    findClosestPointWithin,
     computePath,
     createNavCrowd,
     addAgent,
