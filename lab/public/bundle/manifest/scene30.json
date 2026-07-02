@@ -1,6 +1,6 @@
 {
-  "rawKB": 103.3,
-  "gzipKB": 42.6,
+  "rawKB": 103.8,
+  "gzipKB": 42.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene30-alpha-test-fragment-Dp7v2RIU.js",
@@ -12,10 +12,10 @@
     "scene30-gltf-glb-parser-DJ0cTJ-4.js",
     "scene30-gltf-pbr-builder-ext-B4o2oNmo.js",
     "scene30-ibl-fragment-CeRrvT96.js",
-    "scene30-pbr-refraction-BoBqbsCw.js",
-    "scene30-pbr-renderable-DZ9ODR1F.js",
+    "scene30-pbr-refraction-oZTMNctc.js",
+    "scene30-pbr-renderable-D7h7dd01.js",
     "scene30-pbr-template-ext-BoJ8SFLM.js",
-    "scene30-pbr-transmission-ext-DKsUm8cj.js",
+    "scene30-pbr-transmission-ext-DGnAupRp.js",
     "scene30-rgbd-decode-RQYTGqhL.js",
     "scene30-scene-uniforms-FTYH6Ct0.js",
     "scene30-texture-2d-DQo3n8D6.js",

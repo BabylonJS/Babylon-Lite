@@ -40,6 +40,22 @@ export interface ShaderPacket {
      *  splice this packet out and stop retaining/iterating dead chunk state every
      *  frame (set only for merged opaque renderables). */
     _owner?: ShaderPacket[];
+    /** @internal Inputs of the last system-UBO write, used to skip redundant recompute + writeBuffer
+     *  (see updatePacket). Undefined until the first per-pass update. */
+    _lastCamera?: Camera | null;
+    /** @internal */
+    _lastCameraVersion?: number;
+    /** @internal */
+    _lastMeshWmVersion?: number;
+    /** @internal */
+    _lastTargetWidth?: number;
+    /** @internal */
+    _lastTargetHeight?: number;
+    /** @internal Effective camera aspect (getEffectiveAspectRatio) at the last write — a `camera.viewport`
+     *  change can alter the aspect (hence projection/viewProjection) while target size stays the same. */
+    _lastAspect?: number;
+    /** @internal */
+    _lastAlphaCutoff?: number;
 }
 
 interface ShaderMaterialRenderState extends ShaderMaterial {
@@ -235,8 +251,42 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
 function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext): void {
     const engine = scene.surface.engine;
     const state = material as ShaderMaterialRenderState;
-    writeSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, context._camera ?? scene.camera, context.targetWidth, context.targetHeight);
-    engine._device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);
+    // Skip the system-UBO recompute + writeBuffer when EVERY input is unchanged since this packet's last
+    // write: same camera (identity + worldMatrixVersion — the same change key the view/projection caches
+    // already rely on), same mesh world-matrix version, same target size and same material uniform version
+    // (alphaCutoff). A packet is updated once per PASS per frame, and most packets are static meshes under
+    // a camera that only moves some frames — these per-packet writeBuffers dominate CPU frame time in
+    // large scenes, and the skipped ones are byte-identical rewrites of what the UBO already holds.
+    const camera = context._camera ?? scene.camera;
+    const cameraVersion = camera ? camera.worldMatrixVersion : -1;
+    const meshWmVersion = packet.mesh.worldMatrixVersion;
+    // alphaCutoff is compared by VALUE, not by the material's uniform version: animated materials bump
+    // that version every frame (time uniforms and the like live in the CUSTOM ubo, which has its own
+    // version gate), and keying on it would defeat this skip for exactly the materials that dominate.
+    const alphaCutoff = material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4;
+    // Effective aspect keys the view/projection uniforms: getEffectiveAspectRatio folds in the camera's
+    // normalized viewport, which can change (altering projection) with target size and worldMatrixVersion
+    // both unchanged, so targetWidth/Height alone would not catch it.
+    const aspect = camera ? getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight) : 1;
+    if (
+        packet._lastCamera !== camera ||
+        packet._lastCameraVersion !== cameraVersion ||
+        packet._lastMeshWmVersion !== meshWmVersion ||
+        packet._lastTargetWidth !== context.targetWidth ||
+        packet._lastTargetHeight !== context.targetHeight ||
+        packet._lastAspect !== aspect ||
+        packet._lastAlphaCutoff !== alphaCutoff
+    ) {
+        writeSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
+        engine._device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);
+        packet._lastCamera = camera;
+        packet._lastCameraVersion = cameraVersion;
+        packet._lastMeshWmVersion = meshWmVersion;
+        packet._lastTargetWidth = context.targetWidth;
+        packet._lastTargetHeight = context.targetHeight;
+        packet._lastAspect = aspect;
+        packet._lastAlphaCutoff = alphaCutoff;
+    }
     if (packet._lastResourceVersion !== material._resourceVersion) {
         // Acquire the NEW bound textures BEFORE releasing the old set: a texture present in both (e.g. a material
         // that only swapped ONE of its textures) must never transiently drop to ref-count 0, or releaseTexture
