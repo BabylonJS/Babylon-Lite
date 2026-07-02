@@ -1,14 +1,16 @@
 /**
  * Camera FOV cache invalidation — a repro for issue #271.
  *
- * The camera never moves, so its `worldMatrixVersion` stays constant for the
- * whole run. Each frame we only mutate the public projection field
- * `camera.fov` (and periodically `nearPlane` / `farPlane`). If the projection
- * cache were still keyed on `worldMatrixVersion` (the pre-fix behaviour) the
- * rendered projection would be frozen at the initial FOV and nothing would
- * appear to change. With the fix, `getProjectionMatrix` keys on the actual
- * projection inputs, so the ring of cubes should visibly "breathe" (zoom in
- * and out) purely from the per-frame FOV change.
+ * As long as you don't orbit the camera, its `worldMatrixVersion` stays
+ * constant for the whole run. Each frame we only mutate the public projection
+ * field `camera.fov` (and periodically `nearPlane` / `farPlane`). If the
+ * projection cache were still keyed on `worldMatrixVersion` (the pre-fix
+ * behaviour) the rendered projection would be frozen at the initial FOV and
+ * nothing would appear to change. With the fix, `getProjectionMatrix` keys on
+ * the actual projection inputs, so the ring of cubes should visibly "breathe"
+ * (zoom in and out) purely from the per-frame FOV change. (Dragging to orbit
+ * bumps `worldMatrixVersion` and would have masked the old bug — keep the
+ * camera still to see the pure repro.)
  */
 import {
     addToScene,
@@ -37,8 +39,13 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0.04, g: 0.05, b: 0.08, a: 1 };
 
-    // Static camera: we deliberately never change alpha/beta/radius/target,
-    // so worldMatrixVersion is fixed and only fov/near/far vary at runtime.
+    // The repro relies on the camera staying still: as long as you don't drag
+    // to orbit, alpha/beta/radius/target never change, so worldMatrixVersion is
+    // fixed and ONLY fov/near/far vary at runtime — exactly the case that used
+    // to leave the projection frozen (#271). attachControl is left enabled so
+    // you can still orbit to inspect; note that interacting bumps
+    // worldMatrixVersion and would mask the bug on the old cache. Comment out
+    // the attachControl call below for a strictly stationary repro.
     const camera = createArcRotateCamera(-Math.PI / 2, 1.2, 12, { x: 0, y: 0, z: 0 });
     camera.fov = BASE_FOV;
     scene.camera = camera;
