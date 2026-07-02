@@ -289,7 +289,7 @@ export class AbstractMesh extends TransformNode {
             return new BoundingInfo(new Vector3(lo[0], lo[1], lo[2]), new Vector3(hi[0], hi[1], hi[2]));
         }
         const positions = this._lite._cpuPositions;
-        if (positions && positions.length >= 3) {
+        if (positions && positions.length >= 3 && positions.length % 3 === 0) {
             const [min, max] = computeAabb(positions);
             if (
                 Number.isFinite(min[0]) &&

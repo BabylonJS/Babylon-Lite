@@ -37,8 +37,6 @@ interface ShaderMaterialPipelineState extends ShaderMaterial {
     _shaderCustomVersion?: number;
 }
 
-const SHADER_STAGE_ALL = SS.VERTEX | SS.FRAGMENT;
-
 export function getOrCreateShaderPipelineBindings(engine: EngineContext, material: ShaderMaterial): ShaderPipelineBindings {
     const state = material as ShaderMaterialPipelineState;
     if (state._shaderBindings && state._shaderDevice === engine._device) {
@@ -155,6 +153,9 @@ function buildBindGroupLayoutEntries(
     storageBuffers: readonly { name: string; type: string }[],
     hasCustomUbo: boolean
 ): GPUBindGroupLayoutEntry[] {
+    // Local (not module-level): reading the WebGPU flag globals must be deferred until
+    // first device/pipeline use so importing the engine never requires them to exist.
+    const SHADER_STAGE_ALL = SS.VERTEX | SS.FRAGMENT;
     const entries: GPUBindGroupLayoutEntry[] = [{ binding: 0, visibility: SHADER_STAGE_ALL, buffer: { type: "uniform" } }];
     let nextBinding = 1;
     if (hasCustomUbo) {

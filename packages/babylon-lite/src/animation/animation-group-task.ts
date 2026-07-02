@@ -1,4 +1,4 @@
-import { tickAnimation } from "./animation-group.js";
+import { tickAnimation } from "./animation-tick.js";
 import type { AnimationGroup } from "./animation-group.js";
 import { addAnimationTask, createAnimationTask, removeAnimationTask } from "./animation-manager.js";
 import type { AnimationManager, AnimationTask } from "./animation-manager.js";

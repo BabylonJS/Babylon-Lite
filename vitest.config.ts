@@ -22,6 +22,24 @@ export default defineConfig({
                     name: "build",
                     include: ["tests/lite/build/**/*.test.ts"],
                     testTimeout: 300_000,
+                    // Build-integration tests share the package's `build/` output directory (several
+                    // rebuild it, others read it). Run their files sequentially so a rebuild never
+                    // races a concurrent read/build in a sibling file.
+                    fileParallelism: false,
+                },
+            },
+            {
+                // Imports the package with NO WebGPU globals present (Node/SSR/Jest
+                // baseline). Overrides setupFiles so `setup-webgpu-globals.ts` does
+                // not pre-install GPUShaderStage/GPUTextureUsage/etc, reproducing the
+                // crash environment. Guards against module top-level dereferencing
+                // WebGPU flag namespaces at import time.
+                extends: true,
+                test: {
+                    name: "no-webgpu",
+                    include: ["tests/lite/no-webgpu/**/*.test.ts"],
+                    setupFiles: [],
+                    testTimeout: 120_000,
                 },
             },
             {

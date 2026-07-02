@@ -245,6 +245,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `HDRCubeTexture`                                                           | ❌ Not supported | throwing stub; use native `loadHdrEnvironment`                                                                                                                                                                                                                 |
 | `RenderTargetTexture`                                                      | ❌ Not supported | throwing stub; use native frame-graph RTT                                                                                                                                                                                                                      |
 | `MirrorTexture`                                                            | ❌ Not supported | throwing stub                                                                                                                                                                                                                                                  |
+| `HtmlTexture` / `HtmlInteractionManager` / `HtmlRaycastInteractionManager` (+ `IsHtmlInCanvasUploadSupported`, `UploadHtmlElementToTexture`, `ComputeOverlayCssTransform`, `GetElementPixelFromUv`, `IsHtmlInCanvasSupportedNatively`, `InstallHtmlInCanvasPolyfill`, `UninstallHtmlInCanvasPolyfill`) | ❌ Not supported | throwing stubs ([unsupported-apis.ts](src/unsupported/unsupported-apis.ts)); new BJS `Materials/Textures/HTML/*` — a DOM/CSS overlay-interop feature (live HTML element → texture + pointer/raycast forwarding) with no equivalent in Babylon Lite's WebGPU renderer |
 
 ## Loaders
 
@@ -466,3 +467,9 @@ large-world-rendering scenes are now resolved.
 > (`PhysicsAggregate` not yet wrapped), not a Lite-core unblock; and audio scenes
 > have no pixel oracle. So no scene moved into the working list this run — Task 2 is
 > dormant, as expected when no Lite change unblocks a scene.
+>
+> **Task 2 re-check (2026-06-26):** the only commit to land since the last sync
+> (#313, "Move Lite gl ping pong out of the package") touches `packages/babylon-lite-gl/`
+> and the `lab/gl` WebGL track only — **nothing under `packages/babylon-lite/src/**`**,
+> so no new Lite capability came online. No previously-skipped scene is newly
+> unblocked; Task 2 stays dormant this run.
