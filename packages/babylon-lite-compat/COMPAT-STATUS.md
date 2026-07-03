@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `c729b94f2e36f2d915415620857452f7ad0ff731`
-- **Last sync date:** 2026-06-26
+- **Last synced BJS commit:** `4a4481e911bee11cb4b9e92689f65c69edb474b8`
+- **Last sync date:** 2026-06-29
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -176,7 +176,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `mesh.thinInstanceSetBuffer`                                                                                    | ⚡ Partial         | meshes (`matrix` + `color` → Lite thin instances)                                                                                                                                                                                          |
 | `mesh.clone` / `createInstance`                                                                                 | ⚡ Partial         | throwing stub                                                                                                                                                                                                                              |
 | `TransformNode`                                                                                                 | ✅ Full            | meshes                                                                                                                                                                                                                                     |
-| `mesh.getBoundingInfo`                                                                                          | ✅ Full            | meshes (local-space `BoundingInfo` from Lite mesh `boundMin`/`boundMax`, with a `computeAabb` fold of the retained CPU positions as fallback — matches `LoadedMesh.getBoundingInfo`)                                                        |
+| `mesh.getBoundingInfo`                                                                                          | ✅ Full            | meshes — local-space `BoundingInfo` from Lite `boundMin`/`boundMax` (factory/loader meshes), falling back to `computeAabb` over the retained CPU positions                                                                                  |
 | LOD / `EdgesRenderer` / `OutlineRenderer`                                                                       | ❌ Not supported   | throwing stub; not in Lite                                                                                                                                                                                                                 |
 | `CSG` / `CSG2` (+ `InitializeCSG2Async`)                                                                        | ✅ Full            | [meshes/csg.ts](src/meshes/csg.ts) over Lite `createCsgFromMesh`/`createMeshFromCsg` and `createCsg2FromMesh`/`createMeshesFromCsg2` (CSG2 preserves per-source materials)                                                                 |
 
@@ -245,6 +245,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `HDRCubeTexture`                                                           | ❌ Not supported | throwing stub; use native `loadHdrEnvironment`                                                                                                                                                                                                                 |
 | `RenderTargetTexture`                                                      | ❌ Not supported | throwing stub; use native frame-graph RTT                                                                                                                                                                                                                      |
 | `MirrorTexture`                                                            | ❌ Not supported | throwing stub                                                                                                                                                                                                                                                  |
+| `HtmlTexture` / `HtmlInteractionManager` / `HtmlRaycastInteractionManager` (+ `IsHtmlInCanvasUploadSupported`, `UploadHtmlElementToTexture`, `ComputeOverlayCssTransform`, `GetElementPixelFromUv`, `IsHtmlInCanvasSupportedNatively`, `InstallHtmlInCanvasPolyfill`, `UninstallHtmlInCanvasPolyfill`) | ❌ Not supported | throwing stubs ([unsupported-apis.ts](src/unsupported/unsupported-apis.ts)); new BJS `Materials/Textures/HTML/*` — a DOM/CSS overlay-interop feature (live HTML element → texture + pointer/raycast forwarding) with no equivalent in Babylon Lite's WebGPU renderer |
 
 ## Loaders
 

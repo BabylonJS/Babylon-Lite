@@ -16,6 +16,16 @@ import {
     EdgesRenderer,
     OutlineRenderer,
     MirrorTexture,
+    HtmlTexture,
+    HtmlInteractionManager,
+    HtmlRaycastInteractionManager,
+    IsHtmlInCanvasUploadSupported,
+    UploadHtmlElementToTexture,
+    ComputeOverlayCssTransform,
+    GetElementPixelFromUv,
+    IsHtmlInCanvasSupportedNatively,
+    InstallHtmlInCanvasPolyfill,
+    UninstallHtmlInCanvasPolyfill,
     Sound,
     SceneSerializer,
 } from "../src/unsupported/unsupported-apis";
@@ -56,12 +66,32 @@ describe("Unsupported API stubs throw on construction", () => {
         ["EdgesRenderer", () => new EdgesRenderer()],
         ["OutlineRenderer", () => new OutlineRenderer()],
         ["MirrorTexture", () => new MirrorTexture()],
+        ["HtmlTexture", () => new HtmlTexture()],
+        ["HtmlInteractionManager", () => new HtmlInteractionManager()],
+        ["HtmlRaycastInteractionManager", () => new HtmlRaycastInteractionManager()],
         ["Sound", () => new Sound()],
     ];
 
     it.each(cases)("%s throws LiteCompatError naming the API", (name, construct) => {
         expect(construct).toThrow(LiteCompatError);
         expect(construct).toThrow(new RegExp(name));
+    });
+});
+
+describe("HTML-texture function stubs throw on call", () => {
+    const cases: Array<[string, () => unknown]> = [
+        ["IsHtmlInCanvasUploadSupported", () => IsHtmlInCanvasUploadSupported()],
+        ["UploadHtmlElementToTexture", () => UploadHtmlElementToTexture()],
+        ["ComputeOverlayCssTransform", () => ComputeOverlayCssTransform()],
+        ["GetElementPixelFromUv", () => GetElementPixelFromUv()],
+        ["IsHtmlInCanvasSupportedNatively", () => IsHtmlInCanvasSupportedNatively()],
+        ["InstallHtmlInCanvasPolyfill", () => InstallHtmlInCanvasPolyfill()],
+        ["UninstallHtmlInCanvasPolyfill", () => UninstallHtmlInCanvasPolyfill()],
+    ];
+
+    it.each(cases)("%s throws LiteCompatError naming the API", (name, call) => {
+        expect(call).toThrow(LiteCompatError);
+        expect(call).toThrow(new RegExp(name));
     });
 });
 
