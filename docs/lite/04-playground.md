@@ -6,7 +6,7 @@ The **[Lite Playground](https://liteplayground.babylonjs.com)** is the fastest w
 
 > **Beta.** The Lite Playground is in beta — expect a few rough edges and occasional breaking changes while the experience stabilizes.
 
-> New to Lite? Read **[Welcome](/lite)** for the big picture and **[Getting Started](/lite/01-getting-started)** for the mental model. The Playground is where you put that mental model to work without setting up a project.
+> New to Lite? Read **[Welcome](00-welcome.md)** for the big picture and **[Getting Started](01-getting-started.md)** for the mental model. The Playground is where you put that mental model to work without setting up a project.
 
 ---
 
@@ -229,9 +229,9 @@ To re-run after editing, send `{ type: "run" }`; to stop the scene, send `{ type
 
 ## Next steps
 
-- 🚀 **[Getting Started](/lite/01-getting-started)** — the mental model behind the code you'll write in the Playground.
-- 🔁 **[Porting Guide](/lite/03-porting-guide)** — translate a Babylon.js scene to Lite, then paste it in and run.
-- 📊 **[Feature Comparison](/lite/02-feature-comparison)** — what Lite covers today, so you know what will run.
+- 🚀 **[Getting Started](01-getting-started.md)** — the mental model behind the code you'll write in the Playground.
+- 🔁 **[Porting Guide](03-porting-guide.md)** — translate a Babylon.js scene to Lite, then paste it in and run.
+- 📊 **[Feature Comparison](02-feature-comparison.md)** — what Lite covers today, so you know what will run.
 - 🌐 **[github.com/BabylonJS/Babylon-Lite](https://github.com/BabylonJS/Babylon-Lite)** — the source, including the Playground itself under `playground/`.
 
 Built something worth sharing, or hit a rough edge? Save a snippet and **[open an issue](https://github.com/BabylonJS/Babylon-Lite/issues)** — early feedback directly shapes the roadmap. 💙

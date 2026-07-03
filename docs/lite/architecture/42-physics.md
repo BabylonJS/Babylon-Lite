@@ -201,7 +201,7 @@ steps matches the animation and sprite managers.
   displacement into a velocity.
 - **Floating origin** (`havok-floating-origin.ts`): `enableHavokFloatingOrigin`
   opts a world into multi-region simulation for Large World Rendering
-  (see [35-large-world-rendering.md](/lite/architecture/35-large-world-rendering)).
+  (see [35-large-world-rendering.md](35-large-world-rendering.md)).
   Its `step(world, dt)` receives the same clamped per-step seconds as the single-region path.
 - **Debug viewer** (`physics-viewer.ts`): wireframe overlay of collider shapes.
 
