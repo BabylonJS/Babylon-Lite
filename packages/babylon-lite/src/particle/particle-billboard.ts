@@ -1,15 +1,24 @@
 import { createGridSpriteAtlas } from "../sprite/shared/sprite-atlas.js";
 import { createFacingBillboardSystem, addBillboardSpriteIndex, clearBillboardSprites } from "../sprite/billboard-sprite.js";
-import { billboardBlendAdditive, billboardBlendAlpha } from "../sprite/billboard-blend.js";
+import { billboardBlendAdditive, billboardBlendAlpha, billboardBlendOneOne } from "../sprite/billboard-blend.js";
 import type { BillboardBlendMode, FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 import type { ParticleSystem } from "./particle-system.js";
 
+const BLENDMODE_ONEONE = 0; // Babylon.js BaseParticleSystem.BLENDMODE_ONEONE (pure additive, src·1 + dst)
 const BLENDMODE_STANDARD = 1; // Babylon.js BaseParticleSystem.BLENDMODE_STANDARD (alpha blend)
 
 /** Map a particle-system blend mode to a billboard blend descriptor. */
 function blendForMode(mode: number): BillboardBlendMode {
-    // ONEONE (0), ADD (2), MULTIPLYADD (4) all render additively; STANDARD (1) is alpha-blended.
-    return mode === BLENDMODE_STANDARD ? billboardBlendAlpha : billboardBlendAdditive;
+    // Babylon.js: ONEONE (0) adds the source RGB at full strength (ALPHA_ONEONE); STANDARD (1) is
+    // alpha-blended (ALPHA_COMBINE); ADD (2) and MULTIPLYADD (4) weight the source by its alpha
+    // (ALPHA_ADD). Only ONEONE and ADD differ, and only where the texture alpha is below 1.
+    if (mode === BLENDMODE_STANDARD) {
+        return billboardBlendAlpha;
+    }
+    if (mode === BLENDMODE_ONEONE) {
+        return billboardBlendOneOne;
+    }
+    return billboardBlendAdditive;
 }
 
 /**
