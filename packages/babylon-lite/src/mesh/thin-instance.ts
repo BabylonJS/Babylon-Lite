@@ -60,7 +60,7 @@ export interface ThinInstanceData {
      *  (see `setThinInstanceCullBoundsPad`). Undefined reads as 0. */
     _cullBoundsPad?: number;
     /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
-     *  mesh-gpu-refcount.ts. Absent/undefined means exactly one (implicit) owner. */
+     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
     _refCount?: number;
 }
 

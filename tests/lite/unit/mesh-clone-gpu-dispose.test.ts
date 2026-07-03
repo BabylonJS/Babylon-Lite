@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose";
-import { releaseGpuResource } from "../../../packages/babylon-lite/src/mesh/mesh-gpu-refcount";
+import { release } from "../../../packages/babylon-lite/src/resource/ref-count";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { SkeletonData } from "../../../packages/babylon-lite/src/animation/types";
 import { ObservableVec3 } from "../../../packages/babylon-lite/src/math/observable-vec3";
@@ -159,7 +159,7 @@ describe("mesh clone GPU buffer ownership", () => {
         // Simulate `attachVat(engine, clone, baked)`: release this mesh's claim on the shared
         // skeleton, destroy `boneTexture` only if that made it the last owner (it isn't here —
         // `src` still holds a claim), then drop the reference.
-        const wasLastOwner = releaseGpuResource(skel);
+        const wasLastOwner = release(skel);
         expect(wasLastOwner).toBe(false); // src is still a live owner, so nothing should be destroyed yet
         if (wasLastOwner) {
             skel.boneTexture.destroy();

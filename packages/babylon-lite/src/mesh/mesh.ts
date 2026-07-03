@@ -71,7 +71,7 @@ export interface MeshGPU {
      *  it. Undefined → tight mesh (empty suffix, byte-identical pipeline key). */
     readonly _vbKey?: string;
     /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
-     *  mesh-gpu-refcount.ts. Absent/undefined means exactly one (implicit) owner. */
+     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
     _refCount?: number;
 }
 

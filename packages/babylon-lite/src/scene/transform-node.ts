@@ -5,7 +5,7 @@
 
 import type { Mesh } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
-import { retainGpuResource } from "../mesh/mesh-gpu-refcount.js";
+import { retain } from "../resource/ref-count.js";
 import type { SceneNode } from "./scene-node.js";
 import { createSceneNode, createSceneNodeFromMatrix } from "./scene-node.js";
 
@@ -21,7 +21,7 @@ export function createTransformNode(name: string, px = 0, py = 0, pz = 0, qx = 0
 }
 
 /** Deep-clone a SceneNode tree. Meshes are shallow-cloned (shared GPU buffers — see
- *  `cloneMeshNode` and `mesh-gpu-refcount.ts` for how disposal safely handles the sharing).
+ *  `cloneMeshNode` and `resource/ref-count.ts` for how disposal safely handles the sharing).
  *  Lights, cameras, and other non-mesh/non-TN children are shallow-cloned. */
 export function cloneTransformNode(src: SceneNode): SceneNode {
     if ("_gpu" in src) {
@@ -64,7 +64,7 @@ function cloneMeshNode(mesh: Mesh): Mesh {
         name: mesh.name + "_clone",
         children: [],
         // Share the SAME `_gpu` object (not a copy) — the wrapper's identity is the ref-count
-        // key in mesh-gpu-refcount.ts, so both meshes must point at the exact same instance
+        // key in resource/ref-count.ts, so both meshes must point at the exact same instance
         // for `disposeMeshGpu` to know they're co-owners of the underlying GPUBuffers.
         _gpu: mesh._gpu,
     } as unknown as Mesh;
@@ -74,7 +74,7 @@ function cloneMeshNode(mesh: Mesh): Mesh {
     // otherwise disposing one mesh would free buffers the other still renders with.
     for (const r of [mesh._gpu, mesh.skeleton, mesh.morphTargets, mesh.thinInstances]) {
         if (r) {
-            retainGpuResource(r);
+            retain(r);
         }
     }
     initMeshTransform(meshClone, mesh.position.x, mesh.position.y, mesh.position.z, 0, 0, 0, mesh.scaling.x, mesh.scaling.y, mesh.scaling.z);

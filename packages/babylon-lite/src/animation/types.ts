@@ -155,7 +155,7 @@ export interface SkeletonData {
     readonly joints1: Uint16Array | Uint8Array | null;
     readonly weights1: Float32Array | null;
     /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
-     *  mesh-gpu-refcount.ts. Absent/undefined means exactly one (implicit) owner. */
+     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
     _refCount?: number;
 }
 
@@ -196,6 +196,6 @@ export interface MorphTargetData {
     readonly targets: readonly { positions: Float32Array; normals: Float32Array | null }[];
     readonly weights: Float32Array<ArrayBuffer>;
     /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
-     *  mesh-gpu-refcount.ts. Absent/undefined means exactly one (implicit) owner. */
+     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
     _refCount?: number;
 }
