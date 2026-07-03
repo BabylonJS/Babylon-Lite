@@ -57,7 +57,7 @@ for (let i = 0; i < 180; i++) stepScene(engine, scene, 1000 / 60); // simulate 3
 
 It needs no WebGPU and runs on plain Node (recommended), Deno, Web Workers, or
 CI. Rendering is out of scope. See the
-[Headless (Null Engine) guide](https://doc.babylonjs.com/lite/) for details,
+[Headless (Null Engine) guide](https://doc.babylonjs.com/lite/05-headless-null-engine) for details,
 supported runtimes, and limitations.
 
 ## License

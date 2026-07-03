@@ -48,11 +48,11 @@ describe("null engine (headless, no WebGPU)", () => {
 
         const deltas: number[] = [];
         const body = { y: 10, vy: 0 };
-        const g = -9.81;
+        const gravityY = -9.81;
         onBeforeRender(scene, (dtMs: number) => {
             deltas.push(dtMs);
             const dt = dtMs / 1000;
-            body.vy += g * dt;
+            body.vy += gravityY * dt;
             body.y += body.vy * dt;
         });
 
@@ -66,7 +66,7 @@ describe("null engine (headless, no WebGPU)", () => {
         expect(deltas.every((d) => d === stepMs)).toBe(true);
 
         // Semi-implicit Euler over 1s from rest ≈ analytic 0.5*g*t² within integrator error.
-        const analytic = 10 + 0.5 * g * 1 * 1; // ≈ 5.095
+        const analytic = 10 + 0.5 * gravityY * 1 * 1; // ≈ 5.095
         expect(body.y).toBeGreaterThan(analytic - 0.5);
         expect(body.y).toBeLessThan(analytic + 0.5);
         expect(body.y).toBeLessThan(10); // it fell
