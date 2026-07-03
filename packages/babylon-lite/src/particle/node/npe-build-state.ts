@@ -91,3 +91,40 @@ export function getSystemValue(state: NpeBuildState, source: number): ParticleVa
             return null;
     }
 }
+
+/** Whether a contextual source id is handled by {@link getContextualValue}. Keep in sync with its switch. */
+export function isContextualSourceSupported(source: number): boolean {
+    switch (source) {
+        case CTX_POSITION:
+        case CTX_DIRECTION:
+        case CTX_AGE:
+        case CTX_LIFETIME:
+        case CTX_COLOR:
+        case CTX_SCALED_DIRECTION:
+        case CTX_SCALE:
+        case CTX_AGE_GRADIENT:
+        case CTX_ANGLE:
+        case CTX_INITIAL_COLOR:
+        case CTX_COLOR_DEAD:
+        case CTX_INITIAL_DIRECTION:
+        case CTX_COLOR_STEP:
+        case CTX_SCALED_COLOR_STEP:
+        case CTX_SIZE:
+        case CTX_DIRECTION_SCALE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/** Whether a system source id is handled by {@link getSystemValue}. Keep in sync with its switch. */
+export function isSystemSourceSupported(source: number): boolean {
+    switch (source) {
+        case SYS_TIME:
+        case SYS_DELTA:
+        case SYS_EMITTER:
+            return true;
+        default:
+            return false;
+    }
+}

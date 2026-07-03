@@ -1,5 +1,5 @@
 import type { ParsedParticleBlock, ParticleBlockEvaluator, ParticleValue, NpeGetter } from "../npe-types.js";
-import { getContextualValue, getSystemValue } from "../npe-build-state.js";
+import { getContextualValue, getSystemValue, isContextualSourceSupported, isSystemSourceSupported } from "../npe-build-state.js";
 
 const TYPE_INT = 0x0001;
 const TYPE_FLOAT = 0x0002;
@@ -40,8 +40,14 @@ export const particleInputBlock: ParticleBlockEvaluator = {
 
         let getter: NpeGetter;
         if (contextual !== 0) {
+            if (!isContextualSourceSupported(contextual)) {
+                throw new Error(`NodeParticle: unsupported contextual source 0x${contextual.toString(16)} on block "${block.name}"`);
+            }
             getter = (state) => getContextualValue(state, contextual);
         } else if (systemSource !== 0) {
+            if (!isSystemSourceSupported(systemSource)) {
+                throw new Error(`NodeParticle: unsupported system source ${systemSource} on block "${block.name}"`);
+            }
             getter = (state) => getSystemValue(state, systemSource);
         } else {
             const constant = parseConstant(block);
