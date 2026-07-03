@@ -1,4 +1,4 @@
-import type { Vec3, Color4 } from "../../math/types.js";
+import type { Vec3, Color4, Mat4 } from "../../math/types.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
@@ -13,31 +13,31 @@ export type NpeGetter = (state: NpeBuildState) => ParticleValue;
 
 /** A parsed connection on a block input. `targetBlockId === null` means the input is unconnected. */
 export interface ParsedParticleInput {
-    name: string;
-    targetBlockId: number | null;
-    targetConnectionName: string | null;
+    readonly name: string;
+    readonly targetBlockId: number | null;
+    readonly targetConnectionName: string | null;
     /** Literal value serialized on the input itself (used when unconnected), if any. */
-    value?: unknown;
+    readonly value?: unknown;
     /** Type tag for {@link value} (e.g. `number`, `BABYLON.Vector3`, `BABYLON.Color4`). */
-    valueType?: string;
+    readonly valueType?: string;
 }
 
 /** A parsed graph block. The raw `serialized` object carries block-specific fields. */
 export interface ParsedParticleBlock {
-    id: number;
+    readonly id: number;
     /** Class name with the `BABYLON.` prefix stripped (e.g. `SystemBlock`). */
-    className: string;
-    name: string;
-    inputs: ParsedParticleInput[];
+    readonly className: string;
+    readonly name: string;
+    readonly inputs: readonly ParsedParticleInput[];
     /** Raw serialized block, for block-specific fields (value, type, url, operation, lockMode, capacity, …). */
-    serialized: Record<string, unknown>;
+    readonly serialized: Readonly<Record<string, unknown>>;
 }
 
 /** A parsed node-particle graph. */
 export interface ParticleGraph {
-    blocks: Map<number, ParsedParticleBlock>;
+    readonly blocks: ReadonlyMap<number, ParsedParticleBlock>;
     /** Ids of the `SystemBlock` roots — one built {@link ParticleSystem} per root. */
-    systemBlockIds: number[];
+    readonly systemBlockIds: readonly number[];
 }
 
 /**
@@ -51,8 +51,12 @@ export interface NpeBuildState {
     particle: Particle | null;
     /** Capacity for the system under construction (set by the SystemBlock before the build walk). */
     capacity: number;
-    /** Emitter world position (pure-translation emitter). */
+    /** Emitter world position — the translation of {@link emitterWorldMatrix}; returned by the `Emitter` source. */
     emitter: Vec3;
+    /** Emitter world matrix — baked into birth position (as coordinates) and direction (as a normal) by the shape blocks. */
+    emitterWorldMatrix: Mat4;
+    /** Inverse of {@link emitterWorldMatrix} — used by the cylinder emitter to measure azimuth in the emitter's local frame. */
+    emitterInverseWorldMatrix: Mat4;
     /** The hosting scene (for camera-dependent blocks such as AlignAngle). */
     scene: SceneContext;
     /** Base URL used to resolve relative texture URLs in the graph (mirrors BJS texture-base resolution). */

@@ -1,5 +1,5 @@
 import { createParticleSystem } from "../../particle-system.js";
-import { copyColor4 } from "../../particle-math.js";
+import { copyColor4 } from "../../../math/color4-ref.js";
 import type { Color4 } from "../../../math/types.js";
 import type { ParticleScale } from "../../particle.js";
 import type { ParticleBlockEvaluator } from "../npe-types.js";

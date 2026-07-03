@@ -325,7 +325,7 @@ frame timing).
 | `ParticleSystem.animate()` | `animateParticleSystem(sys, scaledRatio)` |
 | `_createQueueStart` / `_updateQueueStart` linked lists | `_createQueue` / `_updateQueue` arrays |
 | `SystemBlock`, `CreateParticleBlock`, `PointShapeBlock`, `BasicPositionUpdateBlock`, `AlignAngleBlock`, `ParticleTextureSourceBlock`, `ParticleInputBlock` | `blocks/*` evaluators of the same names |
-| `RandomRange(min,max)` | `randomRange(min,max)` (`particle/particle-math.ts`) |
+| `RandomRange(min,max)` | `randomRange(min,max)` (`math/random-range.ts`) |
 | billboard vertex emit (`_appendParticleVertex`) | `FacingBillboardSpriteSystem` instance write |
 
 ---
@@ -360,7 +360,6 @@ frame timing).
 packages/babylon-lite/src/particle/
   particle.ts                      // Particle pure-state + pool reset
   particle-system.ts               // ParticleSystem state + animateParticleSystem + recycle
-  particle-math.ts                 // randomRange, vec/colour scratch helpers
   particle-billboard.ts            // bind ParticleSystem → FacingBillboardSpriteSystem instance buffer
   particle-scene.ts                // register/start/stop + per-frame animate hook into SceneContext
   node/

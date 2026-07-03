@@ -1,5 +1,7 @@
 export type { Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat, Mat4Storage } from "./types.js";
+export { randomRange } from "./random-range.js";
 export { linearToSrgbByte, srgbByteToLinear, packedSrgbToLinearRgba } from "./color.js";
+export { copyColor4, scaleColor4ToRef } from "./color4-ref.js";
 export { vec3 } from "./vec3-ctor.js";
 export { Vec3Up } from "./vec3-up.js";
 export { addVec3 } from "./add-vec3.js";
@@ -15,6 +17,7 @@ export { lerpVec3 } from "./lerp-vec3.js";
 export {
     addVec3InPlace,
     addVec3ToRef,
+    copyVec3,
     crossVec3InPlace,
     crossVec3ToRef,
     lerpVec3InPlace,
@@ -41,6 +44,7 @@ export { mat4FromQuat } from "./mat4-from-quat.js";
 export { mat4Compose } from "./mat4-compose.js";
 export { mat4ComposeInto } from "./mat4-compose-into.js";
 export { mat4MultiplyInto } from "./mat4-multiply-into.js";
+export { transformCoordinatesToRef, transformNormalToRef, mat4GetTranslationToRef } from "./mat4-transform.js";
 export type { Aabb } from "./aabb.js";
 export { computeAabb } from "./aabb.js";
 export { ObservableVec3 } from "./observable-vec3.js";

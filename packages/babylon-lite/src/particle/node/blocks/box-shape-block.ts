@@ -1,4 +1,5 @@
-import { randomRange } from "../../particle-math.js";
+import { randomRange } from "../../../math/random-range.js";
+import { transformCoordinatesToRef, transformNormalToRef } from "../../../math/mat4-transform.js";
 import type { Vec3 } from "../../../math/types.js";
 import type { ParticleSystem } from "../../particle-system.js";
 import type { ParticleBlockEvaluator } from "../npe-types.js";
@@ -7,8 +8,8 @@ import type { ParticleBlockEvaluator } from "../npe-types.js";
  * `BoxShapeBlock` — emits particles from a box. The position slot draws a uniform random point inside
  * `[minEmitBox, maxEmitBox]`; the direction slot draws a uniform random direction between `direction1`
  * and `direction2`. Each component uses `randomRange` (which skips the RNG when min === max), so a
- * zero-width axis consumes no random — matching BJS `BoxShapeBlock` exactly. The pure-translation emitter
- * offsets world-space positions; directions are unaffected.
+ * zero-width axis consumes no random — matching BJS `BoxShapeBlock` exactly. The emitter's world matrix
+ * (translation + rotation + scale) is baked into birth position (as coordinates) and direction (as a normal).
  */
 export const boxShapeBlock: ParticleBlockEvaluator = {
     build(block, ctx) {
@@ -33,9 +34,7 @@ export const boxShapeBlock: ParticleBlockEvaluator = {
                 particle.position.y = ry;
                 particle.position.z = rz;
             } else {
-                particle.position.x = rx + state.emitter.x;
-                particle.position.y = ry + state.emitter.y;
-                particle.position.z = rz + state.emitter.z;
+                transformCoordinatesToRef(rx, ry, rz, state.emitterWorldMatrix, particle.position);
             }
         };
 
@@ -47,12 +46,16 @@ export const boxShapeBlock: ParticleBlockEvaluator = {
             const rx = randomRange(dir1.x, dir2.x);
             const ry = randomRange(dir1.y, dir2.y);
             const rz = randomRange(dir1.z, dir2.z);
-            particle.direction.x = rx;
-            particle.direction.y = ry;
-            particle.direction.z = rz;
-            particle._initialDirection.x = rx;
-            particle._initialDirection.y = ry;
-            particle._initialDirection.z = rz;
+            if (sys.isLocal) {
+                particle.direction.x = rx;
+                particle.direction.y = ry;
+                particle.direction.z = rz;
+            } else {
+                transformNormalToRef(rx, ry, rz, state.emitterWorldMatrix, particle.direction);
+            }
+            particle._initialDirection.x = particle.direction.x;
+            particle._initialDirection.y = particle.direction.y;
+            particle._initialDirection.z = particle.direction.z;
         };
 
         ctx.setOutput(block.id, "output", () => system);

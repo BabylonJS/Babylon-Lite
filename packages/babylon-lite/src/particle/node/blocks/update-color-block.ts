@@ -1,4 +1,4 @@
-import { copyColor4 } from "../../particle-math.js";
+import { copyColor4 } from "../../../math/color4-ref.js";
 import type { Color4 } from "../../../math/types.js";
 import type { ParticleSystem } from "../../particle-system.js";
 import type { ParticleBlockEvaluator } from "../npe-types.js";

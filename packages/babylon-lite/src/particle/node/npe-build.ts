@@ -1,6 +1,9 @@
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
-import type { Vec3 } from "../../math/types.js";
+import type { Vec3, Mat4 } from "../../math/types.js";
+import { mat4Translation } from "../../math/mat4-translation.js";
+import { mat4GetTranslationToRef } from "../../math/mat4-transform.js";
+import { mat4Invert } from "../../math/mat4-invert.js";
 import type { ParticleSystem } from "../particle-system.js";
 import type { ParticleGraph, NpeGetter, NpeBuildContext, NpeBuildState, ParticleBlockEvaluator, ParticleValue, ParsedParticleInput } from "./npe-types.js";
 import { loadParticleBlockEvaluator } from "./npe-registry.js";
@@ -40,8 +43,10 @@ export interface NodeParticleSet {
 
 /** Options for {@link buildNodeParticleSet}. */
 export interface BuildNodeParticleOptions {
-    /** Emitter world position applied to every system (pure-translation emitter). Defaults to the origin. */
+    /** Emitter world position (translation-only emitter). Defaults to the origin. Ignored when {@link emitterWorldMatrix} is set. */
     emitter?: Vec3;
+    /** Emitter world matrix (translation + rotation + scale). Takes precedence over {@link emitter}. */
+    emitterWorldMatrix?: Mat4;
     /** Base URL used to resolve relative texture URLs in the graph. */
     textureBaseUrl?: string;
 }
@@ -50,8 +55,12 @@ export interface BuildNodeParticleOptions {
  * Build the runtime particle systems from a parsed graph.
  *
  * All block evaluators are dynamically imported up-front (so a scene bundles only the block classes its
- * graph references), then each `SystemBlock` root is built via a post-order walk of its `particle` input
- * chain — the same order Babylon.js builds in, which is what keeps creation-time random draws aligned.
+ * graph references), then each `SystemBlock` root is built via a post-order walk over its inputs. The
+ * post-order serves two purposes: an upstream block registers its output getters before any downstream
+ * block resolves them, and update blocks push onto `_updateQueue` in traversal order — that traversal
+ * order must match Babylon.js's update-queue order to stay parity-correct for multi-update graphs.
+ * (Creation-time random draws are ordered separately, by the fixed creation-slot order in
+ * `runCreationSlots`, not by this walk.)
  */
 export async function buildNodeParticleSet(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options: BuildNodeParticleOptions = {}): Promise<NodeParticleSet> {
     // Pre-load the evaluator for every distinct block class in the graph.
@@ -77,11 +86,27 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
 
         const capacity = typeof systemBlock.serialized.capacity === "number" ? systemBlock.serialized.capacity : 1000;
 
+        let emitterWorldMatrix: Mat4;
+        const emitter: Vec3 = { x: 0, y: 0, z: 0 };
+        if (options.emitterWorldMatrix) {
+            emitterWorldMatrix = options.emitterWorldMatrix;
+            mat4GetTranslationToRef(emitterWorldMatrix, emitter);
+        } else {
+            const e = options.emitter ?? { x: 0, y: 0, z: 0 };
+            emitterWorldMatrix = mat4Translation(e.x, e.y, e.z);
+            emitter.x = e.x;
+            emitter.y = e.y;
+            emitter.z = e.z;
+        }
+        const emitterInverseWorldMatrix = mat4Invert(emitterWorldMatrix);
+
         const state: NpeBuildState = {
             system: null,
             particle: null,
             capacity,
-            emitter: options.emitter ?? { x: 0, y: 0, z: 0 },
+            emitter,
+            emitterWorldMatrix,
+            emitterInverseWorldMatrix,
             scene,
             textureBaseUrl: options.textureBaseUrl,
         };
@@ -99,6 +124,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
                     if (getter) {
                         return getter;
                     }
+                    throw new Error(`NodeParticle: unresolved connection ${block.className}.${name} -> ${input.targetBlockId}:${input.targetConnectionName}`);
                 }
                 if (input) {
                     const literal = parseInputLiteral(input);

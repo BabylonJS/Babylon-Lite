@@ -1,6 +1,6 @@
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
-import type { Vec3 } from "../../math/types.js";
+import type { Vec3, Mat4 } from "../../math/types.js";
 import { parseNodeParticleSource } from "./npe-parser.js";
 import { buildNodeParticleSet } from "./npe-build.js";
 import type { NodeParticleSet } from "./npe-build.js";
@@ -11,8 +11,10 @@ export interface ParseNodeParticleOptions {
     json?: string | object;
     /** Override the snippet server origin. */
     snippetServer?: string;
-    /** Emitter world position applied to every system (pure-translation emitter). */
+    /** Emitter world position (translation-only emitter). Ignored when {@link ParseNodeParticleOptions.emitterWorldMatrix} is set. */
     emitter?: Vec3;
+    /** Emitter world matrix (translation + rotation + scale). Takes precedence over {@link ParseNodeParticleOptions.emitter}. */
+    emitterWorldMatrix?: Mat4;
     /** Base URL used to resolve relative texture URLs in the graph (mirrors BJS texture-base resolution). */
     textureBaseUrl?: string;
 }
@@ -41,5 +43,9 @@ export async function parseNodeParticleSetFromSnippet(
     }
 
     const graph = parseNodeParticleSource(source);
-    return await buildNodeParticleSet(engine, scene, graph, { emitter: options.emitter, textureBaseUrl: options.textureBaseUrl });
+    return await buildNodeParticleSet(engine, scene, graph, {
+        emitter: options.emitter,
+        emitterWorldMatrix: options.emitterWorldMatrix,
+        textureBaseUrl: options.textureBaseUrl,
+    });
 }

@@ -1,4 +1,5 @@
-import { randomRange } from "../../particle-math.js";
+import { randomRange } from "../../../math/random-range.js";
+import { transformCoordinatesToRef, transformNormalToRef } from "../../../math/mat4-transform.js";
 import type { Vec3 } from "../../../math/types.js";
 import type { ParticleSystem } from "../../particle-system.js";
 import type { ParticleBlockEvaluator } from "../npe-types.js";
@@ -10,7 +11,8 @@ import type { ParticleBlockEvaluator } from "../npe-types.js";
  * unless both `direction1` and `direction2` are connected, in which case it draws a uniform random direction
  * between them (the `BoxShapeBlock` behaviour). The random-draw order and the `randomRange` short-circuit
  * (which skips the RNG when min === max, so a zero-width range or zero randomizer consumes nothing) match BJS
- * `SphereShapeBlock` exactly, keeping creation-time draws aligned. Pure-translation emitter only.
+ * `SphereShapeBlock` exactly, keeping creation-time draws aligned. The emitter's world matrix is baked into
+ * birth position and direction.
  */
 export const sphereShapeBlock: ParticleBlockEvaluator = {
     build(block, ctx) {
@@ -46,9 +48,7 @@ export const sphereShapeBlock: ParticleBlockEvaluator = {
                 particle.position.y = ry;
                 particle.position.z = rz;
             } else {
-                particle.position.x = rx + state.emitter.x;
-                particle.position.y = ry + state.emitter.y;
-                particle.position.z = rz + state.emitter.z;
+                transformCoordinatesToRef(rx, ry, rz, state.emitterWorldMatrix, particle.position);
             }
         };
 
@@ -61,12 +61,16 @@ export const sphereShapeBlock: ParticleBlockEvaluator = {
                 const rx = randomRange(dir1.x, dir2.x);
                 const ry = randomRange(dir1.y, dir2.y);
                 const rz = randomRange(dir1.z, dir2.z);
-                particle.direction.x = rx;
-                particle.direction.y = ry;
-                particle.direction.z = rz;
-                particle._initialDirection.x = rx;
-                particle._initialDirection.y = ry;
-                particle._initialDirection.z = rz;
+                if (sys.isLocal) {
+                    particle.direction.x = rx;
+                    particle.direction.y = ry;
+                    particle.direction.z = rz;
+                } else {
+                    transformNormalToRef(rx, ry, rz, state.emitterWorldMatrix, particle.direction);
+                }
+                particle._initialDirection.x = particle.direction.x;
+                particle._initialDirection.y = particle.direction.y;
+                particle._initialDirection.z = particle.direction.z;
                 return;
             }
             const directionRandomizer = directionRandomizerGetter(state) as number;
@@ -89,12 +93,16 @@ export const sphereShapeBlock: ParticleBlockEvaluator = {
                 dy /= length;
                 dz /= length;
             }
-            particle.direction.x = dx;
-            particle.direction.y = dy;
-            particle.direction.z = dz;
-            particle._initialDirection.x = dx;
-            particle._initialDirection.y = dy;
-            particle._initialDirection.z = dz;
+            if (sys.isLocal) {
+                particle.direction.x = dx;
+                particle.direction.y = dy;
+                particle.direction.z = dz;
+            } else {
+                transformNormalToRef(dx, dy, dz, state.emitterWorldMatrix, particle.direction);
+            }
+            particle._initialDirection.x = particle.direction.x;
+            particle._initialDirection.y = particle.direction.y;
+            particle._initialDirection.z = particle.direction.z;
         };
 
         ctx.setOutput(block.id, "output", () => system);

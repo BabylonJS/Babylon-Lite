@@ -1,4 +1,5 @@
-import { randomRange } from "../../particle-math.js";
+import { randomRange } from "../../../math/random-range.js";
+import { transformCoordinatesToRef, transformNormalToRef } from "../../../math/mat4-transform.js";
 import type { Vec3 } from "../../../math/types.js";
 import type { ParticleSystem } from "../../particle-system.js";
 import type { ParticleBlockEvaluator } from "../npe-types.js";
@@ -9,7 +10,8 @@ import type { ParticleBlockEvaluator } from "../npe-types.js";
  * cylinder surface normal in the XZ plane, jittered by `directionRandomizer`, unless both `direction1` and
  * `direction2` are connected. Mirrors BJS `CylinderShapeBlock` — note the azimuth jitter draws
  * `randomRange(-PI/2, PI/2)` even when the randomizer is 0 (it is then multiplied by 0), so the random
- * sequence stays aligned. Pure-translation emitter only.
+ * sequence stays aligned. The emitter's world matrix is baked into birth position and direction (the radial
+ * direction is measured in the emitter's local frame via the inverse world matrix).
  */
 export const cylinderShapeBlock: ParticleBlockEvaluator = {
     build(block, ctx) {
@@ -43,9 +45,7 @@ export const cylinderShapeBlock: ParticleBlockEvaluator = {
                 particle.position.y = yPos;
                 particle.position.z = zPos;
             } else {
-                particle.position.x = xPos + state.emitter.x;
-                particle.position.y = yPos + state.emitter.y;
-                particle.position.z = zPos + state.emitter.z;
+                transformCoordinatesToRef(xPos, yPos, zPos, state.emitterWorldMatrix, particle.position);
             }
         };
 
@@ -58,12 +58,16 @@ export const cylinderShapeBlock: ParticleBlockEvaluator = {
                 const rx = randomRange(dir1.x, dir2.x);
                 const ry = randomRange(dir1.y, dir2.y);
                 const rz = randomRange(dir1.z, dir2.z);
-                particle.direction.x = rx;
-                particle.direction.y = ry;
-                particle.direction.z = rz;
-                particle._initialDirection.x = rx;
-                particle._initialDirection.y = ry;
-                particle._initialDirection.z = rz;
+                if (sys.isLocal) {
+                    particle.direction.x = rx;
+                    particle.direction.y = ry;
+                    particle.direction.z = rz;
+                } else {
+                    transformNormalToRef(rx, ry, rz, state.emitterWorldMatrix, particle.direction);
+                }
+                particle._initialDirection.x = particle.direction.x;
+                particle._initialDirection.y = particle.direction.y;
+                particle._initialDirection.z = particle.direction.z;
                 return;
             }
             const directionRandomizer = directionRandomizerGetter(state) as number;
@@ -76,6 +80,14 @@ export const cylinderShapeBlock: ParticleBlockEvaluator = {
                 ty /= length;
                 tz /= length;
             }
+
+            // Rotate the radial vector back into the emitter's local frame so the azimuth is measured on the
+            // cylinder's local axis (mirrors BJS applying `emitterInverseWorldMatrix`). Identity for a
+            // translation-only emitter.
+            transformNormalToRef(tx, ty, tz, state.emitterInverseWorldMatrix, particle.direction);
+            tx = particle.direction.x;
+            ty = particle.direction.y;
+            tz = particle.direction.z;
 
             const randY = randomRange(-directionRandomizer / 2, directionRandomizer / 2);
             let azimuth = Math.atan2(tx, tz);
@@ -90,12 +102,16 @@ export const cylinderShapeBlock: ParticleBlockEvaluator = {
                 ty /= length;
                 tz /= length;
             }
-            particle.direction.x = tx;
-            particle.direction.y = ty;
-            particle.direction.z = tz;
-            particle._initialDirection.x = tx;
-            particle._initialDirection.y = ty;
-            particle._initialDirection.z = tz;
+            if (sys.isLocal) {
+                particle.direction.x = tx;
+                particle.direction.y = ty;
+                particle.direction.z = tz;
+            } else {
+                transformNormalToRef(tx, ty, tz, state.emitterWorldMatrix, particle.direction);
+            }
+            particle._initialDirection.x = particle.direction.x;
+            particle._initialDirection.y = particle.direction.y;
+            particle._initialDirection.z = particle.direction.z;
         };
 
         ctx.setOutput(block.id, "output", () => system);

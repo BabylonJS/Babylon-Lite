@@ -1,4 +1,5 @@
-import { randomRange } from "../../particle-math.js";
+import { randomRange } from "../../../math/random-range.js";
+import { transformCoordinatesToRef, transformNormalToRef } from "../../../math/mat4-transform.js";
 import type { Vec3 } from "../../../math/types.js";
 import type { ParticleSystem } from "../../particle-system.js";
 import type { ParticleBlockEvaluator } from "../npe-types.js";
@@ -6,7 +7,8 @@ import type { ParticleBlockEvaluator } from "../npe-types.js";
 /**
  * `PointShapeBlock` — emits particles from a single point (the emitter). The position slot places the
  * particle at the emitter with no random draw; the direction slot draws a uniform random direction between
- * `direction1` and `direction2`. Mirrors BJS `PointShapeBlock`. Pure-translation emitter only.
+ * `direction1` and `direction2`. Mirrors BJS `PointShapeBlock`. The emitter's world matrix is baked into the
+ * birth position and direction.
  */
 export const pointShapeBlock: ParticleBlockEvaluator = {
     build(block, ctx) {
@@ -22,9 +24,7 @@ export const pointShapeBlock: ParticleBlockEvaluator = {
                 particle.position.y = 0;
                 particle.position.z = 0;
             } else {
-                particle.position.x = state.emitter.x;
-                particle.position.y = state.emitter.y;
-                particle.position.z = state.emitter.z;
+                transformCoordinatesToRef(0, 0, 0, state.emitterWorldMatrix, particle.position);
             }
         };
 
@@ -36,12 +36,16 @@ export const pointShapeBlock: ParticleBlockEvaluator = {
             const rx = randomRange(dir1.x, dir2.x);
             const ry = randomRange(dir1.y, dir2.y);
             const rz = randomRange(dir1.z, dir2.z);
-            particle.direction.x = rx;
-            particle.direction.y = ry;
-            particle.direction.z = rz;
-            particle._initialDirection.x = rx;
-            particle._initialDirection.y = ry;
-            particle._initialDirection.z = rz;
+            if (sys.isLocal) {
+                particle.direction.x = rx;
+                particle.direction.y = ry;
+                particle.direction.z = rz;
+            } else {
+                transformNormalToRef(rx, ry, rz, state.emitterWorldMatrix, particle.direction);
+            }
+            particle._initialDirection.x = particle.direction.x;
+            particle._initialDirection.y = particle.direction.y;
+            particle._initialDirection.z = particle.direction.z;
         };
 
         ctx.setOutput(block.id, "output", () => system);

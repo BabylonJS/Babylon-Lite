@@ -1,4 +1,4 @@
-import { copyVec3 } from "../../particle-math.js";
+import { copyVec3 } from "../../../math/vec3-ref.js";
 import type { Vec3 } from "../../../math/types.js";
 import type { ParticleSystem } from "../../particle-system.js";
 import type { ParticleBlockEvaluator } from "../npe-types.js";

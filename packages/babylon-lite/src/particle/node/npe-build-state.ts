@@ -1,4 +1,5 @@
-import { scaleVec3ToRef, scaleColor4ToRef } from "../particle-math.js";
+import { scaleVec3ToRef } from "../../math/vec3-ref.js";
+import { scaleColor4ToRef } from "../../math/color4-ref.js";
 import type { NpeBuildState, ParticleValue } from "./npe-types.js";
 
 // Contextual source ids (Babylon.js `NodeParticleContextualSources`; values are hex).

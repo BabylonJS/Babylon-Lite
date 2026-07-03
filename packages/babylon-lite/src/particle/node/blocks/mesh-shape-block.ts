@@ -1,4 +1,5 @@
-import { randomRange } from "../../particle-math.js";
+import { randomRange } from "../../../math/random-range.js";
+import { transformCoordinatesToRef, transformNormalToRef } from "../../../math/mat4-transform.js";
 import type { Vec3 } from "../../../math/types.js";
 import type { Color4 } from "../../../math/types.js";
 import type { ParticleSystem } from "../../particle-system.js";
@@ -19,7 +20,8 @@ interface CachedVertexData {
  * the direction is the interpolated face normal (`useMeshNormalsForDirection`, the default) or a uniform
  * random between `direction1`/`direction2`. The three raw `Math.random()` draws (face index, then the two
  * barycentric coordinates) mirror BJS `MeshShapeBlock` exactly. A graph with no baked geometry emits nothing,
- * as in BJS. Pure-translation emitter, mesh-local geometry (no world-space transform).
+ * as in BJS. The emitter's world matrix is baked into birth position and direction; the mesh's own
+ * world-space transform (BJS `worldSpace`) is not applied — geometry is sampled in mesh-local space.
  */
 export const meshShapeBlock: ParticleBlockEvaluator = {
     build(block, ctx) {
@@ -85,9 +87,7 @@ export const meshShapeBlock: ParticleBlockEvaluator = {
                 particle.position.y = ry;
                 particle.position.z = rz;
             } else {
-                particle.position.x = rx + state.emitter.x;
-                particle.position.y = ry + state.emitter.y;
-                particle.position.z = rz + state.emitter.z;
+                transformCoordinatesToRef(rx, ry, rz, state.emitterWorldMatrix, particle.position);
             }
 
             if (useMeshNormalsForDirection && normals) {
@@ -109,9 +109,13 @@ export const meshShapeBlock: ParticleBlockEvaluator = {
             state.particle = particle;
             state.system = sys;
             if (useMeshNormalsForDirection && normals) {
-                particle.direction.x = normalX;
-                particle.direction.y = normalY;
-                particle.direction.z = normalZ;
+                if (sys.isLocal) {
+                    particle.direction.x = normalX;
+                    particle.direction.y = normalY;
+                    particle.direction.z = normalZ;
+                } else {
+                    transformNormalToRef(normalX, normalY, normalZ, state.emitterWorldMatrix, particle.direction);
+                }
                 return;
             }
             const dir1 = dir1Getter(state) as Vec3;
@@ -119,12 +123,16 @@ export const meshShapeBlock: ParticleBlockEvaluator = {
             const rx = randomRange(dir1.x, dir2.x);
             const ry = randomRange(dir1.y, dir2.y);
             const rz = randomRange(dir1.z, dir2.z);
-            particle.direction.x = rx;
-            particle.direction.y = ry;
-            particle.direction.z = rz;
-            particle._initialDirection.x = rx;
-            particle._initialDirection.y = ry;
-            particle._initialDirection.z = rz;
+            if (sys.isLocal) {
+                particle.direction.x = rx;
+                particle.direction.y = ry;
+                particle.direction.z = rz;
+            } else {
+                transformNormalToRef(rx, ry, rz, state.emitterWorldMatrix, particle.direction);
+            }
+            particle._initialDirection.x = particle.direction.x;
+            particle._initialDirection.y = particle.direction.y;
+            particle._initialDirection.z = particle.direction.z;
         };
     },
 };
