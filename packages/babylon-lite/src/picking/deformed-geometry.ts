@@ -174,7 +174,19 @@ function applySkinPositions(mesh: Mesh, out: Float32Array): void {
     const vertexCount = out.length / 3;
     for (let v = 0; v < vertexCount; v++) {
         const i = v * 3;
-        skinVec3ToRef(skeleton.boneMatrices, skeleton.joints, skeleton.weights, skeleton.joints1, skeleton.weights1, v, source[i]!, source[i + 1]!, source[i + 2]!, 1, _skinScratch);
+        skinVec3ToRef(
+            skeleton.boneMatrices,
+            skeleton.joints,
+            skeleton.weights,
+            skeleton.joints1,
+            skeleton.weights1,
+            v,
+            source[i]!,
+            source[i + 1]!,
+            source[i + 2]!,
+            1,
+            _skinScratch
+        );
         out[i] = _skinScratch[0];
         out[i + 1] = _skinScratch[1];
         out[i + 2] = _skinScratch[2];
@@ -191,7 +203,19 @@ function applySkinNormals(mesh: Mesh, out: Float32Array): void {
     const vertexCount = out.length / 3;
     for (let v = 0; v < vertexCount; v++) {
         const i = v * 3;
-        skinVec3ToRef(skeleton.boneMatrices, skeleton.joints, skeleton.weights, skeleton.joints1, skeleton.weights1, v, source[i]!, source[i + 1]!, source[i + 2]!, 0, _skinScratch);
+        skinVec3ToRef(
+            skeleton.boneMatrices,
+            skeleton.joints,
+            skeleton.weights,
+            skeleton.joints1,
+            skeleton.weights1,
+            v,
+            source[i]!,
+            source[i + 1]!,
+            source[i + 2]!,
+            0,
+            _skinScratch
+        );
         out[i] = _skinScratch[0];
         out[i + 1] = _skinScratch[1];
         out[i + 2] = _skinScratch[2];
