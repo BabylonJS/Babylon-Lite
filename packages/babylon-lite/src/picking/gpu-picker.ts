@@ -379,12 +379,17 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     device.queue.submit([encoder.finish()]);
 
     await Promise.all([rt.colorStaging.mapAsync(GPUMapMode.READ), rt.depthStaging.mapAsync(GPUMapMode.READ)]);
-
-    const colorData = new U8(rt.colorStaging.getMappedRange());
-    const pickId = (colorData[0]! << 16) | (colorData[1]! << 8) | colorData[2]!;
-    const depth = new F32(rt.depthStaging.getMappedRange())[0]!;
-    rt.colorStaging.unmap();
-    rt.depthStaging.unmap();
+    let pickId = 0;
+    let depth = 0;
+    try {
+        await Promise.all([rt.colorStaging.mapAsync(GPUMapMode.READ), rt.depthStaging.mapAsync(GPUMapMode.READ)]);
+        const colorData = new U8(rt.colorStaging.getMappedRange());
+        pickId = (colorData[0]! << 16) | (colorData[1]! << 8) | colorData[2]!;
+        depth = new F32(rt.depthStaging.getMappedRange())[0]!;
+    } finally {
+        rt.colorStaging.unmap();
+        rt.depthStaging.unmap();
+    }
 
     // Destroy temp per-mesh UBOs
     for (let i = 0; i < tempBuffers.length; i++) {
