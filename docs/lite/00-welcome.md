@@ -131,6 +131,8 @@ await startEngine(engine);
 
 Notice the shape is the same: create an engine, build a scene, add a light, load a glTF, set up the environment and camera, then run. The difference is that Lite hands you **plain data plus tree-shakable functions** instead of classes and methods — which is exactly what lets the bundler strip everything you don't use.
 
+> Want to run this without installing anything? Paste it into the **[Lite Playground](https://liteplayground.babylonjs.com)** and hit Run. See the **[Playground guide](/lite/04-playground)** for a tour.
+
 > Ready to port a real scene? See the **[Porting Guide](/lite/03-porting-guide)** for a full side-by-side API map.
 
 ---
@@ -213,7 +215,7 @@ This is just the beginning. On the roadmap:
 
 - **Feature parity with Babylon.js** — closing the gap so more scenes can be built in Lite without compromise.
 - **A Lite Viewer** — a drop-in, ultra-light viewer for showcasing models and scenes with the smallest possible footprint.
-- **A Lite Playground and Sandbox** — the tools you love from the Babylon ecosystem, reimagined for Lite.
+- **A Lite Sandbox** — drag-and-drop model inspection, reimagined for Lite. (The **[Lite Playground](https://liteplayground.babylonjs.com)** is already live — try Lite in your browser today.)
 
 And just as importantly: we want to **hear from you** — what's missing, what you'd need before reaching for Lite, and where it should go next. Your feedback will directly shape the roadmap.
 
@@ -222,6 +224,7 @@ And just as importantly: we want to **hear from you** — what's missing, what y
 ## Next steps
 
 - 🚀 **[Getting Started](/lite/01-getting-started)** — install Lite, learn the mental model, and render your first scene.
+- 🛝 **[Lite Playground](/lite/04-playground)** — try Lite in your browser with zero setup: edit, run, and share snippets live.
 - 🔁 **[Porting Guide](/lite/03-porting-guide)** — translate a Babylon.js scene to Babylon Lite, side by side.
 - 📊 **[Feature Comparison](/lite/02-feature-comparison)** — the full Lite-vs-Babylon.js feature matrix, so you can see exactly what's covered, partial, or missing.
 - 🧱 **[Architecture docs](/lite/architecture/00-overview)** — deep dives into the engine internals.

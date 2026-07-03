@@ -11,6 +11,12 @@
 #      (only if the agent changed something) branches, commits, pushes, and opens a
 #      DRAFT PR. Validation results are captured in the PR body either way.
 #
+# A preflight guard (scripts/check-open-compat-sync-pr.ts) runs before both halves and
+# skips a scheduled/manual run when a previous scheduled run's compat-sync PR is still
+# open, so at most one scheduled compat-sync PR exists at a time (and no inference is
+# spent on a noop run). Issue-triggered PRs are explicit requests and do not count
+# toward this limit, nor are issue-triggered runs themselves guarded.
+#
 # ── Triggers (all three retained from the gh-aw workflow) ──────────────────────────
 #   1. Daily schedule        → the `schedules:` cron below.
 #   2. Manual run            → the "Run pipeline" button + the parameters below.
@@ -20,10 +26,26 @@
 #      `issueNumber`. The agent then treats that issue as the request to address.
 #
 # ── Secrets (set as SECRET pipeline variables on this pipeline) ───────────────────
-#   - GITHUB_TOKEN        PAT with contents:write + pull_requests:write (opens the PR)
 #   - COPILOT_CLI_TOKEN   fine-grained PAT (github_pat_...) from a Copilot-subscribed
 #                         account; authenticates the Copilot CLI. Inference bills to
 #                         that account (the BabylonJS org has no org Copilot plan).
+#   - PR auth — pick ONE of the following:
+#       (preferred) GH_APP_ID + GH_APP_PRIVATE_KEY
+#                         A GitHub App registered in the BabylonJS org and installed
+#                         on the target repo with `contents: write`,
+#                         `pull requests: write`, and `issues: write` (for labels).
+#                         The PR driver mints a short-lived installation token, so the
+#                         PR is authored by the app's bot identity (`<app>[bot]`) and
+#                         a human — even the pipeline owner — can review/approve it.
+#                         Store GH_APP_PRIVATE_KEY as the App's .pem base64-encoded on
+#                         a single line (base64 avoids newline mangling in the secret
+#                         store). Produce it with:
+#                           PowerShell: [Convert]::ToBase64String([IO.File]::ReadAllBytes("app.pem"))
+#                           bash:       base64 -w0 app.pem
+#       (fallback)  GITHUB_TOKEN
+#                         PAT with contents:write + pull_requests:write. PRs are then
+#                         authored by the PAT owner, who CANNOT review their own PR —
+#                         use only if no GitHub App is available.
 #
 # ── Known gaps vs. the gh-aw framework (cannot be ported 1:1) ──────────────────────
 #   - No AI-credit (AIC) per-run/daily caps — the Copilot CLI has no such mechanism;
@@ -107,6 +129,26 @@ stages:
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
+                # ── Preflight guard ───────────────────────────────────────────────
+                # Keep at most one SCHEDULED/manual-origin compat-sync PR open at a
+                # time. If a previous scheduled run's PR is still open (not
+                # merged/closed), this run is skipped entirely: the guard sets
+                # skipCompatSync=true and the agent + PR steps below are conditioned
+                # off it. Runs BEFORE the agent so we never burn inference on a noop.
+                # Issue-origin PRs do not count toward the limit, and issue-triggered
+                # runs (ISSUE_NUMBER set) bypass the guard and always proceed.
+                - script: npx tsx scripts/check-open-compat-sync-pr.ts
+                  displayName: "Guard: skip if a compat-sync PR is already open"
+                  env:
+                      GITHUB_REPOSITORY: $(TARGET_REPO)
+                      # Read-only PR access; same auth resolution as the PR driver.
+                      GH_APP_ID: $(GH_APP_ID)
+                      GH_APP_PRIVATE_KEY: $(GH_APP_PRIVATE_KEY)
+                      GITHUB_TOKEN: $(GITHUB_TOKEN)
+                      # Issue-triggered runs are explicit user requests and bypass the
+                      # guard (always proceed, even with a compat-sync PR already open).
+                      ISSUE_NUMBER: ${{ parameters.issueNumber }}
+
                 # ── Agent step ────────────────────────────────────────────────────
                 # Runs the update-compat-layer skill headlessly. The skill reads the
                 # last-synced SHA from COMPAT-STATUS.md, diffs BJS master + Lite since
@@ -130,6 +172,8 @@ stages:
 
                       copilot --model "$COPILOT_MODEL" --allow-all-tools --no-ask-user --prompt "$(cat "$PROMPT_FILE")"
                   displayName: "Run update-compat-layer skill"
+                  # Skip when the guard found an already-open compat-sync PR.
+                  condition: and(succeeded(), ne(variables['skipCompatSync'], 'true'))
                   env:
                       # Copilot CLI auth (fine-grained PAT from a Copilot-subscribed account).
                       COPILOT_CLI_TOKEN: $(COPILOT_CLI_TOKEN)
@@ -146,8 +190,17 @@ stages:
                 # DRAFT PR only when the agent actually changed something.
                 - script: npx tsx scripts/open-compat-sync-pr.ts
                   displayName: "Validate and open compat-sync draft PR"
+                  # Skip when the guard found an already-open compat-sync PR.
+                  condition: and(succeeded(), ne(variables['skipCompatSync'], 'true'))
                   env:
                       GITHUB_REPOSITORY: $(TARGET_REPO)
+                      # PR auth: a GitHub App (preferred — PRs authored by the app bot,
+                      # so they stay reviewable) with a GITHUB_TOKEN PAT fallback. The
+                      # driver mints an installation token when GH_APP_ID +
+                      # GH_APP_PRIVATE_KEY are present; otherwise it uses GITHUB_TOKEN.
+                      # Leaving the App vars unset keeps the old PAT behaviour.
+                      GH_APP_ID: $(GH_APP_ID)
+                      GH_APP_PRIVATE_KEY: $(GH_APP_PRIVATE_KEY)
                       GITHUB_TOKEN: $(GITHUB_TOKEN)
                       BASE_BRANCH: $(TARGET_BASE_BRANCH)
                       ISSUE_NUMBER: ${{ parameters.issueNumber }}

@@ -1,6 +1,6 @@
 {
-  "rawKB": 161.1,
-  "gzipKB": 65.8,
+  "rawKB": 161.7,
+  "gzipKB": 66,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene241-alpha-test-fragment-BpzeKSEk.js",
@@ -29,10 +29,10 @@
     "scene241-iridescence-fragment-2b1zlUa_.js",
     "scene241-light-base-Dop4VNA_.js",
     "scene241-light-matrix-CtsX4GmG.js",
-    "scene241-pbr-refraction-DNqW9e3Y.js",
-    "scene241-pbr-renderable-Cr91uc8z.js",
+    "scene241-pbr-refraction-BM6Ld0xO.js",
+    "scene241-pbr-renderable-Cn3eMXX4.js",
     "scene241-pbr-template-ext-BoJ8SFLM.js",
-    "scene241-pbr-transmission-ext-Db4oCePH.js",
+    "scene241-pbr-transmission-ext-CjXyT1vC.js",
     "scene241-reflectance-fragment-btSdECMQ.js",
     "scene241-rgbd-decode-Bil1WUEk.js",
     "scene241-scene-uniforms-FTYH6Ct0.js",

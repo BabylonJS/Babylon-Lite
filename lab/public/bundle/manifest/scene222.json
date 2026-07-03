@@ -1,10 +1,10 @@
 {
-  "rawKB": 111.5,
-  "gzipKB": 41,
+  "rawKB": 112,
+  "gzipKB": 41.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene222-gpu-pool-CHlSfwGp.js",
-    "scene222-shader-renderable-DalN8ei-.js",
+    "scene222-shader-renderable-CRGFXMki.js",
     "scene222-standard-renderable-BdLy8HER.js",
     "scene222-swapchain-overlay-ilhN4El_.js",
     "scene222-ubo-layout-Cs5YvLYZ.js",

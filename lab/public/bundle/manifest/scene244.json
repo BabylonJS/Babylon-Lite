@@ -1,6 +1,6 @@
 {
-  "rawKB": 133,
-  "gzipKB": 53.7,
+  "rawKB": 133.5,
+  "gzipKB": 53.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene244-animation-pointer-ext-CZbMTIy3.js",
@@ -16,10 +16,10 @@
     "scene244-gltf-json-asset-DaKe4-Lc.js",
     "scene244-gltf-pbr-builder-ext-BI2CisGc.js",
     "scene244-ibl-fragment-CeRrvT96.js",
-    "scene244-pbr-refraction-DiZpotWY.js",
-    "scene244-pbr-renderable-qZJHZZWG.js",
+    "scene244-pbr-refraction-DIfqsSft.js",
+    "scene244-pbr-renderable-jW5O9qsT.js",
     "scene244-pbr-template-ext-BoJ8SFLM.js",
-    "scene244-pbr-transmission-ext-DtzMM7BX.js",
+    "scene244-pbr-transmission-ext-CyMHcZvy.js",
     "scene244-reflectance-fragment-COQ8Gwb2.js",
     "scene244-rgbd-decode-DC93u83f.js",
     "scene244-scene-uniforms-FTYH6Ct0.js",

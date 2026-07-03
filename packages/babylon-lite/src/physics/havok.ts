@@ -16,7 +16,6 @@ import type { SceneNode } from "../scene/scene-node.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { HavokFloatingOriginContext, WorldRegion } from "./havok-floating-origin.js";
-import { onBeforeRender } from "../scene/scene-core.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import { mat4Multiply } from "../math/mat4-multiply.js";
 import { mat4Scale } from "../math/mat4-scale.js";
@@ -195,7 +194,17 @@ export interface PhysicsWorld {
     /** @internal */ readonly _hknp: any;
     /** @internal */ readonly _hkWorld: any;
     /** @internal */ readonly _bodies: PhysicsBody[];
-    /** @internal */ _timestep: number;
+    /** @internal Owning scene, retained so out-of-step callers (e.g. the character controller) can
+     *  read the current per-frame delta (`scene.fixedDeltaMs` / `engine._currentDelta`) when the
+     *  world has no fixed step configured. The world already captures the scene in its per-frame
+     *  step closure, so this adds no new lifetime coupling. */
+    readonly _scene: SceneContext;
+    /** @internal Fixed simulation step in **milliseconds**, matching {@link SceneContext.fixedDeltaMs}.
+     *  Independent of the scene: defaults to `0` ("no world-level fixed step") and is only set by
+     *  {@link setPhysicsTimestep} / {@link setPhysicsTimestepMs}. When `0`, the step resolves the live
+     *  per-frame delta the scene feeds it (`scene.fixedDeltaMs` when running fixed, else the engine's
+     *  real frame delta), so runtime changes to `scene.fixedDeltaMs` are always respected. */
+    _fixedDeltaMs: number;
     /** @internal World-wide gravity `[x, y, z]` set at creation; used to seed floating-origin regions. */
     _gravity: number[];
     /** @internal Floating-origin runtime; present only after `enableHavokFloatingOrigin` is called. */
@@ -204,6 +213,8 @@ export interface PhysicsWorld {
     _afterStep?: ((timestep: number) => void)[];
     /** @internal Lazily-created Havok query collector, cached by the standalone `physics/havok-queries.ts` module. */
     _queryCollector?: any;
+    /** @internal Removes the per-frame step callback from the scene; called by `disposePhysics` before the native world is released. */
+    _stopStep?: () => void;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
@@ -231,14 +242,25 @@ export function createHavokWorld(scene: SceneContext, hknp: any, gravity?: Vec3)
         _hknp: hknp,
         _hkWorld: hkWorld,
         _bodies: [],
-        _timestep: 1 / 60,
+        _scene: scene,
+        _fixedDeltaMs: 0,
         _gravity: [g.x, g.y, g.z],
     };
 
-    // Register per-frame physics step
-    onBeforeRender(scene, (deltaMs: number) => {
+    // Register the per-frame physics step directly on the scene (mirror of
+    // physics-viewer.ts). Keep a remover so disposePhysics can stop stepping
+    // before the native world is released — otherwise a still-running step
+    // would step a freed world (use-after-free in Havok WASM).
+    const stepCb = (deltaMs: number): void => {
         _stepWorld(world, deltaMs);
-    });
+    };
+    scene._beforeRender.unshift(stepCb);
+    world._stopStep = () => {
+        const i = scene._beforeRender.indexOf(stepCb);
+        if (i >= 0) {
+            scene._beforeRender.splice(i, 1);
+        }
+    };
 
     return world;
 }
@@ -265,16 +287,31 @@ export async function enableHavokFloatingOrigin(world: PhysicsWorld, floatingOri
 
 // ─── Per-frame stepping ──────────────────────────────────────────────
 
+/** Hard ceiling on a single physics step (100 ms = a 10 fps floor). A long hitch — backgrounded tab,
+ *  GC pause, hit breakpoint — otherwise hands Havok a huge dt, which tunnels fast bodies through thin
+ *  geometry and can destabilise the constraint solver. Shared by the per-frame step and the
+ *  out-of-loop callers (`worldStepSeconds`) so every physics consumer agrees on the effective step. */
+const MAX_STEP_MS = 100;
+
 function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     const { _hknp: hknp, _hkWorld: hkWorld, _bodies: bodies } = world;
-    const dt = Math.min(deltaMs / 1000, 0.1);
-    if (dt <= 0) {
+    // Step size in ms: the world's own fixed step when set (`> 0`), otherwise the live per-frame delta
+    // the scene supplies — which the render loop already resolves as `scene.fixedDeltaMs > 0 ?
+    // scene.fixedDeltaMs : engine._currentDelta`, so runtime changes to `scene.fixedDeltaMs` flow
+    // through here every frame. Reject non-finite or non-positive steps up front — matching the
+    // animation/sprite managers — so a NaN/negative delta can never reach the solver (a NaN dt would
+    // poison every body's integration).
+    const stepMs = world._fixedDeltaMs > 0 ? world._fixedDeltaMs : deltaMs;
+    if (!Number.isFinite(stepMs) || stepMs <= 0) {
         return;
     }
+    // Clamp the step (see MAX_STEP_MS): capping degrades a stall into a brief slow-motion rather than
+    // an explosion (Babylon.js caps its physics substep the same way).
+    const dt = Math.min(stepMs, MAX_STEP_MS) / 1000;
 
     // Floating-origin worlds run a multi-region step (loaded on demand).
     if (world._fo) {
-        world._fo.step(world);
+        world._fo.step(world, dt);
         return;
     }
 
@@ -292,7 +329,7 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
         }
     }
 
-    hknp.HP_World_Step(hkWorld, world._timestep);
+    hknp.HP_World_Step(hkWorld, dt);
 
     // Post-step: sync DYNAMIC bodies from Havok → node
     for (let i = 0; i < bodies.length; i++) {
@@ -308,7 +345,7 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     if (world._afterStep) {
         const cbs = world._afterStep;
         for (let i = 0; i < cbs.length; i++) {
-            cbs[i]!(world._timestep);
+            cbs[i]!(dt);
         }
     }
 }
@@ -392,21 +429,65 @@ export function getPhysicsGravity(world: PhysicsWorld, worldPosition?: Vec3): Ve
 // ─── Timestep ────────────────────────────────────────────────────────
 
 /**
- * Sets the fixed simulation timestep used by each world step.
+ * Sets the fixed simulation timestep used by each world step, in **seconds**.
+ *
+ * Pass `0` to make the world step at the real per-frame delta instead of a fixed step.
+ * See {@link setPhysicsTimestepMs} for the millisecond-based equivalent.
  * @param world - The physics world.
- * @param dt - Timestep in seconds (e.g. `1 / 60`).
+ * @param dt - Fixed step in seconds (e.g. `1 / 60`), or `0` to use the frame delta.
  */
 export function setPhysicsTimestep(world: PhysicsWorld, dt: number): void {
-    world._timestep = dt;
+    world._fixedDeltaMs = dt * 1000;
 }
 
 /**
- * Returns the world's fixed simulation timestep in seconds.
+ * Returns the world's fixed simulation timestep in **seconds** (`0` means the real per-frame delta
+ * is used). See {@link getPhysicsTimestepMs} for the millisecond-based equivalent.
  * @param world - The physics world.
- * @returns The timestep in seconds.
+ * @returns The fixed step in seconds.
  */
 export function getPhysicsTimestep(world: PhysicsWorld): number {
-    return world._timestep;
+    return world._fixedDeltaMs / 1000;
+}
+
+/**
+ * Sets the fixed simulation timestep used by each world step, in **milliseconds** (matching
+ * {@link SceneContext.fixedDeltaMs}). Pass `0` to make the world step at the real per-frame delta
+ * instead of a fixed step. See {@link setPhysicsTimestep} for the seconds-based equivalent.
+ * @param world - The physics world.
+ * @param fixedDeltaMs - Fixed step in milliseconds (e.g. `1000 / 60`), or `0` to use the frame delta.
+ */
+export function setPhysicsTimestepMs(world: PhysicsWorld, fixedDeltaMs: number): void {
+    world._fixedDeltaMs = fixedDeltaMs;
+}
+
+/**
+ * Returns the world's fixed simulation timestep in **milliseconds** (`0` means the real per-frame
+ * delta is used). See {@link getPhysicsTimestep} for the seconds-based equivalent.
+ * @param world - The physics world.
+ * @returns The fixed step in milliseconds.
+ */
+export function getPhysicsTimestepMs(world: PhysicsWorld): number {
+    return world._fixedDeltaMs;
+}
+
+/**
+ * Effective physics step in **seconds** for callers that run outside the per-frame step loop
+ * (force→impulse application, the character controller): the world's fixed step when set, otherwise
+ * the owning scene's current per-frame delta — its own `fixedDeltaMs`, else the engine's real frame
+ * delta — mirroring how `_stepWorld` resolves the delta the scene feeds it. Applies the same
+ * finite/positive guard and {@link MAX_STEP_MS} clamp as `_stepWorld`, so every physics caller agrees
+ * on the effective step. Returns `0` on a frame with no delta yet (e.g. before the first render);
+ * callers guard against that.
+ * @internal
+ */
+export function worldStepSeconds(world: PhysicsWorld): number {
+    const scene = world._scene;
+    const stepMs = world._fixedDeltaMs > 0 ? world._fixedDeltaMs : scene.fixedDeltaMs > 0 ? scene.fixedDeltaMs : scene.surface.engine._currentDelta;
+    if (!Number.isFinite(stepMs) || stepMs <= 0) {
+        return 0;
+    }
+    return Math.min(stepMs, MAX_STEP_MS) / 1000;
 }
 
 // ─── Velocity limits ─────────────────────────────────────────────────
@@ -528,7 +609,10 @@ export function applyPhysicsBodyImpulse(body: PhysicsBody, impulse: Vec3, locati
  * @param location - World-space application point.
  */
 export function applyPhysicsBodyForce(world: PhysicsWorld, body: PhysicsBody, force: Vec3, location: Vec3): void {
-    applyPhysicsBodyImpulse(body, { x: force.x * world._timestep, y: force.y * world._timestep, z: force.z * world._timestep }, location);
+    // impulse = force × Δt (seconds). When the world has no fixed step, `worldStepSeconds` falls back
+    // to the scene's current per-frame delta (its `fixedDeltaMs`, else the engine's real frame delta).
+    const dt = worldStepSeconds(world);
+    applyPhysicsBodyImpulse(body, { x: force.x * dt, y: force.y * dt, z: force.z * dt }, location);
 }
 
 /**
@@ -1270,6 +1354,16 @@ export function getPhysicsBodyDebugGeometry(world: PhysicsWorld, body: PhysicsBo
  * @param world - The physics world to dispose.
  */
 export function disposePhysics(world: PhysicsWorld): void {
+    // Stop per-frame stepping before any native world is released so a still-queued
+    // _beforeRender callback can't step a freed world (use-after-free in Havok WASM).
+    world._stopStep?.();
+    world._stopStep = undefined;
+
+    // Drop after-step hooks (e.g. the collision-event drain registered by
+    // onPhysicsCollision). They read the native world via HP_World_GetCollisionEvents,
+    // so they must not survive it — clear them alongside the step callback.
+    world._afterStep = undefined;
+
     if (world._fo) {
         world._fo.dispose(world);
         return;

@@ -118,6 +118,27 @@ function emitPackageJson(): Plugin {
                 jsdelivr: "./dist/index.js",
                 unpkg: "./dist/index.js",
                 sideEffects: false,
+                // A small, curated allowlist of STRICTLY-OPTIONAL peer dependencies. Every
+                // transitive *runtime* dependency is still bundled as an opaque implementation
+                // detail (there is no `dependencies` field), so a plain `npm i @babylonjs/lite`
+                // and CDN usage stay self-contained. These peers are never bundled and — being
+                // optional — are never auto-installed or warned about by npm/pnpm/yarn:
+                //   - @babylonjs/havok: the physics module is injected by the caller into
+                //     `createHavokWorld(scene, hknp)`; Lite never imports it. This entry only
+                //     advertises the supported version range for consumers who enable physics.
+                //   - @webgpu/types: the public `index.d.ts` references ambient WebGPU globals
+                //     (`GPUDevice`, `GPUTexture`, `GPUSampler`, ...). TypeScript consumers need
+                //     these types on their compile path.
+                // Keep this in sync with the allowlist in
+                // tests/lite/build/public-api-types.test.ts.
+                peerDependencies: {
+                    "@babylonjs/havok": "^1.3.0",
+                    "@webgpu/types": "^0.1.52",
+                },
+                peerDependenciesMeta: {
+                    "@babylonjs/havok": { optional: true },
+                    "@webgpu/types": { optional: true },
+                },
                 ...(provenance ? { babylonLiteRelease: provenance } : {}),
             };
             writeFileSync(resolve(PACKAGE_ROOT, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
@@ -152,13 +173,87 @@ function resolveDependencyDir(dep: string): string {
     return dir;
 }
 
+/** A discovered license/notice file: its path relative to the package root and its text. */
+type LicenseFile = { relPath: string; text: string };
+
+/**
+ * Recursively collect every license/notice/copying file a bundled dependency
+ * ships, so attribution covers not just the top-level LICENSE but any NOTICE
+ * file (Apache-2.0 §4) or nested upstream license the package vendors alongside
+ * its code. Nested `node_modules` are skipped: those are the dependency's own
+ * transitive deps, which Lite does not bundle. Results are de-duplicated by
+ * content so a package that ships the same license in several places is only
+ * reproduced once.
+ */
+function collectLicenseFiles(pkgDir: string): LicenseFile[] {
+    const matches: LicenseFile[] = [];
+    const seen = new Set<string>();
+    const walk = (dir: string): void => {
+        for (const name of readdirSync(dir)) {
+            const full = resolve(dir, name);
+            if (statSync(full).isDirectory()) {
+                if (name !== "node_modules") {
+                    walk(full);
+                }
+                continue;
+            }
+            if (!/^(license|licence|copying|notice)/i.test(name)) {
+                continue;
+            }
+            const text = readFileSync(full, "utf8").trimEnd();
+            const key = text.replace(/\s+/g, " ").trim();
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            matches.push({ relPath: full.slice(pkgDir.length + 1).replace(/\\/g, "/"), text });
+        }
+    };
+    walk(pkgDir);
+    matches.sort((a, b) => a.relPath.localeCompare(b.relPath));
+    return matches;
+}
+
+/**
+ * Curated attribution for upstream native/runtime components compiled INTO the
+ * bundled WASM artifacts. The npm packages ship only their own top-level
+ * LICENSE and omit the licenses of the C++/toolchain code embedded in their
+ * `.wasm`, so we reproduce those here to honour their (permissive) terms. Each
+ * `file` is checked into {@link THIRD_PARTY_NOTICES_DIR} verbatim from the
+ * authoritative upstream repository named in `source`.
+ *
+ * Both `@recast-navigation/wasm` and `manifold-3d` are Emscripten-generated, so
+ * their `.wasm`/glue embeds the Emscripten runtime; `@recast-navigation/wasm`
+ * additionally embeds the Recast & Detour C++ library. Manifold's own C++ is
+ * Apache-2.0 — identical to `manifold-3d`'s shipped LICENSE — so it needs no
+ * separate entry.
+ */
+const SUPPLEMENTAL_NOTICES: ReadonlyArray<{ title: string; embeddedBy: string; source: string; file: string }> = [
+    {
+        title: "Recast & Detour (recastnavigation)",
+        embeddedBy: "@recast-navigation/wasm",
+        source: "https://github.com/recastnavigation/recastnavigation",
+        file: "recastnavigation-LICENSE.txt",
+    },
+    {
+        title: "Emscripten runtime",
+        embeddedBy: "@recast-navigation/wasm, manifold-3d",
+        source: "https://github.com/emscripten-core/emscripten",
+        file: "emscripten-LICENSE.txt",
+    },
+];
+
+const THIRD_PARTY_NOTICES_DIR = resolve(__dirname, "third-party-notices");
+
 /**
  * Generate THIRD_PARTY_NOTICES.txt by aggregating the license text of every
- * bundled runtime dependency. Generated at build time so the notices stay in
- * sync with the actual dependency versions on each release. Fails the build if
- * a license file cannot be located, so attribution is never silently dropped.
+ * bundled runtime dependency, plus curated notices for the upstream native
+ * components embedded in their WASM. Generated at build time so the notices stay
+ * in sync with the actual dependency versions on each release. Fails the build
+ * if a license file cannot be located, so attribution is never silently dropped.
  */
 function emitThirdPartyNotices(): Plugin {
+    const divider = "=".repeat(78);
     return {
         name: "emit-third-party-notices",
         writeBundle() {
@@ -169,14 +264,30 @@ function emitThirdPartyNotices(): Plugin {
             for (const dep of BUNDLED_DEPENDENCIES) {
                 const pkgDir = resolveDependencyDir(dep);
                 const { version } = JSON.parse(readFileSync(resolve(pkgDir, "package.json"), "utf8")) as { version: string };
-                const licenseFile = readdirSync(pkgDir).find((f) => /^(license|licence|copying)/i.test(f));
-                if (!licenseFile) {
+                const licenseFiles = collectLicenseFiles(pkgDir);
+                if (licenseFiles.length === 0) {
                     throw new Error(`No license file found for bundled dependency "${dep}" in ${pkgDir}`);
                 }
-                const licenseText = readFileSync(resolve(pkgDir, licenseFile), "utf8").trimEnd();
-                const divider = "=".repeat(78);
-                sections.push(`${divider}\n${dep} ${version}\n${divider}\n\n${licenseText}`);
+                // A single top-level license is shown plainly; when a package ships
+                // several (e.g. LICENSE + NOTICE), each is labelled with its path.
+                const body = licenseFiles.length === 1 ? licenseFiles[0]!.text : licenseFiles.map((f) => `--- ${f.relPath} ---\n\n${f.text}`).join("\n\n");
+                sections.push(`${divider}\n${dep} ${version}\n${divider}\n\n${body}`);
             }
+
+            sections.push(
+                `${divider}\nBundled upstream components\n${divider}\n\n` +
+                    "The following native/runtime components are compiled into the WebAssembly\n" +
+                    "artifacts of the packages above. Their upstream licenses are reproduced here."
+            );
+            for (const notice of SUPPLEMENTAL_NOTICES) {
+                const licensePath = resolve(THIRD_PARTY_NOTICES_DIR, notice.file);
+                if (!existsSync(licensePath)) {
+                    throw new Error(`Missing supplemental license text for "${notice.title}" at ${licensePath}`);
+                }
+                const licenseText = readFileSync(licensePath, "utf8").trimEnd();
+                sections.push(`${divider}\n${notice.title}\nEmbedded by: ${notice.embeddedBy}\nSource: ${notice.source}\n${divider}\n\n${licenseText}`);
+            }
+
             writeFileSync(resolve(PACKAGE_ROOT, "THIRD_PARTY_NOTICES.txt"), sections.join("\n\n") + "\n");
         },
     };
