@@ -86,7 +86,6 @@ export const cylinderShapeBlock: ParticleBlockEvaluator = {
             // translation-only emitter.
             transformNormalToRef(tx, ty, tz, state.emitterInverseWorldMatrix, particle.direction);
             tx = particle.direction.x;
-            ty = particle.direction.y;
             tz = particle.direction.z;
 
             const randY = randomRange(-directionRandomizer / 2, directionRandomizer / 2);
