@@ -4,6 +4,7 @@ import type { Vec3, Mat4 } from "../../math/types.js";
 import { mat4Translation } from "../../math/mat4-translation.js";
 import { mat4GetTranslationToRef } from "../../math/mat4-transform.js";
 import { mat4Invert } from "../../math/mat4-invert.js";
+import { mat4Identity } from "../../math/mat4-identity.js";
 import type { ParticleSystem } from "../particle-system.js";
 import type { ParticleGraph, NpeGetter, NpeBuildContext, NpeBuildState, ParticleBlockEvaluator, ParticleValue, ParsedParticleInput } from "./npe-types.js";
 import { loadParticleBlockEvaluator } from "./npe-registry.js";
@@ -98,7 +99,9 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             emitter.y = e.y;
             emitter.z = e.z;
         }
-        const emitterInverseWorldMatrix = mat4Invert(emitterWorldMatrix);
+        // The emitter world matrix is always a rigid transform (translation + rotation),
+        // so it is invertible; fall back to identity only to satisfy the type checker.
+        const emitterInverseWorldMatrix = mat4Invert(emitterWorldMatrix) ?? mat4Identity();
 
         const state: NpeBuildState = {
             system: null,
