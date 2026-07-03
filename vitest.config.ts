@@ -22,6 +22,10 @@ export default defineConfig({
                     name: "build",
                     include: ["tests/lite/build/**/*.test.ts"],
                     testTimeout: 300_000,
+                    // Build-integration tests share the package's `build/` output directory (several
+                    // rebuild it, others read it). Run their files sequentially so a rebuild never
+                    // races a concurrent read/build in a sibling file.
+                    fileParallelism: false,
                 },
             },
             {

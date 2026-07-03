@@ -1,12 +1,14 @@
 // Export the current playground project as a runnable, self-contained zip.
 //
 // The zip contains an `index.html` whose import map resolves the bare
-// `@babylonjs/lite` specifier to the esm.sh CDN, plus a `main.js` bundle produced
-// by the same esbuild pipeline the runner uses (relative imports inlined, other
-// npm packages already rewritten to esm.sh URLs). Any same-origin assets the scene
-// references with a root-absolute path (e.g. `"/brdf-lut.png"`) are fetched and
-// bundled alongside, with the reference rewritten to a relative path, so opening
-// `index.html` over a static server runs the scene exactly as in the playground.
+// `@babylonjs/lite` specifier to the active ESM CDN (esm.sh, or its jsDelivr
+// fallback), plus a `main.js` bundle produced by the same esbuild pipeline the
+// runner uses (relative imports inlined, other npm packages already rewritten to
+// that CDN's URLs). Any same-origin assets the scene references with a root-absolute
+// path (e.g. `"/brdf-lut.png"`) are fetched and bundled alongside, with the reference
+// rewritten to a relative path, so opening `index.html` over a static server runs the
+// scene exactly as in the playground. The CDN is whichever one was reachable at
+// download time; the baked URL is static and not re-probed when the zip is opened.
 // Cross-origin `https://` asset URLs are left untouched (they still need internet).
 
 import { strToU8, zipSync, type Zippable } from "fflate";
@@ -115,13 +117,13 @@ function triggerDownload(blob: Blob, filename: string): void {
 /**
  * Bundle the project and download it as `<name>.zip` containing `index.html`,
  * `main.js`, and any same-origin assets the scene references. `version` is the
- * selected engine version (`"nightly"` or a semver), which determines the esm.sh
+ * selected engine version (`"nightly"` or a semver), which determines the CDN
  * engine URL baked into the import map.
  */
 export async function downloadProject(project: Project, version: string, name: string): Promise<void> {
     const transpiled = await transpile(project.files, project.entry);
     const { bundle, assets } = await collectAssets(transpiled);
-    const html = indexHtml(downloadEngineUrl(version), name || "Babylon Lite scene");
+    const html = indexHtml(await downloadEngineUrl(version), name || "Babylon Lite scene");
     const entries: Zippable = {
         "index.html": strToU8(html),
         "main.js": strToU8(bundle),

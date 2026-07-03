@@ -26,7 +26,7 @@ This gives Babylon Lite enough structure for offscreen RTT passes, per-pass came
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
 export type { Task } from "./frame-graph/task.js";
 export { getFrameGraph } from "./scene/scene.js";
-export { addRenderPass, addTask, addTaskAtStart, addTaskBefore } from "./frame-graph/frame-graph-actions.js";
+export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter } from "./frame-graph/frame-graph-actions.js";
 
 export type { Pass } from "./frame-graph/pass.js";
 export { addPassDependencies } from "./frame-graph/pass.js";
@@ -169,6 +169,7 @@ Tasks execute in array order. There is no automatic dependency analysis; caller 
 addTask(sceneOrGraph, task); // append at end
 addTaskAtStart(sceneOrGraph, task); // insert at start of user work, after built-in system tasks such as ShadowTask
 addTaskBefore(sceneOrGraph, task, beforeTask);
+addTaskAfter(sceneOrGraph, task, afterTask); // insert immediately after afterTask
 ```
 
 Rules:
@@ -176,6 +177,7 @@ Rules:
 - Offscreen producer tasks must run before consumers that sample their output.
 - Overlay tasks should use `clr: false` and run after the task they overlay.
 - `addTaskBefore()` appends if the `beforeTask` is not found.
+- `addTaskAfter()` inserts immediately after `afterTask`, and appends if it is not found.
 - If tasks are added or inserted outside the startup/resize path, caller code must rebuild the graph before the next frame.
 - If a task uses `addMesh()` before `registerScene()`, defer the explicit `build()` call until after `registerScene()` so deferred material builders have run.
 
@@ -349,7 +351,9 @@ task.addMesh(mesh);
 task.addMesh(mesh, { material: overrideMaterialOrView });
 ```
 
-`addMesh()` accepts a source material or `MaterialView` and resolves at `record()` time through the source material family's `_buildGroup._rebuildSingle` hook. The mesh's material family must already be registered with the scene so the builder has run. Passing a material view lets a pass reuse source material state with pass-specific render feature bits, for example Standard/PBR/Node no-color shadow variants used by PCF shadow render tasks.
+`addMesh()` accepts a source material or `MaterialView` and resolves through the source material family's `_buildGroup._rebuildSingle` hook. The mesh's material family must already be registered with the scene so the builder has run. Passing a material view lets a pass reuse source material state with pass-specific render feature bits, for example Standard/PBR/Node no-color shadow variants used by PCF shadow render tasks.
+
+Adds made **before** the task's first `record()` are queued and drained at `record()` time. A **runtime** add (after `record()`, once the task is live) resolves the mesh and re-buckets it into that task immediately, so it renders on the next frame without a `frameGraph.build()` — a full rebuild would reallocate the shared scene UBO and every task's render target mid-frame. The task tracks this via its internal `_recorded` flag.
 
 If a task has explicit renderables, it does **not** auto-mirror the scene.
 

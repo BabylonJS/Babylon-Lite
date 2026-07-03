@@ -101,11 +101,26 @@ function makePickerEngine(): ReturnType<typeof makeEngine> & { pass: { drawCalls
         } else if (descriptor.label === "pick-depth-staging") {
             new Float32Array(data)[0] = 0.5;
         }
+        // Mirrors real WebGPU: a GPUBuffer allows only ONE outstanding map at a time — calling mapAsync
+        // again before the previous map's unmap() throws. A tiny setTimeout (rather than resolving on the
+        // same microtask) gives two pickAsync calls fired back-to-back a real chance to interleave, the
+        // same way two rAF-driven GPU picks racing in a browser would.
+        let mapped = false;
         return {
             destroy() {},
             getMappedRange: () => data,
-            mapAsync: async () => undefined,
-            unmap() {},
+            mapAsync: () =>
+                new Promise<void>((res, rej) => {
+                    if (mapped) {
+                        rej(new Error(`Failed to execute 'mapAsync' on 'GPUBuffer': Buffer already has an outstanding map pending.`));
+                        return;
+                    }
+                    mapped = true;
+                    setTimeout(res, 0);
+                }),
+            unmap() {
+                mapped = false;
+            },
         } as unknown as GPUBuffer;
     };
     device.createBindGroup = (descriptor) => descriptor as unknown as GPUBindGroup;
@@ -260,6 +275,24 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
 
         expect(info.hit).toBe(true);
         expect(pass.drawCalls).toEqual([{ group2Bound: true }]);
+    });
+
+    // Regression: a picker's 1×1 readback buffers (colorStaging/depthStaging) are lazily created ONCE and
+    // reused for every pick. Two overlapping pickAsync calls on the SAME picker used to race mapAsync on
+    // those shared buffers — e.g. a cursor-following hover preview picking on every pointermove, racing a
+    // pick fired by a click landing before the hover pick unmapped — throwing "Buffer already has an
+    // outstanding map pending." The mock buffer above reproduces that exact throw for a real concurrent
+    // mapAsync call, so this test fails against the old, unserialized pickAsync.
+    it("serializes overlapping pickAsync calls on the same picker instead of racing their shared staging buffers", async () => {
+        const { engine } = makePickerEngine();
+        const { scene } = makePickScene(engine);
+        const picker = createGpuPicker(scene);
+
+        // Fire both WITHOUT awaiting the first — this is the overlap that used to throw.
+        const [a, b] = await Promise.all([pickAsync(picker, 4, 4), pickAsync(picker, 4, 4)]);
+
+        expect(a.hit).toBe(true);
+        expect(b.hit).toBe(true);
     });
 
     it("invalidates cached pipeline sets when the WebGPU device changes", () => {

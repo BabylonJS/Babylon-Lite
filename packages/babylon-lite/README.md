@@ -44,7 +44,9 @@ Full documentation is available at
 `@babylonjs/lite` is a derivative of [Babylon.js](https://www.babylonjs.com/)
 (Apache-2.0). It bundles a small number of third-party runtime libraries
 (`manifold-3d`, `@recast-navigation/*`, `text-shaper`) whose code ships inside
-the published package. Their license texts are reproduced in
+the published package. Their license texts — together with those of the
+upstream native components embedded in their WebAssembly (Recast &amp; Detour and
+the Emscripten runtime) — are reproduced in
 [THIRD_PARTY_NOTICES.txt](./THIRD_PARTY_NOTICES.txt).
 
 Development-only tooling (build, test, and lint frameworks) is **not** part of
