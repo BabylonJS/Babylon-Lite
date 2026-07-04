@@ -74,6 +74,10 @@ export function createNullEngine(_options?: NullEngineOptions): EngineContext {
         _renderFn: null,
         _currentDelta: 0,
         _cbs: [],
+        // A headless scene is still registered/unregistered as a rendering context of its
+        // (self-referential) surface, so `disposeScene` can `unregisterRenderingContext`
+        // without dereferencing an absent list.
+        _renderingContexts: [],
     };
     // The engine IS its own primary surface (EngineContext extends SurfaceContext), matching the
     // real `createEngine` self-reference — scene binding reads `surface.engine`. `engine` and
