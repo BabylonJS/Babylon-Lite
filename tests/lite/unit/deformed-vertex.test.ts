@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { MorphTargetData, SkeletonData } from "../../../packages/babylon-lite/src/animation/types";
 import type { Vec3 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
-import { computeDeformedPositionToRef } from "../../../packages/babylon-lite/src/picking/deformed-geometry";
+import { computeDeformedPositionToRef } from "../../../packages/babylon-lite/src/picking/deformed-vertex";
 
 // ── Column-major mat4 fixtures (translation is enough to exercise the skinning math) ──
 

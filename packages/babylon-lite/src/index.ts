@@ -461,7 +461,7 @@ export type { GpuPicker, PickDiscardRule, PickOptions } from "./picking/gpu-pick
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
-export { computeDeformedPositionToRef } from "./picking/deformed-geometry.js";
+export { computeDeformedPositionToRef } from "./picking/deformed-vertex.js";
 
 // ─── Gizmos ──────────────────────────────────────────────────────────
 export { createUtilityLayer, registerUtilityLayer, disposeUtilityLayer } from "./gizmo/utility-layer.js";
