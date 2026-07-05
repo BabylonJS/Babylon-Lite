@@ -37,6 +37,29 @@ main().catch(console.error);
 Full documentation is available at
 [https://doc.babylonjs.com/lite/](https://doc.babylonjs.com/lite/).
 
+## Headless simulation (null engine)
+
+Babylon Lite can run **without a GPU or canvas** for server-side physics,
+deterministic simulation, or CI — the Lite analogue of Babylon.js `NullEngine`.
+Use `createNullEngine()` instead of `createEngine()`, and drive the loop
+yourself with `stepScene()`:
+
+```ts
+import { createNullEngine, stepScene, createSceneContext } from "@babylonjs/lite";
+
+const engine = createNullEngine(); // no device, no canvas — synchronous
+const scene = createSceneContext(engine, { defaultRenderTask: false });
+
+// ...add physics bodies / onBeforeRender callbacks...
+
+for (let i = 0; i < 180; i++) stepScene(engine, scene, 1000 / 60); // simulate 3s
+```
+
+It needs no WebGPU and runs on plain Node (recommended), Deno, Web Workers, or
+CI. Rendering is out of scope. See the
+[Headless (Null Engine) guide](https://doc.babylonjs.com/lite/05-headless-null-engine) for details,
+supported runtimes, and limitations.
+
 ## License
 
 [Apache-2.0](./LICENSE)

@@ -194,6 +194,7 @@ You now have the mental model and a running scene. From here:
 - 🔁 **[Porting Guide](03-porting-guide.md)** — a side-by-side API map for translating a Babylon.js scene to Lite.
 - 📊 **[Feature Comparison](02-feature-comparison.md)** — exactly what Lite covers today, what's partial, and what's missing.
 - 🧱 **[Architecture docs](architecture/00-overview.md)** — deep dives into every subsystem, ordered from most to least commonly needed.
+- 🧪 **[Headless (Null Engine)](05-headless-null-engine.md)** — run a scene without a GPU for server-side physics and deterministic simulation.
 - 🌐 **[github.com/BabylonJS/Babylon-Lite](https://github.com/BabylonJS/Babylon-Lite)** — browse the source and the scene gallery.
 
 Found something missing or confusing? **[Open an issue](https://github.com/BabylonJS/Babylon-Lite/issues)** — early feedback directly shapes the roadmap. 💙
