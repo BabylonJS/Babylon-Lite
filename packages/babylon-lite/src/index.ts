@@ -114,6 +114,8 @@ export type { TaaPostProcessTask, TaaPostProcessTaskConfig } from "./post-proces
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
 export { attachControl, setCameraLimits } from "./camera/arc-rotate-controls.js";
 export type { AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-rotate-controls.js";
+export { interpolateArcRotateCamera } from "./camera/arc-rotate-interpolate.js";
+export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "./camera/arc-rotate-interpolate.js";
 export { createFreeCamera } from "./camera/free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
 
@@ -275,6 +277,8 @@ export { createAnimationController } from "./skeleton/skeleton-updater.js";
 export { enableBoneControl, getBoneByName, setBonePosition, setBoneRotationQuaternion, setBoneScaling, setBoneVisible, clearBoneOverride } from "./skeleton/bone-control.js";
 export type { Skeleton, Bone } from "./skeleton/bone-control.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
+export { runFrameInterpolation } from "./animation/frame-interpolation.js";
+export type { FrameInterpolationStep } from "./animation/frame-interpolation.js";
 export { AnimationGroupMaskMode, createAnimationGroupMask, animationGroupMaskRetainsTarget } from "./animation/animation-group-mask.js";
 export type { AnimationGroupMask } from "./animation/animation-group-mask.js";
 export { setAnimationWeight } from "./animation/animation-weight.js";
@@ -314,6 +318,7 @@ export { crossVec3 } from "./math/cross-vec3.js";
 export { lengthVec3 } from "./math/length-vec3.js";
 export { negateVec3 } from "./math/negate-vec3.js";
 export { lerpVec3 } from "./math/lerp-vec3.js";
+export { expDampFactor, dampScalar, lerpAngleShortest } from "./math/damp.js";
 export {
     addVec3InPlace,
     addVec3ToRef,
