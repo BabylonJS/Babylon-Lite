@@ -7,6 +7,11 @@ describe("expDampFactor", () => {
         expect(expDampFactor(0, 0.1)).toBe(0);
     });
 
+    it("returns 0 for a negative frame delta (never moves the value backwards)", () => {
+        expect(expDampFactor(-0.016, 0.1)).toBe(0);
+        expect(expDampFactor(-1, 0.1)).toBe(0);
+    });
+
     it("returns 1 immediately when the factor is non-positive", () => {
         expect(expDampFactor(0.016, 0)).toBe(1);
         expect(expDampFactor(0.016, -1)).toBe(1);

@@ -14,6 +14,17 @@ function tick(scene: SceneContext, deltaMs = 16): void {
     }
 }
 
+/**
+ * Invoke callbacks the way scene-core does: a live `for...of` over the array itself (no snapshot).
+ * This is the iteration mode that a mid-frame `splice` would corrupt, so it is what the
+ * concurrent-completion regression test below exercises.
+ */
+function tickLive(scene: SceneContext, deltaMs = 16): void {
+    for (const cb of scene._beforeRender) {
+        cb(deltaMs);
+    }
+}
+
 describe("runFrameInterpolation", () => {
     it("resolves when the step returns false and detaches the driver", async () => {
         const scene = makeScene();
@@ -89,6 +100,39 @@ describe("runFrameInterpolation", () => {
 
         controller.abort(reason);
         await expect(promise).rejects.toBe(reason);
+        expect(scene._beforeRender.length).toBe(0);
+    });
+
+    it("does not skip a concurrent interpolation when one completes mid-frame under live iteration", async () => {
+        const scene = makeScene();
+        let firstFrames = 0;
+        let secondFrames = 0;
+
+        // The first interpolation completes on its first frame (returns false), so its driver retires
+        // itself from _beforeRender while scene-core is still iterating that array. If retirement used
+        // splice(), the live for...of would skip the very next element — the second interpolation —
+        // that frame. Retiring in place (noop) must keep the second driver running this same frame.
+        const firstPromise = runFrameInterpolation(scene, () => {
+            firstFrames++;
+            return false;
+        });
+        const secondPromise = runFrameInterpolation(scene, () => {
+            secondFrames++;
+            return secondFrames < 2; // needs a second frame to complete
+        });
+
+        expect(scene._beforeRender.length).toBe(2);
+
+        tickLive(scene); // first completes and retires; second must still tick this frame
+        expect(firstFrames).toBe(1);
+        expect(secondFrames).toBe(1);
+        await expect(firstPromise).resolves.toBeUndefined();
+
+        tickLive(scene); // second completes on its next frame
+        expect(secondFrames).toBe(2);
+        await expect(secondPromise).resolves.toBeUndefined();
+
+        // Both drivers are gone and no retired-noop slots are left dangling.
         expect(scene._beforeRender.length).toBe(0);
     });
 });

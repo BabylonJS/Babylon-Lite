@@ -6,6 +6,14 @@ function toError(reason: unknown): Error {
 }
 
 /**
+ * Shared sentinel used to retire a finished driver in place. `scene._beforeRender` is walked with a
+ * live `for...of` loop each frame, so a finished driver must not change the array length mid-frame
+ * (that would skip the next callback). It swaps itself for this noop instead; trailing noops are then
+ * trimmed so the array cannot grow without bound.
+ */
+const RetiredDriver = (): void => {};
+
+/**
  * Per-frame update callback driven by {@link runFrameInterpolation}. Called once
  * per rendered frame with the frame's delta time in seconds.
  * @param deltaSeconds - Elapsed time since the previous frame, in seconds.
@@ -46,9 +54,17 @@ export function runFrameInterpolation(scene: SceneContext, step: FrameInterpolat
                 return;
             }
             settled = true;
-            const index = scene._beforeRender.indexOf(driver);
+            const list = scene._beforeRender;
+            const index = list.indexOf(driver);
             if (index >= 0) {
-                scene._beforeRender.splice(index, 1);
+                // Do NOT splice: scene-core walks `_beforeRender` with a live for-of, so shrinking the
+                // array mid-frame (finish() can run from inside `driver` during that walk) would skip
+                // the next callback — e.g. another active interpolation. Retire the slot in place, then
+                // trim any trailing retired slots so the array can't grow without bound.
+                list[index] = RetiredDriver;
+                while (list.length > 0 && list[list.length - 1] === RetiredDriver) {
+                    list.pop();
+                }
             }
             if (onAbort && signal) {
                 signal.removeEventListener("abort", onAbort);

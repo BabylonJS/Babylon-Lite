@@ -37,8 +37,9 @@ function concatMat(...mats: Float32Array[]): Float32Array {
 }
 
 function makeMorph(targets: number[][]): MorphTargetData {
-    // computeMaxExtents expands by every target's full delta and never reads weights,
-    // so the weights here are intentionally zero to prove weight-independence.
+    // computeMaxExtents conservatively bounds every reachable morph combination (summing each
+    // target's positive/negative deltas) and never reads weights, so the weights here are
+    // intentionally zero to prove weight-independence.
     return {
         targets: targets.map((positions) => ({ positions: new Float32Array(positions), normals: null })),
         weights: new Float32Array(targets.length),
@@ -57,7 +58,7 @@ function makeSkeleton(o: { boneCount: number; boneMatrices: Float32Array; joints
     } as unknown as SkeletonData;
 }
 
-function makeMesh(fields: Partial<Mesh> & { worldMatrix: Float32Array }): Mesh {
+function makeMesh(fields: Partial<Omit<Mesh, "worldMatrix">> & { worldMatrix: Float32Array }): Mesh {
     return fields as unknown as Mesh;
 }
 
@@ -68,7 +69,7 @@ describe("computeMaxExtents", () => {
             worldMatrix: translationMat(10, 0, 0),
         });
 
-        const [extent] = computeMaxExtents([mesh]);
+        const extent = computeMaxExtents([mesh])[0]!;
 
         expect(extent.minimum[0]).toBeCloseTo(9);
         expect(extent.maximum[0]).toBeCloseTo(11);
@@ -84,7 +85,7 @@ describe("computeMaxExtents", () => {
             worldMatrix: scaleMat(2, 3, 4),
         });
 
-        const [extent] = computeMaxExtents([mesh]);
+        const extent = computeMaxExtents([mesh])[0]!;
 
         expect(extent.minimum[0]).toBeCloseTo(-2);
         expect(extent.maximum[0]).toBeCloseTo(2);
@@ -101,12 +102,35 @@ describe("computeMaxExtents", () => {
             morphTargets: makeMorph([[5, -2, 0]]),
         });
 
-        const [extent] = computeMaxExtents([mesh]);
+        const extent = computeMaxExtents([mesh])[0]!;
 
         // Base (0,0,0) expanded by delta (5,-2,0): min (0,-2,0), max (5,0,0).
         expect(extent.minimum[0]).toBeCloseTo(0);
         expect(extent.maximum[0]).toBeCloseTo(5);
         expect(extent.minimum[1]).toBeCloseTo(-2);
+        expect(extent.maximum[1]).toBeCloseTo(0);
+        expect(extent.minimum[2]).toBeCloseTo(0);
+        expect(extent.maximum[2]).toBeCloseTo(0);
+    });
+
+    it("conservatively bounds multiple morph targets stacking in the same direction", () => {
+        const mesh = makeMesh({
+            _cpuPositions: new Float32Array([0, 0, 0]),
+            worldMatrix: identityMat(),
+            // Two targets whose x-deltas stack positively (1 + 2) and one negative y-delta.
+            morphTargets: makeMorph([
+                [1, 0, 0],
+                [2, -1, 0],
+            ]),
+        });
+
+        const extent = computeMaxExtents([mesh])[0]!;
+
+        // Bounding each target independently would give max x = 2; the combined pose reaches x = 3, so
+        // the box must expand by the SUM of same-direction deltas: min (0,-1,0), max (3,0,0).
+        expect(extent.minimum[0]).toBeCloseTo(0);
+        expect(extent.maximum[0]).toBeCloseTo(3);
+        expect(extent.minimum[1]).toBeCloseTo(-1);
         expect(extent.maximum[1]).toBeCloseTo(0);
         expect(extent.minimum[2]).toBeCloseTo(0);
         expect(extent.maximum[2]).toBeCloseTo(0);
@@ -124,7 +148,7 @@ describe("computeMaxExtents", () => {
             }),
         });
 
-        const [extent] = computeMaxExtents([mesh]);
+        const extent = computeMaxExtents([mesh])[0]!;
 
         // bone0 box min (-1,0,0) max (1,2,3), translated +10 in x.
         expect(extent.minimum[0]).toBeCloseTo(9);
@@ -148,7 +172,7 @@ describe("computeMaxExtents", () => {
             }),
         });
 
-        const [extent] = computeMaxExtents([mesh]);
+        const extent = computeMaxExtents([mesh])[0]!;
 
         // vertex0 -> bone0: (1,0,0); vertex1 -> bone1: (0,21,0). Union: min (0,0,0) max (1,21,0).
         expect(extent.minimum[0]).toBeCloseTo(0);
@@ -166,7 +190,7 @@ describe("computeMaxExtents", () => {
             boundMax: [1, 1, 1],
         });
 
-        const [extent] = computeMaxExtents([mesh]);
+        const extent = computeMaxExtents([mesh])[0]!;
 
         expect(extent.minimum[0]).toBeCloseTo(-1);
         expect(extent.maximum[0]).toBeCloseTo(1);
@@ -179,7 +203,7 @@ describe("computeMaxExtents", () => {
     it("returns an inverted extent for a mesh with no geometry or bounds", () => {
         const mesh = makeMesh({ worldMatrix: identityMat() });
 
-        const [extent] = computeMaxExtents([mesh]);
+        const extent = computeMaxExtents([mesh])[0]!;
 
         expect(extent.minimum[0]).toBe(Number.POSITIVE_INFINITY);
         expect(extent.maximum[0]).toBe(Number.NEGATIVE_INFINITY);
@@ -228,7 +252,7 @@ describe("computeMaxExtents", () => {
             _ctrl: ctrl,
         } as unknown as AnimationGroup;
 
-        const [extent] = computeMaxExtents([mesh], group, null, 0.25);
+        const extent = computeMaxExtents([mesh], group, null, 0.25)[0]!;
 
         // x-translation sweeps 0..1, so the box x-range [-1,1] sweeps to the union [-1, 2].
         expect(extent.minimum[0]).toBeCloseTo(-1);

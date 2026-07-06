@@ -12,7 +12,8 @@
  * easing used by core ArcRotateCamera: `1 - 2^(-deltaSeconds / factor)`. Feed the
  * returned value as the `t` of a lerp/damp so the same motion plays identically
  * regardless of frame rate.
- * @param deltaSeconds - Elapsed time this frame, in seconds.
+ * @param deltaSeconds - Elapsed time this frame, in seconds. Non-positive values return `0` (no
+ *   progress), so a stalled or backwards frame delta never moves the value the wrong way.
  * @param factor - Smoothing time constant. Smaller is snappier, larger is slower.
  *   Values `<= 0` return `1` (snap immediately to the goal).
  * @returns The per-frame interpolation weight in `[0, 1]`.
@@ -20,6 +21,9 @@
 export function expDampFactor(deltaSeconds: number, factor: number): number {
     if (factor <= 0) {
         return 1;
+    }
+    if (deltaSeconds <= 0) {
+        return 0;
     }
     return 1 - Math.pow(2, -deltaSeconds / factor);
 }

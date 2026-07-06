@@ -51,23 +51,28 @@ function extentCorners(min: ArrayLike<number>, max: ArrayLike<number>): Float32A
     return c;
 }
 
-/** Per-vertex min/max positions, expanded by each morph target's deltas. */
+/** Per-vertex min/max positions, conservatively expanded to bound every morph-target combination. */
 function computeMorphedRange(mesh: Mesh, vertexCount: number): { minP: Float32Array; maxP: Float32Array } {
     const positions = mesh._cpuPositions!;
-    const minP = new Float32Array(positions.subarray(0, vertexCount * 3));
+    const componentCount = vertexCount * 3;
+    const minP = new Float32Array(positions.subarray(0, componentCount));
     const maxP = new Float32Array(minP);
     const morph = mesh.morphTargets;
     if (morph) {
+        // Any subset of morph targets can be active simultaneously (each weight up to 1), and their
+        // deltas can stack in the same direction. Bounding each target independently against the base
+        // would under-bound that stacking and can frame the camera too tightly. Instead accumulate the
+        // sum of all negative deltas into the lower bound and all positive deltas into the upper bound,
+        // per component — a conservative box that contains every reachable morphed pose.
         for (const target of morph.targets) {
             const deltas = target.positions;
-            const count = Math.min(deltas.length, vertexCount * 3);
+            const count = Math.min(deltas.length, componentCount);
             for (let i = 0; i < count; i++) {
-                const p = positions[i]! + deltas[i]!;
-                if (p < minP[i]!) {
-                    minP[i] = p;
-                }
-                if (p > maxP[i]!) {
-                    maxP[i] = p;
+                const d = deltas[i]!;
+                if (d < 0) {
+                    minP[i]! += d;
+                } else {
+                    maxP[i]! += d;
                 }
             }
         }
@@ -232,12 +237,12 @@ function accumulateCorners(corners: Float32Array, matrix: ArrayLike<number>, ext
  * Computes the maximum world-space extents of the given meshes, optionally stepping through an
  * animation to capture the full swept volume (node, skeletal, and morph-target animation).
  *
- * @param meshes The meshes to bound (e.g. from {@link getContainerMeshes}).
- * @param animationGroup An optional animation group to sample across its duration. When omitted
+ * @param meshes - The meshes to bound (e.g. from {@link getContainerMeshes}).
+ * @param animationGroup - An optional animation group to sample across its duration. When omitted
  *   (or zero-length), the meshes are bounded once at their current pose.
- * @param engine The engine context. Required when `animationGroup` drives skinned or morph-target
+ * @param engine - The engine context. Required when `animationGroup` drives skinned or morph-target
  *   meshes, because seeking the animation uploads the resulting pose to the GPU.
- * @param animationStep Sampling interval in seconds while stepping the animation. Defaults to 1/6.
+ * @param animationStep - Sampling interval in seconds while stepping the animation. Defaults to 1/6.
  * @returns One world-space extent per input mesh (parallel to `meshes`). A mesh with no geometry
  *   contributes an inverted extent (`+Inf`/`-Inf`).
  */
@@ -270,8 +275,15 @@ export function computeMaxExtents(meshes: readonly Mesh[], animationGroup: Anima
         const frameRate = animationGroup.frameRate || DEFAULT_FRAME_RATE;
         const savedTime = animationGroup.currentTime;
         const savedPlaying = animationGroup.isPlaying;
+        const savedStopped = animationGroup._stopped;
         const step = Math.max(animationStep, 1e-3);
         const engineArg = engine ?? undefined;
+
+        // Force the group out of the "stopped" state while sampling. Otherwise `goToFrame` skips the
+        // controller tick for a stopped glTF-mixer group when no engine is supplied (see goToFrame),
+        // so the sampled poses would never advance and the swept volume would collapse to the rest
+        // pose. Restored below alongside time and playing state.
+        animationGroup._stopped = false;
 
         for (let time = 0; time <= animationGroup.duration; time += step) {
             goToFrame(animationGroup, time * frameRate, engineArg);
@@ -280,6 +292,7 @@ export function computeMaxExtents(meshes: readonly Mesh[], animationGroup: Anima
 
         // Restore the original playback position and state.
         goToFrame(animationGroup, savedTime * frameRate, engineArg);
+        animationGroup._stopped = savedStopped;
         animationGroup.isPlaying = savedPlaying;
     } else {
         updateExtents();
