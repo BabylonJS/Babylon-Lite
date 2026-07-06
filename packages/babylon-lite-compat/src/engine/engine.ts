@@ -402,8 +402,9 @@ const NULL_CANVAS = { width: 0, height: 0 } as unknown as RenderCanvas;
  * (`createNullEngine`): scenes constructed against it build a Lite scene context
  * with **no** frame-graph render task (`defaultRenderTask: false`), so no swapchain
  * or GPU resource is ever allocated. The compat `NullEngine` drives a pure-JS
- * `requestAnimationFrame` loop that advances each scene one fixed step via Lite's
- * `stepScene` (which fires the scene's `onBeforeRender` callbacks — CPU animations,
+ * `requestAnimationFrame` loop that advances each scene by the wall-clock delta
+ * between frames via Lite's `stepScene` (which fires the scene's `onBeforeRender`
+ * callbacks — CPU animations,
  * physics steps, user logic). Only the device-less simulation surface works; adding
  * meshes with materials (whose deferred GPU builders need a device) is unsupported,
  * matching Babylon.js's `NullEngine` limitations. Extends {@link WebGPUEngine} so it
@@ -425,8 +426,8 @@ export class NullEngine extends WebGPUEngine {
     }
 
     /**
-     * Drive a pure-JS frame loop: each tick advances every registered scene by one
-     * fixed step through Lite's `stepScene` (which fires the scene's before-render
+     * Drive a pure-JS frame loop: each tick advances every registered scene by the
+     * wall-clock delta between frames through Lite's `stepScene` (which fires the scene's before-render
      * callbacks: CPU animations, physics, render observables), then runs the user
      * callback(s). No GPU work is recorded or submitted.
      */

@@ -64,14 +64,16 @@ describe("RawTexture3D", () => {
         expect(bytes.every((b) => b === 0)).toBe(true);
     });
 
-    it("coerces a non-Uint8Array ArrayBufferView into a byte view over the same buffer", () => {
+    it("coerces a non-Uint8Array ArrayBufferView into a tightly packed byte view over the same buffer", () => {
         createTexture3DFromPixelsMock.mockClear();
-        // A Float32Array of one RGBA texel (16 bytes) for a 1x1x1 volume.
+        // A Float32Array of four values (16 bytes) backing a 1x1x1 volume, which only
+        // needs width*height*depth*4 = 4 RGBA8 bytes. The helper trims the trailing
+        // bytes so the upload stays tightly packed, without copying off the buffer.
         const view = new Float32Array([1, 2, 3, 4]);
         new RawTexture3D(view, 1, 1, 1, 5, fakeScene() as never);
         const bytes = createTexture3DFromPixelsMock.mock.calls[0]![1];
         expect(bytes).toBeInstanceOf(Uint8Array);
-        expect(bytes.length).toBe(16);
+        expect(bytes.length).toBe(4);
         expect(bytes.buffer).toBe(view.buffer);
     });
 

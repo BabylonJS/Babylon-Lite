@@ -318,10 +318,10 @@ function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number
     if (data === null) {
         return new Uint8Array(expected);
     }
-    if (data instanceof Uint8Array) {
-        return data;
-    }
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    // Keep the result tightly packed: trim any trailing bytes beyond width*height*depth*4
+    // so we never upload unintended data past the volume Lite expects.
+    return bytes.byteLength > expected ? bytes.subarray(0, expected) : bytes;
 }
 
 /**
