@@ -1,6 +1,6 @@
 import { F32 } from "../engine/typed-arrays.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { morphVec3ToRef, skinVec3ToRef } from "./deformation-math.js";
+import { addMorphDelta, skinVertexToRef } from "./deformation-math.js";
 
 export function hasCpuDeformation(mesh: Mesh): boolean {
     return !!mesh._cpuPositions && (!!mesh.morphTargets || !!mesh.skeleton);
@@ -30,9 +30,6 @@ export function computeDeformedNormals(mesh: Mesh): Float32Array | null {
     return out;
 }
 
-// Scratch reused by the bulk morph pass to keep it allocation-light.
-const _morphScratch: [number, number, number] = [0, 0, 0];
-
 function applyMorphPositions(mesh: Mesh, out: Float32Array): void {
     const morph = mesh.morphTargets;
     if (!morph) {
@@ -42,10 +39,7 @@ function applyMorphPositions(mesh: Mesh, out: Float32Array): void {
     const vertexCount = out.length / 3;
     for (let v = 0; v < vertexCount; v++) {
         const i = v * 3;
-        morphVec3ToRef(morph, i, out[i]!, out[i + 1]!, out[i + 2]!, _morphScratch);
-        out[i] = _morphScratch[0];
-        out[i + 1] = _morphScratch[1];
-        out[i + 2] = _morphScratch[2];
+        addMorphDelta(morph, out, i, i);
     }
 }
 
@@ -72,9 +66,6 @@ function applyMorphNormals(mesh: Mesh, out: Float32Array): void {
     }
 }
 
-// Scratch reused by the bulk skin passes (applySkinPositions/applySkinNormals).
-const _skinScratch: [number, number, number] = [0, 0, 0];
-
 function applySkinPositions(mesh: Mesh, out: Float32Array): void {
     const skeleton = mesh.skeleton;
     if (!skeleton) {
@@ -85,22 +76,7 @@ function applySkinPositions(mesh: Mesh, out: Float32Array): void {
     const vertexCount = out.length / 3;
     for (let v = 0; v < vertexCount; v++) {
         const i = v * 3;
-        skinVec3ToRef(
-            skeleton.boneMatrices,
-            skeleton.joints,
-            skeleton.weights,
-            skeleton.joints1,
-            skeleton.weights1,
-            v,
-            source[i]!,
-            source[i + 1]!,
-            source[i + 2]!,
-            1,
-            _skinScratch
-        );
-        out[i] = _skinScratch[0];
-        out[i + 1] = _skinScratch[1];
-        out[i + 2] = _skinScratch[2];
+        skinVertexToRef(skeleton.boneMatrices, skeleton.joints, skeleton.weights, skeleton.joints1, skeleton.weights1, v, source[i]!, source[i + 1]!, source[i + 2]!, 1, out, i);
     }
 }
 
@@ -114,21 +90,6 @@ function applySkinNormals(mesh: Mesh, out: Float32Array): void {
     const vertexCount = out.length / 3;
     for (let v = 0; v < vertexCount; v++) {
         const i = v * 3;
-        skinVec3ToRef(
-            skeleton.boneMatrices,
-            skeleton.joints,
-            skeleton.weights,
-            skeleton.joints1,
-            skeleton.weights1,
-            v,
-            source[i]!,
-            source[i + 1]!,
-            source[i + 2]!,
-            0,
-            _skinScratch
-        );
-        out[i] = _skinScratch[0];
-        out[i + 1] = _skinScratch[1];
-        out[i + 2] = _skinScratch[2];
+        skinVertexToRef(skeleton.boneMatrices, skeleton.joints, skeleton.weights, skeleton.joints1, skeleton.weights1, v, source[i]!, source[i + 1]!, source[i + 2]!, 0, out, i);
     }
 }

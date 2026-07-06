@@ -4,24 +4,33 @@
 // picking scene's namespace object. Both the bulk (`deformed-geometry.ts`) and single-vertex
 // (`deformed-vertex.ts`) paths import them via static named imports, so there is one implementation
 // and no duplicated math.
+//
+// The primitives read and write a `Float32Array` at a caller-supplied offset. That lets the bulk
+// path — which is statically imported by detailed picking and therefore inlined into every picking
+// scene's bundle — call them straight over its position buffer with no per-vertex scratch/copy glue.
+// The single-vertex path (only pulled into hotspot/viewer bundles) absorbs the small bridging cost of
+// a length-3 scratch instead, keeping the size-sensitive bulk path as tight as a hand-inlined loop.
 
 import type { Mesh } from "../mesh/mesh.js";
 
 type MorphState = NonNullable<Mesh["morphTargets"]>;
 
 /**
- * Accumulates a single vertex's active morph-target position offsets onto (x, y, z) and writes the
- * result into `out`. `componentOffset` is the vertex's base index into the flat position buffer
- * (vertexIndex * 3).
+ * Accumulates a single vertex's active morph-target position offsets directly onto the vec3 stored at
+ * `outOffset` in `out`, in place (zero-allocation). Reading and writing the same buffer at the same
+ * offset lets the bulk path call this per vertex with no scratch/copy glue; the single-vertex path
+ * passes a length-3 scratch (`outOffset` 0) whose morph deltas still come from `componentOffset`.
  *
  * @param morph - The mesh's morph-target state.
- * @param componentOffset - The vertex's base index into the flat position buffer (vertexIndex * 3).
- * @param x - The vertex's current x component (typically the base or already-morphed position).
- * @param y - The vertex's current y component.
- * @param z - The vertex's current z component.
- * @param out - Destination vec3, written in place (zero-allocation).
+ * @param out - Buffer holding the vertex's current position at `outOffset`; updated in place.
+ * @param outOffset - Index of the vertex's x component within `out`.
+ * @param componentOffset - The vertex's base index into the morph target position buffers
+ *   (vertexIndex * 3). Equals `outOffset` for the bulk path; differs when `out` is a scratch.
  */
-export function morphVec3ToRef(morph: MorphState, componentOffset: number, x: number, y: number, z: number, out: [number, number, number]): void {
+export function addMorphDelta(morph: MorphState, out: Float32Array, outOffset: number, componentOffset: number): void {
+    let x = out[outOffset]!;
+    let y = out[outOffset + 1]!;
+    let z = out[outOffset + 2]!;
     const targetCount = Math.min(morph.count, morph.targets.length);
     for (let t = 0; t < targetCount; t++) {
         const weight = morph.weights[t] ?? 0;
@@ -33,17 +42,19 @@ export function morphVec3ToRef(morph: MorphState, componentOffset: number, x: nu
         y += positions[componentOffset + 1]! * weight;
         z += positions[componentOffset + 2]! * weight;
     }
-    out[0] = x;
-    out[1] = y;
-    out[2] = z;
+    out[outOffset] = x;
+    out[outOffset + 1] = y;
+    out[outOffset + 2] = z;
 }
 
 // Scratch reused by skinVec3ToRef for each bone transform to keep it zero-allocation.
 const _boneTransformScratch: [number, number, number] = [0, 0, 0];
 
 /**
- * Applies bone-blended skinning to a single vertex, writing the skinned vec3 into `out`
- * (zero-allocation). `wCoord` is 1 for positions (bone translation applies) and 0 for normals.
+ * Applies bone-blended skinning to a single vertex, writing the skinned vec3 directly to `outOffset`
+ * in `out` (zero-allocation). `wCoord` is 1 for positions (bone translation applies) and 0 for
+ * normals. The source components are passed as scalars so the caller can read from a separate,
+ * unmodified copy while this writes into `out` (the bulk path relies on that to skin in place).
  *
  * @param boneMatrices - Flat column-major 4x4 bone matrices (16 floats per bone).
  * @param joints - Primary 4-joint indices per vertex.
@@ -55,9 +66,10 @@ const _boneTransformScratch: [number, number, number] = [0, 0, 0];
  * @param y - The vertex's y component.
  * @param z - The vertex's z component.
  * @param wCoord - 1 for positions, 0 for normals.
- * @param out - Destination vec3, written in place (zero-allocation).
+ * @param out - Destination buffer; the skinned vec3 is written at `outOffset`.
+ * @param outOffset - Index of the destination x component within `out`.
  */
-export function skinVec3ToRef(
+export function skinVertexToRef(
     boneMatrices: Float32Array,
     joints: Uint16Array | Uint8Array,
     weights: Float32Array,
@@ -68,7 +80,8 @@ export function skinVec3ToRef(
     y: number,
     z: number,
     wCoord: 0 | 1,
-    out: [number, number, number]
+    out: Float32Array,
+    outOffset: number
 ): void {
     let rx = 0;
     let ry = 0;
@@ -97,9 +110,9 @@ export function skinVec3ToRef(
         }
     }
 
-    out[0] = rx;
-    out[1] = ry;
-    out[2] = rz;
+    out[outOffset] = rx;
+    out[outOffset + 1] = ry;
+    out[outOffset + 2] = rz;
 }
 
 /** Zero-allocation bone transform: writes `boneMatrix * [x, y, z, wCoord]` (xyz) into `out`. */

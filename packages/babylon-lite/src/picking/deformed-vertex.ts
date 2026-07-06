@@ -1,9 +1,12 @@
 import type { Vec3 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { morphVec3ToRef, skinVec3ToRef } from "./deformation-math.js";
+import { addMorphDelta, skinVertexToRef } from "./deformation-math.js";
 
-// Scratch reused by computeDeformedPositionToRef to keep it zero-allocation.
-const _deformScratch: [number, number, number] = [0, 0, 0];
+// Scratch reused by computeDeformedPositionToRef to keep it zero-allocation after the first call. The
+// shared primitives operate on a Float32Array at an offset, so the single vertex is staged here at
+// offset 0 and copied out to the Vec3 result at the end. Allocated lazily so merely importing this
+// module (e.g. for tree-shaking analysis) does not allocate anything until the function is called.
+let _deformScratch: Float32Array | undefined;
 
 /**
  * Writes the deformed MESH-LOCAL position of a single vertex into `out`, applying the mesh's active
@@ -34,35 +37,44 @@ export function computeDeformedPositionToRef(mesh: Mesh, vertexIndex: number, ou
     if (!base) {
         return false;
     }
-    const i = vertexIndex * 3;
-    if (i < 0 || i + 2 >= base.length) {
+    const componentOffset = vertexIndex * 3;
+    if (componentOffset < 0 || componentOffset + 2 >= base.length) {
         return false;
     }
 
-    let x = base[i]!;
-    let y = base[i + 1]!;
-    let z = base[i + 2]!;
+    const scratch = (_deformScratch ??= new Float32Array(3));
+    scratch[0] = base[componentOffset]!;
+    scratch[1] = base[componentOffset + 1]!;
+    scratch[2] = base[componentOffset + 2]!;
 
-    // Morph targets — accumulate this vertex's active target offsets (shared with the bulk path).
+    // Morph targets — accumulate this vertex's active target offsets (shared with the bulk path). The
+    // vertex is staged at scratch offset 0, but its deltas still come from the mesh's componentOffset.
     const morph = mesh.morphTargets;
     if (morph) {
-        morphVec3ToRef(morph, i, x, y, z, _deformScratch);
-        x = _deformScratch[0];
-        y = _deformScratch[1];
-        z = _deformScratch[2];
+        addMorphDelta(morph, scratch, 0, componentOffset);
     }
 
     // Skeletal skinning — reuse the same bone-blend math the render path uses. wCoord = 1 (position).
     const skeleton = mesh.skeleton;
     if (skeleton) {
-        skinVec3ToRef(skeleton.boneMatrices, skeleton.joints, skeleton.weights, skeleton.joints1, skeleton.weights1, vertexIndex, x, y, z, 1, _deformScratch);
-        x = _deformScratch[0];
-        y = _deformScratch[1];
-        z = _deformScratch[2];
+        skinVertexToRef(
+            skeleton.boneMatrices,
+            skeleton.joints,
+            skeleton.weights,
+            skeleton.joints1,
+            skeleton.weights1,
+            vertexIndex,
+            scratch[0]!,
+            scratch[1]!,
+            scratch[2]!,
+            1,
+            scratch,
+            0
+        );
     }
 
-    out.x = x;
-    out.y = y;
-    out.z = z;
+    out.x = scratch[0]!;
+    out.y = scratch[1]!;
+    out.z = scratch[2]!;
     return true;
 }
