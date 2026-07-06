@@ -1,12 +1,12 @@
-import type { Vec3, Color4, Mat4 } from "../../math/types.js";
+import type { Vec2, Vec3, Color4, Mat4 } from "../../math/types.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
-import type { Particle, ParticleScale } from "../particle.js";
+import type { Particle } from "../particle.js";
 import type { ParticleSystem } from "../particle-system.js";
 
 /** Any value that can flow along a node-particle connection. */
-export type ParticleValue = number | Vec3 | Color4 | ParticleScale | ParticleSystem | Texture2D | null | undefined;
+export type ParticleValue = number | Vec3 | Color4 | Vec2 | ParticleSystem | Texture2D | null | undefined;
 
 /** Pulls an output's value for the current build/particle context (mirrors BJS `_storedFunction`). */
 export type NpeGetter = (state: NpeBuildState) => ParticleValue;

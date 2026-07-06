@@ -1,7 +1,6 @@
 import { createParticleSystem } from "../../particle-system.js";
 import { copyColor4 } from "../../../math/color4-ref.js";
-import type { Color4 } from "../../../math/types.js";
-import type { ParticleScale } from "../../particle.js";
+import type { Color4, Vec2 } from "../../../math/types.js";
 import type { ParticleBlockEvaluator } from "../npe-types.js";
 
 /**
@@ -59,7 +58,7 @@ export const createParticleBlock: ParticleBlockEvaluator = {
             particle.size = typeof size === "number" ? size : 1;
             const scale = scaleGetter(state);
             if (scale && typeof scale === "object") {
-                const vec = scale as ParticleScale;
+                const vec = scale as Vec2;
                 particle.scale.x = vec.x;
                 particle.scale.y = vec.y;
             } else {

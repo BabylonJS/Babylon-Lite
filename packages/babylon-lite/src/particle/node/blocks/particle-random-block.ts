@@ -1,5 +1,5 @@
-import type { Vec3, Color4 } from "../../../math/types.js";
-import type { ParticleScale } from "../../particle.js";
+import type { Vec2, Vec3, Color4 } from "../../../math/types.js";
+import type { ParticleRandomValue } from "../../particle.js";
 import type { ParticleBlockEvaluator, ParticleValue, NpeGetter } from "../npe-types.js";
 
 const LOCK_NONE = 0;
@@ -12,7 +12,7 @@ const LOCK_ONCE_PER_PARTICLE = 3;
  * draws **per component and never short-circuits** when min === max — the draw still advances the RNG,
  * which is essential for deterministic parity.
  */
-function drawRandom(min: ParticleValue, max: ParticleValue): ParticleValue {
+function drawRandom(min: ParticleValue, max: ParticleValue): ParticleRandomValue {
     if (typeof min === "number") {
         const hi = typeof max === "number" ? max : 0;
         return min + Math.random() * (hi - min);
@@ -37,8 +37,8 @@ function drawRandom(min: ParticleValue, max: ParticleValue): ParticleValue {
                 z: lo.z + Math.random() * (hi.z - lo.z),
             };
         }
-        const lo = min as ParticleScale;
-        const hi = max && typeof max === "object" ? (max as ParticleScale) : { x: 0, y: 0 };
+        const lo = min as Vec2;
+        const hi = max && typeof max === "object" ? (max as Vec2) : { x: 0, y: 0 };
         return {
             x: lo.x + Math.random() * (hi.x - lo.x),
             y: lo.y + Math.random() * (hi.y - lo.y),
@@ -60,15 +60,24 @@ export const particleRandomBlock: ParticleBlockEvaluator = {
 
         let storedValue: ParticleValue = null;
         let currentLockId = -2;
-        const oncePerParticle = lockMode === LOCK_ONCE_PER_PARTICLE ? new Map<number, ParticleValue>() : null;
 
         const getter: NpeGetter = (state) => {
-            if (oncePerParticle) {
-                const id = state.particle?.id ?? -1;
-                let cached = oncePerParticle.get(id);
+            if (lockMode === LOCK_ONCE_PER_PARTICLE) {
+                // A `OncePerParticle` value is drawn once and stays fixed for the particle's whole life.
+                // Cache it ON the particle (keyed by this block's id) rather than in a system-wide map, so
+                // it is pruned when the particle is recycled instead of leaking one entry per particle id.
+                const particle = state.particle;
+                if (!particle) {
+                    return drawRandom(minGetter(state), maxGetter(state));
+                }
+                let cache = particle._onceRandomValues;
+                if (cache === undefined) {
+                    cache = particle._onceRandomValues = new Map<number, ParticleRandomValue>();
+                }
+                let cached = cache.get(block.id);
                 if (cached === undefined) {
                     cached = drawRandom(minGetter(state), maxGetter(state));
-                    oncePerParticle.set(id, cached);
+                    cache.set(block.id, cached);
                 }
                 return cached;
             }

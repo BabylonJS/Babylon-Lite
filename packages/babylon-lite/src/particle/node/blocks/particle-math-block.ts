@@ -1,5 +1,4 @@
-import type { Vec3, Color4 } from "../../../math/types.js";
-import type { ParticleScale } from "../../particle.js";
+import type { Vec2, Vec3, Color4 } from "../../../math/types.js";
 import type { ParticleBlockEvaluator, ParticleValue, NpeGetter } from "../npe-types.js";
 
 const OP_ADD = 0;
@@ -35,7 +34,7 @@ function splatColor(s: number): Color4 {
 function splatVec3(s: number): Vec3 {
     return { x: s, y: s, z: s };
 }
-function splatVec2(s: number): ParticleScale {
+function splatVec2(s: number): Vec2 {
     return { x: s, y: s };
 }
 
@@ -48,7 +47,7 @@ function applyOp(op: number, left: ParticleValue, right: ParticleValue): Particl
     }
 
     // Determine the vector shape from whichever operand is not a scalar; the other is splatted to match.
-    const shape = (leftScalar ? right : left) as Vec3 | Color4 | ParticleScale;
+    const shape = (leftScalar ? right : left) as Vec3 | Color4 | Vec2;
 
     if ("r" in shape) {
         const a = leftScalar ? splatColor(left as number) : (left as Color4);
@@ -60,8 +59,8 @@ function applyOp(op: number, left: ParticleValue, right: ParticleValue): Particl
         const b = rightScalar ? splatVec3(right as number) : (right as Vec3);
         return { x: applyScalar(op, a.x, b.x), y: applyScalar(op, a.y, b.y), z: applyScalar(op, a.z, b.z) };
     }
-    const a = leftScalar ? splatVec2(left as number) : (left as ParticleScale);
-    const b = rightScalar ? splatVec2(right as number) : (right as ParticleScale);
+    const a = leftScalar ? splatVec2(left as number) : (left as Vec2);
+    const b = rightScalar ? splatVec2(right as number) : (right as Vec2);
     return { x: applyScalar(op, a.x, b.x), y: applyScalar(op, a.y, b.y) };
 }
 

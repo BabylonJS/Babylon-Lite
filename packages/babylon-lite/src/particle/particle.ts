@@ -1,10 +1,7 @@
-import type { Vec3, Color4 } from "../math/types.js";
+import type { Vec2, Vec3, Color4 } from "../math/types.js";
 
-/** Non-uniform 2D scale applied to a particle's billboard quad (multiplies {@link Particle.size}). */
-export interface ParticleScale {
-    x: number;
-    y: number;
-}
+/** A value a `ParticleRandomBlock` can draw and cache per particle (the numeric/vector/colour leaf types). */
+export type ParticleRandomValue = number | Vec3 | Color4 | Vec2;
 
 /**
  * A single CPU-simulated particle — pure state, pooled and reused across its lifecycle.
@@ -37,7 +34,7 @@ export interface Particle {
     /** Uniform size multiplier. */
     size: number;
     /** Non-uniform per-axis scale (multiplies {@link size}). */
-    scale: ParticleScale;
+    scale: Vec2;
     /** Animation-sheet cell index. */
     cellIndex: number;
 
@@ -49,6 +46,12 @@ export interface Particle {
     _initialDirection: Vec3;
     /** @internal Scratch: position in emitter-local space. */
     _localPosition: Vec3;
+    /**
+     * @internal Cache of `OncePerParticle` random-block draws, keyed by the random block's id. Lazily
+     * created and cleared when the particle is recycled, so per-particle random locks are pruned with the
+     * particle instead of accumulating in a system-wide map.
+     */
+    _onceRandomValues?: Map<number, ParticleRandomValue>;
 }
 
 /** Create a fresh particle with the given id and default (zeroed) state. */

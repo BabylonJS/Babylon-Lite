@@ -263,5 +263,7 @@ function recycleParticle(system: ParticleSystem, index: number): void {
         particles[index] = particles[lastIndex]!;
     }
     particles.pop();
+    // Prune this particle's per-life random-lock cache so `OncePerParticle` draws don't accumulate.
+    dead._onceRandomValues?.clear();
     system._stock.push(dead);
 }

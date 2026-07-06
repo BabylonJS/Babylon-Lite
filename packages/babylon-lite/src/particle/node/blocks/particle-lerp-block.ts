@@ -1,5 +1,4 @@
-import type { Vec3, Color4 } from "../../../math/types.js";
-import type { ParticleScale } from "../../particle.js";
+import type { Vec2, Vec3, Color4 } from "../../../math/types.js";
 import type { ParticleBlockEvaluator, ParticleValue, NpeGetter } from "../npe-types.js";
 
 /** Scalar lerp: `(1 - g) * a + g * b`. */
@@ -22,8 +21,8 @@ function lerpValue(left: ParticleValue, right: ParticleValue, gradient: number):
             const b = right && typeof right === "object" && "z" in right ? (right as Vec3) : { x: 0, y: 0, z: 0 };
             return { x: lerp(gradient, a.x, b.x), y: lerp(gradient, a.y, b.y), z: lerp(gradient, a.z, b.z) };
         }
-        const a = left as ParticleScale;
-        const b = right && typeof right === "object" ? (right as ParticleScale) : { x: 0, y: 0 };
+        const a = left as Vec2;
+        const b = right && typeof right === "object" ? (right as Vec2) : { x: 0, y: 0 };
         return { x: lerp(gradient, a.x, b.x), y: lerp(gradient, a.y, b.y) };
     }
     return 0;

@@ -1,5 +1,4 @@
-import type { Color4, Vec3 } from "../../../math/types.js";
-import type { ParticleScale } from "../../particle.js";
+import type { Color4, Vec3, Vec2 } from "../../../math/types.js";
 import type { ParticleBlockEvaluator, ParticleValue, NpeBuildState } from "../npe-types.js";
 
 /**
@@ -51,14 +50,14 @@ export const particleConverterBlock: ParticleBlockEvaluator = {
                 w = wIn(state) as number;
             }
             if (hasXy) {
-                const temp = xyIn(state) as ParticleScale | null;
+                const temp = xyIn(state) as Vec2 | null;
                 if (temp) {
                     x = temp.x;
                     y = temp.y;
                 }
             }
             if (hasZw) {
-                const temp = zwIn(state) as ParticleScale | null;
+                const temp = zwIn(state) as Vec2 | null;
                 if (temp) {
                     z = temp.x;
                     w = temp.y;

@@ -179,7 +179,7 @@ internal state (`_particles`, `_stock` [recycle pool], `_started`, `_stopped`,
 ### Getter model (`npe-types.ts`)
 `NpeGetter = (state: NpeBuildState) => ParticleValue` is the compiled form of a
 connection — Babylon's `_storedFunction`. `ParticleValue = number | Vec3 | Color4
-| ParticleScale | ParticleSystem | Texture2D | null | undefined` (the system
+| Vec2 | ParticleSystem | Texture2D | null | undefined` (the system
 itself flows along the `particle`/`output` ports). `NpeBuildState` is **dual
 purpose**: build-time fields (`capacity`, `emitter`, `emitterWorldMatrix`,
 `emitterInverseWorldMatrix`, `scene`, `textureBaseUrl`) and run-time fields
