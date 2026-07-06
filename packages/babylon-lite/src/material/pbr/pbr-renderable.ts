@@ -33,6 +33,7 @@ import {
 } from "./pbr-flags.js";
 import type { PbrExt } from "./pbr-flags.js";
 import { createPbrComposer } from "./pbr-compose.js";
+import { StandardToneMapping } from "./tone-mapping.js";
 import { _computePbrMaterialFeatures } from "./pbr-material.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import type { ThinInstanceData } from "../../mesh/thin-instance.js";
@@ -263,15 +264,18 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _syncThinInstanceGpuData = gpuMod.syncThinInstanceGpuData;
     }
 
-    // ACES tonemap WGSL is dynamically imported only when requested (keeps standard-tonemap bundles lean).
-    // Must be loaded before the composer is created so deps are fully resolved.
-    let _acesHelpers = "";
-    let _acesTonemapCall = "";
+    // Tone mapping WGSL comes from the pluggable `imageProcessing.toneMapping` value, so a bundle only
+    // carries the algorithm it references (e.g. AcesToneMapping's ~0.5 KB is bundled only when the app
+    // imports it). When tone mapping is enabled but no algorithm was chosen, fall back to the default
+    // StandardToneMapping — the single source of the standard exponential WGSL (pbr-template no longer
+    // bakes its own copy).
+    let _toneMappingHelpers = "";
+    let _toneMappingCall = "";
     const hasTonemap = scene.imageProcessing.toneMappingEnabled;
-    if (hasTonemap && scene.imageProcessing.toneMappingType === "aces") {
-        const acesMod = await import("./pbr-aces-wgsl.js");
-        _acesHelpers = acesMod.ACES_HELPERS_WGSL;
-        _acesTonemapCall = acesMod.ACES_TONEMAP_CALL_WGSL;
+    if (hasTonemap) {
+        const toneMapping = scene.imageProcessing.toneMapping ?? StandardToneMapping;
+        _toneMappingHelpers = toneMapping.helpersWGSL;
+        _toneMappingCall = toneMapping.callWGSL;
     }
 
     // Fog WGSL is dynamically imported only when the scene has fog, so non-fog PBR scenes
@@ -289,8 +293,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _getSingleLightBlock,
         _multiLightWGSL,
         _multiLightLoop,
-        _acesHelpers,
-        _acesTonemapCall,
+        _toneMappingHelpers,
+        _toneMappingCall,
         _fogHelper,
         _fogBlock,
         _createPbrTemplateExt,
