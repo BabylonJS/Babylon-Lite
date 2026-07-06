@@ -1,9 +1,8 @@
 {
-  "rawKB": 58.3,
-  "gzipKB": 22.1,
+  "rawKB": 46.6,
+  "gzipKB": 17.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene128-shader-renderable-CLHEZYZ3.js",
     "scene128.js"
   ]
 }
