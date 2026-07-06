@@ -1,5 +1,11 @@
 node_modules/
 
+# This is a pnpm workspace — pnpm-lock.yaml is the single source of truth.
+# npm/yarn lockfiles diverge from it (npm ignores pnpm.overrides), producing
+# misleading audit results and Dependabot noise, so keep them out of the repo.
+package-lock.json
+yarn.lock
+
 dist/
 packages/babylon-lite/build/
 *.tsbuildinfo

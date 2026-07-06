@@ -496,7 +496,9 @@ async function save(meta: SnippetMeta): Promise<void> {
         currentSnippetVersion = result.version;
         currentMeta = meta;
         markClean();
-        history.replaceState(null, "", snippetPath(result.id, result.version));
+        // Push (not replace) so the previous URL stays on the history stack and
+        // the browser back button returns to it — e.g. the earlier snippet version.
+        history.pushState(null, "", snippetPath(result.id, result.version));
         const link = permalinkFor(result.id, result.version);
         try {
             await navigator.clipboard.writeText(link);
@@ -628,6 +630,32 @@ if (embedMode) {
 
 // Load engine IntelliSense in the background; editing works regardless.
 void registerEngineTypes();
+
+// Browser back/forward: reflect the target URL. Because save() pushes a history
+// entry, navigating back can land on an earlier snippet version — reload it and
+// re-run. Landing at a non-snippet URL (e.g. the root) just drops the snippet
+// association so the current content behaves as unsaved again.
+if (!embedMode) {
+    window.addEventListener("popstate", () => {
+        void (async () => {
+            const fromPath = parseSnippetPath(location.pathname);
+            if (fromPath) {
+                if (await loadSnippetInto(fromPath.id, fromPath.version, false)) {
+                    void run();
+                } else {
+                    // Load failed: the browser already moved the address bar to the
+                    // target path, but state still reflects the previously loaded
+                    // snippet. Restore the URL so URL and state stay in sync.
+                    history.replaceState(null, "", currentSnippetId ? snippetPath(currentSnippetId, currentSnippetVersion) : "/");
+                }
+                return;
+            }
+            currentSnippetId = null;
+            currentSnippetVersion = "0";
+            currentMeta = {};
+        })();
+    });
+}
 
 // Boot: load a shared snippet if the URL has one, else restore autosaved work,
 // else fall back to the default snippet already in the editor.
