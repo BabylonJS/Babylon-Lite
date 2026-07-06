@@ -107,15 +107,39 @@ describe("build/index.d.ts", () => {
 });
 
 describe("build/package.json", () => {
-    it("declares no runtime dependencies", () => {
+    it("declares no runtime dependencies and only strictly-optional allowlisted peers", () => {
         expect(existsSync(PACKAGE_JSON_PATH)).toBe(true);
 
         const pkg = JSON.parse(readFileSync(PACKAGE_JSON_PATH, "utf-8")) as Record<string, unknown>;
 
-        // The published package must bundle every transitive runtime dep as an
-        // opaque implementation detail — no `dependencies` and no
-        // `peerDependencies` should ever appear in dist/package.json.
+        // The published package must bundle every transitive *runtime* dep as an
+        // opaque implementation detail, so `dependencies` is always empty and a
+        // plain `npm i @babylonjs/lite` (or CDN usage) pulls in nothing else.
         expect(pkg.dependencies ?? {}).toEqual({});
-        expect(pkg.peerDependencies ?? {}).toEqual({});
+
+        // A small, curated allowlist of OPTIONAL peer dependencies is permitted.
+        // These are never bundled and — being optional — are never auto-installed
+        // or warned about by npm/pnpm/yarn when the corresponding feature is unused:
+        //   - @babylonjs/havok: injected by the caller into `createHavokWorld()`;
+        //     Lite never imports it. The peer entry only advertises the supported range.
+        //   - @webgpu/types: ambient/global types referenced by the public .d.ts;
+        //     TypeScript consumers need them at compile time.
+        // Every allowlisted peer MUST be marked optional. Keep this allowlist in sync
+        // with `emitPackageJson()` in packages/babylon-lite/vite.config.ts.
+        const ALLOWED_OPTIONAL_PEERS = ["@babylonjs/havok", "@webgpu/types"];
+        const peers = (pkg.peerDependencies ?? {}) as Record<string, string>;
+        const peerMeta = (pkg.peerDependenciesMeta ?? {}) as Record<string, { optional?: boolean }>;
+
+        // The declared peers must be EXACTLY the allowlist: no unexpected peer may
+        // leak in, and — just as importantly — the whole `peerDependencies` block
+        // must not be accidentally dropped from `emitPackageJson()`, which would
+        // silently regress the feature while still passing a subset check.
+        expect(Object.keys(peers).sort()).toEqual([...ALLOWED_OPTIONAL_PEERS].sort());
+
+        // ...and every one of them must be strictly optional so no package manager
+        // errors or auto-installs when the corresponding feature is unused.
+        for (const name of ALLOWED_OPTIONAL_PEERS) {
+            expect(peerMeta[name]?.optional, `peer dependency '${name}' must be marked optional in peerDependenciesMeta`).toBe(true);
+        }
     });
 });

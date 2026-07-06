@@ -1,10 +1,38 @@
 import { describe, expect, it } from "vitest";
 
+import { getPhysicsTimestepMs } from "babylon-lite";
+import type { SceneContext } from "babylon-lite";
+
 import { HavokPlugin, PhysicsEngine, PhysicsShapeType, PhysicsMotionType, PhysicsPrestepType, PhysicsConstraintType } from "../src/physics/physics";
 import { LiteCompatError } from "../src/error";
 
 // A minimal non-function, non-undefined stand-in for the awaited Havok module.
 const fakeHknp = {};
+
+/** A tiny mock of the Havok WASM interface — only what `createHavokWorld` / `_stepWorld` touch. */
+function makeMockHknp() {
+    const calls: number[] = [];
+    return {
+        HP_World_Create: () => [0, { __world: true }],
+        HP_World_SetGravity: () => undefined,
+        HP_World_Step: (_world: unknown, dt: number) => calls.push(dt),
+        HP_World_Release: () => undefined,
+        /** Seconds handed to the most recent `HP_World_Step` (undefined if never stepped). */
+        lastStepSeconds: () => calls[calls.length - 1],
+    };
+}
+
+/** Minimal scene exposing what the physics step reads: `_beforeRender`, `fixedDeltaMs`, real-delta fallback. */
+function makeScene(fixedDeltaMs = 0, engineCurrentDelta = 0): SceneContext {
+    return { _beforeRender: [], fixedDeltaMs, surface: { engine: { _currentDelta: engineCurrentDelta } } } as unknown as SceneContext;
+}
+
+/** Invoke every registered before-render callback with `deltaMs`, as the render loop would each frame. */
+function stepFrame(scene: SceneContext, deltaMs: number): void {
+    for (const cb of [...(scene as unknown as { _beforeRender: ((d: number) => void)[] })._beforeRender]) {
+        cb(deltaMs);
+    }
+}
 
 describe("HavokPlugin", () => {
     it("matches the Babylon.js plugin shape", () => {
@@ -29,30 +57,55 @@ describe("HavokPlugin", () => {
     });
 
     describe("useDeltaForWorldStep timestep policy (issue #332)", () => {
-        it("advances by the elapsed frame time, clamped to 0.1s, when enabled", () => {
-            const plugin = new HavokPlugin(true, fakeHknp);
-            // 60 Hz frame
-            expect(plugin._computeTimestep(1000 / 60)).toBeCloseTo(1 / 60);
-            // 120 Hz frame → half the simulated slice per frame (twice as many frames)
-            expect(plugin._computeTimestep(1000 / 120)).toBeCloseTo(1 / 120);
-            // 144 Hz frame
-            expect(plugin._computeTimestep(1000 / 144)).toBeCloseTo(1 / 144);
-            // 30 FPS frame → double the slice
-            expect(plugin._computeTimestep(1000 / 30)).toBeCloseTo(1 / 30);
-            // Long stall is clamped to 100ms
-            expect(plugin._computeTimestep(5000)).toBeCloseTo(0.1);
-            // Non-positive delta falls back to the fixed step
-            expect(plugin._computeTimestep(0)).toBeCloseTo(1 / 60);
-            expect(plugin._computeTimestep(-5)).toBeCloseTo(1 / 60);
+        it("leaves the world in native frame-delta mode when enabled, so it advances by the elapsed frame time", () => {
+            const hknp = makeMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            const scene = makeScene();
+            plugin._attachToLiteScene(scene);
+
+            // Delta stepping = no world-level fixed step; Lite steps by the live per-frame delta.
+            expect(getPhysicsTimestepMs(plugin.world!)).toBe(0);
+
+            stepFrame(scene, 1000 / 60);
+            expect(hknp.lastStepSeconds()).toBeCloseTo(1 / 60, 10);
+            stepFrame(scene, 1000 / 144);
+            expect(hknp.lastStepSeconds()).toBeCloseTo(1 / 144, 10);
+            // A long stall is clamped by Lite's tunnelling ceiling (100ms).
+            stepFrame(scene, 5000);
+            expect(hknp.lastStepSeconds()).toBeCloseTo(0.1, 10);
         });
 
-        it("always uses the fixed timestep when disabled", () => {
-            const plugin = new HavokPlugin(false, fakeHknp);
-            expect(plugin._computeTimestep(1000 / 60)).toBeCloseTo(1 / 60);
-            expect(plugin._computeTimestep(1000 / 144)).toBeCloseTo(1 / 60);
-            expect(plugin._computeTimestep(5000)).toBeCloseTo(1 / 60);
+        it("does not disable native delta stepping when setTimeStep is called in delta mode", () => {
+            const hknp = makeMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            const scene = makeScene();
+            plugin._attachToLiteScene(scene);
+
+            // Babylon.js keeps delta stepping active; setTimeStep only records the fallback fixed step.
             plugin.setTimeStep(1 / 90);
-            expect(plugin._computeTimestep(1000 / 144)).toBeCloseTo(1 / 90);
+            expect(plugin.getTimeStep()).toBeCloseTo(1 / 90);
+            expect(getPhysicsTimestepMs(plugin.world!)).toBe(0);
+
+            stepFrame(scene, 1000 / 144);
+            expect(hknp.lastStepSeconds()).toBeCloseTo(1 / 144, 10);
+        });
+
+        it("pins the world to the fixed timestep when disabled", () => {
+            const hknp = makeMockHknp();
+            const plugin = new HavokPlugin(false, hknp);
+            const scene = makeScene(1000 / 60);
+            plugin._attachToLiteScene(scene);
+
+            // Fixed stepping = the world uses _fixedTimeStep regardless of the frame delta.
+            expect(getPhysicsTimestepMs(plugin.world!)).toBeCloseTo(1000 / 60, 10);
+            stepFrame(scene, 1000 / 144);
+            expect(hknp.lastStepSeconds()).toBeCloseTo(1 / 60, 10);
+
+            // A later setTimeStep re-pins the world's fixed step.
+            plugin.setTimeStep(1 / 90);
+            expect(getPhysicsTimestepMs(plugin.world!)).toBeCloseTo(1000 / 90, 10);
+            stepFrame(scene, 1000 / 144);
+            expect(hknp.lastStepSeconds()).toBeCloseTo(1 / 90, 10);
         });
     });
 

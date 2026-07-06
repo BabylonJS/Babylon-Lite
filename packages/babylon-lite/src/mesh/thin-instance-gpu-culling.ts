@@ -22,10 +22,11 @@ const PARAM_BYTES = 192;
 const COUNT_U32_OFFSET = 44;
 const MESH_WORLD_FLOAT_OFFSET = 24;
 const LOCAL_SPHERE_FLOAT_OFFSET = 40;
+const BOUNDS_PAD_F32_OFFSET = 45;
 const INDIRECT_ARGS_BYTES = 20;
 
 const CULL_WGSL_NO_COLOR = /* wgsl */ `
-struct CullParams{planes:array<vec4<f32>,6>,meshWorld:mat4x4<f32>,localSphere:vec4<f32>,count:u32};
+struct CullParams{planes:array<vec4<f32>,6>,meshWorld:mat4x4<f32>,localSphere:vec4<f32>,count:u32,boundsPad:f32};
 @group(0)@binding(0)var<storage,read> srcMatrices:array<mat4x4<f32>>;
 @group(0)@binding(1)var<storage,read_write> dstMatrices:array<mat4x4<f32>>;
 @group(0)@binding(2)var<storage,read_write> args:array<atomic<u32>>;
@@ -35,7 +36,7 @@ let center=(world*vec4<f32>(params.localSphere.xyz,1.0)).xyz;
 let sx=length(world[0].xyz);
 let sy=length(world[1].xyz);
 let sz=length(world[2].xyz);
-let radius=params.localSphere.w*max(max(sx,sy),sz)+0.0001;
+let radius=params.localSphere.w*max(max(sx,sy),sz)+params.boundsPad+0.0001;
 for(var i=0u;i<6u;i++){
 let p=params.planes[i];
 if(dot(p.xyz,center)+p.w < -radius){return false;}
@@ -287,6 +288,7 @@ function writeCullParams(engine: EngineContext, state: ThinInstanceGpuCullState,
     params.set(mesh.worldMatrix, MESH_WORLD_FLOAT_OFFSET);
     params.set(state._localSphere, LOCAL_SPHERE_FLOAT_OFFSET);
     state._paramsU32[COUNT_U32_OFFSET] = instanceCount;
+    params[BOUNDS_PAD_F32_OFFSET] = mesh.thinInstances?._cullBoundsPad ?? 0;
 
     const args = state._argsData;
     args[0] = indexCount;

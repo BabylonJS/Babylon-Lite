@@ -2,7 +2,7 @@
 
 A WebGPU-exclusive, tree-shakable 3D engine that produces pixel-identical output to Babylon.js — in a fraction of the bundle size.
 
-📖 **[Documentation](docs/lite/00-welcome.md)** — Start with Welcome, then [Getting Started](docs/lite/01-getting-started.md), the [Feature Comparison](docs/lite/02-feature-comparison.md), and the [Porting Guide](docs/lite/03-porting-guide.md)
+📖 **[Documentation](docs/lite/00-welcome.md)** — Start with Welcome, then [Getting Started](docs/lite/01-getting-started.md), the [Feature Comparison](docs/lite/02-feature-comparison.md), the [Porting Guide](docs/lite/03-porting-guide.md), and [Headless (Null Engine)](docs/lite/05-headless-null-engine.md)
 
 🤝 **[Contributing](CONTRIBUTING.md)** — How to add scenes, tests, and contribute code
 

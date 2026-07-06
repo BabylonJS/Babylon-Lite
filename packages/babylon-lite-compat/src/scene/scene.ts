@@ -69,21 +69,6 @@ interface DefaultEnvironmentOptions {
     applyImageProcessing?: boolean;
 }
 
-/**
- * Minimal `SceneContext` stand-in for a headless ({@link NullEngine}) scene, which
- * has no Lite GPU context. It satisfies only the plain data accessors a deviceless
- * scene may touch (`clearColor` / `camera` / `imageProcessing` / `animationGroups`);
- * no Lite scene method is ever invoked on it.
- */
-function createHeadlessLite(): SceneContext {
-    return {
-        clearColor: { r: 0, g: 0, b: 0, a: 1 },
-        camera: null,
-        imageProcessing: { exposure: 1, contrast: 1, toneMappingEnabled: false },
-        animationGroups: [],
-    } as unknown as SceneContext;
-}
-
 export class Scene extends AbstractScene {
     /** @internal Underlying Babylon Lite scene context. */
     public readonly _lite: SceneContext;
@@ -162,8 +147,6 @@ export class Scene extends AbstractScene {
     private _blendManager: AnimationManager | null = null;
     private _ambientColor = new Color3(0, 0, 0);
     private _environmentIntensity = 1;
-    /** @internal Whether this scene is bound to a headless `NullEngine` (no GPU context). */
-    private _headless = false;
     /** @internal Tracks whether at least one frame has ticked (gates `onAfterRenderObservable`). */
     private _renderedAFrame = false;
     /** @internal `NodeMaterial`s whose async parse the engine drives after shadow generators are built. */
@@ -178,13 +161,14 @@ export class Scene extends AbstractScene {
         super();
         this._engine = engine;
         if (engine._headless) {
-            // Headless (`NullEngine`): no Lite scene context — the engine drives a
-            // pure-JS tick loop (see `NullEngine.runRenderLoop`) that calls `_tick`.
-            // Only the deviceless surface (CPU animations, manual canvas drawing)
-            // works; there is no GPU rendering. The stub `_lite` satisfies the few
-            // plain accessors a headless scene may touch (camera / clearColor / …).
-            this._headless = true;
-            this._lite = createHeadlessLite();
+            // Headless (`NullEngine`): back the scene with a real Lite context that has
+            // NO frame-graph render task (`defaultRenderTask: false`), so no swapchain or
+            // GPU resource is ever built. The engine drives it via Lite's `stepScene`,
+            // which fires the same before-render hook the GPU path uses (CPU animations,
+            // physics, render observables). Only the device-less surface works; adding
+            // meshes with materials is unsupported (their builders need a device).
+            this._lite = createSceneContext(engine._lite, { defaultRenderTask: false });
+            onBeforeRender(this._lite, (deltaMs: number) => this._tick(deltaMs));
             engine._registerScene(this);
             return;
         }
@@ -712,7 +696,7 @@ export class Scene extends AbstractScene {
      * @returns `true` once physics is enabled.
      */
     public enablePhysics(gravity?: { x: number; y: number; z: number } | null, plugin?: HavokPlugin): boolean {
-        if (this._headless) {
+        if (this._engine._headless) {
             return unsupported("Scene.enablePhysics", "A headless (NullEngine) scene has no render loop to step physics.");
         }
         if (!(plugin instanceof HavokPlugin)) {
@@ -803,9 +787,6 @@ export class Scene extends AbstractScene {
 
     public dispose(): void {
         this.onDisposeObservable.notifyObservers(this);
-        // A headless scene has no Lite context to dispose (see `createHeadlessLite`).
-        if (!this._headless) {
-            disposeScene(this._lite);
-        }
+        disposeScene(this._lite);
     }
 }

@@ -8,6 +8,7 @@ import type { LiteMetadata } from "../metadata.js";
 import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
+import { _setTickAnimationImpl } from "./animation-tick.js";
 
 const DEFAULT_FRAME_RATE = 60;
 
@@ -95,6 +96,31 @@ export function stopAnimation(group: AnimationGroup): void {
     group._stopped = true;
 }
 
+/** Push the group's public playback state into its controller. */
+function syncControllerFromGroup(group: AnimationGroup, ctrl: AnimationController): void {
+    ctrl.time = group.currentTime;
+    ctrl.playing = group.isPlaying;
+    ctrl.speedRatio = group.speedRatio;
+    ctrl.loop = group.loopAnimation;
+    ctrl._setMask?.(group.mask ?? null);
+}
+
+/** The real per-frame stepper. Lives in this dynamically-loaded module; the always-loaded
+ *  animation-tick forwarder calls it once registered. */
+function tickAnimationImpl(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
+    if (!group._stopped && group._ctrl) {
+        syncControllerFromGroup(group, group._ctrl);
+        group._ctrl.tick(deltaMs, engine);
+        group.currentTime = group._ctrl.time;
+    }
+}
+
+/** @internal Wire the always-loaded tickAnimation forwarder to its real implementation.
+ *  Called by the group factories so a scene cannot hold groups before the impl is registered. */
+export function _installTickAnimation(): void {
+    _setTickAnimationImpl(tickAnimationImpl);
+}
+
 /** Seek to a specific frame, apply the pose, and pause. */
 export function goToFrame(group: AnimationGroup, frame: number, engine?: EngineContext): void {
     const ctrl = group._ctrl;
@@ -107,23 +133,6 @@ export function goToFrame(group: AnimationGroup, frame: number, engine?: EngineC
             group.currentTime = ctrl.time;
         }
     }
-}
-
-/** @internal Advance animation by deltaMs. Called by the engine each frame. */
-export function tickAnimation(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
-    if (!group._stopped && group._ctrl) {
-        syncControllerFromGroup(group, group._ctrl);
-        group._ctrl.tick(deltaMs, engine);
-        group.currentTime = group._ctrl.time;
-    }
-}
-
-function syncControllerFromGroup(group: AnimationGroup, ctrl: AnimationController): void {
-    ctrl.time = group.currentTime;
-    ctrl.playing = group.isPlaying;
-    ctrl.speedRatio = group.speedRatio;
-    ctrl.loop = group.loopAnimation;
-    ctrl._setMask?.(group.mask ?? null);
 }
 
 /** Create AnimationGroup(s) from parsed glTF animation data.
@@ -143,6 +152,8 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
     if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && !hasPointer && !hasNodeWriteback)) {
         return [];
     }
+
+    _installTickAnimation();
 
     return clips.map((clip, clipIndex) => {
         const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides, nodeNames);

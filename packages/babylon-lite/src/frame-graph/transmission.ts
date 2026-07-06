@@ -24,6 +24,10 @@ export interface RenderTaskTransmissionState {
     _sourceTexture: GPUTexture | null;
     /** @internal */
     _blit: TransmissionBlitState | null;
+    /** @internal Depth grab (the `grabDepth` option): the task's depth attachment snapshotted at the same
+     *  mid-pass break as the scene-colour copy, resolved into a single-sample `r32float`. Null when the
+     *  option is off, the task has no depth attachment, or the target hasn't built yet. */
+    _depth: TransmissionDepthGrabState | null;
     /** @internal */
     readonly _copyCount: number;
     /** @internal */
@@ -32,9 +36,39 @@ export interface RenderTaskTransmissionState {
     _copies: number;
 }
 
-interface TransmissionBlitState {
+/** @internal Depth-grab state built by the lazy `transmission-depth-grab` module and consumed by the per-frame
+ *  grab in `updateTransmissionTexture`. Exported so the lazy module can construct it. */
+export interface TransmissionDepthGrabState {
+    readonly texture: Texture2D;
+    /** @internal */
+    readonly _view: GPUTextureView;
+    /** @internal */
+    readonly _blit: TransmissionBlitState;
+}
+
+/** @internal */
+export interface TransmissionBlitState {
+    /** @internal */
     readonly _pipeline: GPURenderPipeline;
+    /** @internal */
     readonly _bindGroup: GPUBindGroup;
+}
+
+/** @internal Builds the depth-grab target + resolve blit, and records the per-frame resolve pass. Lives in the
+ *  lazily-imported `transmission-depth-grab` module so its shaders/pipelines/pass-descriptor cost zero bytes for
+ *  transmission scenes that never set `grabDepth`. */
+export interface DepthGrabImpl {
+    create: (engine: EngineContext, source: GPUTexture, width: number, height: number, multisampled: boolean) => TransmissionDepthGrabState;
+    record: (engine: EngineContext, depth: TransmissionDepthGrabState) => void;
+}
+
+let _depthGrab: DepthGrabImpl | null = null;
+
+/** @internal Called at the top level of `transmission-depth-grab.ts` (module side-effect) to wire the builder into
+ *  this shared module. The dynamic `import("./transmission-depth-grab.js")` in a grabDepth task's `_preload` runs
+ *  before the frame graph builds, so `_depthGrab` is installed by the time `configureTransmissionSource` runs. */
+export function _installDepthGrab(impl: DepthGrabImpl): void {
+    _depthGrab = impl;
 }
 
 const BLIT_SHADER = `@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{var p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));var u=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));return V(vec4f(p[i],0,1),u[i]);}@fragment fn fs(v:V)->@location(0)vec4f{return textureSample(t,s,v.u);}`;
@@ -83,6 +117,14 @@ export interface TransmissionOptions {
     /** Cap the scene-colour grab mip chain. Use this when the material samples explicit low LODs only, so
      *  unused tiny mips are not regenerated every frame. Ignored when `generateMipmaps` is false. */
     mipLevelCount?: number;
+    /** When true, ALSO snapshot the task's DEPTH attachment at the same mid-pass grab, into a single-sample
+     *  `r32float` texture exposed as `SceneColorGrab.depthTexture` — the opaque scene depth as of the moment
+     *  the first transmissive surface draws. Lets a transmissive material depth-ray-march the opaque scene
+     *  (screen-space reflection / refraction) without re-rendering a separate depth prepass: the depth
+     *  attachment itself cannot be sampled while the transmissive draw has it bound (a WebGPU feedback loop),
+     *  which is exactly why the snapshot is taken at the pass break. MSAA sources resolve sample 0 (matching
+     *  `createDepthResolveTask`). No-op when the task's render target carries no depth attachment. */
+    grabDepth?: boolean;
 }
 
 /** Handle to a render task's scene-color grab, returned by `enableRenderTaskTransmission`. */
@@ -92,15 +134,35 @@ export interface SceneColorGrab {
      *  (e.g. on resize), so consumers that bind it to a custom material should re-bind when it
      *  changes. */
     readonly texture: Texture2D | null;
+    /** The live opaque-scene DEPTH grab (`grabDepth: true`): the task's depth attachment as of the moment
+     *  the first transmissive surface draws, resolved to a single-sample `r32float` (raw NDC depth as
+     *  stored; a cleared texel means no geometry). Null before the target builds or when `grabDepth` is
+     *  off. Identity changes when the task rebuilds (e.g. on resize) — re-bind on change. */
+    readonly depthTexture: Texture2D | null;
 }
 
 /** Enable mid-pass scene-color grabs for a single render task and return the live texture handle. The task is wrapped so transmissive draw calls can sample the opaque color rendered earlier in the same pass. */
 export function enableRenderTaskTransmission(task: RenderTask, engine: EngineContext, options?: TransmissionOptions): SceneColorGrab {
     const linear = options?.linear !== false;
     applyTransmissionOptions(task, options);
+    // grabDepth is opt-in: only when set do we dynamic-import the depth-grab shaders/pipelines (installed via the
+    // module side-effect). `_preload` is awaited before the frame graph builds, so `_createDepthGrab` is ready by
+    // the time `configureTransmissionSource` runs in record(). Transmission scenes without grabDepth never fetch it.
+    if (task._config.transmission?.grabDepth) {
+        const priorPreload = task._preload?.bind(task);
+        task._preload = async (): Promise<void> => {
+            if (priorPreload) {
+                await priorPreload();
+            }
+            await import("./transmission-depth-grab.js");
+        };
+    }
     const grab: SceneColorGrab = {
         get texture(): Texture2D | null {
             return (task._targetSignature as { _transmissionTexture?: Texture2D })._transmissionTexture ?? null;
+        },
+        get depthTexture(): Texture2D | null {
+            return (task._targetSignature as { _transmissionDepthTexture?: Texture2D | null })._transmissionDepthTexture ?? null;
         },
     };
     if (task._executeWithTransmission) {
@@ -267,6 +329,7 @@ function createRenderTaskTransmission(task: RenderTask, engine: EngineContext): 
         _sourceHeight: rt._height,
         _sourceTexture: null,
         _blit: null,
+        _depth: null,
         _copyCount: normalizeCopyCount(task._config.transmission),
         _generateMipmaps: generateMipmaps,
         _copies: 0,
@@ -279,6 +342,15 @@ function configureTransmissionSource(state: RenderTaskTransmissionState, task: R
     state._sourceHeight = rt._height;
     state._sourceTexture = rt._colorTexture;
     const sampleCount = task._targetSignature._sampleCount;
+    // Depth grab (grabDepth): (re)build the r32float snapshot + its resolve blit against the task's CURRENT
+    // depth attachment, and publish it on the target signature so `SceneColorGrab.depthTexture` stays live.
+    const sig = task._targetSignature as { _transmissionDepthTexture?: Texture2D | null };
+    sig._transmissionDepthTexture = null;
+    const depthSource = rt._depthTexture;
+    if (task._config.transmission?.grabDepth && _depthGrab && depthSource && rt._width > 0 && rt._height > 0) {
+        state._depth = _depthGrab.create(engine, depthSource, rt._width, rt._height, sampleCount > 1);
+        sig._transmissionDepthTexture = state._depth.texture;
+    }
     if (!state._sourceTexture) {
         return;
     }
@@ -287,6 +359,7 @@ function configureTransmissionSource(state: RenderTaskTransmissionState, task: R
 
 function disposeRenderTaskTransmission(state: RenderTaskTransmissionState | null | undefined): void {
     state?.texture.texture.destroy();
+    state?._depth?.texture.texture.destroy();
 }
 
 export function executePassWithTransmission(task: RenderTask, engine: EngineContext, state: RenderTaskTransmissionState, sampleCount: number): number {
@@ -349,6 +422,12 @@ function updateTransmissionTexture(state: RenderTaskTransmissionState, engine: E
     }
     if (state._generateMipmaps) {
         recordMipmaps(engine, state.texture.texture, engine._currentEncoder);
+    }
+    // Depth grab rides the same mid-pass break: the depth attachment is unbound here (the pass just ended),
+    // so it is legal to sample; the resumed segment re-attaches it with loadOp "load". The record body lives in
+    // the lazy depth-grab module (installed only when grabDepth is enabled), so it costs zero bytes otherwise.
+    if (state._depth) {
+        _depthGrab?.record(engine, state._depth);
     }
     state._copies++;
 }
@@ -536,6 +615,7 @@ function applyTransmissionOptions(task: RenderTask, options: TransmissionOptions
     set("copyCount", options.copyCount);
     set("generateMipmaps", options.generateMipmaps);
     set("mipLevelCount", options.mipLevelCount);
+    set("grabDepth", options.grabDepth);
     if (changed) {
         task._config.transmission = next;
     }

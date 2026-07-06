@@ -8,8 +8,8 @@
  * `Texture.LoadAsync`) so the GPU handle is present when the material binds.
  */
 
-import { loadTexture2D, loadBasisTexture2D, loadKtxTexture2D, createTexture2DFromPixels, updateTexture2DFromPixels } from "babylon-lite";
-import type { Texture2D, Texture2DOptions, EngineContext } from "babylon-lite";
+import { loadTexture2D, loadBasisTexture2D, loadKtxTexture2D, createTexture2DFromPixels, updateTexture2DFromPixels, createTexture3DFromPixels } from "babylon-lite";
+import type { Texture2D, Texture2DOptions, EngineContext, Texture3D } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
@@ -237,6 +237,91 @@ export class RawTexture extends BaseTexture {
     public static CreateRGBATexture(data: Uint8Array, width: number, height: number, scene: Scene): RawTexture {
         return new RawTexture(data, width, height, scene);
     }
+}
+
+/**
+ * Babylon.js `RawTexture3D` — a volumetric texture created from raw RGBA8 pixel
+ * bytes (the common case being a colour-grading LUT / colour cube). Backed by
+ * Babylon Lite's `createTexture3DFromPixels`; the GPU handle is available
+ * synchronously after construction.
+ *
+ * Babylon Lite's 3D-texture path is RGBA8-only, so the `format` argument is
+ * recorded for API parity but the upload always treats `data` as tightly-packed
+ * `width * height * depth * 4` RGBA bytes (x fastest, then y, then z).
+ */
+export class RawTexture3D extends BaseTexture {
+    private readonly _scene: Scene;
+    /** Babylon.js `RawTexture3D.is3D` — always true for a 3D texture. */
+    public readonly is3D = true;
+
+    public constructor(
+        data: ArrayBufferView | null,
+        width: number,
+        height: number,
+        depth: number,
+        /** Babylon.js texture format (recorded for parity; Lite uploads RGBA8). */
+        public format: number,
+        scene: Scene,
+        _generateMipMaps = true,
+        _invertY = false,
+        _samplingMode = 3,
+        _textureType?: number,
+        _creationFlags?: number
+    ) {
+        super();
+        this._scene = scene;
+        const bytes = toRgbaBytes(data, width, height, depth);
+        this._lite = createTexture3DFromPixels(scene.getEngine()._lite, bytes, width, height, depth) as Texture3D;
+    }
+
+    public override getClassName(): string {
+        return "RawTexture3D";
+    }
+
+    /** Gets the width of the texture. */
+    public get width(): number {
+        return (this._lite as Texture3D | undefined)?.width ?? 0;
+    }
+
+    /** Gets the height of the texture. */
+    public get height(): number {
+        return (this._lite as Texture3D | undefined)?.height ?? 0;
+    }
+
+    /** Gets the depth of the texture. */
+    public get depth(): number {
+        return (this._lite as Texture3D | undefined)?.depth ?? 0;
+    }
+
+    /**
+     * Replace the texture's pixel contents. Babylon Lite has no in-place 3D update,
+     * so the volume is re-uploaded (a fresh Lite 3D texture handle).
+     */
+    public update(data: ArrayBufferView): void {
+        const bytes = toRgbaBytes(data, this.width, this.height, this.depth);
+        this._lite = createTexture3DFromPixels(this._scene.getEngine()._lite, bytes, this.width, this.height, this.depth) as Texture3D;
+    }
+
+    public override whenReadyAsync(): Promise<void> {
+        return Promise.resolve();
+    }
+}
+
+/**
+ * @internal Coerce a raw `ArrayBufferView` (or a bare `Uint8Array`) into the tightly
+ * packed `width * height * depth * 4` RGBA8 `Uint8Array` Babylon Lite's
+ * `createTexture3DFromPixels` expects. Babylon.js allows a `null` data argument
+ * (an empty texture); Lite requires bytes, so `null` becomes a zero-filled volume.
+ */
+function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number, depth: number): Uint8Array {
+    const expected = width * height * depth * 4;
+    if (data === null) {
+        return new Uint8Array(expected);
+    }
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    // Keep the result tightly packed: trim any trailing bytes beyond width*height*depth*4
+    // so we never upload unintended data past the volume Lite expects.
+    return bytes.byteLength > expected ? bytes.subarray(0, expected) : bytes;
 }
 
 /**

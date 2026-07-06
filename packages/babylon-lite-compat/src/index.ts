@@ -81,7 +81,7 @@ export {
 } from "./materials/materials.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
-export { BaseTexture, Texture, RawTexture, DynamicTexture, CubeTexture, HDRCubeTexture, RenderTargetTexture } from "./textures/textures.js";
+export { BaseTexture, Texture, RawTexture, RawTexture3D, DynamicTexture, CubeTexture, HDRCubeTexture, RenderTargetTexture } from "./textures/textures.js";
 
 // ─── Loading ─────────────────────────────────────────────────────────
 export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync } from "./loading/scene-loader.js";
@@ -233,8 +233,25 @@ export {
     EdgesRenderer,
     OutlineRenderer,
     MirrorTexture,
+    HtmlTexture,
+    HtmlInteractionManager,
+    HtmlRaycastInteractionManager,
+    IsHtmlInCanvasUploadSupported,
+    UploadHtmlElementToTexture,
+    ComputeOverlayCssTransform,
+    GetElementPixelFromUv,
+    IsHtmlInCanvasSupportedNatively,
+    InstallHtmlInCanvasPolyfill,
+    UninstallHtmlInCanvasPolyfill,
     Sound,
     SceneSerializer,
+} from "./unsupported/unsupported-apis.js";
+export type {
+    IHtmlTextureOptions,
+    IHtmlInteractionManagerOptions,
+    IHtmlRaycastInteractionManagerOptions,
+    IHtmlInCanvasPolyfillModule,
+    IInstallHtmlInCanvasPolyfillOptions,
 } from "./unsupported/unsupported-apis.js";
 export {
     Skeleton,

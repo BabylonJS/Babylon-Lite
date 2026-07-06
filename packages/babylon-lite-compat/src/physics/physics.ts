@@ -10,13 +10,16 @@
  * `new HavokPlugin(useDeltaForWorldStep, hpInjection)`. When
  * `useDeltaForWorldStep` is `true` (the Babylon.js default) the world is stepped
  * by the **elapsed frame time** rather than a fixed `1/60` slice, so simulation
- * speed is independent of the display refresh rate (resolves issue #332). It
- * achieves this purely through the public Lite API — by updating the world's
- * timestep from the per-frame delta *before* Lite's own step callback runs — so
- * no Lite-core change is required.
+ * speed is independent of the display refresh rate (resolves issue #332). Lite's
+ * native physics does this on its own: a world with no fixed step (its
+ * `_fixedDeltaMs` is `0`, the default) advances by the live per-frame delta each
+ * frame (clamped to a tunnelling ceiling). The wrapper therefore just leaves the
+ * world in its native frame-delta mode for delta stepping, and pins a fixed step
+ * only when `useDeltaForWorldStep` is `false` — no per-frame policy of its own is
+ * needed.
  */
 
-import { createHavokWorld, setPhysicsTimestep, setPhysicsTimestepProvider, setPhysicsGravity, disposePhysics } from "babylon-lite";
+import { createHavokWorld, setPhysicsTimestep, setPhysicsGravity, disposePhysics } from "babylon-lite";
 import type { PhysicsWorld, SceneContext } from "babylon-lite";
 
 import { unsupported } from "../error.js";
@@ -129,7 +132,9 @@ export class HavokPlugin {
     /** Set the fixed timestep used when delta stepping is disabled. Matches Babylon.js. */
     public setTimeStep(timeStep: number): void {
         this._fixedTimeStep = timeStep;
-        if (this.world) {
+        // Only a fixed-step world tracks this value on the native side. In delta mode Lite steps by
+        // the live frame delta, so pushing a fixed step here would disable that — leave the world be.
+        if (this.world && !this._useDeltaForWorldStep) {
             setPhysicsTimestep(this.world, timeStep);
         }
     }
@@ -164,33 +169,23 @@ export class HavokPlugin {
     }
 
     /**
-     * @internal Compute the timestep (in seconds) to advance the world by for a
-     * frame whose elapsed time is `deltaMs` milliseconds, following Babylon.js's
-     * `useDeltaForWorldStep` policy: the clamped elapsed delta when enabled (with a
-     * fallback to the fixed step for a non-positive delta), otherwise the fixed step.
-     */
-    public _computeTimestep(deltaMs: number): number {
-        if (!this._useDeltaForWorldStep) {
-            return this._fixedTimeStep;
-        }
-        const deltaSeconds = deltaMs / 1000;
-        return deltaSeconds > 0 ? Math.min(deltaSeconds, 0.1) : this._fixedTimeStep;
-    }
-
-    /**
-     * @internal Create the native Lite world for `liteScene` and wire delta stepping.
+     * @internal Create the native Lite world for `liteScene` and select the step mode.
      *
-     * Delta stepping is installed as a timestep *provider* on the native world (not as a separate
-     * scene before-render callback): the world advances by {@link _computeTimestep} of the frame
-     * delta from inside its own per-frame step. Because the provider lives on the world, it is torn
-     * down together with the world in {@link dispose} — nothing lingers on the scene after disposal.
+     * Lite's native physics already steps a world by the live per-frame delta when it has no fixed
+     * step (`createHavokWorld` leaves `_fixedDeltaMs === 0`), clamping to a tunnelling ceiling — which
+     * is exactly Babylon.js's `useDeltaForWorldStep` behaviour. So delta stepping needs nothing extra
+     * here; only the legacy fixed-step mode pins the world to {@link _fixedTimeStep}. The step is
+     * driven from inside the world's own per-frame callback, so it is torn down together with the
+     * world in {@link dispose} — nothing lingers on the scene after disposal.
      */
     public _attachToLiteScene(liteScene: SceneContext, gravity?: Vec3Like): void {
         if (!this._supported) {
             return unsupported("HavokPlugin", "The Havok module is not ready. `await HavokPhysics()` before constructing the plugin.");
         }
         this.world = createHavokWorld(liteScene, this._hknp, gravity);
-        setPhysicsTimestepProvider(this.world, (deltaMs: number) => this._computeTimestep(deltaMs));
+        if (!this._useDeltaForWorldStep) {
+            setPhysicsTimestep(this.world, this._fixedTimeStep);
+        }
     }
 }
 

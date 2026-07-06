@@ -70,7 +70,7 @@
         "@webgpu/types": "^0.1.52",
         "browserstack-node-sdk": "^1.57.1",
         "dotenv": "^17.4.2",
-        "esbuild": "^0.27.0",
+        "esbuild": "^0.28.1",
         "eslint": "^10.1.0",
         "eslint-config-prettier": "^10.1.8",
         "eslint-plugin-prettier": "^5.5.5",
@@ -86,7 +86,8 @@
         "typescript": "^5.7.0",
         "typescript-eslint": "^8.57.2",
         "vite": "^6.4.3",
-        "vitest": "^4.1.0"
+        "vitest": "^4.1.0",
+        "webpack": "^5"
     },
     "dependencies": {
         "prettier": "^3.8.1"
@@ -107,7 +108,8 @@
             "js-yaml": ">=4.2.0 <5.0.0",
             "brace-expansion": ">=5.0.6",
             "picomatch": ">=4.0.4",
-            "@protobufjs/utf8": ">=1.1.1"
+            "@protobufjs/utf8": ">=1.1.1",
+            "dompurify": ">=3.4.11"
         }
     }
 }

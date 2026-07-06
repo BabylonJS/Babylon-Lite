@@ -9,7 +9,7 @@
  * chunks that are never loaded (e.g. animation for a static model) are
  * correctly excluded from the manifest numbers.
  */
-import { build, type Plugin } from "vite";
+import { build, type Plugin, type Rollup } from "vite";
 import { execFileSync } from "child_process";
 import { resolve, dirname, join, extname } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
@@ -842,10 +842,32 @@ export function isLiteBundleExternal(id: string): boolean {
 function liteManualChunks(id: string): string | undefined {
     const clean = id.replace(/\\/g, "/").split("?")[0]!;
     if (/(?:^|\/)text-shaper[-/]/.test(clean)) {
-        return "text-shaper";
+        return TEXT_SHAPER_CHUNK_NAME;
     }
     return undefined;
 }
+
+/** The manual-chunk name {@link liteManualChunks} pins the `text-shaper` vendor
+ *  runtime into. Every scene imports the `babylon-lite` barrel, which re-exports the
+ *  default text APIs that pull in `text-shaper`; for the ~200 scenes that use no text,
+ *  tree-shaking empties that pinned chunk, so Rollup logs a harmless
+ *  `Generated an empty chunk: "text-shaper"` (`EMPTY_BUNDLE`) — once per scene. The
+ *  empty chunk is never referenced or loaded, so {@link liteBundleOnWarn} silences
+ *  exactly that warning while leaving every other Rollup warning intact. */
+const TEXT_SHAPER_CHUNK_NAME = "text-shaper";
+
+/** Suppress the expected empty-`text-shaper`-chunk warning (see
+ *  {@link TEXT_SHAPER_CHUNK_NAME}); forward all other Rollup warnings unchanged. */
+const liteBundleOnWarn: Rollup.WarningHandlerWithDefault = (warning, defaultHandler) => {
+    if (warning.code === "EMPTY_BUNDLE") {
+        const names = warning.names ?? [];
+        const emptyChunkNames = names.length > 0 ? names : [warning.message];
+        if (emptyChunkNames.every((entry) => entry.includes(TEXT_SHAPER_CHUNK_NAME))) {
+            return;
+        }
+    }
+    defaultHandler(warning);
+};
 
 function readLiteSceneSource(scene: string): string {
     try {
@@ -926,6 +948,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
             rollupOptions: {
                 input: { [scene]: liteSceneEntry(scene, sourceLabDir) },
                 external: isLiteBundleExternal,
+                onwarn: liteBundleOnWarn,
                 output: {
                     format: "es",
                     entryFileNames: "[name].js",
@@ -1045,7 +1068,7 @@ export async function buildBundleScenes(): Promise<void> {
                     input: { [scene]: isBjs ? bjsSceneEntry(scene) : liteSceneEntry(scene) },
                     // Exclude third-party WASM runtimes from Lite bundles so the
                     // bundle-size metric reflects only first-party Lite engine code.
-                    ...(!isBjs && { external: isLiteBundleExternal }),
+                    ...(!isBjs && { external: isLiteBundleExternal, onwarn: liteBundleOnWarn }),
                     output: {
                         format: "es",
                         entryFileNames: "[name].js",

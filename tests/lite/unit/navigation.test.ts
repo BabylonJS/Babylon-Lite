@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createNavMeshFromSources } from "../../../packages/babylon-lite/src/navigation/navigation";
+import { createNavMeshFromSources, findClosestPointWithin } from "../../../packages/babylon-lite/src/navigation/navigation";
 import type { NavigationPlugin, NavMeshSource } from "../../../packages/babylon-lite/src/navigation/navigation";
 
 function createMockPlugin(capture: { positions?: number[]; indices?: number[]; navMeshQueryInput?: unknown }): NavigationPlugin {
@@ -45,5 +45,30 @@ describe("navigation raw sources", () => {
         createNavMeshFromSources(plugin, [{ positions: [0, 0, 0, 1, 0, 0, 0, 0, 1], indices: [0, 1, 2] }], { doNotReverseIndices: true });
 
         expect(capture.indices).toEqual([0, 1, 2]);
+    });
+});
+
+describe("findClosestPointWithin", () => {
+    function makeReadyPlugin(findClosestPoint: (position: unknown, opts: unknown) => unknown): NavigationPlugin {
+        return { _navMesh: { ok: true }, _navMeshQuery: { findClosestPoint } } as unknown as NavigationPlugin;
+    }
+
+    it("returns the snapped point and forwards the caller's halfExtents", () => {
+        let seen: unknown;
+        const plugin = makeReadyPlugin((_position, opts) => {
+            seen = opts;
+            return { success: true, point: { x: 1, y: 2, z: 3 } };
+        });
+
+        const result = findClosestPointWithin(plugin, { x: 1.1, y: 2, z: 3 }, { x: 5, y: 4, z: 5 });
+
+        expect(result).toEqual({ x: 1, y: 2, z: 3 });
+        expect(seen).toEqual({ halfExtents: { x: 5, y: 4, z: 5 } });
+    });
+
+    it("returns null when the query finds nothing inside the box", () => {
+        const plugin = makeReadyPlugin(() => ({ success: false, point: { x: 0, y: 0, z: 0 } }));
+
+        expect(findClosestPointWithin(plugin, { x: 99, y: 0, z: 99 }, { x: 1, y: 1, z: 1 })).toBeNull();
     });
 });

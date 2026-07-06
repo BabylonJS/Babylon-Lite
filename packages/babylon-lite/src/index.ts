@@ -15,6 +15,8 @@ export {
     VERSION,
 } from "./engine/engine.js";
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
+export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
+export type { NullEngineOptions } from "./engine/null-engine.js";
 export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings } from "./engine/gpu-task-timing.js";
 export type { RenderTaskGpuTiming, RenderTaskGpuTimings, RenderTaskGpuTimingStatus } from "./engine/gpu-task-timing.js";
 export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./engine/surface.js";
@@ -47,7 +49,7 @@ export { setSubtreeVisible } from "./scene/visibility.js";
 // RenderTask, and user tasks can render offscreen RTTs, overlays, etc.
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
-export { addRenderPass, addTask, addTaskAtStart, addTaskBefore } from "./frame-graph/frame-graph-actions.js";
+export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter } from "./frame-graph/frame-graph-actions.js";
 export { createFrameGraphContext, registerFrameGraphContext, unregisterFrameGraphContext, disposeFrameGraphContext } from "./frame-graph/frame-graph-context.js";
 export type { FrameGraphContext, FrameGraphContextOptions } from "./frame-graph/frame-graph-context.js";
 export type { Task } from "./frame-graph/task.js";
@@ -56,6 +58,8 @@ export { addPassDependencies } from "./frame-graph/pass.js";
 export type { RenderPass } from "./frame-graph/render-pass.js";
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
 export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export type { DepthPyramid, DepthPyramidOptions, DepthPyramidReduce, DepthPyramidTaskOptions } from "./frame-graph/depth-pyramid.js";
+export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-pyramid.js";
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
 export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
@@ -186,6 +190,8 @@ export type { Csg2Solid } from "./mesh/csg2.js";
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
 export { createTexture2DFromPixels, updateTexture2DFromPixels, createRenderTexture2D } from "./texture/pixels-texture.js";
+export { createTexture3DFromPixels } from "./texture/pixels-texture.js";
+export type { Texture3D, PixelsTexture3DOptions } from "./texture/pixels-texture.js";
 export type { PixelsTexture2DOptions, RenderTexture2DOptions } from "./texture/pixels-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
@@ -297,7 +303,7 @@ export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions,
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
 export { bakeVat, attachVat } from "./vat/vat-baker.js";
-export type { VatBakeResult, VatClip, VatHandle } from "./vat/vat-baker.js";
+export type { VatBakeResult, VatBakeOptions, VatClip, VatHandle } from "./vat/vat-baker.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
 export { normalizeVec3 } from "./math/normalize-vec3.js";
@@ -361,6 +367,7 @@ export {
     setThinInstanceColors,
     setThinInstanceColor,
     enableThinInstanceGpuCulling,
+    setThinInstanceCullBoundsPad,
 } from "./mesh/thin-instance.js";
 export {
     addHierarchyInstance,
@@ -621,8 +628,9 @@ export {
     setPhysicsGravity,
     getPhysicsGravity,
     setPhysicsTimestep,
-    setPhysicsTimestepProvider,
     getPhysicsTimestep,
+    setPhysicsTimestepMs,
+    getPhysicsTimestepMs,
     onPhysicsAfterStep,
     setPhysicsVelocityLimits,
     getPhysicsVelocityLimits,
@@ -687,6 +695,7 @@ export {
     createNavMeshFromSources,
     createDebugNavMeshGeometry,
     getClosestPoint,
+    findClosestPointWithin,
     computePath,
     createNavCrowd,
     addAgent,
