@@ -1192,6 +1192,38 @@ export async function buildBundleScenes(): Promise<void> {
  * bundle-sceneN.html, and measure only the /bundle/*.js bytes that are
  * actually fetched at runtime.
  */
+/** How many times to attempt measuring a single Lite scene before giving up. */
+const LITE_MEASURE_ATTEMPTS = 3;
+
+/**
+ * Measure a Lite scene, retrying on failure. A Lite scene that never reaches its
+ * `dataset.ready` signal (e.g. a transient failure or rate-limit fetching a large
+ * multi-file remote asset such as Sponza's ~70 files in CI) would otherwise be
+ * silently under-counted: the render pipeline's lazily-imported chunks only load
+ * once the scene renders. `measurePage(..., requireReady=true)` rejects such a
+ * measurement rather than recording a truncated size, so we retry a few times to
+ * absorb transient network flakiness before failing the build loudly.
+ */
+async function measureLiteSceneWithRetry(
+    browser: any,
+    port: number,
+    scene: string
+): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= LITE_MEASURE_ATTEMPTS; attempt++) {
+        try {
+            return await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/", true);
+        } catch (err) {
+            lastError = err;
+            console.warn(`  ${scene}: measurement attempt ${attempt}/${LITE_MEASURE_ATTEMPTS} failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+    throw new Error(
+        `Failed to measure ${scene} after ${LITE_MEASURE_ATTEMPTS} attempts. This usually indicates a transient failure ` +
+            `(e.g. rate-limit) fetching a remote asset during measurement, which would truncate the bundle. Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`
+    );
+}
+
 async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readonly string[], pruneManifest = true): Promise<BundleManifest> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
@@ -1214,10 +1246,10 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
         const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
         console.log(`Browser launched in ${elapsed(tBrowser)}`);
 
-        // Measure Lite scenes (write after each)
+        // Measure Lite scenes (write after each), retrying transient failures.
         for (const scene of liteScenes) {
             const tPage = performance.now();
-            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/");
+            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measureLiteSceneWithRetry(browser, port, scene);
             manifest[scene] = { ...manifest[scene], rawKB, gzipKB, ignoredRawKB, runtimeChunks: chunks };
             flushScene(scene);
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
@@ -1272,7 +1304,8 @@ export async function measurePage(
     port: number,
     scene: string,
     htmlFile: string,
-    bundlePath: string
+    bundlePath: string,
+    requireReady = false
 ): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
     const page = await browser.newPage();
     const jsPayloads: RuntimeJsPayload[] = [];
@@ -1297,10 +1330,37 @@ export async function measurePage(
     });
 
     await page.goto(`http://localhost:${port}/${htmlFile}`);
+    // Resolve as soon as the scene finishes (dataset.ready) OR reports a fatal
+    // error (dataset.error), so a fast-failing scene doesn't burn the full timeout.
+    let notReadyReason: string | undefined;
     try {
-        await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 50_000 });
+        await page.waitForFunction(
+            () => {
+                const c = document.querySelector("canvas");
+                return c?.dataset.ready === "true" || c?.dataset.error != null;
+            },
+            { timeout: 50_000 }
+        );
+        notReadyReason = await page.evaluate(() => {
+            const c = document.querySelector("canvas");
+            if (c?.dataset.ready === "true") return undefined;
+            return c?.dataset.error ?? "canvas reported neither ready nor error";
+        });
     } catch {
-        // BJS pages may not reach ready state without GPU — just measure fetched JS
+        // waitForFunction timed out: the scene set neither ready nor error.
+        notReadyReason = "timed out after 50s waiting for canvas ready/error signal";
+    }
+
+    // For Lite scenes (requireReady), a scene that never rendered would under-count
+    // its bundle: the render pipeline's lazily-imported chunks (pbr-renderable,
+    // ibl-fragment, generate-mipmaps, …) only load once the scene renders, so a
+    // failed remote-asset fetch would silently produce a truncated size. Reject the
+    // measurement so the caller can retry / fail loudly instead of recording a bogus
+    // decrease. BJS pages (requireReady=false) may legitimately never reach ready
+    // without a real GPU, so they keep the lenient "measure whatever loaded" behavior.
+    if (requireReady && notReadyReason !== undefined) {
+        await page.close();
+        throw new Error(`measurePage: scene "${scene}" did not become ready (${notReadyReason}); refusing to record a truncated bundle.`);
     }
 
     await Promise.all(responseReads);
