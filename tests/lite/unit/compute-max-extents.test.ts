@@ -37,9 +37,8 @@ function concatMat(...mats: Float32Array[]): Float32Array {
 }
 
 function makeMorph(targets: number[][]): MorphTargetData {
-    // computeMaxExtents conservatively bounds every reachable morph combination (summing each
-    // target's positive/negative deltas) and never reads weights, so the weights here are
-    // intentionally zero to prove weight-independence.
+    // computeMaxExtents bounds each target independently (base + delta) and never reads weights,
+    // so the weights here are intentionally zero to prove weight-independence.
     return {
         targets: targets.map((positions) => ({ positions: new Float32Array(positions), normals: null })),
         weights: new Float32Array(targets.length),
@@ -113,11 +112,11 @@ describe("computeMaxExtents", () => {
         expect(extent.maximum[2]).toBeCloseTo(0);
     });
 
-    it("conservatively bounds multiple morph targets stacking in the same direction", () => {
+    it("bounds each morph target independently against the base (matches core, does not sum stacking)", () => {
         const mesh = makeMesh({
             _cpuPositions: new Float32Array([0, 0, 0]),
             worldMatrix: identityMat(),
-            // Two targets whose x-deltas stack positively (1 + 2) and one negative y-delta.
+            // Two targets whose x-deltas would stack to +3 if summed, plus one negative y-delta.
             morphTargets: makeMorph([
                 [1, 0, 0],
                 [2, -1, 0],
@@ -126,10 +125,10 @@ describe("computeMaxExtents", () => {
 
         const extent = computeMaxExtents([mesh])[0]!;
 
-        // Bounding each target independently would give max x = 2; the combined pose reaches x = 3, so
-        // the box must expand by the SUM of same-direction deltas: min (0,-1,0), max (3,0,0).
+        // Core takes the per-vertex AABB of {base, base+d0, base+d1}, so max x = max(0, 1, 2) = 2 (NOT
+        // the summed 3). ViewerLite must match core so the full and lite viewers frame identically.
         expect(extent.minimum[0]).toBeCloseTo(0);
-        expect(extent.maximum[0]).toBeCloseTo(3);
+        expect(extent.maximum[0]).toBeCloseTo(2);
         expect(extent.minimum[1]).toBeCloseTo(-1);
         expect(extent.maximum[1]).toBeCloseTo(0);
         expect(extent.minimum[2]).toBeCloseTo(0);

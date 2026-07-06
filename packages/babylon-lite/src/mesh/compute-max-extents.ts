@@ -51,7 +51,7 @@ function extentCorners(min: ArrayLike<number>, max: ArrayLike<number>): Float32A
     return c;
 }
 
-/** Per-vertex min/max positions, conservatively expanded to bound every morph-target combination. */
+/** Per-vertex min/max positions, expanded by each morph target's deltas. */
 function computeMorphedRange(mesh: Mesh, vertexCount: number): { minP: Float32Array; maxP: Float32Array } {
     const positions = mesh._cpuPositions!;
     const componentCount = vertexCount * 3;
@@ -59,20 +59,23 @@ function computeMorphedRange(mesh: Mesh, vertexCount: number): { minP: Float32Ar
     const maxP = new Float32Array(minP);
     const morph = mesh.morphTargets;
     if (morph) {
-        // Any subset of morph targets can be active simultaneously (each weight up to 1), and their
-        // deltas can stack in the same direction. Bounding each target independently against the base
-        // would under-bound that stacking and can frame the camera too tightly. Instead accumulate the
-        // sum of all negative deltas into the lower bound and all positive deltas into the upper bound,
-        // per component — a conservative box that contains every reachable morphed pose.
+        // Bound each morph target independently against the base (per component). This mirrors Babylon.js
+        // core's `computeMaxExtents`, which takes the per-vertex AABB of {base, target0, target1, ...}
+        // where core's `MorphTarget.getPositions()` returns absolute positions and Lite stores deltas
+        // (base + delta == core's absolute target position). Matching core exactly is intentional: the
+        // full Viewer frames from core's result, so the ViewerLite camera must frame identically. Note
+        // this does NOT bound targets stacking together, but neither does core; if a wider conservative
+        // bound is ever wanted it should be changed in core first so the two stay in sync.
         for (const target of morph.targets) {
             const deltas = target.positions;
             const count = Math.min(deltas.length, componentCount);
             for (let i = 0; i < count; i++) {
-                const d = deltas[i]!;
-                if (d < 0) {
-                    minP[i]! += d;
-                } else {
-                    maxP[i]! += d;
+                const p = positions[i]! + deltas[i]!;
+                if (p < minP[i]!) {
+                    minP[i] = p;
+                }
+                if (p > maxP[i]!) {
+                    maxP[i] = p;
                 }
             }
         }
