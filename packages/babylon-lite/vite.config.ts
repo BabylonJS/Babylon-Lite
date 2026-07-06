@@ -21,7 +21,7 @@ import { stripManifoldNodeRequire } from "../../scripts/strip-manifold-node-requ
  *   build/
  *     package.json              exports "." -> ./lib/index.js  (what bundlers resolve)
  *     index.d.ts                shared rolled-up types for both trees
- *     README.md, LICENSE, THIRD_PARTY_NOTICES.txt
+ *     README.md, LICENSE, NOTICE.txt
  *     lib/                      module-granular ES output for BUNDLER consumers
  *       index.js, <mirrors src/ tree>.js, _chunks/vendor/*.js
  *     dist/                     prebundled, minified ES output for BROWSER / CDN use
@@ -246,7 +246,7 @@ const SUPPLEMENTAL_NOTICES: ReadonlyArray<{ title: string; embeddedBy: string; s
 const THIRD_PARTY_NOTICES_DIR = resolve(__dirname, "third-party-notices");
 
 /**
- * Generate THIRD_PARTY_NOTICES.txt by aggregating the license text of every
+ * Generate NOTICE.txt by aggregating the license text of every
  * bundled runtime dependency, plus curated notices for the upstream native
  * components embedded in their WASM. Generated at build time so the notices stay
  * in sync with the actual dependency versions on each release. Fails the build
@@ -288,7 +288,7 @@ function emitThirdPartyNotices(): Plugin {
                 sections.push(`${divider}\n${notice.title}\nEmbedded by: ${notice.embeddedBy}\nSource: ${notice.source}\n${divider}\n\n${licenseText}`);
             }
 
-            writeFileSync(resolve(PACKAGE_ROOT, "THIRD_PARTY_NOTICES.txt"), sections.join("\n\n") + "\n");
+            writeFileSync(resolve(PACKAGE_ROOT, "NOTICE.txt"), sections.join("\n\n") + "\n");
         },
     };
 }
@@ -583,7 +583,7 @@ export default defineConfig(({ mode }) => {
     // Module-granular library build for bundler consumers: one entry per source
     // module — this is the tree a real bundler resolves, and what the bundle-size
     // harness measures. Emits the shared package metadata (package.json, README,
-    // LICENSE, THIRD_PARTY_NOTICES) into the build root. Does NOT emit types (see the
+    // LICENSE, NOTICE.txt) into the build root. Does NOT emit types (see the
     // `dist` pass above). `build:lib` and `build:dist` write to disjoint subdirs +
     // non-conflicting root files, so they can run in either order after a clean.
     return {
