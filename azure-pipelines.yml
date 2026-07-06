@@ -448,6 +448,17 @@ stages:
                       BSTACK_SESSIONS_REQUIRED: "2"
                       BSTACK_LOCAL_IDENTIFIER: "bstack-lite-parity-$(Build.BuildId)"
 
+                # Scrub BrowserStack credentials from the report/JUnit artifacts
+                # before they are published/uploaded. The CDP wsEndpoint embeds the
+                # access key and can surface in Playwright error output.
+                - script: npx tsx scripts/redact-secrets.ts test-results
+                  condition: always()
+                  continueOnError: true
+                  displayName: "Redact secrets from test artifacts"
+                  env:
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+
                 - task: PublishTestResults@2
                   condition: always()
                   inputs:

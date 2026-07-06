@@ -34,6 +34,13 @@ if [ "$PREFERRED" -gt "$MAX_SESSIONS" ]; then
     PREFERRED="$MAX_SESSIONS"
 fi
 MINIMUM="${BSTACK_SESSIONS_MIN:-1}"
+# Guard against a contradictory config: MINIMUM must not exceed the (capped)
+# preferred count, otherwise the "available >= PREFERRED" branch would grant
+# fewer than MINIMUM and silently violate the minimum guarantee.
+if [ "$MINIMUM" -gt "$PREFERRED" ]; then
+    echo "[browserstack-wait] BSTACK_SESSIONS_MIN (${MINIMUM}) exceeds the effective preferred count (${PREFERRED}, capped at BSTACK_MAX_SESSIONS=${MAX_SESSIONS}). Lower BSTACK_SESSIONS_MIN or raise BSTACK_SESSIONS_REQUIRED/BSTACK_MAX_SESSIONS." >&2
+    exit 1
+fi
 WAIT_TIMEOUT="${BSTACK_WAIT_TIMEOUT:-900}"
 INTERVAL="${BSTACK_POLL_INTERVAL:-30}"
 MAX_RETRIES="${BSTACK_MAX_RETRIES:-3}"
