@@ -163,6 +163,16 @@ async function main(): Promise<void> {
         },
     };
 
+    // Bundle-size full-experience hook (see docs/lite/architecture/38-bundle-size-tooling.md).
+    // The GPU picker is dynamic-imported (`import("babylon-lite")` inside probePick),
+    // so its chunk is NOT part of the first-frame download — it only loads when the
+    // user actually clicks to pick. Exercising it here lets the bundle harness measure
+    // the true full-experience size (first-frame + this interaction-only lazy chunk).
+    (window as unknown as { __bjsExerciseFull?: () => Promise<void> }).__bjsExerciseFull = async () => {
+        await (window as unknown as { __scene222: { probePick: (x: number, y: number) => Promise<string> } }).__scene222.probePick(canvas.clientWidth * 0.5, canvas.clientHeight * 0.5);
+        canvas.dataset.fullReady = "true";
+    };
+
     await registerUtilityLayer(utilityLayer);
 
     let frame = 0;

@@ -689,6 +689,9 @@
             .size-info .size-label-bjs {
                 color: #f0883e;
             }
+            .size-info .size-label-full {
+                color: #a371f7;
+            }
             .size-info .size-ratio {
                 color: #d29922;
                 font-weight: 600;
@@ -4469,7 +4472,7 @@
                             var card = document.querySelector('[data-scene="' + scene + '"] .size-info');
                             if (!card) continue;
                             var html =
-                                '<div class="size-row"><span class="size-label">Lite</span>' +
+                                '<div class="size-row"><span class="size-label" title="JS fetched to render the first frame (the gated bundle size)">First</span>' +
                                 '<span><span class="size-value">' +
                                 sizes.rawKB +
                                 "</span> KB min</span>" +
@@ -4478,6 +4481,18 @@
                                 " KB gzip</span>" +
                                 renderBundleMasterDelta(sizes, masterSizes) +
                                 "</div>";
+                            if (sizes.fullExperienceRawKB != null && sizes.fullExperienceRawKB > sizes.rawKB) {
+                                var lazyDelta = (sizes.fullExperienceRawKB - sizes.rawKB).toFixed(1);
+                                html +=
+                                    '<div class="size-row"><span class="size-label size-label-full" title="Full experience: first frame + interaction-only lazy chunks">Full</span>' +
+                                    '<span><span class="size-value">' +
+                                    sizes.fullExperienceRawKB +
+                                    "</span> KB min</span>" +
+                                    (sizes.fullExperienceGzipKB != null ? '<span class="size-gzip">' + sizes.fullExperienceGzipKB + " KB gzip</span>" : "") +
+                                    '<span class="size-delta size-delta-neutral" title="Extra lazy JS fetched on interaction">+' +
+                                    lazyDelta +
+                                    " KB lazy</span></div>";
+                            }
                             var cfg = (window.SCENE_CONFIG || []).find(function (c) {
                                 return "scene" + c.id === scene;
                             });

@@ -1,9 +1,24 @@
 {
-  "rawKB": 111.9,
+  "rawKB": 112.1,
   "gzipKB": 41.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene222-gpu-pool-CHlSfwGp.js",
+    "scene222-shader-renderable-BnmcQiPl.js",
+    "scene222-standard-renderable-BmTYk9Mh.js",
+    "scene222-swapchain-overlay-ilhN4El_.js",
+    "scene222-ubo-layout-Cs5YvLYZ.js",
+    "scene222-wgsl-helpers-CwHFFXvt.js",
+    "scene222.js"
+  ],
+  "firstFrameRawKB": 112.1,
+  "firstFrameGzipKB": 41.2,
+  "fullExperienceRawKB": 115,
+  "fullExperienceGzipKB": 42.6,
+  "fullExperienceRuntimeChunks": [
+    "scene222-gpu-pool-CHlSfwGp.js",
+    "scene222-gs-gpu-picking-fragment-BFgKMrTw.js",
+    "scene222-index-7Jzc-CvI.js",
     "scene222-shader-renderable-BnmcQiPl.js",
     "scene222-standard-renderable-BmTYk9Mh.js",
     "scene222-swapchain-overlay-ilhN4El_.js",

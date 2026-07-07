@@ -208,6 +208,13 @@ interface BundleManifestEntry {
     rawKB: number;
     gzipKB: number;
     ignoredRawKB?: number;
+    /** Explicit alias of rawKB: JS fetched to render the first frame (== the gated size). */
+    firstFrameRawKB?: number;
+    firstFrameGzipKB?: number;
+    /** Full-experience: JS fetched after interaction-only lazy chunks are exercised. */
+    fullExperienceRawKB?: number;
+    fullExperienceGzipKB?: number;
+    fullExperienceRuntimeChunks?: string[];
     bjsRawKB?: number;
     bjsGzipKB?: number;
     runtimeChunks?: string[];
@@ -1217,11 +1224,23 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
         // Measure Lite scenes (write after each)
         for (const scene of liteScenes) {
             const tPage = performance.now();
-            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/");
-            manifest[scene] = { ...manifest[scene], rawKB, gzipKB, ignoredRawKB, runtimeChunks: chunks };
+            const { rawKB, gzipKB, ignoredRawKB, chunks, fullRawKB, fullGzipKB, fullChunks } = await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/");
+            manifest[scene] = {
+                ...manifest[scene],
+                rawKB,
+                gzipKB,
+                ignoredRawKB,
+                runtimeChunks: chunks,
+                firstFrameRawKB: rawKB,
+                firstFrameGzipKB: gzipKB,
+                fullExperienceRawKB: fullRawKB,
+                fullExperienceGzipKB: fullGzipKB,
+                fullExperienceRuntimeChunks: fullChunks,
+            };
             flushScene(scene);
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
-            console.log(`  measured ${scene}: ${rawKB} KB raw, ${gzipKB} KB gzip${ignored} (${elapsed(tPage)})`);
+            const fullNote = fullRawKB > rawKB ? `, full-experience ${fullRawKB} KB raw (+${(fullRawKB - rawKB).toFixed(1)} KB lazy)` : "";
+            console.log(`  measured ${scene}: first-frame ${rawKB} KB raw, ${gzipKB} KB gzip${fullNote}${ignored} (${elapsed(tPage)})`);
         }
 
         // Measure BJS scenes — skip if sizes already cached in manifest
@@ -1267,13 +1286,24 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
     return manifest;
 }
 
-export async function measurePage(
-    browser: any,
-    port: number,
-    scene: string,
-    htmlFile: string,
-    bundlePath: string
-): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
+export interface MeasuredBundle {
+    /** First-frame (current gated) size: JS fetched to reach the first rendered frame. */
+    rawKB: number;
+    gzipKB: number;
+    ignoredRawKB: number;
+    chunks: string[];
+    /**
+     * Full-experience size: JS fetched after the scene's optional
+     * `window.__bjsExerciseFull()` hook triggers its interaction-only lazy
+     * chunks (pick, gizmo, dispose, animation, …). Equal to the first-frame
+     * numbers when the scene exposes no hook.
+     */
+    fullRawKB: number;
+    fullGzipKB: number;
+    fullChunks: string[];
+}
+
+export async function measurePage(browser: any, port: number, scene: string, htmlFile: string, bundlePath: string): Promise<MeasuredBundle> {
     const page = await browser.newPage();
     const jsPayloads: RuntimeJsPayload[] = [];
     const chunkFiles: string[] = [];
@@ -1303,19 +1333,68 @@ export async function measurePage(
         // BJS pages may not reach ready state without GPU — just measure fetched JS
     }
 
+    // Snapshot the first-frame payload set (everything fetched to reach the
+    // first rendered frame). Awaiting in-flight reads first so bodies are ready.
     await Promise.all(responseReads);
     if (responseReadErrors.length > 0) {
         throw responseReadErrors[0];
     }
-    const summary = summarizeRuntimeBundle(jsPayloads, bundleInfoDir, scene);
-    const ignoredRawKB = bytesToRoundedKB(summary.ignoredRawBytes);
-    const rawBytes = summary.rawBytes;
+    const firstFramePayloads = jsPayloads.slice();
+    const firstFrameChunks = chunkFiles.slice();
+
+    // Full-experience: invoke the scene's optional exercise hook to trigger its
+    // interaction-only lazy chunks, then wait for it to signal completion via
+    // `dataset.fullReady`. Scenes with no hook produce no extra fetches, so the
+    // full-experience totals equal the first-frame totals.
+    try {
+        const hasHook = await page.evaluate(() => {
+            const fn = (window as unknown as { __bjsExerciseFull?: () => unknown }).__bjsExerciseFull;
+            if (typeof fn !== "function") {
+                return false;
+            }
+            // Fire-and-forget: the hook awaits its own lazy imports and sets
+            // `canvas.dataset.fullReady = "true"` when done. We poll for that
+            // signal below rather than blocking on the evaluate call.
+            void Promise.resolve(fn()).catch(() => {
+                const c = document.querySelector("canvas");
+                if (c) {
+                    c.dataset.fullReady = "true";
+                }
+            });
+            return true;
+        });
+        if (hasHook) {
+            try {
+                await page.waitForFunction(() => document.querySelector("canvas")?.dataset.fullReady === "true", { timeout: 30_000 });
+            } catch {
+                // Hook did not signal completion in time — measure whatever it fetched.
+            }
+            // Brief settle so any in-flight lazy chunk responses are observed.
+            await new Promise((r) => setTimeout(r, 300));
+            await Promise.all(responseReads);
+            if (responseReadErrors.length > 0) {
+                throw responseReadErrors[0];
+            }
+        }
+    } catch (err) {
+        // A failing exercise hook must not break first-frame measurement.
+        console.warn(`  ${scene}: __bjsExerciseFull hook failed (${err instanceof Error ? err.message : String(err)})`);
+    }
+    const fullPayloads = jsPayloads.slice();
+    const fullChunks = chunkFiles.slice();
 
     await page.close();
+
+    const firstFrame = summarizeRuntimeBundle(firstFramePayloads, bundleInfoDir, scene);
+    const full = summarizeRuntimeBundle(fullPayloads, bundleInfoDir, scene);
+
     return {
-        rawKB: bytesToRoundedKB(rawBytes),
-        gzipKB: bytesToRoundedKB(summary.gzipBytes),
-        ignoredRawKB,
-        chunks: Array.from(new Set(chunkFiles)).sort(),
+        rawKB: bytesToRoundedKB(firstFrame.rawBytes),
+        gzipKB: bytesToRoundedKB(firstFrame.gzipBytes),
+        ignoredRawKB: bytesToRoundedKB(firstFrame.ignoredRawBytes),
+        chunks: Array.from(new Set(firstFrameChunks)).sort(),
+        fullRawKB: bytesToRoundedKB(full.rawBytes),
+        fullGzipKB: bytesToRoundedKB(full.gzipBytes),
+        fullChunks: Array.from(new Set(fullChunks)).sort(),
     };
 }
