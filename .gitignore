@@ -50,6 +50,7 @@ lab/public/doom/CREDITS.txt
 .freedoom-cache/
 lab/public/librequake/
 .librequake-cache/
+.kaykit-staging/
 lab/public/minecraft/voxelpack/*.png
 lab/public/minecraft/voxelpack/License.txt
 .voxelpack-cache/

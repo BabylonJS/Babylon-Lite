@@ -61,3 +61,19 @@ export const billboardBlendAdditive: BillboardBlendDescriptor = {
     },
     _depthMode: "transparent",
 };
+
+/**
+ * Pure additive blending (`src·1 + dst`), matching Babylon.js `BLENDMODE_ONEONE` / `ALPHA_ONEONE`:
+ * the billboard's RGB is added at full strength with **no alpha weighting**, so a texture that
+ * encodes its own falloff in the RGB channels (a flare, a glow) stacks exactly as Babylon.js draws
+ * it. Contrast {@link billboardBlendAdditive}, which weights the source by its alpha (Babylon.js
+ * `BLENDMODE_ADD`) — the two match only when the source alpha is 1 everywhere.
+ */
+export const billboardBlendOneOne: BillboardBlendDescriptor = {
+    _key: "oneone",
+    _descriptor: {
+        color: { srcFactor: "one", dstFactor: "one", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
+    },
+    _depthMode: "transparent",
+};
