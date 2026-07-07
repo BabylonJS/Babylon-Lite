@@ -3,6 +3,8 @@ import "@babylonjs/core/Loading/loadingScreen";
 import "@babylonjs/core/Loading/Plugins/babylonFileLoader";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 import { Scene } from "@babylonjs/core/scene";
+import "@babylonjs/core/Cameras/universalCamera";
+import "@babylonjs/core/Materials/standardMaterial";
 import "@babylonjs/loaders";
 
 (async function () {

@@ -26,7 +26,7 @@ import {
     PhysicsShapeSphere,
 } from "@babylonjs/core/Physics/v2/physicsShape";
 import "@babylonjs/core/Physics/joinedPhysicsEngineComponent";
-import "@babylonjs/loaders/glTF/2.0";
+import "@babylonjs/loaders/glTF";
 
 const PHYSICS_FPS = 60;
 const ASSET_BASE = "https://playground.babylonjs.com/scenes/";

@@ -5,6 +5,7 @@ import "@babylonjs/core/Loading/loadingScreen";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/loaders/glTF";
+import "@babylonjs/core/Meshes/instancedMesh";
 
 (async function () {
     const __initStart = performance.now();

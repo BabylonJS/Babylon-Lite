@@ -34,7 +34,7 @@ import {
 import type { PhysicsShape } from "@babylonjs/core/Physics/v2/physicsShape";
 import "@babylonjs/core/Physics/joinedPhysicsEngineComponent";
 import "@babylonjs/core/Meshes/Builders/groundBuilder";
-import "@babylonjs/loaders/glTF/2.0";
+import "@babylonjs/loaders/glTF";
 
 const PHYSICS_FPS = 60;
 const HEIGHTMAP_URL = "https://playground.babylonjs.com/textures/heightMap.png";

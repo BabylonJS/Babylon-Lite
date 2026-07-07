@@ -12,7 +12,7 @@ import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import { CreateNavigationPluginAsync } from "@babylonjs/addons/navigation/factory/factory.single-thread";
 import * as RecastCore from "@recast-navigation/core";
 import * as RecastGenerators from "@recast-navigation/generators";
-import "@babylonjs/loaders/glTF/2.0";
+import "@babylonjs/loaders/glTF";
 
 const NAV_MESH_URL = "/models/nav_test.glb";
 const Y_OFFSET = 0.1;

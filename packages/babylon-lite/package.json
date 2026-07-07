@@ -56,7 +56,7 @@
         "@recast-navigation/core": "0.43.0",
         "@recast-navigation/generators": "0.43.0",
         "@recast-navigation/wasm": "0.43.0",
-        "manifold-3d": "3.4.0",
+        "manifold-3d": "3.5.1",
         "text-shaper": "^0.1.18"
     }
 }
