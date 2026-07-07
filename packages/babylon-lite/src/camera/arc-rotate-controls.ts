@@ -154,10 +154,10 @@ export function setCameraLimits(camera: ArcRotateCamera, limits: ArcRotateCamera
  *
  * Camera stays plain data — this function reads/writes its properties.
  *
- * ## Lifecycle / cleanup (important)
+ * ### Lifecycle / cleanup (important)
  *
  * The returned function detaches everything this call attached: it removes the
- * canvas DOM listeners (pointer/wheel/touch/gesture) and, when a `scene` was
+ * canvas DOM listeners (pointer/wheel/contextmenu/touch/gesture) and, when a `scene` was
  * supplied, its `_beforeRender` inertia hook. It is idempotent — calling it more
  * than once is safe (the hook is removed only if still present, and removing a
  * DOM listener twice is a no-op).
