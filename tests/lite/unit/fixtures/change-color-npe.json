@@ -1,8 +1,4 @@
-/** Scene 265 - NPE 'Change - Color' graph. Converted from a classic ParticleSystem with two color gradients
- * (addColorGradient(0, red) + addColorGradient(1, green)) via BABYLON.ConvertToNodeParticleSystemSetAsync
- * (mirrors Babylon.js visual test 'Particles - Change - Color', playground #AUPMMB#0). Checked-in scene data;
- * excluded from bundle-size accounting like the *-nme.ts payloads. */
-export const SCENE265_NPE_JSON = {
+{
   "tags": null,
   "name": "npe",
   "editorData": null,
@@ -1301,4 +1297,4 @@ export const SCENE265_NPE_JSON = {
       "invertY": true
     }
   ]
-};
+}

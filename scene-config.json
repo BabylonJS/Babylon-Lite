@@ -2247,16 +2247,5 @@
         "tags": ["npe", "particles", "billboards"],
         "skipPerf": true,
         "compatParity": true
-    },
-    {
-        "id": 265,
-        "slug": "scene265-npe-change-color",
-        "name": "Scene 265 — NPE Particles: Change - Color",
-        "maxMad": 0.1,
-        "maxRawKB": 45,
-        "description": "Node Particle Editor graph (a classic ParticleSystem with two color gradients — addColorGradient(0, red) + addColorGradient(1, green) — converted to NPE via ConvertToNodeParticleSystemSetAsync, mirroring Babylon.js visual test 'Particles - Change - Color', playground #AUPMMB#0) rendered as camera-facing additive billboards. Reuses the ParticleGradientBlock + ParticleGradientValueBlock machinery from scene264 to drive UpdateColorBlock with a Color4 gradient evaluated at the age/lifetime ratio (no new blocks — the gradient generalizes from scalar size to Color4), alongside SystemBlock, CreateParticleBlock, BoxShapeBlock, ParticleRandomBlock, ParticleInputBlock, ParticleMathBlock, ParticleConverterBlock, UpdatePositionBlock, and ParticleTextureSourceBlock with a deterministic seeded RNG and a frozen frame.",
-        "tags": ["npe", "particles", "billboards"],
-        "skipPerf": true,
-        "compatParity": true
     }
 ]

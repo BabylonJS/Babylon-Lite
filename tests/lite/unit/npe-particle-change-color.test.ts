@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SCENE265_NPE_JSON } from "../../../lab/lite/src/shared/scene265-npe";
+import graphSource from "./fixtures/change-color-npe.json";
 import groundTruth from "./fixtures/change-color-states.json";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
@@ -31,7 +31,7 @@ const truth = groundTruth as { N: number; count: number; particles: BjsParticle[
  */
 describe("NPE particle simulation (Change - Color) — deterministic parity with Babylon.js", () => {
     it(`reproduces Babylon.js particle states after ${truth.N} deterministic steps`, async () => {
-        const graph = parseNodeParticleSource(SCENE265_NPE_JSON);
+        const graph = parseNodeParticleSource(graphSource);
         const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph, { emitter: { x: 0, y: 0, z: 0 } });
         const system = set.systems[0]!;
         expect(system).toBeTruthy();
