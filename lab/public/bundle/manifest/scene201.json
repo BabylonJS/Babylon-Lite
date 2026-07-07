@@ -1,13 +1,13 @@
 {
-  "rawKB": 48.7,
-  "gzipKB": 19.8,
+  "rawKB": 47.7,
+  "gzipKB": 19.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene201-_mat4-storage-f64-BubF55_X.js",
-    "scene201-floating-origin-18rYq_DG.js",
-    "scene201-pack-mat4-with-offset-BS-Lz8k7.js",
-    "scene201-standard-renderable-BT6iqp8p.js",
-    "scene201-wgsl-helpers-CwHFFXvt.js",
+    "scene201-_mat4-storage-f64-C43wVe2F.js",
+    "scene201-floating-origin-BVtibR42.js",
+    "scene201-pack-mat4-with-offset-gfPe3zZb.js",
+    "scene201-standard-renderable-D1Yepw3U.js",
+    "scene201-wgsl-helpers-D25HZhW8.js",
     "scene201.js"
   ]
 }

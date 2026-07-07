@@ -1,17 +1,19 @@
 {
-  "rawKB": 86.2,
-  "gzipKB": 35.1,
+  "rawKB": 85.5,
+  "gzipKB": 35.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene21-background-hdr-skybox-DwM1Bej-.js",
-    "scene21-cubemap-skybox-material-Cr1ObR0t.js",
-    "scene21-generate-mipmaps-AupL-zFb.js",
-    "scene21-gltf-glb-parser-GCKDEofq.js",
-    "scene21-ibl-fragment-CeRrvT96.js",
-    "scene21-pbr-renderable-D0RVqwcz.js",
-    "scene21-rgbd-decode-9DTol7mq.js",
-    "scene21-scene-uniforms-FTYH6Ct0.js",
-    "scene21-sheen-fragment-D8QZ_dKb.js",
+    "scene21-background-hdr-skybox-B_m6laEJ.js",
+    "scene21-cubemap-skybox-material-CJzZe8lW.js",
+    "scene21-generate-mipmaps-ClY_n8rE.js",
+    "scene21-gltf-glb-parser-Bwky1HPx.js",
+    "scene21-ibl-fragment-B8MuDxXP.js",
+    "scene21-pbr-renderable-gcFfRbGf.js",
+    "scene21-rgbd-decode-B9w8RTcJ.js",
+    "scene21-rolldown-runtime-DK3Fl9T5.js",
+    "scene21-scene-uniforms-C73kE8NW-DZ06fff3.js",
+    "scene21-sheen-fragment-Dk1XamXn.js",
+    "scene21-skybox.vertex-D7C6wdGl-C8qNUfIg.js",
     "scene21.js"
   ]
 }

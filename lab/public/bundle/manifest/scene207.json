@@ -1,17 +1,17 @@
 {
-  "rawKB": 59.7,
-  "gzipKB": 24,
+  "rawKB": 58.6,
+  "gzipKB": 23.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene207-_mat4-storage-f64-B_0HYOAx.js",
-    "scene207-floating-origin-CoOl2-Do.js",
-    "scene207-material-view-Dua1bl7W.js",
-    "scene207-no-color-view-BJnjfxE3.js",
-    "scene207-pack-mat4-with-offset-BS-Lz8k7.js",
-    "scene207-shadow-task-SxovdLRJ.js",
-    "scene207-standard-renderable-Q6qXJ1fg.js",
-    "scene207-std-shadow-fragment-pwyXRo4i.js",
-    "scene207-wgsl-helpers-CwHFFXvt.js",
+    "scene207-_mat4-storage-f64-CjR-COCv.js",
+    "scene207-floating-origin-BZdjsB72.js",
+    "scene207-material-view-D7OVqoLw.js",
+    "scene207-no-color-view-3XS0gEVO.js",
+    "scene207-pack-mat4-with-offset-gfPe3zZb.js",
+    "scene207-shadow-task-ClySzv2_.js",
+    "scene207-standard-renderable-p6x9GlLl.js",
+    "scene207-std-shadow-fragment-R_iSjFW7.js",
+    "scene207-wgsl-helpers-D25HZhW8.js",
     "scene207.js"
   ]
 }

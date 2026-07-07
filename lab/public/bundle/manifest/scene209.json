@@ -1,14 +1,14 @@
 {
-  "rawKB": 54.5,
-  "gzipKB": 22.3,
+  "rawKB": 53.3,
+  "gzipKB": 22,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene209-_mat4-storage-f64-3NavC9Rv.js",
-    "scene209-floating-origin-DMyB87f5.js",
-    "scene209-havok-floating-origin-CVYBGBaG.js",
-    "scene209-pack-mat4-with-offset-BS-Lz8k7.js",
-    "scene209-standard-renderable-BhttRL8q.js",
-    "scene209-wgsl-helpers-CwHFFXvt.js",
+    "scene209-_mat4-storage-f64-C9DmUb0g.js",
+    "scene209-floating-origin-B-ExfC8X.js",
+    "scene209-havok-floating-origin-BQrX2GrH.js",
+    "scene209-pack-mat4-with-offset-gfPe3zZb.js",
+    "scene209-standard-renderable-BcZwMt-1.js",
+    "scene209-wgsl-helpers-D25HZhW8.js",
     "scene209.js"
   ]
 }

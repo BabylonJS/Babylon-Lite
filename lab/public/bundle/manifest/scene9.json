@@ -1,17 +1,17 @@
 {
-  "rawKB": 59.6,
-  "gzipKB": 24.1,
+  "rawKB": 58.6,
+  "gzipKB": 23.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene9-generate-mipmaps-xw5BdfZd.js",
-    "scene9-normal-map-fragment-BjHVJ1qk.js",
-    "scene9-point-light-ESYN5_k0.js",
-    "scene9-standard-renderable-DIEblUNe.js",
-    "scene9-std-ambient-fragment-BT8qGSob.js",
-    "scene9-std-opacity-fragment-Dwz7NrjB.js",
-    "scene9-std-reflection-fragment-Cb2Nq9Do.js",
-    "scene9-std-specular-fragment-lgpgl8DR.js",
-    "scene9-wgsl-helpers-CwHFFXvt.js",
+    "scene9-generate-mipmaps-CucBPEOM.js",
+    "scene9-normal-map-fragment-B3NR1Zei.js",
+    "scene9-point-light-gpGqAfKV.js",
+    "scene9-standard-renderable-D_6mxpnh.js",
+    "scene9-std-ambient-fragment-CKBIxnOR.js",
+    "scene9-std-opacity-fragment-CJ6kXh8S.js",
+    "scene9-std-reflection-fragment-DhqwRaPc.js",
+    "scene9-std-specular-fragment-Og46l-UZ.js",
+    "scene9-wgsl-helpers-D25HZhW8.js",
     "scene9.js"
   ]
 }

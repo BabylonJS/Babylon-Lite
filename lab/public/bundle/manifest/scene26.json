@@ -1,18 +1,18 @@
 {
-  "rawKB": 90.2,
-  "gzipKB": 36.7,
+  "rawKB": 89.8,
+  "gzipKB": 36.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene26-emissive-fragment-NHEUTzE3.js",
-    "scene26-generate-mipmaps-CGhaBz9Q.js",
-    "scene26-gltf-glb-parser-wcPvSq_F.js",
-    "scene26-ibl-fragment-CeRrvT96.js",
-    "scene26-ibl-skybox-wgsl-CFIBOHHx.js",
-    "scene26-pbr-aces-wgsl-XxSkrbTG.js",
-    "scene26-pbr-renderable-D-5HVGqK.js",
-    "scene26-rgbd-decode-Y-O5hyxs.js",
-    "scene26-singlelight-point-wgsl-BFpv7Wxi.js",
-    "scene26-subsurface-fragment-ChLQN3KU.js",
+    "scene26-emissive-fragment-BbnRTYnR.js",
+    "scene26-generate-mipmaps-HVaqgXLQ.js",
+    "scene26-gltf-glb-parser-B7hGv2xt.js",
+    "scene26-ibl-fragment-B8MuDxXP.js",
+    "scene26-ibl-skybox-wgsl-CEbLS6sz.js",
+    "scene26-pbr-aces-wgsl-n19XWGij.js",
+    "scene26-pbr-renderable-uDlOyXPc.js",
+    "scene26-rgbd-decode-BCOY_6kB.js",
+    "scene26-singlelight-point-wgsl-Dqji36yF.js",
+    "scene26-subsurface-fragment-C5Tp9cOG.js",
     "scene26.js"
   ]
 }

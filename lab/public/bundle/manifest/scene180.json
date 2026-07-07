@@ -1,9 +1,8 @@
 {
-  "rawKB": 27.8,
-  "gzipKB": 10.4,
-  "ignoredRawKB": 680.2,
+  "rawKB": 28.2,
+  "gzipKB": 147.6,
+  "ignoredRawKB": 671,
   "runtimeChunks": [
-    "scene180-text-shaper-Cie-Mnk-.js",
     "scene180.js"
   ]
 }

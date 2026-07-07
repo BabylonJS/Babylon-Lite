@@ -1,16 +1,16 @@
 {
-  "rawKB": 72.7,
+  "rawKB": 72.1,
   "gzipKB": 28.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene4-esm-shadow-view-7yqUFA1x.js",
-    "scene4-generate-mipmaps-C5qTY_Nn.js",
-    "scene4-material-view-Dua1bl7W.js",
-    "scene4-no-color-view-jut7SxNQ.js",
-    "scene4-shadow-task-DKE6tIG9.js",
-    "scene4-standard-renderable-C-a_tPgC.js",
-    "scene4-std-shadow-fragment-pwyXRo4i.js",
-    "scene4-wgsl-helpers-CwHFFXvt.js",
+    "scene4-esm-shadow-view-CDqW-9xp.js",
+    "scene4-generate-mipmaps-sGjgdtXn.js",
+    "scene4-material-view-D7OVqoLw.js",
+    "scene4-no-color-view-CQ8PaRrZ.js",
+    "scene4-shadow-task-CBRV3hnk.js",
+    "scene4-standard-renderable-BevXEkfj.js",
+    "scene4-std-shadow-fragment-R_iSjFW7.js",
+    "scene4-wgsl-helpers-D25HZhW8.js",
     "scene4.js"
   ]
 }

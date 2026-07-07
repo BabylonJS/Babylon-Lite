@@ -65,7 +65,15 @@ const FRAMEWORK_SPECIFIER = /\?worker(?:&|$)|\?url(?:&|$)|\.wasm(?:\?|$)/;
 
 const isExternal = (source: string): boolean => isVendorSpecifier(source) || FRAMEWORK_SPECIFIER.test(source);
 
-const normalize = (value: string): string => value.replace(/\r\n/g, "\n").trim();
+const normalize = (value: string): string =>
+    value
+        .replace(/\r\n/g, "\n")
+        // Rolldown (vite 8) wraps every concatenated module in `//#region <path>`
+        // / `//#endregion` boundary comments. They are pure codegen bookkeeping,
+        // not emitted code, so drop them before comparing against the sentinel.
+        .replace(/^[ \t]*\/\/#(?:region|endregion).*$/gm, "")
+        .replace(/\n{2,}/g, "\n")
+        .trim();
 
 /** Shared treeshake config: ignore `sideEffects: false` for first-party modules and
  *  verify it (keep anything not provably pure); trust externals as pure; drop benign

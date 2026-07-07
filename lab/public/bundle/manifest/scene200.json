@@ -1,10 +1,10 @@
 {
-  "rawKB": 46.8,
+  "rawKB": 46.5,
   "gzipKB": 18.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene200-standard-renderable-CmdaDWAN.js",
-    "scene200-wgsl-helpers-CwHFFXvt.js",
+    "scene200-standard-renderable-BfaB940L.js",
+    "scene200-wgsl-helpers-D25HZhW8.js",
     "scene200.js"
   ]
 }

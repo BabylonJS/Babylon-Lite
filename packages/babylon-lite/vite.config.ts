@@ -549,8 +549,9 @@ export default defineConfig(({ mode }) => {
                     output: {
                         // Force a true single-file dist artifact. This inlines all
                         // dynamic-imported feature paths and vendor runtimes into
-                        // `dist/index.js`.
-                        inlineDynamicImports: true,
+                        // `dist/index.js`. (Vite 8 / Rolldown: `codeSplitting: false`
+                        // replaces the deprecated `inlineDynamicImports: true`.)
+                        codeSplitting: false,
                     },
                 },
             },
