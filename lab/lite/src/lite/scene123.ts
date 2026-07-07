@@ -6,7 +6,7 @@
 
 import { attachControl, createArcRotateCamera, createEngine, createSceneContext, loadSPZ, registerScene, startEngine } from "babylon-lite";
 
-const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/hornedlizard/hornedlizard.spz";
+const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/hornedlizard/hornedlizard.spz";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();

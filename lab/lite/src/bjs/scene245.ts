@@ -18,7 +18,7 @@ import "@babylonjs/loaders/glTF";
 
     const scene = new Scene(engine);
 
-    await SceneLoader.AppendAsync("", "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/RecursiveSkeletons/glTF/RecursiveSkeletons.gltf", scene);
+    await SceneLoader.AppendAsync("", "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/RecursiveSkeletons/glTF/RecursiveSkeletons.gltf", scene);
 
     scene.clearColor = new Color4(0.2, 0.2, 0.3, 1.0);
     const envTex = await new Promise<CubeTexture>((resolve) => {

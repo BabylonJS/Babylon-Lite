@@ -5,7 +5,7 @@
 
 import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, loadGltf, createHemisphericLight, attachControl, goToFrame, pauseAnimation, registerScene } from "babylon-lite";
 
-const MODEL_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/BrainStem/glTF-Meshopt-EXT/BrainStem.gltf";
+const MODEL_URL = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/BrainStem/glTF-Meshopt-EXT/BrainStem.gltf";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();

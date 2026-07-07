@@ -14,7 +14,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { GaussianSplattingMesh } from "@babylonjs/core/Meshes/GaussianSplatting/gaussianSplattingMesh";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
 
-const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/Halo_Believe.splat";
+const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_Believe.splat";
 
 (async function () {
     const __initStart = performance.now();

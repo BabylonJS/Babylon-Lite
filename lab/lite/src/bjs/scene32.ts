@@ -14,7 +14,7 @@ import "@babylonjs/loaders/glTF";
 
     const scene = new Scene(engine);
 
-    await SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/UnlitTest/glTF-Binary/", "UnlitTest.glb", scene);
+    await SceneLoader.AppendAsync("https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/UnlitTest/glTF-Binary/", "UnlitTest.glb", scene);
 
     scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
     scene.createDefaultCamera(true, true, true);
