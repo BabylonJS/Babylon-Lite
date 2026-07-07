@@ -11,7 +11,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/loaders/glTF";
 
-const MODEL_ROOT = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/IridescenceAbalone/glTF-Binary/";
+const MODEL_ROOT = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/IridescenceAbalone/glTF-Binary/";
 const MODEL_FILE = "IridescenceAbalone.glb";
 const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
 
