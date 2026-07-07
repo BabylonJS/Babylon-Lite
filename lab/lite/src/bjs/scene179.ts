@@ -15,7 +15,7 @@ import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/core/Loading/loadingScreen";
 import "@babylonjs/loaders/glTF";
 
-const MODEL_ROOT = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Sponza/glTF/";
+const MODEL_ROOT = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Models@master/2.0/Sponza/glTF/";
 const MODEL_FILE = "Sponza.gltf";
 
 function seededRandom(seed: number): () => number {

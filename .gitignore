@@ -70,6 +70,7 @@ lab/public/gl/perf-manifest.json
 lab/public/gl/perf-regression-manifest.json
 test-results/
 .bundle-size-tmp/
+.bundle-asset-cache/
 .env.local
 plans/
 log/
