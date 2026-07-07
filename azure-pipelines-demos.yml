@@ -15,7 +15,7 @@ variables:
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
-      value: "9.15.4"
+      value: "9.15.9"
     - name: CI
       value: "true"
     - name: HEADLESS
