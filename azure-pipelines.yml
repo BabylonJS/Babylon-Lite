@@ -218,6 +218,23 @@ stages:
                 - script: pnpm exec playwright install chromium
                   displayName: "Install Playwright browsers"
 
+                # Cache remote scene assets (models/textures/env fetched during
+                # measurement) across runs/PRs. The cache is a pure URL->bytes store
+                # independent of source, so a constant prefix is shared broadly. The
+                # per-run key component means the exact key never hits (so newly
+                # fetched assets are always saved at job end), while restoreKeys
+                # restores the most recent prefix match — a rolling cache that
+                # accumulates new assets instead of freezing. Measurement still
+                # fetches-with-retry on a miss, so a cold/expired cache is only slower,
+                # never incorrect.
+                - task: Cache@2
+                  displayName: "Cache remote scene assets"
+                  inputs:
+                      key: 'bundle-assets | v1 | "$(Build.BuildId)"'
+                      restoreKeys: |
+                          bundle-assets | v1
+                      path: $(System.DefaultWorkingDirectory)/.bundle-asset-cache
+
                 - script: |
                       TARGET_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-refs/heads/master}"
                       TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"

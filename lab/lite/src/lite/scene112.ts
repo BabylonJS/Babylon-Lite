@@ -16,7 +16,7 @@ import {
 } from "babylon-lite";
 import { addDdsEnvironmentBackground } from "babylon-lite/material/pbr/background-dds-environment.js";
 
-const MODEL_URL = "https://raw.githubusercontent.com/BabylonJS/Assets/master/meshes/FlightHelmetKTX/FlightHelmet.gltf";
+const MODEL_URL = "https://cdn.jsdelivr.net/gh/BabylonJS/Assets@master/meshes/FlightHelmetKTX/FlightHelmet.gltf";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
