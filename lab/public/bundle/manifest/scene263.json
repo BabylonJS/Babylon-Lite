@@ -1,6 +1,6 @@
 {
-  "rawKB": 42.6,
-  "gzipKB": 24.8,
+  "rawKB": 43,
+  "gzipKB": 24.9,
   "ignoredRawKB": 27.6,
   "runtimeChunks": [
     "scene263-billboard-renderable-DrThQ2vn.js",
