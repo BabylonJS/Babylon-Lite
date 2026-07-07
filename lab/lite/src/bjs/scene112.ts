@@ -9,7 +9,7 @@ import "@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader";
 import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/loaders/glTF";
 
-const ASSET_ROOT = "https://raw.githubusercontent.com/BabylonJS/Assets/master/meshes/FlightHelmetKTX/";
+const ASSET_ROOT = "https://cdn.jsdelivr.net/gh/BabylonJS/Assets@master/meshes/FlightHelmetKTX/";
 
 (async function () {
     const __initStart = performance.now();
