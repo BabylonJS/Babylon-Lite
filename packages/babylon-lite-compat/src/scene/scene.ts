@@ -608,6 +608,10 @@ export class Scene extends AbstractScene {
         // loaders: `loadEnvironment` (`.env`) and `loadDdsEnvironment` (`.dds`).
         if (this._envTexture?._envLoaderKind === "hdr") {
             await loadHdrEnvironment(this._lite, envUrl, {
+                // Forward the BJS `HDRCubeTexture` `size` as Lite's cubemap `faceSize`
+                // so callers that request e.g. 512 are honoured (Lite otherwise defaults
+                // to 256). Only `HDRCubeTexture` carries `_envLoaderKind === "hdr"`.
+                faceSize: (this._envTexture as HDRCubeTexture).size,
                 skyboxSize: opts?.skyboxSize ?? 1000,
                 useCubemapSkybox: !!skyboxUrl,
                 skipGround: !opts?.createGround,

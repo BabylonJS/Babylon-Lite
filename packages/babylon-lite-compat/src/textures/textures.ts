@@ -436,13 +436,13 @@ export class CubeTexture {
         // Babylon.js fires onLoad once the cube map is ready; some scenes await it
         // before continuing. We resolve on a microtask since the actual GPU upload
         // is deferred to `loadEnvironment` at engine start.
-        setTimeout(() => {
+        queueMicrotask(() => {
             this._ready = true;
             if (onLoad) {
                 onLoad();
             }
             this.onLoadObservable.notifyObservers(this);
-        }, 0);
+        });
     }
 
     /** Babylon.js `BaseTexture.isReady()`. */
@@ -500,13 +500,13 @@ export class HDRCubeTexture {
         // Babylon.js fires onLoad once the HDR is decoded + prefiltered; the real
         // GPU work is deferred to `loadHdrEnvironment` at engine start, so we
         // resolve the readiness signal on a microtask (matches CubeTexture).
-        setTimeout(() => {
+        queueMicrotask(() => {
             this._ready = true;
             if (onLoad) {
                 onLoad();
             }
             this.onLoadObservable.notifyObservers(this);
-        }, 0);
+        });
     }
 
     /** Babylon.js `BaseTexture.isReady()`. */
