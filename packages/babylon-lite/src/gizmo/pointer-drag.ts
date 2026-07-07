@@ -258,8 +258,21 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
         // Idle pointer-move: GPU-pick to determine hover target so gizmos can
         // swap to their hover material before the user starts dragging.  Picks
         // are tagged with a monotonically-increasing token so a stale result
-        // can't overwrite the latest hover decision.
-        void handleHoverMove(state, event);
+        // can't overwrite the latest hover decision (and `pickAsync` serializes
+        // per-picker so overlapping picks never race the shared staging buffers).
+        //
+        // Display-only gizmos (every registered drag disabled) do ZERO hover
+        // picking — no GPU work is spent when nothing is interactive.  This is
+        // what makes `drag.enabled = false` (BJS `PointerDragBehavior.enabled` /
+        // `AxisDragGizmo.isEnabled = false`) fully non-interactive; previously
+        // the dispatcher picked on every move regardless, so a disabled gizmo
+        // still drove a GPU pick per pointer-move.
+        for (const d of state.drags) {
+            if (d.enabled) {
+                void handleHoverMove(state, event);
+                return;
+            }
+        }
     };
 
     const onPointerUp = (event: PointerEvent): void => {
@@ -296,6 +309,9 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
     return state;
 }
 
+/** Perform a single hover pick and update hover state.  `pickAsync` serializes
+ *  per-picker, so concurrent calls (a fast pointer, or a pointer-down racing an
+ *  in-flight hover) never race the picker's shared 1×1 staging buffers. */
 async function handleHoverMove(state: DispatcherState, event: PointerEvent): Promise<void> {
     const token = ++state.hoverToken;
     const info = await pickAsync(state.picker, event.offsetX, event.offsetY);
