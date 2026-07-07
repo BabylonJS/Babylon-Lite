@@ -55,6 +55,8 @@ export async function loadParticleBlockEvaluator(className: string): Promise<Par
             return (await import("./blocks/particle-vector-length-block.js")).particleVectorLengthBlock;
         case "ParticleConditionBlock":
             return (await import("./blocks/particle-condition-block.js")).particleConditionBlock;
+        case "ParticleFloatToIntBlock":
+            return (await import("./blocks/particle-float-to-int-block.js")).particleFloatToIntBlock;
         default:
             throw new Error(`NodeParticle: unsupported block class "${className}"`);
     }
