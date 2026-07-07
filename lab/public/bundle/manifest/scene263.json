@@ -1,6 +1,6 @@
 {
-  "rawKB": 41.9,
-  "gzipKB": 24.6,
+  "rawKB": 42.6,
+  "gzipKB": 24.8,
   "ignoredRawKB": 27.6,
   "runtimeChunks": [
     "scene263-billboard-renderable-DrThQ2vn.js",
@@ -9,7 +9,8 @@
     "scene263-generate-mipmaps-DGaraCoo.js",
     "scene263-particle-converter-block-oStUKUGD.js",
     "scene263-particle-input-block-DEWVwXJp.js",
-    "scene263-particle-lerp-block-BR89V9J9.js",
+    "scene263-particle-lerp-CRpaBd2M.js",
+    "scene263-particle-lerp-block-CZaisCnv.js",
     "scene263-particle-math-block-BfOGyynd.js",
     "scene263-particle-random-block-BQ4BGvxu.js",
     "scene263-random-range-CfhNtuAB.js",

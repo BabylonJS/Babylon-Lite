@@ -2236,5 +2236,16 @@
         "tags": ["npe", "particles", "billboards"],
         "skipPerf": true,
         "compatParity": true
+    },
+    {
+        "id": 264,
+        "slug": "scene264-npe-change-size",
+        "name": "Scene 264 — NPE Particles: Change - Size",
+        "maxMad": 0.1,
+        "maxRawKB": 45,
+        "description": "Node Particle Editor graph (a classic ParticleSystem with two size gradients — addSizeGradient(0, 0.1, 0.3) + addSizeGradient(1, 1, 2) — converted to NPE via ConvertToNodeParticleSystemSetAsync, mirroring Babylon.js visual test 'Particles - Change - Size', playground #L90MXS) rendered as camera-facing additive billboards. Adds ParticleGradientBlock, ParticleGradientValueBlock, and UpdateSizeBlock (per-frame size from a gradient evaluated at the age/lifetime ratio, each stop a OncePerParticle random range) to the NPE block set, alongside SystemBlock, CreateParticleBlock, BoxShapeBlock, ParticleRandomBlock, ParticleInputBlock, ParticleMathBlock, ParticleLerpBlock, ParticleConverterBlock, UpdatePositionBlock, UpdateColorBlock, and ParticleTextureSourceBlock with a deterministic seeded RNG and a frozen frame.",
+        "tags": ["npe", "particles", "billboards"],
+        "skipPerf": true,
+        "compatParity": true
     }
 ]
