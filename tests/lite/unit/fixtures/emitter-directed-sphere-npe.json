@@ -6,7 +6,7 @@
   "blocks": [
     {
       "customType": "BABYLON.SystemBlock",
-      "id": 44,
+      "id": 42,
       "name": "particles",
       "visibleOnFrame": false,
       "inputs": [
@@ -26,7 +26,7 @@
         {
           "name": "texture",
           "inputName": "texture",
-          "targetBlockId": 45,
+          "targetBlockId": 43,
           "targetConnectionName": "texture",
           "isExposedOnFrame": true,
           "exposedPortPosition": -1
@@ -74,7 +74,7 @@
       "preWarmStepOffset": 1,
       "isBillboardBased": true,
       "billBoardMode": 7,
-      "isLocal": false,
+      "isLocal": true,
       "disposeOnStop": false,
       "doNoStart": false,
       "renderingGroupId": 0,
@@ -1220,39 +1220,9 @@
       "value": 0
     },
     {
-      "customType": "BABYLON.ParticleMathBlock",
+      "customType": "BABYLON.ParticleInputBlock",
       "id": 41,
-      "name": "Add Position",
-      "visibleOnFrame": false,
-      "inputs": [
-        {
-          "name": "left",
-          "inputName": "left",
-          "targetBlockId": 42,
-          "targetConnectionName": "output",
-          "isExposedOnFrame": true,
-          "exposedPortPosition": -1
-        },
-        {
-          "name": "right",
-          "inputName": "right",
-          "targetBlockId": 43,
-          "targetConnectionName": "output",
-          "isExposedOnFrame": true,
-          "exposedPortPosition": -1
-        }
-      ],
-      "outputs": [
-        {
-          "name": "output"
-        }
-      ],
-      "operation": 0
-    },
-    {
-      "customType": "BABYLON.ParticleInputBlock",
-      "id": 42,
-      "name": "Position",
+      "name": "Local Position Updated",
       "visibleOnFrame": false,
       "inputs": [],
       "outputs": [
@@ -1261,26 +1231,7 @@
         }
       ],
       "type": 8,
-      "contextualValue": 1,
-      "systemSource": 0,
-      "min": 0,
-      "max": 0,
-      "groupInInspector": "",
-      "displayInInspector": true
-    },
-    {
-      "customType": "BABYLON.ParticleInputBlock",
-      "id": 43,
-      "name": "Scaled Direction",
-      "visibleOnFrame": false,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "output"
-        }
-      ],
-      "type": 8,
-      "contextualValue": 6,
+      "contextualValue": 24,
       "systemSource": 0,
       "min": 0,
       "max": 0,
@@ -1289,7 +1240,7 @@
     },
     {
       "customType": "BABYLON.ParticleTextureSourceBlock",
-      "id": 45,
+      "id": 43,
       "name": "Texture",
       "visibleOnFrame": false,
       "inputs": [],

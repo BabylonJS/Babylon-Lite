@@ -1,5 +1,5 @@
 {
-  "rawKB": 42.1,
+  "rawKB": 42.4,
   "gzipKB": 24.8,
   "ignoredRawKB": 28.6,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene262-create-particle-block-BiKiIhan.js",
     "scene262-generate-mipmaps-Ka9O_fxT.js",
     "scene262-particle-converter-block-oStUKUGD.js",
-    "scene262-particle-input-block-BpNrvH0u.js",
+    "scene262-particle-input-block-BuPe516-.js",
     "scene262-particle-lerp-CRpaBd2M.js",
     "scene262-particle-lerp-block-BNgV0CZy.js",
     "scene262-particle-math-block-BfOGyynd.js",

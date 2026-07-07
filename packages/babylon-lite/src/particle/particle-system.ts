@@ -242,6 +242,11 @@ function runCreationSlots(system: ParticleSystem, particle: Particle): void {
     }
     if (system._createPosition) {
         system._createPosition(particle, system);
+        // Mirror BJS `_CreateLocalPositionData`: seed the local-space position from the emitted position so an
+        // isLocal system's `LocalPositionUpdated` source integrates from the correct origin.
+        particle._localPosition.x = particle.position.x;
+        particle._localPosition.y = particle.position.y;
+        particle._localPosition.z = particle.position.z;
     }
     if (system._createDirection) {
         system._createDirection(particle, system);
