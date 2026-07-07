@@ -21,7 +21,7 @@
  * rotation-anchor geometry — which is the part this scene is meant to
  * cover.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as fs from "fs";
 import * as path from "path";
 import type { Page } from "@playwright/test";

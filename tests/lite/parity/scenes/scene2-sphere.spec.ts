@@ -8,7 +8,7 @@
  * - Full image MAD ≤ 1 (near pixel-perfect)
  * - ≥99% of sphere pixels are exact matches
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 

@@ -4,7 +4,7 @@
  * UnlitTest.glb (KHR_materials_unlit) with default environment (IBL only,
  * no skybox / no ground). Matches Babylon playground #YG3BBF#53.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

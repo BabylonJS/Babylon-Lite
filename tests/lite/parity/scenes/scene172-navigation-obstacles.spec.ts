@@ -6,7 +6,7 @@
  * stays at frame-1 positions. Lite uses the same ?freeze=1 flag to skip
  * its own updateNavCrowd loop.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

@@ -4,7 +4,7 @@
  * Loads the FlightHelmetKTX glTF asset from BabylonJS/Assets and validates
  * KHR_texture_basisu plus frame-graph transmission against Babylon.js.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
