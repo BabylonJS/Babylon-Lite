@@ -11,6 +11,7 @@
  */
 import { build, type Plugin, type Rollup } from "vite";
 import { execFileSync } from "child_process";
+import { createHash } from "crypto";
 import { resolve, dirname, join, extname } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
@@ -1299,6 +1300,129 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
     return manifest;
 }
 
+/**
+ * On-disk cache for remote scene assets fetched during measurement.
+ *
+ * Bundle-size measurement loads each scene in a headless browser and counts the
+ * JS chunks it fetches. Many scenes pull models/textures/environments from remote
+ * hosts (assets.babylonjs.com, playground.babylonjs.com, cdn.jsdelivr.net, …).
+ * A scene's render-pipeline chunks are dynamic imports that load only once the
+ * scene renders, so any remote asset that fails to fetch would prevent the scene
+ * from rendering and truncate its measured bundle. With ~230 remote requests
+ * across ~10 hosts per run, transient failures/rate-limits are near-certain over
+ * time and make measurement non-deterministic.
+ *
+ * We intercept every non-localhost request in the measurement browser and serve
+ * it from this cache: on a miss we fetch from the origin with PER-REQUEST retry
+ * (far more robust than reloading the whole scene) and persist the bytes; on a
+ * hit we serve from disk with no network at all. This makes measurement
+ * deterministic and lets CI warm the cache once (via BUNDLE_ASSET_CACHE_DIR).
+ * If an asset is genuinely unfetchable after retries the request is aborted, the
+ * scene fails to become ready, and the caller fails loudly — bundle size is never
+ * recorded from a truncated load.
+ */
+const ASSET_CACHE_DIR = process.env.BUNDLE_ASSET_CACHE_DIR ? resolve(process.env.BUNDLE_ASSET_CACHE_DIR) : resolve(ROOT, ".bundle-asset-cache");
+const ASSET_FETCH_ATTEMPTS = 4;
+
+interface CachedAsset {
+    status: number;
+    contentType: string;
+    body: Buffer;
+}
+
+// De-dupe concurrent/repeat requests for the same URL within a single run so an
+// asset shared across scenes is fetched at most once. Cleared on failure so a
+// later scene can retry.
+const assetMemCache = new Map<string, Promise<CachedAsset>>();
+
+function assetCacheKey(url: string): string {
+    return createHash("sha256").update(url).digest("hex");
+}
+
+async function fetchAssetWithRetry(url: string): Promise<CachedAsset> {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= ASSET_FETCH_ATTEMPTS; attempt++) {
+        try {
+            const res = await fetch(url, { redirect: "follow" });
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status} ${res.statusText}`);
+            }
+            const body = Buffer.from(await res.arrayBuffer());
+            return { status: res.status, contentType: res.headers.get("content-type") ?? "application/octet-stream", body };
+        } catch (err) {
+            lastErr = err;
+            if (attempt < ASSET_FETCH_ATTEMPTS) {
+                await new Promise((r) => setTimeout(r, 250 * 2 ** (attempt - 1)));
+            }
+        }
+    }
+    throw new Error(`asset fetch failed after ${ASSET_FETCH_ATTEMPTS} attempts: ${url} — ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
+}
+
+async function getCachedAsset(url: string): Promise<CachedAsset> {
+    const inflight = assetMemCache.get(url);
+    if (inflight) {
+        return inflight;
+    }
+    const load = (async (): Promise<CachedAsset> => {
+        const key = assetCacheKey(url);
+        const bodyPath = resolve(ASSET_CACHE_DIR, key);
+        const metaPath = resolve(ASSET_CACHE_DIR, `${key}.json`);
+        if (!process.env.BUNDLE_ASSET_CACHE_DISABLE && existsSync(bodyPath) && existsSync(metaPath)) {
+            const meta = JSON.parse(readFileSync(metaPath, "utf-8")) as { status: number; contentType: string };
+            return { status: meta.status, contentType: meta.contentType, body: readFileSync(bodyPath) };
+        }
+        const asset = await fetchAssetWithRetry(url);
+        console.log(`    [asset-cache miss] fetched ${url}`);
+        mkdirSync(ASSET_CACHE_DIR, { recursive: true });
+        // Atomic write (tmp + rename) so a crash mid-write can't leave a partial body.
+        const tmpBody = `${bodyPath}.tmp${process.pid}`;
+        writeFileSync(tmpBody, asset.body);
+        renameSync(tmpBody, bodyPath);
+        writeFileSync(metaPath, JSON.stringify({ url, status: asset.status, contentType: asset.contentType }));
+        return asset;
+    })();
+    assetMemCache.set(url, load);
+    load.catch(() => assetMemCache.delete(url));
+    return load;
+}
+
+/**
+ * Route every request the measurement page makes: localhost (the bundle server)
+ * passes through untouched so JS chunks are measured normally; every remote asset
+ * is served from {@link getCachedAsset}. Aborts on unfetchable assets so the scene
+ * fails loudly rather than measuring a truncated bundle.
+ */
+async function installAssetCacheRoute(page: any, port: number): Promise<void> {
+    const localBase = `http://localhost:${port}`;
+    await page.route("**/*", async (route: any) => {
+        const url = route.request().url();
+        if (url.startsWith(localBase) || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+            await route.continue().catch(() => {});
+            return;
+        }
+        try {
+            const asset = await getCachedAsset(url);
+            await route.fulfill({
+                status: asset.status,
+                headers: {
+                    "content-type": asset.contentType,
+                    // Faithfully permissive CORS: the real hosts already allow these cross-origin
+                    // asset fetches (that's why scenes load today), so echo an allow-all header
+                    // rather than the origin's specific one.
+                    "access-control-allow-origin": "*",
+                    "cache-control": "public, max-age=31536000",
+                },
+                body: asset.body,
+            });
+        } catch {
+            // Unfetchable after retries — abort so the scene fails to render and the
+            // caller's requireReady guard turns it into a loud, non-silent failure.
+            await route.abort().catch(() => {});
+        }
+    });
+}
+
 export async function measurePage(
     browser: any,
     port: number,
@@ -1329,6 +1453,7 @@ export async function measurePage(
         }
     });
 
+    await installAssetCacheRoute(page, port);
     await page.goto(`http://localhost:${port}/${htmlFile}`);
     // Resolve as soon as the scene finishes (dataset.ready) OR reports a fatal
     // error (dataset.error), so a fast-failing scene doesn't burn the full timeout.
