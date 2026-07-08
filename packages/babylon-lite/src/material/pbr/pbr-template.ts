@@ -85,11 +85,6 @@ export interface PbrTemplateConfig {
     /** Fog blend WGSL, emitted just before the tonemap block; "" for non-fog scenes. */
     /** @internal */
     readonly _fogBlock?: string;
-    /** Scene clip-plane discard WGSL (`dot(worldPos, clipPlane) > 0 → discard`), emitted at the top
-     *  of the fragment main; supplied by the dynamic pbr-clip-wgsl import only for clipping scenes,
-     *  "" otherwise (zero bytes for non-clipping scenes). */
-    /** @internal */
-    readonly _clipBlock?: string;
     /** ACES WGSL: tonemap helper functions (dynamically imported). Empty string = standard exponential tonemap. */
     /** @internal */
     readonly _acesHelpers?: string;
@@ -172,7 +167,6 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _hasTonemap = false,
         _fogHelper = "",
         _fogBlock = "",
-        _clipBlock = "",
         _acesHelpers = "",
         _acesTonemapCall = "",
         _hasAlphaBlend = false,
@@ -451,11 +445,14 @@ color=1.0-exp2(-1.590579*color);`
     const fogHelper = _fogHelper;
     const fogBlock = _fogBlock;
 
-    // Clip plane (opt-in via scene.clipPlane). The discard WGSL is supplied by pbr-renderable, which
-    // dynamically imports pbr-clip-wgsl.ts only when scene.clipPlane is set; "" for non-clipping
-    // scenes so those bundles carry zero clip bytes. Emitted at the very top of the fragment main so
-    // it clips before any texture work, on every fragment path (color, depth-prepass, ESM shadow).
-    const clipBlock = _clipBlock;
+    // Clip plane (opt-in via scene.clipPlane / setClipPlane). Emitted unconditionally at the very top
+    // of the fragment main — runtime-gated by the scene UBO, exactly like Standard's clip and both
+    // families' precedent for cheap always-on scene state. When no clip plane is set the UBO's
+    // clipPlane slot is (0,0,0,0), so `dot(vec4(worldPos,1),0) = 0` and `0 > 0` is false → no discard.
+    // Inlining (vs. a dynamic-imported string) keeps the shared pbr-renderable chunk smaller: the
+    // ~55-byte WGSL literal costs far less than the import/flag/threading machinery it would replace.
+    // Placed before any texture work so it clips on every fragment path (color, depth-prepass, ESM shadow).
+    const clipBlock = `if(dot(vec4<f32>(input.worldPos,1.0),scene.clipPlane)>0.0){discard;}`;
 
     // Alpha output
     const alphaBlock = _noColorOutput

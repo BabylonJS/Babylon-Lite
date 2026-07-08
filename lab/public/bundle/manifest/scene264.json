@@ -1,13 +1,12 @@
 {
-  "rawKB": 74.1,
-  "gzipKB": 30.3,
+  "rawKB": 73.9,
+  "gzipKB": 30.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene264-multilight-wgsl-BI_efNFC.js",
-    "scene264-pbr-clip-wgsl-OyCskTVQ.js",
-    "scene264-pbr-renderable-Cy40sNyf.js",
+    "scene264-multilight-wgsl-C7TFhEA0.js",
+    "scene264-pbr-renderable-B1pn3qfX.js",
     "scene264-shader-composer-Bga-tI-0.js",
-    "scene264-standard-renderable-3VKkrz8i.js",
+    "scene264-standard-renderable-B00ZsNo7.js",
     "scene264-wgsl-helpers-CwHFFXvt.js",
     "scene264.js"
   ]

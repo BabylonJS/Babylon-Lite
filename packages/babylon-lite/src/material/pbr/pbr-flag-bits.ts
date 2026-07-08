@@ -7,10 +7,6 @@ export const PBR_HAS_TONEMAP = 1 << 4;
  *  sceneFeatures), gating the PBR fog blend + calcFogFactor helper into the shader.
  *  Compile-time gated so non-fog PBR scenes stay byte-identical. */
 export const PBR_HAS_FOG = 1 << 5;
-/** Scene has a clip plane (scene.clipPlane != null, via setClipPlane). A scene-feature
- *  bit (threaded via sceneFeatures), gating a `dot(worldPos, clipPlane) > 0 → discard`
- *  into the PBR fragment. Compile-time gated so non-clipping PBR scenes stay byte-identical. */
-export const PBR_HAS_CLIP_PLANE = 1 << 13;
 export const PBR_HAS_ALPHA_BLEND = 1 << 6;
 export const PBR_HAS_SPEC_GLOSS = 1 << 7;
 export const PBR_HAS_DOUBLE_SIDED = 1 << 8;

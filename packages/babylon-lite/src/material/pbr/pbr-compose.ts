@@ -26,7 +26,6 @@ import {
     PBR_HAS_ENV,
     PBR_HAS_TONEMAP,
     PBR_HAS_FOG,
-    PBR_HAS_CLIP_PLANE,
     PBR_HAS_SPEC_GLOSS,
     PBR_HAS_OCCLUSION,
     PBR_HAS_SKYBOX,
@@ -56,9 +55,6 @@ interface PbrComposerDeps {
      *  when scene.fog is set; "" otherwise so non-fog scenes bundle zero fog bytes. */
     readonly _fogHelper: string;
     readonly _fogBlock: string;
-    /** Clip-plane discard WGSL, dynamically loaded by pbr-renderable only when scene.clipPlane is
-     *  set; "" otherwise so non-clipping scenes bundle zero clip bytes. */
-    readonly _clipBlock: string;
     readonly _createPbrTemplateExt: typeof import("./pbr-template-ext.js").createPbrTemplateExt | null;
     readonly _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null;
     readonly _iblSkyboxCalc: string;
@@ -95,7 +91,6 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _acesTonemapCall,
         _fogHelper,
         _fogBlock,
-        _clipBlock,
         _createPbrTemplateExt,
         _anisoExt,
         _iblSkyboxCalc,
@@ -172,7 +167,6 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _hasTonemap: hasScene(PBR_HAS_TONEMAP),
             _fogHelper: hasScene(PBR_HAS_FOG) ? _fogHelper : "",
             _fogBlock: hasScene(PBR_HAS_FOG) ? _fogBlock : "",
-            _clipBlock: hasScene(PBR_HAS_CLIP_PLANE) ? _clipBlock : "",
             _acesHelpers: _acesHelpers,
             _acesTonemapCall: _acesTonemapCall,
             _hasAlphaBlend: has(PBR_HAS_ALPHA_BLEND),

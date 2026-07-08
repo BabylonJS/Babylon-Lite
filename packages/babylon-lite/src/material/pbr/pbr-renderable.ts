@@ -29,7 +29,6 @@ import {
     PBR_HAS_ENV,
     PBR_HAS_TONEMAP,
     PBR_HAS_FOG,
-    PBR_HAS_CLIP_PLANE,
     PBR2_ESM_SHADOW_OUTPUT,
 } from "./pbr-flags.js";
 import type { PbrExt } from "./pbr-flags.js";
@@ -285,14 +284,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _fogBlock = fogMod.PBR_FOG_BLOCK;
     }
 
-    // Clip-plane WGSL is dynamically imported only when the scene has a clip plane, so non-clipping
-    // PBR scenes bundle zero clip bytes (a static import would defeat tree-shaking — see pbr-clip-wgsl.ts).
-    let _clipBlock = "";
-    if (scene.clipPlane) {
-        const clipMod = await import("./pbr-clip-wgsl.js");
-        _clipBlock = clipMod.PBR_CLIP_BLOCK;
-    }
-
     const composePbr = createPbrComposer({
         _singleLightWGSL,
         _getSingleLightBlock,
@@ -302,7 +293,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _acesTonemapCall,
         _fogHelper,
         _fogBlock,
-        _clipBlock,
         _createPbrTemplateExt,
         _anisoExt,
         _iblSkyboxCalc,
@@ -312,7 +302,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _createThinInstanceFragment,
     });
 
-    const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (hasTonemap ? PBR_HAS_TONEMAP : 0) | (scene.fog ? PBR_HAS_FOG : 0) | (scene.clipPlane ? PBR_HAS_CLIP_PLANE : 0);
+    const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (hasTonemap ? PBR_HAS_TONEMAP : 0) | (scene.fog ? PBR_HAS_FOG : 0);
     // Shadow bind group cache — within one scene build, all receiving meshes share the
     // same shadowLights array, so a BG keyed by shadowBGL alone is correct.
     const shadowBGCache = new Map<GPUBindGroupLayout, GPUBindGroup>();
