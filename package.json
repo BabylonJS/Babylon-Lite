@@ -3,6 +3,9 @@
     "private": true,
     "license": "Apache-2.0",
     "packageManager": "pnpm@9.15.9",
+    "engines": {
+        "node": "^20.19.0 || ^22.13.0 || >=24"
+    },
     "scripts": {
         "dev": "pnpm --filter @babylon-lite/parity-harness dev",
         "dev:playground": "pnpm --filter @babylon-lite/playground dev",
