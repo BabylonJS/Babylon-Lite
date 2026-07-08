@@ -16,6 +16,7 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
+import { release } from "../resource/ref-count.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import { goToFrame, stopAnimation } from "../animation/animation-group.js";
 import type { SkeletonBinding, VatData } from "../animation/types.js";
@@ -232,6 +233,14 @@ export function attachVat(engine: EngineContext, mesh: Mesh, baked: VatBakeResul
         weights1Buffer: skel.weights1Buffer,
     };
     mesh.vat = vat;
+    // `skel` may be a GPU resource SHARED with a clone (see resource/ref-count.ts) — release this mesh's
+    // ownership claim before dropping the reference so a clone sibling that still holds `mesh.skeleton`
+    // can eventually free it. `jointsBuffer`/`weightsBuffer`/`joints1Buffer`/`weights1Buffer` are reused by
+    // `vat` above (never destroyed here); only `boneTexture` is VAT-unused, so it's safe to destroy the
+    // moment this was the LAST owner (a still-live clone sibling means it's not, so nothing is destroyed).
+    if (release(skel)) {
+        skel.boneTexture.destroy();
+    }
     mesh.skeleton = null; // baked: no live skinning, no skeleton fragment, no per-frame bone upload
 
     let time = 0;

@@ -282,7 +282,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | -------------------------- | :--: | :-: | ---------------------------------------------------------------------------------------------------------- |
 | ★ 100% Tree-Shakable       |  ✅  | ⚡  | Zero module-level side effects in Lite                                                                     |
 | ★ Minimal Bundle Size      |  ✅  |  —  | Dramatically smaller than BJS for same scene                                                               |
-| ★ Zero Side Effects        |  ✅  |  —  | No register\*() at import time, no globalThis                                                              |
+| ★ Zero Side Effects        |  ✅  |  —  | No register*() at import time, no globalThis                                                               |
 | ★ One-Way Data Ownership   |  ✅  |  —  | Components are plain data; scene is sole owner                                                             |
 | ★ Materials Own Shaders    |  ✅  |  —  | Self-contained material + pipeline units                                                                   |
 | TypeScript                 |  ✅  | ✅  | Strict typing throughout                                                                                   |

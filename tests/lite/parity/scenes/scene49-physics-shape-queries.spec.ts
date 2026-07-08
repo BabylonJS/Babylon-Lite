@@ -7,7 +7,7 @@
  * The static scene self-determines its capture frame (once the broadphase exists and
  * both queries report hits), so the spec just waits on the `captureReady` flag.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";

@@ -5,7 +5,7 @@
  * simulation in which two rows of shapes fall onto a heightfield derived from
  * heightMap.png, then compares the settled frame.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";

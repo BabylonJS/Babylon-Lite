@@ -309,9 +309,17 @@ export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions
     const timeout = opts.timeout ?? 60_000;
     const settleMs = opts.settleMs ?? 1500;
 
-    // Open the BJS ref page in a fresh context to avoid interfering with the lite page.
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const bjsPage = await context.newPage();
+    // When REUSE_BROWSER is set, reuse the worker's existing context/page (kept
+    // alive by the parity fixtures) instead of opening a new window. The test
+    // re-navigates the same page to the lite scene afterwards, so sharing it is
+    // safe. Only reuse when a worker-owned context+page actually exist; otherwise
+    // fall back to a fresh, isolated context we own (and tear down) as before.
+    const wantReuse = process.env.REUSE_BROWSER === "true" || process.env.REUSE_BROWSER === "1";
+    const existingContext = wantReuse ? browser.contexts()[0] : undefined;
+    const existingPage = existingContext?.pages()[0];
+    const reuse = !!existingContext && !!existingPage;
+    const context = existingContext ?? (await browser.newContext({ viewport: { width: 1280, height: 720 } }));
+    const bjsPage = existingPage ?? (await context.newPage());
     const urlParams = opts.seekTime !== undefined ? `?seekTime=${opts.seekTime}${opts.queryParams ? `&${opts.queryParams}` : ""}` : opts.queryParams ? `?${opts.queryParams}` : "";
     await bjsPage.goto(cfg.refUrl(opts.sceneId, urlParams));
 
@@ -347,8 +355,12 @@ export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions
     fs.mkdirSync(refDir, { recursive: true });
     await bjsPage.locator("canvas").screenshot({ path: goldenPath });
 
-    await bjsPage.close();
-    await context.close();
+    // Only tear down the context/page when we own it. In reuse mode the worker
+    // fixture owns the shared context and the calling test still needs the page.
+    if (!reuse) {
+        await bjsPage.close();
+        await context.close();
+    }
 
     return goldenPath;
 }
