@@ -213,7 +213,7 @@ _1: f32,
     // when no clip plane is set the `clipPlane` slot stays (0,0,0,0), so `dot(..) > 0` is always
     // false and nothing is clipped (same always-in, runtime-guarded strategy as fog above). Placed
     // at the top of main so it clips before texture work on every path (color, depth-prepass, ESM).
-    const clipPlaneCode = `if (dot(vec4<f32>(input.vp, 1.0), scene.clipPlane) > 0.0) { discard; }`;
+    const clipPlaneCode = `if(dot(vec4<f32>(input.vp,1.0),scene.clipPlane)>0.0){discard;}`;
 
     // View direction
     const viewDirCode = !_disableLighting ? `let viewDirectionW = normalize(scene.vEyePosition.xyz - input.vp);` : "";
