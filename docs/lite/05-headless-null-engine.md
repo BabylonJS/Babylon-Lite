@@ -11,7 +11,7 @@ That makes it a good fit for running a scene **on a server or in a headless proc
 - Offline computation of transforms / animation state you later ship to a rendering client.
 - Any place a browser and GPU simply aren't available.
 
-> **Not sure whether you want this or the normal engine?** If you need pixels on screen, use [`createEngine`](/lite/01-getting-started) — that's the WebGPU rendering path. Reach for the null engine only when you explicitly want simulation *without* rendering.
+> **Not sure whether you want this or the normal engine?** If you need pixels on screen, use [`createEngine`](01-getting-started.md) — that's the WebGPU rendering path. Reach for the null engine only when you explicitly want simulation *without* rendering.
 
 ---
 
@@ -133,7 +133,7 @@ The null engine needs **no WebGPU and no browser**, so it runs anywhere JavaScri
 | **Deno** | ✅ | Works today. Validated with real Havok WASM. Use `--node-modules-dir=auto` when running inside a pnpm workspace so `npm:` specifiers resolve. |
 | **Web Worker** | ✅ | Runs off the main thread — handy for a simulation worker in a browser app. |
 | **CI / test runner** | ✅ | Ideal for deterministic, fixed-step regression tests (Lite's own `no-webgpu` test project runs the null engine this way). |
-| **Browser (rendering)** | — | For pixels on screen use [`createEngine`](/lite/01-getting-started) (WebGPU), not the null engine. |
+| **Browser (rendering)** | — | For pixels on screen use [`createEngine`](01-getting-started.md) (WebGPU), not the null engine. |
 
 > **Deno is _not_ required.** Node is the recommended host for headless simulation. Deno is only interesting if you're separately exploring headless *rendering* — which the null engine does not do.
 
@@ -166,8 +166,8 @@ Pair these with the normal scene API — `createSceneContext(engine, { defaultRe
 
 ## Next steps
 
-- 🚀 **[Getting Started](/lite/01-getting-started)** — the full (rendering) engine and the Lite mental model.
-- 🧱 **[Animation](/lite/architecture/07-animation)** — animation groups also advance under `stepScene`.
+- 🚀 **[Getting Started](01-getting-started.md)** — the full (rendering) engine and the Lite mental model.
+- 🧱 **[Animation](architecture/07-animation.md)** — animation groups also advance under `stepScene`.
 - 🌐 **[github.com/BabylonJS/Babylon-Lite](https://github.com/BabylonJS/Babylon-Lite)** — source, issues, and the scene gallery.
 
 Running Lite headlessly and hitting a wall? **[Open an issue](https://github.com/BabylonJS/Babylon-Lite/issues)** — this feature's direction is shaped directly by what people need from it. 💙

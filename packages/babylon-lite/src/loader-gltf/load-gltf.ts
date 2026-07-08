@@ -89,28 +89,26 @@ export interface GltfMeshData {
 
 /**
  * Load a glTF/GLB asset, parse it, and upload mesh + material data to GPU.
- * Supports both binary GLB and separate .gltf + .bin + image files.
- * Registers a deferred PBR renderable builder.
- * Automatically parses glTF animations if present.
+ * Registers a deferred PBR renderable builder and automatically parses glTF
+ * animations if present.
  *
- * Returns a AssetContainer. Pass it to addToScene() which adds the hierarchy,
- * registers animation ticks, and applies any scene-level settings.
+ * Returns an {@link AssetContainer}. Pass it to {@link addToScene} which adds the
+ * hierarchy, registers animation ticks, and applies any scene-level settings.
+ *
+ * The `source` may be either:
+ * - **A URL (`string`)** — fetches the asset. Supports both binary GLB and
+ *   separate `.gltf` + `.bin` + image files; relative `.bin`/image paths are
+ *   resolved against the URL.
+ * - **Raw data (`ArrayBuffer` | `Blob`)** — loads from already-loaded local data
+ *   (drag-and-drop, OPFS, a `fetch` body, etc.). GLB-vs-glTF is determined from
+ *   the data's magic bytes, not a file extension. Because raw data has no base
+ *   URL it must be self-contained: a GLB, or a glTF whose buffers/images use
+ *   `data:` URIs. A glTF that references external `.bin`/image files by relative
+ *   path can only be loaded from a URL.
  *
  * @param engine - The engine to upload GPU resources to.
- * @param url - URL of the .glb/.gltf asset to fetch.
+ * @param source - A URL string, or the raw `ArrayBuffer`/`Blob` of a self-contained glTF/GLB asset.
  */
-export function loadGltf(engine: EngineContext, url: string): Promise<AssetContainer>;
-/**
- * Load a glTF/GLB asset directly from already-loaded local data (drag-and-drop, OPFS, a `fetch` body, etc.).
- *
- * GLB-vs-glTF is determined from the data's magic bytes, not a file extension. `ArrayBuffer`/`Blob` inputs
- * have no base URL, so they must be self-contained: a GLB, or a glTF whose buffers/images use `data:` URIs.
- * A glTF that references external `.bin`/image files by relative path can only be loaded from a URL.
- *
- * @param engine - The engine to upload GPU resources to.
- * @param data - The raw `ArrayBuffer` or `Blob` of a self-contained glTF/GLB asset.
- */
-export function loadGltf(engine: EngineContext, data: ArrayBuffer | Blob): Promise<AssetContainer>;
 export async function loadGltf(engine: EngineContext, source: string | ArrayBuffer | Blob): Promise<AssetContainer> {
     const { json, binChunk, baseUrl } = await fetchGltfAsset(source);
 

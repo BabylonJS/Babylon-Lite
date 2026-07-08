@@ -1,5 +1,13 @@
 import type { Vec3 } from "./types.js";
 
+/** Copy `src` into `dst` (in place). */
+export function copyVec3(dst: Vec3, src: Vec3): Vec3 {
+    dst.x = src.x;
+    dst.y = src.y;
+    dst.z = src.z;
+    return dst;
+}
+
 /** Add two vectors into `out`. */
 export function addVec3ToRef(a: Vec3, b: Vec3, out: Vec3): Vec3 {
     out.x = a.x + b.x;

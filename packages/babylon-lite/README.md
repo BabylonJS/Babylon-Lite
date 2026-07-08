@@ -70,7 +70,7 @@ supported runtimes, and limitations.
 the published package. Their license texts — together with those of the
 upstream native components embedded in their WebAssembly (Recast &amp; Detour and
 the Emscripten runtime) — are reproduced in
-[THIRD_PARTY_NOTICES.txt](./THIRD_PARTY_NOTICES.txt).
+[NOTICE.txt](./NOTICE.txt).
 
 Development-only tooling (build, test, and lint frameworks) is **not** part of
 the published package and therefore carries no redistribution obligations.

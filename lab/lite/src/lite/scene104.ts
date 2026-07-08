@@ -42,8 +42,8 @@ import {
 import type { AssetContainer, FreeCamera, Mesh, PbrMaterialProps, PhysicsWorld, SceneNode } from "babylon-lite";
 
 const PHYSICS_FPS = 60;
-const LEVEL_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/CharController/levelTest.glb";
-const LIGHTMAP_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/CharController/lightmap.jpg";
+const LEVEL_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/CharController/levelTest.glb";
+const LIGHTMAP_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/CharController/lightmap.jpg";
 const CAPTURE_FRAMES = 55;
 const CHARACTER_START = { x: 3, y: 0.3, z: -8 };
 const CAPSULE_HEIGHT = 1.8;

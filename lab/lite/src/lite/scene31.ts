@@ -14,7 +14,7 @@ async function main(): Promise<void> {
 
     addToScene(
         scene,
-        await loadGltf(engine, "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/EmissiveStrengthTest/glTF-Binary/EmissiveStrengthTest.glb")
+        await loadGltf(engine, "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/EmissiveStrengthTest/glTF-Binary/EmissiveStrengthTest.glb")
     );
 
     await loadEnvironment(scene, "https://assets.babylonjs.com/environments/environmentSpecular.env", {
