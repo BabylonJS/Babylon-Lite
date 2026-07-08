@@ -135,6 +135,21 @@ describe("static-sound", () => {
         disposeSound(sound);
     });
 
+    it("overrides pitch and playbackRate per play, falling back to the sound defaults", async () => {
+        const sound = await createSoundAsync(engine, new ArrayBuffer(8), { pitch: 600, playbackRate: 1.5 });
+        // Explicit per-play values win over the sound-level defaults.
+        playSound(sound, { pitch: -200, playbackRate: 0.8 });
+        const overridden = newest(sound)._sourceNode as unknown as MockAudioBufferSourceNode;
+        expect(overridden.detune.value).toBe(-200);
+        expect(overridden.playbackRate.value).toBe(0.8);
+        // A play with no overrides falls back to the sound-level defaults.
+        playSound(sound);
+        const defaulted = newest(sound)._sourceNode as unknown as MockAudioBufferSourceNode;
+        expect(defaulted.detune.value).toBe(600);
+        expect(defaulted.playbackRate.value).toBe(1.5);
+        disposeSound(sound);
+    });
+
     it("is removed from the engine on dispose", async () => {
         const sound = await createSoundAsync(engine, new ArrayBuffer(8));
         expect(engine._sounds.has(sound)).toBe(true);
