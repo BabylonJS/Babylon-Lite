@@ -11,6 +11,7 @@
  */
 import { build, type Plugin, type Rollup } from "vite";
 import { execFileSync } from "child_process";
+import { createHash } from "crypto";
 import { resolve, dirname, join, extname } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
@@ -1192,6 +1193,38 @@ export async function buildBundleScenes(): Promise<void> {
  * bundle-sceneN.html, and measure only the /bundle/*.js bytes that are
  * actually fetched at runtime.
  */
+/** How many times to attempt measuring a single Lite scene before giving up. */
+const LITE_MEASURE_ATTEMPTS = 3;
+
+/**
+ * Measure a Lite scene, retrying on failure. A Lite scene that never reaches its
+ * `dataset.ready` signal (e.g. a transient failure or rate-limit fetching a large
+ * multi-file remote asset such as Sponza's ~70 files in CI) would otherwise be
+ * silently under-counted: the render pipeline's lazily-imported chunks only load
+ * once the scene renders. `measurePage(..., requireReady=true)` rejects such a
+ * measurement rather than recording a truncated size, so we retry a few times to
+ * absorb transient network flakiness before failing the build loudly.
+ */
+async function measureLiteSceneWithRetry(
+    browser: any,
+    port: number,
+    scene: string
+): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= LITE_MEASURE_ATTEMPTS; attempt++) {
+        try {
+            return await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/", true);
+        } catch (err) {
+            lastError = err;
+            console.warn(`  ${scene}: measurement attempt ${attempt}/${LITE_MEASURE_ATTEMPTS} failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+    throw new Error(
+        `Failed to measure ${scene} after ${LITE_MEASURE_ATTEMPTS} attempts. This usually indicates a transient failure ` +
+            `(e.g. rate-limit) fetching a remote asset during measurement, which would truncate the bundle. Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`
+    );
+}
+
 async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readonly string[], pruneManifest = true): Promise<BundleManifest> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
@@ -1214,10 +1247,10 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
         const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
         console.log(`Browser launched in ${elapsed(tBrowser)}`);
 
-        // Measure Lite scenes (write after each)
+        // Measure Lite scenes (write after each), retrying transient failures.
         for (const scene of liteScenes) {
             const tPage = performance.now();
-            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/");
+            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measureLiteSceneWithRetry(browser, port, scene);
             manifest[scene] = { ...manifest[scene], rawKB, gzipKB, ignoredRawKB, runtimeChunks: chunks };
             flushScene(scene);
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
@@ -1267,12 +1300,136 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
     return manifest;
 }
 
+/**
+ * On-disk cache for remote scene assets fetched during measurement.
+ *
+ * Bundle-size measurement loads each scene in a headless browser and counts the
+ * JS chunks it fetches. Many scenes pull models/textures/environments from remote
+ * hosts (assets.babylonjs.com, playground.babylonjs.com, cdn.jsdelivr.net, …).
+ * A scene's render-pipeline chunks are dynamic imports that load only once the
+ * scene renders, so any remote asset that fails to fetch would prevent the scene
+ * from rendering and truncate its measured bundle. With ~230 remote requests
+ * across ~10 hosts per run, transient failures/rate-limits are near-certain over
+ * time and make measurement non-deterministic.
+ *
+ * We intercept every non-localhost request in the measurement browser and serve
+ * it from this cache: on a miss we fetch from the origin with PER-REQUEST retry
+ * (far more robust than reloading the whole scene) and persist the bytes; on a
+ * hit we serve from disk with no network at all. This makes measurement
+ * deterministic and lets CI warm the cache once (via BUNDLE_ASSET_CACHE_DIR).
+ * If an asset is genuinely unfetchable after retries the request is aborted, the
+ * scene fails to become ready, and the caller fails loudly — bundle size is never
+ * recorded from a truncated load.
+ */
+const ASSET_CACHE_DIR = process.env.BUNDLE_ASSET_CACHE_DIR ? resolve(process.env.BUNDLE_ASSET_CACHE_DIR) : resolve(ROOT, ".bundle-asset-cache");
+const ASSET_FETCH_ATTEMPTS = 4;
+
+interface CachedAsset {
+    status: number;
+    contentType: string;
+    body: Buffer;
+}
+
+// De-dupe concurrent/repeat requests for the same URL within a single run so an
+// asset shared across scenes is fetched at most once. Cleared on failure so a
+// later scene can retry.
+const assetMemCache = new Map<string, Promise<CachedAsset>>();
+
+function assetCacheKey(url: string): string {
+    return createHash("sha256").update(url).digest("hex");
+}
+
+async function fetchAssetWithRetry(url: string): Promise<CachedAsset> {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= ASSET_FETCH_ATTEMPTS; attempt++) {
+        try {
+            const res = await fetch(url, { redirect: "follow" });
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status} ${res.statusText}`);
+            }
+            const body = Buffer.from(await res.arrayBuffer());
+            return { status: res.status, contentType: res.headers.get("content-type") ?? "application/octet-stream", body };
+        } catch (err) {
+            lastErr = err;
+            if (attempt < ASSET_FETCH_ATTEMPTS) {
+                await new Promise((r) => setTimeout(r, 250 * 2 ** (attempt - 1)));
+            }
+        }
+    }
+    throw new Error(`asset fetch failed after ${ASSET_FETCH_ATTEMPTS} attempts: ${url} — ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
+}
+
+async function getCachedAsset(url: string): Promise<CachedAsset> {
+    const inflight = assetMemCache.get(url);
+    if (inflight) {
+        return inflight;
+    }
+    const load = (async (): Promise<CachedAsset> => {
+        const key = assetCacheKey(url);
+        const bodyPath = resolve(ASSET_CACHE_DIR, key);
+        const metaPath = resolve(ASSET_CACHE_DIR, `${key}.json`);
+        if (!process.env.BUNDLE_ASSET_CACHE_DISABLE && existsSync(bodyPath) && existsSync(metaPath)) {
+            const meta = JSON.parse(readFileSync(metaPath, "utf-8")) as { status: number; contentType: string };
+            return { status: meta.status, contentType: meta.contentType, body: readFileSync(bodyPath) };
+        }
+        const asset = await fetchAssetWithRetry(url);
+        console.log(`    [asset-cache miss] fetched ${url}`);
+        mkdirSync(ASSET_CACHE_DIR, { recursive: true });
+        // Atomic write (tmp + rename) so a crash mid-write can't leave a partial body.
+        const tmpBody = `${bodyPath}.tmp${process.pid}`;
+        writeFileSync(tmpBody, asset.body);
+        renameSync(tmpBody, bodyPath);
+        writeFileSync(metaPath, JSON.stringify({ url, status: asset.status, contentType: asset.contentType }));
+        return asset;
+    })();
+    assetMemCache.set(url, load);
+    load.catch(() => assetMemCache.delete(url));
+    return load;
+}
+
+/**
+ * Route every request the measurement page makes: localhost (the bundle server)
+ * passes through untouched so JS chunks are measured normally; every remote asset
+ * is served from {@link getCachedAsset}. Aborts on unfetchable assets so the scene
+ * fails loudly rather than measuring a truncated bundle.
+ */
+async function installAssetCacheRoute(page: any, port: number): Promise<void> {
+    const localBase = `http://localhost:${port}`;
+    await page.route("**/*", async (route: any) => {
+        const url = route.request().url();
+        if (url.startsWith(localBase) || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+            await route.continue().catch(() => {});
+            return;
+        }
+        try {
+            const asset = await getCachedAsset(url);
+            await route.fulfill({
+                status: asset.status,
+                headers: {
+                    "content-type": asset.contentType,
+                    // Faithfully permissive CORS: the real hosts already allow these cross-origin
+                    // asset fetches (that's why scenes load today), so echo an allow-all header
+                    // rather than the origin's specific one.
+                    "access-control-allow-origin": "*",
+                    "cache-control": "public, max-age=31536000",
+                },
+                body: asset.body,
+            });
+        } catch {
+            // Unfetchable after retries — abort so the scene fails to render and the
+            // caller's requireReady guard turns it into a loud, non-silent failure.
+            await route.abort().catch(() => {});
+        }
+    });
+}
+
 export async function measurePage(
     browser: any,
     port: number,
     scene: string,
     htmlFile: string,
-    bundlePath: string
+    bundlePath: string,
+    requireReady = false
 ): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
     const page = await browser.newPage();
     const jsPayloads: RuntimeJsPayload[] = [];
@@ -1296,11 +1453,39 @@ export async function measurePage(
         }
     });
 
+    await installAssetCacheRoute(page, port);
     await page.goto(`http://localhost:${port}/${htmlFile}`);
+    // Resolve as soon as the scene finishes (dataset.ready) OR reports a fatal
+    // error (dataset.error), so a fast-failing scene doesn't burn the full timeout.
+    let notReadyReason: string | undefined;
     try {
-        await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 50_000 });
+        await page.waitForFunction(
+            () => {
+                const c = document.querySelector("canvas");
+                return c?.dataset.ready === "true" || c?.dataset.error != null;
+            },
+            { timeout: 50_000 }
+        );
+        notReadyReason = await page.evaluate(() => {
+            const c = document.querySelector("canvas");
+            if (c?.dataset.ready === "true") return undefined;
+            return c?.dataset.error ?? "canvas reported neither ready nor error";
+        });
     } catch {
-        // BJS pages may not reach ready state without GPU — just measure fetched JS
+        // waitForFunction timed out: the scene set neither ready nor error.
+        notReadyReason = "timed out after 50s waiting for canvas ready/error signal";
+    }
+
+    // For Lite scenes (requireReady), a scene that never rendered would under-count
+    // its bundle: the render pipeline's lazily-imported chunks (pbr-renderable,
+    // ibl-fragment, generate-mipmaps, …) only load once the scene renders, so a
+    // failed remote-asset fetch would silently produce a truncated size. Reject the
+    // measurement so the caller can retry / fail loudly instead of recording a bogus
+    // decrease. BJS pages (requireReady=false) may legitimately never reach ready
+    // without a real GPU, so they keep the lenient "measure whatever loaded" behavior.
+    if (requireReady && notReadyReason !== undefined) {
+        await page.close();
+        throw new Error(`measurePage: scene "${scene}" did not become ready (${notReadyReason}); refusing to record a truncated bundle.`);
     }
 
     await Promise.all(responseReads);

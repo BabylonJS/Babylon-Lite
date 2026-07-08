@@ -12,7 +12,7 @@ import { MaterialPluginBase } from "@babylonjs/core/Materials/materialPluginBase
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
 
-const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/Halo_Believe.splat";
+const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_Believe.splat";
 
 class SomeWorkingGsPlugin extends MaterialPluginBase {
     constructor(material: GaussianSplattingMaterial) {

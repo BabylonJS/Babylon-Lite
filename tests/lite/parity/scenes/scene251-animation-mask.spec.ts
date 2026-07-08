@@ -8,7 +8,7 @@
  * so its goToFrame poses only the retained bones), so both engines render the
  * identical masked pose, frozen at a deterministic frame.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

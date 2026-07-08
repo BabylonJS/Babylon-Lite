@@ -12,7 +12,7 @@
  * - Full image MAD ≤ maxMad
  * - Rotated cube region MAD ≤ maxRegionMad
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 

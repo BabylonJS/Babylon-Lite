@@ -158,3 +158,71 @@ export function updateTexture2DFromPixels(engine: EngineContext, tex: Texture2D,
         { width, height }
     );
 }
+
+/** Sampler / format overrides for `createTexture3DFromPixels()`. */
+export interface PixelsTexture3DOptions {
+    /** Address mode U/V/W. Default 'clamp-to-edge' (the right choice for a colour LUT — the cube edges
+     *  must not wrap). */
+    addressMode?: GPUAddressMode;
+    /** Min/mag filter. Default 'linear' so a colour-grading LUT interpolates trilinearly in one sample. */
+    filter?: GPUFilterMode;
+    /** Use sRGB format (rgba8unorm-srgb). Leave false for a linear/display LUT. Default false. */
+    srgb?: boolean;
+}
+
+/** A `Texture2D` handle whose underlying GPU texture is `dimension:"3d"`, plus its depth. Bind it to a
+ *  fullscreen effect with `viewDimension:"3d"` and sample it in WGSL as `texture_3d<f32>`. */
+export type Texture3D = Texture2D & { depth: number };
+
+/**
+ * Create a **3D** texture from a tightly-packed RGBA8 byte buffer — the volumetric analog of
+ * `createTexture2DFromPixels`. The primary use is a colour-grading LUT (a `.cube`/HALD colour cube):
+ * upload the N×N×N RGBA volume once and sample it trilinearly with a single `textureSample`.
+ *
+ * The default sampler is linear with clamp-to-edge on all three axes — exactly what a LUT wants (linear
+ * = trilinear interpolation between grid points; clamp = no wrap at the cube faces). The returned handle
+ * is a `Texture2D` (so it drops straight into `setEffectTexture`) with an extra `depth` field; its `view`
+ * is created with `dimension:"3d"`.
+ *
+ * @param engine - Engine context.
+ * @param data - `width * height * depth * 4` bytes, RGBA8, ordered x fastest, then y, then z (slice-major).
+ * @param width - Cube size along R (\>= 1).
+ * @param height - Cube size along G (\>= 1).
+ * @param depth - Cube size along B (\>= 1).
+ * @param options - Sampler / format overrides.
+ */
+export function createTexture3DFromPixels(engine: EngineContext, data: Uint8Array, width: number, height: number, depth: number, options: PixelsTexture3DOptions = {}): Texture3D {
+    if (width < 1 || height < 1 || depth < 1) {
+        throw new Error(`createTexture3DFromPixels: width/height/depth must be >= 1 (got ${width}x${height}x${depth})`);
+    }
+    const expected = width * height * depth * 4;
+    if (data.length < expected) {
+        throw new Error(`createTexture3DFromPixels: data too short — need ${expected} bytes for ${width}x${height}x${depth} RGBA, got ${data.length}`);
+    }
+
+    const device = engine._device;
+    const format: GPUTextureFormat = options.srgb ? "rgba8unorm-srgb" : "rgba8unorm";
+
+    const texture = device.createTexture({
+        size: { width, height, depthOrArrayLayers: depth },
+        dimension: "3d",
+        format,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
+    });
+
+    device.queue.writeTexture({ texture }, data as Uint8Array<ArrayBuffer>, { bytesPerRow: width * 4, rowsPerImage: height }, { width, height, depthOrArrayLayers: depth });
+
+    const address = options.addressMode ?? "clamp-to-edge";
+    const filter = options.filter ?? "linear";
+    const sampler = getOrCreateSampler(engine, {
+        addressModeU: address,
+        addressModeV: address,
+        addressModeW: address,
+        minFilter: filter,
+        magFilter: filter,
+    });
+
+    const tex: Texture3D = { texture, view: texture.createView({ dimension: "3d" }), sampler, width, height, depth };
+    acquireTexture(tex);
+    return tex;
+}
