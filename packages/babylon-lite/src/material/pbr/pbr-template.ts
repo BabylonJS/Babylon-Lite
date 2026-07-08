@@ -85,6 +85,10 @@ export interface PbrTemplateConfig {
     /** Fog blend WGSL, emitted just before the tonemap block; "" for non-fog scenes. */
     /** @internal */
     readonly _fogBlock?: string;
+    /** Scene has a clip plane (scene.clipPlane != null). Gates the clip-discard line into the
+     *  fragment main. Compile-time gated so non-clip scenes emit shaders byte-identical to before. */
+    /** @internal */
+    readonly _hasClipPlane?: boolean;
     /** ACES WGSL: tonemap helper functions (dynamically imported). Empty string = standard exponential tonemap. */
     /** @internal */
     readonly _acesHelpers?: string;
@@ -167,6 +171,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _hasTonemap = false,
         _fogHelper = "",
         _fogBlock = "",
+        _hasClipPlane = false,
         _acesHelpers = "",
         _acesTonemapCall = "",
         _hasAlphaBlend = false,
@@ -445,14 +450,15 @@ color=1.0-exp2(-1.590579*color);`
     const fogHelper = _fogHelper;
     const fogBlock = _fogBlock;
 
-    // Clip plane (opt-in via scene.clipPlane / setClipPlane). Emitted unconditionally at the very top
-    // of the fragment main — runtime-gated by the scene UBO, exactly like Standard's clip and both
-    // families' precedent for cheap always-on scene state. When no clip plane is set the UBO's
-    // clipPlane slot is (0,0,0,0), so `dot(vec4(worldPos,1),0) = 0` and `0 > 0` is false → no discard.
-    // Inlining (vs. a dynamic-imported string) keeps the shared pbr-renderable chunk smaller: the
-    // ~55-byte WGSL literal costs far less than the import/flag/threading machinery it would replace.
+    // Clip plane (opt-in via scene.clipPlane / setClipPlane). Compile-time gated by _hasClipPlane
+    // (the PBR_HAS_CLIP_PLANE scene-feature bit), so a scene with no clip plane emits a fragment
+    // shader byte-identical to before this feature — an always-on runtime-gated discard perturbs
+    // some drivers' shader codegen enough to diverge from the BJS parity reference. Only scenes
+    // that actually call setClipPlane carry the ~55-byte WGSL literal (inlined, so no dynamic-import
+    // or per-feature threading machinery lands in the shared pbr-renderable chunk). When enabled the
+    // discard is runtime-gated by the UBO clipPlane slot: dot(vec4(worldPos,1), plane) > 0 → clip.
     // Placed before any texture work so it clips on every fragment path (color, depth-prepass, ESM shadow).
-    const clipBlock = `if(dot(vec4<f32>(input.worldPos,1.0),scene.clipPlane)>0.0){discard;}`;
+    const clipBlock = _hasClipPlane ? `if(dot(vec4(input.worldPos,1.),scene.clipPlane)>0.){discard;}` : "";
 
     // Alpha output
     const alphaBlock = _noColorOutput

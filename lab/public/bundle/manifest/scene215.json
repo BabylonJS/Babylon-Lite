@@ -4,12 +4,12 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene215-material-view-Dua1bl7W.js",
-    "scene215-multilight-wgsl-DjVmEAHV.js",
+    "scene215-multilight-wgsl-SRROL6UG.js",
     "scene215-no-color-view-DS70AbGo.js",
-    "scene215-pbr-renderable-DoNdWbB1.js",
-    "scene215-pbr-shadow-fragment-CoRW6XHj.js",
+    "scene215-pbr-renderable-C4hdpXgN.js",
+    "scene215-pbr-shadow-fragment-DGl6YcUJ.js",
     "scene215-shadow-task-CPnE-PjD.js",
-    "scene215-singlelight-directional-wgsl-DzV54v_g.js",
+    "scene215-singlelight-directional-wgsl-BpRi11tU.js",
     "scene215.js"
   ]
 }

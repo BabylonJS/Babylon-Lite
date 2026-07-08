@@ -15,6 +15,11 @@ export const PBR_HAS_METALLIC_REFLECTANCE_MAP = 1 << 10;
 export const PBR_HAS_REFLECTANCE_MAP = 1 << 11;
 export const PBR_HAS_USE_ALPHA_ONLY_MR = 1 << 12;
 export const PBR_HAS_OCCLUSION = 1 << 15;
+/** Scene has a clip plane (scene.clipPlane != null / setClipPlane). A scene-feature bit
+ *  (threaded via sceneFeatures) that gates the clip-discard line into the fragment shader.
+ *  Compile-time gated so non-clip PBR scenes stay byte-identical to before — a runtime-gated
+ *  always-on discard perturbs some drivers' codegen and diverges from the BJS reference. */
+export const PBR_HAS_CLIP_PLANE = 1 << 16;
 export const PBR_HAS_SPECULAR_AA = 1 << 17;
 export const PBR_HAS_CLEARCOAT = 1 << 20;
 export const PBR_HAS_EMISSIVE_COLOR = 1 << 21;

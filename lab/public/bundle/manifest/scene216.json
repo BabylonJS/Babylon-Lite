@@ -1,11 +1,11 @@
 {
-  "rawKB": 53.7,
+  "rawKB": 53.8,
   "gzipKB": 22.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene216-pbr-fog-wgsl-BuLKZvgv.js",
-    "scene216-pbr-renderable-Doiilobl.js",
-    "scene216-singlelight-hemispheric-wgsl-BXqEjdZQ.js",
+    "scene216-pbr-renderable-CISA4NJC.js",
+    "scene216-singlelight-hemispheric-wgsl-D6t-GAaw.js",
     "scene216.js"
   ]
 }
