@@ -5,7 +5,7 @@
  * over a ground plane.  No scripted interaction; we just wait for the
  * scene to settle and compare the captured frame against the BJS reference.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as fs from "fs";
 import * as path from "path";
 import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";

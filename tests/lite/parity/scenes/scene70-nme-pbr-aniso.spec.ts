@@ -4,7 +4,7 @@
  * Same NME JSON parsed by both BJS and Lite. Uses non-zero AnisotropyBlock
  * intensity on a metallic sphere so the stretched highlight is visible.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

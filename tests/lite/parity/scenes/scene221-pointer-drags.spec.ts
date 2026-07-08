@@ -7,7 +7,7 @@
  *    derived fields are correctly populated for both engines' pickers).
  * 3. Compares the post-drag rendered frame against the captured golden.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as fs from "fs";
 import * as path from "path";
 import type { Page } from "@playwright/test";

@@ -20,7 +20,7 @@
  * run; the rendered frame is compared against a committed VISUAL golden (`babylon-ref-golden.png`)
  * captured at the pre-contact frame.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
