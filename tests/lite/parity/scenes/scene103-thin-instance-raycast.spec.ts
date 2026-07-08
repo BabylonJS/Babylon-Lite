@@ -10,7 +10,7 @@
  * indices remain a live DATA comparison: the BJS reference page is launched each run and every ray's
  * `hasHit` + hit instance index is asserted IDENTICAL to Lite's.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Browser, Page } from "@playwright/test";
 import * as path from "path";
 import { captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";

@@ -123,12 +123,28 @@ export class PositionGizmo extends GizmoBase {
     /** @internal */
     public readonly _lite: LitePositionGizmo;
     private _attached: AbstractMesh | null = null;
+    private _xGizmo: AxisDragGizmo | null = null;
+    private _yGizmo: AxisDragGizmo | null = null;
+    private _zGizmo: AxisDragGizmo | null = null;
 
     public constructor(layer: UtilityLayerRenderer) {
         super(layer);
         this._lite = createPositionGizmo(layer._engine, layer._lite);
         // Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` defaults to true.
         setPositionGizmoLocalCoordinates(this._lite, true);
+    }
+
+    /** Babylon.js `PositionGizmo.xGizmo/yGizmo/zGizmo` — the per-axis drag sub-gizmos.
+     *  Exposed so callers can toggle interactivity per axis (e.g. `xGizmo.isEnabled = false`
+     *  for a display-only gizmo). Wrappers are cached so identity is stable. */
+    public get xGizmo(): AxisDragGizmo {
+        return (this._xGizmo ??= AxisDragGizmo._fromLite(this._lite.xGizmo, this._layer));
+    }
+    public get yGizmo(): AxisDragGizmo {
+        return (this._yGizmo ??= AxisDragGizmo._fromLite(this._lite.yGizmo, this._layer));
+    }
+    public get zGizmo(): AxisDragGizmo {
+        return (this._zGizmo ??= AxisDragGizmo._fromLite(this._lite.zGizmo, this._layer));
     }
 
     /** Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` — orient widgets to the node's local axes. */
@@ -160,12 +176,26 @@ export class RotationGizmo extends GizmoBase {
     /** @internal */
     public readonly _lite: LiteRotationGizmo;
     private _attached: AbstractMesh | null = null;
+    private _xGizmo: PlaneRotationGizmo | null = null;
+    private _yGizmo: PlaneRotationGizmo | null = null;
+    private _zGizmo: PlaneRotationGizmo | null = null;
 
     public constructor(layer: UtilityLayerRenderer) {
         super(layer);
         this._lite = createRotationGizmo(layer._engine, layer._lite);
         // Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` defaults to true.
         setRotationGizmoLocalCoordinates(this._lite, true);
+    }
+
+    /** Babylon.js `RotationGizmo.xGizmo/yGizmo/zGizmo` — the per-plane rotation sub-gizmos. */
+    public get xGizmo(): PlaneRotationGizmo {
+        return (this._xGizmo ??= PlaneRotationGizmo._fromLite(this._lite.xGizmo, this._layer));
+    }
+    public get yGizmo(): PlaneRotationGizmo {
+        return (this._yGizmo ??= PlaneRotationGizmo._fromLite(this._lite.yGizmo, this._layer));
+    }
+    public get zGizmo(): PlaneRotationGizmo {
+        return (this._zGizmo ??= PlaneRotationGizmo._fromLite(this._lite.zGizmo, this._layer));
     }
 
     /** Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` — orient widgets to the node's local axes. */
@@ -197,12 +227,26 @@ export class ScaleGizmo extends GizmoBase {
     /** @internal */
     public readonly _lite: LiteScaleGizmo;
     private _attached: AbstractMesh | null = null;
+    private _xGizmo: AxisScaleGizmo | null = null;
+    private _yGizmo: AxisScaleGizmo | null = null;
+    private _zGizmo: AxisScaleGizmo | null = null;
 
     public constructor(layer: UtilityLayerRenderer) {
         super(layer);
         this._lite = createScaleGizmo(layer._engine, layer._lite);
         // Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` defaults to true.
         setScaleGizmoLocalCoordinates(this._lite, true);
+    }
+
+    /** Babylon.js `ScaleGizmo.xGizmo/yGizmo/zGizmo` — the per-axis scale sub-gizmos. */
+    public get xGizmo(): AxisScaleGizmo {
+        return (this._xGizmo ??= AxisScaleGizmo._fromLite(this._lite.xGizmo, this._layer));
+    }
+    public get yGizmo(): AxisScaleGizmo {
+        return (this._yGizmo ??= AxisScaleGizmo._fromLite(this._lite.yGizmo, this._layer));
+    }
+    public get zGizmo(): AxisScaleGizmo {
+        return (this._zGizmo ??= AxisScaleGizmo._fromLite(this._lite.zGizmo, this._layer));
     }
 
     /** Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` — orient widgets to the node's local axes. */
@@ -356,6 +400,20 @@ function nodeLite(value: Node | null): SceneNode | null {
     return n._lite ?? n._node ?? null;
 }
 
+/**
+ * @internal Build a single-axis/plane gizmo wrapper around a Lite sub-gizmo that
+ * a composite already created, without re-running the public constructor (which
+ * would build a second Lite gizmo). Used by the composite `xGizmo`/`yGizmo`/`zGizmo`
+ * accessors so `positionGizmo.xGizmo.isEnabled = false` reaches the real sub-gizmo.
+ */
+function wrapSubGizmo<L, T extends { _lite: L }>(ctor: { prototype: T }, lite: L, layer: UtilityLayerRenderer): T {
+    const g = Object.create(ctor.prototype) as { _lite: L; _layer: UtilityLayerRenderer; _attached: Node | null };
+    g._lite = lite;
+    g._layer = layer;
+    g._attached = null;
+    return g as unknown as T;
+}
+
 /** Babylon.js `AxisDragGizmo` — drags the attached node along a single world axis. */
 export class AxisDragGizmo extends GizmoBase {
     /** @internal */
@@ -368,6 +426,21 @@ export class AxisDragGizmo extends GizmoBase {
             dragAxis: { x: dragAxis.x, y: dragAxis.y, z: dragAxis.z },
             color: [color.r, color.g, color.b],
         });
+    }
+
+    /** @internal Wrap an existing Lite axis-drag gizmo (a composite's sub-gizmo). */
+    public static _fromLite(lite: LiteAxisDragGizmo, layer: UtilityLayerRenderer): AxisDragGizmo {
+        return wrapSubGizmo(AxisDragGizmo, lite, layer);
+    }
+
+    /** Babylon.js `IAxisDragGizmo.isEnabled` — when false the gizmo is non-interactive
+     *  (no drag, and no GPU hover picking), while its meshes stay visible and keep
+     *  following the attached node. Toggles the underlying Lite pointer-drag. */
+    public get isEnabled(): boolean {
+        return this._lite.drag.enabled;
+    }
+    public set isEnabled(value: boolean) {
+        this._lite.drag.enabled = value;
     }
 
     public get attachedMesh(): AbstractMesh | null {
@@ -404,6 +477,19 @@ export class PlaneRotationGizmo extends GizmoBase {
         });
     }
 
+    /** @internal Wrap an existing Lite plane-rotation gizmo (a composite's sub-gizmo). */
+    public static _fromLite(lite: LitePlaneRotationGizmo, layer: UtilityLayerRenderer): PlaneRotationGizmo {
+        return wrapSubGizmo(PlaneRotationGizmo, lite, layer);
+    }
+
+    /** Babylon.js `IPlaneRotationGizmo.isEnabled` — toggles interactivity (drag + hover pick). */
+    public get isEnabled(): boolean {
+        return this._lite.drag.enabled;
+    }
+    public set isEnabled(value: boolean) {
+        this._lite.drag.enabled = value;
+    }
+
     public get attachedMesh(): AbstractMesh | null {
         return this._attached as AbstractMesh | null;
     }
@@ -438,6 +524,19 @@ export class PlaneDragGizmo extends GizmoBase {
         });
     }
 
+    /** @internal Wrap an existing Lite plane-drag gizmo (a composite's sub-gizmo). */
+    public static _fromLite(lite: LitePlaneDragGizmo, layer: UtilityLayerRenderer): PlaneDragGizmo {
+        return wrapSubGizmo(PlaneDragGizmo, lite, layer);
+    }
+
+    /** Babylon.js `IPlaneDragGizmo.isEnabled` — toggles interactivity (drag + hover pick). */
+    public get isEnabled(): boolean {
+        return this._lite.drag.enabled;
+    }
+    public set isEnabled(value: boolean) {
+        this._lite.drag.enabled = value;
+    }
+
     public get attachedMesh(): AbstractMesh | null {
         return this._attached as AbstractMesh | null;
     }
@@ -470,6 +569,19 @@ export class AxisScaleGizmo extends GizmoBase {
             dragAxis: { x: dragAxis.x, y: dragAxis.y, z: dragAxis.z },
             color: [color.r, color.g, color.b],
         });
+    }
+
+    /** @internal Wrap an existing Lite axis-scale gizmo (a composite's sub-gizmo). */
+    public static _fromLite(lite: LiteAxisScaleGizmo, layer: UtilityLayerRenderer): AxisScaleGizmo {
+        return wrapSubGizmo(AxisScaleGizmo, lite, layer);
+    }
+
+    /** Babylon.js `IAxisScaleGizmo.isEnabled` — toggles interactivity (drag + hover pick). */
+    public get isEnabled(): boolean {
+        return this._lite.drag.enabled;
+    }
+    public set isEnabled(value: boolean) {
+        this._lite.drag.enabled = value;
     }
 
     public get attachedMesh(): AbstractMesh | null {

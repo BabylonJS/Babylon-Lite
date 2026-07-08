@@ -154,6 +154,9 @@ export interface SkeletonData {
     readonly weights1Buffer: GPUBuffer | null;
     readonly joints1: Uint16Array | Uint8Array | null;
     readonly weights1: Float32Array | null;
+    /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
+     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
+    _refCount?: number;
 }
 
 /** VAT (Vertex Animation Texture) GPU data — BAKED skinning. Attached to `mesh.vat` by vat/vat-baker.ts.
@@ -192,4 +195,7 @@ export interface MorphTargetData {
     readonly weightsBuffer: GPUBuffer;
     readonly targets: readonly { positions: Float32Array; normals: Float32Array | null }[];
     readonly weights: Float32Array<ArrayBuffer>;
+    /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
+     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
+    _refCount?: number;
 }

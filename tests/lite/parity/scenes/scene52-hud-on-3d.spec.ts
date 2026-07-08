@@ -5,7 +5,7 @@
  * reference scene that renders the same StandardMaterial sphere and the same
  * pixel-space sprite HUD through BJS SpriteRenderer.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

@@ -5,7 +5,7 @@
  * shifts every vertex of a sphere upward along +Y at weight=1.0. Rendered
  * with flat colour so parity depends only on the morphed silhouette.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 

@@ -7,7 +7,7 @@
  * origin behind a single flag). Both stacks should render the (~5e6, *, ~5e6)
  * world crisply.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

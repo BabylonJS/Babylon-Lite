@@ -9,7 +9,7 @@
  * the active camera world position into every anchor and re-uploads when the
  * camera moves — crisp, jitter-free cutout cards at large coordinates.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

@@ -5,6 +5,7 @@
 
 import type { Mesh } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
+import { retain } from "../resource/ref-count.js";
 import type { SceneNode } from "./scene-node.js";
 import { createSceneNode, createSceneNodeFromMatrix } from "./scene-node.js";
 
@@ -19,7 +20,8 @@ export function createTransformNode(name: string, px = 0, py = 0, pz = 0, qx = 0
     return createSceneNode(name, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
 }
 
-/** Deep-clone a SceneNode tree. Meshes are shallow-cloned (shared GPU buffers).
+/** Deep-clone a SceneNode tree. Meshes are shallow-cloned (shared GPU buffers — see
+ *  `cloneMeshNode` and `resource/ref-count.ts` for how disposal safely handles the sharing).
  *  Lights, cameras, and other non-mesh/non-TN children are shallow-cloned. */
 export function cloneTransformNode(src: SceneNode): SceneNode {
     if ("_gpu" in src) {
@@ -61,8 +63,20 @@ function cloneMeshNode(mesh: Mesh): Mesh {
         ...mesh,
         name: mesh.name + "_clone",
         children: [],
-        _gpu: { ...mesh._gpu },
+        // Share the SAME `_gpu` object (not a copy) — the wrapper's identity is the ref-count
+        // key in resource/ref-count.ts, so both meshes must point at the exact same instance
+        // for `disposeMeshGpu` to know they're co-owners of the underlying GPUBuffers.
+        _gpu: mesh._gpu,
     } as unknown as Mesh;
+    // `skeleton`/`morphTargets`/`thinInstances` are already shared by reference via the `...mesh`
+    // spread above. Register the extra ownership for all shared GPU resources so `disposeMeshGpu`
+    // only destroys their buffers once the LAST owning mesh (source or clone) releases them —
+    // otherwise disposing one mesh would free buffers the other still renders with.
+    for (const r of [mesh._gpu, mesh.skeleton, mesh.morphTargets, mesh.thinInstances]) {
+        if (r) {
+            retain(r);
+        }
+    }
     initMeshTransform(meshClone, mesh.position.x, mesh.position.y, mesh.position.z, 0, 0, 0, mesh.scaling.x, mesh.scaling.y, mesh.scaling.z);
     // Copy the source rotation as a QUATERNION — the Euler round-trip (mesh.rotation.x/y/z) is lossy
     // near gimbal lock and would skew the clone. set() marks the world matrix dirty so it recomputes.

@@ -3,7 +3,7 @@
  *
  * Captures Babylon.js and Babylon Lite after 3 seconds.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";

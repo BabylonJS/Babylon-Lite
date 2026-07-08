@@ -4,7 +4,7 @@
  * Same NME JSON parsed by both BJS and Lite. Adds a glossy ClearCoatBlock
  * on a dark navy base with intensity=1.0, roughness=0.02, IOR=1.5.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

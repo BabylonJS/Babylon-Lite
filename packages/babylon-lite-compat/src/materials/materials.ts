@@ -14,7 +14,7 @@ import type { StandardMaterialProps, PbrMaterialProps, ClearCoatProps, SheenProp
 
 import { Color3 } from "../math/color.js";
 import type { Scene } from "../scene/scene.js";
-import type { BaseTexture, CubeTexture } from "../textures/textures.js";
+import type { BaseTexture, CubeTexture, HDRCubeTexture } from "../textures/textures.js";
 
 type Tuple3 = [number, number, number];
 type Tuple4 = [number, number, number, number];
@@ -562,19 +562,19 @@ export class PBRMaterial extends PushMaterial {
      * environment assigned to a material is routed to the owning scene's
      * environment (the dominant single-IBL case Babylon.js scenes use).
      */
-    public get environmentTexture(): CubeTexture | null {
+    public get environmentTexture(): CubeTexture | HDRCubeTexture | null {
         return this._scene?.environmentTexture ?? null;
     }
-    public set environmentTexture(value: CubeTexture | null) {
+    public set environmentTexture(value: CubeTexture | HDRCubeTexture | null) {
         if (this._scene) {
             this._scene.environmentTexture = value;
         }
     }
 
-    public get reflectionTexture(): CubeTexture | null {
+    public get reflectionTexture(): CubeTexture | HDRCubeTexture | null {
         return this.environmentTexture;
     }
-    public set reflectionTexture(value: CubeTexture | null) {
+    public set reflectionTexture(value: CubeTexture | HDRCubeTexture | null) {
         this.environmentTexture = value;
     }
 
