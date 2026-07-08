@@ -6,7 +6,7 @@
  *
  * Thresholds: MAD ≤ 1.0 (current ~0.63), ≥99% of pixels within 5 bytes.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 

@@ -5,7 +5,7 @@
  * 30 000 splats down on Y, calls updateData(), and compares the render
  * against a Babylon.js reference captured from babylon-ref-scene121.html.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

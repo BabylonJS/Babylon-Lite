@@ -3,7 +3,7 @@
  *
  * Drops small boxes after 2 seconds and captures Babylon.js / Babylon Lite at 5 seconds.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";

@@ -9,7 +9,7 @@
  * Assertions:
  * - Full image MAD ≤ scene-config maxMad
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

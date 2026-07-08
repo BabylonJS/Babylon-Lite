@@ -8,7 +8,7 @@
  * coordinate is carried by the eye-relative `mesh.world` and instance
  * matrices stay local — crisp instanced geometry with no F32 jitter.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
