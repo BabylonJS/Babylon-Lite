@@ -4,7 +4,7 @@
  * Mixed PBR and Standard materials with thin instances and per-instance color.
  * Compares against the golden reference image.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

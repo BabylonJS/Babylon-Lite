@@ -1,7 +1,7 @@
 /**
  * Scene 140 — Scene 66 NME variant with final-alpha discard on shadow casters.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { PNG } from "pngjs";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";

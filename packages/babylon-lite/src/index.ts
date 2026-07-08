@@ -116,6 +116,8 @@ export type { TaaPostProcessTask, TaaPostProcessTaskConfig } from "./post-proces
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
 export { attachControl, setCameraLimits } from "./camera/arc-rotate-controls.js";
 export type { AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-rotate-controls.js";
+export { interpolateArcRotateCamera } from "./camera/arc-rotate-interpolate.js";
+export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "./camera/arc-rotate-interpolate.js";
 export { createFreeCamera } from "./camera/free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
 
@@ -174,6 +176,8 @@ export {
     resizeMeshGeometry,
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
+export { createBoxData } from "./mesh/create-box.js";
+export type { BoxData } from "./mesh/create-box.js";
 export { createSphereData } from "./mesh/create-sphere.js";
 export type { SphereMeshData } from "./mesh/create-sphere.js";
 export { createCylinderData } from "./mesh/create-cylinder.js";
@@ -284,6 +288,8 @@ export { createAnimationController } from "./skeleton/skeleton-updater.js";
 export { enableBoneControl, getBoneByName, setBonePosition, setBoneRotationQuaternion, setBoneScaling, setBoneVisible, clearBoneOverride } from "./skeleton/bone-control.js";
 export type { Skeleton, Bone } from "./skeleton/bone-control.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
+export { runFrameInterpolation } from "./animation/frame-interpolation.js";
+export type { FrameInterpolationStep } from "./animation/frame-interpolation.js";
 export { AnimationGroupMaskMode, createAnimationGroupMask, animationGroupMaskRetainsTarget } from "./animation/animation-group-mask.js";
 export type { AnimationGroupMask } from "./animation/animation-group-mask.js";
 export { setAnimationWeight } from "./animation/animation-weight.js";
@@ -323,6 +329,7 @@ export { crossVec3 } from "./math/cross-vec3.js";
 export { lengthVec3 } from "./math/length-vec3.js";
 export { negateVec3 } from "./math/negate-vec3.js";
 export { lerpVec3 } from "./math/lerp-vec3.js";
+export { expDampFactor, dampScalar, lerpAngleShortest } from "./math/damp.js";
 export {
     addVec3InPlace,
     addVec3ToRef,
@@ -353,7 +360,7 @@ export { quatFromRotationMatrix } from "./math/quat-from-rotation-matrix.js";
 export { quatFromLookDirectionRH } from "./math/quat-from-look-direction-rh.js";
 export { mat4Decompose } from "./math/mat4-decompose.js";
 export type { DecomposedTransform } from "./math/mat4-decompose.js";
-export type { Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
+export type { Vec2, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";
 export type { GltfMetadata, LiteMetadata } from "./metadata.js";
@@ -395,6 +402,8 @@ export type { PixelViewport } from "./camera/viewport.js";
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { disposeMeshGpu } from "./mesh/mesh-dispose.js";
+export { computeMaxExtents } from "./mesh/compute-max-extents.js";
+export type { MeshExtent } from "./mesh/compute-max-extents.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";
 export { ObservableQuat } from "./math/observable-quat.js";
 export type { StandardMaterialProps, FogConfig } from "./material/standard/standard-material.js";
@@ -468,6 +477,7 @@ export type { GpuPicker, PickDiscardRule, PickOptions } from "./picking/gpu-pick
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
+export { computeDeformedPositionToRef } from "./picking/deformed-vertex.js";
 
 // ─── Gizmos ──────────────────────────────────────────────────────────
 export { createUtilityLayer, registerUtilityLayer, disposeUtilityLayer } from "./gizmo/utility-layer.js";
@@ -596,6 +606,17 @@ export {
     setSpriteRendererTarget,
     disposeSpriteRenderer,
 } from "./sprite/sprite-renderer.js";
+
+// ─── Node Particles (NPE) ────────────────────────────────────────────
+export type { Particle } from "./particle/particle.js";
+export type { ParticleSystem } from "./particle/particle-system.js";
+export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
+export type { NodeParticleSet } from "./particle/node/npe-build.js";
+export type { ParseNodeParticleOptions } from "./particle/node/node-particle.js";
+export { parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
+export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
+export { registerNodeParticleSet } from "./particle/particle-scene.js";
+export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
 
 // ─── Text ────────────────────────────────────────────────────────────
 export type { Font } from "./text/font.js";

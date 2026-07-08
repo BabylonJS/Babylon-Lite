@@ -50,6 +50,7 @@ lab/public/doom/CREDITS.txt
 .freedoom-cache/
 lab/public/librequake/
 .librequake-cache/
+.kaykit-staging/
 lab/public/minecraft/voxelpack/*.png
 lab/public/minecraft/voxelpack/License.txt
 .voxelpack-cache/
@@ -69,6 +70,7 @@ lab/public/gl/perf-manifest.json
 lab/public/gl/perf-regression-manifest.json
 test-results/
 .bundle-size-tmp/
+.bundle-asset-cache/
 .env.local
 plans/
 log/

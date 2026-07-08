@@ -1,0 +1,24 @@
+{
+  "rawKB": 40.7,
+  "gzipKB": 24.3,
+  "ignoredRawKB": 28.6,
+  "runtimeChunks": [
+    "scene262-billboard-renderable-q1v61uze.js",
+    "scene262-box-shape-block-D8WFepx1.js",
+    "scene262-color4-ref-CLya10nC.js",
+    "scene262-create-particle-block-BiKiIhan.js",
+    "scene262-generate-mipmaps-Ka9O_fxT.js",
+    "scene262-particle-converter-block-oStUKUGD.js",
+    "scene262-particle-input-block-BpNrvH0u.js",
+    "scene262-particle-lerp-block-BR89V9J9.js",
+    "scene262-particle-math-block-BfOGyynd.js",
+    "scene262-particle-random-block-BQ4BGvxu.js",
+    "scene262-random-range-CfhNtuAB.js",
+    "scene262-system-block-9G87vecE.js",
+    "scene262-texture-source-block-g7XH0Av-.js",
+    "scene262-update-color-block-DyTKpc2p.js",
+    "scene262-update-position-block-Bd7HeafP.js",
+    "scene262-vec3-ref-BQ9hm9R5.js",
+    "scene262.js"
+  ]
+}
