@@ -11,7 +11,7 @@ import {
     type RenderTask,
 } from "babylon-lite";
 
-const MODEL_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/MosquitoInAmber/glTF/MosquitoInAmber.gltf";
+const MODEL_URL = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Models@master/2.0/MosquitoInAmber/glTF/MosquitoInAmber.gltf";
 const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
 
 // Fixed camera pose framing the amber from the sandbox cameraPosition

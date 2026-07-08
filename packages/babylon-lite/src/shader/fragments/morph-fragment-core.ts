@@ -38,11 +38,15 @@ for (var i = 0u; i < morph.count; i = i + 1u) {
  *  `shader-composer.ts` needs no storage-buffer support (keeping non-morph scenes byte-identical).
  *  The rewrite is anchored on the unique binding names (`morphDeltas`, `morph`) and asserts both were
  *  found, so any future change to the composer's decl format fails loudly here rather than silently
- *  shipping a wrong address space. */
+ *  shipping a wrong address space. The pattern tolerates arbitrary whitespace (`\s*`) around the
+ *  punctuation because the production WGSL minifier strips spaces adjacent to `)`/`<`/`>`/`:` — the
+ *  composed decl is `)var<uniform>morphDeltas:` in the minified bundle vs `) var<uniform> morphDeltas:`
+ *  in dev. A regex with hard-coded single spaces matches 0 in the bundle and breaks every morph scene
+ *  (see GUIDANCE.md: never depend on emitted WGSL whitespace). */
 function patchMorphStorage(composed: ComposedShader): ComposedShader {
     const morphBindings = new Set<number>();
     let rewrites = 0;
-    const vertexWGSL = composed._vertexWGSL.replace(/@group\(1\)@binding\((\d+)\) var<uniform> (morphDeltas|morph):/g, (_match, num: string, name: string) => {
+    const vertexWGSL = composed._vertexWGSL.replace(/@group\(1\)@binding\((\d+)\)\s*var<uniform>\s*(morphDeltas|morph)\s*:/g, (_match, num: string, name: string) => {
         morphBindings.add(Number(num));
         rewrites++;
         return `@group(1)@binding(${num}) var<storage, read> ${name}:`;

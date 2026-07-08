@@ -26,10 +26,14 @@ function typecheckDts(dts: string) {
     // `--ignoreConfig` is required under TypeScript 6: passing a file on the
     // command line while a tsconfig.json exists in cwd is otherwise an error
     // (TS5112). WebGPU types are not needed here (WebGL package).
-    return spawnSync(NODE, [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--lib", "es2022,dom,dom.iterable", dts], {
-        cwd: PACKAGE_DIR,
-        encoding: "utf-8",
-    });
+    return spawnSync(
+        NODE,
+        [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--lib", "es2022,dom,dom.iterable", dts],
+        {
+            cwd: PACKAGE_DIR,
+            encoding: "utf-8",
+        }
+    );
 }
 
 describe("babylon-lite-gl build output", () => {

@@ -3,7 +3,7 @@
 
 import { addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial, createSceneContext, createSolidTexture2D, loadEnvironment, loadGltf, onBeforeRender, registerScene, startEngine } from "babylon-lite";
 
-const MODEL_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/IridescenceAbalone/glTF-Binary/IridescenceAbalone.glb";
+const MODEL_URL = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/IridescenceAbalone/glTF-Binary/IridescenceAbalone.glb";
 const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
 
 async function main(): Promise<void> {
