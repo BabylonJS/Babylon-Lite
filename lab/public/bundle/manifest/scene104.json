@@ -1,5 +1,5 @@
 {
-  "rawKB": 101.9,
+  "rawKB": 102,
   "gzipKB": 39.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -7,7 +7,7 @@
     "scene104-gltf-feature-registry-B9tXLdjr.js",
     "scene104-gltf-glb-parser-BJfNq64D.js",
     "scene104-shader-composer-CgJmQyJj.js",
-    "scene104-standard-renderable-BYZDGzK-.js",
+    "scene104-standard-renderable-DyCnrjVB.js",
     "scene104-std-lightmap-fragment-BtZeffyx.js",
     "scene104-wgsl-helpers-CwHFFXvt.js",
     "scene104.js"
