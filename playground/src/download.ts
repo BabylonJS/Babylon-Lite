@@ -14,7 +14,7 @@
 import { strToU8, zipSync, type Zippable } from "fflate";
 import { transpile } from "./transpile";
 import { downloadEngineUrl } from "./versions";
-import { ASSET_EXT } from "./base";
+import { ASSET_EXT, withBase } from "./base";
 import type { Project } from "./snippets";
 
 // Asset extensions worth bundling when referenced by a root-absolute path.
@@ -35,7 +35,7 @@ async function collectAssets(bundle: string): Promise<{ bundle: string; assets: 
     let rewritten = bundle;
     for (const path of paths) {
         try {
-            const response = await fetch(path);
+            const response = await fetch(withBase(path));
             const contentType = response.headers.get("content-type") ?? "";
             if (!response.ok || contentType.includes("text/html")) {
                 continue;
