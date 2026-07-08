@@ -267,11 +267,8 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
         // `AxisDragGizmo.isEnabled = false`) fully non-interactive; previously
         // the dispatcher picked on every move regardless, so a disabled gizmo
         // still drove a GPU pick per pointer-move.
-        for (const d of state.drags) {
-            if (d.enabled) {
-                void handleHoverMove(state, event);
-                return;
-            }
+        if (state.drags.some((d) => d.enabled)) {
+            void handleHoverMove(state, event);
         }
     };
 
