@@ -207,6 +207,14 @@ _1: f32,
     // Main fragment body — mirrors old composeFragmentShader exactly
     const doubleSidedEntry = `@fragment fn main(input: FragmentInput)${_noColorOutput ? "" : " -> @location(0) vec4<f32>"} {`;
 
+    // Scene clip plane (opt-in via setClipPlane). Discards fragments on the positive side of the
+    // plane: `dot(vec4(worldPos, 1.0), clipPlane) > 0 → discard`, matching BJS' clipPlaneFragment
+    // and Lite's ClipPlanesBlock. Emitted unconditionally and runtime-gated by the scene UBO value:
+    // when no clip plane is set the `clipPlane` slot stays (0,0,0,0), so `dot(..) > 0` is always
+    // false and nothing is clipped (same always-in, runtime-guarded strategy as fog above). Placed
+    // at the top of main so it clips before texture work on every path (color, depth-prepass, ESM).
+    const clipPlaneCode = `if (dot(vec4<f32>(input.vp, 1.0), scene.clipPlane) > 0.0) { discard; }`;
+
     // View direction
     const viewDirCode = !_disableLighting ? `let viewDirectionW = normalize(scene.vEyePosition.xyz - input.vp);` : "";
 
@@ -268,6 +276,7 @@ ${helpers}
 /*FI*/
 ${doubleSidedEntry}
 /*SV*/
+${clipPlaneCode}
 ${viewDirCode}
 ${normalCode}
 /*AC*/

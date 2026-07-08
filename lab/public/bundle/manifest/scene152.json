@@ -1,21 +1,21 @@
 {
-  "rawKB": 94,
-  "gzipKB": 39.1,
+  "rawKB": 94.2,
+  "gzipKB": 39.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene152-create-skeleton-DOtZWQXa.js",
-    "scene152-generate-mipmaps-lfy_yAfq.js",
-    "scene152-gltf-animation-Ca2-OwAh.js",
+    "scene152-create-skeleton-C4V1Y5_m.js",
+    "scene152-generate-mipmaps-CrwVlOsn.js",
+    "scene152-gltf-animation-BOM_1zGb.js",
     "scene152-gltf-ext-spec-gloss-D60sFZYX.js",
-    "scene152-gltf-feature-animations-D3TKVRLO.js",
+    "scene152-gltf-feature-animations-Bovj0hNk.js",
     "scene152-gltf-feature-extras-VHPteGay.js",
-    "scene152-gltf-feature-registry-B4mQ-NA8.js",
-    "scene152-gltf-feature-skeleton-Dycakb4m.js",
+    "scene152-gltf-feature-registry-CxImwy0D.js",
+    "scene152-gltf-feature-skeleton-CoZh95fI.js",
     "scene152-gltf-glb-parser-Dr_B2hXm.js",
     "scene152-gltf-sampler-desc-D0Q2VM93.js",
-    "scene152-pbr-renderable-Dm1on-1z.js",
-    "scene152-singlelight-hemispheric-wgsl-CG2laBNj.js",
-    "scene152-skeleton-fragment-IV-KUAr4.js",
+    "scene152-pbr-renderable-BmQMnwHG.js",
+    "scene152-singlelight-hemispheric-wgsl-QwtwpgZc.js",
+    "scene152-skeleton-fragment-CVLvFj83.js",
     "scene152.js"
   ]
 }

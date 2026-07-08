@@ -2237,5 +2237,16 @@
         "tags": ["npe", "particles", "billboards"],
         "skipPerf": true,
         "compatParity": true
+    },
+    {
+        "id": 264,
+        "slug": "scene264-clip-plane-materials",
+        "name": "Scene 264 — Clip Plane (PBR + Standard)",
+        "maxMad": 0.1,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 76,
+        "description": "Two spheres — one StandardMaterial, one PBRMaterial — sliced by a single scene clip plane (setClipPlane, y > 0 discarded). Regression coverage for the forum report that setClipPlane was honored only by Node Material: the built-in PBR and Standard fragment shaders now test scene.clipPlane and discard clipped fragments, matching Babylon.js where scene.clipPlane clips every material family automatically.",
+        "tags": ["clip-plane", "pbr", "standard"],
+        "skipPerf": true
     }
 ]

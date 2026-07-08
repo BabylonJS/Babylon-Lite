@@ -85,6 +85,11 @@ export interface PbrTemplateConfig {
     /** Fog blend WGSL, emitted just before the tonemap block; "" for non-fog scenes. */
     /** @internal */
     readonly _fogBlock?: string;
+    /** Scene clip-plane discard WGSL (`dot(worldPos, clipPlane) > 0 → discard`), emitted at the top
+     *  of the fragment main; supplied by the dynamic pbr-clip-wgsl import only for clipping scenes,
+     *  "" otherwise (zero bytes for non-clipping scenes). */
+    /** @internal */
+    readonly _clipBlock?: string;
     /** ACES WGSL: tonemap helper functions (dynamically imported). Empty string = standard exponential tonemap. */
     /** @internal */
     readonly _acesHelpers?: string;
@@ -167,6 +172,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _hasTonemap = false,
         _fogHelper = "",
         _fogBlock = "",
+        _clipBlock = "",
         _acesHelpers = "",
         _acesTonemapCall = "",
         _hasAlphaBlend = false,
@@ -445,6 +451,12 @@ color=1.0-exp2(-1.590579*color);`
     const fogHelper = _fogHelper;
     const fogBlock = _fogBlock;
 
+    // Clip plane (opt-in via scene.clipPlane). The discard WGSL is supplied by pbr-renderable, which
+    // dynamically imports pbr-clip-wgsl.ts only when scene.clipPlane is set; "" for non-clipping
+    // scenes so those bundles carry zero clip bytes. Emitted at the very top of the fragment main so
+    // it clips before any texture work, on every fragment path (color, depth-prepass, ESM shadow).
+    const clipBlock = _clipBlock;
+
     // Alpha output
     const alphaBlock = _noColorOutput
         ? ""
@@ -490,6 +502,7 @@ ${meshLightIndexHelper}
 ${fragmentHelpers}
 ${doubleSidedEntry}
 ${fragmentPrelude}/*SV*/
+${clipBlock}
 let baseColorSample=textureSample(baseColorTexture,baseColorSampler,${baseColorUV});
 ${baseColorDecode}
 let orm=textureSample(ormTexture,ormSampler,${ormUV}).rgb;

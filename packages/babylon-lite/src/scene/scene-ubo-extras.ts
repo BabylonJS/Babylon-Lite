@@ -68,6 +68,11 @@ export function setFog(scene: SceneContext, config: FogConfig): void {
  * The clip plane is opt-in: importing `setClipPlane` is what pulls the clip-plane
  * UBO writer into the bundle, keeping those bytes out of scenes that never clip.
  *
+ * Fragments on the positive side of the plane (`a·x + b·y + c·z + d > 0`) are discarded.
+ * The built-in PBR, Standard, and Node materials honour this automatically. A custom
+ * {@link ShaderMaterial} owns its full WGSL, so it must apply the clip itself using the
+ * `scene.clipPlane` value exposed in the shader prelude (see `ShaderMaterialOptions.fragmentSource`).
+ *
  * @param scene - The scene to configure.
  * @param plane - The clip plane as `[a, b, c, d]` coefficients of `a·x + b·y + c·z + d`.
  */

@@ -30,7 +30,18 @@ export type ShaderDefineMap = Readonly<Record<string, ShaderDefineValue>>;
  *  samplers, defines, and blend/depth state. Passed to `createShaderMaterial()`. */
 export interface ShaderMaterialOptions {
     readonly name?: string;
+    /** WGSL vertex source. Lite prepends a prelude exposing the scene UBO as
+     *  `@group(0) @binding(0) var<uniform> scene: SceneUniforms;` (view/projection, eye position,
+     *  fog, and the scene `clipPlane`), the ShaderSystem/ShaderUniforms UBOs, declared samplers, and
+     *  a `VertexInput` struct built from `attributes`. */
     readonly vertexSource: string;
+    /** WGSL fragment source. The same scene prelude is prepended (see `vertexSource`).
+     *
+     *  Clip planes: unlike the built-in PBR/Standard/Node materials — which honour `setClipPlane`
+     *  automatically — a ShaderMaterial owns its full WGSL, so Lite cannot inject clipping without a
+     *  known world-position varying (this matches Babylon.js, where ShaderMaterial requires opting in).
+     *  To clip, pass the world-space position from your vertex stage and discard on the plane, e.g.
+     *  `if (dot(vec4<f32>(input.worldPos, 1.0), scene.clipPlane) > 0.0) { discard; }`. */
     readonly fragmentSource: string;
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniforms?: readonly ShaderUniformOption[];
