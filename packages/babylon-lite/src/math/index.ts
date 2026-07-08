@@ -14,6 +14,7 @@ export { normalizeVec3 as normalizeVec3Tuple } from "./normalize-vec3.js";
 export { normalizeVec3 } from "./normalize-vec3-object.js";
 export { negateVec3 } from "./negate-vec3.js";
 export { lerpVec3 } from "./lerp-vec3.js";
+export { expDampFactor, dampScalar, lerpAngleShortest } from "./damp.js";
 export {
     addVec3InPlace,
     addVec3ToRef,

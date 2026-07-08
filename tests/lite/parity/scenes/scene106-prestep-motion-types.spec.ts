@@ -13,7 +13,7 @@
  *
  * The playground's DynamicTexture text labels are intentionally omitted.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";

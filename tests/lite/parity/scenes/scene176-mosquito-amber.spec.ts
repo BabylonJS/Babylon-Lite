@@ -5,7 +5,7 @@
  * against the studio.env HDR environment (IBL + blurred HDR skybox), using
  * frame-graph scene-texture transmission. Reproduces the Babylon.js sandbox view.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

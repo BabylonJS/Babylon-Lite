@@ -4,12 +4,12 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene210-generate-mipmaps-FlTqpeEP.js",
-    "scene210-gltf-feature-registry-CY-sJF_a.js",
+    "scene210-gltf-feature-registry-D3G3CqB0.js",
     "scene210-gltf-feature-xmp-D3lFvTPA.js",
     "scene210-gltf-glb-parser-BvpUzLkV.js",
-    "scene210-gltf-interleave-D_EopIqT.js",
+    "scene210-gltf-interleave-CMrG9jAE.js",
     "scene210-gltf-normals-CW8aOx3G.js",
-    "scene210-pbr-renderable-B9sdatqH.js",
+    "scene210-pbr-renderable-DQa_iz8o.js",
     "scene210-rolldown-runtime-DK3Fl9T5.js",
     "scene210-singlelight-hemispheric-wgsl-Dv0t_zsl.js",
     "scene210.js"

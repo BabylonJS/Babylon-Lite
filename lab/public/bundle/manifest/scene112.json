@@ -1,6 +1,6 @@
 {
-  "rawKB": 119.5,
-  "gzipKB": 48.8,
+  "rawKB": 119.2,
+  "gzipKB": 48.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene112-background-dds-skybox-BA7fXrS_.js",
@@ -9,17 +9,16 @@
     "scene112-generate-mipmaps-BVShZfQ6.js",
     "scene112-gltf-ext-basisu-DiCmSFNa.js",
     "scene112-gltf-ext-dielectric-BUmyd_J1.js",
-    "scene112-gltf-feature-registry-D8JBnCuq.js",
+    "scene112-gltf-feature-registry-ObPhrrhm.js",
     "scene112-gltf-json-asset-C2GL2FD8.js",
     "scene112-ibl-fragment-B8MuDxXP.js",
-    "scene112-pbr-refraction-CmWtkzCF.js",
-    "scene112-pbr-renderable--fBlDhlL.js",
-    "scene112-pbr-transmission-ext-qTnxnfSY.js",
+    "scene112-pbr-refraction-5SH6bxMn.js",
+    "scene112-pbr-renderable-D-GNhL9n.js",
+    "scene112-pbr-transmission-ext-DXZ_nqVe.js",
     "scene112-rgbd-decode-CwQFDRTh.js",
     "scene112-rolldown-runtime-DK3Fl9T5.js",
     "scene112-scene-uniforms-C73kE8NW-DZ06fff3.js",
     "scene112-singlelight-hemispheric-wgsl-CuGX0trP.js",
-    "scene112-transmission-CgjTP8_i.js",
     "scene112-wgsl-helpers-2lnJY0kr.js",
     "scene112.js"
   ]
