@@ -6,7 +6,7 @@
  * compares against the BJS reference (also default precision). Both
  * stacks should jitter similarly at world ~5e6.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

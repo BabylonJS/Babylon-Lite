@@ -258,7 +258,8 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
         // Idle pointer-move: GPU-pick to determine hover target so gizmos can
         // swap to their hover material before the user starts dragging.  Picks
         // are tagged with a monotonically-increasing token so a stale result
-        // can't overwrite the latest hover decision.
+        // can't overwrite the latest hover decision (and `pickAsync` serializes
+        // per-picker so overlapping picks never race the shared staging buffers).
         void handleHoverMove(state, event);
     };
 
@@ -296,14 +297,27 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
     return state;
 }
 
+/** Perform a single hover pick and update hover state.  `pickAsync` serializes
+ *  per-picker, so concurrent calls (a fast pointer, or a pointer-down racing an
+ *  in-flight hover) never race the picker's shared 1×1 staging buffers.
+ *
+ *  Display-only gizmos (every registered drag disabled) do ZERO hover picking —
+ *  no GPU work is spent when nothing is interactive.  This is what makes
+ *  `drag.enabled = false` (BJS `PointerDragBehavior.enabled` /
+ *  `AxisDragGizmo.isEnabled = false`) fully non-interactive.  We still fall
+ *  through to the hover-transition logic so a gizmo hovered just before it was
+ *  disabled clears its hover material instead of staying stuck. */
 async function handleHoverMove(state: DispatcherState, event: PointerEvent): Promise<void> {
-    const token = ++state.hoverToken;
-    const info = await pickAsync(state.picker, event.offsetX, event.offsetY);
-    if (token !== state.hoverToken || state.active) {
-        return;
+    let next: PointerDrag | null = null;
+    if (state.drags.some((d) => d.enabled)) {
+        const token = ++state.hoverToken;
+        const info = await pickAsync(state.picker, event.offsetX, event.offsetY);
+        if (token !== state.hoverToken || state.active) {
+            return;
+        }
+        const drag = info.hit && info.pickedMesh ? findDragForMesh(state.drags, info.pickedMesh as Mesh) : null;
+        next = drag && drag.enabled ? drag : null;
     }
-    const drag = info.hit && info.pickedMesh ? findDragForMesh(state.drags, info.pickedMesh as Mesh) : null;
-    const next = drag && drag.enabled ? drag : null;
     if (next === state.hovered) {
         return;
     }

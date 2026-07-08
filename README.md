@@ -8,7 +8,7 @@ A WebGPU-exclusive, tree-shakable 3D engine that produces pixel-identical output
 
 ## Prerequisites
 
-- **Node.js** ≥ 18
+- **Node.js** ≥ 20.19 (ESLint 10 requires `^20.19 || ^22.13 || >=24`; CI runs Node 22)
 - **pnpm** ≥ 9 (`corepack enable` to activate the version pinned in `package.json`)
 - A browser with **WebGPU** support (Chrome 113+, Edge 113+, or recent Firefox and Safari)
 

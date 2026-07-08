@@ -8,7 +8,7 @@
  * - BoomBox region: MAD ≤ 0.1, ≥99% of pixels within 1 byte
  * - Full image: MAD ≤ 0.5
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 
