@@ -14,10 +14,10 @@
 import { strToU8, zipSync, type Zippable } from "fflate";
 import { transpile } from "./transpile";
 import { downloadEngineUrl } from "./versions";
+import { ASSET_EXT } from "./base";
 import type { Project } from "./snippets";
 
 // Asset extensions worth bundling when referenced by a root-absolute path.
-const ASSET_EXT = "png|jpe?g|webp|gif|svg|env|dds|ktx2?|basis|hdr|exr|glb|gltf|bin|json|mp3|wav|ogg|m4a|ttf|otf|woff2?|wgsl";
 const ASSET_RE = new RegExp(`["'\`](/[\\w./-]+\\.(?:${ASSET_EXT}))["'\`]`, "g");
 
 /**

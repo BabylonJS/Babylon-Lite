@@ -7,6 +7,12 @@ import { defineConfig } from "vite";
  * the playground UI.
  */
 export default defineConfig({
+    // Deploy base path. Root ("/") for the canonical nightly deploy; per-PR and
+    // per-version snapshots are served under a sub-path (e.g. "/pr/123/",
+    // "/v/1.4.0/") set via PLAYGROUND_BASE so all assets, the runner iframe, the
+    // self-hosted engine, and SPA snippet routes resolve relative to that prefix.
+    // Must start and end with a slash.
+    base: process.env.PLAYGROUND_BASE ?? "/",
     server: {
         // Bind both IPv4 and IPv6 loopback. Vite's default `localhost` can bind
         // only one stack (we saw it land on IPv6 ::1 only), so a browser that

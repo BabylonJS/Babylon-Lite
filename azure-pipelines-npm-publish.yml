@@ -51,6 +51,7 @@ parameters:
       default: false
 
 variables:
+    - group: BabylonJS-Deployment
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
@@ -240,3 +241,26 @@ stages:
                   displayName: "Publish compat package to npm"
                   env:
                       NPM_TOKEN: $(NPM_TOKEN)
+
+                # --- Versioned playground snapshot ------------------------------
+                # After a successful publish, build the Lite Playground from this
+                # tagged commit and deploy it to an immutable per-version sub-path,
+                # so every release gets a permanent, self-consistent playground URL
+                # (its self-hosted engine is built from — and stamped with — the
+                # published version via PACKAGE_VERSION). PLAYGROUND_BASE matches the
+                # deploy path so assets, the runner, the engine, and SPA snippet
+                # routes resolve under the sub-path. Compile-time gated on dryRun so
+                # dry runs never upload.
+                - ${{ if eq(parameters.dryRun, false) }}:
+                      - script: pnpm build:playground
+                        displayName: "Build versioned playground"
+                        env:
+                            PACKAGE_VERSION: $(PACKAGE_VERSION)
+                            PLAYGROUND_BASE: /lite/v/$(PACKAGE_VERSION)/playground/
+
+                      - template: config/templates/upload-static-site.yml
+                        parameters:
+                            siteDir: $(System.DefaultWorkingDirectory)/playground/dist
+                            deployPath: lite/v/$(PACKAGE_VERSION)/playground
+                            siteName: "Lite Playground v$(PACKAGE_VERSION)"
+                            postComment: false
