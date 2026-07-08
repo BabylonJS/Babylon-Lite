@@ -85,4 +85,20 @@ describe("Scene animation tick (addToScene render-loop wiring)", () => {
         scene._beforeRender[0]!(1000);
         expect(group.currentTime).toBe(0);
     });
+
+    it("defers to an AnimationManager: does not advance a manager-owned group", () => {
+        const ctrl = makeStubController();
+        const group = makeGroup(ctrl);
+        const scene = makeScene();
+        const container = { entities: [], animationGroups: [group] } as unknown as AssetContainer;
+
+        // addToScene registers the auto-tick, but the group becomes manager-owned afterward
+        // (mirrors the forum repro where AnimationManager attaches after addToScene). The scene
+        // tick must skip it each frame so the manager is the sole driver (no double-advance).
+        addToScene(scene, container);
+        (group as AnimationGroup & { _animationManager?: object })._animationManager = {};
+
+        scene._beforeRender[0]!(1000);
+        expect(group.currentTime).toBe(0);
+    });
 });

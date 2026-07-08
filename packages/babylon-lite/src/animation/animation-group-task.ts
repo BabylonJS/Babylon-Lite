@@ -10,7 +10,6 @@ interface AnimationGroupTaskManager extends AnimationManager {
 }
 
 interface AnimationGroupTaskGroup extends AnimationGroup {
-    _animationManager?: AnimationManager;
     _animationTask?: AnimationTask;
 }
 

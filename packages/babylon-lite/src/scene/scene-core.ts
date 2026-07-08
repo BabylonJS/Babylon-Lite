@@ -319,6 +319,13 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             ctx.animationGroups.push(...groups);
             ctx._beforeRender.push((deltaMs: number) => {
                 for (const g of groups) {
+                    // Defer to an AnimationManager if one owns this group — it drives and blends
+                    // the group itself, so ticking here too would double-advance time and clobber
+                    // the blended pose (last-writer-wins). Checked per-frame because the manager
+                    // typically attaches after addToScene. Zero-cost for non-manager scenes.
+                    if (g._animationManager) {
+                        continue;
+                    }
                     tickAnimation(g, deltaMs, engine);
                 }
             });

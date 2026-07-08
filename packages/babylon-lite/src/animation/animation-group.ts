@@ -8,6 +8,7 @@ import type { LiteMetadata } from "../metadata.js";
 import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
+import type { AnimationManager } from "./animation-manager.js";
 import { _setTickAnimationImpl } from "./animation-tick.js";
 
 const DEFAULT_FRAME_RATE = 60;
@@ -76,6 +77,10 @@ export interface AnimationGroup {
     _additive?: AnimationAdditiveMixer;
     /** @internal Whether stop() was called (suppresses tickAnimation). */
     _stopped: boolean;
+    /** @internal The AnimationManager that currently owns/drives this group, if any. Set by
+     *  {@link addAnimationGroup}. Type-only import, so it is erased at build — no runtime cycle
+     *  and no bundle cost for always-loaded consumers (e.g. scene-core's render-loop tick). */
+    _animationManager?: AnimationManager;
 }
 
 /** Start playing an animation group. */
