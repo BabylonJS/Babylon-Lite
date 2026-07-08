@@ -150,6 +150,40 @@ describe("static-sound", () => {
         disposeSound(sound);
     });
 
+    it("preserves per-play pitch/playbackRate overrides across pause and resume", async () => {
+        const sound = await createSoundAsync(engine, new ArrayBuffer(8), { pitch: 600, playbackRate: 1.5 });
+        playSound(sound, { pitch: -200, playbackRate: 0.8 });
+        const instance = newest(sound);
+
+        ctx.currentTime = 0.5;
+        pauseSound(sound);
+        expect(instance._state).toBe(SoundState.Paused);
+
+        // Resuming with no options re-inits the source node from the retained per-instance overrides.
+        resumeSound(sound);
+        const resumed = instance._sourceNode as unknown as MockAudioBufferSourceNode;
+        expect(resumed.detune.value).toBe(-200);
+        expect(resumed.playbackRate.value).toBe(0.8);
+        disposeSound(sound);
+    });
+
+    it("preserves per-play pitch/playbackRate overrides through the engine-state-change restart", async () => {
+        // A looping sound started while the engine is suspended defers to Starting and restarts on resume.
+        ctx._setState("suspended");
+        const sound = await createSoundAsync(engine, new ArrayBuffer(8), { pitch: 600, playbackRate: 1.5 });
+        playSound(sound, { loop: true, pitch: -200, playbackRate: 0.8 });
+        const instance = newest(sound);
+        expect(instance._state).toBe(SoundState.Starting);
+
+        // Engine becomes running -> `_onEngineStateChanged` restarts the instance with the retained overrides.
+        ctx._setState("running");
+        const started = instance._sourceNode as unknown as MockAudioBufferSourceNode;
+        expect(instance._state).toBe(SoundState.Started);
+        expect(started.detune.value).toBe(-200);
+        expect(started.playbackRate.value).toBe(0.8);
+        disposeSound(sound);
+    });
+
     it("is removed from the engine on dispose", async () => {
         const sound = await createSoundAsync(engine, new ArrayBuffer(8));
         expect(engine._sounds.has(sound)).toBe(true);
