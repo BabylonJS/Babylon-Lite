@@ -8,7 +8,7 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    const root = await loadGltf(engine, "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/PotOfCoalsAnimationPointer/glTF/PotOfCoalsAnimationPointer.gltf");
+    const root = await loadGltf(engine, "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/PotOfCoalsAnimationPointer/glTF/PotOfCoalsAnimationPointer.gltf");
     addToScene(scene, root);
 
     scene.clearColor = { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };

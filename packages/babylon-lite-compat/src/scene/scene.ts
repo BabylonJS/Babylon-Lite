@@ -20,6 +20,7 @@ import {
     setClipPlane,
     loadEnvironment,
     loadDdsEnvironment,
+    loadHdrEnvironment,
     createHemisphericLight,
     addToScene,
     createAnimationManager,
@@ -40,7 +41,7 @@ import { StandardMaterial } from "../materials/materials.js";
 import { Animatable } from "../animations/animation.js";
 import type { Animation } from "../animations/animation.js";
 import { AnimationGroup } from "../animations/animation.js";
-import type { CubeTexture } from "../textures/textures.js";
+import type { CubeTexture, HDRCubeTexture } from "../textures/textures.js";
 import type { WebGPUEngine } from "../engine/engine.js";
 import { AbstractScene } from "./abstract-scene.js";
 
@@ -133,7 +134,7 @@ export class Scene extends AbstractScene {
      */
     private readonly _pendingAdds: Array<() => void> = [];
     private _started = false;
-    private _envTexture: CubeTexture | null = null;
+    private _envTexture: CubeTexture | HDRCubeTexture | null = null;
     private _defaultEnvOptions: DefaultEnvironmentOptions | null = null;
     private readonly _shadowGenerators: Array<{ _build(engine: import("babylon-lite").EngineContext): void; _liteGen?: unknown }> = [];
     private readonly _pendingTextures: Array<Promise<void>> = [];
@@ -532,10 +533,10 @@ export class Scene extends AbstractScene {
 
     // ── Environment / IBL (Babylon.js `scene.environmentTexture` + `createDefaultEnvironment`) ──
 
-    public get environmentTexture(): CubeTexture | null {
+    public get environmentTexture(): CubeTexture | HDRCubeTexture | null {
         return this._envTexture;
     }
-    public set environmentTexture(value: CubeTexture | null) {
+    public set environmentTexture(value: CubeTexture | HDRCubeTexture | null) {
         this._envTexture = value;
     }
 
@@ -562,7 +563,7 @@ export class Scene extends AbstractScene {
      * loaded `.env` specular cubemap as an HDR skybox, so this records the env URL (if
      * not already set) and flags a skybox-from-environment load at engine start.
      */
-    public createDefaultSkybox(texture?: CubeTexture, _pbr?: boolean, scale?: number, _blur?: number, _setGlobalEnv?: boolean): { dispose(): void } {
+    public createDefaultSkybox(texture?: CubeTexture | HDRCubeTexture, _pbr?: boolean, scale?: number, _blur?: number, _setGlobalEnv?: boolean): { dispose(): void } {
         if (texture) {
             this._envTexture = texture;
         }
@@ -605,7 +606,17 @@ export class Scene extends AbstractScene {
         // Babylon.js `CubeTexture.CreateFromPrefilteredData` accepts both `.env`
         // and `.dds` prefiltered environments. Babylon Lite splits these into two
         // loaders: `loadEnvironment` (`.env`) and `loadDdsEnvironment` (`.dds`).
-        if (envUrl.toLowerCase().endsWith(".dds")) {
+        if (this._envTexture?._envLoaderKind === "hdr") {
+            await loadHdrEnvironment(this._lite, envUrl, {
+                // Forward the BJS `HDRCubeTexture` `size` as Lite's cubemap `faceSize`
+                // so callers that request e.g. 512 are honoured (Lite otherwise defaults
+                // to 256). Only `HDRCubeTexture` carries `_envLoaderKind === "hdr"`.
+                faceSize: (this._envTexture as HDRCubeTexture).size,
+                skyboxSize: opts?.skyboxSize ?? 1000,
+                useCubemapSkybox: !!skyboxUrl,
+                skipGround: !opts?.createGround,
+            });
+        } else if (envUrl.toLowerCase().endsWith(".dds")) {
             await loadDdsEnvironment(this._lite, envUrl, {
                 brdfUrl: DEFAULT_BRDF_URL,
                 skipSkybox: !opts?.createSkybox,

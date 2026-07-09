@@ -19,7 +19,7 @@ import "@babylonjs/core/Rendering/depthRendererSceneComponent";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
 import "@babylonjs/core/Materials/standardMaterial";
 
-const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/Halo_Believe.splat";
+const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_Believe.splat";
 
 Effect.ShadersStore["customDepthPixelShader"] = `
     precision highp float;

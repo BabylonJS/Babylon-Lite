@@ -4,7 +4,7 @@
  * Captures Babylon.js and Babylon Lite after a short deterministic fixed-step
  * simulation and compares the PhysicsViewer wireframe overlay.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";

@@ -20,7 +20,7 @@ import { GPUPicker } from "@babylonjs/core/Collisions/gpuPicker";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
 import "@babylonjs/core/Materials/standardMaterial";
 
-const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/Halo_Believe.splat";
+const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_Believe.splat";
 // Screen-centre coordinates pick the GS mesh in both BJS and Lite (the
 // renderMesh quads cover most of the rendered area for this splat).
 const DEFAULT_PICK_X_RATIO = 0.5;
