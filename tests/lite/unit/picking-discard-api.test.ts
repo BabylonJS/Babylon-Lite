@@ -173,7 +173,7 @@ function makePickScene(engine: EngineContext): { scene: Parameters<typeof create
                 _vpCache: new Float32Array(16),
             },
             meshes: [mesh],
-            _gsMeshes: [],
+            _pickSources: [],
         } as unknown as Parameters<typeof createGpuPicker>[0],
     };
 }

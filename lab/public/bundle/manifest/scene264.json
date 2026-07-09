@@ -1,9 +1,9 @@
 {
-  "rawKB": 40.7,
-  "gzipKB": 25.8,
+  "rawKB": 40.9,
+  "gzipKB": 25.9,
   "ignoredRawKB": 34.5,
   "runtimeChunks": [
-    "scene264-billboard-renderable-AyA3VAjf.js",
+    "scene264-billboard-renderable-BItOEIZ3.js",
     "scene264-box-shape-block-DLKR-sKT.js",
     "scene264-color4-ref-CLya10nC.js",
     "scene264-create-particle-block-C9oUMxfD.js",
