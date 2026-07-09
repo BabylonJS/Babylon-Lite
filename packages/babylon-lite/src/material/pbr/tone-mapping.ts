@@ -18,7 +18,16 @@ export interface ToneMapping {
     readonly id: string;
     /** Module-scope WGSL (function/const definitions) injected once. Empty when the algorithm is inline. */
     readonly helpersWGSL: string;
-    /** Per-fragment WGSL that transforms `color` in place (may reference `helpersWGSL` and `scene.vImageInfos.x`). */
+    /**
+     * Per-fragment WGSL that transforms the working `color` (linear RGB) in place. May reference
+     * `helpersWGSL`.
+     *
+     * IMPORTANT: `callWGSL` is responsible for applying exposure — the PBR template omits the exposure
+     * multiply when tone mapping is enabled and delegates it here. Start the fragment with
+     * `color *= scene.vImageInfos.x;` (the exposure factor) before the tone-mapping curve, or exposure
+     * will be silently dropped. See the built-ins (`StandardToneMapping`, `AcesToneMapping`,
+     * `NeutralToneMapping`) for the exact form.
+     */
     readonly callWGSL: string;
 }
 

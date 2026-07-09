@@ -28,6 +28,8 @@ export async function rebuildScenePbrPipelines(scene: SceneContext): Promise<voi
         return;
     }
 
+    const device = ctx.surface.engine._device;
+
     let changed = false;
     for (const [builder, meshes] of ctx._groups) {
         if (builder._materialFamily !== "pbr" || meshes.length === 0) {
@@ -66,9 +68,25 @@ export async function rebuildScenePbrPipelines(scene: SceneContext): Promise<voi
         // Tear down the OLD per-mesh GPU state now that the rebuild is complete: destroys the old UBOs
         // (no longer referenced by the new bind groups) and releases the textures the builder just
         // re-acquired, so shared textures' refcounts return to their pre-rebuild value and stay alive.
-        for (const fn of oldDisposers) {
-            fn();
-        }
+        //
+        // This must NOT run synchronously: the old per-mesh/material UBOs may still be referenced by a
+        // frame already submitted to the GPU this tick, and destroying them now hits the WebGPU validation
+        // error "Buffer used in submit while destroyed". Defer until the GPU has drained the currently-
+        // submitted work (onSubmittedWorkDone), mirroring processMaterialSwaps. The make-before-break
+        // refcount invariant holds across the defer: the builder already re-acquired the shared textures
+        // (refcount bumped), so they stay alive until the deferred release nets the refcount back down.
+        void device.queue
+            .onSubmittedWorkDone()
+            .then(() => {
+                try {
+                    for (const fn of oldDisposers) {
+                        fn();
+                    }
+                } catch {
+                    // Device may have been lost/disposed before the deferred teardown ran.
+                }
+            })
+            .catch(() => {});
 
         changed = true;
     }

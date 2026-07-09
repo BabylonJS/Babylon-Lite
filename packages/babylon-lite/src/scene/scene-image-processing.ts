@@ -1,5 +1,6 @@
 import type { ImageProcessingConfig, SceneContext } from "./scene-core.js";
 import { rebuildScenePbrPipelines } from "./scene-rebuild.js";
+import { StandardToneMapping } from "../material/pbr/tone-mapping.js";
 
 /** Fields of {@link ImageProcessingConfig} that may be updated at runtime via {@link setSceneImageProcessing}. */
 export type ImageProcessingUpdate = Partial<ImageProcessingConfig>;
@@ -23,14 +24,17 @@ export type ImageProcessingUpdate = Partial<ImageProcessingConfig>;
 export async function setSceneImageProcessing(scene: SceneContext, update: ImageProcessingUpdate): Promise<void> {
     const ip = scene.imageProcessing;
 
+    // An undefined `toneMapping` resolves to the default StandardToneMapping in the PBR builder, so compare
+    // by the EFFECTIVE algorithm id (undefined -> standard). Comparing the raw `toneMapping?.id` would treat
+    // switching between `undefined` and `StandardToneMapping` as a change and trigger a needless rebuild.
     const prevEnabled = ip.toneMappingEnabled;
-    // Undefined toneMapping resolves to the default standard algorithm; use its stable id for the compare.
-    const prevToneMappingId = ip.toneMapping?.id;
+    const prevToneMappingId = ip.toneMapping?.id ?? StandardToneMapping.id;
 
     Object.assign(ip, update);
 
     const enabledChanged = ip.toneMappingEnabled !== prevEnabled;
-    const toneMappingChanged = ip.toneMappingEnabled && ip.toneMapping?.id !== prevToneMappingId;
+    const nextToneMappingId = ip.toneMapping?.id ?? StandardToneMapping.id;
+    const toneMappingChanged = ip.toneMappingEnabled && nextToneMappingId !== prevToneMappingId;
 
     if (enabledChanged || toneMappingChanged) {
         await rebuildScenePbrPipelines(scene);

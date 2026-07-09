@@ -33,7 +33,8 @@ export interface ImageProcessingConfig {
     /**
      * Tone mapping algorithm applied by PBR materials when `toneMappingEnabled` is true.
      * Undefined means the default {@link StandardToneMapping} (exponential). Assign a
-     * built-in ({@link StandardToneMapping}, {@link AcesToneMapping}) or a custom {@link ToneMapping}.
+     * built-in ({@link StandardToneMapping}, {@link AcesToneMapping}, {@link NeutralToneMapping})
+     * or a custom {@link ToneMapping}.
      *
      * This is baked into the PBR shaders at `registerScene()` time. To change it after
      * registration, use `setSceneImageProcessing` so the affected pipelines are rebuilt.
