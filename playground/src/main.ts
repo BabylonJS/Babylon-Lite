@@ -20,6 +20,10 @@ import {
 } from "./snippets";
 import { getEmbedMode, decodeCodeHash, openInPlaygroundUrl, EmbedHost } from "./embed";
 import { NIGHTLY, engineUrlForVersion, fetchPublishedVersions } from "./versions";
+import { createSettingsStore, type PlaygroundSettings } from "./settings";
+import { mountSettingsPanel } from "./fluent/settings-panel";
+import { mountAppChrome } from "./fluent/app-chrome";
+import { mountToolbar, type ToolbarModel, type ToolbarActions, type ViewMode } from "./fluent/toolbar";
 
 const editorContainer = document.getElementById("editor") as HTMLElement;
 const fileTabsContainer = document.getElementById("fileTabs") as HTMLElement;
@@ -29,26 +33,18 @@ const previewLoaderText = document.getElementById("previewLoaderText") as HTMLEl
 const consoleEl = document.getElementById("console") as HTMLElement;
 const splitEl = document.getElementById("split") as HTMLElement;
 const splitter = document.getElementById("splitter") as HTMLElement;
-const runBtn = document.getElementById("runBtn") as HTMLButtonElement;
-const newBtn = document.getElementById("newBtn") as HTMLButtonElement;
 const fullscreenBtn = document.getElementById("fullscreenBtn") as HTMLButtonElement;
 const fpsCounter = document.getElementById("fpsCounter") as HTMLElement;
-const downloadBtn = document.getElementById("downloadBtn") as HTMLButtonElement;
-const examplesEl = document.getElementById("examples") as HTMLSelectElement;
-const versionEl = document.getElementById("versionSelect") as HTMLSelectElement;
-const saveBtn = document.getElementById("saveBtn") as HTMLButtonElement;
-const saveDetailsBtn = document.getElementById("saveDetailsBtn") as HTMLButtonElement;
-const saveDialog = document.getElementById("saveDialog") as HTMLDialogElement;
-const saveDialogCancel = document.getElementById("saveDialogCancel") as HTMLButtonElement;
-const snippetNameInput = document.getElementById("snippetName") as HTMLInputElement;
-const snippetDescriptionInput = document.getElementById("snippetDescription") as HTMLTextAreaElement;
-const snippetTagsInput = document.getElementById("snippetTags") as HTMLInputElement;
-const toastEl = document.getElementById("toast") as HTMLElement;
-const openFullBtn = document.getElementById("openFullBtn") as HTMLAnchorElement;
-const menuBtn = document.getElementById("menuBtn") as HTMLButtonElement;
-const actionsMenu = document.getElementById("actionsMenu") as HTMLElement;
-const modeCodeBtn = document.getElementById("modeCodeBtn") as HTMLButtonElement;
-const modeSceneBtn = document.getElementById("modeSceneBtn") as HTMLButtonElement;
+const settingsDrawer = document.getElementById("settingsDrawer") as HTMLElement;
+const settingsBackdrop = document.getElementById("settingsBackdrop") as HTMLElement;
+const settingsRoot = document.getElementById("settingsRoot") as HTMLElement;
+
+// Shared playground settings, persisted to localStorage. Drives editor options,
+// the FPS overlay, and auto-run; the Fluent settings panel reads/writes the same store.
+const settings = createSettingsStore();
+
+// The Fluent app-chrome island (toast + save dialog). main.ts drives it imperatively.
+const chrome = mountAppChrome(document.getElementById("appChromeRoot") as HTMLElement);
 
 // Embed mode (`?embed=runner|split`) hosts the playground inside another page and
 // exposes a postMessage API. `null` when running as the standalone app.
@@ -118,15 +114,8 @@ function appendBuildError(file: string, line: number, column: number, text: stri
     consoleEl.scrollTop = consoleEl.scrollHeight;
 }
 
-let toastTimer: number | undefined;
 function showToast(text: string, isError = false): void {
-    toastEl.textContent = text;
-    toastEl.classList.toggle("error", isError);
-    toastEl.hidden = false;
-    window.clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => {
-        toastEl.hidden = true;
-    }, 3000);
+    chrome.showToast(text, isError);
 }
 
 const runner = new Runner(previewHost, (message: RunnerMessage) => {
@@ -142,8 +131,10 @@ const runner = new Runner(previewHost, (message: RunnerMessage) => {
             embedHost?.emit({ channel: "babylon-lite-playground", type: "error", text: message.text });
             break;
         case "stats":
-            fpsCounter.hidden = false;
-            fpsCounter.textContent = `${Math.round(message.fps)} FPS`;
+            if (settings.get().showFps) {
+                fpsCounter.hidden = false;
+                fpsCounter.textContent = `${Math.round(message.fps)} FPS`;
+            }
             embedHost?.emit({ channel: "babylon-lite-playground", type: "stats", fps: message.fps });
             break;
         case "ran":
@@ -173,7 +164,7 @@ async function run(): Promise<void> {
         return;
     }
     running = true;
-    runBtn.disabled = true;
+    toolbar.update({ running: true });
     clearConsole();
     setLoading(true, "Compiling…");
     appendConsole("system", "Compiling…");
@@ -202,7 +193,7 @@ async function run(): Promise<void> {
         }
     } finally {
         running = false;
-        runBtn.disabled = false;
+        toolbar.update({ running: false });
         if (rerunPending) {
             rerunPending = false;
             void run();
@@ -216,6 +207,74 @@ mountFileTabs(fileTabsContainer, editor);
 if (embedMode !== "runner") {
     mountSplitter(splitEl, splitter);
 }
+
+// --- Playground settings: apply to the editor / FPS overlay, wire auto-run ----
+
+/** Push the current settings into the editor and preview chrome. */
+function applySettings(next: PlaygroundSettings): void {
+    editor.updateOptions({
+        fontSize: next.editorFontSize,
+        wordWrap: next.wordWrap ? "on" : "off",
+        minimap: { enabled: next.minimap },
+    });
+    editor.setTheme(next.editorTheme);
+    // Hide the FPS overlay immediately when disabled; it reappears on the next
+    // stats tick when re-enabled.
+    if (!next.showFps) {
+        fpsCounter.hidden = true;
+    }
+}
+
+applySettings(settings.get());
+settings.subscribe(applySettings);
+
+// Auto-run: re-run a short debounce after edits stop, when enabled in settings.
+let autoRunTimer: number | undefined;
+editor.onContentChange(() => {
+    const current = settings.get();
+    if (!current.autoRun) {
+        return;
+    }
+    window.clearTimeout(autoRunTimer);
+    autoRunTimer = window.setTimeout(() => void run(), current.autoRunDelay);
+});
+
+// Settings drawer: a lazily-mounted Fluent/React island (see fluent/settings-panel).
+// The gear button lives in the Fluent toolbar and calls openSettings via actions.
+let settingsPanelMounted = false;
+let settingsOpen = false;
+
+function closeSettings(): void {
+    if (!settingsOpen) {
+        return;
+    }
+    settingsOpen = false;
+    settingsDrawer.hidden = true;
+    settingsBackdrop.hidden = true;
+}
+
+function openSettings(): void {
+    if (settingsOpen) {
+        return;
+    }
+    settingsOpen = true;
+    if (!settingsPanelMounted) {
+        mountSettingsPanel(settingsRoot, settings, closeSettings);
+        settingsPanelMounted = true;
+    }
+    settingsBackdrop.hidden = false;
+    settingsDrawer.hidden = false;
+    // Slide in: start off-screen, then release on the next frame.
+    settingsDrawer.classList.add("is-entering");
+    requestAnimationFrame(() => settingsDrawer.classList.remove("is-entering"));
+}
+
+settingsBackdrop.addEventListener("click", closeSettings);
+window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && settingsOpen) {
+        closeSettings();
+    }
+});
 
 /** Current editor content as a saveable project. */
 function currentProject(): Project {
@@ -307,76 +366,60 @@ if (!embedMode) {
     });
 }
 
-// Populate the examples picker.
-for (const example of EXAMPLES) {
-    const option = document.createElement("option");
-    option.value = example.id;
-    option.textContent = example.label;
-    examplesEl.appendChild(option);
-}
-
-examplesEl.addEventListener("change", () => {
-    const example = EXAMPLES.find((candidate) => candidate.id === examplesEl.value);
-    if (example) {
-        // Loading an example starts a fresh, unsaved snippet.
-        resetToUnsaved();
-        editor.setFiles(projectFor(example).files, projectFor(example).entry);
-        markClean();
-        void run();
-    }
-});
-
-runBtn.addEventListener("click", () => void run());
-
-// --- Mobile chrome: hamburger menu + Code/Scene view toggle ------------------
-// On narrow screens the toolbar actions collapse into a dropdown, and the
-// side-by-side split becomes a single pane that switches between editing the
-// code and viewing the scene. Both are driven by classes on <body>; the CSS
-// media query decides whether they have any visual effect.
+// --- Toolbar (Fluent) --------------------------------------------------------
+// The header is a Fluent React island (fluent/toolbar.tsx). All behaviour still
+// lives here; the toolbar renders the model and forwards user intent through the
+// actions below.
 
 const MODE_KEY = "bl-pg-mode";
 
-function closeMenu(): void {
-    document.body.classList.remove("menu-open");
-    menuBtn.setAttribute("aria-expanded", "false");
+const EXAMPLE_OPTIONS = EXAMPLES.map((example) => ({ value: example.id, label: example.label }));
+
+// Restore the persisted view mode (storage may be unavailable / throw — fall back to scene).
+let storedMode: string | null = null;
+try {
+    storedMode = localStorage.getItem(MODE_KEY);
+} catch {
+    // Storage blocked (private mode / third-party iframe); use the default.
 }
+const initialMode: ViewMode = storedMode === "code" ? "code" : "scene";
 
-function toggleMenu(): void {
-    const open = document.body.classList.toggle("menu-open");
-    menuBtn.setAttribute("aria-expanded", String(open));
-}
+const toolbarActions: ToolbarActions = {
+    run: () => void run(),
+    newProject,
+    save: () => void save(currentMeta),
+    saveWithDetails: () => {
+        chrome.openSaveDialog({ name: currentMeta.name ?? "", description: currentMeta.description ?? "", tags: currentMeta.tags ?? "" }, (values) => void save(values));
+    },
+    download: downloadCurrent,
+    openInFull,
+    openSettings,
+    setMode,
+    setVersion,
+    loadExample,
+};
 
-menuBtn.addEventListener("click", (event) => {
-    event.stopPropagation();
-    toggleMenu();
-});
+const initialToolbarModel: ToolbarModel = {
+    mode: initialMode,
+    version: currentVersion,
+    versions: [{ value: NIGHTLY, label: "Nightly (latest source)" }],
+    examples: EXAMPLE_OPTIONS,
+    selectedExample: null,
+    running: false,
+    embedMode,
+};
 
-// Close the menu after picking an action, or when tapping outside it.
-actionsMenu.addEventListener("click", (event) => {
-    if ((event.target as HTMLElement).closest(".btn, a")) {
-        closeMenu();
-    }
-});
-actionsMenu.addEventListener("change", closeMenu);
-document.addEventListener("click", (event) => {
-    if (document.body.classList.contains("menu-open") && !(event.target as HTMLElement).closest(".toolbar")) {
-        closeMenu();
-    }
-});
+const toolbar = mountToolbar(document.getElementById("toolbarRoot") as HTMLElement, toolbarActions, initialToolbarModel);
 
-// The two mode tabs, in DOM order, for roving-tabindex keyboard navigation.
-const modeTabs = [modeCodeBtn, modeSceneBtn];
+// Apply the initial view mode now that the toolbar is mounted (body classes drive
+// the responsive CSS; the toolbar reflects the selected tab).
+setMode(initialMode);
 
-function setMode(mode: "code" | "scene"): void {
+/** Toggle the Code/Scene view (drives the responsive CSS via <body> classes). */
+function setMode(mode: ViewMode): void {
     document.body.classList.toggle("mode-code", mode === "code");
     document.body.classList.toggle("mode-scene", mode === "scene");
-    // ARIA tab semantics: the selected tab is the single roving tab stop; the
-    // other is removed from the tab order and reached via arrow keys.
-    for (const tab of modeTabs) {
-        const isActive = (tab === modeCodeBtn) === (mode === "code");
-        tab.setAttribute("aria-selected", String(isActive));
-        tab.tabIndex = isActive ? 0 : -1;
-    }
+    toolbar.update({ mode });
     try {
         localStorage.setItem(MODE_KEY, mode);
     } catch {
@@ -384,61 +427,59 @@ function setMode(mode: "code" | "scene"): void {
     }
 }
 
-modeCodeBtn.addEventListener("click", () => setMode("code"));
-modeSceneBtn.addEventListener("click", () => setMode("scene"));
-
-// Arrow/Home/End move selection between the tabs (WAI-ARIA tabs pattern).
-function onModeKeydown(event: KeyboardEvent): void {
-    const index = modeTabs.indexOf(event.currentTarget as HTMLButtonElement);
-    let next: number;
-    switch (event.key) {
-        case "ArrowRight":
-        case "ArrowDown":
-            next = (index + 1) % modeTabs.length;
-            break;
-        case "ArrowLeft":
-        case "ArrowUp":
-            next = (index - 1 + modeTabs.length) % modeTabs.length;
-            break;
-        case "Home":
-            next = 0;
-            break;
-        case "End":
-            next = modeTabs.length - 1;
-            break;
-        default:
-            return;
+/** Load one of the bundled examples as a fresh, unsaved project. */
+function loadExample(id: string): void {
+    const example = EXAMPLES.find((candidate) => candidate.id === id);
+    if (!example) {
+        return;
     }
-    event.preventDefault();
-    setMode(next === 0 ? "code" : "scene");
-    modeTabs[next]?.focus();
+    resetToUnsaved();
+    editor.setFiles(projectFor(example).files, projectFor(example).entry);
+    toolbar.update({ selectedExample: id });
+    markClean();
+    void run();
 }
 
-for (const tab of modeTabs) {
-    tab.addEventListener("keydown", onModeKeydown);
-}
-
-// Restore the persisted mode (storage may be unavailable / throw — fall back to scene).
-let storedMode: string | null = null;
-try {
-    storedMode = localStorage.getItem(MODE_KEY);
-} catch {
-    // Storage blocked (private mode / third-party iframe); use the default.
-}
-setMode(storedMode === "code" ? "code" : "scene");
-
-// New: discard the current project (with a guard if there are unsaved edits) and
-// load a clean starter scene.
-newBtn.addEventListener("click", () => {
+/** Discard the current project (guarded if dirty) and load a clean starter scene. */
+function newProject(): void {
     if (dirty && !window.confirm("Discard unsaved changes and start a new project?")) {
         return;
     }
     resetToUnsaved();
     editor.setFiles(STARTER_PROJECT.files, STARTER_PROJECT.entry);
-    examplesEl.selectedIndex = -1;
+    toolbar.update({ selectedExample: null });
     markClean();
     void run();
-});
+}
+
+/** Switch the engine version the runner loads, and re-run. */
+function setVersion(version: string): void {
+    currentVersion = version;
+    toolbar.update({ version });
+    void run();
+}
+
+let downloading = false;
+/** Package the current project as a runnable zip. */
+function downloadCurrent(): void {
+    if (downloading) {
+        return;
+    }
+    downloading = true;
+    chrome.showProgress("Packaging download…");
+    void downloadProject(currentProject(), currentVersion, currentMeta.name ?? "")
+        .then(() => chrome.dismissToast())
+        .catch((err: unknown) => showToast(err instanceof Error ? err.message : "Failed to build download", true))
+        .finally(() => {
+            downloading = false;
+        });
+}
+
+/** Hand the current content off to the full standalone Lite Playground. */
+function openInFull(): void {
+    const snippet = currentSnippetId ? { id: currentSnippetId, version: currentSnippetVersion } : null;
+    window.open(openInPlaygroundUrl(JSON.stringify(currentProject()), snippet), "_blank", "noopener");
+}
 
 // Fullscreen the preview canvas (toggles in/out).
 fullscreenBtn.addEventListener("click", () => {
@@ -449,47 +490,21 @@ fullscreenBtn.addEventListener("click", () => {
     }
 });
 
-downloadBtn.addEventListener("click", () => {
-    downloadBtn.disabled = true;
-    showToast("Packaging download…");
-    void downloadProject(currentProject(), currentVersion, currentMeta.name ?? "")
-        .then(() => {
-            toastEl.hidden = true;
-        })
-        .catch((err: unknown) => showToast(err instanceof Error ? err.message : "Failed to build download", true))
-        .finally(() => {
-            downloadBtn.disabled = false;
-        });
-});
-
-// Engine version selector: "Nightly" plus published releases (loaded from the CDN).
-function addVersionOption(value: string, label: string): void {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    versionEl.appendChild(option);
-}
-addVersionOption(NIGHTLY, "Nightly (latest source)");
-versionEl.value = NIGHTLY;
-
-versionEl.addEventListener("change", () => {
-    currentVersion = versionEl.value;
-    void run();
-});
-
+// Populate the engine version list: "Nightly" plus published releases (from the CDN).
 void (async () => {
     const versions = await fetchPublishedVersions();
-    for (const version of versions) {
-        addVersionOption(version, `v${version}`);
-    }
-    // Keep the current selection (defaults to nightly) after populating.
-    versionEl.value = currentVersion;
+    toolbar.update({
+        versions: [{ value: NIGHTLY, label: "Nightly (latest source)" }, ...versions.map((version) => ({ value: version, label: `v${version}` }))],
+    });
 })();
 
+let saving = false;
 async function save(meta: SnippetMeta): Promise<void> {
-    saveBtn.disabled = true;
-    saveDetailsBtn.disabled = true;
-    showToast("Saving…");
+    if (saving) {
+        return;
+    }
+    saving = true;
+    chrome.showProgress("Saving…");
     try {
         const result = await saveSnippet(currentProject(), meta, currentSnippetId ?? undefined);
         currentSnippetId = result.id;
@@ -509,29 +524,9 @@ async function save(meta: SnippetMeta): Promise<void> {
     } catch (err) {
         showToast(err instanceof Error ? err.message : "Failed to save snippet", true);
     } finally {
-        saveBtn.disabled = false;
-        saveDetailsBtn.disabled = false;
+        saving = false;
     }
 }
-
-saveBtn.addEventListener("click", () => void save(currentMeta));
-
-saveDetailsBtn.addEventListener("click", () => {
-    snippetNameInput.value = currentMeta.name ?? "";
-    snippetDescriptionInput.value = currentMeta.description ?? "";
-    snippetTagsInput.value = currentMeta.tags ?? "";
-    saveDialog.showModal();
-});
-
-saveDialogCancel.addEventListener("click", () => saveDialog.close());
-
-saveDialog.addEventListener("submit", () => {
-    void save({
-        name: snippetNameInput.value.trim(),
-        description: snippetDescriptionInput.value.trim(),
-        tags: snippetTagsInput.value.trim(),
-    });
-});
 
 async function loadFromUrl(): Promise<boolean> {
     // Inline content handed off from an embed via `#code=<base64url>`. The fragment
@@ -563,7 +558,7 @@ async function loadFromUrl(): Promise<boolean> {
 
 /** Load a snippet revision into the editor, optionally rewriting the URL to the path form. */
 async function loadSnippetInto(id: string, version: string, rewriteUrl: boolean): Promise<boolean> {
-    showToast("Loading snippet…");
+    chrome.showProgress("Loading snippet…");
     try {
         const snippet = await loadSnippet(combineSnippetId(id, version));
         currentSnippetId = id;
@@ -574,7 +569,7 @@ async function loadSnippetInto(id: string, version: string, rewriteUrl: boolean)
         if (rewriteUrl) {
             history.replaceState(null, "", snippetPath(id, version));
         }
-        toastEl.hidden = true;
+        chrome.dismissToast();
         return true;
     } catch (err) {
         showToast(err instanceof Error ? err.message : "Failed to load snippet", true);
@@ -594,14 +589,6 @@ function parseProject(payload: string): Project {
     }
     return { files: { "index.ts": payload }, entry: "index.ts" };
 }
-
-// "Open in Lite Playground" hands the current content off to the full standalone
-// playground (preferring a saved snippet id, falling back to inline `#code=`).
-openFullBtn.addEventListener("click", (event) => {
-    event.preventDefault();
-    const snippet = currentSnippetId ? { id: currentSnippetId, version: currentSnippetVersion } : null;
-    window.open(openInPlaygroundUrl(JSON.stringify(currentProject()), snippet), "_blank", "noopener");
-});
 
 // In embed mode, expose the postMessage API so a host page can drive the
 // playground and observe its output.
@@ -668,7 +655,7 @@ void (async () => {
             currentSnippetVersion = saved.version;
             currentMeta = saved.meta;
             editor.setFiles(saved.files, saved.entry);
-            examplesEl.selectedIndex = -1;
+            toolbar.update({ selectedExample: null });
             if (saved.snippetId) {
                 history.replaceState(null, "", snippetPath(saved.snippetId, saved.version));
             }

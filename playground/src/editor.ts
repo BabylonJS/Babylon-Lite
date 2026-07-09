@@ -91,6 +91,10 @@ export interface PlaygroundEditor {
     clearBuildMarkers(): void;
     /** Focus a file and move the cursor to a 1-based line/column. */
     revealLocation(file: string, line: number, column: number): void;
+    /** Apply Monaco editor options (font size, word wrap, minimap, …). */
+    updateOptions(options: monaco.editor.IEditorOptions): void;
+    /** Switch the Monaco color theme. */
+    setTheme(theme: string): void;
 }
 
 function languageForFile(name: string): string {
@@ -301,6 +305,8 @@ export function createEditor(container: HTMLElement, files: Record<string, strin
         setBuildMarkers,
         clearBuildMarkers,
         revealLocation,
+        updateOptions: (options: monaco.editor.IEditorOptions) => editor.updateOptions(options),
+        setTheme: (theme: string) => monaco.editor.setTheme(theme),
     };
 }
 

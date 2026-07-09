@@ -7,15 +7,104 @@
 }
 
 :root {
-    --bg: #0d1117;
-    --bg-elevated: #161b22;
-    --border: #30363d;
-    --text: #e6edf3;
-    --text-dim: #8b949e;
-    --accent: #58a6ff;
-    --accent-strong: #1f6feb;
-    --error: #f85149;
-    --warn: #d29922;
+    /* ------------------------------------------------------------------
+       Fluent 2 design tokens (webDarkTheme subset)
+
+       These variables intentionally use Fluent's exact token names and
+       webDarkTheme values. Fluent v9's <FluentProvider> emits its theme as
+       CSS custom properties with these same names, so if the playground later
+       adopts @fluentui/react-components, a FluentProvider wrapper will
+       transparently supply these variables and the styles below keep working.
+       Values sourced from @fluentui/tokens (brandWeb + alias/darkColor).
+       ------------------------------------------------------------------ */
+
+    /* Neutral surfaces */
+    --colorNeutralBackground1: #292929;
+    --colorNeutralBackground1Hover: #3d3d3d;
+    --colorNeutralBackground1Pressed: #1f1f1f;
+    --colorNeutralBackground2: #1f1f1f;
+    --colorNeutralBackground3: #141414;
+    --colorNeutralBackground4: #0a0a0a;
+    --colorNeutralBackgroundDisabled: #141414;
+
+    /* Neutral foregrounds */
+    --colorNeutralForeground1: #ffffff;
+    --colorNeutralForeground2: #d6d6d6;
+    --colorNeutralForeground3: #adadad;
+    --colorNeutralForegroundDisabled: #5c5c5c;
+    --colorNeutralForegroundOnBrand: #ffffff;
+
+    /* Neutral strokes */
+    --colorNeutralStroke1: #666666;
+    --colorNeutralStroke1Hover: #757575;
+    --colorNeutralStroke2: #525252;
+    --colorNeutralStrokeAccessible: #adadad;
+    --colorStrokeFocus2: #ffffff;
+
+    /* Brand ramp (brandWeb) */
+    --colorBrandBackground: #115ea3;
+    --colorBrandBackgroundHover: #0f6cbd;
+    --colorBrandBackgroundPressed: #0c3b5e;
+    --colorBrandForeground1: #479ef5;
+    --colorBrandForegroundLink: #479ef5;
+    --colorCompoundBrandStroke: #479ef5;
+
+    /* Shared status colors */
+    --colorStatusDangerForeground1: #f1707b;
+    --colorStatusWarningForeground1: #d29922;
+
+    /* Radii */
+    --borderRadiusSmall: 2px;
+    --borderRadiusMedium: 4px;
+    --borderRadiusLarge: 6px;
+    --borderRadiusXLarge: 8px;
+    --borderRadiusCircular: 10000px;
+
+    /* Spacing */
+    --spacingHorizontalXS: 4px;
+    --spacingHorizontalSNudge: 6px;
+    --spacingHorizontalS: 8px;
+    --spacingHorizontalMNudge: 10px;
+    --spacingHorizontalM: 12px;
+    --spacingHorizontalL: 16px;
+    --spacingHorizontalXL: 20px;
+
+    /* Typography */
+    --fontFamilyBase:
+        "Segoe UI", "Segoe UI Web (West European)", -apple-system,
+        BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+    --fontFamilyMonospace: ui-monospace, Consolas, "Courier New", Courier, monospace;
+    --fontSizeBase100: 10px;
+    --fontSizeBase200: 12px;
+    --fontSizeBase300: 14px;
+    --fontSizeBase400: 16px;
+    --fontSizeBase500: 20px;
+    --fontWeightRegular: 400;
+    --fontWeightMedium: 500;
+    --fontWeightSemibold: 600;
+
+    /* Elevation */
+    --shadow16:
+        0 8px 16px rgba(0, 0, 0, 0.28), 0 0 2px rgba(0, 0, 0, 0.24);
+
+    /* ------------------------------------------------------------------
+       App-level semantic aliases — map the playground's existing variables
+       onto Fluent tokens so the component styles below pick up the Fluent 2
+       palette while keeping their original intent.
+       ------------------------------------------------------------------ */
+    --bg: var(--colorNeutralBackground3);
+    --bg-elevated: var(--colorNeutralBackground2);
+    --surface-control: var(--colorNeutralBackground1);
+    --surface-control-hover: var(--colorNeutralBackground1Hover);
+    --surface-popover: var(--colorNeutralBackground1);
+    --border: var(--colorNeutralStroke2);
+    --border-strong: var(--colorNeutralStroke1);
+    --text: var(--colorNeutralForeground1);
+    --text-dim: var(--colorNeutralForeground3);
+    --accent: var(--colorBrandForeground1);
+    --accent-strong: var(--colorBrandBackground);
+    --error: var(--colorStatusDangerForeground1);
+    --warn: var(--colorStatusWarningForeground1);
 }
 
 html,
@@ -26,10 +115,12 @@ body,
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: var(--fontFamilyBase);
+    font-size: var(--fontSizeBase300);
     background: var(--bg);
     color: var(--text);
     overflow: hidden;
+    -webkit-font-smoothing: antialiased;
 }
 
 #app {
@@ -83,112 +174,12 @@ body {
     cursor: help;
 }
 
-.actions {
-    display: flex;
-    gap: 0.5rem;
-}
-
-/* Text labels inside the (otherwise icon-only) action buttons. Hidden on desktop,
-   revealed when the actions collapse into the mobile dropdown menu. */
-.action-label {
-    display: none;
-}
-
-/* Mobile-only chrome: the Code/Scene segmented toggle and the hamburger button.
-   Hidden on desktop; the mobile media query reveals them. The hamburger uses a
-   `.btn.menu-btn` selector so it outranks the `.btn-icon { display: inline-flex }`
-   rule defined further down. */
-.mode-toggle,
-.btn.menu-btn {
-    display: none;
-}
-
-.mode-toggle {
-    flex: 0 0 auto;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
-    background: var(--bg);
-}
-
-.mode-btn {
-    font: inherit;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-    background: transparent;
-    border: none;
-    padding: 0.4rem 0.8rem;
-    cursor: pointer;
-}
-
-.mode-btn[aria-selected="true"] {
-    background: var(--accent-strong);
-    color: #fff;
-    font-weight: 600;
-}
-
-.select {
-    font: inherit;
-    font-size: 0.85rem;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.4rem 0.6rem;
-    cursor: pointer;
-}
-
-.select:hover {
-    border-color: var(--accent);
-}
-
-.btn {
-    font: inherit;
-    font-size: 0.85rem;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.4rem 0.9rem;
-    cursor: pointer;
-    transition:
-        background 0.15s ease,
-        border-color 0.15s ease;
-}
-
-.btn:hover {
-    border-color: var(--accent);
-}
-
-.btn-primary {
-    background: var(--accent-strong);
-    border-color: var(--accent-strong);
-    color: #fff;
-    font-weight: 600;
-}
-
-.btn-primary:hover {
-    background: var(--accent);
-    border-color: var(--accent);
-}
-
-.btn:disabled {
-    opacity: 0.5;
-    cursor: default;
-}
-
-/* Square icon buttons (toolbar actions). */
-.btn-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.4rem;
-    width: 2.1rem;
-    height: 2.1rem;
-}
-
-.btn-icon svg {
-    display: block;
+/* Fluent 2 keyboard focus indicator for the remaining vanilla controls
+   (file tabs and the preview overlay buttons). The toolbar is React/Fluent. */
+.file-tab:focus-visible,
+.overlay-btn:focus-visible {
+    outline: 2px solid var(--colorStrokeFocus2);
+    outline-offset: 1px;
 }
 
 .split {
@@ -294,9 +285,9 @@ body {
 .file-tab-rename {
     font: inherit;
     color: var(--text);
-    background: var(--bg);
+    background: var(--surface-control);
     border: 1px solid var(--accent);
-    border-radius: 3px;
+    border-radius: var(--borderRadiusSmall);
     padding: 0 0.2rem;
     width: 8rem;
 }
@@ -312,7 +303,7 @@ body {
 }
 
 .file-tab-close:hover {
-    color: #ff6b6b;
+    color: var(--error);
 }
 
 .file-tab-add {
@@ -372,13 +363,13 @@ body {
 }
 
 .fps-counter {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-family: var(--fontFamilyMonospace);
     font-size: 0.72rem;
     font-variant-numeric: tabular-nums;
-    color: #e6edf3;
+    color: var(--colorNeutralForeground1);
     background: rgba(1, 4, 9, 0.65);
     border: 1px solid var(--border);
-    border-radius: 5px;
+    border-radius: var(--borderRadiusSmall);
     padding: 0.15rem 0.4rem;
 }
 
@@ -389,10 +380,10 @@ body {
     width: 28px;
     height: 28px;
     padding: 0;
-    color: #e6edf3;
+    color: var(--colorNeutralForeground1);
     background: rgba(1, 4, 9, 0.65);
     border: 1px solid var(--border);
-    border-radius: 5px;
+    border-radius: var(--borderRadiusSmall);
     cursor: pointer;
 }
 
@@ -493,9 +484,9 @@ body {
     flex: 0 0 auto;
     height: 9rem;
     overflow-y: auto;
-    background: #010409;
+    background: var(--colorNeutralBackground4);
     border-top: 1px solid var(--border);
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-family: var(--fontFamilyMonospace);
     font-size: 0.78rem;
     line-height: 1.5;
     padding: 0.5rem 0.75rem;
@@ -534,130 +525,25 @@ body {
     color: var(--accent);
 }
 
-/* Save split-button */
-.save-group {
-    display: flex;
+/* Save dialog + toast now live in the Fluent app-chrome root (fluent/app-chrome.tsx).
+   Fluent renders them via portals under this provider, which must not take up
+   layout space of its own. */
+.app-chrome-provider {
+    display: contents;
+    background: transparent;
 }
 
-.save-group .btn {
-    border-radius: 0;
-}
-
-.save-group .btn:first-child {
-    border-top-left-radius: 6px;
-    border-bottom-left-radius: 6px;
-}
-
-.btn-caret {
-    border-top-right-radius: 6px;
-    border-bottom-right-radius: 6px;
-    border-left: none;
-    padding-left: 0.55rem;
-    padding-right: 0.55rem;
-}
-
-/* Save dialog */
-.dialog {
-    /* Native modal dialogs center via `margin: auto`, which the global reset
-       (`* { margin: 0 }`) clobbers — restore it so the dialog is centered. */
-    margin: auto;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg-elevated);
-    color: var(--text);
-    padding: 0;
-    width: min(28rem, 92vw);
-}
-
-.dialog::backdrop {
-    background: rgba(1, 4, 9, 0.6);
-}
-
-.dialog-form {
+.save-dialog-content {
     display: flex;
     flex-direction: column;
-    gap: 0.9rem;
-    padding: 1.25rem;
+    gap: var(--spacingVerticalM, 0.75rem);
 }
 
-.dialog-form h2 {
-    font-size: 1rem;
-    font-weight: 600;
-}
-
-.field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-}
-
-.field input,
-.field textarea {
-    font: inherit;
-    font-size: 0.85rem;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.45rem 0.6rem;
-    resize: vertical;
-}
-
-.field input:focus,
-.field textarea:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
-.dialog-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    margin-top: 0.25rem;
-}
-
-/* Toast */
-.toast {
-    position: fixed;
-    bottom: 1.25rem;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 0.6rem 1rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
-    box-shadow: 0 8px 24px rgba(1, 4, 9, 0.5);
-    z-index: 10;
-}
-
-.toast.error {
-    border-color: var(--error);
-    color: var(--error);
-}
-
-/* Open-in-playground link: only shown in embed mode. */
-#openFullBtn {
+/* Embed mode: compact chrome, host drives via postMessage. The toolbar itself
+   (React/Fluent) hides its own actions in embed mode; here we only handle the
+   surrounding structural chrome. */
+body.embed .preview-overlay {
     display: none;
-    text-decoration: none;
-    align-items: center;
-}
-
-/* Embed mode: compact chrome, host drives via postMessage. */
-body.embed #examples,
-body.embed #versionSelect,
-body.embed #downloadBtn,
-body.embed #newBtn,
-body.embed .preview-overlay,
-body.embed .save-group {
-    display: none;
-}
-
-body.embed #openFullBtn {
-    display: inline-flex;
 }
 
 body.embed .toolbar {
@@ -674,10 +560,60 @@ body.embed-runner .split {
     grid-template-columns: 1fr;
 }
 
-/* Runner embed has no editor, so the Code/Scene toggle would have nothing to
-   switch to — hide it even on mobile. */
-body.embed-runner .mode-toggle {
+/* ---------------------------------------------------------------------------
+   Settings drawer
+
+   A right-anchored panel that hosts the React + Fluent settings island. The
+   drawer shell (position, slide-in, backdrop) is plain CSS using the Fluent
+   token layer; everything inside #settingsRoot is rendered by Fluent.
+--------------------------------------------------------------------------- */
+.settings-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.settings-backdrop[hidden] {
     display: none;
+}
+
+.settings-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 41;
+    width: min(360px, 90vw);
+    background: var(--colorNeutralBackground2);
+    border-left: 1px solid var(--border);
+    box-shadow: var(--shadow16);
+    transform: translateX(0);
+    transition: transform 0.18s ease;
+}
+
+.settings-drawer[hidden] {
+    display: none;
+}
+
+/* Slide-in start state, toggled off on the next frame by main.ts. */
+.settings-drawer.is-entering {
+    transform: translateX(100%);
+}
+
+.settings-root,
+.settings-fluent-provider {
+    height: 100%;
+}
+
+.settings-fluent-provider {
+    background: var(--colorNeutralBackground2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .settings-drawer {
+        transition: none;
+    }
 }
 
 /* ---------------------------------------------------------------------------
@@ -703,65 +639,6 @@ body.embed-runner .mode-toggle {
     .brand-text,
     .brand .beta-badge {
         display: none;
-    }
-
-    .mode-toggle {
-        display: inline-flex;
-    }
-
-    .btn.menu-btn {
-        display: inline-flex;
-    }
-
-    /* Actions become a dropdown panel anchored under the hamburger button. */
-    .actions {
-        position: absolute;
-        top: calc(100% + 0.4rem);
-        right: 0.5rem;
-        z-index: 20;
-        flex-direction: column;
-        align-items: stretch;
-        min-width: 13rem;
-        padding: 0.5rem;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        box-shadow: 0 12px 28px rgba(1, 4, 9, 0.55);
-    }
-
-    body:not(.menu-open) .actions {
-        display: none;
-    }
-
-    /* In the menu, icon buttons become full-width rows with a visible label. */
-    .actions .action-label {
-        display: inline;
-    }
-
-    .actions .btn-icon {
-        width: 100%;
-        height: auto;
-        justify-content: flex-start;
-        gap: 0.6rem;
-        padding: 0.55rem 0.65rem;
-    }
-
-    .actions .select {
-        width: 100%;
-    }
-
-    .actions .save-group {
-        width: 100%;
-    }
-
-    .actions .save-group .btn:first-child {
-        flex: 1 1 auto;
-    }
-
-    .actions .btn-caret {
-        flex: 0 0 auto;
-        width: auto;
-        justify-content: center;
     }
 
     /* Single full-screen pane; both panes share one grid cell and overlap. */

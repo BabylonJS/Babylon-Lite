@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
 /**
  * The Lite Playground app (editor + runner shell). The self-hosted engine under
@@ -7,6 +8,7 @@ import { defineConfig } from "vite";
  * the playground UI.
  */
 export default defineConfig({
+    plugins: [react()],
     server: {
         // Bind both IPv4 and IPv6 loopback. Vite's default `localhost` can bind
         // only one stack (we saw it land on IPv6 ::1 only), so a browser that

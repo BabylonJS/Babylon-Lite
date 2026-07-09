@@ -3,6 +3,7 @@
     "compilerOptions": {
         "outDir": "./dist",
         "rootDir": ".",
+        "jsx": "react-jsx",
         "types": ["@webgpu/types", "vite/client"]
     },
     "include": ["src", "scripts", "vite.config.ts", "vite.engine.config.ts"]
