@@ -1,5 +1,5 @@
 {
-  "rawKB": 87.7,
+  "rawKB": 87.8,
   "gzipKB": 35.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,8 +9,8 @@
     "scene178-gltf-glb-parser-d5msxooD.js",
     "scene178-ibl-fragment-CeRrvT96.js",
     "scene178-ibl-skybox-wgsl-CFIBOHHx.js",
-    "scene178-iridescence-fragment-B41NSj5n.js",
-    "scene178-pbr-renderable-Bg2Olj63.js",
+    "scene178-iridescence-fragment-Brk0XiiY.js",
+    "scene178-pbr-renderable-BVq02vOu.js",
     "scene178-rgbd-decode-BsmWs_Sj.js",
     "scene178-scene-uniforms-FTYH6Ct0.js",
     "scene178.js"
