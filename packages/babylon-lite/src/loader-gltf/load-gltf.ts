@@ -228,7 +228,9 @@ function assetUsesGltfFeatures(json: any) {
     return (
         json.extensionsUsed?.length ||
         json.animations?.length ||
-        JSON.stringify(json).includes("extras") ||
+        // "extras" (per-item metadata) or "sparse" (sparse accessor) anywhere in the asset means a
+        // feature module is needed. One stringify covers both — same cheap substring gate as extras.
+        /extras|sparse/.test(JSON.stringify(json)) ||
         (json.skins?.length && anyPrimitive(json, (p) => p.attributes?.JOINTS_0 !== undefined)) ||
         anyPrimitive(json, (p) => !!p.targets?.length) ||
         // A node with a negative-determinant local transform (odd negative scale, or a `matrix`

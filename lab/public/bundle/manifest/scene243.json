@@ -1,5 +1,5 @@
 {
-  "rawKB": 97.2,
+  "rawKB": 97.3,
   "gzipKB": 40.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene243-gltf-feature-animations-C06Hz25F.js",
     "scene243-gltf-feature-extras-VHPteGay.js",
     "scene243-gltf-feature-morph-BCUQi4W_.js",
-    "scene243-gltf-feature-registry-eBJA3kV-.js",
+    "scene243-gltf-feature-registry-BTYv3NTv.js",
     "scene243-gltf-json-asset-CnDTTIDf.js",
     "scene243-gltf-pbr-builder-ext-CVrSOAh6.js",
     "scene243-ibl-fragment-CeRrvT96.js",
