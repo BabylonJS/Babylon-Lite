@@ -1,6 +1,6 @@
 {
-  "rawKB": 110.5,
-  "gzipKB": 44.7,
+  "rawKB": 110.4,
+  "gzipKB": 44.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene144-create-skeleton-pj3iqxnA.js",
@@ -14,10 +14,10 @@
     "scene144-gltf-glb-parser-CXf6hcyj.js",
     "scene144-gltf-pbr-builder-ext-g9qXikef.js",
     "scene144-ibl-fragment-CeRrvT96.js",
-    "scene144-pbr-renderable-Cj12iCXG.js",
+    "scene144-pbr-renderable-D0QInMO-.js",
     "scene144-rgbd-decode-DNSQ_egC.js",
     "scene144-scene-uniforms-FTYH6Ct0.js",
-    "scene144-skeleton-fragment-Z9bmSqj3.js",
+    "scene144-skeleton-fragment-BDvpOA8m.js",
     "scene144-texture-2d-DQo3n8D6.js",
     "scene144.js"
   ]

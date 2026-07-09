@@ -227,6 +227,12 @@ export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./
 export { createMaterialView } from "./material/material-view.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
+export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
+export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
+export type { ToneMapping } from "./material/pbr/tone-mapping.js";
+export { StandardToneMapping } from "./material/pbr/tone-mapping.js";
+export { AcesToneMapping } from "./material/pbr/pbr-aces-wgsl.js";
+export { NeutralToneMapping } from "./material/pbr/pbr-neutral-wgsl.js";
 export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
 export { enableMaterialStencil } from "./material/enable-material-stencil.js";

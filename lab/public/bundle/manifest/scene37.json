@@ -1,5 +1,5 @@
 {
-  "rawKB": 97.1,
+  "rawKB": 97,
   "gzipKB": 39.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -12,7 +12,7 @@
     "scene37-gltf-glb-parser-CkbGcOCI.js",
     "scene37-gltf-pbr-builder-ext-rpTZqaAk.js",
     "scene37-ibl-fragment-CeRrvT96.js",
-    "scene37-pbr-renderable-BR1GmafX.js",
+    "scene37-pbr-renderable-Bo3qroe7.js",
     "scene37-pbr-template-ext-BoJ8SFLM.js",
     "scene37-reflectance-fragment-QHrzuq3H.js",
     "scene37-rgbd-decode-D3VLnI-E.js",
