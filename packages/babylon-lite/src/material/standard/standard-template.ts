@@ -255,6 +255,9 @@ var color = vec4<f32>(finalDiffuse * baseAmbientColor + finalSpecular + reflecti
         lightingBlock = `var color = vec4<f32>(clamp(emissiveContrib * diffuseColor, vec3<f32>(0.0), vec3<f32>(1.0)) * baseColor, alpha);`;
     }
 
+    // For a color-less pass (depth/shadow only) emit only the early `return;` after the alpha-test slot;
+    // the lighting + color tail below would be unreachable dead code (WGSL "code is unreachable"). The
+    // color path is byte-identical to the previous template, so pixel output is unchanged.
     const _fragmentTemplate = `/*SU*/
 ${lightsStructs}
 ${materialStruct}
@@ -277,7 +280,10 @@ ${diffuseColorCode}
 ${emissiveCode}
 ${specularColorCode}
 /*AT*/
-${_noColorOutput ? "return;" : _esmShadowOutput ? esmShadowDepthCode : ""}
+${
+    _noColorOutput
+        ? "return;"
+        : `${_esmShadowOutput ? esmShadowDepthCode : ""}
 ${lightingBlock}
 /*BC*/
 color = vec4<f32>(max(color.rgb, vec3<f32>(0.0)), color.a);
@@ -286,7 +292,8 @@ let fog = calcFogFactor(input.vf);
 color = vec4<f32>(mix(scene.vFogColor.rgb, color.rgb, fog), color.a);
 }
 /*BA*/
-${_noColorOutput ? "" : "return color;"}
+return color;`
+}
 }`;
 
     return {

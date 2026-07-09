@@ -1,5 +1,5 @@
 {
-  "rawKB": 92.4,
+  "rawKB": 92.5,
   "gzipKB": 36.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene47-gltf-glb-parser-6-tsF2C2.js",
     "scene47-gltf-sampler-desc-BJMmnJDF.js",
     "scene47-shader-composer-CgJmQyJj.js",
-    "scene47-standard-renderable-CUonYaUG.js",
+    "scene47-standard-renderable-dtxObRL9.js",
     "scene47-wgsl-helpers-CwHFFXvt.js",
     "scene47.js"
   ]

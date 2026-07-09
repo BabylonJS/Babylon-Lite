@@ -59,6 +59,9 @@ export interface ThinInstanceData {
     /** @internal Extra world-space radius added to every instance's culling sphere
      *  (see `setThinInstanceCullBoundsPad`). Undefined reads as 0. */
     _cullBoundsPad?: number;
+    /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
+     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
+    _refCount?: number;
 }
 
 /** Set all instances from a pre-built matrix array. */
