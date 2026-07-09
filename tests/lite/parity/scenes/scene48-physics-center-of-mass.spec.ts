@@ -6,7 +6,7 @@
  * physics steps after the kick. The scene self-determines the capture frame,
  * so the spec just waits on the `captureReady` flag (no fixed ?captureFrame).
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";

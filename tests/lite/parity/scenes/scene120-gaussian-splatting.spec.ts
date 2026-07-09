@@ -10,7 +10,7 @@
  * sort lands, so the screenshot is taken once the splat cloud is
  * settled.  Asserts full-image MAD ≤ `sceneConfig.maxMad`.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

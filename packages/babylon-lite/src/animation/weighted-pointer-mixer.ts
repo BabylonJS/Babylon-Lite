@@ -1,5 +1,5 @@
 import { F32 } from "../engine/typed-arrays.js";
-import { tickAnimation } from "./animation-tick.js";
+import { tickAnimationCore } from "./animation-group.js";
 import type { AnimationGroup, AnimationPropertyMixer, AnimationPropertyRuntimeTrack } from "./animation-group.js";
 import { ANIMATION_GROUP_TASK_CATEGORY, getAnimationGroups } from "./animation-group-task.js";
 import { setAnimationTaskCategoryHandler } from "./animation-manager.js";
@@ -30,31 +30,9 @@ interface WeightedPointerBucket {
 interface WeightedPointerScratch {
     readonly buckets: WeightedPointerBucket[];
     readonly sample: Float32Array;
-    readonly fades: AnimationWeightFade[];
 }
 
 let scratchByManager: WeakMap<AnimationManager, WeightedPointerScratch> | undefined;
-
-interface AnimationWeightFade {
-    readonly group: AnimationGroup;
-    readonly from: number;
-    readonly to: number;
-    readonly durationMs: number;
-    elapsedMs: number;
-}
-
-/** Options for {@link fadeAnimationWeight}. */
-export interface FadeAnimationWeightOptions {
-    readonly to: number;
-    readonly durationMs: number;
-    readonly from?: number;
-}
-
-/** Options for {@link crossFadeAnimationGroups}. */
-export interface CrossFadeAnimationGroupsOptions {
-    readonly durationMs: number;
-    readonly toWeight?: number;
-}
 
 /** Enables weighted property-animation blending on `manager` by registering its category handler. */
 export function enablePropertyAnimationBlending(manager: AnimationManager): void {
@@ -68,43 +46,14 @@ function getScratch(manager: AnimationManager): WeightedPointerScratch {
         scratch = {
             buckets: [],
             sample: new F32(16),
-            fades: [],
         };
         scratchByManager.set(manager, scratch);
     }
     return scratch;
 }
 
-/** Animates `group`'s blend weight toward `options.to` over `options.durationMs`, enabling blending on `manager`.
- *  @throws If `to`/`from` are outside `[0, 1]` or the duration is not a finite positive number. */
-export function fadeAnimationWeight(manager: AnimationManager, group: AnimationGroup, options: FadeAnimationWeightOptions): void {
-    const to = validateWeight(options.to);
-    const from = options.from === undefined ? group.weight : validateWeight(options.from);
-    if (!(options.durationMs > 0) || !Number.isFinite(options.durationMs)) {
-        throw new Error(`Animation weight fade duration must be a finite positive number, got ${options.durationMs}`);
-    }
-
-    enablePropertyAnimationBlending(manager);
-    group.weight = from;
-    const scratch = getScratch(manager);
-    for (let i = scratch.fades.length - 1; i >= 0; i--) {
-        if (scratch.fades[i]!.group === group) {
-            scratch.fades.splice(i, 1);
-        }
-    }
-    scratch.fades.push({ group, from, to, durationMs: options.durationMs, elapsedMs: 0 });
-}
-
-/** Cross-fades from `fromGroup` to `toGroup`, fading the first to weight 0 and the second to `options.toWeight` (default 1). */
-export function crossFadeAnimationGroups(manager: AnimationManager, fromGroup: AnimationGroup, toGroup: AnimationGroup, options: CrossFadeAnimationGroupsOptions): void {
-    const toWeight = validateWeight(options.toWeight ?? 1);
-    fadeAnimationWeight(manager, fromGroup, { to: 0, durationMs: options.durationMs });
-    fadeAnimationWeight(manager, toGroup, { to: toWeight, durationMs: options.durationMs });
-}
-
 function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: number): boolean {
     const scratch = getScratch(manager);
-    updateFades(scratch, deltaMs);
     let contestedCount = 0;
 
     for (let bucketIndex = 0; bucketIndex < scratch.buckets.length; bucketIndex++) {
@@ -146,7 +95,7 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
         const mixer = group._propertyMixer;
         const tracks = mixer?.[MIX_TRACKS];
         if (!tracks) {
-            tickAnimation(group, deltaMs, manager.engine);
+            tickAnimationCore(group, deltaMs, manager.engine);
             continue;
         }
 
@@ -182,26 +131,6 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
     }
 
     return true;
-}
-
-function updateFades(scratch: WeightedPointerScratch, deltaMs: number): void {
-    for (let i = scratch.fades.length - 1; i >= 0; i--) {
-        const fade = scratch.fades[i]!;
-        fade.elapsedMs = Math.min(fade.durationMs, fade.elapsedMs + Math.max(0, deltaMs));
-        const t = fade.elapsedMs / fade.durationMs;
-        fade.group.weight = fade.from + (fade.to - fade.from) * t;
-        if (fade.elapsedMs >= fade.durationMs) {
-            fade.group.weight = fade.to;
-            scratch.fades.splice(i, 1);
-        }
-    }
-}
-
-function validateWeight(weight: number): number {
-    if (!Number.isFinite(weight) || weight < 0 || weight > 1) {
-        throw new Error(`Animation weight must be a finite number between 0 and 1, got ${weight}`);
-    }
-    return weight;
 }
 
 function advancePropertyGroupTime(group: AnimationGroup, mixer: AnimationPropertyMixer, deltaMs: number): number {

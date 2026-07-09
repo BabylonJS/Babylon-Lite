@@ -68,6 +68,10 @@ export interface StaticSoundPlayOptions {
     loopEnd?: number;
     /** Loop start point in seconds. */
     loopStart?: number;
+    /** Detune of this instance, in cents. Defaults to the sound's `pitch`. */
+    pitch?: number;
+    /** Playback rate multiplier of this instance. Defaults to the sound's `playbackRate`. */
+    playbackRate?: number;
     /** Start offset in seconds. */
     startOffset?: number;
     /** Per-instance volume. */
@@ -123,7 +127,7 @@ export interface StaticSound {
 export interface SoundInstance {
     /** @internal */ _sound: StaticSound;
     /** @internal */ _engine: AudioEngine;
-    /** @internal */ _options: { duration: number; loop: boolean; loopEnd: number; loopStart: number; startOffset: number };
+    /** @internal */ _options: { duration: number; loop: boolean; loopEnd: number; loopStart: number; pitch: number; playbackRate: number; startOffset: number };
     /** @internal */ _volumeNode: GainNode;
     /** @internal */ _sourceNode: AudioBufferSourceNode | null;
     /** @internal */ _state: SoundState;
@@ -221,6 +225,8 @@ export function playSound(sound: StaticSound, options: StaticSoundPlayOptions = 
         loop: options.loop ?? sound._options.loop,
         loopStart: options.loopStart ?? sound._options.loopStart,
         loopEnd: options.loopEnd ?? sound._options.loopEnd,
+        pitch: options.pitch ?? sound._options.pitch,
+        playbackRate: options.playbackRate ?? sound._options.playbackRate,
         startOffset: options.startOffset ?? sound._options.startOffset,
         volume: options.volume ?? 1,
         waitTime: options.waitTime ?? 0,
@@ -310,6 +316,8 @@ function _createInstance(sound: StaticSound): SoundInstance {
             loop: sound._options.loop,
             loopEnd: sound._options.loopEnd,
             loopStart: sound._options.loopStart,
+            pitch: sound._options.pitch,
+            playbackRate: sound._options.playbackRate,
             startOffset: sound._options.startOffset,
         },
         _volumeNode: new GainNode(engine._ctx),
@@ -343,6 +351,8 @@ function _instancePlay(instance: SoundInstance, options: Required<StaticSoundPla
     instance._options.loop = options.loop;
     instance._options.loopStart = options.loopStart;
     instance._options.loopEnd = options.loopEnd;
+    instance._options.pitch = options.pitch;
+    instance._options.playbackRate = options.playbackRate;
     instance._options.startOffset = options.startOffset;
 
     let startOffset = instance._options.startOffset;
@@ -394,6 +404,8 @@ function _instanceResume(instance: SoundInstance, options: StaticSoundPlayOption
             loop: options.loop ?? instance._options.loop,
             loopStart: options.loopStart ?? instance._options.loopStart,
             loopEnd: options.loopEnd ?? instance._options.loopEnd,
+            pitch: options.pitch ?? instance._options.pitch,
+            playbackRate: options.playbackRate ?? instance._options.playbackRate,
             startOffset: options.startOffset ?? instance._options.startOffset,
             volume: options.volume ?? instance._volumeNode.gain.value,
             waitTime: options.waitTime ?? 0,
@@ -440,6 +452,8 @@ function _onEngineStateChanged(instance: SoundInstance): void {
             loop: instance._options.loop,
             loopStart: instance._options.loopStart,
             loopEnd: instance._options.loopEnd,
+            pitch: instance._options.pitch,
+            playbackRate: instance._options.playbackRate,
             startOffset: instance._options.startOffset,
             volume: instance._volumeNode.gain.value,
             waitTime: 0,
@@ -476,11 +490,11 @@ function _initSourceNode(instance: SoundInstance): void {
     }
 
     const node = instance._sourceNode;
-    node.detune.value = sound._options.pitch;
+    node.detune.value = instance._options.pitch;
     node.loop = instance._options.loop;
     node.loopEnd = instance._options.loopEnd;
     node.loopStart = instance._options.loopStart;
-    node.playbackRate.value = sound._options.playbackRate;
+    node.playbackRate.value = instance._options.playbackRate;
 }
 
 function _deinitSourceNode(instance: SoundInstance): void {

@@ -23,14 +23,23 @@ import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
 import type { ClusteredLightContainer } from "../light/clustered.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
+import type { ToneMapping } from "../material/pbr/tone-mapping.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
     exposure: number;
     contrast: number;
     toneMappingEnabled: boolean;
-    /** "standard" (BJS TONEMAPPING_STANDARD, default) or "aces" (BJS TONEMAPPING_ACES). */
-    toneMappingType?: "standard" | "aces";
+    /**
+     * Tone mapping algorithm applied by PBR materials when `toneMappingEnabled` is true.
+     * Undefined means the default {@link StandardToneMapping} (exponential). Assign a
+     * built-in ({@link StandardToneMapping}, {@link AcesToneMapping}, {@link NeutralToneMapping})
+     * or a custom {@link ToneMapping}.
+     *
+     * This is baked into the PBR shaders at `registerScene()` time. To change it after
+     * registration, use `setSceneImageProcessing` so the affected pipelines are rebuilt.
+     */
+    toneMapping?: ToneMapping;
 }
 
 /** A clipping plane expressed as the coefficients `[a, b, c, d]` of `a·x + b·y + c·z + d`. */

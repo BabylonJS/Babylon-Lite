@@ -116,6 +116,8 @@ export type { TaaPostProcessTask, TaaPostProcessTaskConfig } from "./post-proces
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
 export { attachControl, setCameraLimits } from "./camera/arc-rotate-controls.js";
 export type { AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-rotate-controls.js";
+export { interpolateArcRotateCamera } from "./camera/arc-rotate-interpolate.js";
+export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "./camera/arc-rotate-interpolate.js";
 export { createFreeCamera } from "./camera/free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
 
@@ -225,6 +227,12 @@ export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./
 export { createMaterialView } from "./material/material-view.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
+export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
+export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
+export type { ToneMapping } from "./material/pbr/tone-mapping.js";
+export { StandardToneMapping } from "./material/pbr/tone-mapping.js";
+export { AcesToneMapping } from "./material/pbr/pbr-aces-wgsl.js";
+export { NeutralToneMapping } from "./material/pbr/pbr-neutral-wgsl.js";
 export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
 export { enableMaterialStencil } from "./material/enable-material-stencil.js";
@@ -281,12 +289,15 @@ export { createAnimationController } from "./skeleton/skeleton-updater.js";
 export { enableBoneControl, getBoneByName, setBonePosition, setBoneRotationQuaternion, setBoneScaling, setBoneVisible, clearBoneOverride } from "./skeleton/bone-control.js";
 export type { Skeleton, Bone } from "./skeleton/bone-control.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
+export { runFrameInterpolation } from "./animation/frame-interpolation.js";
+export type { FrameInterpolationStep } from "./animation/frame-interpolation.js";
 export { AnimationGroupMaskMode, createAnimationGroupMask, animationGroupMaskRetainsTarget } from "./animation/animation-group-mask.js";
 export type { AnimationGroupMask } from "./animation/animation-group-mask.js";
 export { setAnimationWeight } from "./animation/animation-weight.js";
-export { crossFadeAnimationGroups, enablePropertyAnimationBlending, fadeAnimationWeight } from "./animation/weighted-pointer-mixer.js";
+export { enablePropertyAnimationBlending } from "./animation/weighted-pointer-mixer.js";
+export { crossFadeAnimationGroups, fadeAnimationWeight } from "./animation/animation-weight-fade.js";
 export { enableAnimationBlending, setAnimationAdditive } from "./animation/weighted-gltf-mixer.js";
-export type { CrossFadeAnimationGroupsOptions, FadeAnimationWeightOptions } from "./animation/weighted-pointer-mixer.js";
+export type { CrossFadeAnimationGroupsOptions, FadeAnimationWeightOptions } from "./animation/animation-weight-fade.js";
 export type { AnimationAdditiveOptions } from "./animation/weighted-gltf-mixer.js";
 export {
     addAnimationTask,
@@ -320,6 +331,7 @@ export { crossVec3 } from "./math/cross-vec3.js";
 export { lengthVec3 } from "./math/length-vec3.js";
 export { negateVec3 } from "./math/negate-vec3.js";
 export { lerpVec3 } from "./math/lerp-vec3.js";
+export { expDampFactor, dampScalar, lerpAngleShortest } from "./math/damp.js";
 export {
     addVec3InPlace,
     addVec3ToRef,
@@ -392,6 +404,8 @@ export type { PixelViewport } from "./camera/viewport.js";
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { disposeMeshGpu } from "./mesh/mesh-dispose.js";
+export { computeMaxExtents } from "./mesh/compute-max-extents.js";
+export type { MeshExtent } from "./mesh/compute-max-extents.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";
 export { ObservableQuat } from "./math/observable-quat.js";
 export type { StandardMaterialProps, FogConfig } from "./material/standard/standard-material.js";
@@ -465,6 +479,7 @@ export type { GpuPicker, PickDiscardRule, PickOptions } from "./picking/gpu-pick
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
+export { computeDeformedPositionToRef } from "./picking/deformed-vertex.js";
 
 // ─── Gizmos ──────────────────────────────────────────────────────────
 export { createUtilityLayer, registerUtilityLayer, disposeUtilityLayer } from "./gizmo/utility-layer.js";
