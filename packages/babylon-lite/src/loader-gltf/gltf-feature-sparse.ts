@@ -53,12 +53,23 @@ interface Accessor {
     sparse?: Sparse;
 }
 interface BufferView {
+    buffer?: number;
     byteOffset?: number;
+    byteLength?: number;
     byteStride?: number;
 }
 
 function align4(n: number): number {
     return (n + 3) & ~3;
+}
+
+/** Byte size of a component type, with an explicit error for malformed/unsupported types. */
+function componentBytes(componentType: number): number {
+    const b = COMPONENT_BYTES[componentType];
+    if (!b) {
+        throw new Error(`glTF sparse: unsupported componentType ${componentType}`);
+    }
+    return b;
 }
 
 /** Read one unsigned integer sparse index. */
@@ -134,7 +145,7 @@ const feature: GltfFeature = {
             if (a.sparse) {
                 sparseIdx.push(i);
                 const cc = TYPE_SIZES[a.type] ?? 1;
-                appended = align4(appended + a.count * cc * COMPONENT_BYTES[a.componentType]!);
+                appended = align4(appended + a.count * cc * componentBytes(a.componentType));
             }
         }
         if (sparseIdx.length === 0) {
@@ -152,7 +163,7 @@ const feature: GltfFeature = {
             const a = accessors[i]!;
             const sparse = a.sparse!;
             const cc = TYPE_SIZES[a.type] ?? 1;
-            const compBytes = COMPONENT_BYTES[a.componentType]!;
+            const compBytes = componentBytes(a.componentType);
             const elemBytes = cc * compBytes;
             const dstOffset = cursor;
 
@@ -172,13 +183,20 @@ const feature: GltfFeature = {
             }
 
             // 2) Sparse override: replace element at indices[e] with values[e].
+            const idxComponentType = sparse.indices.componentType;
+            if (idxComponentType === undefined) {
+                throw new Error("glTF sparse: indices.componentType is required");
+            }
             const idxBv = bufferViews[sparse.indices.bufferView]!;
             const idxBase = (idxBv.byteOffset ?? 0) + (sparse.indices.byteOffset ?? 0);
-            const idxBytes = COMPONENT_BYTES[sparse.indices.componentType!]!;
+            const idxBytes = componentBytes(idxComponentType);
             const valBv = bufferViews[sparse.values.bufferView]!;
             const valBase = (valBv.byteOffset ?? 0) + (sparse.values.byteOffset ?? 0);
             for (let e = 0; e < sparse.count; e++) {
-                const target = readIndex(binChunk, idxBase + e * idxBytes, sparse.indices.componentType!);
+                const target = readIndex(binChunk, idxBase + e * idxBytes, idxComponentType);
+                if (target < 0 || target >= a.count) {
+                    throw new Error(`glTF sparse: index ${target} out of range for accessor of count ${a.count}`);
+                }
                 for (let c = 0; c < cc; c++) {
                     const value = readComponent(binChunk, valBase + (e * cc + c) * compBytes, a.componentType);
                     writeComponent(outView, dstOffset + (target * cc + c) * compBytes, a.componentType, value);
@@ -186,11 +204,12 @@ const feature: GltfFeature = {
             }
 
             // Rebind the accessor onto the materialized region; the substitution is now baked in.
+            const byteLength = elemBytes * a.count;
             a.bufferView = bufferViews.length;
             a.byteOffset = 0;
-            bufferViews.push({ byteOffset: dstOffset });
+            bufferViews.push({ buffer: 0, byteOffset: dstOffset, byteLength });
             delete a.sparse;
-            cursor = align4(cursor + elemBytes * a.count);
+            cursor = align4(cursor + byteLength);
         }
 
         return outView;
