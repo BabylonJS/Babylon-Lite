@@ -22,10 +22,11 @@
  *     otherwise read as raw bytes and renders as corrupted geometry). VEC4 is
  *     excluded because JOINTS_0/1 are the only unsigned non-normalized VEC4
  *     vertex attribute, and the skeleton feature reads them as Uint8/Uint16 and
- *     de-strides them itself — they must never be floattened here.
+ *     de-strides them itself — they must never be flattened here.
  * Tight (non-strided) unsigned integer accessors are left intact: indices and
- * tight JOINTS_0/WEIGHTS_0 are already correct and the index / skeleton paths
- * expect integers.
+ * tight JOINTS_0/1 are already correct and the index / skeleton paths expect
+ * integers. (WEIGHTS_n are FLOAT or normalized, so they are handled by the
+ * FLOAT / `normalized` branches above, not here.)
  */
 
 import { U8, DV } from "../engine/typed-arrays.js";
@@ -111,7 +112,7 @@ const feature: GltfFeature = {
             // de-stride them into tightly-packed FLOAT. VEC4 (JOINTS_n) is excluded.
             const unsignedInt = a.componentType === UNSIGNED_BYTE || a.componentType === UNSIGNED_SHORT;
             const stridedUnsignedInt =
-                unsignedInt && a.normalized !== true && componentCount !== 4 && stride !== undefined && compBytes !== undefined && stride !== componentCount * compBytes;
+                unsignedInt && a.normalized !== true && a.type !== "VEC4" && stride !== undefined && compBytes !== undefined && stride !== componentCount * compBytes;
             if (signed || a.normalized === true || stridedFloat || stridedUnsignedInt) {
                 convert.push(i);
                 appended = align4(appended + a.count * componentCount * 4);
