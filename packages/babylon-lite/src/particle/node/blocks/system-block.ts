@@ -48,6 +48,9 @@ export const systemBlock: ParticleBlockEvaluator = {
                 return typeof rate === "number" ? rate : sys.emitRate;
             };
         } else {
+            // Clear any previously-installed getter so a constant rate is never shadowed by a stale
+            // dynamic getter (defensive if this block ever re-runs against an already-configured system).
+            system._emitRateGetter = null;
             const emitRate = ctx.input(block, "emitRate", () => 10)(state);
             if (typeof emitRate === "number") {
                 system.emitRate = emitRate;
