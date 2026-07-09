@@ -1,6 +1,6 @@
 {
-  "rawKB": 62.5,
-  "gzipKB": 25.6,
+  "rawKB": 61.8,
+  "gzipKB": 25.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene206-_mat4-storage-f64-FI8ZUjRd.js",
@@ -8,8 +8,7 @@
     "scene206-floating-origin-B3Cmn-Fn.js",
     "scene206-pack-mat4-with-offset-BS-Lz8k7.js",
     "scene206-scene-uniforms-FTYH6Ct0.js",
-    "scene206-standard-renderable-BC1FQ5sY.js",
-    "scene206-wgsl-helpers-CwHFFXvt.js",
+    "scene206-standard-renderable-fpHwEHW_.js",
     "scene206.js"
   ]
 }

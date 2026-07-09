@@ -1,17 +1,17 @@
 {
-  "rawKB": 78.7,
-  "gzipKB": 32.4,
+  "rawKB": 77.7,
+  "gzipKB": 32.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene23-anisotropy-fragment-CbNkTpSR.js",
-    "scene23-background-dds-skybox-YRmWTRyD.js",
-    "scene23-background-ground-BAFKPnr1.js",
+    "scene23-background-dds-skybox-o77MthFd.js",
+    "scene23-background-ground-DmmKHN9b.js",
     "scene23-cubemap-skybox-material-sjF5EPm1.js",
     "scene23-ibl-fragment-CeRrvT96.js",
-    "scene23-pbr-renderable-DGlYamnr.js",
+    "scene23-pbr-renderable-B_0TrixN.js",
     "scene23-rgbd-decode-BeChsxxY.js",
     "scene23-scene-uniforms-FTYH6Ct0.js",
-    "scene23-wgsl-helpers-CkUi9P9Q.js",
+    "scene23-wgsl-helpers-BgB2AJrF.js",
     "scene23.js"
   ]
 }

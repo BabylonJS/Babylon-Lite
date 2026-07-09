@@ -1,10 +1,9 @@
 {
-  "rawKB": 50.3,
-  "gzipKB": 20,
+  "rawKB": 49.6,
+  "gzipKB": 19.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene228-standard-renderable-CT3O-Dof.js",
-    "scene228-wgsl-helpers-CwHFFXvt.js",
+    "scene228-standard-renderable-DJZlGqJV.js",
     "scene228.js"
   ]
 }

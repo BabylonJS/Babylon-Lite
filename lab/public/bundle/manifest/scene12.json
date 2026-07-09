@@ -1,22 +1,22 @@
 {
-  "rawKB": 103.4,
-  "gzipKB": 42.2,
+  "rawKB": 102.9,
+  "gzipKB": 42,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene12-create-skeleton-Cjf80v3R.js",
-    "scene12-generate-mipmaps-Bsp4UQ3D.js",
-    "scene12-gltf-animation-B52vCe_y.js",
-    "scene12-gltf-feature-animations-mg2hSyya.js",
-    "scene12-gltf-feature-registry-CwS0X5va.js",
-    "scene12-gltf-feature-skeleton-Buu6DPVS.js",
+    "scene12-generate-mipmaps-WJd2dKx2.js",
+    "scene12-gltf-animation-DCrRAyqI.js",
+    "scene12-gltf-feature-animations-BQXKsHFX.js",
+    "scene12-gltf-feature-registry-CWn1bZnM.js",
+    "scene12-gltf-feature-skeleton-BviNuLO1.js",
     "scene12-gltf-glb-parser-BrsOlymf.js",
     "scene12-ibl-fragment-CeRrvT96.js",
-    "scene12-pbr-renderable-k2jsIxp9.js",
+    "scene12-pbr-renderable-Cobj0uBn.js",
     "scene12-reflectance-fragment-Kimqnape.js",
     "scene12-rgbd-decode-BLiTLohS.js",
     "scene12-scene-uniforms-FTYH6Ct0.js",
     "scene12-singlelight-directional-wgsl-DhnkgLEx.js",
-    "scene12-skeleton-fragment-HQ02KgI1.js",
+    "scene12-skeleton-fragment-DSvfMW4N.js",
     "scene12.js"
   ]
 }

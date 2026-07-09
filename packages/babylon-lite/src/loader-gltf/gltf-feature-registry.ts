@@ -16,6 +16,8 @@
  * The core loader knows zero feature names; new extensions are added here alone.
  */
 import type { GltfFeature } from "./gltf-feature.js";
+import type { GltfMatExtCtx, GltfMaterialData } from "./gltf-material.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { anyPrimitive, needsOrmComposite } from "./gltf-parser.js";
 
 /** Dynamic `import()` of a feature's `GltfFeature` module. */
@@ -73,6 +75,18 @@ export async function loadGltfFeatures(json: any): Promise<GltfFeature[]> {
     const used: string[] = json.extensionsUsed ?? [];
     const mods = await Promise.all(_features.flatMap(([t, load]) => ((typeof t === "string" ? used.includes(t) : t(json)) ? [load()] : [])));
     return mods.map((m) => m.default);
+}
+
+/** Run every active material feature and merge its PBR fragment. */
+export async function runGltfMaterialFeatures(mat: GltfMaterialData, features: GltfFeature[], ctx: GltfMatExtCtx): Promise<Partial<PbrMaterialProps> | undefined> {
+    const fragments = await Promise.all(features.map((feature) => feature.applyMaterial!(mat, ctx)));
+    let layers: Partial<PbrMaterialProps> | undefined;
+    for (const fragment of fragments) {
+        if (fragment) {
+            Object.assign((layers ??= {}), fragment);
+        }
+    }
+    return layers;
 }
 
 function hasGltfExtras(json: any): boolean {
