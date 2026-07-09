@@ -8,7 +8,7 @@
 import { test, expect } from "../parity-fixtures";
 import type { Browser, Page } from "@playwright/test";
 import * as path from "path";
-import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
+import { acquireBjsPage, attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
 const SCENE_ID = 115;
 const SEEK_TIME = 100 / 60;
@@ -90,14 +90,12 @@ function expectMarkerState(state: PickState, label: string): void {
 }
 
 async function readBjsPickState(browser: Browser): Promise<PickState> {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const bjsPage = await context.newPage();
+    const { page: bjsPage, release } = await acquireBjsPage(browser);
     try {
         await bjsPage.goto(`/babylon-ref-scene${SCENE_ID}.html?seekTime=${SEEK_TIME}`);
         return await readPickState(bjsPage);
     } finally {
-        await bjsPage.close();
-        await context.close();
+        await release();
     }
 }
 

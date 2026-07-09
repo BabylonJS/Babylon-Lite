@@ -4,6 +4,8 @@ import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { SpotLight } from "@babylonjs/core/Lights/spotLight";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent";
+// TEMP (BJS 9.15+ pure/non-pure split): restores the createDepthStencilTexture side-effect dropped by tree-shaking; remove once upstream re-adds the transitive registration (open BJS PR).
+import "@babylonjs/core/Engines/AbstractEngine/abstractEngine.texture";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";

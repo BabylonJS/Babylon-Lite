@@ -4,7 +4,13 @@ import "@babylonjs/core/Loading/Plugins/babylonFileLoader";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/core/Cameras/universalCamera";
+// TEMP (BJS 9.15+ pure/non-pure split): the .babylon loader no longer transitively
+// registers these parsers; without them Light/Material parse throws mid-load and the
+// scene ends up with no active camera. Remove once upstream re-adds the transitive
+// registration (open BJS PR).
+import "@babylonjs/core/Lights/pointLight";
 import "@babylonjs/core/Materials/standardMaterial";
+import "@babylonjs/core/Materials/Textures/cubeTexture";
 import "@babylonjs/loaders";
 
 (async function () {

@@ -28,7 +28,7 @@ import { test, expect } from "../parity-fixtures";
 import type { Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
+import { acquireBjsPage, captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(105);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene105-moving-platform");
@@ -80,11 +80,9 @@ test("Scene 105 — Character controller + moving platform matches Babylon.js", 
     const goldenPath = await captureGolden(browser, { sceneId: 105, queryParams: `captureFrame=${VISUAL_FRAME}`, waitFlag: "captureReady" });
 
     // ── Babylon.js reference (live DATA) at the collision frame ──
-    const bjsContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const bjsPage = await bjsContext.newPage();
+    const { page: bjsPage, release } = await acquireBjsPage(browser);
     const bjs = await capture(bjsPage, "/babylon-ref-scene105.html", COLLISION_FRAME, "Scene 105 BJS reference (collisions)");
-    await bjsPage.close();
-    await bjsContext.close();
+    await release();
 
     // ── Lite: collision frame (data) + pre-contact frame (visual) ──
     const lite = await capture(page, "/scene105.html", COLLISION_FRAME, "Scene 105 Lite (collisions)");

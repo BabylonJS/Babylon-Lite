@@ -21,7 +21,7 @@ import { test, expect } from "../parity-fixtures";
 import * as fs from "fs";
 import * as path from "path";
 import type { Page } from "@playwright/test";
-import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
+import { acquireBjsPage, attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(222);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene222-composite-gizmos");
@@ -136,8 +136,7 @@ test("Scene 222 — Composite Gizmos matches Babylon.js reference (local→world
     const browser = page.context().browser()!;
 
     if (!fs.existsSync(GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
-        const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-        const bjsPage = await ctx.newPage();
+        const { page: bjsPage, release } = await acquireBjsPage(browser);
         await bjsPage.goto("/babylon-ref-scene222.html");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
@@ -146,8 +145,7 @@ test("Scene 222 — Composite Gizmos matches Babylon.js reference (local→world
         await bjsPage.waitForTimeout(300);
         fs.mkdirSync(REFERENCE_DIR, { recursive: true });
         await bjsPage.locator("canvas").screenshot({ path: GOLDEN_REF });
-        await bjsPage.close();
-        await ctx.close();
+        await release();
     }
 
     await page.goto("/scene222.html");

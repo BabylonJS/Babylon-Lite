@@ -13,7 +13,7 @@
 import { test, expect } from "../parity-fixtures";
 import type { Browser, Page } from "@playwright/test";
 import * as path from "path";
-import { captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
+import { acquireBjsPage, captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(102);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene102-physics-raycast");
@@ -28,16 +28,14 @@ async function readRayResult(page: Page): Promise<string | undefined> {
 
 /** Launch the BJS reference page live to read the raycast result DATA at the capture frame. */
 async function captureBjsData(browser: Browser): Promise<string | undefined> {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const bjsPage = await context.newPage();
+    const { page: bjsPage, release } = await acquireBjsPage(browser);
 
     await bjsPage.goto(`/babylon-ref-scene102.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 102 BJS reference" });
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: `Scene 102 BJS reference at frame ${CAPTURE_FRAME}`, flag: "captureReady", pollMs: 100 });
     const rayResult = await readRayResult(bjsPage);
 
-    await bjsPage.close();
-    await context.close();
+    await release();
     return rayResult;
 }
 

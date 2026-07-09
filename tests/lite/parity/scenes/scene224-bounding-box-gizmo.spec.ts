@@ -25,7 +25,7 @@ import { test, expect } from "../parity-fixtures";
 import * as fs from "fs";
 import * as path from "path";
 import type { Page } from "@playwright/test";
-import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
+import { acquireBjsPage, attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(224);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene224-bounding-box-gizmo");
@@ -87,8 +87,7 @@ test("Scene 224 — Bounding Box Gizmo matches Babylon.js reference (determinist
     const browser = page.context().browser()!;
 
     if (!fs.existsSync(GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
-        const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-        const bjsPage = await ctx.newPage();
+        const { page: bjsPage, release } = await acquireBjsPage(browser);
         await bjsPage.goto("/babylon-ref-scene224.html?nocam=1");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
@@ -99,8 +98,7 @@ test("Scene 224 — Bounding Box Gizmo matches Babylon.js reference (determinist
         console.log(`BJS  root: x=${bjsAfter.px.toFixed(3)} qw=${bjsAfter.qw.toFixed(3)} sx=${bjsAfter.sx.toFixed(3)}`);
         fs.mkdirSync(REFERENCE_DIR, { recursive: true });
         await bjsPage.locator("canvas").screenshot({ path: GOLDEN_REF });
-        await bjsPage.close();
-        await ctx.close();
+        await release();
     }
 
     await page.goto("/scene224.html?nocam=1");

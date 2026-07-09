@@ -364,3 +364,35 @@ export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions
 
     return goldenPath;
 }
+
+/**
+ * Acquire a page for capturing live Babylon.js (BJS) reference DATA (not the golden
+ * image) — e.g. physics event flags, picking coordinates, gizmo state.
+ *
+ * When `REUSE_BROWSER` is set and the parity worker already owns a context+page,
+ * this hands back that shared page instead of opening a new browser window, and
+ * `release()` is a no-op (the worker fixture owns the page's lifecycle, and the
+ * calling test re-navigates it afterwards). Otherwise it creates a fresh, isolated
+ * context+page that the caller owns, and `release()` tears both down.
+ *
+ * This mirrors {@link captureGolden}'s reuse logic so headed local runs keep a
+ * single reused window per worker rather than popping a window per data-capture spec.
+ */
+export async function acquireBjsPage(browser: Browser): Promise<{ page: Page; release: () => Promise<void> }> {
+    const wantReuse = process.env.REUSE_BROWSER === "true" || process.env.REUSE_BROWSER === "1";
+    const existingContext = wantReuse ? browser.contexts()[0] : undefined;
+    const existingPage = existingContext?.pages()[0];
+    if (existingContext && existingPage) {
+        // Reuse the worker-owned context/page; the fixture tears it down at end of worker.
+        return { page: existingPage, release: async () => {} };
+    }
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    const page = await context.newPage();
+    return {
+        page,
+        release: async () => {
+            await page.close();
+            await context.close();
+        },
+    };
+}

@@ -10,7 +10,7 @@ import { test, expect } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
+import { acquireBjsPage, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(40);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene40-physics");
@@ -22,16 +22,14 @@ test.skip(!!sceneConfig.skipParity, "Scene 40 skipped via skipParity in scene-co
 
 async function captureBjsReference(browser: Browser): Promise<string> {
     fs.mkdirSync(REFERENCE_DIR, { recursive: true });
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const bjsPage = await context.newPage();
+    const { page: bjsPage, release } = await acquireBjsPage(browser);
 
     await bjsPage.goto(`/babylon-ref-scene40.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 40 BJS reference" });
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: `Scene 40 BJS reference at frame ${CAPTURE_FRAME}`, flag: "captureReady", pollMs: 100 });
     await bjsPage.locator("canvas").screenshot({ path: LIVE_REF });
 
-    await bjsPage.close();
-    await context.close();
+    await release();
     return LIVE_REF;
 }
 

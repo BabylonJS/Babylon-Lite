@@ -8,7 +8,7 @@ import { test, expect } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
+import { acquireBjsPage, attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(41);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene41-physics-shapes");
@@ -24,16 +24,14 @@ async function captureBjsReference(browser: Browser): Promise<string> {
     }
 
     fs.mkdirSync(REFERENCE_DIR, { recursive: true });
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const bjsPage = await context.newPage();
+    const { page: bjsPage, release } = await acquireBjsPage(browser);
 
     await bjsPage.goto(`/babylon-ref-scene41.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 41 BJS reference" });
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: `Scene 41 BJS reference at frame ${CAPTURE_FRAME}`, flag: "captureReady", pollMs: 100 });
     await bjsPage.locator("canvas").screenshot({ path: GOLDEN_REF });
 
-    await bjsPage.close();
-    await context.close();
+    await release();
     return GOLDEN_REF;
 }
 

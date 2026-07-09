@@ -12,6 +12,14 @@ import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 import { Scene } from "@babylonjs/core/scene";
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import "@babylonjs/loaders";
+// TEMP (BJS 9.15+ pure/non-pure split): the .babylon loader no longer transitively
+// registers these parsers; without them the HillValley load throws mid-parse and the
+// scene ends up with no active camera. Remove once upstream re-adds the transitive
+// registration (open BJS PR).
+import "@babylonjs/core/Cameras/universalCamera";
+import "@babylonjs/core/Lights/pointLight";
+import "@babylonjs/core/Materials/standardMaterial";
+import "@babylonjs/core/Materials/Textures/cubeTexture";
 import { FrameGraph } from "@babylonjs/core/FrameGraph/frameGraph";
 import { FrameGraphClearTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/clearTextureTask";
 import { FrameGraphGeometryRendererTask } from "@babylonjs/core/FrameGraph/Tasks/Rendering/geometryRendererTask";
