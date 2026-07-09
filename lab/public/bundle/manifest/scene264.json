@@ -1,0 +1,19 @@
+{
+  "rawKB": 80.2,
+  "gzipKB": 33.6,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene264-env-helpers-23YvOcOj.js",
+    "scene264-generate-mipmaps-KrqAJzxS.js",
+    "scene264-gltf-ext-lights-image-based-Bl2jmRGe.js",
+    "scene264-gltf-feature-registry-RAFggZxh.js",
+    "scene264-gltf-json-asset-OTC4RQu_.js",
+    "scene264-hdr-ibl-pipeline-JseuEIIG.js",
+    "scene264-ibl-fragment-CeRrvT96.js",
+    "scene264-pbr-renderable-CskWgmPH.js",
+    "scene264-rgbd-decode-C0Son7dU.js",
+    "scene264-samplers-DRa_c529.js",
+    "scene264-scene-ubo-extras-B5B4aSOt.js",
+    "scene264.js"
+  ]
+}

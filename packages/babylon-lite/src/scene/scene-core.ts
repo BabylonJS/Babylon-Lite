@@ -332,6 +332,10 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
                 }
             });
         }
+        // Feature-owned scene wiring (e.g. EXT_lights_image_based installs its IBL
+        // environment). Runs synchronously so the environment is registered before
+        // registerScene() builds the scene UBO / PBR renderables.
+        result._sceneSetup?.(ctx);
         return;
     }
     if ("_gpu" in entity && "material" in entity) {

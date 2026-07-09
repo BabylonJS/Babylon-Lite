@@ -30,6 +30,14 @@ export interface AssetContainer {
      *  `enableBoneControl()` was called before loading; otherwise `undefined`.
      *  Drive bones via `getBoneByName()` + the `setBone*` functions. */
     skeletons?: Skeleton[];
+    /** Deferred scene-wiring hook contributed by a loader feature that needs the
+     *  target `SceneContext` (which the loader itself never sees). `addToScene()`
+     *  invokes it once, synchronously, while processing the container. Used by
+     *  `EXT_lights_image_based` to install its image-based-light environment
+     *  (spherical harmonics + specular cubemap) onto the scene. Lazy features own
+     *  the closure so the core loader/scene stay feature-agnostic.
+     *  @internal */
+    _sceneSetup?: (scene: import("./scene/scene-core.js").SceneContext) => void;
 }
 
 /**
