@@ -1,6 +1,6 @@
 {
   "rawKB": 109.1,
-  "gzipKB": 44.5,
+  "gzipKB": 44.6,
   "ignoredRawKB": 6.8,
   "runtimeChunks": [
     "scene149-_math-factory-DFVyS8gB.js",
@@ -9,13 +9,13 @@
     "scene149-generate-mipmaps-D6ALG8gN.js",
     "scene149-geometry-texture-output-BfeQftmX.js",
     "scene149-gltf-feature-lights-punctual-w2wC-7RK.js",
-    "scene149-gltf-feature-registry-DsFEMG34.js",
+    "scene149-gltf-feature-registry-CnklNaiP.js",
     "scene149-gltf-glb-parser-Cwf9MN9N.js",
     "scene149-gltf-light-pointer-state-B7kFTRxK.js",
     "scene149-input-block-DAEnTkZz.js",
     "scene149-light-base-BQ7Gfu17.js",
     "scene149-light-matrix-C5CpBrkV.js",
-    "scene149-node-geometry-view-DOWaQAoz.js",
+    "scene149-node-geometry-view-ZpeFiNX8.js",
     "scene149-node-renderable-DzRebq3N.js",
     "scene149-texture-block-qpJiHpPr.js",
     "scene149-transform-block-DIn9rrpC.js",

@@ -1,6 +1,6 @@
 {
-  "rawKB": 111.7,
-  "gzipKB": 45.6,
+  "rawKB": 111.6,
+  "gzipKB": 45.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene146-alpha-test-fragment-DKqMogCi.js",
@@ -9,8 +9,8 @@
     "scene146-generate-mipmaps-B6juG4-I.js",
     "scene146-gltf-json-asset-BgvJBxWB.js",
     "scene146-ibl-fragment-CeRrvT96.js",
-    "scene146-pbr-geometry-view-DMYUWw2G.js",
-    "scene146-pbr-renderable-C8pmt_l6.js",
+    "scene146-pbr-geometry-view-DA9hdVGL.js",
+    "scene146-pbr-renderable-Cpuu9iqh.js",
     "scene146-rgbd-decode-D-Fc_tIM.js",
     "scene146-scene-uniforms-FTYH6Ct0.js",
     "scene146-shader-composer-DOjPUQGI.js",

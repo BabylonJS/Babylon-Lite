@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `fe3f8210e9def4da065ec4ee2b2ef07e5afff63b`
-- **Last sync date:** 2026-07-04
+- **Last synced BJS commit:** `5fe4c29ff4e956c03533e65f8c2912212486692a`
+- **Last sync date:** 2026-07-07
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -185,9 +185,18 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | BJS API                                                               | Status     | Module                                   |
 | --------------------------------------------------------------------- | ---------- | ---------------------------------------- |
 | `UtilityLayerRenderer`                                                | ✅ Full    | [gizmos/gizmos.ts](src/gizmos/gizmos.ts) |
-| `PositionGizmo` / `RotationGizmo` / `ScaleGizmo` / `BoundingBoxGizmo` | ⚡ Partial | gizmos (over Lite gizmo suite)           |
+| `PositionGizmo` / `RotationGizmo` / `ScaleGizmo` / `BoundingBoxGizmo` | ⚡ Partial | gizmos (over Lite gizmo suite); composites expose `xGizmo`/`yGizmo`/`zGizmo` |
+| `AxisDragGizmo` / `PlaneDragGizmo` / `PlaneRotationGizmo` / `AxisScaleGizmo` | ⚡ Partial | gizmos; `isEnabled` toggles interactivity (drag + hover pick) — display-only when disabled |
 | `LightGizmo` / `CameraGizmo`                                          | ⚡ Partial | gizmos                                   |
 | `GizmoManager`                                                        | ⚡ Partial | gizmos                                   |
+
+> **Display-only / non-interactive gizmos (issue #328).** Setting a sub-gizmo's
+> `isEnabled = false` (e.g. `positionGizmo.xGizmo.isEnabled = false`) disables its drag
+> **and** suppresses GPU hover picking, while the widget stays visible and keeps following
+> its node — the public replacement for poking a native gizmo's private `_disposePointer()`.
+> This relies on the Lite dispatcher skipping hover picks when no registered drag is enabled;
+> Lite's `pickAsync` already serializes per-picker so overlapping hover/press picks never race
+> the shared `pick-color-staging` buffer.
 
 ## Behaviors
 
@@ -243,7 +252,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `RawTexture3D`                                                             | ✅ Full          | textures (Lite `createTexture3DFromPixels` — RGBA8 volumetric texture / colour-grading LUT; `width`/`height`/`depth` getters, `update` re-upload; `format` recorded for parity)                                                                                 |
 | `DynamicTexture` (canvas-backed)                                           | ✅ Full          | textures                                                                                                                                                                                                                                                       |
 | `CubeTexture` (`CreateFromPrefilteredData`, `isReady`, `onLoadObservable`) | ⚡ Partial       | textures (URL handle → Lite `loadEnvironment` at engine start)                                                                                                                                                                                                 |
-| `HDRCubeTexture`                                                           | ❌ Not supported | throwing stub; use native `loadHdrEnvironment`                                                                                                                                                                                                                 |
+| `HDRCubeTexture`                                                           | ⚡ Partial       | textures (`.hdr` equirect environment handle → Lite `loadHdrEnvironment` at engine start, mirroring `CubeTexture`; standalone GPU HDR-cube object not exposed)                                                                                                 |
 | `RenderTargetTexture`                                                      | ❌ Not supported | throwing stub; use native frame-graph RTT                                                                                                                                                                                                                      |
 | `MirrorTexture`                                                            | ❌ Not supported | throwing stub                                                                                                                                                                                                                                                  |
 | `HtmlTexture` / `HtmlInteractionManager` / `HtmlRaycastInteractionManager` (+ `IsHtmlInCanvasUploadSupported`, `UploadHtmlElementToTexture`, `ComputeOverlayCssTransform`, `GetElementPixelFromUv`, `IsHtmlInCanvasSupportedNatively`, `InstallHtmlInCanvasPolyfill`, `UninstallHtmlInCanvasPolyfill`) | ❌ Not supported | throwing stubs ([unsupported-apis.ts](src/unsupported/unsupported-apis.ts)); new BJS `Materials/Textures/HTML/*` — a DOM/CSS overlay-interop feature (live HTML element → texture + pointer/raycast forwarding) with no equivalent in Babylon Lite's WebGPU renderer |

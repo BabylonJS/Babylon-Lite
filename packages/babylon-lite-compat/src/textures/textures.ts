@@ -409,6 +409,13 @@ export class CubeTexture {
     public name: string;
     public gammaSpace = true;
     public level = 1;
+    /**
+     * @internal Which Lite environment loader the scene should route this handle
+     * through at engine start. Plain `.env`/`.dds` cube maps load via
+     * `loadEnvironment`/`loadDdsEnvironment`; `HDRCubeTexture` overrides this to
+     * `"hdr"` so the scene picks `loadHdrEnvironment`.
+     */
+    public readonly _envLoaderKind: "cube" | "hdr" = "cube";
     /** Fires when the cube map is "ready" (resolved on a microtask in this compat layer). */
     public readonly onLoadObservable = new Observable<CubeTexture>();
     private _ready = false;
@@ -429,13 +436,13 @@ export class CubeTexture {
         // Babylon.js fires onLoad once the cube map is ready; some scenes await it
         // before continuing. We resolve on a microtask since the actual GPU upload
         // is deferred to `loadEnvironment` at engine start.
-        setTimeout(() => {
+        queueMicrotask(() => {
             this._ready = true;
             if (onLoad) {
                 onLoad();
             }
             this.onLoadObservable.notifyObservers(this);
-        }, 0);
+        });
     }
 
     /** Babylon.js `BaseTexture.isReady()`. */
@@ -453,10 +460,62 @@ export class CubeTexture {
     }
 }
 
-/** Babylon.js `HDRCubeTexture` — see {@link CubeTexture}; use native `loadHdrEnvironment`. */
+/**
+ * Babylon.js `HDRCubeTexture` — a Radiance `.hdr` (RGBE) equirectangular panorama
+ * used as an environment / IBL source. Like {@link CubeTexture} this is a
+ * lightweight handle that records the `.hdr` URL; the actual GPU work (equirect →
+ * prefiltered cubemap + irradiance SH + BRDF LUT) happens when it is assigned to
+ * `scene.environmentTexture` and the engine starts, at which point the scene
+ * routes it through Babylon Lite's native `loadHdrEnvironment`.
+ */
 export class HDRCubeTexture {
-    public constructor() {
-        unsupported("HDRCubeTexture", "Use the native `loadHdrEnvironment` API; a standalone HDR cube texture object is not wrapped.");
+    /** Source URL of the `.hdr` panorama. */
+    public readonly url: string;
+    /** Requested cubemap face size (BJS `size`); forwarded to Lite's `faceSize`. */
+    public readonly size: number;
+    /** Babylon.js `coordinatesMode` (skybox = 5). Recorded for API parity. */
+    public coordinatesMode = 0;
+    public name: string;
+    public gammaSpace = true;
+    public level = 1;
+    /** @internal Selects Lite's `loadHdrEnvironment` in the scene's env loader. */
+    public readonly _envLoaderKind: "cube" | "hdr" = "hdr";
+    /** Fires when the HDR environment is "ready" (resolved on a microtask). */
+    public readonly onLoadObservable = new Observable<HDRCubeTexture>();
+    private _ready = false;
+
+    public constructor(
+        url: string,
+        _sceneOrEngine?: unknown,
+        size = 256,
+        _noMipmap?: boolean,
+        _generateHarmonics?: boolean,
+        _gammaSpace?: boolean,
+        _prefilterOnLoad?: boolean,
+        onLoad?: (() => void) | null
+    ) {
+        this.url = url;
+        this.size = size;
+        this.name = url;
+        // Babylon.js fires onLoad once the HDR is decoded + prefiltered; the real
+        // GPU work is deferred to `loadHdrEnvironment` at engine start, so we
+        // resolve the readiness signal on a microtask (matches CubeTexture).
+        queueMicrotask(() => {
+            this._ready = true;
+            if (onLoad) {
+                onLoad();
+            }
+            this.onLoadObservable.notifyObservers(this);
+        });
+    }
+
+    /** Babylon.js `BaseTexture.isReady()`. */
+    public isReady(): boolean {
+        return this._ready;
+    }
+
+    public dispose(): void {
+        // GPU resources are owned by the scene's environment, disposed with the scene.
     }
 }
 

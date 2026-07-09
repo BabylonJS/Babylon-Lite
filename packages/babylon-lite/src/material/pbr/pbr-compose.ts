@@ -49,8 +49,8 @@ interface PbrComposerDeps {
     readonly _getSingleLightBlock: ((type: string) => string) | null;
     readonly _multiLightWGSL: string;
     readonly _multiLightLoop: string;
-    readonly _acesHelpers: string;
-    readonly _acesTonemapCall: string;
+    readonly _toneMappingHelpers: string;
+    readonly _toneMappingCall: string;
     /** Fog WGSL (calcFogFactor helper + blend block), dynamically loaded by pbr-renderable only
      *  when scene.fog is set; "" otherwise so non-fog scenes bundle zero fog bytes. */
     readonly _fogHelper: string;
@@ -87,8 +87,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _getSingleLightBlock,
         _multiLightWGSL,
         _multiLightLoop,
-        _acesHelpers,
-        _acesTonemapCall,
+        _toneMappingHelpers,
+        _toneMappingCall,
         _fogHelper,
         _fogBlock,
         _createPbrTemplateExt,
@@ -167,8 +167,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _hasTonemap: hasScene(PBR_HAS_TONEMAP),
             _fogHelper: hasScene(PBR_HAS_FOG) ? _fogHelper : "",
             _fogBlock: hasScene(PBR_HAS_FOG) ? _fogBlock : "",
-            _acesHelpers: _acesHelpers,
-            _acesTonemapCall: _acesTonemapCall,
+            _toneMappingHelpers: _toneMappingHelpers,
+            _toneMappingCall: _toneMappingCall,
             _hasAlphaBlend: has(PBR_HAS_ALPHA_BLEND),
             _hasSpecularAA,
             _hasGammaAlbedo: has(PBR_HAS_GAMMA_ALBEDO),
