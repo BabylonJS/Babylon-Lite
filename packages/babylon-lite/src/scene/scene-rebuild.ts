@@ -34,27 +34,42 @@ export async function rebuildScenePbrPipelines(scene: SceneContext): Promise<voi
             continue;
         }
 
-        // Tear down the group's existing per-mesh GPU state and remove its renderables.
+        // Capture the existing per-mesh teardown closures WITHOUT running them yet. The teardown
+        // releases each material's refcounted GPU textures (and destroys the old per-mesh UBOs); running
+        // it before the rebuild could drop a shared texture's refcount to zero and destroy it, leaving
+        // the freshly built bind groups pointing at a destroyed texture ("Destroyed texture used in a
+        // submit"). Instead we rebuild first (make-before-break): the builder re-acquires the same
+        // textures, bumping their refcount, so running the old teardown afterwards nets no change and the
+        // textures stay alive.
+        const oldDisposers: Array<() => void> = [];
         const meshSet = new Set<Mesh>(meshes);
         for (const mesh of meshes) {
             const disposers = ctx._meshDisposables.get(mesh);
             if (disposers) {
-                for (const fn of disposers) {
-                    fn();
-                }
-                ctx._meshDisposables.delete(mesh);
+                oldDisposers.push(...disposers);
             }
         }
+
+        // Remove the group's existing renderables (the builder produces fresh ones).
         for (let i = ctx._renderables.length - 1; i >= 0; i--) {
             if (meshSet.has(ctx._renderables[i]!.mesh as Mesh)) {
                 ctx._renderables.splice(i, 1);
             }
         }
 
-        // Re-run the builder — re-scans meshes for scene-wide features and recompiles pipelines.
+        // Re-run the builder — re-scans meshes for scene-wide features, recompiles pipelines, and
+        // overwrites each mesh's _meshDisposables with fresh teardown closures (re-acquiring textures).
         const result = await builder(ctx, meshes);
         builder._rebuildSingle = result.rebuildSingle;
         ctx._renderables.push(...result.renderables);
+
+        // Tear down the OLD per-mesh GPU state now that the rebuild is complete: destroys the old UBOs
+        // (no longer referenced by the new bind groups) and releases the textures the builder just
+        // re-acquired, so shared textures' refcounts return to their pre-rebuild value and stay alive.
+        for (const fn of oldDisposers) {
+            fn();
+        }
+
         changed = true;
     }
 
