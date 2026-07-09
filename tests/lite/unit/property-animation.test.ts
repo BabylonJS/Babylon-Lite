@@ -5,7 +5,7 @@ import { goToFrame } from "../../../packages/babylon-lite/src/animation/animatio
 import { setAnimationWeight } from "../../../packages/babylon-lite/src/animation/animation-weight";
 import { enablePropertyAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-pointer-mixer";
 import { enableAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-gltf-mixer";
-import { crossFadeAnimationGroups } from "../../../packages/babylon-lite/src/animation/animation-weight-fade";
+import { crossFadeAnimationGroups, fadeAnimationWeight } from "../../../packages/babylon-lite/src/animation/animation-weight-fade";
 import { createPropertyAnimationClip, createPropertyAnimationGroup } from "../../../packages/babylon-lite/src/animation/property-animation";
 import type { AnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group";
 import type { AnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
@@ -233,6 +233,36 @@ describe("Property animation", () => {
         expect(positiveGroup.weight).toBeCloseTo(0.75);
         expect(negativeGroup.weight).toBeCloseTo(0.25);
         expect(target.position.x).toBeCloseTo(1);
+    });
+
+    it("composes with a pre-existing _preUpdate hook instead of clobbering it", () => {
+        const manager = createAnimationManager();
+        const target = { position: { x: 0 } };
+        const clip = createPropertyAnimationClip("slide", [
+            {
+                path: "position.x",
+                keys: [
+                    { time: 0, value: 1 },
+                    { time: 2, value: 1 },
+                ],
+            },
+        ]);
+        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        enablePropertyAnimationBlending(manager);
+        setAnimationWeight(group, 0);
+
+        // A pre-existing per-manager pre-update hook (e.g. installed by some other feature).
+        const priorHook = vi.fn();
+        (manager as AnimationManager & { _preUpdate?: (m: AnimationManager, dt: number) => void })._preUpdate = priorHook;
+
+        // Scheduling a fade must preserve the prior hook, not overwrite it.
+        fadeAnimationWeight(manager, group, { to: 1, durationMs: 1000 });
+        updateAnimationManager(manager, 250);
+
+        // Prior hook still runs each tick, and the fade advanced the weight.
+        expect(priorHook).toHaveBeenCalledTimes(1);
+        expect(priorHook).toHaveBeenCalledWith(manager, 250);
+        expect(group.weight).toBeCloseTo(0.25);
     });
 
     it("runs autonomously through requestAnimationFrame", () => {

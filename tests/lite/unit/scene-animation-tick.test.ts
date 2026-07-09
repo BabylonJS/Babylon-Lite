@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { addToScene } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { _installTickAnimation } from "../../../packages/babylon-lite/src/animation/animation-group";
 import type { AnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group";
+import type { AnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
 import type { AnimationController } from "../../../packages/babylon-lite/src/skeleton/skeleton-updater";
 import type { AssetContainer } from "../../../packages/babylon-lite/src/asset-container";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
@@ -96,7 +97,7 @@ describe("Scene animation tick (addToScene render-loop wiring)", () => {
         // (mirrors the forum repro where AnimationManager attaches after addToScene). The scene
         // tick must skip it each frame so the manager is the sole driver (no double-advance).
         addToScene(scene, container);
-        (group as AnimationGroup & { _animationManager?: object })._animationManager = {};
+        group._animationManager = {} as AnimationManager;
 
         scene._beforeRender[0]!(1000);
         expect(group.currentTime).toBe(0);

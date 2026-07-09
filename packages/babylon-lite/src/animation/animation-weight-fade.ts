@@ -30,6 +30,9 @@ export interface CrossFadeAnimationGroupsOptions {
 }
 
 let fadesByManager: WeakMap<AnimationManager, AnimationWeightFade[]> | undefined;
+/** Any `_preUpdate` hook that existed before the fade scheduler installed its own, preserved so
+ *  the scheduler composes with (rather than clobbers) other per-manager pre-update behavior. */
+let priorPreUpdateByManager: WeakMap<AnimationManager, NonNullable<AnimationManager["_preUpdate"]>> | undefined;
 
 function getFades(manager: AnimationManager): AnimationWeightFade[] {
     fadesByManager ??= new WeakMap();
@@ -41,12 +44,27 @@ function getFades(manager: AnimationManager): AnimationWeightFade[] {
     return fades;
 }
 
-/** Per-manager pre-update hook: advances all scheduled weight fades before the blend mixer runs. */
+/** Per-manager pre-update hook: runs any pre-existing hook first, then advances all scheduled
+ *  weight fades before the blend mixer runs. A stable module constant so installing it is
+ *  idempotent — it is never wrapped, so repeated installs cannot grow a wrapper chain. */
 function runManagerWeightFades(manager: AnimationManager, deltaMs: number): void {
+    priorPreUpdateByManager?.get(manager)?.(manager, deltaMs);
     const fades = fadesByManager?.get(manager);
     if (fades) {
         updateFades(fades, deltaMs);
     }
+}
+
+/** Install {@link runManagerWeightFades} as the manager's pre-update hook exactly once, preserving
+ *  any hook that was already present so both run each tick. */
+function installWeightFadeHook(manager: AnimationManager): void {
+    if (manager._preUpdate === runManagerWeightFades) {
+        return;
+    }
+    if (manager._preUpdate) {
+        (priorPreUpdateByManager ??= new WeakMap()).set(manager, manager._preUpdate);
+    }
+    manager._preUpdate = runManagerWeightFades;
 }
 
 /** Animates `group`'s blend weight toward `options.to` over `options.durationMs`.
@@ -71,7 +89,7 @@ export function fadeAnimationWeight(manager: AnimationManager, group: AnimationG
         }
     }
     fades.push({ group, from, to, durationMs: options.durationMs, elapsedMs: 0 });
-    manager._preUpdate = runManagerWeightFades;
+    installWeightFadeHook(manager);
 }
 
 /** Cross-fades from `fromGroup` to `toGroup`, fading the first to weight 0 and the second to `options.toWeight` (default 1).

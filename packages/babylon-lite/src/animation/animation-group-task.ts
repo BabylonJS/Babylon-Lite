@@ -1,4 +1,4 @@
-import { tickAnimation } from "./animation-tick.js";
+import { tickAnimationCore } from "./animation-group.js";
 import type { AnimationGroup } from "./animation-group.js";
 import { addAnimationTask, createAnimationTask, removeAnimationTask } from "./animation-manager.js";
 import type { AnimationManager, AnimationTask } from "./animation-manager.js";
@@ -49,7 +49,7 @@ export function addAnimationGroup(manager: AnimationManager, group: AnimationGro
         groupInternal._animationTask ??
         createAnimationTask(
             (taskManager, deltaMs) => {
-                tickAnimation(group, deltaMs, taskManager.engine);
+                tickAnimationCore(group, deltaMs, taskManager.engine);
             },
             {
                 category: ANIMATION_GROUP_TASK_CATEGORY,

@@ -1,5 +1,5 @@
 import { F32 } from "../engine/typed-arrays.js";
-import { tickAnimation } from "./animation-tick.js";
+import { tickAnimationCore } from "./animation-group.js";
 import type { AnimationGroup, AnimationPropertyMixer, AnimationPropertyRuntimeTrack } from "./animation-group.js";
 import { ANIMATION_GROUP_TASK_CATEGORY, getAnimationGroups } from "./animation-group-task.js";
 import { setAnimationTaskCategoryHandler } from "./animation-manager.js";
@@ -95,7 +95,7 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
         const mixer = group._propertyMixer;
         const tracks = mixer?.[MIX_TRACKS];
         if (!tracks) {
-            tickAnimation(group, deltaMs, manager.engine);
+            tickAnimationCore(group, deltaMs, manager.engine);
             continue;
         }
 
