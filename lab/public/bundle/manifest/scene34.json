@@ -1,6 +1,6 @@
 {
   "rawKB": 96.8,
-  "gzipKB": 39.8,
+  "gzipKB": 39.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene34-generate-mipmaps-C244DQVV.js",
@@ -8,11 +8,11 @@
     "scene34-gltf-ext-node-visibility-BITO3iFw.js",
     "scene34-gltf-feature-animation-pointer-DaFC0phL.js",
     "scene34-gltf-feature-animations-DyttCede.js",
-    "scene34-gltf-feature-registry-BdkYMnC6.js",
+    "scene34-gltf-feature-registry-DU0zQ2j6.js",
     "scene34-gltf-glb-parser-BxoFTGKn.js",
     "scene34-gltf-sampler-denorm-C_vs8OEN.js",
     "scene34-ibl-fragment-CeRrvT96.js",
-    "scene34-pbr-renderable-BgnDr8I7.js",
+    "scene34-pbr-renderable-BlDygUE0.js",
     "scene34-rgbd-decode-ByPAsdES.js",
     "scene34-scene-uniforms-FTYH6Ct0.js",
     "scene34-visibility-BqheoYx1.js",

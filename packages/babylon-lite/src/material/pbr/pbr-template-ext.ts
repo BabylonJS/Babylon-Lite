@@ -59,8 +59,8 @@ export function createPbrTemplateExt(flags: {
     _hasVertexColor: boolean;
     /** @internal */
     _hasUv2: boolean;
-    /** @internal */
-    _hasOcclusionUv2: boolean;
+    /** @internal Per-channel UV1 selection bitmask (see pbr-material.ts). Decoded locally. */
+    _uv2Mask: number;
     /** @internal features2 bitfield — read locally for orm-unpack (occlusion split) without
      *  adding a flag branch to the shared composer. */
     _features2?: number;
@@ -71,7 +71,14 @@ export function createPbrTemplateExt(flags: {
     /** @internal */
     _hasSpecGloss: boolean;
 }): PbrTemplateExt {
-    const { _hasUvTransform, _hasVertexColor, _hasUv2, _hasOcclusionUv2, _hasAnyNormal, _hasEmissiveTexture, _hasSpecGloss } = flags;
+    const { _hasUvTransform, _hasVertexColor, _hasUv2, _hasAnyNormal, _hasEmissiveTexture, _hasSpecGloss } = flags;
+    // Per-channel UV1 (TEXCOORD_1) selection. Bit literals mirror the gltf slow-path encode:
+    // baseColor=1, orm=2, normal=4, emissive=8, specGloss=16, occlusion=32. Only honoured when the
+    // uv2 vertex attribute is actually present (_hasUv2); otherwise every channel falls back to
+    // input.uv so the shader never references a missing uv2 varying.
+    const uv2Mask = _hasUv2 ? flags._uv2Mask : 0;
+    const baseUvFor = (bit: number): string => (uv2Mask & bit ? "input.uv2" : "input.uv");
+    const _hasOcclusionUv2 = !!(uv2Mask & 32);
     // orm-unpack: occlusion sampled from the ORM texture with its own UV transform.
     // PBR2_OCCL_UV_SPLIT is defined locally (not in shared pbr-flag-bits.ts) per GUIDANCE
     // §4c′ — it is set in uv-transform-fragment.detect and read only here, both lazy.
@@ -83,8 +90,10 @@ export function createPbrTemplateExt(flags: {
         { _name: `${name}UVm`, _type: "vec4<f32>" },
         { _name: `${name}UVt`, _type: "vec4<f32>" },
     ];
-    const uvVarName = (name: string) => (_hasUvTransform ? `${name}UV` : "input.uv");
-    const uvTransformDecl = (name: string) => (_hasUvTransform ? `let ${name}UV = txfUV(input.uv, material.${name}UVm, material.${name}UVt.xy);\n` : "");
+    // Each channel's sampled UV: with a UV transform it becomes a `${name}UV` local (built from
+    // the channel's base UV set); without a transform it is the base UV set (input.uv / input.uv2).
+    const uvVarName = (name: string, bit: number) => (_hasUvTransform ? `${name}UV` : baseUvFor(bit));
+    const uvTransformDecl = (name: string, bit: number) => (_hasUvTransform ? `let ${name}UV = txfUV(${baseUvFor(bit)}, material.${name}UVm, material.${name}UVt.xy);\n` : "");
     const UV_TRANSFORM_HELPER_WGSL = _hasUvTransform
         ? `fn txfUV(uv: vec2<f32>, m: vec4<f32>, t: vec2<f32>) -> vec2<f32> {
 return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
@@ -151,21 +160,22 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
     const fragmentHelpers = UV_TRANSFORM_HELPER_WGSL;
 
     // ── Fragment prelude ────────────────────────────────────────
+    // Bit literal per channel (1/2/4/8/16) selects its base UV set inside the transform.
     const fragmentPrelude = _hasUvTransform
-        ? uvTransformDecl("baseColor") +
-          (_hasAnyNormal ? uvTransformDecl("normal") : "") +
-          uvTransformDecl("orm") +
-          (_hasOcclusionSplit ? uvTransformDecl("occl") : "") +
-          (_hasEmissiveTexture ? uvTransformDecl("emissive") : "") +
-          (_hasSpecGloss ? uvTransformDecl("specGloss") : "")
+        ? uvTransformDecl("baseColor", 1) +
+          (_hasAnyNormal ? uvTransformDecl("normal", 4) : "") +
+          uvTransformDecl("orm", 2) +
+          (_hasOcclusionSplit ? uvTransformDecl("occl", 0) : "") +
+          (_hasEmissiveTexture ? uvTransformDecl("emissive", 8) : "") +
+          (_hasSpecGloss ? uvTransformDecl("specGloss", 16) : "")
         : "";
 
     // ── UV expressions ──────────────────────────────────────────
-    const uvForBaseColor = uvVarName("baseColor");
-    const uvForNormal = uvVarName("normal");
-    const uvForOrm = uvVarName("orm");
-    const uvForEmissive = uvVarName("emissive");
-    const uvForSpecGloss = uvVarName("specGloss");
+    const uvForBaseColor = uvVarName("baseColor", 1);
+    const uvForNormal = uvVarName("normal", 4);
+    const uvForOrm = uvVarName("orm", 2);
+    const uvForEmissive = uvVarName("emissive", 8);
+    const uvForSpecGloss = uvVarName("specGloss", 16);
 
     // ── Base color modifier ─────────────────────────────────────
     // NOTE: backtick (not double-quote) so the bundle's WGSL identifier mangler

@@ -11,7 +11,7 @@
 import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_ALPHA_ONLY_MR, PBR2_HAS_REFLECTANCE_FACTORS, PBR2_HAS_UV2 } from "../pbr-flag-bits.js";
+import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_ALPHA_ONLY_MR, PBR2_HAS_REFLECTANCE_FACTORS } from "../pbr-flag-bits.js";
 
 // Reflectance-only features2 bit (reserved in pbr-flag-bits.ts). Defined here,
 // not in the shared flag module, for zero bundle movement on scenes that never
@@ -220,7 +220,10 @@ export const pbrExt: PbrExt = {
             hasMR,
             hasR,
             (ctx._features & PBR_HAS_USE_ALPHA_ONLY_MR) !== 0,
-            (ctx._features2 & PBR2_HAS_UV2) !== 0,
+            // Occlusion-on-UV1 specifically (mask bit 1<<5), not any channel. Must match
+            // createPbrTemplateExt's _hasOcclusionUv2 so the occlusionTexture binding it declares
+            // and this sample agree. ctx._uv2Mask is already zeroed when uv2 isn't present.
+            ((ctx._uv2Mask ?? 0) & (1 << 5)) !== 0,
             (ctx._features2 & PBR2_REFL_UV_TX) !== 0
         );
     },

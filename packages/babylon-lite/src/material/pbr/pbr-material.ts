@@ -99,6 +99,9 @@ export interface PbrMaterialProps extends Material {
     occlusionStrength?: number;
     /** UV set index for the occlusion texture (0 = UV1, 1 = UV2). Default 0. */
     occlusionTexCoord?: number;
+    /** @internal Per-channel UV1 (TEXCOORD_1) selection bitmask, precomputed at glTF build time by
+     *  the slow-path loader (gltf-pbr-builder-ext). Bit literals mirror pbr-template-ext's decode. */
+    _uv2Mask?: number;
     /** Separate occlusion texture sampled with UV2 when occlusionTexCoord=1.
      *  R channel is occlusion. When set, ORM.r is NOT used for occlusion. */
     occlusionTexture?: Texture2D;
@@ -202,7 +205,11 @@ export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: 
     if ((mat as { _hasUvTx?: boolean })._hasUvTx) {
         features2 |= PBR2_HAS_UV_TRANSFORM;
     }
-    if (mat.occlusionTexCoord) {
+    // Per-channel UV set selection (glTF texCoord). `_uv2Mask` is precomputed once at glTF build
+    // time by the lazy slow-path loader (gltf-pbr-builder-ext) — the only place a texture can carry
+    // texCoord:1 (occlusion included) — so the always-loaded fast path pays just one read here.
+    // Any channel on UV1 needs the uv2 vertex attribute + varying threaded through.
+    if ((mat as { _uv2Mask?: number })._uv2Mask) {
         features2 |= PBR2_HAS_UV2;
     }
     if (mat.baseColorFactor) {
