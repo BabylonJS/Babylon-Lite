@@ -27,10 +27,12 @@ import type { SceneContext } from "../scene/scene-core.js";
 // NOTE: this module is a lazily-imported feature chunk (see gltf-feature-registry)
 // and keeps ZERO static runtime imports — every dependency is pulled in via dynamic
 // import inside applyAsset. Scenes that never trigger EXT_lights_image_based never
-// fetch this chunk (or its dependencies) at runtime. Its reuse of the shared IBL
-// modules (env-helpers, hdr-ibl-pipeline, rgbd-decode, samplers) does, however,
-// participate in rollup's static chunk graph for every gltf build, which can hoist
-// those shared leaves into standalone chunks — see the PR notes on bundle-size.
+// fetch this chunk (or its dependencies) at runtime. The cubemap uploader is kept
+// private (ibl-cubemap-upload.js) rather than shared with loader-env/rgbd-decode so
+// the extension does not pin that decoder into every .env/DDS scene. Its reuse of
+// env-helpers / hdr-ibl-pipeline still participates in rollup's static chunk graph
+// for every gltf build, which can hoist shared leaves (e.g. samplers) into their own
+// chunk — see the PR notes on bundle-size.
 
 interface GltfImageBasedLight {
     name?: string;
@@ -113,7 +115,7 @@ const feature: GltfFeature = {
         const { resolveImage } = await import("./gltf-parser.js");
         const faceImages = await Promise.all(flatIndices.map((imgIdx) => resolveImage(json, ctx._binChunk, imgIdx, ctx._baseUrl)));
 
-        const { uploadCubemapRGBD } = await import("../loader-env/rgbd-decode.js");
+        const { uploadCubemapRGBD } = await import("./ibl-cubemap-upload.js");
         const specularCube = uploadCubemapRGBD(engine, faceImages, specularImageSize, mipCount);
         for (const img of faceImages) {
             img.close();
