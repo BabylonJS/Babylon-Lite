@@ -1,5 +1,5 @@
 {
-  "rawKB": 123.5,
+  "rawKB": 123.4,
   "gzipKB": 50.9,
   "ignoredRawKB": 6.4,
   "runtimeChunks": [
@@ -15,7 +15,7 @@
     "scene141-node-registry-B1Twnwa-.js",
     "scene141-node-renderable-BMALB2gu.js",
     "scene141-node-shadow-BscttRKr.js",
-    "scene141-pbr-renderable-BraJdTIk.js",
+    "scene141-pbr-renderable-BH2OdoAx.js",
     "scene141-pbr-shadow-fragment-DHDAZ1HL.js",
     "scene141-shader-composer-DsbaH8hr.js",
     "scene141-shadow-fragment-core-Dbe1xNkt.js",

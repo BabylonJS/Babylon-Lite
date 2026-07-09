@@ -1,5 +1,5 @@
 {
-  "rawKB": 104.3,
+  "rawKB": 104.2,
   "gzipKB": 41.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene212-ibl-fragment-CeRrvT96.js",
     "scene212-ibl-skybox-wgsl-CFIBOHHx.js",
     "scene212-pbr-refraction-qjtw4-0g.js",
-    "scene212-pbr-renderable-DYiyT1u1.js",
+    "scene212-pbr-renderable-DBdNYfM-.js",
     "scene212-pbr-transmission-ext-DCWIGCsE.js",
     "scene212-reflectance-fragment-Bc1MZN1G.js",
     "scene212-refraction-dispersion-wgsl-BKvBCmZU.js",

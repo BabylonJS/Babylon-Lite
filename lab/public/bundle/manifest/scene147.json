@@ -1,5 +1,5 @@
 {
-  "rawKB": 103.8,
+  "rawKB": 103.7,
   "gzipKB": 41.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,8 +10,8 @@
     "scene147-gltf-glb-parser-BPCGAatE.js",
     "scene147-gltf-light-pointer-state-B7kFTRxK.js",
     "scene147-multilight-wgsl-CLgjeQ_G.js",
-    "scene147-pbr-geometry-view-B_ch7e_i.js",
-    "scene147-pbr-renderable-DHIfcPh7.js",
+    "scene147-pbr-geometry-view-C1u4RbNF.js",
+    "scene147-pbr-renderable-BKKiN2pY.js",
     "scene147-shader-composer-B51nefZQ.js",
     "scene147-ubo-layout-Cs5YvLYZ.js",
     "scene147.js"
