@@ -139,7 +139,7 @@ export interface RenderTask extends Task {
 
     /** Per-task scene UBO + bind group. Created eagerly in createRenderTask
      *  so renderables can reference `_sceneBG` at `bind()` time. Written each
-     *  frame by `writePassSceneUBO`. Destroyed in `dispose()`. */
+     *  frame by `_writePassSceneUBO`. Destroyed in `dispose()`. */
     /** @internal */
     _sceneUBO: GPUBuffer;
     /** @internal */
@@ -433,7 +433,7 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
     refreshTaskSceneBindGroup(task, eng);
     const camera = task._config.cam ?? sc.camera;
     sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
-    writePassSceneUBO(task, eng, sc, camera);
+    _writePassSceneUBO(task, eng, sc, camera);
     refreshSceneLightsUBO(eng, sc);
     // Expose the active camera to per-binding `update()` calls. Some renderables
     // (e.g. transparent billboard systems) need it to compute view-space sort
@@ -551,8 +551,9 @@ function refreshTaskSceneBindGroup(task: RenderTask, eng: EngineContext): void {
 }
 
 /** Write the canonical SceneUniforms struct to the task-owned scene UBO.
- *  Bails before touching scratch/GPU when all inputs are unchanged. */
-function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneContext, camera: Camera | null): void {
+ *  Bails before touching scratch/GPU when all inputs are unchanged.
+ *  @internal Exported for unit testing of the scene-UBO change-detection guard. */
+export function _writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneContext, camera: Camera | null): void {
     if (!camera) {
         return;
     }
