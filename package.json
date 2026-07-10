@@ -85,13 +85,13 @@
         "pngjs": "^7.0.0",
         "rollup-plugin-visualizer": "^7.0.1",
         "terser": "^5.48.0",
-        "tsx": "^4.23.0",
+        "tsx": "4.22.5",
         "typedoc": "^0.28.19",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.63.0",
+        "typescript-eslint": "8.62.1",
         "vite": "^6.4.3",
-        "vitest": "^4.1.10",
-        "webpack": "^5.108.4"
+        "vitest": "4.1.9",
+        "webpack": "5.108.3"
     },
     "dependencies": {
         "prettier": "^3.9.4"
@@ -113,7 +113,10 @@
             "brace-expansion": ">=5.0.6",
             "picomatch": ">=4.0.4",
             "@protobufjs/utf8": ">=1.1.1",
-            "dompurify": ">=3.4.11"
+            "dompurify": ">=3.4.11",
+            "tsx": "4.22.5",
+            "@typescript-eslint/types@8.63.0": "8.62.1",
+            "@typescript-eslint/tsconfig-utils@8.63.0": "8.62.1"
         }
     }
 }
