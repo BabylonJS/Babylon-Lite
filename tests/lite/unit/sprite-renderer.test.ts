@@ -814,6 +814,10 @@ describe("shared pipeline cache across SpriteRenderer instances", () => {
         const srB = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
         expect(counters.pipelinesBuilt).toBe(1);
         expect(_spriteRendererPipelineCacheSize(srB)).toBe(1);
+
+        // Balance the shared-cache refcount so process-wide state doesn't leak across tests.
+        disposeSpriteRenderer(srA);
+        disposeSpriteRenderer(srB);
     });
 
     it("disposing one renderer does not clear pipelines still needed by another", () => {
@@ -830,8 +834,12 @@ describe("shared pipeline cache across SpriteRenderer instances", () => {
         expect(_spriteRendererPipelineCacheSize(srB)).toBe(1);
 
         // A new renderer on the same device still reuses the cached pipeline.
-        createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        const srC = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
         expect(counters.pipelinesBuilt).toBe(1);
+
+        // Balance the shared-cache refcount so process-wide state doesn't leak across tests.
+        disposeSpriteRenderer(srB);
+        disposeSpriteRenderer(srC);
     });
 });
 
@@ -910,5 +918,8 @@ describe("secondary-surface rendering (multi-canvas)", () => {
 
         expect(capturedView).toBe(secondaryView);
         expect(capturedView).not.toBe(primaryView);
+
+        // Balance the shared-cache refcount and free per-renderer GPU resources.
+        disposeSpriteRenderer(sr);
     });
 });

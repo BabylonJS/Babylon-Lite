@@ -193,7 +193,7 @@ export function resolveSpriteFrame(atlas: SpriteAtlas, frame: number): number {
  * `SpriteRenderer` (those hold it `readonly` and never free it), so a single
  * atlas can back many layers/renderers across many surfaces. That makes the
  * atlas the caller's to dispose: call this once, after every renderer/layer
- * referencing it has been disposed. Idempotent is NOT guaranteed — the
+ * referencing it has been disposed. Idempotence is NOT guaranteed — the
  * underlying `GPUTexture.destroy()` must be called exactly once.
  *
  * Note: atlases created via `createGridSpriteAtlas` from an externally-owned

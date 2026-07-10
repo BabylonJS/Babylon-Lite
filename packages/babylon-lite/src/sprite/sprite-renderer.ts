@@ -271,8 +271,17 @@ export function createSpriteRenderer(surface: SurfaceContext, opts: SpriteRender
     };
 
     // Pre-warm pipelines currently in use, so the first frame doesn't pay compile cost.
-    for (const layer of rr.layers) {
-        getOrCreateSpritePipeline(engine, rr._pipelineCache, surface.format, 1, layer.blendMode, false, false, undefined, undefined, layer);
+    // If pipeline compilation throws here, `rr` is never returned and `disposeSpriteRenderer`
+    // is never called, so unwind the resources we've already acquired (the shared-cache
+    // refcount and the index buffer) to avoid leaking them for the rest of the process.
+    try {
+        for (const layer of rr.layers) {
+            getOrCreateSpritePipeline(engine, rr._pipelineCache, surface.format, 1, layer.blendMode, false, false, undefined, undefined, layer);
+        }
+    } catch (err) {
+        releaseSharedSpriteRendererPipelineCache();
+        indexBuffer.destroy();
+        throw err;
     }
 
     return rr;
