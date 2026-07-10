@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { renderFrame, type EngineContext, type RenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
@@ -112,5 +113,21 @@ describe("GPU resource retirement", () => {
         await Promise.resolve();
 
         expect(oldBuffer.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("continues draining when one retirement throws", () => {
+        const afterFailure = vi.fn();
+        const engine = {
+            _retirements: [
+                () => {
+                    throw new Error("already disposed");
+                },
+                afterFailure,
+            ],
+        } as unknown as EngineContext;
+
+        expect(() => disposeGpuResourceRetirements(engine)).not.toThrow();
+        expect(afterFailure).toHaveBeenCalledTimes(1);
+        expect(engine._retirements).toHaveLength(0);
     });
 });
