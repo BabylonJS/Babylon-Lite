@@ -106,6 +106,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasAnyUv2 = false;
     let hasAnyVertexColor = false;
     let hasAnyFlatNormal = false;
+    let hasGammaAlbedo = false;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps & { _hasReflExt?: boolean; _hasUvTx?: boolean };
@@ -130,6 +131,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasAnyUv2 ||= !!m._gpu.uv2Buffer && mat.occlusionTexCoord === 1;
         hasAnyVertexColor ||= !!m._gpu.colorBuffer;
         hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
+        hasGammaAlbedo ||= !!mat.gammaAlbedo;
     }
 
     // ── Dynamically import fragment creators based on scene capabilities ──
@@ -233,6 +235,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _createPbrTemplateExt = extMod.createPbrTemplateExt;
     }
 
+    const _gammaTemplate = hasGammaAlbedo ? await import("./pbr-template-gamma.js") : null;
+
     let _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null = null;
     let _syncThinInstanceBuffers:
         | ((
@@ -301,6 +305,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _anisoExt,
         _iblSkyboxCalc,
         _flatNormalWgsl,
+        _gammaTemplate,
         _createPbrShadowFragment,
         _shadowLights: shadowLights,
         _createThinInstanceFragment,

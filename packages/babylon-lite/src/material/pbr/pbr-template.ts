@@ -14,6 +14,8 @@ import type { PbrTemplateExt } from "./pbr-template-ext.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
 
+type PbrGammaTemplate = typeof import("./pbr-template-gamma.js");
+
 const STAGE_FRAGMENT = 0x2;
 
 // ── BRDF functions (always present in PBR) ──────────────────────
@@ -131,6 +133,8 @@ export interface PbrTemplateConfig {
      *  When undefined, base template defaults to master-like behavior (no feature strings). */
     /** @internal */
     readonly _ext?: PbrTemplateExt;
+    /** @internal */
+    readonly _gammaTemplate?: PbrGammaTemplate | null;
     /** Generate a fragment stage that runs discard/alpha-test logic and writes no color. */
     /** @internal */
     readonly _noColorOutput?: boolean;
@@ -182,6 +186,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _anisoBrdfFunctions = "",
         _anisoTBBlock = "",
         _ext,
+        _gammaTemplate,
         _noColorOutput = false,
         _esmShadowOutput = false,
         _esmShadowDepthCode = "",
@@ -366,8 +371,7 @@ var N=N_geom;`;
     const baseColorFactorRgb = _hasBaseColorFactor ? "*material.baseColorFactor.rgb" : "";
     const baseColorFactorAlpha = _hasBaseColorFactor ? "*material.baseColorFactor.a" : "";
     const baseColorDecode = _hasGammaAlbedo
-        ? `var baseColor=pow(baseColorSample.rgb,vec3<f32>(2.2))${baseColorFactorRgb};
-var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`
+        ? _gammaTemplate!.gammaBaseColor(baseColorFactorRgb, baseColorFactorAlpha, vertexColorMod)
         : `var baseColor=baseColorSample.rgb${baseColorFactorRgb};
 var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`;
 

@@ -22,7 +22,7 @@ import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
 import type { ClusteredLightContainer } from "../light/clustered.js";
-import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
+import type { PickSource } from "../picking/pick-contributor.js";
 import type { ToneMapping } from "../material/pbr/tone-mapping.js";
 
 /** Image processing configuration. */
@@ -88,12 +88,12 @@ export interface SceneContext extends RenderingContext {
     _renderables: Renderable[];
     /** @internal Pre-pass work (shadow maps, compute, etc.). */
     _prePasses: PrePassRenderable[];
-    /** GaussianSplatting meshes attached to this scene.  Populated by
-     *  `attachGaussianSplattingMesh`.  Scene-core stays GS-agnostic apart from
-     *  this opaque registry (used by `gpu-picker` to iterate GS meshes without
-     *  scanning `_renderables`). */
+    /** Pick sources — one per optional pickable entity (GS mesh, billboard system, …). Registered by
+     *  the entity module via `registerPickSource` when the entity is added; each is pure data + a
+     *  dynamic-import thunk the GPU picker resolves (once) on the first pick, so rendering the entity
+     *  pulls no pick-pipeline bytes. Scene-core stays pick-agnostic apart from this opaque list. */
     /** @internal */
-    _gsMeshes: GaussianSplattingMesh[];
+    _pickSources: PickSource[];
     /** @internal Scene uniform updaters (one per shared UBO). */
     _uniformUpdaters: SceneUniformUpdater[];
     /** @internal Opt-in feature writers for the SceneUniforms UBO (fog, clip plane, env SH).
@@ -186,7 +186,7 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         imageProcessing: { exposure: 1.0, contrast: 1.0, toneMappingEnabled: false },
         _renderables: [],
         _prePasses: [],
-        _gsMeshes: [],
+        _pickSources: [],
         _uniformUpdaters: [],
         fixedDeltaMs: 0,
         _beforeRender: [],
@@ -407,7 +407,7 @@ export function disposeScene(scene: SceneContext): void {
     ctx.meshes.length = 0;
     ctx._renderables.length = 0;
     ctx._prePasses.length = 0;
-    ctx._gsMeshes.length = 0;
+    ctx._pickSources.length = 0;
     ctx._uniformUpdaters.length = 0;
     ctx._beforeRender.length = 0;
     ctx._deferredBuilders.length = 0;

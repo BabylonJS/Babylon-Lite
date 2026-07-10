@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `5fe4c29ff4e956c03533e65f8c2912212486692a`
-- **Last sync date:** 2026-07-07
+- **Last synced BJS commit:** `b1d90d67bc09f56bf2882671f4484997630c4482`
+- **Last sync date:** 2026-07-09
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -205,7 +205,10 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `Behavior<T>` interface                      | ✅ Full            | [behaviors/behaviors.ts](src/behaviors/behaviors.ts) |
 | `AutoRotationBehavior`                       | ✅ Full            | behaviors                                            |
 | `BouncingBehavior` / `FramingBehavior`       | ⚡ Partial         | behaviors (no tweened animation)                     |
-| `PointerDragBehavior` / `SixDofDragBehavior` | 🔧 Needs Lite core | use native `createPointerDrag`                       |
+| `PointerDragBehavior`                        | 🔧 Needs Lite core | throwing stub ([unsupported-apis.ts](src/unsupported/unsupported-apis.ts)); Lite's `createPointerDrag` only drives utility-layer gizmo colliders, not arbitrary main-scene meshes |
+| `SixDofDragBehavior` / `BaseSixDofDragBehavior` / `MultiPointerScaleBehavior` | ❌ Not supported | throwing stub; six-DoF / multi-pointer mesh manipulation not in Lite |
+| `AttachToBoxBehavior` / `FadeInOutBehavior` / `SurfaceMagnetismBehavior` / `FollowBehavior` / `HandConstraintBehavior` | ❌ Not supported | throwing stub; MRTK/XR-oriented mesh behaviors not in Lite |
+| `InterpolatingBehavior` / `GeospatialClippingBehavior` | ❌ Not supported | throwing stub; camera interpolation / geospatial clipping not in Lite |
 
 ## Actions
 
@@ -263,6 +266,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | ----------------------------------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SceneLoader.ImportMeshAsync` / `AppendAsync` / `LoadAssetContainerAsync`     | ⚡ Partial       | [loading/scene-loader.ts](src/loading/scene-loader.ts)                                                                                                   |
 | glTF 2.0 + extensions                                                         | ✅ Full          | via Lite `loadGltf`                                                                                                                                      |
+| `KHR_gaussian_splatting` (glTF extension)                                    | ❌ Not supported | new BJS `9.16` loader extension (#18659); Lite loads standalone `.ply`/`.splat`/`.sog`/`.spz` clouds via `GaussianSplattingMesh`, but its glTF loader does not decode splat data embedded in a glTF via this extension |
 | `MeshoptCompression` (`EXT_meshopt_compression`)                              | ✅ Full          | [meshes/compression.ts](src/meshes/compression.ts) (no-op `Configuration` shim; Lite decodes meshopt in its glTF loader)                                 |
 | `KHR_materials_variants` (`SelectVariant` / `GetAvailableVariants` / `Reset`) | ✅ Full          | [loading/material-variants.ts](src/loading/material-variants.ts) (over Lite `selectVariant` / `getVariantNames` / `resetVariant`; root mesh → container) |
 | `.babylon`                                                                    | ✅ Full          | via Lite `loadBabylon`                                                                                                                                   |
@@ -494,3 +498,17 @@ large-world-rendering scenes are now resolved.
 > unblock — addressed under Task 3 by wrapping `HavokPlugin` (with BJS-matching
 > `useDeltaForWorldStep` delta stepping) over the existing public Lite physics API. No
 > previously-skipped scene is newly unblocked; Task 2 stays dormant.
+>
+> **Task 2 re-check (2026-07-09):** the two commits touching
+> `packages/babylon-lite/src/**` since the last status commit are #389
+> (animation fix — decouples `crossFadeAnimationGroups`/`fadeAnimationWeight` into a
+> mixer-neutral `animation-weight-fade.ts` and stops double-driving manager-owned
+> glTF groups; public export paths unchanged) and #388 (audio — per-instance
+> `pitch`/`playbackRate` on Lite's `playSound`, a Lite-only extra not present in the
+> BJS `IStaticSoundPlayOptions` surface). **Neither adds a new Lite public export**
+> (`git diff` of `index.ts` shows only a module-path change for the moved fade
+> functions), so no previously-skipped scene is newly unblocked. The compat blend
+> path already enables blending explicitly (`enableAnimationBlending` on a
+> scene-owned `AnimationManager`) and detaches each group's `_ctrl`, so #389's
+> behaviour change (fades no longer implicitly enable a mixer) requires no compat
+> change. Task 2 stays dormant.

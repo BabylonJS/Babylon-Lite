@@ -1,10 +1,9 @@
 {
-  "rawKB": 51.5,
-  "gzipKB": 20.4,
+  "rawKB": 50.8,
+  "gzipKB": 20,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene42-standard-renderable-Bil7My3S.js",
-    "scene42-wgsl-helpers-CwHFFXvt.js",
+    "scene42-standard-renderable-rj7__PCb.js",
     "scene42.js"
   ]
 }
