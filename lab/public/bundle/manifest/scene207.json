@@ -1,6 +1,6 @@
 {
-  "rawKB": 58.9,
-  "gzipKB": 23.6,
+  "rawKB": 59,
+  "gzipKB": 23.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene207-_mat4-storage-f64-B_0HYOAx.js",
