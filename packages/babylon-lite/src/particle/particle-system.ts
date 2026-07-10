@@ -10,6 +10,24 @@ import { createParticle, resetParticle } from "./particle.js";
 export type ParticleProcess = (particle: Particle, system: ParticleSystem) => void;
 
 /**
+ * Sprite-sheet (animation-sheet) configuration for a particle system. Constructed by
+ * `SetupSpriteSheetBlock` and referenced only through {@link ParticleSystem._spriteSheet}, so a system
+ * that uses no sheet carries none of these fields or their default initializers. The billboard builder
+ * reads the cell dimensions, the creation birth-hook seeds each particle's cell range, and
+ * `BasicSpriteUpdateBlock` reads the change speed and random-start flag.
+ * @internal
+ */
+export interface SpriteSheetConfig {
+    cellWidth: number;
+    cellHeight: number;
+    startCellID: number;
+    endCellID: number;
+    loop: boolean;
+    randomStartCell: boolean;
+    changeSpeed: number;
+}
+
+/**
  * A CPU-simulated particle system — pure state.
  *
  * The node-graph build configures the public properties and fills {@link ParticleSystem._createQueue}
@@ -40,23 +58,12 @@ export interface ParticleSystem {
     /** Particle texture used by the billboard renderer (resolved after async asset loads complete). */
     texture: Texture2D | null;
 
-    /** Sprite-sheet cell width in pixels (animation sheet). */
-    spriteCellWidth: number;
-    /** Sprite-sheet cell height in pixels (animation sheet). */
-    spriteCellHeight: number;
-    /** First sprite-sheet cell index used by the animation. */
-    startSpriteCellID: number;
-    /** Last sprite-sheet cell index used by the animation. */
-    endSpriteCellID: number;
-    /** Whether the sprite-sheet animation loops over the particle's life. */
-    spriteCellLoop: boolean;
-    /** Whether each particle starts on a random sprite-sheet cell. */
-    spriteRandomStartCell: boolean;
-    /** Sprite-sheet cell change speed (number of cycles over the particle's life). */
-    spriteCellChangeSpeed: number;
-
-    /** @internal Whether sprite-sheet animation is enabled (set by `SetupSpriteSheetBlock`). */
-    _isAnimationSheetEnabled: boolean;
+    /**
+     * @internal Sprite-sheet (animation-sheet) configuration, or `null` when the system uses no sheet.
+     * Set once by `SetupSpriteSheetBlock`. Holding all sprite config behind one optional handle keeps
+     * non-sprite systems free of per-feature fields and default initializers.
+     */
+    _spriteSheet: SpriteSheetConfig | null;
 
     /** @internal Deferred texture binder, run by the build once async loads settle. */
     _resolveTexture: (() => void) | null;
@@ -109,6 +116,13 @@ export interface ParticleSystem {
     _createColor: ParticleProcess | null;
     /** @internal */
     _createColorDead: ParticleProcess | null;
+    /**
+     * @internal Per-particle creation hooks, run in push order after the fixed creation slots — the
+     * position the former hardcoded animation-sheet birth-capture occupied. Feature blocks attach
+     * birth-time closures here so the core creation loop stays free of feature-specific branches. Hooks
+     * MUST NOT draw `Math.random()`; the creation RNG order is parity-load-bearing.
+     */
+    _createQueue: ParticleProcess[];
     /** @internal Per-particle update steps, in graph-connection order. */
     _updateQueue: ParticleProcess[];
 }
@@ -127,14 +141,7 @@ export function createParticleSystem(name: string, capacity: number): ParticleSy
         isLocal: false,
         emitter: { x: 0, y: 0, z: 0 },
         texture: null,
-        spriteCellWidth: 0,
-        spriteCellHeight: 0,
-        startSpriteCellID: 0,
-        endSpriteCellID: 0,
-        spriteCellLoop: true,
-        spriteRandomStartCell: false,
-        spriteCellChangeSpeed: 1,
-        _isAnimationSheetEnabled: false,
+        _spriteSheet: null,
         _resolveTexture: null,
         _particles: [],
         _stock: [],
@@ -155,6 +162,7 @@ export function createParticleSystem(name: string, capacity: number): ParticleSy
         _createAngle: null,
         _createColor: null,
         _createColorDead: null,
+        _createQueue: [],
         _updateQueue: [],
     };
 }
@@ -293,16 +301,13 @@ function runCreationSlots(system: ParticleSystem, particle: Particle): void {
         system._createColorDead(particle, system);
     }
 
-    // Animation-sheet: capture the system's cell range at birth (immutable per particle) and seed the
-    // starting cell. Mirrors BJS core particle creation gated on `isAnimationSheetEnabled`; the per-frame
-    // BasicSpriteUpdateBlock advances `cellIndex` from these. No RNG is drawn here (the random start-cell
-    // offset is drawn lazily on first update), so this does not perturb the creation random sequence.
-    if (system._isAnimationSheetEnabled) {
-        particle._initialStartSpriteCellId = system.startSpriteCellID;
-        particle._initialEndSpriteCellId = system.endSpriteCellID;
-        particle._initialSpriteCellLoop = system.spriteCellLoop;
-        particle.cellIndex = system.startSpriteCellID;
-        particle._randomCellOffset = -1;
+    // Feature birth hooks (e.g. the animation-sheet cell-range capture) run here in push order, at the
+    // fixed position the former hardcoded animation-sheet branch occupied. The list is empty for systems
+    // with no feature hooks, so non-sprite systems pay nothing; the hooks draw no RNG, so the creation
+    // random sequence is unchanged.
+    const createQueue = system._createQueue;
+    for (let q = 0; q < createQueue.length; q++) {
+        createQueue[q]!(particle, system);
     }
 }
 

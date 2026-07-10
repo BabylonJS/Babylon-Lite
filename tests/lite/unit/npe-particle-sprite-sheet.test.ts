@@ -45,7 +45,7 @@ describe("NPE sprite-sheet animation — deterministic parity with Babylon.js", 
             const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph, { emitter: { x: 0, y: 0, z: 0 } });
             const system = set.systems[0]!;
             expect(system).toBeTruthy();
-            expect(system._isAnimationSheetEnabled, "animation sheet enabled by SetupSpriteSheetBlock").toBe(true);
+            expect(system._spriteSheet, "sprite sheet configured by SetupSpriteSheetBlock").not.toBeNull();
 
             let seed = 1;
             Math.random = () => {

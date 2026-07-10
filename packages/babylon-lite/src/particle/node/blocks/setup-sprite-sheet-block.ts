@@ -1,40 +1,43 @@
-import type { ParticleSystem } from "../../particle-system.js";
+import type { ParticleSystem, SpriteSheetConfig } from "../../particle-system.js";
 import type { ParticleBlockEvaluator } from "../npe-types.js";
 
 /**
- * `SetupSpriteSheetBlock` — configures the system's animation-sheet (sprite-sheet) properties: cell
- * dimensions, the start/end cell range, loop, random start cell, and cell change speed. It is a
- * pass-through in the creation chain (particle in → particle out) that sets the properties on the
- * {@link ParticleSystem}; the per-particle cell state is seeded at creation and advanced each frame by
- * {@link basicSpriteUpdateBlock}. Mirrors BJS `SetupSpriteSheetBlock`.
+ * `SetupSpriteSheetBlock` — configures the system's animation-sheet (sprite-sheet): cell dimensions, the
+ * start/end cell range, loop, random start cell, and cell change speed. It is a pass-through in the
+ * creation chain (particle in → particle out) that stores the config in {@link ParticleSystem._spriteSheet}
+ * and attaches a creation birth-hook that seeds each particle's cell state; the cell is then advanced each
+ * frame by {@link basicSpriteUpdateBlock}. Mirrors BJS `SetupSpriteSheetBlock`.
  */
 export const setupSpriteSheetBlock: ParticleBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.input(block, "particle")(ctx.state) as ParticleSystem;
         const s = block.serialized;
 
-        system._isAnimationSheetEnabled = true;
-        if (typeof s.width === "number") {
-            system.spriteCellWidth = s.width;
-        }
-        if (typeof s.height === "number") {
-            system.spriteCellHeight = s.height;
-        }
-        if (typeof s.start === "number") {
-            system.startSpriteCellID = s.start;
-        }
-        if (typeof s.end === "number") {
-            system.endSpriteCellID = s.end;
-        }
-        if (typeof s.loop === "boolean") {
-            system.spriteCellLoop = s.loop;
-        }
-        if (typeof s.randomStartCell === "boolean") {
-            system.spriteRandomStartCell = s.randomStartCell;
-        }
-        if (typeof s.spriteCellChangeSpeed === "number") {
-            system.spriteCellChangeSpeed = s.spriteCellChangeSpeed;
-        }
+        // All sprite config lives in one handle on the system (one optional field, not eight named props
+        // with defaults on every particle system). Absent serialized fields fall back to the BJS defaults
+        // the core previously initialized.
+        const sheet: SpriteSheetConfig = {
+            cellWidth: typeof s.width === "number" ? s.width : 0,
+            cellHeight: typeof s.height === "number" ? s.height : 0,
+            startCellID: typeof s.start === "number" ? s.start : 0,
+            endCellID: typeof s.end === "number" ? s.end : 0,
+            loop: typeof s.loop === "boolean" ? s.loop : true,
+            randomStartCell: typeof s.randomStartCell === "boolean" ? s.randomStartCell : false,
+            changeSpeed: typeof s.spriteCellChangeSpeed === "number" ? s.spriteCellChangeSpeed : 1,
+        };
+        system._spriteSheet = sheet;
+
+        // Birth hook: capture the cell range on each particle at creation (immutable for its life) and seed
+        // the starting cell. Pushed onto the generic creation queue so the core sim loop carries no
+        // sprite-specific branch. Draws no RNG (the random start-cell offset is drawn lazily on first
+        // update), so the creation random sequence matches Babylon.js.
+        system._createQueue.push((particle) => {
+            particle._initialStartSpriteCellId = sheet.startCellID;
+            particle._initialEndSpriteCellId = sheet.endCellID;
+            particle._initialSpriteCellLoop = sheet.loop;
+            particle.cellIndex = sheet.startCellID;
+            particle._randomCellOffset = -1;
+        });
 
         ctx.setOutput(block.id, "output", () => system);
     },

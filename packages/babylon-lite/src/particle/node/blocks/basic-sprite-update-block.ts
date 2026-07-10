@@ -14,10 +14,14 @@ function clamp01(value: number): number {
  * a per-particle random fraction of its life (drawn lazily on the first update).
  */
 function updateCellIndex(particle: Particle, system: ParticleSystem): void {
+    // Set by SetupSpriteSheetBlock, which always precedes this update block in the graph, so it is
+    // non-null whenever this hook runs. Reading it here (rather than named system fields) keeps the sprite
+    // config off the shared ParticleSystem shape.
+    const sheet = system._spriteSheet!;
     let offsetAge = particle.age;
-    let changeSpeed = system.spriteCellChangeSpeed;
+    let changeSpeed = sheet.changeSpeed;
 
-    if (system.spriteRandomStartCell) {
+    if (sheet.randomStartCell) {
         if (particle._randomCellOffset < 0) {
             particle._randomCellOffset = Math.random() * particle.lifeTime;
         }

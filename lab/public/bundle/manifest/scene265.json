@@ -1,9 +1,9 @@
 {
-  "rawKB": 43.9,
+  "rawKB": 43.7,
   "gzipKB": 25.8,
   "ignoredRawKB": 29.7,
   "runtimeChunks": [
-    "scene265-basic-sprite-update-block-CFXyGQtJ.js",
+    "scene265-basic-sprite-update-block-BG1gruqg.js",
     "scene265-billboard-renderable-CPnueImg.js",
     "scene265-box-shape-block-D3cG5FlM.js",
     "scene265-color4-ref-CLya10nC.js",
@@ -16,7 +16,7 @@
     "scene265-particle-math-block-BfOGyynd.js",
     "scene265-particle-random-block-BQ4BGvxu.js",
     "scene265-random-range-CfhNtuAB.js",
-    "scene265-setup-sprite-sheet-block-BrvsbKYr.js",
+    "scene265-setup-sprite-sheet-block-Ce7OsLk4.js",
     "scene265-system-block-CtHZM8kJ.js",
     "scene265-texture-source-block-C2ZQbDrN.js",
     "scene265-update-color-block-BqW6L609.js",

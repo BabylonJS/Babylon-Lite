@@ -30,10 +30,11 @@ export function createParticleBillboard(system: ParticleSystem): FacingBillboard
     if (!texture) {
         throw new Error("createParticleBillboard: the particle system has no texture");
     }
+    const sheet = system._spriteSheet;
     const atlas = createGridSpriteAtlas(texture, {
         // With an animation sheet the texture is a grid of cells; otherwise it is a single-frame sprite.
-        cellWidthPx: system._isAnimationSheetEnabled && system.spriteCellWidth > 0 ? system.spriteCellWidth : texture.width,
-        cellHeightPx: system._isAnimationSheetEnabled && system.spriteCellHeight > 0 ? system.spriteCellHeight : texture.height,
+        cellWidthPx: sheet && sheet.cellWidth > 0 ? sheet.cellWidth : texture.width,
+        cellHeightPx: sheet && sheet.cellHeight > 0 ? sheet.cellHeight : texture.height,
     });
     return createFacingBillboardSystem(atlas, { capacity: system.capacity, blendMode: blendForMode(system.blendMode) });
 }
