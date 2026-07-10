@@ -1,23 +1,23 @@
 {
-  "rawKB": 98.3,
-  "gzipKB": 40.7,
+  "rawKB": 98.9,
+  "gzipKB": 40.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene164-create-morph-targets-DRqKS4bi.js",
-    "scene164-create-skeleton-CBLyRVMO.js",
+    "scene164-create-skeleton-DioqZBBa.js",
     "scene164-generate-mipmaps-BxA9-hzJ.js",
     "scene164-gltf-animation-ziUYBbVg.js",
     "scene164-gltf-color-normalize-4-WGzPL2.js",
-    "scene164-gltf-feature-animations-BP-rQ02Z.js",
+    "scene164-gltf-feature-animations-CoptQtIt.js",
     "scene164-gltf-feature-morph-Dcma2yce.js",
-    "scene164-gltf-feature-registry-BFb-1Tan.js",
-    "scene164-gltf-feature-skeleton-B5SJY-Kk.js",
+    "scene164-gltf-feature-registry-BTZNRQQb.js",
+    "scene164-gltf-feature-skeleton-DRjn81A9.js",
     "scene164-gltf-json-asset-B2lSB7pA.js",
-    "scene164-morph-fragment-C8E61rmA.js",
-    "scene164-pbr-renderable-QKJGuop1.js",
+    "scene164-morph-fragment-DFUW-FkT.js",
+    "scene164-pbr-renderable-BA_7Bls-.js",
     "scene164-pbr-template-ext-BoJ8SFLM.js",
     "scene164-singlelight-hemispheric-wgsl-L03Bnk5I.js",
-    "scene164-skeleton-fragment-CqyyJhn5.js",
+    "scene164-skeleton-fragment-CZatw6gP.js",
     "scene164.js"
   ]
 }
