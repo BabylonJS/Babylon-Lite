@@ -1,0 +1,27 @@
+{
+  "rawKB": 43.9,
+  "gzipKB": 25.8,
+  "ignoredRawKB": 29.7,
+  "runtimeChunks": [
+    "scene265-basic-sprite-update-block-CFXyGQtJ.js",
+    "scene265-billboard-renderable-CPnueImg.js",
+    "scene265-box-shape-block-D3cG5FlM.js",
+    "scene265-color4-ref-CLya10nC.js",
+    "scene265-create-particle-block-DI5B7sgA.js",
+    "scene265-generate-mipmaps-Dl4XKq0Y.js",
+    "scene265-particle-converter-block-oStUKUGD.js",
+    "scene265-particle-input-block-BVZy71Sg.js",
+    "scene265-particle-lerp-CRpaBd2M.js",
+    "scene265-particle-lerp-block-BsYxdSfW.js",
+    "scene265-particle-math-block-BfOGyynd.js",
+    "scene265-particle-random-block-BQ4BGvxu.js",
+    "scene265-random-range-CfhNtuAB.js",
+    "scene265-setup-sprite-sheet-block-BrvsbKYr.js",
+    "scene265-system-block-CtHZM8kJ.js",
+    "scene265-texture-source-block-C2ZQbDrN.js",
+    "scene265-update-color-block-BqW6L609.js",
+    "scene265-update-position-block-COqCbQ_o.js",
+    "scene265-vec3-ref-BQ9hm9R5.js",
+    "scene265.js"
+  ]
+}

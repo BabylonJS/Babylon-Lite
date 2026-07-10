@@ -30,7 +30,11 @@ export function createParticleBillboard(system: ParticleSystem): FacingBillboard
     if (!texture) {
         throw new Error("createParticleBillboard: the particle system has no texture");
     }
-    const atlas = createGridSpriteAtlas(texture, { cellWidthPx: texture.width, cellHeightPx: texture.height });
+    const atlas = createGridSpriteAtlas(texture, {
+        // With an animation sheet the texture is a grid of cells; otherwise it is a single-frame sprite.
+        cellWidthPx: system._isAnimationSheetEnabled && system.spriteCellWidth > 0 ? system.spriteCellWidth : texture.width,
+        cellHeightPx: system._isAnimationSheetEnabled && system.spriteCellHeight > 0 ? system.spriteCellHeight : texture.height,
+    });
     return createFacingBillboardSystem(atlas, { capacity: system.capacity, blendMode: blendForMode(system.blendMode) });
 }
 
@@ -45,7 +49,7 @@ export function syncParticleBillboard(system: ParticleSystem, billboard: FacingB
             sizeWorld: [particle.size * particle.scale.x, particle.size * particle.scale.y],
             color: [particle.color.r, particle.color.g, particle.color.b, particle.color.a],
             rotation: particle.angle,
-            frame: 0,
+            frame: particle.cellIndex,
         });
     }
 }

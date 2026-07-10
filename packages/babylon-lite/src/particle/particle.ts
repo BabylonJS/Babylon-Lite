@@ -38,6 +38,16 @@ export interface Particle {
     /** Animation-sheet cell index. */
     cellIndex: number;
 
+    /** @internal Animation-sheet: start cell captured at birth (immutable for the particle's life). */
+    _initialStartSpriteCellId: number;
+    /** @internal Animation-sheet: end cell captured at birth. */
+    _initialEndSpriteCellId: number;
+    /** @internal Animation-sheet: whether the cell animation loops, captured at birth. */
+    _initialSpriteCellLoop: boolean;
+    /** @internal Animation-sheet: random cell-time offset for `spriteRandomStartCell`, drawn lazily on the
+     *  first update; `-1` until drawn. */
+    _randomCellOffset: number;
+
     /** @internal Scratch: direction scale for the current step (= the system's scaled update speed). */
     _directionScale: number;
     /** @internal Scratch: `direction * _directionScale`. */
@@ -70,6 +80,10 @@ export function createParticle(id: number): Particle {
         size: 1,
         scale: { x: 1, y: 1 },
         cellIndex: 0,
+        _initialStartSpriteCellId: 0,
+        _initialEndSpriteCellId: 0,
+        _initialSpriteCellLoop: true,
+        _randomCellOffset: -1,
         _directionScale: 0,
         _scaledDirection: { x: 0, y: 0, z: 0 },
         _initialDirection: { x: 0, y: 0, z: 0 },

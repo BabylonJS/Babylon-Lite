@@ -40,6 +40,24 @@ export interface ParticleSystem {
     /** Particle texture used by the billboard renderer (resolved after async asset loads complete). */
     texture: Texture2D | null;
 
+    /** Sprite-sheet cell width in pixels (animation sheet). */
+    spriteCellWidth: number;
+    /** Sprite-sheet cell height in pixels (animation sheet). */
+    spriteCellHeight: number;
+    /** First sprite-sheet cell index used by the animation. */
+    startSpriteCellID: number;
+    /** Last sprite-sheet cell index used by the animation. */
+    endSpriteCellID: number;
+    /** Whether the sprite-sheet animation loops over the particle's life. */
+    spriteCellLoop: boolean;
+    /** Whether each particle starts on a random sprite-sheet cell. */
+    spriteRandomStartCell: boolean;
+    /** Sprite-sheet cell change speed (number of cycles over the particle's life). */
+    spriteCellChangeSpeed: number;
+
+    /** @internal Whether sprite-sheet animation is enabled (set by `SetupSpriteSheetBlock`). */
+    _isAnimationSheetEnabled: boolean;
+
     /** @internal Deferred texture binder, run by the build once async loads settle. */
     _resolveTexture: (() => void) | null;
 
@@ -109,6 +127,14 @@ export function createParticleSystem(name: string, capacity: number): ParticleSy
         isLocal: false,
         emitter: { x: 0, y: 0, z: 0 },
         texture: null,
+        spriteCellWidth: 0,
+        spriteCellHeight: 0,
+        startSpriteCellID: 0,
+        endSpriteCellID: 0,
+        spriteCellLoop: true,
+        spriteRandomStartCell: false,
+        spriteCellChangeSpeed: 1,
+        _isAnimationSheetEnabled: false,
         _resolveTexture: null,
         _particles: [],
         _stock: [],
@@ -265,6 +291,18 @@ function runCreationSlots(system: ParticleSystem, particle: Particle): void {
     }
     if (system._createColorDead) {
         system._createColorDead(particle, system);
+    }
+
+    // Animation-sheet: capture the system's cell range at birth (immutable per particle) and seed the
+    // starting cell. Mirrors BJS core particle creation gated on `isAnimationSheetEnabled`; the per-frame
+    // BasicSpriteUpdateBlock advances `cellIndex` from these. No RNG is drawn here (the random start-cell
+    // offset is drawn lazily on first update), so this does not perturb the creation random sequence.
+    if (system._isAnimationSheetEnabled) {
+        particle._initialStartSpriteCellId = system.startSpriteCellID;
+        particle._initialEndSpriteCellId = system.endSpriteCellID;
+        particle._initialSpriteCellLoop = system.spriteCellLoop;
+        particle.cellIndex = system.startSpriteCellID;
+        particle._randomCellOffset = -1;
     }
 }
 

@@ -57,6 +57,10 @@ export async function loadParticleBlockEvaluator(className: string): Promise<Par
             return (await import("./blocks/particle-condition-block.js")).particleConditionBlock;
         case "ParticleFloatToIntBlock":
             return (await import("./blocks/particle-float-to-int-block.js")).particleFloatToIntBlock;
+        case "SetupSpriteSheetBlock":
+            return (await import("./blocks/setup-sprite-sheet-block.js")).setupSpriteSheetBlock;
+        case "BasicSpriteUpdateBlock":
+            return (await import("./blocks/basic-sprite-update-block.js")).basicSpriteUpdateBlock;
         default:
             throw new Error(`NodeParticle: unsupported block class "${className}"`);
     }
