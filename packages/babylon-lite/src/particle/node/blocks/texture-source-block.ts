@@ -14,13 +14,19 @@ export const textureSourceBlock: ParticleBlockEvaluator = {
         // Babylon.js resolves a particle texture path against the scene's texture base.
         const isAbsolute = /^(https?:)?\/\//.test(rawUrl) || rawUrl.startsWith("/");
         const url = rawUrl && base && !isAbsolute ? new URL(rawUrl, base).href : rawUrl;
+        // Babylon.js's ParticleTextureSourceBlock.invertY defaults to true. Our billboard renderer samples
+        // the V axis opposite to Babylon.js's particle shader (createGridSpriteAtlas maps texture row 0 →
+        // uvMin.y, i.e. top-down), so we upload with the *opposite* flip to land on the same pixels. Skipping
+        // this made the (nearly symmetric) flare's slightly off-centre hotspot render mirrored vertically —
+        // a size-proportional vertical offset that dominated the particle parity error.
+        const blockInvertY = block.serialized.invertY !== false;
         const holder: { texture: Texture2D | null } = { texture: null };
 
         if (url) {
             ctx.addBuildPromise(
                 (async () => {
                     try {
-                        holder.texture = await loadTexture2D(ctx.engine, url);
+                        holder.texture = await loadTexture2D(ctx.engine, url, { invertY: !blockInvertY });
                     } catch {
                         // A failed texture load must not break the simulation; the particle simply
                         // renders untextured (and headless/CPU-only builds have no device at all).

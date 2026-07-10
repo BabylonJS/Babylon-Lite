@@ -31,6 +31,7 @@ import { getPickingSceneBGL } from "./picking-pipeline.js";
 import { getRenderTargetSize } from "../engine/engine.js";
 import { getViewMatrix, getProjectionMatrix } from "../camera/camera.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import type { PickContributor, PickPassContext } from "./pick-contributor.js";
 
 interface GsPickingCache {
     device: GPUDevice;
@@ -44,6 +45,9 @@ interface GsPickingCache {
 }
 
 let _cache: GsPickingCache | null = null;
+
+/** Scratch pick matrix, reused across GS pick draws (recomputed per draw from the pick pixel). */
+const _gsPickMx = new F32(16);
 
 /** Build the GS picking WGSL as a self-contained template literal.
  *
@@ -358,6 +362,16 @@ export function drawGsForPicking(
     pass.drawIndexed(6, mesh.vertexCount);
 }
 
+/** Draw one GS mesh into the shared pick pass as a pick contributor: (re)binds the GS pick
+ *  matrix at group 0, then issues the pick draw with id `baseId`. The GS pipeline zooms its own
+ *  clip-space output onto the pick pixel, so it rebinds group 0 — the next contributor must
+ *  rebind what it needs (billboards rebind the mesh pick VP). */
+export function drawGsMeshForPicking(ctx: PickPassContext, mesh: GaussianSplattingMesh, res: GsPickMeshResources, baseId: number): void {
+    computeGsPickMatrix(_gsPickMx, ctx.px, ctx.py, ctx.w, ctx.h);
+    gsPickWritePickMatrixAndBind(ctx.pass, ctx.engine, _gsPickMx);
+    drawGsForPicking(ctx.pass, ctx.engine, ctx.scene, mesh, res, baseId, ctx.w, ctx.h);
+}
+
 /** Compute the pickMatrix for GS picking — same matrix `computePickVP` builds,
  *  but applied to the clip-space output of the GS shader rather than the world.
  *
@@ -383,4 +397,27 @@ export function computeGsPickMatrix(out: Float32Array, px: number, py: number, w
     out[13] = -ndcY * h;
     out[14] = 0;
     out[15] = 1;
+}
+
+/** Build the pick contributor for one GS mesh (one pick id). The picker calls this once (via the pick
+ *  source registered by the GS pipeline) and reuses the result, so the pick GPU resources live in
+ *  this closure and free in `dispose`. */
+export function createPickContributor(mesh: GaussianSplattingMesh): PickContributor {
+    let res: GsPickMeshResources | null = null;
+    return {
+        draw(ctx, baseId) {
+            res ??= createGsPickMeshResources(ctx.engine, mesh);
+            drawGsMeshForPicking(ctx, mesh, res, baseId);
+            return baseId + 1;
+        },
+        resolve(info) {
+            info.pickedMesh = mesh;
+        },
+        dispose() {
+            if (res) {
+                disposeGsPickMeshResources(res);
+                res = null;
+            }
+        },
+    };
 }

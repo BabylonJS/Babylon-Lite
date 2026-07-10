@@ -1,22 +1,22 @@
 {
-  "rawKB": 111.6,
-  "gzipKB": 45.5,
+  "rawKB": 110.5,
+  "gzipKB": 45.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene146-alpha-test-fragment-DKqMogCi.js",
-    "scene146-background-ground-Cvg4Rev_.js",
-    "scene146-background-solid-skybox-Cx2LKhP_.js",
-    "scene146-generate-mipmaps-B6juG4-I.js",
-    "scene146-gltf-json-asset-BgvJBxWB.js",
+    "scene146-alpha-test-fragment-L5q46WY3.js",
+    "scene146-background-ground-Dmt_5P9m.js",
+    "scene146-background-solid-skybox-DtLNEa5J.js",
+    "scene146-generate-mipmaps-DEgXRuY9.js",
+    "scene146-gltf-json-asset-oCUO4rUK.js",
     "scene146-ibl-fragment-CeRrvT96.js",
-    "scene146-pbr-geometry-view-DA9hdVGL.js",
-    "scene146-pbr-renderable-Cpuu9iqh.js",
-    "scene146-rgbd-decode-D-Fc_tIM.js",
+    "scene146-pbr-geometry-view-DP6hK4RS.js",
+    "scene146-pbr-renderable-Ik6bYiXR.js",
+    "scene146-rgbd-decode-DZYt7kUp.js",
     "scene146-scene-uniforms-FTYH6Ct0.js",
     "scene146-shader-composer-DOjPUQGI.js",
     "scene146-skybox.vertex-Ban7q6IM-D1KSfOUq.js",
     "scene146-ubo-layout-CaKc5tGR.js",
-    "scene146-wgsl-helpers-DHWOYtor.js",
+    "scene146-wgsl-helpers-BxdFLrVn.js",
     "scene146.js"
   ]
 }

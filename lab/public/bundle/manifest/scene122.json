@@ -1,9 +1,9 @@
 {
-  "rawKB": 48.1,
+  "rawKB": 48.2,
   "gzipKB": 19.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene122-gaussian-splatting-pipeline-sh-DIpbh4iH.js",
+    "scene122-gaussian-splatting-pipeline-sh-DCM3WMGs.js",
     "scene122.js"
   ]
 }
