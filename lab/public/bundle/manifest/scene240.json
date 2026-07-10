@@ -1,5 +1,5 @@
 {
-  "rawKB": 90.8,
+  "rawKB": 90.9,
   "gzipKB": 37.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -7,7 +7,7 @@
     "scene240-generate-mipmaps-BQZ9ivTX.js",
     "scene240-gltf-animation-aBVjSk7N.js",
     "scene240-gltf-feature-animations-CVhWeNLT.js",
-    "scene240-gltf-feature-registry-Qez-HwfU.js",
+    "scene240-gltf-feature-registry-BJPaRqTC.js",
     "scene240-gltf-json-asset-wZq70j5q.js",
     "scene240-gltf-multi-buffer-Cwm5u1Qq.js",
     "scene240-gltf-normals-DYhLwXNX.js",

@@ -1,5 +1,5 @@
 {
-  "rawKB": 98.5,
+  "rawKB": 98.6,
   "gzipKB": 40.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene164-gltf-color-normalize-4-WGzPL2.js",
     "scene164-gltf-feature-animations-BBCk7Uhp.js",
     "scene164-gltf-feature-morph-Dcma2yce.js",
-    "scene164-gltf-feature-registry-ETAD7yc2.js",
+    "scene164-gltf-feature-registry-R9Cl9Cjm.js",
     "scene164-gltf-feature-skeleton-B5SJY-Kk.js",
     "scene164-gltf-json-asset-BCxbuHbB.js",
     "scene164-morph-fragment-uMd1sOoJ.js",

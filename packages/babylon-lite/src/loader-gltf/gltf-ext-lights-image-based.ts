@@ -27,12 +27,15 @@ import type { SceneContext } from "../scene/scene-core.js";
 // NOTE: this module is a lazily-imported feature chunk (see gltf-feature-registry)
 // and keeps ZERO static runtime imports — every dependency is pulled in via dynamic
 // import inside applyAsset. Scenes that never trigger EXT_lights_image_based never
-// fetch this chunk (or its dependencies) at runtime. The cubemap uploader is kept
-// private (ibl-cubemap-upload.js) rather than shared with loader-env/rgbd-decode so
-// the extension does not pin that decoder into every .env/DDS scene. Its reuse of
-// env-helpers / hdr-ibl-pipeline still participates in rollup's static chunk graph
-// for every gltf build, which can hoist shared leaves (e.g. samplers) into their own
-// chunk — see the PR notes on bundle-size.
+// fetch this chunk (or its dependencies) at runtime. The heavy IBL helpers it reuses
+// (cubemap upload, env-texture assembly, BRDF LUT, SH conversion, samplers) are kept
+// as PRIVATE copies (ibl-cubemap-upload.js + ibl-env-assembly.js) rather than shared
+// with loader-env / loader-hdr. This is a deliberate, user-approved exception to the
+// max-reuse mandate: those canonical helpers are single-consumer and thus inlined
+// into every glTF scene's main chunk; importing them here would make this feature a
+// second consumer and force rollup to hoist them into shared chunks that all 44 glTF
+// scenes would pay for. The private copies isolate the feature's byte cost to the one
+// scene that uses it. See ibl-env-assembly.js for the canonical-source mapping.
 
 interface GltfImageBasedLight {
     name?: string;
@@ -112,7 +115,7 @@ const feature: GltfFeature = {
         // uploadCubemapRGBD expects; glTF face order +X,-X,+Y,-Y,+Z,-Z matches
         // WebGPU cube layers).
         const flatIndices = light.specularImages.flat();
-        const { resolveImage } = await import("./gltf-parser.js");
+        const { resolveImage } = await import("./ibl-env-assembly.js");
         const faceImages = await Promise.all(flatIndices.map((imgIdx) => resolveImage(json, ctx._binChunk, imgIdx, ctx._baseUrl)));
 
         const { uploadCubemapRGBD } = await import("./ibl-cubemap-upload.js");
@@ -121,7 +124,7 @@ const feature: GltfFeature = {
             img.close();
         }
 
-        const { generateBrdfLut } = await import("../loader-hdr/hdr-ibl-pipeline.js");
+        const { generateBrdfLut } = await import("./ibl-env-assembly.js");
         const brdfLut = generateBrdfLut(engine);
 
         const intensity = light.intensity ?? 1;
@@ -129,15 +132,16 @@ const feature: GltfFeature = {
         // Fit the LOD scale to the available mip count exactly as Babylon does.
         const lodGenerationScale = (mipCount - 1) / Math.log2(specularImageSize);
 
-        const { assembleEnvironmentTextures } = await import("../loader-env/env-helpers.js");
+        const { assembleEnvironmentTextures } = await import("./ibl-env-assembly.js");
         const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, lodGenerationScale, engine);
 
         const envRotationY = light.rotation ? envYawFromQuaternion(light.rotation) : 0;
 
-        // Pull the scene-wiring helpers in now (still lazy — part of this feature
-        // chunk) so the synchronous _sceneSetup closure can use them directly.
-        const { acquireGPUTexture, releaseGPUTexture } = await import("../resource/gpu-pool.js");
-        const { registerEnvSceneUniforms } = await import("../scene/scene-ubo-extras.js");
+        // Pull the scene-wiring helper in now (still lazy — part of this feature
+        // chunk) so the synchronous _sceneSetup closure can use it directly.
+        // registerEnvSceneUniforms is a private copy (see ibl-env-assembly) to
+        // avoid pinning scene-ubo-extras into every glTF scene.
+        const { registerEnvSceneUniforms } = await import("./ibl-env-assembly.js");
 
         // Defer the scene wiring: applyAsset has no SceneContext, so hand the core
         // loader a closure that addToScene() runs against the real scene.
@@ -148,11 +152,14 @@ const feature: GltfFeature = {
             }
             registerEnvSceneUniforms(scene);
 
-            acquireGPUTexture(specularCube);
-            acquireGPUTexture(brdfLut);
+            // specularCube + brdfLut are created fresh here and owned solely by
+            // this scene (nothing else acquires them), so a direct destroy on
+            // scene teardown is equivalent to the gpu-pool refcount path used by
+            // load-env — and it avoids pinning gpu-pool's exports into every
+            // glTF scene's main chunk, keeping the 43 non-IBL scenes at baseline.
             scene._disposables.push(() => {
-                releaseGPUTexture(specularCube);
-                releaseGPUTexture(brdfLut);
+                specularCube.destroy();
+                brdfLut.destroy();
             });
 
             // Match loadEnvironment's image-processing defaults (tone mapping on,
