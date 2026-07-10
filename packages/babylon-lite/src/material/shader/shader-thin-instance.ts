@@ -32,7 +32,7 @@ type CullModule = typeof import("../../mesh/thin-instance-cull-binding.js");
 /** The shader-renderable helpers handed in positionally by `buildShaderGroup`. */
 interface ShaderHelpers {
     buildPlain: (scene: SceneContext, meshes: Mesh[]) => MeshGroupBuildResult;
-    createPacket: (scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh) => ShaderPacket;
+    createPacket: (scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, aux?: boolean) => ShaderPacket;
     updatePacket: (scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch) => void;
     updateCustomUbo: (engine: EngineContext, material: ShaderMaterial, uniformBatch?: UniformCopyBatch) => void;
     getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName) => GPUBuffer;
@@ -177,7 +177,7 @@ function createShaderInstancedRenderable(
 /** Build one instanced renderable for `mesh` (used by the combined `rebuildSingle`). */
 function buildInstancedSingle(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean, h: ShaderHelpers, cull?: CullModule): Renderable {
     const bindings = h.getOrCreateShaderPipelineBindings(scene.surface.engine, material);
-    const packet = h.createPacket(scene, material, bindings.systemSpec, mesh);
+    const packet = h.createPacket(scene, material, bindings.systemSpec, mesh, isOverride);
     return createShaderInstancedRenderable(scene, material, packet, isOverride, h, cull);
 }
 

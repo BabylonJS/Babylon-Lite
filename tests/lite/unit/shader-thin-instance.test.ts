@@ -8,6 +8,7 @@ import { buildShaderRenderablesWithInstancing } from "../../../packages/babylon-
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import type { UboSpec } from "../../../packages/babylon-lite/src/shader/fragment-types";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
     GPUBufferUsage?: { VERTEX: number; COPY_DST: number; STORAGE: number; INDIRECT: number };
@@ -36,6 +37,65 @@ function makeThinInstances(): ThinInstanceData {
 }
 
 describe("ShaderMaterial thin instances", () => {
+    it("marks material-override packets as auxiliary", () => {
+        const engine = {
+            _device: {
+                createBuffer: vi.fn(),
+                queue: { writeBuffer: vi.fn() },
+            },
+        } as unknown as EngineContext;
+        const material = {
+            attributes: ["position"],
+            needAlphaBlending: false,
+        } as unknown as ShaderMaterial;
+        const override = {
+            attributes: ["position"],
+            needAlphaBlending: false,
+        } as unknown as ShaderMaterial;
+        const mesh = {
+            material,
+            thinInstances: makeThinInstances(),
+            _gpu: { positionBuffer: {} as GPUBuffer, indexBuffer: {} as GPUBuffer, indexCount: 3, indexFormat: "uint16" },
+            worldMatrix: new Float32Array(16),
+        } as unknown as Mesh;
+        const scene = { surface: { engine } } as unknown as SceneContext;
+        const systemSpec = { _totalBytes: 16, _offsets: new Map(), _structBody: "" };
+        const packet = {
+            mesh,
+            systemUBO: {} as GPUBuffer,
+            systemData: new Float32Array(4),
+            _bindGroup: {} as GPUBindGroup,
+            _lastResourceVersion: 0,
+            _boundTextures: [],
+            _boundStorageBuffers: [],
+        } as ShaderPacket;
+        const createPacket = vi.fn((_scene: SceneContext, _material: ShaderMaterial, _systemSpec: UboSpec, _mesh: Mesh, _aux?: boolean): ShaderPacket => packet);
+        const result = buildShaderRenderablesWithInstancing(
+            scene,
+            [mesh],
+            () => {
+                throw new Error("plain builder should not run");
+            },
+            createPacket,
+            vi.fn(),
+            vi.fn(),
+            () => mesh._gpu.positionBuffer,
+            () => ({}) as GPURenderPipeline,
+            () => ({
+                group1BGL: {} as GPUBindGroupLayout,
+                systemSpec,
+                customSpec: null,
+                vertexBuffers: [],
+                pipelines: new Map(),
+                _pipelineLayout: {} as GPUPipelineLayout,
+            })
+        );
+
+        result.rebuildSingle(scene, mesh, override);
+
+        expect(createPacket).toHaveBeenLastCalledWith(scene, override, systemSpec, mesh, true);
+    });
+
     it("records an indirect draw at zero instances so a cached bundle can show later instances", () => {
         const createBuffer = vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() }) as unknown as GPUBuffer);
         const engine = {

@@ -9,22 +9,29 @@ export function retireGpuResources(engine: EngineContext, retirement: GpuResourc
 
 /** @internal Fence the current retirement batch after renderFrame has submitted its command buffer. */
 export function flushGpuResourceRetirements(engine: EngineContext): void {
-    const retirements = engine._retirements;
-    if (retirements.length === 0) {
+    const batch = engine._retirements.splice(0);
+    if (batch.length === 0) {
         return;
     }
-    const batch = retirements.splice(0);
-    const drain = () => runRetirements(batch);
+    const drain = () => {
+        for (const retire of batch) {
+            try {
+                retire();
+            } catch {
+                // Cleanup is best-effort after device loss or an already-disposed resource.
+            }
+        }
+    };
     void engine._device.queue.onSubmittedWorkDone().then(drain, drain);
 }
 
 /** @internal Drain resources that never reached another frame before engine teardown. */
 export function disposeGpuResourceRetirements(engine: EngineContext): void {
-    runRetirements(engine._retirements.splice(0));
-}
-
-function runRetirements(retirements: readonly GpuResourceRetirement[]): void {
-    for (const retire of retirements) {
-        retire();
+    for (const retire of engine._retirements.splice(0)) {
+        try {
+            retire();
+        } catch {
+            // Cleanup is best-effort after device loss or an already-disposed resource.
+        }
     }
 }
