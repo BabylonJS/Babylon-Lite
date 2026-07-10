@@ -227,6 +227,12 @@ export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./
 export { createMaterialView } from "./material/material-view.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
+export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
+export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
+export type { ToneMapping } from "./material/pbr/tone-mapping.js";
+export { StandardToneMapping } from "./material/pbr/tone-mapping.js";
+export { AcesToneMapping } from "./material/pbr/pbr-aces-wgsl.js";
+export { NeutralToneMapping } from "./material/pbr/pbr-neutral-wgsl.js";
 export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
 export { enableMaterialStencil } from "./material/enable-material-stencil.js";
@@ -530,6 +536,10 @@ export type { Sprite2DCustomShader, Sprite2DCustomShaderOptions, Sprite2DCustomT
 export { createSprite2DCustomShader } from "./sprite/sprite-custom-shader.js";
 export type { Sprite2DHandle } from "./sprite/sprite-2d-handle.js";
 export { addSprite2D, updateSprite2D, removeSprite2D, setSprite2DFrame, getSprite2DHandleIndex, isSprite2DHandleAlive } from "./sprite/sprite-2d-handle.js";
+export type { SpritePickInfo } from "./sprite/picking/pick-sprite-2d.js";
+export { pickSprite2D } from "./sprite/picking/pick-sprite-2d.js";
+export type { BillboardPickInfo } from "./sprite/picking/pick-billboard.js";
+export { pickBillboardSprite } from "./sprite/picking/pick-billboard.js";
 export { addDepthHostedSpriteLayer } from "./sprite/sprite-scene.js";
 // ─── World-space billboards ────────────────────────────────────────
 export type {

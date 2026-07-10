@@ -244,6 +244,17 @@ export {
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
     Sound,
+    PointerDragBehavior,
+    BaseSixDofDragBehavior,
+    SixDofDragBehavior,
+    MultiPointerScaleBehavior,
+    AttachToBoxBehavior,
+    FadeInOutBehavior,
+    SurfaceMagnetismBehavior,
+    FollowBehavior,
+    HandConstraintBehavior,
+    InterpolatingBehavior,
+    GeospatialClippingBehavior,
     SceneSerializer,
 } from "./unsupported/unsupported-apis.js";
 export type {

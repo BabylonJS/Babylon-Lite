@@ -33,6 +33,7 @@ import {
 } from "./pbr-flags.js";
 import type { PbrExt } from "./pbr-flags.js";
 import { createPbrComposer } from "./pbr-compose.js";
+import { StandardToneMapping } from "./tone-mapping.js";
 import { _computePbrMaterialFeatures } from "./pbr-material.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import type { ThinInstanceData } from "../../mesh/thin-instance.js";
@@ -105,6 +106,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasAnyUv2 = false;
     let hasAnyVertexColor = false;
     let hasAnyFlatNormal = false;
+    let hasGammaAlbedo = false;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps & { _hasReflExt?: boolean; _hasUvTx?: boolean };
@@ -129,6 +131,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasAnyUv2 ||= !!m._gpu.uv2Buffer && mat.occlusionTexCoord === 1;
         hasAnyVertexColor ||= !!m._gpu.colorBuffer;
         hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
+        hasGammaAlbedo ||= !!mat.gammaAlbedo;
     }
 
     // ── Dynamically import fragment creators based on scene capabilities ──
@@ -232,6 +235,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _createPbrTemplateExt = extMod.createPbrTemplateExt;
     }
 
+    const _gammaTemplate = hasGammaAlbedo ? await import("./pbr-template-gamma.js") : null;
+
     let _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null = null;
     let _syncThinInstanceBuffers:
         | ((
@@ -263,15 +268,18 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _syncThinInstanceGpuData = gpuMod.syncThinInstanceGpuData;
     }
 
-    // ACES tonemap WGSL is dynamically imported only when requested (keeps standard-tonemap bundles lean).
-    // Must be loaded before the composer is created so deps are fully resolved.
-    let _acesHelpers = "";
-    let _acesTonemapCall = "";
+    // Tone mapping WGSL comes from the pluggable `imageProcessing.toneMapping` value, so a bundle only
+    // carries the algorithm it references (e.g. AcesToneMapping's ~0.5 KB is bundled only when the app
+    // imports it). When tone mapping is enabled but no algorithm was chosen, fall back to the default
+    // StandardToneMapping — the single source of the standard exponential WGSL (pbr-template no longer
+    // bakes its own copy).
+    let _toneMappingHelpers = "";
+    let _toneMappingCall = "";
     const hasTonemap = scene.imageProcessing.toneMappingEnabled;
-    if (hasTonemap && scene.imageProcessing.toneMappingType === "aces") {
-        const acesMod = await import("./pbr-aces-wgsl.js");
-        _acesHelpers = acesMod.ACES_HELPERS_WGSL;
-        _acesTonemapCall = acesMod.ACES_TONEMAP_CALL_WGSL;
+    if (hasTonemap) {
+        const toneMapping = scene.imageProcessing.toneMapping ?? StandardToneMapping;
+        _toneMappingHelpers = toneMapping.helpersWGSL;
+        _toneMappingCall = toneMapping.callWGSL;
     }
 
     // Fog WGSL is dynamically imported only when the scene has fog, so non-fog PBR scenes
@@ -289,14 +297,15 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _getSingleLightBlock,
         _multiLightWGSL,
         _multiLightLoop,
-        _acesHelpers,
-        _acesTonemapCall,
+        _toneMappingHelpers,
+        _toneMappingCall,
         _fogHelper,
         _fogBlock,
         _createPbrTemplateExt,
         _anisoExt,
         _iblSkyboxCalc,
         _flatNormalWgsl,
+        _gammaTemplate,
         _createPbrShadowFragment,
         _shadowLights: shadowLights,
         _createThinInstanceFragment,

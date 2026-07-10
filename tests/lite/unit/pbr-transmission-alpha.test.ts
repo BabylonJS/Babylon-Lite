@@ -4,14 +4,8 @@ import type { PbrMaterialProps } from "../../../packages/babylon-lite/src/materi
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { _PbrBindCtx } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
 import { _computePbrMaterialFeatures } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
-import {
-    PBR_HAS_ALPHA_BLEND,
-    PBR_HAS_ALPHA_TEST,
-    PBR2_HAS_REFRACTION,
-    PBR2_HAS_REFRACTION_MAP,
-    PBR2_HAS_VOLUME,
-} from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits";
-import { makeRefractionRttExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/refraction-rtt-fragment";
+import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ALPHA_TEST, PBR2_HAS_REFRACTION } from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits";
+import { makeRefractionRttExt, PBR2_HAS_REFRACTION_MAP, PBR2_HAS_VOLUME } from "../../../packages/babylon-lite/src/material/pbr/fragments/refraction-rtt-fragment";
 
 const refractionRttExt = makeRefractionRttExt();
 const dummyTexture = {} as Texture2D;

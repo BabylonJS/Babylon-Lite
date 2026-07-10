@@ -1,5 +1,6 @@
 import { scaleVec3ToRef } from "../../math/vec3-ref.js";
 import { scaleColor4ToRef } from "../../math/color4-ref.js";
+import { transformCoordinatesToRef } from "../../math/mat4-transform.js";
 import type { NpeBuildState, ParticleValue } from "./npe-types.js";
 
 // Contextual source ids (Babylon.js `NodeParticleContextualSources`; values are hex).
@@ -17,6 +18,7 @@ const CTX_COLOR_DEAD = 0x0014;
 const CTX_INITIAL_DIRECTION = 0x0015;
 const CTX_COLOR_STEP = 0x0016;
 const CTX_SCALED_COLOR_STEP = 0x0017;
+const CTX_LOCAL_POSITION_UPDATED = 0x0018;
 const CTX_SIZE = 0x0019;
 const CTX_DIRECTION_SCALE = 0x0020;
 
@@ -68,6 +70,15 @@ export function getContextualValue(state: NpeBuildState, source: number): Partic
         case CTX_SCALED_COLOR_STEP:
             scaleColor4ToRef(particle.colorStep, system._scaledUpdateSpeed, system._scaledColorStep);
             return system._scaledColorStep;
+        case CTX_LOCAL_POSITION_UPDATED:
+            // isLocal position integration: advance the local position by the scaled direction, then bake the
+            // emitter world matrix to get the world position. Mirrors BJS `LocalPositionUpdated`.
+            scaleVec3ToRef(particle.direction, particle._directionScale, particle._scaledDirection);
+            particle._localPosition.x += particle._scaledDirection.x;
+            particle._localPosition.y += particle._scaledDirection.y;
+            particle._localPosition.z += particle._scaledDirection.z;
+            transformCoordinatesToRef(particle._localPosition.x, particle._localPosition.y, particle._localPosition.z, state.emitterWorldMatrix, particle.position);
+            return particle.position;
         case CTX_SIZE:
             return particle.size;
         case CTX_DIRECTION_SCALE:
@@ -109,6 +120,7 @@ export function isContextualSourceSupported(source: number): boolean {
         case CTX_INITIAL_DIRECTION:
         case CTX_COLOR_STEP:
         case CTX_SCALED_COLOR_STEP:
+        case CTX_LOCAL_POSITION_UPDATED:
         case CTX_SIZE:
         case CTX_DIRECTION_SCALE:
             return true;

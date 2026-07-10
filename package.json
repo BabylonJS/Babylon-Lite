@@ -87,7 +87,7 @@
         "terser": "^5.48.0",
         "tsx": "^4.23.0",
         "typedoc": "^0.28.19",
-        "typescript": "^5.7.0",
+        "typescript": "^6.0.3",
         "typescript-eslint": "^8.63.0",
         "vite": "^6.4.3",
         "vitest": "^4.1.10",

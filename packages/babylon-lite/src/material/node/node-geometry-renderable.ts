@@ -216,7 +216,7 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
             device.createRenderPipeline({
                 label: "node-material-geometry",
                 layout: device.createPipelineLayout({ bindGroupLayouts: [a._sceneBGL, a._meshBGL] }),
-                vertex: { module: a._shaderModule, entryPoint: "vs_main", buffers: a._vertexBuffers },
+                vertex: { module: a._shaderModule, entryPoint: "vs_main", buffers: [...a._vertexBuffers] },
                 fragment: { module: a._shaderModule, entryPoint: "fs_main", targets: colorFormats.map((f) => ({ format: f })) },
                 depthStencil: { format: a._depthFormat, depthCompare: a._depthCompare, depthWriteEnabled: true },
                 multisample: { count: a._msaaSamples },

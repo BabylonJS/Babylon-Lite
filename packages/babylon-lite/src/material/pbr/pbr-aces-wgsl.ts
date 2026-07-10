@@ -1,9 +1,11 @@
 /**
- * ACES Fitted tonemap WGSL helpers.
- * Kept in a separate module so scenes using the default exponential tonemap
- * don't pay the ~0.5 KB string cost. Dynamic-imported by pbr-renderable.ts only
- * when scene.imageProcessing.toneMappingType === "aces".
+ * ACES Fitted tone mapping WGSL.
+ * Kept in a separate module so scenes using the default exponential (standard)
+ * tone mapping don't pay the ~0.5 KB string cost: `AcesToneMapping` is only bundled
+ * when the app references it (e.g. `setSceneImageProcessing(scene, { toneMapping: AcesToneMapping })`).
  */
+
+import type { ToneMapping } from "./tone-mapping.js";
 
 export const ACES_HELPERS_WGSL = `
 const ACESInputMat = mat3x3<f32>(vec3<f32>(0.59719,0.07600,0.02840),vec3<f32>(0.35458,0.90834,0.13383),vec3<f32>(0.04823,0.01566,0.83777));
@@ -14,3 +16,10 @@ fn ACESFitted(color: vec3<f32>) -> vec3<f32> { var c = ACESInputMat*color; c = R
 
 export const ACES_TONEMAP_CALL_WGSL = `color *= scene.vImageInfos.x;
 color = ACESFitted(color);`;
+
+/** ACES Fitted tone mapping (Babylon.js `TONEMAPPING_ACES`). */
+export const AcesToneMapping: ToneMapping = {
+    id: "aces",
+    helpersWGSL: ACES_HELPERS_WGSL,
+    callWGSL: ACES_TONEMAP_CALL_WGSL,
+};

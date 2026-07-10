@@ -21,7 +21,7 @@
         "@webgpu/types": "^0.1.52",
         "esbuild-wasm": "^0.25.0",
         "monaco-editor": "^0.54.0",
-        "typescript": "^5.7.0",
+        "typescript": "^6.0.3",
         "vite": "^6.4.3"
     }
 }

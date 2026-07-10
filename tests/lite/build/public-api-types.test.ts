@@ -39,10 +39,20 @@ describe("build/index.d.ts", () => {
         // Type-check the generated declaration file in isolation, without
         // skipLibCheck, so that any unresolved (e.g. internal-only) types
         // leaking into the public API surface are caught.
+        //
+        // `--ignoreConfig` is required under TypeScript 6: passing a file on the
+        // command line while a tsconfig.json exists in cwd is now an error
+        // (TS5112) unless config loading is explicitly skipped.
+        //
+        // WebGPU types come from TypeScript 6's built-in `dom` lib (which now
+        // bundles them). The `@webgpu/types` package is intentionally NOT loaded
+        // here: doing so duplicates those declarations and, without skipLibCheck,
+        // trips TS6200/TS2717 conflicts between the package and the native lib.
         const result = spawnSync(
             NODE,
             [
                 TSC_JS,
+                "--ignoreConfig",
                 "--noEmit",
                 "--strict",
                 "--target",
@@ -53,8 +63,6 @@ describe("build/index.d.ts", () => {
                 "bundler",
                 "--lib",
                 "es2022,dom,dom.iterable",
-                "--types",
-                "@webgpu/types",
                 DTS_PATH,
             ],
             {

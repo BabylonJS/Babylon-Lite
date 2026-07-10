@@ -14,6 +14,8 @@ import type { PbrTemplateExt } from "./pbr-template-ext.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
 
+type PbrGammaTemplate = typeof import("./pbr-template-gamma.js");
+
 const STAGE_FRAGMENT = 0x2;
 
 // ── BRDF functions (always present in PBR) ──────────────────────
@@ -85,12 +87,12 @@ export interface PbrTemplateConfig {
     /** Fog blend WGSL, emitted just before the tonemap block; "" for non-fog scenes. */
     /** @internal */
     readonly _fogBlock?: string;
-    /** ACES WGSL: tonemap helper functions (dynamically imported). Empty string = standard exponential tonemap. */
+    /** Tone mapping WGSL: module-scope helper functions/consts. Empty string = inline default (no helpers). */
     /** @internal */
-    readonly _acesHelpers?: string;
-    /** ACES WGSL: tonemap call block replacing the default exponential one. */
+    readonly _toneMappingHelpers?: string;
+    /** Tone mapping WGSL: per-fragment call block. Empty string = default standard exponential. */
     /** @internal */
-    readonly _acesTonemapCall?: string;
+    readonly _toneMappingCall?: string;
     /** Has alpha blending */
     /** @internal */
     readonly _hasAlphaBlend?: boolean;
@@ -131,6 +133,8 @@ export interface PbrTemplateConfig {
      *  When undefined, base template defaults to master-like behavior (no feature strings). */
     /** @internal */
     readonly _ext?: PbrTemplateExt;
+    /** @internal */
+    readonly _gammaTemplate?: PbrGammaTemplate | null;
     /** Generate a fragment stage that runs discard/alpha-test logic and writes no color. */
     /** @internal */
     readonly _noColorOutput?: boolean;
@@ -167,8 +171,8 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _hasTonemap = false,
         _fogHelper = "",
         _fogBlock = "",
-        _acesHelpers = "",
-        _acesTonemapCall = "",
+        _toneMappingHelpers = "",
+        _toneMappingCall = "",
         _hasAlphaBlend = false,
         _hasSpecularAA = false,
         _hasGammaAlbedo = false,
@@ -182,6 +186,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _anisoBrdfFunctions = "",
         _anisoTBBlock = "",
         _ext,
+        _gammaTemplate,
         _noColorOutput = false,
         _esmShadowOutput = false,
         _esmShadowDepthCode = "",
@@ -366,8 +371,7 @@ var N=N_geom;`;
     const baseColorFactorRgb = _hasBaseColorFactor ? "*material.baseColorFactor.rgb" : "";
     const baseColorFactorAlpha = _hasBaseColorFactor ? "*material.baseColorFactor.a" : "";
     const baseColorDecode = _hasGammaAlbedo
-        ? `var baseColor=pow(baseColorSample.rgb,vec3<f32>(2.2))${baseColorFactorRgb};
-var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`
+        ? _gammaTemplate!.gammaBaseColor(baseColorFactorRgb, baseColorFactorAlpha, vertexColorMod)
         : `var baseColor=baseColorSample.rgb${baseColorFactorRgb};
 var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`;
 
@@ -427,16 +431,11 @@ var AA_factor_y=0.0;`;
 var directSpecular=vec3<f32>(0.0);
 /*BL*/`;
 
-    // Tonemap: BJS TONEMAPPING_STANDARD (exponential) by default; caller-supplied
-    // ACES WGSL (from pbr-aces-wgsl.ts) is used when provided.
-    const useAces = _hasTonemap && _acesTonemapCall !== "";
-    const acesBlock = useAces ? _acesHelpers : "";
-    const tonemapBlock = _hasTonemap
-        ? useAces
-            ? _acesTonemapCall
-            : `color*=scene.vImageInfos.x;
-color=1.0-exp2(-1.590579*color);`
-        : `color*=scene.vImageInfos.x;`;
+    // Tonemap: when enabled, the resolved tone mapping's WGSL (imageProcessing.toneMapping, defaulted to
+    // StandardToneMapping upstream in pbr-renderable — so _toneMappingCall is always non-empty here when
+    // _hasTonemap). When disabled, only exposure is applied. Helpers are emitted alongside the call.
+    const toneMappingHelpersBlock = _hasTonemap ? _toneMappingHelpers : "";
+    const tonemapBlock = _hasTonemap ? _toneMappingCall : `color*=scene.vImageInfos.x;`;
 
     // Fog (opt-in via scene.fog). The fog WGSL — `_fogHelper` (calcFogFactor) and `_fogBlock`
     // (the blend, emitted just before the tonemap block) — is supplied by pbr-renderable, which
@@ -481,7 +480,7 @@ ${_esmShadowOutput ? "struct shadowParamsUniforms { biasAndScale: vec4<f32>, dep
 /*FB*/
 /*FI*/
 ${BRDF_FUNCTIONS}
-${acesBlock}
+${toneMappingHelpersBlock}
 ${fogHelper}
 ${anisoBrdfBlock}
 ${lightDecls}
