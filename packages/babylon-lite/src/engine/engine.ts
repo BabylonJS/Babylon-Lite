@@ -6,6 +6,7 @@ import { _buildSurface, _refreshScRT, isDomCanvas, resizeSurface, setSurfaceSize
 import type { GpuFrameTimer } from "./gpu-timer.js";
 import type { GpuTaskTimer } from "./gpu-task-timer.js";
 import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
+import { disposeGpuResourceRetirements, flushGpuResourceRetirements } from "./gpu-resource-retirement.js";
 
 // `__BL_VERSION__` is replaced at build time with the resolved package version
 // by the lite Vite build (see `define` in packages/babylon-lite/vite.config.ts).
@@ -138,6 +139,8 @@ export interface EngineContext extends SurfaceContext {
     _currentDelta: number;
     /** @internal */
     _cbs: GPUCommandBuffer[];
+    /** @internal GPU resource disposers waiting for the next frame command buffer to be submitted. */
+    _retirements: Array<() => void>;
 
     /** @internal Per-frame floating-origin offset updater. Set when the engine
      *  was created with `useFloatingOrigin: true` (which requires
@@ -388,6 +391,7 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
             _currentEncoder: undefined,
             _currentDelta: 0,
             _cbs: [],
+            _retirements: [],
             _wrapRenderableForFO,
             _makePackMeshWorld,
             _lightFoVersion,
@@ -478,6 +482,7 @@ export function disposeEngine(engine: EngineContext): void {
         s._context.unconfigure();
     }
     surfaces.length = 0;
+    disposeGpuResourceRetirements(engine);
     engine._device.destroy();
 }
 
@@ -539,6 +544,7 @@ export function renderFrame(engine: EngineContext, delta: number): void {
     engine._gpuTimerEnd?.(finalEncoder);
     engine._cbs[0] = finalEncoder.finish();
     engine._device.queue.submit(engine._cbs);
+    flushGpuResourceRetirements(engine);
     engine.drawCallCount = drawCalls;
     // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
     // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.

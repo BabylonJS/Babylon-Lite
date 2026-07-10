@@ -256,7 +256,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // from the per-frame update() below (which always runs). It is version-gated, so static instances
     // cost nothing, and it never recreates the buffer for a same-capacity update — keeping the cached
     // bundle's setVertexBuffer reference valid.
-    let _syncThinInstanceGpuData: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean) => void) | null = null;
+    let _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer) | null = null;
     if (hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
         _createThinInstanceFragment = mod.createThinInstanceFragment;
@@ -265,7 +265,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         if (hasCullingTI) {
             _cull = await import("../../mesh/thin-instance-cull-binding.js");
         }
-        _syncThinInstanceGpuData = gpuMod.syncThinInstanceGpuData;
+        _syncThinInstanceForDraw = gpuMod.syncThinInstanceForDraw;
     }
 
     // Tone mapping WGSL comes from the pluggable `imageProcessing.toneMapping` value, so a bundle only
@@ -316,7 +316,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // same shadowLights array, so a BG keyed by shadowBGL alone is correct.
     const shadowBGCache = new Map<GPUBindGroupLayout, GPUBindGroup>();
     const syncThinInstanceBuffers = _syncThinInstanceBuffers;
-    const syncThinInstanceGpuData = _syncThinInstanceGpuData;
+    const syncThinInstanceForDraw = _syncThinInstanceForDraw;
 
     // Closure used both for the initial per-mesh build below AND for later
     // material-swap / per-pass-override rebuilds (set on pbrGroupBuilder._rebuildSingle).
@@ -411,6 +411,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
         let _lastWorldVersion = mesh.worldMatrixVersion;
         let _lastLightsCount = s.lights.length;
+        let thinDrawArgs: GPUBuffer | null = null;
         const sortCenter = isTransparent || needsTaskRefraction ? ([mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number]) : null;
         const _baseUpdate = (): void => {
             const worldVersion = mesh.worldMatrixVersion;
@@ -440,12 +441,12 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                 device.queue.writeBuffer(materialUBO, 0, data.buffer, 0, data.byteLength);
             }
             // Upload any dirty thin-instance matrices/colors every frame (version-gated; see the
-            // _syncThinInstanceGpuData declaration above). This is what makes per-frame animated
+            // _syncThinInstanceForDraw declaration above). This is what makes per-frame animated
             // instance transforms (wind sway) actually reach the GPU despite the cached draw bundle.
-            if (hasTI && syncThinInstanceGpuData) {
+            if (hasTI && syncThinInstanceForDraw) {
                 const ti = mesh.thinInstances;
                 if (ti) {
-                    syncThinInstanceGpuData(engine, ti, hasTIColor);
+                    thinDrawArgs = syncThinInstanceForDraw(engine, ti, hasTIColor, mesh._gpu.indexCount);
                 }
             }
         };
@@ -506,8 +507,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
             if (cullBinding) {
                 cullBinding.draw(pass, gpu.indexCount, ti!.count);
-            } else if (ti && ti.count > 0) {
-                pass.drawIndexed(gpu.indexCount, ti.count);
+            } else if (ti && thinDrawArgs) {
+                pass.drawIndexedIndirect(thinDrawArgs, 0);
             } else {
                 pass.drawIndexed(gpu.indexCount);
             }
@@ -529,6 +530,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                 return {
                     renderable: r,
                     pipeline,
+                    ...(cb ? { _updateBatches: [cb._updateBatch] } : {}),
                     update: cb ? cb.update : update,
                     draw: (pass) => drawWith(pass, materialBindGroup, cb),
                 };
@@ -554,6 +556,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _envTextures: envTextures ?? null,
         _shadowLights: shadowLights,
         _syncThinInstanceBuffers: _syncThinInstanceBuffers,
+        _syncThinInstanceForDraw,
     };
 
     scene._disposables.push(
@@ -581,7 +584,10 @@ export interface _PbrGeometryContext {
     readonly _shadowLights: readonly { readonly lightIndex: number; readonly shadowType: "esm" | "pcf" | "csm"; readonly gen: ShadowGenerator }[];
     /** @internal */
     readonly _syncThinInstanceBuffers:
-        ((engine: EngineContext, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | null;
+        | ((engine: EngineContext, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
+        | null;
+    /** @internal */
+    readonly _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer) | null;
 }
 
 function toSingleLightType(type: string): SingleLightType {

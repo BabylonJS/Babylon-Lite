@@ -21,6 +21,7 @@ import { mat4Invert } from "../math/mat4-invert.js";
 import { buildLightViewMatrix, casterVersionSum, createShadowCamera, multiply4x4, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 /** Generation of the material that ACTUALLY casts this caster mesh's shadow — the explicit
  *  `_shadowCasterMaterial` override when set, else the mesh's own material. Lets the caster-set diff detect a
@@ -178,21 +179,11 @@ export function ensureCsmShadowTaskState(
         // leaves our cached no-color material views dangling at the destroyed UBOs — the
         // "Buffer used in submit while destroyed" flood seen when a caster's material swaps variant on first
         // render). Rebuild the cascade tasks below with the casters' CURRENT materials and return the NEW
-        // state — the caller swaps to it, so the OLD task is
-        // never recorded again. Its GPU buffers may still be referenced by a frame already submitted this
-        // tick, so we must NOT dispose it synchronously; defer until the GPU drains the currently-submitted
-        // work (onSubmittedWorkDone). Mirrors resizeMeshGeometry.
+        // state — the caller swaps to it, so the OLD task is never recorded again. Its GPU buffers may still
+        // be referenced by the next frame command buffer, especially during async pre-first-frame construction,
+        // so retire it only after that frame has submitted and drained. Mirrors resizeMeshGeometry.
         const old = existing._task;
-        void engine._device.queue
-            .onSubmittedWorkDone()
-            .then(() => {
-                try {
-                    old.dispose();
-                } catch {
-                    // Device may have been lost/disposed before the deferred dispose ran — nothing to free.
-                }
-            })
-            .catch(() => {});
+        retireGpuResources(engine, () => old.dispose());
     }
 
     const materialViews = new Map<Material, MaterialView>();
@@ -219,7 +210,7 @@ export function ensureCsmShadowTaskState(
             _ownsDepthTexture: false, // borrowed: the shared CSM depth array is owned by the generator
         };
         const camera = createShadowCamera(sg);
-        const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera }, engine, scene);
+        const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera, _skipClusteredLights: true }, engine, scene);
         for (const mesh of casterMeshes) {
             const material = mesh.material;
             if (material) {

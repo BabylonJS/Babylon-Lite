@@ -1,11 +1,11 @@
 {
-  "rawKB": 61.5,
-  "gzipKB": 24.4,
+  "rawKB": 62.8,
+  "gzipKB": 24.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene103-standard-renderable-BvMENqfj.js",
+    "scene103-standard-renderable-C4vlJoXq.js",
     "scene103-thin-instance-fragment-CBn2miAC.js",
-    "scene103-thin-instance-gpu-D2OBjYZH.js",
+    "scene103-thin-instance-gpu-uZEwCChy.js",
     "scene103.js"
   ]
 }

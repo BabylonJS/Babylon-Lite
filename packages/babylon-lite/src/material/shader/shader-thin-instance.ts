@@ -24,7 +24,8 @@ import type { DrawUpdateContext, MeshGroupBuildResult, Renderable } from "../../
 import type { ShaderAttributeName, ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings } from "./shader-pipeline.js";
 import type { ShaderPacket, ShaderRenderPass } from "./shader-renderable.js";
-import { syncThinInstanceBuffers } from "../../mesh/thin-instance-gpu.js";
+import { syncThinInstanceBuffers, syncThinInstanceDrawArgs, syncThinInstanceGpuData } from "../../mesh/thin-instance-gpu.js";
+import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
 
 type CullModule = typeof import("../../mesh/thin-instance-cull-binding.js");
 
@@ -32,8 +33,8 @@ type CullModule = typeof import("../../mesh/thin-instance-cull-binding.js");
 interface ShaderHelpers {
     buildPlain: (scene: SceneContext, meshes: Mesh[]) => MeshGroupBuildResult;
     createPacket: (scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh) => ShaderPacket;
-    updatePacket: (scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext) => void;
-    updateCustomUbo: (engine: EngineContext, material: ShaderMaterial) => void;
+    updatePacket: (scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch) => void;
+    updateCustomUbo: (engine: EngineContext, material: ShaderMaterial, uniformBatch?: UniformCopyBatch) => void;
     getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName) => GPUBuffer;
     getOrCreateShaderPipeline: (
         engine: EngineContext,
@@ -45,6 +46,7 @@ interface ShaderHelpers {
         instanceAttrs?: string
     ) => GPURenderPipeline;
     getOrCreateShaderPipelineBindings: (engine: EngineContext, material: ShaderMaterial) => ShaderPipelineBindings;
+    getUniformBatch?: (signature: RenderTargetSignature) => UniformCopyBatch;
 }
 
 /** Instance vertex buffer layouts. `baseLocation` is the first free shader
@@ -86,9 +88,7 @@ function instancePreludeAttributes(baseLocation: number, hasColor: boolean): str
     return wgsl;
 }
 
-/** Build ONE thin-instance renderable for a ShaderMaterial mesh (opaque or
- *  transparent). Marked `_direct` so instance buffers are re-bound fresh each
- *  frame; this also prepares the renderable for opaque-only GPU culling. */
+/** Build ONE thin-instance renderable for a ShaderMaterial mesh (opaque or transparent). */
 function createShaderInstancedRenderable(
     scene: SceneContext,
     material: ShaderMaterial,
@@ -107,15 +107,18 @@ function createShaderInstancedRenderable(
     const variantKey = `|ti1c${hasColor ? 1 : 0}`;
     const wm = mesh.worldMatrix as unknown as ArrayLike<number>;
     const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
-    const update = (context: DrawUpdateContext): void => {
+    let drawArgs: GPUBuffer | null = null;
+    const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
         if (packet._disposed) {
             return;
         }
         if (!isOverride && mesh.material !== material) {
             return;
         }
-        h.updateCustomUbo(scene.surface.engine, material);
-        h.updatePacket(scene, material, packet, context);
+        h.updateCustomUbo(scene.surface.engine, material, uniformBatch);
+        h.updatePacket(scene, material, packet, context, uniformBatch);
+        syncThinInstanceGpuData(scene.surface.engine, ti, hasColor);
+        drawArgs = syncThinInstanceDrawArgs(scene.surface.engine, ti, mesh._gpu.indexCount);
         if (isTransparent) {
             const m = mesh.worldMatrix as unknown as ArrayLike<number>;
             sortCenter[0] = m[12]!;
@@ -130,9 +133,6 @@ function createShaderInstancedRenderable(
         if (!isOverride && mesh.material !== material) {
             return 0;
         }
-        if (ti.count <= 0) {
-            return 0;
-        }
         const gpu = mesh._gpu;
         let slot = 0;
         for (let i = 0; i < material.attributes.length; i++) {
@@ -143,6 +143,8 @@ function createShaderInstancedRenderable(
         pass.setBindGroup(1, packet._bindGroup);
         if (cullBinding) {
             cullBinding.draw(pass, gpu.indexCount, ti.count);
+        } else if (drawArgs) {
+            pass.drawIndexedIndirect(drawArgs, 0);
         } else {
             pass.drawIndexed(gpu.indexCount, ti.count);
         }
@@ -157,16 +159,18 @@ function createShaderInstancedRenderable(
             const bindings = h.getOrCreateShaderPipelineBindings(eng, material);
             const vertexBuffers = [...bindings.vertexBuffers, ...instanceLayouts];
             const pipeline = h.getOrCreateShaderPipeline(eng, sig, material, bindings, variantKey, vertexBuffers, instanceAttrs);
-            const cb = cull?.tryBind(r, scene, mesh, eng, hasColor, isTransparent, update, sig);
+            const uniformBatch = h.getUniformBatch?.(sig);
+            const baseUpdate = (context: DrawUpdateContext): void => update(context, uniformBatch);
+            const cb = cull?.tryBind(r, scene, mesh, eng, hasColor, isTransparent, baseUpdate, sig);
             return {
                 renderable: r,
                 pipeline,
-                update: cb ? cb.update : update,
+                _updateBatches: uniformBatch ? (cb ? [uniformBatch, cb._updateBatch] : [uniformBatch]) : cb ? [cb._updateBatch] : undefined,
+                update: cb ? cb.update : baseUpdate,
                 draw: (pass) => draw(pass, eng, cb),
             };
         },
     };
-    (r as { _direct?: boolean })._direct = true;
     return r;
 }
 
@@ -190,9 +194,19 @@ export function buildShaderRenderablesWithInstancing(
     getAttrBuffer: ShaderHelpers["getAttrBuffer"],
     getOrCreateShaderPipeline: ShaderHelpers["getOrCreateShaderPipeline"],
     getOrCreateShaderPipelineBindings: ShaderHelpers["getOrCreateShaderPipelineBindings"],
+    getUniformBatch?: ShaderHelpers["getUniformBatch"],
     cull?: CullModule
 ): MeshGroupBuildResult {
-    const h: ShaderHelpers = { buildPlain, createPacket, updatePacket, updateCustomUbo, getAttrBuffer, getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings };
+    const h: ShaderHelpers = {
+        buildPlain,
+        createPacket,
+        updatePacket,
+        updateCustomUbo,
+        getAttrBuffer,
+        getOrCreateShaderPipeline,
+        getOrCreateShaderPipelineBindings,
+        getUniformBatch,
+    };
     const instanced: Mesh[] = [];
     const plain: Mesh[] = [];
     for (const mesh of meshes) {
