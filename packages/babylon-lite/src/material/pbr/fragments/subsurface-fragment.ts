@@ -15,11 +15,12 @@ import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/frag
 import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_SUBSURFACE, PBR_HAS_THICKNESS_MAP, PBR2_HAS_THICKNESS_GLTF_CHANNEL } from "../pbr-flag-bits.js";
+import { PBR_HAS_SUBSURFACE, PBR_HAS_THICKNESS_MAP } from "../pbr-flag-bits.js";
 
 // Subsurface-only features2 bits (reserved in pbr-flag-bits.ts). Defined here,
 // not in the shared flag module, so they aren't retained in the entry/shared
 // chunk for scenes that never load this lazy fragment (zero bundle movement).
+const PBR2_HAS_THICKNESS_GLTF_CHANNEL = 1 << 7;
 const PBR2_HAS_TRANSLUCENCY_COLOR_MAP = 1 << 22;
 const PBR2_HAS_TRANSLUCENCY_INTENSITY_MAP = 1 << 23;
 const PBR2_HAS_TRANSLUCENCY_UV_TX = 1 << 24;

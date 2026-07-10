@@ -61,6 +61,7 @@ interface PbrComposerDeps {
     /** Flat-normal WGSL (face normal from derivatives), dynamically loaded by pbr-renderable only
      *  when a no-NORMAL mesh is present; "" otherwise so normal-having scenes bundle zero bytes. */
     readonly _flatNormalWgsl: string;
+    readonly _gammaTemplate: typeof import("./pbr-template-gamma.js") | null;
     readonly _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null;
     readonly _shadowLights: readonly { readonly lightIndex: number; readonly shadowType: import("./fragments/pbr-shadow-fragment.js").PbrShadowLightSlot["shadowType"] }[];
     readonly _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null;
@@ -95,6 +96,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _anisoExt,
         _iblSkyboxCalc,
         _flatNormalWgsl,
+        _gammaTemplate,
         _createPbrShadowFragment,
         _shadowLights,
         _createThinInstanceFragment,
@@ -182,6 +184,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _anisoBrdfFunctions: _hasAnisotropy && _anisoExt ? _anisoExt.ANISO_BRDF_FUNCTIONS : "",
             _anisoTBBlock: _hasAnisotropy && _anisoExt ? _anisoExt.makeAnisotropyTBBlock(hasNormal, (features2 & _anisoExt.PBR2_HAS_ANISO_TEX) !== 0) : "",
             _ext,
+            _gammaTemplate,
             _noColorOutput: (features2 & PBR2_NO_COLOR_OUTPUT) !== 0,
             _esmShadowOutput: (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0,
             _esmShadowDepthCode,

@@ -8,8 +8,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
-import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
-import type { GltfFeature } from "./gltf-feature.js";
+import type { GltfMaterialData } from "./gltf-material.js";
 import { mipLevelCount } from "../texture/mip-count.js";
 import { linearToSrgbByte } from "../math/color.js";
 
@@ -135,20 +134,4 @@ export function buildDefaultPbrTextures(
         ormTexture = getCachedTex(mat._metallicRoughnessImage!, false);
     }
     return { baseColorTexture, ormTexture, normalTexture, emissiveTexture };
-}
-
-/** Run all material-layer features and merge their fragments. */
-export async function runMatExts(mat: GltfMaterialData, exts: GltfFeature[], ctx: GltfMatExtCtx): Promise<Partial<PbrMaterialProps> | undefined> {
-    if (!exts.length) {
-        return undefined;
-    }
-    const fragments = await Promise.all(exts.map((ext) => ext.applyMaterial!(mat, ctx)));
-    let layers: Partial<PbrMaterialProps> | undefined;
-    for (const f of fragments) {
-        if (f) {
-            layers ??= {};
-            Object.assign(layers, f);
-        }
-    }
-    return layers;
 }

@@ -10,16 +10,12 @@ import type { BindingDecl, ShaderFragment, UboField } from "../../../shader/frag
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { PbrExt } from "../pbr-flags.js";
 import type { IridescenceProps, PbrMaterialProps } from "../pbr-material.js";
-import {
-    PBR_HAS_METALLIC_REFLECTANCE_MAP,
-    PBR_HAS_REFLECTANCE_MAP,
-    PBR2_HAS_IRIDESCENCE,
-    PBR2_HAS_IRIDESCENCE_MAP,
-    PBR2_HAS_IRIDESCENCE_THICKNESS_MAP,
-    PBR2_HAS_REFLECTANCE_FACTORS,
-} from "../pbr-flag-bits.js";
+import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR2_HAS_REFLECTANCE_FACTORS } from "../pbr-flag-bits.js";
 
 const STAGE_FRAGMENT = 0x2;
+const PBR2_HAS_IRIDESCENCE = 1 << 17;
+const PBR2_HAS_IRIDESCENCE_MAP = 1 << 18;
+const PBR2_HAS_IRIDESCENCE_THICKNESS_MAP = 1 << 19;
 const PBR2_HAS_IRIDESCENCE_UV_TX = 1 << 20;
 const PBR2_HAS_IRIDESCENCE_THICKNESS_UV_TX = 1 << 21;
 const PBR2_HAS_IRIDESCENCE_UV2 = 1 << 22;

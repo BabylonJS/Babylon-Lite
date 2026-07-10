@@ -18,7 +18,7 @@
  *  - The runtime `vFogInfos.x > 0.0` guard lets `fogMode` toggle none/linear/exp/exp2 at runtime.
  */
 
-import { WGSL_FOG } from "../../shader/wgsl-helpers.js";
+import { WGSL_FOG } from "../../shader/wgsl-fog.js";
 
 /** `calcFogFactor` + `E_FOG` helper WGSL (reads `scene.vFogInfos`). */
 export const PBR_FOG_HELPER = WGSL_FOG;
