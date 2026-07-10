@@ -37,7 +37,7 @@ import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target.js";
 import { createThinInstanceFragment } from "../../shader/fragments/thin-instance-fragment.js";
-import { syncThinInstanceBuffers, syncThinInstanceDrawArgs, syncThinInstanceGpuData } from "../../mesh/thin-instance-gpu.js";
+import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../mesh/thin-instance-gpu.js";
 
 import type { Material } from "../material.js";
 import type { StandardMaterialProps } from "./standard-material.js";
@@ -175,8 +175,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         }
         const ti = hasThinInstances ? mesh.thinInstances : null;
         if (ti) {
-            syncThinInstanceGpuData(engine, ti, hasInstanceColor);
-            thinDrawArgs = syncThinInstanceDrawArgs(engine, ti, mesh._gpu.indexCount);
+            thinDrawArgs = syncThinInstanceForDraw(engine, ti, hasInstanceColor, mesh._gpu.indexCount);
         }
     };
 
@@ -203,7 +202,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         if (ti && thinDrawArgs) {
             pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(g.indexCount);
+            pass.drawIndexed(g.indexCount, ti?.count);
         }
         return 1;
     };

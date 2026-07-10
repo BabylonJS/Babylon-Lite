@@ -24,7 +24,7 @@ import type { DrawUpdateContext, MeshGroupBuildResult, Renderable } from "../../
 import type { ShaderAttributeName, ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings } from "./shader-pipeline.js";
 import type { ShaderPacket, ShaderRenderPass } from "./shader-renderable.js";
-import { syncThinInstanceBuffers, syncThinInstanceDrawArgs, syncThinInstanceGpuData } from "../../mesh/thin-instance-gpu.js";
+import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../mesh/thin-instance-gpu.js";
 import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
 
 type CullModule = typeof import("../../mesh/thin-instance-cull-binding.js");
@@ -117,8 +117,7 @@ function createShaderInstancedRenderable(
         }
         h.updateCustomUbo(scene.surface.engine, material, uniformBatch);
         h.updatePacket(scene, material, packet, context, uniformBatch);
-        syncThinInstanceGpuData(scene.surface.engine, ti, hasColor);
-        drawArgs = syncThinInstanceDrawArgs(scene.surface.engine, ti, mesh._gpu.indexCount);
+        drawArgs = syncThinInstanceForDraw(scene.surface.engine, ti, hasColor, mesh._gpu.indexCount);
         if (isTransparent) {
             const m = mesh.worldMatrix as unknown as ArrayLike<number>;
             sortCenter[0] = m[12]!;

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { syncThinInstanceDrawArgs, syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
+import { syncThinInstanceDrawArgs, syncThinInstanceForDraw, syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
@@ -99,5 +99,30 @@ describe("thin-instance stable draw arguments", () => {
             [36, 12, 0, 0, 0],
             [36, 7, 0, 0, 0],
         ]);
+    });
+
+    it("keeps cached static draws direct until the instance count changes", () => {
+        const createBuffer = vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() }) as unknown as GPUBuffer);
+        const engine = {
+            _device: {
+                createBuffer,
+                queue: { writeBuffer: vi.fn() },
+            },
+        } as unknown as EngineContext;
+        const ti = makeThinInstances(12);
+
+        expect(syncThinInstanceForDraw(engine, ti, false, 36)).toBeNull();
+        expect(syncThinInstanceForDraw(engine, ti, false, 36)).toBeNull();
+        expect(ti._drawArgsBuffer).toBeFalsy();
+
+        ti.count = 7;
+        ti._version++;
+        ti._dirtyMin = 0;
+        ti._dirtyMax = ti.count;
+
+        const indirect = syncThinInstanceForDraw(engine, ti, false, 36);
+        expect(indirect).toBe(ti._drawArgsBuffer);
+        expect(indirect).toBeTruthy();
+        expect(syncThinInstanceForDraw(engine, ti, false, 36)).toBe(indirect);
     });
 });

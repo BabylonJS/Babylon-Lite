@@ -40,8 +40,8 @@ type ThinInstanceSync = (
 /** Fragment factories passed from the async group builder. */
 export interface StdFragmentFactories {
     tiSync?: ThinInstanceSync;
-    /** Uploads dirty thin-instance data and returns stable indirect draw args. */
-    tiUpdate?: (engine: EngineContext, ti: any, hasColor: boolean, indexCount: number) => GPUBuffer;
+    /** Uploads dirty thin-instance data and promotes cached draws to stable indirect args when their count changes. */
+    tiUpdate?: (engine: EngineContext, ti: any, hasColor: boolean, indexCount: number) => GPUBuffer | null;
     tiFragment?: (hasColor: boolean) => ShaderFragment;
     shadowFragment?: (shadowLights: import("./fragments/std-shadow-fragment.js").ShadowLightSlot[]) => ShaderFragment;
     /** Present only when at least one mesh in the build has morph targets. */
@@ -241,7 +241,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             } else if (ti && thinDrawArgs) {
                 pass.drawIndexedIndirect(thinDrawArgs, 0);
             } else {
-                pass.drawIndexed(g.indexCount);
+                pass.drawIndexed(g.indexCount, ti?.count);
             }
             return 1;
         };

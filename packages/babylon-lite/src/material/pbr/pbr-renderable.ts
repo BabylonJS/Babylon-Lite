@@ -256,7 +256,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // from the per-frame update() below (which always runs). It is version-gated, so static instances
     // cost nothing, and it never recreates the buffer for a same-capacity update — keeping the cached
     // bundle's setVertexBuffer reference valid.
-    let _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer) | null = null;
+    let _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer | null) | null = null;
     if (hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
         _createThinInstanceFragment = mod.createThinInstanceFragment;
@@ -443,11 +443,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             // Upload any dirty thin-instance matrices/colors every frame (version-gated; see the
             // _syncThinInstanceForDraw declaration above). This is what makes per-frame animated
             // instance transforms (wind sway) actually reach the GPU despite the cached draw bundle.
-            if (hasTI && syncThinInstanceForDraw) {
-                const ti = mesh.thinInstances;
-                if (ti) {
-                    thinDrawArgs = syncThinInstanceForDraw(engine, ti, hasTIColor, mesh._gpu.indexCount);
-                }
+            if (hasTI) {
+                thinDrawArgs = syncThinInstanceForDraw!(engine, mesh.thinInstances!, hasTIColor, mesh._gpu.indexCount);
             }
         };
         // FO-version wrapper applied only when the engine has floating-origin
@@ -507,10 +504,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
             if (cullBinding) {
                 cullBinding.draw(pass, gpu.indexCount, ti!.count);
-            } else if (ti && thinDrawArgs) {
+            } else if (thinDrawArgs) {
                 pass.drawIndexedIndirect(thinDrawArgs, 0);
             } else {
-                pass.drawIndexed(gpu.indexCount);
+                pass.drawIndexed(gpu.indexCount, ti?.count);
             }
             return 1;
         };
@@ -585,7 +582,7 @@ export interface _PbrGeometryContext {
     /** @internal */
     readonly _syncThinInstanceBuffers: SyncThinInstanceBuffers | null;
     /** @internal */
-    readonly _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer) | null;
+    readonly _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer | null) | null;
 }
 
 function toSingleLightType(type: string): SingleLightType {

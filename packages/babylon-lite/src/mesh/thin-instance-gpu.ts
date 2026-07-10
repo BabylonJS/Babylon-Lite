@@ -138,9 +138,12 @@ export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstance
     return ti._drawArgsBuffer;
 }
 
-/** Sync thin-instance vertex data and the stable indirect draw arguments captured by render bundles. */
-export function syncThinInstanceForDraw(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number): GPUBuffer {
+/** Sync thin-instance vertex data and return stable indirect args only after a direct draw's count changes. */
+export function syncThinInstanceForDraw(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number): GPUBuffer | null {
     syncThinInstanceGpuData(engine, ti, hasColor);
+    if (!ti._drawArgsBuffer && (ti._drawArgsInstanceCount ??= ti.count) === ti.count) {
+        return null;
+    }
     return syncThinInstanceDrawArgs(engine, ti, indexCount);
 }
 

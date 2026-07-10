@@ -96,7 +96,7 @@ describe("ShaderMaterial thin instances", () => {
         expect(createPacket).toHaveBeenLastCalledWith(scene, override, systemSpec, mesh, true);
     });
 
-    it("records an indirect draw at zero instances so a cached bundle can show later instances", () => {
+    it("promotes a cached direct draw to indirect after the instance count changes", () => {
         const createBuffer = vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() }) as unknown as GPUBuffer);
         const engine = {
             _device: {
@@ -149,13 +149,23 @@ describe("ShaderMaterial thin instances", () => {
         const binding = result.renderables[0]!.bind(engine, {} as RenderTargetSignature);
         binding.update!({ targetWidth: 1, targetHeight: 1 });
         const drawIndexedIndirect = vi.fn();
+        const drawIndexed = vi.fn();
         const pass = {
             setVertexBuffer: vi.fn(),
             setIndexBuffer: vi.fn(),
             setBindGroup: vi.fn(),
+            drawIndexed,
             drawIndexedIndirect,
         } as unknown as GPURenderBundleEncoder;
 
+        expect(binding.draw(pass, engine)).toBe(1);
+        expect(drawIndexed).toHaveBeenCalledWith(3, 0);
+        expect(drawIndexedIndirect).not.toHaveBeenCalled();
+
+        mesh.thinInstances!.count = 1;
+        mesh.thinInstances!._version++;
+        mesh.thinInstances!._dirtyMax = 1;
+        binding.update!({ targetWidth: 1, targetHeight: 1 });
         expect(binding.draw(pass, engine)).toBe(1);
         expect(drawIndexedIndirect).toHaveBeenCalledTimes(1);
     });
