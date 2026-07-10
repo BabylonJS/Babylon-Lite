@@ -141,7 +141,7 @@ export interface RenderTask extends Task {
 
     /** Per-task scene UBO + bind group. Created eagerly in createRenderTask
      *  so renderables can reference `_sceneBG` at `bind()` time. Written each
-     *  frame by `writePassSceneUBO`. Destroyed in `dispose()`. */
+     *  frame by `_writePassSceneUBO`. Destroyed in `dispose()`. */
     /** @internal */
     _sceneUBO: GPUBuffer;
     /** @internal */
@@ -455,7 +455,7 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
     if (!task._config._skipClusteredLights && targetSignature._colorFormat) {
         sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
     }
-    writePassSceneUBO(task, eng, sc, camera);
+    _writePassSceneUBO(task, eng, sc, camera);
     refreshSceneLightsUBO(eng, sc);
     // Expose the active camera to per-binding `update()` calls. Some renderables
     // (e.g. transparent billboard systems) need it to compute view-space sort
@@ -578,8 +578,9 @@ function refreshTaskSceneBindGroup(task: RenderTask, eng: EngineContext): void {
 }
 
 /** Write the canonical SceneUniforms struct to the task-owned scene UBO.
- *  Bails before touching scratch/GPU when all inputs are unchanged. */
-function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneContext, camera: Camera | null): void {
+ *  Bails before touching scratch/GPU when all inputs are unchanged.
+ *  @internal Exported for unit testing of the scene-UBO change-detection guard. */
+export function _writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneContext, camera: Camera | null): void {
     if (!camera) {
         return;
     }
@@ -591,8 +592,14 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
     const img = scene.imageProcessing;
     const envRotationY = scene.envRotationY || 0;
     const wv = camera.worldMatrixVersion;
+    // `envTextures` identity is tracked so an environment loaded (or swapped) AFTER the scene has reached
+    // steady state invalidates this cache. Its spherical-harmonics irradiance and `lodGenerationScale` are
+    // written into the scene UBO below (via `_packSceneUniforms` + the env-SH contributor); without tracking
+    // it, a late env load would change none of the other guarded inputs, so the UBO would never be rewritten
+    // and the model would keep zero irradiance (dark diffuse, specular-only "mirror" look).
+    const envTextures = scene._envTextures;
     const s = task._su;
-    if (s[0] === camera && s[1] === fog && s[2] === wv && s[3] === aspect && s[4] === envRotationY && s[5] === img.exposure && s[6] === img.contrast) {
+    if (s[0] === camera && s[1] === fog && s[2] === wv && s[3] === aspect && s[4] === envRotationY && s[5] === img.exposure && s[6] === img.contrast && s[7] === envTextures) {
         return;
     }
     s[0] = camera;
@@ -602,6 +609,7 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
     s[4] = envRotationY;
     s[5] = img.exposure;
     s[6] = img.contrast;
+    s[7] = envTextures;
 
     const data = task._suData;
     _packSceneUniforms(data, eng, scene, camera, aspect);

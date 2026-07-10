@@ -5,8 +5,8 @@
   "runtimeChunks": [
     "scene253-alpha-test-fragment-CBuxkQtx.js",
     "scene253-animation-pointer-basecolor-C0cq9A_I.js",
-    "scene253-animation-pointer-ext-DGzvmWIc.js",
-    "scene253-animation-pointer-lights-BiAo08Kl.js",
+    "scene253-animation-pointer-ext-DRlECK1o.js",
+    "scene253-animation-pointer-lights-CqUMFCBU.js",
     "scene253-create-morph-targets-D5qHDYGj.js",
     "scene253-create-skeleton-Cr9qF7Pe.js",
     "scene253-directional-light-C8wh1GmE.js",
@@ -19,12 +19,12 @@
     "scene253-gltf-ext-iridescence-b4LVniAM.js",
     "scene253-gltf-ext-unlit-1vUYfF7v.js",
     "scene253-gltf-ext-uv-transform-DixkPR9o.js",
-    "scene253-gltf-feature-animation-pointer-D6WTR0B4.js",
+    "scene253-gltf-feature-animation-pointer-BnkAS3xV.js",
     "scene253-gltf-feature-animations-4C6t2Bb5.js",
     "scene253-gltf-feature-extras-VHPteGay.js",
     "scene253-gltf-feature-lights-punctual-BD0mrLuD.js",
     "scene253-gltf-feature-morph-OgvZWqfo.js",
-    "scene253-gltf-feature-registry-DqRYjSI1.js",
+    "scene253-gltf-feature-registry-DllfL8b_.js",
     "scene253-gltf-feature-skeleton-BYmZVC5E.js",
     "scene253-gltf-json-asset-CPydyTRL.js",
     "scene253-gltf-light-pointer-state-B7kFTRxK.js",
@@ -48,7 +48,7 @@
     "scene253-texture-2d-DQo3n8D6.js",
     "scene253-unlit-fragment-DWtvt7yQ.js",
     "scene253-uv-transform-fragment-B8ijWmAK.js",
-    "scene253-visibility-BvnumwCB.js",
+    "scene253-visibility-CnZyTJzb.js",
     "scene253.js"
   ]
 }
