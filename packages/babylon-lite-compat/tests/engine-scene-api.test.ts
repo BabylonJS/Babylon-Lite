@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { WebGPUEngine } from "../src/engine/engine";
+import { AbstractEngine, Engine, ThinEngine, WebGPUEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
 
 /**
@@ -165,5 +165,19 @@ describe("Scene entity registries", () => {
         expect(a.getClassName()).toBe("Scene");
         expect(a.getUniqueId()).toBe(1);
         expect(b.getUniqueId()).toBe(2);
+    });
+});
+
+describe("AbstractEngine version statics", () => {
+    it("reports the targeted @babylonjs/core version", () => {
+        expect(AbstractEngine.Version).toBe("9.16.1");
+        expect(AbstractEngine.NpmPackage).toBe("babylonjs@9.16.1");
+    });
+
+    it("inherits the version statics on every engine subclass", () => {
+        for (const Ctor of [ThinEngine, Engine, WebGPUEngine]) {
+            expect(Ctor.Version).toBe("9.16.1");
+            expect(Ctor.NpmPackage).toBe("babylonjs@9.16.1");
+        }
     });
 });

@@ -40,6 +40,20 @@ import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
 
 export abstract class AbstractEngine {
+    /**
+     * Babylon.js `AbstractEngine.Version` — the `@babylonjs/core` version this
+     * compat layer targets. Kept in sync with the last-reconciled BJS release
+     * (see `COMPAT-STATUS.md` › "Last synced BJS commit").
+     */
+    public static get Version(): string {
+        return "9.16.1";
+    }
+
+    /** Babylon.js `AbstractEngine.NpmPackage` — the npm package + version string. */
+    public static get NpmPackage(): string {
+        return `babylonjs@${AbstractEngine.Version}`;
+    }
+
     /** @internal The underlying Lite engine context. Populated by `initAsync()`. */
     public _lite!: EngineContext;
 
