@@ -564,8 +564,14 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
     const img = scene.imageProcessing;
     const envRotationY = scene.envRotationY || 0;
     const wv = camera.worldMatrixVersion;
+    // `envTextures` identity is tracked so an environment loaded (or swapped) AFTER the scene has reached
+    // steady state invalidates this cache. Its spherical-harmonics irradiance and `lodGenerationScale` are
+    // written into the scene UBO below (via `_packSceneUniforms` + the env-SH contributor); without tracking
+    // it, a late env load would change none of the other guarded inputs, so the UBO would never be rewritten
+    // and the model would keep zero irradiance (dark diffuse, specular-only "mirror" look).
+    const envTextures = scene._envTextures;
     const s = task._su;
-    if (s[0] === camera && s[1] === fog && s[2] === wv && s[3] === aspect && s[4] === envRotationY && s[5] === img.exposure && s[6] === img.contrast) {
+    if (s[0] === camera && s[1] === fog && s[2] === wv && s[3] === aspect && s[4] === envRotationY && s[5] === img.exposure && s[6] === img.contrast && s[7] === envTextures) {
         return;
     }
     s[0] = camera;
@@ -575,6 +581,7 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
     s[4] = envRotationY;
     s[5] = img.exposure;
     s[6] = img.contrast;
+    s[7] = envTextures;
 
     const data = task._suData;
     _packSceneUniforms(data, eng, scene, camera, aspect);
