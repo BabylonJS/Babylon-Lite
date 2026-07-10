@@ -50,6 +50,15 @@ interface SingleLightWgslModule {
     getSingleLightBlock(): string;
 }
 
+type SyncThinInstanceBuffers = (
+    engine: EngineContext,
+    ti: ThinInstanceData,
+    pass: GPURenderPassEncoder | GPURenderBundleEncoder,
+    slot: number,
+    hasColor: boolean,
+    drawBuffers?: import("../../mesh/thin-instance-gpu.js").ThinInstanceDrawBuffers | null
+) => number;
+
 /** Build PBR Renderable(s) + a SceneUniformUpdater from PBR meshes. */
 export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], envTextures: EnvironmentTextures | undefined): Promise<MeshGroupBuildResult> {
     const engine = scene.surface.engine;
@@ -238,16 +247,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     const _gammaTemplate = hasGammaAlbedo ? await import("./pbr-template-gamma.js") : null;
 
     let _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null = null;
-    let _syncThinInstanceBuffers:
-        | ((
-              engine: EngineContext,
-              ti: ThinInstanceData,
-              pass: GPURenderPassEncoder | GPURenderBundleEncoder,
-              slot: number,
-              hasColor: boolean,
-              drawBuffers?: import("../../mesh/thin-instance-gpu.js").ThinInstanceDrawBuffers | null
-          ) => number)
-        | null = null;
+    let _syncThinInstanceBuffers: SyncThinInstanceBuffers | null = null;
     let _cull: typeof import("../../mesh/thin-instance-cull-binding.js") | undefined;
     // Per-frame thin-instance matrix/color UPLOAD (no pass — just writeBuffer of the dirty range).
     // The bundle-recorded draw only re-binds the buffer; animated instances (e.g. wind-swayed flora)
@@ -583,9 +583,7 @@ export interface _PbrGeometryContext {
     /** @internal */
     readonly _shadowLights: readonly { readonly lightIndex: number; readonly shadowType: "esm" | "pcf" | "csm"; readonly gen: ShadowGenerator }[];
     /** @internal */
-    readonly _syncThinInstanceBuffers:
-        | ((engine: EngineContext, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
-        | null;
+    readonly _syncThinInstanceBuffers: SyncThinInstanceBuffers | null;
     /** @internal */
     readonly _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer) | null;
 }
