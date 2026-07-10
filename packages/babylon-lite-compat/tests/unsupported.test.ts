@@ -27,6 +27,17 @@ import {
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
     Sound,
+    PointerDragBehavior,
+    BaseSixDofDragBehavior,
+    SixDofDragBehavior,
+    MultiPointerScaleBehavior,
+    AttachToBoxBehavior,
+    FadeInOutBehavior,
+    SurfaceMagnetismBehavior,
+    FollowBehavior,
+    HandConstraintBehavior,
+    InterpolatingBehavior,
+    GeospatialClippingBehavior,
     SceneSerializer,
 } from "../src/unsupported/unsupported-apis";
 import { MeshBuilder } from "../src/meshes/meshes";
@@ -70,6 +81,17 @@ describe("Unsupported API stubs throw on construction", () => {
         ["HtmlInteractionManager", () => new HtmlInteractionManager()],
         ["HtmlRaycastInteractionManager", () => new HtmlRaycastInteractionManager()],
         ["Sound", () => new Sound()],
+        ["PointerDragBehavior", () => new PointerDragBehavior()],
+        ["BaseSixDofDragBehavior", () => new BaseSixDofDragBehavior()],
+        ["SixDofDragBehavior", () => new SixDofDragBehavior()],
+        ["MultiPointerScaleBehavior", () => new MultiPointerScaleBehavior()],
+        ["AttachToBoxBehavior", () => new AttachToBoxBehavior()],
+        ["FadeInOutBehavior", () => new FadeInOutBehavior()],
+        ["SurfaceMagnetismBehavior", () => new SurfaceMagnetismBehavior()],
+        ["FollowBehavior", () => new FollowBehavior()],
+        ["HandConstraintBehavior", () => new HandConstraintBehavior()],
+        ["InterpolatingBehavior", () => new InterpolatingBehavior()],
+        ["GeospatialClippingBehavior", () => new GeospatialClippingBehavior()],
     ];
 
     it.each(cases)("%s throws LiteCompatError naming the API", (name, construct) => {

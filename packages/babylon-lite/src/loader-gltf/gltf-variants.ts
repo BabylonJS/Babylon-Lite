@@ -7,13 +7,13 @@
 
 import type { Mesh } from "../mesh/mesh.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
-import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
+import type { GltfImageCache, GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
-import type { GltfFeature } from "./gltf-feature.js";
+import type { GltfFeature, GltfMaterialFeatureRunner } from "./gltf-feature.js";
 import type { MaterialVariantData, VariantMeshEntry } from "./material-variants.js";
 import type { EngineContext } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
-import { runMatExts, uploadTex, type GenerateMipmapsFn, type TextureWrapFn, identityTexWrap } from "./gltf-pbr-builder.js";
+import { uploadTex, type GenerateMipmapsFn, type TextureWrapFn, identityTexWrap } from "./gltf-pbr-builder.js";
 import { buildDefaultPbrTexturesExt, assemblePbrPropsExt } from "./gltf-pbr-builder-ext.js";
 
 /**
@@ -29,6 +29,7 @@ export async function loadVariantMaterials(
     meshes: Mesh[],
     engine: EngineContext,
     exts: GltfFeature[],
+    runMatExts: GltfMaterialFeatureRunner,
     wrapTex: TextureWrapFn = identityTexWrap
 ): Promise<MaterialVariantData> {
     const generateMipmaps: GenerateMipmapsFn = (await import("../texture/generate-mipmaps.js")).generateMipmaps;
@@ -42,8 +43,8 @@ export async function loadVariantMaterials(
         maxAnisotropy: 4,
     });
 
-    const matCache = new Map<number, Promise<GltfMaterialData>>();
-    const imageCache = new Map<number, Promise<ImageBitmap>>();
+    const matCache: Promise<GltfMaterialData>[] = [];
+    const imageCache: GltfImageCache = [];
     const fetchImg = makeImageFetcher(json, binChunk, baseUrl, imageCache);
     const getCachedTex = (bitmap: ImageBitmap, srgb: boolean) => uploadTex(engine, bitmap, srgb, sampler, generateMipmaps);
     const extCtx: GltfMatExtCtx = {
@@ -60,12 +61,7 @@ export async function loadVariantMaterials(
         },
     };
     const getMat = (matIdx: number): Promise<GltfMaterialData> => {
-        let p = matCache.get(matIdx);
-        if (!p) {
-            p = assembleMaterial(json, binChunk, matIdx, baseUrl, imageCache);
-            matCache.set(matIdx, p);
-        }
-        return p;
+        return (matCache[matIdx] ??= assembleMaterial(json, binChunk, matIdx, baseUrl, imageCache));
     };
 
     const pbrCache = new Map<GltfMaterialData, Promise<PbrMaterialProps>>();

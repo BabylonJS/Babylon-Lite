@@ -12,7 +12,17 @@ const feature: GltfFeature = {
             return {};
         }
         const { loadVariantMaterials } = await import("./gltf-variants.js");
-        const materialVariants = await loadVariantMaterials(ctx._json, ctx._binChunk, ctx._baseUrl, variantNames, meshes, ctx._engine, ctx._matExts, ctx._wrapTex);
+        const materialVariants = await loadVariantMaterials(
+            ctx._json,
+            ctx._binChunk,
+            ctx._baseUrl,
+            variantNames,
+            meshes,
+            ctx._engine,
+            ctx._matExts,
+            ctx._runMatExts!,
+            ctx._wrapTex
+        );
         return { materialVariants };
     },
 };
