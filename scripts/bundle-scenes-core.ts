@@ -1501,7 +1501,14 @@ export async function measurePage(
             if (c?.dataset.ready === "true") return undefined;
             return c?.dataset.error ?? "canvas reported neither ready nor error";
         });
-    } catch {
+    } catch (err) {
+        // Only treat a genuine Playwright timeout as "not ready"; any other error
+        // (page crash, execution context destroyed, navigation failure, …) is a
+        // real failure that must propagate instead of masquerading as a timeout.
+        if (!(err instanceof Error) || err.name !== "TimeoutError") {
+            await page.close();
+            throw err;
+        }
         // waitForFunction timed out: the scene set neither ready nor error.
         notReadyReason = `timed out after ${Math.round(readyTimeoutMs / 1000)}s waiting for canvas ready/error signal`;
     }
