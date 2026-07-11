@@ -5,7 +5,9 @@
  *  Pillar 4b: plain data, no scene reference.
  *  Pillar 4c: materials own shaders — mesh just holds material props. */
 
-import type { EngineContext } from "../engine/engine.js";
+import { bumpVisibilityEpoch, type EngineContext } from "../engine/engine.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import { release } from "../resource/ref-count.js";
 import type { Mesh } from "./mesh.js";
 import { initMeshTransform, uploadMeshToGPU } from "./mesh.js";
 import { computeAabb } from "../math/compute-aabb.js";
@@ -69,12 +71,10 @@ export function createMeshFromData(
     return mesh;
 }
 
-/** Force every registered scene's cached render + shadow bundles to RE-RECORD on the next frame, by bumping
- *  each rendering context's `_renderableVersion` (the same signal a mesh add/remove or `resizeMeshGeometry`
- *  emits). Use after an out-of-band GPU buffer REALLOCATION that the cached bundles can't otherwise notice —
- *  e.g. growing a thin-instanced mesh's matrix buffer past its capacity (the bundle captured the old buffer
- *  handle and would bind a freed buffer). A no-op-cheap version bump; the actual re-record happens lazily. */
+/** Force cached render + shadow bundles to RE-RECORD on the next frame. The global epoch also reaches
+ *  tasks recorded before their scene was registered; registered scenes retain their structural version bump. */
 export function invalidateRenderBundles(engine: EngineContext): void {
+    bumpVisibilityEpoch();
     for (const ctx of engine._renderingContexts) {
         const sc = ctx as { _renderableVersion?: number };
         if (sc._renderableVersion !== undefined) {
@@ -116,17 +116,11 @@ export function resizeMeshGeometry(
     // mutation — so bump every registered scene's renderable version, which is exactly what the cached
     // bundles already key off to know they must rebuild. (A mesh holds no scene reference per pillar 4b,
     // so we can't target just its owner; bumping all registered scenes is a no-op for any without it.)
-    for (const ctx of engine._renderingContexts) {
-        const sc = ctx as { _renderableVersion?: number };
-        if (sc._renderableVersion !== undefined) {
-            sc._renderableVersion++;
-        }
-    }
+    invalidateRenderBundles(engine);
     // Allocate the NEW buffers and swap them in FIRST, so any subsequent frame records from the new
-    // geometry. The OLD buffers may still be referenced by a frame that was already submitted to the GPU
-    // this tick, so we must NOT destroy them synchronously — that hits the validation error
-    // "Buffer used in submit while destroyed". Defer their destruction until the GPU has drained the
-    // currently-submitted work (onSubmittedWorkDone), by which point nothing references them.
+    // geometry. The OLD buffers may still be referenced by the next frame command buffer, especially when
+    // resize happens during async scene construction before the first submit. Retire them through the engine's
+    // frame-gated queue so destruction cannot run before that command buffer has submitted and drained.
     mesh._gpu = uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors);
     const [min, max] = computeAabb(positions);
     mesh.boundMin = isFinite(min[0]) ? min : undefined;
@@ -139,22 +133,21 @@ export function resizeMeshGeometry(
     mesh._cpuIndices = indices;
     engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
 
-    void engine._device.queue
-        .onSubmittedWorkDone()
-        .then(() => {
-            try {
-                old.positionBuffer.destroy();
-                old.normalBuffer.destroy();
-                old.indexBuffer.destroy();
-                old.uvBuffer.destroy();
-                old.uv2Buffer?.destroy();
-                old.tangentBuffer?.destroy();
-                old.colorBuffer?.destroy();
-            } catch {
-                // Device may have been lost/disposed before the deferred destroy ran — nothing to free.
-            }
-        })
-        .catch(() => {});
+    // `cloneTransformNode` shares the exact MeshGPU object between siblings. Replacing this mesh's
+    // `_gpu` drops one ownership claim; only retire the old buffers when no sibling still references
+    // them. Otherwise a later frame would legitimately bind the clone's still-live geometry after it
+    // had been destroyed.
+    if (release(old)) {
+        retireGpuResources(engine, () => {
+            old.positionBuffer.destroy();
+            old.normalBuffer.destroy();
+            old.indexBuffer.destroy();
+            old.uvBuffer.destroy();
+            old.uv2Buffer?.destroy();
+            old.tangentBuffer?.destroy();
+            old.colorBuffer?.destroy();
+        });
+    }
 }
 
 /** Re-upload (part of) a mesh's NORMAL buffer — the twin of `updateMeshPositions` for dynamically

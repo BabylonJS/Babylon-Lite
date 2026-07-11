@@ -47,6 +47,14 @@ export interface ThinInstanceData {
     _colorGpuBufferStorage: boolean;
     /** @internal Last color version uploaded to GPU. */
     _colorGpuVersion: number;
+    /** @internal Stable indirect args buffer used by cached thin-instance render bundles. */
+    _drawArgsBuffer?: GPUBuffer | null;
+    /** @internal CPU mirror for the indirect args buffer. */
+    _drawArgsData?: Uint32Array;
+    /** @internal Last index count written to `_drawArgsBuffer`. */
+    _drawArgsIndexCount?: number;
+    /** @internal Last instance count observed by a cached direct draw or written to `_drawArgsBuffer`. */
+    _drawArgsInstanceCount?: number;
 
     /** @internal Lazy per-mesh F32 upload scratch. Allocated by thin-instance-gpu.ts only
      *  when `matrices` is F64-backed (HPM-on); F32-backed input takes a direct

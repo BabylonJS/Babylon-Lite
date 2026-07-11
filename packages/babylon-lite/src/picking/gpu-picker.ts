@@ -181,7 +181,7 @@ function createPickDiscardBindGroup(engine: EngineContext, layout: GPUBindGroupL
         if (!data) {
             return null;
         }
-        const buffer = createMappedBuffer(engine, data, BU.STORAGE);
+        const buffer = createMappedBuffer(engine, data, BU.STORAGE, "pick-discard-storage");
         tempBuffers.push(buffer);
         entries.push({ binding: i, resource: { buffer } });
     }
@@ -203,6 +203,38 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     const debugLabel = options?.debugLabel;
     const engine = scene.surface.engine;
     const device = engine._device;
+    if (!scene.camera) {
+        return createEmptyPickingInfo();
+    }
+
+    // Resolve every lazy dependency before opening a command encoder. Awaiting while a render pass is
+    // still unsubmitted lets the main frame resize and retire mesh buffers that the pick pass already
+    // captured; the eventual pick submission then references destroyed geometry.
+    const preparedContributors: { source: PickSource; contributor: PickContributor }[] = [];
+    if (scene._pickSources.length > 0) {
+        const sources = scene._pickSources.slice();
+        for (const source of sources) {
+            let contributor = picker._contributors?.get(source);
+            if (!contributor) {
+                const pipeline = await source.load();
+                if (!scene._pickSources.includes(source)) {
+                    continue;
+                }
+                contributor = pipeline.createPickContributor(source.entity);
+                (picker._contributors ??= new Map()).set(source, contributor);
+            }
+            preparedContributors.push({ source, contributor });
+        }
+    }
+
+    let deformedGeometry: typeof DeformedGeometry | null = null;
+    for (const mesh of scene.meshes) {
+        if ((mesh.morphTargets || mesh.skeleton) && mesh._cpuPositions) {
+            deformedGeometry = await import("./deformed-geometry.js");
+            break;
+        }
+    }
+
     // Pick coordinates are relative to the scene's own surface canvas, not the engine's
     // primary canvas — they differ when the scene renders into an auxiliary surface.
     const canvas = scene.surface.canvas;
@@ -247,14 +279,6 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     const meshes = scene.meshes;
     const meshCount = meshes.length;
     let nextId = 1;
-    let deformedGeometry: typeof DeformedGeometry | null = null;
-    for (let mi = 0; mi < meshCount; mi++) {
-        const mesh = meshes[mi]!;
-        if ((mesh.morphTargets || mesh.skeleton) && mesh._cpuPositions) {
-            deformedGeometry = await import("./deformed-geometry.js");
-            break;
-        }
-    }
 
     // ── Render pass (1×1 target) ─────────────────────────────────────
     const encoder = device.createCommandEncoder({ label: "pick" });
@@ -292,7 +316,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
                 continue;
             }
             _tiUboU32[0] = nextId;
-            const tiUbo = createUniformBuffer(engine, _tiUboView);
+            const tiUbo = createUniformBuffer(engine, _tiUboView, "pick-thin-instance-ubo");
             tempBuffers.push(tiUbo);
 
             pass.setPipeline(pipelines.thinInstancePipeline);
@@ -317,13 +341,13 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
         } else {
             _uboF32.set(mesh.worldMatrix, 0);
             _uboU32[16] = nextId;
-            const meshUbo = createUniformBuffer(engine, _uboView);
+            const meshUbo = createUniformBuffer(engine, _uboView, "pick-mesh-ubo");
             tempBuffers.push(meshUbo);
             let positionBuffer = gpu.positionBuffer;
             if (deformedGeometry && (mesh.morphTargets || mesh.skeleton) && mesh._cpuPositions) {
                 const deformedPositions = deformedGeometry.computeDeformedPositions(mesh);
                 if (deformedPositions) {
-                    positionBuffer = createMappedBuffer(engine, deformedPositions, BU.VERTEX);
+                    positionBuffer = createMappedBuffer(engine, deformedPositions, BU.VERTEX, "pick-deformed-position");
                     tempBuffers.push(positionBuffer);
                 }
             }
@@ -355,17 +379,11 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     // resolve, resources, and view math all live in the contributor's own (lazily imported)
     // module, so a scene with no contributors fetches zero contributor pick bytes.
     const contribRanges: { base: number; count: number; contributor: PickContributor }[] = [];
-    if (scene._pickSources.length > 0) {
+    if (preparedContributors.length > 0) {
         const pickCtx: PickPassContext = { picker, pass, engine, scene, camera, sceneBG: picker._sceneBG!, px, py, w, h };
-        for (let ci = 0; ci < scene._pickSources.length; ci++) {
-            const src = scene._pickSources[ci]!;
-            // Build each contributor once (per picker) and cache it — the first pick lazy-imports the
-            // source's pipeline, so a scene that never picks fetches zero contributor pick bytes.
-            let contributor = picker._contributors?.get(src);
-            if (!contributor) {
-                const pipeline = await src.load();
-                contributor = pipeline.createPickContributor(src.entity);
-                (picker._contributors ??= new Map()).set(src, contributor);
+        for (const { source, contributor } of preparedContributors) {
+            if (!scene._pickSources.includes(source)) {
+                continue;
             }
             const base = nextId;
             nextId = contributor.draw(pickCtx, base);
@@ -381,17 +399,20 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     encoder.copyTextureToBuffer({ texture: rt.depthColorTex }, { buffer: rt.depthStaging, bytesPerRow: 256 }, { width: 1, height: 1 });
     device.queue.submit([encoder.finish()]);
 
-    await Promise.all([rt.colorStaging.mapAsync(GPUMapMode.READ), rt.depthStaging.mapAsync(GPUMapMode.READ)]);
+    let pickId: number;
+    let depth: number;
+    try {
+        await Promise.all([rt.colorStaging.mapAsync(GPUMapMode.READ), rt.depthStaging.mapAsync(GPUMapMode.READ)]);
 
-    const colorData = new U8(rt.colorStaging.getMappedRange());
-    const pickId = (colorData[0]! << 16) | (colorData[1]! << 8) | colorData[2]!;
-    const depth = new F32(rt.depthStaging.getMappedRange())[0]!;
-    rt.colorStaging.unmap();
-    rt.depthStaging.unmap();
-
-    // Destroy temp per-mesh UBOs
-    for (let i = 0; i < tempBuffers.length; i++) {
-        tempBuffers[i]!.destroy();
+        const colorData = new U8(rt.colorStaging.getMappedRange());
+        pickId = (colorData[0]! << 16) | (colorData[1]! << 8) | colorData[2]!;
+        depth = new F32(rt.depthStaging.getMappedRange())[0]!;
+        rt.colorStaging.unmap();
+        rt.depthStaging.unmap();
+    } finally {
+        for (let i = 0; i < tempBuffers.length; i++) {
+            tempBuffers[i]!.destroy();
+        }
     }
 
     // ── Resolve pick ID to mesh ──────────────────────────────────────

@@ -33,7 +33,7 @@ import type { EngineContext } from "../engine/engine.js";
 import { _vis } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Camera } from "../camera/camera.js";
-import type { Renderable, DrawBinding, DrawUpdateContext } from "../render/renderable.js";
+import type { Renderable, DrawBinding, DrawUpdateContext, DrawUpdateBatch } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Material } from "../material/material.js";
@@ -91,6 +91,8 @@ export interface RenderTaskConfig {
      *  `grabDepth: true` also snapshots the task's DEPTH attachment at the same mid-pass grab (see
      *  `TransmissionOptions.grabDepth`). */
     transmission?: { copyCount?: number; generateMipmaps?: boolean; mipLevelCount?: number; grabDepth?: boolean };
+    /** @internal Skip clustered-light preparation for passes that never run forward lighting. */
+    _skipClusteredLights?: boolean;
 }
 
 /** A frame-graph task that records a single `RenderPass`, binds the scene's `RenderTarget`, and draws renderables into it. */
@@ -115,7 +117,7 @@ export interface RenderTask extends Task {
     /** @internal */
     _transparentBindings: DrawBinding[];
     /** Cached opaque render bundle. Invalidated by renderable list mutations
-     *  (`_lastVersion`) and visibility changes (`_lastVis`). */
+     *  (`_lastVersion`) and the global visibility/resource epoch (`_lastVis`). */
     /** @internal */
     _opaqueBundles: GPURenderBundle[];
     /** @internal */
@@ -156,6 +158,8 @@ export interface RenderTask extends Task {
     _executeWithTransmission?(sampleCount: number): number;
     /** @internal */
     _targetSignature: RenderTargetSignature;
+    /** @internal Lazy feature work flushed after binding updates and before the render pass. */
+    _updateBatches: DrawUpdateBatch[];
 
     /** Add a mesh to this task's explicit render list with an optional per-pass material override. Resolved via
      *  `material._buildGroup._rebuildSingle`, so the mesh's material family must already have been registered with the
@@ -229,6 +233,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _suData: new F32(SCENE_UBO_BYTES / 4),
         _su: [],
         _targetSignature: targetSignature,
+        _updateBatches: [],
         _pendingMeshes: [],
         addMesh(mesh, opts) {
             const material = opts?.material ?? mesh.material;
@@ -295,6 +300,10 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             task._renderables.length = 0;
             task._opaqueBundles.length = 0;
             task._sceneUBO.destroy();
+            for (const batch of task._updateBatches) {
+                batch.destroy();
+            }
+            task._updateBatches.length = 0;
         },
     };
     return task;
@@ -308,6 +317,12 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
         return;
     }
     let removed = false;
+    for (let i = task._pendingMeshes.length - 1; i >= 0; i--) {
+        if (task._pendingMeshes[i]!.mesh === mesh) {
+            task._pendingMeshes.splice(i, 1);
+            removed = true;
+        }
+    }
     for (let i = task._renderables.length - 1; i >= 0; i--) {
         if (task._renderables[i]!.mesh === mesh) {
             task._renderables.splice(i, 1);
@@ -371,6 +386,11 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
     transparent.length = 0;
     for (const r of task._renderables) {
         const binding = r.bind(eng, targetSignature);
+        for (const batch of binding._updateBatches ?? []) {
+            if (!task._updateBatches.includes(batch)) {
+                task._updateBatches.push(batch);
+            }
+        }
         if (r.isTransparent || r._transmissive) {
             transparent.push(binding);
         } else if (r._direct) {
@@ -432,16 +452,24 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
     // extension raises MAX_LIGHTS after this task was first recorded).
     refreshTaskSceneBindGroup(task, eng);
     const camera = task._config.cam ?? sc.camera;
-    sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
+    if (!task._config._skipClusteredLights && targetSignature._colorFormat) {
+        sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
+    }
     _writePassSceneUBO(task, eng, sc, camera);
     refreshSceneLightsUBO(eng, sc);
     // Expose the active camera to per-binding `update()` calls. Some renderables
     // (e.g. transparent billboard systems) need it to compute view-space sort
     // depths during their update.
     (context as MutableDrawUpdateContext)._camera = camera;
+    for (const batch of task._updateBatches) {
+        batch.reset();
+    }
     updateBindings(task._opaqueBindings, context);
     updateBindings(task._directBindings, context);
     updateBindings(task._transparentBindings, context);
+    for (const batch of task._updateBatches) {
+        batch.flush(eng);
+    }
     // Per-frame back-to-front sort for transparent bindings — must run AFTER
     // updateBindings so renderables that compute `_worldCenter` inside their
     // own `update()` (billboard systems) are seen with current values.
@@ -503,9 +531,8 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     // Scene bind group (group 0) is task-owned and identical for every draw in this pass.
     pass.setBindGroup(0, sceneBG);
 
-    // Opaque: cached render bundle. Invalidated by scene mutation (_renderableVersion)
-    // or visibility version (_vis). The bundle records group(0) at its start so it can
-    // be replayed standalone (executeBundles inherits no inherited state).
+    // Opaque: cached render bundle. Invalidated by scene mutation (_renderableVersion) or
+    // the global visibility/resource epoch (_vis). The bundle records group(0) at its start.
     if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || opaqueBundles.length === 0) {
         const desc = rt._descriptor;
         const be = eng._device.createRenderBundleEncoder({

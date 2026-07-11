@@ -10,12 +10,14 @@ import { BU } from "../engine/gpu-flags.js";
 import type { Camera } from "../camera/camera.js";
 import { getViewProjectionMatrix } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { DrawUpdateContext } from "../render/renderable.js";
+import type { RenderTargetSignature } from "../engine/render-target.js";
+import type { DrawUpdateBatch, DrawUpdateContext } from "../render/renderable.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh, MeshGPU } from "./mesh.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import { syncThinInstanceGpuData } from "./thin-instance-gpu.js";
 import type { ThinInstanceDrawBuffers } from "./thin-instance-gpu.js";
+import { bumpVisibilityEpoch } from "../engine/engine.js";
 
 const WORKGROUP_SIZE = 64;
 const PARAM_BYTES = 192;
@@ -101,6 +103,10 @@ export interface ThinInstanceGpuCullState {
     _argsData: Uint32Array;
     /** @internal */
     _drawBuffers: ThinInstanceDrawBuffers | null;
+    /** @internal */
+    _indexCount: number;
+    /** @internal */
+    _active: boolean;
 }
 
 /** Result consumed by a material draw closure after culling has run for the active pass. */
@@ -109,9 +115,64 @@ export interface ThinInstanceGpuCullResult {
     readonly argsBuffer: GPUBuffer;
 }
 
+interface ComputeDispatch {
+    readonly pipeline: GPUComputePipeline;
+    readonly bindGroup: GPUBindGroup;
+    readonly workgroupsX: number;
+}
+
+/** @internal Task-local batch that submits all culling work through one compute pass. */
+export interface ComputeDispatchBatch extends DrawUpdateBatch {
+    queue(dispatch: ComputeDispatch): void;
+}
+
 let _cachedDevice: GPUDevice | null = null;
 let _pipelineNoColor: GPUComputePipeline | null = null;
 let _pipelineColor: GPUComputePipeline | null = null;
+let _dispatchBatches: WeakMap<RenderTargetSignature, ComputeDispatchBatch> | null = null;
+
+/** @internal Return the compute batch associated with one render task. */
+export function getComputeDispatchBatch(signature: RenderTargetSignature): ComputeDispatchBatch {
+    _dispatchBatches ??= new WeakMap();
+    let batch = _dispatchBatches.get(signature);
+    if (batch) {
+        return batch;
+    }
+    const dispatches: ComputeDispatch[] = [];
+    let count = 0;
+    batch = {
+        reset(): void {
+            count = 0;
+        },
+        flush(engine): void {
+            if (count === 0) {
+                return;
+            }
+            const pass = engine._currentEncoder.beginComputePass();
+            let lastPipeline: GPUComputePipeline | null = null;
+            for (let i = 0; i < count; i++) {
+                const dispatch = dispatches[i]!;
+                if (dispatch.pipeline !== lastPipeline) {
+                    pass.setPipeline(dispatch.pipeline);
+                    lastPipeline = dispatch.pipeline;
+                }
+                pass.setBindGroup(0, dispatch.bindGroup);
+                pass.dispatchWorkgroups(dispatch.workgroupsX);
+            }
+            pass.end();
+        },
+        destroy(): void {
+            dispatches.length = 0;
+            count = 0;
+            _dispatchBatches?.delete(signature);
+        },
+        queue(dispatch): void {
+            dispatches[count++] = dispatch;
+        },
+    };
+    _dispatchBatches.set(signature, batch);
+    return batch;
+}
 
 /** Create per-binding culling state. */
 export function createTiCullState(): ThinInstanceGpuCullState {
@@ -133,6 +194,8 @@ export function createTiCullState(): ThinInstanceGpuCullState {
         _paramsU32: new U32(paramsBytes),
         _argsData: new U32(5),
         _drawBuffers: null,
+        _indexCount: -1,
+        _active: false,
     };
 }
 
@@ -158,18 +221,22 @@ export function prepareTiCull(
     gpu: MeshGPU,
     ti: ThinInstanceData,
     hasColor: boolean,
-    context: DrawUpdateContext
+    context: DrawUpdateContext,
+    dispatchBatch?: ComputeDispatchBatch
 ): ThinInstanceGpuCullResult | null {
     const camera = context._camera;
     if (!ti._gpuCullingEnabled || !camera || mesh.visible === false || ti.count === 0) {
+        setCullActive(state, false);
         state._drawBuffers = null;
         return null;
     }
     if (hasColor && !ti.colors) {
+        setCullActive(state, false);
         state._drawBuffers = null;
         return null;
     }
     if (!state._localSphereReady && !computeLocalSphere(mesh as Mesh, state._localSphere)) {
+        setCullActive(state, false);
         state._drawBuffers = null;
         return null;
     }
@@ -179,6 +246,7 @@ export function prepareTiCull(
     const sourceMatrixBuffer = ti._gpuBuffer;
     const sourceColorBuffer = hasColor ? ti._colorGpuBuffer : null;
     if (!sourceMatrixBuffer || (hasColor && !sourceColorBuffer)) {
+        setCullActive(state, false);
         state._drawBuffers = null;
         return null;
     }
@@ -210,13 +278,23 @@ export function prepareTiCull(
     const aspect = (context.targetWidth / context.targetHeight) * (v ? v.width / v.height : 1);
     writeCullParams(engine, state, mesh, gpu.indexCount, ti.count, camera, aspect);
 
-    const pass = engine._currentEncoder.beginComputePass();
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, state._bindGroup);
-    pass.dispatchWorkgroups(Math.ceil(ti.count / WORKGROUP_SIZE));
-    pass.end();
+    const dispatch = {
+        pipeline,
+        bindGroup: state._bindGroup,
+        workgroupsX: Math.ceil(ti.count / WORKGROUP_SIZE),
+    };
+    if (dispatchBatch) {
+        dispatchBatch.queue(dispatch);
+    } else {
+        const pass = engine._currentEncoder.beginComputePass();
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, state._bindGroup);
+        pass.dispatchWorkgroups(dispatch.workgroupsX);
+        pass.end();
+    }
 
     state._drawBuffers = { matrixBuffer: visibleMatrixBuffer, colorBuffer: visibleColorBuffer };
+    setCullActive(state, true);
     return { drawBuffers: state._drawBuffers, argsBuffer };
 }
 
@@ -238,6 +316,7 @@ function ensureCullBuffers(engine: EngineContext, state: ThinInstanceGpuCullStat
         state._capacity = capacity;
         state._bindGroup = null;
         state._drawBuffers = null;
+        bumpVisibilityEpoch();
     } else if (hasColor && !state._visibleColorBuffer) {
         state._visibleColorBuffer = device.createBuffer({
             size: Math.max(state._capacity * 16, 4),
@@ -245,6 +324,7 @@ function ensureCullBuffers(engine: EngineContext, state: ThinInstanceGpuCullStat
         });
         state._bindGroup = null;
         state._drawBuffers = null;
+        bumpVisibilityEpoch();
     }
     if (!state._argsBuffer) {
         state._argsBuffer = device.createBuffer({
@@ -290,15 +370,26 @@ function writeCullParams(engine: EngineContext, state: ThinInstanceGpuCullState,
     state._paramsU32[COUNT_U32_OFFSET] = instanceCount;
     params[BOUNDS_PAD_F32_OFFSET] = mesh.thinInstances?._cullBoundsPad ?? 0;
 
-    const args = state._argsData;
-    args[0] = indexCount;
-    args[1] = 0;
-    args[2] = 0;
-    args[3] = 0;
-    args[4] = 0;
-
-    engine._device.queue.writeBuffer(state._argsBuffer!, 0, args.buffer, args.byteOffset, args.byteLength);
+    if (state._indexCount !== indexCount) {
+        const args = state._argsData;
+        args[0] = indexCount;
+        args[1] = 0;
+        args[2] = 0;
+        args[3] = 0;
+        args[4] = 0;
+        engine._device.queue.writeBuffer(state._argsBuffer!, 0, args.buffer, args.byteOffset, args.byteLength);
+        state._indexCount = indexCount;
+    } else {
+        engine._currentEncoder.clearBuffer(state._argsBuffer!, 4, 4);
+    }
     engine._device.queue.writeBuffer(state._paramsBuffer!, 0, state._paramsBytes);
+}
+
+function setCullActive(state: ThinInstanceGpuCullState, active: boolean): void {
+    if (state._active !== active) {
+        state._active = active;
+        bumpVisibilityEpoch();
+    }
 }
 
 function writeFrustumPlanes(out: Float32Array, m: Mat4): void {

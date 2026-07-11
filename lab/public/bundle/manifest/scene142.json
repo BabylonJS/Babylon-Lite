@@ -1,9 +1,9 @@
 {
-  "rawKB": 60.5,
-  "gzipKB": 22.5,
+  "rawKB": 61,
+  "gzipKB": 22.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene142-standard-renderable-X8KTOcet.js",
+    "scene142-standard-renderable-D3JSTpTB.js",
     "scene142.js"
   ]
 }

@@ -21,6 +21,7 @@ import { mat4Invert } from "../math/mat4-invert.js";
 import { buildLightViewMatrix, casterVersionSum, createShadowCamera, multiply4x4, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 /** Generation of the material that ACTUALLY casts this caster mesh's shadow — the explicit
  *  `_shadowCasterMaterial` override when set, else the mesh's own material. Lets the caster-set diff detect a
@@ -46,6 +47,8 @@ export interface CsmConfig {
     _shadowMaxZ: number | null;
     /** @internal */
     _bias: number;
+    /** @internal */
+    _worldSpaceBias: number | null;
     /** @internal */
     _darkness: number;
     /** @internal */
@@ -178,21 +181,11 @@ export function ensureCsmShadowTaskState(
         // leaves our cached no-color material views dangling at the destroyed UBOs — the
         // "Buffer used in submit while destroyed" flood seen when a caster's material swaps variant on first
         // render). Rebuild the cascade tasks below with the casters' CURRENT materials and return the NEW
-        // state — the caller swaps to it, so the OLD task is
-        // never recorded again. Its GPU buffers may still be referenced by a frame already submitted this
-        // tick, so we must NOT dispose it synchronously; defer until the GPU drains the currently-submitted
-        // work (onSubmittedWorkDone). Mirrors resizeMeshGeometry.
+        // state — the caller swaps to it, so the OLD task is never recorded again. Its GPU buffers may still
+        // be referenced by the next frame command buffer, especially during async pre-first-frame construction,
+        // so retire it only after that frame has submitted and drained. Mirrors resizeMeshGeometry.
         const old = existing._task;
-        void engine._device.queue
-            .onSubmittedWorkDone()
-            .then(() => {
-                try {
-                    old.dispose();
-                } catch {
-                    // Device may have been lost/disposed before the deferred dispose ran — nothing to free.
-                }
-            })
-            .catch(() => {});
+        retireGpuResources(engine, () => old.dispose());
     }
 
     const materialViews = new Map<Material, MaterialView>();
@@ -219,7 +212,7 @@ export function ensureCsmShadowTaskState(
             _ownsDepthTexture: false, // borrowed: the shared CSM depth array is owned by the generator
         };
         const camera = createShadowCamera(sg);
-        const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera }, engine, scene);
+        const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera, _skipClusteredLights: true }, engine, scene);
         for (const mesh of casterMeshes) {
             const material = mesh.material;
             if (material) {
@@ -314,7 +307,8 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
     for (let i = 0; i < cascades._transforms.length; i++) {
         const cam = state._cameras[i]!;
         cam.fov = 1;
-        updateShadowCameraBase(cam, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, _biasViewProjection(cascades._biased[i]!, cfg._bias));
+        const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[i]!, cascades._far[i]!);
+        updateShadowCameraBase(cam, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, _biasViewProjection(cascades._biased[i]!, clipBias));
     }
 
     state._lastCasterVersion = casterVersion;
@@ -521,6 +515,12 @@ function _computeCsmCascades(engine: EngineContext, camera: Camera, light: Direc
             // the stored depth STEPPED at each quantum boundary as the light direction changed — appearing as
             // self-shadow acne that VIBRATES. Removing the quantize makes those steps a sub-millimetre, imperceptible
             // drift, and still covers the moving-caster case it was added for (the range drifts, it never pops).
+        }
+
+        // The caster matrix adds the world-space bias toward clip Z=1. Reserve the same distance at the far plane
+        // so geometry on the tightly fitted caster bound remains inside the clip volume after that offset.
+        if (cfg._worldSpaceBias) {
+            viewMaxZ += cfg._worldSpaceBias;
         }
 
         const proj0 = orthoOffCenterLH(minX, maxX, minY, maxY, viewMinZ, viewMaxZ);
@@ -749,13 +749,21 @@ function _writeCsmUbo(out: Float32Array, cascades: CsmCascades, cfg: CsmConfig):
     out[77] = cfg._cascadeBlendPercentage === 0 ? 10000 : 1 / cfg._cascadeBlendPercentage;
 }
 
-function _biasViewProjection(viewProj: Float32Array, bias: number): Float32Array {
+/** @internal Convert a physical caster offset to the clip-space Z offset for one orthographic cascade. */
+export function csmWorldBiasClipOffset(worldSpaceBias: number, near: number, far: number): number {
+    const range = far - near;
+    if (!Number.isFinite(worldSpaceBias) || worldSpaceBias <= 0 || !Number.isFinite(range) || range <= 0) {
+        return 0;
+    }
+    return worldSpaceBias / range;
+}
+
+function _biasViewProjection(viewProj: Float32Array, clipOffset: number): Float32Array {
     const biased = new Float32Array(viewProj);
-    const b = bias * 0.5;
     for (let col = 0; col < 4; col++) {
         const z = 2 + col * 4;
         const w = 3 + col * 4;
-        biased[z] = biased[z]! + b * biased[w]!;
+        biased[z] = biased[z]! + clipOffset * biased[w]!;
     }
     return biased;
 }

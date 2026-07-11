@@ -68,11 +68,11 @@ function cloneMeshNode(mesh: Mesh): Mesh {
         // for `disposeMeshGpu` to know they're co-owners of the underlying GPUBuffers.
         _gpu: mesh._gpu,
     } as unknown as Mesh;
-    // `skeleton`/`morphTargets`/`thinInstances` are already shared by reference via the `...mesh`
+    // `skeleton`/`vat`/`morphTargets`/`thinInstances` are already shared by reference via the `...mesh`
     // spread above. Register the extra ownership for all shared GPU resources so `disposeMeshGpu`
     // only destroys their buffers once the LAST owning mesh (source or clone) releases them —
     // otherwise disposing one mesh would free buffers the other still renders with.
-    for (const r of [mesh._gpu, mesh.skeleton, mesh.morphTargets, mesh.thinInstances]) {
+    for (const r of [mesh._gpu, mesh.skeleton, mesh.vat, mesh.morphTargets, mesh.thinInstances]) {
         if (r) {
             retain(r);
         }
