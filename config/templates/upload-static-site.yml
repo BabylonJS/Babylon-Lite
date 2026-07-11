@@ -1,13 +1,17 @@
 # Reusable step template: upload a static site directory and post its link to the PR
 #
 # Parameters:
-#   siteDir     - path to the static site folder to zip and upload
-#   deployPath  - storage path where the site should be served
-#   siteName    - label used in display names and the PR comment
+#   siteDir        - path to the static site folder to zip and upload
+#   deployPath     - storage path where the site should be served
+#   siteName       - label used in display names and the PR comment
+#   postComment    - post a PR comment with the link (default true)
+#   storageAccount - storage account to upload to (default $(STORAGE_ACCOUNT))
+#   linkUrl        - public URL to link in the PR comment (when postComment)
 #
 # Required pipeline variables:
 #   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN
 #   Report upload settings: DEPLOY_ENDPOINT_UPLOAD, STORAGE_ACCOUNT, SERVE_DOMAIN
+#   Playground snapshots additionally pass TOOLS_STORAGE_ACCOUNT via storageAccount.
 # Required service connection:
 #   BabylonBotPAT - GitHub PAT service connection for PR comments
 
@@ -24,6 +28,19 @@ parameters:
     - name: postComment
       type: boolean
       default: true
+    # Storage account to upload to. Defaults to the report storage account; the
+    # playground snapshot jobs override this with the tools storage account so
+    # their sites serve from the playground subdomain.
+    - name: storageAccount
+      type: string
+      default: $(STORAGE_ACCOUNT)
+    # Public URL to link in the PR comment. Callers pass this explicitly because
+    # the served URL can't always be derived from the upload path (e.g. the tools
+    # account strips its container prefix from the public domain). Only used when
+    # postComment is true.
+    - name: linkUrl
+      type: string
+      default: ""
 
 steps:
     - script: |
@@ -42,7 +59,7 @@ steps:
             -H "Content-Type: multipart/form-data" \
             -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
             -F "path=${{ parameters.deployPath }}" \
-            -F "storageAccount=$(STORAGE_ACCOUNT)" \
+            -F "storageAccount=${{ parameters.storageAccount }}" \
             -F "zip=@_static_site.zip"
 
           rm -f _static_site.zip
@@ -62,6 +79,6 @@ steps:
                 comment: |
                     ### ${{ parameters.siteName }} - Static Site
 
-                    [Open deployed site]($(SERVE_DOMAIN)/${{ parameters.deployPath }}/index.html)
+                    [Open deployed site](${{ parameters.linkUrl }})
 
                     <sub>Build $(Build.BuildNumber) - $(Build.SourceBranchName) @ $(Build.SourceVersion)</sub>
