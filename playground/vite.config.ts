@@ -40,6 +40,20 @@ export default defineConfig({
     build: {
         target: "esnext",
         sourcemap: true,
+        rollupOptions: {
+            output: {
+                // `index.html` is the sole entry, and Rollup only invokes
+                // `entryFileNames` for entry chunks — so the app's entry (the
+                // coordinator in entry.ts) is emitted as a stable, unhashed
+                // `assets/boot.js`. Any deploy can then hand off to another
+                // snapshot's coordinator via a predictable `<base>assets/boot.js`.
+                // Every other chunk and asset stays content-hashed for long-term
+                // immutable caching.
+                entryFileNames: "assets/boot.js",
+                chunkFileNames: "assets/[name]-[hash].js",
+                assetFileNames: "assets/[name]-[hash][extname]",
+            },
+        },
     },
     worker: {
         format: "es",
