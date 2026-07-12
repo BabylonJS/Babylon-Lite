@@ -1,4 +1,4 @@
-// Scene 264 — EnvironmentTest (cx20 gltf-test parity).
+// Scene 265 — EnvironmentTest (cx20 gltf-test parity).
 // Exercises EXT_lights_image_based: the glTF carries its own image-based light
 // (irradiance SH9 + prefiltered specular cubemap), so we do NOT call
 // loadEnvironment — the extension installs the environment onto the scene.

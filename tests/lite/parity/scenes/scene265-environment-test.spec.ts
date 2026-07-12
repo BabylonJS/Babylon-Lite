@@ -1,5 +1,5 @@
 /**
- * Scene 264 — EnvironmentTest / glTF-IBL (cx20 gltf-test parity).
+ * Scene 265 — EnvironmentTest / glTF-IBL (cx20 gltf-test parity).
  *
  * Exercises the EXT_lights_image_based glTF extension: the model carries its own
  * document-level image-based light (irradiance SH9 + prefiltered specular cubemap
@@ -9,17 +9,17 @@ import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(264);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene264-environment-test");
+const sceneConfig = getSceneConfig(265);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene265-environment-test");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 264 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 265 skipped via skipParity in scene-config.json");
 
-test("Scene 264 — EnvironmentTest matches Babylon.js reference", async ({ page }, testInfo) => {
+test("Scene 265 — EnvironmentTest matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 264, timeout: 90_000 });
+    await captureGolden(browser, { sceneId: 265, timeout: 90_000 });
 
-    await page.goto("/scene264.html");
+    await page.goto("/scene265.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

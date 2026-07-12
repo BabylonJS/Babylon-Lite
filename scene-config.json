@@ -2239,9 +2239,9 @@
         "compatParity": true
     },
     {
-        "id": 264,
-        "slug": "scene264-environment-test",
-        "name": "Scene 264 — EnvironmentTest (EXT_lights_image_based)",
+        "id": 265,
+        "slug": "scene265-environment-test",
+        "name": "Scene 265 — EnvironmentTest (EXT_lights_image_based)",
         "maxMad": 0.5,
         "maxRawKB": 82,
         "description": "EnvironmentTest.gltf (glTF-IBL) — cx20 gltf-test. Exercises EXT_lights_image_based: the glTF carries its own document-level image-based light (irradiance SH9 + prefiltered specular cubemap mips + intensity/rotation), driving PBR IBL through Lite's existing environment path (EnvironmentTextures + scene UBO spherical harmonics). Grid of metallic-roughness spheres.",
