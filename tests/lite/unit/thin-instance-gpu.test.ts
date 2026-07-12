@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import { syncThinInstanceDrawArgs, syncThinInstanceForDraw, syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
-import { _shadowCasterEpoch } from "../../../packages/babylon-lite/src/mesh/shadow-caster-epoch";
-import { setThinInstanceDrawCount, type ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
+import { setThinInstanceCount, setThinInstanceDrawCount, setThinInstanceMatrix, type ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
@@ -143,17 +143,54 @@ describe("thin-instance stable draw arguments", () => {
         ti._gpuVersion = ti._version;
         ti._dirtyMin = 12;
         ti._dirtyMax = 0;
-        const mesh = { thinInstances: ti } as unknown as Mesh;
+        const mesh = { thinInstances: ti, _gpu: {} as Mesh["_gpu"] } as unknown as Mesh;
 
         expect(syncThinInstanceForDraw(engine, ti, false, 36)).toBeNull();
         setThinInstanceDrawCount(mesh, 7);
 
         expect(ti.count).toBe(7);
-        expect(ti._version).toBe(1);
+        expect(ti._version).toBe(2);
         expect(ti._dirtyMin).toBe(12);
         expect(ti._dirtyMax).toBe(0);
         expect(syncThinInstanceForDraw(engine, ti, false, 36)).toBe(indirectBuffer);
         expect(writeBuffer).toHaveBeenCalledTimes(1);
+    });
+
+    it("supports consecutive count-only changes before the next draw", () => {
+        const ti = makeThinInstances(12);
+        ti._gpuBuffer = { size: 12 * 64 } as GPUBuffer;
+        ti._gpuVersion = ti._version;
+        const mesh = { thinInstances: ti, _gpu: {} as Mesh["_gpu"] } as unknown as Mesh;
+
+        setThinInstanceDrawCount(mesh, 7);
+        setThinInstanceDrawCount(mesh, 9);
+
+        expect(ti.count).toBe(9);
+        expect(ti._gpuVersion).toBe(ti._version);
+        expect(ti._dirtyMin).toBe(0);
+        expect(ti._dirtyMax).toBe(12);
+    });
+
+    it("keeps ordinary count changes dirty until matrices upload", () => {
+        const createBuffer = vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() }) as unknown as GPUBuffer);
+        const writeBuffer = vi.fn();
+        const engine = {
+            _device: {
+                createBuffer,
+                queue: { writeBuffer },
+            },
+        } as unknown as EngineContext;
+        const ti = makeThinInstances(2);
+        const mesh = { thinInstances: ti, _gpu: {} as Mesh["_gpu"] } as unknown as Mesh;
+
+        setThinInstanceCount(mesh, 0);
+        setThinInstanceMatrix(mesh, 0, new Float32Array(16) as unknown as Mat4);
+        setThinInstanceCount(mesh, 1);
+        syncThinInstanceGpuData(engine, ti, false);
+
+        expect(createBuffer).toHaveBeenCalledTimes(1);
+        expect(writeBuffer).toHaveBeenCalledTimes(1);
+        expect(ti._gpuVersion).toBe(ti._version);
     });
 
     it("rejects count changes before the fixed-capacity pool has synchronized", () => {
@@ -176,8 +213,7 @@ describe("thin-instance stable draw arguments", () => {
 
     it("does not invalidate draw or shadow state when the count is unchanged", () => {
         const ti = makeThinInstances(12);
-        const mesh = { thinInstances: ti } as unknown as Mesh;
-        const shadowEpoch = _shadowCasterEpoch;
+        const mesh = { thinInstances: ti, _gpu: {} as Mesh["_gpu"] } as unknown as Mesh;
 
         setThinInstanceDrawCount(mesh, 12);
 
@@ -185,6 +221,5 @@ describe("thin-instance stable draw arguments", () => {
         expect(ti._version).toBe(1);
         expect(ti._dirtyMin).toBe(0);
         expect(ti._dirtyMax).toBe(12);
-        expect(_shadowCasterEpoch).toBe(shadowEpoch);
     });
 });

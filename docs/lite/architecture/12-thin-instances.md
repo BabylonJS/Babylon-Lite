@@ -208,10 +208,10 @@ This avoids shifting the entire array, keeping removal O(1). Callers must be awa
 | `_colorGpuVersion` | `syncThinInstanceBuffers` (after color upload)                                                             | —                                         |
 
 GPU upload is skipped when `_version === _gpuVersion` (or `_colorVersion === _colorGpuVersion`), avoiding redundant `writeBuffer` calls for static instances.
-`setThinInstanceDrawCount` does not bump either data version; draw-argument synchronization observes
-`count` independently. It does bump the shared shadow-caster epoch, while the shared shadow dirty sum
-includes the matrix version used by every transform/count mutation helper. Static ESM, PCF, and CSM maps
-therefore redraw after caster transforms or active counts change.
+`setThinInstanceDrawCount` does not mark either data stream dirty; draw-argument synchronization observes
+`count` independently. It advances the existing thin-instance version without marking matrix/color ranges
+dirty, so shadow caches observe the change while GPU synchronization performs no attribute upload. Static
+ESM, PCF, and CSM maps therefore redraw only when one of their actual casters changes.
 
 ---
 

@@ -4,6 +4,7 @@ import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
+import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { updateMeshGeometry } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 import { setThinInstanceColor, setThinInstanceDrawCount, setThinInstanceMatrix, type ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
@@ -46,7 +47,7 @@ describe("shadow caster dirty tracking", () => {
             useFloatingOrigin: false,
         } as unknown as EngineContext;
         const gpu = {
-            positionBuffer: {} as GPUBuffer,
+            positionBuffer: { size: 9 * 4 } as GPUBuffer,
             normalBuffer: {} as GPUBuffer,
             uvBuffer: {} as GPUBuffer,
             indexBuffer: {} as GPUBuffer,
@@ -58,14 +59,15 @@ describe("shadow caster dirty tracking", () => {
             hasColor: false,
         } satisfies MeshGPU;
         const mesh = {
-            worldMatrix: identity(),
-            worldMatrixVersion: 1,
+            name: "caster",
+            children: [],
             _gpu: gpu,
             _cpuPositions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
             _cpuNormals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
             _cpuIndices: new Uint32Array([0, 1, 2]),
             thinInstances: makeThinInstances(),
         } as unknown as Mesh;
+        initMeshTransform(mesh);
         const execute = vi.fn(() => 1);
         const task = { record: vi.fn(), execute, dispose: vi.fn() } as unknown as PcfTaskState["_task"];
         const camera = {
@@ -108,6 +110,18 @@ describe("shadow caster dirty tracking", () => {
         const computeLightMatrix = vi.fn(() => matrix);
 
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(1);
+        expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(0);
+
+        const unrelated = {
+            name: "unrelated",
+            children: [],
+            _gpu: { ...gpu },
+            _cpuPositions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+            _cpuNormals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+            _cpuIndices: new Uint32Array([0, 1, 2]),
+        } as unknown as Mesh;
+        initMeshTransform(unrelated);
+        updateMeshGeometry(engine, unrelated, new Float32Array([0, 0, 0, 2, 0, 0, 0, 2, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 2, 1]));
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(0);
 
         setThinInstanceDrawCount(mesh, 2);

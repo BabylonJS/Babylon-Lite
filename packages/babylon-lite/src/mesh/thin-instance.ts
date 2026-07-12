@@ -6,7 +6,6 @@
 import { F32 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "./mesh.js";
-import { bumpShadowCasterEpoch } from "./shadow-caster-epoch.js";
 
 /** CPU-side data backing a thin-instanced mesh: world matrices, optional colors, and GPU sync state. */
 export interface ThinInstanceData {
@@ -143,7 +142,7 @@ export function setThinInstanceDrawCount(mesh: Mesh, count: number): void {
         throw new Error("setThinInstanceDrawCount requires a fully synchronized fixed-capacity pool");
     }
     ti.count = count;
-    bumpShadowCasterEpoch();
+    ti._gpuVersion = ++ti._version;
 }
 
 /** Add one instance. Returns its index. Grows capacity as needed. */

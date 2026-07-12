@@ -22,7 +22,6 @@ import { buildLightViewMatrix, casterVersionSum, createShadowCamera, multiply4x4
 import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
-import { _shadowCasterEpoch } from "../mesh/shadow-caster-epoch.js";
 
 /** Generation of the material that ACTUALLY casts this caster mesh's shadow — the explicit
  *  `_shadowCasterMaterial` override when set, else the mesh's own material. Lets the caster-set diff detect a
@@ -657,9 +656,9 @@ function _getThinCasterAabbCache(): WeakMap<Mesh, { _version: number; _worldVers
  *  exactly: each local bound corner is transformed by the per-instance matrix, then by the prototype mesh
  *  world matrix. Parked/degenerate instances (zero linear part — drawn as zero-area, used to hide an unused
  *  tail) are skipped so a tail parked far off-world can't balloon the box. */
-export function _thinInstanceWorldAabb(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"]>): ThinCasterAabb | null {
+function _thinInstanceWorldAabb(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"]>): ThinCasterAabb | null {
     const cache = _getThinCasterAabbCache();
-    const worldVersion = mesh.worldMatrixVersion + _shadowCasterEpoch;
+    const worldVersion = mesh.worldMatrixVersion;
     const cached = cache.get(mesh);
     if (cached && cached._version === ti._version && cached._worldVersion === worldVersion) {
         return cached._aabb;

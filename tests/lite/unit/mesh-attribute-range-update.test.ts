@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { updateMeshColors, updateMeshNormals, updateMeshPositions, updateMeshTangents, updateMeshUv2, updateMeshUvs } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
-import { _shadowCasterEpoch } from "../../../packages/babylon-lite/src/mesh/shadow-caster-epoch";
 
 function fixture() {
     const buffers = {
@@ -26,6 +26,7 @@ function fixture() {
             tangentBuffer: buffers.tangent,
         },
     } as unknown as Mesh;
+    initMeshTransform(mesh);
     return { buffers, writeBuffer, engine, mesh };
 }
 
@@ -68,11 +69,18 @@ describe("mesh attribute range updates", () => {
 
     it("does not dirty shadows for an empty valid range", () => {
         const { writeBuffer, engine, mesh } = fixture();
-        const shadowEpoch = _shadowCasterEpoch;
+        const worldVersion = mesh.worldMatrixVersion;
 
         updateMeshPositions(engine, mesh, new Float32Array(0), 0, 0);
 
         expect(writeBuffer).not.toHaveBeenCalled();
-        expect(_shadowCasterEpoch).toBe(shadowEpoch);
+        expect(mesh.worldMatrixVersion).toBe(worldVersion);
+    });
+
+    it("rejects updates to clone-shared geometry", () => {
+        const { engine, mesh } = fixture();
+        mesh._gpu._refCount = 2;
+
+        expect(() => updateMeshPositions(engine, mesh, new Float32Array(3))).toThrow("unshared geometry");
     });
 });

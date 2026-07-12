@@ -12,7 +12,6 @@ import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
-import { _shadowCasterEpoch } from "../mesh/shadow-caster-epoch.js";
 
 /** Write shadow generator state into a Float32Array(24) for UBO upload.
  *  Layout: [lightMatrix(16), depthValues.x, depthValues.y, 0, 0, shadowsInfo(4)] */
@@ -127,7 +126,7 @@ export function createSharedShadowUBO(
 
 /** Sum caster transform versions plus non-transform geometry/count mutations. */
 export function casterVersionSum(casterMeshes: readonly Mesh[]): number {
-    let sum = _shadowCasterEpoch;
+    let sum = 0;
     for (const mesh of casterMeshes) {
         // Bitwise coercion maps the absent optional version to zero without another branch.
         sum += mesh.worldMatrixVersion + ~~(mesh.thinInstances?._version as number);

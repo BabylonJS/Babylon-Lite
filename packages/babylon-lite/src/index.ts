@@ -169,6 +169,7 @@ export {
     createExtrudeShape,
     createMeshFromData,
     updateMeshGeometry,
+    updateMeshGeometryCapacity,
     updateMeshPositions,
     updateMeshNormals,
     updateMeshColors,
@@ -178,6 +179,7 @@ export {
     resizeMeshGeometry,
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
+export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
 export { createSphereData } from "./mesh/create-sphere.js";
