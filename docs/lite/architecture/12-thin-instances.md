@@ -50,6 +50,9 @@ export function setThinInstanceCount(mesh: Mesh, count: number): void;
 /** Change the active draw count without marking matrix or color data dirty. */
 export function setThinInstanceDrawCount(mesh: Mesh, count: number): void;
 
+/** Pre-create stable indirect draw arguments during scene warm-up. */
+export function enableThinInstanceDynamicDrawCount(mesh: Mesh): void;
+
 /** Add one instance. Returns the new instance index. Grows capacity 2× when full. */
 export function addThinInstance(mesh: Mesh, matrix: Mat4): number;
 
@@ -79,6 +82,10 @@ must complete one full-capacity GPU synchronization before this setter is used.
 
 `setThinInstanceCount()` remains the convenience path that changes the count and marks the complete active
 matrix range `[0, count)` dirty for upload.
+
+Call `enableThinInstanceDynamicDrawCount()` before `registerScene()` when a synchronized pool will change
+counts interactively. Its next normal GPU sync creates the stable indirect argument buffer during warm-up,
+so the first later count change does not invalidate cached render bundles.
 
 ### Functions — Hierarchy Instance Pools (`hierarchy-instance-pool.ts`)
 

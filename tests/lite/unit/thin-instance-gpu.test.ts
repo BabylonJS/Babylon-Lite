@@ -3,7 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import { syncThinInstanceDrawArgs, syncThinInstanceForDraw, syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
-import { setThinInstanceCount, setThinInstanceDrawCount, setThinInstanceMatrix, type ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
+import {
+    enableThinInstanceDynamicDrawCount,
+    setThinInstanceCount,
+    setThinInstanceDrawCount,
+    setThinInstanceMatrix,
+    type ThinInstanceData,
+} from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
@@ -169,6 +175,31 @@ describe("thin-instance stable draw arguments", () => {
         expect(ti._gpuVersion).toBe(ti._version);
         expect(ti._dirtyMin).toBe(0);
         expect(ti._dirtyMax).toBe(12);
+    });
+
+    it("creates stable indirect args during warm-up when explicitly enabled", () => {
+        const indirectBuffer = { size: 20 } as GPUBuffer;
+        const engine = {
+            _device: {
+                createBuffer: vi.fn(() => indirectBuffer),
+                queue: { writeBuffer: vi.fn() },
+            },
+        } as unknown as EngineContext;
+        const ti = makeThinInstances(4);
+        ti._gpuBuffer = { size: 4 * 64 } as GPUBuffer;
+        ti._gpuVersion = ti._version;
+        const mesh = { thinInstances: ti, _gpu: {} as Mesh["_gpu"] } as unknown as Mesh;
+
+        enableThinInstanceDynamicDrawCount(mesh);
+        const args = syncThinInstanceForDraw(engine, ti, false, 36);
+
+        expect(args).toBe(indirectBuffer);
+        expect(ti._drawArgsBuffer).toBe(indirectBuffer);
+        expect(engine._device.queue.writeBuffer).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects dynamic draw-count warm-up without thin instances", () => {
+        expect(() => enableThinInstanceDynamicDrawCount({} as Mesh)).toThrow("requires mesh.thinInstances");
     });
 
     it("keeps ordinary count changes dirty until matrices upload", () => {
