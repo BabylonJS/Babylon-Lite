@@ -117,6 +117,8 @@ export interface EngineContext extends SurfaceContext {
 
     /** @internal */
     _device: GPUDevice;
+    /** @internal Original creation options retained for optional subsystems such as recovery. */
+    _options?: EngineOptions;
     /** @internal Live high-level storage allocations owned by this engine. */
     _storageBuffers?: Set<StorageBuffer>;
     /** @internal Storage-related limits retained lazily for device-loss recovery. */
@@ -334,8 +336,8 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         canvas.setAttribute("data-engine", versionToLog);
     }
 
-    const useHpm = options?.useHighPrecisionMatrix === true;
-    const useFO = options?.useFloatingOrigin === true;
+    const useHpm = !!options?.useHighPrecisionMatrix;
+    const useFO = !!options?.useFloatingOrigin;
     if (useFO && !useHpm) {
         throw new Error("Babylon Lite: useFloatingOrigin requires useHighPrecisionMatrix on the engine.");
     }
@@ -391,6 +393,7 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
             surfaces, // public readonly view of `_surfaces` (same underlying array)
             _surfaces: surfaces,
             _device: device,
+            _options: options,
             drawCallCount: 0,
             gpuFrameTimeMs: 0,
             useHighPrecisionMatrix: useHpm,

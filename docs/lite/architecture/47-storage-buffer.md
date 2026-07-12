@@ -38,7 +38,8 @@ resource liveness and engine ownership. Engine disposal destroys all remaining l
 their wrappers disposed, releases retained CPU bytes, and clears the lazy registry.
 When the first storage buffer is created, the engine also retains its current storage-related WebGPU limits
 (`maxBufferSize`, `maxStorageBufferBindingSize`, and `maxStorageBuffersPerShaderStage`) and requests them
-again during device recovery.
+again during device recovery. Those values are merged with any limits originally supplied to
+`createEngine(..., { requiredLimits })`.
 
 ## Pipeline Configuration
 

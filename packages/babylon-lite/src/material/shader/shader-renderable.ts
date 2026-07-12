@@ -435,8 +435,8 @@ function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, 
         const slot = material._storageBufferSlots.get(storage.name);
         const storageBuffer = slot?.current;
         const buffer = storageBuffer?._buffer;
-        if (!buffer || storageBuffer._engine !== engine) {
-            throw new Error(`ShaderMaterial: storage buffer "${storage.name}" is invalid for this engine.`);
+        if (!buffer || !engine._storageBuffers?.has(storageBuffer)) {
+            throw new Error(`ShaderMaterial storage "${storage.name}" is invalid.`);
         }
         entries.push({ binding: nextBinding++, resource: { buffer } });
     }

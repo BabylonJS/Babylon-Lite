@@ -161,11 +161,11 @@ describe("StorageBuffer lifecycle", () => {
         const storage = createStorageBuffer(owner.engine, new Float32Array(4));
         setShaderStorageBuffer(other.material, "cells", storage);
 
-        expect(() => buildShaderMaterialRenderables(other.scene, [other.mesh])).toThrow("invalid for this engine");
+        expect(() => buildShaderMaterialRenderables(other.scene, [other.mesh])).toThrow("is invalid");
 
         setShaderStorageBuffer(owner.material, "cells", storage);
         disposeStorageBuffer(storage);
-        expect(() => buildShaderMaterialRenderables(owner.scene, [owner.mesh])).toThrow("invalid for this engine");
+        expect(() => buildShaderMaterialRenderables(owner.scene, [owner.mesh])).toThrow("is invalid");
     });
 
     it("does not allow shallow copies to impersonate registered storage", () => {
@@ -178,5 +178,14 @@ describe("StorageBuffer lifecycle", () => {
         expect(() => disposeStorageBuffer(copy)).toThrow("live registered allocation");
         expect(rawBuffer.destroy).not.toHaveBeenCalled();
         expect(engine._storageBuffers?.has(storage)).toBe(true);
+    });
+
+    it("rejects an unregistered wrapper through the production bind path", () => {
+        const fixture = makeRenderableFixture();
+        const storage = createStorageBuffer(fixture.engine, new Float32Array(1));
+        setShaderStorageBuffer(fixture.material, "cells", storage);
+        fixture.engine._storageBuffers!.delete(storage);
+
+        expect(() => buildShaderMaterialRenderables(fixture.scene, [fixture.mesh])).toThrow("is invalid");
     });
 });
