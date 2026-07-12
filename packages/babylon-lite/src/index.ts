@@ -195,6 +195,10 @@ export type { CsgSolid } from "./mesh/csg.js";
 export { initializeCsg2Async, isCsg2Ready, createCsg2FromMesh, csg2Subtract, csg2Intersect, csg2Add, createMeshFromCsg2, createMeshesFromCsg2, disposeCsg2 } from "./mesh/csg2.js";
 export type { Csg2Solid } from "./mesh/csg2.js";
 
+// ─── Resources ───────────────────────────────────────────────────────
+export { createStorageBuffer, updateStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
+export type { StorageBuffer } from "./resource/storage-buffer.js";
+
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
 export { createTexture2DFromPixels, updateTexture2DFromPixels, createRenderTexture2D } from "./texture/pixels-texture.js";
