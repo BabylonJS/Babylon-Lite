@@ -383,6 +383,7 @@ export {
     setThinInstances,
     setThinInstanceCount,
     setThinInstanceDrawCount,
+    enableThinInstanceDynamicDrawCount,
     flushThinInstances,
     setThinInstanceColors,
     setThinInstanceColor,

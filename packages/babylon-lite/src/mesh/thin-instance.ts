@@ -145,6 +145,19 @@ export function setThinInstanceDrawCount(mesh: Mesh, count: number): void {
     ti._gpuVersion = ++ti._version;
 }
 
+/** Opt a fixed-capacity thin-instance pool into stable indirect draw arguments before its count changes.
+ * The buffer is created on the next normal GPU sync, allowing scene warm-up to absorb its visibility epoch
+ * instead of lazily invalidating cached render bundles on the first interactive count transition. */
+export function enableThinInstanceDynamicDrawCount(mesh: Mesh): void {
+    const ti = mesh.thinInstances;
+    if (!ti) {
+        throw new Error("enableThinInstanceDynamicDrawCount requires mesh.thinInstances");
+    }
+    if (!ti._drawArgsBuffer) {
+        ti._drawArgsInstanceCount = -1;
+    }
+}
+
 /** Add one instance. Returns its index. Grows capacity as needed. */
 export function addThinInstance(mesh: Mesh, matrix: Mat4): number {
     const ti = mesh.thinInstances;
