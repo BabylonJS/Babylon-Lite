@@ -91,6 +91,12 @@ export interface ThinInstanceGpuCullState {
     _hasColor: boolean;
     /** @internal */
     _localSphereReady: boolean;
+    /** @internal CPU geometry reference used to build `_localSphere`. */
+    _localPositions?: Float32Array;
+    /** @internal Bounds references used to detect same-buffer geometry updates. */
+    _localBoundMin?: Mesh["boundMin"];
+    /** @internal Bounds references used to detect same-buffer geometry updates. */
+    _localBoundMax?: Mesh["boundMax"];
     /** @internal */
     _localSphere: Float32Array;
     /** @internal */
@@ -235,12 +241,18 @@ export function prepareTiCull(
         state._drawBuffers = null;
         return null;
     }
-    if (!state._localSphereReady && !computeLocalSphere(mesh as Mesh, state._localSphere)) {
-        setCullActive(state, false);
-        state._drawBuffers = null;
-        return null;
+    const positions = mesh._cpuPositions;
+    if (!state._localSphereReady || state._localPositions !== positions || state._localBoundMin !== mesh.boundMin || state._localBoundMax !== mesh.boundMax) {
+        if (!computeLocalSphere(mesh as Mesh, state._localSphere)) {
+            setCullActive(state, false);
+            state._drawBuffers = null;
+            return null;
+        }
+        state._localSphereReady = true;
+        state._localPositions = positions;
+        state._localBoundMin = mesh.boundMin;
+        state._localBoundMax = mesh.boundMax;
     }
-    state._localSphereReady = true;
 
     syncThinInstanceGpuData(engine, ti, hasColor);
     const sourceMatrixBuffer = ti._gpuBuffer;

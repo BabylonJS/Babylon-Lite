@@ -1,9 +1,9 @@
 {
-  "rawKB": 102.5,
+  "rawKB": 102.6,
   "gzipKB": 38.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene221-shader-renderable-BmW-tj35.js",
+    "scene221-shader-renderable-BRk2kAJu.js",
     "scene221-standard-renderable-DpESG6NP.js",
     "scene221-swapchain-overlay-ilhN4El_.js",
     "scene221-ubo-layout-CnrP4RZD.js",

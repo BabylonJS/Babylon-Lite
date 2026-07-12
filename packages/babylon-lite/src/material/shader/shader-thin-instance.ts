@@ -100,11 +100,12 @@ function createShaderInstancedRenderable(
     const isTransparent = material.needAlphaBlending;
     const mesh = packet.mesh;
     const ti = mesh.thinInstances!;
-    const hasColor = !!ti.colors;
+    // `_tic` is undefined by default; loose comparison maps only the explicit `false` opt-out to zero.
+    const hasColor = !!ti.colors && material._tic != 0;
     const baseLocation = material.attributes.length;
     const instanceLayouts = instanceVertexLayouts(baseLocation, hasColor);
     const instanceAttrs = instancePreludeAttributes(baseLocation, hasColor);
-    const variantKey = `|ti1c${hasColor ? 1 : 0}`;
+    const variantKey = "" + +hasColor;
     const wm = mesh.worldMatrix as unknown as ArrayLike<number>;
     const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
     let drawArgs: GPUBuffer | null = null;

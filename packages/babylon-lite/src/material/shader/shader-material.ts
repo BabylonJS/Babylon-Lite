@@ -38,6 +38,9 @@ export interface ShaderMaterialOptions {
     readonly samplers?: readonly ShaderSamplerOption[];
     readonly storageBuffers?: readonly ShaderStorageBufferOption[];
     readonly defines?: ShaderDefineMap;
+    /** Bind and inject the mesh's optional thin-instance RGBA stream for this material. Disable on
+     *  color-independent overrides (for example a depth caster) that need only the instance matrices. */
+    readonly useThinInstanceColors?: boolean;
     readonly needAlphaBlending?: boolean;
     /** Blend equation used when `needAlphaBlending` is set. "alpha" (default) is
      *  standard src-over; "additive" adds the fragment's premultiplied-by-alpha
@@ -125,6 +128,8 @@ export interface ShaderMaterial extends Material {
     readonly samplerDecls: readonly ShaderSamplerDecl[];
     readonly storageBufferDecls: readonly ShaderStorageBufferDecl[];
     readonly defines: readonly ShaderDefine[];
+    /** @internal Explicit thin-instance color preference; numeric zero is reserved for compact runtime checks. */
+    readonly _tic?: boolean | 0;
     readonly needAlphaBlending: boolean;
     readonly blendMode: "alpha" | "additive";
     /** True for transmissive/refractive surfaces (see `ShaderMaterialOptions.transmissive`). */
@@ -296,6 +301,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         samplerDecls,
         storageBufferDecls,
         defines,
+        _tic: options.useThinInstanceColors,
         needAlphaBlending: options.needAlphaBlending ?? false,
         blendMode: options.blendMode ?? "alpha",
         transmissive: options.transmissive ?? false,

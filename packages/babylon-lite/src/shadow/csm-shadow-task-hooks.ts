@@ -22,6 +22,7 @@ import { buildLightViewMatrix, casterVersionSum, createShadowCamera, multiply4x4
 import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import { _shadowCasterEpoch } from "../mesh/shadow-caster-epoch.js";
 
 /** Generation of the material that ACTUALLY casts this caster mesh's shadow — the explicit
  *  `_shadowCasterMaterial` override when set, else the mesh's own material. Lets the caster-set diff detect a
@@ -641,10 +642,9 @@ interface ThinCasterAabb {
     _max: [number, number, number];
 }
 
-/** Per-mesh cache of a thin-instanced caster's world AABB, keyed on BOTH the instance-matrix version and the
- *  prototype mesh's `worldMatrixVersion` — the drawn world transform is `mesh.world * instanceMatrix`, so the
- *  AABB must invalidate when EITHER changes (a rebake, or the prototype moving/reparenting). Lazily allocated
- *  so this module keeps zero import-time side effects and stays tree-shakable. */
+/** Per-mesh cache of a thin-instanced caster's world AABB. It keys on instance data, prototype
+ *  transform, and the shared non-transform caster epoch.
+ *  Lazily allocated so this module keeps zero import-time side effects and stays tree-shakable. */
 let _thinCasterAabbCache: WeakMap<Mesh, { _version: number; _worldVersion: number; _aabb: ThinCasterAabb | null }> | null = null;
 function _getThinCasterAabbCache(): WeakMap<Mesh, { _version: number; _worldVersion: number; _aabb: ThinCasterAabb | null }> {
     if (!_thinCasterAabbCache) {
@@ -657,11 +657,9 @@ function _getThinCasterAabbCache(): WeakMap<Mesh, { _version: number; _worldVers
  *  exactly: each local bound corner is transformed by the per-instance matrix, then by the prototype mesh
  *  world matrix. Parked/degenerate instances (zero linear part — drawn as zero-area, used to hide an unused
  *  tail) are skipped so a tail parked far off-world can't balloon the box. */
-function _thinInstanceWorldAabb(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"]>): ThinCasterAabb | null {
+export function _thinInstanceWorldAabb(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"]>): ThinCasterAabb | null {
     const cache = _getThinCasterAabbCache();
-    // The drawn transform is `mesh.world * instanceMatrix`, so the AABB depends on BOTH the instance matrices
-    // and the prototype world matrix — invalidate when either version changes.
-    const worldVersion = mesh.worldMatrixVersion;
+    const worldVersion = mesh.worldMatrixVersion + _shadowCasterEpoch;
     const cached = cache.get(mesh);
     if (cached && cached._version === ti._version && cached._worldVersion === worldVersion) {
         return cached._aabb;

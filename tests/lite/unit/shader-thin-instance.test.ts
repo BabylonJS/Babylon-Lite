@@ -96,6 +96,87 @@ describe("ShaderMaterial thin instances", () => {
         expect(createPacket).toHaveBeenLastCalledWith(scene, override, systemSpec, mesh, true);
     });
 
+    it("lets a color-independent material override share matrices without binding the mesh color stream", () => {
+        const engine = {
+            _device: {
+                createBuffer: vi.fn(),
+                queue: { writeBuffer: vi.fn() },
+            },
+        } as unknown as EngineContext;
+        const material = {
+            attributes: ["position"],
+            needAlphaBlending: false,
+        } as unknown as ShaderMaterial;
+        const override = {
+            attributes: ["position"],
+            needAlphaBlending: false,
+            _tic: false,
+        } as unknown as ShaderMaterial;
+        const ti = makeThinInstances();
+        ti.count = 1;
+        ti.colors = new Float32Array([1, 0, 0, 1]);
+        ti._colorVersion = 1;
+        ti._gpuBuffer = { size: 64 } as GPUBuffer;
+        ti._gpuVersion = ti._version;
+        const positionBuffer = {} as GPUBuffer;
+        const mesh = {
+            material,
+            thinInstances: ti,
+            _gpu: { positionBuffer, indexBuffer: {} as GPUBuffer, indexCount: 3, indexFormat: "uint16" },
+            worldMatrix: new Float32Array(16),
+        } as unknown as Mesh;
+        const scene = { surface: { engine } } as unknown as SceneContext;
+        const systemSpec = { _totalBytes: 16, _offsets: new Map(), _structBody: "" };
+        const packet = {
+            mesh,
+            systemUBO: {} as GPUBuffer,
+            systemData: new Float32Array(4),
+            _bindGroup: {} as GPUBindGroup,
+            _lastResourceVersion: 0,
+            _boundTextures: [],
+            _boundStorageBuffers: [],
+        } as ShaderPacket;
+        const getPipeline = vi.fn((..._args: Parameters<Parameters<typeof buildShaderRenderablesWithInstancing>[7]>): GPURenderPipeline => ({}) as GPURenderPipeline);
+        const result = buildShaderRenderablesWithInstancing(
+            scene,
+            [mesh],
+            () => {
+                throw new Error("plain builder should not run");
+            },
+            () => packet,
+            vi.fn(),
+            vi.fn(),
+            () => positionBuffer,
+            getPipeline,
+            () => ({
+                group1BGL: {} as GPUBindGroupLayout,
+                systemSpec,
+                customSpec: null,
+                vertexBuffers: [],
+                pipelines: new Map(),
+                _pipelineLayout: {} as GPUPipelineLayout,
+            })
+        );
+        const overrideRenderable = result.rebuildSingle(scene, mesh, override);
+        const binding = overrideRenderable.bind(engine, {} as RenderTargetSignature);
+        binding.update!({ targetWidth: 1, targetHeight: 1 });
+        const pass = {
+            setVertexBuffer: vi.fn(),
+            setIndexBuffer: vi.fn(),
+            setBindGroup: vi.fn(),
+            drawIndexed: vi.fn(),
+        } as unknown as GPURenderBundleEncoder;
+
+        binding.draw(pass, engine);
+
+        expect(getPipeline.mock.calls[0]![4]).toBe("0");
+        expect(getPipeline.mock.calls[0]![5]).toHaveLength(1);
+        expect(getPipeline.mock.calls[0]![6]).not.toContain("instanceColor");
+        expect(pass.setVertexBuffer).toHaveBeenCalledTimes(2);
+        expect(ti._colorGpuVersion).toBe(0);
+        expect(engine._device.queue.writeBuffer).not.toHaveBeenCalled();
+    });
+
     it("promotes a cached direct draw to indirect after the instance count changes", () => {
         const createBuffer = vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() }) as unknown as GPUBuffer);
         const engine = {
