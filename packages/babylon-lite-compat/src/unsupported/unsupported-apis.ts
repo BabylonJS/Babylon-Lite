@@ -202,6 +202,82 @@ export class Sound {
     }
 }
 
+// ─── Behaviors (mesh + camera) ───────────────────────────────────────
+// Babylon Lite exposes a utility-layer pointer-drag dispatcher
+// (`createPointerDrag` / `registerPointerDrag`) used by its gizmos, but it does
+// not expose the main-scene mesh-dragging, XR/multi-pointer, follow, or
+// geospatial camera behaviors these BJS classes provide, so each is a throwing
+// stub. The camera behaviors that Lite *can* back (`AutoRotationBehavior`,
+// `BouncingBehavior`, `FramingBehavior`) live in `behaviors/behaviors.ts`.
+export class PointerDragBehavior {
+    public constructor() {
+        unsupported(
+            "PointerDragBehavior",
+            "Babylon Lite's pointer-drag (`createPointerDrag`) only drives utility-layer gizmo colliders, not arbitrary main-scene meshes, so mesh drag-behaviors cannot be wrapped."
+        );
+    }
+}
+
+export class BaseSixDofDragBehavior {
+    public constructor() {
+        unsupported("BaseSixDofDragBehavior", "Six-DoF mesh dragging is not implemented in Babylon Lite.");
+    }
+}
+
+export class SixDofDragBehavior {
+    public constructor() {
+        unsupported("SixDofDragBehavior", "Six-DoF mesh dragging is not implemented in Babylon Lite.");
+    }
+}
+
+export class MultiPointerScaleBehavior {
+    public constructor() {
+        unsupported("MultiPointerScaleBehavior", "Multi-pointer scaling is not implemented in Babylon Lite.");
+    }
+}
+
+export class AttachToBoxBehavior {
+    public constructor() {
+        unsupported("AttachToBoxBehavior", "Bounding-box attachment (app-bar UI) is not implemented in Babylon Lite.");
+    }
+}
+
+export class FadeInOutBehavior {
+    public constructor() {
+        unsupported("FadeInOutBehavior", "Mesh fade-in/out visibility tweening is not implemented in Babylon Lite.");
+    }
+}
+
+export class SurfaceMagnetismBehavior {
+    public constructor() {
+        unsupported("SurfaceMagnetismBehavior", "Surface magnetism (mesh snapping) is not implemented in Babylon Lite.");
+    }
+}
+
+export class FollowBehavior {
+    public constructor() {
+        unsupported("FollowBehavior", "Camera-follow behavior is not implemented in Babylon Lite.");
+    }
+}
+
+export class HandConstraintBehavior {
+    public constructor() {
+        unsupported("HandConstraintBehavior", "WebXR hand-constraint behavior is out of scope for Babylon Lite.");
+    }
+}
+
+export class InterpolatingBehavior {
+    public constructor() {
+        unsupported("InterpolatingBehavior", "The interpolating camera behavior is not implemented in Babylon Lite.");
+    }
+}
+
+export class GeospatialClippingBehavior {
+    public constructor() {
+        unsupported("GeospatialClippingBehavior", "Geospatial camera clipping is not implemented in Babylon Lite.");
+    }
+}
+
 // ─── Serialization ───────────────────────────────────────────────────
 /** Babylon.js scene serializer. Babylon Lite uses different data structures and does not round-trip `.babylon`. */
 export const SceneSerializer = {

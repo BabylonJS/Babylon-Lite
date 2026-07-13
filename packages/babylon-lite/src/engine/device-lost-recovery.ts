@@ -332,7 +332,9 @@ function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
         hasTangent: !!mesh._cpuTangents && mesh._cpuTangents.length > 0,
         hasColor: !!mesh._cpuColors && mesh._cpuColors.length > 0,
         indexBuffer: createMappedBuffer(engine, indices, BU.INDEX),
-        indexCount: mesh._gpu.indexCount,
+        // Capacity-reserved meshes retain exact active CPU geometry. Recovery intentionally collapses the
+        // reservation; the next capacity update may grow it again without exposing padded arrays publicly.
+        indexCount: indices.length,
         indexFormat: mesh._cpuIndexFormat ?? mesh._gpu.indexFormat,
     };
 }

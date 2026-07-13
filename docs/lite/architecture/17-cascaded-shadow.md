@@ -30,6 +30,7 @@ interface CsmDirectionalShadowGeneratorConfig {
     stabilizeCascades?: boolean; // bounding-sphere fit (no shimmer), default false
     shadowMaxZ?: number; // max shadow distance, default = camera far plane
     bias?: number; // depth bias, default 0.00005
+    worldSpaceBias?: number; // caster depth offset in world units; supplied non-positive/non-finite values disable bias
     darkness?: number; // 0 = black shadow, 1 = no shadow, default 0
     frustumEdgeFalloff?: number; // soft cascade-edge fade 0..1, default 0
     forceRefreshEveryFrame?: boolean; // default false
@@ -88,7 +89,13 @@ sampler `compare:"less"`, linear filtering.
 - **Caster pass:** N depth-only render tasks (one per cascade layer), each rendering
   every caster through the material family's _no-color_ view, clearing the layer to
   depth 1.0 with `depthCompare:"less-equal"`. The per-cascade camera facade carries
-  the cascade view matrix + **bias-adjusted** ortho·view transform.
+  the cascade view matrix + **bias-adjusted** ortho·view transform. Legacy `bias`
+  supplies the existing normalized projection offset. `worldSpaceBias`, when present,
+  extends the fitted far plane by that distance, then converts the authored
+  world-space distance into a per-cascade clip offset
+  `worldSpaceBias / (paddedFar-near)`. The physical separation stays constant while a
+  moving light or caster changes the fitted cascade depth range, and far-bound casters
+  remain inside the clip volume after the offset.
 - **Receiver pass:** group-2 bind group per CSM light = `[arrayDepthView,
 comparisonSampler, csmUBO]` (binding order 0,1,2). The 2d-array view dimension is
   produced by the shader composer (`bglEntry` maps `_textureType` containing `"array"`
@@ -163,14 +170,18 @@ For `p = (i+1)/N`: `log = minZ*ratio^p`, `uniform = minZ + range*p`,
    world-AABB Z in cascade view space (depthClamp-false behaviour:
    `viewMinZ = min(0, castersMinZ)`, `viewMaxZ = min(extents.z, castersMaxZ)` when
    `castersMinZ <= viewMaxZ`). v1 uses depthClamp = false so no GPU depth-clip feature
-   is required.
+   is required. A positive `worldSpaceBias` then extends `viewMaxZ` by the same
+   distance so the farthest fitted caster is not clipped after biasing.
 7. `ortho = OrthoOffCenterLH(minX,maxX,minY,maxY, viewMinZ, viewMaxZ)` (column-major,
    half-z, near→0 far→1 — same convention as the PCF generator's shadow ortho).
 8. `transform = ortho · view`. **Texel snap (always applied):** project the world origin
    (`transform[12], transform[13]`), `× mapSize/2`, round, build an XY translation of the
    rounded offset, `transform = (T·ortho) · view`.
 9. Receiver `cascadeTransforms[i] = transform` (unbiased). Caster camera view-projection
-   = `transform` with a `bias·0.5·w` term added to its Z row.
+   adds `clipOffset·w` to its Z row, where `clipOffset = bias·0.5` for the legacy
+   normalized bias, or `worldSpaceBias / (paddedViewMaxZ-viewMinZ)` for a world-space
+   bias. The latter is invariant in world units even when caster-AABB fitting changes
+   the range.
 
 ## State Machine / Lifecycle
 
@@ -228,6 +239,11 @@ scenes that create a CSM generator.
 oracle (`captureGolden({ force: true })`) and compares the Lite render of
 `scene214.html` (6×6 Standard box casters + Standard ground receiver, 4-cascade CSM).
 Threshold `maxMad` in `scene-config.json` (achieved MAD = 0.000).
+
+`tests/lite/unit/csm-world-space-bias.test.ts` proves that per-cascade clip offsets
+map back to the same authored world-space distance across changing fitted depth
+ranges, preserve a tightly fitted far caster after the projection reserves bias
+headroom, and produce no bias for invalid or collapsed inputs.
 
 ## File Manifest
 
