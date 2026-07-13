@@ -1,5 +1,5 @@
 {
-  "rawKB": 100.6,
+  "rawKB": 100.7,
   "gzipKB": 42.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,16 +10,16 @@
     "scene245-gltf-feature-animations-JDRZSSUs.js",
     "scene245-gltf-feature-registry-gM33Awmp.js",
     "scene245-gltf-feature-skeleton-D19NTiji.js",
-    "scene245-gltf-interleave-DmjUidsh.js",
+    "scene245-gltf-interleave-7NBE5rBz.js",
     "scene245-gltf-json-asset-D_ddxWqm.js",
     "scene245-gltf-normals-DYhLwXNX.js",
     "scene245-gltf-strided-attribute-CGKc0Sx6.js",
     "scene245-ibl-fragment-CeRrvT96.js",
-    "scene245-pbr-renderable-g3l_UKLP.js",
+    "scene245-pbr-renderable-LroVgmo8.js",
     "scene245-pbr-template-ext-BoJ8SFLM.js",
     "scene245-rgbd-decode-CKe7_W5g.js",
     "scene245-scene-uniforms-FTYH6Ct0.js",
-    "scene245-skeleton-fragment-CbjQRh1l.js",
+    "scene245-skeleton-fragment-CBRXJtTI.js",
     "scene245.js"
   ]
 }

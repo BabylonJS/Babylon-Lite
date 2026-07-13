@@ -1,6 +1,6 @@
 {
   "rawKB": 104.1,
-  "gzipKB": 41.7,
+  "gzipKB": 41.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene212-generate-mipmaps-ffZ1zox-.js",
@@ -10,9 +10,9 @@
     "scene212-ibl-fragment-CeRrvT96.js",
     "scene212-ibl-skybox-wgsl-CFIBOHHx.js",
     "scene212-pbr-refraction-DQZVKvEq.js",
-    "scene212-pbr-renderable-Dvg48W9h.js",
+    "scene212-pbr-renderable-CnA5FmOo.js",
     "scene212-pbr-transmission-ext-C0Ra7jTr.js",
-    "scene212-reflectance-fragment-Bc1MZN1G.js",
+    "scene212-reflectance-fragment-DXIvnZqo.js",
     "scene212-refraction-dispersion-wgsl-BKvBCmZU.js",
     "scene212-rgbd-decode-XvCcjKVH.js",
     "scene212-scene-uniforms-FTYH6Ct0.js",

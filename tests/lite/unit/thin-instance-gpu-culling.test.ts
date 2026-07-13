@@ -5,6 +5,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
+import { updateMeshGeometry } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 import { createTiCullState, getComputeDispatchBatch, prepareTiCull } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu-culling";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { DrawUpdateContext } from "../../../packages/babylon-lite/src/render/renderable";
@@ -88,13 +89,33 @@ describe("thin-instance GPU culling submission", () => {
             _currentEncoder: { beginComputePass, clearBuffer } as unknown as GPUCommandEncoder,
         } as unknown as EngineContext;
         const ti = makeThinInstances(65);
+        const positionBuffer = {} as GPUBuffer;
+        const normalBuffer = {} as GPUBuffer;
+        const uvBuffer = {} as GPUBuffer;
+        const indexBuffer = {} as GPUBuffer;
         const mesh = {
             visible: true,
             worldMatrix: identity(),
             _cpuPositions: new Float32Array([-1, -1, -1, 1, 1, 1]),
+            _cpuNormals: new Float32Array([0, 1, 0, 0, 1, 0]),
+            _cpuIndices: new Uint32Array([0, 1, 0]),
+            boundMin: [-1, -1, -1],
+            boundMax: [1, 1, 1],
             thinInstances: ti,
         } as unknown as Mesh;
-        const gpu = { indexCount: 36 } as unknown as MeshGPU;
+        const gpu = {
+            positionBuffer,
+            normalBuffer,
+            uvBuffer,
+            indexBuffer,
+            indexCount: 3,
+            indexFormat: "uint32",
+            hasUv: false,
+            hasUv2: false,
+            hasTangent: false,
+            hasColor: false,
+        } satisfies MeshGPU;
+        mesh._gpu = gpu;
         const context = {
             targetWidth: 800,
             targetHeight: 600,
@@ -106,10 +127,13 @@ describe("thin-instance GPU culling submission", () => {
 
         const first = prepareTiCull(engine, state, mesh, gpu, ti, false, context, batch);
         batch.reset();
+        const expandedPositions = new Float32Array([-2, -2, -2, 2, 2, 2]);
+        updateMeshGeometry(engine, mesh, expandedPositions, new Float32Array([0, 1, 0, 0, 1, 0]), new Uint32Array([0, 1, 0]));
         const second = prepareTiCull(engine, state, mesh, gpu, ti, false, context, batch);
 
         expect(first).not.toBeNull();
         expect(second).not.toBeNull();
+        expect(state._localSphere[3]).toBeCloseTo(Math.sqrt(12));
         expect(beginComputePass).not.toHaveBeenCalled();
         batch.flush(engine);
         expect(beginComputePass).toHaveBeenCalledTimes(1);

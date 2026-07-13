@@ -17,6 +17,19 @@ function material() {
 }
 
 describe("ShaderMaterial uniform updates", () => {
+    it("enables thin-instance colors by default and preserves an explicit opt-out", () => {
+        const defaults = material();
+        const withoutColors = createShaderMaterial({
+            vertexSource: defaults.vertexSource,
+            fragmentSource: defaults.fragmentSource,
+            attributes: ["position"],
+            useThinInstanceColors: false,
+        });
+
+        expect(defaults._tic).toBeUndefined();
+        expect(withoutColors._tic).toBe(false);
+    });
+
     it("does not dirty the UBO when the normalized value is unchanged", () => {
         const mat = material();
 

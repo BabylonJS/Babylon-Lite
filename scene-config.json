@@ -1850,7 +1850,7 @@
         "slug": "scene211-meshopt-brainstem",
         "name": "Scene 211 — BrainStem Meshopt",
         "maxMad": 0.2,
-        "maxRawKB": 90.7,
+        "maxRawKB": 91,
         "description": "KhronosGroup BrainStem (glTF-Meshopt-EXT) exercising EXT_meshopt_compression + KHR_mesh_quantization; skinned and animated, decoded via dynamic-imported loader features so non-meshopt scenes pay nothing. Frozen via seekTime for deterministic parity.",
         "tags": ["pbr", "gltf", "meshopt", "quantization", "skeleton", "animation"],
         "skipPerf": true,

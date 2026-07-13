@@ -1,14 +1,14 @@
 {
-  "rawKB": 78.3,
-  "gzipKB": 32.8,
+  "rawKB": 78.2,
+  "gzipKB": 32.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene20-background-dds-skybox-BIv-MiR7.js",
     "scene20-background-ground-Dvr9kU6H.js",
     "scene20-cubemap-skybox-material-B495OxWx.js",
-    "scene20-emissive-fragment-D2vDlPTz.js",
+    "scene20-emissive-fragment-B_pIHOBu.js",
     "scene20-ibl-fragment-CeRrvT96.js",
-    "scene20-pbr-renderable-Csh6d8zP.js",
+    "scene20-pbr-renderable-D5lj8Nuk.js",
     "scene20-rgbd-decode-ChiiPMbr.js",
     "scene20-scene-uniforms-FTYH6Ct0.js",
     "scene20-singlelight-hemispheric-wgsl-TLZaCFzg.js",

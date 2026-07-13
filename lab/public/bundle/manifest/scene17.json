@@ -5,11 +5,11 @@
   "runtimeChunks": [
     "scene17-generate-mipmaps-DNSbr_z3.js",
     "scene17-ibl-fragment-CeRrvT96.js",
-    "scene17-pbr-renderable-Bcmg6ZPd.js",
+    "scene17-pbr-renderable-DNCGSRmh.js",
     "scene17-rgbd-decode-aydmE8bD.js",
     "scene17-shader-composer-Bga-tI-0.js",
     "scene17-singlelight-hemispheric-wgsl-DpzOMoaT.js",
-    "scene17-standard-renderable-Dxgeg9aa.js",
+    "scene17-standard-renderable-C1KIECNI.js",
     "scene17-thin-instance-fragment-CBn2miAC.js",
     "scene17-thin-instance-gpu-d94c-_y4.js",
     "scene17-wgsl-fog-m3PkjS7i.js",

@@ -48,6 +48,8 @@ export interface CsmConfig {
     /** @internal */
     _bias: number;
     /** @internal */
+    _worldSpaceBias: number | null;
+    /** @internal */
     _darkness: number;
     /** @internal */
     _frustumEdgeFalloff: number;
@@ -305,7 +307,8 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
     for (let i = 0; i < cascades._transforms.length; i++) {
         const cam = state._cameras[i]!;
         cam.fov = 1;
-        updateShadowCameraBase(cam, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, _biasViewProjection(cascades._biased[i]!, cfg._bias));
+        const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[i]!, cascades._far[i]!);
+        updateShadowCameraBase(cam, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, _biasViewProjection(cascades._biased[i]!, clipBias));
     }
 
     state._lastCasterVersion = casterVersion;
@@ -514,6 +517,12 @@ function _computeCsmCascades(engine: EngineContext, camera: Camera, light: Direc
             // drift, and still covers the moving-caster case it was added for (the range drifts, it never pops).
         }
 
+        // The caster matrix adds the world-space bias toward clip Z=1. Reserve the same distance at the far plane
+        // so geometry on the tightly fitted caster bound remains inside the clip volume after that offset.
+        if (cfg._worldSpaceBias) {
+            viewMaxZ += cfg._worldSpaceBias;
+        }
+
         const proj0 = orthoOffCenterLH(minX, maxX, minY, maxY, viewMinZ, viewMaxZ);
         let transform = multiply4x4(proj0, view);
 
@@ -632,10 +641,9 @@ interface ThinCasterAabb {
     _max: [number, number, number];
 }
 
-/** Per-mesh cache of a thin-instanced caster's world AABB, keyed on BOTH the instance-matrix version and the
- *  prototype mesh's `worldMatrixVersion` — the drawn world transform is `mesh.world * instanceMatrix`, so the
- *  AABB must invalidate when EITHER changes (a rebake, or the prototype moving/reparenting). Lazily allocated
- *  so this module keeps zero import-time side effects and stays tree-shakable. */
+/** Per-mesh cache of a thin-instanced caster's world AABB. It keys on instance data, prototype
+ *  transform, and the shared non-transform caster epoch.
+ *  Lazily allocated so this module keeps zero import-time side effects and stays tree-shakable. */
 let _thinCasterAabbCache: WeakMap<Mesh, { _version: number; _worldVersion: number; _aabb: ThinCasterAabb | null }> | null = null;
 function _getThinCasterAabbCache(): WeakMap<Mesh, { _version: number; _worldVersion: number; _aabb: ThinCasterAabb | null }> {
     if (!_thinCasterAabbCache) {
@@ -650,8 +658,6 @@ function _getThinCasterAabbCache(): WeakMap<Mesh, { _version: number; _worldVers
  *  tail) are skipped so a tail parked far off-world can't balloon the box. */
 function _thinInstanceWorldAabb(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"]>): ThinCasterAabb | null {
     const cache = _getThinCasterAabbCache();
-    // The drawn transform is `mesh.world * instanceMatrix`, so the AABB depends on BOTH the instance matrices
-    // and the prototype world matrix — invalidate when either version changes.
     const worldVersion = mesh.worldMatrixVersion;
     const cached = cache.get(mesh);
     if (cached && cached._version === ti._version && cached._worldVersion === worldVersion) {
@@ -740,13 +746,21 @@ function _writeCsmUbo(out: Float32Array, cascades: CsmCascades, cfg: CsmConfig):
     out[77] = cfg._cascadeBlendPercentage === 0 ? 10000 : 1 / cfg._cascadeBlendPercentage;
 }
 
-function _biasViewProjection(viewProj: Float32Array, bias: number): Float32Array {
+/** @internal Convert a physical caster offset to the clip-space Z offset for one orthographic cascade. */
+export function csmWorldBiasClipOffset(worldSpaceBias: number, near: number, far: number): number {
+    const range = far - near;
+    if (!Number.isFinite(worldSpaceBias) || worldSpaceBias <= 0 || !Number.isFinite(range) || range <= 0) {
+        return 0;
+    }
+    return worldSpaceBias / range;
+}
+
+function _biasViewProjection(viewProj: Float32Array, clipOffset: number): Float32Array {
     const biased = new Float32Array(viewProj);
-    const b = bias * 0.5;
     for (let col = 0; col < 4; col++) {
         const z = 2 + col * 4;
         const w = 3 + col * 4;
-        biased[z] = biased[z]! + b * biased[w]!;
+        biased[z] = biased[z]! + clipOffset * biased[w]!;
     }
     return biased;
 }

@@ -168,6 +168,8 @@ export {
     createTube,
     createExtrudeShape,
     createMeshFromData,
+    updateMeshGeometry,
+    updateMeshGeometryCapacity,
     updateMeshPositions,
     updateMeshNormals,
     updateMeshColors,
@@ -177,6 +179,7 @@ export {
     resizeMeshGeometry,
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
+export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
 export { createSphereData } from "./mesh/create-sphere.js";
@@ -191,6 +194,10 @@ export { createCsgFromMesh, csgSubtract, csgIntersect, csgUnion, createMeshFromC
 export type { CsgSolid } from "./mesh/csg.js";
 export { initializeCsg2Async, isCsg2Ready, createCsg2FromMesh, csg2Subtract, csg2Intersect, csg2Add, createMeshFromCsg2, createMeshesFromCsg2, disposeCsg2 } from "./mesh/csg2.js";
 export type { Csg2Solid } from "./mesh/csg2.js";
+
+// ─── Resources ───────────────────────────────────────────────────────
+export { createStorageBuffer, updateStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
+export type { StorageBuffer } from "./resource/storage-buffer.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
@@ -379,6 +386,8 @@ export {
     setThinInstanceMatrix,
     setThinInstances,
     setThinInstanceCount,
+    setThinInstanceDrawCount,
+    enableThinInstanceDynamicDrawCount,
     flushThinInstances,
     setThinInstanceColors,
     setThinInstanceColor,
