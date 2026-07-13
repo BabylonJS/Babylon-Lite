@@ -86,3 +86,22 @@ export function resolveReleaseType(requested: ReleaseType): ResolvedReleaseType 
     }
     return requested;
 }
+
+// ---------------------------------------------------------------------------
+// ONE-TIME EXCEPTION — the burned 2.0.0 version.
+//
+// 2.0.0 was published to npm by accident (an unintended major produced by a
+// scheduled `auto` run before the auto->major promotion was removed) and has
+// since been deprecated. npm forbids reusing a published version number, so the
+// first *intentional* major bump — which would naturally compute 2.0.0 — must
+// skip the burned version and release 2.0.1 instead. This exception is specific
+// to 2.0.0 and exists only to bridge past that accident; it can be deleted once
+// the 2.x line has moved beyond 2.0.x.
+// ---------------------------------------------------------------------------
+export const BURNED_VERSION = "2.0.0";
+export const BURNED_VERSION_REPLACEMENT = "2.0.1";
+
+export function applyBurnedVersionException(version: string): string {
+    return version === BURNED_VERSION ? BURNED_VERSION_REPLACEMENT : version;
+}
+

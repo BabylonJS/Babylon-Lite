@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bumpVersion, detectBreakingChanges, parseReleaseType, resolveReleaseType } from "../../../scripts/release-version";
+import { applyBurnedVersionException, bumpVersion, detectBreakingChanges, parseReleaseType, resolveReleaseType } from "../../../scripts/release-version";
 
 describe("release version resolution", () => {
     describe("resolveReleaseType — auto never emits a major", () => {
@@ -40,6 +40,26 @@ describe("release version resolution", () => {
         it("resolves 1.10.0 to 1.11.0 for an auto release with breaking changes", () => {
             const resolved = resolveReleaseType("auto");
             expect(bumpVersion("1.10.0", resolved)).toBe("1.11.0");
+        });
+    });
+
+    describe("applyBurnedVersionException — one-time 2.0.0 skip", () => {
+        it("skips the burned 2.0.0 and returns 2.0.1", () => {
+            // 2.0.0 was published in error and deprecated; npm forbids reuse, so the
+            // first intentional major must land on 2.0.1 instead.
+            expect(applyBurnedVersionException("2.0.0")).toBe("2.0.1");
+        });
+
+        it("leaves every other version untouched", () => {
+            expect(applyBurnedVersionException("1.11.0")).toBe("1.11.0");
+            expect(applyBurnedVersionException("2.0.1")).toBe("2.0.1");
+            expect(applyBurnedVersionException("2.1.0")).toBe("2.1.0");
+            expect(applyBurnedVersionException("3.0.0")).toBe("3.0.0");
+        });
+
+        it("turns an explicit major from the 1.x line into 2.0.1", () => {
+            const resolved = resolveReleaseType("major");
+            expect(applyBurnedVersionException(bumpVersion("1.11.0", resolved))).toBe("2.0.1");
         });
     });
 

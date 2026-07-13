@@ -5,6 +5,8 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 
 import {
+    applyBurnedVersionException,
+    BURNED_VERSION,
     bumpVersion,
     detectBreakingChanges,
     maxVersion,
@@ -198,7 +200,18 @@ if (breakingChangesDetected && requestedReleaseType === "auto") {
 // ever produced by an explicit 'major' request, so an accidental breaking commit
 // on master can no longer trigger a surprise major release.
 const resolvedReleaseType: ResolvedReleaseType = resolveReleaseType(requestedReleaseType);
-const nextVersion = bumpVersion(resolutionBaseVersion, resolvedReleaseType);
+// ONE-TIME EXCEPTION: skip the burned 2.0.0 version (published by accident and
+// deprecated; npm forbids reusing it) so the first intentional major lands on
+// 2.0.1. See applyBurnedVersionException in scripts/release-version.ts.
+const computedVersion = bumpVersion(resolutionBaseVersion, resolvedReleaseType);
+const nextVersion = applyBurnedVersionException(computedVersion);
+
+if (nextVersion !== computedVersion) {
+    console.log(
+        `##vso[task.logissue type=warning]Version ${BURNED_VERSION} was published in error and deprecated; ` +
+            `npm forbids reusing it. Releasing ${nextVersion} instead (one-time exception).`
+    );
+}
 
 if (isVersionPublished(nextVersion)) {
     throw new Error(`${PACKAGE_NAME}@${nextVersion} is already published. Refusing to overwrite an existing npm version.`);
