@@ -4,8 +4,19 @@ import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
-type ReleaseType = "auto" | "patch" | "minor" | "major";
-type ResolvedReleaseType = Exclude<ReleaseType, "auto">;
+import {
+    applyBurnedVersionException,
+    BURNED_VERSION,
+    bumpVersion,
+    detectBreakingChanges,
+    maxVersion,
+    parseExplicitReleaseType,
+    parseReleaseType,
+    resolveReleaseType,
+    type ReleaseType,
+    type ResolvedReleaseType,
+} from "./release-version";
+
 type ReleaseConfig = {
     type?: unknown;
     nonce?: unknown;
@@ -53,20 +64,6 @@ function run(command: string, args: string[], options: { allowFailure?: boolean 
     }
 }
 
-function parseReleaseType(value: string | undefined): ReleaseType {
-    if (value === "patch" || value === "minor" || value === "major" || value === "auto") {
-        return value;
-    }
-    throw new Error(`Unsupported release type '${value}'. Expected auto, patch, minor, or major.`);
-}
-
-function parseExplicitReleaseType(value: unknown): ResolvedReleaseType {
-    if (value === "patch" || value === "minor" || value === "major") {
-        return value;
-    }
-    throw new Error(`Unsupported release config type '${String(value)}'. Expected patch, minor, or major.`);
-}
-
 function readReleaseConfig(): { releaseType: ResolvedReleaseType; nonce: number } {
     const config = JSON.parse(readFileSync(RELEASE_CONFIG_PATH, "utf-8")) as ReleaseConfig;
     const releaseType = parseExplicitReleaseType(config.type);
@@ -93,44 +90,6 @@ function resolveRequestedReleaseType(): { releaseType: ReleaseType; source: stri
     }
 
     return { releaseType: parseReleaseType(process.env.RELEASE_TYPE ?? "auto"), source: "RELEASE_TYPE" };
-}
-
-function parseVersion(version: string): [number, number, number] {
-    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-    if (!match) {
-        throw new Error(`Unsupported semver version '${version}'. Expected x.y.z.`);
-    }
-    return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-function compareVersions(a: [number, number, number], b: [number, number, number]): number {
-    for (let i = 0; i < 3; i++) {
-        if (a[i] !== b[i]) {
-            return a[i]! - b[i]!;
-        }
-    }
-    return 0;
-}
-
-function maxVersion(a: string, b: string): string {
-    if (!a) {
-        return b;
-    }
-    if (!b) {
-        return a;
-    }
-    return compareVersions(parseVersion(a), parseVersion(b)) >= 0 ? a : b;
-}
-
-function bumpVersion(version: string, releaseType: ResolvedReleaseType): string {
-    const [major, minor, patch] = parseVersion(version);
-    if (releaseType === "major") {
-        return `${major + 1}.0.0`;
-    }
-    if (releaseType === "minor") {
-        return `${major}.${minor + 1}.0`;
-    }
-    return `${major}.${minor}.${patch + 1}`;
 }
 
 function getLatestPublishedVersion(fallbackVersion: string): string {
@@ -188,7 +147,7 @@ function getPreviousReleaseTag(latestPublishedVersion: string): string {
 function hasBreakingChanges(previousReleaseTag: string): boolean {
     const logRange = previousReleaseTag ? `${previousReleaseTag}..HEAD` : "HEAD";
     const commitMessages = run("git", ["log", "--format=%B", logRange], { allowFailure: true });
-    return /^BREAKING[ -]CHANGE:/m.test(commitMessages) || /^[a-z]+(?:\([^)]+\))?!:/m.test(commitMessages);
+    return detectBreakingChanges(commitMessages);
 }
 
 const requested = resolveRequestedReleaseType();
@@ -221,9 +180,15 @@ if (currentBuildId && latestPublishedBuildId === currentBuildId) {
 const previousReleaseTag = getPreviousReleaseTag(resolutionBaseVersion);
 const breakingChangesDetected = hasBreakingChanges(previousReleaseTag);
 
-if (breakingChangesDetected && requestedReleaseType !== "auto" && requestedReleaseType !== "major") {
+if (breakingChangesDetected && requestedReleaseType === "auto") {
     // Azure Pipelines parses `##vso[task.logissue ...]` from stdout, so use console.log (not
     // console.warn, which writes to stderr and may not be picked up as an annotation).
+    console.log(
+        `##vso[task.logissue type=warning]Breaking changes were detected since ${previousReleaseTag || "the start of history"}. ` +
+            `Auto releases never emit a major, so this is being released as a minor. ` +
+            `A major release must be requested explicitly (manual 'major' run or config/release.json type 'major').`
+    );
+} else if (breakingChangesDetected && requestedReleaseType !== "major") {
     console.log(
         `##vso[task.logissue type=warning]Breaking changes were detected since ${previousReleaseTag || "the start of history"}. ` +
             `A ${requestedReleaseType} release will hide those changes from the next auto release. ` +
@@ -231,8 +196,22 @@ if (breakingChangesDetected && requestedReleaseType !== "auto" && requestedRelea
     );
 }
 
-const resolvedReleaseType: ResolvedReleaseType = requestedReleaseType === "auto" ? (breakingChangesDetected ? "major" : "minor") : requestedReleaseType;
-const nextVersion = bumpVersion(resolutionBaseVersion, resolvedReleaseType);
+// Auto never self-promotes to a major (see resolveReleaseType). A major is only
+// ever produced by an explicit 'major' request, so an accidental breaking commit
+// on master can no longer trigger a surprise major release.
+const resolvedReleaseType: ResolvedReleaseType = resolveReleaseType(requestedReleaseType);
+// ONE-TIME EXCEPTION: skip the burned 2.0.0 version (published by accident and
+// deprecated; npm forbids reusing it) so the first intentional major lands on
+// 2.0.1. See applyBurnedVersionException in scripts/release-version.ts.
+const computedVersion = bumpVersion(resolutionBaseVersion, resolvedReleaseType);
+const nextVersion = applyBurnedVersionException(computedVersion);
+
+if (nextVersion !== computedVersion) {
+    console.log(
+        `##vso[task.logissue type=warning]Version ${BURNED_VERSION} was published in error and deprecated; ` +
+            `npm forbids reusing it. Releasing ${nextVersion} instead (one-time exception).`
+    );
+}
 
 if (isVersionPublished(nextVersion)) {
     throw new Error(`${PACKAGE_NAME}@${nextVersion} is already published. Refusing to overwrite an existing npm version.`);

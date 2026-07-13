@@ -17,7 +17,7 @@
  * If lab/public/bundle/master-manifest.json is available, bundle-size increases
  * relative to master are emitted as warnings only; ceilings remain the blocker.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./parity-fixtures";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 
@@ -85,25 +85,25 @@ for (const scene of SCENES) {
         page.on("response", onResponse);
 
         // Navigate to the bundle page and wait for the scene to finish rendering
-        await page.goto(`/bundle-scene${scene.id}.html`, { waitUntil: "domcontentloaded" });
         let readyTimedOut = false;
         try {
+            await page.goto(`/bundle-scene${scene.id}.html`, { waitUntil: "domcontentloaded" });
             await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", undefined, { timeout: 20_000 });
         } catch {
             // Some heavy scenes fetch all runtime JS but do not mark the canvas ready in cloud browsers.
             readyTimedOut = true;
+        } finally {
+            // Always detach the listener — the page is shared across tests under
+            // REUSE_BROWSER, so a leaked listener would accumulate. Do NOT close the
+            // page; in default mode Playwright tears it down in fixture teardown.
+            page.off("response", onResponse);
         }
         if (readyTimedOut) {
-            page.off("response", onResponse);
-            await page.close();
             const sceneKey = `scene${scene.id}`;
             const files = BUNDLE_MANIFEST?.[sceneKey]?.runtimeChunks;
             expect(files, `bundle manifest must contain runtime chunks for ${sceneKey}`).toBeTruthy();
             runtimeFiles.length = 0;
             runtimeFiles.push(...files!);
-        } else {
-            page.off("response", onResponse);
-            await page.close();
         }
         for (const file of Array.from(new Set(runtimeFiles))) {
             jsPayloads.push({ url: `/bundle/${file}`, file, body: readFileSync(resolve(__dirname, "../../../lab/public/bundle", file)) });

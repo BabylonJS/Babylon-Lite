@@ -123,6 +123,7 @@ export function ensurePcfShadowTaskState(
                 rt,
                 clr: true,
                 cam: camera,
+                _skipClusteredLights: true,
             },
             engine,
             scene

@@ -29,11 +29,11 @@ import {
     buildSpriteLayerUbo,
     createSpriteInstanceBuffer,
     createSpriteLayerBindGroup,
-    createSpritePipelineCache,
+    acquireSharedSpriteRendererPipelineCache,
     ensureSpriteInstanceBuffer,
     getOrCreateSpritePipeline,
     getSpritePipelineCacheSize,
-    resetSpritePipelineCache,
+    releaseSharedSpriteRendererPipelineCache,
     uploadSpriteInstances,
     writeSpriteLayerUboIfDirty,
 } from "./sprite-pipeline.js";
@@ -85,7 +85,9 @@ export interface SpriteRenderer extends RenderingContext {
     _surface: SurfaceContext;
     /** @internal */
     _indexBuffer: GPUBuffer;
-    /** @internal */
+    /** @internal Reference to the process-wide shared sprite pipeline cache
+     *  (device-keyed). Not owned by this renderer — acquired at create, released
+     *  at dispose; never `reset` per-renderer. */
     _pipelineCache: SpritePipelineCache;
     /** @internal */
     _layerGpu: Map<Sprite2DLayer, LayerGpu>;
@@ -246,7 +248,7 @@ export function createSpriteRenderer(surface: SurfaceContext, opts: SpriteRender
         _kind: KIND,
         _surface: surface,
         _indexBuffer: indexBuffer,
-        _pipelineCache: createSpritePipelineCache(),
+        _pipelineCache: acquireSharedSpriteRendererPipelineCache(),
         _layerGpu: new Map(),
         _visibleBundles: [],
         _targetWidth: canvas.width,
@@ -269,8 +271,17 @@ export function createSpriteRenderer(surface: SurfaceContext, opts: SpriteRender
     };
 
     // Pre-warm pipelines currently in use, so the first frame doesn't pay compile cost.
-    for (const layer of rr.layers) {
-        getOrCreateSpritePipeline(engine, rr._pipelineCache, surface.format, 1, layer.blendMode, false, false, undefined, undefined, layer);
+    // If pipeline compilation throws here, `rr` is never returned and `disposeSpriteRenderer`
+    // is never called, so unwind the resources we've already acquired (the shared-cache
+    // refcount and the index buffer) to avoid leaking them for the rest of the process.
+    try {
+        for (const layer of rr.layers) {
+            getOrCreateSpritePipeline(engine, rr._pipelineCache, surface.format, 1, layer.blendMode, false, false, undefined, undefined, layer);
+        }
+    } catch (err) {
+        releaseSharedSpriteRendererPipelineCache();
+        indexBuffer.destroy();
+        throw err;
     }
 
     return rr;
@@ -343,7 +354,7 @@ function spriteRendererRecord(rr: SpriteRenderer): number {
     assertSpriteRendererLayers(rr.layers);
     const eng = rr._surface.engine;
     const encoder = eng._currentEncoder;
-    const swapView = rr._targetView ?? eng.scRT._colorView!;
+    const swapView = rr._targetView ?? rr._surface.scRT._colorView!;
 
     // Open a sampleCount=1 render pass on the target view (the swapchain by default, or an
     // offscreen render texture when one is set via setSpriteRendererTarget). This keeps HUD
@@ -491,7 +502,11 @@ export function disposeSpriteRenderer(sr: SpriteRenderer): void {
     sr._visibleBundles.length = 0;
     sr._beforeUpdate.length = 0;
     sr._indexBuffer.destroy();
-    resetSpritePipelineCache(sr._pipelineCache);
+    // Release our refcount on the process-wide shared pipeline cache instead of
+    // clearing it — other live `SpriteRenderer`s on this device still need the
+    // compiled pipelines. The cache is cleared only when the last renderer is
+    // disposed (refcount hits 0).
+    releaseSharedSpriteRendererPipelineCache();
     sr._layers.length = 0;
 }
 

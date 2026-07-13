@@ -14,9 +14,10 @@
 import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, SheenProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_SHEEN, PBR_HAS_SHEEN_TEXTURE, PBR_HAS_SHEEN_ALBEDO_SCALING, PBR2_HAS_SHEEN_UV_TX } from "../pbr-flag-bits.js";
+import { PBR_HAS_SHEEN, PBR_HAS_SHEEN_TEXTURE, PBR_HAS_SHEEN_ALBEDO_SCALING } from "../pbr-flag-bits.js";
 
 const STAGE_FRAGMENT = 0x2;
+const PBR2_HAS_SHEEN_UV_TX = 1 << 13;
 
 // Extension-local features2 bit (defined here, not in the shared flag module, so scenes
 // without a separate sheen roughness texture carry zero bytes for it). Set when the material

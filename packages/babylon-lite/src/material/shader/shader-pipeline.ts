@@ -26,6 +26,25 @@ export interface ShaderPipelineBindings {
     readonly customSpec: UboSpec | null;
     readonly vertexBuffers: readonly GPUVertexBufferLayout[];
     readonly pipelines: Map<string, GPURenderPipeline>;
+    /** @internal */
+    readonly _pipelineLayout: GPUPipelineLayout;
+}
+
+/** @internal Optional cross-material cache, installed only for groups with multiple ShaderMaterials. */
+export interface ShaderPipelineCache {
+    readonly generation: number;
+    getBindings(material: ShaderMaterial): ShaderPipelineBindings | undefined;
+    setBindings(material: ShaderMaterial, bindings: ShaderPipelineBindings): void;
+    getModule(device: GPUDevice, code: string, label: string): { readonly id: number; readonly module: GPUShaderModule };
+    getPipelineKey(
+        sig: RenderTargetSignature,
+        variantKey: string,
+        vertexModuleId: number,
+        fragmentModuleId: number,
+        vertexBuffers: readonly GPUVertexBufferLayout[],
+        material: ShaderMaterial,
+        stencilKey: string
+    ): string;
 }
 
 interface ShaderMaterialPipelineState extends ShaderMaterial {
@@ -34,35 +53,47 @@ interface ShaderMaterialPipelineState extends ShaderMaterial {
     _shaderCustomUbo?: GPUBuffer | null;
     _shaderCustomSpec?: UboSpec | null;
     _shaderCustomData?: ArrayBuffer | null;
+    _shaderCustomBytes?: Uint8Array<ArrayBuffer> | null;
     _shaderCustomVersion?: number;
+    _shaderCacheGeneration?: number;
+    _shaderPipelineCache?: ShaderPipelineCache;
 }
 
 export function getOrCreateShaderPipelineBindings(engine: EngineContext, material: ShaderMaterial): ShaderPipelineBindings {
     const state = material as ShaderMaterialPipelineState;
-    if (state._shaderBindings && state._shaderDevice === engine._device) {
+    const cache = state._shaderPipelineCache;
+    if (state._shaderBindings && state._shaderDevice === engine._device && state._shaderCacheGeneration === cache?.generation) {
         return state._shaderBindings;
     }
 
+    let bindings = cache?.getBindings(material);
+    if (!bindings) {
+        const systemFields = material.uniformDecls.filter((u) => _isShaderSystemUniform(u.name)).map(toUboField);
+        const customFields = material.uniformDecls.filter((u) => !_isShaderSystemUniform(u.name)).map(toUboField);
+        const systemSpec = computeUboLayout(systemFields.length > 0 ? systemFields : [{ _name: "_pad", _type: "vec4<f32>" }]);
+        const customSpec = customFields.length > 0 ? computeUboLayout(customFields) : null;
+        const group1BGL = engine._device.createBindGroupLayout({
+            label: "shader-material-group1",
+            entries: buildBindGroupLayoutEntries(material.samplerDecls, material.storageBufferDecls, customSpec !== null),
+        });
+        bindings = {
+            group1BGL,
+            systemSpec,
+            customSpec,
+            vertexBuffers: material.attributes.map(attributeLayout),
+            pipelines: new Map(),
+            _pipelineLayout: engine._device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), group1BGL] }),
+        };
+        cache?.setBindings(material, bindings);
+    }
+
     state._shaderDevice = engine._device;
-    const systemFields = material.uniformDecls.filter((u) => _isShaderSystemUniform(u.name)).map(toUboField);
-    const customFields = material.uniformDecls.filter((u) => !_isShaderSystemUniform(u.name)).map(toUboField);
-    const systemSpec = computeUboLayout(systemFields.length > 0 ? systemFields : [{ _name: "_pad", _type: "vec4<f32>" }]);
-    const customSpec = customFields.length > 0 ? computeUboLayout(customFields) : null;
-    const group1BGL = engine._device.createBindGroupLayout({
-        label: "shader-material-group1",
-        entries: buildBindGroupLayoutEntries(material.samplerDecls, material.storageBufferDecls, customSpec !== null),
-    });
-    const bindings: ShaderPipelineBindings = {
-        group1BGL,
-        systemSpec,
-        customSpec,
-        vertexBuffers: material.attributes.map(attributeLayout),
-        pipelines: new Map(),
-    };
+    state._shaderCacheGeneration = cache?.generation;
     state._shaderBindings = bindings;
-    state._shaderCustomSpec = customSpec;
+    state._shaderCustomSpec = bindings.customSpec;
     state._shaderCustomUbo = null;
     state._shaderCustomData = null;
+    state._shaderCustomBytes = null;
     state._shaderCustomVersion = -1;
     return bindings;
 }
@@ -81,17 +112,30 @@ export function getOrCreateShaderPipeline(
     // instancing existed. The dynamically-imported thin-instance module is the
     // only caller that passes non-default values, so no instancing logic runs
     // for non-instanced scenes.
-    const key = `${targetSignatureKey(sig)}${variantKey}`;
+    const stencil = material.stencil && _stencilResolver ? _stencilResolver(material.stencil) : null;
+    const device = engine._device;
+    const cache = (material as ShaderMaterialPipelineState)._shaderPipelineCache;
+    const wantsFragment = !!sig._colorFormat || material.depthOnlyFragment;
+    let key = `${targetSignatureKey(sig)}${variantKey}`;
+    let vertModule: GPUShaderModule | null = null;
+    let fragModule: GPUShaderModule | null = null;
+    if (cache) {
+        const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
+        const vert = cache.getModule(device, `${prelude}\n${material.vertexSource}`, `${material.name ?? "shader"}-vertex`);
+        const frag = wantsFragment ? cache.getModule(device, `${prelude}\n${material.fragmentSource}`, `${material.name ?? "shader"}-fragment`) : null;
+        key = cache.getPipelineKey(sig, variantKey, vert.id, frag?.id ?? 0, vertexBuffers, material, stencil?._key ?? "");
+        vertModule = vert.module;
+        fragModule = frag?.module ?? null;
+    }
     const cached = bindings.pipelines.get(key);
     if (cached) {
         return cached;
     }
-    const stencil = material.stencil && _stencilResolver ? _stencilResolver(material.stencil) : null;
-    const device = engine._device;
-    const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
-    const vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: `${prelude}\n${material.vertexSource}` });
-    const wantsFragment = !!sig._colorFormat || material.depthOnlyFragment;
-    const fragModule = wantsFragment ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;
+    if (!vertModule) {
+        const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
+        vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: `${prelude}\n${material.vertexSource}` });
+        fragModule = wantsFragment ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;
+    }
     const colorTarget: GPUColorTargetState | null = sig._colorFormat
         ? {
               format: sig._colorFormat,
@@ -114,7 +158,7 @@ export function getOrCreateShaderPipeline(
 
     const pipeline = device.createRenderPipeline({
         label: `${material.name ?? "shader"}-pipeline`,
-        layout: device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), bindings.group1BGL] }),
+        layout: bindings._pipelineLayout,
         vertex: { module: vertModule, entryPoint: "mainVertex", buffers: vertexBuffers as GPUVertexBufferLayout[] },
         ...(fragModule ? { fragment: { module: fragModule, entryPoint: "mainFragment", targets: colorTarget ? [colorTarget] : [] } } : {}),
         ...(sig._depthStencilFormat

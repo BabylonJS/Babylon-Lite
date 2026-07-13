@@ -7,9 +7,8 @@
  *  Factored here so Standard, PBR, and ShaderMaterial renderables share one
  *  implementation of the cull lifecycle instead of copy-pasting it three times.
  *  `tryBind` is the single seam a renderable's `bind()` calls: it does the
- *  opaque-only gate + per-mesh `_gpuCullingEnabled` check, marks the renderable
- *  `_direct` (read by the render task's buildBindings right after `bind()`
- *  returns), and creates the per-binding state. The renderable then reads
+ *  opaque-only gate + per-mesh `_gpuCullingEnabled` check and creates the
+ *  per-binding state. The renderable then reads
  *  `cullDrawBufs` for the compacted instance source and calls `binding.draw(...)`
  *  for the indirect-vs-fallback draw call. Keeping these few seams tiny is what
  *  lets non-culling scenes — which still fetch the per-material renderable
@@ -21,7 +20,14 @@ import type { SceneContext } from "../scene/scene.js";
 import type { DrawUpdateContext, Renderable } from "../render/renderable.js";
 import type { Mesh } from "./mesh.js";
 import type { ThinInstanceDrawBuffers } from "./thin-instance-gpu.js";
-import { createTiCullState, destroyTiCullState, prepareTiCull, type ThinInstanceGpuCullState } from "./thin-instance-gpu-culling.js";
+import {
+    createTiCullState,
+    destroyTiCullState,
+    getComputeDispatchBatch,
+    prepareTiCull,
+    type ComputeDispatchBatch,
+    type ThinInstanceGpuCullState,
+} from "./thin-instance-gpu-culling.js";
 
 /** Per-binding cull lifecycle. The renderable's `bind()` obtains one from
  *  `tryBind`, uses `update` as the binding's update, reads `cullDrawBufs` (the
@@ -33,6 +39,8 @@ export interface TiCullBinding {
     cullDrawBufs: ThinInstanceDrawBuffers | null;
     /** @internal Indirect draw-args buffer (null until/unless culling ran this frame). */
     _args: GPUBuffer | null;
+    /** @internal Shared task-local compute submission batch. */
+    _updateBatch: ComputeDispatchBatch;
     /** Issue the indirect (culled) draw when visible instances were compacted, else a full instanced draw. */
     draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, indexCount: number, instanceCount: number): void;
 }
@@ -42,10 +50,10 @@ type CullCachingRenderable = Renderable & { _tiCullStates?: WeakMap<RenderTarget
 
 /** Create a per-binding cull lifecycle for one thin-instanced renderable binding,
  *  iff the mesh opts in and is not excluded (transparent / transmissive — v1 is
- *  opaque-only). Marks the renderable `_direct` so it leaves the cached opaque
- *  bundle; this is safe to do during `bind()` because buildBindings reads
- *  `_direct` only after `bind()` returns. Returns undefined when culling does not
- *  apply, so the caller falls back to a normal instanced draw.
+ *  opaque-only). Returns undefined when culling does not apply, so the caller
+ *  falls back to a normal instanced draw. Opaque culling
+ *  stays bundle-compatible because its compacted buffers and indirect args are
+ *  stable; cull-state transitions bump the bundle invalidation epoch.
  *
  *  The cull STATE (visible/args/params GPU buffers) is REUSED across re-binds: it
  *  is cached on the renderable, keyed by the pass's render-target signature.
@@ -71,7 +79,6 @@ export function tryBind(
     if (excluded || !ti?._gpuCullingEnabled) {
         return undefined;
     }
-    (renderable as { _direct?: boolean })._direct = true;
     const holder = renderable as CullCachingRenderable;
     const cache = (holder._tiCullStates ??= new WeakMap());
     let state = cache.get(signature);
@@ -87,18 +94,22 @@ export function tryBind(
         // version, which re-binds us); recompute the local bounding sphere so culling stays accurate.
         state._localSphereReady = false;
     }
+    const updateBatch = getComputeDispatchBatch(signature);
     const binding: TiCullBinding = {
         cullDrawBufs: null,
         _args: null,
+        _updateBatch: updateBatch,
         update(context: DrawUpdateContext): void {
             baseUpdate?.(context);
-            const res = prepareTiCull(engine, state, mesh, mesh._gpu, ti, hasColor, context);
+            const res = prepareTiCull(engine, state, mesh, mesh._gpu, ti, hasColor, context, updateBatch);
             binding.cullDrawBufs = res?.drawBuffers ?? null;
             binding._args = res?.argsBuffer ?? null;
         },
         draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, indexCount: number, instanceCount: number): void {
             if (binding._args) {
                 pass.drawIndexedIndirect(binding._args, 0);
+            } else if (ti._drawArgsBuffer) {
+                pass.drawIndexedIndirect(ti._drawArgsBuffer, 0);
             } else {
                 pass.drawIndexed(indexCount, instanceCount);
             }

@@ -12,6 +12,8 @@
  *      (createSceneContext registers a default scene-render task)
  *   3. fg.build()                           → record every task
  *      (allocate render-target textures, build pass descriptors)
+ *      buildFrameGraphTask(fg, task)        → record one task added after the
+ *                                             graph was already built
  *   4. fg.execute()                         → drain every task into the
  *      current command encoder (called from scene._record)
  *   5. fg.dispose()                         → free everything
@@ -53,11 +55,7 @@ export function createFrameGraph(_engine: EngineContext): FrameGraph {
             // Phase 1 — record. Each task creates its passes; `createRenderPass`
             // appends each new pass to the currently-recording task's `_passes` list.
             for (let i = 0; i < fg._tasks.length; i++) {
-                const task = fg._tasks[i]!;
-                task._passes.length = 0;
-                fg._currentProcessedTask = task;
-                task.record();
-                fg._currentProcessedTask = null;
+                recordTask(fg, fg._tasks[i]!);
             }
             // Phase 2 — initialize. Runs after every task has finished recording
             // so passes can safely reference resources allocated by other tasks
@@ -93,6 +91,27 @@ export function createFrameGraph(_engine: EngineContext): FrameGraph {
         },
     };
     return fg;
+}
+
+/** Record and initialize one task already present in a live graph without rebuilding existing tasks. */
+export function buildFrameGraphTask(fg: FrameGraph, task: Task): void {
+    if (!fg._tasks.includes(task)) {
+        throw new Error(`buildFrameGraphTask("${task.name}"): task is not registered in this graph.`);
+    }
+    recordTask(fg, task);
+    for (const pass of task._passes) {
+        pass._initialize();
+    }
+}
+
+function recordTask(fg: FrameGraph, task: Task): void {
+    task._passes.length = 0;
+    fg._currentProcessedTask = task;
+    try {
+        task.record();
+    } finally {
+        fg._currentProcessedTask = null;
+    }
 }
 
 /** Add a task at the END of execute order. */
