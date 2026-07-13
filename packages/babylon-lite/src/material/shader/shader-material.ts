@@ -1,6 +1,7 @@
 import { F32 } from "../../engine/typed-arrays.js";
 import type { Material, StencilState } from "../material.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { StorageBuffer } from "../../resource/storage-buffer.js";
 import type { Mat4 } from "../../math/types.js";
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
@@ -113,7 +114,7 @@ export interface ShaderTextureSlot {
 
 export interface ShaderStorageBufferSlot {
     readonly decl: ShaderStorageBufferDecl;
-    current: GPUBuffer | null;
+    current: StorageBuffer | null;
 }
 
 /** A custom WGSL material: compiled from user-supplied vertex/fragment sources
@@ -463,13 +464,22 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
 }
 
 /** Bind (or clear) a declared read-only storage buffer. */
-export function setShaderStorageBuffer(material: ShaderMaterial, name: string, buffer: GPUBuffer | null): void {
+export function setShaderStorageBuffer(material: ShaderMaterial, name: string, buffer: StorageBuffer | null): void {
     const slot = material._storageBufferSlots.get(name);
     if (!slot) {
         throw new Error(`ShaderMaterial: storage buffer "${name}" was not declared.`);
     }
+    if (buffer && !("_engine" in buffer)) {
+        throw new Error("setShaderStorageBuffer requires a StorageBuffer created by createStorageBuffer; raw GPUBuffer is not supported.");
+    }
+    if (buffer?._destroyed) {
+        throw new Error(`ShaderMaterial: storage buffer "${name}" has been disposed.`);
+    }
+    if (buffer && !buffer._engine._storageBuffers?.has(buffer)) {
+        throw new Error("setShaderStorageBuffer requires a live StorageBuffer created by createStorageBuffer.");
+    }
     // See setShaderTexture: only invalidate the bind groups when the bound buffer HANDLE changes; re-binding the
-    // same GPUBuffer is a no-op (contents update live), so an unconditional bump churned the descriptor heap.
+    // same StorageBuffer is a no-op (contents update live), so an unconditional bump churned the descriptor heap.
     if (slot.current !== buffer) {
         slot.current = buffer;
         material._resourceVersion++;

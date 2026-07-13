@@ -187,7 +187,11 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
         if (missingFeatures.length > 0) {
             throw new Error(`WebGPU device recovery missing required features: ${missingFeatures.join(", ")}`);
         }
-        engine._device = await adapter.requestDevice({ requiredFeatures: state.requiredFeatures });
+        engine._device = await adapter.requestDevice({
+            requiredFeatures: state.requiredFeatures,
+            requiredLimits: { ...engine._options?.requiredLimits, ...engine._storageRequiredLimits },
+        });
+        engine._rebuildStorageBuffers?.();
         // Reconfigure every surface's canvas context against the new device and re-acquire
         // its swapchain texture (the previous device's textures are invalid). The rebuilt
         // frame graphs need fresh color attachments. Per-surface `_swapchainCopySrc` is
@@ -205,6 +209,7 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
             });
             _refreshScRT(surface);
         }
+
         clearSceneBGLCache();
         resizeEngine(engine);
 

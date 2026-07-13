@@ -433,9 +433,10 @@ function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, 
     }
     for (const storage of material.storageBufferDecls) {
         const slot = material._storageBufferSlots.get(storage.name);
-        const buffer = slot?.current;
-        if (!buffer) {
-            throw new Error(`ShaderMaterial: storage buffer "${storage.name}" has no GPUBuffer. Call setShaderStorageBuffer() before rendering.`);
+        const storageBuffer = slot?.current;
+        const buffer = storageBuffer?._buffer;
+        if (!buffer || !engine._storageBuffers?.has(storageBuffer)) {
+            throw new Error(`ShaderMaterial storage "${storage.name}" is invalid.`);
         }
         entries.push({ binding: nextBinding++, resource: { buffer } });
     }
@@ -456,7 +457,10 @@ function collectShaderStorageBuffers(material: ShaderMaterial): GPUBuffer[] {
     const buffers: GPUBuffer[] = [];
     for (const slot of material._storageBufferSlots.values()) {
         if (slot.current) {
-            buffers.push(slot.current);
+            const buffer = slot.current._buffer;
+            if (buffer) {
+                buffers.push(buffer);
+            }
         }
     }
     return buffers;

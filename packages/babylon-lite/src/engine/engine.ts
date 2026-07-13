@@ -1,4 +1,5 @@
 import type { Mesh } from "../mesh/mesh.js";
+import type { StorageBuffer } from "../resource/storage-buffer.js";
 import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
 import { _setHpmAllocator } from "../math/_matrix-allocator.js";
 import type { SurfaceContext, SurfaceOptions } from "./surface.js";
@@ -116,6 +117,16 @@ export interface EngineContext extends SurfaceContext {
 
     /** @internal */
     _device: GPUDevice;
+    /** @internal Original creation options retained for optional subsystems such as recovery. */
+    _options?: EngineOptions;
+    /** @internal Live high-level storage allocations owned by this engine. */
+    _storageBuffers?: Set<StorageBuffer>;
+    /** @internal Storage-related limits retained lazily for device-loss recovery. */
+    _storageRequiredLimits?: Record<string, GPUSize64>;
+    /** @internal Installed lazily by the storage-buffer module. */
+    _rebuildStorageBuffers?: () => void;
+    /** @internal Installed lazily by the storage-buffer module. */
+    _disposeStorageBuffers?: () => void;
     /** @internal Shared 1×1 white texture used as the default baseColor / ORM for
      *  factor-only PBR materials (created via `createPbrMaterial` without textures).
      *  A white ORM yields `metallic = metallicFactor`, `roughness = roughnessFactor`,
@@ -325,8 +336,8 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         canvas.setAttribute("data-engine", versionToLog);
     }
 
-    const useHpm = options?.useHighPrecisionMatrix === true;
-    const useFO = options?.useFloatingOrigin === true;
+    const useHpm = !!options?.useHighPrecisionMatrix;
+    const useFO = !!options?.useFloatingOrigin;
     if (useFO && !useHpm) {
         throw new Error("Babylon Lite: useFloatingOrigin requires useHighPrecisionMatrix on the engine.");
     }
@@ -382,6 +393,7 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
             surfaces, // public readonly view of `_surfaces` (same underlying array)
             _surfaces: surfaces,
             _device: device,
+            _options: options,
             drawCallCount: 0,
             gpuFrameTimeMs: 0,
             useHighPrecisionMatrix: useHpm,
@@ -482,6 +494,7 @@ export function disposeEngine(engine: EngineContext): void {
     }
     surfaces.length = 0;
     disposeGpuResourceRetirements(engine);
+    engine._disposeStorageBuffers?.();
     engine._device.destroy();
 }
 
