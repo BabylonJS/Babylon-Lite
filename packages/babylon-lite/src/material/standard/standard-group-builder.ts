@@ -35,6 +35,7 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         const hasMorph = meshes.some((m) => !!m.morphTargets);
 
         let tiSync: ((engine: EngineContext, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
+        let tiUpdate: ((engine: EngineContext, ti: any, hasColor: boolean, indexCount: number) => GPUBuffer | null) | undefined;
         let tiFragment: any;
         let shadowFragment: any;
         let morphFragment: any;
@@ -45,6 +46,7 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
             imports.push(
                 import("../../mesh/thin-instance-gpu.js").then((m) => {
                     tiSync = m.syncThinInstanceBuffers;
+                    tiUpdate = m.syncThinInstanceForDraw;
                 }),
                 import("../../shader/fragments/thin-instance-fragment.js").then((m) => {
                     tiFragment = m.createThinInstanceFragment;
@@ -84,7 +86,7 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         }
 
         const renderableMod = await import("./standard-renderable.js");
-        const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiFragment, shadowFragment, morphFragment, cull });
+        const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiUpdate, tiFragment, shadowFragment, morphFragment, cull });
         // Wire the per-mesh rebuild closure used by material swap + per-pass override.
         builder._rebuildSingle = result.rebuildSingle;
         return result;

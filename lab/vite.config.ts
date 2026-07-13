@@ -170,7 +170,7 @@ function serveReferenceImages(): Plugin {
             server.middlewares.use((req, res, next) => {
                 const url = (req.url ?? "").split("?")[0]; // strip query string
                 const liteHtmlCompat = url.match(
-                    /^\/((?:scene|bundle-scene|bundle-bjs-scene|babylon-ref-scene|bundle-baseline-scene)\d+|demo-[^/]+|dispose-test|leak-test|material-swap-test|picking-test)\.html$/
+                    /^\/((?:scene|bundle-scene|bundle-bjs-scene|babylon-ref-scene|bundle-baseline-scene)\d+|demo-[^/]+|dispose-test|leak-test|material-swap-test|picking-test|billboard-pick-test)\.html$/
                 );
                 if (liteHtmlCompat) {
                     const name = liteHtmlCompat[1];
@@ -327,6 +327,11 @@ function serveReferenceImages(): Plugin {
                         ".wad": "application/octet-stream",
                         ".txt": "text/plain; charset=utf-8",
                         ".md": "text/markdown; charset=utf-8",
+                        // Freeciv tileset grids are plain-text `.spec` / `.tilespec` files read
+                        // via fetch().text(); without an entry here they fall through to the SPA
+                        // HTML fallback and parseSpec chokes on `<!doctype html>`.
+                        ".spec": "text/plain; charset=utf-8",
+                        ".tilespec": "text/plain; charset=utf-8",
                     };
                     const ext = url.slice(url.lastIndexOf(".")).toLowerCase();
                     const assetType = ASSET_TYPES[ext];

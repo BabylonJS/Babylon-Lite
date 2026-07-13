@@ -184,3 +184,21 @@ export function resolveSpriteFrame(atlas: SpriteAtlas, frame: number): number {
     }
     return frame;
 }
+
+/**
+ * Release the GPU texture backing `atlas`.
+ *
+ * A `SpriteAtlas` is a pure data record whose lifetime is governed by its
+ * `Texture2D`; it is deliberately NOT owned by any `Sprite2DLayer` or
+ * `SpriteRenderer` (those hold it `readonly` and never free it), so a single
+ * atlas can back many layers/renderers across many surfaces. That makes the
+ * atlas the caller's to dispose: call this once, after every renderer/layer
+ * referencing it has been disposed. Idempotence is NOT guaranteed — the
+ * underlying `GPUTexture.destroy()` must be called exactly once.
+ *
+ * Note: atlases created via `createGridSpriteAtlas` from an externally-owned
+ * `Texture2D` should be freed by whoever owns that texture, not via this call.
+ */
+export function disposeSpriteAtlas(atlas: SpriteAtlas): void {
+    atlas.texture.texture.destroy();
+}

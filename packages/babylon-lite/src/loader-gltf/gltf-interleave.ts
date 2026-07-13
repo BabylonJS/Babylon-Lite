@@ -213,6 +213,18 @@ export async function buildInterleavedPartial(
         }
         if (accessorIsStrided(json, idx)) {
             const il = resolveStrided(json, binChunk, idx);
+            // Genuine GPU interleaving bakes the attribute's byte offset into the WebGPU
+            // vertex layout (`attributes[].offset`), which must satisfy offset + size <=
+            // arrayStride — i.e. the attribute fits within a single stride. A "block"
+            // layout, where one bufferView's byteStride is shared by attributes whose
+            // byteOffset lies beyond a single stride (e.g. all POSITIONs packed, then all
+            // TEXCOORDs — as in glTF SimpleTexture), can't be expressed that way and would
+            // produce an invalid pipeline. De-stride such attributes into their own tight
+            // buffer instead (offset 0, own arrayStride), so they bind correctly.
+            const elemBytes = il._componentCount * (COMP_BYTES[il._componentType] ?? 4);
+            if (il._offset + elemBytes > il._stride) {
+                return { _tight: destrideToTight(il), _count: il._count };
+            }
             return { _tight: eager ? destrideToTight(il) : null, _il: il, _count: il._count };
         }
         const av = resolveAccessor(json, binChunk, idx);

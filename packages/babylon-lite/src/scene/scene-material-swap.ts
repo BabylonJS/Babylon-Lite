@@ -1,4 +1,5 @@
 import type { SceneContext } from "./scene-core.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 /** @internal Drain _materialSwapQueue: dispose old resources and rebuild renderables. */
 export function processMaterialSwaps(scene: SceneContext): void {
@@ -6,31 +7,28 @@ export function processMaterialSwaps(scene: SceneContext): void {
     if (q.length === 0) {
         return;
     }
-    const device = scene.surface.engine._device;
+    const engine = scene.surface.engine;
     for (const mesh of q) {
         const old = scene._meshDisposables.get(mesh);
         if (old) {
             scene._meshDisposables.delete(mesh);
             // These disposables free the OLD renderable's GPU resources (per-mesh/material UBOs, the
             // GPU-cull state buffers, texture releases). They must NOT run synchronously: the old buffers
-            // may still be referenced by a frame already submitted to the GPU this tick, and destroying
-            // them now hits the validation error "Buffer used in submit while destroyed" (seen when a
+            // may still be referenced by the next frame command buffer, and destroying them now hits the
+            // validation error "Buffer used in submit while destroyed" (seen when a
             // plugin / shadow-receiver variant change swaps a planted mesh's material — e.g. planting a
             // fern or agave). The new renderable is rebuilt below and replaces the old one, so nothing
-            // records the old resources again; defer the teardown until the GPU has drained the
-            // currently-submitted work (onSubmittedWorkDone). Mirrors resizeMeshGeometry.
-            void device.queue
-                .onSubmittedWorkDone()
-                .then(() => {
-                    try {
-                        for (const fn of old) {
-                            fn();
-                        }
-                    } catch {
-                        // Device may have been lost/disposed before the deferred teardown ran.
-                    }
-                })
-                .catch(() => {});
+            // records the old resources again; retire the teardown after the next submitted frame drains.
+            retireGpuResources(engine, () => {
+                for (const fn of old) {
+                    fn();
+                }
+            });
+        }
+        for (let i = scene._renderables.length - 1; i >= 0; i--) {
+            if (scene._renderables[i]!.mesh === mesh) {
+                scene._renderables.splice(i, 1);
+            }
         }
 
         const mat = mesh.material;
