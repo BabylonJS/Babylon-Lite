@@ -26,7 +26,7 @@
  *
  * Run:  npx playwright test --config playwright.perf.config.ts tests/lite/perf/perf-regression.spec.ts
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, acquireContext } from "../parity/parity-fixtures";
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import type { BrowserContext, Page } from "@playwright/test";
@@ -298,7 +298,7 @@ if (!hasBaseline) {
                     skipWithWarning(`[NOT A PERFORMANCE ISSUE] Baseline bundle missing for scene ${scene.id} (${scene.name}) — likely a newly added scene`, testName);
                 }
 
-                const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+                const { context, release } = await acquireContext(browser);
 
                 const currentUrl = `/lite/bundle-scene${scene.id}.html`;
                 const baselineUrl = `/lite/bundle-baseline-scene${scene.id}.html`;
@@ -310,7 +310,7 @@ if (!hasBaseline) {
                     try {
                         return await measurePage(context, url, RUNS_PER_SCENE);
                     } catch (e) {
-                        await context.close();
+                        await release();
                         skipWithWarning(`[NOT A PERFORMANCE ISSUE] ${label} scene failed to load/render: ${(e as Error).message}`, testName);
                     }
                 };
@@ -325,7 +325,7 @@ if (!hasBaseline) {
                     baseline = await measure("Baseline", baselineUrl);
                 }
 
-                await context.close();
+                await release();
 
                 const avgDeltaPct = baseline.avgMs > 0 ? ((current.avgMs - baseline.avgMs) / baseline.avgMs) * 100 : 0;
                 const p95DeltaPct = baseline.p95Ms > 0 ? ((current.p95Ms - baseline.p95Ms) / baseline.p95Ms) * 100 : 0;

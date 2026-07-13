@@ -4,7 +4,7 @@
  * The scene picks the centre camera-facing billboard via `pickBillboardSprite` and floats a
  * small marker mesh in front of it. The BJS oracle does the same with `scene.pickSprite`.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Page } from "@playwright/test";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";

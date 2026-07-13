@@ -21,7 +21,7 @@
  * NOTE: Measures CPU-side time only (JS execution + command encoding + GL
  * submission). GPU execution is async and not captured.
  */
-import { test } from "@playwright/test";
+import { test, acquireContext } from "../../shared/reuse-fixtures";
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import type { BrowserContext } from "@playwright/test";
@@ -223,7 +223,7 @@ const manifest: Manifest = loadExistingManifest();
 test.describe("GL RAF Performance Benchmark", () => {
     for (const scene of SCENES) {
         test(`${scene.label}`, async ({ browser }) => {
-            const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+            const { context, release } = await acquireContext(browser);
 
             const liteUrl = `/gl/scene${scene.id}.html`;
             const bjsUrl = `/gl/babylon-ref-scene${scene.id}.html`;
@@ -235,7 +235,7 @@ test.describe("GL RAF Performance Benchmark", () => {
             const lite = await measurePage(context, liteUrl, DURATION_MS);
             const bjs = await measurePage(context, bjsUrl, DURATION_MS);
 
-            await context.close();
+            await release();
 
             manifest[scene.name] = { lite, bjs };
 
