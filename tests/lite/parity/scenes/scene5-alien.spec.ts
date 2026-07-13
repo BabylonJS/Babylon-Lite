@@ -4,7 +4,7 @@
  * Both the golden reference and Babylon Lite seek to exactly 0.5 s of
  * animation time (via ?seekTime=0.5) so the skeleton pose is identical.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 

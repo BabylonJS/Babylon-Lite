@@ -5,7 +5,7 @@
  * frame 100 (seekTime = 100 / 60), perform the same precise pick at the same
  * CSS canvas coordinate, and move visible markers from the real pick data.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Browser, Page } from "@playwright/test";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";

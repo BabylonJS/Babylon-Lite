@@ -187,7 +187,11 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
         if (missingFeatures.length > 0) {
             throw new Error(`WebGPU device recovery missing required features: ${missingFeatures.join(", ")}`);
         }
-        engine._device = await adapter.requestDevice({ requiredFeatures: state.requiredFeatures });
+        engine._device = await adapter.requestDevice({
+            requiredFeatures: state.requiredFeatures,
+            requiredLimits: { ...engine._options?.requiredLimits, ...engine._storageRequiredLimits },
+        });
+        engine._rebuildStorageBuffers?.();
         // Reconfigure every surface's canvas context against the new device and re-acquire
         // its swapchain texture (the previous device's textures are invalid). The rebuilt
         // frame graphs need fresh color attachments. Per-surface `_swapchainCopySrc` is
@@ -205,6 +209,7 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
             });
             _refreshScRT(surface);
         }
+
         clearSceneBGLCache();
         resizeEngine(engine);
 
@@ -237,6 +242,7 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
     scene._renderables.length = 0;
     scene._uniformUpdaters.length = 0;
     scene._meshDisposables.clear();
+    scene._meshAuxDisposables.clear();
     if (scene._lightGpuState) {
         scene._lightGpuState = undefined;
     }
@@ -331,7 +337,9 @@ function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
         hasTangent: !!mesh._cpuTangents && mesh._cpuTangents.length > 0,
         hasColor: !!mesh._cpuColors && mesh._cpuColors.length > 0,
         indexBuffer: createMappedBuffer(engine, indices, BU.INDEX),
-        indexCount: mesh._gpu.indexCount,
+        // Capacity-reserved meshes retain exact active CPU geometry. Recovery intentionally collapses the
+        // reservation; the next capacity update may grow it again without exposing padded arrays publicly.
+        indexCount: indices.length,
         indexFormat: mesh._cpuIndexFormat ?? mesh._gpu.indexFormat,
     };
 }

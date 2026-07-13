@@ -13,7 +13,7 @@
  * BJS oracle on the same machine as the Lite render keeps the comparison
  * apples-to-apples across platforms (e.g. local Windows vs CI macOS).
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

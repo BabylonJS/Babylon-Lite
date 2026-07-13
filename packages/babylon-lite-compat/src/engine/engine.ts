@@ -20,7 +20,19 @@
  * returns immediately and rendering begins on a subsequent tick.
  */
 
-import { createEngine, startEngine, stopEngine, resizeEngine, setEngineSize, disposeEngine, registerScene, registerSceneWithShadowSupport, onBeforeRender } from "babylon-lite";
+import {
+    createEngine,
+    startEngine,
+    stopEngine,
+    resizeEngine,
+    setEngineSize,
+    disposeEngine,
+    registerScene,
+    registerSceneWithShadowSupport,
+    onBeforeRender,
+    createNullEngine,
+    stepScene,
+} from "babylon-lite";
 import type { EngineContext, EngineOptions, RenderCanvas } from "babylon-lite";
 
 import { LiteCompatError, unsupported } from "../error.js";
@@ -33,8 +45,8 @@ export abstract class AbstractEngine {
 
     /**
      * @internal Whether this engine has no GPU device (a {@link NullEngine}). Headless
-     * engines drive a pure-JS animation/observable loop instead of Babylon Lite's
-     * GPU render loop, so the compat `Scene` skips its Lite scene-context setup.
+     * engines build their Lite scene context with no frame-graph render task and are
+     * advanced by a pure-JS loop that steps Lite's simulation (see {@link NullEngine}).
      */
     public _headless = false;
 
@@ -385,20 +397,26 @@ const NULL_CANVAS = { width: 0, height: 0 } as unknown as RenderCanvas;
 
 /**
  * Babylon.js's `NullEngine` — a headless engine with no GPU device, used to run
- * scene logic (animations, observables, frame timing) without rendering. Babylon
- * Lite has no headless context, so the compat `NullEngine` builds nothing on the
- * GPU: it drives a pure-JS `requestAnimationFrame` loop that advances each scene's
- * CPU animations and fires its before/after-render observables. Scenes constructed
- * against it skip the Lite scene-context build (see `Scene`'s headless branch), so
- * only the deviceless surface (CPU animations, manual 2D-canvas drawing, etc.)
- * works — there is no WebGPU rendering. Extends {@link WebGPUEngine} so it is
- * accepted everywhere a compat engine is (e.g. `new Scene(engine)`).
+ * scene logic (animations, observables, physics stepping, frame timing) without
+ * rendering. Backed by Babylon Lite's real device-less headless engine
+ * (`createNullEngine`): scenes constructed against it build a Lite scene context
+ * with **no** frame-graph render task (`defaultRenderTask: false`), so no swapchain
+ * or GPU resource is ever allocated. The compat `NullEngine` drives a pure-JS
+ * `requestAnimationFrame` loop that advances each scene by the wall-clock delta
+ * between frames via Lite's `stepScene` (which fires the scene's `onBeforeRender`
+ * callbacks — CPU animations,
+ * physics steps, user logic). Only the device-less simulation surface works; adding
+ * meshes with materials (whose deferred GPU builders need a device) is unsupported,
+ * matching Babylon.js's `NullEngine` limitations. Extends {@link WebGPUEngine} so it
+ * is accepted everywhere a compat engine is (e.g. `new Scene(engine)`).
  */
 export class NullEngine extends WebGPUEngine {
     public constructor() {
         super(NULL_CANVAS);
         this._headless = true;
-        // No GPU device to acquire — usable immediately, no `initAsync()` needed.
+        // Back the headless engine with Lite's real device-less engine context. No GPU
+        // device to acquire — usable immediately, no `initAsync()` needed.
+        this._lite = createNullEngine();
         this._initialized = true;
     }
 
@@ -408,8 +426,10 @@ export class NullEngine extends WebGPUEngine {
     }
 
     /**
-     * Drive a pure-JS frame loop: each tick advances every registered scene's CPU
-     * animations + render observables, then runs the user callback(s). No GPU work.
+     * Drive a pure-JS frame loop: each tick advances every registered scene by the
+     * wall-clock delta between frames through Lite's `stepScene` (which fires the scene's before-render
+     * callbacks: CPU animations, physics, render observables), then runs the user
+     * callback(s). No GPU work is recorded or submitted.
      */
     public override runRenderLoop(callback: () => void): void {
         this._loopCallbacks.push(callback);
@@ -423,7 +443,7 @@ export class NullEngine extends WebGPUEngine {
             const deltaMs = current - last;
             last = current;
             for (const scene of this._scenes) {
-                scene._tick(deltaMs);
+                stepScene(this._lite, scene._lite, deltaMs);
             }
             for (const cb of this._loopCallbacks) {
                 cb();

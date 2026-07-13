@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
@@ -6,6 +6,7 @@ import { createGpuPicker, pickAsync } from "../../../packages/babylon-lite/src/p
 import { getPickingPipelineSet } from "../../../packages/babylon-lite/src/picking/picking-pipeline";
 import { pickingShaderSource, pickingThinInstanceShaderSource } from "../../../packages/babylon-lite/src/picking/picking-shader";
 import type { PickDiscardRule, PickOptions } from "../../../packages/babylon-lite/src";
+import type { PickPipelineModule, PickSource } from "../../../packages/babylon-lite/src/picking/pick-contributor";
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
@@ -54,8 +55,17 @@ function makeEngine(): {
     };
 }
 
-function makePickerEngine(): ReturnType<typeof makeEngine> & { pass: { drawCalls: { group2Bound: boolean }[] } } {
+interface MockBufferRecord {
+    descriptor: GPUBufferDescriptor;
+    destroy: ReturnType<typeof vi.fn>;
+}
+
+function makePickerEngine(): ReturnType<typeof makeEngine> & {
+    pass: { drawCalls: { group2Bound: boolean }[] };
+    buffers: MockBufferRecord[];
+} {
     const base = makeEngine();
+    const buffers: MockBufferRecord[] = [];
     const passState = {
         drawCalls: [] as { group2Bound: boolean }[],
         pipeline: null as (GPURenderPipeline & { _bindGroupLayoutCount?: number }) | null,
@@ -96,17 +106,35 @@ function makePickerEngine(): ReturnType<typeof makeEngine> & { pass: { drawCalls
         }) as unknown as GPUTexture;
     device.createBuffer = (descriptor) => {
         const data = new ArrayBuffer(Math.max(256, descriptor.size));
+        const destroy = vi.fn();
         if (descriptor.label === "pick-color-staging") {
             new Uint8Array(data)[2] = 1;
         } else if (descriptor.label === "pick-depth-staging") {
             new Float32Array(data)[0] = 0.5;
         }
-        return {
-            destroy() {},
+        // Mirrors real WebGPU: a GPUBuffer allows only ONE outstanding map at a time — calling mapAsync
+        // again before the previous map's unmap() throws. A tiny setTimeout (rather than resolving on the
+        // same microtask) gives two pickAsync calls fired back-to-back a real chance to interleave, the
+        // same way two rAF-driven GPU picks racing in a browser would.
+        let mapped = false;
+        const buffer = {
+            destroy,
             getMappedRange: () => data,
-            mapAsync: async () => undefined,
-            unmap() {},
+            mapAsync: () =>
+                new Promise<void>((res, rej) => {
+                    if (mapped) {
+                        rej(new Error(`Failed to execute 'mapAsync' on 'GPUBuffer': Buffer already has an outstanding map pending.`));
+                        return;
+                    }
+                    mapped = true;
+                    setTimeout(res, 0);
+                }),
+            unmap() {
+                mapped = false;
+            },
         } as unknown as GPUBuffer;
+        buffers.push({ descriptor: { ...descriptor }, destroy });
+        return buffer;
     };
     device.createBindGroup = (descriptor) => descriptor as unknown as GPUBindGroup;
     device.createCommandEncoder = () =>
@@ -117,7 +145,8 @@ function makePickerEngine(): ReturnType<typeof makeEngine> & { pass: { drawCalls
         }) as unknown as GPUCommandEncoder;
 
     (globalThis as unknown as { GPUMapMode: { READ: number } }).GPUMapMode ??= { READ: 1 };
-    return { ...base, pass: passState };
+    base.engine._retirements = [];
+    return { ...base, pass: passState, buffers };
 }
 
 function makePickScene(engine: EngineContext): { scene: Parameters<typeof createGpuPicker>[0]; mesh: Mesh; discardBuffer: GPUBuffer } {
@@ -158,7 +187,7 @@ function makePickScene(engine: EngineContext): { scene: Parameters<typeof create
                 _vpCache: new Float32Array(16),
             },
             meshes: [mesh],
-            _gsMeshes: [],
+            _pickSources: [],
         } as unknown as Parameters<typeof createGpuPicker>[0],
     };
 }
@@ -260,6 +289,71 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
 
         expect(info.hit).toBe(true);
         expect(pass.drawCalls).toEqual([{ group2Bound: true }]);
+    });
+
+    it("destroys temporary pick buffers after the pick submission readback completes", async () => {
+        const { engine, buffers } = makePickerEngine();
+        const { scene } = makePickScene(engine);
+        const picker = createGpuPicker(scene);
+
+        await pickAsync(picker, 4, 4);
+
+        const persistentLabels = new Set(["pick-color-staging", "pick-depth-staging", "pick-scene-ubo"]);
+        const temporary = buffers.filter(({ descriptor }) => !persistentLabels.has(String(descriptor.label ?? "")));
+        expect(temporary.length).toBeGreaterThan(0);
+        expect(temporary.every(({ destroy }) => destroy.mock.calls.length === 1)).toBe(true);
+        expect(engine._retirements).toHaveLength(0);
+    });
+
+    it("loads lazy pick contributors before creating an encoder that can capture replaceable mesh buffers", async () => {
+        const { engine } = makePickerEngine();
+        const { scene } = makePickScene(engine);
+        let resolveLoad!: (pipeline: PickPipelineModule) => void;
+        const load = vi.fn(
+            () =>
+                new Promise<PickPipelineModule>((resolve) => {
+                    resolveLoad = resolve;
+                })
+        );
+        const source: PickSource = { entity: {}, load };
+        scene._pickSources.push(source);
+        const createCommandEncoder = vi.spyOn(engine._device, "createCommandEncoder");
+        const picker = createGpuPicker(scene);
+
+        const pendingPick = pickAsync(picker, 4, 4);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(load).toHaveBeenCalledTimes(1);
+        expect(createCommandEncoder).not.toHaveBeenCalled();
+
+        resolveLoad({
+            createPickContributor: () => ({
+                draw: (_ctx, baseId) => baseId,
+                resolve: () => {},
+            }),
+        });
+        await pendingPick;
+
+        expect(createCommandEncoder).toHaveBeenCalledTimes(1);
+    });
+
+    // Regression: a picker's 1×1 readback buffers (colorStaging/depthStaging) are lazily created ONCE and
+    // reused for every pick. Two overlapping pickAsync calls on the SAME picker used to race mapAsync on
+    // those shared buffers — e.g. a cursor-following hover preview picking on every pointermove, racing a
+    // pick fired by a click landing before the hover pick unmapped — throwing "Buffer already has an
+    // outstanding map pending." The mock buffer above reproduces that exact throw for a real concurrent
+    // mapAsync call, so this test fails against the old, unserialized pickAsync.
+    it("serializes overlapping pickAsync calls on the same picker instead of racing their shared staging buffers", async () => {
+        const { engine } = makePickerEngine();
+        const { scene } = makePickScene(engine);
+        const picker = createGpuPicker(scene);
+
+        // Fire both WITHOUT awaiting the first — this is the overlap that used to throw.
+        const [a, b] = await Promise.all([pickAsync(picker, 4, 4), pickAsync(picker, 4, 4)]);
+
+        expect(a.hit).toBe(true);
+        expect(b.hit).toBe(true);
     });
 
     it("invalidates cached pipeline sets when the WebGPU device changes", () => {

@@ -11,7 +11,7 @@
  * remain a live DATA comparison: the BJS reference page is launched each run to confirm that
  * BOTH TRIGGER_ENTERED and TRIGGER_EXITED fired by the capture frame, matching Lite.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as path from "path";
 import { captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";

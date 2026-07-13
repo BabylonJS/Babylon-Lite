@@ -33,7 +33,7 @@ import type { EngineContext } from "../engine/engine.js";
 import { _vis } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Camera } from "../camera/camera.js";
-import type { Renderable, DrawBinding, DrawUpdateContext } from "../render/renderable.js";
+import type { Renderable, DrawBinding, DrawUpdateContext, DrawUpdateBatch } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Material } from "../material/material.js";
@@ -87,8 +87,12 @@ export interface RenderTaskConfig {
     cs?: boolean;
     /** Scene-texture transmission settings. `copyCount: 0` copies before every transmissive draw.
      *  `generateMipmaps: false` allocates only mip 0 for the refraction texture and skips mip generation.
-     *  `mipLevelCount` caps the generated chain when a material only samples low explicit LODs. */
-    transmission?: { copyCount?: number; generateMipmaps?: boolean; mipLevelCount?: number };
+     *  `mipLevelCount` caps the generated chain when a material only samples low explicit LODs.
+     *  `grabDepth: true` also snapshots the task's DEPTH attachment at the same mid-pass grab (see
+     *  `TransmissionOptions.grabDepth`). */
+    transmission?: { copyCount?: number; generateMipmaps?: boolean; mipLevelCount?: number; grabDepth?: boolean };
+    /** @internal Skip clustered-light preparation for passes that never run forward lighting. */
+    _skipClusteredLights?: boolean;
 }
 
 /** A frame-graph task that records a single `RenderPass`, binds the scene's `RenderTarget`, and draws renderables into it. */
@@ -113,13 +117,16 @@ export interface RenderTask extends Task {
     /** @internal */
     _transparentBindings: DrawBinding[];
     /** Cached opaque render bundle. Invalidated by renderable list mutations
-     *  (`_lastVersion`) and visibility changes (`_lastVis`). */
+     *  (`_lastVersion`) and the global visibility/resource epoch (`_lastVis`). */
     /** @internal */
     _opaqueBundles: GPURenderBundle[];
     /** @internal */
     _lastVersion: number;
     /** @internal */
     _lastVis: number;
+    /** @internal True once `record()` has run — the task is "live" (GPU target allocated, material batch builders
+     *  present). A runtime `addMesh` after this resolves + re-buckets THIS task immediately (no frame-graph rebuild). */
+    _recorded: boolean;
 
     /** @internal */
     _renderPassDescriptor: GPURenderPassDescriptor;
@@ -134,7 +141,7 @@ export interface RenderTask extends Task {
 
     /** Per-task scene UBO + bind group. Created eagerly in createRenderTask
      *  so renderables can reference `_sceneBG` at `bind()` time. Written each
-     *  frame by `writePassSceneUBO`. Destroyed in `dispose()`. */
+     *  frame by `_writePassSceneUBO`. Destroyed in `dispose()`. */
     /** @internal */
     _sceneUBO: GPUBuffer;
     /** @internal */
@@ -151,11 +158,14 @@ export interface RenderTask extends Task {
     _executeWithTransmission?(sampleCount: number): number;
     /** @internal */
     _targetSignature: RenderTargetSignature;
+    /** @internal Lazy feature work flushed after binding updates and before the render pass. */
+    _updateBatches: DrawUpdateBatch[];
 
-    /** Add a mesh to this task's explicit render list with an optional per-pass material override.
-     *  Resolved at `record()` time via `material._buildGroup._rebuildSingle`,
-     *  so the mesh's material family must already have been registered with
-     *  the scene (so its batch builder has run). */
+    /** Add a mesh to this task's explicit render list with an optional per-pass material override. Resolved via
+     *  `material._buildGroup._rebuildSingle`, so the mesh's material family must already have been registered with the
+     *  scene (its batch builder has run). BEFORE the first `record()` the add is QUEUED and drained at record() time;
+     *  AFTER (a live/runtime add) it is resolved + re-bucketed into THIS task immediately, so the mesh renders on the
+     *  next frame without a `frameGraph.build()` (which would re-allocate shared GPU resources across all tasks). */
     addMesh(mesh: Mesh, opts?: { material?: Material }): void;
     /** @internal */
     _pendingMeshes: { mesh: Mesh; material: Material }[];
@@ -212,6 +222,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _opaqueBundles: [],
         _lastVersion: -1,
         _lastVis: 0,
+        _recorded: false,
         _renderPassDescriptor: { colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
         _depthSrc: config.depth,
@@ -222,6 +233,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _suData: new F32(SCENE_UBO_BYTES / 4),
         _su: [],
         _targetSignature: targetSignature,
+        _updateBatches: [],
         _pendingMeshes: [],
         addMesh(mesh, opts) {
             const material = opts?.material ?? mesh.material;
@@ -229,6 +241,17 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
                 return;
             }
             task._pendingMeshes.push({ mesh, material });
+            if (task._recorded) {
+                // Live (post-record) add: resolve + re-bucket THIS task now — buildBindings clears its bundle cache
+                // so it re-records on the next execute. Deliberately NOT a frame-graph rebuild (that re-allocates the
+                // shared scene UBO + every task's render target mid-frame and crashes the in-flight submit).
+                resolvePendingMeshes(task, sc);
+                // A live add makes the render list explicit (mirrors record(), where a pending mesh forces
+                // _autoFromScene = false). Without this, an auto-mirroring task's next scene-version resync in
+                // prepareRenderTaskPass would clear _renderables and drop the just-added mesh.
+                task._autoFromScene = false;
+                buildBindings(task, engine, targetSignature);
+            }
         },
         record(): void {
             if (task._autoFromScene) {
@@ -258,6 +281,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             refreshTaskSceneBindGroup(task, engine);
             buildBindings(task, engine, targetSignature);
             buildRenderPassDescriptor(task, rt);
+            task._recorded = true; // task is now live — a subsequent addMesh resolves + re-buckets immediately
         },
         execute(): number {
             return executePass(task, engine, targetSignature, updateContext);
@@ -276,6 +300,10 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             task._renderables.length = 0;
             task._opaqueBundles.length = 0;
             task._sceneUBO.destroy();
+            for (const batch of task._updateBatches) {
+                batch.destroy();
+            }
+            task._updateBatches.length = 0;
         },
     };
     return task;
@@ -289,6 +317,12 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
         return;
     }
     let removed = false;
+    for (let i = task._pendingMeshes.length - 1; i >= 0; i--) {
+        if (task._pendingMeshes[i]!.mesh === mesh) {
+            task._pendingMeshes.splice(i, 1);
+            removed = true;
+        }
+    }
     for (let i = task._renderables.length - 1; i >= 0; i--) {
         if (task._renderables[i]!.mesh === mesh) {
             task._renderables.splice(i, 1);
@@ -352,6 +386,11 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
     transparent.length = 0;
     for (const r of task._renderables) {
         const binding = r.bind(eng, targetSignature);
+        for (const batch of binding._updateBatches ?? []) {
+            if (!task._updateBatches.includes(batch)) {
+                task._updateBatches.push(batch);
+            }
+        }
         if (r.isTransparent || r._transmissive) {
             transparent.push(binding);
         } else if (r._direct) {
@@ -413,16 +452,24 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
     // extension raises MAX_LIGHTS after this task was first recorded).
     refreshTaskSceneBindGroup(task, eng);
     const camera = task._config.cam ?? sc.camera;
-    sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
-    writePassSceneUBO(task, eng, sc, camera);
+    if (!task._config._skipClusteredLights && targetSignature._colorFormat) {
+        sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
+    }
+    _writePassSceneUBO(task, eng, sc, camera);
     refreshSceneLightsUBO(eng, sc);
     // Expose the active camera to per-binding `update()` calls. Some renderables
     // (e.g. transparent billboard systems) need it to compute view-space sort
     // depths during their update.
     (context as MutableDrawUpdateContext)._camera = camera;
+    for (const batch of task._updateBatches) {
+        batch.reset();
+    }
     updateBindings(task._opaqueBindings, context);
     updateBindings(task._directBindings, context);
     updateBindings(task._transparentBindings, context);
+    for (const batch of task._updateBatches) {
+        batch.flush(eng);
+    }
     // Per-frame back-to-front sort for transparent bindings — must run AFTER
     // updateBindings so renderables that compute `_worldCenter` inside their
     // own `update()` (billboard systems) are seen with current values.
@@ -484,9 +531,8 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     // Scene bind group (group 0) is task-owned and identical for every draw in this pass.
     pass.setBindGroup(0, sceneBG);
 
-    // Opaque: cached render bundle. Invalidated by scene mutation (_renderableVersion)
-    // or visibility version (_vis). The bundle records group(0) at its start so it can
-    // be replayed standalone (executeBundles inherits no inherited state).
+    // Opaque: cached render bundle. Invalidated by scene mutation (_renderableVersion) or
+    // the global visibility/resource epoch (_vis). The bundle records group(0) at its start.
     if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || opaqueBundles.length === 0) {
         const desc = rt._descriptor;
         const be = eng._device.createRenderBundleEncoder({
@@ -532,8 +578,9 @@ function refreshTaskSceneBindGroup(task: RenderTask, eng: EngineContext): void {
 }
 
 /** Write the canonical SceneUniforms struct to the task-owned scene UBO.
- *  Bails before touching scratch/GPU when all inputs are unchanged. */
-function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneContext, camera: Camera | null): void {
+ *  Bails before touching scratch/GPU when all inputs are unchanged.
+ *  @internal Exported for unit testing of the scene-UBO change-detection guard. */
+export function _writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneContext, camera: Camera | null): void {
     if (!camera) {
         return;
     }
@@ -545,8 +592,14 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
     const img = scene.imageProcessing;
     const envRotationY = scene.envRotationY || 0;
     const wv = camera.worldMatrixVersion;
+    // `envTextures` identity is tracked so an environment loaded (or swapped) AFTER the scene has reached
+    // steady state invalidates this cache. Its spherical-harmonics irradiance and `lodGenerationScale` are
+    // written into the scene UBO below (via `_packSceneUniforms` + the env-SH contributor); without tracking
+    // it, a late env load would change none of the other guarded inputs, so the UBO would never be rewritten
+    // and the model would keep zero irradiance (dark diffuse, specular-only "mirror" look).
+    const envTextures = scene._envTextures;
     const s = task._su;
-    if (s[0] === camera && s[1] === fog && s[2] === wv && s[3] === aspect && s[4] === envRotationY && s[5] === img.exposure && s[6] === img.contrast) {
+    if (s[0] === camera && s[1] === fog && s[2] === wv && s[3] === aspect && s[4] === envRotationY && s[5] === img.exposure && s[6] === img.contrast && s[7] === envTextures) {
         return;
     }
     s[0] = camera;
@@ -556,6 +609,7 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
     s[4] = envRotationY;
     s[5] = img.exposure;
     s[6] = img.contrast;
+    s[7] = envTextures;
 
     const data = task._suData;
     _packSceneUniforms(data, eng, scene, camera, aspect);

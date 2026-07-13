@@ -8,6 +8,7 @@ import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { registerMeshScene, unregisterMeshScene, enqueueMaterialSwap } from "./mesh-scene-registry.js";
 import { processMaterialSwaps } from "./scene-material-swap.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
+import { tickAnimation } from "../animation/animation-tick.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { FogConfig } from "../material/standard/standard-material.js";
 import type { Renderable, PrePassRenderable, SceneUniformUpdater, MeshGroupBuilder } from "../render/renderable.js";
@@ -21,15 +22,24 @@ import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
 import type { ClusteredLightContainer } from "../light/clustered.js";
-import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
+import type { PickSource } from "../picking/pick-contributor.js";
+import type { ToneMapping } from "../material/pbr/tone-mapping.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
     exposure: number;
     contrast: number;
     toneMappingEnabled: boolean;
-    /** "standard" (BJS TONEMAPPING_STANDARD, default) or "aces" (BJS TONEMAPPING_ACES). */
-    toneMappingType?: "standard" | "aces";
+    /**
+     * Tone mapping algorithm applied by PBR materials when `toneMappingEnabled` is true.
+     * Undefined means the default {@link StandardToneMapping} (exponential). Assign a
+     * built-in ({@link StandardToneMapping}, {@link AcesToneMapping}, {@link NeutralToneMapping})
+     * or a custom {@link ToneMapping}.
+     *
+     * This is baked into the PBR shaders at `registerScene()` time. To change it after
+     * registration, use `setSceneImageProcessing` so the affected pipelines are rebuilt.
+     */
+    toneMapping?: ToneMapping;
 }
 
 /** A clipping plane expressed as the coefficients `[a, b, c, d]` of `a·x + b·y + c·z + d`. */
@@ -78,12 +88,12 @@ export interface SceneContext extends RenderingContext {
     _renderables: Renderable[];
     /** @internal Pre-pass work (shadow maps, compute, etc.). */
     _prePasses: PrePassRenderable[];
-    /** GaussianSplatting meshes attached to this scene.  Populated by
-     *  `attachGaussianSplattingMesh`.  Scene-core stays GS-agnostic apart from
-     *  this opaque registry (used by `gpu-picker` to iterate GS meshes without
-     *  scanning `_renderables`). */
+    /** Pick sources — one per optional pickable entity (GS mesh, billboard system, …). Registered by
+     *  the entity module via `registerPickSource` when the entity is added; each is pure data + a
+     *  dynamic-import thunk the GPU picker resolves (once) on the first pick, so rendering the entity
+     *  pulls no pick-pipeline bytes. Scene-core stays pick-agnostic apart from this opaque list. */
     /** @internal */
-    _gsMeshes: GaussianSplattingMesh[];
+    _pickSources: PickSource[];
     /** @internal Scene uniform updaters (one per shared UBO). */
     _uniformUpdaters: SceneUniformUpdater[];
     /** @internal Opt-in feature writers for the SceneUniforms UBO (fog, clip plane, env SH).
@@ -101,6 +111,13 @@ export interface SceneContext extends RenderingContext {
     _disposables: (() => void)[];
     /** @internal Per-mesh cleanup callbacks (mesh UBOs, bind groups). For material swap + dispose. */
     _meshDisposables: Map<Mesh, (() => void)[]>;
+    /** @internal Per-mesh cleanup callbacks for AUX (material-OVERRIDE) view packets that an explicit render
+     *  task registered on a mesh it does not own — e.g. a depth-prepass / SSAO no-colour view of a wall. Kept
+     *  SEPARATE from `_meshDisposables` because a MAIN-material swap (`processMaterialSwaps`, which rebuilds
+     *  only the main renderable) must NOT tear these down: they belong to another task, whose cached bundle
+     *  would then replay a destroyed system UBO ("used in submit while destroyed"). Drained only on a real mesh
+     *  removal (`removeFromScene`) and scene dispose, exactly like `_meshDisposables` minus the swap path. */
+    _meshAuxDisposables: Map<Mesh, (() => void)[]>;
     /** @internal Meshes whose material was changed via setter — drained before each render frame. */
     _materialSwapQueue: Mesh[];
     /** @internal Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
@@ -169,7 +186,7 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         imageProcessing: { exposure: 1.0, contrast: 1.0, toneMappingEnabled: false },
         _renderables: [],
         _prePasses: [],
-        _gsMeshes: [],
+        _pickSources: [],
         _uniformUpdaters: [],
         fixedDeltaMs: 0,
         _beforeRender: [],
@@ -177,6 +194,7 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         _groups: new Map(),
         _disposables: [],
         _meshDisposables: new Map(),
+        _meshAuxDisposables: new Map(),
         _materialSwapQueue: [],
         _renderableVersion: 0,
         _materialEpoch: 0,
@@ -310,9 +328,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             ctx.animationGroups.push(...groups);
             ctx._beforeRender.push((deltaMs: number) => {
                 for (const g of groups) {
-                    if (!g._stopped && g._ctrl) {
-                        g._ctrl.tick(deltaMs, engine);
-                    }
+                    tickAnimation(g, deltaMs, engine);
                 }
             });
         }
@@ -376,6 +392,12 @@ export function disposeScene(scene: SceneContext): void {
         }
     }
     ctx._meshDisposables.clear();
+    for (const fns of ctx._meshAuxDisposables.values()) {
+        for (const fn of fns) {
+            fn();
+        }
+    }
+    ctx._meshAuxDisposables.clear();
     for (const mesh of ctx.meshes) {
         // Free the mesh's shared GPU buffers only when this was its LAST owning scene.
         if (unregisterMeshScene(ctx, mesh)) {
@@ -385,7 +407,7 @@ export function disposeScene(scene: SceneContext): void {
     ctx.meshes.length = 0;
     ctx._renderables.length = 0;
     ctx._prePasses.length = 0;
-    ctx._gsMeshes.length = 0;
+    ctx._pickSources.length = 0;
     ctx._uniformUpdaters.length = 0;
     ctx._beforeRender.length = 0;
     ctx._deferredBuilders.length = 0;

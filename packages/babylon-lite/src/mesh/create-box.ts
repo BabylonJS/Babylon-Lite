@@ -72,27 +72,24 @@ const BOX_INDICES = new U32([
   20, 21, 22,  20, 22, 23,
 ]);
 
-/** Create box CPU data. `size` scales all positions (default 1). */
+/**
+ * Create box CPU data. `size` scales all positions (default 1).
+ *
+ * Always returns freshly-allocated typed arrays (never the shared module-level
+ * constants), matching the other primitive data factories (createSphereData,
+ * createCylinderData, …). This keeps the public API safe: callers may freely
+ * mutate the returned buffers without corrupting subsequent calls.
+ */
 export function createBoxData(size = 1): BoxData {
-    if (size === 1) {
-        return {
-            positions: BOX_POSITIONS,
-            normals: BOX_NORMALS,
-            uvs: BOX_UVS,
-            indices: BOX_INDICES,
-            vertexCount: 24,
-            indexCount: 36,
-        };
-    }
     const positions = new F32(BOX_POSITIONS.length);
     for (let i = 0; i < positions.length; i++) {
         positions[i] = BOX_POSITIONS[i]! * size;
     }
     return {
         positions,
-        normals: BOX_NORMALS,
-        uvs: BOX_UVS,
-        indices: BOX_INDICES,
+        normals: BOX_NORMALS.slice(),
+        uvs: BOX_UVS.slice(),
+        indices: BOX_INDICES.slice(),
         vertexCount: 24,
         indexCount: 36,
     };

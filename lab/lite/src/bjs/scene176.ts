@@ -20,7 +20,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/loaders/glTF";
 
-const MODEL_ROOT = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/MosquitoInAmber/glTF/";
+const MODEL_ROOT = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Models@master/2.0/MosquitoInAmber/glTF/";
 const MODEL_FILE = "MosquitoInAmber.gltf";
 const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
 

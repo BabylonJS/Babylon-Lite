@@ -15,8 +15,18 @@
  *   - signed component types (BYTE/SHORT) → FLOAT (core would otherwise throw)
  *   - `normalized` accessors → FLOAT (core would otherwise read raw ints)
  *   - strided FLOAT accessors → tightly-packed FLOAT (core ignores byteStride)
- * Unsigned non-normalized integer accessors (JOINTS_0, indices) are left intact:
- * they are already tight and the skeleton / index paths expect integers.
+ *   - strided unsigned non-normalized integer accessors that are NOT VEC4 →
+ *     tightly-packed FLOAT (core / interleave bind them as float32 and ignore
+ *     byteStride, so an over-strided UNSIGNED_SHORT/BYTE POSITION — e.g. the
+ *     quantized Duck's UNSIGNED_SHORT VEC3 POSITION with byteStride 8 — is
+ *     otherwise read as raw bytes and renders as corrupted geometry). VEC4 is
+ *     excluded because JOINTS_0/1 are the only unsigned non-normalized VEC4
+ *     vertex attribute, and the skeleton feature reads them as Uint8/Uint16 and
+ *     de-strides them itself — they must never be flattened here.
+ * Tight (non-strided) unsigned integer accessors are left intact: indices and
+ * tight JOINTS_0/1 are already correct and the index / skeleton paths expect
+ * integers. (WEIGHTS_n are FLOAT or normalized, so they are handled by the
+ * FLOAT / `normalized` branches above, not here.)
  */
 
 import { U8, DV } from "../engine/typed-arrays.js";
@@ -93,9 +103,17 @@ const feature: GltfFeature = {
             }
             const componentCount = TYPE_COMPONENTS[a.type] ?? 1;
             const stride = bufferViews[a.bufferView]?.byteStride;
+            const compBytes = COMPONENT_BYTES[a.componentType];
             const signed = a.componentType === BYTE || a.componentType === SHORT;
             const stridedFloat = a.componentType === FLOAT && stride !== undefined && stride !== componentCount * 4;
-            if (signed || a.normalized === true || stridedFloat) {
+            // Over-strided unsigned non-normalized integer attributes (e.g. quantized
+            // UNSIGNED_SHORT/BYTE POSITION with a padded byteStride) are bound as
+            // float32 by the interleave/tight paths, which ignore byteStride — so
+            // de-stride them into tightly-packed FLOAT. VEC4 (JOINTS_n) is excluded.
+            const unsignedInt = a.componentType === UNSIGNED_BYTE || a.componentType === UNSIGNED_SHORT;
+            const stridedUnsignedInt =
+                unsignedInt && a.normalized !== true && a.type !== "VEC4" && stride !== undefined && compBytes !== undefined && stride !== componentCount * compBytes;
+            if (signed || a.normalized === true || stridedFloat || stridedUnsignedInt) {
                 convert.push(i);
                 appended = align4(appended + a.count * componentCount * 4);
             }

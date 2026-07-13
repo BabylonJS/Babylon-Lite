@@ -38,11 +38,10 @@ import {
 } from "babylon-lite";
 import type { Mesh as LiteMesh, SceneNode, EngineContext } from "babylon-lite";
 
-import { Vector3 } from "../math/vector.js";
-import { liteBackedVector3 } from "../math/vector.js";
-import { BoundingInfo } from "../culling/bounding.js";
+import { Vector3, liteBackedVector3 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
 import { Matrix } from "../math/matrix.js";
+import { BoundingInfo } from "../culling/bounding.js";
 import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
@@ -277,15 +276,11 @@ export class AbstractMesh extends TransformNode {
     }
 
     /**
-     * Babylon.js `mesh.getBoundingInfo()` — local-space AABB of this mesh.
-     *
-     * Babylon Lite stores a mesh's local bounds on `boundMin` / `boundMax` (set by
-     * the mesh factories and the glTF loader); when present they are returned
-     * directly. When the bounds were never set but a CPU position buffer is still
-     * retained, the AABB is folded on demand from those positions with Lite's
-     * `computeAabb`. Bounds are reported in local geometry space, matching
-     * `LoadedMesh.getBoundingInfo` and how Lite's `createDefaultCamera` frames
-     * models.
+     * Babylon.js `mesh.getBoundingInfo()` — local-space AABB of this mesh. Babylon
+     * Lite stores `boundMin`/`boundMax` (local space) on factory- and loader-built
+     * meshes; when absent (e.g. a placeholder mesh whose bounds were never computed)
+     * we fold the retained CPU positions through Lite's `computeAabb`. A mesh with
+     * no geometry returns a degenerate zero-size box.
      */
     public getBoundingInfo(): BoundingInfo {
         const lo = this._lite.boundMin;
@@ -296,7 +291,7 @@ export class AbstractMesh extends TransformNode {
         const positions = this._lite._cpuPositions;
         if (positions && positions.length >= 3 && positions.length % 3 === 0) {
             const [min, max] = computeAabb(positions);
-            if (isFinite(min[0]) && isFinite(min[1]) && isFinite(min[2])) {
+            if (Number.isFinite(min[0]) && Number.isFinite(min[1]) && Number.isFinite(min[2]) && Number.isFinite(max[0]) && Number.isFinite(max[1]) && Number.isFinite(max[2])) {
                 return new BoundingInfo(new Vector3(min[0], min[1], min[2]), new Vector3(max[0], max[1], max[2]));
             }
         }

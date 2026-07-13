@@ -2,13 +2,13 @@
 
 A WebGPU-exclusive, tree-shakable 3D engine that produces pixel-identical output to Babylon.js — in a fraction of the bundle size.
 
-📖 **[Documentation](docs/lite/00-welcome.md)** — Start with Welcome, then [Getting Started](docs/lite/01-getting-started.md), the [Feature Comparison](docs/lite/02-feature-comparison.md), and the [Porting Guide](docs/lite/03-porting-guide.md)
+📖 **[Documentation](docs/lite/00-welcome.md)** — Start with Welcome, then [Getting Started](docs/lite/01-getting-started.md), the [Feature Comparison](docs/lite/02-feature-comparison.md), the [Porting Guide](docs/lite/03-porting-guide.md), and [Headless (Null Engine)](docs/lite/05-headless-null-engine.md)
 
 🤝 **[Contributing](CONTRIBUTING.md)** — How to add scenes, tests, and contribute code
 
 ## Prerequisites
 
-- **Node.js** ≥ 18
+- **Node.js** ≥ 20.19 (ESLint 10 requires `^20.19 || ^22.13 || >=24`; CI runs Node 22)
 - **pnpm** ≥ 9 (`corepack enable` to activate the version pinned in `package.json`)
 - A browser with **WebGPU** support (Chrome 113+, Edge 113+, or recent Firefox and Safari)
 

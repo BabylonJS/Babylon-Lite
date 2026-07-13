@@ -16,7 +16,28 @@ import {
     EdgesRenderer,
     OutlineRenderer,
     MirrorTexture,
+    HtmlTexture,
+    HtmlInteractionManager,
+    HtmlRaycastInteractionManager,
+    IsHtmlInCanvasUploadSupported,
+    UploadHtmlElementToTexture,
+    ComputeOverlayCssTransform,
+    GetElementPixelFromUv,
+    IsHtmlInCanvasSupportedNatively,
+    InstallHtmlInCanvasPolyfill,
+    UninstallHtmlInCanvasPolyfill,
     Sound,
+    PointerDragBehavior,
+    BaseSixDofDragBehavior,
+    SixDofDragBehavior,
+    MultiPointerScaleBehavior,
+    AttachToBoxBehavior,
+    FadeInOutBehavior,
+    SurfaceMagnetismBehavior,
+    FollowBehavior,
+    HandConstraintBehavior,
+    InterpolatingBehavior,
+    GeospatialClippingBehavior,
     SceneSerializer,
 } from "../src/unsupported/unsupported-apis";
 import { MeshBuilder } from "../src/meshes/meshes";
@@ -56,12 +77,43 @@ describe("Unsupported API stubs throw on construction", () => {
         ["EdgesRenderer", () => new EdgesRenderer()],
         ["OutlineRenderer", () => new OutlineRenderer()],
         ["MirrorTexture", () => new MirrorTexture()],
+        ["HtmlTexture", () => new HtmlTexture()],
+        ["HtmlInteractionManager", () => new HtmlInteractionManager()],
+        ["HtmlRaycastInteractionManager", () => new HtmlRaycastInteractionManager()],
         ["Sound", () => new Sound()],
+        ["PointerDragBehavior", () => new PointerDragBehavior()],
+        ["BaseSixDofDragBehavior", () => new BaseSixDofDragBehavior()],
+        ["SixDofDragBehavior", () => new SixDofDragBehavior()],
+        ["MultiPointerScaleBehavior", () => new MultiPointerScaleBehavior()],
+        ["AttachToBoxBehavior", () => new AttachToBoxBehavior()],
+        ["FadeInOutBehavior", () => new FadeInOutBehavior()],
+        ["SurfaceMagnetismBehavior", () => new SurfaceMagnetismBehavior()],
+        ["FollowBehavior", () => new FollowBehavior()],
+        ["HandConstraintBehavior", () => new HandConstraintBehavior()],
+        ["InterpolatingBehavior", () => new InterpolatingBehavior()],
+        ["GeospatialClippingBehavior", () => new GeospatialClippingBehavior()],
     ];
 
     it.each(cases)("%s throws LiteCompatError naming the API", (name, construct) => {
         expect(construct).toThrow(LiteCompatError);
         expect(construct).toThrow(new RegExp(name));
+    });
+});
+
+describe("HTML-texture function stubs throw on call", () => {
+    const cases: Array<[string, () => unknown]> = [
+        ["IsHtmlInCanvasUploadSupported", () => IsHtmlInCanvasUploadSupported()],
+        ["UploadHtmlElementToTexture", () => UploadHtmlElementToTexture()],
+        ["ComputeOverlayCssTransform", () => ComputeOverlayCssTransform()],
+        ["GetElementPixelFromUv", () => GetElementPixelFromUv()],
+        ["IsHtmlInCanvasSupportedNatively", () => IsHtmlInCanvasSupportedNatively()],
+        ["InstallHtmlInCanvasPolyfill", () => InstallHtmlInCanvasPolyfill()],
+        ["UninstallHtmlInCanvasPolyfill", () => UninstallHtmlInCanvasPolyfill()],
+    ];
+
+    it.each(cases)("%s throws LiteCompatError naming the API", (name, call) => {
+        expect(call).toThrow(LiteCompatError);
+        expect(call).toThrow(new RegExp(name));
     });
 });
 

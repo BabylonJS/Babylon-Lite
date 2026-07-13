@@ -10,7 +10,7 @@
 import { attachControl, createArcRotateCamera, createEngine, createSceneContext, loadSplat, registerScene, startEngine } from "babylon-lite";
 import type { GaussianSplattingMesh } from "babylon-lite";
 
-const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/Halo_Believe.splat";
+const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_Believe.splat";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();

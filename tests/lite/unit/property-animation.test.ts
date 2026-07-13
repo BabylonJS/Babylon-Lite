@@ -3,8 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createAnimationManager, startAnimationManager, stopAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
 import { goToFrame } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { setAnimationWeight } from "../../../packages/babylon-lite/src/animation/animation-weight";
-import { crossFadeAnimationGroups, enablePropertyAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-pointer-mixer";
+import { enablePropertyAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-pointer-mixer";
+import { enableAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-gltf-mixer";
+import { crossFadeAnimationGroups, fadeAnimationWeight } from "../../../packages/babylon-lite/src/animation/animation-weight-fade";
 import { createPropertyAnimationClip, createPropertyAnimationGroup } from "../../../packages/babylon-lite/src/animation/property-animation";
+import type { AnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group";
+import type { AnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
 
 describe("Property animation", () => {
     it("updates a Babylon-style position.x frame animation without a scene or engine", () => {
@@ -231,6 +235,36 @@ describe("Property animation", () => {
         expect(target.position.x).toBeCloseTo(1);
     });
 
+    it("composes with a pre-existing _preUpdate hook instead of clobbering it", () => {
+        const manager = createAnimationManager();
+        const target = { position: { x: 0 } };
+        const clip = createPropertyAnimationClip("slide", [
+            {
+                path: "position.x",
+                keys: [
+                    { time: 0, value: 1 },
+                    { time: 2, value: 1 },
+                ],
+            },
+        ]);
+        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        enablePropertyAnimationBlending(manager);
+        setAnimationWeight(group, 0);
+
+        // A pre-existing per-manager pre-update hook (e.g. installed by some other feature).
+        const priorHook = vi.fn();
+        (manager as AnimationManager & { _preUpdate?: (m: AnimationManager, dt: number) => void })._preUpdate = priorHook;
+
+        // Scheduling a fade must preserve the prior hook, not overwrite it.
+        fadeAnimationWeight(manager, group, { to: 1, durationMs: 1000 });
+        updateAnimationManager(manager, 250);
+
+        // Prior hook still runs each tick, and the fade advanced the weight.
+        expect(priorHook).toHaveBeenCalledTimes(1);
+        expect(priorHook).toHaveBeenCalledWith(manager, 250);
+        expect(group.weight).toBeCloseTo(0.25);
+    });
+
     it("runs autonomously through requestAnimationFrame", () => {
         const callbacks: Array<(now: number) => void> = [];
         const requestAnimationFrameMock = vi.fn((callback: (now: number) => void) => {
@@ -269,5 +303,27 @@ describe("Property animation", () => {
             stopAnimationManager(manager);
             vi.unstubAllGlobals();
         }
+    });
+
+    it("cross-fade does not clobber an active skeletal blend handler", () => {
+        const manager = createAnimationManager();
+        enableAnimationBlending(manager);
+        const skeletalHandler = (manager as AnimationManager)._taskCategoryHandler;
+        expect(skeletalHandler).toBeDefined();
+
+        const groupA = { name: "a", weight: 1 } as unknown as AnimationGroup;
+        const groupB = { name: "b", weight: 0 } as unknown as AnimationGroup;
+        crossFadeAnimationGroups(manager, groupA, groupB, { durationMs: 1000 });
+
+        // The single category-handler slot must still hold the skeletal handler — before the fix,
+        // the fade re-registered the property handler here and blended nothing on glTF groups.
+        expect((manager as AnimationManager)._taskCategoryHandler).toBe(skeletalHandler);
+
+        // The fade tween is applied via the per-manager pre-update hook, independent of the active
+        // mixer. Suppress the skeletal handler (stub groups have no glTF mixer) to isolate it.
+        (manager as AnimationManager)._taskCategoryHandler = undefined;
+        updateAnimationManager(manager, 250);
+        expect(groupA.weight).toBeCloseTo(0.75);
+        expect(groupB.weight).toBeCloseTo(0.25);
     });
 });

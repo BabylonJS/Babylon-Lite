@@ -47,6 +47,14 @@ export interface ThinInstanceData {
     _colorGpuBufferStorage: boolean;
     /** @internal Last color version uploaded to GPU. */
     _colorGpuVersion: number;
+    /** @internal Stable indirect args buffer used by cached thin-instance render bundles. */
+    _drawArgsBuffer?: GPUBuffer | null;
+    /** @internal CPU mirror for the indirect args buffer. */
+    _drawArgsData?: Uint32Array;
+    /** @internal Last index count written to `_drawArgsBuffer`. */
+    _drawArgsIndexCount?: number;
+    /** @internal Last instance count observed by a cached direct draw or written to `_drawArgsBuffer`. */
+    _drawArgsInstanceCount?: number;
 
     /** @internal Lazy per-mesh F32 upload scratch. Allocated by thin-instance-gpu.ts only
      *  when `matrices` is F64-backed (HPM-on); F32-backed input takes a direct
@@ -55,6 +63,13 @@ export interface ThinInstanceData {
 
     /** @internal Opt-in flag for GPU frustum culling + indirect drawing. */
     _gpuCullingEnabled: boolean;
+
+    /** @internal Extra world-space radius added to every instance's culling sphere
+     *  (see `setThinInstanceCullBoundsPad`). Undefined reads as 0. */
+    _cullBoundsPad?: number;
+    /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
+     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
+    _refCount?: number;
 }
 
 /** Set all instances from a pre-built matrix array. */
@@ -93,8 +108,9 @@ export function setThinInstances(mesh: Mesh, matrices: Float32Array | Float64Arr
  *  draw FRAME-TO-FRAME on an established thin-instanced mesh WITHOUT recreating the GPU buffer (which would
  *  invalidate any cached render/shadow bundle that captured the old buffer handle). Pre-size the buffer once
  *  with `setThinInstances(mesh, matrices, capacity)`, then call this each update with `count <= capacity`.
- *  The draw reads `count` live, so the bundle stays valid. Caller must keep writing into the SAME `matrices`
- *  array the mesh already references. No-op if the mesh isn't thin-instanced yet. */
+ *  Count changes promote cached direct draws to stable indirect arguments, so the bundle stays valid.
+ *  Caller must keep writing into the SAME `matrices` array the mesh already references. No-op if the mesh
+ *  isn't thin-instanced yet. */
 export function setThinInstanceCount(mesh: Mesh, count: number): void {
     const ti = mesh.thinInstances;
     if (!ti) {
@@ -104,6 +120,42 @@ export function setThinInstanceCount(mesh: Mesh, count: number): void {
     ti._version++;
     ti._dirtyMin = 0;
     ti._dirtyMax = count;
+}
+
+/** Change only the active instance draw count for an established fixed-capacity pool.
+ *
+ * Unlike `setThinInstanceCount`, this does not mark matrix or color data dirty. Callers that expose
+ * newly written slots must separately mark their exact dirty ranges before the next draw. The pool
+ * must have completed an initial full-capacity GPU synchronization. */
+export function setThinInstanceDrawCount(mesh: Mesh, count: number): void {
+    const ti = mesh.thinInstances;
+    if (!ti) {
+        return;
+    }
+    if (!Number.isInteger(count) || count < 0 || count > ti._capacity) {
+        throw new RangeError(`Thin instance draw count ${count} must be an integer between 0 and capacity ${ti._capacity}`);
+    }
+    if (ti.count === count) {
+        return;
+    }
+    if (!ti._gpuBuffer || ti._gpuVersion !== ti._version || (ti.colors && (!ti._colorGpuBuffer || ti._colorGpuVersion !== ti._colorVersion))) {
+        throw new Error("setThinInstanceDrawCount requires a fully synchronized fixed-capacity pool");
+    }
+    ti.count = count;
+    ti._gpuVersion = ++ti._version;
+}
+
+/** Opt a fixed-capacity thin-instance pool into stable indirect draw arguments before its count changes.
+ * The buffer is created on the next normal GPU sync, allowing scene warm-up to absorb its visibility epoch
+ * instead of lazily invalidating cached render bundles on the first interactive count transition. */
+export function enableThinInstanceDynamicDrawCount(mesh: Mesh): void {
+    const ti = mesh.thinInstances;
+    if (!ti) {
+        throw new Error("enableThinInstanceDynamicDrawCount requires mesh.thinInstances");
+    }
+    if (!ti._drawArgsBuffer) {
+        ti._drawArgsInstanceCount = -1;
+    }
 }
 
 /** Add one instance. Returns its index. Grows capacity as needed. */
@@ -185,6 +237,7 @@ export function flushThinInstances(mesh: Mesh): void {
 export function setThinInstanceColors(mesh: Mesh, colors: Float32Array): void {
     const ti = mesh.thinInstances!;
     ti.colors = colors;
+    ti._version++;
     ti._colorVersion++;
     ti._colorDirtyMin = 0;
     ti._colorDirtyMax = ti.count;
@@ -202,6 +255,7 @@ export function setThinInstanceColor(mesh: Mesh, index: number, r: number, g: nu
     c[o + 1] = g;
     c[o + 2] = b;
     c[o + 3] = a;
+    ti._version++;
     ti._colorVersion++;
     ti._colorDirtyMin = Math.min(ti._colorDirtyMin, index);
     ti._colorDirtyMax = Math.max(ti._colorDirtyMax, index + 1);
@@ -224,4 +278,24 @@ export function enableThinInstanceGpuCulling(mesh: Mesh, enabled = true): void {
     ti._gpuCullingEnabled = enabled;
     ti._gpuVersion = -1;
     ti._colorGpuVersion = -1;
+}
+
+/** Set an extra WORLD-SPACE radius added to every instance's GPU-culling sphere.
+ *
+ * The culler derives each instance's sphere from the prototype's authored vertex bounds, so a
+ * vertex shader that DISPLACES geometry beyond them — terrain-following height offsets, tall wind
+ * sway, growth animations — can move a visible instance outside its sphere and pop it at the
+ * screen edge. The usual workaround is disabling culling for the whole mesh; padding the sphere
+ * by the maximum shader displacement instead keeps culling both correct and enabled.
+ *
+ * The pad is in world units, applied after per-instance scaling. 0 restores the exact authored
+ * bounds. Takes effect on the next culled pass (the culler reads it when writing its per-pass
+ * params), so it can be changed live.
+ */
+export function setThinInstanceCullBoundsPad(mesh: Mesh, pad: number): void {
+    const ti = mesh.thinInstances;
+    if (!ti) {
+        throw new Error("setThinInstanceCullBoundsPad requires mesh.thinInstances");
+    }
+    ti._cullBoundsPad = pad;
 }

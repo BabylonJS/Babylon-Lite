@@ -1,6 +1,12 @@
 // Core math types — plain typed objects, not classes.
 // Pure functions operate on these. Data-oriented for GPU buffer packing.
 
+/** 2-component vector (uv, screen-space, 2D scale) */
+export interface Vec2 {
+    x: number;
+    y: number;
+}
+
 /** 3-component vector (position, direction, color) */
 export interface Vec3 {
     x: number;

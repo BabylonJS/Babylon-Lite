@@ -20,6 +20,7 @@ import {
     setClipPlane,
     loadEnvironment,
     loadDdsEnvironment,
+    loadHdrEnvironment,
     createHemisphericLight,
     addToScene,
     createAnimationManager,
@@ -31,6 +32,7 @@ import type { SceneContext, Camera as LiteCamera, ArcRotateCamera as LiteArcRota
 
 import { Color3, Color4 } from "../math/color.js";
 import type { Plane } from "../math/plane.js";
+import { HavokPlugin, PhysicsEngine } from "../physics/physics.js";
 import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
 import type { Camera } from "../cameras/cameras.js";
@@ -39,7 +41,7 @@ import { StandardMaterial } from "../materials/materials.js";
 import { Animatable } from "../animations/animation.js";
 import type { Animation } from "../animations/animation.js";
 import { AnimationGroup } from "../animations/animation.js";
-import type { CubeTexture } from "../textures/textures.js";
+import type { CubeTexture, HDRCubeTexture } from "../textures/textures.js";
 import type { WebGPUEngine } from "../engine/engine.js";
 import { AbstractScene } from "./abstract-scene.js";
 
@@ -66,21 +68,6 @@ interface DefaultEnvironmentOptions {
     skyboxFromEnv?: boolean;
     /** @internal Apply EnvironmentHelper image processing (only set by `createDefaultEnvironment`). */
     applyImageProcessing?: boolean;
-}
-
-/**
- * Minimal `SceneContext` stand-in for a headless ({@link NullEngine}) scene, which
- * has no Lite GPU context. It satisfies only the plain data accessors a deviceless
- * scene may touch (`clearColor` / `camera` / `imageProcessing` / `animationGroups`);
- * no Lite scene method is ever invoked on it.
- */
-function createHeadlessLite(): SceneContext {
-    return {
-        clearColor: { r: 0, g: 0, b: 0, a: 1 },
-        camera: null,
-        imageProcessing: { exposure: 1, contrast: 1, toneMappingEnabled: false },
-        animationGroups: [],
-    } as unknown as SceneContext;
 }
 
 export class Scene extends AbstractScene {
@@ -147,7 +134,7 @@ export class Scene extends AbstractScene {
      */
     private readonly _pendingAdds: Array<() => void> = [];
     private _started = false;
-    private _envTexture: CubeTexture | null = null;
+    private _envTexture: CubeTexture | HDRCubeTexture | null = null;
     private _defaultEnvOptions: DefaultEnvironmentOptions | null = null;
     private readonly _shadowGenerators: Array<{ _build(engine: import("babylon-lite").EngineContext): void; _liteGen?: unknown }> = [];
     private readonly _pendingTextures: Array<Promise<void>> = [];
@@ -161,8 +148,6 @@ export class Scene extends AbstractScene {
     private _blendManager: AnimationManager | null = null;
     private _ambientColor = new Color3(0, 0, 0);
     private _environmentIntensity = 1;
-    /** @internal Whether this scene is bound to a headless `NullEngine` (no GPU context). */
-    private _headless = false;
     /** @internal Tracks whether at least one frame has ticked (gates `onAfterRenderObservable`). */
     private _renderedAFrame = false;
     /** @internal `NodeMaterial`s whose async parse the engine drives after shadow generators are built. */
@@ -177,13 +162,14 @@ export class Scene extends AbstractScene {
         super();
         this._engine = engine;
         if (engine._headless) {
-            // Headless (`NullEngine`): no Lite scene context — the engine drives a
-            // pure-JS tick loop (see `NullEngine.runRenderLoop`) that calls `_tick`.
-            // Only the deviceless surface (CPU animations, manual canvas drawing)
-            // works; there is no GPU rendering. The stub `_lite` satisfies the few
-            // plain accessors a headless scene may touch (camera / clearColor / …).
-            this._headless = true;
-            this._lite = createHeadlessLite();
+            // Headless (`NullEngine`): back the scene with a real Lite context that has
+            // NO frame-graph render task (`defaultRenderTask: false`), so no swapchain or
+            // GPU resource is ever built. The engine drives it via Lite's `stepScene`,
+            // which fires the same before-render hook the GPU path uses (CPU animations,
+            // physics, render observables). Only the device-less surface works; adding
+            // meshes with materials is unsupported (their builders need a device).
+            this._lite = createSceneContext(engine._lite, { defaultRenderTask: false });
+            onBeforeRender(this._lite, (deltaMs: number) => this._tick(deltaMs));
             engine._registerScene(this);
             return;
         }
@@ -547,10 +533,10 @@ export class Scene extends AbstractScene {
 
     // ── Environment / IBL (Babylon.js `scene.environmentTexture` + `createDefaultEnvironment`) ──
 
-    public get environmentTexture(): CubeTexture | null {
+    public get environmentTexture(): CubeTexture | HDRCubeTexture | null {
         return this._envTexture;
     }
-    public set environmentTexture(value: CubeTexture | null) {
+    public set environmentTexture(value: CubeTexture | HDRCubeTexture | null) {
         this._envTexture = value;
     }
 
@@ -577,7 +563,7 @@ export class Scene extends AbstractScene {
      * loaded `.env` specular cubemap as an HDR skybox, so this records the env URL (if
      * not already set) and flags a skybox-from-environment load at engine start.
      */
-    public createDefaultSkybox(texture?: CubeTexture, _pbr?: boolean, scale?: number, _blur?: number, _setGlobalEnv?: boolean): { dispose(): void } {
+    public createDefaultSkybox(texture?: CubeTexture | HDRCubeTexture, _pbr?: boolean, scale?: number, _blur?: number, _setGlobalEnv?: boolean): { dispose(): void } {
         if (texture) {
             this._envTexture = texture;
         }
@@ -620,7 +606,17 @@ export class Scene extends AbstractScene {
         // Babylon.js `CubeTexture.CreateFromPrefilteredData` accepts both `.env`
         // and `.dds` prefiltered environments. Babylon Lite splits these into two
         // loaders: `loadEnvironment` (`.env`) and `loadDdsEnvironment` (`.dds`).
-        if (envUrl.toLowerCase().endsWith(".dds")) {
+        if (this._envTexture?._envLoaderKind === "hdr") {
+            await loadHdrEnvironment(this._lite, envUrl, {
+                // Forward the BJS `HDRCubeTexture` `size` as Lite's cubemap `faceSize`
+                // so callers that request e.g. 512 are honoured (Lite otherwise defaults
+                // to 256). Only `HDRCubeTexture` carries `_envLoaderKind === "hdr"`.
+                faceSize: (this._envTexture as HDRCubeTexture).size,
+                skyboxSize: opts?.skyboxSize ?? 1000,
+                useCubemapSkybox: !!skyboxUrl,
+                skipGround: !opts?.createGround,
+            });
+        } else if (envUrl.toLowerCase().endsWith(".dds")) {
             await loadDdsEnvironment(this._lite, envUrl, {
                 brdfUrl: DEFAULT_BRDF_URL,
                 skipSkybox: !opts?.createSkybox,
@@ -696,6 +692,51 @@ export class Scene extends AbstractScene {
         return unsupported("Scene.pickWithRay", "Synchronous CPU ray-mesh intersection is not implemented in Babylon Lite.");
     }
 
+    /** @internal The active Physics V2 engine, once `enablePhysics` has wired one. */
+    private _physicsEngine: PhysicsEngine | null = null;
+
+    /**
+     * Babylon.js `scene.enablePhysics(gravity, plugin)`. Wires the given Havok V2
+     * {@link HavokPlugin} to this scene, creating the native Lite physics world and
+     * registering per-frame stepping. The plugin's `useDeltaForWorldStep` flag
+     * controls whether the world advances by elapsed frame time (refresh-rate
+     * independent — issue #332) or a fixed `1/60` step.
+     *
+     * Bodies are created with the native `createPhysicsAggregate` /
+     * `createPhysicsBody` API against `scene.getPhysicsEngine().getPhysicsPlugin().world`.
+     * @returns `true` once physics is enabled.
+     */
+    public enablePhysics(gravity?: { x: number; y: number; z: number } | null, plugin?: HavokPlugin): boolean {
+        if (this._engine._headless) {
+            return unsupported("Scene.enablePhysics", "A headless (NullEngine) scene has no render loop to step physics.");
+        }
+        if (!(plugin instanceof HavokPlugin)) {
+            return unsupported("Scene.enablePhysics", "Pass a `HavokPlugin` instance (Babylon Lite physics is Havok-V2 only).");
+        }
+        const g = gravity ?? { x: 0, y: -9.81, z: 0 };
+        plugin._attachToLiteScene(this._lite, g);
+        this._physicsEngine = new PhysicsEngine(plugin, g);
+        return true;
+    }
+
+    /** Babylon.js `scene.getPhysicsEngine()` — the active Physics V2 engine, or `null`. */
+    public getPhysicsEngine(): PhysicsEngine | null {
+        return this._physicsEngine;
+    }
+
+    /** Babylon.js `scene.isPhysicsEnabled()`. */
+    public isPhysicsEnabled(): boolean {
+        return this._physicsEngine !== null;
+    }
+
+    /** Babylon.js `scene.disablePhysicsEngine()` — release the active physics world. */
+    public disablePhysicsEngine(): void {
+        if (this._physicsEngine) {
+            this._physicsEngine.dispose();
+            this._physicsEngine = null;
+        }
+    }
+
     /**
      * Babylon.js `scene.beginDirectAnimation(target, animations, from, to, loop, speedRatio?)`.
      * Drives the given `Animation`s on the CPU each frame, writing onto the target's
@@ -757,9 +798,6 @@ export class Scene extends AbstractScene {
 
     public dispose(): void {
         this.onDisposeObservable.notifyObservers(this);
-        // A headless scene has no Lite context to dispose (see `createHeadlessLite`).
-        if (!this._headless) {
-            disposeScene(this._lite);
-        }
+        disposeScene(this._lite);
     }
 }

@@ -17,7 +17,7 @@
  * are tolerated; the parity comparison still validates that BJS and Lite end
  * up in the same final pose given the same pointer events.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as fs from "fs";
 import * as path from "path";
 import type { Page } from "@playwright/test";

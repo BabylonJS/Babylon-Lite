@@ -43,6 +43,7 @@ import { spriteBlendAlpha, spriteBlendAdditive, spriteBlendPremultiplied, sprite
 import { createSprite2DCustomShader } from "../../../packages/babylon-lite/src/sprite/sprite-custom-shader";
 import { setSprite2DCoverageGamma } from "../../../packages/babylon-lite/src/sprite/sprite-2d-coverage-gamma";
 import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
+import { disposeSpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
@@ -796,5 +797,129 @@ describe("depth-hosted per-instance Z (slot [13] of the per-instance vertex buff
         // New sprite picks up the new layer default.
         addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [10, 10] });
         expect(layer._instanceData[1 * DEPTH_INSTANCE_FLOATS_PER_SPRITE + 13]).toBeCloseTo(0.8);
+    });
+});
+
+describe("shared pipeline cache across SpriteRenderer instances", () => {
+    it("reuses one compiled pipeline for multiple renderers on the same device (same blend mode)", () => {
+        const { engine, counters } = makeMockEngine();
+        const atlas = makeMockAtlas();
+
+        const srA = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        expect(counters.pipelinesBuilt).toBe(1);
+        expect(_spriteRendererPipelineCacheSize(srA)).toBe(1);
+
+        // A second renderer on the same device with an identical blend mode must
+        // hit the shared cache — no additional pipeline compile.
+        const srB = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        expect(counters.pipelinesBuilt).toBe(1);
+        expect(_spriteRendererPipelineCacheSize(srB)).toBe(1);
+
+        // Balance the shared-cache refcount so process-wide state doesn't leak across tests.
+        disposeSpriteRenderer(srA);
+        disposeSpriteRenderer(srB);
+    });
+
+    it("disposing one renderer does not clear pipelines still needed by another", () => {
+        const { engine, counters } = makeMockEngine();
+        const atlas = makeMockAtlas();
+
+        const srA = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        const srB = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        expect(counters.pipelinesBuilt).toBe(1);
+
+        // Disposing A releases its refcount but must NOT wipe the shared cache
+        // while B is still alive.
+        disposeSpriteRenderer(srA);
+        expect(_spriteRendererPipelineCacheSize(srB)).toBe(1);
+
+        // A new renderer on the same device still reuses the cached pipeline.
+        const srC = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        expect(counters.pipelinesBuilt).toBe(1);
+
+        // Balance the shared-cache refcount so process-wide state doesn't leak across tests.
+        disposeSpriteRenderer(srB);
+        disposeSpriteRenderer(srC);
+    });
+});
+
+describe("disposeSpriteAtlas", () => {
+    function makeDestroyableAtlas(): { atlas: SpriteAtlas; destroy: ReturnType<typeof vi.fn> } {
+        const destroy = vi.fn();
+        const texture = {
+            texture: { destroy } as unknown as GPUTexture,
+            view: {} as GPUTextureView,
+            sampler: {} as GPUSampler,
+            width: 128,
+            height: 128,
+        } satisfies Texture2D;
+        const atlas: SpriteAtlas = {
+            texture,
+            textureSizePx: [128, 128],
+            frames: [{ uvMin: [0, 0], uvMax: [1, 1], sourceSizePx: [128, 128], pivot: [0.5, 0.5] }],
+            premultipliedAlpha: true,
+        };
+        return { atlas, destroy };
+    }
+
+    it("destroys the backing GPU texture", () => {
+        const { atlas, destroy } = makeDestroyableAtlas();
+        disposeSpriteAtlas(atlas);
+        expect(destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("is decoupled from renderer disposal — disposing a SpriteRenderer never frees the atlas texture", () => {
+        const { engine } = makeMockEngine();
+        const { atlas, destroy } = makeDestroyableAtlas();
+        const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        disposeSpriteRenderer(sr);
+        expect(destroy).not.toHaveBeenCalled();
+
+        // The atlas is the caller's to free, and can be shared across renderers.
+        disposeSpriteAtlas(atlas);
+        expect(destroy).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("secondary-surface rendering (multi-canvas)", () => {
+    it("records its render pass into its OWN surface's swapchain, not the engine's primary surface", () => {
+        // Regression: a SpriteRenderer attached to a secondary surface (createSurface)
+        // must target THAT surface's swapchain view — not `engine.scRT._colorView`
+        // (the engine's primary surface). The text renderer already used the per-surface
+        // view; the sprite renderer fell back to the engine's, so with the primary surface
+        // bound to a throwaway offscreen canvas (multi-canvas / shared-engine model), sprites
+        // drew to the offscreen target and the real canvas rendered blank/black.
+        const { engine } = makeMockEngine();
+        const primaryView = engine.scRT._colorView;
+        const secondaryView = { _tag: "secondary-color-view" };
+
+        // Distinct secondary surface: shares the engine/device, owns its own swapchain view.
+        const secondarySurface = {
+            engine,
+            canvas: { width: 640, height: 480 } as HTMLCanvasElement,
+            format: engine.format,
+            _renderingContexts: [],
+            scRT: { _colorView: secondaryView },
+        } as unknown as Parameters<typeof createSpriteRenderer>[0];
+
+        // Capture the color-attachment view handed to beginRenderPass.
+        let capturedView: unknown;
+        const pass = { executeBundles: vi.fn(), end: vi.fn() };
+        (engine as unknown as { _currentEncoder: unknown })._currentEncoder = {
+            beginRenderPass: vi.fn((desc: GPURenderPassDescriptor) => {
+                capturedView = (desc.colorAttachments as GPURenderPassColorAttachment[])[0]?.view;
+                return pass;
+            }),
+        };
+
+        // Clear-only renderer (no layers): the pass opens + clears the target, then ends.
+        const sr = createSpriteRenderer(secondarySurface, { layers: [], clear: true });
+        (sr as unknown as { _record(): number })._record();
+
+        expect(capturedView).toBe(secondaryView);
+        expect(capturedView).not.toBe(primaryView);
+
+        // Balance the shared-cache refcount and free per-renderer GPU resources.
+        disposeSpriteRenderer(sr);
     });
 });

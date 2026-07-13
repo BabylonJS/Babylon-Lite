@@ -15,6 +15,8 @@ export {
     VERSION,
 } from "./engine/engine.js";
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
+export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
+export type { NullEngineOptions } from "./engine/null-engine.js";
 export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings } from "./engine/gpu-task-timing.js";
 export type { RenderTaskGpuTiming, RenderTaskGpuTimings, RenderTaskGpuTimingStatus } from "./engine/gpu-task-timing.js";
 export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./engine/surface.js";
@@ -51,7 +53,8 @@ export { setSubtreeVisible } from "./scene/visibility.js";
 // RenderTask, and user tasks can render offscreen RTTs, overlays, etc.
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
-export { addRenderPass, addTask, addTaskAtStart, addTaskBefore } from "./frame-graph/frame-graph-actions.js";
+export { buildFrameGraphTask } from "./frame-graph/frame-graph.js";
+export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter } from "./frame-graph/frame-graph-actions.js";
 export { createFrameGraphContext, registerFrameGraphContext, unregisterFrameGraphContext, disposeFrameGraphContext } from "./frame-graph/frame-graph-context.js";
 export type { FrameGraphContext, FrameGraphContextOptions } from "./frame-graph/frame-graph-context.js";
 export type { Task } from "./frame-graph/task.js";
@@ -60,6 +63,8 @@ export { addPassDependencies } from "./frame-graph/pass.js";
 export type { RenderPass } from "./frame-graph/render-pass.js";
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
 export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export type { DepthPyramid, DepthPyramidOptions, DepthPyramidReduce, DepthPyramidTaskOptions } from "./frame-graph/depth-pyramid.js";
+export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-pyramid.js";
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
 export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
@@ -116,6 +121,8 @@ export type { TaaPostProcessTask, TaaPostProcessTaskConfig } from "./post-proces
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
 export { attachControl, setCameraLimits } from "./camera/arc-rotate-controls.js";
 export type { AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-rotate-controls.js";
+export { interpolateArcRotateCamera } from "./camera/arc-rotate-interpolate.js";
+export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "./camera/arc-rotate-interpolate.js";
 export { createFreeCamera } from "./camera/free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
 
@@ -165,6 +172,8 @@ export {
     createTube,
     createExtrudeShape,
     createMeshFromData,
+    updateMeshGeometry,
+    updateMeshGeometryCapacity,
     updateMeshPositions,
     updateMeshNormals,
     updateMeshColors,
@@ -174,6 +183,9 @@ export {
     resizeMeshGeometry,
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
+export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
+export { createBoxData } from "./mesh/create-box.js";
+export type { BoxData } from "./mesh/create-box.js";
 export { createSphereData } from "./mesh/create-sphere.js";
 export type { SphereMeshData } from "./mesh/create-sphere.js";
 export { createCylinderData } from "./mesh/create-cylinder.js";
@@ -187,9 +199,15 @@ export type { CsgSolid } from "./mesh/csg.js";
 export { initializeCsg2Async, isCsg2Ready, createCsg2FromMesh, csg2Subtract, csg2Intersect, csg2Add, createMeshFromCsg2, createMeshesFromCsg2, disposeCsg2 } from "./mesh/csg2.js";
 export type { Csg2Solid } from "./mesh/csg2.js";
 
+// ─── Resources ───────────────────────────────────────────────────────
+export { createStorageBuffer, updateStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
+export type { StorageBuffer } from "./resource/storage-buffer.js";
+
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
 export { createTexture2DFromPixels, updateTexture2DFromPixels, createRenderTexture2D } from "./texture/pixels-texture.js";
+export { createTexture3DFromPixels } from "./texture/pixels-texture.js";
+export type { Texture3D, PixelsTexture3DOptions } from "./texture/pixels-texture.js";
 export type { PixelsTexture2DOptions, RenderTexture2DOptions } from "./texture/pixels-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
@@ -221,6 +239,13 @@ export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./
 export { createMaterialView } from "./material/material-view.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
+export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
+export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
+export { rebuildScenePbrPipelines } from "./scene/scene-rebuild.js";
+export type { ToneMapping } from "./material/pbr/tone-mapping.js";
+export { StandardToneMapping } from "./material/pbr/tone-mapping.js";
+export { AcesToneMapping } from "./material/pbr/pbr-aces-wgsl.js";
+export { NeutralToneMapping } from "./material/pbr/pbr-neutral-wgsl.js";
 export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
 export { enableMaterialStencil } from "./material/enable-material-stencil.js";
@@ -277,12 +302,15 @@ export { createAnimationController } from "./skeleton/skeleton-updater.js";
 export { enableBoneControl, getBoneByName, setBonePosition, setBoneRotationQuaternion, setBoneScaling, setBoneVisible, clearBoneOverride } from "./skeleton/bone-control.js";
 export type { Skeleton, Bone } from "./skeleton/bone-control.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
+export { runFrameInterpolation } from "./animation/frame-interpolation.js";
+export type { FrameInterpolationStep } from "./animation/frame-interpolation.js";
 export { AnimationGroupMaskMode, createAnimationGroupMask, animationGroupMaskRetainsTarget } from "./animation/animation-group-mask.js";
 export type { AnimationGroupMask } from "./animation/animation-group-mask.js";
 export { setAnimationWeight } from "./animation/animation-weight.js";
-export { crossFadeAnimationGroups, enablePropertyAnimationBlending, fadeAnimationWeight } from "./animation/weighted-pointer-mixer.js";
+export { enablePropertyAnimationBlending } from "./animation/weighted-pointer-mixer.js";
+export { crossFadeAnimationGroups, fadeAnimationWeight } from "./animation/animation-weight-fade.js";
 export { enableAnimationBlending, setAnimationAdditive } from "./animation/weighted-gltf-mixer.js";
-export type { CrossFadeAnimationGroupsOptions, FadeAnimationWeightOptions } from "./animation/weighted-pointer-mixer.js";
+export type { CrossFadeAnimationGroupsOptions, FadeAnimationWeightOptions } from "./animation/animation-weight-fade.js";
 export type { AnimationAdditiveOptions } from "./animation/weighted-gltf-mixer.js";
 export {
     addAnimationTask,
@@ -300,8 +328,8 @@ export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./ani
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
-export { bakeVat, attachVat } from "./vat/vat-baker.js";
-export type { VatBakeResult, VatClip, VatHandle } from "./vat/vat-baker.js";
+export { bakeVat, bakeVatMany, attachVat } from "./vat/vat-baker.js";
+export type { VatBakeResult, VatBakeOptions, VatBakeTarget, VatClip, VatHandle } from "./vat/vat-baker.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
 export { normalizeVec3 } from "./math/normalize-vec3.js";
@@ -316,6 +344,7 @@ export { crossVec3 } from "./math/cross-vec3.js";
 export { lengthVec3 } from "./math/length-vec3.js";
 export { negateVec3 } from "./math/negate-vec3.js";
 export { lerpVec3 } from "./math/lerp-vec3.js";
+export { expDampFactor, dampScalar, lerpAngleShortest } from "./math/damp.js";
 export {
     addVec3InPlace,
     addVec3ToRef,
@@ -346,7 +375,7 @@ export { quatFromRotationMatrix } from "./math/quat-from-rotation-matrix.js";
 export { quatFromLookDirectionRH } from "./math/quat-from-look-direction-rh.js";
 export { mat4Decompose } from "./math/mat4-decompose.js";
 export type { DecomposedTransform } from "./math/mat4-decompose.js";
-export type { Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
+export type { Vec2, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";
 export type { GltfMetadata, LiteMetadata } from "./metadata.js";
@@ -361,10 +390,13 @@ export {
     setThinInstanceMatrix,
     setThinInstances,
     setThinInstanceCount,
+    setThinInstanceDrawCount,
+    enableThinInstanceDynamicDrawCount,
     flushThinInstances,
     setThinInstanceColors,
     setThinInstanceColor,
     enableThinInstanceGpuCulling,
+    setThinInstanceCullBoundsPad,
 } from "./mesh/thin-instance.js";
 export {
     addHierarchyInstance,
@@ -387,6 +419,8 @@ export type { PixelViewport } from "./camera/viewport.js";
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { disposeMeshGpu } from "./mesh/mesh-dispose.js";
+export { computeMaxExtents } from "./mesh/compute-max-extents.js";
+export type { MeshExtent } from "./mesh/compute-max-extents.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";
 export { ObservableQuat } from "./math/observable-quat.js";
 export type { StandardMaterialProps, FogConfig } from "./material/standard/standard-material.js";
@@ -460,6 +494,7 @@ export type { GpuPicker, PickDiscardRule, PickOptions } from "./picking/gpu-pick
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
+export { computeDeformedPositionToRef } from "./picking/deformed-vertex.js";
 
 // ─── Gizmos ──────────────────────────────────────────────────────────
 export { createUtilityLayer, registerUtilityLayer, disposeUtilityLayer } from "./gizmo/utility-layer.js";
@@ -494,7 +529,7 @@ export type { RenderTargetSignature } from "./engine/render-target.js";
 
 // ─── Sprites (2D) ────────────────────────────────────────────────────
 export type { SpriteAtlas, SpriteFrame, SpriteSampling, GridAtlasOptions, LoadAtlasOptions } from "./sprite/shared/sprite-atlas.js";
-export { createGridSpriteAtlas, loadSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
+export { createGridSpriteAtlas, loadSpriteAtlas, disposeSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
 export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/shared/sprite-atlas-packer.js";
 export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
@@ -516,6 +551,10 @@ export type { Sprite2DCustomShader, Sprite2DCustomShaderOptions, Sprite2DCustomT
 export { createSprite2DCustomShader } from "./sprite/sprite-custom-shader.js";
 export type { Sprite2DHandle } from "./sprite/sprite-2d-handle.js";
 export { addSprite2D, updateSprite2D, removeSprite2D, setSprite2DFrame, getSprite2DHandleIndex, isSprite2DHandleAlive } from "./sprite/sprite-2d-handle.js";
+export type { SpritePickInfo } from "./sprite/picking/pick-sprite-2d.js";
+export { pickSprite2D } from "./sprite/picking/pick-sprite-2d.js";
+export type { BillboardPickInfo } from "./sprite/picking/pick-billboard.js";
+export { pickBillboardSprite } from "./sprite/picking/pick-billboard.js";
 export { addDepthHostedSpriteLayer } from "./sprite/sprite-scene.js";
 // ─── World-space billboards ────────────────────────────────────────
 export type {
@@ -589,6 +628,17 @@ export {
     disposeSpriteRenderer,
 } from "./sprite/sprite-renderer.js";
 
+// ─── Node Particles (NPE) ────────────────────────────────────────────
+export type { Particle } from "./particle/particle.js";
+export type { ParticleSystem } from "./particle/particle-system.js";
+export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
+export type { NodeParticleSet } from "./particle/node/npe-build.js";
+export type { ParseNodeParticleOptions } from "./particle/node/node-particle.js";
+export { parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
+export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
+export { registerNodeParticleSet } from "./particle/particle-scene.js";
+export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
+
 // ─── Text ────────────────────────────────────────────────────────────
 export type { Font } from "./text/font.js";
 export { loadFont, createFontFromBuffer } from "./text/font.js";
@@ -626,6 +676,8 @@ export {
     getPhysicsGravity,
     setPhysicsTimestep,
     getPhysicsTimestep,
+    setPhysicsTimestepMs,
+    getPhysicsTimestepMs,
     onPhysicsAfterStep,
     setPhysicsVelocityLimits,
     getPhysicsVelocityLimits,
@@ -690,6 +742,7 @@ export {
     createNavMeshFromSources,
     createDebugNavMeshGeometry,
     getClosestPoint,
+    findClosestPointWithin,
     computePath,
     createNavCrowd,
     addAgent,

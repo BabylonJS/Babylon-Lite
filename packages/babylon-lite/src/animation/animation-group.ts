@@ -8,6 +8,8 @@ import type { LiteMetadata } from "../metadata.js";
 import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
+import type { AnimationManager } from "./animation-manager.js";
+import { _setTickAnimationImpl } from "./animation-tick.js";
 
 const DEFAULT_FRAME_RATE = 60;
 
@@ -75,6 +77,10 @@ export interface AnimationGroup {
     _additive?: AnimationAdditiveMixer;
     /** @internal Whether stop() was called (suppresses tickAnimation). */
     _stopped: boolean;
+    /** @internal The AnimationManager that currently owns/drives this group, if any. Set by
+     *  {@link addAnimationGroup}. Type-only import, so it is erased at build — no runtime cycle
+     *  and no bundle cost for always-loaded consumers (e.g. scene-core's render-loop tick). */
+    _animationManager?: AnimationManager;
 }
 
 /** Start playing an animation group. */
@@ -95,6 +101,45 @@ export function stopAnimation(group: AnimationGroup): void {
     group._stopped = true;
 }
 
+/** Push the group's public playback state into its controller. */
+function syncControllerFromGroup(group: AnimationGroup, ctrl: AnimationController): void {
+    ctrl.time = group.currentTime;
+    ctrl.playing = group.isPlaying;
+    ctrl.speedRatio = group.speedRatio;
+    ctrl.loop = group.loopAnimation;
+    ctrl._setMask?.(group.mask ?? null);
+}
+
+/** @internal The real per-frame stepper, advancing the group unconditionally. Manager-driven
+ *  callers (the weighted mixers and the generic group task) invoke this directly because they
+ *  own the group and must always advance it. Lives in this dynamically-loaded module. */
+export function tickAnimationCore(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
+    if (!group._stopped && group._ctrl) {
+        syncControllerFromGroup(group, group._ctrl);
+        group._ctrl.tick(deltaMs, engine);
+        group.currentTime = group._ctrl.time;
+    }
+}
+
+/** The scene auto-tick path. Registered on the always-loaded animation-tick forwarder, so this
+ *  runs for the scene render-loop tick. Defers to an AnimationManager if one owns the group — the
+ *  manager drives and blends it, so ticking here too would double-advance time and clobber the
+ *  blended pose (last-writer-wins). Checked per-frame because the manager typically attaches after
+ *  addToScene. Keeping the guard here (dynamically-loaded) rather than in scene-core keeps the
+ *  always-loaded core free of the property read. */
+function tickAnimationImpl(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
+    if (group._animationManager) {
+        return;
+    }
+    tickAnimationCore(group, deltaMs, engine);
+}
+
+/** @internal Wire the always-loaded tickAnimation forwarder to its real implementation.
+ *  Called by the group factories so a scene cannot hold groups before the impl is registered. */
+export function _installTickAnimation(): void {
+    _setTickAnimationImpl(tickAnimationImpl);
+}
+
 /** Seek to a specific frame, apply the pose, and pause. */
 export function goToFrame(group: AnimationGroup, frame: number, engine?: EngineContext): void {
     const ctrl = group._ctrl;
@@ -107,23 +152,6 @@ export function goToFrame(group: AnimationGroup, frame: number, engine?: EngineC
             group.currentTime = ctrl.time;
         }
     }
-}
-
-/** @internal Advance animation by deltaMs. Called by the engine each frame. */
-export function tickAnimation(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
-    if (!group._stopped && group._ctrl) {
-        syncControllerFromGroup(group, group._ctrl);
-        group._ctrl.tick(deltaMs, engine);
-        group.currentTime = group._ctrl.time;
-    }
-}
-
-function syncControllerFromGroup(group: AnimationGroup, ctrl: AnimationController): void {
-    ctrl.time = group.currentTime;
-    ctrl.playing = group.isPlaying;
-    ctrl.speedRatio = group.speedRatio;
-    ctrl.loop = group.loopAnimation;
-    ctrl._setMask?.(group.mask ?? null);
 }
 
 /** Create AnimationGroup(s) from parsed glTF animation data.
@@ -143,6 +171,8 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
     if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && !hasPointer && !hasNodeWriteback)) {
         return [];
     }
+
+    _installTickAnimation();
 
     return clips.map((clip, clipIndex) => {
         const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides, nodeNames);
