@@ -1,5 +1,5 @@
 {
-  "rawKB": 143.6,
+  "rawKB": 143.7,
   "gzipKB": 58.1,
   "ignoredRawKB": 3.3,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene73-fragment-output-CfRmfbPv.js",
     "scene73-generate-mipmaps-DcnO72FN.js",
     "scene73-gltf-ext-clearcoat-BgaLgSgD.js",
-    "scene73-gltf-feature-registry-BHYeIm-u.js",
+    "scene73-gltf-feature-registry-CSNKAtfS.js",
     "scene73-gltf-glb-parser-Bm1IrZjT.js",
     "scene73-ibl-fragment-CeRrvT96.js",
     "scene73-input-block-lrbZBZJO.js",

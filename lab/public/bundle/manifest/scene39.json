@@ -1,5 +1,5 @@
 {
-  "rawKB": 108.8,
+  "rawKB": 108.9,
   "gzipKB": 46.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -12,7 +12,7 @@
     "scene39-gltf-feature-animation-pointer-CLES_-mr.js",
     "scene39-gltf-feature-animations-eOJFbLQK.js",
     "scene39-gltf-feature-lights-punctual-5HuRS6Ip.js",
-    "scene39-gltf-feature-registry-CmrMeHhc.js",
+    "scene39-gltf-feature-registry-DWIeQH-G.js",
     "scene39-gltf-json-asset-BoHskl0t.js",
     "scene39-gltf-light-pointer-state-B7kFTRxK.js",
     "scene39-gltf-pbr-builder-ext-WVY5V9c8.js",

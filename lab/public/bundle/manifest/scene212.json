@@ -1,11 +1,11 @@
 {
-  "rawKB": 104.1,
+  "rawKB": 104.2,
   "gzipKB": 41.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene212-generate-mipmaps-ffZ1zox-.js",
     "scene212-gltf-ext-dielectric-C6hvXXiF.js",
-    "scene212-gltf-feature-registry-B_jczvrv.js",
+    "scene212-gltf-feature-registry-B1FTzveb.js",
     "scene212-gltf-glb-parser-DpbXuAuC.js",
     "scene212-ibl-fragment-CeRrvT96.js",
     "scene212-ibl-skybox-wgsl-CFIBOHHx.js",

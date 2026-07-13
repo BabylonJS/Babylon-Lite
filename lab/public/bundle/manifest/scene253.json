@@ -1,5 +1,5 @@
 {
-  "rawKB": 153,
+  "rawKB": 153.1,
   "gzipKB": 64.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -24,7 +24,7 @@
     "scene253-gltf-feature-extras-VHPteGay.js",
     "scene253-gltf-feature-lights-punctual-BD0mrLuD.js",
     "scene253-gltf-feature-morph-OgvZWqfo.js",
-    "scene253-gltf-feature-registry-DllfL8b_.js",
+    "scene253-gltf-feature-registry-B2fkk9xC.js",
     "scene253-gltf-feature-skeleton-BYmZVC5E.js",
     "scene253-gltf-json-asset-CPydyTRL.js",
     "scene253-gltf-light-pointer-state-B7kFTRxK.js",

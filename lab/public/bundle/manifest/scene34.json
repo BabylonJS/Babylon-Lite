@@ -1,5 +1,5 @@
 {
-  "rawKB": 96.8,
+  "rawKB": 96.9,
   "gzipKB": 40,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,7 +8,7 @@
     "scene34-gltf-ext-node-visibility-DWsJZC5Q.js",
     "scene34-gltf-feature-animation-pointer-CE1BnN9s.js",
     "scene34-gltf-feature-animations-BoKR3Ok5.js",
-    "scene34-gltf-feature-registry-CJICailA.js",
+    "scene34-gltf-feature-registry-DJtUXEQr.js",
     "scene34-gltf-glb-parser-BxoFTGKn.js",
     "scene34-gltf-sampler-denorm-C_vs8OEN.js",
     "scene34-ibl-fragment-CeRrvT96.js",

@@ -1,5 +1,5 @@
 {
-  "rawKB": 99.5,
+  "rawKB": 99.6,
   "gzipKB": 42.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,7 +8,7 @@
     "scene246-generate-mipmaps-DzKvtUax.js",
     "scene246-gltf-animation-Bg1KL3K9.js",
     "scene246-gltf-feature-animations-DxZ057Zf.js",
-    "scene246-gltf-feature-registry-CBbXbqJx.js",
+    "scene246-gltf-feature-registry-BOTdaBTS.js",
     "scene246-gltf-feature-skeleton-CD4nSwQl.js",
     "scene246-gltf-interleave-ZNL-XZje.js",
     "scene246-gltf-json-asset-BLYKbDyg.js",
