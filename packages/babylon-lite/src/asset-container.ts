@@ -4,6 +4,7 @@ import type { AnimationGroup } from "./animation/animation-group.js";
 import type { MaterialVariantData } from "./loader-gltf/material-variants.js";
 import type { Mesh } from "./mesh/mesh.js";
 import type { Skeleton } from "./skeleton/bone-control.js";
+import type { SceneContext } from "./scene/scene-core.js";
 
 /**
  * Result returned by loadGltf / loadBabylon.
@@ -37,7 +38,7 @@ export interface AssetContainer {
      *  (spherical harmonics + specular cubemap) onto the scene. Lazy features own
      *  the closure so the core loader/scene stay feature-agnostic.
      *  @internal */
-    _sceneSetup?: (scene: import("./scene/scene-core.js").SceneContext) => void;
+    _sceneSetup?: (scene: SceneContext) => void;
 }
 
 /**
