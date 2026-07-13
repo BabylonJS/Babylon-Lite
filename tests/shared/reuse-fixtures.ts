@@ -61,17 +61,30 @@ export async function acquireContext(browser: Browser, viewport: Viewport = DEFA
 /**
  * Acquire a page for reference/oracle captures.
  *
- * In reuse mode this hands back a live page inside the worker's single shared
- * window (reusing the current tab, or opening one more tab in the SAME window —
- * never a new window) with a no-op `release()`. Otherwise it opens a fresh
- * isolated context+page and `release()` closes them, matching the previous
- * per-spec `browser.newContext()` + `context.close()` behaviour.
+ * In reuse mode this opens a DEDICATED tab inside the worker's single shared
+ * window (never a new window) and applies the requested viewport to it, so the
+ * caller gets the viewport it asked for and never has to share the test's own
+ * `page`. `release()` closes just that tab — but only while another page keeps
+ * the window alive, so the single shared window is never torn down. Otherwise it
+ * opens a fresh isolated context+page and `release()` closes them, matching the
+ * previous per-spec `browser.newContext()` + `context.close()` behaviour.
  */
 export async function acquireReferencePage(browser: Browser, viewport: Viewport = DEFAULT_VIEWPORT): Promise<{ page: Page; release: () => Promise<void> }> {
     if (REUSE_BROWSER) {
         const context = browser.contexts()[0] ?? (await browser.newContext({ viewport }));
-        const page = context.pages().find((p) => !p.isClosed()) ?? (await context.newPage());
-        return { page, release: async () => {} };
+        const page = await context.newPage();
+        await page.setViewportSize(viewport);
+        return {
+            page,
+            release: async () => {
+                // Close our dedicated tab, but keep the window alive: never close
+                // the last remaining page, or the single shared window would go away
+                // and the next test would have to open a new one.
+                if (!page.isClosed() && context.pages().length > 1) {
+                    await page.close();
+                }
+            },
+        };
     }
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();

@@ -85,7 +85,6 @@ for (const scene of SCENES) {
         page.on("response", onResponse);
 
         // Navigate to the bundle page and wait for the scene to finish rendering
-        page.on("response", onResponse);
         let readyTimedOut = false;
         try {
             await page.goto(`/bundle-scene${scene.id}.html`, { waitUntil: "domcontentloaded" });
