@@ -218,9 +218,7 @@ function packGlyphAtSlot(
 
 function markSlotDead(out: Float32Array, slot: number): void {
     const base = slot * TEXT_INSTANCE_FLOATS;
-    for (let i = 0; i < TEXT_INSTANCE_FLOATS; i++) {
-        out[base + i] = 0;
-    }
+    out.fill(0, base, base + TEXT_INSTANCE_FLOATS);
     out[base + 7] = 1; // sentinel
 }
 
@@ -267,6 +265,28 @@ function popFreeSlot(group: TextDataDrawGroup): number {
     return group.freeSlots.length > 0 ? group.freeSlots.pop()! : -1;
 }
 
+/** Shift every group `slotStart` / freeSlot / run-record slot at or after `threshold` by
+ *  `delta` (positive to open a gap, negative to close one). `exclude` — a group being grown
+ *  in place — is skipped so its own range isn't shifted; run-record slots are always shifted. */
+function shiftSlotsAtOrAfter(data: TextData, threshold: number, delta: number, exclude?: TextDataDrawGroup): void {
+    for (const g of data._groups) {
+        if (g !== exclude && g.slotStart >= threshold) {
+            g.slotStart += delta;
+            for (let i = 0; i < g.freeSlots.length; i++) {
+                g.freeSlots[i] = g.freeSlots[i]! + delta;
+            }
+        }
+    }
+    for (const rec of data._runRecords.values()) {
+        const slots = rec.slots;
+        for (let i = 0; i < slots.length; i++) {
+            if (slots[i]! >= threshold) {
+                slots[i] = slots[i]! + delta;
+            }
+        }
+    }
+}
+
 /** Grow `group` by `extraSlots`. Returns the absolute index of the first newly-added
  *  slot. Shifts later groups' slot ranges right by `extraSlots` and rewrites any run
  *  slot indices that fall in the shifted range. Marks the shifted region dirty. */
@@ -282,24 +302,8 @@ function growGroup(data: TextData, group: TextDataDrawGroup, extraSlots: number)
     if (moveEndFloat > moveStartFloat) {
         data._instances.copyWithin(moveStartFloat + floatDelta, moveStartFloat, moveEndFloat);
     }
-    // Shift later groups + their freeSlots arrays.
-    for (const g of data._groups) {
-        if (g !== group && g.slotStart >= insertAt) {
-            g.slotStart += extraSlots;
-            for (let i = 0; i < g.freeSlots.length; i++) {
-                g.freeSlots[i] = g.freeSlots[i]! + extraSlots;
-            }
-        }
-    }
-    // Shift any run records whose slots fall inside the shifted region.
-    for (const rec of data._runRecords.values()) {
-        const slots = rec.slots;
-        for (let i = 0; i < slots.length; i++) {
-            if (slots[i]! >= insertAt) {
-                slots[i] = slots[i]! + extraSlots;
-            }
-        }
-    }
+    // Shift later groups (and their runs) right to open the gap for the new slots.
+    shiftSlotsAtOrAfter(data, insertAt, extraSlots, group);
     data._instanceCount += extraSlots;
     group.slotCount += extraSlots;
     // Newly-added slots and the shifted region are dirty.
@@ -371,22 +375,27 @@ function lookupCurveSet(storage: GlyphStorage, curveSetId: CurveSetId, op: strin
     return cs;
 }
 
-function ensureGroup(data: TextData, curveSetId: CurveSetId): TextDataDrawGroup {
-    const existing = findGroup(data, curveSetId);
-    if (existing) {
-        return existing;
-    }
-    const curveSet = lookupCurveSet(data._storage, curveSetId, "addRun");
-    const group: TextDataDrawGroup = {
+/** Build a fresh draw group for `curveSetId` starting at absolute slot `slotStart`. */
+function makeDrawGroup(curveSetId: CurveSetId, curveSet: GlyphStorageCurveSet, slotStart: number): TextDataDrawGroup {
+    return {
         curveSetId,
         curveSet,
-        slotStart: data._instanceCount,
+        slotStart,
         slotCount: 0,
         liveCount: 0,
         freeSlots: [],
         bindGroup: null,
         bindGroupVersion: -1,
     };
+}
+
+function ensureGroup(data: TextData, curveSetId: CurveSetId): TextDataDrawGroup {
+    const existing = findGroup(data, curveSetId);
+    if (existing) {
+        return existing;
+    }
+    const curveSet = lookupCurveSet(data._storage, curveSetId, "addRun");
+    const group = makeDrawGroup(curveSetId, curveSet, data._instanceCount);
     data._groups.push(group);
     return group;
 }
@@ -468,18 +477,7 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
         const curveSet = lookupCurveSet(storage, curveSetId, "reset");
 
         const existing = prevGroupByCurveSet.get(curveSetId);
-        const group: TextDataDrawGroup =
-            existing ??
-            ({
-                curveSetId,
-                curveSet,
-                slotStart: writeSlot,
-                slotCount: 0,
-                liveCount: 0,
-                freeSlots: [],
-                bindGroup: null,
-                bindGroupVersion: -1,
-            } as TextDataDrawGroup);
+        const group: TextDataDrawGroup = existing ?? makeDrawGroup(curveSetId, curveSet, writeSlot);
         // Re-point cached curveSet at the (possibly new) storage's entry; invalidate
         // bind group when the underlying GlyphStorageCurveSet identity changed.
         if (group.curveSet !== curveSet) {
@@ -589,22 +587,8 @@ function dropEmptyGroup(data: TextData, group: TextDataDrawGroup): void {
         if (moveEndFloat > moveStartFloat) {
             data._instances.copyWithin(moveStartFloat - floatDelta, moveStartFloat, moveEndFloat);
         }
-        for (const g of data._groups) {
-            if (g.slotStart >= removedStart) {
-                g.slotStart -= removedCount;
-                for (let i = 0; i < g.freeSlots.length; i++) {
-                    g.freeSlots[i] = g.freeSlots[i]! - removedCount;
-                }
-            }
-        }
-        for (const r of data._runRecords.values()) {
-            const slots = r.slots;
-            for (let i = 0; i < slots.length; i++) {
-                if (slots[i]! >= removedStart) {
-                    slots[i] = slots[i]! - removedCount;
-                }
-            }
-        }
+        // Close the gap left by the removed group (its runs are already gone).
+        shiftSlotsAtOrAfter(data, removedStart, -removedCount);
         data._instanceCount -= removedCount;
         markDirty(data, removedStart, data._instanceCount);
     }

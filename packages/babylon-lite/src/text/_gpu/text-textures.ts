@@ -42,14 +42,12 @@ function uploadAll(device: GPUDevice, tex: GPUTexture, cpuData: Float32Array, te
         return;
     }
     const rows = rowsForTexels(texelsUsed);
-    const bytes = rows * BYTES_PER_ROW;
     device.queue.writeTexture(
         { texture: tex },
         cpuData.buffer as ArrayBuffer,
         { offset: cpuData.byteOffset, bytesPerRow: BYTES_PER_ROW, rowsPerImage: rows },
         { width: TEX_WIDTH, height: rows, depthOrArrayLayers: 1 }
     );
-    void bytes;
 }
 
 /** Ensure `atlas.gpu` matches the current device and has enough rows for all used texels.
