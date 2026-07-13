@@ -107,6 +107,11 @@ export interface TextData {
     _storage: GlyphStorage;
     /** @internal Monotonic version bumped whenever instance data changes. */
     _version: number;
+    /** @internal Monotonic version bumped only when the draw structure changes, i.e. when a
+     *  group's slot range (`slotStart`/`slotCount`) moves. Content-only edits (same-length
+     *  replace, add-into-free-slot, partial remove) leave this stable so cached render bundles
+     *  stay valid. */
+    _layoutVersion: number;
     /** @internal Inclusive-exclusive dirty range of instances awaiting upload. */
     _dirtyStart: number;
     /** @internal */ _dirtyEnd: number;
@@ -285,6 +290,8 @@ function shiftSlotsAtOrAfter(data: TextData, threshold: number, delta: number, e
             }
         }
     }
+    // Slot ranges moved — cached render bundles keyed on `_layoutVersion` must rebuild.
+    data._layoutVersion++;
 }
 
 /** Grow `group` by `extraSlots`. Returns the absolute index of the first newly-added
@@ -515,6 +522,7 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
     data._dirtyStart = 0;
     data._dirtyEnd = writeSlot;
     data._version++;
+    data._layoutVersion++;
 }
 
 // ─── addRun / removeRun / replaceRun ───────────────────────────────────────
@@ -650,6 +658,7 @@ export function createTextData(storage: GlyphStorage, runs?: readonly GlyphRun[]
         _instanceCount: 0,
         _storage: storage,
         _version: 1,
+        _layoutVersion: 0,
         _dirtyStart: 0,
         _dirtyEnd: 0,
         _gpu: null,

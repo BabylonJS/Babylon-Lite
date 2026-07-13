@@ -139,11 +139,11 @@ interface LayerGpu {
      *  for near-zero per-frame command-recording cost (mirrors the sprite renderer). The
      *  bundle binds buffer *objects* (instance data, UBO), so freely-mutating contents
      *  (glyph instance bytes, mvp/opacity/gamma UBO) do NOT require a rebuild. Invalidated
-     *  when the draw structure changes (`data._version`) or a baked object reference changes:
-     *  pipeline swap, instance-buffer reallocation, or atlas-driven bind-group rebuild. */
+     *  when the draw structure changes (`data._layoutVersion`) or a baked object reference
+     *  changes: pipeline swap, instance-buffer reallocation, or atlas-driven bind-group rebuild. */
     renderBundle: GPURenderBundle | null;
-    /** `data._version` the cached `renderBundle` was recorded against. */
-    bundleDataVersion: number;
+    /** `data._layoutVersion` the cached `renderBundle` was recorded against. */
+    bundleLayoutVersion: number;
     /** Draw-group count baked into the cached bundle (for the metrics return value). */
     bundleDrawCalls: number;
 }
@@ -198,7 +198,7 @@ function ensureLayerGpu(rr: TextRenderer, layer: TextLayer): LayerGpu {
         lastMvpInputs: new Float32Array(6),
         mvpUploaded: false,
         renderBundle: null,
-        bundleDataVersion: -1,
+        bundleLayoutVersion: -1,
         bundleDrawCalls: 0,
     };
     rr._layerGpu.set(layer, lg);
@@ -422,14 +422,14 @@ function textRendererRecord(rr: TextRenderer): number {
             continue;
         }
 
-        // (Re)record the per-layer bundle when the draw structure changes. Any glyph
-        // add/remove/replace bumps `data._version` (all group mutations go through
-        // markDirty / replaceAllRuns), so the bundle is rebuilt exactly when slot ranges
-        // move. Object-reference changes (pipeline swap, instance-buffer realloc,
-        // atlas-driven bind-group rebuild) null the bundle at their source. The steady-state
-        // win is frames with no text edits: `data._version` is stable and the pre-baked
-        // bundle is replayed with zero per-call command recording.
-        if (lg.renderBundle == null || lg.bundleDataVersion !== data._version) {
+        // (Re)record the per-layer bundle when the draw structure changes. Only slot-range
+        // moves (group grow/shrink/reset) bump `data._layoutVersion`; content-only edits
+        // (same-length replace, add-into-free-slot, partial remove) leave it stable so the
+        // cached bundle keeps replaying. Object-reference changes (pipeline swap,
+        // instance-buffer realloc, atlas-driven bind-group rebuild) null the bundle at their
+        // source. The steady-state win is frames with no structural edits: `data._layoutVersion`
+        // is stable and the pre-baked bundle is replayed with zero per-call command recording.
+        if (lg.renderBundle == null || lg.bundleLayoutVersion !== data._layoutVersion) {
             const be = device.createRenderBundleEncoder({
                 colorFormats: [format],
                 sampleCount: 1,
@@ -449,7 +449,7 @@ function textRendererRecord(rr: TextRenderer): number {
                 groupDraws++;
             }
             lg.renderBundle = be.finish();
-            lg.bundleDataVersion = data._version;
+            lg.bundleLayoutVersion = data._layoutVersion;
             lg.bundleDrawCalls = groupDraws;
         }
 
