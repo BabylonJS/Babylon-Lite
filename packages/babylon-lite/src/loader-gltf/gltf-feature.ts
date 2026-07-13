@@ -24,6 +24,8 @@ import type { Texture2D } from "../texture/texture-2d.js";
 import type { TextureWrapFn } from "./gltf-pbr-builder.js";
 import type { BoneOverride } from "../skeleton/bone-control.js";
 
+export type GltfMaterialFeatureRunner = (mat: GltfMaterialData, features: GltfFeature[], ctx: GltfMatExtCtx) => Promise<Partial<PbrMaterialProps> | undefined>;
+
 /** Per-load context handed to every non-material feature hook. */
 export interface GltfLoadCtx {
     /** @internal */
@@ -40,6 +42,8 @@ export interface GltfLoadCtx {
     _worldMatrixCache: Map<number, Mat4>;
     /** @internal All material-layer features active for this load (so e.g. variants can re-use them). */
     _matExts: GltfFeature[];
+    /** @internal Material-feature merger supplied by the optional feature registry. */
+    _runMatExts?: GltfMaterialFeatureRunner;
     /** Composed texture-wrap function aggregating every active feature's
      *  `wrapTexture` hook. Identity when no feature contributes one. */
     /** @internal */

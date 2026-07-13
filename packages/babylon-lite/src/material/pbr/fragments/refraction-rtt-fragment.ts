@@ -2,17 +2,14 @@ import type { ShaderFragment, UboField } from "../../../shader/fragment-types.js
 import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { getTrilinearAnisotropicSampler } from "../../../resource/trilinear-anisotropic-sampler.js";
-import {
-    PBR_HAS_THICKNESS_MAP,
-    PBR2_HAS_DISPERSION,
-    PBR2_HAS_REFRACTION,
-    PBR2_HAS_REFRACTION_MAP,
-    PBR2_HAS_THICKNESS_GLTF_CHANNEL,
-    PBR2_HAS_VOLUME,
-    PBR2_LINEAR_IMAGE_PROCESSING,
-} from "../pbr-flag-bits.js";
+import { PBR_HAS_THICKNESS_MAP, PBR2_HAS_REFRACTION } from "../pbr-flag-bits.js";
 
 type TransmissionMat = PbrMaterialProps & { _linearImageProcessing?: boolean };
+export const PBR2_HAS_VOLUME = 1 << 5;
+export const PBR2_HAS_REFRACTION_MAP = 1 << 6;
+const PBR2_HAS_THICKNESS_GLTF_CHANNEL = 1 << 7;
+const PBR2_LINEAR_IMAGE_PROCESSING = 1 << 14;
+const PBR2_HAS_DISPERSION = 1 << 20;
 const LINEAR_IMAGE_PROCESSING_SLOTS = { NI: `if(scene.vImageInfos.w>=0.0){`, BC: `}` };
 
 function makeRefractionMod(

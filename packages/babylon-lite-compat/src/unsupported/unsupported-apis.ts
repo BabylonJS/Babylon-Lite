@@ -110,10 +110,171 @@ export class MirrorTexture {
     }
 }
 
+// ─── HTML textures (DOM/CSS overlay interop) ─────────────────────────
+// New in BJS: `Materials/Textures/HTML/*` — uploads a live DOM element into a
+// texture and forwards pointer/raycast interaction onto an overlaid HTML layer.
+// This is a DOM-driven, host-page feature with no Babylon Lite equivalent (Lite
+// is a WebGPU renderer with no HTML overlay / interaction subsystem),
+// so every entry throws.
+
+/** Options accepted by Babylon.js `HtmlTexture` (shape-only stub for type parity). */
+export interface IHtmlTextureOptions {
+    [key: string]: unknown;
+}
+
+/** Options accepted by Babylon.js `HtmlInteractionManager` (shape-only stub). */
+export interface IHtmlInteractionManagerOptions {
+    [key: string]: unknown;
+}
+
+/** Options accepted by Babylon.js `HtmlRaycastInteractionManager` (shape-only stub). */
+export interface IHtmlRaycastInteractionManagerOptions {
+    [key: string]: unknown;
+}
+
+/** Module shape of an HTML-in-canvas polyfill (shape-only stub). */
+export interface IHtmlInCanvasPolyfillModule {
+    [key: string]: unknown;
+}
+
+/** Options accepted by `InstallHtmlInCanvasPolyfill` (shape-only stub). */
+export interface IInstallHtmlInCanvasPolyfillOptions {
+    [key: string]: unknown;
+}
+
+export class HtmlTexture {
+    public constructor() {
+        unsupported("HtmlTexture", "Rendering a live DOM element into a texture is a host-page/DOM feature with no Babylon Lite equivalent.");
+    }
+}
+
+export class HtmlInteractionManager {
+    public constructor() {
+        unsupported("HtmlInteractionManager", "HTML overlay interaction is not part of Babylon Lite's WebGPU renderer.");
+    }
+}
+
+export class HtmlRaycastInteractionManager {
+    public constructor() {
+        unsupported("HtmlRaycastInteractionManager", "HTML overlay raycast interaction is not part of Babylon Lite's WebGPU renderer.");
+    }
+}
+
+/** Babylon.js `IsHtmlInCanvasUploadSupported` — HTML texture upload is unsupported by the compat layer. */
+export function IsHtmlInCanvasUploadSupported(): never {
+    return unsupported("IsHtmlInCanvasUploadSupported", "HTML-element texture upload is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `UploadHtmlElementToTexture` — HTML texture upload is unsupported by the compat layer. */
+export function UploadHtmlElementToTexture(): never {
+    return unsupported("UploadHtmlElementToTexture", "HTML-element texture upload is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `ComputeOverlayCssTransform` — HTML overlay interaction is unsupported by the compat layer. */
+export function ComputeOverlayCssTransform(): never {
+    return unsupported("ComputeOverlayCssTransform", "HTML overlay interaction is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `GetElementPixelFromUv` — HTML overlay raycast interaction is unsupported by the compat layer. */
+export function GetElementPixelFromUv(): never {
+    return unsupported("GetElementPixelFromUv", "HTML overlay raycast interaction is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `IsHtmlInCanvasSupportedNatively` — the HTML-in-canvas feature is unsupported by the compat layer. */
+export function IsHtmlInCanvasSupportedNatively(): never {
+    return unsupported("IsHtmlInCanvasSupportedNatively", "The HTML-in-canvas feature is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `InstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
+export function InstallHtmlInCanvasPolyfill(): never {
+    return unsupported("InstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
+}
+
+/** Babylon.js `UninstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
+export function UninstallHtmlInCanvasPolyfill(): never {
+    return unsupported("UninstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
+}
+
 // ─── Audio ───────────────────────────────────────────────────────────
 export class Sound {
     public constructor() {
         unsupported("Sound", "Audio is not part of Babylon Lite. Use the Web Audio API directly.");
+    }
+}
+
+// ─── Behaviors (mesh + camera) ───────────────────────────────────────
+// Babylon Lite exposes a utility-layer pointer-drag dispatcher
+// (`createPointerDrag` / `registerPointerDrag`) used by its gizmos, but it does
+// not expose the main-scene mesh-dragging, XR/multi-pointer, follow, or
+// geospatial camera behaviors these BJS classes provide, so each is a throwing
+// stub. The camera behaviors that Lite *can* back (`AutoRotationBehavior`,
+// `BouncingBehavior`, `FramingBehavior`) live in `behaviors/behaviors.ts`.
+export class PointerDragBehavior {
+    public constructor() {
+        unsupported(
+            "PointerDragBehavior",
+            "Babylon Lite's pointer-drag (`createPointerDrag`) only drives utility-layer gizmo colliders, not arbitrary main-scene meshes, so mesh drag-behaviors cannot be wrapped."
+        );
+    }
+}
+
+export class BaseSixDofDragBehavior {
+    public constructor() {
+        unsupported("BaseSixDofDragBehavior", "Six-DoF mesh dragging is not implemented in Babylon Lite.");
+    }
+}
+
+export class SixDofDragBehavior {
+    public constructor() {
+        unsupported("SixDofDragBehavior", "Six-DoF mesh dragging is not implemented in Babylon Lite.");
+    }
+}
+
+export class MultiPointerScaleBehavior {
+    public constructor() {
+        unsupported("MultiPointerScaleBehavior", "Multi-pointer scaling is not implemented in Babylon Lite.");
+    }
+}
+
+export class AttachToBoxBehavior {
+    public constructor() {
+        unsupported("AttachToBoxBehavior", "Bounding-box attachment (app-bar UI) is not implemented in Babylon Lite.");
+    }
+}
+
+export class FadeInOutBehavior {
+    public constructor() {
+        unsupported("FadeInOutBehavior", "Mesh fade-in/out visibility tweening is not implemented in Babylon Lite.");
+    }
+}
+
+export class SurfaceMagnetismBehavior {
+    public constructor() {
+        unsupported("SurfaceMagnetismBehavior", "Surface magnetism (mesh snapping) is not implemented in Babylon Lite.");
+    }
+}
+
+export class FollowBehavior {
+    public constructor() {
+        unsupported("FollowBehavior", "Camera-follow behavior is not implemented in Babylon Lite.");
+    }
+}
+
+export class HandConstraintBehavior {
+    public constructor() {
+        unsupported("HandConstraintBehavior", "WebXR hand-constraint behavior is out of scope for Babylon Lite.");
+    }
+}
+
+export class InterpolatingBehavior {
+    public constructor() {
+        unsupported("InterpolatingBehavior", "The interpolating camera behavior is not implemented in Babylon Lite.");
+    }
+}
+
+export class GeospatialClippingBehavior {
+    public constructor() {
+        unsupported("GeospatialClippingBehavior", "Geospatial camera clipping is not implemented in Babylon Lite.");
     }
 }
 

@@ -10,7 +10,7 @@
  *
  * BJS reference: playground #Z8HTUN#1 (+ collision event)
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 

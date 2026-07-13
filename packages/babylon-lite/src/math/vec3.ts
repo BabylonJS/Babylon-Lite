@@ -12,6 +12,7 @@ export { lerpVec3 } from "./lerp-vec3.js";
 export {
     addVec3InPlace,
     addVec3ToRef,
+    copyVec3,
     crossVec3InPlace,
     crossVec3ToRef,
     lerpVec3InPlace,

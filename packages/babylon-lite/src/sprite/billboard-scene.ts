@@ -1,8 +1,14 @@
 import type { SceneContext } from "../scene/scene-core.js";
 import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { AxisLockedBillboardSpriteSystem, BillboardSpriteSystem, FacingBillboardSpriteSystem } from "./billboard-sprite.js";
+import { registerPickSource } from "../picking/pick-contributor.js";
 
 function addBillboardSystem(scene: SceneContext, system: BillboardSpriteSystem): void {
+    // Make this system pickable by registering a pick source (the system + a dynamic-import thunk for
+    // its pick pipeline). Pure data — billboard *rendering* pulls no pick-pipeline bytes; the picker
+    // builds the contributor on the first pick via the pipeline's `createPickContributor`. The
+    // unregister is disposed with the scene so the source doesn't outlive the system.
+    scene._disposables.push(registerPickSource(scene, system, () => import("../picking/billboard-pick-pipeline.js")));
     addDeferredSceneRenderables(scene, async (engine) => {
         const { buildBillboardRenderable } = await import("./billboard-renderable.js");
         const built = buildBillboardRenderable(engine, system);

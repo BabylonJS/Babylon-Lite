@@ -14,6 +14,15 @@ export async function parseGltfJsonAsset(buffer: ArrayBuffer, baseUrl: string): 
     return { json, binChunk, baseUrl };
 }
 
+/** Fetch and decode an image referenced by an external glTF URI. */
+export async function resolveExternalImage(uri: string, baseUrl: string): Promise<ImageBitmap> {
+    const response = await fetch(new URL(uri, baseUrl + "x"));
+    if (!response.ok) {
+        throw new Error(`Failed to load image: ${response.status} ${response.statusText}`);
+    }
+    return createImageBitmap(await response.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+}
+
 /** Resolve a glTF buffer `uri` to a fetchable URL. With a base URL (the source was a URL string), relative
  *  `.bin` paths resolve against it. Without one (ArrayBuffer/Blob source), only self-contained `data:`/
  *  absolute URIs are resolvable — a bare relative path has no base and throws a clear error.

@@ -17,7 +17,7 @@
  * If lab/public/bundle/master-manifest.json is available, bundle-size increases
  * relative to master are emitted as warnings only; ceilings remain the blocker.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./parity-fixtures";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 
@@ -85,25 +85,25 @@ for (const scene of SCENES) {
         page.on("response", onResponse);
 
         // Navigate to the bundle page and wait for the scene to finish rendering
-        await page.goto(`/bundle-scene${scene.id}.html`, { waitUntil: "domcontentloaded" });
         let readyTimedOut = false;
         try {
+            await page.goto(`/bundle-scene${scene.id}.html`, { waitUntil: "domcontentloaded" });
             await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", undefined, { timeout: 20_000 });
         } catch {
             // Some heavy scenes fetch all runtime JS but do not mark the canvas ready in cloud browsers.
             readyTimedOut = true;
+        } finally {
+            // Always detach the listener — the page is shared across tests under
+            // REUSE_BROWSER, so a leaked listener would accumulate. Do NOT close the
+            // page; in default mode Playwright tears it down in fixture teardown.
+            page.off("response", onResponse);
         }
         if (readyTimedOut) {
-            page.off("response", onResponse);
-            await page.close();
             const sceneKey = `scene${scene.id}`;
             const files = BUNDLE_MANIFEST?.[sceneKey]?.runtimeChunks;
             expect(files, `bundle manifest must contain runtime chunks for ${sceneKey}`).toBeTruthy();
             runtimeFiles.length = 0;
             runtimeFiles.push(...files!);
-        } else {
-            page.off("response", onResponse);
-            await page.close();
         }
         for (const file of Array.from(new Set(runtimeFiles))) {
             jsPayloads.push({ url: `/bundle/${file}`, file, body: readFileSync(resolve(__dirname, "../../../lab/public/bundle", file)) });
@@ -201,9 +201,10 @@ for (const scene of SCENES) {
         }
 
         // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
-        // List excludes the sprite-using scenes (50-59 and the 92-95 custom-shader scenes). 60-series are
-        // NME demos with no sprites; 1-40 are core 3D.
-        const SPRITE_USING_IDS = new Set([50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 205, 206]);
+        // List excludes the sprite-using scenes (50-59, the 92-98 custom-shader scenes, and the
+        // 117/118 sprite-picking scenes). 60-series are NME demos with no sprites; 1-40 are core 3D.
+        // 262/263/264 are NPE particle scenes (particles render as billboards).
+        const SPRITE_USING_IDS = new Set([50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));
             expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);

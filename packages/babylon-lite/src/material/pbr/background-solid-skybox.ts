@@ -10,7 +10,6 @@ import { BU, SS } from "../../engine/gpu-flags.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
-import type { Mat4 } from "../../math/types.js";
 import type { Renderable } from "../../render/renderable.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 
@@ -25,39 +24,22 @@ import { createSingleUniformBGL } from "../../shader/bgl-helpers.js";
 
 const SKY_MESH_UNIFORM_SIZE = 96; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad
 
-function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
+function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer } {
     // prettier-ignore
     const positions = new F32([
-     S,-S, S, -S,-S, S, -S, S, S,  S, S, S,
-     S, S,-S, -S, S,-S, -S,-S,-S,  S,-S,-S,
-     S, S,-S,  S,-S,-S,  S,-S, S,  S, S, S,
-    -S, S, S, -S,-S, S, -S,-S,-S, -S, S,-S,
-    -S, S, S, -S, S,-S,  S, S,-S,  S, S, S,
-     S,-S, S,  S,-S,-S, -S,-S,-S, -S,-S, S,
+    -S,-S,-S,  S,-S,-S, -S, S,-S,  S, S,-S,
+    -S,-S, S,  S,-S, S, -S, S, S,  S, S, S,
   ]);
     // prettier-ignore
     const indices = new U16([
-     2, 1, 0,  3, 2, 0,   6, 5, 4,  7, 6, 4,
-    10, 9, 8, 11,10, 8,  14,13,12, 15,14,12,
-    18,17,16, 19,18,16,  22,21,20, 23,22,20,
+    6,4,5, 7,6,5,  0,2,3, 1,0,3,
+    5,1,3, 7,5,3,  0,4,6, 2,0,6,
+    3,2,6, 7,3,6,  0,1,5, 4,0,5,
   ]);
     return {
         posBuffer: createMappedBuffer(engine, positions, BU.VERTEX),
         idxBuffer: createMappedBuffer(engine, indices, BU.INDEX),
-        idxCount: 36,
     };
-}
-
-function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Float32Array {
-    const world = new F32(16);
-    world[0] = 1;
-    world[5] = 1;
-    world[10] = 1;
-    world[15] = 1;
-    world[12] = rootPosition[0];
-    world[13] = rootPosition[1];
-    world[14] = rootPosition[2];
-    return world;
 }
 
 interface SkyboxMaterial {
@@ -135,13 +117,12 @@ export function buildSolidSkyboxRenderable(
     primaryColor: [number, number, number]
 ): Renderable {
     const engine = scene.surface.engine;
-    const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
     const cc = scene.clearColor;
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
 
     const skyMat = createSkyboxMaterial();
     const skyOutputColor: [number, number, number] = [cc.r, cc.g, cc.b];
-    const skyUBO = createSkyMeshUBO(engine, skyboxWorld as unknown as Mat4, primaryColor, skyOutputColor);
+    const skyUBO = createSkyMeshUBO(engine, rootPosition, primaryColor, skyOutputColor);
     const skyBG = skyMat.createBindGroup(engine, skyUBO, envTextures);
 
     const r: Renderable = {
@@ -155,7 +136,7 @@ export function buildSolidSkyboxRenderable(
                     pass.setBindGroup(1, skyBG);
                     pass.setVertexBuffer(0, skyBufs.posBuffer);
                     pass.setIndexBuffer(skyBufs.idxBuffer, "uint16");
-                    pass.drawIndexed(skyBufs.idxCount);
+                    pass.drawIndexed(36);
                     return 1;
                 },
             };
@@ -164,9 +145,17 @@ export function buildSolidSkyboxRenderable(
     return r;
 }
 
-function createSkyMeshUBO(engine: EngineContext, world: Mat4, primaryColor: [number, number, number], skyOutputColor: [number, number, number]): GPUBuffer {
+function createSkyMeshUBO(
+    engine: EngineContext,
+    rootPosition: [number, number, number],
+    primaryColor: [number, number, number],
+    skyOutputColor: [number, number, number]
+): GPUBuffer {
     const data = new F32(SKY_MESH_UNIFORM_SIZE / 4);
-    data.set(world, 0);
+    data[0] = data[5] = data[10] = data[15] = 1;
+    data[12] = rootPosition[0];
+    data[13] = rootPosition[1];
+    data[14] = rootPosition[2];
     data[16] = primaryColor[0];
     data[17] = primaryColor[1];
     data[18] = primaryColor[2];

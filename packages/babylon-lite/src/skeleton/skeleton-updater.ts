@@ -67,6 +67,8 @@ function computeTopoOrder(nodes: readonly { readonly parentIdx: number }[]): Int
 export interface AnimationController {
     /** Advance animation by deltaMs and update bone textures. */
     tick(deltaMs: number, engine?: EngineContext): void;
+    /** @internal Advance/evaluate without submitting bone or morph data to the GPU. */
+    _tickCpu?(deltaMs: number, engine?: EngineContext): void;
     /** Current playback time in seconds. */
     time: number;
     /** True if playing. */
@@ -189,6 +191,7 @@ export function createAnimationController(
     let morphUploadF32 = pointerScratch;
 
     let cachedEngine: EngineContext | undefined;
+    let uploadGpu = true;
 
     // ── Animation mask (include/exclude targets by name) ──────────────────────────
     // `maskedNodes[i] = 1` marks node i's channels to be skipped this playback, so the
@@ -233,6 +236,15 @@ export function createAnimationController(
         loop: true,
         _setMask,
         _debugWorldMat: worldMat,
+        _tickCpu(deltaMs, engine): void {
+            const previous = uploadGpu;
+            uploadGpu = false;
+            try {
+                ctrl.tick(deltaMs, engine);
+            } finally {
+                uploadGpu = previous;
+            }
+        },
 
         tick:
             clip.duration <= 0
@@ -242,10 +254,10 @@ export function createAnimationController(
                           cachedEngine = engine;
                       }
                       const activeEngine = engine ?? cachedEngine;
-                      if (requiresEngine && !activeEngine) {
+                      if (requiresEngine && uploadGpu && !activeEngine) {
                           throw new Error("AnimationController.tick requires an EngineContext for skeleton or morph animation");
                       }
-                      const device = requiresEngine ? activeEngine!._device : null;
+                      const device = requiresEngine && uploadGpu ? activeEngine!._device : null;
 
                       if (ctrl.playing) {
                           ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
@@ -322,7 +334,9 @@ export function createAnimationController(
                                           const mb = bindings[bindingIndex]!;
                                           mb.weights.set(morphUploadF32.subarray(0, tc));
                                           // Write the weights array after the immutable header.
-                                          device!.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 16, morphUploadF32.buffer, 0, tc * 4);
+                                          if (uploadGpu) {
+                                              device!.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 16, morphUploadF32.buffer, 0, tc * 4);
+                                          }
                                       }
                                   }
                                   break;
@@ -403,13 +417,15 @@ export function createAnimationController(
                           }
 
                           // Upload to GPU
-                          const texWidth = skel.boneCount * 4;
-                          device!.queue.writeTexture(
-                              { texture: skel.runtimeSkeleton?.boneTexture ?? skel.boneTexture },
-                              boneData.buffer,
-                              { bytesPerRow: texWidth * 16 },
-                              { width: texWidth, height: 1 }
-                          );
+                          if (uploadGpu) {
+                              const texWidth = skel.boneCount * 4;
+                              device!.queue.writeTexture(
+                                  { texture: skel.runtimeSkeleton?.boneTexture ?? skel.boneTexture },
+                                  boneData.buffer,
+                                  { bytesPerRow: texWidth * 16 },
+                                  { width: texWidth, height: 1 }
+                              );
+                          }
                       }
                   },
     };

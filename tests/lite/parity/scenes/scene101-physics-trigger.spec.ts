@@ -11,7 +11,7 @@
  * remain a live DATA comparison: the BJS reference page is launched each run to confirm that
  * BOTH TRIGGER_ENTERED and TRIGGER_EXITED fired by the capture frame, matching Lite.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as path from "path";
 import { captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
@@ -25,8 +25,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 101 skipped via skipParity in scene-c
 
 /** Launch the BJS reference page live to read the trigger-event DATA at the capture frame. */
 async function captureBjsData(browser: Browser): Promise<{ entered: string | undefined; exited: string | undefined }> {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const bjsPage = await context.newPage();
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
 
     await bjsPage.goto(`/babylon-ref-scene101.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 101 BJS reference" });
@@ -35,8 +34,7 @@ async function captureBjsData(browser: Browser): Promise<{ entered: string | und
     const entered = await bjsPage.locator("canvas").evaluate((el) => (el as HTMLCanvasElement).dataset.entered);
     const exited = await bjsPage.locator("canvas").evaluate((el) => (el as HTMLCanvasElement).dataset.exited);
 
-    await bjsPage.close();
-    await context.close();
+    await release();
     return { entered, exited };
 }
 

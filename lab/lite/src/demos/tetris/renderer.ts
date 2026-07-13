@@ -70,6 +70,28 @@ interface PetGeometry {
     colors: Float32Array;
 }
 
+function normalizeVertexColorsToRgba(colors: number[], vertexCount: number): Float32Array {
+    if (colors.length === 0) {
+        return new Float32Array(0);
+    }
+    if (colors.length === vertexCount * 4) {
+        return new Float32Array(colors);
+    }
+    if (colors.length === vertexCount * 3) {
+        const out = new Float32Array(vertexCount * 4);
+        for (let v = 0; v < vertexCount; v++) {
+            const src = v * 3;
+            const dst = v * 4;
+            out[dst] = colors[src]!;
+            out[dst + 1] = colors[src + 1]!;
+            out[dst + 2] = colors[src + 2]!;
+            out[dst + 3] = 1;
+        }
+        return out;
+    }
+    throw new Error(`Invalid vertex color buffer length ${colors.length} for ${vertexCount} vertices`);
+}
+
 /** Fetch the offline-baked Cube Pets geometry (see scripts/bake-tetris-pets.mjs).
  *  Each entry is a single merged mesh normalised to a unit cube, in piece-type
  *  order (I, O, T, S, Z, J, L). */
@@ -86,7 +108,7 @@ async function loadPetGeometries(url: string): Promise<PetGeometry[]> {
         normals: new Float32Array(p.normals),
         uvs: new Float32Array(p.uvs),
         indices: new Uint32Array(p.indices),
-        colors: new Float32Array(p.colors),
+        colors: normalizeVertexColorsToRgba(p.colors, p.positions.length / 3),
     }));
 }
 
@@ -159,7 +181,7 @@ async function loadGeometryFromUrl(url: string, key: string): Promise<PetGeometr
         normals: new Float32Array(p.normals),
         uvs: new Float32Array(p.uvs),
         indices: new Uint32Array(p.indices),
-        colors: new Float32Array(p.colors ?? []),
+        colors: normalizeVertexColorsToRgba(p.colors ?? [], p.positions.length / 3),
     };
 }
 

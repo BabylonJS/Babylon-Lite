@@ -23,7 +23,7 @@ variables:
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
-      value: "9.15.4"
+      value: "11.9.0"
     - name: CI
       value: "true"
     - name: HEADLESS
@@ -217,6 +217,23 @@ stages:
 
                 - script: pnpm exec playwright install chromium
                   displayName: "Install Playwright browsers"
+
+                # Cache remote scene assets (models/textures/env fetched during
+                # measurement) across runs/PRs. The cache is a pure URL->bytes store
+                # independent of source, so a constant prefix is shared broadly. The
+                # per-run key component means the exact key never hits (so newly
+                # fetched assets are always saved at job end), while restoreKeys
+                # restores the most recent prefix match — a rolling cache that
+                # accumulates new assets instead of freezing. Measurement still
+                # fetches-with-retry on a miss, so a cold/expired cache is only slower,
+                # never incorrect.
+                - task: Cache@2
+                  displayName: "Cache remote scene assets"
+                  inputs:
+                      key: 'bundle-assets | v1 | "$(Build.BuildId)"'
+                      restoreKeys: |
+                          bundle-assets | v1
+                      path: $(System.DefaultWorkingDirectory)/.bundle-asset-cache
 
                 - script: |
                       TARGET_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-refs/heads/master}"
@@ -430,14 +447,32 @@ stages:
                       SKIP_BJS: "true"
                       SKIP_MEASURE: "true"
 
-                # Run parity tests via BrowserStack (macOS Chrome with real WebGPU)
-                # browserstack-node-sdk handles connection & local tunnel
+                # Run parity tests on BrowserStack (macOS Chrome with real WebGPU)
+                # via a direct CDP connection — NO browserstack-node-sdk. The wait
+                # script grabs up to BSTACK_SESSIONS_REQUIRED parallel sessions and
+                # exports CIWORKERS so the specs shard across that many cloud browsers
+                # (falling back to fewer when the plan is busy). A BrowserStack Local
+                # tunnel (started by the Playwright globalSetup) exposes the local dev
+                # server to the remote browser.
                 # Requires BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY
-                # from the BabylonJS-BrowserStack variable group
-                - script: pnpm test:parity-cloud
-                  displayName: "Run parity tests (BrowserStack)"
+                # from the BabylonJS-BrowserStack variable group.
+                - script: bash scripts/browserstack-wait.sh pnpm test:parity-cloud
+                  displayName: "Run parity tests (BrowserStack, sharded)"
                   env:
                       HEADLESS: "true"
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+                      BSTACK_SESSIONS_REQUIRED: "2"
+                      BSTACK_LOCAL_IDENTIFIER: "bstack-lite-parity-$(Build.BuildId)"
+
+                # Scrub BrowserStack credentials from the report/JUnit artifacts
+                # before they are published/uploaded. The CDP wsEndpoint embeds the
+                # access key and can surface in Playwright error output.
+                - script: npx tsx scripts/redact-secrets.ts test-results
+                  condition: always()
+                  continueOnError: true
+                  displayName: "Redact secrets from test artifacts"
+                  env:
                       BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
                       BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
 

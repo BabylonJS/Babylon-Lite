@@ -8,7 +8,7 @@
  * - Full image MAD ≤ 5
  * - ≥80% of pixels within 5 of reference
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

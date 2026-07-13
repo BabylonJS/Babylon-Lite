@@ -23,7 +23,7 @@ import "@babylonjs/core/Physics/v2/physicsEngineComponent";
 import "@babylonjs/core/Animations/animatable";
 
 const PHYSICS_FPS = 60;
-const LEVEL_BASE = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/CharController/";
+const LEVEL_BASE = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/CharController/";
 const CAPTURE_FRAMES = 55;
 const CHARACTER_START = new Vector3(3, 0.3, -8);
 const CAPSULE_HEIGHT = 1.8;

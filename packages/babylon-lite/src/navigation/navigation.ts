@@ -512,6 +512,20 @@ export function getClosestPoint(plugin: NavigationPlugin, position: Vec3): Vec3 
     return { x: res.point.x, y: res.point.y, z: res.point.z };
 }
 
+/** Snap a position to the closest point on the navmesh within a search box, or null when no part of the
+ *  mesh lies inside it. Unlike getClosestPoint — which does not inspect the query's success flag, so a
+ *  position outside its fixed ±1-unit box returns an UNSPECIFIED point (whatever the query left in its
+ *  output) rather than signalling a miss — the search extent is explicit here and a failed query is
+ *  reported as null, so callers can distinguish "snapped" from "nothing nearby". */
+export function findClosestPointWithin(plugin: NavigationPlugin, position: Vec3, halfExtents: Vec3): Vec3 | null {
+    _assertReady(plugin);
+    const res = plugin._navMeshQuery.findClosestPoint(position, { halfExtents });
+    if (!res.success) {
+        return null;
+    }
+    return { x: res.point.x, y: res.point.y, z: res.point.z };
+}
+
 /** Compute a path between two world positions, snapped to the navmesh. */
 export function computePath(plugin: NavigationPlugin, start: Vec3, end: Vec3): Vec3[] {
     _assertReady(plugin);

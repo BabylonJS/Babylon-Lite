@@ -16,7 +16,7 @@
  *   4. Asserts heap growth from cycle 2→N is within tolerance
  *      (cycle 1→2 is excluded as JIT/cache warmup)
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, acquireReferencePage } from "../parity/parity-fixtures";
 import type { CDPSession } from "@playwright/test";
 
 // ── Configuration ──────────────────────────────────────────────────
@@ -62,8 +62,7 @@ async function getJSHeapUsed(cdp: CDPSession): Promise<number> {
 test.describe("Memory Leak Detection", () => {
     for (const scene of SCENES) {
         test(`${scene.label} — no leak across ${CYCLES} cycles`, async ({ browser }) => {
-            const context = await browser.newContext({ viewport: { width: 800, height: 600 } });
-            const page = await context.newPage();
+            const { page, release } = await acquireReferencePage(browser, { width: 800, height: 600 });
             const cdp = await page.context().newCDPSession(page);
             await cdp.send("Performance.enable");
             await cdp.send("HeapProfiler.enable");
@@ -94,8 +93,7 @@ test.describe("Memory Leak Detection", () => {
 
             await cdp.send("HeapProfiler.disable");
             await cdp.send("Performance.disable");
-            await page.close();
-            await context.close();
+            await release();
 
             // Report
             const heapKB = heapSizes.map((h) => (h / 1024).toFixed(0));

@@ -6,7 +6,7 @@
  * format depends on GPU features, so pixel-level parity is marked skipParity
  * in scene-config.json until goldens are generated per-target.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
