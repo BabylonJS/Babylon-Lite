@@ -35,6 +35,8 @@ export interface ShaderMaterialOptions {
     readonly uniforms?: readonly ShaderUniformOption[];
     readonly samplers?: readonly ShaderSamplerOption[];
     readonly defines?: ShaderDefineMap;
+    /** Bind/inject the mesh's optional thin-instance RGBA stream for this material. Default true. */
+    readonly useThinInstanceColors?: boolean;
     readonly needAlphaBlending?: boolean;
     readonly needAlphaTesting?: boolean;
     readonly backFaceCulling?: boolean;
@@ -97,6 +99,17 @@ A ShaderMaterial mesh can be hardware-instanced via the standard thin-instance A
 @location(N+4) instanceColor: vec4<f32>,   // only when setThinInstanceColors() was called
 ```
 
+`useThinInstanceColors` controls whether this particular ShaderMaterial draw consumes the mesh's optional
+RGBA stream. It defaults to `true`, preserving the automatic behaviour above. When set to `false`, the
+instanced variant still injects and binds `world0..world3`, but it does not inject `instanceColor`, bind or
+GPU-cull a color buffer, or synchronize colors for that draw. The mesh's `ThinInstanceData.colors` remains
+intact, so another material rendering the same mesh can still consume it.
+
+The option is specifically valid for sampler-free depth/material overrides: a visible material may consume
+per-instance tint while its `_shadowCasterMaterial` uses `{ useThinInstanceColors: false }`. Both draws then
+share the mesh's one matrix buffer, while the caster avoids an unused color vertex stream. The override WGSL
+must not reference `input.instanceColor`. The option is ignored for non-instanced meshes.
+
 The user shader composes the instance transform itself (matching Babylon.js `instancesVertex`):
 
 ```wgsl
@@ -110,7 +123,7 @@ The `world` system uniform stays the **mesh** world matrix; for thin instances t
 Implementation notes (bundle discipline):
 
 - The instance vertex-buffer layouts, the prelude attribute lines, and the per-mesh instanced renderable live in `material/shader/shader-thin-instance.ts`, **dynamically imported** via `shader-group-builder.ts` → `buildShaderGroup` only when `meshes.some(m => m.thinInstances)`. Non-instanced ShaderMaterial scenes route through the unchanged synchronous `buildShaderMaterialRenderables`.
-- The expensive bindings (`group1BGL`, `systemSpec`, `customSpec`) are shared between the non-instanced and instanced variants — instancing is vertex data, not bind groups. Only the vertex buffer layouts and the `VertexInput` struct differ, so `getOrCreateShaderPipeline()` keys instanced pipelines on a variant suffix (`|ti1c{0|1}`).
+- The expensive bindings (`group1BGL`, `systemSpec`, `customSpec`) are shared between the non-instanced and instanced variants — instancing is vertex data, not bind groups. Only the vertex buffer layouts and the `VertexInput` struct differ, so `getOrCreateShaderPipeline()` keys instanced pipelines on a compact non-empty variant suffix (`0` or `1`). The color bit is `1` only when the mesh has colors and the material did not opt out through `useThinInstanceColors`.
 - Instanced ShaderMaterial meshes render as **one `_direct` renderable per mesh** (not merged), so per-mesh instance buffers are re-bound fresh each frame (avoiding stale render-bundle references when instance capacity grows).
 - **Opt-in GPU frustum culling** is wired via the shared `mesh/thin-instance-cull-binding.ts` helper (same as Standard/PBR): when `enableThinInstanceGpuCulling(mesh)` is set, the compute cull pass runs in the binding `update()` and the draw becomes `drawIndexedIndirect`. Opaque instanced ShaderMaterial only; transparent instanced meshes use the normal (non-culled) instanced draw.
 
@@ -288,6 +301,7 @@ The cache key includes:
 - Define set.
 - Alpha/depth/cull state.
 - Render target signature: color format, depth/stencil format, sample count, flipY.
+- Thin-instance variant: matrix stream present and whether this material consumes the optional color stream.
 
 ### Bind group layout
 
@@ -436,6 +450,7 @@ fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
 | `setFloat`, `setVector3`, `setTexture` methods    | `setShaderUniform`, `setShaderTexture` standalone functions                |
 | `needAlphaBlending`                               | Transparent renderable + blend pipeline                                    |
 | `needAlphaTesting`                                | Hint only; shader performs discard                                         |
+| Per-draw thin-instance color opt-out              | `useThinInstanceColors: false` on a color-independent ShaderMaterial        |
 
 ## Dependencies
 
@@ -459,6 +474,7 @@ Use Babylon.js doc playgrounds as BJS reference concepts while keeping Lite sour
 | ShaderMaterial uniform update  | Doc playground `#5T8G3I#16`       | Custom scalar/vector/color uniform mutation through `setShaderUniform` |
 | ShaderMaterial defines variant | Derived from doc `defines` option | WGSL const define emitted into prelude and included in pipeline key    |
 | ShaderMaterial alpha           | Lite-authored WGSL reference      | `needAlphaBlending` and explicit shader-side discard for alpha testing |
+| Thin-instance color opt-out    | Lite unit contract                | Override keeps matrix instancing but omits color layout, sync and bind  |
 
 Implementation should add lab scenes using the next available scene IDs, plus parity specs and bundle-size ceilings. The BJS side may use Babylon `ShaderMaterial` with GLSL from the docs; the Lite side must use equivalent WGSL and the new Lite `ShaderMaterial`.
 

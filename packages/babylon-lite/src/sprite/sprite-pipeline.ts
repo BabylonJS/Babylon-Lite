@@ -133,11 +133,7 @@ export function acquireSharedSpriteRendererPipelineCache(): SpritePipelineCache 
  *  Clears the cache (dropping cache-held pipeline/shader refs) when the last user
  *  is disposed. Safe to over-call; refcount floors at 0. */
 export function releaseSharedSpriteRendererPipelineCache(): void {
-    if (_sharedSpriteRendererPipelineCacheRefs === 0) {
-        return;
-    }
-    _sharedSpriteRendererPipelineCacheRefs--;
-    if (_sharedSpriteRendererPipelineCacheRefs === 0 && _sharedSpriteRendererPipelineCache) {
+    if (_sharedSpriteRendererPipelineCacheRefs > 0 && --_sharedSpriteRendererPipelineCacheRefs === 0 && _sharedSpriteRendererPipelineCache) {
         resetSpritePipelineCache(_sharedSpriteRendererPipelineCache);
         _sharedSpriteRendererPipelineCache = null;
     }

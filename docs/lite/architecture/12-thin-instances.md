@@ -8,6 +8,11 @@ Thin instances allow a single mesh to be drawn thousands of times with unique pe
 
 Thin instances are supported by all three mesh material families: **Standard**, **PBR**, and **ShaderMaterial** (custom user-WGSL). For ShaderMaterial integration specifics (auto-injected `world0..world3` / `instanceColor` vertex attributes and the user-shader contract) see `24-shader-material.md`.
 
+A ShaderMaterial draw may explicitly ignore an existing instance-color stream with
+`useThinInstanceColors: false`. This is draw-local: the mesh keeps its colors for other materials, while the
+selected material binds only the instance matrices. The canonical use is a color-independent depth override
+sharing the visible mesh's matrices without paying for unused color synchronization or vertex fetch.
+
 ---
 
 ## Public API Surface
@@ -39,6 +44,15 @@ export interface ThinInstanceData {
 /** Bulk-set all instance matrices. Creates ThinInstanceData if absent. */
 export function setThinInstances(mesh: Mesh, matrices: Float32Array, count: number): void;
 
+/** Change the active count and mark the complete active matrix range dirty. */
+export function setThinInstanceCount(mesh: Mesh, count: number): void;
+
+/** Change the active draw count without marking matrix or color data dirty. */
+export function setThinInstanceDrawCount(mesh: Mesh, count: number): void;
+
+/** Pre-create stable indirect draw arguments during scene warm-up. */
+export function enableThinInstanceDynamicDrawCount(mesh: Mesh): void;
+
 /** Add one instance. Returns the new instance index. Grows capacity 2× when full. */
 export function addThinInstance(mesh: Mesh, matrix: Mat4): number;
 
@@ -57,6 +71,21 @@ export function setThinInstanceColors(mesh: Mesh, colors: Float32Array): void;
 /** Enable/disable per-pass GPU frustum culling. Must be called before registerScene(). */
 export function enableThinInstanceGpuCulling(mesh: Mesh, enabled?: boolean): void;
 ```
+
+`setThinInstanceDrawCount()` is the count-only path for fixed-capacity pools whose CPU array and GPU
+buffer are already populated. It accepts an integer in `[0, _capacity]`, updates only `count`, and leaves
+matrix/color versions and dirty ranges untouched. Cached draws observe the count through their stable
+indirect argument buffer, so changing the active prefix neither replaces instance buffers nor invalidates
+render bundles. A caller exposing newly written slots must mark those exact matrix/color ranges dirty with
+the corresponding update API; the count-only setter deliberately does not upload vertex data. The pool
+must complete one full-capacity GPU synchronization before this setter is used.
+
+`setThinInstanceCount()` remains the convenience path that changes the count and marks the complete active
+matrix range `[0, count)` dirty for upload.
+
+Call `enableThinInstanceDynamicDrawCount()` before `registerScene()` when a synchronized pool will change
+counts interactively. Its next normal GPU sync creates the stable indirect argument buffer during warm-up,
+so the first later count change does not invalidate cached render bundles.
 
 ### Functions — Hierarchy Instance Pools (`hierarchy-instance-pool.ts`)
 
@@ -180,12 +209,16 @@ This avoids shifting the entire array, keeping removal O(1). Callers must be awa
 
 | Version field      | Bumped by                                                                                                  | Checked by                                |
 | ------------------ | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `_version`         | `setThinInstances`, `addThinInstance`, `setThinInstanceMatrix`, `removeThinInstance`, `flushThinInstances` | `syncThinInstanceBuffers` (matrix upload) |
+| `_version`         | Matrix/count helpers plus color helpers (color-only changes leave the matrix dirty range empty but still dirty static shadows) | `syncThinInstanceBuffers` (matrix sync/version) |
 | `_colorVersion`    | `setThinInstanceColors`                                                                                    | `syncThinInstanceBuffers` (color upload)  |
 | `_gpuVersion`      | `syncThinInstanceBuffers` (after matrix upload)                                                            | —                                         |
 | `_colorGpuVersion` | `syncThinInstanceBuffers` (after color upload)                                                             | —                                         |
 
 GPU upload is skipped when `_version === _gpuVersion` (or `_colorVersion === _colorGpuVersion`), avoiding redundant `writeBuffer` calls for static instances.
+`setThinInstanceDrawCount` does not mark either data stream dirty; draw-argument synchronization observes
+`count` independently. It advances the existing thin-instance version without marking matrix/color ranges
+dirty, so shadow caches observe the change while GPU synchronization performs no attribute upload. Static
+ESM, PCF, and CSM maps therefore redraw only when one of their actual casters changes.
 
 ---
 
@@ -610,6 +643,7 @@ Scene 17 (`scene17-pbr-std-thin-instances`) validates PBR thin instances: a PBR 
 | Swap-remove correctness | `removeThinInstance(i)` → last instance moves to slot `i`, count decrements        |
 | Version skip            | Static instances: GPU upload skipped when `_version === _gpuVersion`               |
 | Color independence      | Matrix mutation does not trigger color re-upload (separate version counters)       |
+| Count-only draw update  | Active count changes update draw args without dirtying matrix or color buffers      |
 | Zero-cost loading       | Scenes without thin instances never fetch `thin-instance-gpu.js` chunk             |
 
 ---

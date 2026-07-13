@@ -39,6 +39,8 @@ export interface CsmDirectionalShadowGeneratorConfig {
     shadowMaxZ?: number;
     /** Depth bias added during shadow-map generation. Default 0.00005. */
     bias?: number;
+    /** Caster depth offset in world units. Overrides `bias` when supplied; non-positive or non-finite values disable bias. */
+    worldSpaceBias?: number;
     /** Shadow darkness (0 = black shadow, 1 = no shadow). Default 0. */
     darkness?: number;
     /** Soft fade-out at the edge of each cascade frustum, 0..1. Default 0. */
@@ -71,6 +73,7 @@ export function createCsmDirectionalShadowGenerator(engine: EngineContext, _ligh
     const mapSize = cfg.mapSize ?? 1024;
     const numCascades = Math.min(cfg.numCascades ?? 4, 4);
     const bias = cfg.bias ?? 0.00005;
+    const worldSpaceBias = cfg.worldSpaceBias;
     const darkness = cfg.darkness ?? 0;
     const frustumEdgeFalloff = cfg.frustumEdgeFalloff ?? 0;
 
@@ -82,6 +85,7 @@ export function createCsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         _depthClamp: false,
         _shadowMaxZ: cfg.shadowMaxZ ?? null,
         _bias: bias,
+        _worldSpaceBias: worldSpaceBias === undefined ? null : Number.isFinite(worldSpaceBias) && worldSpaceBias > 0 ? worldSpaceBias : 0,
         _darkness: darkness,
         _frustumEdgeFalloff: frustumEdgeFalloff,
         _mapSize: mapSize,

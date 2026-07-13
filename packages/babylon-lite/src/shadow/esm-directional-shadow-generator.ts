@@ -309,6 +309,7 @@ function ensureEsmShadowTaskState(
                 clr: true,
                 clrColor: { r: 0, g: 0, b: 0, a: 0 },
                 cam: camera,
+                _skipClusteredLights: true,
             },
             engine,
             scene

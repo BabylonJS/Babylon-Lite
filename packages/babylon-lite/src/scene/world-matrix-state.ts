@@ -66,6 +66,11 @@ function peekWorldMatrixState(p: IWorldMatrixProvider | null): WorldMatrixAccess
     return (s as WorldMatrixAccessors | undefined) ?? null;
 }
 
+/** @internal Bump one engine object's world version without changing its transform values. */
+export function _markWorldMatrixDirty(host: IWorldMatrixProvider): void {
+    peekWorldMatrixState(host)?._invalidate();
+}
+
 /**
  * Create world matrix state for any entity type.
  *

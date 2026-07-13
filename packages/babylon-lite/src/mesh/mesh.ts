@@ -64,6 +64,12 @@ export interface MeshGPU {
     readonly indexBuffer: GPUBuffer;
     readonly indexCount: number;
     readonly indexFormat: GPUIndexFormat;
+    /** @internal Reserved vertex capacity for grow-only procedural geometry. */
+    _vertexCapacity?: number;
+    /** @internal Reserved index capacity for grow-only procedural geometry. */
+    _indexCapacity?: number;
+    /** @internal Reused padded indices whose inactive tail is degenerate. */
+    _indexScratch?: Uint32Array;
     /** @internal Per-attribute interleave layout. Undefined → all attributes tight (default). */
     readonly _vbLayout?: MeshVbLayout;
     /** @internal Precomputed pipeline cache-key suffix for this mesh's interleave layout.

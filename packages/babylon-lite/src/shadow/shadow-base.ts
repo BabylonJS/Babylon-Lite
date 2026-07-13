@@ -124,11 +124,12 @@ export function createSharedShadowUBO(
     return { ubo, data };
 }
 
-/** Sum caster world matrix versions for shadow-map dirty checks. */
+/** Sum caster transform versions plus non-transform geometry/count mutations. */
 export function casterVersionSum(casterMeshes: readonly Mesh[]): number {
     let sum = 0;
     for (const mesh of casterMeshes) {
-        sum += mesh.worldMatrixVersion;
+        // Bitwise coercion maps the absent optional version to zero without another branch.
+        sum += mesh.worldMatrixVersion + ~~(mesh.thinInstances?._version as number);
     }
     return sum;
 }

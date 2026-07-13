@@ -49,6 +49,7 @@ export { setSubtreeVisible } from "./scene/visibility.js";
 // RenderTask, and user tasks can render offscreen RTTs, overlays, etc.
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
+export { buildFrameGraphTask } from "./frame-graph/frame-graph.js";
 export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter } from "./frame-graph/frame-graph-actions.js";
 export { createFrameGraphContext, registerFrameGraphContext, unregisterFrameGraphContext, disposeFrameGraphContext } from "./frame-graph/frame-graph-context.js";
 export type { FrameGraphContext, FrameGraphContextOptions } from "./frame-graph/frame-graph-context.js";
@@ -167,6 +168,8 @@ export {
     createTube,
     createExtrudeShape,
     createMeshFromData,
+    updateMeshGeometry,
+    updateMeshGeometryCapacity,
     updateMeshPositions,
     updateMeshNormals,
     updateMeshColors,
@@ -176,6 +179,7 @@ export {
     resizeMeshGeometry,
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
+export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
 export { createSphereData } from "./mesh/create-sphere.js";
@@ -190,6 +194,10 @@ export { createCsgFromMesh, csgSubtract, csgIntersect, csgUnion, createMeshFromC
 export type { CsgSolid } from "./mesh/csg.js";
 export { initializeCsg2Async, isCsg2Ready, createCsg2FromMesh, csg2Subtract, csg2Intersect, csg2Add, createMeshFromCsg2, createMeshesFromCsg2, disposeCsg2 } from "./mesh/csg2.js";
 export type { Csg2Solid } from "./mesh/csg2.js";
+
+// ─── Resources ───────────────────────────────────────────────────────
+export { createStorageBuffer, updateStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
+export type { StorageBuffer } from "./resource/storage-buffer.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
@@ -316,8 +324,8 @@ export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./ani
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
-export { bakeVat, attachVat } from "./vat/vat-baker.js";
-export type { VatBakeResult, VatBakeOptions, VatClip, VatHandle } from "./vat/vat-baker.js";
+export { bakeVat, bakeVatMany, attachVat } from "./vat/vat-baker.js";
+export type { VatBakeResult, VatBakeOptions, VatBakeTarget, VatClip, VatHandle } from "./vat/vat-baker.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
 export { normalizeVec3 } from "./math/normalize-vec3.js";
@@ -378,6 +386,8 @@ export {
     setThinInstanceMatrix,
     setThinInstances,
     setThinInstanceCount,
+    setThinInstanceDrawCount,
+    enableThinInstanceDynamicDrawCount,
     flushThinInstances,
     setThinInstanceColors,
     setThinInstanceColor,

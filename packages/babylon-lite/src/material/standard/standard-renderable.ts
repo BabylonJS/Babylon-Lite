@@ -40,6 +40,8 @@ type ThinInstanceSync = (
 /** Fragment factories passed from the async group builder. */
 export interface StdFragmentFactories {
     tiSync?: ThinInstanceSync;
+    /** Uploads dirty thin-instance data and promotes cached draws to stable indirect args when their count changes. */
+    tiUpdate?: (engine: EngineContext, ti: any, hasColor: boolean, indexCount: number) => GPUBuffer | null;
     tiFragment?: (hasColor: boolean) => ShaderFragment;
     shadowFragment?: (shadowLights: import("./fragments/std-shadow-fragment.js").ShadowLightSlot[]) => ShaderFragment;
     /** Present only when at least one mesh in the build has morph targets. */
@@ -54,7 +56,7 @@ export interface StdFragmentFactories {
 export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[], factories: StdFragmentFactories): MeshGroupBuildResult {
     const engine = scene.surface.engine;
     const device = engine._device;
-    const { tiSync, tiFragment, shadowFragment, cull, morphFragment } = factories;
+    const { tiSync, tiUpdate, tiFragment, shadowFragment, cull, morphFragment } = factories;
 
     // Collect per-light shadow info.
     const shadowLights: { lightIndex: number; shadowType: "esm" | "pcf" | "csm"; gen: ShadowGenerator }[] = [];
@@ -170,6 +172,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
         let _lastWorldVersion = mesh.worldMatrixVersion;
         let _lastLightsCount = s.lights.length;
+        let thinDrawArgs: GPUBuffer | null = null;
         const sortCenter = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number];
         const _baseUpdate = (): void => {
             const worldVersion = mesh.worldMatrixVersion;
@@ -189,6 +192,10 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 _stdMatScratch.fill(0);
                 writeStdMaterialData(_stdMatScratch, mat, textureLevel);
                 device.queue.writeBuffer(materialUBO, 0, _stdMatScratch.buffer, 0, 96);
+            }
+            const ti = hasThinInstances ? mesh.thinInstances : null;
+            if (ti && tiUpdate) {
+                thinDrawArgs = tiUpdate(engine, ti, hasInstanceColor, mesh._gpu.indexCount);
             }
         };
         // FO-version wrapper applied only when the engine has floating-origin
@@ -231,10 +238,10 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             }
             if (cullBinding) {
                 cullBinding.draw(pass, g.indexCount, ti!.count);
-            } else if (ti && ti.count > 0) {
-                pass.drawIndexed(g.indexCount, ti.count);
+            } else if (ti && thinDrawArgs) {
+                pass.drawIndexedIndirect(thinDrawArgs, 0);
             } else {
-                pass.drawIndexed(g.indexCount);
+                pass.drawIndexed(g.indexCount, ti?.count);
             }
             return 1;
         };
@@ -250,6 +257,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 return {
                     renderable: r,
                     pipeline,
+                    ...(cb ? { _updateBatches: [cb._updateBatch] } : {}),
                     update: cb ? cb.update : update,
                     draw: (pass) => draw(pass, cb),
                 };

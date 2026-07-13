@@ -1,6 +1,6 @@
 {
-  "rawKB": 40.9,
-  "gzipKB": 25.9,
+  "rawKB": 41.3,
+  "gzipKB": 26,
   "ignoredRawKB": 34.5,
   "runtimeChunks": [
     "scene264-billboard-renderable-BItOEIZ3.js",

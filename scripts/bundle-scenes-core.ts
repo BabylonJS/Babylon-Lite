@@ -1196,6 +1196,35 @@ export async function buildBundleScenes(): Promise<void> {
 /** How many times to attempt measuring a single Lite scene before giving up. */
 const LITE_MEASURE_ATTEMPTS = 3;
 
+/** Default budget for a Lite scene to reach its `dataset.ready` signal. */
+const READY_TIMEOUT_MS_DEFAULT = 50_000;
+
+/**
+ * Per-scene overrides for the ready-timeout.
+ *
+ * A few scenes perform compute-heavy GPU work that is near-instant on real
+ * hardware but dramatically slower under CI's software WebGPU (SwiftShader).
+ * scene129 (Gaussian Splatting + GPU picking) combines a GS radix-sort compute
+ * pass with a GPU→CPU picking readback (`pickAsync` → buffer `mapAsync`), which
+ * SwiftShader executes far slower than a real adapter. It renders in ~2s on a
+ * real GPU but does not reliably reach `dataset.ready` within the 50s default
+ * under SwiftShader, so the bundle measurement flakes with the identical
+ * "did not become ready (timed out after 50s …)" error across unrelated PRs.
+ *
+ * Recording a size only once the scene renders is intentional (the render
+ * pipeline's lazy chunks load on first render), so the right fix is a larger
+ * budget for these scenes rather than measuring a truncated bundle. We grant the
+ * same 150s the parity spec already allows for scene129; a genuinely-broken
+ * scene still fails loudly, just after a longer wait.
+ */
+const READY_TIMEOUT_OVERRIDES_MS: Readonly<Record<string, number>> = {
+    scene129: 150_000,
+};
+
+function readyTimeoutForScene(scene: string): number {
+    return READY_TIMEOUT_OVERRIDES_MS[scene] ?? READY_TIMEOUT_MS_DEFAULT;
+}
+
 /**
  * Measure a Lite scene, retrying on failure. A Lite scene that never reaches its
  * `dataset.ready` signal (e.g. a transient failure or rate-limit fetching a large
@@ -1213,7 +1242,7 @@ async function measureLiteSceneWithRetry(
     let lastError: unknown;
     for (let attempt = 1; attempt <= LITE_MEASURE_ATTEMPTS; attempt++) {
         try {
-            return await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/", true);
+            return await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/", true, readyTimeoutForScene(scene));
         } catch (err) {
             lastError = err;
             console.warn(`  ${scene}: measurement attempt ${attempt}/${LITE_MEASURE_ATTEMPTS} failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1429,7 +1458,8 @@ export async function measurePage(
     scene: string,
     htmlFile: string,
     bundlePath: string,
-    requireReady = false
+    requireReady = false,
+    readyTimeoutMs = READY_TIMEOUT_MS_DEFAULT
 ): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
     const page = await browser.newPage();
     const jsPayloads: RuntimeJsPayload[] = [];
@@ -1464,16 +1494,23 @@ export async function measurePage(
                 const c = document.querySelector("canvas");
                 return c?.dataset.ready === "true" || c?.dataset.error != null;
             },
-            { timeout: 50_000 }
+            { timeout: readyTimeoutMs }
         );
         notReadyReason = await page.evaluate(() => {
             const c = document.querySelector("canvas");
             if (c?.dataset.ready === "true") return undefined;
             return c?.dataset.error ?? "canvas reported neither ready nor error";
         });
-    } catch {
+    } catch (err) {
+        // Only treat a genuine Playwright timeout as "not ready"; any other error
+        // (page crash, execution context destroyed, navigation failure, …) is a
+        // real failure that must propagate instead of masquerading as a timeout.
+        if (!(err instanceof Error) || err.name !== "TimeoutError") {
+            await page.close();
+            throw err;
+        }
         // waitForFunction timed out: the scene set neither ready nor error.
-        notReadyReason = "timed out after 50s waiting for canvas ready/error signal";
+        notReadyReason = `timed out after ${Math.round(readyTimeoutMs / 1000)}s waiting for canvas ready/error signal`;
     }
 
     // For Lite scenes (requireReady), a scene that never rendered would under-count

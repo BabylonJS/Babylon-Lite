@@ -1,8 +1,10 @@
 import { F32 } from "../../engine/typed-arrays.js";
 import type { Material, StencilState } from "../material.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { StorageBuffer } from "../../resource/storage-buffer.js";
 import type { Mat4 } from "../../math/types.js";
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
+import { bumpVisibilityEpoch } from "../../engine/engine.js";
 
 /** Vertex attribute names a ShaderMaterial can bind. `joints`/`weights` (and `joints1`/`weights1`
  *  for \>4 bones/vertex) are the skinning attributes — bound from the mesh's skeleton/VAT buffers,
@@ -37,6 +39,9 @@ export interface ShaderMaterialOptions {
     readonly samplers?: readonly ShaderSamplerOption[];
     readonly storageBuffers?: readonly ShaderStorageBufferOption[];
     readonly defines?: ShaderDefineMap;
+    /** Bind and inject the mesh's optional thin-instance RGBA stream for this material. Disable on
+     *  color-independent overrides (for example a depth caster) that need only the instance matrices. */
+    readonly useThinInstanceColors?: boolean;
     readonly needAlphaBlending?: boolean;
     /** Blend equation used when `needAlphaBlending` is set. "alpha" (default) is
      *  standard src-over; "additive" adds the fragment's premultiplied-by-alpha
@@ -109,7 +114,7 @@ export interface ShaderTextureSlot {
 
 export interface ShaderStorageBufferSlot {
     readonly decl: ShaderStorageBufferDecl;
-    current: GPUBuffer | null;
+    current: StorageBuffer | null;
 }
 
 /** A custom WGSL material: compiled from user-supplied vertex/fragment sources
@@ -124,6 +129,8 @@ export interface ShaderMaterial extends Material {
     readonly samplerDecls: readonly ShaderSamplerDecl[];
     readonly storageBufferDecls: readonly ShaderStorageBufferDecl[];
     readonly defines: readonly ShaderDefine[];
+    /** @internal Explicit thin-instance color preference; numeric zero is reserved for compact runtime checks. */
+    readonly _tic?: boolean | 0;
     readonly needAlphaBlending: boolean;
     readonly blendMode: "alpha" | "additive";
     /** True for transmissive/refractive surfaces (see `ShaderMaterialOptions.transmissive`). */
@@ -295,6 +302,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         samplerDecls,
         storageBufferDecls,
         defines,
+        _tic: options.useThinInstanceColors,
         needAlphaBlending: options.needAlphaBlending ?? false,
         blendMode: options.blendMode ?? "alpha",
         transmissive: options.transmissive ?? false,
@@ -375,19 +383,50 @@ function normalizeUniformValue(decl: ShaderUniformDecl, value: ShaderUniformValu
     return arr;
 }
 
+function setUniformValue(material: ShaderMaterial, name: string, value: number | ArrayLike<number>): void {
+    const slot = material._uniformValues.get(name);
+    if (!slot) {
+        throw new Error(`ShaderMaterial: uniform "${name}" was not declared.`);
+    }
+    const count = elementCount(slot.decl.type);
+    const length = typeof value === "number" ? 1 : value.length;
+    if (length !== count) {
+        throw new Error(`ShaderMaterial: uniform "${slot.decl.name}" of type ${slot.decl.type} expects ${count} value(s), got ${length}.`);
+    }
+
+    let changed = false;
+    if (typeof value === "number") {
+        changed = slot.value[0] !== Math.fround(value);
+    } else {
+        for (let i = 0; i < count; i++) {
+            if (slot.value[i] !== Math.fround(value[i]!)) {
+                changed = true;
+                break;
+            }
+        }
+    }
+    if (!changed) {
+        return;
+    }
+
+    if (typeof value === "number") {
+        slot.value[0] = value;
+    } else {
+        for (let i = 0; i < count; i++) {
+            slot.value[i] = value[i]!;
+        }
+    }
+    material._uniformVersion++;
+    material._uboVersion = material._uniformVersion;
+}
+
 /** Set a declared uniform's value, validating its element count against the
  *  declared type and bumping the material's UBO version.
  *  @param material - Target material.
  *  @param name - Declared uniform name.
  *  @param value - New value (scalar, array, or `Float32Array`). */
 export function setShaderUniform(material: ShaderMaterial, name: string, value: ShaderUniformValue): void {
-    const slot = material._uniformValues.get(name);
-    if (!slot) {
-        throw new Error(`ShaderMaterial: uniform "${name}" was not declared.`);
-    }
-    slot.value.set(normalizeUniformValue(slot.decl, value));
-    material._uniformVersion++;
-    material._uboVersion = material._uniformVersion;
+    setUniformValue(material, name, value);
 }
 
 /** Bind (or clear) the texture for a declared sampler, enforcing that depth and
@@ -420,20 +459,31 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
     if (slot.current !== texture) {
         slot.current = texture;
         material._resourceVersion++;
+        bumpVisibilityEpoch();
     }
 }
 
 /** Bind (or clear) a declared read-only storage buffer. */
-export function setShaderStorageBuffer(material: ShaderMaterial, name: string, buffer: GPUBuffer | null): void {
+export function setShaderStorageBuffer(material: ShaderMaterial, name: string, buffer: StorageBuffer | null): void {
     const slot = material._storageBufferSlots.get(name);
     if (!slot) {
         throw new Error(`ShaderMaterial: storage buffer "${name}" was not declared.`);
     }
+    if (buffer && !("_engine" in buffer)) {
+        throw new Error("setShaderStorageBuffer requires a StorageBuffer created by createStorageBuffer; raw GPUBuffer is not supported.");
+    }
+    if (buffer?._destroyed) {
+        throw new Error(`ShaderMaterial: storage buffer "${name}" has been disposed.`);
+    }
+    if (buffer && !buffer._engine._storageBuffers?.has(buffer)) {
+        throw new Error("setShaderStorageBuffer requires a live StorageBuffer created by createStorageBuffer.");
+    }
     // See setShaderTexture: only invalidate the bind groups when the bound buffer HANDLE changes; re-binding the
-    // same GPUBuffer is a no-op (contents update live), so an unconditional bump churned the descriptor heap.
+    // same StorageBuffer is a no-op (contents update live), so an unconditional bump churned the descriptor heap.
     if (slot.current !== buffer) {
         slot.current = buffer;
         material._resourceVersion++;
+        bumpVisibilityEpoch();
     }
 }
 
@@ -452,5 +502,5 @@ export function setShaderVector3(material: ShaderMaterial, name: string, value: 
  *  `getViewProjectionMatrix()` / `mat4Invert()`), so camera/math matrices can be fed
  *  straight into a matrix uniform without laundering through a typed array. */
 export function setShaderMatrix(material: ShaderMaterial, name: string, value: Float32Array | Mat4): void {
-    setShaderUniform(material, name, value instanceof Float32Array ? value : Array.from(value));
+    setUniformValue(material, name, value);
 }
