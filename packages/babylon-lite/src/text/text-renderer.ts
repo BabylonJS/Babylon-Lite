@@ -113,6 +113,9 @@ export interface TextRenderer extends RenderingContext {
     /** @internal */ _targetHeight: number;
     /** @internal */ _disposed: boolean;
     /** @internal */ _clear: boolean;
+    /** @internal Reused scratch array of per-layer bundles collected each `_record`,
+     *  replayed with a single `pass.executeBundles(...)`. */
+    _visibleBundles: GPURenderBundle[];
 }
 
 /** @internal Per-layer GPU resources owned by the renderer. */
@@ -131,6 +134,18 @@ interface LayerGpu {
     /** Snapshot of (posX, posY, rot, scale, W, H) to skip mvp upload when unchanged. */
     lastMvpInputs: Float32Array;
     mvpUploaded: boolean;
+    /** Pre-recorded GPU command bundle for this layer: `setPipeline` + quad/instance vertex
+     *  buffers + per-draw-group `setBindGroup` + `draw`. Replayed via `pass.executeBundles`
+     *  for near-zero per-frame command-recording cost (mirrors the sprite renderer). The
+     *  bundle binds buffer *objects* (instance data, UBO), so freely-mutating contents
+     *  (glyph instance bytes, mvp/opacity/gamma UBO) do NOT require a rebuild. Invalidated
+     *  when the draw structure changes (`data._layoutVersion`) or a baked object reference
+     *  changes: pipeline swap, instance-buffer reallocation, or atlas-driven bind-group rebuild. */
+    renderBundle: GPURenderBundle | null;
+    /** `data._layoutVersion` the cached `renderBundle` was recorded against. */
+    bundleLayoutVersion: number;
+    /** Draw-group count baked into the cached bundle (for the metrics return value). */
+    bundleDrawCalls: number;
 }
 
 const _mvpScratch = new Float32Array(16);
@@ -182,6 +197,9 @@ function ensureLayerGpu(rr: TextRenderer, layer: TextLayer): LayerGpu {
         uploadedViewportH: 0,
         lastMvpInputs: new Float32Array(6),
         mvpUploaded: false,
+        renderBundle: null,
+        bundleLayoutVersion: -1,
+        bundleDrawCalls: 0,
     };
     rr._layerGpu.set(layer, lg);
     return lg;
@@ -203,6 +221,8 @@ function ensureInstanceCapacity(device: GPUDevice, lg: LayerGpu, needed: number)
     });
     lg.instanceCap = cap;
     lg.uploadedDataVersion = -1;
+    // Bundle baked a reference to the old GPUBuffer; force a re-record.
+    lg.renderBundle = null;
 }
 
 function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGroupLayout): void {
@@ -227,11 +247,14 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
                 ],
             });
             lg.bindGroupAtlasVersions[i] = atlasGpu.uploadedVersion;
+            // Bundle baked the old bind group; force a re-record.
+            lg.renderBundle = null;
         }
     }
     if (lg.bindGroups.length > data._groups.length) {
         lg.bindGroups.length = data._groups.length;
         lg.bindGroupAtlasVersions.length = data._groups.length;
+        lg.renderBundle = null;
     }
 
     // Instance buffer.
@@ -310,6 +333,7 @@ export function createTextRenderer(surface: SurfaceContext, opts: TextRendererOp
         _targetHeight: canvas.height,
         _disposed: false,
         _clear: opts.clear ?? true,
+        _visibleBundles: [],
         layers,
         _layers: layers,
         clearColor: opts.clearValue ?? { r: 0, g: 0, b: 0, a: 1 },
@@ -350,6 +374,8 @@ function textRendererUpdate(rr: TextRenderer): void {
             // Pipeline change → bind groups must be rebuilt against new bindGroupLayout.
             lg.bindGroups.length = 0;
             lg.bindGroupAtlasVersions.length = 0;
+            // Bundle baked the old pipeline; force a re-record.
+            lg.renderBundle = null;
         }
         uploadLayer(rr, lg, cache.bindGroupLayout);
     }
@@ -360,8 +386,10 @@ function textRendererRecord(rr: TextRenderer): number {
         return 0;
     }
     const eng = rr._surface.engine;
+    const device = eng._device;
     const encoder = eng._currentEncoder;
     const swapView = rr._surface.scRT._colorView!;
+    const format = rr._surface.format;
 
     const pass = encoder.beginRenderPass({
         colorAttachments: [
@@ -375,10 +403,11 @@ function textRendererRecord(rr: TextRenderer): number {
     });
 
     let drawCalls = 0;
-    let lastPipeline: GPURenderPipeline | null = null;
-    const { cache } = getOrCreateTextPipeline(rr._surface.engine, rr._surface.format, 1, null, false);
+    const { cache } = getOrCreateTextPipeline(rr._surface.engine, format, 1, null, false);
     const quadVertex = cache.quadVertexBuffer;
-    pass.setVertexBuffer(0, quadVertex);
+
+    const visibleBundles = rr._visibleBundles;
+    visibleBundles.length = 0;
 
     for (const layer of rr._layers) {
         if (!layer.visible) {
@@ -392,23 +421,45 @@ function textRendererRecord(rr: TextRenderer): number {
         if (data._instanceCount === 0) {
             continue;
         }
-        if (lastPipeline !== lg.pipeline) {
-            pass.setPipeline(lg.pipeline);
-            lastPipeline = lg.pipeline;
-        }
-        pass.setVertexBuffer(1, lg.instanceBuf);
-        for (let i = 0; i < data._groups.length; i++) {
-            const g = data._groups[i]!;
-            const bg = lg.bindGroups[i];
-            if (g.slotCount === 0 || !bg) {
-                continue;
+
+        // (Re)record the per-layer bundle when the draw structure changes. Only slot-range
+        // moves (group grow/shrink/reset) bump `data._layoutVersion`; content-only edits
+        // (same-length replace, add-into-free-slot, partial remove) leave it stable so the
+        // cached bundle keeps replaying. Object-reference changes (pipeline swap,
+        // instance-buffer realloc, atlas-driven bind-group rebuild) null the bundle at their
+        // source. The steady-state win is frames with no structural edits: `data._layoutVersion`
+        // is stable and the pre-baked bundle is replayed with zero per-call command recording.
+        if (lg.renderBundle == null || lg.bundleLayoutVersion !== data._layoutVersion) {
+            const be = device.createRenderBundleEncoder({
+                colorFormats: [format],
+                sampleCount: 1,
+            });
+            be.setPipeline(lg.pipeline);
+            be.setVertexBuffer(0, quadVertex);
+            be.setVertexBuffer(1, lg.instanceBuf);
+            let groupDraws = 0;
+            for (let i = 0; i < data._groups.length; i++) {
+                const g = data._groups[i]!;
+                const bg = lg.bindGroups[i];
+                if (g.slotCount === 0 || !bg) {
+                    continue;
+                }
+                be.setBindGroup(0, bg);
+                be.draw(6, g.slotCount, 0, g.slotStart);
+                groupDraws++;
             }
-            pass.setBindGroup(0, bg);
-            pass.draw(6, g.slotCount, 0, g.slotStart);
-            drawCalls++;
+            lg.renderBundle = be.finish();
+            lg.bundleLayoutVersion = data._layoutVersion;
+            lg.bundleDrawCalls = groupDraws;
         }
+
+        visibleBundles.push(lg.renderBundle);
+        drawCalls += lg.bundleDrawCalls;
     }
 
+    if (visibleBundles.length > 0) {
+        pass.executeBundles(visibleBundles);
+    }
     pass.end();
     return drawCalls;
 }

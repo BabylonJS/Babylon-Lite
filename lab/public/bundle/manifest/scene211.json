@@ -1,5 +1,5 @@
 {
-  "rawKB": 90.8,
+  "rawKB": 90.9,
   "gzipKB": 38.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene211-gltf-ext-quantization-DTtElLs7.js",
     "scene211-gltf-feature-animations-CsN6DvHw.js",
     "scene211-gltf-feature-meshopt-Dt65KW5n.js",
-    "scene211-gltf-feature-registry-BBHWaYli.js",
+    "scene211-gltf-feature-registry-4ulav0ud.js",
     "scene211-gltf-feature-skeleton-DpuvZ9VR.js",
     "scene211-gltf-json-asset-CHRQZ19d.js",
     "scene211-gltf-multi-buffer-Cwm5u1Qq.js",

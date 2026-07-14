@@ -1,12 +1,12 @@
 {
-  "rawKB": 104.1,
+  "rawKB": 104.3,
   "gzipKB": 42,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene176-generate-mipmaps-LBrT9Lsp.js",
     "scene176-gltf-ext-dielectric-C6hvXXiF.js",
     "scene176-gltf-feature-extras-VHPteGay.js",
-    "scene176-gltf-feature-registry-BgSCMk40.js",
+    "scene176-gltf-feature-registry-BJSz-sbu.js",
     "scene176-gltf-json-asset-C-LYB2bT.js",
     "scene176-ibl-fragment-CeRrvT96.js",
     "scene176-ibl-skybox-wgsl-CFIBOHHx.js",
