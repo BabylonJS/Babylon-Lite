@@ -15,7 +15,7 @@
  * stamp canvas.dataset.animationFrozen="true", so a screenshot of either is
  * directly comparable.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../../shared/reuse-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig, loadSceneConfigAll } from "./compare-utils";
 

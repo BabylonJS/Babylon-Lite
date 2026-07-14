@@ -32,7 +32,7 @@
  *       PERF_DURATION=5      — measurement duration in seconds (default: 5)
  *       PERF_REGRESSION_PCT=5 — allowed % regression vs baseline (default: 5)
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, acquireContext } from "../../shared/reuse-fixtures";
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import type { BrowserContext } from "@playwright/test";
@@ -248,7 +248,7 @@ test.describe("GL Perf Regression (lite-gl vs Babylon ref)", () => {
 
     for (const scene of SCENES) {
         test(`${scene.label}`, async ({ browser }) => {
-            const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+            const { context, release } = await acquireContext(browser);
 
             const currentUrl = `/gl/scene${scene.id}.html`;
             const baselineUrl = `/gl/babylon-ref-scene${scene.id}.html`;
@@ -303,7 +303,7 @@ test.describe("GL Perf Regression (lite-gl vs Babylon ref)", () => {
                     ).toBeLessThanOrEqual(limitMs);
                 }
             } finally {
-                await context.close();
+                await release();
             }
         });
     }
