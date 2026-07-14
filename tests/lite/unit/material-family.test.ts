@@ -29,6 +29,12 @@ describe("getMaterialFamily", () => {
         expect(getMaterialFamily(fakeMaterial(undefined))).toBeUndefined();
     });
 
+    it("returns undefined (no throw) for a plain material-like object with no builder", () => {
+        // _buildGroup is @internal / trimmed from the public d.ts, so callers can legally
+        // pass a bare { name, metadata } typed as Material.
+        expect(getMaterialFamily({ name: "plain" } as unknown as Material)).toBeUndefined();
+    });
+
     it("reports a custom builder's own family string", () => {
         expect(getMaterialFamily(fakeMaterial("myCustomType"))).toBe("myCustomType");
     });
