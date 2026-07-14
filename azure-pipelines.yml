@@ -1,6 +1,6 @@
 # Azure Pipelines — Babylon Lite CI
 #
-# Runs on every PR targeting master. Seven parallel jobs:
+# Runs on every PR targeting master. Eight parallel jobs:
 #   1. Release Markers  — breaking-change marker validation
 #   2. API Report       — public API diff comment + breaking-change validation
 #   3. Unit Tests       — vitest + plumbing (Playwright)
@@ -8,6 +8,7 @@
 #   5. Perf Regression  — Lite vs Stable on BrowserStack
 #   6. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
 #   7. Lint             — ESLint + TypeScript type-check
+#   8. Playground Snapshot — per-PR playground deploy + PR comment
 #
 
 trigger: none
@@ -20,6 +21,10 @@ pr:
 variables:
     - group: BabylonJS-BrowserStack
     - group: BabylonJS-Deployment
+    # Provides TOOLS_STORAGE_ACCOUNT — the tools storage account backing
+    # liteplayground.babylonjs.com, so PR playground snapshots serve same-origin
+    # as nightly (required by the client-side deploy coordinator).
+    - group: BabylonJS-CI-Infrastructure
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
@@ -298,6 +303,7 @@ stages:
                       siteDir: $(System.DefaultWorkingDirectory)/lab/dist
                       deployPath: lite/$(Build.BuildNumber)/lab
                       siteName: "Lab"
+                      linkUrl: $(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/lab/index.html
 
           # ──────────────────────────────────────────────────────────────
           # Job 4: Performance Regression
@@ -603,3 +609,72 @@ stages:
                       mergeTestResults: true
                       testRunTitle: "Compat Layer"
                   continueOnError: true
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 8: PR Playground Snapshot
+          # ──────────────────────────────────────────────────────────────
+          # Builds the Lite Playground from THIS PR's source — the self-hosted
+          # engine is bundled from the same commit, so the runner executes the PR's
+          # engine code — and deploys it to a per-PR sub-path on the tools account
+          # (served at liteplayground.babylonjs.com/pr/<N>/, same origin as nightly),
+          # then comments the URL on the PR. PLAYGROUND_BASE is set to match the
+          # public sub-path so every asset, the runner iframe, the self-hosted
+          # engine, and the SPA snippet routes resolve under it.
+          #
+          # Fork PRs: Azure withholds secret variables (including the deploy token)
+          # from fork-triggered PRs by default, so on a fork the upload step simply
+          # no-ops (it is continueOnError) and the PR still passes. To publish
+          # snapshots for fork PRs, enable "Make secrets available to builds of
+          # forks" in the pipeline's trigger settings — note this exposes the
+          # deploy token to fork-authored code, a security trade-off to weigh.
+          - job: PlaygroundSnapshot
+            displayName: "PR Playground Snapshot"
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                # Immutable per-PR snapshot, served same-origin as nightly on the
+                # tools account so the deploy coordinator can hand off to it.
+                #   deployPath     — upload path inside the tools storage account
+                #                    (the `litePlayground` container maps to the
+                #                    subdomain root, so this becomes /pr/<N>/).
+                #   playgroundBase — public base path baked into the build.
+                #   playgroundUrl  — public URL posted in the PR comment.
+                - name: deployPath
+                  value: litePlayground/pr/$(System.PullRequest.PullRequestNumber)
+                - name: playgroundBase
+                  value: /pr/$(System.PullRequest.PullRequestNumber)/
+                - name: playgroundUrl
+                  value: https://liteplayground.babylonjs.com/pr/$(System.PullRequest.PullRequestNumber)/
+            steps:
+                # fetchDepth: 0 + tags so the engine build can resolve the latest
+                # npm-lite-v* tag for its version stamp (see vite.engine.config.ts).
+                - checkout: self
+                  fetchDepth: 0
+                  fetchTags: true
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                # PLAYGROUND_BASE must be leading- and trailing-slashed and match
+                # the public sub-path so the built app resolves assets under it.
+                - script: pnpm build:playground
+                  displayName: "Build the playground (engine + app)"
+                  env:
+                      PLAYGROUND_BASE: $(playgroundBase)
+
+                - template: config/templates/upload-static-site.yml
+                  parameters:
+                      siteDir: $(System.DefaultWorkingDirectory)/playground/dist
+                      deployPath: $(deployPath)
+                      storageAccount: $(TOOLS_STORAGE_ACCOUNT)
+                      siteName: "Lite Playground"
+                      linkUrl: $(playgroundUrl)

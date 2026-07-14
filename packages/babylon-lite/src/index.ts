@@ -233,6 +233,8 @@ export { loadNodeBlockEmitterWithGeometry } from "./material/node/node-geometry-
 export { createNodeNoColorMaterialView } from "./material/node/no-color-view.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
 export { createMaterialView } from "./material/material-view.js";
+export { getMaterialFamily } from "./material/material-family.js";
+export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
