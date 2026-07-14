@@ -32,7 +32,7 @@ const _features: [Trigger, Loader][] = [
     // bufferViews first, then sparse accessors are materialized (so their base can
     // read decompressed data), then quantization dequantizes the resulting accessors.
     ["EXT_meshopt_compression", () => import("./gltf-feature-meshopt.js")],
-    [(j) => !!(j.accessors as any[] | undefined)?.some((a: any) => a.sparse), () => import("./gltf-feature-sparse.js")],
+    [(j) => !!(j.accessors as any[] | undefined)?.some((a) => a.sparse), () => import("./gltf-feature-sparse.js")],
     ["KHR_mesh_quantization", () => import("./gltf-ext-quantization.js")],
     // Pre-mesh features (geometry decompression)
     ["KHR_draco_mesh_compression", () => import("./gltf-feature-draco.js")],
