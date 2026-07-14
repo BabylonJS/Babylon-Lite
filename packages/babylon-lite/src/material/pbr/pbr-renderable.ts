@@ -136,8 +136,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasCullingTI ||= !!m.thinInstances?._gpuCullingEnabled;
         hasAnyUnlit ||= !!mat.unlit;
         hasAnyUvTransform ||= !!mat._hasUvTx;
-        // UV2 counts when ANY PBR channel samples texCoord 1 (occlusion included) — precomputed as
-        // `_uv2Mask` on the material by the glTF slow path (0/undefined on the fast path).
+        // UV2 counts when ANY PBR channel samples texCoord 1 (occlusion included, via `_uv2Mask`
+        // bit 32) — precomputed as `_uv2Mask` on the material by the glTF slow path (0/undefined on
+        // the fast path). Occlusion-on-UV1 (incl. KHR_texture_basisu) always routes through that slow
+        // path, so its UV2 usage is already reflected here without a separate occlusionTexCoord check.
         hasAnyUv2 ||= !!m._gpu.uv2Buffer && !!(mat as { _uv2Mask?: number })._uv2Mask;
         hasAnyVertexColor ||= !!m._gpu.colorBuffer;
         hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
