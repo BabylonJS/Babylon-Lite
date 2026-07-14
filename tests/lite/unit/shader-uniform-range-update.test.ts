@@ -196,6 +196,16 @@ describe("ShaderMaterial ranged custom UBO updates", () => {
         expect(customWrite[4]).toBe(12);
     });
 
+    it("preserves one version increment per public uniform setter", () => {
+        const { material } = fixture();
+        const version = material._uniformVersion;
+
+        setShaderUniform(material, "tint", [0.2, 0.4, 0.6]);
+
+        expect(material._uniformVersion).toBe(version + 1);
+        expect(material._uboVersion).toBe(material._uniformVersion);
+    });
+
     it("registers once per scene and can re-register after scene callbacks are cleared", () => {
         const first = fixture();
         const secondScene = {
