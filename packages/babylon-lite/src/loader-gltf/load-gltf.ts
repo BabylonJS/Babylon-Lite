@@ -194,12 +194,10 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
         Object.assign(container, rest);
         if (_sceneSetup) {
             const prev = container._sceneSetup;
-            container._sceneSetup = prev
-                ? (scene) => {
-                      prev(scene);
-                      _sceneSetup(scene);
-                  }
-                : _sceneSetup;
+            container._sceneSetup = (scene) => {
+                prev?.(scene);
+                _sceneSetup(scene);
+            };
         }
     }
     return container;
