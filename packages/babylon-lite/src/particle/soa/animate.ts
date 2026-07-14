@@ -24,8 +24,10 @@ export interface SoaSystem {
     /** Update steps, run in graph order on every live particle each frame. */
     updateSteps: ParticleStep[];
 
-    /** @internal Scaled step for the current particle (= the object runtime's `_directionScale`). */
+    /** @internal Scaled step for the current particle (= the object runtime's `_directionScale`; clamped on the dying step). */
     _scaledStep: number;
+    /** @internal Update speed scaled by the step ratio for the whole frame (unclamped; used by scaled colour step). */
+    _scaledUpdateSpeed: number;
     /** @internal Fractional emission carry-over between steps. */
     _newPartsExcess: number;
     /** @internal Whether the system is started. */
@@ -46,6 +48,7 @@ export function createSoaSystem(capacity: number): SoaSystem {
         createSteps: [],
         updateSteps: [],
         _scaledStep: 0,
+        _scaledUpdateSpeed: 0,
         _newPartsExcess: 0,
         _started: false,
         _stopped: false,
@@ -102,6 +105,7 @@ function updateExisting(system: SoaSystem, scaledUpdateSpeed: number): void {
     const age = buffer.age;
     const lifeTime = buffer.lifeTime;
     const steps = system.updateSteps;
+    system._scaledUpdateSpeed = scaledUpdateSpeed;
 
     for (let i = 0; i < buffer.alive; i++) {
         let stepSpeed = scaledUpdateSpeed;
