@@ -33,10 +33,10 @@ export function enableShaderUniformRangeUpdates(scene: SceneContext, material: S
 
 function installRangeUpdater(material: RangeShaderMaterialState): void {
     const dirty = new Set<string>();
+    let dirtyVersion = -1;
     const mark = (name: string) => {
         if (dirty.size === 0) {
-            material._uniformVersion++;
-            material._uboVersion = material._uniformVersion;
+            dirtyVersion = material._uniformVersion;
         }
         dirty.add(name);
     };
@@ -53,9 +53,15 @@ function installRangeUpdater(material: RangeShaderMaterialState): void {
         if (!spec || !data || !buffer) {
             return;
         }
-        if (material._shaderCustomVersion === material._uniformVersion) {
+        const directMutation = material._uniformVersion === dirtyVersion;
+        if (!directMutation && material._shaderCustomVersion === material._uniformVersion) {
             dirty.clear();
+            dirtyVersion = -1;
             return;
+        }
+        if (directMutation) {
+            material._uniformVersion++;
+            material._uboVersion = material._uniformVersion;
         }
         let min = 0x7fffffff;
         let max = -1;
@@ -73,6 +79,7 @@ function installRangeUpdater(material: RangeShaderMaterialState): void {
             engine._device.queue.writeBuffer(buffer, min, data, min, max - min);
         }
         dirty.clear();
+        dirtyVersion = -1;
         material._shaderCustomVersion = material._uniformVersion;
     };
 }
