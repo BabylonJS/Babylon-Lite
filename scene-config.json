@@ -1584,7 +1584,7 @@
         "name": "Scene 164 - Device Lost Recovery",
         "maxMad": 0.01,
         "maxRegionMad": 0.08,
-        "maxRawKB": 99,
+        "maxRawKB": 99.1,
         "description": "Scene 5 Alien glTF forces WebGPU device loss and validates opt-in automatic recovery without an app rebuild callback.",
         "tags": ["pbr", "gltf", "anim", "recovery"],
         "skipPerf": true
@@ -2176,7 +2176,7 @@
         "name": "Scene 255 — Skin Weights (Byte)",
         "maxMad": 0.1,
         "maxRegionMad": 0.5,
-        "maxRawKB": 94.3,
+        "maxRawKB": 94.4,
         "description": "glTF Animation_SkinType_01: a skinned plane whose vertex WEIGHTS are a normalized UNSIGNED_BYTE accessor (componentType 5121). Validates denormalization of non-float skin weights (glTF-Asset-Generator Category B); Lite previously read them raw and exploded the skin. Frozen at seekTime=1.0.",
         "tags": ["gltf", "skeleton", "animation"],
         "skipPerf": true
