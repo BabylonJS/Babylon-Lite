@@ -34,6 +34,25 @@ export function stripBase(pathname: string): string {
     return pathname.replace(/^\//, "");
 }
 
+/**
+ * The fixed release version of the current deploy, derived from the deploy base:
+ * a `/v/<ver>/` snapshot reports `<ver>`. The root nightly build and per-PR
+ * snapshots (`/pr/<N>/`) are source builds, not fixed releases, so they report
+ * `null` (i.e. "nightly"). Drives the version selector's current selection.
+ */
+export function currentDeployVersion(): string | null {
+    const match = BASE.match(/^\/v\/([^/]+)\/$/);
+    return match ? match[1]! : null;
+}
+
+/**
+ * Deploy base for a selectable engine version: the root (`/`) for nightly, or the
+ * immutable `/v/<ver>/` snapshot for a fixed release. Pass `null` for nightly.
+ */
+export function baseForVersion(version: string | null): string {
+    return version ? `/v/${version}/` : "/";
+}
+
 // Same-origin asset extensions worth treating as deploy-base-relative when they
 // appear as a quoted root-absolute path (e.g. `"/brdf-lut.png"`) in code. Shared
 // with the download bundler (see download.ts) so both recognise the same set.
