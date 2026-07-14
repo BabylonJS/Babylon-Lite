@@ -51,6 +51,11 @@ parameters:
       default: false
 
 variables:
+    - group: BabylonJS-Deployment
+    # Provides TOOLS_STORAGE_ACCOUNT — the tools storage account backing
+    # liteplayground.babylonjs.com, so versioned playground snapshots serve
+    # same-origin as nightly (required by the client-side deploy coordinator).
+    - group: BabylonJS-CI-Infrastructure
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
@@ -240,3 +245,28 @@ stages:
                   displayName: "Publish compat package to npm"
                   env:
                       NPM_TOKEN: $(NPM_TOKEN)
+
+                # --- Versioned playground snapshot ------------------------------
+                # After a successful publish, build the Lite Playground from this
+                # tagged commit and deploy it to an immutable per-version sub-path
+                # on the tools account (served at liteplayground.babylonjs.com/v/<ver>/),
+                # so every release gets a permanent, self-consistent playground URL
+                # served same-origin as nightly (its self-hosted engine is built
+                # from — and stamped with — the published version via PACKAGE_VERSION).
+                # PLAYGROUND_BASE matches the public sub-path so assets, the runner,
+                # the engine, and SPA snippet routes resolve under it. Compile-time
+                # gated on dryRun so dry runs never upload.
+                - ${{ if eq(parameters.dryRun, false) }}:
+                      - script: pnpm build:playground
+                        displayName: "Build versioned playground"
+                        env:
+                            PACKAGE_VERSION: $(PACKAGE_VERSION)
+                            PLAYGROUND_BASE: /v/$(PACKAGE_VERSION)/
+
+                      - template: config/templates/upload-static-site.yml
+                        parameters:
+                            siteDir: $(System.DefaultWorkingDirectory)/playground/dist
+                            deployPath: litePlayground/v/$(PACKAGE_VERSION)
+                            storageAccount: $(TOOLS_STORAGE_ACCOUNT)
+                            siteName: "Lite Playground v$(PACKAGE_VERSION)"
+                            postComment: false

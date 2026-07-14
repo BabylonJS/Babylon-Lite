@@ -20,6 +20,7 @@ import {
 } from "./snippets";
 import { getEmbedMode, decodeCodeHash, openInPlaygroundUrl, EmbedHost } from "./embed";
 import { NIGHTLY, engineUrlForVersion, fetchPublishedVersions } from "./versions";
+import { BASE } from "./base";
 
 const editorContainer = document.getElementById("editor") as HTMLElement;
 const fileTabsContainer = document.getElementById("fileTabs") as HTMLElement;
@@ -227,8 +228,8 @@ function resetToUnsaved(): void {
     currentSnippetId = null;
     currentSnippetVersion = "0";
     currentMeta = {};
-    if (location.hash || location.pathname !== "/") {
-        history.replaceState(null, "", "/");
+    if (location.hash || location.pathname !== BASE) {
+        history.replaceState(null, "", BASE);
     }
 }
 
@@ -544,7 +545,7 @@ async function loadFromUrl(): Promise<boolean> {
         const project = parseProject(inline);
         editor.setFiles(project.files, project.entry);
         markClean();
-        history.replaceState(null, "", "/");
+        history.replaceState(null, "", BASE);
         return true;
     }
     // Path form `/snippet/ID/v/VERSION` (canonical) — load and keep the URL.
@@ -646,7 +647,7 @@ if (!embedMode) {
                     // Load failed: the browser already moved the address bar to the
                     // target path, but state still reflects the previously loaded
                     // snippet. Restore the URL so URL and state stay in sync.
-                    history.replaceState(null, "", currentSnippetId ? snippetPath(currentSnippetId, currentSnippetVersion) : "/");
+                    history.replaceState(null, "", currentSnippetId ? snippetPath(currentSnippetId, currentSnippetVersion) : BASE);
                 }
                 return;
             }
