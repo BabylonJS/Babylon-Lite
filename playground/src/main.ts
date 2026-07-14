@@ -496,11 +496,13 @@ versionEl.addEventListener("change", () => {
     }
     // Persist current work synchronously so it restores after the reload (autosave
     // is otherwise debounced), then carry any snippet route across to the target
-    // snapshot so a permalink stays a permalink.
+    // snapshot so a permalink stays a permalink. Preserve the query and hash too so
+    // an inline `#code=` payload or a legacy `#ID[#REV]` snippet link survives the
+    // switch rather than relying on autosave alone.
     writeAutosave();
     const rest = stripBase(location.pathname);
     const suffix = rest === "index.html" ? "" : rest;
-    location.href = `${targetBase}${suffix}${location.search}`;
+    location.href = `${targetBase}${suffix}${location.search}${location.hash}`;
 });
 
 void (async () => {
