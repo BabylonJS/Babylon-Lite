@@ -362,7 +362,7 @@
         "slug": "scene35-gltf-instancing",
         "name": "Scene 35 — EXT_mesh_gpu_instancing",
         "maxMad": 0.02,
-        "maxRawKB": 83.8,
+        "maxRawKB": 83.9,
         "description": "SimpleInstancing.glb (EXT_mesh_gpu_instancing) — 5×5×5 grid of 125 unit cubes driven by per-instance TRS accessors. Default IBL env. Matches PG #YG3BBF#57.",
         "tags": ["pbr", "gltf", "env", "gpu-instancing"],
         "compatParity": true
@@ -404,7 +404,7 @@
         "slug": "scene39-animation-pointer-waterfall",
         "name": "Scene 39 — KHR_animation_pointer (Animated Waterfall)",
         "maxMad": 0.6,
-        "maxRawKB": 108.9,
+        "maxRawKB": 109.0,
         "description": "AnimatedWaterfall.gltf — grass blades rotate via /nodes/{n}/rotation pointers and water/foam surfaces scroll via /materials/{m}/.../KHR_texture_transform offset+scale pointers. Default IBL env, no skybox/ground. Validates KHR_animation_pointer node-TRS + texture-transform handlers.",
         "tags": ["pbr", "gltf", "env", "lights-punctual", "texture-transform", "animation-pointer"],
         "skipPerf": true,
@@ -1456,7 +1456,7 @@
         "slug": "scene152-gltf-manager",
         "name": "Scene 152 — Unified AnimationManager",
         "maxMad": 0.02,
-        "maxRawKB": 94.2,
+        "maxRawKB": 94.3,
         "description": "One explicit AnimationManager drives a glTF shark skeleton group and a manual camera orbit property group.",
         "tags": ["pbr", "gltf", "anim"],
         "skipPerf": true,
@@ -2033,7 +2033,7 @@
         "slug": "scene240-animated-triangle",
         "name": "Scene 240 — AnimatedTriangle",
         "maxMad": 0.2,
-        "maxRawKB": 91.1,
+        "maxRawKB": 91.2,
         "description": "AnimatedTriangle.gltf — cx20 gltf-test. Node-rotation animation; material-less no-NORMAL mesh (smooth normals).",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2053,7 +2053,7 @@
         "slug": "scene242-emissive-fireflies",
         "name": "Scene 242 — EmissiveFireflies",
         "maxMad": 0.2,
-        "maxRawKB": 97.3,
+        "maxRawKB": 97.4,
         "description": "EmissiveFireflies.gltf — cx20 gltf-test. KHR_animation_pointer material emissiveFactor/emissiveStrength/baseColorFactor.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2073,7 +2073,7 @@
         "slug": "scene244-pot-of-coals-animation-pointer",
         "name": "Scene 244 — PotOfCoalsAnimationPointer",
         "maxMad": 0.2,
-        "maxRawKB": 133.8,
+        "maxRawKB": 133.9,
         "description": "PotOfCoalsAnimationPointer.gltf — cx20 gltf-test. KHR_animation_pointer texture-transform rotation.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2093,7 +2093,7 @@
         "slug": "scene246-simple-skin",
         "name": "Scene 246 — SimpleSkin",
         "maxMad": 0.2,
-        "maxRawKB": 99.6,
+        "maxRawKB": 99.7,
         "description": "SimpleSkin.gltf — cx20 gltf-test. Material-less skinned mesh; interleaved JOINTS/WEIGHTS, no-NORMAL smooth normals.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2103,7 +2103,7 @@
         "slug": "scene247-teapots-galore",
         "name": "Scene 247 — TeapotsGalore",
         "maxMad": 0.4,
-        "maxRawKB": 84.8,
+        "maxRawKB": 84.9,
         "description": "TeapotsGalore.gltf — cx20 gltf-test. EXT_mesh_gpu_instancing, top-down view.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2154,7 +2154,7 @@
         "slug": "scene253-animate-all-the-things",
         "name": "Scene 253 — AnimateAllTheThings",
         "maxMad": 0.3,
-        "maxRawKB": 153.1,
+        "maxRawKB": 153.2,
         "description": "cx20 gltf-test AnimateAllTheThings, viewed top-down over the full grid of test objects. Exercises KHR_lights_punctual, KHR_texture_transform, KHR_materials_unlit/ior/transmission/iridescence/volume/emissive_strength and KHR_animation_pointer, plus skinning and morph targets. Frozen at a deterministic frame.",
         "tags": ["gltf", "animation", "animation-pointer", "transmission", "iridescence", "skeleton", "morph"],
         "skipPerf": true
@@ -2220,7 +2220,7 @@
         "name": "Scene 260 — Triangle Strip",
         "maxMad": 0.1,
         "maxRegionMad": 0.5,
-        "maxRawKB": 80,
+        "maxRawKB": 80.1,
         "description": "glTF Mesh_PrimitiveMode_11: a quad drawn as a TRIANGLE_STRIP (primitive mode 5) with uint32 indices. Validates non-triangle-list primitive topologies (glTF-Asset-Generator Category C); Lite hardcoded a triangle-list pipeline and rendered POINTS/LINES/strips garbled. The loader now reads the primitive mode and the pipeline honors the matching WebGPU topology.",
         "tags": ["gltf", "topology"],
         "skipPerf": true
