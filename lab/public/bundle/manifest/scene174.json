@@ -1,16 +1,16 @@
 {
-  "rawKB": 97,
-  "gzipKB": 39.6,
+  "rawKB": 96.3,
+  "gzipKB": 39.4,
   "ignoredRawKB": 1485.2,
   "runtimeChunks": [
-    "scene174-generate-mipmaps-oyz7Zcb3.js",
+    "scene174-generate-mipmaps-BTK0V8Us.js",
     "scene174-gltf-glb-parser-V10AO6Mf.js",
-    "scene174-pbr-renderable-D5I4312H.js",
+    "scene174-pbr-renderable-Ck7RP8ZJ.js",
     "scene174-recast-navigation-CYBQI-zY-Dry_z7x_.js",
-    "scene174-shader-composer-CgJmQyJj.js",
-    "scene174-singlelight-hemispheric-wgsl-STW_78f5.js",
-    "scene174-standard-renderable-BG-ku13t.js",
-    "scene174-wgsl-helpers-CwHFFXvt.js",
+    "scene174-shader-composer-DishuYLa.js",
+    "scene174-singlelight-hemispheric-wgsl-DYuLXC4p.js",
+    "scene174-standard-renderable-hP_Zd-jO.js",
+    "scene174-wgsl-fog-m3PkjS7i.js",
     "scene174.js"
   ]
 }

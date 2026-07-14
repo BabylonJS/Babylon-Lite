@@ -27,12 +27,13 @@
 
 import type { ComposedShader, ShaderFragment, Varying } from "../../shader/fragment-types.js";
 import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
-import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ENV, PBR2_GEOMETRY_OUTPUT, _registerPbrExt, type _PbrBindCtx, type _PbrFragCtx, type PbrExt } from "./pbr-flags.js";
+import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ENV, _registerPbrExt, type _PbrBindCtx, type _PbrFragCtx, type PbrExt } from "./pbr-flags.js";
 import type { createPbrComposer, PbrLightMode } from "./pbr-compose.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
+const PBR2_GEOMETRY_OUTPUT = 1 << 21;
 
 // ─── PBR extension contributing the geometry-params fragment ──────────
 

@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose";
+import { resizeMeshGeometry } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 import { release } from "../../../packages/babylon-lite/src/resource/ref-count";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { SkeletonData } from "../../../packages/babylon-lite/src/animation/types";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { ObservableVec3 } from "../../../packages/babylon-lite/src/math/observable-vec3";
 import { ObservableQuat } from "../../../packages/babylon-lite/src/math/observable-quat";
 
@@ -14,6 +16,15 @@ function fakeBuffer(): GPUBuffer {
 
 function fakeTexture(): GPUTexture {
     return { destroy: vi.fn() } as unknown as GPUTexture;
+}
+
+function mappedBuffer(descriptor: GPUBufferDescriptor): GPUBuffer {
+    const data = new ArrayBuffer(Number(descriptor.size));
+    return {
+        destroy: vi.fn(),
+        getMappedRange: () => data,
+        unmap: vi.fn(),
+    } as unknown as GPUBuffer;
 }
 
 function makeMesh(gpu: MeshGPU): Mesh {
@@ -30,6 +41,44 @@ function makeMesh(gpu: MeshGPU): Mesh {
 }
 
 describe("mesh clone GPU buffer ownership", () => {
+    it("resizing one clone releases its claim without retiring geometry still owned by its sibling", () => {
+        const gpu: MeshGPU = {
+            positionBuffer: fakeBuffer(),
+            normalBuffer: fakeBuffer(),
+            uvBuffer: fakeBuffer(),
+            indexBuffer: fakeBuffer(),
+            indexCount: 3,
+            indexFormat: "uint16",
+        };
+        const src = makeMesh(gpu);
+        const clone = cloneTransformNode(src) as Mesh;
+        const engine = {
+            _device: {
+                createBuffer: vi.fn(mappedBuffer),
+                queue: { writeBuffer: vi.fn() },
+            },
+            _renderingContexts: [],
+            _retirements: [],
+        } as unknown as EngineContext;
+
+        resizeMeshGeometry(engine, src, new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 1, 2]));
+
+        expect(src._gpu).not.toBe(gpu);
+        expect(clone._gpu).toBe(gpu);
+        expect(gpu._refCount).toBe(1);
+        expect(engine._retirements).toHaveLength(0);
+        expect(gpu.positionBuffer.destroy).not.toHaveBeenCalled();
+        expect(gpu.normalBuffer.destroy).not.toHaveBeenCalled();
+        expect(gpu.uvBuffer.destroy).not.toHaveBeenCalled();
+        expect(gpu.indexBuffer.destroy).not.toHaveBeenCalled();
+
+        disposeMeshGpu(clone);
+        expect(gpu.positionBuffer.destroy).toHaveBeenCalledTimes(1);
+        expect(gpu.normalBuffer.destroy).toHaveBeenCalledTimes(1);
+        expect(gpu.uvBuffer.destroy).toHaveBeenCalledTimes(1);
+        expect(gpu.indexBuffer.destroy).toHaveBeenCalledTimes(1);
+    });
+
     it("does not destroy shared buffers when the source mesh is disposed while a clone is still alive", () => {
         const gpu: MeshGPU = {
             positionBuffer: fakeBuffer(),
@@ -144,11 +193,14 @@ describe("mesh clone GPU buffer ownership", () => {
             indexCount: 3,
             indexFormat: "uint16",
         };
+        const jointsBuffer = fakeBuffer();
+        const weightsBuffer = fakeBuffer();
         const skel = {
             boneTexture: fakeTexture(),
             boneCount: 1,
-            jointsBuffer: fakeBuffer(),
-            weightsBuffer: fakeBuffer(),
+            jointsBuffer,
+            weightsBuffer,
+            _skinBuffers: { jointsBuffer, weightsBuffer, joints1Buffer: null, weights1Buffer: null },
         } as unknown as SkeletonData;
 
         const src = makeMesh(gpu);

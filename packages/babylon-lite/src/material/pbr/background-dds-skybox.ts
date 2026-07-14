@@ -17,39 +17,22 @@ import ddsSkyboxFragSrc from "../../../shaders/skybox-dds.fragment.wgsl?raw";
 const SKY_DDS_UNIFORM_SIZE = 96;
 const DEFAULT_SKY_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
 
-function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
+function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer } {
     // prettier-ignore
     const positions = new F32([
-     S,-S, S, -S,-S, S, -S, S, S,  S, S, S,
-     S, S,-S, -S, S,-S, -S,-S,-S,  S,-S,-S,
-     S, S,-S,  S,-S,-S,  S,-S, S,  S, S, S,
-    -S, S, S, -S,-S, S, -S,-S,-S, -S, S,-S,
-    -S, S, S, -S, S,-S,  S, S,-S,  S, S, S,
-     S,-S, S,  S,-S,-S, -S,-S,-S, -S,-S, S,
+    -S,-S,-S,  S,-S,-S, -S, S,-S,  S, S,-S,
+    -S,-S, S,  S,-S, S, -S, S, S,  S, S, S,
   ]);
     // prettier-ignore
     const indices = new U16([
-     2, 1, 0,  3, 2, 0,   6, 5, 4,  7, 6, 4,
-    10, 9, 8, 11,10, 8,  14,13,12, 15,14,12,
-    18,17,16, 19,18,16,  22,21,20, 23,22,20,
+    6,4,5, 7,6,5,  0,2,3, 1,0,3,
+    5,1,3, 7,5,3,  0,4,6, 2,0,6,
+    3,2,6, 7,3,6,  0,1,5, 4,0,5,
   ]);
     return {
         posBuffer: createMappedBuffer(engine, positions, BU.VERTEX),
         idxBuffer: createMappedBuffer(engine, indices, BU.INDEX),
-        idxCount: 36,
     };
-}
-
-function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Float32Array {
-    const world = new F32(16);
-    world[0] = 1;
-    world[5] = 1;
-    world[10] = 1;
-    world[15] = 1;
-    world[12] = rootPosition[0];
-    world[13] = rootPosition[1];
-    world[14] = rootPosition[2];
-    return world;
 }
 
 /** Build a DDS cube skybox as a complete Renderable (order 0). */
@@ -63,14 +46,12 @@ export async function buildDdsSkyboxRenderable(
 ): Promise<Renderable> {
     const engine = scene.surface.engine;
 
-    const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
-
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
     const { cubeView, sampler } = await loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL);
 
     const fragCode = SCENE_UBO_WGSL + (enableNoise ? WGSL_DITHER : WGSL_NO_DITHER) + ddsSkyboxFragSrc;
     const mat = createCubemapSkyboxMaterial(enableNoise ? "skybox-dds" : "skybox-dds0", SCENE_UBO_WGSL + ddsSkyboxVertSrc, fragCode);
-    const ubo = createDdsMeshUBO(engine, skyboxWorld, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
+    const ubo = createDdsMeshUBO(engine, rootPosition, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
     const bindGroup = mat.createBindGroup(engine, ubo, cubeView, sampler);
 
     const r: Renderable = {
@@ -84,7 +65,7 @@ export async function buildDdsSkyboxRenderable(
                     pass.setBindGroup(1, bindGroup);
                     pass.setVertexBuffer(0, skyBufs.posBuffer);
                     pass.setIndexBuffer(skyBufs.idxBuffer, "uint16");
-                    pass.drawIndexed(skyBufs.idxCount);
+                    pass.drawIndexed(36);
                     return 1;
                 },
             };
@@ -95,9 +76,18 @@ export async function buildDdsSkyboxRenderable(
 
 // ─── DDS Skybox UBO ──────────────────────────────────────────────────────────
 
-function createDdsMeshUBO(engine: EngineContext, world: Float32Array, primaryColor: [number, number, number], exposureLinear: number, contrast: number): GPUBuffer {
+function createDdsMeshUBO(
+    engine: EngineContext,
+    rootPosition: [number, number, number],
+    primaryColor: [number, number, number],
+    exposureLinear: number,
+    contrast: number
+): GPUBuffer {
     const data = new F32(SKY_DDS_UNIFORM_SIZE / 4);
-    data.set(world, 0);
+    data[0] = data[5] = data[10] = data[15] = 1;
+    data[12] = rootPosition[0];
+    data[13] = rootPosition[1];
+    data[14] = rootPosition[2];
     data[16] = primaryColor[0];
     data[17] = primaryColor[1];
     data[18] = primaryColor[2];

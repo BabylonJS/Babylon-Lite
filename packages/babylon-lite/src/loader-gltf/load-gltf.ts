@@ -16,11 +16,11 @@ import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import { resolveAccessor, buildParentMap, computeNodeWorldMatrix, anyPrimitive, needsOrmComposite, TYPE_SIZES } from "./gltf-parser.js";
 import type { AccessorView } from "./gltf-parser.js";
 import type { GltfVb } from "./gltf-interleave.js";
-import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
+import type { GltfImageCache, GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
 import type { DecodedPrimitive, GltfFeature, GltfLoadCtx } from "./gltf-feature.js";
 import type { TextureWrapFn } from "./gltf-pbr-builder.js";
-import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, runMatExts, uploadTex } from "./gltf-pbr-builder.js";
+import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, uploadTex } from "./gltf-pbr-builder.js";
 import type * as GltfColorNormalize from "./gltf-color-normalize.js";
 import type * as GltfFeatureRegistry from "./gltf-feature-registry.js";
 import type * as GltfPbrBuilderExt from "./gltf-pbr-builder-ext.js";
@@ -122,7 +122,8 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
     // the asset can possibly trigger a feature — so plain metallic-roughness
     // GLBs (no extensions/animations/skins/morphs/ORM-composite) never fetch the
     // registry. Core loader knows zero feature names.
-    const features = assetUsesGltfFeatures(json) ? await (await importGltfFeatureRegistry()).loadGltfFeatures(json) : [];
+    const featureRegistry = assetUsesGltfFeatures(json) ? await importGltfFeatureRegistry() : undefined;
+    const features = featureRegistry ? await featureRegistry.loadGltfFeatures(json) : [];
 
     // Pre-parse hooks (EXT_meshopt_compression decompression, KHR_mesh_quantization
     // dequantization) may rewrite bufferViews/accessors and hand back a replacement
@@ -165,6 +166,7 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
         _parentMap: parentMap,
         _worldMatrixCache: worldMatrixCache,
         _matExts: matExts,
+        _runMatExts: featureRegistry?.runGltfMaterialFeatures,
         _wrapTex: wrapTex,
     };
 
@@ -261,15 +263,10 @@ function assetUsesGltfFeatures(json: any) {
  *  (KHR_node_visibility, KHR_animation_pointer) to address specific nodes. */
 function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]): { root: TransformNode; nodeMap: (TransformNode | undefined)[] } {
     // Map nodeIndex → uploaded Mesh[]
-    const nodeToMeshes = new Map<number, Mesh[]>();
+    const nodeToMeshes: Mesh[][] = [];
     for (let i = 0; i < meshDatas.length; i++) {
         const ni = meshDatas[i]!._nodeIndex;
-        let arr = nodeToMeshes.get(ni);
-        if (!arr) {
-            arr = [];
-            nodeToMeshes.set(ni, arr);
-        }
-        arr.push(meshes[i]!);
+        (nodeToMeshes[ni] ??= []).push(meshes[i]!);
     }
 
     const nodeMap: (TransformNode | undefined)[] = new Array(json.nodes?.length ?? 0);
@@ -293,7 +290,7 @@ function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]
                 tn.children.push(buildNode(childIdx));
             }
         }
-        const nodeMeshes = nodeToMeshes.get(nodeIdx) ?? [];
+        const nodeMeshes = nodeToMeshes[nodeIdx] ?? [];
         tn.children.push(...nodeMeshes);
         return tn;
     }
@@ -318,18 +315,13 @@ async function extractAllMeshes(
     decodedPrimitives: Map<unknown, DecodedPrimitive>
 ): Promise<GltfMeshData[]> {
     // Per-load image cache — avoids decoding the same glTF image index multiple times
-    const imageCache = new Map<number, Promise<ImageBitmap>>();
+    const imageCache: GltfImageCache = [];
 
     // Cache material assembly by glTF material index — avoids duplicate image fetches
-    const matCache = new Map<number, Promise<GltfMaterialData>>();
-    const getMat = (matIdx: number): Promise<GltfMaterialData> => {
-        const key = matIdx ?? -1;
-        let p = matCache.get(key);
-        if (!p) {
-            p = assembleMaterial(json, binChunk, matIdx, baseUrl, imageCache);
-            matCache.set(key, p);
-        }
-        return p;
+    const matCache: Promise<GltfMaterialData>[] = [];
+    const getMat = (matIdx: number | undefined): Promise<GltfMaterialData> => {
+        const key = (matIdx ?? -1) + 1;
+        return (matCache[key] ??= assembleMaterial(json, binChunk, key - 1, baseUrl, imageCache));
     };
 
     // First pass: do all sync work, fire all material fetches concurrently
@@ -512,26 +504,24 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
     const meshFeatures = features.filter((f) => f.applyMesh);
 
     // Texture cache: shared textures uploaded once, keyed by (bitmap, srgb).
-    const texCache = new Map<number, Texture2D>();
-    let texId = 0;
-    const bitmapIds = new Map<ImageBitmap, number>();
+    const texCache = new Map<ImageBitmap, Texture2D[]>();
 
     function getCachedTexture(bitmap: ImageBitmap, srgb: boolean): Texture2D {
-        let id = bitmapIds.get(bitmap);
-        if (id === undefined) {
-            bitmapIds.set(bitmap, (id = texId++));
+        let textures = texCache.get(bitmap);
+        if (!textures) {
+            texCache.set(bitmap, (textures = []));
         }
-        const key = id * 2 + +srgb;
-        let tex = texCache.get(key);
+        const key = +srgb;
+        let tex = textures[key];
         if (!tex) {
             tex = uploadTex(engine, bitmap, srgb, sampler, _generateMipmaps!);
-            texCache.set(key, tex);
+            textures[key] = tex;
         }
         return tex;
     }
 
     // Per-load image fetcher for ext modules (uses same image cache as core).
-    const extImageCache = matExts.length ? new Map<number, Promise<ImageBitmap>>() : null;
+    const extImageCache: GltfImageCache | null = matExts.length ? [] : null;
     const extFetchImg = extImageCache ? makeImageFetcher(json, binChunk, baseUrl, extImageCache) : null;
     const extCtx: GltfMatExtCtx = {
         _engine: engine,
@@ -572,7 +562,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
             return cached;
         }
         cached = (async () => {
-            const extLayers = await runMatExts(mat, matExts, extCtx);
+            const extLayers = matExts.length ? await ctx._runMatExts!(mat, matExts, extCtx) : undefined;
             if (_needsPbrExt) {
                 const extMod = await _ensurePbrExt();
                 const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, samplerFor);

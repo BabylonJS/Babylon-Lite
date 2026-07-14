@@ -1,7 +1,8 @@
 /** Generic ref-counting for plain objects that carry an optional `_refCount` field.
  *
  *  Its one current use is GPU resource objects (`MeshGPU`, `SkeletonData`,
- *  `MorphTargetData`, `ThinInstanceData`) shared across mesh clones:
+ *  skin buffers, `VatData`, `MorphTargetData`, `ThinInstanceData`) shared across mesh clones or
+ *  between a live skeleton and baked VAT data:
  *  `cloneTransformNode`/`cloneMeshNode` intentionally SHARE geometry (mesh._gpu),
  *  skeleton, morph-target, and thin-instance GPU buffers between a source mesh and
  *  its clone (mirrors BJS `Mesh.clone()` — cheap instancing, no duplicate GPU memory),

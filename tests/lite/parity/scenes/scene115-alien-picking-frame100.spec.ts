@@ -5,7 +5,7 @@
  * frame 100 (seekTime = 100 / 60), perform the same precise pick at the same
  * CSS canvas coordinate, and move visible markers from the real pick data.
  */
-import { test, expect } from "../parity-fixtures";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import type { Browser, Page } from "@playwright/test";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
@@ -90,14 +90,12 @@ function expectMarkerState(state: PickState, label: string): void {
 }
 
 async function readBjsPickState(browser: Browser): Promise<PickState> {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const bjsPage = await context.newPage();
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
     try {
         await bjsPage.goto(`/babylon-ref-scene${SCENE_ID}.html?seekTime=${SEEK_TIME}`);
         return await readPickState(bjsPage);
     } finally {
-        await bjsPage.close();
-        await context.close();
+        await release();
     }
 }
 
