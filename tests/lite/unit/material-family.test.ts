@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getMaterialFamily } from "../../../packages/babylon-lite/src/material/material-family";
 import { createMaterialView } from "../../../packages/babylon-lite/src/material/material-view";
-import { isPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
-import { isStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/standard-material";
-import { isShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
-import { isNodeMaterial } from "../../../packages/babylon-lite/src/material/node/node-material";
+import { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "../../../packages/babylon-lite/src/material/material-guards";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 
 /** Device-free material stub: getMaterialFamily only reads `_buildGroup._materialFamily`

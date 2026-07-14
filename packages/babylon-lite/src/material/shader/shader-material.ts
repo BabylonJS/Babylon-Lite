@@ -4,7 +4,6 @@ import type { Texture2D } from "../../texture/texture-2d.js";
 import type { StorageBuffer } from "../../resource/storage-buffer.js";
 import type { Mat4 } from "../../math/types.js";
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
-import { getMaterialFamily } from "../material-family.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
 
 /** Vertex attribute names a ShaderMaterial can bind. `joints`/`weights` (and `joints1`/`weights1`
@@ -157,15 +156,6 @@ export interface ShaderMaterial extends Material {
     _uniformVersion: number;
     /** @internal */
     _resourceVersion: number;
-}
-
-/** TypeScript type guard: narrows a {@link Material} to {@link ShaderMaterial} when it belongs to
- *  the shader family (see {@link getMaterialFamily}). This also covers materials built on top of
- *  {@link createShaderMaterial}, such as the grid material. A {@link MaterialView} over a shader
- *  source also passes, since it inherits every shader property through its prototype chain.
- *  Fully tree-shakable — scenes that never call it retain zero bytes for it. */
-export function isShaderMaterial(material: Material): material is ShaderMaterial {
-    return getMaterialFamily(material) === "shader";
 }
 
 function isIdentifier(name: string): boolean {

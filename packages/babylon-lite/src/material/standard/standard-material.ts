@@ -9,7 +9,6 @@
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { Material, StencilState } from "../material.js";
 import type { MaterialPlugin } from "../plugin/material-plugin.js";
-import { getMaterialFamily } from "../material-family.js";
 import {
     AMBIENT_USES_UV2,
     DIFFUSE_USES_UV2,
@@ -102,14 +101,6 @@ export interface StandardMaterialProps extends Material {
     backFaceCulling: boolean;
     /** When true, skip all lighting and output emissive * diffuse * baseColor. Default false. */
     disableLighting: boolean;
-}
-
-/** TypeScript type guard: narrows a {@link Material} to {@link StandardMaterialProps} when it
- *  belongs to the standard family (see {@link getMaterialFamily}). A {@link MaterialView} over a
- *  standard source also passes, since it inherits every standard property through its prototype
- *  chain. Fully tree-shakable — scenes that never call it retain zero bytes for it. */
-export function isStandardMaterial(material: Material): material is StandardMaterialProps {
-    return getMaterialFamily(material) === "standard";
 }
 
 /** @internal Compute Standard material-only feature bits. Mesh/pass bits are added by the renderable. */

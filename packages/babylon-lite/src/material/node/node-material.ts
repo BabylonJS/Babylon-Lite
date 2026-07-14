@@ -20,7 +20,6 @@ import { parseNodeMaterialSource, findBlockByClassName } from "./node-parser.js"
 import { loadGraphEmitters, emitGraph } from "./node-emitter.js";
 import type { BlockEmitter, NodeBuildState, NodeGraph, NodeValueType } from "./node-types.js";
 import type { Material } from "../material.js";
-import { getMaterialFamily } from "../material-family.js";
 import { compileNodePipeline, type NodeCompileResult } from "./node-pipeline.js";
 import type * as NodeEnv from "./node-env.js";
 
@@ -71,14 +70,6 @@ export interface NodeMaterial extends Material {
     readonly _hasSkeleton: boolean;
     /** @internal */
     readonly _hasInstances: boolean;
-}
-
-/** TypeScript type guard: narrows a {@link Material} to {@link NodeMaterial} when it belongs to
- *  the node family (see {@link getMaterialFamily}). A {@link MaterialView} over a node source also
- *  passes, since it inherits every node property through its prototype chain. Fully tree-shakable
- *  — scenes that never call it retain zero bytes for it. */
-export function isNodeMaterial(material: Material): material is NodeMaterial {
-    return getMaterialFamily(material) === "node";
 }
 
 /** A live handle to one named Node Material input (uniform or texture). Set

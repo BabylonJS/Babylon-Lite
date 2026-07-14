@@ -8,7 +8,6 @@ import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Material, StencilState } from "../material.js";
 import type { MaterialPlugin } from "../plugin/material-plugin.js";
-import { getMaterialFamily } from "../material-family.js";
 import { createSolidTexture2D } from "../../texture/solid-texture.js";
 import { _installPbrFallbackResolver } from "./pbr-pipeline.js";
 import {
@@ -392,14 +391,6 @@ export function createPbrMaterial(props?: Partial<PbrMaterialProps>): PbrMateria
         _uboVersion: 0,
     } as PbrMaterialProps;
     return mat;
-}
-
-/** TypeScript type guard: narrows a {@link Material} to {@link PbrMaterialProps} when it
- *  belongs to the PBR family (see {@link getMaterialFamily}). A {@link MaterialView} over a
- *  PBR source also passes, since it inherits every PBR property through its prototype chain.
- *  Fully tree-shakable — scenes that never call it retain zero bytes for it. */
-export function isPbrMaterial(material: Material): material is PbrMaterialProps {
-    return getMaterialFamily(material) === "pbr";
 }
 
 /** Collect all non-null textures referenced by a PBR material (for acquire/release). */
