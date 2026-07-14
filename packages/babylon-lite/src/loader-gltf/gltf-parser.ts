@@ -134,15 +134,7 @@ export async function resolveImage(json: any, binChunk: DataView, imageIdx: numb
     }
 
     if (image.uri) {
-        // External URI (relative to .gltf base URL)
-        const imageUrl = new URL(image.uri, baseUrl + "x").href;
-        const response = await fetch(imageUrl);
-        if (!response.ok) {
-            throw new Error(`Failed to load image: ${response.status} ${response.statusText}`);
-        }
-        const blob = await response.blob();
-        const bmp = await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
-        return bmp;
+        return (await import("./gltf-json-asset.js")).resolveExternalImage(image.uri, baseUrl);
     }
 
     throw new Error("Image has neither bufferView nor uri");

@@ -1,21 +1,21 @@
 {
-  "rawKB": 89.1,
-  "gzipKB": 37.4,
+  "rawKB": 89.3,
+  "gzipKB": 37.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene11-create-skeleton-DFuWXrv6.js",
-    "scene11-generate-mipmaps-Bs01JPuG.js",
-    "scene11-gltf-animation-3J4czZWG.js",
+    "scene11-create-skeleton-D-3exD5E.js",
+    "scene11-generate-mipmaps-NYh3Upxa.js",
+    "scene11-gltf-animation-Bh-q-0xx.js",
     "scene11-gltf-ext-spec-gloss-D60sFZYX.js",
-    "scene11-gltf-feature-animations-Cjc-2eYk.js",
+    "scene11-gltf-feature-animations-CUKuLYEP.js",
     "scene11-gltf-feature-extras-VHPteGay.js",
-    "scene11-gltf-feature-registry-CdsXYPpC.js",
-    "scene11-gltf-feature-skeleton-b4Flkm4k.js",
+    "scene11-gltf-feature-registry-B6-2Tazf.js",
+    "scene11-gltf-feature-skeleton-Djlep9zW.js",
     "scene11-gltf-glb-parser-B0CzN8nR.js",
     "scene11-gltf-sampler-desc-DP9TFn1W.js",
-    "scene11-pbr-renderable-C1u2TPD4.js",
-    "scene11-singlelight-hemispheric-wgsl-B7Q6UIxj.js",
-    "scene11-skeleton-fragment-GSiQ7BTn.js",
+    "scene11-pbr-renderable-RB-CPhl8.js",
+    "scene11-singlelight-hemispheric-wgsl-B65r2jYR.js",
+    "scene11-skeleton-fragment-C1GjAglH.js",
     "scene11.js"
   ]
 }

@@ -8,12 +8,13 @@
 // jsDelivr fallback) is selected by `./cdn`.
 
 import { getCdn } from "./cdn";
+import { withBase } from "./base";
 
 /** Sentinel value for the self-hosted, source-tracking engine build. */
 export const NIGHTLY = "nightly";
 
-/** URL of the self-hosted nightly engine bundle (served at the app root). */
-export const NIGHTLY_ENGINE_URL = "/engine/dev/index.js";
+/** URL of the self-hosted nightly engine bundle (served under the app's deploy base). */
+export const NIGHTLY_ENGINE_URL = withBase("engine/dev/index.js");
 
 const REGISTRY_URL = "https://registry.npmjs.org/@babylonjs/lite";
 

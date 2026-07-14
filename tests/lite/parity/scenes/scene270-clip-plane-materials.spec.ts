@@ -2,17 +2,17 @@ import { test, expect } from "@playwright/test";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(264);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene264-clip-plane-materials");
+const sceneConfig = getSceneConfig(270);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene270-clip-plane-materials");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 264 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 270 skipped via skipParity in scene-config.json");
 
-test("Scene 264 — scene clip plane slices PBR and Standard materials like Babylon.js", async ({ page }, testInfo) => {
+test("Scene 270 — scene clip plane slices PBR and Standard materials like Babylon.js", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 264 });
+    await captureGolden(browser, { sceneId: 270 });
 
-    await page.goto("/scene264.html");
+    await page.goto("/scene270.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

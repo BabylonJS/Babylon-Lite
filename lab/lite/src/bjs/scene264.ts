@@ -1,20 +1,22 @@
-// BJS reference for scene 264 — a scene clip plane must slice both the
-// StandardMaterial sphere and the PBRMaterial sphere, exactly as Babylon.js
-// applies `scene.clipPlane` to every material family automatically.
+// BJS reference for scene 264 — builds the SAME NPE graph as Lite (the "Change - Size" system with two
+// size gradients), seeds the RNG identically, steps the simulation a fixed number of times, and renders
+// the frozen frame.
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
-import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
-import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
-import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
-import { Plane } from "@babylonjs/core/Maths/math.plane";
+import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Scene } from "@babylonjs/core/scene";
+import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
+import { NodeParticleSystemSet } from "@babylonjs/core/Particles/Node/nodeParticleSystemSet";
+import "@babylonjs/core/Particles/Node/Blocks";
+import "@babylonjs/core/Shaders/particles.vertex";
+import "@babylonjs/core/Shaders/particles.fragment";
+import { SCENE264_NPE_JSON } from "../shared/scene264-npe.js";
 
-const CLIP_PLANE: readonly [number, number, number, number] = [0, 1, 0, 0];
+/** Deterministic steps before freezing — must match the Lite scene. */
+const STEPS = 200;
 
 (async function () {
     const initStart = performance.now();
@@ -23,38 +25,33 @@ const CLIP_PLANE: readonly [number, number, number, number] = [0, 1, 0, 0];
     await engine.initAsync();
 
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(0.03, 0.035, 0.05, 1);
-    scene.clipPlane = new Plane(CLIP_PLANE[0], CLIP_PLANE[1], CLIP_PLANE[2], CLIP_PLANE[3]);
+    scene.clearColor = new Color4(0, 0, 0, 1);
 
-    const camera = new ArcRotateCamera("cam", -Math.PI / 2, Math.PI / 2.6, 9, new Vector3(0, 0, 0), scene);
+    const camera = new ArcRotateCamera("cam", -Math.PI / 2, 1.2, 12, new Vector3(0, 0.7, 0), scene);
     camera.minZ = 0.1;
     camera.maxZ = 100;
 
-    const stdSphere = MeshBuilder.CreateSphere("scene264-standard-sphere", { segments: 32, diameter: 2.4 }, scene);
-    stdSphere.position = new Vector3(-2.2, 0, 0);
-    const stdMat = new StandardMaterial("std-mat", scene);
-    stdMat.diffuseColor = new Color3(0.95, 0.25, 0.15);
-    stdMat.specularColor = new Color3(0.4, 0.4, 0.4);
-    stdMat.specularPower = 48;
-    stdSphere.material = stdMat;
+    // Build the same NPE graph Lite parses.
+    const set = NodeParticleSystemSet.Parse(SCENE264_NPE_JSON);
+    const built = await set.buildAsync(scene);
+    const system = built.systems[0] as ParticleSystem;
 
-    const pbrSphere = MeshBuilder.CreateSphere("scene264-pbr-sphere", { segments: 32, diameter: 2.4 }, scene);
-    pbrSphere.position = new Vector3(2.2, 0, 0);
-    const pbrMat = new PBRMaterial("pbr-mat", scene);
-    pbrMat.albedoColor = new Color3(0.15, 0.55, 1.0);
-    pbrMat.metallic = 0.2;
-    pbrMat.roughness = 0.4;
-    pbrMat.environmentIntensity = 0;
-    pbrSphere.material = pbrMat;
+    // Use the same resolved flare texture as Lite (the graph stores a relative path).
+    system.particleTexture = new Texture("https://playground.babylonjs.com/textures/flare.png", scene);
+    system.preWarmStepOffset = 1;
 
-    const hemi = new HemisphericLight("hemi", new Vector3(0, 1, 0), scene);
-    hemi.intensity = 0.7;
-    hemi.diffuse = new Color3(1.0, 1.0, 1.0);
-    hemi.groundColor = new Color3(0.1, 0.1, 0.12);
-    const dir = new DirectionalLight("dir", new Vector3(-0.4, -1, -0.3), scene);
-    dir.position = new Vector3(4, 8, 5);
-    dir.intensity = 0.8;
-    dir.diffuse = new Color3(1.0, 0.95, 0.85);
+    // Seed Math.random identically to the Lite scene, then step the simulation deterministically and
+    // freeze it (updateSpeed 0) so the render loop renders a stable frame.
+    let seed = 1;
+    Math.random = () => {
+        const x = Math.sin(seed++) * 10000;
+        return x - Math.floor(x);
+    };
+    system.start();
+    for (let i = 0; i < STEPS; i++) {
+        system.animate(true);
+    }
+    system.updateSpeed = 0;
 
     const engineWithDrawCalls = engine as unknown as { _drawCalls?: { current: number; fetchNewFrame?: () => void } };
     scene.onBeforeRenderObservable.add(() => {
@@ -63,6 +60,7 @@ const CLIP_PLANE: readonly [number, number, number, number] = [0, 1, 0, 0];
     scene.onAfterRenderObservable.add(() => {
         canvas.dataset.drawCalls = String(engineWithDrawCalls._drawCalls?.current ?? 0);
     });
+
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());

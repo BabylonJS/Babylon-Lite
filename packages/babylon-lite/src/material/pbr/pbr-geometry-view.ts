@@ -16,10 +16,12 @@
 import { createMaterialView } from "../material-view.js";
 import type { MaterialView } from "../material.js";
 import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
-import { PBR_HAS_ALPHA_BLEND, PBR2_GEOMETRY_OUTPUT } from "./pbr-flags.js";
+import { PBR_HAS_ALPHA_BLEND } from "./pbr-flags.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 import { getPbrGeometryGroupBuilder } from "./pbr-geometry-renderable.js";
 import { _ensurePbrGeometryExt } from "./pbr-geometry-output-shader.js";
+
+const PBR2_GEOMETRY_OUTPUT = 1 << 21;
 
 /** Per-task ordered attachment list driving the geometry template. The array
  *  index is the MRT color-attachment slot used in `@location(i)`. */

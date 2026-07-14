@@ -8,6 +8,7 @@ import type { LiteMetadata } from "../metadata.js";
 import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
+import type { AnimationManager } from "./animation-manager.js";
 import { _setTickAnimationImpl } from "./animation-tick.js";
 
 const DEFAULT_FRAME_RATE = 60;
@@ -76,6 +77,10 @@ export interface AnimationGroup {
     _additive?: AnimationAdditiveMixer;
     /** @internal Whether stop() was called (suppresses tickAnimation). */
     _stopped: boolean;
+    /** @internal The AnimationManager that currently owns/drives this group, if any. Set by
+     *  {@link addAnimationGroup}. Type-only import, so it is erased at build — no runtime cycle
+     *  and no bundle cost for always-loaded consumers (e.g. scene-core's render-loop tick). */
+    _animationManager?: AnimationManager;
 }
 
 /** Start playing an animation group. */
@@ -105,14 +110,28 @@ function syncControllerFromGroup(group: AnimationGroup, ctrl: AnimationControlle
     ctrl._setMask?.(group.mask ?? null);
 }
 
-/** The real per-frame stepper. Lives in this dynamically-loaded module; the always-loaded
- *  animation-tick forwarder calls it once registered. */
-function tickAnimationImpl(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
+/** @internal The real per-frame stepper, advancing the group unconditionally. Manager-driven
+ *  callers (the weighted mixers and the generic group task) invoke this directly because they
+ *  own the group and must always advance it. Lives in this dynamically-loaded module. */
+export function tickAnimationCore(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
     if (!group._stopped && group._ctrl) {
         syncControllerFromGroup(group, group._ctrl);
         group._ctrl.tick(deltaMs, engine);
         group.currentTime = group._ctrl.time;
     }
+}
+
+/** The scene auto-tick path. Registered on the always-loaded animation-tick forwarder, so this
+ *  runs for the scene render-loop tick. Defers to an AnimationManager if one owns the group — the
+ *  manager drives and blends it, so ticking here too would double-advance time and clobber the
+ *  blended pose (last-writer-wins). Checked per-frame because the manager typically attaches after
+ *  addToScene. Keeping the guard here (dynamically-loaded) rather than in scene-core keeps the
+ *  always-loaded core free of the property read. */
+function tickAnimationImpl(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
+    if (group._animationManager) {
+        return;
+    }
+    tickAnimationCore(group, deltaMs, engine);
 }
 
 /** @internal Wire the always-loaded tickAnimation forwarder to its real implementation.

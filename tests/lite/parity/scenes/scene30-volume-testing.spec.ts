@@ -5,7 +5,7 @@
  * Matches Babylon playground #YG3BBF#16 using frame-graph scene-texture
  * transmission for KHR_materials_transmission.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

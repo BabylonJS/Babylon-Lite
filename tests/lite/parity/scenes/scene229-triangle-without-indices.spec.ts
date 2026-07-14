@@ -4,7 +4,7 @@
  * The glTF primitive intentionally omits `indices`. Lite should synthesize an
  * identity index buffer at load time and keep the indexed GPU draw path.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 

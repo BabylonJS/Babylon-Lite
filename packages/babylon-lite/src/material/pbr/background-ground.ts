@@ -4,7 +4,6 @@
 
 import { F32, U16, U8 } from "../../engine/typed-arrays.js";
 import { TU, BU, SS } from "../../engine/gpu-flags.js";
-import type { Mat4 } from "../../math/types.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
@@ -56,23 +55,8 @@ export async function buildGroundRenderable(
     const fragCode = SCENE_UBO_WGSL + WGSL_IMAGE_PROCESSING + (enableNoise ? WGSL_DITHER : WGSL_NO_DITHER) + groundFragSrc;
     const gndMat = createGroundMaterial(enableNoise, fragCode);
 
-    // Ground world: rotated 90° X (XY→XZ), translated to rootPosition
-    // Column-major for WGSL: ground quad in XY plane, normal +Z → world +Y
-    // Offset Y by -0.01 to prevent z-fighting with scene floor geometry.
-    const eps = 2.220446049250313e-16;
-    const groundWorld = new F32(16);
-    groundWorld[0] = 1;
-    groundWorld[5] = eps;
-    groundWorld[6] = -1;
-    groundWorld[9] = 1;
-    groundWorld[10] = eps;
-    groundWorld[12] = rootPosition[0];
-    groundWorld[13] = rootPosition[1];
-    groundWorld[14] = rootPosition[2];
-    groundWorld[15] = 1;
-
     const gndBufs = createGroundBuffers(engine, groundSize);
-    const gndUBO = createBgMeshUBO(engine, groundWorld as unknown as Mat4, primaryColor);
+    const gndUBO = createBgMeshUBO(engine, rootPosition, primaryColor);
 
     const groundTex = await loadGroundTexture(engine, groundTextureUrl, groundImagePromise);
     const groundTexView = groundTex.createView();
@@ -92,7 +76,7 @@ export async function buildGroundRenderable(
                     pass.setVertexBuffer(1, gndBufs.normBuffer);
                     pass.setVertexBuffer(2, gndBufs.uvBuffer);
                     pass.setIndexBuffer(gndBufs.idxBuffer, "uint16");
-                    pass.drawIndexed(gndBufs.idxCount);
+                    pass.drawIndexed(6);
                     return 1;
                 },
             };
@@ -212,7 +196,6 @@ function createGroundBuffers(
     normBuffer: GPUBuffer;
     uvBuffer: GPUBuffer;
     idxBuffer: GPUBuffer;
-    idxCount: number;
 } {
     const h = groundSize / 2;
     // prettier-ignore
@@ -239,15 +222,22 @@ function createGroundBuffers(
         normBuffer: createMappedBuffer(engine, normals, BU.VERTEX),
         uvBuffer: createMappedBuffer(engine, uvs, BU.VERTEX),
         idxBuffer: createMappedBuffer(engine, indices, BU.INDEX),
-        idxCount: 6,
     };
 }
 
 // ─── Ground UBO ─────────────────────────────────────────────────────────────
 
-function createBgMeshUBO(engine: EngineContext, world: Mat4, primaryColor: [number, number, number]): GPUBuffer {
+function createBgMeshUBO(engine: EngineContext, rootPosition: [number, number, number], primaryColor: [number, number, number]): GPUBuffer {
     const data = new F32(BG_MESH_UNIFORM_SIZE / 4);
-    data.set(world, 0); // offset 0: world mat4x4
+    // Ground world: rotate XY to XZ, then translate to the scene root.
+    const eps = 2.220446049250313e-16;
+    data[0] = data[15] = 1;
+    data[5] = data[10] = eps;
+    data[6] = -1;
+    data[9] = 1;
+    data[12] = rootPosition[0];
+    data[13] = rootPosition[1];
+    data[14] = rootPosition[2];
     data[16] = primaryColor[0]; // offset 64: primaryColor.r
     data[17] = primaryColor[1]; // offset 68: primaryColor.g
     data[18] = primaryColor[2]; // offset 72: primaryColor.b

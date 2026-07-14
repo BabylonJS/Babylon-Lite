@@ -22,15 +22,24 @@ import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
 import type { ClusteredLightContainer } from "../light/clustered.js";
-import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
+import type { PickSource } from "../picking/pick-contributor.js";
+import type { ToneMapping } from "../material/pbr/tone-mapping.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
     exposure: number;
     contrast: number;
     toneMappingEnabled: boolean;
-    /** "standard" (BJS TONEMAPPING_STANDARD, default) or "aces" (BJS TONEMAPPING_ACES). */
-    toneMappingType?: "standard" | "aces";
+    /**
+     * Tone mapping algorithm applied by PBR materials when `toneMappingEnabled` is true.
+     * Undefined means the default {@link StandardToneMapping} (exponential). Assign a
+     * built-in ({@link StandardToneMapping}, {@link AcesToneMapping}, {@link NeutralToneMapping})
+     * or a custom {@link ToneMapping}.
+     *
+     * This is baked into the PBR shaders at `registerScene()` time. To change it after
+     * registration, use `setSceneImageProcessing` so the affected pipelines are rebuilt.
+     */
+    toneMapping?: ToneMapping;
 }
 
 /** A clipping plane expressed as the coefficients `[a, b, c, d]` of `a·x + b·y + c·z + d`. */
@@ -79,12 +88,12 @@ export interface SceneContext extends RenderingContext {
     _renderables: Renderable[];
     /** @internal Pre-pass work (shadow maps, compute, etc.). */
     _prePasses: PrePassRenderable[];
-    /** GaussianSplatting meshes attached to this scene.  Populated by
-     *  `attachGaussianSplattingMesh`.  Scene-core stays GS-agnostic apart from
-     *  this opaque registry (used by `gpu-picker` to iterate GS meshes without
-     *  scanning `_renderables`). */
+    /** Pick sources — one per optional pickable entity (GS mesh, billboard system, …). Registered by
+     *  the entity module via `registerPickSource` when the entity is added; each is pure data + a
+     *  dynamic-import thunk the GPU picker resolves (once) on the first pick, so rendering the entity
+     *  pulls no pick-pipeline bytes. Scene-core stays pick-agnostic apart from this opaque list. */
     /** @internal */
-    _gsMeshes: GaussianSplattingMesh[];
+    _pickSources: PickSource[];
     /** @internal Scene uniform updaters (one per shared UBO). */
     _uniformUpdaters: SceneUniformUpdater[];
     /** @internal Opt-in feature writers for the SceneUniforms UBO (fog, clip plane, env SH).
@@ -177,7 +186,7 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         imageProcessing: { exposure: 1.0, contrast: 1.0, toneMappingEnabled: false },
         _renderables: [],
         _prePasses: [],
-        _gsMeshes: [],
+        _pickSources: [],
         _uniformUpdaters: [],
         fixedDeltaMs: 0,
         _beforeRender: [],
@@ -323,6 +332,10 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
                 }
             });
         }
+        // Feature-owned scene wiring (e.g. EXT_lights_image_based installs its IBL
+        // environment). Runs synchronously so the environment is registered before
+        // registerScene() builds the scene UBO / PBR renderables.
+        result._sceneSetup?.(ctx);
         return;
     }
     if ("_gpu" in entity && "material" in entity) {
@@ -398,7 +411,7 @@ export function disposeScene(scene: SceneContext): void {
     ctx.meshes.length = 0;
     ctx._renderables.length = 0;
     ctx._prePasses.length = 0;
-    ctx._gsMeshes.length = 0;
+    ctx._pickSources.length = 0;
     ctx._uniformUpdaters.length = 0;
     ctx._beforeRender.length = 0;
     ctx._deferredBuilders.length = 0;

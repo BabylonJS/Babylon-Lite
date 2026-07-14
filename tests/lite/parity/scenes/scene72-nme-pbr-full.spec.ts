@@ -7,7 +7,7 @@
  *
  * This is the full visual parity coverage scene for the PBR-MR NME stack.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
