@@ -62,7 +62,7 @@
     {
         "slug": "break-meshes",
         "name": "Break Meshes",
-        "description": "Voronoi mesh fracture + physics: the Khronos BoomBox glTF is split into cell pieces at startup via half-space clipping (ported from CedricGuillemet/64Kb5) with UV interpolation. Each cell gets its own Havok convex-hull rigid body and the pieces fall and scatter on the ground under gravity. Original surfaces keep the PBR material; the exposed interior cut faces use a separate 'fractured core' material, all lit by an HDR environment with soft shadows.",
+        "description": "Voronoi mesh fracture + physics: the Khronos BoomBox glTF is split into cell pieces at startup via half-space clipping (ported from CedricGuillemet/64Kb5) with UV interpolation. Each cell gets its own Havok convex-hull rigid body and the fractured pieces sit flush on the ground as the intact model, resting on their (static) hulls. Original surfaces keep the PBR material; the exposed interior cut faces use a separate 'fractured core' material, all lit by an HDR environment with soft shadows.",
         "tags": ["pbr", "gltf", "physics", "showcase"],
         "mobile": true
     },

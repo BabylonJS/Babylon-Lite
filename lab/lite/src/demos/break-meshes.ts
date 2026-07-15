@@ -10,11 +10,13 @@
 import HavokPhysics from "@babylonjs/havok";
 import {
     addToScene,
+    applyPhysicsImpulse,
     attachControl,
     createDefaultCamera,
     createDirectionalLight,
     createEngine,
     createEsmDirectionalShadowGenerator,
+    createGpuPicker,
     createGround,
     createHavokWorld,
     createPhysicsAggregate,
@@ -25,16 +27,20 @@ import {
     getContainerMeshes,
     loadEnvironment,
     loadGltf,
+    pickAsync,
+    PhysicsMotionType,
     PhysicsShapeType,
     registerSceneWithShadowSupport,
     removeFromScene,
     setCameraLimits,
     setParent,
+    setPhysicsBodyMass,
+    setPhysicsBodyMotionType,
     setPhysicsTimestepMs,
     setShadowTaskCasterMeshes,
     startEngine,
 } from "babylon-lite";
-import type { Mesh } from "babylon-lite";
+import type { Mesh, PhysicsBody } from "babylon-lite";
 import { breakMesh } from "./break-mesh.js";
 import { configureDemoDecoderBases, demoAssetUrl } from "./demo-asset-url.js";
 import { installFetchProgress } from "./loading-progress.js";
@@ -169,19 +175,17 @@ async function main(): Promise<void> {
 
     const pieces: Mesh[] = [];
     for (const m of sourceMeshes) {
-        pieces.push(...breakMesh(engine, m, seeds, coreMat, { separation: 0.04, receiveShadows: false }));
+        pieces.push(...breakMesh(engine, m, seeds, coreMat, { separation: 0, receiveShadows: false }));
     }
     for (const m of sourceMeshes) {
         removeFromScene(scene, m);
     }
-    // Lift the pieces above the ground and add them so they fall. Each cell's shell
-    // is a scene root (parent == null); its cap rides along as a child, so moving/
-    // adding the root moves the whole cell.
-    const dropHeight = span * 2;
+    // Place the reassembled boombox directly on the ground — no drop, no per-cell
+    // separation — so the pieces sit flush as the intact model. groundY == the
+    // model's minY, so leaving the pieces at their fractured positions rests the
+    // boombox exactly on the ground. Each cell's shell is a scene root (parent ==
+    // null); its cap rides along as a child.
     for (const p of pieces) {
-        if (!p.parent) {
-            p.position.y += dropHeight;
-        }
         addToScene(scene, p);
     }
 
@@ -258,22 +262,86 @@ async function main(): Promise<void> {
     const world = createHavokWorld(scene, hknp, { x: 0, y: -9.8, z: 0 });
 
     // The world advances ONE fixed step per rendered frame (scene.fixedDeltaMs), so
-    // its wall-clock speed is tied to the frame cadence. Shrink the per-frame step
-    // to slow the fall ~8×.
-    setPhysicsTimestepMs(world, 1000 / 60 / 8);
+    // its wall-clock speed is tied to the frame cadence. Shrink the per-frame step to
+    // slow the sim ~1.3× (8/6) — a light slow-mo that keeps the break snappy.
+    setPhysicsTimestepMs(world, (1000 / 60 / 8) * 6);
 
     // One CONVEX_HULL body per cell. The hull must span BOTH the shell (the clipped
     // boombox surface) AND its cap child (the generated orange cut-face polygons), so
     // pass includeChildMeshes: true — the shape builder does NOT walk children unless
     // asked, and without it the hull would be built from the shell vertices alone.
+    //
+    // The cells are placed flush as the intact boombox, and convex hulls of adjacent
+    // Voronoi cells always overlap slightly — so dynamic bodies would immediately push
+    // each other apart and the model would burst. Keep the bodies STATIC (mass 0) so
+    // the assembled boombox rests stably on the ground; picking (below) flips them to
+    // dynamic to break the model on demand.
+    const bodyByRoot = new Map<Mesh, PhysicsBody>();
+    const allBodies: PhysicsBody[] = [];
     for (const p of pieces) {
         if (p.parent) {
             continue; // caps ride their shell — no separate body
         }
         const shape = createPhysicsShape(world, { type: PhysicsShapeType.CONVEX_HULL, mesh: p, includeChildMeshes: true });
-        createPhysicsAggregate(world, p, PhysicsShapeType.CONVEX_HULL, { mass: 1, restitution: 0.2, friction: 0.6, shape });
+        const agg = createPhysicsAggregate(world, p, PhysicsShapeType.CONVEX_HULL, { mass: 0, restitution: 0.2, friction: 0.6, shape });
+        bodyByRoot.set(p, agg.body);
+        allBodies.push(agg.body);
     }
     createPhysicsAggregate(world, ground, PhysicsShapeType.BOX, { mass: 0, restitution: 0.1, friction: 0.8 });
+
+    // ── Interaction: click a boombox part to shatter it. The first pick flips every
+    // cell from static to dynamic (gravity + the overlapping hulls then burst the
+    // model apart) and punches the clicked part along the pick ray; later picks just
+    // punch whatever part is clicked.
+    const picker = createGpuPicker(scene);
+    const IMPULSE = span * 24;
+    let shattered = false;
+    const punchAt = async (clientX: number, clientY: number): Promise<void> => {
+        const rect = canvas.getBoundingClientRect();
+        const info = await pickAsync(picker, clientX - rect.left, clientY - rect.top);
+        if (!info.hit || !info.pickedMesh) {
+            return;
+        }
+        // Resolve the picked mesh (a shell root, or its cap child) to the cell root
+        // that owns the physics body.
+        let root: Mesh | null = info.pickedMesh as Mesh;
+        while (root && !bodyByRoot.has(root)) {
+            root = root.parent as Mesh | null;
+        }
+        if (!root) {
+            return; // clicked the ground (or anything without a cell body)
+        }
+        if (!shattered) {
+            shattered = true;
+            for (const b of allBodies) {
+                setPhysicsBodyMotionType(world, b, PhysicsMotionType.DYNAMIC);
+                setPhysicsBodyMass(world, b, 1);
+            }
+        }
+        const d = info.ray?.direction ?? [0, -1, 0];
+        const point = info.pickedPoint;
+        applyPhysicsImpulse(
+            world,
+            bodyByRoot.get(root)!,
+            { x: d[0]! * IMPULSE, y: d[1]! * IMPULSE, z: d[2]! * IMPULSE },
+            point ? { x: point[0], y: point[1], z: point[2] } : undefined
+        );
+    };
+    // Only treat a near-stationary press/release as a click, so camera-orbit drags
+    // don't trigger a pick.
+    let downX = 0;
+    let downY = 0;
+    let downT = 0;
+    canvas.addEventListener("pointerdown", (e) => {
+        downX = e.clientX;
+        downY = e.clientY;
+        downT = performance.now();
+    });
+    canvas.addEventListener("pointerup", (e) => {
+        if (Math.hypot(e.clientX - downX, e.clientY - downY) < 6 && performance.now() - downT < 500) {
+            void punchAt(e.clientX, e.clientY);
+        }
+    });
 
     await registerSceneWithShadowSupport(scene);
     progress.done();
