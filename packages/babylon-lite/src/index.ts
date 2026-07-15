@@ -205,6 +205,8 @@ export { createTexture2DFromPixels, updateTexture2DFromPixels, createRenderTextu
 export { createTexture3DFromPixels } from "./texture/pixels-texture.js";
 export type { Texture3D, PixelsTexture3DOptions } from "./texture/pixels-texture.js";
 export type { PixelsTexture2DOptions, RenderTexture2DOptions } from "./texture/pixels-texture.js";
+export { createTexture2DArray, uploadImageToArrayLayer, loadImageToArrayLayer, createTexture2DArrayFromUrls } from "./texture/texture-array.js";
+export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions } from "./texture/texture-array.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
