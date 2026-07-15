@@ -270,3 +270,57 @@ stages:
                             storageAccount: $(TOOLS_STORAGE_ACCOUNT)
                             siteName: "Lite Playground v$(PACKAGE_VERSION)"
                             postComment: false
+
+                      # Record this release in the deployed-versions manifest the
+                      # playground reads to populate its version selector (only
+                      # versions with a live /v/<ver>/ snapshot are offered). The
+                      # manifest lives at the origin root (/v/versions.json), shared
+                      # by every snapshot. Read-modify-write: fetch the current list,
+                      # add this version, dedupe + sort newest first, then re-upload
+                      # just that file to the /v path. The deploy server overlays at
+                      # the given path, so sibling /v/<ver>/ snapshots are left
+                      # intact. Finally purge the manifest (a .json, otherwise cached
+                      # at the CDN default TTL) so the new release shows up promptly.
+                      - script: |
+                            set -euo pipefail
+
+                            VER="$(PACKAGE_VERSION)"
+                            MANIFEST_URL="https://liteplayground.babylonjs.com/v/versions.json"
+                            WORK="$(Build.ArtifactStagingDirectory)/versions-manifest"
+                            mkdir -p "$WORK"
+
+                            # Fetch the current manifest, distinguishing "not there yet"
+                            # from a transient failure. A 404 is the first-run empty
+                            # case; any other non-200 (5xx, network error) must NOT be
+                            # treated as empty, or we'd overwrite the manifest with just
+                            # this version and drop older still-deployed releases from
+                            # the selector. On such failures, skip the update (the step
+                            # is continueOnError) and leave the manifest intact — this
+                            # version is picked up by the next successful publish.
+                            HTTP_CODE="$(curl -sS -o "$WORK/current.json" -w '%{http_code}' "$MANIFEST_URL" || echo 000)"
+                            if [ "$HTTP_CODE" = "404" ]; then
+                              echo "No existing manifest (404); starting a new list."
+                              echo '[]' > "$WORK/current.json"
+                            elif [ "$HTTP_CODE" != "200" ]; then
+                              echo "Manifest fetch failed (HTTP $HTTP_CODE); skipping update to avoid clobbering existing versions."
+                              exit 1
+                            fi
+
+                            node -e 'const fs=require("fs");const ver=process.argv[1];let list=[];try{const p=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));if(Array.isArray(p))list=p.filter(v=>typeof v==="string");}catch{}if(!list.includes(ver))list.push(ver);const cmp=(a,b)=>{const pa=a.split(".").map(Number),pb=b.split(".").map(Number);for(let i=0;i<3;i++){const d=(pa[i]||0)-(pb[i]||0);if(d)return d;}return 0;};list=list.filter(v=>!v.includes("-")).sort(cmp).reverse();fs.writeFileSync(process.argv[3],JSON.stringify(list)+"\n");' "$VER" "$WORK/current.json" "$WORK/versions.json"
+
+                            echo "Updated manifest:"; cat "$WORK/versions.json"
+
+                            (cd "$WORK" && zip -j versions.zip versions.json)
+
+                            curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
+                              -H "Content-Type: multipart/form-data" \
+                              -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
+                              -F "path=litePlayground/v" \
+                              -F "storageAccount=$(TOOLS_STORAGE_ACCOUNT)" \
+                              -F "zip=@$WORK/versions.zip"
+
+                            curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_PURGE)?endpoint=lite-playground&profileName=$(CDN_PROFILE_TOOLS)" --fail-with-body -i -X POST \
+                              -H "Authorization: Bearer $(DEPLOY_TOKEN)"
+                        displayName: "Update deployed-versions manifest"
+                        condition: succeeded()
+                        continueOnError: true
