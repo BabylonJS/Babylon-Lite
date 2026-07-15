@@ -222,6 +222,7 @@ export {
     setShaderVector3,
     setShaderMatrix,
 } from "./material/shader/shader-material.js";
+export { enableShaderUniformRangeUpdates } from "./material/shader/shader-uniform-range.js";
 export { createShaderNoColorMaterialView } from "./material/shader/no-color-view.js";
 export { createShaderNormalMaterialView } from "./material/shader/normal-view.js";
 export type { ShaderNormalViewConfig } from "./material/shader/normal-view.js";

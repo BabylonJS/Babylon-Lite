@@ -1,5 +1,5 @@
 {
-  "rawKB": 97.6,
+  "rawKB": 97.7,
   "gzipKB": 39.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,7 +8,7 @@
     "scene22-material-view-Dua1bl7W.js",
     "scene22-multilight-wgsl-My9Iptth.js",
     "scene22-no-color-view-DHPAYos4.js",
-    "scene22-pbr-renderable-WnyBYGCE.js",
+    "scene22-pbr-renderable-Zulj0hz7.js",
     "scene22-pbr-shadow-fragment-CSEDArnD.js",
     "scene22-pbr-template-gamma-CVmXdy8B.js",
     "scene22-shader-composer-Bga-tI-0.js",

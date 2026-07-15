@@ -1,9 +1,9 @@
 {
-  "rawKB": 76.2,
+  "rawKB": 76.3,
   "gzipKB": 31.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene116-pbr-renderable-k-vWhazx.js",
+    "scene116-pbr-renderable-B_c-26sZ.js",
     "scene116-shader-composer-Bga-tI-0.js",
     "scene116-singlelight-hemispheric-wgsl-hXzjd_qm.js",
     "scene116-standard-renderable-B6DFgoG2.js",

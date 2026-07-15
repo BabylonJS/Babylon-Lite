@@ -1,6 +1,6 @@
 {
   "rawKB": 78.2,
-  "gzipKB": 32.3,
+  "gzipKB": 32.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene23-anisotropy-fragment-CbNkTpSR.js",
@@ -8,7 +8,7 @@
     "scene23-background-ground-DmmKHN9b.js",
     "scene23-cubemap-skybox-material-sjF5EPm1.js",
     "scene23-ibl-fragment-CeRrvT96.js",
-    "scene23-pbr-renderable-CqMrypUZ.js",
+    "scene23-pbr-renderable-Cl6UhMRU.js",
     "scene23-rgbd-decode-BeChsxxY.js",
     "scene23-scene-uniforms-FTYH6Ct0.js",
     "scene23-wgsl-helpers-BgB2AJrF.js",

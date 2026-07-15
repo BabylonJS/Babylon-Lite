@@ -189,7 +189,8 @@ export function composePbrGeometryShader(
     vbStrides: MeshVbLayout | undefined,
     vbKey: string,
     attachments: readonly GeometryTextureType[],
-    emitColor: boolean
+    emitColor: boolean,
+    uv2Mask = 0
 ): ComposedShader {
     // Strip PBR_HAS_ALPHA_BLEND: the template's alpha-blend branch returns
     // `finalAlpha = saturate(alpha + luminanceOverAlpha²)` which we don't need
@@ -212,7 +213,8 @@ export function composePbrGeometryShader(
         singleLightType,
         esmShadowDepthCode,
         vbStrides,
-        `${vbKey}:geom:${attachments.join(",")}:${emitColor ? "c" : ""}`
+        `${vbKey}:geom:${attachments.join(",")}:${emitColor ? "c" : ""}`,
+        uv2Mask
     );
 
     const hasIbl = (sceneFeatures & PBR_HAS_ENV) !== 0;

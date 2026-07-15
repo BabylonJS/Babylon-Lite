@@ -193,9 +193,20 @@ export type ShaderUniformValue = number | readonly number[] | Float32Array;
 
 export function setShaderUniform(material: ShaderMaterial, name: string, value: ShaderUniformValue): void;
 export function setShaderTexture(material: ShaderMaterial, name: string, texture: Texture2D | null): void;
+export function enableShaderUniformRangeUpdates(scene: SceneContext, material: ShaderMaterial): void;
 ```
 
 `setShaderUniform` validates that the name exists, the declared type is custom or settable, and the supplied float count matches the declaration. It increments `_uniformVersion` and `_uboVersion`.
+
+`enableShaderUniformRangeUpdates` is an opt-in for materials with large custom UBOs and one or a few animated
+values. After the custom UBO has been packed once, each changed custom value is written directly into the
+material's retained packed `ArrayBuffer`. The opt-in updater widens one pending byte range across all changes made
+before the next frame, then uploads only that 4-byte-aligned range through `queue.writeBuffer` from a scene
+before-render callback. The first upload and every packed-buffer recreation
+remain whole-buffer writes. System uniforms have no custom offset and therefore produce no custom-UBO upload.
+Enabling is idempotent per scene, and the same material may be registered with multiple scenes.
+Materials that do not opt in keep the original renderable-owned whole-buffer path and pull in zero range-update
+implementation bytes.
 
 `setShaderTexture` validates that the sampler exists, stores the `Texture2D | null`, and increments `_resourceVersion`. The renderable rebuilds the group-1 bind group when the resource version changes.
 

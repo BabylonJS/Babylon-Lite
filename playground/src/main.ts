@@ -19,8 +19,8 @@ import {
     type Project,
 } from "./snippets";
 import { getEmbedMode, decodeCodeHash, openInPlaygroundUrl, EmbedHost } from "./embed";
-import { NIGHTLY, engineUrlForVersion, fetchPublishedVersions } from "./versions";
-import { BASE } from "./base";
+import { NIGHTLY, NIGHTLY_ENGINE_URL, fetchDeployedVersions } from "./versions";
+import { BASE, stripBase, currentDeployVersion, baseForVersion } from "./base";
 
 const editorContainer = document.getElementById("editor") as HTMLElement;
 const fileTabsContainer = document.getElementById("fileTabs") as HTMLElement;
@@ -67,9 +67,12 @@ let currentMeta: SnippetMeta = {};
 // Host bridge, only created in embed mode (see below).
 let embedHost: EmbedHost | null = null;
 
-// The engine version the runner loads (`"nightly"` self-hosted by default, or a
-// published version from the CDN).
-let currentVersion = NIGHTLY;
+// The fixed release this deploy runs, or `NIGHTLY` for the root/PR source builds.
+// Derived from the deploy base (a `/v/<ver>/` snapshot pins `<ver>`) and fixed for
+// the page's lifetime: the selector switches versions by navigating to another
+// snapshot, not by hot-swapping here. Drives the selector's current option and the
+// CDN pin baked into downloaded projects.
+const currentVersion = currentDeployVersion() ?? NIGHTLY;
 
 function appendConsole(level: string, text: string): void {
     const line = document.createElement("div");
@@ -188,7 +191,7 @@ async function run(): Promise<void> {
         setLoading(true, "Running…");
         appendConsole("system", "Running…");
         runStartedAt = performance.now();
-        await runner.run(code, await engineUrlForVersion(currentVersion));
+        await runner.run(code, NIGHTLY_ENGINE_URL);
     } catch (err) {
         setLoading(false);
         runStartedAt = null;
@@ -463,7 +466,13 @@ downloadBtn.addEventListener("click", () => {
         });
 });
 
-// Engine version selector: "Nightly" plus published releases (loaded from the CDN).
+// Engine version selector: "Nightly" (this deploy's self-hosted source build) plus
+// the fixed releases that have a deployed `/v/<ver>/` snapshot. PRs are never
+// listed — a PR is a source build and shows as "Nightly". Switching version isn't
+// a hot-swap: each option is its own same-origin snapshot, so selecting one
+// navigates there. In-progress work survives the navigation via the shared
+// same-origin autosave; a saved snippet's path is carried across so its permalink
+// stays intact.
 function addVersionOption(value: string, label: string): void {
     const option = document.createElement("option");
     option.value = value;
@@ -474,16 +483,39 @@ addVersionOption(NIGHTLY, "Nightly (latest source)");
 versionEl.value = NIGHTLY;
 
 versionEl.addEventListener("change", () => {
-    currentVersion = versionEl.value;
-    void run();
+    const selected = versionEl.value;
+    if (selected === currentVersion) {
+        return;
+    }
+    const targetBase = baseForVersion(selected === NIGHTLY ? null : selected);
+    if (targetBase === BASE) {
+        // Already on this snapshot's origin (e.g. picking Nightly from a PR build,
+        // which is itself nightly-equivalent) — nothing to navigate to.
+        versionEl.value = currentVersion;
+        return;
+    }
+    // Persist current work synchronously so it restores after the reload (autosave
+    // is otherwise debounced), then carry any snippet route across to the target
+    // snapshot so a permalink stays a permalink. Preserve the query and hash too so
+    // an inline `#code=` payload or a legacy `#ID[#REV]` snippet link survives the
+    // switch rather than relying on autosave alone.
+    writeAutosave();
+    const rest = stripBase(location.pathname);
+    const suffix = rest === "index.html" ? "" : rest;
+    location.href = `${targetBase}${suffix}${location.search}${location.hash}`;
 });
 
 void (async () => {
-    const versions = await fetchPublishedVersions();
+    const versions = await fetchDeployedVersions();
+    // Ensure the running snapshot's own version is selectable even if the manifest
+    // hasn't listed it yet (e.g. just-deployed, or manifest cache still warming).
+    if (currentVersion !== NIGHTLY && !versions.includes(currentVersion)) {
+        versions.unshift(currentVersion);
+    }
     for (const version of versions) {
         addVersionOption(version, `v${version}`);
     }
-    // Keep the current selection (defaults to nightly) after populating.
+    // Reflect the deploy we're actually running (defaults to nightly).
     versionEl.value = currentVersion;
 })();
 
