@@ -2,10 +2,12 @@
 // Loads the Khronos BoomBox glTF PBR model lit by an HDR environment (used as
 // both IBL and a visible skybox). At startup it is fractured into Voronoi cells
 // via `breakMesh` (ported from CedricGuillemet/64Kb5's DynamicsEdit.cpp, see
-// ./break-mesh.ts) with UV interpolation, each cell gets its own Havok convex-hull
-// rigid body, and the pieces are dropped so they fall and scatter on the ground.
-// Original surfaces keep the PBR material; the exposed interior cut faces use a
-// separate "fractured core" material. Soft directional shadows track the pieces.
+// ./break-mesh.ts) with UV interpolation, and duplicated into several instances
+// scattered across the ground. Each instance rests assembled as static convex-hull
+// cells; clicking one GPU-picks it and shatters just that boombox, punching the
+// picked cell along the pick ray. Original surfaces keep the PBR material; the
+// exposed interior cut faces use a separate "fractured core" material, and soft
+// directional shadows track the cells.
 
 import HavokPhysics from "@babylonjs/havok";
 import {
@@ -50,6 +52,9 @@ const ENV_URL = "https://assets.babylonjs.com/core/environments/environmentSpecu
 const SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
 
 const CELL_COUNT = 14;
+
+/** Total number of BoomBox instances (1 original + 10 duplicates scattered around). */
+const INSTANCE_COUNT = 11;
 
 /** Small deterministic RNG (mulberry32) so the fracture is stable across loads. */
 function makeRng(seed: number): () => number {
@@ -147,6 +152,10 @@ async function main(): Promise<void> {
     const maxZ = aabb.max[2]!;
     const groundY = isFinite(minY) ? minY : 0;
     const span = Math.max(maxX - minX, maxY - minY, maxZ - minZ, 0.001);
+    // Horizontal centre of the (baked, world-space) model — the pivot for per-instance
+    // spin and the framing/ground centre.
+    const cx = (minX + maxX) / 2;
+    const cz = (minZ + maxZ) / 2;
 
     // Material for the freshly exposed interior faces — a warm "fractured core".
     // PBR (not standard) so every shadow caster shares the PBR shadow family, which
@@ -158,41 +167,86 @@ async function main(): Promise<void> {
         emissiveColor: [0.12, 0.03, 0.0],
     });
 
-    // ── Fracture the BoomBox into Voronoi cells NOW, at scene startup. Scatter
-    // deterministic seed sites inside the scaled model bounds (inset so cells near
-    // the surface still get a full complement of cut planes), fracture, then swap
-    // the intact model out for the generated pieces.
-    const rng = makeRng(1337);
+    // ── Build several fractured BoomBox instances scattered around the origin. The
+    // first sits where the source model is; the others get random ground offsets.
+    // Each instance is fractured with its own seed set (so the break pattern varies)
+    // into a flush, on-the-ground assembly of static convex-hull cells that shatters
+    // independently when one of its parts is picked.
     const inset = 0.12;
-    const seeds: number[][] = [];
-    for (let i = 0; i < CELL_COUNT; i++) {
-        seeds.push([
-            minX + (inset + rng() * (1 - 2 * inset)) * (maxX - minX),
-            minY + (inset + rng() * (1 - 2 * inset)) * (maxY - minY),
-            minZ + (inset + rng() * (1 - 2 * inset)) * (maxZ - minZ),
-        ]);
+    const makeSeeds = (r: () => number): number[][] => {
+        const s: number[][] = [];
+        for (let i = 0; i < CELL_COUNT; i++) {
+            s.push([
+                minX + (inset + r() * (1 - 2 * inset)) * (maxX - minX),
+                minY + (inset + r() * (1 - 2 * inset)) * (maxY - minY),
+                minZ + (inset + r() * (1 - 2 * inset)) * (maxZ - minZ),
+            ]);
+        }
+        return s;
+    };
+
+    // Random ground offsets: instance 0 at the origin, the rest scattered around it
+    // within `spread`, rejecting placements that crowd a previously-placed instance.
+    const spread = span * 8.5;
+    const offRng = makeRng(9001);
+    const offsets: [number, number][] = [[0, 0]];
+    let guard = 0;
+    while (offsets.length < INSTANCE_COUNT && guard++ < 2000) {
+        const ang = offRng() * Math.PI * 2;
+        const dist = span * 2.5 + offRng() * (spread - span * 2.5);
+        const ox = Math.cos(ang) * dist;
+        const oz = Math.sin(ang) * dist;
+        if (offsets.every(([x, z]) => Math.hypot(x - ox, z - oz) > span * 2.2)) {
+            offsets.push([ox, oz]);
+        }
     }
 
-    const pieces: Mesh[] = [];
-    for (const m of sourceMeshes) {
-        pieces.push(...breakMesh(engine, m, seeds, coreMat, { separation: 0, receiveShadows: false }));
+    interface BoomboxInstance {
+        roots: Mesh[];
+        bodies: PhysicsBody[];
+        shattered: boolean;
+    }
+    const instances: BoomboxInstance[] = [];
+    const allPieces: Mesh[] = [];
+    for (let i = 0; i < offsets.length; i++) {
+        const [ox, oz] = offsets[i]!;
+        const seeds = makeSeeds(makeRng(1337 + i * 131));
+        // Random spin about the vertical axis. The cell geometry is baked in world
+        // space around the model centre (cx, cz), so a plain mesh rotation would spin
+        // it around the world origin — cancel the pivot in `position` so the instance
+        // rotates about its own centre before being translated to (ox, oz).
+        const theta = offRng() * Math.PI * 2;
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+        const dpx = cx * (1 - cosT) - cz * sinT;
+        const dpz = cx * sinT + cz * (1 - cosT);
+        const qy = Math.sin(theta / 2);
+        const qw = Math.cos(theta / 2);
+        const roots: Mesh[] = [];
+        for (const m of sourceMeshes) {
+            for (const p of breakMesh(engine, m, seeds, coreMat, { separation: 0, receiveShadows: false })) {
+                if (!p.parent) {
+                    // Shell root: apply the Y spin and shift the whole cell (its cap
+                    // child rides along) to this instance's ground offset. groundY ==
+                    // the model's minY and a Y spin leaves height unchanged, so Y stays
+                    // untouched to keep every instance flush on the ground.
+                    p.rotationQuaternion.set(0, qy, 0, qw);
+                    p.position.x = ox + dpx;
+                    p.position.z = oz + dpz;
+                    roots.push(p);
+                }
+                addToScene(scene, p);
+                allPieces.push(p);
+            }
+        }
+        instances.push({ roots, bodies: [], shattered: false });
     }
     for (const m of sourceMeshes) {
         removeFromScene(scene, m);
     }
-    // Place the reassembled boombox directly on the ground — no drop, no per-cell
-    // separation — so the pieces sit flush as the intact model. groundY == the
-    // model's minY, so leaving the pieces at their fractured positions rests the
-    // boombox exactly on the ground. Each cell's shell is a scene root (parent ==
-    // null); its cap rides along as a child.
-    for (const p of pieces) {
-        addToScene(scene, p);
-    }
 
     // Shadow-receiving ground plane the pieces land on.
     const groundW = span * 30;
-    const cx = (minX + maxX) / 2;
-    const cz = (minZ + maxZ) / 2;
     const ground = createGround(engine, { width: groundW, height: groundW });
     ground.position.set(cx, groundY, cz);
     const groundMat = createStandardMaterial();
@@ -202,19 +256,19 @@ async function main(): Promise<void> {
     ground.receiveShadows = true;
     addToScene(scene, ground);
 
-    // Camera framing the drop + landing area (manual pose — the huge ground plane
+    // Camera framing the whole scattered cluster (manual pose — the huge ground plane
     // would wreck createDefaultCamera's auto-framing).
     const cam = createDefaultCamera(scene);
     cam.target.x = cx;
-    cam.target.y = groundY + span * 1.4;
+    cam.target.y = groundY + span * 0.6;
     cam.target.z = cz;
     cam.alpha = 1.6;
-    cam.beta = 1.1;
-    cam.radius = span * 6.5;
+    cam.beta = 1.12;
+    cam.radius = span * 19;
     cam.nearPlane = span * 0.02;
     cam.farPlane = span * 4000;
     attachControl(cam, canvas, scene);
-    setCameraLimits(cam, { lowerRadiusLimit: span * 2, upperRadiusLimit: span * 30, upperBetaLimit: Math.PI / 2 + 0.2 }, scene);
+    setCameraLimits(cam, { lowerRadiusLimit: span * 2, upperRadiusLimit: span * 40, upperBetaLimit: Math.PI / 2 + 0.2 }, scene);
 
     // Directional "sun" for the shadows, tilted modestly off vertical so the pile
     // casts a readable shadow onto the surrounding ground rather than hiding it
@@ -254,7 +308,7 @@ async function main(): Promise<void> {
         forceRefreshEveryFrame: true,
     });
     sun.shadowGenerator = shadowGen;
-    setShadowTaskCasterMeshes(shadowGen, pieces);
+    setShadowTaskCasterMeshes(shadowGen, allPieces);
 
     // ── Havok physics: one convex-hull body per cell + a static ground; gravity
     // pulls the pieces down. The world auto-steps in the render loop.
@@ -271,31 +325,28 @@ async function main(): Promise<void> {
     // pass includeChildMeshes: true — the shape builder does NOT walk children unless
     // asked, and without it the hull would be built from the shell vertices alone.
     //
-    // The cells are placed flush as the intact boombox, and convex hulls of adjacent
-    // Voronoi cells always overlap slightly — so dynamic bodies would immediately push
-    // each other apart and the model would burst. Keep the bodies STATIC (mass 0) so
-    // the assembled boombox rests stably on the ground; picking (below) flips them to
-    // dynamic to break the model on demand.
-    const bodyByRoot = new Map<Mesh, PhysicsBody>();
-    const allBodies: PhysicsBody[] = [];
-    for (const p of pieces) {
-        if (p.parent) {
-            continue; // caps ride their shell — no separate body
+    // Each instance's cells are placed flush as an intact boombox, and convex hulls of
+    // adjacent Voronoi cells always overlap slightly — so dynamic bodies would
+    // immediately push each other apart and the model would burst. Keep every body
+    // STATIC (mass 0) so the boomboxes rest stably on the ground; picking (below) flips
+    // a single instance's cells to dynamic to break just that model on demand.
+    const rootData = new Map<Mesh, { body: PhysicsBody; instance: BoomboxInstance }>();
+    for (const inst of instances) {
+        for (const root of inst.roots) {
+            const shape = createPhysicsShape(world, { type: PhysicsShapeType.CONVEX_HULL, mesh: root, includeChildMeshes: true });
+            const agg = createPhysicsAggregate(world, root, PhysicsShapeType.CONVEX_HULL, { mass: 0, restitution: 0.2, friction: 0.6, shape });
+            inst.bodies.push(agg.body);
+            rootData.set(root, { body: agg.body, instance: inst });
         }
-        const shape = createPhysicsShape(world, { type: PhysicsShapeType.CONVEX_HULL, mesh: p, includeChildMeshes: true });
-        const agg = createPhysicsAggregate(world, p, PhysicsShapeType.CONVEX_HULL, { mass: 0, restitution: 0.2, friction: 0.6, shape });
-        bodyByRoot.set(p, agg.body);
-        allBodies.push(agg.body);
     }
     createPhysicsAggregate(world, ground, PhysicsShapeType.BOX, { mass: 0, restitution: 0.1, friction: 0.8 });
 
-    // ── Interaction: click a boombox part to shatter it. The first pick flips every
-    // cell from static to dynamic (gravity + the overlapping hulls then burst the
-    // model apart) and punches the clicked part along the pick ray; later picks just
-    // punch whatever part is clicked.
+    // ── Interaction: click a boombox part to shatter THAT boombox. The first pick on
+    // an instance flips all its cells from static to dynamic (gravity + the overlapping
+    // hulls then burst it apart) and punches the clicked cell along the pick ray; later
+    // picks just punch whatever cell is clicked. Other instances stay intact.
     const picker = createGpuPicker(scene);
     const IMPULSE = span * 24;
-    let shattered = false;
     const punchAt = async (clientX: number, clientY: number): Promise<void> => {
         const rect = canvas.getBoundingClientRect();
         const info = await pickAsync(picker, clientX - rect.left, clientY - rect.top);
@@ -305,27 +356,23 @@ async function main(): Promise<void> {
         // Resolve the picked mesh (a shell root, or its cap child) to the cell root
         // that owns the physics body.
         let root: Mesh | null = info.pickedMesh as Mesh;
-        while (root && !bodyByRoot.has(root)) {
+        while (root && !rootData.has(root)) {
             root = root.parent as Mesh | null;
         }
         if (!root) {
             return; // clicked the ground (or anything without a cell body)
         }
-        if (!shattered) {
-            shattered = true;
-            for (const b of allBodies) {
+        const hit = rootData.get(root)!;
+        if (!hit.instance.shattered) {
+            hit.instance.shattered = true;
+            for (const b of hit.instance.bodies) {
                 setPhysicsBodyMotionType(world, b, PhysicsMotionType.DYNAMIC);
                 setPhysicsBodyMass(world, b, 1);
             }
         }
         const d = info.ray?.direction ?? [0, -1, 0];
         const point = info.pickedPoint;
-        applyPhysicsImpulse(
-            world,
-            bodyByRoot.get(root)!,
-            { x: d[0]! * IMPULSE, y: d[1]! * IMPULSE, z: d[2]! * IMPULSE },
-            point ? { x: point[0], y: point[1], z: point[2] } : undefined
-        );
+        applyPhysicsImpulse(world, hit.body, { x: d[0]! * IMPULSE, y: d[1]! * IMPULSE, z: d[2]! * IMPULSE }, point ? { x: point[0], y: point[1], z: point[2] } : undefined);
     };
     // Only treat a near-stationary press/release as a click, so camera-orbit drags
     // don't trigger a pick.
