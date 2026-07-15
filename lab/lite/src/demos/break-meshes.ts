@@ -16,6 +16,7 @@ import {
     attachControl,
     createDefaultCamera,
     createDirectionalLight,
+    createBox,
     createEngine,
     createEsmDirectionalShadowGenerator,
     createGpuPicker,
@@ -29,6 +30,7 @@ import {
     getContainerMeshes,
     loadEnvironment,
     loadGltf,
+    onBeforeRender,
     pickAsync,
     PhysicsMotionType,
     PhysicsShapeType,
@@ -270,13 +272,12 @@ async function main(): Promise<void> {
     attachControl(cam, canvas, scene);
     setCameraLimits(cam, { lowerRadiusLimit: span * 2, upperRadiusLimit: span * 40, upperBetaLimit: Math.PI / 2 + 0.2 }, scene);
 
-    // Directional "sun" for the shadows, tilted modestly off vertical so the pile
-    // casts a readable shadow onto the surrounding ground rather than hiding it
-    // straight underneath.
-    const lightDir = [0.35, -1, 0.28];
-    const sun = createDirectionalLight([lightDir[0]!, lightDir[1]!, lightDir[2]!], 1.1);
-    const lightPos = [cx - span * 1.4, groundY + span * 4, cz - span * 1.1];
-    sun.position.set(lightPos[0]!, lightPos[1]!, lightPos[2]!);
+    // Straight top-down "sun". A vertical light casts shadows directly beneath each
+    // piece, so they can never be stretched/elongated by a grazing light angle no
+    // matter where a shard flies (buildLightViewMatrix swaps the up-vector for a
+    // vertical direction, so [0,-1,0] is well-defined).
+    const sun = createDirectionalLight([0, -1, 0], 1.1);
+    sun.position.set(cx, groundY + span * 6, cz);
     addToScene(scene, sun);
 
     // ESM ortho depth (near/far along the light axis, measured from the light eye at
@@ -308,7 +309,53 @@ async function main(): Promise<void> {
         forceRefreshEveryFrame: true,
     });
     sun.shadowGenerator = shadowGen;
-    setShadowTaskCasterMeshes(shadowGen, allPieces);
+
+    // FIXED shadow volume mapping the ground. The generator auto-fits its ortho X/Y to
+    // all caster AABBs each frame, so a flung shard would otherwise balloon the frustum
+    // and blur/stretch every shadow. Pin the volume to a fixed square of the ground by
+    // making four tiny invisible corner anchors permanent casters, and — since the
+    // light is vertical, only horizontal position (not height) affects the X/Y fit —
+    // drop any piece that strays outside that square from the caster set. The frustum
+    // then stays a constant ground-mapped box: shadows keep a stable resolution and
+    // never stretch. Anchors sit on the ground so their own (vertical) shadow is
+    // coincident with it and invisible.
+    const shadowHalf = span * 12;
+    const anchors: Mesh[] = [];
+    const corners: [number, number][] = [
+        [-shadowHalf, -shadowHalf],
+        [shadowHalf, -shadowHalf],
+        [-shadowHalf, shadowHalf],
+        [shadowHalf, shadowHalf],
+    ];
+    for (const [ax, az] of corners) {
+        const a = createBox(engine, span * 0.02);
+        a.position.set(cx + ax, groundY, cz + az);
+        a.visible = false;
+        addToScene(scene, a);
+        anchors.push(a);
+    }
+    let currentCasters: Mesh[] = [...anchors, ...allPieces];
+    setShadowTaskCasterMeshes(shadowGen, currentCasters);
+    onBeforeRender(scene, () => {
+        const next: Mesh[] = anchors.slice();
+        for (const p of allPieces) {
+            const wm = p.worldMatrix as ArrayLike<number>;
+            const bmin = p.boundMin ?? [-0.5, -0.5, -0.5];
+            const bmax = p.boundMax ?? [0.5, 0.5, 0.5];
+            const lx = (bmin[0]! + bmax[0]!) * 0.5;
+            const ly = (bmin[1]! + bmax[1]!) * 0.5;
+            const lz = (bmin[2]! + bmax[2]!) * 0.5;
+            const wx = wm[0]! * lx + wm[4]! * ly + wm[8]! * lz + wm[12]!;
+            const wz = wm[2]! * lx + wm[6]! * ly + wm[10]! * lz + wm[14]!;
+            if (Math.abs(wx - cx) <= shadowHalf && Math.abs(wz - cz) <= shadowHalf) {
+                next.push(p);
+            }
+        }
+        if (next.length !== currentCasters.length || next.some((m, i) => m !== currentCasters[i])) {
+            currentCasters = next;
+            setShadowTaskCasterMeshes(shadowGen, currentCasters);
+        }
+    });
 
     // ── Havok physics: one convex-hull body per cell + a static ground; gravity
     // pulls the pieces down. The world auto-steps in the render loop.
