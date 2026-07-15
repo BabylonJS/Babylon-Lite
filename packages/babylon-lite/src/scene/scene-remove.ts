@@ -16,7 +16,6 @@ import type { RenderTask } from "../frame-graph/render-task.js";
  *  or a whole AssetContainer. Safe to call more than once (idempotent).
  *
  *  Standalone function for tree-shaking — only included when actually used. */
-export function removeFromScene(...args: Parameters<typeof addToScene>): void;
 export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
     // AssetContainer — undo addToScene(scene, container) field by field.
     if ("entities" in entity) {
@@ -68,6 +67,15 @@ export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | 
     detachParent(entity);
     removeChildren(scene, entity as unknown as SceneNode);
 }
+
+// Compile-time symmetry guard (zero runtime cost, not part of the public API):
+// removeFromScene must accept exactly the same arguments as addToScene so the two
+// stay mirror images. If either signature drifts, `_ParamsEqual` resolves to `false`,
+// `_AssertTrue<false>` violates its `extends true` constraint, and the build fails.
+// The `declare const` is ambient — it emits no JavaScript and is never exported.
+type _ParamsEqual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type _AssertTrue<T extends true> = T;
+declare const _removeMatchesAdd: _AssertTrue<_ParamsEqual<Parameters<typeof addToScene>, Parameters<typeof removeFromScene>>>;
 
 /** Drop a shadow generator from the scene and dispose its task resources exactly once.
  *  The disposable render task lives on the lazily-created task state, not the generator
