@@ -334,12 +334,12 @@ return out;
     if (hasNormal) {
         normalBlock = `let normalMapRaw=textureSample(normalTexture,normalSampler_,${normalUV}).rgb*2.0-1.0;
 ${normalScaleMod}let normalMapNorm=normalize(${normalRef});
-let N_geom=normalize(input.worldNormal);
+var N_geom=normalize(input.worldNormal);
 let TBN=mat3x3<f32>(input.worldTangent,input.worldBitangent,input.worldNormal);
 var N=normalize(TBN*normalMapNorm);`;
     } else if (hasCotangentNormal) {
         normalBlock = `let normalMapSample=textureSample(normalTexture,normalSampler_,${normalUV}).rgb*2.0-1.0;
-${normalScaleMod.replace(/normalMapRaw/g, "normalMapSample").replace(/scaledNormal/g, "scaledNormalCT")}let N_geom=normalize(input.worldNormal);
+${normalScaleMod.replace(/normalMapRaw/g, "normalMapSample").replace(/scaledNormal/g, "scaledNormalCT")}var N_geom=normalize(input.worldNormal);
 let dp1=dpdx(input.worldPos);
 let dp2=dpdy(input.worldPos);
 let duv1=dpdx(${normalUV});
@@ -359,7 +359,7 @@ var N=normalize(cotangentFrame*normalize(${normalRefCt}));`;
         // of this shared template so normal-having scenes pay zero bundle cost.
         normalBlock = `${_flatNormalWgsl}`;
     } else {
-        normalBlock = `let N_geom=normalize(input.worldNormal);
+        normalBlock = `var N_geom=normalize(input.worldNormal);
 var N=N_geom;`;
     }
 
@@ -459,7 +459,14 @@ return vec4<f32>(color,finalAlpha);`
     const doubleSidedEntry = _hasDoubleSided
         ? `@fragment fn main(input: FragmentInput, @builtin(front_facing) frontFacing: bool)${_noColorOutput ? "" : " -> @location(0) vec4<f32>"} {`
         : `@fragment fn main(input: FragmentInput)${_noColorOutput ? "" : " -> @location(0) vec4<f32>"} {`;
-    const doubleSidedFlip = _hasDoubleSided ? `if (!frontFacing) { N = -N; }` : "";
+    // On a double-sided backface, flip the shading normal to face the viewer.
+    // The geometric normal (`N_geom`) must flip with it so view-dependent terms
+    // that consume it (e.g. specular environment horizon occlusion) stay consistent
+    // — matching Babylon.js's `geometricNormalW` flip under TWOSIDEDLIGHTING && NORMAL.
+    // The flat-shaded path (no vertex NORMAL) already orients N_geom to the viewer via
+    // the eye vector, so it is excluded here (mirrors BJS gating on `defined(NORMAL)`).
+    const doubleSidedGeomFlip = _flatGeometricNormal ? "" : " N_geom = -N_geom;";
+    const doubleSidedFlip = _hasDoubleSided ? `if (!frontFacing) { N = -N;${doubleSidedGeomFlip} }` : "";
 
     const lightDecls = _hasMultiLight ? _multiLightWGSL : _hasSingleLight ? _singleLightWGSL : "";
     const lightBindingDecl = _hasSingleLight || _hasMultiLight ? `@group(0) @binding(1) var<uniform> lights: lightsUniforms;` : "";

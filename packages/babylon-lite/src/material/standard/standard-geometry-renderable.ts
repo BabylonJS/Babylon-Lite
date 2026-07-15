@@ -37,7 +37,7 @@ import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target.js";
 import { createThinInstanceFragment } from "../../shader/fragments/thin-instance-fragment.js";
-import { syncThinInstanceBuffers } from "../../mesh/thin-instance-gpu.js";
+import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../mesh/thin-instance-gpu.js";
 
 import type { Material } from "../material.js";
 import type { StandardMaterialProps } from "./standard-material.js";
@@ -153,6 +153,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     const hasThinInstances = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
     const hasInstanceColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
     const sortCenter = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number];
+    let thinDrawArgs: GPUBuffer | null = null;
 
     const update = (): void => {
         if (mesh.worldMatrixVersion !== _lastWorldVersion || scene.lights.length !== _lastLightsCount) {
@@ -171,6 +172,10 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             res._matData.fill(0);
             writeStdMaterialData(res._matData, source, textureLevel);
             device.queue.writeBuffer(res._matUBO, 0, res._matData.buffer, 0, 96);
+        }
+        const ti = hasThinInstances ? mesh.thinInstances : null;
+        if (ti) {
+            thinDrawArgs = syncThinInstanceForDraw(engine, ti, hasInstanceColor, mesh._gpu.indexCount);
         }
     };
 
@@ -194,10 +199,10 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasInstanceColor);
         }
         pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
-        if (ti && ti.count > 0) {
-            pass.drawIndexed(g.indexCount, ti.count);
+        if (ti && thinDrawArgs) {
+            pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(g.indexCount);
+            pass.drawIndexed(g.indexCount, ti?.count);
         }
         return 1;
     };

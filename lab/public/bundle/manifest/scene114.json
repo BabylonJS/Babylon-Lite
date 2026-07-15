@@ -1,11 +1,11 @@
 {
-  "rawKB": 79.8,
-  "gzipKB": 31.3,
+  "rawKB": 80.9,
+  "gzipKB": 31.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene114-morph-fragment-D7uhVjcX.js",
-    "scene114-pbr-renderable-BFe5_CnE.js",
-    "scene114-pbr-template-ext-BoJ8SFLM.js",
+    "scene114-morph-fragment-DLjixOml.js",
+    "scene114-pbr-renderable-Bz1zsS0O.js",
+    "scene114-pbr-template-ext-CiHpOV5G.js",
     "scene114-singlelight-hemispheric-wgsl-CEVgMDLE.js",
     "scene114-skeleton-fragment-qheSzR-l.js",
     "scene114-unlit-fragment-DWtvt7yQ.js",

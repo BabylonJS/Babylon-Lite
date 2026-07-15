@@ -159,6 +159,20 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         !!(tex.ormTexture as { _hasTx?: true })._hasTx ||
         !!(tex.emissiveTexture as { _hasTx?: true } | undefined)?._hasTx ||
         !!(tex.occlusionTexture as { _hasTx?: true } | undefined)?._hasTx;
+    // Per-channel UV1 (TEXCOORD_1) selection bitmask. Computed here on the slow path — the only
+    // place a texture can carry texCoord:1 — so the always-loaded fast path just reads `_uv2Mask`.
+    // Bit literals are a private contract with createPbrTemplateExt's decode (baseColor=1, orm=2,
+    // normal=4, emissive=8, specGloss=16, occlusion=32). specGloss arrives via extLayers. Occlusion
+    // reads `mat._occlusionTexCoord` (set from the glTF material's occlusionTexture.texCoord for
+    // every path, including KHR_texture_basisu, since occlusion-on-UV1 always routes through here).
+    const tc1 = (t: unknown): boolean => (t as { _texCoord?: number } | undefined)?._texCoord === 1;
+    const uv2Mask =
+        (tc1(tex.baseColorTexture) ? 1 : 0) |
+        (tc1(tex.ormTexture) ? 2 : 0) |
+        (tc1(tex.normalTexture) ? 4 : 0) |
+        (tc1(tex.emissiveTexture) ? 8 : 0) |
+        (tc1((extLayers as { specGlossTexture?: unknown } | undefined)?.specGlossTexture) ? 16 : 0) |
+        (mat._occlusionTexCoord === 1 ? 32 : 0);
     return {
         baseColorTexture: tex.baseColorTexture,
         normalTexture: tex.normalTexture,
@@ -178,6 +192,7 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         ...(hasAnyUvTx ? { _hasUvTx: true } : undefined),
         ...(mat._rawMatDef?.name ? { name: mat._rawMatDef.name as string } : undefined),
         ...extLayers,
+        ...(uv2Mask ? { _uv2Mask: uv2Mask } : undefined),
         _buildGroup: getPbrGroupBuilder(),
         _uboVersion: 0,
     } as PbrMaterialProps;

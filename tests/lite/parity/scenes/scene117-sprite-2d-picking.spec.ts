@@ -6,7 +6,7 @@
  * ThinSprite (Babylon has no 2D-sprite pick), so the pixels match while the `dataset` state
  * proves Lite's `pickSprite2D` resolved the correct sprite.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Page } from "@playwright/test";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";

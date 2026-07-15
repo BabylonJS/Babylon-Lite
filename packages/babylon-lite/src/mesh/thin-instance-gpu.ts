@@ -1,11 +1,13 @@
 /** Thin instance GPU buffer sync — dynamically loaded only by scenes with thin instances.
  *  Keeps the standard renderable chunk unchanged for scenes without thin instances. */
 
-import { F32 } from "../engine/typed-arrays.js";
+import { F32, U32 } from "../engine/typed-arrays.js";
 import { BU } from "../engine/gpu-flags.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import type { EngineContext } from "../engine/engine.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
+import { bumpVisibilityEpoch } from "../engine/engine.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 /** @internal Optional replacement buffers used by GPU culling after it compacts visible instances. */
 export interface ThinInstanceDrawBuffers {
@@ -14,15 +16,20 @@ export interface ThinInstanceDrawBuffers {
 }
 
 /** @internal Sync CPU thin-instance data to GPU buffers, optionally with STORAGE usage for compute culling. */
-export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean): void {
+export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean): boolean {
     const device = engine._device;
     const needsStorage = ti._gpuCullingEnabled;
+    const retiredBuffers: GPUBuffer[] = [];
+    let recreated = false;
     if (ti._version !== ti._gpuVersion || ti._gpuBufferStorage !== needsStorage) {
         const byteSize = ti.count * 64;
         let bufferRecreated = false;
         if (!ti._gpuBuffer || ti._gpuBuffer.size < byteSize || ti._gpuBufferStorage !== needsStorage) {
-            ti._gpuBuffer?.destroy();
+            if (ti._gpuBuffer) {
+                retiredBuffers.push(ti._gpuBuffer);
+            }
             ti._gpuBuffer = device.createBuffer({
+                label: "thin-instance-matrices",
                 size: Math.max(ti._capacity * 64, 4),
                 // STORAGE is always included: the GPU picker binds this matrix
                 // buffer as a read-only storage buffer for thin-instance picking,
@@ -32,6 +39,7 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
             });
             ti._gpuBufferStorage = needsStorage;
             bufferRecreated = true;
+            recreated = true;
         }
         // Upload only the dirty range (or full range if buffer was just created)
         const dirtyMin = bufferRecreated ? 0 : ti._dirtyMin;
@@ -68,13 +76,17 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
             const colorByteSize = ti.count * 16;
             let colorRecreated = false;
             if (!ti._colorGpuBuffer || ti._colorGpuBuffer.size < colorByteSize || ti._colorGpuBufferStorage !== needsStorage) {
-                ti._colorGpuBuffer?.destroy();
+                if (ti._colorGpuBuffer) {
+                    retiredBuffers.push(ti._colorGpuBuffer);
+                }
                 ti._colorGpuBuffer = device.createBuffer({
+                    label: "thin-instance-colors",
                     size: Math.max(ti._capacity * 16, 4),
                     usage: BU.VERTEX | BU.COPY_DST | (needsStorage ? BU.STORAGE : 0),
                 });
                 ti._colorGpuBufferStorage = needsStorage;
                 colorRecreated = true;
+                recreated = true;
             }
             // Upload only the dirty colour range (mirrors the matrix path) — full range on (re)create.
             const cMin = colorRecreated ? 0 : ti._colorDirtyMin;
@@ -87,6 +99,52 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
             ti._colorGpuVersion = ti._colorVersion;
         }
     }
+    if (retiredBuffers.length > 0) {
+        retireGpuResources(engine, () => {
+            for (const buffer of retiredBuffers) {
+                buffer.destroy();
+            }
+        });
+    }
+    if (recreated) {
+        bumpVisibilityEpoch();
+    }
+    return recreated;
+}
+
+/** Sync the stable indirect draw arguments captured by cached thin-instance render bundles. */
+export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstanceData, indexCount: number): GPUBuffer {
+    if (!ti._drawArgsBuffer) {
+        ti._drawArgsBuffer = engine._device.createBuffer({
+            size: 20,
+            usage: BU.INDIRECT | BU.COPY_DST,
+        });
+        ti._drawArgsData = new U32(5);
+        ti._drawArgsIndexCount = -1;
+        ti._drawArgsInstanceCount = -1;
+        bumpVisibilityEpoch();
+    }
+    if (ti._drawArgsIndexCount !== indexCount || ti._drawArgsInstanceCount !== ti.count) {
+        const args = ti._drawArgsData!;
+        args[0] = indexCount;
+        args[1] = ti.count;
+        args[2] = 0;
+        args[3] = 0;
+        args[4] = 0;
+        engine._device.queue.writeBuffer(ti._drawArgsBuffer, 0, args.buffer, args.byteOffset, args.byteLength);
+        ti._drawArgsIndexCount = indexCount;
+        ti._drawArgsInstanceCount = ti.count;
+    }
+    return ti._drawArgsBuffer;
+}
+
+/** Sync thin-instance vertex data and return stable indirect args only after a direct draw's count changes. */
+export function syncThinInstanceForDraw(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number): GPUBuffer | null {
+    syncThinInstanceGpuData(engine, ti, hasColor);
+    if (!ti._drawArgsBuffer && (ti._drawArgsInstanceCount ??= ti.count) === ti.count) {
+        return null;
+    }
+    return syncThinInstanceDrawArgs(engine, ti, indexCount);
 }
 
 /** Sync thin instance matrix + optional color GPU buffers and bind to vertex slots. */

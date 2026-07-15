@@ -29,9 +29,10 @@ export function createEmptyUniformBuffer(engine: EngineContext, byteLength: numb
 }
 
 /** Create a mapped-at-creation buffer (for VERTEX/INDEX/STORAGE uploads). Size is padded to ≥4 and 4-byte aligned. */
-export function createMappedBuffer(engine: EngineContext, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
+export function createMappedBuffer(engine: EngineContext, data: ArrayBufferView, usage: GPUBufferUsageFlags, label?: string): GPUBuffer {
     const size = align(Math.max(data.byteLength, 4), 4);
     const buf = engine._device.createBuffer({
+        label,
         size,
         usage: usage | BU.COPY_DST,
         mappedAtCreation: true,
