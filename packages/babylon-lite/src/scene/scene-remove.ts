@@ -1,4 +1,4 @@
-import type { SceneContext } from "./scene-core.js";
+import type { addToScene, SceneContext } from "./scene-core.js";
 import { unregisterMeshScene } from "./mesh-scene-registry.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { LightBase } from "../light/types.js";
@@ -16,6 +16,7 @@ import type { RenderTask } from "../frame-graph/render-task.js";
  *  or a whole AssetContainer. Safe to call more than once (idempotent).
  *
  *  Standalone function for tree-shaking — only included when actually used. */
+export function removeFromScene(...args: Parameters<typeof addToScene>): void;
 export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
     // AssetContainer — undo addToScene(scene, container) field by field.
     if ("entities" in entity) {
