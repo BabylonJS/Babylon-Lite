@@ -264,7 +264,7 @@ async function main(): Promise<void> {
     cam.target.z = cz;
     cam.alpha = 1.6;
     cam.beta = 1.12;
-    cam.radius = span * 19;
+    cam.radius = span * 13;
     cam.nearPlane = span * 0.02;
     cam.farPlane = span * 4000;
     attachControl(cam, canvas, scene);
