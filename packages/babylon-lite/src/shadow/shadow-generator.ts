@@ -1,3 +1,5 @@
+import type { Texture2D } from "../texture/texture-2d.js";
+
 interface ShadowGeneratorRuntimeConfig {
     _mapSize: number;
     _bias: number;
@@ -28,7 +30,7 @@ export interface ShadowGenerator {
     /** @internal Number of cascades — set by the CSM generator, undefined otherwise. */
     _csmCascadeCount?: number;
     /** @internal Lazily-created borrowed Texture2D wrapper for custom CSM receivers. */
-    _csmReceiverTexture?: import("../texture/texture-2d.js").Texture2D;
+    _csmReceiverTexture?: Texture2D;
     /** @internal Receiver-facing shadow map sampler. */
     _depthSampler: GPUSampler;
     /** @internal */
