@@ -1,4 +1,4 @@
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, cloneTransformNode, attachControl, loadGltf, loadEnvironment, loadTexture2D, createPbrMaterial, createSolidTexture2D, goToFrame, registerScene } from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, cloneTransformNode, attachControl, loadGltf, loadEnvironment, loadTexture2D, createPbrMaterial, setPbrMetallicReflectance, createSolidTexture2D, goToFrame, registerScene } from "babylon-lite";
 import type { TransformNode } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 
@@ -55,16 +55,19 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
     const mrcB = Math.pow(250 / 255, 2.2);
 
     function makeMat(opts: { metallicReflectanceTex?: typeof metallicReflectanceTex; reflectanceTex?: typeof reflectanceTex; useOnlyMetallic?: boolean }) {
-        return createPbrMaterial({
+        const mat = createPbrMaterial({
             baseColorTexture: baseColorTex,
             ormTexture: ormTex,
             occlusionStrength: 0.0,
             metallicF0Factor: 0.95,
-            metallicReflectanceColor: [mrcR, mrcG, mrcB],
-            metallicReflectanceTexture: opts.metallicReflectanceTex,
-            reflectanceTexture: opts.reflectanceTex,
-            useOnlyMetallicFromMetallicReflectanceTexture: opts.useOnlyMetallic,
         });
+        setPbrMetallicReflectance(mat, {
+            color: [mrcR, mrcG, mrcB],
+            texture: opts.metallicReflectanceTex,
+            reflectanceTexture: opts.reflectanceTex,
+            useOnlyMetallicFromTexture: opts.useOnlyMetallic,
+        });
+        return mat;
     }
 
     const matUpper = makeMat({ metallicReflectanceTex: metallicReflectanceTex });

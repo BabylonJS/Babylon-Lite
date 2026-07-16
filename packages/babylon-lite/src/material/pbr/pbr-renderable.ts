@@ -96,47 +96,26 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // ── Single O(N) scan over meshes for all scene-wide feature flags ──
     // Flags are plain locals (not an object return) so terser can mangle their names.
     // Replaces ~11 sequential meshes.some() loops (was O(11N)).
-    let hasSkybox = false;
-    let hasMetallicReflectance = false;
-    let hasClearcoat = false;
-    let hasSheen = false;
-    let hasIridescence = false;
-    let hasAnyAnisotropy = false;
-    let hasAnySubsurface = false;
-    let hasAlphaTest = false;
     let hasTransmissionRefraction = false;
     let needsEmissiveColor = false;
     let hasSomeSkeletons = false;
     let hasSomeMorphs = false;
     let hasSomeThinInstances = false;
     let hasCullingTI = false;
-    let hasAnyUnlit = false;
-    let hasAnyShadowOnly = false;
     let hasAnyUvTransform = false;
     let hasAnyUv2 = false;
     let hasAnyVertexColor = false;
     let hasAnyFlatNormal = false;
-    let hasGammaAlbedo = false;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
-        const mat = m.material as PbrMaterialProps & { _hasReflExt?: boolean; _hasUvTx?: boolean };
+        const mat = m.material as PbrMaterialProps & { _hasUvTx?: boolean };
         const refractionIntensity = mat.subsurface?.refraction?.intensity ?? 0;
-        hasSkybox ||= !!mat.skyboxMode;
-        hasMetallicReflectance ||= !!(mat.metallicReflectanceTexture || mat.reflectanceTexture || mat._hasReflExt);
-        hasClearcoat ||= !!mat.clearCoat?.isEnabled;
-        hasSheen ||= !!mat.sheen?.isEnabled;
-        hasIridescence ||= !!mat.iridescence?.isEnabled;
-        hasAnyAnisotropy ||= !!mat.anisotropy?.isEnabled;
-        hasAnySubsurface ||= !!mat.subsurface?.translucency;
-        hasAlphaTest ||= mat.alphaCutOff! > 0;
         hasTransmissionRefraction ||= refractionIntensity > 0 && !!mat.transmissive;
         needsEmissiveColor ||= !!mat.emissiveColor;
         hasSomeSkeletons ||= !!m.skeleton;
         hasSomeMorphs ||= !!m.morphTargets;
         hasSomeThinInstances ||= !!m.thinInstances;
         hasCullingTI ||= !!m.thinInstances?._gpuCullingEnabled;
-        hasAnyUnlit ||= !!mat.unlit;
-        hasAnyShadowOnly ||= !!mat.shadowOnly;
         hasAnyUvTransform ||= !!mat._hasUvTx;
         // UV2 counts when ANY PBR channel samples texCoord 1 (occlusion included, via `_uv2Mask`
         // bit 32) — precomputed as `_uv2Mask` on the material by the glTF slow path (0/undefined on
@@ -145,21 +124,14 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasAnyUv2 ||= !!m._gpu.uv2Buffer && !!(mat as { _uv2Mask?: number })._uv2Mask;
         hasAnyVertexColor ||= !!m._gpu.colorBuffer;
         hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
-        hasGammaAlbedo ||= !!mat.gammaAlbedo;
     }
 
     // ── Dynamically import fragment creators based on scene capabilities ──
 
     // IBL fragment.
-    let _iblSkyboxCalc = "";
     if (hasEnv) {
         const mod = await import("./fragments/ibl-fragment.js");
         _registerPbrExt(mod.pbrExt);
-        if (hasSkybox) {
-            // Skybox-mode WGSL is only loaded when at least one mesh in the scene needs it.
-            const sky = await import("./fragments/ibl-skybox-wgsl.js");
-            _iblSkyboxCalc = sky.IBL_SKYBOX_CALCULATION;
-        }
     }
 
     // Flat-normal WGSL is only loaded when at least one mesh lacks a NORMAL attribute
@@ -212,35 +184,16 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         }
     };
 
-    await _drainPbrExts([
-        [hasAlphaTest, () => import("./fragments/alpha-test-fragment.js")],
-        [hasMetallicReflectance, () => import("./fragments/reflectance-fragment.js")],
-        [hasClearcoat, () => import("./fragments/clearcoat-fragment.js")],
-        [hasSheen, () => import("./fragments/sheen-fragment.js")],
-        [hasIridescence, () => import("./fragments/iridescence-fragment.js")],
-        [hasAnySubsurface, () => import("./fragments/subsurface-fragment.js")],
-    ]);
     if (hasTransmissionRefraction) {
         const mod = await import("./pbr-refraction.js");
         await mod.registerPbrRefraction(scene as SceneContext, engine, _registerPbrExt);
     }
     await _drainPbrExts([
         [needsEmissiveColor, () => import("./fragments/emissive-fragment.js")],
-        [hasAnyUnlit, () => import("./fragments/unlit-fragment.js")],
-        [hasAnyShadowOnly, () => import("./fragments/shadow-only-fragment.js")],
         [hasSomeSkeletons, () => import("./fragments/skeleton-fragment.js")],
         [hasSomeMorphs, () => import("./fragments/morph-fragment.js")],
         [hasAnyUvTransform, () => import("./fragments/uv-transform-fragment.js")],
     ]);
-
-    // Anisotropy needs its module reference retained (for ANISO_BRDF_FUNCTIONS /
-    // makeAnisotropyTBBlock / ANISO_DIRECT_DG / ANISO_BENT_NORMAL strings consumed
-    // by the template below), so it keeps the full module binding.
-    let _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null = null;
-    if (hasAnyAnisotropy) {
-        _anisoExt = await import("./fragments/anisotropy-fragment.js");
-        _registerPbrExt(_anisoExt.pbrExt);
-    }
 
     // Lazy-load pbr-template-ext when any advanced features are present.
     // Scene1 has none of these, so it won't pay the ~1.5KB cost.
@@ -249,8 +202,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const extMod = await import("./pbr-template-ext.js");
         _createPbrTemplateExt = extMod.createPbrTemplateExt;
     }
-
-    const _gammaTemplate = hasGammaAlbedo ? await import("./pbr-template-gamma.js") : null;
 
     let _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null = null;
     let _syncThinInstanceBuffers: SyncThinInstanceBuffers | null = null;
@@ -308,10 +259,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _fogHelper,
         _fogBlock,
         _createPbrTemplateExt,
-        _anisoExt,
-        _iblSkyboxCalc,
         _flatNormalWgsl,
-        _gammaTemplate,
         _createPbrShadowFragment,
         _shadowLights: shadowLights,
         _createThinInstanceFragment,

@@ -33,6 +33,7 @@
  *  Until then, transmissive materials render as opaque. */
 import type { GltfFeature } from "./gltf-feature.js";
 import type { PbrMaterialProps, RefractionProps } from "../material/pbr/pbr-material.js";
+import { setPbrMetallicReflectance, type MetallicReflectanceOptions } from "../material/pbr/set-metallic-reflectance.js";
 
 const ext: GltfFeature = {
     id: "KHR_materials_dielectric",
@@ -64,6 +65,13 @@ const ext: GltfFeature = {
 
         const out: Partial<PbrMaterialProps> = {};
         const subsurface: NonNullable<PbrMaterialProps["subsurface"]> = {};
+        // Dielectric-reflectance fields are collected here and applied once at the end via
+        // setPbrMetallicReflectance, which writes them onto `out` AND registers the
+        // reflectance ext (fragment statically imported by the setter). `hasRefl` mirrors
+        // the old `_hasReflExt` flag: it forces registration for factor-only cases (no
+        // texture) such as a non-default IOR.
+        const reflOpts: MetallicReflectanceOptions = {};
+        let hasRefl = false;
 
         if (eIor) {
             const ior: number = typeof eIor.ior === "number" ? eIor.ior : 1.5;
@@ -73,9 +81,9 @@ const ext: GltfFeature = {
             // reflectance fragment for every KHR_materials_ior scene with
             // default IOR. Only write when the factor meaningfully differs.
             if (ior !== 1.5) {
-                out.metallicF0Factor = ((ior - 1) / (ior + 1)) ** 2 / 0.04;
-                out.specularWeight = 1.0;
-                (out as { _hasReflExt?: boolean })._hasReflExt = true;
+                reflOpts.f0Factor = ((ior - 1) / (ior + 1)) ** 2 / 0.04;
+                reflOpts.specularWeight = 1.0;
+                hasRefl = true;
             }
             subsurface.refraction = { indexOfRefraction: ior };
         }
@@ -85,26 +93,26 @@ const ext: GltfFeature = {
             // also specified, this overrides it (spec says specular wins).
             if (typeof eSp.specularFactor === "number") {
                 if (Math.abs(eSp.specularFactor - 1) > 1e-6) {
-                    out.metallicF0Factor = eSp.specularFactor;
-                    out.specularWeight = eSp.specularFactor;
-                    (out as { _hasReflExt?: boolean })._hasReflExt = true;
+                    reflOpts.f0Factor = eSp.specularFactor;
+                    reflOpts.specularWeight = eSp.specularFactor;
+                    hasRefl = true;
                 } else {
-                    delete out.metallicF0Factor;
-                    delete out.specularWeight;
+                    delete reflOpts.f0Factor;
+                    delete reflOpts.specularWeight;
                 }
             }
             if (Array.isArray(eSp.specularColorFactor) && eSp.specularColorFactor.length === 3) {
                 if (eSp.specularColorFactor[0] !== 1 || eSp.specularColorFactor[1] !== 1 || eSp.specularColorFactor[2] !== 1) {
-                    out.metallicReflectanceColor = [eSp.specularColorFactor[0], eSp.specularColorFactor[1], eSp.specularColorFactor[2]];
-                    (out as { _hasReflExt?: boolean })._hasReflExt = true;
+                    reflOpts.color = [eSp.specularColorFactor[0], eSp.specularColorFactor[1], eSp.specularColorFactor[2]];
+                    hasRefl = true;
                 }
             }
             if (specTex) {
-                out.metallicReflectanceTexture = specTex;
-                out.useOnlyMetallicFromMetallicReflectanceTexture = true;
+                reflOpts.texture = specTex;
+                reflOpts.useOnlyMetallicFromTexture = true;
             }
             if (specColTex) {
-                out.reflectanceTexture = specColTex;
+                reflOpts.reflectanceTexture = specColTex;
             }
         }
 
@@ -160,6 +168,12 @@ const ext: GltfFeature = {
 
         if (Object.keys(subsurface).length > 0) {
             out.subsurface = subsurface;
+        }
+        // Apply the reflectance ext when any dielectric-reflectance field was populated.
+        // setPbrMetallicReflectance writes the fields onto `out` and registers the ext.
+        // Refraction/volume subsurface data does NOT register the reflectance ext.
+        if (reflOpts.texture || reflOpts.reflectanceTexture || hasRefl) {
+            setPbrMetallicReflectance(out, reflOpts);
         }
         return Object.keys(out).length > 0 ? out : null;
     },

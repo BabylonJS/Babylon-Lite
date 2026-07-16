@@ -213,6 +213,19 @@ export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
 export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
+export { setShadowOnly } from "./material/pbr/set-shadow-only.js";
+export type { ShadowOnlyOptions } from "./material/pbr/set-shadow-only.js";
+export { setPbrClearCoat } from "./material/pbr/set-clearcoat.js";
+export { setPbrSheen } from "./material/pbr/set-sheen.js";
+export { setPbrIridescence } from "./material/pbr/set-iridescence.js";
+export { setPbrUnlit } from "./material/pbr/set-unlit.js";
+export { setPbrSubsurface } from "./material/pbr/set-subsurface.js";
+export { setPbrMetallicReflectance } from "./material/pbr/set-metallic-reflectance.js";
+export { setPbrAnisotropy } from "./material/pbr/set-anisotropy.js";
+export { setPbrGammaAlbedo } from "./material/pbr/set-gamma-albedo.js";
+export { setPbrSkybox } from "./material/pbr/set-skybox.js";
+export { setPbrAlphaCutoff } from "./material/pbr/set-alpha-cutoff.js";
+export type { MetallicReflectanceOptions } from "./material/pbr/set-metallic-reflectance.js";
 export {
     createShaderMaterial,
     setShaderUniform,

@@ -1,6 +1,6 @@
 {
   "rawKB": 92.3,
-  "gzipKB": 39.1,
+  "gzipKB": 39,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene5-create-morph-targets-CxWjyKmd.js",
@@ -13,11 +13,11 @@
     "scene5-gltf-feature-registry-C96LOoV9.js",
     "scene5-gltf-feature-skeleton-BYbOC8HD.js",
     "scene5-gltf-json-asset-DXOveXY1.js",
-    "scene5-morph-fragment-BCFcPMrl.js",
-    "scene5-pbr-renderable-BmLRzx9U.js",
+    "scene5-morph-fragment-QwWvEHtJ.js",
+    "scene5-pbr-renderable-BJZiVT_9.js",
     "scene5-pbr-template-ext-CiHpOV5G.js",
     "scene5-singlelight-hemispheric-wgsl-Cu_KX2Nl.js",
-    "scene5-skeleton-fragment-_YKE2Wvs.js",
+    "scene5-skeleton-fragment-DTIlD_zy.js",
     "scene5.js"
   ]
 }

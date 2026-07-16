@@ -574,15 +574,24 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
         }
         cached = (async () => {
             const extLayers = matExts.length ? await ctx._runMatExts!(mat, matExts, extCtx) : undefined;
+            let props: PbrMaterialProps;
             if (_needsPbrExt) {
                 const extMod = await _ensurePbrExt();
                 const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, samplerFor);
-                return extMod.assemblePbrPropsExt(mat, tex, extLayers);
+                props = extMod.assemblePbrPropsExt(mat, tex, extLayers);
+            } else {
+                const tex = buildSampledPbrTextures
+                    ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
+                    : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
+                props = assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
             }
-            const tex = buildSampledPbrTextures
-                ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
-                : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
-            return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
+            // Alpha-test (MASK) is opt-in: the fragment + feature-bit detection bundle only via
+            // this conditional import, so glTF assets with no MASK materials pay nothing.
+            if (mat._alphaMode === "MASK") {
+                const { setPbrAlphaCutoff } = await import("../material/pbr/set-alpha-cutoff.js");
+                setPbrAlphaCutoff(props, mat._alphaCutoff);
+            }
+            return props;
         })();
         builtMaterialCache.set(mat, cached);
         return cached;

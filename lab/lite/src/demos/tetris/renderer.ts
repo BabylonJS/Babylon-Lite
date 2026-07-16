@@ -32,7 +32,7 @@ import {
     createDirectionalLight,
     createHemisphericLight,
     createMeshFromData,
-    createPbrMaterial,
+    createPbrMaterial, setPbrSkybox,
     createSolidTexture2D,
     loadTexture2D,
     onBeforeRender,
@@ -261,8 +261,8 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
         environmentIntensity: 1.0,
         directIntensity: 0,
         doubleSided: true,
-        skyboxMode: true,
     });
+    setPbrSkybox(skybox.material);
     const syncSkybox = (): void => {
         const w = camera.worldMatrix;
         skybox.position.set(w[12]!, w[13]!, w[14]!);

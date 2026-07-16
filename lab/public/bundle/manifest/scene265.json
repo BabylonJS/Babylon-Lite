@@ -1,5 +1,5 @@
 {
-  "rawKB": 80.2,
+  "rawKB": 80.1,
   "gzipKB": 33.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene265-ibl-cubemap-upload-aeOmgodq.js",
     "scene265-ibl-env-assembly-c2UHDMKi.js",
     "scene265-ibl-fragment-CeRrvT96.js",
-    "scene265-pbr-renderable-BB5iijTs.js",
+    "scene265-pbr-renderable-O-8TN1EV.js",
     "scene265.js"
   ]
 }

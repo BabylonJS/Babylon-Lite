@@ -33,6 +33,9 @@ import {
     PBR2_NO_COLOR_OUTPUT,
 } from "./pbr-flag-bits.js";
 import { _getPbrExts, type _PbrFragCtx } from "./pbr-flags.js";
+import type { AnisoTemplateHooks } from "./fragments/anisotropy-fragment.js";
+import type { GammaTemplateHooks } from "./fragments/gamma-fragment.js";
+import type { SkyboxTemplateHooks } from "./fragments/skybox-fragment.js";
 import {
     MSH_HAS_TANGENTS,
     MSH_HAS_MORPH_TARGETS,
@@ -56,12 +59,9 @@ interface PbrComposerDeps {
     readonly _fogHelper: string;
     readonly _fogBlock: string;
     readonly _createPbrTemplateExt: typeof import("./pbr-template-ext.js").createPbrTemplateExt | null;
-    readonly _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null;
-    readonly _iblSkyboxCalc: string;
     /** Flat-normal WGSL (face normal from derivatives), dynamically loaded by pbr-renderable only
      *  when a no-NORMAL mesh is present; "" otherwise so normal-having scenes bundle zero bytes. */
     readonly _flatNormalWgsl: string;
-    readonly _gammaTemplate: typeof import("./pbr-template-gamma.js") | null;
     readonly _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null;
     readonly _shadowLights: readonly { readonly lightIndex: number; readonly shadowType: import("./fragments/pbr-shadow-fragment.js").PbrShadowLightSlot["shadowType"] }[];
     readonly _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null;
@@ -94,10 +94,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _fogHelper,
         _fogBlock,
         _createPbrTemplateExt,
-        _anisoExt,
-        _iblSkyboxCalc,
         _flatNormalWgsl,
-        _gammaTemplate,
         _createPbrShadowFragment,
         _shadowLights,
         _createThinInstanceFragment,
@@ -132,6 +129,9 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const _hasMorph = hasMesh(MSH_HAS_MORPH_TARGETS);
         const hasShadow = hasMesh(MSH_RECEIVE_SHADOWS);
         const _hasAnisotropy = has(PBR_HAS_ANISOTROPY);
+        const _anisoHooks = _hasAnisotropy ? (_getPbrExts().get("anisotropy") as (AnisoTemplateHooks | undefined)) : undefined;
+        const _gammaHooks = has(PBR_HAS_GAMMA_ALBEDO) ? (_getPbrExts().get("gamma-albedo") as (GammaTemplateHooks | undefined)) : undefined;
+        const _skyboxHooks = has(PBR_HAS_SKYBOX) ? (_getPbrExts().get("skybox") as (SkyboxTemplateHooks | undefined)) : undefined;
         const _hasEmissiveColor = has(PBR_HAS_EMISSIVE_COLOR);
         const _hasEmissiveTexture = has(PBR_HAS_EMISSIVE);
         const hasTI = hasMesh(MSH_HAS_THIN_INSTANCES);
@@ -183,10 +183,10 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _hasReflectanceExt,
             _hasIbl,
             _hasAnisotropy,
-            _anisoBrdfFunctions: _hasAnisotropy && _anisoExt ? _anisoExt.ANISO_BRDF_FUNCTIONS : "",
-            _anisoTBBlock: _hasAnisotropy && _anisoExt ? _anisoExt.makeAnisotropyTBBlock(hasNormal, (features2 & _anisoExt.PBR2_HAS_ANISO_TEX) !== 0) : "",
+            _anisoBrdfFunctions: _hasAnisotropy && _anisoHooks ? _anisoHooks._anisoBrdf : "",
+            _anisoTBBlock: _hasAnisotropy && _anisoHooks ? _anisoHooks._anisoTB(hasNormal, (features2 & _anisoHooks._anisoTexBit) !== 0) : "",
             _ext,
-            _gammaTemplate,
+            _gammaBaseColor: _gammaHooks?._gammaBaseColor ?? null,
             _noColorOutput: (features2 & PBR2_NO_COLOR_OUTPUT) !== 0,
             _esmShadowOutput: (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0,
             _esmShadowDepthCode,
@@ -202,8 +202,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _hasIbl: _hasIbl,
             _hasAnyNormal,
             _hasSpecularAA,
-            _anisoBentNormalCode: _hasAnisotropy && _anisoExt ? _anisoExt.ANISO_BENT_NORMAL : "",
-            _iblSkyboxCalc: has(PBR_HAS_SKYBOX) ? _iblSkyboxCalc : "",
+            _anisoBentNormalCode: _hasAnisotropy && _anisoHooks ? _anisoHooks._anisoBentNormal : "",
+            _iblSkyboxCalc: _skyboxHooks?._skyboxCalc ?? "",
         };
         // Registration order defines iteration order; callers register in composer-matching order.
         let pc: ((composed: ComposedShader) => ComposedShader) | undefined;

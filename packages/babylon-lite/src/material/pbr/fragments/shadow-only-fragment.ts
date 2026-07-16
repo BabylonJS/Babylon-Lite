@@ -6,9 +6,11 @@
  * transparent); shadowed fragments output alpha proportional to the shadow
  * strength, in a caller-chosen `shadowOnlyColor` (defaults to black).
  *
- * Zero bytes in bundles for scenes that don't use shadow-only materials — the
- * module is dynamically imported by pbr-renderable only when at least one mesh
- * in the scene has `mat.shadowOnly === true`.
+ * Zero bytes in bundles for scenes that don't use shadow-only materials — this
+ * module is statically imported only by `set-shadow-only.ts` (the `setShadowOnly`
+ * opt-in setter), so it is bundled only when an app imports `setShadowOnly`. The
+ * renderable's always-loaded chunk carries no scan for `shadowOnly` and no
+ * dynamic-import specifier for this file.
  *
  * Implementation notes
  * --------------------
