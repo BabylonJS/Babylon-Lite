@@ -10,7 +10,7 @@
  * indices remain a live DATA comparison: the BJS reference page is launched each run and every ray's
  * `hasHit` + hit instance index is asserted IDENTICAL to Lite's.
  */
-import { test, expect } from "../parity-fixtures";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import type { Browser, Page } from "@playwright/test";
 import * as path from "path";
 import { captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
@@ -34,16 +34,14 @@ async function readRayHits(page: Page): Promise<string | undefined> {
 
 /** Launch the BJS reference page live to read the raycast-hit DATA at the capture frame. */
 async function captureBjsData(browser: Browser): Promise<string | undefined> {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const bjsPage = await context.newPage();
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
 
     await bjsPage.goto(`/babylon-ref-scene103.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 103 BJS reference" });
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: `Scene 103 BJS reference at frame ${CAPTURE_FRAME}`, flag: "captureReady", pollMs: 100 });
     const rayHits = await readRayHits(bjsPage);
 
-    await bjsPage.close();
-    await context.close();
+    await release();
     return rayHits;
 }
 

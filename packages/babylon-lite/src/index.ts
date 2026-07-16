@@ -49,6 +49,7 @@ export { setSubtreeVisible } from "./scene/visibility.js";
 // RenderTask, and user tasks can render offscreen RTTs, overlays, etc.
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
+export { buildFrameGraphTask } from "./frame-graph/frame-graph.js";
 export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter } from "./frame-graph/frame-graph-actions.js";
 export { createFrameGraphContext, registerFrameGraphContext, unregisterFrameGraphContext, disposeFrameGraphContext } from "./frame-graph/frame-graph-context.js";
 export type { FrameGraphContext, FrameGraphContextOptions } from "./frame-graph/frame-graph-context.js";
@@ -167,6 +168,8 @@ export {
     createTube,
     createExtrudeShape,
     createMeshFromData,
+    updateMeshGeometry,
+    updateMeshGeometryCapacity,
     updateMeshPositions,
     updateMeshNormals,
     updateMeshColors,
@@ -176,6 +179,7 @@ export {
     resizeMeshGeometry,
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
+export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
 export { createSphereData } from "./mesh/create-sphere.js";
@@ -190,6 +194,10 @@ export { createCsgFromMesh, csgSubtract, csgIntersect, csgUnion, createMeshFromC
 export type { CsgSolid } from "./mesh/csg.js";
 export { initializeCsg2Async, isCsg2Ready, createCsg2FromMesh, csg2Subtract, csg2Intersect, csg2Add, createMeshFromCsg2, createMeshesFromCsg2, disposeCsg2 } from "./mesh/csg2.js";
 export type { Csg2Solid } from "./mesh/csg2.js";
+
+// ─── Resources ───────────────────────────────────────────────────────
+export { createStorageBuffer, updateStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
+export type { StorageBuffer } from "./resource/storage-buffer.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
@@ -214,6 +222,7 @@ export {
     setShaderVector3,
     setShaderMatrix,
 } from "./material/shader/shader-material.js";
+export { enableShaderUniformRangeUpdates } from "./material/shader/shader-uniform-range.js";
 export { createShaderNoColorMaterialView } from "./material/shader/no-color-view.js";
 export { createShaderNormalMaterialView } from "./material/shader/normal-view.js";
 export type { ShaderNormalViewConfig } from "./material/shader/normal-view.js";
@@ -225,10 +234,13 @@ export { loadNodeBlockEmitterWithGeometry } from "./material/node/node-geometry-
 export { createNodeNoColorMaterialView } from "./material/node/no-color-view.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
 export { createMaterialView } from "./material/material-view.js";
+export { getMaterialFamily } from "./material/material-family.js";
+export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
 export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
+export { rebuildScenePbrPipelines } from "./scene/scene-rebuild.js";
 export type { ToneMapping } from "./material/pbr/tone-mapping.js";
 export { StandardToneMapping } from "./material/pbr/tone-mapping.js";
 export { AcesToneMapping } from "./material/pbr/pbr-aces-wgsl.js";
@@ -279,8 +291,7 @@ export type { LinearDepthMaterialOptions } from "./render/linear-depth-material.
 export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-shadow-generator.js";
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
-export { createCsmDirectionalShadowGenerator } from "./shadow/csm-directional-shadow-generator.js";
-export { onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
+export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
 export { setShadowTaskCasterMeshes } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
@@ -315,8 +326,8 @@ export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./ani
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
-export { bakeVat, attachVat } from "./vat/vat-baker.js";
-export type { VatBakeResult, VatBakeOptions, VatClip, VatHandle } from "./vat/vat-baker.js";
+export { bakeVat, bakeVatMany, attachVat } from "./vat/vat-baker.js";
+export type { VatBakeResult, VatBakeOptions, VatBakeTarget, VatClip, VatHandle } from "./vat/vat-baker.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
 export { normalizeVec3 } from "./math/normalize-vec3.js";
@@ -377,6 +388,8 @@ export {
     setThinInstanceMatrix,
     setThinInstances,
     setThinInstanceCount,
+    setThinInstanceDrawCount,
+    enableThinInstanceDynamicDrawCount,
     flushThinInstances,
     setThinInstanceColors,
     setThinInstanceColor,
@@ -514,7 +527,7 @@ export type { RenderTargetSignature } from "./engine/render-target.js";
 
 // ─── Sprites (2D) ────────────────────────────────────────────────────
 export type { SpriteAtlas, SpriteFrame, SpriteSampling, GridAtlasOptions, LoadAtlasOptions } from "./sprite/shared/sprite-atlas.js";
-export { createGridSpriteAtlas, loadSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
+export { createGridSpriteAtlas, loadSpriteAtlas, disposeSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
 export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/shared/sprite-atlas-packer.js";
 export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";

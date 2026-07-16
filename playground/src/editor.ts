@@ -2,6 +2,7 @@ import * as monaco from "monaco-editor";
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import type { BuildDiagnostic } from "./transpile";
+import { withBase } from "./base";
 // The WebGPU type definitions are bundled as raw text so Monaco can resolve the
 // ~90 `GPU*` types referenced by the engine's public surface (otherwise the engine
 // d.ts itself reports "cannot find name" errors). They declare global interfaces.
@@ -50,7 +51,7 @@ export async function registerEngineTypes(): Promise<void> {
     }
     engineTypesLoaded = true;
     try {
-        const response = await fetch("/engine/dev/index.d.ts");
+        const response = await fetch(withBase("engine/dev/index.d.ts"));
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }

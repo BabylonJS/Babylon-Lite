@@ -16,6 +16,9 @@ import type { ShaderAttributeName, ShaderMaterial, ShaderUniformType } from "./s
 import type { ShaderPipelineBindings } from "./shader-pipeline.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "./shader-pipeline.js";
+import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
+
+type UniformBatchFactory = (signature: import("../../engine/render-target.js").RenderTargetSignature) => UniformCopyBatch;
 
 /** @internal Exported as a type only (zero runtime bytes) for the dynamically-imported
  *  thin-instance builder. */
@@ -63,17 +66,18 @@ interface ShaderMaterialRenderState extends ShaderMaterial {
     _shaderCustomUbo?: GPUBuffer | null;
     _shaderCustomSpec?: UboSpec | null;
     _shaderCustomData?: ArrayBuffer | null;
+    _shaderCustomBytes?: Uint8Array<ArrayBuffer> | null;
     _shaderCustomVersion?: number;
 }
 
 /** @internal */
 export type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
-export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh[]): MeshGroupBuildResult {
+export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh[], getUniformBatch?: UniformBatchFactory): MeshGroupBuildResult {
     const renderables: Renderable[] = [];
 
     const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable =>
-        buildSingleShaderRenderable(s, mesh, (materialOverride ?? mesh.material) as ShaderMaterial, materialOverride != null);
+        buildSingleShaderRenderable(s, mesh, (materialOverride ?? mesh.material) as ShaderMaterial, materialOverride != null, getUniformBatch);
 
     const byMaterial = new Map<ShaderMaterial, Mesh[]>();
     for (const mesh of meshes) {
@@ -87,7 +91,7 @@ export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh
     }
 
     for (const [material, matMeshes] of byMaterial) {
-        const built = buildMaterialRenderables(scene, material, matMeshes);
+        const built = buildMaterialRenderables(scene, material, matMeshes, false, getUniformBatch);
         renderables.push(...built);
     }
 
@@ -101,30 +105,42 @@ export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh
  *  module exports — so those helpers keep their mangled names in this chunk (an
  *  export would de-mangle them, growing every ShaderMaterial scene's bundle). */
 export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Promise<MeshGroupBuildResult> {
+    let getUniformBatch: UniformBatchFactory | undefined;
+    if (meshes.length > 1) {
+        const { getUniformCopyBatch } = await import("../../render/uniform-copy-batch.js");
+        getUniformBatch = getUniformCopyBatch;
+    }
+    const firstMaterial = meshes[0]?.material;
+    if (firstMaterial && meshes.some((mesh) => mesh.material !== firstMaterial)) {
+        const { enableShaderPipelineCache } = await import("./shader-pipeline-cache.js");
+        enableShaderPipelineCache(scene.surface.engine, meshes);
+    }
+    const buildPlain = (s: SceneContext, plainMeshes: Mesh[]): MeshGroupBuildResult => buildShaderMaterialRenderables(s, plainMeshes, getUniformBatch);
     if (!meshes.some((m) => !!m.thinInstances)) {
-        return buildShaderMaterialRenderables(scene, meshes);
+        return buildPlain(scene, meshes);
     }
     const mod = await import("./shader-thin-instance.js");
     const cull = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled) ? await import("../../mesh/thin-instance-cull-binding.js") : undefined;
     return mod.buildShaderRenderablesWithInstancing(
         scene,
         meshes,
-        buildShaderMaterialRenderables,
+        buildPlain,
         createPacket,
         updatePacket,
         updateCustomUbo,
         getAttrBuffer,
         getOrCreateShaderPipeline,
         getOrCreateShaderPipelineBindings,
+        getUniformBatch,
         cull
     );
 }
 
-function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean): Renderable {
-    return buildMaterialRenderables(scene, material, [mesh], isOverride)[0]!;
+function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean, getUniformBatch?: UniformBatchFactory): Renderable {
+    return buildMaterialRenderables(scene, material, [mesh], isOverride, getUniformBatch)[0]!;
 }
 
-function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial, meshes: readonly Mesh[], isOverride = false): Renderable[] {
+function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial, meshes: readonly Mesh[], isOverride = false, getUniformBatch?: UniformBatchFactory): Renderable[] {
     const engine = scene.surface.engine;
     const bindings = getOrCreateShaderPipelineBindings(engine, material);
     ensureCustomUbo(engine, material, bindings.customSpec);
@@ -134,9 +150,9 @@ function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial,
     const packets = meshes.map((mesh) => createPacket(scene, material, bindings.systemSpec, mesh, isOverride));
     const isTransparent = material.needAlphaBlending;
     if (isTransparent) {
-        return packets.map((packet) => createTransparentRenderable(scene, material, packet, isOverride));
+        return packets.map((packet) => createTransparentRenderable(scene, material, packet, isOverride, getUniformBatch));
     }
-    return [createOpaqueRenderable(scene, material, packets, isOverride)];
+    return [createOpaqueRenderable(scene, material, packets, isOverride, getUniformBatch)];
 }
 
 function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, aux = false): ShaderPacket {
@@ -161,7 +177,13 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
     return packet;
 }
 
-function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, packets: readonly ShaderPacket[], isOverride: boolean): Renderable {
+function createOpaqueRenderable(
+    scene: SceneContext,
+    material: ShaderMaterial,
+    packets: readonly ShaderPacket[],
+    isOverride: boolean,
+    getUniformBatch?: UniformBatchFactory
+): Renderable {
     // Only merged renderables (>1 mesh) can outlive an individual packet's mesh,
     // so give those packets a back-reference enabling disposal-time compaction.
     if (packets.length > 1) {
@@ -169,8 +191,8 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
             packet._owner = packets as ShaderPacket[];
         }
     }
-    const update = (context: DrawUpdateContext): void => {
-        updateCustomUbo(scene.surface.engine, material);
+    const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
+        updateCustomUbo(scene.surface.engine, material, uniformBatch);
         for (const packet of packets) {
             if (packet._disposed) {
                 continue;
@@ -178,7 +200,7 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
             if (!isOverride && packet.mesh.material !== material) {
                 continue;
             }
-            updatePacket(scene, material, packet, context);
+            updatePacket(scene, material, packet, context, uniformBatch);
         }
     };
     const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
@@ -201,24 +223,31 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
         mesh: packets.length === 1 ? packets[0]!.mesh : undefined,
         bind(eng, sig) {
             const bindings = getOrCreateShaderPipelineBindings(eng, material);
-            return { renderable: r, pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings), update, draw: (pass) => draw(pass, eng) };
+            const uniformBatch = getUniformBatch?.(sig);
+            return {
+                renderable: r,
+                pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings),
+                _updateBatches: uniformBatch ? [uniformBatch] : undefined,
+                update: (context) => update(context, uniformBatch),
+                draw: (pass) => draw(pass, eng),
+            };
         },
     };
     return r;
 }
 
-function createTransparentRenderable(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, isOverride: boolean): Renderable {
+function createTransparentRenderable(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, isOverride: boolean, getUniformBatch?: UniformBatchFactory): Renderable {
     const wm = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
     const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
-    const update = (context: DrawUpdateContext): void => {
+    const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
         if (packet._disposed) {
             return;
         }
         if (!isOverride && packet.mesh.material !== material) {
             return;
         }
-        updateCustomUbo(scene.surface.engine, material);
-        updatePacket(scene, material, packet, context);
+        updateCustomUbo(scene.surface.engine, material, uniformBatch);
+        updatePacket(scene, material, packet, context, uniformBatch);
         const m = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
         sortCenter[0] = m[12]!;
         sortCenter[1] = m[13]!;
@@ -242,13 +271,20 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
         _worldCenter: sortCenter,
         bind(eng, sig) {
             const bindings = getOrCreateShaderPipelineBindings(eng, material);
-            return { renderable: r, pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings), update, draw: (pass) => draw(pass, eng) };
+            const uniformBatch = getUniformBatch?.(sig);
+            return {
+                renderable: r,
+                pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings),
+                _updateBatches: uniformBatch ? [uniformBatch] : undefined,
+                update: (context) => update(context, uniformBatch),
+                draw: (pass) => draw(pass, eng),
+            };
         },
     };
     return r;
 }
 
-function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext): void {
+function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void {
     const engine = scene.surface.engine;
     const state = material as ShaderMaterialRenderState;
     // Skip the system-UBO recompute + writeBuffer when EVERY input is unchanged since this packet's last
@@ -278,7 +314,11 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         packet._lastAlphaCutoff !== alphaCutoff
     ) {
         writeSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
-        engine._device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);
+        if (uniformBatch) {
+            uniformBatch.queue(packet.systemUBO, packet.systemData);
+        } else {
+            engine._device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);
+        }
         packet._lastCamera = camera;
         packet._lastCameraVersion = cameraVersion;
         packet._lastMeshWmVersion = meshWmVersion;
@@ -321,6 +361,7 @@ function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, custom
     if (!customSpec) {
         state._shaderCustomUbo = null;
         state._shaderCustomData = null;
+        state._shaderCustomBytes = null;
         state._shaderCustomVersion = material._uniformVersion;
         return;
     }
@@ -330,11 +371,12 @@ function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, custom
     }
     state._shaderCustomUbo = createEmptyUniformBuffer(engine, customSpec._totalBytes, "shader-custom-ubo");
     state._shaderCustomData = new ArrayBuffer(customSpec._totalBytes);
+    state._shaderCustomBytes = new U8(state._shaderCustomData);
     state._shaderCustomVersion = -1;
     updateCustomUbo(engine, material);
 }
 
-function updateCustomUbo(engine: EngineContext, material: ShaderMaterial): void {
+function updateCustomUbo(engine: EngineContext, material: ShaderMaterial, uniformBatch?: UniformCopyBatch): void {
     const state = material as ShaderMaterialRenderState;
     const customSpec = state._shaderCustomSpec;
     const customUbo = state._shaderCustomUbo;
@@ -342,7 +384,7 @@ function updateCustomUbo(engine: EngineContext, material: ShaderMaterial): void 
     if (!customSpec || !customUbo || !customData || state._shaderCustomVersion === material._uniformVersion) {
         return;
     }
-    const bytes = new U8(customData);
+    const bytes = state._shaderCustomBytes ?? (state._shaderCustomBytes = new U8(customData));
     bytes.fill(0);
     for (const [name, slot] of material._uniformValues) {
         if (_isShaderSystemUniform(name)) {
@@ -353,7 +395,11 @@ function updateCustomUbo(engine: EngineContext, material: ShaderMaterial): void 
             writeTypedValue(customData, offset, slot.decl.type, slot.value);
         }
     }
-    engine._device.queue.writeBuffer(customUbo, 0, bytes);
+    if (uniformBatch) {
+        uniformBatch.queue(customUbo, bytes);
+    } else {
+        engine._device.queue.writeBuffer(customUbo, 0, bytes);
+    }
     state._shaderCustomVersion = material._uniformVersion;
 }
 
@@ -387,9 +433,10 @@ function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, 
     }
     for (const storage of material.storageBufferDecls) {
         const slot = material._storageBufferSlots.get(storage.name);
-        const buffer = slot?.current;
-        if (!buffer) {
-            throw new Error(`ShaderMaterial: storage buffer "${storage.name}" has no GPUBuffer. Call setShaderStorageBuffer() before rendering.`);
+        const storageBuffer = slot?.current;
+        const buffer = storageBuffer?._buffer;
+        if (!buffer || !engine._storageBuffers?.has(storageBuffer)) {
+            throw new Error(`ShaderMaterial storage "${storage.name}" is invalid.`);
         }
         entries.push({ binding: nextBinding++, resource: { buffer } });
     }
@@ -410,7 +457,10 @@ function collectShaderStorageBuffers(material: ShaderMaterial): GPUBuffer[] {
     const buffers: GPUBuffer[] = [];
     for (const slot of material._storageBufferSlots.values()) {
         if (slot.current) {
-            buffers.push(slot.current);
+            const buffer = slot.current._buffer;
+            if (buffer) {
+                buffers.push(buffer);
+            }
         }
     }
     return buffers;

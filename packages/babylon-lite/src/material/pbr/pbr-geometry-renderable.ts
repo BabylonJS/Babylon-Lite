@@ -186,8 +186,10 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const hasTI = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
     const hasTIColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
     const syncThinInstanceBuffers = ctx._syncThinInstanceBuffers;
+    const syncThinInstanceForDraw = ctx._syncThinInstanceForDraw;
     const isAlphaBlend = res._alphaBlend;
     const sortCenter = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number];
+    let thinDrawArgs: GPUBuffer | null = null;
 
     let _lastWorldVersion = mesh.worldMatrixVersion;
     let _lastLightsCount = scene.lights.length;
@@ -210,6 +212,10 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
             matScratch.fill(0);
             _writePbrMaterialData(matScratch, source, materialSpec);
             device.queue.writeBuffer(materialUBO, 0, matScratch.buffer, 0, matScratch.byteLength);
+        }
+        const ti = hasTI ? mesh.thinInstances : null;
+        if (ti && syncThinInstanceForDraw) {
+            thinDrawArgs = syncThinInstanceForDraw(engine, ti, hasTIColor, mesh._gpu.indexCount);
         }
     };
     const _invalidate = (): void => {
@@ -259,10 +265,10 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
             slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasTIColor);
         }
         pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-        if (ti && ti.count > 0) {
-            pass.drawIndexed(gpu.indexCount, ti.count);
+        if (ti && thinDrawArgs) {
+            pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(gpu.indexCount);
+            pass.drawIndexed(gpu.indexCount, ti?.count);
         }
         return 1;
     };
@@ -313,6 +319,7 @@ function _ensureViewResources(
     const source = view.source as PbrMaterialProps;
     const vbLayout = (source as unknown as { _vbLayout?: import("../../mesh/mesh.js").MeshVbLayout })._vbLayout;
     const vbKey = "";
+    const uv2Mask = (source as { _uv2Mask?: number })._uv2Mask ?? 0;
 
     // Compose with the active-attachment scope set so the registered ext
     // sees the right list when contributing the geometry-params fragment.
@@ -331,7 +338,8 @@ function _ensureViewResources(
             vbLayout,
             vbKey,
             view._geometryAttachments,
-            view._emitColor
+            view._emitColor,
+            uv2Mask
         );
     } finally {
         _setActivePbrGeometryAttachments(prev);

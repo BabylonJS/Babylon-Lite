@@ -110,6 +110,35 @@ export function resetSpritePipelineCache(cache: SpritePipelineCache): void {
     cache._devices = new WeakMap();
 }
 
+// Process-wide sprite pipeline cache shared by every `SpriteRenderer` (the HUD /
+// pure-2D path). Compiled `GPUShaderModule`s + `GPURenderPipeline`s are keyed by
+// `GPUDevice` inside the cache, so instances on the same device dedupe pipelines,
+// and destroy→recreate of a renderer for the same canvas pays no recompile.
+// Lazy-init on first acquire (per GUIDANCE §4 — module-level `null` initializer +
+// helper, never a top-level `new WeakMap()`), refcounted so the cache is released
+// exactly when the last `SpriteRenderer` is disposed. The billboard/depth
+// (`buildSpriteRenderable`) path keeps its own shared cache; the two are disjoint
+// by construction (different pipeline keys) and could be unified in a follow-up.
+let _sharedSpriteRendererPipelineCache: SpritePipelineCache | null = null;
+let _sharedSpriteRendererPipelineCacheRefs = 0;
+
+/** @internal Acquire (refcount++) the process-wide SpriteRenderer pipeline cache. */
+export function acquireSharedSpriteRendererPipelineCache(): SpritePipelineCache {
+    _sharedSpriteRendererPipelineCache ??= createSpritePipelineCache();
+    _sharedSpriteRendererPipelineCacheRefs++;
+    return _sharedSpriteRendererPipelineCache;
+}
+
+/** @internal Release (refcount--) the process-wide SpriteRenderer pipeline cache.
+ *  Clears the cache (dropping cache-held pipeline/shader refs) when the last user
+ *  is disposed. Safe to over-call; refcount floors at 0. */
+export function releaseSharedSpriteRendererPipelineCache(): void {
+    if (_sharedSpriteRendererPipelineCacheRefs > 0 && --_sharedSpriteRendererPipelineCacheRefs === 0 && _sharedSpriteRendererPipelineCache) {
+        resetSpritePipelineCache(_sharedSpriteRendererPipelineCache);
+        _sharedSpriteRendererPipelineCache = null;
+    }
+}
+
 export function getSpritePipelineCacheSize(cache: SpritePipelineCache, device: GPUDevice): number {
     return cache._devices.get(device)?._pipelines.size ?? 0;
 }

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity/parity-fixtures";
 
 test.describe("GPU Billboard Picking", () => {
     test("pickBillboardSprite hits a clear billboard, misses a corner, and respects mesh occlusion", async ({ page }) => {

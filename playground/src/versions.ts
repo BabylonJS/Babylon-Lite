@@ -1,33 +1,31 @@
 // Engine version selection for the playground runtime.
 //
-// The runner resolves the bare `@babylonjs/lite` import to an engine bundle URL
-// chosen here: the self-hosted "nightly" bundle (built from workspace source and
-// served alongside the app) by default, or a specific published release loaded on
-// demand from a public ESM CDN. Switching versions only changes the import URL — no
-// redeploy is needed to target a released version. The CDN (esm.sh, with an automatic
-// jsDelivr fallback) is selected by `./cdn`.
+// Every deploy runs its own self-hosted engine bundle (built from the source that
+// deploy was cut from and served under its base): nightly at the root, the PR
+// build under `/pr/<N>/`, and the exact release under `/v/<ver>/`. The runner
+// always imports that self-hosted bundle, so the engine and the surrounding
+// playground UI are always a matched pair. The version selector therefore doesn't
+// hot-swap an engine URL — it navigates between these snapshots (see main.ts). The
+// list of switchable fixed releases is the `/v/versions.json` manifest, written by
+// the npm-publish pipeline as versioned snapshots are deployed.
+//
+// The CDN (esm.sh, with an automatic jsDelivr fallback, selected by `./cdn`) is
+// used only to pin a *downloaded* project's import map to a public release.
 
 import { getCdn } from "./cdn";
+import { withBase } from "./base";
 
 /** Sentinel value for the self-hosted, source-tracking engine build. */
 export const NIGHTLY = "nightly";
 
-/** URL of the self-hosted nightly engine bundle (served at the app root). */
-export const NIGHTLY_ENGINE_URL = "/engine/dev/index.js";
+/** URL of the self-hosted nightly engine bundle (served under the app's deploy base). */
+export const NIGHTLY_ENGINE_URL = withBase("engine/dev/index.js");
 
-const REGISTRY_URL = "https://registry.npmjs.org/@babylonjs/lite";
-
-/** How many recent published versions to offer in the selector. */
-const MAX_VERSIONS = 20;
-
-/** Resolve the engine bundle URL for a selected version (`"nightly"` or a semver). */
-export async function engineUrlForVersion(version: string): Promise<string> {
-    if (version === NIGHTLY) {
-        return NIGHTLY_ENGINE_URL;
-    }
-    const cdn = await getCdn();
-    return cdn.engineUrl(version);
-}
+/**
+ * Location of the deployed-versions manifest, always at the origin root so every
+ * snapshot (root nightly, `/pr/<N>/`, `/v/<ver>/`) reads the same shared list.
+ */
+const VERSIONS_MANIFEST_URL = "/v/versions.json";
 
 /**
  * The CDN specifier baked into a *downloaded* project's import map. The self-hosted
@@ -41,20 +39,23 @@ export async function downloadEngineUrl(version: string): Promise<string> {
 }
 
 /**
- * Fetch the list of published `@babylonjs/lite` versions, newest first, excluding
- * pre-releases. Returns an empty list if the registry can't be reached so the
- * selector can still offer nightly.
+ * Fetch the fixed `@babylonjs/lite` versions that have a deployed playground
+ * snapshot under `/v/<ver>/`, newest first. The manifest is written by the
+ * npm-publish pipeline after each versioned snapshot deploys, so the selector
+ * only ever offers versions the user can actually switch to. Returns an empty
+ * list when the manifest is missing or unreachable, so the selector still offers
+ * Nightly.
  */
-export async function fetchPublishedVersions(): Promise<string[]> {
+export async function fetchDeployedVersions(): Promise<string[]> {
     try {
-        const response = await fetch(REGISTRY_URL, { headers: { Accept: "application/vnd.npm.install-v1+json" } });
+        const response = await fetch(VERSIONS_MANIFEST_URL, { headers: { Accept: "application/json" } });
         if (!response.ok) {
             return [];
         }
-        const data = (await response.json()) as { versions?: Record<string, unknown> };
-        const versions = Object.keys(data.versions ?? {}).filter((version) => !version.includes("-"));
+        const data = (await response.json()) as unknown;
+        const versions = Array.isArray(data) ? data.filter((v): v is string => typeof v === "string" && !v.includes("-")) : [];
         versions.sort(compareSemver);
-        return versions.reverse().slice(0, MAX_VERSIONS);
+        return versions.reverse();
     } catch {
         return [];
     }
