@@ -136,9 +136,10 @@ export interface PickOptions {
      *
      *  `fn shouldDiscardPick(input: PickDiscardInput) -> bool`
      *
-     *  The input exposes only generic picker data: `worldPos`, `pickId`, `thinInstanceIndex`,
-     *  `hasThinInstance`, and `instanceExtras` (the original thin-instance matrix w lanes, zero for
-     *  non-instanced meshes). Storage entries are uploaded and bound by Lite for the current pick only. */
+     *  The input exposes only generic picker data: `worldPos`, `fragmentCoord` (framebuffer pixel
+     *  coordinates), `pickId`, `thinInstanceIndex`, `hasThinInstance`, and `instanceExtras` (the
+     *  original thin-instance matrix w lanes, zero for non-instanced meshes). Storage entries are
+     *  uploaded and bound by Lite for the current pick only. */
     discard?: PickDiscardRule;
     /** Dev-only diagnostics: logs the pick ray, pixel, pick id/depth and resolved mesh. */
     debugLabel?: string;

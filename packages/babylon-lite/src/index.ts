@@ -291,8 +291,7 @@ export type { LinearDepthMaterialOptions } from "./render/linear-depth-material.
 export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-shadow-generator.js";
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
-export { createCsmDirectionalShadowGenerator } from "./shadow/csm-directional-shadow-generator.js";
-export { onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
+export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
 export { setShadowTaskCasterMeshes } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
