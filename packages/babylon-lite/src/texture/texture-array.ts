@@ -12,6 +12,34 @@
  * The whole feature is a set of free functions with zero module-level side
  * effects, so an app that never touches texture arrays strips it entirely, and
  * an app that already holds an `ImageBitmap` never bundles the URL-fetch path.
+ *
+ * There is no built-in material that samples an array layer, so consuming a
+ * `Texture2DArray` means sampling it from your own WGSL: declare a sampler with
+ * `viewDimension: "2d-array"` on a {@link createShaderMaterial | ShaderMaterial}
+ * (which emits a `texture_2d_array<f32>` binding) and sample it with an explicit
+ * integer layer index. `StandardMaterial`/`PBRMaterial` slots are plain
+ * `texture_2d<f32>` and cannot read a layer.
+ *
+ * @example
+ * ```ts
+ * // Build a 3-layer array from images, then sample a chosen layer in a shader.
+ * const atlas = await createTexture2DArrayFromUrls(engine, ["grass.png", "rock.png", "sand.png"]);
+ *
+ * const material = createShaderMaterial({
+ *     attributes: ["position", "uv"],
+ *     // Custom uniforms are exposed in WGSL via the `shaderUniforms` struct.
+ *     uniforms: [{ name: "layer", type: "f32", defaultValue: 0 }],
+ *     // A sampler named "atlas" emits `var atlas: texture_2d_array<f32>` plus `var atlasSampler: sampler`.
+ *     samplers: [{ name: "atlas", viewDimension: "2d-array" }],
+ *     vertexSource,
+ *     fragmentSource: `
+ *         @fragment fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+ *             return textureSample(atlas, atlasSampler, uv, i32(shaderUniforms.layer));
+ *         }`,
+ * });
+ * setShaderTexture(material, "atlas", atlas);
+ * setShaderUniform(material, "layer", 1); // sample the "rock" layer
+ * ```
  */
 
 import { TU } from "../engine/gpu-flags.js";
@@ -26,7 +54,9 @@ import type { EngineContext } from "../engine/engine.js";
  *  `dimension:"2d-array"`, plus a `layers` count. Bind it to a shader sampler
  *  declared `viewDimension:"2d-array"` and sample it in WGSL as
  *  `texture_2d_array<f32>`. */
-export type Texture2DArray = Texture2D & { layers: number };
+export interface Texture2DArray extends Texture2D {
+    layers: number;
+}
 
 /** Sampler and format options for `createTexture2DArray()`. */
 export interface TextureArrayOptions {
