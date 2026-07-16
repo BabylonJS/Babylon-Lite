@@ -19,12 +19,14 @@ import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { DrawUpdateContext, Renderable } from "../render/renderable.js";
 import type { Mesh } from "./mesh.js";
+import type { ThinInstanceData } from "./thin-instance.js";
 import type { ThinInstanceDrawBuffers } from "./thin-instance-gpu.js";
 import {
     createTiCullState,
     destroyTiCullState,
     getComputeDispatchBatch,
     prepareTiCull,
+    publishTiLodBucket,
     type ComputeDispatchBatch,
     type ThinInstanceGpuCullState,
 } from "./thin-instance-gpu-culling.js";
@@ -76,7 +78,21 @@ export function tryBind(
     signature: RenderTargetSignature
 ): TiCullBinding | undefined {
     const ti = mesh.thinInstances;
-    if (excluded || !ti?._gpuCullingEnabled) {
+    if (!ti) {
+        return undefined;
+    }
+    if (ti._lodSource) {
+        if (excluded) {
+            throw new Error("Thin-instance LOD partners require an opaque, non-transmissive material");
+        }
+        // The partner consumes buffers published by another renderable's update, so its vertex/indirect
+        // handles must be resolved at draw time rather than captured in an opaque render bundle.
+        (renderable as { _direct?: boolean })._direct = true;
+        // This mesh is the LOD partner of a GPU-culled mesh: it consumes the far bucket that mesh's
+        // culling compacts for this pass and never draws its own instance count (see bindLodPartner).
+        return bindLodPartner(ti, signature, hasColor, baseUpdate);
+    }
+    if (excluded || !ti._gpuCullingEnabled) {
         return undefined;
     }
     const holder = renderable as CullCachingRenderable;
@@ -101,9 +117,13 @@ export function tryBind(
         _updateBatch: updateBatch,
         update(context: DrawUpdateContext): void {
             baseUpdate?.(context);
-            const res = prepareTiCull(engine, state, mesh, mesh._gpu, ti, hasColor, context, updateBatch);
+            const partner = ti._lodPartner ?? null;
+            const res = prepareTiCull(engine, state, mesh, mesh._gpu, ti, hasColor, context, updateBatch, partner);
             binding.cullDrawBufs = res?.drawBuffers ?? null;
             binding._args = res?.argsBuffer ?? null;
+            if (ti._lodBuckets) {
+                publishTiLodBucket(ti, signature, res);
+            }
         },
         draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, indexCount: number, instanceCount: number): void {
             if (binding._args) {
@@ -112,6 +132,48 @@ export function tryBind(
                 pass.drawIndexedIndirect(ti._drawArgsBuffer, 0);
             } else {
                 pass.drawIndexed(indexCount, instanceCount);
+            }
+        },
+    };
+    return binding;
+}
+
+/** @internal Binding for the LOD partner of a GPU-culled mesh (`setThinInstanceLodPartner`). Its update
+ *  looks up the far bucket the source mesh's culling published for this pass's signature; its draw issues
+ *  ONLY that bucket's indirect draw — with no bucket (source not culling this pass, or culling fell back)
+ *  it draws nothing, so the partner can never fall back to its own instance count and double-draw. */
+function bindLodPartner(ti: ThinInstanceData, signature: RenderTargetSignature, hasColor: boolean, baseUpdate: ((context: DrawUpdateContext) => void) | undefined): TiCullBinding {
+    const currentBucket = () => {
+        const bucket = ti._lodBuckets?.get(signature);
+        if (!bucket?.active) {
+            return null;
+        }
+        if (hasColor && !bucket.colorBuffer) {
+            throw new Error("Thin-instance LOD partner requires the source draw to provide instance colors");
+        }
+        return bucket;
+    };
+    const binding: TiCullBinding = {
+        get cullDrawBufs() {
+            return currentBucket();
+        },
+        get _args() {
+            return currentBucket()?.argsBuffer ?? null;
+        },
+        _updateBatch: getComputeDispatchBatch(signature),
+        update(context: DrawUpdateContext): void {
+            baseUpdate?.(context);
+        },
+        draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, indexCount: number, instanceCount: number): void {
+            const bucket = currentBucket();
+            if (bucket) {
+                pass.drawIndexedIndirect(bucket.argsBuffer, 0);
+            } else if (!ti._lodSource) {
+                if (ti._drawArgsBuffer) {
+                    pass.drawIndexedIndirect(ti._drawArgsBuffer, 0);
+                } else {
+                    pass.drawIndexed(indexCount, instanceCount);
+                }
             }
         },
     };

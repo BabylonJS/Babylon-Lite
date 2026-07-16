@@ -47,6 +47,22 @@ interface Ray {
     direction: [number, number, number];
     length: number;
 }
+
+interface PickOptions {
+    filter?: (mesh: Mesh) => boolean;
+    discard?: PickDiscardRule;
+    debugLabel?: string;
+}
+
+// WGSL shape injected for custom discard rules.
+struct PickDiscardInput {
+    worldPos: vec3f,
+    fragmentCoord: vec2f, // selected pixel center in the original backing framebuffer
+    pickId: u32,
+    thinInstanceIndex: u32,
+    hasThinInstance: u32,
+    instanceExtras: vec4f,
+}
 ```
 
 ### Functions
@@ -90,7 +106,7 @@ and .babylon loader. No copies needed — the arrays already exist in JS memory.
 
 1. Each mesh (or thin instance) is assigned a sequential pick ID (1-based; 0 = miss).
 2. A WGSL shader writes the 24-bit pick ID as RGB at `@location(0)` and the fragment's NDC depth at `@location(1)`.
-3. The pass uses a **pick-zoomed view-projection** so only the picked pixel survives, drawing all meshes to a **1×1** target: two colour attachments (`rgba8unorm` pick ID + `r32float` NDC depth) plus a `depth24plus` depth buffer (reverse-Z, compare `greater`).
+3. The pass uses a **pick-zoomed view-projection** so only the picked pixel survives, drawing all meshes to a **1×1** target: two colour attachments (`rgba8unorm` pick ID + `r32float` NDC depth) plus a `depth24plus` depth buffer (reverse-Z, compare `greater`). Because the 1×1 fragment position is always `(0.5, 0.5)`, the scene UBO separately carries the selected pixel center in original backing-framebuffer coordinates for custom discard WGSL.
 4. The 1×1 pick-ID and depth texels are copied to staging buffers and read back.
 5. The pick ID is decoded: `(r << 16) | (g << 8) | b`.
 6. The world-space hit point is reconstructed by unprojecting NDC + the read-back depth through `inverse(VP)`.
@@ -179,13 +195,13 @@ each attachment is a single texel:
 **Regular meshes:**
 | Group | Binding | Type | Content |
 |-------|---------|------|---------|
-| 0 | 0 | uniform | `mat4x4f` — viewProjection (shared, 64 bytes) |
+| 0 | 0 | uniform | `mat4x4f` viewProjection + `vec2f` original fragment coordinate (shared, 80 bytes) |
 | 1 | 0 | uniform | `mat4x4f` world + `u32` pickId (80 bytes, 16-aligned) |
 
 **Thin-instanced meshes:**
 | Group | Binding | Type | Content |
 |-------|---------|------|---------|
-| 0 | 0 | uniform | `mat4x4f` — viewProjection (shared) |
+| 0 | 0 | uniform | `mat4x4f` viewProjection + `vec2f` original fragment coordinate (shared, 80 bytes) |
 | 1 | 0 | uniform | `u32` baseMeshPickId (16 bytes, padded) |
 | 1 | 1 | read-only-storage | `array<mat4x4f>` — instance world matrices |
 

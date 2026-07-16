@@ -292,7 +292,7 @@ export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-sh
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
 export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
-export { setShadowTaskCasterMeshes } from "./frame-graph/shadow-inputs.js";
+export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
@@ -395,6 +395,8 @@ export {
     setThinInstanceColor,
     enableThinInstanceGpuCulling,
     setThinInstanceCullBoundsPad,
+    setThinInstanceLodPartner,
+    clearThinInstanceLodPartner,
 } from "./mesh/thin-instance.js";
 export {
     addHierarchyInstance,
@@ -404,7 +406,7 @@ export {
     setHierarchyInstanceMatrix,
 } from "./mesh/hierarchy-instance-pool.js";
 export type { HierarchyInstancePool } from "./mesh/hierarchy-instance-pool.js";
-export type { ThinInstanceData } from "./mesh/thin-instance.js";
+export type { ThinInstanceData, ThinInstanceLodPartnerOptions } from "./mesh/thin-instance.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 export type { SceneContext, ImageProcessingConfig, ClipPlane } from "./scene/scene.js";
