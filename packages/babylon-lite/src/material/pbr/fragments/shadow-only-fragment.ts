@@ -13,8 +13,9 @@
  * Implementation notes
  * --------------------
  * A shadow-only mesh sets `receiveShadows = true`, which forces the multi-light
- * PBR path (lightMode = 2). That path declares `var shadowFactors: array<f32,
- * MAX_LIGHTS>` (all entries initialised to 1.0 = no shadow) at fragment-main
+ * PBR path (lightMode = 2). That path declares
+ * `var shadowFactors: array<f32, MAX_LIGHTS>` (all entries initialised to 1.0 =
+ * no shadow) at fragment-main
  * scope and the shadow fragment writes the real shadow factor into
  * `shadowFactors[lightIndex]` for each shadow-casting light.
  *
