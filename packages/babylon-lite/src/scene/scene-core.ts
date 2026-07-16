@@ -493,6 +493,12 @@ export async function registerSceneWithShadowSupport(scene: SceneContext): Promi
 const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;
 
 async function ensureShadowTask(engine: EngineContext, scene: SceneContext): Promise<void> {
+    // Idempotent: the scene keeps its `_frameGraph` (and its `_tasks`) across unregister/re-register
+    // cycles, and `buildScene` does not clear the task list — so a plain unshift would stack a new
+    // shadow task on every re-registration. Only add one when the scene has none.
+    if (scene._frameGraph._tasks.some((task) => task.name === "shadow")) {
+        return;
+    }
     const { createShadowTask } = await import("../frame-graph/shadow-task.js");
     scene._frameGraph._tasks.unshift(createShadowTask(engine, scene));
 }

@@ -100,7 +100,7 @@ export interface BindingDecl {
  *   HOOK_AI      → AI
  *   HOOK_NI  → NI
  */
-export type FragmentSlot = "HF" | "SV" | "AT" | "AC" | "MF" | "BL" | "AS" | "AD" | "AI" | "NI" | "BC" | "BA";
+export type FragmentSlot = "HF" | "SV" | "AT" | "AC" | "MF" | "BL" | "AS" | "AD" | "AI" | "NI" | "BC" | "BA" | "FA";
 
 // ── Vertex injection points ─────────────────────────────────────
 
