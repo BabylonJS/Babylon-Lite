@@ -209,7 +209,7 @@ export async function createTexture2DArrayFromUrls(engine: EngineContext, urls: 
         })
     );
 
-    const firstRejection = results.find((res): res is PromiseRejectedResult => res.status === "rejected");
+    const firstRejection = results.find((res) => res.status === "rejected");
     if (firstRejection) {
         for (const res of results) {
             if (res.status === "fulfilled") {
