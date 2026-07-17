@@ -370,6 +370,15 @@ createTube(engine: Engine, options: TubeOptions): Mesh
 createExtrudeShape(engine: Engine, options: ExtrudeShapeOptions): Mesh
 createGround(engine: Engine, options?: GroundOptions): Mesh
 createGroundFromHeightMap(engine: Engine, url: string, options: GroundOptions): Promise<Mesh>
+getMeshGeometry(mesh: Mesh): {
+    positions: Float32Array;
+    normals: Float32Array;
+    indices: Uint32Array;
+    uvs?: Float32Array;
+    uvs2?: Float32Array;
+    tangents?: Float32Array;
+    colors?: Float32Array;
+} | null
 
 // Materials
 createStandardMaterial(): StandardMaterialProps

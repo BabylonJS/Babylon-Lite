@@ -180,6 +180,7 @@ export {
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
 export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
+export { getMeshGeometry } from "./mesh/get-mesh-geometry.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
 export { createSphereData } from "./mesh/create-sphere.js";
