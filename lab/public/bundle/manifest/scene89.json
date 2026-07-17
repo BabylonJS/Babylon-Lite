@@ -1,5 +1,5 @@
 {
-  "rawKB": 60.3,
+  "rawKB": 60.1,
   "gzipKB": 27.1,
   "ignoredRawKB": 7.6,
   "runtimeChunks": [
@@ -7,10 +7,10 @@
     "scene89-add-block-d4WPLv3_.js",
     "scene89-divide-block-DneT2xkF.js",
     "scene89-fragment-output-CfRmfbPv.js",
-    "scene89-input-block-CLXo1VJ0.js",
+    "scene89-input-block-pa3aV2cZ.js",
     "scene89-loop-block-D-f9D6qu.js",
     "scene89-multiply-block-BqOpGCEj.js",
-    "scene89-node-registry-CB6643fp.js",
+    "scene89-node-registry-8hxI1FjL.js",
     "scene89-node-registry-extra-compat-DjvO4Ffj.js",
     "scene89-node-registry-extra-math-BaLrv1wL.js",
     "scene89-node-renderable-DYM14Tnq.js",

@@ -9,30 +9,10 @@
  *  value is consumed in fragment stage, a varying to carry it across.
  */
 
-import type { BlockEmitter, NodeBuildState, NodeExpr, NodeValueType, Stage, NodeBlock } from "../node-types.js";
+import type { BlockEmitter, NodeBuildState, NodeEmitContext, NodeExpr, NodeValueType, Stage, NodeBlock } from "../node-types.js";
 import { WGSL } from "../node-types.js";
 
 type BjsType = number; // NodeMaterialBlockConnectionPointTypes
-
-function bjsTypeToNodeType(t: BjsType): NodeValueType {
-    // bitflags: 0x1=Float, 0x4=Vec2, 0x8=Vec3, 0x10=Vec4, 0x20=Color3, 0x40=Color4
-    if (t === 0x1 || t === 0x2) {
-        return "f32";
-    }
-    if (t === 0x4) {
-        return "vec2f";
-    }
-    if (t === 0x8 || t === 0x20) {
-        return "vec3f";
-    }
-    if (t === 0x10 || t === 0x40) {
-        return "vec4f";
-    }
-    if (t === 0x80) {
-        return "mat4f";
-    }
-    throw new Error(`InputBlock: unsupported BJS connection point type 0x${t.toString(16)}`);
-}
 
 function wgslLiteral(value: unknown, type: NodeValueType): string {
     if (type === "f32") {
@@ -136,12 +116,12 @@ function emitSystemValue(block: NodeBlock, stage: Stage, state: NodeBuildState):
     void state;
 }
 
-function emitUniform(block: NodeBlock, state: NodeBuildState): NodeExpr {
+function emitUniform(block: NodeBlock, state: NodeBuildState, ctx: NodeEmitContext): NodeExpr {
     // Determine the WGSL type. BJS serializes the port type under `type`.
     const portType = (block.serialized["type"] as BjsType | undefined) ?? 0x10;
-    const type = bjsTypeToNodeType(portType);
+    const type = ctx.bjsTypeToNodeType(portType, "InputBlock");
     // UBO field name — use block name (must be unique; parser enforces via namedInputs key).
-    const fieldName = sanitize(block.name || `input${block.id}`);
+    const fieldName = ctx.sanitize(block.name || `input${block.id}`);
     // Dedup.
     if (!state.nodeUboFields.find((f) => f._name === fieldName)) {
         state.nodeUboFields.push({ _name: fieldName, _type: WGSL[type] as any });
@@ -153,13 +133,9 @@ function emitUniform(block: NodeBlock, state: NodeBuildState): NodeExpr {
     return { expr: `nodeU.${fieldName}`, type };
 }
 
-function sanitize(name: string): string {
-    return name.replace(/[^A-Za-z0-9_]/g, "_");
-}
-
 export const emitter: BlockEmitter = {
     className: "InputBlock",
-    emit(block, _outputName, stage, state, _ctx) {
+    emit(block, _outputName, stage, state, ctx) {
         const mode = (block.serialized["mode"] ?? block.serialized["_mode"]) as number | undefined;
         if (mode === 1) {
             return emitAttribute(block, stage, state);
@@ -171,6 +147,6 @@ export const emitter: BlockEmitter = {
             return emitSystemValue(block, stage, state);
         }
         // Default to Uniform (mode 0 or unspecified).
-        return emitUniform(block, state);
+        return emitUniform(block, state, ctx);
     },
 };

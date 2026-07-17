@@ -56,6 +56,22 @@ export function uploadTex(
     return result;
 }
 
+export function uploadBaseColorFactorTexture(engine: EngineContext, factor: readonly number[], sampler: GPUSampler, generateMipmaps: GenerateMipmapsFn): Texture2D {
+    return uploadTex(
+        engine,
+        null,
+        true,
+        sampler,
+        generateMipmaps,
+        new U8([linearToSrgbByte(factor[0]!), linearToSrgbByte(factor[1]!), linearToSrgbByte(factor[2]!), Math.round(Math.max(0, Math.min(1, factor[3]!)) * 255)])
+    );
+}
+
+export function uploadOrmFactorTexture(engine: EngineContext, roughness: number, metallic: number, sampler: GPUSampler, generateMipmaps: GenerateMipmapsFn): Texture2D {
+    const clamp = (value: number): number => Math.round(Math.max(0, Math.min(1, value)) * 255);
+    return uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(roughness), clamp(metallic), 255]));
+}
+
 /** Assemble a PbrMaterialProps from parsed glTF material data + already-uploaded
  *  textures + per-ext fragment overrides. Fast-path: no wrapTex, no occlusionOnUv2,
  *  no occlusionTexture. Slow-path additions live in gltf-pbr-builder-ext.ts. */
@@ -107,19 +123,7 @@ export function buildDefaultPbrTextures(
     generateMipmaps: GenerateMipmapsFn,
     getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => Texture2D
 ): { baseColorTexture: Texture2D; ormTexture: Texture2D; normalTexture: Texture2D | undefined; emissiveTexture: Texture2D | undefined } {
-    const baseColorTexture = mat._baseColorImage
-        ? getCachedTex(mat._baseColorImage, true)
-        : (() => {
-              const f = mat._baseColorFactor;
-              return uploadTex(
-                  engine,
-                  null,
-                  true,
-                  sampler,
-                  generateMipmaps,
-                  new U8([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
-              );
-          })();
+    const baseColorTexture = mat._baseColorImage ? getCachedTex(mat._baseColorImage, true) : uploadBaseColorFactorTexture(engine, mat._baseColorFactor, sampler, generateMipmaps);
     const normalTexture = mat._normalImage ? getCachedTex(mat._normalImage, false) : undefined;
     const emissiveTexture = mat._emissiveImage ? getCachedTex(mat._emissiveImage, true) : undefined;
 
@@ -128,8 +132,7 @@ export function buildDefaultPbrTextures(
     if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
         ormTexture = getCachedTex(single, false);
     } else if (!single) {
-        const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
+        ormTexture = uploadOrmFactorTexture(engine, mat._roughnessFactor, mat._metallicFactor, sampler, generateMipmaps);
     } else {
         ormTexture = getCachedTex(mat._metallicRoughnessImage!, false);
     }

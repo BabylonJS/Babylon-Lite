@@ -1,21 +1,21 @@
 {
-  "rawKB": 97.1,
+  "rawKB": 97,
   "gzipKB": 40.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene34-generate-mipmaps-C244DQVV.js",
-    "scene34-gltf-animation-yjwB90d0.js",
-    "scene34-gltf-ext-node-visibility-DWsJZC5Q.js",
-    "scene34-gltf-feature-animation-pointer-CE1BnN9s.js",
-    "scene34-gltf-feature-animations-BoKR3Ok5.js",
-    "scene34-gltf-feature-registry-bcYZK_JW.js",
+    "scene34-gltf-animation-B5Xev34I.js",
+    "scene34-gltf-ext-node-visibility-Xu7_-gD2.js",
+    "scene34-gltf-feature-animation-pointer-Dg1vdjKD.js",
+    "scene34-gltf-feature-animations-DInWHC6L.js",
+    "scene34-gltf-feature-registry-ByvYV-Xn.js",
     "scene34-gltf-glb-parser-BxoFTGKn.js",
-    "scene34-gltf-sampler-denorm-C_vs8OEN.js",
+    "scene34-gltf-sampler-denorm-DL1-ViwU.js",
     "scene34-ibl-fragment-CeRrvT96.js",
-    "scene34-pbr-renderable-BWMpYg-a.js",
-    "scene34-rgbd-decode-ByPAsdES.js",
+    "scene34-pbr-renderable-LhohO3ui.js",
+    "scene34-rgbd-decode-BmSWzo3A.js",
     "scene34-scene-uniforms-FTYH6Ct0.js",
-    "scene34-visibility-8Ff_Kr9x.js",
+    "scene34-visibility-uTP-hWgN.js",
     "scene34.js"
   ]
 }
