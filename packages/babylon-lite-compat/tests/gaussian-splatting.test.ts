@@ -40,4 +40,13 @@ describe("GaussianSplattingMesh", () => {
         expect(() => gs.updateData(new ArrayBuffer(0))).not.toThrow();
         expect(() => gs.bakeCurrentTransformIntoVertices()).not.toThrow();
     });
+
+    it("exposes a null safeOrbitCameraLimits (BJS shape parity)", () => {
+        const gs = new GaussianSplattingMesh("splat");
+        expect(gs.safeOrbitCameraLimits).toBeNull();
+        // Field is read/write for shape parity with @babylonjs/core.
+        gs.safeOrbitCameraLimits = { radiusMin: 2, elevationMinMax: [-0.5, 0.5] };
+        expect(gs.safeOrbitCameraLimits.radiusMin).toBe(2);
+        expect(gs.safeOrbitCameraLimits.elevationMinMax).toEqual([-0.5, 0.5]);
+    });
 });
