@@ -17,13 +17,12 @@ import { getBilinearSampler } from "../resource/samplers.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
 import {
-    buildLightViewMatrix,
     casterVersionSum,
+    computeDirectionalLightMatrix,
     createSharedShadowUBO,
     createShadowCamera,
     createShadowParamsUBO,
     createShadowRenderTarget,
-    multiply4x4,
     updateShadowCameraBase,
     writeShadowUboFields,
 } from "./shadow-base.js";
@@ -145,66 +144,6 @@ async function preloadEsmShadowTaskState(casterMeshes: readonly Mesh[]): Promise
         );
     }
     await Promise.all(loads);
-}
-
-/** @internal Compute the ESM directional light view/projection matrix for ShadowTask. */
-function _computeDirectionalLightMatrix(
-    light: DirectionalLight,
-    casterMeshes: readonly Mesh[],
-    orthoMinZ: number,
-    orthoMaxZ: number,
-    offX = 0,
-    offY = 0,
-    offZ = 0
-): EsmLightMatrix {
-    const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x - offX, light.position.y - offY, light.position.z - offZ);
-    let lMinX = Infinity;
-    let lMaxX = -Infinity;
-    let lMinY = Infinity;
-    let lMaxY = -Infinity;
-    for (const mesh of casterMeshes) {
-        const world = mesh.worldMatrix;
-        const bmin = mesh.boundMin ?? [-0.5, -0.5, -0.5];
-        const bmax = mesh.boundMax ?? [0.5, 0.5, 0.5];
-        for (let ci = 0; ci < 8; ci++) {
-            const lx = ci & 1 ? bmax[0]! : bmin[0]!;
-            const ly = ci & 2 ? bmax[1]! : bmin[1]!;
-            const lz = ci & 4 ? bmax[2]! : bmin[2]!;
-            const wx = world[0]! * lx + world[4]! * ly + world[8]! * lz + world[12]! - offX;
-            const wy = world[1]! * lx + world[5]! * ly + world[9]! * lz + world[13]! - offY;
-            const wz = world[2]! * lx + world[6]! * ly + world[10]! * lz + world[14]! - offZ;
-            const vx = view[0]! * wx + view[4]! * wy + view[8]! * wz + view[12]!;
-            const vy = view[1]! * wx + view[5]! * wy + view[9]! * wz + view[13]!;
-            lMinX = Math.min(lMinX, vx);
-            lMaxX = Math.max(lMaxX, vx);
-            lMinY = Math.min(lMinY, vy);
-            lMaxY = Math.max(lMaxY, vy);
-        }
-    }
-    if (!Number.isFinite(lMinX)) {
-        lMinX = -1;
-        lMaxX = 1;
-        lMinY = -1;
-        lMaxY = 1;
-    }
-    const sx = (lMaxX - lMinX) * 0.1;
-    const sy = (lMaxY - lMinY) * 0.1;
-    lMinX -= sx;
-    lMaxX += sx;
-    lMinY -= sy;
-    lMaxY += sy;
-
-    const near = orthoMinZ;
-    const far = orthoMaxZ;
-    const proj = new F32(16);
-    proj[0] = 2 / (lMaxX - lMinX);
-    proj[5] = 2 / (lMaxY - lMinY);
-    proj[10] = 1 / (far - near);
-    proj[12] = -(lMaxX + lMinX) / (lMaxX - lMinX);
-    proj[13] = -(lMaxY + lMinY) / (lMaxY - lMinY);
-    proj[14] = -near / (far - near);
-    proj[15] = 1;
-    return { _view: view, _viewProj: multiply4x4(proj, view), _near: near, _far: far };
 }
 
 function nearestBestKernel(idealKernel: number): number {
@@ -350,7 +289,7 @@ function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: E
         return 0;
     }
 
-    const matrix = _computeDirectionalLightMatrix(sg._light as DirectionalLight, casterMeshes, sg._config._orthoMinZ!, sg._config._orthoMaxZ!, offX, offY, offZ);
+    const matrix = computeDirectionalLightMatrix(sg._light as DirectionalLight, casterMeshes, sg._config._orthoMinZ!, sg._config._orthoMaxZ!, offX, offY, offZ);
     if (shadowMatrixChanged(sg._lightMatrix, matrix._viewProj)) {
         packMat4IntoF32(sg._lightMatrix, matrix._viewProj, 0);
         sg._version++;

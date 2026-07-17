@@ -37,6 +37,14 @@ function pickDiscardStorageDecls(opts?: PickingShaderOptions): string {
 
 // ─── Shared structs + fragment shader ───────────────────────────────
 
+const PICK_SCENE = /* wgsl */ `
+struct SceneUniforms {
+viewProjection: mat4x4f,
+fragmentCoord: vec2f,
+};
+@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+`;
+
 const PICK_FS = /* wgsl */ `
 struct VsOut {
 @builtin(position) p: vec4f,
@@ -48,7 +56,7 @@ struct VsOut {
 };
 struct FsOut { @location(0) color: vec4f, @location(1) depth: vec4f };
 @fragment fn fs(input: VsOut) -> FsOut {
-if (shouldDiscardPick(PickDiscardInput(input.worldPos, input.p.xy, input.pickId, input.thinInstanceIndex, input.hasThinInstance, input.instanceExtras))) { discard; }
+if (shouldDiscardPick(PickDiscardInput(input.worldPos, scene.fragmentCoord, input.pickId, input.thinInstanceIndex, input.hasThinInstance, input.instanceExtras))) { discard; }
 let id = input.pickId;
 let r = f32((id >> 16u) & 0xFFu) / 255.0;
 let g = f32((id >> 8u) & 0xFFu) / 255.0;
@@ -61,12 +69,11 @@ return FsOut(vec4f(r, g, b, 1.0), vec4f(input.p.z, 0.0, 0.0, 0.0));
 
 export function pickingShaderSource(opts?: PickingShaderOptions): string {
     return /* wgsl */ `
-struct SceneUniforms { viewProjection: mat4x4f };
+${PICK_SCENE}
 struct MeshUniforms {
 world: mat4x4f,
 pickId: u32,
 };
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 ${PICK_DISCARD_INPUT}
 ${pickDiscardStorageDecls(opts)}
@@ -90,11 +97,10 @@ return out;
 
 export function pickingThinInstanceShaderSource(opts?: PickingShaderOptions): string {
     return /* wgsl */ `
-struct SceneUniforms { viewProjection: mat4x4f };
+${PICK_SCENE}
 struct TIMeshUniforms {
 baseMeshPickId: u32,
 };
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
 @group(1) @binding(0) var<uniform> tiMesh: TIMeshUniforms;
 @group(1) @binding(1) var<storage, read> instances: array<mat4x4f>;
 ${PICK_DISCARD_INPUT}

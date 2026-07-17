@@ -16,17 +16,13 @@ const OUTPUT: Record<string, { swizzle: string; type: NodeValueType }> = {
     a: { swizzle: ".w", type: "f32" },
 };
 
-function sanitize(name: string): string {
-    return name.replace(/[^A-Za-z0-9_]/g, "_");
-}
-
 function bindingName(block: NodeBlock, inputName: string, ctx: NodeEmitContext, fallback: string): string {
     const input = block.inputs.get(inputName);
     if (input?.source) {
         const producer = ctx.graph.blocks.get(input.source.blockId);
-        return sanitize(producer?.name || fallback);
+        return ctx.sanitize(producer?.name || fallback);
     }
-    return sanitize(fallback);
+    return ctx.sanitize(fallback);
 }
 
 function ensureBinding(state: NodeBuildState, name: string): void {
@@ -64,7 +60,7 @@ function emitBiPlanarSample(block: NodeBlock, stage: Stage, state: NodeBuildStat
         return memo;
     }
 
-    const baseName = sanitize(block.name || `biPlanar${block.id}`);
+    const baseName = ctx.sanitize(block.name || `biPlanar${block.id}`);
     const texX = bindingName(block, "source", ctx, baseName);
     const texY = bindingName(block, "sourceY", ctx, texX);
     ensureBinding(state, texX);

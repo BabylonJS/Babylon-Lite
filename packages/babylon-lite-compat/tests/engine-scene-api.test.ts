@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { WebGPUEngine } from "../src/engine/engine";
+import { VERSION } from "babylon-lite";
+import { AbstractEngine, Engine, ThinEngine, WebGPUEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
 
 /**
@@ -165,5 +166,19 @@ describe("Scene entity registries", () => {
         expect(a.getClassName()).toBe("Scene");
         expect(a.getUniqueId()).toBe(1);
         expect(b.getUniqueId()).toBe(2);
+    });
+});
+
+describe("AbstractEngine version statics", () => {
+    it("reports the underlying Babylon Lite version", () => {
+        expect(AbstractEngine.Version).toBe(VERSION);
+        expect(AbstractEngine.NpmPackage).toBe(`@babylonjs/lite-compat@${VERSION}`);
+    });
+
+    it("inherits the version statics on every engine subclass", () => {
+        for (const Ctor of [ThinEngine, Engine, WebGPUEngine]) {
+            expect(Ctor.Version).toBe(VERSION);
+            expect(Ctor.NpmPackage).toBe(`@babylonjs/lite-compat@${VERSION}`);
+        }
     });
 });

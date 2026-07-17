@@ -1,5 +1,5 @@
 {
-  "rawKB": 60.1,
+  "rawKB": 60,
   "gzipKB": 27.2,
   "ignoredRawKB": 8,
   "runtimeChunks": [
@@ -10,11 +10,11 @@
     "scene86-color-merger-0HZ9FICW.js",
     "scene86-color-splitter-BK-XgtrJ.js",
     "scene86-fragment-output-CfRmfbPv.js",
-    "scene86-input-block-CwCrNWmt.js",
+    "scene86-input-block-edu8ZLj3.js",
     "scene86-mesh-attribute-exists-block-BROoqX_6.js",
-    "scene86-node-registry-C_0vsZEK.js",
+    "scene86-node-registry-B0lHyL8v.js",
     "scene86-node-registry-extra-compat-BySiaXlE.js",
-    "scene86-node-registry-extra-procedural-B0-_-3_0.js",
+    "scene86-node-registry-extra-procedural-BCtNk_Fl.js",
     "scene86-node-renderable-CvPYaM11.js",
     "scene86-reflection-texture-base-block-CklyAZSo.js",
     "scene86-scale-block-6qtIvFiz.js",

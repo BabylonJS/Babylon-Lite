@@ -15,7 +15,7 @@ import { resolveCameraViewport } from "../camera/viewport.js";
 import { createEmptyUniformBuffer, createMappedBuffer, createUniformBuffer } from "../resource/gpu-buffers.js";
 
 // ─── Scratch arrays — allocated once, reused across all picks ──────
-const _pickVP = new F32(16);
+const _pickVP = new F32(20);
 const PICK_MESH_UBO_BYTES = 80;
 const PICK_TI_UBO_BYTES = 16;
 const _uboScratch = new ArrayBuffer(PICK_MESH_UBO_BYTES);
@@ -34,7 +34,7 @@ export interface GpuPicker {
     _scene: SceneContext;
     /** @internal 1×1 render targets (lazily created). */
     _rt: PickTargets1x1 | null;
-    /** @internal Reusable scene UBO (64 bytes). */
+    /** @internal Reusable scene UBO (80 bytes: pick VP + original framebuffer fragment coordinate). */
     _sceneUbo: GPUBuffer | null;
     /** @internal Reusable scene bind group. */
     _sceneBG: GPUBindGroup | null;
@@ -99,7 +99,7 @@ function ensureTargets(engine: EngineContext, picker: GpuPicker): PickTargets1x1
 function ensureSceneUbo(engine: EngineContext, picker: GpuPicker): GPUBuffer {
     const device = engine._device;
     if (!picker._sceneUbo) {
-        picker._sceneUbo = createEmptyUniformBuffer(engine, 64, "pick-scene-ubo");
+        picker._sceneUbo = createEmptyUniformBuffer(engine, 80, "pick-scene-ubo");
         const sceneBGL = getPickingSceneBGL(engine);
         picker._sceneBG = device.createBindGroup({ label: "pick-scene-bg", layout: sceneBGL, entries: [{ binding: 0, resource: { buffer: picker._sceneUbo } }] });
     }
@@ -136,8 +136,9 @@ export interface PickOptions {
      *
      *  `fn shouldDiscardPick(input: PickDiscardInput) -> bool`
      *
-     *  The input exposes only generic picker data: `worldPos`, `fragmentCoord` (framebuffer pixel
-     *  coordinates), `pickId`, `thinInstanceIndex`, `hasThinInstance`, and `instanceExtras` (the
+     *  The input exposes only generic picker data: `worldPos`, `fragmentCoord` (the selected pixel
+     *  centre in the original backing framebuffer), `pickId`, `thinInstanceIndex`,
+     *  `hasThinInstance`, and `instanceExtras` (the
      *  original thin-instance matrix w lanes, zero for non-instanced meshes). Storage entries are
      *  uploaded and bound by Lite for the current pick only. */
     discard?: PickDiscardRule;
@@ -271,6 +272,12 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
 
     // ── Compute pick-zoomed VP (renders single pixel to 1×1 target) ──
     computePickVP(_pickVP, vp as unknown as Float32Array, px, py, w, h);
+    // The pick renders into a 1x1 target, whose fragment position is always (0.5, 0.5). Preserve the
+    // selected pixel's coordinate in the original backing framebuffer so consumer discard rules can
+    // reproduce screen-space dithering exactly. Include the camera viewport origin because visible
+    // material fragment coordinates are surface-wide, while px/py above are viewport-local.
+    _pickVP[16] = viewport.x + px + 0.5;
+    _pickVP[17] = viewport.y + py + 0.5;
 
     const rt = ensureTargets(engine, picker);
     const sceneUbo = ensureSceneUbo(engine, picker);

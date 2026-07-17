@@ -26,11 +26,13 @@
  *  in `_matrix-allocator.ts`. F32 by default; F64 after an HPM engine is
  *  constructed (see `docs/lite/architecture/36-high-precision-matrix.md`). */
 
-import type { Mat4 } from "../math/types.js";
+import type { Mat4, Quat, Vec3 } from "../math/types.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import type { Mat4Storage } from "../math/types.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
+import { mat4Compose } from "../math/mat4-compose.js";
+import { mat4Identity } from "../math/mat4-identity.js";
 
 export interface WorldMatrixAccessors {
     /** Getter — returns lazily computed world matrix. */
@@ -69,6 +71,22 @@ function peekWorldMatrixState(p: IWorldMatrixProvider | null): WorldMatrixAccess
 /** @internal Bump one engine object's world version without changing its transform values. */
 export function _markWorldMatrixDirty(host: IWorldMatrixProvider): void {
     peekWorldMatrixState(host)?._invalidate();
+}
+
+/** Compose a local TRS matrix, skipping the general composition path for the default transform. */
+export function composeTrsLocalMatrix(position: Vec3, rotation: Quat, scaling: Vec3): Mat4 {
+    const isIdentity =
+        position.x === 0 &&
+        position.y === 0 &&
+        position.z === 0 &&
+        rotation.x === 0 &&
+        rotation.y === 0 &&
+        rotation.z === 0 &&
+        rotation.w === 1 &&
+        scaling.x === 1 &&
+        scaling.y === 1 &&
+        scaling.z === 1;
+    return isIdentity ? mat4Identity() : mat4Compose(position.x, position.y, position.z, rotation.x, rotation.y, rotation.z, rotation.w, scaling.x, scaling.y, scaling.z);
 }
 
 /**
