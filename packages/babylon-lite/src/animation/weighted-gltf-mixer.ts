@@ -10,6 +10,8 @@ import { evaluateSampler } from "./evaluate.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import type { Mat4Storage } from "../math/types.js";
+import { _boneApplier } from "../skeleton/bone-control-hooks.js";
+import type { BoneOverride } from "../skeleton/bone-control.js";
 
 const GLTF_CLIP = 0;
 const GLTF_NODES = 1;
@@ -28,6 +30,7 @@ const _boneTmp = new F32(16);
 interface WeightedGltfTarget {
     readonly nodes: readonly NodeRest[];
     readonly skeletons: readonly SkeletonBinding[];
+    readonly overrides: ReadonlyMap<number, unknown> | undefined;
     readonly trs: Float32Array;
     readonly localMat: Float32Array;
     readonly worldMat: Float32Array;
@@ -155,6 +158,26 @@ function resetWeightedGltfTarget(target: WeightedGltfTarget): void {
     target.rWeight.fill(0);
     target.sWeight.fill(0);
     resetTarget(target);
+    // Apply opt-in bone overrides on top of the rest pose, BEFORE accumulation so animated
+    // components overwrite them while untouched or masked-out components keep the override —
+    // matching the single-clip controller path (skeleton-updater.ts). Routed through the same
+    // null hook, so blend bundles without bone control pay only a branch.
+    const overrides = target.overrides;
+    if (overrides !== undefined && overrides.size > 0) {
+        _boneApplier?.(overrides as ReadonlyMap<number, BoneOverride>, target.trs, target.nodes.length);
+    }
+}
+
+/** True when this channel is masked OUT for the group (mask active, node named, excluded).
+ *  One helper shared by both accumulate paths — mirrors `animationGroupMaskRetainsTarget`
+ *  (animation-group-mask.ts) inline so blend-only bundles don't pull in the mask module. */
+function channelMaskedOut(group: AnimationGroup, channelIndex: number, nodeIdx: number): boolean {
+    const mask = group.mask;
+    if (mask === undefined || mask.disabled || nodeIdx < 0) {
+        return false;
+    }
+    const name = group.targetedAnimations[channelIndex]!.targetName ?? "";
+    return (mask.names.indexOf(name) !== -1) !== (mask.mode === 0); /* Include */
 }
 
 function getTarget(scratch: WeightedGltfScratch, mixer: AnimationGltfMixer): WeightedGltfTarget {
@@ -162,9 +185,13 @@ function getTarget(scratch: WeightedGltfScratch, mixer: AnimationGltfMixer): Wei
     let target = scratch.targets.get(nodes);
     if (!target) {
         const numNodes = nodes.length;
+        const skeletons = mixer[GLTF_SKELETONS];
         target = {
             nodes,
-            skeletons: mixer[GLTF_SKELETONS],
+            skeletons,
+            // Bone overrides ride on the shared runtime skeleton (stamped by enableBoneControl).
+            // Undefined unless bone control is active, so blend-only scenes pay nothing.
+            overrides: skeletons.length > 0 ? skeletons[0]!.runtimeSkeleton?._overrides : undefined,
             trs: new F32(numNodes * TRS_STRIDE),
             localMat: new F32(numNodes * 16),
             worldMat: new F32(numNodes * 16),
@@ -211,6 +238,9 @@ function accumulateAdditiveGroup(scratch: WeightedGltfScratch, group: AnimationG
         const ch = clip.channels[channelIndex]!;
         const sampler = clip.samplers[ch.samplerIdx]!;
         const nodeIdx = ch.nodeIdx;
+        if (channelMaskedOut(group, channelIndex, nodeIdx)) {
+            continue;
+        }
         const base = nodeIdx * TRS_STRIDE;
         switch (ch.path) {
             case PATH_TRANSLATION:
@@ -255,6 +285,9 @@ function accumulateGroup(manager: AnimationManager, scratch: WeightedGltfScratch
         const ch = clip.channels[channelIndex]!;
         const sampler = clip.samplers[ch.samplerIdx]!;
         const nodeIdx = ch.nodeIdx;
+        if (channelMaskedOut(group, channelIndex, nodeIdx)) {
+            continue;
+        }
         const base = nodeIdx * TRS_STRIDE;
         switch (ch.path) {
             case PATH_TRANSLATION:
