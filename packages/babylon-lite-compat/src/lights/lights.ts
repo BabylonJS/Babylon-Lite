@@ -57,6 +57,25 @@ export abstract class Light extends Node {
     }
     private set _liteIntensity(value: number) {
         (this._lite as unknown as { intensity: number }).intensity = value;
+        this._bumpLiteVersion();
+    }
+
+    /**
+     * @internal Lazily-resolved bump for the underlying Lite light's
+     * `_lightVersion` (see {@link ensureLightVersionBump}). Cached after first use.
+     */
+    private _liteVersionBump: (() => void) | null = null;
+
+    /**
+     * @internal Advance the underlying Lite light's `_lightVersion`. Lite's shared
+     * lights-UBO refresh is gated on the sum of every light's `_lightVersion`, and
+     * factory lights only bump it on observable direction/position writes — never on
+     * scalar `intensity` writes. Since these wrappers mutate `intensity` directly
+     * (both `intensity` and `setEnabled`), this makes those writes reach the GPU.
+     */
+    private _bumpLiteVersion(): void {
+        this._liteVersionBump ??= ensureLightVersionBump(this._lite);
+        this._liteVersionBump();
     }
 
     /**
@@ -107,6 +126,39 @@ export abstract class Light extends Node {
         this._lite.shadowGenerator = undefined;
         super.dispose();
     }
+}
+
+/**
+ * @internal Ensure the underlying Lite light exposes a `_bumpLightVersion()` that,
+ * when called, advances its `_lightVersion`, and return that bump function. Reuses a
+ * pre-existing `_bumpLightVersion` (e.g. installed by the glTF punctual-lights
+ * feature) when present; otherwise wraps the light's existing `_lightVersion` getter
+ * with an extra counter that the returned bump increments. Mirrors the shim pattern
+ * in `babylon-lite`'s `gltf-feature-lights-punctual.ts`.
+ */
+function ensureLightVersionBump(lite: LightBase): () => void {
+    const existing = (lite as { _bumpLightVersion?: () => void })._bumpLightVersion;
+    if (existing) {
+        return existing;
+    }
+    const baseGet = Object.getOwnPropertyDescriptor(lite, "_lightVersion")?.get;
+    let extra = 0;
+    Object.defineProperty(lite, "_lightVersion", {
+        get(): number {
+            return (baseGet ? (baseGet.call(lite) as number) : 0) + extra;
+        },
+        enumerable: false,
+        configurable: true,
+    });
+    const bump = (): void => {
+        extra++;
+    };
+    Object.defineProperty(lite, "_bumpLightVersion", {
+        value: bump,
+        enumerable: false,
+        configurable: true,
+    });
+    return bump;
 }
 
 function readColor(tuple: Tuple3): Color3 {

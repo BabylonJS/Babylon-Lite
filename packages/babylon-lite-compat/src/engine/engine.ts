@@ -52,7 +52,7 @@ export abstract class AbstractEngine {
 
     /** Babylon.js `AbstractEngine.NpmPackage` — the npm package + version string. */
     public static get NpmPackage(): string {
-        return `@babylonjs/lite-compat@${AbstractEngine.Version}`;
+        return `@babylonjs/lite-compat@${this.Version}`;
     }
 
     /** @internal The underlying Lite engine context. Populated by `initAsync()`. */

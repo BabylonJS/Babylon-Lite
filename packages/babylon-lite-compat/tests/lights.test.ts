@@ -65,3 +65,37 @@ describe("Light.setEnabled visibility toggle", () => {
         expect(light._lite.intensity).toBeCloseTo(0.7);
     });
 });
+
+describe("Light intensity writes bump the Lite light version", () => {
+    // Lite's shared lights-UBO refresh is gated on the sum of each light's
+    // `_lightVersion`; factory lights don't bump it on scalar `intensity` writes,
+    // so the wrapper must, or intensity/enable changes never reach the GPU.
+    function lightVersion(light: { _lite: unknown }): number {
+        return (light._lite as { _lightVersion?: number })._lightVersion ?? 0;
+    }
+
+    it("advances _lightVersion on an intensity change", () => {
+        const light = new DirectionalLight("d", new Vector3(0, -1, 0));
+        const before = lightVersion(light);
+        light.intensity = 0.4;
+        expect(lightVersion(light)).toBeGreaterThan(before);
+    });
+
+    it("advances _lightVersion on setEnabled(false) then setEnabled(true)", () => {
+        const light = new PointLight("p", new Vector3(1, 1, 1));
+        light.intensity = 1;
+        const afterIntensity = lightVersion(light);
+        light.setEnabled(false);
+        expect(lightVersion(light)).toBeGreaterThan(afterIntensity);
+        const afterDisable = lightVersion(light);
+        light.setEnabled(true);
+        expect(lightVersion(light)).toBeGreaterThan(afterDisable);
+    });
+
+    it("advances _lightVersion for the spot light too", () => {
+        const light = new SpotLight("s", new Vector3(0, 0, 0), new Vector3(0, -1, 0), Math.PI / 4, 2);
+        const before = lightVersion(light);
+        light.intensity = 3;
+        expect(lightVersion(light)).toBeGreaterThan(before);
+    });
+});
