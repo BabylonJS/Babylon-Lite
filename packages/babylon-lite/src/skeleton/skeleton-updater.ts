@@ -336,6 +336,12 @@ export function createAnimationController(
                                           // Write the weights array after the immutable header.
                                           if (uploadGpu) {
                                               device!.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 16, morphUploadF32.buffer, 0, tc * 4);
+                                              // Bump the pose counter so shadow generators re-render the depth
+                                              // map while morph weights animate (morphing never dirties the
+                                              // world matrix). Gated on `playing` so a paused pose stays cached.
+                                              if (ctrl.playing && mb.runtimeMorphTargets) {
+                                                  mb.runtimeMorphTargets._version = (mb.runtimeMorphTargets._version ?? 0) + 1;
+                                              }
                                           }
                                       }
                                   }
@@ -425,6 +431,12 @@ export function createAnimationController(
                                   { bytesPerRow: texWidth * 16 },
                                   { width: texWidth, height: 1 }
                               );
+                              // Bump the pose counter so shadow generators re-render the depth map
+                              // while the skeleton animates (skinning never dirties the world matrix).
+                              // Gated on `playing` so a paused pose leaves the shadow map cached.
+                              if (ctrl.playing && skel.runtimeSkeleton) {
+                                  skel.runtimeSkeleton._version = (skel.runtimeSkeleton._version ?? 0) + 1;
+                              }
                           }
                       }
                   },

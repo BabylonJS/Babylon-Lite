@@ -159,6 +159,10 @@ export interface SkeletonData {
     _refCount?: number;
     /** @internal Shared ownership for skin vertex buffers reused by VAT data. */
     readonly _skinBuffers: SkinBufferData;
+    /** @internal Monotonic pose counter bumped each frame the bone matrices are re-uploaded
+     *  while playing. Lets shadow generators detect skeletal deformation — which never changes
+     *  the mesh world matrix — and re-render the depth map so the shadow tracks the animation. */
+    _version?: number;
 }
 
 /** @internal Ref-counted skin vertex buffers shared by live skeletons and VAT data. */
@@ -216,4 +220,8 @@ export interface MorphTargetData {
     /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
      *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
     _refCount?: number;
+    /** @internal Monotonic pose counter bumped each frame the morph weights are re-uploaded
+     *  while playing. Lets shadow generators detect morph deformation (which never changes the
+     *  mesh world matrix) and re-render the depth map so the shadow tracks the animation. */
+    _version?: number;
 }

@@ -19,6 +19,7 @@ import { createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-
 import { getViewProjectionMatrix } from "../camera/camera.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import { buildLightViewMatrix, casterVersionSum, createShadowCamera, multiply4x4, updateShadowCameraBase } from "./shadow-base.js";
+import { casterWorldAabb } from "./caster-world-aabb.js";
 import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
@@ -624,22 +625,18 @@ function _castersWorldAabb(casterMeshes: readonly Mesh[]): { _min: [number, numb
             }
             continue;
         }
-        const world = mesh.worldMatrix;
-        const bmin = mesh.boundMin ?? [-0.5, -0.5, -0.5];
-        const bmax = mesh.boundMax ?? [0.5, 0.5, 0.5];
-        for (let k = 0; k < 8; k++) {
-            const lx = k & 1 ? bmax[0]! : bmin[0]!;
-            const ly = k & 2 ? bmax[1]! : bmin[1]!;
-            const lz = k & 4 ? bmax[2]! : bmin[2]!;
-            const wx = world[0]! * lx + world[4]! * ly + world[8]! * lz + world[12]!;
-            const wy = world[1]! * lx + world[5]! * ly + world[9]! * lz + world[13]!;
-            const wz = world[2]! * lx + world[6]! * ly + world[10]! * lz + world[14]!;
-            minX = Math.min(minX, wx);
-            maxX = Math.max(maxX, wx);
-            minY = Math.min(minY, wy);
-            maxY = Math.max(maxY, wy);
-            minZ = Math.min(minZ, wz);
-            maxZ = Math.max(maxZ, wz);
+        // Non-instanced caster: fit to its true world-space AABB (folds CPU positions through the
+        // world matrix), correct for both local-bounds procedural meshes and world-bounds glTF
+        // meshes. See `casterWorldAabb`. (The thin-instanced branch above intentionally composes
+        // `world * instanceMatrix` over the prototype's local bounds instead.)
+        const aabb = casterWorldAabb(mesh);
+        if (aabb) {
+            minX = Math.min(minX, aabb[0][0]);
+            maxX = Math.max(maxX, aabb[1][0]);
+            minY = Math.min(minY, aabb[0][1]);
+            maxY = Math.max(maxY, aabb[1][1]);
+            minZ = Math.min(minZ, aabb[0][2]);
+            maxZ = Math.max(maxZ, aabb[1][2]);
         }
     }
     if (!Number.isFinite(minX)) {
