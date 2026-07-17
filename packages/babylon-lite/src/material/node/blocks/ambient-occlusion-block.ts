@@ -46,10 +46,6 @@ fn nme_computeAo(depthTex: texture_2d<f32>, depthSamp: sampler, fragCoord: vec4<
 }
 `;
 
-function sanitize(name: string): string {
-    return name.replace(/[^A-Za-z0-9_]/g, "_");
-}
-
 function num(value: unknown, fallback: number): string {
     return typeof value === "number" ? `${value}` : `${fallback}`;
 }
@@ -63,7 +59,7 @@ export const emitter: BlockEmitter = {
             throw new Error(`NodeMaterial: AmbientOcclusionBlock "${block.name}" requires an ImageSourceBlock source`);
         }
         const producer = ctx.graph.blocks.get(source.blockId);
-        const bindingName = sanitize(producer?.name || `ao${block.id}`);
+        const bindingName = ctx.sanitize(producer?.name || `ao${block.id}`);
         if (!state.textures.find((t) => t.name === bindingName)) {
             state.textures.push({ name: bindingName, kind: "texture2d", texture: null });
         }

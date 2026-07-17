@@ -4,14 +4,12 @@
 import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
-import { mat4Compose } from "../math/mat4-compose.js";
-import { mat4Identity } from "../math/mat4-identity.js";
 import type { Material } from "../material/material.js";
 import type { SkeletonData, MorphTargetData, VatData } from "../animation/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
-import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "../scene/world-matrix-state.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { eulerToQuat, createEulerProxy } from "../scene/scene-node.js";
 
@@ -143,13 +141,7 @@ export interface Mesh extends SceneNode {
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.
  *  Used by all mesh creation paths (factories, loaders). */
 export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): void {
-    const wm = createWorldMatrixState(() => {
-        const p = mesh.position,
-            rq = mesh.rotationQuaternion,
-            s = mesh.scaling;
-        const isIdentity = p.x === 0 && p.y === 0 && p.z === 0 && rq.x === 0 && rq.y === 0 && rq.z === 0 && rq.w === 1 && s.x === 1 && s.y === 1 && s.z === 1;
-        return isIdentity ? mat4Identity() : mat4Compose(p.x, p.y, p.z, rq.x, rq.y, rq.z, rq.w, s.x, s.y, s.z);
-    });
+    const wm = createWorldMatrixState(() => composeTrsLocalMatrix(mesh.position, mesh.rotationQuaternion, mesh.scaling));
     const onWmDirty = () => wm.markLocalDirty();
 
     const [iqx, iqy, iqz, iqw] = eulerToQuat(rx, ry, rz);

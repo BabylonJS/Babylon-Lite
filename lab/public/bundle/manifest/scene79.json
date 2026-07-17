@@ -1,6 +1,6 @@
 {
-  "rawKB": 61.5,
-  "gzipKB": 27.7,
+  "rawKB": 61.3,
+  "gzipKB": 27.6,
   "ignoredRawKB": 8.1,
   "runtimeChunks": [
     "scene79-_math-factory-DFVyS8gB.js",
@@ -9,10 +9,10 @@
     "scene79-curve-block-CStLhZYq.js",
     "scene79-divide-block-CY1pX0X7.js",
     "scene79-fragment-output-CfRmfbPv.js",
-    "scene79-input-block-BlC907Cr.js",
+    "scene79-input-block-DV52P_gf.js",
     "scene79-multiply-block-CHVCDqxQ.js",
     "scene79-nlerp-block-DCTQwLVE.js",
-    "scene79-node-registry-CJ482XCy.js",
+    "scene79-node-registry-DzAorKDE.js",
     "scene79-node-registry-extra-math-Dw_l0pN0.js",
     "scene79-node-renderable-ISWSeBbm.js",
     "scene79-random-number-block-Cc5cHymD.js",

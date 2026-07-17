@@ -7,6 +7,7 @@ import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Mat4Storage } from "../math/types.js";
 import type { RenderTarget } from "../engine/render-target.js";
+import type { DirectionalLight } from "../light/directional-light.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
@@ -74,6 +75,64 @@ export function multiply4x4(a: Float32Array, b: Float32Array): Float32Array {
         }
     }
     return out;
+}
+
+/** Fit an orthographic directional-light projection to caster world-space bounds. */
+export function computeDirectionalLightMatrix(
+    light: DirectionalLight,
+    casterMeshes: readonly Mesh[],
+    orthoMinZ: number,
+    orthoMaxZ: number,
+    offX = 0,
+    offY = 0,
+    offZ = 0
+): { _view: Float32Array; _viewProj: Float32Array; _near: number; _far: number } {
+    const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x - offX, light.position.y - offY, light.position.z - offZ);
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const mesh of casterMeshes) {
+        const world = mesh.worldMatrix;
+        const boundMin = mesh.boundMin ?? [-0.5, -0.5, -0.5];
+        const boundMax = mesh.boundMax ?? [0.5, 0.5, 0.5];
+        for (let corner = 0; corner < 8; corner++) {
+            const localX = corner & 1 ? boundMax[0] : boundMin[0];
+            const localY = corner & 2 ? boundMax[1] : boundMin[1];
+            const localZ = corner & 4 ? boundMax[2] : boundMin[2];
+            const worldX = world[0]! * localX + world[4]! * localY + world[8]! * localZ + world[12]! - offX;
+            const worldY = world[1]! * localX + world[5]! * localY + world[9]! * localZ + world[13]! - offY;
+            const worldZ = world[2]! * localX + world[6]! * localY + world[10]! * localZ + world[14]! - offZ;
+            const viewX = view[0]! * worldX + view[4]! * worldY + view[8]! * worldZ + view[12]!;
+            const viewY = view[1]! * worldX + view[5]! * worldY + view[9]! * worldZ + view[13]!;
+            minX = Math.min(minX, viewX);
+            maxX = Math.max(maxX, viewX);
+            minY = Math.min(minY, viewY);
+            maxY = Math.max(maxY, viewY);
+        }
+    }
+    if (!Number.isFinite(minX)) {
+        minX = -1;
+        maxX = 1;
+        minY = -1;
+        maxY = 1;
+    }
+    const padX = (maxX - minX) * 0.1;
+    const padY = (maxY - minY) * 0.1;
+    minX -= padX;
+    maxX += padX;
+    minY -= padY;
+    maxY += padY;
+
+    const projection = new F32(16);
+    projection[0] = 2 / (maxX - minX);
+    projection[5] = 2 / (maxY - minY);
+    projection[10] = 1 / (orthoMaxZ - orthoMinZ);
+    projection[12] = -(maxX + minX) / (maxX - minX);
+    projection[13] = -(maxY + minY) / (maxY - minY);
+    projection[14] = -orthoMinZ / (orthoMaxZ - orthoMinZ);
+    projection[15] = 1;
+    return { _view: view, _viewProj: multiply4x4(projection, view), _near: orthoMinZ, _far: orthoMaxZ };
 }
 
 /** Create the shared shadow-params UBO (32 bytes) holding bias/depthScale/depth-range fields. */

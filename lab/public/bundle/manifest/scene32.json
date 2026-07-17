@@ -1,15 +1,15 @@
 {
-  "rawKB": 80.1,
+  "rawKB": 80,
   "gzipKB": 33,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene32-generate-mipmaps-DdnhjgK3.js",
     "scene32-gltf-ext-unlit-1vUYfF7v.js",
-    "scene32-gltf-feature-registry-mmoWs9VW.js",
+    "scene32-gltf-feature-registry-BYplY_A6.js",
     "scene32-gltf-glb-parser-BX2AS-bF.js",
     "scene32-ibl-fragment-CeRrvT96.js",
-    "scene32-pbr-renderable-D6ARAOMy.js",
-    "scene32-rgbd-decode-3FngBUdB.js",
+    "scene32-pbr-renderable-BvjjNlRM.js",
+    "scene32-rgbd-decode-DEnCQHFZ.js",
     "scene32-scene-uniforms-FTYH6Ct0.js",
     "scene32-unlit-fragment-DWtvt7yQ.js",
     "scene32.js"

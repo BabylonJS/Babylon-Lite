@@ -1,22 +1,22 @@
 {
-  "rawKB": 98.2,
-  "gzipKB": 40.8,
+  "rawKB": 97.9,
+  "gzipKB": 40.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene219-create-skeleton-DIqv-tev.js",
     "scene219-generate-mipmaps-f8miyjQL.js",
-    "scene219-gltf-animation-DNidooGR.js",
+    "scene219-gltf-animation-BwzmXeHe.js",
     "scene219-gltf-ext-spec-gloss-D60sFZYX.js",
-    "scene219-gltf-feature-animations-B_YvITgV.js",
+    "scene219-gltf-feature-animations-BH9gaH5q.js",
     "scene219-gltf-feature-extras-VHPteGay.js",
-    "scene219-gltf-feature-registry-DUtKrki_.js",
-    "scene219-gltf-feature-skeleton-CpmBaHpL.js",
+    "scene219-gltf-feature-registry-KprVAlmL.js",
+    "scene219-gltf-feature-skeleton-BzJmV0gU.js",
     "scene219-gltf-glb-parser-PDyH09Yg.js",
-    "scene219-gltf-sampler-desc-CKWNJQQv.js",
-    "scene219-pbr-renderable-WUkS1xKq.js",
-    "scene219-singlelight-hemispheric-wgsl-DDoH6CHa.js",
+    "scene219-gltf-sampler-desc-DMXka76e.js",
+    "scene219-pbr-renderable-DBbWRUb6.js",
+    "scene219-singlelight-hemispheric-wgsl-DKsxUnBs.js",
     "scene219-thin-instance-fragment-CBn2miAC.js",
-    "scene219-thin-instance-gpu-BgRIhZge.js",
+    "scene219-thin-instance-gpu-BoCl2HMc.js",
     "scene219.js"
   ]
 }

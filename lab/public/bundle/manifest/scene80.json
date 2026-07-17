@@ -1,6 +1,6 @@
 {
-  "rawKB": 61,
-  "gzipKB": 26.7,
+  "rawKB": 60.8,
+  "gzipKB": 26.6,
   "ignoredRawKB": 6,
   "runtimeChunks": [
     "scene80-_math-factory-DFVyS8gB.js",
@@ -9,9 +9,9 @@
     "scene80-desaturate-block-fwjhrbl5.js",
     "scene80-fragment-output-CfRmfbPv.js",
     "scene80-gradient-block-DY_wOadG.js",
-    "scene80-input-block-CRfb77r9.js",
-    "scene80-node-registry-C7HntA8G.js",
-    "scene80-node-registry-extra-procedural-CIYNG1uF.js",
+    "scene80-input-block-DkwEQhbC.js",
+    "scene80-node-registry-KVaU9iJg.js",
+    "scene80-node-registry-extra-procedural-BLc7IE-c.js",
     "scene80-node-renderable-CpLAYRD9.js",
     "scene80-posterize-block-PW8UWjyJ.js",
     "scene80-replace-color-block-jNV1Iu7G.js",
