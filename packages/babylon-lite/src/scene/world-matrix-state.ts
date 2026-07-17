@@ -73,7 +73,7 @@ export function _markWorldMatrixDirty(host: IWorldMatrixProvider): void {
     peekWorldMatrixState(host)?._invalidate();
 }
 
-/** Compose a local TRS matrix, reusing the shared identity matrix for the default transform. */
+/** Compose a local TRS matrix, skipping the general composition path for the default transform. */
 export function composeTrsLocalMatrix(position: Vec3, rotation: Quat, scaling: Vec3): Mat4 {
     const isIdentity =
         position.x === 0 &&
