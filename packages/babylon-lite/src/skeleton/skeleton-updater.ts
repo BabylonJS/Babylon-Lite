@@ -192,6 +192,10 @@ export function createAnimationController(
 
     let cachedEngine: EngineContext | undefined;
     let uploadGpu = true;
+    // Time of the pose most recently uploaded to the GPU. Used to detect pose
+    // changes so shadow generators re-render the depth map not just during
+    // playback but also when the timeline is scrubbed while paused.
+    let lastAppliedTime = NaN;
 
     // ── Animation mask (include/exclude targets by name) ──────────────────────────
     // `maskedNodes[i] = 1` marks node i's channels to be skipped this playback, so the
@@ -274,6 +278,15 @@ export function createAnimationController(
                       }
                       const t = ctrl.time;
 
+                      // A pose is "dirty" (needs a shadow-map refresh) when it is
+                      // being uploaded to the GPU AND either playback is advancing
+                      // time or the timeline was scrubbed to a new time while paused.
+                      // A static paused pose keeps the same time, so the shadow map
+                      // stays cached.
+                      const poseDirty = uploadGpu && (ctrl.playing || t !== lastAppliedTime);
+                      if (uploadGpu) {
+                          lastAppliedTime = t;
+                      }
                       // 1. Reset to rest-pose TRS
                       for (let i = 0; i < numNodes; i++) {
                           const n = nodes[i]!;
@@ -338,8 +351,9 @@ export function createAnimationController(
                                               device!.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 16, morphUploadF32.buffer, 0, tc * 4);
                                               // Bump the pose counter so shadow generators re-render the depth
                                               // map while morph weights animate (morphing never dirties the
-                                              // world matrix). Gated on `playing` so a paused pose stays cached.
-                                              if (ctrl.playing && mb.runtimeMorphTargets) {
+                                              // world matrix). Gated on `poseDirty` so a static paused pose
+                                              // stays cached but a scrubbed one refreshes.
+                                              if (poseDirty && mb.runtimeMorphTargets) {
                                                   mb.runtimeMorphTargets._version = (mb.runtimeMorphTargets._version ?? 0) + 1;
                                               }
                                           }
@@ -433,8 +447,9 @@ export function createAnimationController(
                               );
                               // Bump the pose counter so shadow generators re-render the depth map
                               // while the skeleton animates (skinning never dirties the world matrix).
-                              // Gated on `playing` so a paused pose leaves the shadow map cached.
-                              if (ctrl.playing && skel.runtimeSkeleton) {
+                              // Gated on `poseDirty` so a static paused pose leaves the shadow map
+                              // cached but a scrubbed one refreshes.
+                              if (poseDirty && skel.runtimeSkeleton) {
                                   skel.runtimeSkeleton._version = (skel.runtimeSkeleton._version ?? 0) + 1;
                               }
                           }

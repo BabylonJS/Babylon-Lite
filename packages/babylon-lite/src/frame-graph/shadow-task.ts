@@ -11,6 +11,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { Task } from "./task.js";
 import { _getShadowTaskCasterMeshes, _setShadowTaskInputPreloader } from "./shadow-inputs.js";
+import { enableSkinnedCasterAabb } from "../shadow/caster-world-aabb.js";
 
 /** Scene-owned frame-graph task that schedules shadow-map generation across the scene's shadow generators. */
 export interface ShadowTask extends Task {
@@ -40,6 +41,10 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
                 if (sg?._preloadShadowTask && casterMeshes) {
                     shadowGenerators.add(sg);
                     loads.push(sg._preloadShadowTask(casterMeshes));
+                    // Install the skinned-caster AABB path here (awaited before the first frame) so a
+                    // skinned caster's shadow frustum tracks its posed geometry from frame one, without
+                    // pulling that math into scenes whose casters are all static.
+                    loads.push(enableSkinnedCasterAabb(casterMeshes));
                 }
             }
             await Promise.all(loads);
@@ -90,5 +95,9 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
 }
 
 async function preloadShadowTaskInput(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): Promise<void> {
-    await shadowGenerator._preloadShadowTask?.(casterMeshes);
+    // Runs when a generator's caster set is (re)supplied (e.g. the Viewer wiring casters after a model
+    // load), giving the skinned-AABB path a head start before rendering when a caster is skinned. The
+    // registration-time `_preload` above awaits the same load, so scenes built through it are correct
+    // from frame one regardless of this fire-and-forget call.
+    await Promise.all([shadowGenerator._preloadShadowTask?.(casterMeshes), enableSkinnedCasterAabb(casterMeshes)]);
 }
