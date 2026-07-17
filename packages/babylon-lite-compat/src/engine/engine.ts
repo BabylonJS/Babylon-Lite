@@ -32,6 +32,7 @@ import {
     onBeforeRender,
     createNullEngine,
     stepScene,
+    VERSION,
 } from "babylon-lite";
 import type { EngineContext, EngineOptions, RenderCanvas } from "babylon-lite";
 
@@ -40,6 +41,20 @@ import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
 
 export abstract class AbstractEngine {
+    /**
+     * Babylon.js `AbstractEngine.Version` — reports the underlying Babylon Lite
+     * runtime version (the build-time-resolved `VERSION` exported by
+     * `@babylonjs/lite`), not the upstream `@babylonjs/core` release it targets.
+     */
+    public static get Version(): string {
+        return VERSION;
+    }
+
+    /** Babylon.js `AbstractEngine.NpmPackage` — the npm package + version string. */
+    public static get NpmPackage(): string {
+        return `@babylonjs/lite-compat@${this.Version}`;
+    }
+
     /** @internal The underlying Lite engine context. Populated by `initAsync()`. */
     public _lite!: EngineContext;
 
