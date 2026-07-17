@@ -197,6 +197,27 @@ describe("createTexture2DArrayFromUrls", () => {
         vi.unstubAllGlobals();
     });
 
+    it("closes already-decoded layers when another layer fails to load", async () => {
+        const cap: Captured = { copyCalls: [] };
+        const engine = makeEngine(cap);
+        const good = fakeSource(8, 8);
+        let n = 0;
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve({} as Blob) }));
+        vi.stubGlobal(
+            "createImageBitmap",
+            vi.fn().mockImplementation(() => {
+                const i = n++;
+                return i === 0 ? Promise.resolve(good) : Promise.reject(new Error("decode failed"));
+            })
+        );
+
+        await expect(createTexture2DArrayFromUrls(engine, ["a.png", "b.png"])).rejects.toThrow(/decode failed/);
+        // The layer that decoded before the failure must not leak.
+        expect(good.close).toHaveBeenCalled();
+        expect(cap.copyCalls).toHaveLength(0);
+        vi.unstubAllGlobals();
+    });
+
     it("requires at least one URL (enforced by the tuple type)", () => {
         // Compile-only: the tuple type rejects an empty array. Never executed.
         const _typecheck = () =>

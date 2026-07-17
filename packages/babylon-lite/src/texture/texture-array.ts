@@ -196,7 +196,10 @@ export async function loadImageToArrayLayer(engine: EngineContext, tex: Texture2
  * @returns A promise resolving to the populated `Texture2DArray`.
  */
 export async function createTexture2DArrayFromUrls(engine: EngineContext, urls: readonly [string, ...string[]], options: TextureArrayOptions = {}): Promise<Texture2DArray> {
-    const bitmaps = (await Promise.all(
+    // allSettled (not all): a rejected fetch/decode must not leak the layers that
+    // already decoded — Promise.all would reject on the first failure and orphan
+    // every fulfilled ImageBitmap. Close the fulfilled ones, then rethrow.
+    const results = await Promise.allSettled(
         urls.map(async (url) => {
             const r = await fetch(url);
             if (!r.ok) {
@@ -204,7 +207,19 @@ export async function createTexture2DArrayFromUrls(engine: EngineContext, urls: 
             }
             return createImageBitmap(await r.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
         })
-    )) as [ImageBitmap, ...ImageBitmap[]];
+    );
+
+    const firstRejection = results.find((res): res is PromiseRejectedResult => res.status === "rejected");
+    if (firstRejection) {
+        for (const res of results) {
+            if (res.status === "fulfilled") {
+                res.value.close();
+            }
+        }
+        throw firstRejection.reason;
+    }
+
+    const bitmaps = results.filter((res): res is PromiseFulfilledResult<ImageBitmap> => res.status === "fulfilled").map((res) => res.value) as [ImageBitmap, ...ImageBitmap[]];
 
     const width = bitmaps[0].width;
     const height = bitmaps[0].height;
