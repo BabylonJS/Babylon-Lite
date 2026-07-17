@@ -1,5 +1,5 @@
 {
-  "rawKB": 97.6,
+  "rawKB": 97.7,
   "gzipKB": 41.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,12 +9,12 @@
     "scene243-gltf-feature-animations-CqCIReXQ.js",
     "scene243-gltf-feature-extras-VHPteGay.js",
     "scene243-gltf-feature-morph-BCUQi4W_.js",
-    "scene243-gltf-feature-registry-C9Q6wITr.js",
+    "scene243-gltf-feature-registry-DPma2N_Z.js",
     "scene243-gltf-json-asset-BsQsGpFx.js",
     "scene243-gltf-pbr-builder-ext-D_B-T_v_.js",
     "scene243-ibl-fragment-CeRrvT96.js",
-    "scene243-morph-fragment-CW7eJgWH.js",
-    "scene243-pbr-renderable-hOzZwsME.js",
+    "scene243-morph-fragment-BrwjKotI.js",
+    "scene243-pbr-renderable-IEyBHxXt.js",
     "scene243-pbr-template-ext-CiHpOV5G.js",
     "scene243-rgbd-decode-DLCBrViD.js",
     "scene243-scene-uniforms-FTYH6Ct0.js",

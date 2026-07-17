@@ -63,9 +63,12 @@ interface MockBufferRecord {
 function makePickerEngine(): ReturnType<typeof makeEngine> & {
     pass: { drawCalls: { group2Bound: boolean }[] };
     buffers: MockBufferRecord[];
+    writes: { label: string | undefined; data: Float32Array }[];
 } {
     const base = makeEngine();
     const buffers: MockBufferRecord[] = [];
+    const labels = new WeakMap<object, string | undefined>();
+    const writes: { label: string | undefined; data: Float32Array }[] = [];
     const passState = {
         drawCalls: [] as { group2Bound: boolean }[],
         pipeline: null as (GPURenderPipeline & { _bindGroupLayoutCount?: number }) | null,
@@ -96,7 +99,13 @@ function makePickerEngine(): ReturnType<typeof makeEngine> & {
         queue: { writeBuffer: GPUQueue["writeBuffer"]; submit: GPUQueue["submit"] };
     };
     device.queue = {
-        writeBuffer() {},
+        writeBuffer(buffer, _offset, data, dataOffset, size) {
+            const source = ArrayBuffer.isView(data)
+                ? new Uint8Array(data.buffer, data.byteOffset + (dataOffset ?? 0), size ?? data.byteLength - (dataOffset ?? 0))
+                : new Uint8Array(data, dataOffset ?? 0, size);
+            const copy = source.slice().buffer;
+            writes.push({ label: labels.get(buffer as object), data: new Float32Array(copy) });
+        },
         submit() {},
     };
     device.createTexture = () =>
@@ -133,6 +142,7 @@ function makePickerEngine(): ReturnType<typeof makeEngine> & {
                 mapped = false;
             },
         } as unknown as GPUBuffer;
+        labels.set(buffer as object, descriptor.label);
         buffers.push({ descriptor: { ...descriptor }, destroy });
         return buffer;
     };
@@ -146,7 +156,7 @@ function makePickerEngine(): ReturnType<typeof makeEngine> & {
 
     (globalThis as unknown as { GPUMapMode: { READ: number } }).GPUMapMode ??= { READ: 1 };
     base.engine._retirements = [];
-    return { ...base, pass: passState, buffers };
+    return { ...base, pass: passState, buffers, writes };
 }
 
 function makePickScene(engine: EngineContext): { scene: Parameters<typeof createGpuPicker>[0]; mesh: Mesh; discardBuffer: GPUBuffer } {
@@ -203,12 +213,14 @@ describe("picking discard shader API", () => {
         expect(regular).toContain("return false;");
         expect(regular).toContain("out.hasThinInstance = 0u;");
         expect(regular).toContain("out.thinInstanceIndex = 0xffffffffu;");
+        expect(regular).toContain("PickDiscardInput(input.worldPos, scene.fragmentCoord");
 
         expect(thin).toContain("fn shouldDiscardPick(input: PickDiscardInput) -> bool");
         expect(thin).toContain("return false;");
         expect(thin).toContain("out.hasThinInstance = 1u;");
         expect(thin).toContain("out.thinInstanceIndex = instanceIndex;");
         expect(thin).toContain("out.instanceExtras = vec4f(m[0].w, m[1].w, m[2].w, m[3].w);");
+        expect(thin).toContain("PickDiscardInput(input.worldPos, scene.fragmentCoord");
     });
 
     it("injects a custom discard rule into regular and thin-instance picking shaders", () => {
@@ -223,7 +235,7 @@ return input.hasThinInstance == 1u && input.instanceExtras.x > 4.0;
         expect(regular).toContain(discardWgsl);
         expect(thin).toContain(discardWgsl);
         const discardCall =
-            "if (shouldDiscardPick(PickDiscardInput(input.worldPos, input.p.xy, input.pickId, input.thinInstanceIndex, input.hasThinInstance, input.instanceExtras))) { discard; }";
+            "if (shouldDiscardPick(PickDiscardInput(input.worldPos, scene.fragmentCoord, input.pickId, input.thinInstanceIndex, input.hasThinInstance, input.instanceExtras))) { discard; }";
         expect(regular).toContain(discardCall);
         expect(thin).toContain(discardCall);
         expect(thin).toContain("let world = mat4x4f(");
@@ -293,6 +305,40 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
 
         expect(info.hit).toBe(true);
         expect(pass.drawCalls).toEqual([{ group2Bound: true }]);
+    });
+
+    it("uploads the selected pixel center in original framebuffer coordinates", async () => {
+        const { engine } = makePickerEngine();
+        const { scene } = makePickScene(engine);
+        scene.camera!.viewport = { x: 0.25, y: 0.25, width: 0.5, height: 0.5 };
+        const writeBuffer = vi.spyOn(engine._device.queue, "writeBuffer");
+        const picker = createGpuPicker(scene);
+
+        await pickAsync(picker, 20, 20);
+
+        const sceneWrite = writeBuffer.mock.calls.find((call) => call[2] instanceof Float32Array && call[2].length === 20);
+        expect(sceneWrite).toBeDefined();
+        expect(Array.from((sceneWrite![2] as Float32Array).subarray(16, 18))).toEqual([20.5, 20.5]);
+    });
+
+    it("publishes the selected original framebuffer pixel under DPR and a nonzero viewport", async () => {
+        const { engine, writes } = makePickerEngine();
+        const { scene } = makePickScene(engine);
+        const surface = scene.surface as unknown as { canvas: { width: number; height: number; clientWidth: number; clientHeight: number } };
+        surface.canvas = { width: 128, height: 96, clientWidth: 64, clientHeight: 48 };
+        (scene.camera as unknown as { viewport: { x: number; y: number; width: number; height: number } }).viewport = {
+            x: 0.25,
+            y: 0.25,
+            width: 0.5,
+            height: 0.5,
+        };
+
+        await pickAsync(createGpuPicker(scene), 20, 15);
+
+        const sceneWrite = writes.find((write) => write.label === "pick-scene-ubo");
+        expect(sceneWrite?.data).toHaveLength(20);
+        expect(sceneWrite?.data[16]).toBe(40.5);
+        expect(sceneWrite?.data[17]).toBe(30.5);
     });
 
     it("destroys temporary pick buffers after the pick submission readback completes", async () => {

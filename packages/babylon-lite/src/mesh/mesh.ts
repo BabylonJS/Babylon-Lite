@@ -118,6 +118,10 @@ export interface Mesh extends SceneNode {
 
     /** @internal */
     _gpu: MeshGPU;
+    /** @internal Reason cloning this mesh is currently forbidden. */
+    _clone?: string;
+    /** @internal Highest CSM cascade this mesh casts into; undefined means all cascades. */
+    _shadowMaxCascade?: number;
     /** @internal */
     _cpuPositions?: Float32Array;
     /** @internal */

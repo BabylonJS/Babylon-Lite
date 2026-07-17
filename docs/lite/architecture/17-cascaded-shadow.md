@@ -41,6 +41,8 @@ function createCsmDirectionalShadowGenerator(engine: EngineContext, light: Direc
 function getCsmReceiverTexture(shadowGenerator: ShadowGenerator): Texture2D;
 
 function onCsmReceiverUpdate(shadowGenerator: ShadowGenerator, callback: (data: Float32Array) => void): () => void;
+
+function setShadowCasterMaxCascade(mesh: Mesh, maxCascade: number): void;
 ```
 
 Usage mirrors the other directional generators:
@@ -53,6 +55,13 @@ setShadowTaskCasterMeshes(light.shadowGenerator, casterMeshes);
 // receivers: mesh.receiveShadows = true
 await registerSceneWithShadowSupport(scene);
 ```
+
+`setShadowCasterMaxCascade(mesh, maxCascade)` limits a caster to cascade layers
+`0..maxCascade` (`0` is nearest). The default is all cascades; pass `Infinity` to
+restore it. Values must be non-negative integer indexes or `Infinity`. The cap is
+snapshotted when `setShadowTaskCasterMeshes` supplies the caster set, so changing a
+live cap requires re-supplying a new caster-array instance. CSM updates only the
+changed caster's per-cascade task membership; ESM and single-map PCF ignore the cap.
 
 Custom `ShaderMaterial` receivers use the same public generator without reading its
 internal WebGPU resources:
@@ -233,6 +242,10 @@ Shadow-map recreation is not supported by the current fixed generator configurat
 therefore the wrapper remains valid until the generator's GPU resources are disposed
 with the scene.
 
+Each CSM task state also snapshots every caster's maximum cascade. When a new caster
+array is supplied without material changes, the incremental diff removes and re-adds
+only new, removed, or re-capped casters, preserving all unchanged caster packets.
+
 ## Babylon.js Equivalence Map
 
 | Babylon.js                              | Babylon Lite                                |
@@ -289,6 +302,10 @@ headroom, and produce no bias for invalid or collapsed inputs.
 adapter creates one explicit 2d-array depth wrapper, reuses the generator texture and
 comparison sampler without exposing them in its signature, preserves wrapper identity,
 survives a ShaderMaterial acquire/release cycle, and rejects ESM/PCF generators.
+
+`tests/lite/unit/shadow-caster-max-cascade.test.ts` validates cap input, default and
+reset behavior, and incremental reassignment of an existing caster across cascade
+tasks after a live cap change.
 
 ## File Manifest
 

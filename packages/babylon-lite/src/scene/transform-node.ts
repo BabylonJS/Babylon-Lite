@@ -59,6 +59,9 @@ export function cloneTransformNode(src: SceneNode): SceneNode {
 }
 
 function cloneMeshNode(mesh: Mesh): Mesh {
+    if (mesh._clone) {
+        throw Error(mesh._clone);
+    }
     const meshClone = {
         ...mesh,
         name: mesh.name + "_clone",
