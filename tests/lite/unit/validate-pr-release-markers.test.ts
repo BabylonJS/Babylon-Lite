@@ -22,7 +22,14 @@ globalThis.fetch = async () => {
     attempts++;
     console.log("MOCK_GITHUB_ATTEMPT=" + attempts);
     if (attempts === 1) {
-        return new Response(null, { status: 503, statusText: "Service Unavailable" });
+        return new Response(
+            new ReadableStream({
+                cancel() {
+                    console.log("MOCK_GITHUB_BODY_CANCELLED");
+                },
+            }),
+            { status: 503, statusText: "Service Unavailable" }
+        );
     }
     return new Response(JSON.stringify({ title: "feat: test", body: "", labels: [] }), {
         status: 200,
@@ -47,6 +54,7 @@ globalThis.fetch = async () => {
             expect(result.status, result.stderr).toBe(0);
             expect(result.stdout).toContain("MOCK_GITHUB_ATTEMPT=1");
             expect(result.stdout).toContain("MOCK_GITHUB_ATTEMPT=2");
+            expect(result.stdout).toContain("MOCK_GITHUB_BODY_CANCELLED");
             expect(result.stdout).toContain("No breaking-change marker detected");
         } finally {
             rmSync(tempDir, { recursive: true, force: true });
