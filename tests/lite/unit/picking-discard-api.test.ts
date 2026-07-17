@@ -198,6 +198,7 @@ describe("picking discard shader API", () => {
         const thin = pickingThinInstanceShaderSource();
 
         expect(regular).toContain("struct PickDiscardInput");
+        expect(regular).toContain("fragmentCoord: vec2f");
         expect(regular).toContain("fn shouldDiscardPick(input: PickDiscardInput) -> bool");
         expect(regular).toContain("return false;");
         expect(regular).toContain("out.hasThinInstance = 0u;");
@@ -221,7 +222,10 @@ return input.hasThinInstance == 1u && input.instanceExtras.x > 4.0;
 
         expect(regular).toContain(discardWgsl);
         expect(thin).toContain(discardWgsl);
-        expect(regular).toContain("let discardInput = PickDiscardInput(input.worldPos, input.pickId, input.thinInstanceIndex, input.hasThinInstance, input.instanceExtras);");
+        const discardCall =
+            "if (shouldDiscardPick(PickDiscardInput(input.worldPos, input.p.xy, input.pickId, input.thinInstanceIndex, input.hasThinInstance, input.instanceExtras))) { discard; }";
+        expect(regular).toContain(discardCall);
+        expect(thin).toContain(discardCall);
         expect(thin).toContain("let world = mat4x4f(");
         expect(thin).toContain("vec4f(m[0].xyz, 0.0)");
         expect(thin).toContain("vec4f(m[3].xyz, 1.0)");

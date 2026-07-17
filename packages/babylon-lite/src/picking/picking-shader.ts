@@ -9,6 +9,7 @@ export interface PickingShaderOptions {
 const PICK_DISCARD_INPUT = /* wgsl */ `
 struct PickDiscardInput {
 worldPos: vec3f,
+fragmentCoord: vec2f,
 pickId: u32,
 thinInstanceIndex: u32,
 hasThinInstance: u32,
@@ -38,7 +39,7 @@ function pickDiscardStorageDecls(opts?: PickingShaderOptions): string {
 
 const PICK_FS = /* wgsl */ `
 struct VsOut {
-@builtin(position) position: vec4f,
+@builtin(position) p: vec4f,
 @location(0) @interpolate(flat) pickId: u32,
 @location(1) worldPos: vec3f,
 @location(2) @interpolate(flat) thinInstanceIndex: u32,
@@ -47,13 +48,12 @@ struct VsOut {
 };
 struct FsOut { @location(0) color: vec4f, @location(1) depth: vec4f };
 @fragment fn fs(input: VsOut) -> FsOut {
-let discardInput = PickDiscardInput(input.worldPos, input.pickId, input.thinInstanceIndex, input.hasThinInstance, input.instanceExtras);
-if (shouldDiscardPick(discardInput)) { discard; }
+if (shouldDiscardPick(PickDiscardInput(input.worldPos, input.p.xy, input.pickId, input.thinInstanceIndex, input.hasThinInstance, input.instanceExtras))) { discard; }
 let id = input.pickId;
 let r = f32((id >> 16u) & 0xFFu) / 255.0;
 let g = f32((id >> 8u) & 0xFFu) / 255.0;
 let b = f32(id & 0xFFu) / 255.0;
-return FsOut(vec4f(r, g, b, 1.0), vec4f(input.position.z, 0.0, 0.0, 0.0));
+return FsOut(vec4f(r, g, b, 1.0), vec4f(input.p.z, 0.0, 0.0, 0.0));
 }
 `;
 
@@ -75,7 +75,7 @@ ${PICK_FS}
 @vertex fn vs(@location(0) position: vec3f) -> VsOut {
 var out: VsOut;
 let wp = (mesh.world * vec4f(position, 1.0)).xyz;
-out.position = scene.viewProjection * vec4f(wp, 1.0);
+out.p = scene.viewProjection * vec4f(wp, 1.0);
 out.pickId = mesh.pickId;
 out.worldPos = wp;
 out.thinInstanceIndex = 0xffffffffu;
@@ -115,7 +115,7 @@ vec4f(m[3].xyz, 1.0),
 );
 var out: VsOut;
 let wp = (world * vec4f(position, 1.0)).xyz;
-out.position = scene.viewProjection * vec4f(wp, 1.0);
+out.p = scene.viewProjection * vec4f(wp, 1.0);
 out.pickId = tiMesh.baseMeshPickId + instanceIndex;
 out.worldPos = wp;
 out.thinInstanceIndex = instanceIndex;

@@ -21,6 +21,7 @@
 import { build, type Plugin } from "vite";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import { cpSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync } from "fs";
 import {
     labDir,
@@ -50,6 +51,22 @@ const TETRIS_SRC = resolve(labDir, "public/tetris");
 const PLATFORMER_SRC = resolve(labDir, "public/platformer");
 const SANDBLOX_SRC = resolve(labDir, "public/sandblox");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
+
+const _demoRequire = createRequire(import.meta.url);
+
+/** Absolute path to the ESM build of `@babylonjs/havok`, or null if unavailable.
+ *  Scenes externalize Havok to `/vendor/havok.js` via an import map, but standalone
+ *  demo bundles have no import map — so we alias Havok to this ESM file and bundle
+ *  it inline (its WASM is still fetched at runtime via the caller's `locateFile`). */
+function havokEsmEntry(): string | null {
+    try {
+        const havokMain = _demoRequire.resolve("@babylonjs/havok");
+        const esm = resolve(dirname(dirname(havokMain)), "esm/HavokPhysics_es.js");
+        return existsSync(esm) ? esm : null;
+    } catch {
+        return null;
+    }
+}
 
 interface DemoConfigEntry {
     slug: string;
@@ -242,7 +259,7 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
         }
     }
 
-    for (const file of [...DRACO_FILES, "meshopt_decoder.js", "brdf-lut.png"]) {
+    for (const file of [...DRACO_FILES, "meshopt_decoder.js", "brdf-lut.png", "HavokPhysics.wasm"]) {
         const src = resolve(labDir, "public", file);
         if (existsSync(src)) {
             cpSync(src, resolve(demosDir, file));
@@ -269,6 +286,10 @@ export async function buildDemo(slug: string): Promise<void> {
     const demoOutDir = resolve(demosDir, slug);
     rmSync(demoOutDir, { recursive: true, force: true });
 
+    // Standalone demos have no import map, so Havok can't be externalized to
+    // /vendor/havok.js like scenes do — bundle its ESM build inline instead.
+    const havokEsm = havokEsmEntry();
+
     const buildResult = await build({
         root: labDir,
         configFile: false,
@@ -282,7 +303,7 @@ export async function buildDemo(slug: string): Promise<void> {
             // loop fast (no package rebuild required to see demo changes). Demo sizes could
             // therefore differ slightly from a real consumer's, but the scene bundle-size
             // tests (which DO build against `build/lib`) are what guard against size drift.
-            alias: { "babylon-lite": srcDir },
+            alias: { "babylon-lite": srcDir, ...(havokEsm ? { "@babylonjs/havok": havokEsm } : {}) },
             dedupe: ["@babylonjs/core"],
         },
         build: {
@@ -294,7 +315,8 @@ export async function buildDemo(slug: string): Promise<void> {
             modulePreload: { polyfill: false, resolveDependencies: () => [] },
             rollupOptions: {
                 input: { [slug]: resolve(labDir, `lite/src/demos/${slug}.ts`) },
-                external: isLiteBundleExternal,
+                // Bundle Havok inline (aliased above); keep the other vendor runtimes external.
+                external: (id: string) => id !== "@babylonjs/havok" && isLiteBundleExternal(id),
                 output: {
                     format: "es",
                     entryFileNames: "[name].js",
