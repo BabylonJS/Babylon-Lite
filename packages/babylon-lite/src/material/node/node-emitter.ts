@@ -107,12 +107,39 @@ export function castExpr(value: NodeExpr, target: NodeValueType): NodeExpr {
     throw new Error(`NodeMaterial: cannot cast ${value.type} to ${target} for expression \`${value.expr}\``);
 }
 
+/** @internal Sanitize a block/input name for use as a WGSL identifier. */
+export function sanitize(name: string): string {
+    return name.replace(/[^A-Za-z0-9_]/g, "_");
+}
+
+/** @internal Map Babylon.js connection-point flags to Lite's node value types. */
+export function bjsTypeToNodeType(type: number, source = "NodeMaterial"): NodeValueType {
+    if (type === 0x1 || type === 0x2) {
+        return "f32";
+    }
+    if (type === 0x4) {
+        return "vec2f";
+    }
+    if (type === 0x8 || type === 0x20) {
+        return "vec3f";
+    }
+    if (type === 0x10 || type === 0x40) {
+        return "vec4f";
+    }
+    if (type === 0x80) {
+        return "mat4f";
+    }
+    throw new Error(`${source}: unsupported BJS connection point type 0x${type.toString(16)}`);
+}
+
 function makeContext(graph: NodeGraph, loadedEmitters: Map<string, BlockEmitter>): NodeEmitContext {
     const ctx: NodeEmitContext = {
         graph,
         _loadedEmitters: loadedEmitters,
         temp: (state, prefix) => mintTemp(state, prefix),
         cast: castExpr,
+        sanitize,
+        bjsTypeToNodeType,
         resolve: (block, inputName, stage, state) => {
             const input = block.inputs.get(inputName);
             if (!input) {

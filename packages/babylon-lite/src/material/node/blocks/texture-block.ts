@@ -35,10 +35,6 @@ function applyColorSpace(expr: string, outputName: string, convertToLinear: bool
     return expr;
 }
 
-function sanitize(name: string): string {
-    return name.replace(/[^A-Za-z0-9_]/g, "_");
-}
-
 export const emitter: BlockEmitter = {
     className: "TextureBlock",
     emit(block, outputName, stage, state, ctx) {
@@ -48,9 +44,9 @@ export const emitter: BlockEmitter = {
         const source = block.inputs.get("source");
         if (source?.source) {
             const producer = ctx.graph.blocks.get(source.source.blockId);
-            bindingName = sanitize(producer?.name || `tex${block.id}`);
+            bindingName = ctx.sanitize(producer?.name || `tex${block.id}`);
         } else {
-            bindingName = sanitize(block.name || `tex${block.id}`);
+            bindingName = ctx.sanitize(block.name || `tex${block.id}`);
         }
 
         // Dedup binding.

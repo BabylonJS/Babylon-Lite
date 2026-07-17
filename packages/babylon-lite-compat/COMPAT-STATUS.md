@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `b1d90d67bc09f56bf2882671f4484997630c4482`
-- **Last sync date:** 2026-07-09
+- **Last synced BJS commit:** `958a8dbed4e263d412ee9255ae747299043de19f`
+- **Last sync date:** 2026-07-10
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -89,6 +89,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `engine.runRenderLoop` / `stopRenderLoop`                                                                                                                                             | ⚡ Partial       | engine (async startup; N callbacks)                                                                                                                                           |
 | `engine.resize` / `setSize` / `dispose` / `getRenderingCanvas`                                                                                                                        | ✅ Full          | engine                                                                                                                                                                        |
 | `engine.getCaps()` (compressed-format flags `astc` / `s3tc` / `etc2`)                                                                                                                 | ✅ Full          | engine (derived from the Lite WebGPU device's enabled features)                                                                                                               |
+| `AbstractEngine.Version` / `AbstractEngine.NpmPackage` (static)                                                                                                                        | ✅ Full          | engine (reports the underlying Babylon Lite runtime `VERSION`, wrapped as `@babylonjs/lite-compat@<version>` for `NpmPackage`)                                                 |
 | `engine.beginFrame` / `endFrame`                                                                                                                                                      | ❌ Not supported | —                                                                                                                                                                             |
 | `NullEngine`                                                                                                                                                                          | ✅ Full          | [engine/engine.ts](src/engine/engine.ts) (backed by Lite's real device-less `createNullEngine`; scene built with `defaultRenderTask: false` — no swapchain/GPU resource — and advanced via Lite `stepScene`, which fires the same before-render hook as the GPU path) |
 | `AbstractScene` / `Scene`                                                                                                                                                             | ⚡ Partial       | [scene/scene.ts](src/scene/scene.ts) over [scene/abstract-scene.ts](src/scene/abstract-scene.ts) (entity collections on `AbstractScene`, as in BJS)                           |
@@ -141,7 +142,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `PointLight`                                          | ✅ Full            | lights                                   |
 | `SpotLight`                                           | ✅ Full            | lights                                   |
 | `light.diffuse/specular/intensity/position/direction` | ✅ Full            | lights                                   |
-| `light.setEnabled(false)`                             | 🔧 Needs Lite core | per-light visibility toggle              |
+| `light.setEnabled(false)`                             | ✅ Full            | lights (no per-light flag in Lite; a disabled light zeroes its intensity in the shared lights UBO and restores the logical value on re-enable) |
 | `RectAreaLight`                                       | ❌ Not supported   | not in Lite                              |
 | `ClusteredLightContainer`                             | ❌ Not supported   | throwing stub; not in Lite's public API  |
 
