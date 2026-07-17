@@ -23,6 +23,7 @@ async function fetchGitHubPullRequest(url: string, headers: Record<string, strin
         if (response.ok || (response.status !== 429 && response.status < 500) || attempt === GITHUB_FETCH_ATTEMPTS) {
             return response;
         }
+        await response.body?.cancel();
         console.warn(`GitHub PR metadata request returned ${response.status} ${response.statusText}; retrying (${attempt}/${GITHUB_FETCH_ATTEMPTS}).`);
         await new Promise((resolve) => setTimeout(resolve, attempt * 250));
     }
