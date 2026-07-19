@@ -321,6 +321,30 @@ Other deltas:
 - **Unmute UI.** `createUnmuteUI(engine, { parentElement? })` plus
   `setUnmuteUIEnabled(ui, enabled)` and `disposeUnmuteUI(ui)` (capitalized `UI`,
   and a richer handle than `{ dispose() }`).
+- **Media-stream output (Lite-only).** The final post-master mix can be mirrored
+  into browser media pipelines without affecting speaker output:
+
+  ```typescript
+  export interface AudioEngineMediaStream {
+      readonly stream: MediaStream;
+      /** @internal */ readonly _engine: AudioEngine;
+      /** @internal */ readonly _source: GainNode;
+      /** @internal */ readonly _destination: MediaStreamAudioDestinationNode;
+      /** @internal */ readonly _engineDisposer: () => void;
+      /** @internal */ _registered: boolean;
+      /** @internal */ _disposed: boolean;
+      /** @internal */ _dispose(): void;
+  }
+
+  export function createAudioEngineMediaStream(engine: AudioEngine): AudioEngineMediaStream;
+  export function disposeAudioEngineMediaStream(output: AudioEngineMediaStream): void;
+  ```
+
+  Creation requires a real-time `AudioContext`, connects a
+  `MediaStreamAudioDestinationNode` in parallel with the audible destination,
+  and registers idempotent engine-owned cleanup. Disposal disconnects only this
+  tap, stops every track in its stream, and unregisters the engine cleanup
+  closure so repeated recording sessions do not accumulate retained handles.
 - **Visualizer (Lite-only, no AudioV2 counterpart).** A small canvas-2D
   waveform/bars helper for the demo and manual use:
   `createAudioVisualizer(host, canvas, options?)`,
@@ -421,6 +445,15 @@ createAudioEngineAsync
 disposeAudioEngine
   → run every fn in engine._disposers (removes listeners, clears interval/RAF)
   → close ctx unless it was provided/offline
+
+createAudioEngineMediaStream
+  → require a real-time AudioContext
+  → create MediaStreamAudioDestinationNode
+  → connect mainOut GainNode → media-stream destination (speaker path remains connected)
+  → register idempotent tap disposal in engine._disposers
+disposeAudioEngineMediaStream
+  → disconnect only the media-stream destination
+  → stop every MediaStreamTrack owned by the tap
 ```
 
 All global hooks (`document` click listener, `setInterval`, spatial `requestAnimationFrame`) are registered into `engine._disposers` so disposal is leak-free. **Nothing is registered at module load** — the engine handle owns it all.
@@ -452,6 +485,7 @@ last instance ends (non-looping full play, or explicit stop).
 | `createStreamingSoundAsync`        | `CreateStreamingSoundAsync` + `_WebAudioStreamingSound`      |
 | `createMicrophoneSoundSourceAsync` | `_WebAudioSoundSource` (getUserMedia)                        |
 | `createUnmuteUi`                   | `_WebAudioUnmuteUI` (parentElement injected, no EngineStore) |
+| `createAudioEngineMediaStream`     | Lite-only `MediaStreamAudioDestinationNode` post-master tap  |
 
 Behavior (node types, parameter mappings, ramp curves, panner/listener math)
 is identical. Only ownership, side-effect timing, and call syntax change.
@@ -462,7 +496,8 @@ is identical. Only ownership, side-effect timing, and call syntax change.
 
 - **Web Audio API** (`AudioContext`, `GainNode`, `PannerNode`,
   `StereoPannerNode`, `AnalyserNode`, `AudioBufferSourceNode`,
-  `MediaElementAudioSourceNode`, `MediaStreamAudioSourceNode`).
+  `MediaElementAudioSourceNode`, `MediaStreamAudioSourceNode`,
+  `MediaStreamAudioDestinationNode`).
 - **Lite `math/`** — `Vec3`, `Quat`, `Mat4` (spatial only; static/streaming/bus
   pull no math).
 - **`fetch()`** — same plain pattern as every other Lite loader (no WebRequest).
@@ -474,8 +509,9 @@ is identical. Only ownership, side-effect timing, and call syntax change.
 
 - `audio/index.ts` re-exports only side-effect-free modules; nothing runs at import.
 - Feature modules (`spatial/`, `streaming/`, `analyzer/`, `microphone/`,
-  `unmute-ui/`) are reachable only through their own factory functions, so an
-  app using just `createSoundAsync` + `playSound` drops every other module.
+  `media-stream-output/`, `unmute-ui/`) are reachable only through their own
+  factory functions, so an app using just `createSoundAsync` + `playSound`
+  drops every other module.
 - The sub-node `ensureXSubNode` registration is wired through the option parser,
   not a global registry — unused sub-nodes are eliminated.
 - Lazy-init for all caches (ramp curves, file-extension regex). **No
@@ -532,7 +568,9 @@ optionally, draw that PCM to a canvas for a deterministic _visual_ gate.
    mutation, no `document`/`setInterval`/`new AudioContext` at import time
    (guards the zero-side-effect pillar).
 6. **Disposal** — `disposeAudioEngine` removes the click listener, clears the
-   resume interval/RAF, and closes only contexts it created.
+   resume interval/RAF, stops registered media-stream output tracks, and closes
+   only contexts it created. `disposeAudioEngineMediaStream` disconnects only
+   its tap, stops its tracks, and is idempotent.
 
 ### Tier 2 — Output correctness (`OfflineAudioContext` → PCM), opt-in (native) ★ primary correctness tier
 
@@ -606,6 +644,7 @@ packages/babylon-lite/src/audio/
   stereo.ts                 # StereoPannerNode sub-node
   analyzer.ts               # AnalyserNode (frequency + time-domain readback)
   sound-source.ts           # createSoundSourceAsync / microphone (getUserMedia)
+  media-stream-output.ts     # post-master MediaStream tap (recording / WebRTC)
   unmute-ui.ts              # DOM button (parentElement injected)
   visualizer.ts             # runtime canvas waveform/bars (demo + manual; Lite-only)
   host-types.ts             # AudioGraphHost union + shared sub-graph host plumbing

@@ -767,6 +767,8 @@ export type { NavigationPlugin, NavCrowd, NavMeshParameters, NavMeshSource, Agen
 // ─── Audio (AudioV2 port) ────────────────────────────────────────────
 export { createAudioEngineAsync, disposeAudioEngine, unlockAudioEngineAsync, setMasterVolume, getMasterVolume } from "./audio/audio-engine.js";
 export type { AudioEngine, AudioEngineOptions, AudioEngineState } from "./audio/audio-engine.js";
+export { createAudioEngineMediaStream, disposeAudioEngineMediaStream } from "./audio/media-stream-output.js";
+export type { AudioEngineMediaStream } from "./audio/media-stream-output.js";
 export { createSoundAsync, playSound, pauseSound, resumeSound, stopSound, disposeSound, setSoundVolume, SoundState } from "./audio/static-sound.js";
 export type { StaticSound, StaticSoundOptions, StaticSoundPlayOptions, StaticSoundStopOptions } from "./audio/static-sound.js";
 export {
