@@ -250,6 +250,7 @@ return input.hasThinInstance == 1u && input.instanceExtras.x > 4.0;
     it("injects a custom world adjustment into regular and thin-instance picking shaders", () => {
         const worldAdjustWgsl = `
 fn adjustPickWorld(worldPos: vec3f, instanceExtras: vec4f, thinInstanceIndex: u32) -> vec3f {
+if (thinInstanceIndex == 0xffffffffu) { return worldPos; }
 return worldPos + offsets[thinInstanceIndex].xyz + instanceExtras.xyz;
 }`;
         const options = {
