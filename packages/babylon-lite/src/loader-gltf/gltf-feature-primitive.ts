@@ -5,7 +5,7 @@
  *  affected mesh and installs the PBR pipeline's primitive resolver (topology + stripIndexFormat +
  *  culling). The common triangle-list positive-winding case never loads this module, so the core
  *  loader + pipeline chunks stay byte-identical. */
-import "../material/pbr/pbr-primitive-resolver.js";
+import { setMeshSideOrientation, MeshSideOrientation } from "../mesh/mesh-side-orientation.js";
 import type { GltfFeature } from "./gltf-feature.js";
 
 const feature: GltfFeature = {
@@ -20,11 +20,13 @@ const feature: GltfFeature = {
         }
         // A mesh whose net world-matrix determinant is positive (mirrored vs the RH→LH root flip) has
         // reversed triangle winding; flag it so the pipeline culls "front" (matching BJS, which flips
-        // sideOrientation on negative determinant). Normal meshes have a negative world determinant.
+        // sideOrientation on negative determinant). Normal glTF meshes have a negative world
+        // determinant (the RH→LH root contributes det < 0), so the threshold here is the mirror image
+        // of the native-space rule in updateMeshSideOrientationFromTransform.
         const wm = meshData._worldMatrix as unknown as ArrayLike<number>;
         const det3 = wm[0]! * (wm[5]! * wm[10]! - wm[6]! * wm[9]!) + wm[1]! * (wm[6]! * wm[8]! - wm[4]! * wm[10]!) + wm[2]! * (wm[4]! * wm[9]! - wm[5]! * wm[8]!);
         if (det3 > 0) {
-            (mesh as { _reverseWinding?: boolean })._reverseWinding = true;
+            setMeshSideOrientation(mesh, MeshSideOrientation.FrontClockwise);
         }
     },
 };

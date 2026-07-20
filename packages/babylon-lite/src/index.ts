@@ -421,6 +421,7 @@ export { resolveCameraViewport } from "./camera/viewport.js";
 export type { PixelViewport } from "./camera/viewport.js";
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
+export { setMeshSideOrientation, updateMeshSideOrientationFromTransform, MeshSideOrientation } from "./mesh/mesh-side-orientation.js";
 export { disposeMeshGpu } from "./mesh/mesh-dispose.js";
 export { computeMaxExtents } from "./mesh/compute-max-extents.js";
 export type { MeshExtent } from "./mesh/compute-max-extents.js";
