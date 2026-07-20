@@ -40,13 +40,16 @@ _installMeshFeatureExtra((mesh: Mesh): number => {
 });
 
 _installPbrPrimitiveResolver((meshFeatures, hasDoubleSided): GPUPrimitiveState => {
-    // A mirrored mesh (positive world determinant, e.g. KHR negative node scale) has reversed
-    // triangle winding. We flip the pipeline's `frontFace` (ccw→cw) rather than the cull face, so
-    // WebGPU's `@builtin(front_facing)` value is computed against the mirrored winding. This keeps
-    // the double-sided shader's front-facing normal flip correct (a cullMode flip would leave
-    // front_facing evaluated against the un-mirrored ccw winding, wrongly inverting the shading
-    // normal on the visible outer surface → black). Matches BJS, which flips sideOrientation (the
-    // GL front-face winding) when the world matrix determinant is negative.
+    // `reverseWinding` marks a mesh mirrored relative to Lite's world space: the loader sets it when
+    // the node's world-matrix determinant is positive. (Lite applies a RH→LH root flip with det < 0,
+    // so an un-mirrored glTF node lands at a negative world determinant and a mirrored one — e.g. KHR
+    // negative node scale — at a positive one.) A mirrored mesh has reversed triangle winding, so we
+    // flip the pipeline's `frontFace` (ccw→cw) rather than the cull face: WebGPU derives
+    // `@builtin(front_facing)` from `frontFace`, so this keeps the double-sided shader's front-facing
+    // normal flip correct (a cullMode flip would leave front_facing evaluated against the un-mirrored
+    // ccw winding, wrongly inverting the shading normal on the visible outer surface → black). BJS
+    // handles the same case by flipping sideOrientation (the GL front-face winding); it states the
+    // condition as a negative determinant because it measures the sign in its own opposite-handed space.
     const reverseWinding = (meshFeatures & MSH_REVERSE_WINDING) !== 0;
     // Non-triangle-list primitive topology. Points and lines have no faces to cull; for a strip the
     // material's culling still applies.
