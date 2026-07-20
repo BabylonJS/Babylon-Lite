@@ -2278,5 +2278,16 @@
         "description": "EnvironmentTest.gltf (glTF-IBL) — cx20 gltf-test. Exercises EXT_lights_image_based: the glTF carries its own document-level image-based light (irradiance SH9 + prefiltered specular cubemap mips + intensity/rotation), driving PBR IBL through Lite's existing environment path (EnvironmentTextures + scene UBO spherical harmonics). Grid of metallic-roughness spheres.",
         "tags": ["gltf", "pbr", "env", "ibl"],
         "skipPerf": true
+    },
+    {
+        "id": 266,
+        "slug": "scene266-negative-scale-doublesided",
+        "name": "Scene 266 — Negative Scale (Double-Sided)",
+        "maxMad": 0.15,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 79.5,
+        "description": "Khronos NegativeScaleTest.glb: a grid of double-sided PBR material spheres, each rendered as an un-mirrored copy and a negative-determinant (mirrored) copy. Validates that winding reversal on mirrored double-sided meshes keeps WebGPU front_facing consistent with the geometry; Lite previously flipped the cull face instead of the front-face winding, so the double-sided normal flip inverted the outward normal and the mirrored reflective spheres rendered black.",
+        "tags": ["gltf", "transform", "pbr"],
+        "skipPerf": true
     }
 ]

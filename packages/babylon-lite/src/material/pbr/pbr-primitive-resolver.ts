@@ -41,8 +41,12 @@ _installMeshFeatureExtra((mesh: Mesh): number => {
 
 _installPbrPrimitiveResolver((meshFeatures, hasDoubleSided): GPUPrimitiveState => {
     // A mirrored mesh (positive world determinant, e.g. KHR negative node scale) has reversed
-    // triangle winding, so back-face culling must cull the FRONT face instead. Matches BJS, which
-    // flips sideOrientation when the world matrix determinant is negative.
+    // triangle winding. We flip the pipeline's `frontFace` (ccw→cw) rather than the cull face, so
+    // WebGPU's `@builtin(front_facing)` value is computed against the mirrored winding. This keeps
+    // the double-sided shader's front-facing normal flip correct (a cullMode flip would leave
+    // front_facing evaluated against the un-mirrored ccw winding, wrongly inverting the shading
+    // normal on the visible outer surface → black). Matches BJS, which flips sideOrientation (the
+    // GL front-face winding) when the world matrix determinant is negative.
     const reverseWinding = (meshFeatures & MSH_REVERSE_WINDING) !== 0;
     // Non-triangle-list primitive topology. Points and lines have no faces to cull; for a strip the
     // material's culling still applies.
@@ -55,7 +59,7 @@ _installPbrPrimitiveResolver((meshFeatures, hasDoubleSided): GPUPrimitiveState =
     return {
         topology,
         ...(stripIndexFormat ? { stripIndexFormat } : undefined),
-        cullMode: noCull || hasDoubleSided ? "none" : reverseWinding ? "front" : "back",
-        frontFace: "ccw",
+        cullMode: noCull || hasDoubleSided ? "none" : "back",
+        frontFace: reverseWinding ? "cw" : "ccw",
     };
 });
