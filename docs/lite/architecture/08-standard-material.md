@@ -679,7 +679,7 @@ registerScene(scene)       → runs deferred builders and builds frame graph
 | `fragment composition`            | Bump fragment injects perturbNormal helper + AC slot code   |
 | `shadow fragment ESM`             | ESM shadow factor computation per light                     |
 | `shadow fragment PCF`             | PCF shadow factor computation per light                     |
-| `scene266-standard-vertex-colors`  | Standard RGBA vertex-color interpolation matches BJS exactly |
+| `scene267-standard-vertex-colors`  | Standard RGBA vertex-color interpolation matches BJS exactly |
 
 ## File Manifest
 
