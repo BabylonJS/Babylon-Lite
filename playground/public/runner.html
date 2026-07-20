@@ -12,7 +12,10 @@
         -->
         <script>
             (function () {
-                var engine = new URLSearchParams(location.search).get("engine") || "/engine/dev/index.js";
+                // Default engine path is relative to this runner.html so it resolves
+                // under the app's deploy base (root or a /pr|/v sub-path). The parent
+                // normally passes an explicit, base-resolved URL via `?engine=`.
+                var engine = new URLSearchParams(location.search).get("engine") || "./engine/dev/index.js";
                 var map = document.createElement("script");
                 map.type = "importmap";
                 map.textContent = JSON.stringify({ imports: { "@babylonjs/lite": engine } });

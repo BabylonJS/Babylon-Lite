@@ -8,8 +8,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
-import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
-import type { GltfFeature } from "./gltf-feature.js";
+import type { GltfMaterialData } from "./gltf-material.js";
 import { mipLevelCount } from "../texture/mip-count.js";
 import { linearToSrgbByte } from "../math/color.js";
 
@@ -55,6 +54,22 @@ export function uploadTex(
     };
     engine._dlr?.b(result, bitmap, srgb, !!bitmap, fallback);
     return result;
+}
+
+export function uploadBaseColorFactorTexture(engine: EngineContext, factor: readonly number[], sampler: GPUSampler, generateMipmaps: GenerateMipmapsFn): Texture2D {
+    return uploadTex(
+        engine,
+        null,
+        true,
+        sampler,
+        generateMipmaps,
+        new U8([linearToSrgbByte(factor[0]!), linearToSrgbByte(factor[1]!), linearToSrgbByte(factor[2]!), Math.round(Math.max(0, Math.min(1, factor[3]!)) * 255)])
+    );
+}
+
+export function uploadOrmFactorTexture(engine: EngineContext, roughness: number, metallic: number, sampler: GPUSampler, generateMipmaps: GenerateMipmapsFn): Texture2D {
+    const clamp = (value: number): number => Math.round(Math.max(0, Math.min(1, value)) * 255);
+    return uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(roughness), clamp(metallic), 255]));
 }
 
 /** Assemble a PbrMaterialProps from parsed glTF material data + already-uploaded
@@ -108,19 +123,7 @@ export function buildDefaultPbrTextures(
     generateMipmaps: GenerateMipmapsFn,
     getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => Texture2D
 ): { baseColorTexture: Texture2D; ormTexture: Texture2D; normalTexture: Texture2D | undefined; emissiveTexture: Texture2D | undefined } {
-    const baseColorTexture = mat._baseColorImage
-        ? getCachedTex(mat._baseColorImage, true)
-        : (() => {
-              const f = mat._baseColorFactor;
-              return uploadTex(
-                  engine,
-                  null,
-                  true,
-                  sampler,
-                  generateMipmaps,
-                  new U8([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
-              );
-          })();
+    const baseColorTexture = mat._baseColorImage ? getCachedTex(mat._baseColorImage, true) : uploadBaseColorFactorTexture(engine, mat._baseColorFactor, sampler, generateMipmaps);
     const normalTexture = mat._normalImage ? getCachedTex(mat._normalImage, false) : undefined;
     const emissiveTexture = mat._emissiveImage ? getCachedTex(mat._emissiveImage, true) : undefined;
 
@@ -129,26 +132,9 @@ export function buildDefaultPbrTextures(
     if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
         ormTexture = getCachedTex(single, false);
     } else if (!single) {
-        const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
+        ormTexture = uploadOrmFactorTexture(engine, mat._roughnessFactor, mat._metallicFactor, sampler, generateMipmaps);
     } else {
         ormTexture = getCachedTex(mat._metallicRoughnessImage!, false);
     }
     return { baseColorTexture, ormTexture, normalTexture, emissiveTexture };
-}
-
-/** Run all material-layer features and merge their fragments. */
-export async function runMatExts(mat: GltfMaterialData, exts: GltfFeature[], ctx: GltfMatExtCtx): Promise<Partial<PbrMaterialProps> | undefined> {
-    if (!exts.length) {
-        return undefined;
-    }
-    const fragments = await Promise.all(exts.map((ext) => ext.applyMaterial!(mat, ctx)));
-    let layers: Partial<PbrMaterialProps> | undefined;
-    for (const f of fragments) {
-        if (f) {
-            layers ??= {};
-            Object.assign(layers, f);
-        }
-    }
-    return layers;
 }

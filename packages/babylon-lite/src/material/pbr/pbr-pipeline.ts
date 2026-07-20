@@ -251,7 +251,7 @@ export function createPbrMeshBindGroup(
         addTex(material.normalTexture!);
     }
     addTex(material.ormTexture ?? _pbrFallbackResolver?.(engine)!);
-    if ((features2 & PBR2_HAS_UV2) !== 0 && (meshFeatures & MSH_HAS_UV2) !== 0 && material.occlusionTexture) {
+    if ((features2 & PBR2_HAS_UV2) !== 0 && (meshFeatures & MSH_HAS_UV2) !== 0 && material.occlusionTexture && material.occlusionTexCoord === 1) {
         addTex(material.occlusionTexture);
     }
     if (hasEmissive) {

@@ -20,19 +20,13 @@
 import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, ClearCoatProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import {
-    PBR_HAS_CLEARCOAT,
-    PBR_HAS_METALLIC_REFLECTANCE_MAP,
-    PBR_HAS_REFLECTANCE_MAP,
-    PBR2_CC_INT_MAP,
-    PBR2_CC_ROUGH_MAP,
-    PBR2_CC_NORMAL_MAP,
-    PBR2_CC_F0_REMAP_OFF,
-} from "../pbr-flag-bits.js";
+import { PBR_HAS_CLEARCOAT, PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP } from "../pbr-flag-bits.js";
 
-// Clearcoat-only features2 bit (reserved in pbr-flag-bits.ts). Defined here, not
-// in the shared flag module, for zero bundle movement on scenes that never load
-// this lazy fragment.
+// Clearcoat-only features2 bits, kept out of the shared flag module.
+const PBR2_CC_INT_MAP = 1 << 0;
+const PBR2_CC_ROUGH_MAP = 1 << 1;
+const PBR2_CC_NORMAL_MAP = 1 << 2;
+const PBR2_CC_F0_REMAP_OFF = 1 << 3;
 const PBR2_CC_UV_TX = 1 << 25;
 
 const STAGE_FRAGMENT = 0x2;

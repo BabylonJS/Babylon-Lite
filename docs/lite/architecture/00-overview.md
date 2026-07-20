@@ -381,6 +381,7 @@ createEsmDirectionalShadowGenerator(engine: Engine, light: DirectionalLight, con
 createPcfSpotlightShadowGenerator(engine: Engine, light: SpotLight, config?: PcfSpotlightShadowGeneratorConfig): ShadowGenerator
 createPcfDirectionalShadowGenerator(engine: Engine, light: DirectionalLight, config?: PcfDirectionalShadowGeneratorConfig): ShadowGenerator
 setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): void
+setShadowCasterMaxCascade(mesh: Mesh, maxCascade: number): void
 
 // Animation
 createAnimationController(skeleton, scene): AnimationController

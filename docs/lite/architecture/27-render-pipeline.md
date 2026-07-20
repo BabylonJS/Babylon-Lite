@@ -185,7 +185,20 @@ export type MaterialOrView = Material | MaterialView;
 export function createMaterialView(source: MaterialOrView, renderFeatures: MaterialRenderFeatures): MaterialView;
 export function markMaterialUboDirty(materialOrView: MaterialOrView): void;
 export function rebuildMaterial(scene: SceneContext, materialOrView: MaterialOrView, options?: RebuildMaterialOptions): void;
+
+// Public, read-only material-family discriminator.
+export function getMaterialFamily(material: MaterialOrView): string | undefined;
+
+// Public TypeScript type guards for the well-known core material families.
+export function isPbrMaterial(material: Material): material is PbrMaterialProps;
+export function isStandardMaterial(material: Material): material is StandardMaterialProps;
+export function isShaderMaterial(material: Material): material is ShaderMaterial;
+export function isNodeMaterial(material: Material): material is NodeMaterial;
 ```
+
+`getMaterialFamily()` returns a stable string identifying which concrete family a material belongs to, so scene explorers, serializers, and diagnostics can display the family using only public APIs — never private renderer fields or property-shape heuristics. It unwraps a `MaterialView` to its `source` and reads the family declared on the material's `_buildGroup`. It returns `"pbr"`, `"standard"`, `"shader"` (including the grid material and other `createShaderMaterial`-based materials), `"node"`, or `undefined` (deliberately discoverable from the `string | undefined` signature so callers handle the unknown case). The material-builder surface (`_buildGroup`) is `@internal`, so package consumers cannot author their own builder: a user-created "custom material" is a `createShaderMaterial` (reported as `"shader"`) or a node material (`"node"`), and `getMaterialFamily` will not return an arbitrary user-defined string today. The return type is nonetheless a raw `string` rather than a string-literal union so a new core family can be added without a breaking change, and so the function stays forward-compatible if a public custom-family builder API is introduced later (it passes any tagged string through unchanged).
+
+`isPbrMaterial()`, `isStandardMaterial()`, `isShaderMaterial()`, and `isNodeMaterial()` are formal TypeScript type guards over `getMaterialFamily()`: each narrows a `Material` to the concrete family type (`PbrMaterialProps`, `StandardMaterialProps`, `ShaderMaterial`, `NodeMaterial`). A `MaterialView` over a matching source passes its family's guard, since it inherits every property from the source through its prototype chain. All of these functions are fully tree-shakable: scenes that never call them retain zero bytes for them.
 
 `createMaterialView()` creates a material-compatible object whose prototype is the source material, then stores only view-owned render feature bits and a `source` pointer. Textures, samplers, uniforms, alpha/culling state, extension data, `_buildGroup`, and UBO versions are inherited from the source material. Creating a view from another view collapses to the original source and registers the new view in `source._views`.
 

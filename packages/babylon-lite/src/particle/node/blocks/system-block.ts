@@ -37,9 +37,24 @@ export const systemBlock: ParticleBlockEvaluator = {
             system.capacity = serialized.capacity;
         }
 
-        const emitRate = ctx.input(block, "emitRate", () => 10)(state);
-        if (typeof emitRate === "number") {
-            system.emitRate = emitRate;
+        // A dynamic emit rate (e.g. an emit-rate gradient over the system's target duration) is connected to
+        // a source and must be re-evaluated every step from the current `_actualFrame`; store a getter the
+        // animate loop calls. A constant emit rate is read once here and frozen.
+        if (ctx.isConnected(block, "emitRate")) {
+            const emitRateGetter = ctx.input(block, "emitRate", () => 10);
+            system._emitRateGetter = (sys) => {
+                state.system = sys;
+                const rate = emitRateGetter(state);
+                return typeof rate === "number" ? rate : sys.emitRate;
+            };
+        } else {
+            // Clear any previously-installed getter so a constant rate is never shadowed by a stale
+            // dynamic getter (defensive if this block ever re-runs against an already-configured system).
+            system._emitRateGetter = null;
+            const emitRate = ctx.input(block, "emitRate", () => 10)(state);
+            if (typeof emitRate === "number") {
+                system.emitRate = emitRate;
+            }
         }
 
         const targetStop = ctx.input(block, "targetStopDuration", () => 0)(state);

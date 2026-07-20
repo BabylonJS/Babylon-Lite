@@ -6,11 +6,9 @@ import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../render/renderable.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
-import { createWorldMatrixState } from "../scene/world-matrix-state.js";
+import { composeTrsLocalMatrix, createWorldMatrixState } from "../scene/world-matrix-state.js";
 import { createEulerProxy } from "../scene/scene-node.js";
 import type { EulerProxy } from "../scene/scene-node.js";
-import { mat4Compose } from "../math/mat4-compose.js";
-import { mat4Identity } from "../math/mat4-identity.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { SceneContext } from "../scene/scene-core.js";
@@ -86,13 +84,7 @@ export function createTextRenderable(data: TextData, options?: TextRenderableOpt
     const sc = options?.scaling;
     const initRq = rq ?? { x: 0, y: 0, z: 0, w: 1 };
 
-    const wm = createWorldMatrixState(() => {
-        const p = r.position;
-        const q = r.rotationQuaternion;
-        const s = r.scaling;
-        const isIdentity = p.x === 0 && p.y === 0 && p.z === 0 && q.x === 0 && q.y === 0 && q.z === 0 && q.w === 1 && s.x === 1 && s.y === 1 && s.z === 1;
-        return isIdentity ? mat4Identity() : mat4Compose(p.x, p.y, p.z, q.x, q.y, q.z, q.w, s.x, s.y, s.z);
-    });
+    const wm = createWorldMatrixState(() => composeTrsLocalMatrix(r.position, r.rotationQuaternion, r.scaling));
     const markDirty = (): void => {
         r._wmDirty = true;
         wm.markLocalDirty();

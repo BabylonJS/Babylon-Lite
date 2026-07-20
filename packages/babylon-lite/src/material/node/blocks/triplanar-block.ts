@@ -33,10 +33,6 @@ interface TextureTransform {
     readonly vScale: number;
 }
 
-function sanitize(name: string): string {
-    return name.replace(/[^A-Za-z0-9_]/g, "_");
-}
-
 function formatFloat(value: number): string {
     if (Number.isInteger(value)) {
         return `${value}.0`;
@@ -66,9 +62,9 @@ function bindingName(block: NodeBlock, inputName: string, ctx: NodeEmitContext, 
     const input = block.inputs.get(inputName);
     if (input?.source) {
         const producer = ctx.graph.blocks.get(input.source.blockId);
-        return sanitize(producer?.name || fallback);
+        return ctx.sanitize(producer?.name || fallback);
     }
-    return sanitize(fallback);
+    return ctx.sanitize(fallback);
 }
 
 function ensureBinding(state: NodeBuildState, name: string): void {
@@ -106,7 +102,7 @@ function emitTriPlanarSample(block: NodeBlock, stage: Stage, state: NodeBuildSta
         return memo;
     }
 
-    const baseName = sanitize(block.name || `triPlanar${block.id}`);
+    const baseName = ctx.sanitize(block.name || `triPlanar${block.id}`);
     const texX = bindingName(block, "source", ctx, baseName);
     const texY = bindingName(block, "sourceY", ctx, texX);
     const texZ = bindingName(block, "sourceZ", ctx, texX);

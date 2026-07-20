@@ -60,6 +60,13 @@
         "mobile": false
     },
     {
+        "slug": "break-meshes",
+        "name": "Break Meshes",
+        "description": "Voronoi mesh fracture + physics: the Khronos BoomBox glTF is split into cell pieces via half-space clipping (ported from CedricGuillemet/64Kb5) with UV interpolation, then duplicated into eleven randomly-rotated instances scattered across the ground. Each boombox rests assembled on its own static convex-hull cells; click one to GPU-pick it and shatter just that model — its cells flip to dynamic and the picked cell is punched along the pick ray. Original surfaces keep the PBR material; the exposed interior cut faces use a separate 'fractured core' material, all lit by an HDR environment with soft shadows.",
+        "tags": ["pbr", "gltf", "physics", "showcase"],
+        "mobile": true
+    },
+    {
         "slug": "mosquito-amber",
         "name": "Mosquito in Amber",
         "description": "glTF PBR showcase: the Khronos MosquitoInAmber model (KHR_materials_transmission + ior + volume). Frame-graph scene-texture transmission renders the refractive amber.",

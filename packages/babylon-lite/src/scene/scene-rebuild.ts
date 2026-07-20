@@ -1,6 +1,7 @@
 import type { SceneContext } from "./scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Renderable } from "../render/renderable.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;
 
@@ -28,7 +29,7 @@ export async function rebuildScenePbrPipelines(scene: SceneContext): Promise<voi
         return;
     }
 
-    const device = ctx.surface.engine._device;
+    const engine = ctx.surface.engine;
 
     let changed = false;
     for (const [builder, meshes] of ctx._groups) {
@@ -70,23 +71,16 @@ export async function rebuildScenePbrPipelines(scene: SceneContext): Promise<voi
         // re-acquired, so shared textures' refcounts return to their pre-rebuild value and stay alive.
         //
         // This must NOT run synchronously: the old per-mesh/material UBOs may still be referenced by a
-        // frame already submitted to the GPU this tick, and destroying them now hits the WebGPU validation
-        // error "Buffer used in submit while destroyed". Defer until the GPU has drained the currently-
-        // submitted work (onSubmittedWorkDone), mirroring processMaterialSwaps. The make-before-break
+        // next frame command buffer, and destroying them now hits the WebGPU validation error
+        // "Buffer used in submit while destroyed". Retire after that frame submits and drains, mirroring
+        // processMaterialSwaps. The make-before-break
         // refcount invariant holds across the defer: the builder already re-acquired the shared textures
         // (refcount bumped), so they stay alive until the deferred release nets the refcount back down.
-        void device.queue
-            .onSubmittedWorkDone()
-            .then(() => {
-                try {
-                    for (const fn of oldDisposers) {
-                        fn();
-                    }
-                } catch {
-                    // Device may have been lost/disposed before the deferred teardown ran.
-                }
-            })
-            .catch(() => {});
+        retireGpuResources(engine, () => {
+            for (const fn of oldDisposers) {
+                fn();
+            }
+        });
 
         changed = true;
     }

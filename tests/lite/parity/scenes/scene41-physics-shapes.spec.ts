@@ -4,11 +4,11 @@
  * Captures Babylon.js and Babylon Lite after a short deterministic fixed-step
  * simulation and compares the PhysicsViewer wireframe overlay.
  */
-import { test, expect } from "../parity-fixtures";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { acquireBjsPage, attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(41);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene41-physics-shapes");
@@ -24,7 +24,7 @@ async function captureBjsReference(browser: Browser): Promise<string> {
     }
 
     fs.mkdirSync(REFERENCE_DIR, { recursive: true });
-    const { page: bjsPage, release } = await acquireBjsPage(browser);
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
 
     await bjsPage.goto(`/babylon-ref-scene41.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 41 BJS reference" });

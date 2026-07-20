@@ -1,5 +1,6 @@
 import type { Mesh } from "./mesh.js";
 import { release } from "../resource/ref-count.js";
+import { _detachThinInstanceLodMesh } from "./thin-instance.js";
 
 /** Destroy all GPU resources owned by a mesh (vertex buffers, skeleton, morph targets).
  *  `_gpu`/`skeleton`/`morphTargets`/`thinInstances` may be SHARED with a clone made via
@@ -19,16 +20,34 @@ export function disposeMeshGpu(mesh: Mesh): void {
     }
     const ti = mesh.thinInstances;
     if (ti && release(ti)) {
+        _detachThinInstanceLodMesh(mesh);
         ti._gpuBuffer?.destroy();
         ti._colorGpuBuffer?.destroy();
+        ti._drawArgsBuffer?.destroy();
     }
     const sk = mesh.skeleton;
     if (sk && release(sk)) {
         sk.boneTexture.destroy();
-        sk.jointsBuffer.destroy();
-        sk.weightsBuffer.destroy();
-        sk.joints1Buffer?.destroy();
-        sk.weights1Buffer?.destroy();
+        if (release(sk._skinBuffers)) {
+            sk.jointsBuffer.destroy();
+            sk.weightsBuffer.destroy();
+            sk.joints1Buffer?.destroy();
+            sk.weights1Buffer?.destroy();
+        }
+    }
+    const vat = mesh.vat;
+    if (vat && release(vat)) {
+        vat.settingsBuffer.destroy();
+        vat.instanceTexture?.destroy();
+        if (release(vat._textureResource)) {
+            vat._textureResource.texture.destroy();
+        }
+        if (release(vat._skinBuffers)) {
+            vat.jointsBuffer.destroy();
+            vat.weightsBuffer.destroy();
+            vat.joints1Buffer?.destroy();
+            vat.weights1Buffer?.destroy();
+        }
     }
     const mt = mesh.morphTargets;
     if (mt && release(mt)) {

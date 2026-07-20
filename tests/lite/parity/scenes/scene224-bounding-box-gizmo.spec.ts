@@ -21,11 +21,11 @@
  * rotation-anchor geometry — which is the part this scene is meant to
  * cover.
  */
-import { test, expect } from "../parity-fixtures";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import * as fs from "fs";
 import * as path from "path";
 import type { Page } from "@playwright/test";
-import { acquireBjsPage, attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(224);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene224-bounding-box-gizmo");
@@ -87,7 +87,7 @@ test("Scene 224 — Bounding Box Gizmo matches Babylon.js reference (determinist
     const browser = page.context().browser()!;
 
     if (!fs.existsSync(GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
-        const { page: bjsPage, release } = await acquireBjsPage(browser);
+        const { page: bjsPage, release } = await acquireReferencePage(browser);
         await bjsPage.goto("/babylon-ref-scene224.html?nocam=1");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);

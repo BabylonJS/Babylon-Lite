@@ -10,10 +10,10 @@
  * indices remain a live DATA comparison: the BJS reference page is launched each run and every ray's
  * `hasHit` + hit instance index is asserted IDENTICAL to Lite's.
  */
-import { test, expect } from "../parity-fixtures";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import type { Browser, Page } from "@playwright/test";
 import * as path from "path";
-import { acquireBjsPage, captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
+import { captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(103);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene103-thin-instance-raycast");
@@ -34,7 +34,7 @@ async function readRayHits(page: Page): Promise<string | undefined> {
 
 /** Launch the BJS reference page live to read the raycast-hit DATA at the capture frame. */
 async function captureBjsData(browser: Browser): Promise<string | undefined> {
-    const { page: bjsPage, release } = await acquireBjsPage(browser);
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
 
     await bjsPage.goto(`/babylon-ref-scene103.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 103 BJS reference" });

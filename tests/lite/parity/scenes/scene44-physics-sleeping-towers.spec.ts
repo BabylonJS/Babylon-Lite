@@ -3,11 +3,11 @@
  *
  * Drops small boxes after 2 seconds and captures Babylon.js / Babylon Lite at 5 seconds.
  */
-import { test, expect } from "../parity-fixtures";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { acquireBjsPage, attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(44);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene44-physics-sleeping-towers");
@@ -23,7 +23,7 @@ async function captureBjsReference(browser: Browser): Promise<string> {
     }
 
     fs.mkdirSync(REFERENCE_DIR, { recursive: true });
-    const { page: bjsPage, release } = await acquireBjsPage(browser);
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
 
     await bjsPage.goto(`/babylon-ref-scene44.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 44 BJS reference" });

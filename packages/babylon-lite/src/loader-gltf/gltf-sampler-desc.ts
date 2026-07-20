@@ -1,7 +1,5 @@
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
-import { U8 } from "../engine/typed-arrays.js";
-import { linearToSrgbByte } from "../math/color.js";
-import { uploadTex } from "./gltf-pbr-builder.js";
+import { uploadBaseColorFactorTexture, uploadOrmFactorTexture } from "./gltf-pbr-builder.js";
 import type { GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
@@ -79,17 +77,7 @@ export function buildSampledPbrTextures(
 
     const baseColorTexture = mat._baseColorImage
         ? cached(mat._baseColorImage, true, pbr.baseColorTexture)
-        : (() => {
-              const f = mat._baseColorFactor;
-              return uploadTex(
-                  engine,
-                  null,
-                  true,
-                  defaultSampler,
-                  generateMipmaps,
-                  new U8([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
-              );
-          })();
+        : uploadBaseColorFactorTexture(engine, mat._baseColorFactor, defaultSampler, generateMipmaps);
     const normalTexture = mat._normalImage ? cached(mat._normalImage, false, def.normalTexture) : undefined;
     const emissiveTexture = mat._emissiveImage ? cached(mat._emissiveImage, true, def.emissiveTexture) : undefined;
 
@@ -99,8 +87,7 @@ export function buildSampledPbrTextures(
     if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
         ormTexture = cached(single, false, ormTexInfo);
     } else if (!single) {
-        const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-        ormTexture = uploadTex(engine, null, false, defaultSampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
+        ormTexture = uploadOrmFactorTexture(engine, mat._roughnessFactor, mat._metallicFactor, defaultSampler, generateMipmaps);
     } else {
         ormTexture = cached(mat._metallicRoughnessImage!, false, pbr.metallicRoughnessTexture);
     }

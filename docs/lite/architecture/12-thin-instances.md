@@ -8,6 +8,11 @@ Thin instances allow a single mesh to be drawn thousands of times with unique pe
 
 Thin instances are supported by all three mesh material families: **Standard**, **PBR**, and **ShaderMaterial** (custom user-WGSL). For ShaderMaterial integration specifics (auto-injected `world0..world3` / `instanceColor` vertex attributes and the user-shader contract) see `24-shader-material.md`.
 
+A ShaderMaterial draw may explicitly ignore an existing instance-color stream with
+`useThinInstanceColors: false`. This is draw-local: the mesh keeps its colors for other materials, while the
+selected material binds only the instance matrices. The canonical use is a color-independent depth override
+sharing the visible mesh's matrices without paying for unused color synchronization or vertex fetch.
+
 ---
 
 ## Public API Surface
@@ -30,6 +35,8 @@ export interface ThinInstanceData {
     _colorGpuBufferStorage: boolean;
     _colorGpuVersion: number;
     _gpuCullingEnabled: boolean; // opt-in GPU frustum culling + indirect draw
+    _lodPartner?: Mesh | null; // lower-detail mesh receiving the far cull bucket
+    _lodSource?: Mesh | null; // source mesh when this mesh is the LOD partner
 }
 ```
 
@@ -38,6 +45,15 @@ export interface ThinInstanceData {
 ```typescript
 /** Bulk-set all instance matrices. Creates ThinInstanceData if absent. */
 export function setThinInstances(mesh: Mesh, matrices: Float32Array, count: number): void;
+
+/** Change the active count and mark the complete active matrix range dirty. */
+export function setThinInstanceCount(mesh: Mesh, count: number): void;
+
+/** Change the active draw count without marking matrix or color data dirty. */
+export function setThinInstanceDrawCount(mesh: Mesh, count: number): void;
+
+/** Pre-create stable indirect draw arguments during scene warm-up. */
+export function enableThinInstanceDynamicDrawCount(mesh: Mesh): void;
 
 /** Add one instance. Returns the new instance index. Grows capacity 2× when full. */
 export function addThinInstance(mesh: Mesh, matrix: Mat4): number;
@@ -56,7 +72,33 @@ export function setThinInstanceColors(mesh: Mesh, colors: Float32Array): void;
 
 /** Enable/disable per-pass GPU frustum culling. Must be called before registerScene(). */
 export function enableThinInstanceGpuCulling(mesh: Mesh, enabled?: boolean): void;
+
+interface ThinInstanceLodPartnerOptions {
+    distance: number; // camera-space switch distance in world units
+    band?: number; // deterministic per-instance dither width, default 0
+}
+
+/** Split one GPU-culling result into near/full-detail and far/LOD buckets. */
+export function setThinInstanceLodPartner(fullMesh: Mesh, lodMesh: Mesh, options: ThinInstanceLodPartnerOptions): void;
+
+/** Restore the two meshes to independent rendering. */
+export function clearThinInstanceLodPartner(fullMesh: Mesh): void;
 ```
+
+`setThinInstanceDrawCount()` is the count-only path for fixed-capacity pools whose CPU array and GPU
+buffer are already populated. It accepts an integer in `[0, _capacity]`, updates only `count`, and leaves
+matrix/color versions and dirty ranges untouched. Cached draws observe the count through their stable
+indirect argument buffer, so changing the active prefix neither replaces instance buffers nor invalidates
+render bundles. A caller exposing newly written slots must mark those exact matrix/color ranges dirty with
+the corresponding update API; the count-only setter deliberately does not upload vertex data. The pool
+must complete one full-capacity GPU synchronization before this setter is used.
+
+`setThinInstanceCount()` remains the convenience path that changes the count and marks the complete active
+matrix range `[0, count)` dirty for upload.
+
+Call `enableThinInstanceDynamicDrawCount()` before `registerScene()` when a synchronized pool will change
+counts interactively. Its next normal GPU sync creates the stable indirect argument buffer during warm-up,
+so the first later count change does not invalidate cached render bundles.
 
 ### Functions — Hierarchy Instance Pools (`hierarchy-instance-pool.ts`)
 
@@ -180,12 +222,16 @@ This avoids shifting the entire array, keeping removal O(1). Callers must be awa
 
 | Version field      | Bumped by                                                                                                  | Checked by                                |
 | ------------------ | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `_version`         | `setThinInstances`, `addThinInstance`, `setThinInstanceMatrix`, `removeThinInstance`, `flushThinInstances` | `syncThinInstanceBuffers` (matrix upload) |
+| `_version`         | Matrix/count helpers plus color helpers (color-only changes leave the matrix dirty range empty but still dirty static shadows) | `syncThinInstanceBuffers` (matrix sync/version) |
 | `_colorVersion`    | `setThinInstanceColors`                                                                                    | `syncThinInstanceBuffers` (color upload)  |
 | `_gpuVersion`      | `syncThinInstanceBuffers` (after matrix upload)                                                            | —                                         |
 | `_colorGpuVersion` | `syncThinInstanceBuffers` (after color upload)                                                             | —                                         |
 
 GPU upload is skipped when `_version === _gpuVersion` (or `_colorVersion === _colorGpuVersion`), avoiding redundant `writeBuffer` calls for static instances.
+`setThinInstanceDrawCount` does not mark either data stream dirty; draw-argument synchronization observes
+`count` independently. It advances the existing thin-instance version without marking matrix/color ranges
+dirty, so shadow caches observe the change while GPU synchronization performs no attribute upload. Static
+ESM, PCF, and CSM maps therefore redraw only when one of their actual casters changes.
 
 ---
 
@@ -223,7 +269,7 @@ Returns the updated `slot` number — the next free vertex buffer slot after all
 
 GPU culling is opt-in through `enableThinInstanceGpuCulling(mesh)`. The helper only flips state on existing `ThinInstanceData`; the compute module is dynamically imported (via the shared `thin-instance-cull-binding.ts` lifecycle helper) by the Standard, PBR, and ShaderMaterial group builders only when at least one mesh in that material family has `_gpuCullingEnabled === true`.
 
-The per-binding cull lifecycle is factored into one shared module, `packages/babylon-lite/src/mesh/thin-instance-cull-binding.ts`, used identically by all three material families. Its `tryBind()` seam is called from each renderable's `bind()`: it gates on opt-in + opaque-only, marks the renderable `_direct`, creates the per-binding `ThinInstanceGpuCullState`, registers its disposal, and returns a `TiCullBinding` whose `update()` dispatches the compute cull pass and whose `draw()` issues `drawIndexedIndirect` (or falls back to a normal instanced draw when culling did not run).
+The per-binding cull lifecycle is factored into one shared module, `packages/babylon-lite/src/mesh/thin-instance-cull-binding.ts`, used identically by all three material families. Its `tryBind()` seam is called from each renderable's `bind()`: it gates on opt-in + opaque-only, creates the per-binding `ThinInstanceGpuCullState`, registers its disposal, and returns a `TiCullBinding` whose `update()` dispatches the compute cull pass and whose `draw()` issues `drawIndexedIndirect` (or falls back to a normal instanced draw when culling did not run).
 
 ### Scope
 
@@ -256,7 +302,7 @@ Cull state is owned by each `DrawBinding`, not by `ThinInstanceData`, because th
 6. The compute shader transforms the local sphere by `mesh.world * instanceWorld`, tests it against all planes, atomically appends visible instances to compacted buffers, and atomically increments `args[1]`.
 7. The draw closure binds compacted buffers and calls `drawIndexedIndirect(argsBuffer, 0)`.
 
-Cull-enabled renderables set `_direct = true` so they are encoded every frame with current buffer objects instead of being captured in the opaque render bundle. This avoids stale render-bundle references when thin-instance capacity grows.
+Cull-enabled opaque renderables remain bundle-compatible because their compacted buffers and indirect argument buffers are stable. Any buffer replacement bumps the global visibility epoch, forcing the opaque render bundle to record the new handles before it executes.
 
 ### Compute Shader Outline
 
@@ -273,6 +319,16 @@ if (sphereIntersectsFrustum(center, radius)) {
 ```
 
 The test is conservative: spheres touching a plane stay visible. This preserves parity with non-culled rendering.
+
+### Distance LOD Pairing
+
+`setThinInstanceLodPartner(fullMesh, lodMesh, { distance, band })` extends the opt-in GPU culler with a second compacted output. Both meshes must already have thin-instance state and must be distinct, opaque, non-transmissive meshes. The full-detail mesh must be the only source for the partner, and neither mesh may simultaneously participate in another LOD chain. LOD-paired thin-instance state cannot be shared through `cloneTransformNode`; pair meshes only before cloning or use independent thin-instance data. `distance` and `band` are finite non-negative world-space values.
+
+The source mesh retains in-frustum instances closer than the threshold. Farther instances are compacted into stable matrix/color buffers and an indirect argument buffer consumed by the partner. `band` applies a deterministic instance-index hash in `[-band/2, +band/2]`, spreading transitions without frame-to-frame noise. The partner's geometry and material pipeline are its own, but its drawn matrices and optional instance colors come from the source. A partner that renders instance colors therefore requires the source draw to provide them too.
+
+The far bucket is published per `RenderTargetSignature`, so main, shadow, and auxiliary camera passes never share compacted state. Partner renderables use the direct-draw phase and resolve the current bucket after all binding updates and the shared compute batch have completed; scene insertion order therefore cannot introduce a one-frame lag or capture stale cross-renderable handles in an opaque bundle. Source renderables retain their normal stable-buffer bundle path. If source culling is unavailable, disabled, hidden, or empty, the source falls back to drawing all active instances and the paired partner draws nothing.
+
+Pairing is configured after `setThinInstances()` and before `registerScene()`. Repeating the call with the same pair updates `distance`/`band` live. `clearThinInstanceLodPartner()` makes the partner fall back to its independent instance draw immediately; pairing links are also detached automatically when either mesh is disposed so no draw retains destroyed far-bucket buffers.
 
 ---
 
@@ -610,6 +666,7 @@ Scene 17 (`scene17-pbr-std-thin-instances`) validates PBR thin instances: a PBR 
 | Swap-remove correctness | `removeThinInstance(i)` → last instance moves to slot `i`, count decrements        |
 | Version skip            | Static instances: GPU upload skipped when `_version === _gpuVersion`               |
 | Color independence      | Matrix mutation does not trigger color re-upload (separate version counters)       |
+| Count-only draw update  | Active count changes update draw args without dirtying matrix or color buffers      |
 | Zero-cost loading       | Scenes without thin instances never fetch `thin-instance-gpu.js` chunk             |
 
 ---

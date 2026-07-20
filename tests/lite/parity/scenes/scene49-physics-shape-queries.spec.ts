@@ -7,11 +7,11 @@
  * The static scene self-determines its capture frame (once the broadphase exists and
  * both queries report hits), so the spec just waits on the `captureReady` flag.
  */
-import { test, expect } from "../parity-fixtures";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { acquireBjsPage, attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(49);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene49-physics-shape-queries");
@@ -25,7 +25,7 @@ async function captureBjsReference(browser: Browser): Promise<string> {
     }
 
     fs.mkdirSync(REFERENCE_DIR, { recursive: true });
-    const { page: bjsPage, release } = await acquireBjsPage(browser);
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
 
     await bjsPage.goto(`/babylon-ref-scene49.html?capture=1`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 49 BJS reference" });

@@ -21,6 +21,13 @@ export interface DrawUpdateContext {
     readonly _camera?: Camera | null;
 }
 
+/** @internal Feature-owned work collected during binding updates and flushed before the render pass. */
+export interface DrawUpdateBatch {
+    reset(): void;
+    flush(engine: EngineContext): void;
+    destroy(): void;
+}
+
 /**
  * A per-pass draw binding produced by `Renderable.bind(engine, target)`.
  *
@@ -45,6 +52,8 @@ export interface DrawBinding {
      *  version-guarded to avoid redundant writes. Render task transparent sorting
      *  runs after these updates, so renderables may refresh `_worldCenter` here. */
     update?(context: DrawUpdateContext): void;
+    /** @internal Lazy feature batches used by this binding. */
+    readonly _updateBatches?: readonly DrawUpdateBatch[];
     /** @internal Scratch: camera-space depth for transparent sorting (per-pass). */
     _sortDistance?: number;
 }

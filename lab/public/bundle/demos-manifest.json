@@ -27,6 +27,10 @@
     "rawKB": 73.9,
     "gzipKB": 27.4
   },
+  "break-meshes": {
+    "rawKB": 183.2,
+    "gzipKB": 70.1
+  },
   "mosquito-amber": {
     "rawKB": 109,
     "gzipKB": 43.6

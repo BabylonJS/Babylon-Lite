@@ -5,10 +5,10 @@
  * over a ground plane.  No scripted interaction; we just wait for the
  * scene to settle and compare the captured frame against the BJS reference.
  */
-import { test, expect } from "../parity-fixtures";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import * as fs from "fs";
 import * as path from "path";
-import { acquireBjsPage, attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(223);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene223-camera-light-gizmos");
@@ -21,7 +21,7 @@ test("Scene 223 — Camera + Light Gizmos match Babylon.js reference", async ({ 
     const browser = page.context().browser()!;
 
     if (!fs.existsSync(GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
-        const { page: bjsPage, release } = await acquireBjsPage(browser);
+        const { page: bjsPage, release } = await acquireReferencePage(browser);
         await bjsPage.goto("/babylon-ref-scene223.html");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);

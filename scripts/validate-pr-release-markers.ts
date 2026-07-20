@@ -14,6 +14,21 @@ type GitHubPullRequestResponse = {
 
 const BREAKING_MARKER = /^(?:BREAKING[ -]CHANGE:|[a-z][a-z0-9-]*(?:\([^)]+\))?!:)/m;
 const MALFORMED_BREAKING_CHANGE = /^\s*BREAKING[ -]CHANGE(?!:)/im;
+const GITHUB_FETCH_ATTEMPTS = 3;
+
+async function fetchGitHubPullRequest(url: string, headers: Record<string, string>): Promise<Response> {
+    let response: Response | undefined;
+    for (let attempt = 1; attempt <= GITHUB_FETCH_ATTEMPTS; attempt++) {
+        response = await fetch(url, { headers });
+        if (response.ok || (response.status !== 429 && response.status < 500) || attempt === GITHUB_FETCH_ATTEMPTS) {
+            return response;
+        }
+        await response.body?.cancel();
+        console.warn(`GitHub PR metadata request returned ${response.status} ${response.statusText}; retrying (${attempt}/${GITHUB_FETCH_ATTEMPTS}).`);
+        await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+    }
+    return response!;
+}
 
 function cleanAzureValue(value: string | undefined): string | undefined {
     if (!value || value.startsWith("$(")) {
@@ -85,7 +100,7 @@ async function getPullRequestFromGitHub(): Promise<PullRequestInfo | undefined> 
     };
     headers.Authorization = `Bearer ${githubToken}`;
 
-    const response = await fetch(`https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}`, { headers });
+    const response = await fetchGitHubPullRequest(`https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}`, headers);
     if (!response.ok) {
         fail(`Could not read GitHub PR metadata (${response.status} ${response.statusText}); refusing to skip breaking-label enforcement.`);
     }

@@ -5,11 +5,11 @@
  * simulation in which two rows of shapes fall onto a heightfield derived from
  * heightMap.png, then compares the settled frame.
  */
-import { test, expect } from "../parity-fixtures";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { acquireBjsPage, attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(47);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene47-physics-heightfield");
@@ -25,7 +25,7 @@ async function captureBjsReference(browser: Browser): Promise<string> {
     }
 
     fs.mkdirSync(REFERENCE_DIR, { recursive: true });
-    const { page: bjsPage, release } = await acquireBjsPage(browser);
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
 
     await bjsPage.goto(`/babylon-ref-scene47.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 60_000, label: "Scene 47 BJS reference" });

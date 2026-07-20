@@ -7,11 +7,11 @@
  *    derived fields are correctly populated for both engines' pickers).
  * 3. Compares the post-drag rendered frame against the captured golden.
  */
-import { test, expect } from "../parity-fixtures";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import * as fs from "fs";
 import * as path from "path";
 import type { Page } from "@playwright/test";
-import { acquireBjsPage, attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(221);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene221-pointer-drags");
@@ -131,7 +131,7 @@ test("Scene 221 — Rotation gizmo camembert visible mid-drag", async ({ page },
     const browser = page.context().browser()!;
 
     if (!fs.existsSync(ROTATION_GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
-        const { page: bjsPage, release } = await acquireBjsPage(browser);
+        const { page: bjsPage, release } = await acquireReferencePage(browser);
         await bjsPage.goto("/babylon-ref-scene221.html");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
@@ -167,7 +167,7 @@ test("Scene 221 — Pointer Drags matches Babylon.js reference (post scripted dr
 
     // ── Capture golden by driving the BJS reference page through the drag set ──
     if (!fs.existsSync(GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
-        const { page: bjsPage, release } = await acquireBjsPage(browser);
+        const { page: bjsPage, release } = await acquireReferencePage(browser);
         await bjsPage.goto("/babylon-ref-scene221.html");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);

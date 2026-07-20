@@ -55,6 +55,12 @@ export interface ParticleSystem {
     _actualFrame: number;
     /** @internal Fractional emission carry-over between steps. */
     _newPartsExcess: number;
+    /**
+     * @internal Per-frame emit-rate getter, set by the SystemBlock when the emit rate is a dynamic source
+     * (e.g. an emit-rate gradient over the system's target duration). When null, the constant
+     * {@link ParticleSystem.emitRate} is used instead.
+     */
+    _emitRateGetter: ((system: ParticleSystem) => number) | null;
     /** @internal Update speed scaled by the current step ratio. */
     _scaledUpdateSpeed: number;
     /** @internal Emit power of the most recently created particle (set by the creation queue). */
@@ -110,6 +116,7 @@ export function createParticleSystem(name: string, capacity: number): ParticleSy
         _stopped: false,
         _actualFrame: 0,
         _newPartsExcess: 0,
+        _emitRateGetter: null,
         _scaledUpdateSpeed: 0,
         _emitPower: 1,
         _nextParticleId: 0,
@@ -152,9 +159,11 @@ export function animateParticleSystem(system: ParticleSystem, scaledRatio: numbe
 
     system._scaledUpdateSpeed = system.updateSpeed * scaledRatio;
 
-    // Emission count: integer part this step, fractional part carried over.
-    let newParticles = (system.emitRate * system._scaledUpdateSpeed) >> 0;
-    system._newPartsExcess += system.emitRate * system._scaledUpdateSpeed - newParticles;
+    // Emission count: integer part this step, fractional part carried over. A dynamic emit rate (e.g. an
+    // emit-rate gradient) is re-evaluated each step from the current `_actualFrame`; otherwise the constant.
+    const emitRate = system._emitRateGetter ? system._emitRateGetter(system) : system.emitRate;
+    let newParticles = (emitRate * system._scaledUpdateSpeed) >> 0;
+    system._newPartsExcess += emitRate * system._scaledUpdateSpeed - newParticles;
     if (system._newPartsExcess > 1.0) {
         const extra = system._newPartsExcess >> 0;
         newParticles += extra;
@@ -233,6 +242,11 @@ function runCreationSlots(system: ParticleSystem, particle: Particle): void {
     }
     if (system._createPosition) {
         system._createPosition(particle, system);
+        // Mirror BJS `_CreateLocalPositionData`: seed the local-space position from the emitted position so an
+        // isLocal system's `LocalPositionUpdated` source integrates from the correct origin.
+        particle._localPosition.x = particle.position.x;
+        particle._localPosition.y = particle.position.y;
+        particle._localPosition.z = particle.position.z;
     }
     if (system._createDirection) {
         system._createDirection(particle, system);

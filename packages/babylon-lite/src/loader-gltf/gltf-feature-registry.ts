@@ -16,6 +16,8 @@
  * The core loader knows zero feature names; new extensions are added here alone.
  */
 import type { GltfFeature } from "./gltf-feature.js";
+import type { GltfMatExtCtx, GltfMaterialData } from "./gltf-material.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { anyPrimitive, needsOrmComposite } from "./gltf-parser.js";
 
 /** Dynamic `import()` of a feature's `GltfFeature` module. */
@@ -27,8 +29,10 @@ const M = "KHR_materials_";
 
 const _features: [Trigger, Loader][] = [
     // Pre-parse features (buffer-level): order matters — meshopt decompresses
-    // bufferViews first, then quantization dequantizes the resulting accessors.
+    // bufferViews first, then sparse accessors are materialized (so their base can
+    // read decompressed data), then quantization dequantizes the resulting accessors.
     ["EXT_meshopt_compression", () => import("./gltf-feature-meshopt.js")],
+    [(j) => !!(j.accessors as any[] | undefined)?.some((a) => a.sparse), () => import("./gltf-feature-sparse.js")],
     ["KHR_mesh_quantization", () => import("./gltf-ext-quantization.js")],
     // Pre-mesh features (geometry decompression)
     ["KHR_draco_mesh_compression", () => import("./gltf-feature-draco.js")],
@@ -57,6 +61,7 @@ const _features: [Trigger, Loader][] = [
     // Per-asset features
     [hasGltfExtras, () => import("./gltf-feature-extras.js")],
     ["KHR_lights_punctual", () => import("./gltf-feature-lights-punctual.js")],
+    ["EXT_lights_image_based", () => import("./gltf-ext-lights-image-based.js")],
     [(j) => !!j.animations?.length, () => import("./gltf-feature-animations.js")],
     // Non-Float32 / normalized animation sampler accessors (e.g. Animation_SamplerType normalized
     // BYTE/SHORT rotation) need the lazy denorm converter; plain float samplers never load it.
@@ -73,6 +78,18 @@ export async function loadGltfFeatures(json: any): Promise<GltfFeature[]> {
     const used: string[] = json.extensionsUsed ?? [];
     const mods = await Promise.all(_features.flatMap(([t, load]) => ((typeof t === "string" ? used.includes(t) : t(json)) ? [load()] : [])));
     return mods.map((m) => m.default);
+}
+
+/** Run every active material feature and merge its PBR fragment. */
+export async function runGltfMaterialFeatures(mat: GltfMaterialData, features: GltfFeature[], ctx: GltfMatExtCtx): Promise<Partial<PbrMaterialProps> | undefined> {
+    const fragments = await Promise.all(features.map((feature) => feature.applyMaterial!(mat, ctx)));
+    let layers: Partial<PbrMaterialProps> | undefined;
+    for (const fragment of fragments) {
+        if (fragment) {
+            Object.assign((layers ??= {}), fragment);
+        }
+    }
+    return layers;
 }
 
 function hasGltfExtras(json: any): boolean {

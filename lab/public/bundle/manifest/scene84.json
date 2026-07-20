@@ -1,6 +1,6 @@
 {
-  "rawKB": 84.6,
-  "gzipKB": 36.2,
+  "rawKB": 84.3,
+  "gzipKB": 35.9,
   "ignoredRawKB": 5.5,
   "runtimeChunks": [
     "scene84-_math-factory-DFVyS8gB.js",
@@ -9,20 +9,19 @@
     "scene84-frag-coord-block-ChMHIkS8.js",
     "scene84-frag-depth-block-DFZCC8Qe.js",
     "scene84-fragment-output-CfRmfbPv.js",
-    "scene84-input-block-CBDHkrmD.js",
-    "scene84-node-registry-JVF5g9eF.js",
-    "scene84-node-registry-extra-advanced-BG7KNOUK.js",
-    "scene84-node-registry-extra-math-DxdaBzNa.js",
-    "scene84-node-registry-extra-procedural-CSiLEV2g.js",
+    "scene84-input-block-DqKiIp6x.js",
+    "scene84-node-registry-ayB97QtX.js",
+    "scene84-node-registry-extra-advanced-99egYnRU.js",
+    "scene84-node-registry-extra-math-C7MgdV__.js",
+    "scene84-node-registry-extra-procedural-BFdw-bj3.js",
     "scene84-node-renderable-UtCGlhZJ.js",
     "scene84-screen-size-block-yVY2pHhh.js",
     "scene84-screen-space-block-Cfi3u-na.js",
-    "scene84-standard-renderable-DJWw_LR1.js",
+    "scene84-standard-renderable-bGlKhZkM.js",
     "scene84-transform-block-PEh7VaCZ.js",
     "scene84-twirl-block-tQLhuAc6.js",
     "scene84-vector-splitter-BMf4DQi8.js",
     "scene84-vertex-output-C7G5u6Y0.js",
-    "scene84-wgsl-helpers-CwHFFXvt.js",
     "scene84.js"
   ]
 }

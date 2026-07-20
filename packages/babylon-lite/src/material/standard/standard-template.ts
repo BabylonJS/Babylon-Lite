@@ -11,7 +11,7 @@
  */
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
-import { WGSL_FOG } from "../../shader/wgsl-helpers.js";
+import { WGSL_FOG } from "../../shader/wgsl-fog.js";
 import { MAX_LIGHTS } from "../../light/types.js";
 import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
 
