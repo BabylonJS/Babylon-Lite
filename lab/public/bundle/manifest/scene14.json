@@ -1,5 +1,5 @@
 {
-  "rawKB": 88.3,
+  "rawKB": 88.4,
   "gzipKB": 37,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene14-generate-mipmaps-Drlt5FNB.js",
     "scene14-gltf-glb-parser-B--vN_CU.js",
     "scene14-ibl-fragment-CeRrvT96.js",
-    "scene14-pbr-renderable-DctWukkj.js",
+    "scene14-pbr-renderable-BiMKTvge.js",
     "scene14-rgbd-decode-V270Sy3J.js",
     "scene14-scene-uniforms-FTYH6Ct0.js",
     "scene14-singlelight-hemispheric-wgsl-CzyIPChP.js",

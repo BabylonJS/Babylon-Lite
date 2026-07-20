@@ -1,5 +1,5 @@
 {
-  "rawKB": 103.7,
+  "rawKB": 103.8,
   "gzipKB": 43,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -13,7 +13,7 @@
     "scene30-gltf-pbr-builder-ext-B7YAxFxy.js",
     "scene30-ibl-fragment-CeRrvT96.js",
     "scene30-pbr-refraction-DGvv96wJ.js",
-    "scene30-pbr-renderable-0Hgg3963.js",
+    "scene30-pbr-renderable-BCSis9oN.js",
     "scene30-pbr-template-ext-CiHpOV5G.js",
     "scene30-pbr-transmission-ext-yRQ1qBb2.js",
     "scene30-rgbd-decode-Cliwq_K6.js",

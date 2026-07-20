@@ -1,5 +1,5 @@
 {
-  "rawKB": 108.8,
+  "rawKB": 108.9,
   "gzipKB": 46.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -20,7 +20,7 @@
     "scene39-ibl-fragment-CeRrvT96.js",
     "scene39-light-base-BmeNaEp7.js",
     "scene39-light-matrix-CBTBdGsb.js",
-    "scene39-pbr-renderable-ClPR-Zha.js",
+    "scene39-pbr-renderable-BYPZf55P.js",
     "scene39-pbr-template-ext-CiHpOV5G.js",
     "scene39-rgbd-decode-B15_Busv.js",
     "scene39-scene-uniforms-FTYH6Ct0.js",

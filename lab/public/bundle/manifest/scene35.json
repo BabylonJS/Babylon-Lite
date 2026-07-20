@@ -1,5 +1,5 @@
 {
-  "rawKB": 83.9,
+  "rawKB": 84,
   "gzipKB": 34.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,7 +8,7 @@
     "scene35-gltf-feature-registry-BoOUZk3N.js",
     "scene35-gltf-glb-parser-BJyme4Vk.js",
     "scene35-ibl-fragment-CeRrvT96.js",
-    "scene35-pbr-renderable-DEMbMgZW.js",
+    "scene35-pbr-renderable-DuR-ptNI.js",
     "scene35-rgbd-decode-BysONDsX.js",
     "scene35-scene-uniforms-FTYH6Ct0.js",
     "scene35-thin-instance-fragment-CBn2miAC.js",

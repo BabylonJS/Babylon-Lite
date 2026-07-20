@@ -1,11 +1,11 @@
 {
-  "rawKB": 95.7,
+  "rawKB": 95.8,
   "gzipKB": 39.1,
   "ignoredRawKB": 1485.2,
   "runtimeChunks": [
     "scene171-generate-mipmaps-Cpc8PT2N.js",
     "scene171-gltf-glb-parser-COBAbifQ.js",
-    "scene171-pbr-renderable-CEkswKz7.js",
+    "scene171-pbr-renderable-D5UJlbSE.js",
     "scene171-recast-navigation-CYBQI-zY-Dry_z7x_.js",
     "scene171-shader-composer-DishuYLa.js",
     "scene171-singlelight-hemispheric-wgsl-BfbzAtlS.js",

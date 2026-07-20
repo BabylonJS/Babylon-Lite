@@ -1,5 +1,5 @@
 {
-  "rawKB": 90.4,
+  "rawKB": 90.5,
   "gzipKB": 37.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene29-gltf-json-asset-0jGyvXBv.js",
     "scene29-gltf-pbr-builder-ext-Bu6SRlUL.js",
     "scene29-ibl-fragment-CeRrvT96.js",
-    "scene29-pbr-renderable-Bc0gyCkw.js",
+    "scene29-pbr-renderable-CvAi99ly.js",
     "scene29-pbr-template-ext-CiHpOV5G.js",
     "scene29-rgbd-decode-DZV0-yI9.js",
     "scene29-scene-uniforms-FTYH6Ct0.js",

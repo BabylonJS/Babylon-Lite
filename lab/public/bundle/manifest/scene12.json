@@ -1,5 +1,5 @@
 {
-  "rawKB": 103.7,
+  "rawKB": 103.8,
   "gzipKB": 42.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -11,7 +11,7 @@
     "scene12-gltf-feature-skeleton-Cxvue01k.js",
     "scene12-gltf-glb-parser-BrsOlymf.js",
     "scene12-ibl-fragment-CeRrvT96.js",
-    "scene12-pbr-renderable-b4c18C5f.js",
+    "scene12-pbr-renderable-CNyKbC-X.js",
     "scene12-reflectance-fragment-BESl-7E9.js",
     "scene12-rgbd-decode-BLiTLohS.js",
     "scene12-scene-uniforms-FTYH6Ct0.js",

@@ -1,5 +1,5 @@
 {
-  "rawKB": 80.2,
+  "rawKB": 80.3,
   "gzipKB": 33.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene260-gltf-json-asset-BYJEJqvB.js",
     "scene260-gltf-normals-DYhLwXNX.js",
     "scene260-ibl-fragment-CeRrvT96.js",
-    "scene260-pbr-renderable-CngLQq0P.js",
+    "scene260-pbr-renderable-B4vKMC8b.js",
     "scene260-rgbd-decode-DApx_NN-.js",
     "scene260-scene-uniforms-FTYH6Ct0.js",
     "scene260.js"

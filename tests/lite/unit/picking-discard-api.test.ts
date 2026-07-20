@@ -202,7 +202,7 @@ function makePickScene(engine: EngineContext): { scene: Parameters<typeof create
     };
 }
 
-describe("picking discard shader API", () => {
+describe("picking shader API", () => {
     it("keeps the default picker shader non-discarding", () => {
         const regular = pickingShaderSource();
         const thin = pickingThinInstanceShaderSource();
@@ -211,15 +211,19 @@ describe("picking discard shader API", () => {
         expect(regular).toContain("fragmentCoord: vec2f");
         expect(regular).toContain("fn shouldDiscardPick(input: PickDiscardInput) -> bool");
         expect(regular).toContain("return false;");
+        expect(regular).toContain("fn adjustPickWorld(worldPos: vec3f, instanceExtras: vec4f, thinInstanceIndex: u32) -> vec3f");
+        expect(regular).toContain("let wp = adjustPickWorld((mesh.world * vec4f(position, 1.0)).xyz, vec4f(0.0), 0xffffffffu);");
         expect(regular).toContain("out.hasThinInstance = 0u;");
         expect(regular).toContain("out.thinInstanceIndex = 0xffffffffu;");
         expect(regular).toContain("PickDiscardInput(input.worldPos, scene.fragmentCoord");
 
         expect(thin).toContain("fn shouldDiscardPick(input: PickDiscardInput) -> bool");
         expect(thin).toContain("return false;");
+        expect(thin).toContain("let extras = vec4f(m[0].w, m[1].w, m[2].w, m[3].w);");
+        expect(thin).toContain("let wp = adjustPickWorld((world * vec4f(position, 1.0)).xyz, extras, instanceIndex);");
         expect(thin).toContain("out.hasThinInstance = 1u;");
         expect(thin).toContain("out.thinInstanceIndex = instanceIndex;");
-        expect(thin).toContain("out.instanceExtras = vec4f(m[0].w, m[1].w, m[2].w, m[3].w);");
+        expect(thin).toContain("out.instanceExtras = extras;");
         expect(thin).toContain("PickDiscardInput(input.worldPos, scene.fragmentCoord");
     });
 
@@ -241,6 +245,29 @@ return input.hasThinInstance == 1u && input.instanceExtras.x > 4.0;
         expect(thin).toContain("let world = mat4x4f(");
         expect(thin).toContain("vec4f(m[0].xyz, 0.0)");
         expect(thin).toContain("vec4f(m[3].xyz, 1.0)");
+    });
+
+    it("injects a custom world adjustment into regular and thin-instance picking shaders", () => {
+        const worldAdjustWgsl = `
+fn adjustPickWorld(worldPos: vec3f, instanceExtras: vec4f, thinInstanceIndex: u32) -> vec3f {
+if (thinInstanceIndex == 0xffffffffu) { return worldPos; }
+return worldPos + offsets[thinInstanceIndex].xyz + instanceExtras.xyz;
+}`;
+        const options = {
+            worldAdjustWgsl,
+            storage: [{ name: "offsets", type: "array<vec4f>" }],
+        };
+
+        const regular = pickingShaderSource(options);
+        const thin = pickingThinInstanceShaderSource(options);
+
+        for (const source of [regular, thin]) {
+            expect(source).toContain(worldAdjustWgsl);
+            expect(source.match(/fn adjustPickWorld/g)).toHaveLength(1);
+            expect(source).toContain("@group(2) @binding(0) var<storage, read> offsets: array<vec4f>;");
+        }
+        expect(regular).toContain("adjustPickWorld((mesh.world * vec4f(position, 1.0)).xyz, vec4f(0.0), 0xffffffffu)");
+        expect(thin).toContain("adjustPickWorld((world * vec4f(position, 1.0)).xyz, extras, instanceIndex)");
     });
 });
 

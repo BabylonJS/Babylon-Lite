@@ -1,5 +1,5 @@
 {
-  "rawKB": 99.7,
+  "rawKB": 99.8,
   "gzipKB": 42.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -16,10 +16,10 @@
     "scene246-gltf-normals-DYhLwXNX.js",
     "scene246-gltf-strided-attribute-R3NdoKEL.js",
     "scene246-ibl-fragment-CeRrvT96.js",
-    "scene246-pbr-renderable-DPmM_9fm.js",
+    "scene246-pbr-renderable-TyntI9vk.js",
     "scene246-rgbd-decode-Crvtlca5.js",
     "scene246-scene-uniforms-FTYH6Ct0.js",
-    "scene246-skeleton-fragment-DGOyP63P.js",
+    "scene246-skeleton-fragment-nXOmq8yf.js",
     "scene246.js"
   ]
 }

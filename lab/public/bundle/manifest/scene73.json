@@ -1,5 +1,5 @@
 {
-  "rawKB": 143.3,
+  "rawKB": 143.4,
   "gzipKB": 58.1,
   "ignoredRawKB": 3.3,
   "runtimeChunks": [
@@ -17,7 +17,7 @@
     "scene73-node-env-2j3ozSNZ.js",
     "scene73-node-renderable-Ik7zhWQu.js",
     "scene73-pbr-metallic-roughness-block-full-CUhffh-6.js",
-    "scene73-pbr-renderable-IeUtZOEu.js",
+    "scene73-pbr-renderable-BfB7cNJX.js",
     "scene73-perturb-normal-Bqx-TYaB.js",
     "scene73-reflection-block-CIXuH-z0.js",
     "scene73-rgbd-decode-BwN6b6f1.js",

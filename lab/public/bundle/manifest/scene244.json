@@ -1,5 +1,5 @@
 {
-  "rawKB": 133.7,
+  "rawKB": 133.8,
   "gzipKB": 54.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -17,7 +17,7 @@
     "scene244-gltf-pbr-builder-ext-u9mmdul2.js",
     "scene244-ibl-fragment-CeRrvT96.js",
     "scene244-pbr-refraction-DU061bSP.js",
-    "scene244-pbr-renderable-CJdBL4li.js",
+    "scene244-pbr-renderable-DRU0K1nn.js",
     "scene244-pbr-template-ext-CiHpOV5G.js",
     "scene244-pbr-transmission-ext-D7nGvwg3.js",
     "scene244-reflectance-fragment-CgVvAfDW.js",
