@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
-import type { Renderable } from "../../../packages/babylon-lite/src/render/renderable";
-import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import { addToScene, buildScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
 
 describe("scene material swap", () => {
@@ -40,5 +40,60 @@ describe("scene material swap", () => {
         expect(scene._renderables.filter((renderable) => renderable.mesh === mesh)).toEqual([replacement]);
         expect(disposeOld).not.toHaveBeenCalled();
         expect(retirements).toHaveLength(1);
+    });
+
+    it("rescans a material group when a runtime-added mesh introduces thin instances", async () => {
+        type TestRenderable = Renderable & { usesThinInstances: boolean };
+
+        const engine = {
+            _retirements: [],
+        } as unknown as EngineContext;
+        const scene = {
+            surface: { engine },
+            meshes: [],
+            lights: [],
+            _groups: new Map(),
+            _deferredBuilders: [],
+            _renderables: [],
+            _uniformUpdaters: [],
+            _disposables: [],
+            _meshDisposables: new Map(),
+            _meshAuxDisposables: new Map(),
+            _materialSwapQueue: [],
+            _builtGroups: new Set(),
+            _renderableVersion: 0,
+            _materialEpoch: 0,
+            _built: false,
+        } as unknown as SceneContext;
+
+        const builder = (async (ctx: SceneContext, meshes: Mesh[]) => {
+            const supportsThinInstances = meshes.some((mesh) => !!mesh.thinInstances);
+            const rebuildSingle = (_scene: SceneContext, mesh: Mesh): TestRenderable =>
+                ({
+                    mesh,
+                    order: 100,
+                    isTransparent: false,
+                    usesThinInstances: supportsThinInstances,
+                }) as TestRenderable;
+            builder._rebuildSingle = rebuildSingle;
+            return {
+                renderables: meshes.map((mesh) => rebuildSingle(ctx, mesh)),
+                rebuildSingle,
+            };
+        }) as MeshGroupBuilder;
+        const material = { _buildGroup: builder } as Material;
+        const plainMesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
+        const instancedMesh = { _gpu: {}, material, children: [], thinInstances: {} } as unknown as Mesh;
+
+        addToScene(scene, plainMesh);
+        await buildScene(scene);
+
+        addToScene(scene, instancedMesh);
+        processMaterialSwaps(scene);
+
+        await vi.waitFor(() => {
+            const renderable = scene._renderables.find((candidate) => candidate.mesh === instancedMesh) as TestRenderable | undefined;
+            expect(renderable?.usesThinInstances).toBe(true);
+        });
     });
 });
