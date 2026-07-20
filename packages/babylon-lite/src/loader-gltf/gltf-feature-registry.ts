@@ -61,6 +61,7 @@ const _features: [Trigger, Loader][] = [
     // Per-asset features
     [hasGltfExtras, () => import("./gltf-feature-extras.js")],
     ["KHR_lights_punctual", () => import("./gltf-feature-lights-punctual.js")],
+    ["KHR_gaussian_splatting", () => import("./gltf-feature-gaussian-splatting.js")],
     ["EXT_lights_image_based", () => import("./gltf-ext-lights-image-based.js")],
     [(j) => !!j.animations?.length, () => import("./gltf-feature-animations.js")],
     // Non-Float32 / normalized animation sampler accessors (e.g. Animation_SamplerType normalized

@@ -1,0 +1,13 @@
+{
+  "rawKB": 59.9,
+  "gzipKB": 24.9,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene266-generate-mipmaps-Rj-Xyuue.js",
+    "scene266-gltf-feature-gaussian-splatting-DJOSO5KF.js",
+    "scene266-gltf-feature-primitive-BMqT3MMH.js",
+    "scene266-gltf-feature-registry-CeWSmeGQ.js",
+    "scene266-gltf-glb-parser-BKnxIIpu.js",
+    "scene266.js"
+  ]
+}
