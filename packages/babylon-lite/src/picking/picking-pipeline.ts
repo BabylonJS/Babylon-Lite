@@ -40,7 +40,7 @@ function invalidateIfNeeded(engine: EngineContext): void {
 export function getPickingSceneBGL(engine: EngineContext): GPUBindGroupLayout {
     invalidateIfNeeded(engine);
     if (!_sceneBGL) {
-        _sceneBGL = createSingleUniformBGL(engine, "picking-scene-bgl", SS.VERTEX);
+        _sceneBGL = createSingleUniformBGL(engine, "picking-scene-bgl", SS.VERTEX | SS.FRAGMENT);
     }
     return _sceneBGL;
 }

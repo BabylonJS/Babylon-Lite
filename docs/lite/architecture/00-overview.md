@@ -370,6 +370,15 @@ createTube(engine: Engine, options: TubeOptions): Mesh
 createExtrudeShape(engine: Engine, options: ExtrudeShapeOptions): Mesh
 createGround(engine: Engine, options?: GroundOptions): Mesh
 createGroundFromHeightMap(engine: Engine, url: string, options: GroundOptions): Promise<Mesh>
+getMeshGeometry(mesh: Mesh): {
+    positions: Float32Array;
+    normals: Float32Array;
+    indices: Uint32Array;
+    uvs?: Float32Array;
+    uvs2?: Float32Array;
+    tangents?: Float32Array;
+    colors?: Float32Array;
+} | null
 
 // Materials
 createStandardMaterial(): StandardMaterialProps
@@ -381,6 +390,7 @@ createEsmDirectionalShadowGenerator(engine: Engine, light: DirectionalLight, con
 createPcfSpotlightShadowGenerator(engine: Engine, light: SpotLight, config?: PcfSpotlightShadowGeneratorConfig): ShadowGenerator
 createPcfDirectionalShadowGenerator(engine: Engine, light: DirectionalLight, config?: PcfDirectionalShadowGeneratorConfig): ShadowGenerator
 setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): void
+setShadowCasterMaxCascade(mesh: Mesh, maxCascade: number): void
 
 // Animation
 createAnimationController(skeleton, scene): AnimationController

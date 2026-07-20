@@ -1,14 +1,14 @@
 {
-  "rawKB": 59.9,
-  "gzipKB": 25.6,
+  "rawKB": 59.7,
+  "gzipKB": 25.5,
   "ignoredRawKB": 7,
   "runtimeChunks": [
     "scene77-_math-factory-DFVyS8gB.js",
     "scene77-debug-block-BQoPvcej.js",
     "scene77-elbow-block-CSQUp118.js",
     "scene77-fragment-output-CfRmfbPv.js",
-    "scene77-input-block-_gviBho7.js",
-    "scene77-node-registry-MZJkPhd3.js",
+    "scene77-input-block-BRQz6XR4.js",
+    "scene77-node-registry-B77K2dOa.js",
     "scene77-node-registry-extra-compat-WJskWIWa.js",
     "scene77-node-registry-extra-math-BDZZMEV4.js",
     "scene77-node-renderable-CC9HFVkF.js",

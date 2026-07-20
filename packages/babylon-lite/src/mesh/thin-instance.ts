@@ -6,6 +6,19 @@
 import { F32 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "./mesh.js";
+import type { RenderTargetSignature } from "../engine/render-target.js";
+
+/** @internal One render pass's far-bucket output published by the GPU culler for the LOD partner's draw. */
+export interface ThinInstanceLodBucket {
+    /** Compacted far-bucket instance matrices (vertex + storage usage). */
+    matrixBuffer: GPUBuffer;
+    /** Compacted far-bucket instance colors, when the culled mesh compacts colors. */
+    colorBuffer: GPUBuffer | null;
+    /** Indirect draw args for the far bucket (partner indexCount, visible far count). */
+    argsBuffer: GPUBuffer;
+    /** False while the source mesh's culling is not running — the partner must draw nothing. */
+    active: boolean;
+}
 
 /** CPU-side data backing a thin-instanced mesh: world matrices, optional colors, and GPU sync state. */
 export interface ThinInstanceData {
@@ -67,6 +80,18 @@ export interface ThinInstanceData {
     /** @internal Extra world-space radius added to every instance's culling sphere
      *  (see `setThinInstanceCullBoundsPad`). Undefined reads as 0. */
     _cullBoundsPad?: number;
+    /** @internal LOD partner mesh receiving this mesh's far bucket (set on the full-detail side). */
+    _lodPartner?: Mesh | null;
+    /** @internal Camera distance (world units) at which an in-frustum instance moves to the LOD partner. */
+    _lodDistance?: number;
+    /** @internal Width (world units) of the per-instance threshold dither window (0 = hard cut). */
+    _lodBand?: number;
+    /** @internal Set on the LOD side: mesh whose culling produces this mesh's drawn instances. */
+    _lodSource?: Mesh | null;
+    /** @internal Shared per-pass far-bucket outputs for an LOD pair. Its presence also marks both meshes as paired. */
+    _lodBuckets?: WeakMap<RenderTargetSignature, ThinInstanceLodBucket> | null;
+    /** @internal True when pairing auto-enabled GPU culling on the LOD side (clearing restores it). */
+    _lodAutoCull?: boolean;
     /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
      *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
     _refCount?: number;
@@ -298,4 +323,142 @@ export function setThinInstanceCullBoundsPad(mesh: Mesh, pad: number): void {
         throw new Error("setThinInstanceCullBoundsPad requires mesh.thinInstances");
     }
     ti._cullBoundsPad = pad;
+}
+
+/** Options for `setThinInstanceLodPartner`. */
+export interface ThinInstanceLodPartnerOptions {
+    /** Camera distance (world units) at which an in-frustum instance switches from `fullMesh` to the LOD partner. */
+    distance: number;
+    /** Width (world units) of a per-instance threshold dither window centered on `distance` (default 0 — hard cut). */
+    band?: number;
+}
+
+/** Pair a GPU-culled thin-instanced mesh with a lower-detail partner: when `fullMesh`'s compute cull runs,
+ * in-frustum instances closer than `options.distance` keep drawing through `fullMesh` while farther ones are
+ * compacted into a second bucket drawn by `lodMesh` instead. `lodMesh` must be a normal scene mesh sharing the
+ * same thin-instance matrix layout (it may reference the same matrices array); while paired it draws ONLY the
+ * far bucket — never its own instance count — so when culling is disabled, unavailable, or the instance count
+ * is 0, `fullMesh` falls back to drawing ALL instances and `lodMesh` draws nothing. `options.band` dithers the
+ * threshold per instance by ±band/2 via a deterministic hash of the instance index. Like
+ * `enableThinInstanceGpuCulling`, call after `setThinInstances()` and before `registerScene()`;
+ * `distance`/`band` may be re-set live by calling again with the same pair. */
+export function setThinInstanceLodPartner(fullMesh: Mesh, lodMesh: Mesh, options: ThinInstanceLodPartnerOptions): void {
+    const ti = fullMesh.thinInstances;
+    const lodTi = lodMesh.thinInstances;
+    if (!ti || !lodTi) {
+        throw new Error("setThinInstanceLodPartner requires thinInstances on both meshes");
+    }
+    if (fullMesh === lodMesh) {
+        throw new Error("setThinInstanceLodPartner requires two distinct meshes");
+    }
+    if ((ti._refCount ?? 1) > 1 || (lodTi._refCount ?? 1) > 1) {
+        throw new Error("setThinInstanceLodPartner does not support thin-instance data shared by mesh clones");
+    }
+    if (!Number.isFinite(options.distance) || options.distance < 0) {
+        throw new RangeError("setThinInstanceLodPartner distance must be a finite non-negative number");
+    }
+    const band = options.band ?? 0;
+    if (!Number.isFinite(band) || band < 0) {
+        throw new RangeError("setThinInstanceLodPartner band must be a finite non-negative number");
+    }
+    if (ti._lodSource) {
+        throw new Error("setThinInstanceLodPartner fullMesh cannot already be an LOD partner");
+    }
+    if (lodTi._lodPartner) {
+        throw new Error("setThinInstanceLodPartner lodMesh cannot also own an LOD partner");
+    }
+    if (lodTi._lodSource && lodTi._lodSource !== fullMesh) {
+        throw new Error("setThinInstanceLodPartner lodMesh is already paired with another source mesh");
+    }
+    if (lodTi.colors && !ti.colors) {
+        throw new Error("setThinInstanceLodPartner requires source instance colors when the LOD partner uses instance colors");
+    }
+    const previous = ti._lodPartner;
+    if (previous && previous !== lodMesh) {
+        const prevTi = previous.thinInstances;
+        if (prevTi && prevTi._lodSource === fullMesh) {
+            releaseLodConsumer(prevTi);
+        }
+        previous._clone = undefined;
+        ti._lodBuckets = null;
+    }
+    ti._lodPartner = lodMesh;
+    ti._lodDistance = options.distance;
+    ti._lodBand = band;
+    lodTi._lodSource = fullMesh;
+    fullMesh._clone = lodMesh._clone = "Cannot clone LOD-paired mesh";
+    const buckets = ti._lodBuckets ?? new WeakMap<RenderTargetSignature, ThinInstanceLodBucket>();
+    ti._lodBuckets = buckets;
+    lodTi._lodBuckets = buckets;
+    if (!lodTi._gpuCullingEnabled) {
+        // Route the partner through the culling draw path (so it can consume the far bucket and skip
+        // its own count) and make sure the cull module is fetched for its material group.
+        lodTi._lodAutoCull = true;
+        lodTi._gpuCullingEnabled = true;
+        lodTi._gpuVersion = -1;
+        lodTi._colorGpuVersion = -1;
+    }
+}
+
+/** Dissolve a `setThinInstanceLodPartner` pairing: `fullMesh` culling reverts to its single-bucket output and
+ * the former partner returns to independent rendering (drawing its own instance count again after the next
+ * renderable rebuild; GPU culling auto-enabled by the pairing is switched back off). */
+export function clearThinInstanceLodPartner(fullMesh: Mesh): void {
+    const ti = fullMesh.thinInstances;
+    if (!ti?._lodPartner) {
+        return;
+    }
+    const lodMesh = ti._lodPartner;
+    const lodTi = lodMesh.thinInstances;
+    ti._lodPartner = null;
+    ti._lodDistance = undefined;
+    ti._lodBand = undefined;
+    ti._lodBuckets = null;
+    fullMesh._clone = undefined;
+    lodMesh._clone = undefined;
+    if (lodTi && lodTi._lodSource === fullMesh) {
+        releaseLodConsumer(lodTi);
+    }
+}
+
+/** @internal Break any incoming or outgoing LOD pairing before a mesh's GPU resources are disposed. */
+export function _detachThinInstanceLodMesh(mesh: Mesh): void {
+    const ti = mesh.thinInstances;
+    if (!ti) {
+        return;
+    }
+    const source = ti._lodSource;
+    const sourceTi = source?.thinInstances;
+    if (source && sourceTi?._lodPartner === mesh) {
+        sourceTi._lodPartner = null;
+        sourceTi._lodDistance = undefined;
+        sourceTi._lodBand = undefined;
+        sourceTi._lodBuckets = null;
+        source._clone = undefined;
+    }
+    if (ti._lodSource) {
+        releaseLodConsumer(ti);
+    }
+    const partner = ti._lodPartner;
+    const partnerTi = partner?.thinInstances;
+    ti._lodPartner = null;
+    ti._lodDistance = undefined;
+    ti._lodBand = undefined;
+    ti._lodBuckets = null;
+    mesh._clone = undefined;
+    if (partner && partnerTi?._lodSource === mesh) {
+        partner._clone = undefined;
+        releaseLodConsumer(partnerTi);
+    }
+}
+
+function releaseLodConsumer(lodTi: ThinInstanceData): void {
+    lodTi._lodSource = null;
+    lodTi._lodBuckets = null;
+    if (lodTi._lodAutoCull) {
+        lodTi._lodAutoCull = false;
+        lodTi._gpuCullingEnabled = false;
+        lodTi._gpuVersion = -1;
+        lodTi._colorGpuVersion = -1;
+    }
 }

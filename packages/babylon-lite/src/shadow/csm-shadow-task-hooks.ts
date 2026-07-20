@@ -95,6 +95,8 @@ export interface CsmTaskState extends ShadowTaskInternalState {
      *  leave its cached no-color view dangling). This is precise, unlike the global `_materialEpoch` which also
      *  bumps for swaps of unrelated (non-caster) materials. */
     _casterMatGens: Map<Material, number>;
+    /** @internal Per-caster cascade-cap snapshot used to update task membership incrementally. */
+    _casterMaxCascades: Map<Mesh, number | undefined>;
 }
 
 export const preloadCsmShadowTaskState = preloadPcfShadowTaskState;
@@ -149,28 +151,34 @@ export function ensureCsmShadowTaskState(
             }
         }
         if (!casterMatChanged) {
-            const prevSet = new Set(existing._casterMeshes);
             const nextSet = new Set(casterMeshes);
             const views = existing._materialViews;
             const gens = existing._casterMatGens;
+            const caps = existing._casterMaxCascades;
+            const tasks = existing._tasks;
             for (const m of existing._casterMeshes) {
-                if (!nextSet.has(m)) {
-                    for (const t of existing._tasks) {
+                if (!nextSet.has(m) || m._shadowMaxCascade !== caps.get(m)) {
+                    caps.delete(m);
+                    for (const t of tasks) {
                         removeMeshFromTask(t, m);
                     }
                 }
             }
             for (const m of casterMeshes) {
-                if (!prevSet.has(m) && m.material) {
+                const maxCascade = m._shadowMaxCascade;
+                if (!caps.has(m) && m.material) {
                     const view = getNoColorView(m.material, views);
-                    for (const t of existing._tasks) {
-                        t.addMesh(m, { material: view });
+                    for (let c = 0; c < tasks.length; c++) {
+                        if (c <= (maxCascade ?? c)) {
+                            tasks[c]!.addMesh(m, { material: view });
+                        }
                     }
                     gens.set(m.material, effectiveCasterGen(m.material));
                 }
+                caps.set(m, maxCascade);
             }
             // Force each cascade to re-resolve its newly-added pending casters + re-bucket its binding lists.
-            for (const t of existing._tasks) {
+            for (const t of tasks) {
                 t._lastVersion = -1;
             }
             existing._casterMeshes = casterMeshes;
@@ -184,8 +192,7 @@ export function ensureCsmShadowTaskState(
         // state — the caller swaps to it, so the OLD task is never recorded again. Its GPU buffers may still
         // be referenced by the next frame command buffer, especially during async pre-first-frame construction,
         // so retire it only after that frame has submitted and drained. Mirrors resizeMeshGeometry.
-        const old = existing._task;
-        retireGpuResources(engine, () => old.dispose());
+        retireGpuResources(engine, existing._task.dispose);
     }
 
     const materialViews = new Map<Material, MaterialView>();
@@ -215,7 +222,9 @@ export function ensureCsmShadowTaskState(
         const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera, _skipClusteredLights: true }, engine, scene);
         for (const mesh of casterMeshes) {
             const material = mesh.material;
-            if (material) {
+            // Per-caster cascade cap: a capped caster renders only into layers 0..maxCascade (its far-layer
+            // shadow is sub-texel anyway), saving the excluded layers' draws + pipeline switches.
+            if (material && i <= (mesh._shadowMaxCascade ?? i)) {
                 task.addMesh(mesh, { material: getNoColorView(material, materialViews) });
             }
         }
@@ -246,7 +255,9 @@ export function ensureCsmShadowTaskState(
     // Snapshot each caster material's gen so the next caster-set change can tell whether a CASTER material was
     // rebuilt (→ full rebuild) or only the set changed (→ incremental, keeping unchanged casters' packets).
     const casterMatGens = new Map<Material, number>();
+    const casterMaxCascades = new Map<Mesh, number | undefined>();
     for (const m of casterMeshes) {
+        casterMaxCascades.set(m, m._shadowMaxCascade);
         if (m.material) {
             casterMatGens.set(m.material, effectiveCasterGen(m.material));
         }
@@ -266,6 +277,7 @@ export function ensureCsmShadowTaskState(
         _materialEpoch: scene._materialEpoch,
         _materialViews: materialViews,
         _casterMatGens: casterMatGens,
+        _casterMaxCascades: casterMaxCascades,
     };
 }
 

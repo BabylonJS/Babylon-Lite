@@ -377,78 +377,6 @@ function isNonBreakingOptionalParameterExpansion(removedLine: string, addedLine:
     return addedSignature.parameters.slice(removedSignature.parameters.length).every(isOptionalParameter);
 }
 
-/**
- * Split a parameter (as rendered in an `.api.md` signature) into its optional/rest markers
- * and its type. `url: string` → `{ prefix: "url", optional: false, rest: false, type: "string" }`;
- * `options?: MeshOptions` → optional; `...defines: string[]` → rest. Returns `undefined` for a
- * parameter with no type annotation (which keeps the change classified as breaking by default).
- */
-function parseParameterType(parameter: string): { optional: boolean; rest: boolean; type: string } | undefined {
-    const rest = parameter.startsWith("...");
-    const body = rest ? parameter.slice(3) : parameter;
-    // Find the first top-level `:` that separates the (identifier) name from the type. Parameter
-    // names cannot contain `<`/`(`/`[`/`{`, so any such bracket means we've entered the type.
-    let colon = -1;
-    for (let i = 0; i < body.length; i += 1) {
-        const ch = body[i]!;
-        if (ch === ":") {
-            colon = i;
-            break;
-        }
-        if (ch === "<" || ch === "(" || ch === "[" || ch === "{") {
-            break;
-        }
-    }
-    if (colon === -1) {
-        return undefined;
-    }
-    const name = body.slice(0, colon);
-    const optional = name.trimEnd().endsWith("?");
-    return { optional, rest, type: body.slice(colon + 1).trim() };
-}
-
-/**
- * Treat a parameter whose type UNION GAINED members (none removed) as non-breaking — e.g. an
- * overload set collapsed into a single implementation signature
- * (`f(x: string)` + `f(x: ArrayBuffer | Blob)` → `f(x: string | ArrayBuffer | Blob)`), or a lone
- * signature whose parameter type was widened (`f(x: string)` → `f(x: string | Color3)`). Widening
- * an accepted parameter type is additive: every prior caller still type-checks. Because
- * `breakingApiLines` tests each removed line against ALL added lines, this classifies every removed
- * overload as non-breaking against the single widened signature that supersedes it.
- *
- * Conservative by construction — the name/generics prefix and return-type suffix must be identical,
- * the parameter count must match, optional/rest markers must match position-for-position, and every
- * removed parameter's union members must be a SUBSET of the corresponding added parameter's members.
- * A narrowed or re-spelled parameter type, a changed return type, or a changed arity all fall
- * through to breaking.
- */
-function isNonBreakingParameterTypeWidening(removedLine: string, addedLine: string): boolean {
-    const removedSignature = parseCallableSignature(removedLine);
-    const addedSignature = parseCallableSignature(addedLine);
-
-    if (!removedSignature || !addedSignature) {
-        return false;
-    }
-
-    if (removedSignature.prefix !== addedSignature.prefix || removedSignature.suffix !== addedSignature.suffix) {
-        return false;
-    }
-
-    if (removedSignature.parameters.length !== addedSignature.parameters.length) {
-        return false;
-    }
-
-    return removedSignature.parameters.every((removedParameter, index) => {
-        const removed = parseParameterType(removedParameter);
-        const added = parseParameterType(addedSignature.parameters[index]!);
-        if (!removed || !added || removed.optional !== added.optional || removed.rest !== added.rest) {
-            return false;
-        }
-        const addedMembers = new Set(splitUnionMembers(added.type));
-        return splitUnionMembers(removed.type).every((member) => addedMembers.has(member));
-    });
-}
-
 const CONST_LITERAL_PATTERN = /^export (?:declare )?const ([A-Za-z_$][\w$]*) = (.+);$/;
 const CONST_TYPED_PATTERN = /^export (?:declare )?const ([A-Za-z_$][\w$]*): (.+);$/;
 
@@ -540,6 +468,66 @@ function isNonBreakingUnionWidening(removedLine: string, addedLine: string): boo
     return removedMembers.every((member) => addedMembers.has(member));
 }
 
+/** Split a single parameter declaration into its optional flag and type, ignoring the
+ *  parameter name. Returns `undefined` for rest params (`...x: T[]`) and anything that
+ *  doesn't look like `name: Type` — those are left to other classifiers / stay breaking. */
+function splitParameterType(parameter: string): { optional: boolean; type: string } | undefined {
+    if (parameter.startsWith("...")) {
+        return undefined;
+    }
+    const match = /^[A-Za-z_$][\w$]*(\?)?\s*:\s*([\s\S]+)$/.exec(parameter);
+    if (!match) {
+        return undefined;
+    }
+    return { optional: match[1] === "?", type: match[2]!.trim() };
+}
+
+/**
+ * Treat a function/method whose only change is one or more parameters WIDENING their
+ * type to a union superset — every previous top-level union member is still accepted —
+ * as non-breaking. Widening an input parameter is backward-compatible: existing callers
+ * that passed the old type still type-check (TypeScript parameter bivariance/contravariance).
+ *
+ * Example: `removeFromScene(scene: SceneContext, mesh: Mesh)` →
+ * `removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera)` — `Mesh` is
+ * still in the accepted set, so old calls keep compiling. The parameter NAME may change
+ * (names are not part of a positional call contract). A genuine type REPLACEMENT
+ * (`string` → `Color3`, where `string` is not a member of the new type) keeps the old
+ * member out of the new set and so stays breaking. Mirrors {@link isNonBreakingUnionWidening}
+ * for type aliases.
+ */
+function isNonBreakingParameterWidening(removedLine: string, addedLine: string): boolean {
+    const removedSignature = parseCallableSignature(removedLine);
+    const addedSignature = parseCallableSignature(addedLine);
+    if (!removedSignature || !addedSignature) {
+        return false;
+    }
+    if (removedSignature.prefix !== addedSignature.prefix || removedSignature.suffix !== addedSignature.suffix) {
+        return false;
+    }
+    if (removedSignature.parameters.length === 0 || removedSignature.parameters.length !== addedSignature.parameters.length) {
+        return false;
+    }
+    let widenedAtLeastOne = false;
+    for (let index = 0; index < removedSignature.parameters.length; index += 1) {
+        const removedParam = splitParameterType(removedSignature.parameters[index]!);
+        const addedParam = splitParameterType(addedSignature.parameters[index]!);
+        if (!removedParam || !addedParam || removedParam.optional !== addedParam.optional) {
+            return false;
+        }
+        if (removedParam.type === addedParam.type) {
+            continue;
+        }
+        const addedMembers = new Set(splitUnionMembers(addedParam.type));
+        if (!splitUnionMembers(removedParam.type).every((member) => addedMembers.has(member))) {
+            return false; // a member was dropped/replaced → genuine breaking type change
+        }
+        widenedAtLeastOne = true;
+    }
+    // Require an actual widening so a pure parameter rename isn't silently reclassified.
+    return widenedAtLeastOne;
+}
+
 /**
  * The TypedArray / buffer-view types that TypeScript 5.7 made generic over their
  * backing buffer (`Float32Array` → `Float32Array<TArrayBuffer extends ArrayBufferLike>`).
@@ -600,7 +588,7 @@ export function breakingApiLines(diff: string): string[] {
             !addedLines.some(
                 (addedLine) =>
                     isNonBreakingOptionalParameterExpansion(removedLine, addedLine) ||
-                    isNonBreakingParameterTypeWidening(removedLine, addedLine) ||
+                    isNonBreakingParameterWidening(removedLine, addedLine) ||
                     isNonBreakingConstLiteralWidening(removedLine, addedLine) ||
                     isNonBreakingUnionWidening(removedLine, addedLine) ||
                     isNonBreakingTypedArrayGenericWidening(removedLine, addedLine)

@@ -1,6 +1,6 @@
 {
-  "rawKB": 66.7,
-  "gzipKB": 29.8,
+  "rawKB": 66.5,
+  "gzipKB": 29.7,
   "ignoredRawKB": 8.4,
   "runtimeChunks": [
     "scene82-_math-factory-DFVyS8gB.js",
@@ -9,10 +9,10 @@
     "scene82-color-merger-0HZ9FICW.js",
     "scene82-conditional-block-CD6MCOBs.js",
     "scene82-fragment-output-CfRmfbPv.js",
-    "scene82-input-block-BS70ksk6.js",
-    "scene82-node-registry-B8WONfzs.js",
+    "scene82-input-block-BGy0sQo9.js",
+    "scene82-node-registry-BLOTu5bi.js",
     "scene82-node-registry-extra-math-B_9Eknx7.js",
-    "scene82-node-registry-extra-procedural-Bmt_Y40q.js",
+    "scene82-node-registry-extra-procedural-DxtyQaiU.js",
     "scene82-node-renderable-C4jX944y.js",
     "scene82-scale-block-6qtIvFiz.js",
     "scene82-simplex-perlin-3d-block-Cfood6_x.js",

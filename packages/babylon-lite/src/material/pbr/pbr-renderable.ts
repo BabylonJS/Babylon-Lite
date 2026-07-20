@@ -111,6 +111,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasSomeThinInstances = false;
     let hasCullingTI = false;
     let hasAnyUnlit = false;
+    let hasAnyShadowOnly = false;
     let hasAnyUvTransform = false;
     let hasAnyUv2 = false;
     let hasAnyVertexColor = false;
@@ -135,6 +136,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasSomeThinInstances ||= !!m.thinInstances;
         hasCullingTI ||= !!m.thinInstances?._gpuCullingEnabled;
         hasAnyUnlit ||= !!mat.unlit;
+        hasAnyShadowOnly ||= !!mat.shadowOnly;
         hasAnyUvTransform ||= !!mat._hasUvTx;
         // UV2 counts when ANY PBR channel samples texCoord 1 (occlusion included, via `_uv2Mask`
         // bit 32) — precomputed as `_uv2Mask` on the material by the glTF slow path (0/undefined on
@@ -225,6 +227,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     await _drainPbrExts([
         [needsEmissiveColor, () => import("./fragments/emissive-fragment.js")],
         [hasAnyUnlit, () => import("./fragments/unlit-fragment.js")],
+        [hasAnyShadowOnly, () => import("./fragments/shadow-only-fragment.js")],
         [hasSomeSkeletons, () => import("./fragments/skeleton-fragment.js")],
         [hasSomeMorphs, () => import("./fragments/morph-fragment.js")],
         [hasAnyUvTransform, () => import("./fragments/uv-transform-fragment.js")],
