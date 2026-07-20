@@ -1,4 +1,4 @@
-// Scene 266 — BJS reference for Gaussian Splatting glTF parity.
+// Scene 226 — BJS reference for Gaussian Splatting glTF parity.
 // Mirrors playground #WSAFDA#0: loads Halo_Believe.glb (KHR_gaussian_splatting)
 // via ImportMeshAsync and waits for the first worker sort to land before ready.
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";

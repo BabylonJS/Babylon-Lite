@@ -1,4 +1,4 @@
-// Scene 266 — Gaussian Splatting glTF (Lite).
+// Scene 226 — Gaussian Splatting glTF (Lite).
 // Ports playground #WSAFDA#0: loads Halo_Believe.glb, whose single POINTS-mode
 // primitive carries the KHR_gaussian_splatting extension, via loadGltf(). The new
 // gltf-feature-gaussian-splatting.ts converts the glTF attributes into Lite's

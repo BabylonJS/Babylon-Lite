@@ -2280,9 +2280,9 @@
         "skipPerf": true
     },
     {
-        "id": 266,
-        "slug": "scene266-gs-gltf",
-        "name": "Scene 266 — Gaussian Splatting glTF",
+        "id": 226,
+        "slug": "scene226-gs-gltf",
+        "name": "Scene 226 — Gaussian Splatting glTF",
         "maxMad": 5,
         "maxRawKB": 65,
         "description": "Ports playground #WSAFDA#0: loads Halo_Believe.glb via loadGltf(). The glb's single POINTS-mode primitive carries the KHR_gaussian_splatting extension; the new gltf-feature-gaussian-splatting.ts strips it from the core mesh pipeline and converts POSITION/SCALE/OPACITY/ROTATION + the SH degree-0 DC term into Lite's standard 32-byte splat row buffer, then attaches a GaussianSplattingMesh (rotated 180° about Z to match the BJS reference orientation) via the existing splat pipeline. v1 scope: SH degree 0 only. Reference loads the same .glb via ImportMeshAsync + @babylonjs/loaders KHR_gaussian_splatting.",

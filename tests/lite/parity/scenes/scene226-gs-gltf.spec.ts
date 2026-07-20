@@ -1,9 +1,9 @@
 /**
- * Scene 266 — Gaussian Splatting glTF parity test.
+ * Scene 226 — Gaussian Splatting glTF parity test.
  *
  * Loads Halo_Believe.glb (a KHR_gaussian_splatting asset) through `loadGltf()`
  * and compares the rendered splat cloud against a Babylon.js reference (captured
- * on-the-fly from `babylon-ref-scene266.html`, which loads the same .glb via
+ * on-the-fly from `babylon-ref-scene226.html`, which loads the same .glb via
  * ImportMeshAsync + the glTF KHR_gaussian_splatting loader extension).
  *
  * Both engines drive the same back-to-front depth sort from a worker; the lab
@@ -15,19 +15,19 @@ import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(266);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene266-gs-gltf");
+const sceneConfig = getSceneConfig(226);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene226-gs-gltf");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 266 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 226 skipped via skipParity in scene-config.json");
 
-test("Scene 266 — Gaussian Splatting glTF matches Babylon.js reference", async ({ page }, testInfo) => {
+test("Scene 226 — Gaussian Splatting glTF matches Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(180_000);
 
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 266, timeout: 150_000, settleMs: 800 });
+    await captureGolden(browser, { sceneId: 226, timeout: 150_000, settleMs: 800 });
 
-    await page.goto("/scene266.html");
+    await page.goto("/scene226.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 150_000 });
     await page.waitForFunction(() => !document.getElementById("loader-overlay"), { timeout: 5_000 }).catch(() => undefined);
     await page.waitForTimeout(500);
