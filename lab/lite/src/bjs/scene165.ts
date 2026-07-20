@@ -6,6 +6,15 @@ import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import "@babylonjs/core/Meshes/thinInstanceMesh";
 import { Scene } from "@babylonjs/core/scene";
+// TEMP (BJS 9.15+ pure/non-pure split): the hand-written ShaderMaterial's WGSL include
+// chunks (scene/mesh UBO + thin-instance declarations) are no longer registered
+// transitively, so under WebGPU they 404 to the SPA index.html and the shader fails to
+// compile (blank render). Import them explicitly; remove once upstream re-adds the
+// transitive registration (open BJS PR).
+import "@babylonjs/core/ShadersWGSL/ShadersInclude/sceneUboDeclaration";
+import "@babylonjs/core/ShadersWGSL/ShadersInclude/meshUboDeclaration";
+import "@babylonjs/core/ShadersWGSL/ShadersInclude/instancesDeclaration";
+import "@babylonjs/core/ShadersWGSL/ShadersInclude/instancesVertex";
 
 const vertexSource = `#include<sceneUboDeclaration>
 #include<meshUboDeclaration>

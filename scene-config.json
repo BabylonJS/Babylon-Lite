@@ -1606,8 +1606,6 @@
     {
         "id": 165,
         "slug": "scene165-shader-material-thin-instances",
-        "skipParity": true,
-        "skipParityReason": "Quarantined for dep-bump PR: reference bjs custom-WGSL thin-instance shader renders blank at @babylonjs 9.16.1 (WGSL attribute/UBO API drift); Lite renders. Fix tracked in follow-up.",
         "name": "Scene 165 - ShaderMaterial Thin Instances",
         "maxMad": 0.01,
         "maxRawKB": 45.3,
