@@ -336,7 +336,9 @@ function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number
 /**
  * Babylon.js `DynamicTexture` — a canvas-backed texture. Draw into
  * `getContext()`, then call `update()` to upload the canvas pixels to the GPU.
- * Backed by Babylon Lite's pixel-texture path.
+ * Backed by Babylon Lite's `createDynamicTexture` / `updateDynamicTexture`, which
+ * blit the canvas straight to the GPU via `copyExternalImageToTexture` (no
+ * `getImageData` CPU readback).
  */
 export class DynamicTexture extends BaseTexture {
     private readonly _scene: Scene;
