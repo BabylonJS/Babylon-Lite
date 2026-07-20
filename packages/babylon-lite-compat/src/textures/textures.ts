@@ -8,8 +8,17 @@
  * `Texture.LoadAsync`) so the GPU handle is present when the material binds.
  */
 
-import { loadTexture2D, loadBasisTexture2D, loadKtxTexture2D, createTexture2DFromPixels, updateTexture2DFromPixels, createTexture3DFromPixels } from "babylon-lite";
-import type { Texture2D, Texture2DOptions, EngineContext, Texture3D } from "babylon-lite";
+import {
+    loadTexture2D,
+    loadBasisTexture2D,
+    loadKtxTexture2D,
+    createTexture2DFromPixels,
+    updateTexture2DFromPixels,
+    createTexture3DFromPixels,
+    createDynamicTexture,
+    updateDynamicTexture,
+} from "babylon-lite";
+import type { Texture2D, Texture2DOptions, EngineContext, Texture3D, DynamicTexture2D } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
@@ -335,6 +344,9 @@ export class DynamicTexture extends BaseTexture {
     private readonly _context: CanvasRenderingContext2D;
     private readonly _width: number;
     private readonly _height: number;
+    /** @internal Branded Lite dynamic texture; aliases `_lite` and is the only
+     *  handle `updateDynamicTexture` accepts. */
+    private readonly _dyn: DynamicTexture2D;
 
     public constructor(name: string, options: { width: number; height: number }, scene: Scene) {
         super();
@@ -350,6 +362,10 @@ export class DynamicTexture extends BaseTexture {
             throw new Error("DynamicTexture: 2D canvas context unavailable.");
         }
         this._context = ctx;
+        // Allocate the GPU texture up front (blank until the first draw+update),
+        // matching Babylon.js where the texture exists immediately after construction.
+        this._dyn = createDynamicTexture(scene.getEngine()._lite, options.width, options.height);
+        this._lite = this._dyn;
     }
 
     public override getClassName(): string {
@@ -377,15 +393,9 @@ export class DynamicTexture extends BaseTexture {
         this.update();
     }
 
-    /** Upload the current canvas pixels to the GPU. */
+    /** Blit the current canvas pixels straight to the GPU texture (no CPU readback). */
     public update(): void {
-        const image = this._context.getImageData(0, 0, this._width, this._height);
-        const data = new Uint8Array(image.data.buffer);
-        if (!this._lite) {
-            this._lite = createTexture2DFromPixels(this._scene.getEngine()._lite, data, this._width, this._height);
-        } else {
-            updateTexture2DFromPixels(this._scene.getEngine()._lite, this._lite, data);
-        }
+        updateDynamicTexture(this._scene.getEngine()._lite, this._dyn, this._canvas);
     }
 
     public override whenReadyAsync(): Promise<void> {
