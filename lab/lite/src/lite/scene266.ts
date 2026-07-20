@@ -30,8 +30,8 @@ async function main(): Promise<void> {
     await startEngine(engine);
 
     // The KHR_gaussian_splatting feature exposes one promise per GS primitive via
-    // the container; each resolves to the attached GaussianSplattingMesh.
-    const splats = (container as unknown as { _gaussianSplats?: Promise<{ firstSortReady: Promise<void> }>[] })._gaussianSplats ?? [];
+    // the container's `_gaussianSplats`; each resolves to the attached GaussianSplattingMesh.
+    const splats = container._gaussianSplats ?? [];
     const splat = await splats[0]!;
     // Wait for the worker's first back-to-front sort so the screenshot is settled.
     await splat.firstSortReady;

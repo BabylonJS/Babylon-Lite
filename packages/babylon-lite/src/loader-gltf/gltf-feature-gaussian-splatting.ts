@@ -27,7 +27,7 @@ import type { GltfFeature } from "./gltf-feature.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
-import { resolveAccessor } from "./gltf-parser.js";
+import { TYPE_SIZES } from "./gltf-parser.js";
 import { attachParsedSplat } from "../loader-splat/load-splat.js";
 
 const NAME = "KHR_gaussian_splatting";
@@ -37,6 +37,15 @@ const RotationAttribute = "KHR_gaussian_splatting:ROTATION";
 const ScaleAttribute = "KHR_gaussian_splatting:SCALE";
 const OpacityAttribute = "KHR_gaussian_splatting:OPACITY";
 const ShDegree0Attribute = "KHR_gaussian_splatting:SH_DEGREE_0_COEF_0";
+
+// glTF component types and their byte sizes.
+const CT_BYTE = 5120;
+const CT_UNSIGNED_BYTE = 5121;
+const CT_SHORT = 5122;
+const CT_UNSIGNED_SHORT = 5123;
+const CT_UNSIGNED_INT = 5125;
+const CT_FLOAT = 5126;
+const COMPONENT_BYTES: Record<number, number> = { [CT_BYTE]: 1, [CT_UNSIGNED_BYTE]: 1, [CT_SHORT]: 2, [CT_UNSIGNED_SHORT]: 2, [CT_UNSIGNED_INT]: 4, [CT_FLOAT]: 4 };
 
 // Zeroth-order spherical-harmonics coefficient used to reconstruct a base colour from the SH DC term.
 const ShC0 = 0.28209479177387814;
@@ -71,20 +80,63 @@ function isGsPrimitive(primitive: any): boolean {
     return false;
 }
 
-/** Read an accessor as a Float32Array, denormalizing integer component types to [0, 1]. */
+/**
+ * Read an accessor as a tight Float32Array, honoring `bufferView.byteStride`
+ * (interleaved sources) and normalizing integer component types per the glTF
+ * `normalized` flag. Mirrors BJS `_loadFloatAccessorAsync`.
+ *
+ * NOTE: this deliberately does NOT go through `resolveAccessor`, which returns a
+ * tightly-packed view and ignores `byteStride` — reading a strided KHR_gaussian_splatting
+ * attribute through it would pick up padding / a neighbouring attribute and corrupt the splat.
+ */
 function readFloats(json: any, binChunk: DataView, accessorIdx: number): Float32Array {
-    const view = resolveAccessor(json, binChunk, accessorIdx);
-    // resolveAccessor only ever produces one of these concrete typed arrays.
-    const data = view._data as Float32Array | Uint8Array | Uint16Array | Uint32Array | Int8Array | Int16Array;
-    if (data instanceof Float32Array) {
-        return data;
+    const accessor = json.accessors[accessorIdx];
+    const componentCount = TYPE_SIZES[accessor.type] ?? 1;
+    const count: number = accessor.count;
+    const out = new Float32Array(count * componentCount);
+    // Spec: an accessor with no bufferView is zero-initialized (values may come from an extension).
+    if (accessor.bufferView === undefined) {
+        return out;
     }
-    const normalized = json.accessors[accessorIdx].normalized;
-    const out = new Float32Array(data.length);
-    // Denominators per the glTF normalized-integer convention.
-    const denom = data instanceof Uint8Array ? 255 : data instanceof Uint16Array ? 65535 : data instanceof Int8Array ? 127 : data instanceof Int16Array ? 32767 : 1;
-    for (let i = 0; i < data.length; i++) {
-        out[i] = normalized ? data[i]! / denom : data[i]!;
+    const bufferView = json.bufferViews[accessor.bufferView];
+    const ct: number = accessor.componentType;
+    const compBytes = COMPONENT_BYTES[ct] ?? 4;
+    const elemBytes = componentCount * compBytes;
+    // Interleaved sources set byteStride; tight sources fall back to the packed element size.
+    const stride: number = bufferView.byteStride ?? elemBytes;
+    const normalized = !!accessor.normalized;
+    const base = binChunk.byteOffset + (bufferView.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
+    const dv = new DataView(binChunk.buffer as ArrayBuffer);
+    for (let v = 0; v < count; v++) {
+        const rowBase = base + v * stride;
+        for (let c = 0; c < componentCount; c++) {
+            const off = rowBase + c * compBytes;
+            let value: number;
+            switch (ct) {
+                case CT_FLOAT:
+                    value = dv.getFloat32(off, true);
+                    break;
+                case CT_UNSIGNED_BYTE:
+                    value = normalized ? dv.getUint8(off) / 255 : dv.getUint8(off);
+                    break;
+                case CT_BYTE:
+                    value = normalized ? Math.max(dv.getInt8(off) / 127, -1) : dv.getInt8(off);
+                    break;
+                case CT_UNSIGNED_SHORT:
+                    value = normalized ? dv.getUint16(off, true) / 65535 : dv.getUint16(off, true);
+                    break;
+                case CT_SHORT:
+                    value = normalized ? Math.max(dv.getInt16(off, true) / 32767, -1) : dv.getInt16(off, true);
+                    break;
+                case CT_UNSIGNED_INT:
+                    value = dv.getUint32(off, true);
+                    break;
+                default:
+                    value = dv.getFloat32(off, true);
+                    break;
+            }
+            out[v * componentCount + c] = value;
+        }
     }
     return out;
 }
