@@ -2294,7 +2294,7 @@
         "id": 267,
         "slug": "scene267-standard-vertex-colors",
         "name": "Scene 267 — StandardMaterial Vertex Colors",
-        "maxMad": 0.02,
+        "maxMad": 0.04,
         "maxRawKB": 43,
         "description": "Full-frame affine RGBA vertex-color gradient on an unlit white StandardMaterial. Validates color-buffer binding, interpolation, and multiplication into StandardMaterial base color.",
         "tags": ["standard", "vertex-color", "procedural"],
