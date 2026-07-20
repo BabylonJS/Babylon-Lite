@@ -47,6 +47,14 @@ export function _installStandardStencilResolver(resolve: (stencil: StencilState)
     _stencilResolver = resolve;
 }
 
+/** Vertex-color fragment factory installed only by `enableStandardVertexColors`. */
+export let _stdVertexColorFragment: (() => ShaderFragment) | null = null;
+
+/** @internal Install Standard mesh vertex-color shader support. */
+export function _installStdVertexColorFragment(factory: () => ShaderFragment): void {
+    _stdVertexColorFragment = factory;
+}
+
 // ─── Composer Path (Phase 1) ────────────────────────────────────────
 // Converts feature bitmask → StandardTemplateConfig → ComposedShader.
 // This produces identical WGSL to the old string-builder path but via
