@@ -47,7 +47,23 @@ export interface Texture2D {
 export type Texture2DRecoverySource =
     | { kind: "url"; url: string; opts: Texture2DOptions }
     | { kind: "solid"; rgba: readonly [number, number, number, number] }
-    | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array; samplerDesc: GPUSamplerDescriptor };
+    | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array; samplerDesc: GPUSamplerDescriptor }
+    | {
+          /** A `createDynamicTexture` texture. On loss the blank texture is
+           *  re-allocated with the same format/usage/sampler, and — if a live
+           *  source (e.g. a persistent canvas) was retained by the last
+           *  `updateDynamicTexture` — that source is re-blitted so content
+           *  survives too. `source` is held until the next update or release. */
+          kind: "dynamic";
+          width: number;
+          height: number;
+          format: GPUTextureFormat;
+          mipLevelCount: number;
+          samplerDesc: GPUSamplerDescriptor;
+          source: GPUCopyExternalImageSource | null;
+          flipY: boolean;
+          premultipliedAlpha: boolean;
+      };
 
 /** Create a fresh Texture2D wrapper that shares GPU resources with `base`
  *  but carries its own UV transform. Use this when the same underlying image

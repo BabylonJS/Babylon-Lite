@@ -114,6 +114,57 @@ describe("updateDynamicTexture", () => {
     });
 });
 
+describe("createDynamicTexture device-lost recovery", () => {
+    /** Minimal `_dlr` capture stub matching the engine's DeviceLostRecoveryCapture shape. */
+    function withRecovery(engine: EngineContext): { captured: Array<{ tex: Texture2D; meta: unknown }> } {
+        const captured: Array<{ tex: Texture2D; meta: unknown }> = [];
+        (engine as unknown as { _dlr: unknown })._dlr = {
+            d: (tex: Texture2D, meta: Record<string, unknown>) => {
+                // Mirror the real attachRecoveryCapture.d: stamp the recovery source.
+                (tex as unknown as { _recoverySource: unknown })._recoverySource = { kind: "dynamic", ...meta, source: null, flipY: true, premultipliedAlpha: false };
+                captured.push({ tex, meta });
+            },
+        };
+        return { captured };
+    }
+
+    it("registers a 'dynamic' recovery source when recovery is enabled", () => {
+        const cap = newCap();
+        const engine = makeEngine(cap);
+        const rec = withRecovery(engine);
+        const tex = createDynamicTexture(engine, 64, 32, { srgb: true, mipMaps: true });
+
+        expect(rec.captured).toHaveLength(1);
+        expect(rec.captured[0]!.tex).toBe(tex);
+        expect(rec.captured[0]!.meta).toMatchObject({ width: 64, height: 32, format: "rgba8unorm-srgb", mipLevelCount: 7 });
+        // The wrapper stamps kind + null source until the first update.
+        const src = (tex as unknown as { _recoverySource?: { kind: string; source: unknown } })._recoverySource;
+        expect(src?.kind).toBe("dynamic");
+        expect(src?.source).toBeNull();
+    });
+
+    it("does not touch _recoverySource when recovery is disabled", () => {
+        const cap = newCap();
+        const engine = makeEngine(cap);
+        const tex = createDynamicTexture(engine, 8, 8);
+        expect((tex as unknown as { _recoverySource?: unknown })._recoverySource).toBeUndefined();
+    });
+
+    it("refreshes the retained source on update so a rebuild re-blits latest pixels", () => {
+        const cap = newCap();
+        const engine = makeEngine(cap);
+        withRecovery(engine);
+        const tex = createDynamicTexture(engine, 16, 16);
+        const source = fakeSource(16, 16);
+        updateDynamicTexture(engine, tex, source, { invertY: false, premultiplyAlpha: true });
+
+        const src = (tex as unknown as { _recoverySource?: { source: unknown; flipY: boolean; premultipliedAlpha: boolean } })._recoverySource;
+        expect(src?.source).toBe(source);
+        expect(src?.flipY).toBe(false);
+        expect(src?.premultipliedAlpha).toBe(true);
+    });
+});
+
 describe("DynamicTexture2D brand", () => {
     it("only accepts a createDynamicTexture result (compile-time)", () => {
         const cap = newCap();

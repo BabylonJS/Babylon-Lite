@@ -119,6 +119,9 @@ function attachRecoveryCapture(engine: EngineContext): void {
                 samplerDesc: { magFilter: "linear", minFilter: "linear", mipmapFilter: "linear", addressModeU: "repeat", addressModeV: "repeat", maxAnisotropy: 4 },
             };
         },
+        d(tex, meta) {
+            tex._recoverySource = { kind: "dynamic", ...meta, source: null, flipY: true, premultipliedAlpha: false };
+        },
         m(mesh, uv2s, tangents, colors, gpuIndices, indexFormat) {
             mesh._cpuUv2s = uv2s;
             mesh._cpuTangents = tangents;
@@ -368,6 +371,32 @@ async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): Promise<
         tex.sampler = getBilinearSampler(engine);
         tex.width = 1;
         tex.height = 1;
+        return;
+    }
+    if (source.kind === "dynamic") {
+        const texture = engine._device.createTexture({
+            size: { width: source.width, height: source.height },
+            format: source.format,
+            mipLevelCount: source.mipLevelCount,
+            usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
+        });
+        // Re-blit the last retained source (a persistent canvas survives loss);
+        // if none was retained the texture comes back blank, matching creation.
+        if (source.source) {
+            engine._device.queue.copyExternalImageToTexture({ source: source.source, flipY: source.flipY }, { texture, premultipliedAlpha: source.premultipliedAlpha }, [
+                source.width,
+                source.height,
+            ]);
+            if (source.mipLevelCount > 1) {
+                const { generateMipmaps } = await import("../texture/generate-mipmaps.js");
+                generateMipmaps(engine, texture);
+            }
+        }
+        tex.texture = texture;
+        tex.view = texture.createView();
+        tex.sampler = getOrCreateSampler(engine, source.samplerDesc);
+        tex.width = source.width;
+        tex.height = source.height;
         return;
     }
     const width = source.bitmap?.width ?? 1;

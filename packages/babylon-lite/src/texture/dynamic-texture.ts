@@ -106,24 +106,29 @@ export function createDynamicTexture(engine: EngineContext, width: number, heigh
     const device = engine._device;
     const mipMaps = options.mipMaps ?? false;
     const format: GPUTextureFormat = options.srgb ? "rgba8unorm-srgb" : "rgba8unorm";
+    const levels = mipMaps ? mipLevelCount(width, height) : 1;
 
     const texture = device.createTexture({
         size: { width, height },
         format,
-        mipLevelCount: mipMaps ? mipLevelCount(width, height) : 1,
+        mipLevelCount: levels,
         usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
     });
 
-    const sampler = getOrCreateSampler(engine, {
+    const samplerDesc: GPUSamplerDescriptor = {
         addressModeU: options.addressModeU ?? "clamp-to-edge",
         addressModeV: options.addressModeV ?? "clamp-to-edge",
         minFilter: options.minFilter ?? "linear",
         magFilter: options.magFilter ?? "linear",
         mipmapFilter: mipMaps ? "linear" : "nearest",
-    });
+    };
+    const sampler = getOrCreateSampler(engine, samplerDesc);
 
     const tex: Texture2D = { texture, view: texture.createView(), sampler, width, height };
     acquireTexture(tex);
+    // Opt-in device-lost recovery: retain enough to re-allocate the blank
+    // texture identically; the latest source is stamped by updateDynamicTexture.
+    engine._dlr?.d(tex, { width, height, format, mipLevelCount: levels, samplerDesc });
     return tex as DynamicTexture2D;
 }
 
@@ -145,6 +150,15 @@ export function updateDynamicTexture(engine: EngineContext, tex: DynamicTexture2
     const premultipliedAlpha = opts.premultiplyAlpha ?? false;
 
     engine._device.queue.copyExternalImageToTexture({ source, flipY: invertY }, { texture: tex.texture, premultipliedAlpha }, [tex.width, tex.height]);
+
+    // Keep the retained recovery source current so a device-lost rebuild
+    // re-blits the most recent pixels (no-op unless recovery is enabled).
+    const rec = tex._recoverySource;
+    if (rec && rec.kind === "dynamic") {
+        rec.source = source;
+        rec.flipY = invertY;
+        rec.premultipliedAlpha = premultipliedAlpha;
+    }
 
     if (tex.texture.mipLevelCount > 1) {
         generateMipmaps(engine, tex.texture);

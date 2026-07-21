@@ -395,9 +395,14 @@ export class DynamicTexture extends BaseTexture {
         this.update();
     }
 
-    /** Blit the current canvas pixels straight to the GPU texture (no CPU readback). */
-    public update(): void {
-        updateDynamicTexture(this._scene.getEngine()._lite, this._dyn, this._canvas);
+    /**
+     * Blit the current canvas pixels straight to the GPU texture (no CPU readback).
+     * @param invertY - Flip V so a top-down canvas samples upright. Default `true` (Babylon.js parity).
+     * @param premulAlpha - Treat the upload as premultiplied alpha. Default `false`.
+     * @param _allowGPUOptimization - Accepted for Babylon.js signature parity; the blit is already GPU-direct, so this is a no-op.
+     */
+    public update(invertY: boolean = true, premulAlpha: boolean = false, _allowGPUOptimization: boolean = false): void {
+        updateDynamicTexture(this._scene.getEngine()._lite, this._dyn, this._canvas, { invertY, premultiplyAlpha: premulAlpha });
     }
 
     public override whenReadyAsync(): Promise<void> {
