@@ -350,11 +350,13 @@ export function getPickingRegularPipeline(
     }
 
     const shader = discard
-        ? regularShader({
-              discardWgsl: discard.wgsl,
-              storage: discard.storage,
-              vertexDataComponents: (dataLayout?.components ?? 0) as 0 | 2 | 3 | 4,
-          })
+        ? discard.vertexData
+            ? regularShader({
+                  discardWgsl: discard.wgsl,
+                  storage: discard.storage,
+                  vertexDataComponents: (dataLayout?.components ?? 0) as 0 | 2 | 3 | 4,
+              })
+            : pickingShaderSource({ discardWgsl: discard.wgsl, storage: discard.storage })
         : pickingShaderSource();
     const label = `${discard ? `picking-${discard.key}` : "picking"}-vb-${positionInterleave?._stride ?? 12}-${positionInterleave?._offset ?? 0}${
         vertexData ? `-${vertexData.attribute}-${dataLayout!.layout.arrayStride}-${dataLayout!.offset}` : ""
@@ -391,11 +393,13 @@ export function getPickingThinInstancePipeline(
     }
 
     const shader = discard
-        ? thinInstanceShader({
-              discardWgsl: discard.wgsl,
-              storage: discard.storage,
-              vertexDataComponents: 0,
-          })
+        ? discard.vertexData
+            ? thinInstanceShader({
+                  discardWgsl: discard.wgsl,
+                  storage: discard.storage,
+                  vertexDataComponents: 0,
+              })
+            : pickingThinInstanceShaderSource({ discardWgsl: discard.wgsl, storage: discard.storage })
         : pickingThinInstanceShaderSource();
     const label = `${discard ? `picking-ti-${discard.key}` : "picking-ti"}-vb-${positionInterleave._stride}-${positionInterleave._offset}`;
     const pipeline = createPipeline(engine, shader, set.thinInstancePipeline.getBindGroupLayout(1), set.discardBGL, label, [positionVertexLayout(positionInterleave)]);

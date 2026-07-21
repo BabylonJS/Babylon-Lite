@@ -481,6 +481,43 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
         expect(interleavedPipeline?.vertex.buffers).toEqual([{ arrayStride: 24, attributes: [{ shaderLocation: 0, offset: 8, format: "float32x3" }] }]);
     });
 
+    it("preserves the legacy discard input for interleaved picks without vertex data", async () => {
+        const discard: PickDiscardRule = {
+            key: "legacy-interleaved",
+            wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return input.pickId == 99u; }",
+        };
+
+        const regular = makePickerEngine();
+        const regularScene = makePickScene(regular.engine);
+        regularScene.mesh._gpu = {
+            ...regularScene.mesh._gpu,
+            _vbLayout: {
+                _p: { _stride: 24, _offset: 8 },
+            },
+        };
+        await pickAsync(createGpuPicker(regularScene.scene), 4, 4, { discard });
+        const regularShader = regular.device.shaderModules.find((module) => String(module.label).includes("legacy-interleaved-vb"));
+        expect(regularShader?.code).toContain(discard.wgsl);
+        expect(regularShader?.code).not.toContain("vertexData");
+
+        const thin = makePickerEngine();
+        const thinScene = makePickScene(thin.engine);
+        thinScene.mesh._gpu = {
+            ...thinScene.mesh._gpu,
+            _vbLayout: {
+                _p: { _stride: 24, _offset: 8 },
+            },
+        };
+        thinScene.mesh.thinInstances = {
+            count: 1,
+            _gpuBuffer: {} as GPUBuffer,
+        } as NonNullable<Mesh["thinInstances"]>;
+        await pickAsync(createGpuPicker(thinScene.scene), 4, 4, { discard: { ...discard, key: "legacy-thin-interleaved" } });
+        const thinShader = thin.device.shaderModules.find((module) => String(module.label).includes("legacy-thin-interleaved-vb"));
+        expect(thinShader?.code).toContain(discard.wgsl);
+        expect(thinShader?.code).not.toContain("vertexData");
+    });
+
     it("uploads the selected pixel center in original framebuffer coordinates", async () => {
         const { engine } = makePickerEngine();
         const { scene } = makePickScene(engine);

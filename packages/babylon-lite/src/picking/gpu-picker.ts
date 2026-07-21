@@ -4,7 +4,6 @@ import type { SceneContext } from "../scene/scene.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { PickingInfo } from "./picking-info.js";
 import type { EngineContext } from "../engine/engine.js";
-import type * as DeformedGeometry from "./deformed-geometry.js";
 import type { PickContributor, PickSource, PickPassContext } from "./pick-contributor.js";
 import { createEmptyPickingInfo } from "./picking-info.js";
 import { createPickingRay } from "./ray.js";
@@ -237,18 +236,22 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
         }
     }
 
-    let deformedGeometry: typeof DeformedGeometry | null = null;
+    let needsDeformedGeometry = false;
+    let needsVertexDataFeature = !!pickDiscard?.vertexData;
     for (const mesh of scene.meshes) {
         if ((mesh.morphTargets || mesh.skeleton) && mesh._cpuPositions) {
-            deformedGeometry = await import("./deformed-geometry.js");
+            needsDeformedGeometry = true;
+        }
+        if (mesh._gpu._vbLayout?._p) {
+            needsVertexDataFeature = true;
+        }
+        if (needsDeformedGeometry && needsVertexDataFeature) {
             break;
         }
     }
 
-    let vertexDataFeature: typeof import("./picking-vertex-data.js") | null = null;
-    if (pickDiscard?.vertexData || scene.meshes.some((mesh) => !!mesh._gpu._vbLayout?._p)) {
-        vertexDataFeature = await import("./picking-vertex-data.js");
-    }
+    const deformedGeometry = needsDeformedGeometry ? await import("./deformed-geometry.js") : null;
+    const vertexDataFeature = needsVertexDataFeature ? await import("./picking-vertex-data.js") : null;
 
     // Pick coordinates are relative to the scene's own surface canvas, not the engine's
     // primary canvas — they differ when the scene renders into an auxiliary surface.
