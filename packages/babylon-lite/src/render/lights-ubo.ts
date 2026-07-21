@@ -121,6 +121,20 @@ export function refreshSceneLightsUBO(engine: EngineContext, scene: SceneContext
     return state._buffer;
 }
 
+/** @internal Fill `data` with the light-UBO contents for `foScene.lights`, then
+ *  subtract the floating-origin offset of `foScene.camera` (a no-op for non-LWR
+ *  engines, where `engine._applyLightFoOffset` is undefined). Reuses the same
+ *  `fillLightsData` + `applyLightFoOffset` pipeline as the shared scene lights
+ *  state, but lets a caller supply a DIFFERENT camera/lights source. The
+ *  geometry-renderer task uses this to build a lights UBO relative to a
+ *  `config.camera` override so positional light data shares the same origin as
+ *  its origin-relative world/view packing — without perturbing the scene's
+ *  shared lights state (which stays relative to the scene's active camera). */
+export function _writeTaskLightsData(engine: EngineContext, data: Float32Array, foScene: SceneContext): void {
+    fillLightsData(data, foScene.lights);
+    engine._applyLightFoOffset?.(data, foScene);
+}
+
 /** @internal */
 export function appendMeshLightUboFields(fields: UboField[]): void {
     fields.push({ _name: "lc", _type: "u32" });

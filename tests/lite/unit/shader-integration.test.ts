@@ -2,7 +2,7 @@
  * Integration tests: compose real PBR/Standard fragments with real templates
  * and verify the output is structurally valid.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer";
 import type { ShaderFragment } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import { createPbrTemplate } from "../../../packages/babylon-lite/src/material/pbr/pbr-template";
@@ -19,6 +19,25 @@ import { createPbrShadowFragment } from "../../../packages/babylon-lite/src/mate
 import { createShadowOnlyFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/shadow-only-fragment";
 import { createNormalMapFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/normal-map-fragment";
 import type { PbrTemplateConfig } from "../../../packages/babylon-lite/src/material/pbr/pbr-template";
+import {
+    clearStandardPipelineCache,
+    composeStandardShader,
+    getOrCreateStandardBindings,
+    writeStandardUvTransformData,
+} from "../../../packages/babylon-lite/src/material/standard/standard-pipeline";
+import { createStandardFogFragment } from "../../../packages/babylon-lite/src/material/standard/std-fog-wgsl";
+import { createStdCsmShadowFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-csm-shadow-fragment";
+import { HAS_SKELETON, HAS_SKELETON_8, VERTEX_ALPHA, STD_SCENE_FOG } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
+import { stdSkeletonExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-skeleton-fragment";
+import { createStdVertexColorFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-vertex-color-fragment";
+import { composeStandardGeometryShader } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-output-shader";
+import { createStandardGeometrySkeletonVelocity } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-skeleton-velocity";
+import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
+import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
+import { enableStandardSkeleton, enableStandardUvOffset } from "../../../packages/babylon-lite/src/material/standard/enable-standard-mesh-features";
+import { _getStandardGeometrySkeletonVelocityFactory, preloadStandardGeometryFeatures } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
 
 const defaultPbrConfig: PbrTemplateConfig = {
     _normalMode: "none",
@@ -239,7 +258,8 @@ describe("Standard template + fragments integration", () => {
         expect(result._vertexWGSL).toContain("@vertex fn main");
         expect(result._vertexWGSL).toContain("var finalWorld = mesh.world;");
         expect(result._fragmentWGSL).toContain("@fragment fn main");
-        expect(result._fragmentWGSL).toContain("calcFogFactor");
+        expect(result._fragmentWGSL).not.toContain("calcFogFactor");
+        expect(result._vertexWGSL).not.toContain("out.vf");
     });
 
     it("composes Standard + diffuse texture", () => {
@@ -267,7 +287,7 @@ describe("Standard template + fragments integration", () => {
         expect(result._fragmentWGSL).toContain("vInstanceColor");
     });
 
-    it("composes Standard + bump + fog", () => {
+    it("composes Standard + bump without retaining fog", () => {
         const template = createStandardTemplate({
             _diffuse: true,
             _needsUV: true,
@@ -275,6 +295,168 @@ describe("Standard template + fragments integration", () => {
         });
         const result = composeShader(template, [createNormalMapFragment()]);
         expect(result._fragmentWGSL).toContain("perturbNormal");
-        expect(result._fragmentWGSL).toContain("calcFogFactor");
+        expect(result._fragmentWGSL).not.toContain("calcFogFactor");
+    });
+
+    it("composes fog only with an explicit Standard scene context", () => {
+        const result = composeStandardShader(0, 0, [], "", {
+            _features: STD_SCENE_FOG,
+            _fragments: [createStandardFogFragment()],
+        });
+        expect(result._vertexWGSL).toContain("out.vf");
+        expect(result._fragmentWGSL).toContain("fn calcFogFactor");
+        expect(result._fragmentWGSL).toContain("mix(scene.vFogColor.rgb, color.rgb, fog)");
+    });
+
+    it("keeps fog and non-fog Standard bindings separate on one device", () => {
+        clearStandardPipelineCache();
+        clearSceneBGLCache();
+        const device = {
+            createBindGroupLayout: (descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout,
+            createPipelineLayout: (descriptor: GPUPipelineLayoutDescriptor) => descriptor as unknown as GPUPipelineLayout,
+            createShaderModule: (descriptor: GPUShaderModuleDescriptor) => descriptor as unknown as GPUShaderModule,
+        } as unknown as GPUDevice;
+        const engine = { _device: device } as EngineContext;
+        const noFog = getOrCreateStandardBindings(engine, 0, 0);
+        const fog = getOrCreateStandardBindings(engine, 0, 0, [], "", "", null, {
+            _features: STD_SCENE_FOG,
+            _fragments: [createStandardFogFragment()],
+        });
+        expect(fog).not.toBe(noFog);
+        expect(noFog._composed._fragmentWGSL).not.toContain("calcFogFactor");
+        expect(fog._composed._fragmentWGSL).toContain("calcFogFactor");
+        expect(noFog._sceneFeatures).toBe(0);
+        expect(fog._sceneFeatures).toBe(STD_SCENE_FOG);
+    });
+
+    it("composes Standard CSM without depending on the fog-only varying", () => {
+        const result = composeStandardShader(0, 0, [createStdCsmShadowFragment([{ lightIndex: 0 }])], "");
+        expect(result._fragmentWGSL).toContain("(scene.view * vec4<f32>(input.vp, 1.0)).z");
+        expect(result._fragmentWGSL).not.toContain("input.vf");
+        expect(result._vertexWGSL).not.toContain("out.vf");
+        expect(result._fragmentWGSL).not.toContain("calcFogFactor");
+    });
+
+    it("writes zero UV offsets when the global opt-in is enabled but a material has no offset", () => {
+        enableStandardUvOffset();
+        const material = createStandardMaterial();
+        material.uvScale = [2, 3];
+        const data = new Float32Array(4);
+        writeStandardUvTransformData(data, material, false);
+        expect([...data]).toEqual([2, 3, 0, 0]);
+        writeStandardUvTransformData(data, material, true);
+        expect([...data]).toEqual([2, -3, 0, 3]);
+    });
+
+    it("composes Standard skeletal deformation into geometry position, normal, and velocity state", () => {
+        const features = HAS_SKELETON | HAS_SKELETON_8;
+        const skeleton = stdSkeletonExt._frag(features, 0)!;
+        const result = composeStandardGeometryShader(
+            features,
+            0,
+            [skeleton],
+            [GeometryTextureType.WORLD_POSITION, GeometryTextureType.WORLD_NORMAL, GeometryTextureType.LINEAR_VELOCITY]
+        );
+        expect(result._vertexWGSL).toContain("finalWorld = mesh.world * influence");
+        expect(result._vertexWGSL).toContain("previousBoneSampler");
+        expect(result._vertexWGSL).toContain("mesh.previousWorld * previousInfluence");
+        expect(result._meshUboSpec._offsets.has("previousWorld")).toBe(true);
+        expect(result._meshUboSpec._offsets.has("velocityEnabled")).toBe(true);
+        expect(result._vertexBufferLayouts.some((layout) => (layout.attributes as readonly GPUVertexAttribute[]).some((attribute) => attribute.format === "uint32x4"))).toBe(true);
+        expect(result._vertexWGSL).toContain("@group(1)@binding(2) var boneSampler");
+        expect(result._vertexWGSL).toContain("@group(1)@binding(4) var previousBoneSampler");
+        expect(result._meshBGLDescriptor.entries).toHaveLength(5);
+    });
+
+    it("binds Standard skeleton texture and joint buffers in composed layout order", () => {
+        const boneView = {} as GPUTextureView;
+        const joints = {} as GPUBuffer;
+        const weights = {} as GPUBuffer;
+        const joints1 = {} as GPUBuffer;
+        const weights1 = {} as GPUBuffer;
+        const mesh = {
+            skeleton: {
+                boneTexture: { createView: () => boneView },
+                jointsBuffer: joints,
+                weightsBuffer: weights,
+                joints1Buffer: joints1,
+                weights1Buffer: weights1,
+            },
+        };
+        const entries: GPUBindGroupEntry[] = [];
+        expect(stdSkeletonExt._bind!({} as never, entries, 2, mesh as never)).toBe(3);
+        expect(entries).toEqual([{ binding: 2, resource: boneView }]);
+
+        const calls: [number, GPUBuffer][] = [];
+        const pass = {
+            setVertexBuffer: (slot: number, buffer: GPUBuffer) => calls.push([slot, buffer]),
+        } as unknown as GPURenderPassEncoder;
+        expect(stdSkeletonExt._bindVertexBuffers!(mesh as never, pass, 2)).toBe(6);
+        expect(calls).toEqual([
+            [2, joints],
+            [3, weights],
+            [4, joints1],
+            [5, weights1],
+        ]);
+    });
+
+    it("double-buffers previous bones for Standard geometry velocity", () => {
+        const textures = [{ destroy: vi.fn() }, { destroy: vi.fn() }] as unknown as [GPUTexture, GPUTexture];
+        const writes: GPUTexture[] = [];
+        let textureIndex = 0;
+        const engine = {
+            _device: {
+                createTexture: () => textures[textureIndex++]!,
+                queue: { writeTexture: ({ texture }: GPUImageCopyTexture) => writes.push(texture) },
+            },
+        } as unknown as EngineContext;
+        const bindGroups = [{}, {}] as GPUBindGroup[];
+        const state = createStandardGeometrySkeletonVelocity(
+            engine,
+            { boneCount: 2, boneMatrices: new Float32Array(32) } as never,
+            (texture) => bindGroups[textures.indexOf(texture)]!
+        );
+
+        expect(state._bindGroup).toBe(bindGroups[0]);
+        expect(writes).toEqual([textures[0], textures[1]]);
+        expect(state._update()).toBe(bindGroups[0]);
+        expect(writes.at(-1)).toBe(textures[1]);
+        expect(state._update()).toBe(bindGroups[1]);
+        expect(writes.at(-1)).toBe(textures[0]);
+        state._dispose();
+        expect(textures[0].destroy).toHaveBeenCalledOnce();
+        expect(textures[1].destroy).toHaveBeenCalledOnce();
+    });
+
+    it("preloads skeletal geometry velocity only after the Standard skeleton opt-in", async () => {
+        expect(_getStandardGeometrySkeletonVelocityFactory()).toBeNull();
+        enableStandardSkeleton();
+        await preloadStandardGeometryFeatures([{ skeleton: {} }] as never, true);
+        expect(_getStandardGeometrySkeletonVelocityFactory()).toBe(createStandardGeometrySkeletonVelocity);
+    });
+
+    it("forward Standard vertex color: RGB is unconditional, alpha only under the VERTEXALPHA opt-in", () => {
+        // Default: RGB applied, no vertex-alpha consumption.
+        const rgbOnly = composeStandardShader(0, 0, [createStdVertexColorFragment(false, false)], "");
+        expect(rgbOnly._fragmentWGSL).toContain("baseColor *= input.vColor.rgb");
+        expect(rgbOnly._fragmentWGSL).not.toContain("alpha *= input.vColor.a");
+        // Opt-in: alpha multiplied + vertex-alpha alpha test present.
+        const withAlpha = composeStandardShader(VERTEX_ALPHA, 0, [createStdVertexColorFragment(false, true)], "");
+        expect(withAlpha._fragmentWGSL).toContain("baseColor *= input.vColor.rgb");
+        expect(withAlpha._fragmentWGSL).toContain("alpha *= input.vColor.a");
+        expect(withAlpha._fragmentWGSL).toContain("input.vColor.a < mat.aCut");
+    });
+
+    it("applies RGB vertex color unconditionally but gates vertex alpha behind the VERTEXALPHA opt-in", () => {
+        // Default (no vertex-alpha opt-in): RGB is applied, alpha is NOT consumed.
+        const rgbOnly = composeStandardGeometryShader(0, 0, [createStdVertexColorFragment(false, false)], [GeometryTextureType.ALBEDO]);
+        expect(rgbOnly._fragmentWGSL).toContain("baseColor *= input.vColor.rgb");
+        expect(rgbOnly._fragmentWGSL).not.toContain("alpha *= input.vColor.a");
+
+        // With the opt-in (VERTEXALPHA): alpha is multiplied and masked before geometry alpha testing.
+        const withAlpha = composeStandardGeometryShader(VERTEX_ALPHA, 0, [createStdVertexColorFragment(false, true)], [GeometryTextureType.ALBEDO]);
+        expect(withAlpha._fragmentWGSL).toContain("baseColor *= input.vColor.rgb");
+        expect(withAlpha._fragmentWGSL).toContain("alpha *= input.vColor.a");
+        expect(withAlpha._fragmentWGSL.indexOf("alpha *= input.vColor.a")).toBeLessThan(withAlpha._fragmentWGSL.indexOf("alpha > 0.4"));
     });
 });

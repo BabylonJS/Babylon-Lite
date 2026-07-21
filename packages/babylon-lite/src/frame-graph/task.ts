@@ -47,6 +47,9 @@ export interface Task {
     /** @internal Optional asynchronous preparation run before synchronous frame-graph build. */
     _preload?(): Promise<void>;
 
+    /** @internal Optional scene-mutation hook for tasks that retain per-mesh bindings. */
+    _removeMesh?(mesh: object): void;
+
     /** Optional fast path for built-in tasks that execute without recorded Pass objects. */
     execute?(): number;
 
