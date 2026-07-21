@@ -812,9 +812,9 @@ kept in sync with actual GL state. Two protocols enforce that:
   unset sentinels with `statesDirty=false`). Resetting both halves means the
   first setter after a restore re-marks `statesDirty` and the next
   `applyGLStates` re-issues from scratch. The `\_flush*`reconciler slots are NOT
-cleared (they are pure function refs; a post-restore setter re-installs the
-same ref idempotently, and`statesDirty=false`gates the flush until then).
-Setters become no-ops while`\_isLost`. See §4.7.
+  cleared (they are pure function refs; a post-restore setter re-installs the
+  same ref idempotently, and`statesDirty=false`gates the flush until then).
+  Setters become no-ops while`\_isLost`. See §4.7.
 
 ### 4.2 Cache contract — which GL calls are elided
 
@@ -1411,9 +1411,9 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
 5. No observable / event emitter abstraction. Context-lost/restored use plain `cb[]`.
 6. Matrix / array uniform setters ARE shipped: `setEffectMatrix` / `setEffectMatrix3x3` / `setEffectFloatArray` / `setEffectFloatArray4` / `setEffectIntArray`, each a tree-shakable `export function`.
 7. Depth / stencil / cull / color-mask state setters ARE shipped via the
-  the depth-stencil module (`setDepthState` / `setStencilState` /
-  `setStencilOpSeparate` / `setCullState` / `setColorMask` / `clearEngine`).
-  Blend state is `setBlendMode(engine, mode)` /
+   the depth-stencil module (`setDepthState` / `setStencilState` /
+   `setStencilOpSeparate` / `setCullState` / `setColorMask` / `clearEngine`).
+   Blend state is `setBlendMode(engine, mode)` /
    `setBlendState` (§3.5.1) whose presets match `Constants.ALPHA_*`. `drawEffect`
    still does not touch blend, so fullscreen-effect parity is unchanged.
 8. No texture compression, no KTX, no DDS, no Basis.
@@ -1459,9 +1459,7 @@ export function createBaseEffectState(canvasOrCtx: HTMLCanvasElement | GLEngineC
         return { engine: canvasOrCtx, canvas: getRenderingCanvas(canvasOrCtx), ownsContext: false };
     }
     return {
-        engine: createGLEngine(canvasOrCtx, {
-            /* defaults */
-        }),
+        engine: createGLEngine(canvasOrCtx, {/* defaults */}),
         canvas: canvasOrCtx,
         ownsContext: true,
     };
