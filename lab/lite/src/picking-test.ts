@@ -23,6 +23,9 @@ interface PickTestResults {
     missPick: {
         hit: boolean;
     } | null;
+    vertexDataDiscardPick: {
+        hit: boolean;
+    } | null;
 }
 
 const results: PickTestResults = {
@@ -30,6 +33,7 @@ const results: PickTestResults = {
     error: null,
     centerPick: null,
     missPick: null,
+    vertexDataDiscardPick: null,
 };
 (window as any).__pickTest = results;
 
@@ -47,7 +51,7 @@ async function run(): Promise<void> {
         addToScene(scene, sphere);
 
         await registerScene(scene);
-    await startEngine(engine);
+        await startEngine(engine);
 
         // Let a few frames render so GPU resources are fully initialized
         for (let i = 0; i < 5; i++) {
@@ -74,6 +78,20 @@ async function run(): Promise<void> {
             thinInstanceIndex: centerInfo.thinInstanceIndex,
             normal: getPickedNormal(centerInfo),
             uv: getPickedUV(centerInfo),
+        };
+
+        const vertexDataDiscardInfo = await pickAsync(picker, cx, cy, {
+            discard: {
+                key: "normal-length",
+                vertexData: "normal",
+                wgsl: `
+fn shouldDiscardPick(input: PickDiscardInput) -> bool {
+return length(input.vertexData.xyz) > 0.5;
+}`,
+            },
+        });
+        results.vertexDataDiscardPick = {
+            hit: vertexDataDiscardInfo.hit,
         };
 
         // Pick corner — should miss (background)

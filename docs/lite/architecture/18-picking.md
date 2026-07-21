@@ -54,7 +54,20 @@ interface PickOptions {
     debugLabel?: string;
 }
 
-// WGSL shape injected for custom discard rules.
+type PickVertexDataAttribute = "normal" | "uv" | "uv2" | "tangent" | "color";
+
+interface PickDiscardRule {
+    readonly key: string;
+    readonly wgsl: string;
+    readonly storage?: readonly PickDiscardStorage[];
+    /** Optional regular-mesh vertex attribute exposed to the discard predicate.
+     *  Missing components and meshes without the requested buffer read as zero. Thin instances
+     *  always read zero here and keep their per-instance payload in `instanceExtras`. */
+    readonly vertexData?: PickVertexDataAttribute;
+}
+
+// WGSL shape injected when PickDiscardRule.vertexData is set.
+// Rules without vertexData keep the legacy shape without that field.
 struct PickDiscardInput {
     worldPos: vec3f,
     fragmentCoord: vec2f, // selected pixel center in the original backing framebuffer
@@ -62,6 +75,7 @@ struct PickDiscardInput {
     thinInstanceIndex: u32,
     hasThinInstance: u32,
     instanceExtras: vec4f,
+    vertexData: vec4f,
 }
 ```
 
@@ -110,6 +124,35 @@ and .babylon loader. No copies needed — the arrays already exist in JS memory.
 4. The 1×1 pick-ID and depth texels are copied to staging buffers and read back.
 5. The pick ID is decoded: `(r << 16) | (g << 8) | b`.
 6. The world-space hit point is reconstructed by unprojecting NDC + the read-back depth through `inverse(VP)`.
+
+### Optional regular-mesh vertex data
+
+A `PickDiscardRule` may name one existing mesh attribute through `vertexData`.
+The picker then selects a cached regular-mesh pipeline variant whose second vertex buffer reads that
+attribute and forwards it flat to `PickDiscardInput.vertexData` as a padded `vec4f`:
+
+| Attribute | GPU format  | `vertexData` projection |
+| --------- | ----------- | ----------------------- |
+| `normal`  | `float32x3` | `(x, y, z, 0)`          |
+| `uv`      | `float32x2` | `(x, y, 0, 0)`          |
+| `uv2`     | `float32x2` | `(x, y, 0, 0)`          |
+| `tangent` | `float32x4` | `(x, y, z, w)`          |
+| `color`   | `float32x4` | `(r, g, b, a)`          |
+
+The forwarding is `@interpolate(flat)`, so categorical payloads remain exact within a triangle.
+If a regular mesh does not own the requested GPU attribute, the picker uses the position-only pipeline
+and supplies `vec4f(0.0)`; known zero-filled placeholder UV buffers (`hasUv === false`) are not bound.
+Interleaved glTF buffers use their recorded stride and byte offset for both position and the selected
+attribute. The forwarded value is the raw source-buffer value: skinning and morph deformation do not
+transform normals or tangents for this generic payload. Thin-instance picking likewise supplies zero
+`vertexData`; its existing `instanceExtras` field remains the generic per-instance payload. This keeps
+the feature optional, adds no vertex-buffer binding to default tight picks, and does not make the
+picker interpret consumer data.
+
+The shader snippets, attribute lookup, and tight/interleaved pipeline-variant cache live in
+`picking-vertex-data.ts`. `pickAsync` dynamically imports that module only when a discard rule requests
+`vertexData` or a picked mesh has an interleaved position buffer. Ordinary tight picking keeps the
+original position-only shader and fetches no vertex-data feature chunk.
 
 ### Pick Vertex World Adjustment (Internal Shader Hook)
 
@@ -211,8 +254,13 @@ each attachment is a single texel:
 
 ### Vertex Layout
 
-- Single buffer: position `float32x3`, stride 12, shader location 0
-- No normals, UVs, or tangents needed — picking only cares about geometry position.
+- Default tight regular/thin-instance paths: one position `float32x3` buffer, stride 12, shader location 0.
+- A discard rule with `vertexData` adds a cached regular-mesh pipeline variant with one second buffer
+  at shader location 5. Its format follows the table above, while tight or interleaved stride/offset
+  come from the mesh. The variant is selected only when the current mesh owns that attribute;
+  otherwise the position-only variant supplies zero.
+- Interleaved regular and thin-instance positions use cached position-layout variants even without `vertexData`.
+- No extra buffer is bound for default tight picks or thin instances.
 
 ### Bind Groups
 
@@ -246,7 +294,9 @@ each attachment is a single texel:
 ### Pipeline Caching
 
 - Cached per-device via `device !== _cachedDevice` invalidation pattern.
-- Two pipeline variants: regular and thin-instance (separate shader modules + bind group layouts).
+- Every set has regular position-only and thin-instance variants. A discard rule naming `vertexData`
+  lazily creates regular attribute variants in `picking-vertex-data.ts`. The rule key must change when
+  its WGSL, storage layout, or vertex-data attribute changes.
 
 ## Shader Logic (WGSL — Phase 1)
 
@@ -254,6 +304,13 @@ each attachment is a single texel:
 // Vertex — regular mesh
 @vertex fn vs(@location(0) pos: vec3f) -> @builtin(position) vec4f {
     return viewProjection * world * vec4f(pos, 1.0);
+}
+
+// Optional discard-data variant (example: tangent; other attributes are padded to vec4f).
+@vertex fn vsWithData(@location(0) pos: vec3f,
+                      @location(5) tangent: vec4f) -> VsOut {
+    // world/pick fields omitted here; vertexData is forwarded flat.
+    out.vertexData = tangent;
 }
 
 // Vertex — thin instances (instance_index selects matrix from storage)
@@ -317,6 +374,8 @@ the intended coverage.
 
 - **Pick ID encoding round-trip**: encode u32 → RGB floats → RGBA8 readback → decode u32 = original.
 - **World-adjust shader hook**: identity by default; custom WGSL is injected exactly once in regular/thin shaders; regular meshes receive the non-instance sentinel and thin instances receive packed extras + `instanceIndex`.
+- **Discard vertex data**: every supported attribute generates the correct second-buffer layout and WGSL padding; regular meshes with the buffer forward it flat, regular meshes without it and all thin instances supply zero; default rules retain the position-only layout.
+- **Interleaved picking layouts**: regular/thin-instance positions and requested discard attributes use the mesh's recorded stride/offset; placeholder UV buffers are not treated as real attributes.
 - **Ray unprojection**: `createPickingRay` at canvas center with identity VP should produce Z-forward ray.
 - **Möller–Trumbore**: known triangle + ray → expected `t`, `u`, `v`. Edge cases: parallel, behind, grazing.
 - **Barycentric interpolation**: known face normals/UVs + known `bu`/`bv` → expected interpolated values.
@@ -343,5 +402,6 @@ the intended coverage.
 | `deformed-geometry.ts`       | Deformed CPU positions (morph/skeleton) for picking animated meshes                |
 | `picking-pipeline.ts`        | Cached GPU pipeline + bind group layouts for pick pass                             |
 | `picking-shader.ts`          | WGSL shader source for pick pass                                                   |
+| `picking-vertex-data.ts`     | Lazy regular-mesh attribute/interleaved-layout picking extension                   |
 | `detailed-picking.ts`        | `enableDetailedPicking` — CPU ray-triangle (Möller–Trumbore)                       |
 | `picking-helpers.ts`         | `getPickedNormal`, `getPickedUV` — barycentric interpolation                       |

@@ -15,6 +15,8 @@ test.describe("GPU Picking", () => {
         expect(results.centerPick.distance).toBeGreaterThan(0);
         expect(results.centerPick.pickedPoint).not.toBeNull();
         expect(results.centerPick.thinInstanceIndex).toBe(-1);
+        expect(results.vertexDataDiscardPick).not.toBeNull();
+        expect(results.vertexDataDiscardPick.hit).toBe(false);
 
         // Picked point should be near the sphere surface (radius ~0.5, camera at z=5)
         const [px, py, pz] = results.centerPick.pickedPoint;

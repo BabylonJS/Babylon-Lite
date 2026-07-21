@@ -517,7 +517,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
     // Texture cache: shared textures uploaded once, keyed by (bitmap, srgb).
     const texCache = new Map<ImageBitmap, Texture2D[]>();
 
-    function getCachedTexture(bitmap: ImageBitmap, srgb: boolean): Texture2D {
+    const getCachedTexture = (bitmap: ImageBitmap, srgb: boolean): Texture2D => {
         let textures = texCache.get(bitmap);
         if (!textures) {
             texCache.set(bitmap, (textures = []));
@@ -529,7 +529,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
             textures[key] = tex;
         }
         return tex;
-    }
+    };
 
     // Per-load image fetcher for ext modules (uses same image cache as core).
     const extImageCache: GltfImageCache | null = matExts.length ? [] : null;
@@ -567,28 +567,31 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
     // Build a PbrMaterialProps from parsed glTF material data.
     // Uses shared texture caches so identical bitmaps are uploaded once.
     const builtMaterialCache = new Map<GltfMaterialData, Promise<PbrMaterialProps>>();
-    async function buildPbrFromGltfMat(mat: GltfMaterialData): Promise<PbrMaterialProps> {
+    const buildPbrFromGltfMat = (mat: GltfMaterialData): Promise<PbrMaterialProps> => {
         let cached = builtMaterialCache.get(mat);
-        if (cached) {
-            return cached;
+        if (!cached) {
+            cached = (async () => {
+                const extLayers = matExts.length ? await ctx._runMatExts!(mat, matExts, extCtx) : undefined;
+                if (_needsPbrExt) {
+                    const extMod = await _ensurePbrExt();
+                    const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, samplerFor);
+                    return extMod.assemblePbrPropsExt(mat, tex, extLayers);
+                }
+                const tex = buildSampledPbrTextures
+                    ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
+                    : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
+                return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
+            })();
+            builtMaterialCache.set(mat, cached);
         }
-        cached = (async () => {
-            const extLayers = matExts.length ? await ctx._runMatExts!(mat, matExts, extCtx) : undefined;
-            if (_needsPbrExt) {
-                const extMod = await _ensurePbrExt();
-                const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, samplerFor);
-                return extMod.assemblePbrPropsExt(mat, tex, extLayers);
-            }
-            const tex = buildSampledPbrTextures
-                ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
-                : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
-            return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
-        })();
-        builtMaterialCache.set(mat, cached);
         return cached;
+    };
+
+    if (new Set(meshDatas.map((m) => m._primitive)).size < meshDatas.length) {
+        return import("./gltf-share.js").then((module) => module.share(meshDatas, buildPbrFromGltfMat, meshFeatures, ctx));
     }
 
-    const meshes = await Promise.all(
+    return Promise.all(
         meshDatas.map(async (m, i): Promise<Mesh> => {
             const material = await buildPbrFromGltfMat(m._material);
             const meshName = json.meshes[json.nodes[m._nodeIndex].mesh].name;
@@ -619,8 +622,6 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                     receiveShadows: false,
                     boundMin,
                     boundMax,
-                    skeleton: null,
-                    morphTargets: null,
                     _gpu: gpu,
                     _flatNormal: m._flatNormal,
                 } as unknown as Mesh;
@@ -636,13 +637,9 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
 
             // Run all per-mesh feature hooks (skeleton, morph, …) in parallel.
             // Each hook mutates `mesh` directly (e.g. attaches mesh.skeleton).
-            if (meshFeatures.length > 0) {
-                await Promise.all(meshFeatures.map((f) => f.applyMesh!(m, mesh, ctx)));
-            }
+            await Promise.all(meshFeatures.map((f) => f.applyMesh!(m, mesh, ctx)));
 
             return mesh;
         })
     );
-
-    return meshes;
 }

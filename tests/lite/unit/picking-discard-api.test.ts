@@ -5,6 +5,7 @@ import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { createGpuPicker, pickAsync } from "../../../packages/babylon-lite/src/picking/gpu-picker";
 import { getPickingPipelineSet } from "../../../packages/babylon-lite/src/picking/picking-pipeline";
 import { pickingShaderSource, pickingThinInstanceShaderSource } from "../../../packages/babylon-lite/src/picking/picking-shader";
+import { getPickingRegularPipeline, getPickingVertexDataPipelineSet, pickingVertexDataShaderSource } from "../../../packages/babylon-lite/src/picking/picking-vertex-data";
 import type { PickDiscardRule, PickOptions } from "../../../packages/babylon-lite/src";
 import type { PickPipelineModule, PickSource } from "../../../packages/babylon-lite/src/picking/pick-contributor";
 
@@ -61,7 +62,7 @@ interface MockBufferRecord {
 }
 
 function makePickerEngine(): ReturnType<typeof makeEngine> & {
-    pass: { drawCalls: { group2Bound: boolean }[] };
+    pass: { drawCalls: { group2Bound: boolean }[]; boundVertexSlots: number[] };
     buffers: MockBufferRecord[];
     writes: { label: string | undefined; data: Float32Array }[];
 } {
@@ -73,6 +74,7 @@ function makePickerEngine(): ReturnType<typeof makeEngine> & {
         drawCalls: [] as { group2Bound: boolean }[],
         pipeline: null as (GPURenderPipeline & { _bindGroupLayoutCount?: number }) | null,
         bindGroups: new Set<number>(),
+        boundVertexSlots: [] as number[],
         setPipeline(pipeline: GPURenderPipeline) {
             this.pipeline = pipeline;
             this.bindGroups.clear();
@@ -80,7 +82,9 @@ function makePickerEngine(): ReturnType<typeof makeEngine> & {
         setBindGroup(index: number) {
             this.bindGroups.add(index);
         },
-        setVertexBuffer() {},
+        setVertexBuffer(slot: number) {
+            this.boundVertexSlots.push(slot);
+        },
         setIndexBuffer() {},
         drawIndexed() {
             if ((this.pipeline?._bindGroupLayoutCount ?? 0) > 2 && !this.bindGroups.has(2)) {
@@ -215,6 +219,7 @@ describe("picking shader API", () => {
         expect(regular).toContain("let wp = adjustPickWorld((mesh.world * vec4f(position, 1.0)).xyz, vec4f(0.0), 0xffffffffu);");
         expect(regular).toContain("out.hasThinInstance = 0u;");
         expect(regular).toContain("out.thinInstanceIndex = 0xffffffffu;");
+        expect(regular).not.toContain("vertexData");
         expect(regular).toContain("PickDiscardInput(input.worldPos, scene.fragmentCoord");
 
         expect(thin).toContain("fn shouldDiscardPick(input: PickDiscardInput) -> bool");
@@ -224,6 +229,7 @@ describe("picking shader API", () => {
         expect(thin).toContain("out.hasThinInstance = 1u;");
         expect(thin).toContain("out.thinInstanceIndex = instanceIndex;");
         expect(thin).toContain("out.instanceExtras = extras;");
+        expect(thin).not.toContain("vertexData");
         expect(thin).toContain("PickDiscardInput(input.worldPos, scene.fragmentCoord");
     });
 
@@ -245,6 +251,26 @@ return input.hasThinInstance == 1u && input.instanceExtras.x > 4.0;
         expect(thin).toContain("let world = mat4x4f(");
         expect(thin).toContain("vec4f(m[0].xyz, 0.0)");
         expect(thin).toContain("vec4f(m[3].xyz, 1.0)");
+    });
+
+    it("forwards optional regular-mesh vertex data as one flat padded vec4", () => {
+        const zero = pickingVertexDataShaderSource(false, { vertexDataComponents: 0 });
+        const uv = pickingVertexDataShaderSource(false, { vertexDataComponents: 2 });
+        const normal = pickingVertexDataShaderSource(false, { vertexDataComponents: 3 });
+        const tangent = pickingVertexDataShaderSource(false, { vertexDataComponents: 4 });
+        const thin = pickingVertexDataShaderSource(true, { vertexDataComponents: 0 });
+
+        expect(zero).toContain("out.vertexData = vec4f(0.0);");
+        expect(uv).toContain("@location(5) vertexData: vec2f");
+        expect(uv).toContain("out.vertexData = vec4f(vertexData, 0.0, 0.0);");
+        expect(normal).toContain("@location(5) vertexData: vec3f");
+        expect(normal).toContain("out.vertexData = vec4f(vertexData, 0.0);");
+        expect(tangent).toContain("@location(5) vertexData: vec4f");
+        expect(tangent).toContain("out.vertexData = vertexData;");
+        for (const source of [uv, normal, tangent]) {
+            expect(source).toContain("@location(5) @interpolate(flat) vertexData: vec4f");
+        }
+        expect(thin).toContain("out.vertexData = vec4f(0.0);");
     });
 
     it("injects a custom world adjustment into regular and thin-instance picking shaders", () => {
@@ -277,6 +303,7 @@ describe("picking discard pipeline API", () => {
             key: "public-bindings",
             wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return input.pickId == 1u; }",
             storage: [{ name: "clipData", type: "array<vec4<f32>>", data: () => new Float32Array(4) }],
+            vertexData: "color",
         };
         const options: PickOptions = { discard };
 
@@ -317,6 +344,27 @@ describe("picking discard pipeline API", () => {
         expect(device.pipelineLayouts.every((layout) => Array.from(layout.bindGroupLayouts).length === 3)).toBe(true);
     });
 
+    it("creates the requested regular vertex-data pipeline without changing thin-instance layout", () => {
+        const { engine, device } = makeEngine();
+        const discard = {
+            key: "host-id-tangent",
+            wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return input.vertexData.x > 0.0; }",
+            vertexData: "tangent" as const,
+        };
+
+        const set = getPickingVertexDataPipelineSet(engine, discard);
+        getPickingRegularPipeline(engine, set, discard, undefined, { attribute: "tangent" });
+
+        expect(device.renderPipelines).toHaveLength(3);
+        const dataPipelineDescriptor = device.renderPipelines.find((pipeline) => pipeline.label === "picking-host-id-tangent-vb-12-0-tangent-16-0-pipeline")!;
+        expect(dataPipelineDescriptor.vertex.buffers).toEqual([
+            { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] },
+            { arrayStride: 16, attributes: [{ shaderLocation: 5, offset: 0, format: "float32x4" }] },
+        ]);
+        const thinPipeline = device.renderPipelines.find((pipeline) => pipeline.label === "picking-ti-host-id-tangent-pipeline")!;
+        expect(thinPipeline.vertex.buffers).toHaveLength(1);
+    });
+
     it("binds discard group-2 resources before drawing a discard pipeline", async () => {
         const { engine, pass } = makePickerEngine();
         const { scene, mesh } = makePickScene(engine);
@@ -332,6 +380,142 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
 
         expect(info.hit).toBe(true);
         expect(pass.drawCalls).toEqual([{ group2Bound: true }]);
+    });
+
+    it("binds requested regular vertex data only when that mesh owns the buffer", async () => {
+        const { engine, pass } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        (mesh._gpu as { tangentBuffer?: GPUBuffer }).tangentBuffer = {} as GPUBuffer;
+        const discard: PickDiscardRule = {
+            key: "vertex-data-discard",
+            wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return input.vertexData.x > 0.0; }",
+            vertexData: "tangent",
+        };
+
+        await pickAsync(createGpuPicker(scene), 4, 4, { discard });
+
+        expect(pass.boundVertexSlots).toEqual([0, 1]);
+    });
+
+    it("does not bind the zero-filled UV placeholder when the mesh has no UV attribute", async () => {
+        const { engine, pass } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        (mesh._gpu as { hasUv?: boolean }).hasUv = false;
+        const discard: PickDiscardRule = {
+            key: "missing-uv-data",
+            wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return input.vertexData.x > 0.0; }",
+            vertexData: "uv",
+        };
+
+        await pickAsync(createGpuPicker(scene), 4, 4, { discard });
+
+        expect(pass.boundVertexSlots).toEqual([0]);
+    });
+
+    it("uses interleaved position and vertex-data stride and offsets", async () => {
+        const { engine, device } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        const shared = {} as GPUBuffer;
+        mesh._gpu = {
+            ...mesh._gpu,
+            positionBuffer: shared,
+            uvBuffer: shared,
+            hasUv: true,
+            _vbLayout: {
+                _p: { _stride: 32, _offset: 0 },
+                _u: { _stride: 32, _offset: 24 },
+            },
+        };
+        const discard: PickDiscardRule = {
+            key: "interleaved-uv-data",
+            wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return input.vertexData.x > 0.0; }",
+            vertexData: "uv",
+        };
+
+        await pickAsync(createGpuPicker(scene), 4, 4, { discard });
+
+        const dataPipeline = device.renderPipelines.find(
+            (pipeline) => String(pipeline.label).includes("interleaved-uv-data-vb") && Array.from(pipeline.vertex.buffers ?? []).length === 2
+        );
+        expect(dataPipeline?.vertex.buffers).toEqual([
+            { arrayStride: 32, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] },
+            { arrayStride: 32, attributes: [{ shaderLocation: 5, offset: 24, format: "float32x2" }] },
+        ]);
+    });
+
+    it("uses an interleaved position layout for a default pick", async () => {
+        const { engine, device } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        mesh._gpu = {
+            ...mesh._gpu,
+            _vbLayout: {
+                _p: { _stride: 24, _offset: 8 },
+            },
+        };
+
+        await pickAsync(createGpuPicker(scene), 4, 4);
+
+        const interleavedPipeline = device.renderPipelines.find(
+            (pipeline) => String(pipeline.label).includes("picking-vb") && Array.from(pipeline.vertex.buffers ?? []).length === 1
+        );
+        expect(interleavedPipeline?.vertex.buffers).toEqual([{ arrayStride: 24, attributes: [{ shaderLocation: 0, offset: 8, format: "float32x3" }] }]);
+    });
+
+    it("uses an interleaved position layout for a thin-instance pick", async () => {
+        const { engine, device } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        mesh._gpu = {
+            ...mesh._gpu,
+            _vbLayout: {
+                _p: { _stride: 24, _offset: 8 },
+            },
+        };
+        mesh.thinInstances = {
+            count: 1,
+            _gpuBuffer: {} as GPUBuffer,
+        } as NonNullable<Mesh["thinInstances"]>;
+
+        await pickAsync(createGpuPicker(scene), 4, 4);
+
+        const interleavedPipeline = device.renderPipelines.find((pipeline) => String(pipeline.label).includes("picking-ti-vb"));
+        expect(interleavedPipeline?.vertex.buffers).toEqual([{ arrayStride: 24, attributes: [{ shaderLocation: 0, offset: 8, format: "float32x3" }] }]);
+    });
+
+    it("preserves the legacy discard input for interleaved picks without vertex data", async () => {
+        const discard: PickDiscardRule = {
+            key: "legacy-interleaved",
+            wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return input.pickId == 99u; }",
+        };
+
+        const regular = makePickerEngine();
+        const regularScene = makePickScene(regular.engine);
+        regularScene.mesh._gpu = {
+            ...regularScene.mesh._gpu,
+            _vbLayout: {
+                _p: { _stride: 24, _offset: 8 },
+            },
+        };
+        await pickAsync(createGpuPicker(regularScene.scene), 4, 4, { discard });
+        const regularShader = regular.device.shaderModules.find((module) => String(module.label).includes("legacy-interleaved-vb"));
+        expect(regularShader?.code).toContain(discard.wgsl);
+        expect(regularShader?.code).not.toContain("vertexData");
+
+        const thin = makePickerEngine();
+        const thinScene = makePickScene(thin.engine);
+        thinScene.mesh._gpu = {
+            ...thinScene.mesh._gpu,
+            _vbLayout: {
+                _p: { _stride: 24, _offset: 8 },
+            },
+        };
+        thinScene.mesh.thinInstances = {
+            count: 1,
+            _gpuBuffer: {} as GPUBuffer,
+        } as NonNullable<Mesh["thinInstances"]>;
+        await pickAsync(createGpuPicker(thinScene.scene), 4, 4, { discard: { ...discard, key: "legacy-thin-interleaved" } });
+        const thinShader = thin.device.shaderModules.find((module) => String(module.label).includes("legacy-thin-interleaved-vb"));
+        expect(thinShader?.code).toContain(discard.wgsl);
+        expect(thinShader?.code).not.toContain("vertexData");
     });
 
     it("uploads the selected pixel center in original framebuffer coordinates", async () => {
