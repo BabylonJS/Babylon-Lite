@@ -130,9 +130,10 @@ export function createDynamicTexture(engine: EngineContext, width: number, heigh
     // blank texture identically — no logic here. Like the url/solid/bitmap recovery
     // kinds, the actual rebuild lives elsewhere (the dynamic-texture-recovery
     // module, dynamically imported by device-lost-recovery only when needed), so
-    // the create/update API never bundles recovery code. Gated on engine._dlr so it
-    // is a no-op — and tree-shakes — when recovery is disabled. The latest source is
-    // stamped by updateDynamicTexture.
+    // the create/update API never bundles recovery code. `engine._dlr` is a runtime
+    // flag, so this is a runtime gate (a no-op when recovery is disabled), not
+    // compile-time dead-code elimination. The latest source is stamped by
+    // updateDynamicTexture.
     if (engine._dlr) {
         const rec: Texture2DRecoverySource = {
             kind: "dynamic",
