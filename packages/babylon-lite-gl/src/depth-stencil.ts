@@ -107,7 +107,9 @@ export interface GLDepthState {
 /** Stencil configuration for {@link setStencilState}. Omitted fields are left
  *  unchanged. The `func`/`ref`/`funcMask` triple and the
  *  `opFail`/`opZFail`/`opZPass` triple are each applied as a unit (any member
- *  present re-issues that GL call, merging the unspecified members from cache). */
+ *  present re-issues that GL call). A partial op update merges its unspecified
+ *  members from the front desired triple and restores that shared triple to
+ *  both faces. */
 export interface GLStencilState {
     /** Enable/disable the stencil test (`gl.enable/disable(STENCIL_TEST)`). */
     test?: boolean;
@@ -242,18 +244,12 @@ export function setStencilState(engine: GLEngineContext, state: GLStencilState):
     }
     if (state.opFail !== undefined || state.opZFail !== undefined || state.opZPass !== undefined) {
         ensureStencilOpDefaults(s.rs);
-    }
-    if (state.opFail !== undefined) {
-        s.rs[RS_STENCIL_OP_FAIL + RS_DESIRED] = state.opFail;
-        s.rs[RS_STENCIL_BACK_OP_FAIL + RS_DESIRED] = state.opFail;
-    }
-    if (state.opZFail !== undefined) {
-        s.rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED] = state.opZFail;
-        s.rs[RS_STENCIL_BACK_OP_ZFAIL + RS_DESIRED] = state.opZFail;
-    }
-    if (state.opZPass !== undefined) {
-        s.rs[RS_STENCIL_OP_ZPASS + RS_DESIRED] = state.opZPass;
-        s.rs[RS_STENCIL_BACK_OP_ZPASS + RS_DESIRED] = state.opZPass;
+        const opFail = state.opFail ?? s.rs[RS_STENCIL_OP_FAIL + RS_DESIRED]!;
+        const opZFail = state.opZFail ?? s.rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED]!;
+        const opZPass = state.opZPass ?? s.rs[RS_STENCIL_OP_ZPASS + RS_DESIRED]!;
+        s.rs[RS_STENCIL_OP_FAIL + RS_DESIRED] = s.rs[RS_STENCIL_BACK_OP_FAIL + RS_DESIRED] = opFail;
+        s.rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED] = s.rs[RS_STENCIL_BACK_OP_ZFAIL + RS_DESIRED] = opZFail;
+        s.rs[RS_STENCIL_OP_ZPASS + RS_DESIRED] = s.rs[RS_STENCIL_BACK_OP_ZPASS + RS_DESIRED] = opZPass;
     }
     s._flushStencil = flushStencil;
     s.statesDirty = true;
