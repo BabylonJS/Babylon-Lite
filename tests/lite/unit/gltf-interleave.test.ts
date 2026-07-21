@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { accessorIsStrided, buildInterleavedPartial, installLazyCpu, computeAabbStrided } from "../../../packages/babylon-lite/src/loader-gltf/gltf-interleave.js";
+import { _shareInterleavedCpu } from "../../../packages/babylon-lite/src/loader-gltf/gltf-share.js";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 
 const FLOAT = 5126;
 
@@ -75,6 +77,25 @@ describe("gltf-interleave", () => {
 
         // Cached: repeated reads return the same array instance.
         expect(mesh._cpuPositions).toBe(mesh._cpuPositions);
+    });
+
+    it("shares lazy CPU copies across meshes created from one cached primitive", async () => {
+        const { json, binChunk, primitive } = makeInterleavedAsset();
+        const m = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
+        const first: Record<string, unknown> = {};
+        const second: Record<string, unknown> = {};
+
+        installLazyCpu(first, m as never);
+        installLazyCpu(second, m as never);
+        _shareInterleavedCpu(first as unknown as Mesh, second as unknown as Mesh);
+
+        expect(second._cpuPositions).toBe(first._cpuPositions);
+        expect(second._cpuNormals).toBe(first._cpuNormals);
+
+        const replacement = new Float32Array([7, 8, 9]);
+        second._cpuPositions = replacement;
+        expect(second._cpuPositions).toBe(replacement);
+        expect(first._cpuPositions).not.toBe(replacement);
     });
 
     it("computeAabbStrided folds the AABB directly from the strided slice", async () => {

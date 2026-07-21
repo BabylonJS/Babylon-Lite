@@ -237,7 +237,7 @@ async function rebuildRegisteredScenes(engine: EngineContext): Promise<void> {
 
 async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Promise<void> {
     await rebuildSceneTextures(engine, scene);
-    await rebuildMeshes(engine, scene);
+    await _rebuildMeshes(engine, scene);
 
     scene._renderables.length = 0;
     scene._uniformUpdaters.length = 0;
@@ -284,13 +284,14 @@ function resetFrameGraphTasks(engine: EngineContext, scene: SceneContext): void 
     }
 }
 
-async function rebuildMeshes(engine: EngineContext, scene: SceneContext): Promise<void> {
+/** @internal Rebuild retained mesh resources after a device loss. */
+export async function _rebuildMeshes(engine: EngineContext, scene: SceneContext): Promise<void> {
     let skeletonFactory: typeof createSkeleton | null = null;
     let morphFactory: typeof createMorphTargets | null = null;
 
     for (const mesh of scene.meshes) {
         if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices) {
-            mesh._gpu = uploadRetainedMesh(engine, mesh);
+            mesh._gpu = (mesh._gpu._recoverShared ?? (uploadRetainedMesh as NonNullable<MeshGPU["_recoverShared"]>))(engine, mesh, uploadRetainedMesh);
         }
         if (mesh.skeleton) {
             skeletonFactory ??= (await import("../skeleton/create-skeleton.js")).createSkeleton;
