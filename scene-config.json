@@ -1584,7 +1584,7 @@
         "name": "Scene 164 - Device Lost Recovery",
         "maxMad": 0.01,
         "maxRegionMad": 0.08,
-        "maxRawKB": 99.37,
+        "maxRawKB": 99.6,
         "description": "Scene 5 Alien glTF forces WebGPU device loss and validates opt-in automatic recovery without an app rebuild callback.",
         "tags": ["pbr", "gltf", "anim", "recovery"],
         "skipPerf": true

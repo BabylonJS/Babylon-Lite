@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDynamicTexture, updateDynamicTexture, type DynamicTexture2D } from "../../../packages/babylon-lite/src/texture/dynamic-texture";
+import { rebuildDynamicTexture2D } from "../../../packages/babylon-lite/src/texture/dynamic-texture-recovery";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
@@ -116,25 +117,37 @@ describe("updateDynamicTexture", () => {
 
 describe("createDynamicTexture device-lost recovery", () => {
     /** Enable recovery by making `engine._dlr` truthy. createDynamicTexture stamps
-     *  the recovery source (with an injected rebuild closure) inline when it is. */
+     *  the recovery source (pure data only — no logic) inline when it is. */
     function withRecovery(engine: EngineContext): void {
         (engine as unknown as { _dlr: unknown })._dlr = {};
     }
 
-    it("registers a 'dynamic' recovery source with an injected rebuild closure", async () => {
+    it("registers a pure-data 'dynamic' recovery source (creation params, no logic)", () => {
         const cap = newCap();
         const engine = makeEngine(cap);
         withRecovery(engine);
         const tex = createDynamicTexture(engine, 64, 32, { srgb: true, mipMaps: true });
 
-        const src = (tex as unknown as { _recoverySource?: { kind: string; source: unknown; rebuild?: unknown } })._recoverySource;
+        const src = (tex as unknown as { _recoverySource?: Record<string, unknown> })._recoverySource;
         expect(src?.kind).toBe("dynamic");
         expect(src?.source).toBeNull(); // no source retained until the first update
-        expect(typeof src?.rebuild).toBe("function");
+        expect(src?.width).toBe(64);
+        expect(src?.height).toBe(32);
+        expect(src?.format).toBe("rgba8unorm-srgb");
+        expect(src?.levels).toBe(7); // log2(64)+1
+        expect(src?.samplerDesc).toBeDefined();
+        // The rebuild logic is NOT stamped here; it lives in the recovery module.
+        expect(src?.rebuild).toBeUndefined();
+    });
 
-        // The closure re-allocates a texture with the same format/mips/usage.
+    it("rebuildDynamicTexture2D re-allocates with the same format/mips/usage", async () => {
+        const cap = newCap();
+        const engine = makeEngine(cap);
+        withRecovery(engine);
+        const tex = createDynamicTexture(engine, 64, 32, { srgb: true, mipMaps: true });
+
         cap.createDesc = undefined as GPUTextureDescriptor | undefined;
-        await (src as { rebuild: (e: EngineContext, t: Texture2D) => Promise<void> }).rebuild(engine, tex);
+        await rebuildDynamicTexture2D(engine, tex);
         expect(cap.createDesc?.format).toBe("rgba8unorm-srgb");
         expect(cap.createDesc?.mipLevelCount).toBe(7); // log2(64)+1
         const usage = cap.createDesc?.usage ?? 0;
@@ -161,7 +174,7 @@ describe("createDynamicTexture device-lost recovery", () => {
 
         const src = (
             tex as unknown as {
-                _recoverySource?: { source: unknown; flipY: boolean; premultipliedAlpha: boolean; rebuild: (e: EngineContext, t: Texture2D) => Promise<void> };
+                _recoverySource?: { source: unknown; flipY: boolean; premultipliedAlpha: boolean };
             }
         )._recoverySource;
         expect(src?.source).toBe(source);
@@ -170,7 +183,7 @@ describe("createDynamicTexture device-lost recovery", () => {
 
         // A rebuild now re-blits the retained source with its flip/premultiply flags.
         cap.copyCalls.length = 0;
-        await src!.rebuild(engine, tex);
+        await rebuildDynamicTexture2D(engine, tex);
         expect(cap.copyCalls).toHaveLength(1);
         const call = cap.copyCalls[0]!;
         expect((call.src as { source: unknown; flipY?: boolean }).source).toBe(source);

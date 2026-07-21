@@ -371,9 +371,13 @@ async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): Promise<
         return;
     }
     if (source.kind === "dynamic") {
-        // The rebuild logic is injected by createDynamicTexture (kept out of this
-        // always-bundled module so recovery-only scenes don't pay for it).
-        await source.rebuild(engine, tex);
+        // The dynamic-texture rebuild logic lives in its own module, dynamically
+        // imported here (matching the generateMipmaps lazy-import below) so it
+        // lands in an on-demand chunk: this always-bundled recovery module carries
+        // none of it statically, so a scene that enables recovery but never creates
+        // a dynamic texture never pays for it.
+        const { rebuildDynamicTexture2D } = await import("../texture/dynamic-texture-recovery.js");
+        await rebuildDynamicTexture2D(engine, tex);
         return;
     }
     const width = source.bitmap?.width ?? 1;
