@@ -1,6 +1,6 @@
 {
-  "rawKB": 108.3,
-  "gzipKB": 44,
+  "rawKB": 109.5,
+  "gzipKB": 44.4,
   "ignoredRawKB": 3.3,
   "runtimeChunks": [
     "scene72-_math-factory-DFVyS8gB.js",
@@ -8,7 +8,7 @@
     "scene72-anisotropy-block-DShn3fIV.js",
     "scene72-clearcoat-block-BPLkmxQ1.js",
     "scene72-fragment-output-CfRmfbPv.js",
-    "scene72-generate-mipmaps-XZ2RSD2-.js",
+    "scene72-generate-mipmaps-DNSJzsQu.js",
     "scene72-input-block-sFEUF5kA.js",
     "scene72-lerp-block-BvdxNwIV.js",
     "scene72-material-view-Dua1bl7W.js",
@@ -22,7 +22,7 @@
     "scene72-reflection-block-CIXuH-z0.js",
     "scene72-refraction-block-CNhcdLis.js",
     "scene72-rgbd-decode-PGd42at7.js",
-    "scene72-shadow-task-Ch6JWKhF.js",
+    "scene72-shadow-task-DF-JwmD-.js",
     "scene72-sheen-block-DPtS9jU8.js",
     "scene72-subsurface-block-DAwWnSbB.js",
     "scene72-subtract-block-CyBlvApI.js",
