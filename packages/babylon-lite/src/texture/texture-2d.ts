@@ -53,7 +53,9 @@ export type Texture2DRecoverySource =
            *  re-allocated with the same format/usage/sampler, and — if a live
            *  source (e.g. a persistent canvas) was retained by the last
            *  `updateDynamicTexture` — that source is re-blitted so content
-           *  survives too. `source` is held until the next update or release. */
+           *  survives too. `source` is refreshed on every `updateDynamicTexture`
+           *  (matching the retained-`bitmap` kind); the caller owns the source's
+           *  lifetime, so it is not cleared here on texture release. */
           kind: "dynamic";
           width: number;
           height: number;
