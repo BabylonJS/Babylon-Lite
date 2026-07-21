@@ -230,7 +230,6 @@ interface DeviceLostRecoveryCapture {
     u(tex: Texture2D, url: string, opts: Texture2DOptions): void;
     s(tex: Texture2D, r: number, g: number, b: number, a: number): void;
     b(tex: Texture2D, bitmap: ImageBitmap | null, srgb: boolean, mipMaps: boolean, fallback?: Uint8Array): void;
-    d(tex: Texture2D, meta: { width: number; height: number; format: GPUTextureFormat; mipLevelCount: number; samplerDesc: GPUSamplerDescriptor }): void;
     m(
         mesh: Mesh,
         uv2s: Float32Array | null | undefined,

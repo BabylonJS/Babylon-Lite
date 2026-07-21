@@ -36,7 +36,7 @@ import { TU } from "../engine/gpu-flags.js";
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import { generateMipmaps } from "./generate-mipmaps.js";
 import { mipLevelCount } from "./mip-count.js";
-import type { Texture2D } from "./texture-2d.js";
+import type { Texture2D, Texture2DRecoverySource } from "./texture-2d.js";
 import type { EngineContext } from "../engine/engine.js";
 
 declare const dynamicTexture2DBrand: unique symbol;
@@ -126,9 +126,49 @@ export function createDynamicTexture(engine: EngineContext, width: number, heigh
 
     const tex: Texture2D = { texture, view: texture.createView(), sampler, width, height };
     acquireTexture(tex);
-    // Opt-in device-lost recovery: retain enough to re-allocate the blank
-    // texture identically; the latest source is stamped by updateDynamicTexture.
-    engine._dlr?.d(tex, { width, height, format, mipLevelCount: levels, samplerDesc });
+    // Opt-in device-lost recovery: retain enough to re-allocate the blank texture
+    // identically, with the rebuild logic injected here as a closure (rather than
+    // living in the always-bundled device-lost-recovery module) so a scene that
+    // enables recovery but never creates a dynamic texture strips it entirely.
+    // Gated on engine._dlr so it is a no-op — and tree-shakes — when recovery is
+    // disabled. The latest source is stamped by updateDynamicTexture.
+    if (engine._dlr) {
+        const rec: Texture2DRecoverySource = {
+            kind: "dynamic",
+            source: null,
+            flipY: true,
+            premultipliedAlpha: false,
+            rebuild: async (eng, t) => {
+                const r = t._recoverySource;
+                if (!r || r.kind !== "dynamic") {
+                    return;
+                }
+                const rebuilt = eng._device.createTexture({
+                    size: { width, height },
+                    format,
+                    mipLevelCount: levels,
+                    usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
+                });
+                // Re-blit the last retained source (a persistent canvas survives
+                // loss); if none was retained the texture comes back blank.
+                if (r.source) {
+                    eng._device.queue.copyExternalImageToTexture({ source: r.source, flipY: r.flipY }, { texture: rebuilt, premultipliedAlpha: r.premultipliedAlpha }, [
+                        width,
+                        height,
+                    ]);
+                    if (levels > 1) {
+                        generateMipmaps(eng, rebuilt);
+                    }
+                }
+                t.texture = rebuilt;
+                t.view = rebuilt.createView();
+                t.sampler = getOrCreateSampler(eng, samplerDesc);
+                t.width = width;
+                t.height = height;
+            },
+        };
+        tex._recoverySource = rec;
+    }
     return tex as DynamicTexture2D;
 }
 

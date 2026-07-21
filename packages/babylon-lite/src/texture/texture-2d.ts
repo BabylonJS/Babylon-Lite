@@ -49,19 +49,19 @@ export type Texture2DRecoverySource =
     | { kind: "solid"; rgba: readonly [number, number, number, number] }
     | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array; samplerDesc: GPUSamplerDescriptor }
     | {
-          /** A `createDynamicTexture` texture. On loss the blank texture is
-           *  re-allocated with the same format/usage/sampler, and — if a live
-           *  source (e.g. a persistent canvas) was retained by the last
-           *  `updateDynamicTexture` — that source is re-blitted so content
-           *  survives too. `source` is refreshed on every `updateDynamicTexture`
-           *  (matching the retained-`bitmap` kind); the caller owns the source's
-           *  lifetime, so it is not cleared here on texture release. */
+          /** A `createDynamicTexture` texture. The rebuild logic is injected as a
+           *  closure by `createDynamicTexture` rather than inlined into the
+           *  device-lost-recovery module, so a scene that enables recovery but
+           *  never creates a dynamic texture does not bundle it. On loss the
+           *  closure re-allocates the blank texture with the same
+           *  format/usage/sampler and — if a live source (e.g. a persistent
+           *  canvas) was retained by the last `updateDynamicTexture` — re-blits it
+           *  so content survives too. `source` is refreshed on every
+           *  `updateDynamicTexture` (matching the retained-`bitmap` kind); the
+           *  caller owns the source's lifetime, so it is not cleared here on
+           *  texture release. */
           kind: "dynamic";
-          width: number;
-          height: number;
-          format: GPUTextureFormat;
-          mipLevelCount: number;
-          samplerDesc: GPUSamplerDescriptor;
+          rebuild: (engine: EngineContext, tex: Texture2D) => Promise<void>;
           source: GPUCopyExternalImageSource | null;
           flipY: boolean;
           premultipliedAlpha: boolean;

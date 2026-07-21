@@ -115,32 +115,33 @@ describe("updateDynamicTexture", () => {
 });
 
 describe("createDynamicTexture device-lost recovery", () => {
-    /** Minimal `_dlr` capture stub matching the engine's DeviceLostRecoveryCapture shape. */
-    function withRecovery(engine: EngineContext): { captured: Array<{ tex: Texture2D; meta: unknown }> } {
-        const captured: Array<{ tex: Texture2D; meta: unknown }> = [];
-        (engine as unknown as { _dlr: unknown })._dlr = {
-            d: (tex: Texture2D, meta: Record<string, unknown>) => {
-                // Mirror the real attachRecoveryCapture.d: stamp the recovery source.
-                (tex as unknown as { _recoverySource: unknown })._recoverySource = { kind: "dynamic", ...meta, source: null, flipY: true, premultipliedAlpha: false };
-                captured.push({ tex, meta });
-            },
-        };
-        return { captured };
+    /** Enable recovery by making `engine._dlr` truthy. createDynamicTexture stamps
+     *  the recovery source (with an injected rebuild closure) inline when it is. */
+    function withRecovery(engine: EngineContext): void {
+        (engine as unknown as { _dlr: unknown })._dlr = {};
     }
 
-    it("registers a 'dynamic' recovery source when recovery is enabled", () => {
+    it("registers a 'dynamic' recovery source with an injected rebuild closure", async () => {
         const cap = newCap();
         const engine = makeEngine(cap);
-        const rec = withRecovery(engine);
+        withRecovery(engine);
         const tex = createDynamicTexture(engine, 64, 32, { srgb: true, mipMaps: true });
 
-        expect(rec.captured).toHaveLength(1);
-        expect(rec.captured[0]!.tex).toBe(tex);
-        expect(rec.captured[0]!.meta).toMatchObject({ width: 64, height: 32, format: "rgba8unorm-srgb", mipLevelCount: 7 });
-        // The wrapper stamps kind + null source until the first update.
-        const src = (tex as unknown as { _recoverySource?: { kind: string; source: unknown } })._recoverySource;
+        const src = (tex as unknown as { _recoverySource?: { kind: string; source: unknown; rebuild?: unknown } })._recoverySource;
         expect(src?.kind).toBe("dynamic");
-        expect(src?.source).toBeNull();
+        expect(src?.source).toBeNull(); // no source retained until the first update
+        expect(typeof src?.rebuild).toBe("function");
+
+        // The closure re-allocates a texture with the same format/mips/usage.
+        cap.createDesc = undefined as GPUTextureDescriptor | undefined;
+        await (src as { rebuild: (e: EngineContext, t: Texture2D) => Promise<void> }).rebuild(engine, tex);
+        expect(cap.createDesc?.format).toBe("rgba8unorm-srgb");
+        expect(cap.createDesc?.mipLevelCount).toBe(7); // log2(64)+1
+        const usage = cap.createDesc?.usage ?? 0;
+        expect(usage & GPUTextureUsage.COPY_DST).toBeTruthy();
+        expect(usage & GPUTextureUsage.RENDER_ATTACHMENT).toBeTruthy();
+        // No source retained yet, so the blank rebuild performs no blit.
+        expect(cap.copyCalls).toHaveLength(0);
     });
 
     it("does not touch _recoverySource when recovery is disabled", () => {
@@ -150,7 +151,7 @@ describe("createDynamicTexture device-lost recovery", () => {
         expect((tex as unknown as { _recoverySource?: unknown })._recoverySource).toBeUndefined();
     });
 
-    it("refreshes the retained source on update so a rebuild re-blits latest pixels", () => {
+    it("refreshes the retained source on update so a rebuild re-blits latest pixels", async () => {
         const cap = newCap();
         const engine = makeEngine(cap);
         withRecovery(engine);
@@ -158,10 +159,23 @@ describe("createDynamicTexture device-lost recovery", () => {
         const source = fakeSource(16, 16);
         updateDynamicTexture(engine, tex, source, { invertY: false, premultiplyAlpha: true });
 
-        const src = (tex as unknown as { _recoverySource?: { source: unknown; flipY: boolean; premultipliedAlpha: boolean } })._recoverySource;
+        const src = (
+            tex as unknown as {
+                _recoverySource?: { source: unknown; flipY: boolean; premultipliedAlpha: boolean; rebuild: (e: EngineContext, t: Texture2D) => Promise<void> };
+            }
+        )._recoverySource;
         expect(src?.source).toBe(source);
         expect(src?.flipY).toBe(false);
         expect(src?.premultipliedAlpha).toBe(true);
+
+        // A rebuild now re-blits the retained source with its flip/premultiply flags.
+        cap.copyCalls.length = 0;
+        await src!.rebuild(engine, tex);
+        expect(cap.copyCalls).toHaveLength(1);
+        const call = cap.copyCalls[0]!;
+        expect((call.src as { source: unknown; flipY?: boolean }).source).toBe(source);
+        expect((call.src as { flipY?: boolean }).flipY).toBe(false);
+        expect((call.dst as { premultipliedAlpha?: boolean }).premultipliedAlpha).toBe(true);
     });
 });
 
