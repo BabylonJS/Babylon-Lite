@@ -184,7 +184,7 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
             throw new Error("WebGPU adapter not available during device recovery");
         }
         const missingFeatures = state.requiredFeatures.filter((f) => !adapter.features.has(f));
-        if (missingFeatures.length > 0) {
+        if (missingFeatures.length) {
             throw new Error(`WebGPU device recovery missing required features: ${missingFeatures.join(", ")}`);
         }
         engine._device = await adapter.requestDevice({
@@ -291,7 +291,8 @@ export async function _rebuildMeshes(engine: EngineContext, scene: SceneContext)
 
     for (const mesh of scene.meshes) {
         if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices) {
-            mesh._gpu = (mesh._gpu._recoverShared ?? (uploadRetainedMesh as NonNullable<MeshGPU["_recoverShared"]>))(engine, mesh, uploadRetainedMesh);
+            const recoverShared = mesh._gpu._recoverShared;
+            mesh._gpu = recoverShared ? recoverShared(engine, mesh, uploadRetainedMesh) : uploadRetainedMesh(engine, mesh);
         }
         if (mesh.skeleton) {
             skeletonFactory ??= (await import("../skeleton/create-skeleton.js")).createSkeleton;
