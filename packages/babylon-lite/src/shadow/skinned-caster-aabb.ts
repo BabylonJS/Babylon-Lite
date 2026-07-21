@@ -14,7 +14,8 @@ import { buildSkinnedBoneCorners, growCornersByMatrix } from "../mesh/aabb-corne
 // Per-bone bind-space corner boxes for skinned casters, built once from static bind
 // data (positions/joints/weights/morph deltas never change) and reused every frame.
 // `null` marks a mesh with a skeleton but no usable geometry so it is not rebuilt.
-const _boneCornerCache = new WeakMap<Mesh, BoneCornerBox[] | null>();
+// Lazy-initialized per GUIDANCE (no module-level WeakMap allocation).
+let _boneCornerCache: WeakMap<Mesh, BoneCornerBox[] | null> | null = null;
 
 // Scratch skinning matrix (`worldMatrix · boneMatrices[bone]`), reused per call.
 const _skinMatrix = new F32(16);
@@ -29,10 +30,11 @@ export function skinnedCasterAabb(mesh: Mesh): Aabb | null {
     if (!skeleton || !skeleton.weights || !skeleton.boneMatrices) {
         return null;
     }
-    let boneBoxes = _boneCornerCache.get(mesh);
+    const cache = (_boneCornerCache ??= new WeakMap<Mesh, BoneCornerBox[] | null>());
+    let boneBoxes = cache.get(mesh);
     if (boneBoxes === undefined) {
         boneBoxes = buildSkinnedBoneCorners(mesh);
-        _boneCornerCache.set(mesh, boneBoxes);
+        cache.set(mesh, boneBoxes);
     }
     if (!boneBoxes) {
         return null;

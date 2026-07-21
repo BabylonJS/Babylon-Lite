@@ -8,9 +8,10 @@
  *  0.01-scaled model's ortho frustum ~100x — while using the bounds directly
  *  misplaces procedural casters that sit away from the origin.
  *
- *  Folding the raw CPU positions through the mesh world matrix — the exact
- *  transform the depth pass rasterizes — yields the correct world AABB for both
- *  conventions, so all directional/cascaded generators share this helper.
+ *  Deriving the LOCAL AABB from the raw CPU positions (cached, recomputed only
+ *  when the geometry changes) and folding its 8 corners through the mesh world
+ *  matrix each call yields a correct world AABB for both conventions in O(1) per
+ *  refit, so all directional/cascaded generators share this helper.
  *
  *  A skinned caster's world matrix stays fixed while the skeleton moves its
  *  vertices, so its bind-pose bounds would leave the frustum stranded when the
@@ -22,6 +23,7 @@
 import { F32 } from "../engine/typed-arrays.js";
 import { computeAabb } from "../math/compute-aabb.js";
 import type { Aabb } from "../math/aabb.js";
+import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 
 const DEFAULT_MIN: [number, number, number] = [-0.5, -0.5, -0.5];
@@ -30,6 +32,46 @@ const DEFAULT_MAX: [number, number, number] = [0.5, 0.5, 0.5];
 // Scratch buffer holding the 8 bound corners (xyz each) for the fallback path,
 // reused across calls so the rare no-CPU-positions mesh costs zero allocation.
 const _corners = new F32(24);
+
+// Per-mesh LOCAL-space AABB cache. Computing the tight local box is O(vertexCount);
+// caching it lets a moving caster refit each frame by folding only the 8 box corners
+// through the world matrix — O(1) — instead of rescanning every vertex. The entry is
+// invalidated whenever the geometry is committed anew: every commit path
+// (updateMeshGeometry / resizeMeshGeometry / createMeshFromData / loaders) reassigns
+// both `_cpuPositions` and fresh `boundMin`/`boundMax` arrays, so comparing those three
+// references also catches an in-place vertex edit re-submitted through the SAME
+// positions array (a reference-only key would miss that). Lazy-initialized per GUIDANCE
+// (no module-level WeakMap allocation).
+let _localAabbCache: WeakMap<Mesh, { positions: Float32Array; boundMin: unknown; boundMax: unknown; local: Aabb }> | null = null;
+
+/** Local-space AABB of a caster's CPU positions, cached and recomputed only when the
+ *  mesh's geometry changes (positions array or its `boundMin`/`boundMax` token).
+ *  Returns `null` for empty/degenerate geometry. */
+function localCasterAabb(mesh: Mesh, positions: Float32Array): Aabb | null {
+    const cache = (_localAabbCache ??= new WeakMap<Mesh, { positions: Float32Array; boundMin: unknown; boundMax: unknown; local: Aabb }>());
+    let entry = cache.get(mesh);
+    if (!entry || entry.positions !== positions || entry.boundMin !== mesh.boundMin || entry.boundMax !== mesh.boundMax) {
+        const local = computeAabb(positions);
+        if (!Number.isFinite(local[0][0])) {
+            return null;
+        }
+        entry = { positions, boundMin: mesh.boundMin, boundMax: mesh.boundMax, local };
+        cache.set(mesh, entry);
+    }
+    return entry.local;
+}
+
+/** Fold a local-space AABB through the world matrix by transforming its 8 corners into
+ *  the shared scratch buffer — a conservative world AABB in O(1). */
+function worldAabbFromLocalBounds(bmin: readonly number[], bmax: readonly number[], world: Mat4): Aabb {
+    for (let k = 0; k < 8; k++) {
+        const o = k * 3;
+        _corners[o] = k & 1 ? bmax[0]! : bmin[0]!;
+        _corners[o + 1] = k & 2 ? bmax[1]! : bmin[1]!;
+        _corners[o + 2] = k & 4 ? bmax[2]! : bmin[2]!;
+    }
+    return computeAabb(_corners, world);
+}
 
 // Lazily-resolved skinned-AABB function. The per-bone corner + morph math it needs
 // lives in `skinned-caster-aabb` (which pulls in `aabb-corners`); splitting it behind
@@ -67,10 +109,11 @@ export function enableSkinnedCasterAabb(casterMeshes: readonly Mesh[]): Promise<
  *  returns its current posed bounds (per-bone corners folded through the live bone
  *  matrices) so the frustum follows a mesh the skeleton sweeps across the scene; the
  *  installed function returns `null` for non-skinned meshes, so static casters fall
- *  through. Prefers the CPU position mirror folded through the world matrix (correct
- *  for both local- and world-authored bounds). Falls back to transforming the stored
- *  bound corners by the world matrix for the rare mesh that has no CPU positions; that
- *  path assumes local bounds, preserving the historical behavior for procedural-style
+ *  through. Prefers the mesh's local AABB (derived once from the CPU position mirror
+ *  and cached), folding its 8 corners through the world matrix each call — correct for
+ *  both local- and world-authored bounds and O(1) per refit. Falls back to transforming
+ *  the stored bound corners for the rare mesh that has no CPU positions; that path
+ *  assumes local bounds, preserving the historical behavior for procedural-style
  *  casters. */
 export function casterWorldAabb(mesh: Mesh): Aabb | null {
     const skinned = _skinnedCasterAabb?.(mesh);
@@ -79,19 +122,13 @@ export function casterWorldAabb(mesh: Mesh): Aabb | null {
     }
     const positions = mesh._cpuPositions;
     if (positions && positions.length >= 3) {
-        const aabb = computeAabb(positions, mesh.worldMatrix);
-        if (Number.isFinite(aabb[0][0])) {
-            return aabb;
+        const local = localCasterAabb(mesh, positions);
+        if (local) {
+            return worldAabbFromLocalBounds(local[0], local[1], mesh.worldMatrix);
         }
     }
     const bmin = mesh.boundMin ?? DEFAULT_MIN;
     const bmax = mesh.boundMax ?? DEFAULT_MAX;
-    for (let k = 0; k < 8; k++) {
-        const o = k * 3;
-        _corners[o] = k & 1 ? bmax[0] : bmin[0];
-        _corners[o + 1] = k & 2 ? bmax[1] : bmin[1];
-        _corners[o + 2] = k & 4 ? bmax[2] : bmin[2];
-    }
-    const aabb = computeAabb(_corners, mesh.worldMatrix);
+    const aabb = worldAabbFromLocalBounds(bmin, bmax, mesh.worldMatrix);
     return Number.isFinite(aabb[0][0]) ? aabb : null;
 }
