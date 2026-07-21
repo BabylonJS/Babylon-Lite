@@ -62,6 +62,8 @@ const DEPTH_TEST = 0x0b71;
 const CULL_FACE = 0x0b44;
 /** GL `gl.STENCIL_TEST`. */
 const STENCIL_TEST = 0x0b90;
+/** GL `gl.KEEP`. */
+const KEEP = 0x1e00;
 /** GL `gl.FRONT`. */
 const FRONT = 0x0404;
 /** GL `gl.BACK`. */
@@ -134,6 +136,21 @@ export interface GLStencilOpState {
     opZFail?: GLenum;
     /** Op when both stencil and depth pass (`gl.stencilOpSeparate` arg 4). */
     opZPass?: GLenum;
+}
+
+/** Seed an untouched face's desired op triple with WebGL's KEEP defaults before
+ *  applying a partial update. The leading desired slot is the lazy-init marker. */
+function ensureStencilOpDefaults(rs: Float64Array): void {
+    if (rs[RS_STENCIL_OP_FAIL + RS_DESIRED] === -1) {
+        rs[RS_STENCIL_OP_FAIL + RS_DESIRED] = KEEP;
+        rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED] = KEEP;
+        rs[RS_STENCIL_OP_ZPASS + RS_DESIRED] = KEEP;
+    }
+    if (rs[RS_STENCIL_BACK_OP_FAIL + RS_DESIRED] === -1) {
+        rs[RS_STENCIL_BACK_OP_FAIL + RS_DESIRED] = KEEP;
+        rs[RS_STENCIL_BACK_OP_ZFAIL + RS_DESIRED] = KEEP;
+        rs[RS_STENCIL_BACK_OP_ZPASS + RS_DESIRED] = KEEP;
+    }
 }
 
 /** Options for {@link clearEngine}. */
@@ -223,6 +240,9 @@ export function setStencilState(engine: GLEngineContext, state: GLStencilState):
     if (state.funcMask !== undefined) {
         s.rs[RS_STENCIL_FUNC_MASK + RS_DESIRED] = state.funcMask;
     }
+    if (state.opFail !== undefined || state.opZFail !== undefined || state.opZPass !== undefined) {
+        ensureStencilOpDefaults(s.rs);
+    }
     if (state.opFail !== undefined) {
         s.rs[RS_STENCIL_OP_FAIL + RS_DESIRED] = state.opFail;
         s.rs[RS_STENCIL_BACK_OP_FAIL + RS_DESIRED] = state.opFail;
@@ -259,6 +279,9 @@ export function setStencilOpSeparate(engine: GLEngineContext, face: GLenum, stat
     const setBack = face === BACK || face === FRONT_AND_BACK;
     if (!setFront && !setBack) {
         throw new Error("lite-gl: stencil face must be gl.FRONT, gl.BACK, or gl.FRONT_AND_BACK");
+    }
+    if (state.opFail !== undefined || state.opZFail !== undefined || state.opZPass !== undefined) {
+        ensureStencilOpDefaults(s.rs);
     }
     if (setFront) {
         if (state.opFail !== undefined) {

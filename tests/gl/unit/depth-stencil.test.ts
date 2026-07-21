@@ -120,6 +120,23 @@ describe("lite-gl stencil state", () => {
         expect(callsNamed(mock, "stencilFunc")).toHaveLength(0);
     });
 
+    it("does not elide an explicit ZERO op triple on first use", () => {
+        const { mock, engine } = makeEngine();
+        setStencilState(engine, { opFail: engine.gl.ZERO, opZFail: engine.gl.ZERO, opZPass: engine.gl.ZERO });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.ZERO, engine.gl.ZERO, engine.gl.ZERO]]);
+    });
+
+    it("initializes both faces to KEEP before a first partial separate update", () => {
+        const { mock, engine } = makeEngine();
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.ZERO });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.KEEP, engine.gl.KEEP, engine.gl.ZERO],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP],
+        ]);
+    });
+
     it("partial func update merges unspecified members from cache", () => {
         const { mock, engine } = makeEngine();
         setStencilState(engine, { func: engine.gl.ALWAYS, ref: 0, funcMask: 0x3 });
@@ -168,6 +185,16 @@ describe("lite-gl stencil state", () => {
         applyGLStates(engine);
 
         expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.KEEP, engine.gl.KEEP, engine.gl.INCR_WRAP]]);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+    });
+
+    it("rejects an invalid separate-op face without dirtying state", () => {
+        const { mock, engine } = makeEngine();
+
+        expect(() => setStencilOpSeparate(engine, engine.gl.ALWAYS, { opZPass: engine.gl.INCR_WRAP })).toThrow(/gl\.FRONT, gl\.BACK, or gl\.FRONT_AND_BACK/);
+        applyGLStates(engine);
+
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
         expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
     });
 });

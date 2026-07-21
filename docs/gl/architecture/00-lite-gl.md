@@ -750,8 +750,10 @@ interface GLState {
     // write; slots 48..51 are the standalone (no-desired-twin) cached gl.clearColor
     // RGBA. `applyGLStates` reconciles desired → actual right before each draw /
     // clear. Unset sentinels (both halves): -1 for the enable/mask toggles (and
-    // colorMask packed), 0 for the factor/func/op enum slots — chosen so a desired
-    // slot that still equals its actual twin never issues a GL call.
+    // colorMask packed) plus the leading slot of each stencil-op triple, 0 for
+    // other factor/func/op slots. The first stencil-op update seeds each desired
+    // triple to WebGL's KEEP defaults before merging partial fields, so explicit
+    // ZERO operations cannot be mistaken for untouched state.
     //
     // WHY an index-array (not named fields): the deferred state is touched across
     // state.ts ↔ blend.ts ↔ depth-stencil.ts ↔ apply-states.ts, so esbuild cannot
@@ -862,7 +864,9 @@ unused category costs a scene nothing:
   ONLY the desired half of `rs` and set `statesDirty = true`. They issue no
   `gl.*` and never touch the actual half. Omitted setter fields leave their
   desired slot untouched (merge-from-desired). `setStencilState` writes its op
-  fields to both faces; `setStencilOpSeparate` overrides the selected face.
+  fields to both faces; `setStencilOpSeparate` overrides the selected face. On
+  the first op update after engine creation or cache reset, both desired triples
+  are initialized to WebGL's `KEEP` defaults before the supplied fields merge.
 - **Per-category dispatch (tree-shakeable).** `applyGLStates(engine)` (the
   internal `apply-states.ts`, not exported from the barrel) owns NO reconciliation
   code — it is a tiny dispatcher. Each category's reconciler (`flushBlend` in

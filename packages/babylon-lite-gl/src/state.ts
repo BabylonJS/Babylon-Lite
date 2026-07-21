@@ -111,9 +111,12 @@ export interface GLState {
      * Sentinels (identical for both halves): `-1` for the tri-state enables
      * (`RS_BLEND_ENABLED` / `RS_DEPTH_TEST` / `RS_DEPTH_MASK` / `RS_CULL_ENABLED`
      * / `RS_STENCIL_TEST`) and the mask caches (`RS_STENCIL_MASK` /
-     * `RS_COLOR_MASK`); `0` for every func / equation / op / ref slot (no GL enum
-     * is `0`). An unset desired equals its unset actual and is never flushed; the
-     * `-1` blend/test sentinels guarantee the first applied state is never elided.
+     * `RS_COLOR_MASK`), plus each face's leading stencil-op slot
+     * (`RS_STENCIL_OP_FAIL` / `RS_STENCIL_BACK_OP_FAIL`); `0` for every other
+     * func / equation / op / ref slot. The leading op sentinels let the first op
+     * setter seed omitted fields to WebGL's `KEEP` defaults before merging. An
+     * unset desired equals its unset actual and is never flushed; the `-1`
+     * blend/test sentinels guarantee the first applied state is never elided.
      * The blend func/equation slots are only trusted while `RS_BLEND_ENABLED` is
      * `1` — the disabled→enabled transition re-issues both (matching Babylon's
      * `AlphaState`, which does not track them while blending is off).
@@ -174,13 +177,24 @@ export interface GLState {
     quadVao: WebGLVertexArrayObject | null;
 }
 
-/** Indices in `rs` whose unset sentinel is `-1` (the tri-state enables + the
- *  `stencilMask` / `colorMask` caches). Every other slot defaults to `0`. The
- *  sentinel is written to BOTH the actual (`i`) and desired (`i + RS_DESIRED`)
- *  halves. Kept as a function-local literal so it stays a runtime value (no
- *  module-level allocation / side effect). */
+/** Indices in `rs` whose unset sentinel is `-1` (the tri-state enables, the
+ *  `stencilMask` / `colorMask` caches, and the leading slot of each stencil-op
+ *  triple). Every other slot defaults to `0`. The sentinel is written to BOTH
+ *  the actual (`i`) and desired (`i + RS_DESIRED`) halves. Kept as a
+ *  function-local literal so it stays a runtime value (no module-level
+ *  allocation / side effect). */
 function applyRenderStateSentinels(rs: Float64Array): void {
-    for (const i of [RS_BLEND_ENABLED, RS_DEPTH_TEST, RS_DEPTH_MASK, RS_CULL_ENABLED, RS_STENCIL_TEST, RS_STENCIL_MASK, RS_COLOR_MASK]) {
+    for (const i of [
+        RS_BLEND_ENABLED,
+        RS_DEPTH_TEST,
+        RS_DEPTH_MASK,
+        RS_CULL_ENABLED,
+        RS_STENCIL_TEST,
+        RS_STENCIL_MASK,
+        RS_STENCIL_OP_FAIL,
+        RS_COLOR_MASK,
+        RS_STENCIL_BACK_OP_FAIL,
+    ]) {
         rs[i] = -1;
         rs[i + RS_DESIRED] = -1;
     }
