@@ -184,7 +184,7 @@ export function liteErrorPlugin(): Plugin {
                 `const T: Array<(...a: any[]) => string> = [\n${tableEntries.join("\n")}\n];\n` +
                 `export function decodeLiteError(code: number, args: readonly unknown[]): string {\n` +
                 `    const fn = T[code];\n` +
-                `    return fn ? fn(...args) : \`Babylon-Lite error #\${code}\`;\n` +
+                `    return fn ? fn(...args) : \`Error #\${code}\`;\n` +
                 `}\n`;
         },
 

@@ -20,7 +20,7 @@ At build time a Vite plugin (`scripts/lite-error-plugin.ts`) rewrites every inte
 `throw new Error("…")` into `ThrowLiteError(code, …args)`. At runtime, a thrown Babylon Lite error carries:
 
 - **`error.message`** — the bare code, formatted as `#<code>` (e.g. `#12`).
-- **`error.lite`** — a non-enumerable array of the runtime values the original message would have
+- **`error.lite`** — an array of the runtime values the original message would have
   interpolated (the offending mesh name, an invalid size, etc.).
 
 The verbose message text lives in a table that is **not loaded by default**. A scene that never decodes an

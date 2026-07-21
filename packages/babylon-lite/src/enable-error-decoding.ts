@@ -16,15 +16,19 @@ export function enableErrorDecoding(): void {
 
 /** Decode a Babylon-Lite error into its full, human-readable message.
  *
- *  Works even when {@link enableErrorDecoding} was never called: by default Babylon-Lite throws
- *  errors whose message is the bare code `#<code>` with the interpolation args attached as a `lite`
- *  property, so this reads the code and args back out and runs them through the message table. If
- *  the error was already decoded (decoding was enabled when it was thrown) or isn't a Babylon-Lite
- *  coded error, its message is returned unchanged.
+ *  Accepts `unknown` so you can hand it a `catch` binding directly (which TypeScript types as
+ *  `unknown`) with no cast. Works even when {@link enableErrorDecoding} was never called: by default
+ *  Babylon-Lite throws errors whose message is the bare code `#<code>` with the interpolation args
+ *  attached as a `lite` property, so this reads the code and args back out and runs them through the
+ *  message table. If the error was already decoded (decoding was enabled when it was thrown) or isn't
+ *  a Babylon-Lite coded error, its message is returned unchanged (non-`Error` values are stringified).
  *
  *  Importing this pulls in the message table chunk (same as {@link enableErrorDecoding}); leave it
  *  out of production builds to keep them lean. */
-export function decodeError(error: Error): string {
+export function decodeError(error: unknown): string {
+    if (!(error instanceof Error)) {
+        return String(error);
+    }
     const args = (error as LiteError).lite;
     if (args === undefined) {
         return error.message;
