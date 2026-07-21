@@ -8,7 +8,7 @@ import type { GLEngineContext } from "./context.js";
  *
  * These `@internal` index consts are imported by blend.ts / depth-stencil.ts /
  * apply-states.ts. Because they are plain `const` integers, esbuild inlines each
- * to a 1–2 char literal (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` → `rs[22]`) when
+ * to a 1–2 char literal (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` → `rs[25]`) when
  * bundling a scene — far smaller than the old cross-module `.dBlendSrcRGB` named
  * props, which could not be mangled and shipped verbatim in every bundle.
  *
