@@ -74,9 +74,12 @@ export interface MeshGPU {
      *  Built once by the interleave module so the hot render path never assembles
      *  it. Undefined → tight mesh (empty suffix, byte-identical pipeline key). */
     readonly _vbKey?: string;
-    /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
-     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
+    /** @internal Extra-owner count when geometry is shared across glTF nodes or mesh clones.
+     *  See resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
     _refCount?: number;
+    /** @internal Rebuild one shared geometry per replacement device. Installed only
+     *  by the glTF sharing path, so ordinary meshes pay no recovery-state cost. */
+    _recoverShared?: (engine: EngineContext, mesh: Mesh, upload: (engine: EngineContext, mesh: Mesh) => MeshGPU) => MeshGPU;
 }
 
 // ─── Mesh ────────────────────────────────────────────────────────────

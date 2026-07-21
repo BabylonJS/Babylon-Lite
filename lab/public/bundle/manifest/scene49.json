@@ -1,9 +1,9 @@
 {
-  "rawKB": 93.9,
-  "gzipKB": 35.3,
+  "rawKB": 94.3,
+  "gzipKB": 35.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene49-standard-renderable-iCHj8SqA.js",
+    "scene49-standard-renderable-zGkagLCp.js",
     "scene49-swapchain-overlay-ilhN4El_.js",
     "scene49-ubo-layout-CnrP4RZD.js",
     "scene49.js"

@@ -3,11 +3,11 @@
   "gzipKB": 31.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene248-generate-mipmaps-gW6SEOHu.js",
+    "scene248-generate-mipmaps-CYJ_7sR5.js",
     "scene248-gltf-json-asset-CY3IaG7V.js",
     "scene248-gltf-sampler-desc-8fgzibKT.js",
     "scene248-ibl-fragment-CeRrvT96.js",
-    "scene248-pbr-renderable-DO_8ifXU.js",
+    "scene248-pbr-renderable-DOp1W3ez.js",
     "scene248-rgbd-decode-D6QLlMzp.js",
     "scene248-scene-uniforms-FTYH6Ct0.js",
     "scene248.js"

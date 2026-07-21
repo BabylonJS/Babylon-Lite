@@ -4,7 +4,6 @@ import type { SceneContext } from "../scene/scene.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { PickingInfo } from "./picking-info.js";
 import type { EngineContext } from "../engine/engine.js";
-import type * as DeformedGeometry from "./deformed-geometry.js";
 import type { PickContributor, PickSource, PickPassContext } from "./pick-contributor.js";
 import { createEmptyPickingInfo } from "./picking-info.js";
 import { createPickingRay } from "./ray.js";
@@ -13,6 +12,9 @@ import { getPickingPipelineSet, getPickingSceneBGL } from "./picking-pipeline.js
 import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js";
 import { resolveCameraViewport } from "../camera/viewport.js";
 import { createEmptyUniformBuffer, createMappedBuffer, createUniformBuffer } from "../resource/gpu-buffers.js";
+
+/** Existing regular-mesh vertex buffers a pick-discard rule can project into `PickDiscardInput.vertexData`. */
+export type PickVertexDataAttribute = "normal" | "uv" | "uv2" | "tangent" | "color";
 
 // ─── Scratch arrays — allocated once, reused across all picks ──────
 const _pickVP = new F32(20);
@@ -139,7 +141,8 @@ export interface PickOptions {
      *  The input exposes only generic picker data: `worldPos`, `fragmentCoord` (the selected pixel
      *  centre in the original backing framebuffer), `pickId`, `thinInstanceIndex`,
      *  `hasThinInstance`, and `instanceExtras` (the
-     *  original thin-instance matrix w lanes, zero for non-instanced meshes). Storage entries are
+     *  original thin-instance matrix w lanes, zero for non-instanced meshes), and optional regular-mesh
+     *  `vertexData` selected by the discard rule. Storage entries are
      *  uploaded and bound by Lite for the current pick only. */
     discard?: PickDiscardRule;
     /** Dev-only diagnostics: logs the pick ray, pixel, pick id/depth and resolved mesh. */
@@ -160,6 +163,10 @@ export interface PickDiscardRule {
     readonly wgsl: string;
     /** Optional typed-array storage inputs exposed to the discard WGSL at group 2. */
     readonly storage?: readonly PickDiscardStorage[];
+    /** Optional existing regular-mesh attribute forwarded flat as a padded `PickDiscardInput.vertexData` vec4.
+     *  Values come from the mesh's source attribute buffer (not skin/morph-deformed). Meshes without the
+     *  requested buffer and all thin instances receive zero. */
+    readonly vertexData?: PickVertexDataAttribute;
 }
 
 /** Storage data for a pick discard rule. Lite injects the WGSL declaration and owns the GPU buffer upload. */
@@ -229,13 +236,22 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
         }
     }
 
-    let deformedGeometry: typeof DeformedGeometry | null = null;
+    let needsDeformedGeometry = false;
+    let needsVertexDataFeature = !!pickDiscard?.vertexData;
     for (const mesh of scene.meshes) {
         if ((mesh.morphTargets || mesh.skeleton) && mesh._cpuPositions) {
-            deformedGeometry = await import("./deformed-geometry.js");
+            needsDeformedGeometry = true;
+        }
+        if (mesh._gpu._vbLayout?._p) {
+            needsVertexDataFeature = true;
+        }
+        if (needsDeformedGeometry && needsVertexDataFeature) {
             break;
         }
     }
+
+    const deformedGeometry = needsDeformedGeometry ? await import("./deformed-geometry.js") : null;
+    const vertexDataFeature = needsVertexDataFeature ? await import("./picking-vertex-data.js") : null;
 
     // Pick coordinates are relative to the scene's own surface canvas, not the engine's
     // primary canvas — they differ when the scene renders into an auxiliary surface.
@@ -299,7 +315,11 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     });
 
     const defaultPipelines = getPickingPipelineSet(engine);
-    const discardPipelines = pickDiscard ? getPickingPipelineSet(engine, pickDiscard) : null;
+    const discardPipelines = pickDiscard
+        ? pickDiscard.vertexData
+            ? vertexDataFeature!.getPickingVertexDataPipelineSet(engine, pickDiscard)
+            : getPickingPipelineSet(engine, pickDiscard)
+        : null;
 
     const tempBuffers: GPUBuffer[] = [];
     for (let mi = 0; mi < meshCount; mi++) {
@@ -318,6 +338,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
         const ti = mesh.thinInstances;
         const discardBG = pickDiscard && discardPipelines?.discardBGL ? createPickDiscardBindGroup(engine, discardPipelines.discardBGL, pickDiscard, mesh, tempBuffers) : null;
         const pipelines = discardPipelines && (!discardPipelines.discardBGL || discardBG) ? discardPipelines : defaultPipelines;
+        const activeDiscard = pipelines === discardPipelines ? pickDiscard : null;
 
         if (ti) {
             if (ti.count <= 0 || !ti._gpuBuffer) {
@@ -327,12 +348,16 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             const tiUbo = createUniformBuffer(engine, _tiUboView, "pick-thin-instance-ubo");
             tempBuffers.push(tiUbo);
 
-            pass.setPipeline(pipelines.thinInstancePipeline);
+            const thinInstancePipeline =
+                vertexDataFeature && gpu._vbLayout?._p
+                    ? vertexDataFeature.getPickingThinInstancePipeline(engine, pipelines, activeDiscard, gpu._vbLayout._p)
+                    : pipelines.thinInstancePipeline;
+            pass.setPipeline(thinInstancePipeline);
             pass.setBindGroup(0, picker._sceneBG!);
             pass.setBindGroup(
                 1,
                 device.createBindGroup({
-                    layout: pipelines.thinInstancePipeline.getBindGroupLayout(1),
+                    layout: thinInstancePipeline.getBindGroupLayout(1),
                     entries: [
                         { binding: 0, resource: { buffer: tiUbo } },
                         { binding: 1, resource: { buffer: ti._gpuBuffer } },
@@ -360,12 +385,23 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
                 }
             }
 
-            pass.setPipeline(pipelines.regularPipeline);
+            const vertexData = activeDiscard?.vertexData && vertexDataFeature ? vertexDataFeature.getPickVertexDataBinding(mesh, activeDiscard.vertexData) : null;
+            const positionInterleave = positionBuffer === gpu.positionBuffer ? gpu._vbLayout?._p : undefined;
+            const regularPipeline = vertexDataFeature
+                ? vertexDataFeature.getPickingRegularPipeline(
+                      engine,
+                      pipelines,
+                      activeDiscard,
+                      positionInterleave,
+                      vertexData && activeDiscard?.vertexData ? { attribute: activeDiscard.vertexData, interleave: vertexData.interleave } : null
+                  )
+                : pipelines.regularPipeline;
+            pass.setPipeline(regularPipeline);
             pass.setBindGroup(0, picker._sceneBG!);
             pass.setBindGroup(
                 1,
                 device.createBindGroup({
-                    layout: pipelines.regularPipeline.getBindGroupLayout(1),
+                    layout: regularPipeline.getBindGroupLayout(1),
                     entries: [{ binding: 0, resource: { buffer: meshUbo } }],
                 })
             );
@@ -373,6 +409,9 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
                 pass.setBindGroup(2, discardBG);
             }
             pass.setVertexBuffer(0, positionBuffer);
+            if (vertexData) {
+                pass.setVertexBuffer(1, vertexData.buffer);
+            }
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
             pass.drawIndexed(gpu.indexCount);
             nextId++;

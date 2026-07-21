@@ -4,12 +4,12 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene28-clearcoat-fragment-C_r2a0mp.js",
-    "scene28-generate-mipmaps-7w1hCgCw.js",
+    "scene28-generate-mipmaps-DC3pYVss.js",
     "scene28-gltf-ext-clearcoat-BgaLgSgD.js",
-    "scene28-gltf-feature-registry-0CYa-dn-.js",
+    "scene28-gltf-feature-registry-CbeSgNn4.js",
     "scene28-gltf-json-asset-zLp1R-pr.js",
     "scene28-ibl-fragment-CeRrvT96.js",
-    "scene28-pbr-renderable-CQ1yiO4n.js",
+    "scene28-pbr-renderable-DHNjwGlv.js",
     "scene28-rgbd-decode-3bYlLKul.js",
     "scene28-scene-uniforms-FTYH6Ct0.js",
     "scene28.js"

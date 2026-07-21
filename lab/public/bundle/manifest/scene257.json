@@ -1,16 +1,16 @@
 {
   "rawKB": 80.3,
-  "gzipKB": 33.2,
+  "gzipKB": 33.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene257-flat-normal-wgsl-Cm9mM4tC.js",
-    "scene257-generate-mipmaps-C2jNwHZ4.js",
+    "scene257-generate-mipmaps-dsBTFzHk.js",
     "scene257-gltf-feature-primitive-BMqT3MMH.js",
-    "scene257-gltf-feature-registry-DBAiJLTS.js",
+    "scene257-gltf-feature-registry-C7UR2sZJ.js",
     "scene257-gltf-json-asset-DWytQMMR.js",
     "scene257-gltf-normals-DYhLwXNX.js",
     "scene257-ibl-fragment-CeRrvT96.js",
-    "scene257-pbr-renderable-r-x0WSd_.js",
+    "scene257-pbr-renderable-DX93nURS.js",
     "scene257-rgbd-decode-Dqe669eK.js",
     "scene257-scene-uniforms-FTYH6Ct0.js",
     "scene257.js"
