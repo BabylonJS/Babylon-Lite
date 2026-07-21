@@ -1411,7 +1411,7 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
 5. No observable / event emitter abstraction. Context-lost/restored use plain `cb[]`.
 6. Matrix / array uniform setters ARE shipped: `setEffectMatrix` / `setEffectMatrix3x3` / `setEffectFloatArray` / `setEffectFloatArray4` / `setEffectIntArray`, each a tree-shakable `export function`.
 7. Depth / stencil / cull / color-mask state setters ARE shipped via the
-   the depth-stencil module (`setDepthState` / `setStencilState` /
+   depth-stencil module (`setDepthState` / `setStencilState` /
    `setStencilOpSeparate` / `setCullState` / `setColorMask` / `clearEngine`).
    Blend state is `setBlendMode(engine, mode)` /
    `setBlendState` (§3.5.1) whose presets match `Constants.ALPHA_*`. `drawEffect`
