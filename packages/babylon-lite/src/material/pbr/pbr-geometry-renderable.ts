@@ -319,6 +319,7 @@ function _ensureViewResources(
     const source = view.source as PbrMaterialProps;
     const vbLayout = (source as unknown as { _vbLayout?: import("../../mesh/mesh.js").MeshVbLayout })._vbLayout;
     const vbKey = "";
+    const uv2Mask = (source as { _uv2Mask?: number })._uv2Mask ?? 0;
 
     // Compose with the active-attachment scope set so the registered ext
     // sees the right list when contributing the geometry-params fragment.
@@ -337,7 +338,8 @@ function _ensureViewResources(
             vbLayout,
             vbKey,
             view._geometryAttachments,
-            view._emitColor
+            view._emitColor,
+            uv2Mask
         );
     } finally {
         _setActivePbrGeometryAttachments(prev);

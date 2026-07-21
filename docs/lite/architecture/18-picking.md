@@ -47,6 +47,22 @@ interface Ray {
     direction: [number, number, number];
     length: number;
 }
+
+interface PickOptions {
+    filter?: (mesh: Mesh) => boolean;
+    discard?: PickDiscardRule;
+    debugLabel?: string;
+}
+
+// WGSL shape injected for custom discard rules.
+struct PickDiscardInput {
+    worldPos: vec3f,
+    fragmentCoord: vec2f, // selected pixel center in the original backing framebuffer
+    pickId: u32,
+    thinInstanceIndex: u32,
+    hasThinInstance: u32,
+    instanceExtras: vec4f,
+}
 ```
 
 ### Functions
@@ -90,10 +106,34 @@ and .babylon loader. No copies needed — the arrays already exist in JS memory.
 
 1. Each mesh (or thin instance) is assigned a sequential pick ID (1-based; 0 = miss).
 2. A WGSL shader writes the 24-bit pick ID as RGB at `@location(0)` and the fragment's NDC depth at `@location(1)`.
-3. The pass uses a **pick-zoomed view-projection** so only the picked pixel survives, drawing all meshes to a **1×1** target: two colour attachments (`rgba8unorm` pick ID + `r32float` NDC depth) plus a `depth24plus` depth buffer (reverse-Z, compare `greater`).
+3. The pass uses a **pick-zoomed view-projection** so only the picked pixel survives, drawing all meshes to a **1×1** target: two colour attachments (`rgba8unorm` pick ID + `r32float` NDC depth) plus a `depth24plus` depth buffer (reverse-Z, compare `greater`). Because the 1×1 fragment position is always `(0.5, 0.5)`, the scene UBO separately carries the selected pixel center in original backing-framebuffer coordinates for custom discard WGSL.
 4. The 1×1 pick-ID and depth texels are copied to staging buffers and read back.
 5. The pick ID is decoded: `(r << 16) | (g << 8) | b`.
 6. The world-space hit point is reconstructed by unprojecting NDC + the read-back depth through `inverse(VP)`.
+
+### Pick Vertex World Adjustment (Internal Shader Hook)
+
+`picking-shader.ts` accepts an internal `PickingShaderOptions.worldAdjustWgsl`
+source override. The source must define:
+
+```wgsl
+fn adjustPickWorld(worldPos: vec3f, instanceExtras: vec4f, thinInstanceIndex: u32) -> vec3f
+```
+
+The default implementation returns `worldPos` unchanged. Both mesh shader
+variants call the hook after their affine world transform and before
+view-projection:
+
+- Regular meshes pass zero `instanceExtras` and `0xffffffffu` as the
+  non-instance sentinel.
+- Thin instances pass the four spare matrix `w` lanes and the actual
+  `instanceIndex`.
+
+This is a shader-source composition seam, not a root `PickOptions` API. Internal
+specialized picking pipelines can use it to mirror world-space vertex
+displacement from their visible shader. Storage declarations supplied through
+the same `PickingShaderOptions.storage` array are visible to the injected WGSL;
+the owning pipeline must expose those bindings to the vertex stage.
 
 ### Pick contributors (optional entity types)
 
@@ -179,13 +219,13 @@ each attachment is a single texel:
 **Regular meshes:**
 | Group | Binding | Type | Content |
 |-------|---------|------|---------|
-| 0 | 0 | uniform | `mat4x4f` — viewProjection (shared, 64 bytes) |
+| 0 | 0 | uniform | `mat4x4f` viewProjection + `vec2f` original fragment coordinate (shared, 80 bytes) |
 | 1 | 0 | uniform | `mat4x4f` world + `u32` pickId (80 bytes, 16-aligned) |
 
 **Thin-instanced meshes:**
 | Group | Binding | Type | Content |
 |-------|---------|------|---------|
-| 0 | 0 | uniform | `mat4x4f` — viewProjection (shared) |
+| 0 | 0 | uniform | `mat4x4f` viewProjection + `vec2f` original fragment coordinate (shared, 80 bytes) |
 | 1 | 0 | uniform | `u32` baseMeshPickId (16 bytes, padded) |
 | 1 | 1 | read-only-storage | `array<mat4x4f>` — instance world matrices |
 
@@ -276,6 +316,7 @@ the intended coverage.
 ### Unit Tests
 
 - **Pick ID encoding round-trip**: encode u32 → RGB floats → RGBA8 readback → decode u32 = original.
+- **World-adjust shader hook**: identity by default; custom WGSL is injected exactly once in regular/thin shaders; regular meshes receive the non-instance sentinel and thin instances receive packed extras + `instanceIndex`.
 - **Ray unprojection**: `createPickingRay` at canvas center with identity VP should produce Z-forward ray.
 - **Möller–Trumbore**: known triangle + ray → expected `t`, `u`, `v`. Edge cases: parallel, behind, grazing.
 - **Barycentric interpolation**: known face normals/UVs + known `bu`/`bv` → expected interpolated values.

@@ -628,8 +628,8 @@ function updateBindings(list: readonly DrawBinding[], context: DrawUpdateContext
     }
 }
 
-/** Iterate DrawBindings, deduping setPipeline. */
-function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext): number {
+/** @internal Iterate DrawBindings, deduping setPipeline. */
+export function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext): number {
     let lp: GPURenderPipeline | null = null;
     let draws = 0;
     for (const b of list) {

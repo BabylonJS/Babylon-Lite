@@ -1,3 +1,5 @@
+import { rebaseAssetReferences, withBase } from "./base";
+
 export type RunnerMessage =
     | { type: "ready" }
     | { type: "ran" }
@@ -41,7 +43,7 @@ export class Runner {
         const frame = document.createElement("iframe");
         frame.setAttribute("sandbox", "allow-scripts allow-same-origin");
         const ready = this.waitForReady(frame);
-        frame.src = engineUrl ? `/runner.html?engine=${encodeURIComponent(engineUrl)}` : "/runner.html";
+        frame.src = engineUrl ? withBase(`runner.html?engine=${encodeURIComponent(engineUrl)}`) : withBase("runner.html");
 
         if (this.frame) {
             this.frame.remove();
@@ -51,8 +53,9 @@ export class Runner {
 
         await ready;
         // Same-origin iframe: target our own origin so code is never delivered to a
-        // page that navigated the frame cross-origin.
-        frame.contentWindow?.postMessage({ type: "run", code }, window.location.origin);
+        // page that navigated the frame cross-origin. Rebase root-absolute asset
+        // paths so same-origin assets resolve under a /pr or /v sub-path deploy.
+        frame.contentWindow?.postMessage({ type: "run", code: rebaseAssetReferences(code) }, window.location.origin);
     }
 
     /** Tear down the current runner iframe, stopping its engine and render loop. */

@@ -6,7 +6,7 @@
  * physics steps after the kick. The scene self-determines the capture frame,
  * so the spec just waits on the `captureReady` flag (no fixed ?captureFrame).
  */
-import { test, expect } from "../parity-fixtures";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import type { Browser } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
@@ -24,16 +24,14 @@ async function captureBjsReference(browser: Browser): Promise<string> {
     }
 
     fs.mkdirSync(REFERENCE_DIR, { recursive: true });
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const bjsPage = await context.newPage();
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
 
     await bjsPage.goto(`/babylon-ref-scene48.html?capture=1`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 48 BJS reference" });
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 48 BJS reference after kick", flag: "captureReady", pollMs: 100 });
     await bjsPage.locator("canvas").screenshot({ path: GOLDEN_REF });
 
-    await bjsPage.close();
-    await context.close();
+    await release();
     return GOLDEN_REF;
 }
 

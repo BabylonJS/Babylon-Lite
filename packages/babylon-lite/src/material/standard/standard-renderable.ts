@@ -14,7 +14,14 @@ import type { StandardMaterialProps } from "./standard-material.js";
 import { _computeStandardMaterialFeatures, _standardShaderVariantKey } from "./standard-material.js";
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
-import { getOrCreateStandardBindings, getOrCreateStandardPipeline, createStandardMeshBindGroup, clearStandardPipelineCache, writeStdMaterialData } from "./standard-pipeline.js";
+import {
+    getOrCreateStandardBindings,
+    getOrCreateStandardPipeline,
+    createStandardMeshBindGroup,
+    clearStandardPipelineCache,
+    writeStdMaterialData,
+    _stdVertexColorFragment,
+} from "./standard-pipeline.js";
 import { ESM_SHADOW_OUTPUT, NO_COLOR_OUTPUT, NEEDS_UV, NEEDS_UV2, HAS_OPACITY_TEXTURE, _getStdExts } from "./standard-flags.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
@@ -87,6 +94,10 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         // to switch the placeholder morph bindings to storage buffers.
         if (meshFeatures & MSH_HAS_MORPH_TARGETS && morphFragment) {
             frags.push(morphFragment());
+        }
+        const hasVertexColor = !!mesh._gpu.colorBuffer && !!_stdVertexColorFragment;
+        if (hasVertexColor) {
+            frags.push(_stdVertexColorFragment!());
         }
         for (const ext of _getStdExts().values()) {
             if (features & ext._feature) {
@@ -224,6 +235,9 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             }
             if (needsUV2 && g.uv2Buffer) {
                 pass.setVertexBuffer(slot++, g.uv2Buffer, vb?._u2?._offset);
+            }
+            if (hasVertexColor) {
+                pass.setVertexBuffer(slot++, g.colorBuffer!);
             }
 
             const ti = hasThinInstances ? mesh.thinInstances : null;

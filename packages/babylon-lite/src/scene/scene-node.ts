@@ -6,11 +6,9 @@
 import type { Mat4 } from "../math/types.js";
 import type { LiteMetadata } from "../metadata.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
-import { mat4Compose } from "../math/mat4-compose.js";
-import { mat4Identity } from "../math/mat4-identity.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
-import { createWorldMatrixState, attachWorldMatrixState } from "./world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "./world-matrix-state.js";
 
 // ─── EulerProxy ──────────────────────────────────────────────────────
 
@@ -150,11 +148,7 @@ function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, 
         if (matrix) {
             return matrix;
         }
-        const p = node.position,
-            rq = node.rotationQuaternion,
-            s = node.scaling;
-        const isIdentity = p.x === 0 && p.y === 0 && p.z === 0 && rq.x === 0 && rq.y === 0 && rq.z === 0 && rq.w === 1 && s.x === 1 && s.y === 1 && s.z === 1;
-        return isIdentity ? mat4Identity() : mat4Compose(p.x, p.y, p.z, rq.x, rq.y, rq.z, rq.w, s.x, s.y, s.z);
+        return composeTrsLocalMatrix(node.position, node.rotationQuaternion, node.scaling);
     });
     const onWmDirty = () => {
         if (!matrix) {

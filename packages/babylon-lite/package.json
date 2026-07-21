@@ -16,6 +16,10 @@
         "./material/pbr/pbr-thin-instance-ext": {
             "import": "./src/material/pbr/pbr-thin-instance-ext.ts"
         },
+        "./material/standard/enable-standard-vertex-colors": {
+            "import": "./src/material/standard/enable-standard-vertex-colors.ts",
+            "types": "./src/material/standard/enable-standard-vertex-colors.ts"
+        },
         "./loader-env/load-dds-env": {
             "import": "./src/loader-env/load-dds-env.ts"
         },

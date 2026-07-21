@@ -453,6 +453,7 @@ var luminanceOverAlpha=0.0;
 /*BA*/
 luminanceOverAlpha+=dot(${_hasIbl ? `finalSpecularScaled` : `directSpecular`},vec3<f32>(0.2126,0.7152,0.0722));
 finalAlpha=saturate(finalAlpha+luminanceOverAlpha*luminanceOverAlpha);
+/*FA*/
 return vec4<f32>(color,finalAlpha);`
           : `return vec4<f32>(color,alpha*material.materialAlpha);`;
 

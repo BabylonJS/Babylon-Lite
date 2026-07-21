@@ -216,7 +216,30 @@ sphere.material = createStandardMaterial();
 addToScene(scene, sphere);
 ```
 
-### 9. Removing & Disposing Entities
+### 9. StandardMaterial Vertex Colors Are Opt-In
+
+PBR materials consume mesh vertex colors automatically. Standard materials use an explicit opt-in so scenes without vertex colors retain no feature code. Supply a tightly packed RGBA buffer (four floats per vertex), call `enableStandardVertexColors()` once, then register the scene.
+
+```typescript
+import { enableStandardVertexColors } from "babylon-lite/material/standard/enable-standard-vertex-colors";
+
+const vertexCount = positions.length / 3;
+const colors = new Float32Array(vertexCount * 4);
+for (let i = 0; i < vertexCount; i++) {
+    const offset = i * 4;
+    colors[offset] = 1;
+    colors[offset + 3] = 1;
+}
+
+const mesh = createMeshFromData(engine, "colored", positions, normals, indices, undefined, undefined, undefined, colors);
+mesh.material = createStandardMaterial();
+addToScene(scene, mesh);
+
+enableStandardVertexColors();
+await registerScene(scene);
+```
+
+### 10. Removing & Disposing Entities
 
 BJS uses `mesh.dispose()` on individual objects. Lite uses `removeFromScene()` which removes the mesh from the scene and destroys all its GPU resources (buffers, textures, skeleton data).
 
@@ -291,6 +314,7 @@ await startEngine(engine);
 | **No `new` keyword**            | Everything is created via factory functions, not constructors.                                                                                                                                |
 | **Assign camera explicitly**    | Either use `createDefaultCamera(scene)` (auto-assigns) or set `scene.camera = myCamera` manually.                                                                                             |
 | **Materials are optional**      | `createStandardMaterial()` / `createPbrMaterial()` return props objects. Assign to `mesh.material`.                                                                                           |
+| **Standard vertex colors**      | Supply four floats (RGBA) per vertex and call `enableStandardVertexColors()` before `registerScene()`. PBR vertex colors remain automatic.                                                   |
 | **WebGPU only**                 | No WebGL fallback. `createEngine()` throws if WebGPU is unavailable.                                                                                                                          |
 | **No `dispose()` on meshes**    | Use `removeFromScene(scene, mesh)` to remove a single mesh and destroy its GPU resources. Use `disposeScene(scene)` + `disposeEngine(engine)` to tear down everything.                        |
 | **Tree-shakable imports**       | Import only what you use. Unused features are stripped from the bundle.                                                                                                                       |

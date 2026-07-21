@@ -6,6 +6,8 @@
 // `kind: "babylon-lite"` marker tags snippets as Lite so we can reject snippets
 // authored for the classic engine when loading.
 
+import { stripBase, withBase } from "./base";
+
 const SNIPPET_SERVER_BASE = "https://snippet.babylonjs.com";
 
 // The snippet server requires `application/json` to persist the payload, but its
@@ -210,14 +212,14 @@ export function permalinkFor(id: string, version: string): string {
     return `${location.origin}${snippetPath(id, version)}`;
 }
 
-/** The path-based URL for a snippet revision, e.g. `/snippet/XKIIYQ/v/0`. */
+/** The path-based URL for a snippet revision, e.g. `/snippet/XKIIYQ/v/0` (under the deploy base). */
 export function snippetPath(id: string, version: string): string {
-    return `/snippet/${id}/v/${version}`;
+    return withBase(`snippet/${id}/v/${version}`);
 }
 
-/** Parse a `/snippet/ID/v/VERSION` pathname, or `null` when it isn't one. */
+/** Parse a `/snippet/ID/v/VERSION` pathname (under the deploy base), or `null` when it isn't one. */
 export function parseSnippetPath(pathname: string): { id: string; version: string } | null {
-    const match = pathname.match(/^\/snippet\/([^/]+)\/v\/([^/]+)\/?$/);
+    const match = stripBase(pathname).match(/^snippet\/([^/]+)\/v\/([^/]+)\/?$/);
     return match ? { id: match[1]!, version: match[2]! } : null;
 }
 

@@ -180,16 +180,25 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
     // Run every feature's per-asset hook (animations, variants, metadata, …) and
     // merge the returned AssetContainer fragments. `entities` is appended (never
     // overwritten) so features like KHR_lights_punctual can contribute lights
-    // without trampling the root TransformNode.
+    // without trampling the root TransformNode. `_sceneSetup` is composed (chained
+    // in feature order) rather than overwritten, so multiple features can each
+    // contribute deferred scene wiring without the last one winning.
     const assetFragments = await Promise.all(features.flatMap((f) => (f.applyAsset ? [f.applyAsset(meshes, root, ctx)] : [])));
     const container: AssetContainer = { entities: [root] };
     for (const frag of assetFragments) {
         if (frag.entities?.length) {
             container.entities.push(...frag.entities);
         }
-        const { entities: _ignored, ...rest } = frag;
+        const { entities: _ignored, _sceneSetup, ...rest } = frag;
         void _ignored;
         Object.assign(container, rest);
+        if (_sceneSetup) {
+            const prev = container._sceneSetup;
+            container._sceneSetup = (scene) => {
+                prev?.(scene);
+                _sceneSetup(scene);
+            };
+        }
     }
     return container;
 }
@@ -230,7 +239,9 @@ function assetUsesGltfFeatures(json: any) {
     return (
         json.extensionsUsed?.length ||
         json.animations?.length ||
-        JSON.stringify(json).includes("extras") ||
+        // "extras" (per-item metadata) or "sparse" (sparse accessor) anywhere in the asset means a
+        // feature module is needed. One stringify covers both — same cheap substring gate as extras.
+        /extras|sparse/.test(JSON.stringify(json)) ||
         (json.skins?.length && anyPrimitive(json, (p) => p.attributes?.JOINTS_0 !== undefined)) ||
         anyPrimitive(json, (p) => !!p.targets?.length) ||
         // A node with a negative-determinant local transform (odd negative scale, or a `matrix`

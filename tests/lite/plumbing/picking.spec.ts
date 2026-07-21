@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity/parity-fixtures";
 
 test.describe("GPU Picking", () => {
     test("pickAsync hits a sphere at canvas center and misses at corner", async ({ page }) => {
