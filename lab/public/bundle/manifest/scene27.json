@@ -1,18 +1,18 @@
 {
-  "rawKB": 82.8,
+  "rawKB": 82.6,
   "gzipKB": 33.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene27-generate-mipmaps-CaLzDGPp.js",
+    "scene27-generate-mipmaps-D_b91Z8N.js",
     "scene27-gltf-ext-dielectric-C6hvXXiF.js",
-    "scene27-gltf-feature-registry-CNDCiXeA.js",
-    "scene27-gltf-feature-variants-BB_eeMhX.js",
-    "scene27-gltf-glb-parser-By8noE3G.js",
-    "scene27-gltf-pbr-builder-ext-2vzfBQ-x.js",
-    "scene27-gltf-variants-DDyPuyX-.js",
-    "scene27-pbr-renderable-fB-3DEE1.js",
-    "scene27-reflectance-fragment-8TyuueJv.js",
-    "scene27-singlelight-hemispheric-wgsl-3mejQG9t.js",
+    "scene27-gltf-feature-registry-DjUx_tdT.js",
+    "scene27-gltf-feature-variants-BvUlsFMT.js",
+    "scene27-gltf-glb-parser-Bioo-vc0.js",
+    "scene27-gltf-pbr-builder-ext-QF6BCZ0V.js",
+    "scene27-gltf-variants-BPGDlw5y.js",
+    "scene27-pbr-renderable-BOul90H9.js",
+    "scene27-reflectance-fragment-d-P9_gz0.js",
+    "scene27-singlelight-hemispheric-wgsl-BMMbUYIK.js",
     "scene27-texture-2d-DQo3n8D6.js",
     "scene27.js"
   ]

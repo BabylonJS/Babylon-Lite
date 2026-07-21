@@ -1,19 +1,19 @@
 {
-  "rawKB": 92.8,
-  "gzipKB": 38.6,
+  "rawKB": 92.5,
+  "gzipKB": 38.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene254-generate-mipmaps-CYYOn21m.js",
-    "scene254-gltf-animation-CHzaih8c.js",
-    "scene254-gltf-feature-animations-CUiCU9Kg.js",
-    "scene254-gltf-feature-registry-Ch-xzG3O.js",
-    "scene254-gltf-json-asset-Cy750zhW.js",
-    "scene254-gltf-sampler-denorm-DDbhviuB.js",
+    "scene254-generate-mipmaps-CYwo5pXb.js",
+    "scene254-gltf-animation-Bqf1IUwb.js",
+    "scene254-gltf-feature-animations-Dcp0h-5b.js",
+    "scene254-gltf-feature-registry-5X2FRwCs.js",
+    "scene254-gltf-json-asset-BEt5RgKD.js",
+    "scene254-gltf-sampler-denorm-DcOzb2Z2.js",
     "scene254-ibl-fragment-CeRrvT96.js",
-    "scene254-pbr-renderable-8fV8zGa7.js",
-    "scene254-rgbd-decode-1cqWvEkH.js",
+    "scene254-pbr-renderable-BtHlnczZ.js",
+    "scene254-rgbd-decode-CsBw0n-g.js",
     "scene254-scene-uniforms-FTYH6Ct0.js",
-    "scene254-singlelight-hemispheric-wgsl-iaIOf9xl.js",
+    "scene254-singlelight-hemispheric-wgsl-DIgy99yY.js",
     "scene254.js"
   ]
 }

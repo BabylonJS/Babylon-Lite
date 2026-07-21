@@ -1,6 +1,6 @@
 {
-  "rawKB": 94.3,
-  "gzipKB": 35.5,
+  "rawKB": 93,
+  "gzipKB": 35,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene49-standard-renderable-zGkagLCp.js",
