@@ -811,10 +811,10 @@ kept in sync with actual GL state. Two protocols enforce that:
   the whole `rs` array — BOTH its actual half AND its desired twins — back to the
   unset sentinels with `statesDirty=false`). Resetting both halves means the
   first setter after a restore re-marks `statesDirty` and the next
-  `applyGLStates` re-issues from scratch. The `\_flush*`reconciler slots are NOT
+  `applyGLStates` re-issues from scratch. The `_flush*` reconciler slots are NOT
   cleared (they are pure function refs; a post-restore setter re-installs the
-  same ref idempotently, and`statesDirty=false`gates the flush until then).
-  Setters become no-ops while`\_isLost`. See §4.7.
+  same ref idempotently, and `statesDirty=false` gates the flush until then).
+  Setters become no-ops while `_isLost`. See §4.7.
 
 ### 4.2 Cache contract — which GL calls are elided
 
