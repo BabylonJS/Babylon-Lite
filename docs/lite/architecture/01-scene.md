@@ -60,7 +60,10 @@ export interface SceneContext {
 }
 
 /** Add an entity or asset container to the scene. Auto-routes by type. */
-export function addToScene(scene: SceneContext, entity: Mesh | LightBase | ShadowGenerator | TransformNode | AssetContainer): void;
+export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void;
+
+/** Remove an entity or asset container from the scene, undoing addToScene. Idempotent. */
+export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void;
 
 /** Register a callback to run before each rendered frame. */
 export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => void): void;

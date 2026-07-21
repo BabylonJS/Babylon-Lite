@@ -200,6 +200,13 @@ export class MockBaseAudioContext {
 
 export class MockAudioContext extends MockBaseAudioContext {
     public state: "running" | "suspended" | "closed" = "running";
+    public readonly mediaStreamDestinations: MockMediaStreamAudioDestinationNode[] = [];
+
+    public createMediaStreamDestination(): MockMediaStreamAudioDestinationNode {
+        const destination = new MockMediaStreamAudioDestinationNode(this);
+        this.mediaStreamDestinations.push(destination);
+        return destination;
+    }
 
     public addEventListener(type: string, cb: () => void): void {
         if (type === "statechange") {
@@ -344,6 +351,14 @@ export class MockMediaStream {
     public constructor(public readonly tracks: MockMediaStreamTrack[] = [new MockMediaStreamTrack()]) {}
     public getTracks(): MockMediaStreamTrack[] {
         return this.tracks;
+    }
+}
+
+export class MockMediaStreamAudioDestinationNode extends MockAudioNode {
+    public readonly stream = new MockMediaStream();
+
+    public constructor(public readonly context: MockBaseAudioContext) {
+        super();
     }
 }
 

@@ -1,12 +1,12 @@
 {
-  "rawKB": 69.4,
+  "rawKB": 69.3,
   "gzipKB": 27.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene214-material-view-Dua1bl7W.js",
     "scene214-no-color-view-OJ_S3bHJ.js",
-    "scene214-shadow-task-Bcz9_2S_.js",
-    "scene214-standard-renderable-BdOP4pb_.js",
+    "scene214-shadow-task-CLY4rmFg.js",
+    "scene214-standard-renderable-DJ92wc06.js",
     "scene214-std-shadow-fragment-DUILnYou.js",
     "scene214.js"
   ]

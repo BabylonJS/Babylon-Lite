@@ -42,11 +42,11 @@ import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../mesh/thi
 import type { Material } from "../material.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import { _getStdExtsSorted, DOUBLE_SIDED, HAS_DIFFUSE_TEXTURE, HAS_OPACITY_TEXTURE, NEEDS_UV, NEEDS_UV2 } from "./standard-flags.js";
-import { writeStdMaterialData } from "./standard-pipeline.js";
+import { writeStdMaterialData, _stdVertexColorFragment } from "./standard-pipeline.js";
 import { composeStandardGeometryShader } from "./standard-geometry-output-shader.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
-import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES } from "../mesh-features.js";
+import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import type { StandardGeometryMaterialView } from "./geometry-view.js";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that geometry views point at
@@ -95,7 +95,7 @@ interface StandardGeometryViewResources {
 }
 
 /** Pack the mesh-feature bits that change shader composition / pipeline
- *  into a 2-bit variant key. At most 4 variants per view in the worst case. */
+ *  into a 3-bit variant key. At most 8 variants per view in the worst case. */
 function _variantKey(meshFeatures: number): number {
     let k = 0;
     if (meshFeatures & MSH_HAS_THIN_INSTANCES) {
@@ -103,6 +103,9 @@ function _variantKey(meshFeatures: number): number {
     }
     if (meshFeatures & MSH_HAS_INSTANCE_COLOR) {
         k |= 2;
+    }
+    if (_stdVertexColorFragment && meshFeatures & MSH_HAS_VERTEX_COLOR) {
+        k |= 4;
     }
     return k;
 }
@@ -150,6 +153,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     const needsUV = (features & NEEDS_UV) !== 0;
     const needsUV2 = (features & NEEDS_UV2) !== 0;
     const isAlphaBlend = res._alphaBlend;
+    const hasVertexColor = !!_stdVertexColorFragment && (meshFeatures & MSH_HAS_VERTEX_COLOR) !== 0;
     const hasThinInstances = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
     const hasInstanceColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
     const sortCenter = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number];
@@ -193,6 +197,9 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         }
         if (needsUV2 && g.uv2Buffer) {
             pass.setVertexBuffer(slot++, g.uv2Buffer);
+        }
+        if (hasVertexColor) {
+            pass.setVertexBuffer(slot++, g.colorBuffer!);
         }
         const ti = hasThinInstances ? mesh.thinInstances : null;
         if (ti) {
@@ -252,6 +259,9 @@ function _ensureViewResources(view: StandardGeometryMaterialView, engine: Engine
                 usedExts.push({ _ext: ext });
             }
         }
+    }
+    if (_stdVertexColorFragment && meshFeatures & MSH_HAS_VERTEX_COLOR) {
+        frags.push(_stdVertexColorFragment());
     }
 
     // Thin instances. Mirror standard-renderable: when per-instance colour is

@@ -526,7 +526,7 @@
         "slug": "scene49-physics-shape-queries",
         "name": "Scene 49 — Physics Shape Queries",
         "maxMad": 0.005,
-        "maxRawKB": 93.8,
+        "maxRawKB": 94.1,
         "maxGzipKB": 36,
         "description": "Havok Physics V2 shape queries — merge of PG #1VT1BK#11 (shapeProximity) and #1VT1BK#12 (shapeCast), shown as TWO distinct groups stacked along Y. Group A (top): cylinder query shape + animated capsule body, shapeProximity draws the closest-point pair (orange on the cylinder, red on the capsule). Group B (bottom): cylinder swept +X + animated capsule body, shapeCast draws the cast ray (cyan) plus its hit point (green). Clicking a cylinder attaches a 3-axis rotation gizmo (GPU-picked) and the queries read the cylinder's live rotation; the gizmo is interactive-only so the static parity frame shows no gizmo. Frame captured once both queries report hits.",
         "tags": ["physics", "procedural", "std"],
@@ -1188,7 +1188,7 @@
         "slug": "scene115-alien-picking-frame100",
         "name": "Scene 115 — Alien Picking Frame 100",
         "maxMad": 0.01,
-        "maxRawKB": 126.82,
+        "maxRawKB": 127.02,
         "description": "Precise picking validation on the animated Alien glTF at frame 100: BJS and Lite CPU PickInfo values drive a surface sphere and normal marker.",
         "tags": ["pbr", "gltf", "anim", "skeleton", "picking"],
         "skipPerf": true
@@ -1220,7 +1220,7 @@
         "slug": "scene118-billboard-picking",
         "name": "Scene 118 — Billboard Sprite Picking",
         "maxMad": 0.15,
-        "maxRawKB": 76.8,
+        "maxRawKB": 77.1,
         "description": "Visual billboard-picking validation: pickBillboardSprite resolves the centre camera-facing billboard and a small marker mesh floats in front of it. The BJS oracle does the same with scene.pickSprite.",
         "tags": ["sprite", "billboard", "picking"],
         "skipPerf": true
@@ -1947,7 +1947,7 @@
         "slug": "scene221-pointer-drags",
         "name": "Scene 221 — Pointer Drags",
         "maxMad": 2.5,
-        "maxRawKB": 102.7,
+        "maxRawKB": 102.9,
         "description": "Four cubes over a ground, each driven by a different gizmo: axisDragGizmo (X), planeRotationGizmo (Y) with rotation sector camembert, planeDragGizmo (Y normal), axisScaleGizmo (Y). UtilityLayer overlay + scripted pointer-drag interaction.",
         "tags": ["std", "gizmo", "interactive"],
         "skipPerf": true,
@@ -1958,7 +1958,7 @@
         "slug": "scene222-composite-gizmos",
         "name": "Scene 222 — Composite Gizmos",
         "maxMad": 1.5,
-        "maxRawKB": 118.8,
+        "maxRawKB": 119.1,
         "description": "Three cubes each parented to a TransformNode with non-null rotation and translation, driven by composite PositionGizmo / RotationGizmo / ScaleGizmo. Scripted manipulation in LOCAL coords, then switches to WORLD coords (where supported) and re-manipulates before parity comparison.",
         "tags": ["std", "gizmo", "interactive", "composite"],
         "skipPerf": true,
@@ -2277,6 +2277,27 @@
         "maxRawKB": 82,
         "description": "EnvironmentTest.gltf (glTF-IBL) — cx20 gltf-test. Exercises EXT_lights_image_based: the glTF carries its own document-level image-based light (irradiance SH9 + prefiltered specular cubemap mips + intensity/rotation), driving PBR IBL through Lite's existing environment path (EnvironmentTextures + scene UBO spherical harmonics). Grid of metallic-roughness spheres.",
         "tags": ["gltf", "pbr", "env", "ibl"],
+        "skipPerf": true
+    },
+    {
+        "id": 266,
+        "slug": "scene266-negative-scale-doublesided",
+        "name": "Scene 266 — Negative Scale (Double-Sided)",
+        "maxMad": 0.15,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 79.5,
+        "description": "Khronos NegativeScaleTest.glb: a grid of double-sided PBR material spheres, each rendered as an un-mirrored copy and a negative-determinant (mirrored) copy. Validates that winding reversal on mirrored double-sided meshes keeps WebGPU front_facing consistent with the geometry; Lite previously flipped the cull face instead of the front-face winding, so the double-sided normal flip inverted the outward normal and the mirrored reflective spheres rendered black.",
+        "tags": ["gltf", "transform", "pbr"],
+        "skipPerf": true
+    },
+    {
+        "id": 267,
+        "slug": "scene267-standard-vertex-colors",
+        "name": "Scene 267 — StandardMaterial Vertex Colors",
+        "maxMad": 0.04,
+        "maxRawKB": 43,
+        "description": "Full-frame affine RGBA vertex-color gradient on an unlit white StandardMaterial. Validates color-buffer binding, interpolation, and multiplication into StandardMaterial base color.",
+        "tags": ["standard", "vertex-color", "procedural"],
         "skipPerf": true
     }
 ]

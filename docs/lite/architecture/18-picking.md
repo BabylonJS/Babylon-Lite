@@ -111,6 +111,30 @@ and .babylon loader. No copies needed — the arrays already exist in JS memory.
 5. The pick ID is decoded: `(r << 16) | (g << 8) | b`.
 6. The world-space hit point is reconstructed by unprojecting NDC + the read-back depth through `inverse(VP)`.
 
+### Pick Vertex World Adjustment (Internal Shader Hook)
+
+`picking-shader.ts` accepts an internal `PickingShaderOptions.worldAdjustWgsl`
+source override. The source must define:
+
+```wgsl
+fn adjustPickWorld(worldPos: vec3f, instanceExtras: vec4f, thinInstanceIndex: u32) -> vec3f
+```
+
+The default implementation returns `worldPos` unchanged. Both mesh shader
+variants call the hook after their affine world transform and before
+view-projection:
+
+- Regular meshes pass zero `instanceExtras` and `0xffffffffu` as the
+  non-instance sentinel.
+- Thin instances pass the four spare matrix `w` lanes and the actual
+  `instanceIndex`.
+
+This is a shader-source composition seam, not a root `PickOptions` API. Internal
+specialized picking pipelines can use it to mirror world-space vertex
+displacement from their visible shader. Storage declarations supplied through
+the same `PickingShaderOptions.storage` array are visible to the injected WGSL;
+the owning pipeline must expose those bindings to the vertex stage.
+
 ### Pick contributors (optional entity types)
 
 The picker draws meshes itself (Phase 1, ids `1..M`), then iterates
@@ -292,6 +316,7 @@ the intended coverage.
 ### Unit Tests
 
 - **Pick ID encoding round-trip**: encode u32 → RGB floats → RGBA8 readback → decode u32 = original.
+- **World-adjust shader hook**: identity by default; custom WGSL is injected exactly once in regular/thin shaders; regular meshes receive the non-instance sentinel and thin instances receive packed extras + `instanceIndex`.
 - **Ray unprojection**: `createPickingRay` at canvas center with identity VP should produce Z-forward ray.
 - **Möller–Trumbore**: known triangle + ray → expected `t`, `u`, `v`. Edge cases: parallel, behind, grazing.
 - **Barycentric interpolation**: known face normals/UVs + known `bu`/`bv` → expected interpolated values.

@@ -1,6 +1,6 @@
 {
   "rawKB": 54.1,
-  "gzipKB": 22.2,
+  "gzipKB": 22.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene216-pbr-fog-wgsl-BuLKZvgv.js",

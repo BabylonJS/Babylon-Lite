@@ -180,6 +180,7 @@ export {
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
 export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
+export { getMeshGeometry } from "./mesh/get-mesh-geometry.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
 export { createSphereData } from "./mesh/create-sphere.js";
@@ -767,6 +768,8 @@ export type { NavigationPlugin, NavCrowd, NavMeshParameters, NavMeshSource, Agen
 // ─── Audio (AudioV2 port) ────────────────────────────────────────────
 export { createAudioEngineAsync, disposeAudioEngine, unlockAudioEngineAsync, setMasterVolume, getMasterVolume } from "./audio/audio-engine.js";
 export type { AudioEngine, AudioEngineOptions, AudioEngineState } from "./audio/audio-engine.js";
+export { createAudioEngineMediaStream, disposeAudioEngineMediaStream } from "./audio/media-stream-output.js";
+export type { AudioEngineMediaStream } from "./audio/media-stream-output.js";
 export { createSoundAsync, playSound, pauseSound, resumeSound, stopSound, disposeSound, setSoundVolume, SoundState } from "./audio/static-sound.js";
 export type { StaticSound, StaticSoundOptions, StaticSoundPlayOptions, StaticSoundStopOptions } from "./audio/static-sound.js";
 export {

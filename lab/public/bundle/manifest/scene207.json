@@ -1,5 +1,5 @@
 {
-  "rawKB": 60.7,
+  "rawKB": 60.6,
   "gzipKB": 24.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,8 +8,8 @@
     "scene207-material-view-Dua1bl7W.js",
     "scene207-no-color-view-BIPV5MXI.js",
     "scene207-pack-mat4-with-offset-BS-Lz8k7.js",
-    "scene207-shadow-task-BO4xEw5Q.js",
-    "scene207-standard-renderable--HZGtF5z.js",
+    "scene207-shadow-task-CV_Fb_A2.js",
+    "scene207-standard-renderable-Dcu4H6JI.js",
     "scene207-std-shadow-fragment-pwyXRo4i.js",
     "scene207.js"
   ]
