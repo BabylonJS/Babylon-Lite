@@ -8,5 +8,5 @@
 
 /** @internal Resolve the full message for `code`, applying interpolated `args`. */
 export function decodeLiteError(code: number, _args: readonly unknown[]): string {
-    return `Babylon-Lite error #${code}`;
+    return `Error #${code}`;
 }

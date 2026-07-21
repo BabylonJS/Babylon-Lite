@@ -42,7 +42,7 @@ export { getFloatingOriginOffset } from "./large-world/floating-origin.js";
 
 // Opt-in full error messages. By default Babylon-Lite throws compact coded errors to keep
 // bundles small; calling this loads the message table so errors report their full text.
-export { enableErrorDecoding } from "./enable-error-decoding.js";
+export { enableErrorDecoding, decodeError } from "./enable-error-decoding.js";
 
 // Subtree visibility toggle (used to hide a node before deferring its disposal,
 // e.g. streaming voxel chunks). Standalone module — bundled only when used.

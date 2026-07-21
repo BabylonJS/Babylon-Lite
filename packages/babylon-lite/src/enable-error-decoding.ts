@@ -1,4 +1,4 @@
-import { _setLiteErrorDecoder } from "./lite-error.js";
+import { _setLiteErrorDecoder, type LiteError } from "./lite-error.js";
 import { decodeLiteError } from "./error-messages.js";
 
 /** Opt in to full, human-readable error messages.
@@ -12,4 +12,23 @@ import { decodeLiteError } from "./error-messages.js";
  *  This pulls in the message table chunk; leave it out of production builds to keep them lean. */
 export function enableErrorDecoding(): void {
     _setLiteErrorDecoder(decodeLiteError);
+}
+
+/** Decode a Babylon-Lite error into its full, human-readable message.
+ *
+ *  Works even when {@link enableErrorDecoding} was never called: by default Babylon-Lite throws
+ *  errors whose message is the bare code `#<code>` with the interpolation args attached as a `lite`
+ *  property, so this reads the code and args back out and runs them through the message table. If
+ *  the error was already decoded (decoding was enabled when it was thrown) or isn't a Babylon-Lite
+ *  coded error, its message is returned unchanged.
+ *
+ *  Importing this pulls in the message table chunk (same as {@link enableErrorDecoding}); leave it
+ *  out of production builds to keep them lean. */
+export function decodeError(error: Error): string {
+    const args = (error as LiteError).lite;
+    if (args === undefined) {
+        return error.message;
+    }
+    const match = /^#(\d+)$/.exec(error.message);
+    return match ? decodeLiteError(Number(match[1]), args) : error.message;
 }

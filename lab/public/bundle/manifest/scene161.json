@@ -1,6 +1,6 @@
 {
-  "rawKB": 39,
-  "gzipKB": 15.3,
+  "rawKB": 39.2,
+  "gzipKB": 15.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene161-shader-renderable-B64lcsXS.js",
