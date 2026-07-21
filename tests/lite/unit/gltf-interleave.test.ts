@@ -1,7 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { accessorIsStrided, buildInterleavedPartial, installLazyCpu, computeAabbStrided } from "../../../packages/babylon-lite/src/loader-gltf/gltf-interleave.js";
-import { _shareInterleavedCpu } from "../../../packages/babylon-lite/src/loader-gltf/gltf-share.js";
-import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 
 const FLOAT = 5126;
 
@@ -85,17 +83,24 @@ describe("gltf-interleave", () => {
         const first: Record<string, unknown> = {};
         const second: Record<string, unknown> = {};
 
+        expect(m._vb!._p!._cpu).toBeUndefined();
+        expect(m._vb!._n!._cpu).toBeUndefined();
         installLazyCpu(first, m as never);
         installLazyCpu(second, m as never);
-        _shareInterleavedCpu(first as unknown as Mesh, second as unknown as Mesh);
 
-        expect(second._cpuPositions).toBe(first._cpuPositions);
-        expect(second._cpuNormals).toBe(first._cpuNormals);
+        expect(m._vb!._p!._cpu).toBeUndefined();
+        expect(m._vb!._n!._cpu).toBeUndefined();
+        const positions = first._cpuPositions;
+        const normals = first._cpuNormals;
+        expect(m._vb!._p!._cpu).toBe(positions);
+        expect(m._vb!._n!._cpu).toBe(normals);
+        expect(second._cpuPositions).toBe(positions);
+        expect(second._cpuNormals).toBe(normals);
 
         const replacement = new Float32Array([7, 8, 9]);
         second._cpuPositions = replacement;
         expect(second._cpuPositions).toBe(replacement);
-        expect(first._cpuPositions).not.toBe(replacement);
+        expect(first._cpuPositions).toBe(positions);
     });
 
     it("computeAabbStrided folds the AABB directly from the strided slice", async () => {

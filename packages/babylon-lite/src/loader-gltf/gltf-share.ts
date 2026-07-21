@@ -47,7 +47,6 @@ export async function share(
                 } as unknown as Mesh;
                 initMeshTransform(mesh);
                 interleave!.installLazyCpu(mesh, m);
-                _shareInterleavedCpu(source, mesh);
                 mesh._cpuIndices = source._cpuIndices;
                 engine._dlr?.m(mesh, m._uv2s, m._tangents, m._colors, m._indices, source._gpu.indexFormat);
             } else {
@@ -125,29 +124,6 @@ export function _installSharedRecovery(gpu: MeshGPU): void {
         return next;
     };
     gpu._recoverShared = recover;
-}
-
-/** @internal Materialize one canonical interleaved CPU copy, then install it as
- *  an independently writable data property on each owning Mesh. */
-export function _shareInterleavedCpu(source: Mesh, target: Mesh): void {
-    const positions = source._cpuPositions;
-    if (positions) {
-        const descriptor = { configurable: true, enumerable: true, writable: true, value: positions };
-        Object.defineProperty(source, "_cpuPositions", descriptor);
-        Object.defineProperty(target, "_cpuPositions", descriptor);
-    }
-    const normals = source._cpuNormals;
-    if (normals) {
-        const descriptor = { configurable: true, enumerable: true, writable: true, value: normals };
-        Object.defineProperty(source, "_cpuNormals", descriptor);
-        Object.defineProperty(target, "_cpuNormals", descriptor);
-    }
-    const uvs = source._cpuUvs;
-    if (uvs) {
-        const descriptor = { configurable: true, enumerable: true, writable: true, value: uvs };
-        Object.defineProperty(source, "_cpuUvs", descriptor);
-        Object.defineProperty(target, "_cpuUvs", descriptor);
-    }
 }
 
 function shareCpuGeometry(meshDatas: GltfMeshData[], activeNodes: Set<number>): void {
