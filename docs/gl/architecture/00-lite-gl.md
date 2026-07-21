@@ -744,10 +744,10 @@ interface GLState {
 
     // ── Deferred render state (Babylon's applyStates model) ──────────────────
     // The blend / depth / cull / stencil / colorMask render-state lives in ONE
-    // flat Float64Array(46) instead of ~42 named fields. Slots 0..20 (indexed by
+    // flat Float64Array(52) instead of ~48 named fields. Slots 0..23 (indexed by
     // the @internal `RS_*` consts in state.ts) are the ACTUAL applied GL state;
-    // slots 21..41 (`rs[RS_X + RS_DESIRED]`) are the DESIRED twin the setters
-    // write; slots 42..45 are the standalone (no-desired-twin) cached gl.clearColor
+    // slots 24..47 (`rs[RS_X + RS_DESIRED]`) are the DESIRED twin the setters
+    // write; slots 48..51 are the standalone (no-desired-twin) cached gl.clearColor
     // RGBA. `applyGLStates` reconciles desired → actual right before each draw /
     // clear. Unset sentinels (both halves): -1 for the enable/mask toggles (and
     // colorMask packed), 0 for the factor/func/op enum slots — chosen so a desired
@@ -757,11 +757,11 @@ interface GLState {
     // state.ts ↔ blend.ts ↔ depth-stencil.ts ↔ apply-states.ts, so esbuild cannot
     // mangle named properties — each long name (`.dBlendSrcRGB`) would ship
     // verbatim, many times, in every scene bundle. The `RS_*` consts are plain
-    // integers esbuild inlines (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` → `rs[22]`),
+    // integers esbuild inlines (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` → `rs[25]`),
     // so the storage costs a single short array access everywhere. Float64 (not
     // Int32) because stencilMask / stencilFuncMask can be 0xFFFFFFFF, which Int32
     // stores as -1 — colliding with the -1 unset sentinel.
-    rs: Float64Array; // 46 = 21 actual + 21 desired + 4 clearColor
+    rs: Float64Array; // 52 = 24 actual + 24 desired + 4 clearColor
     /** Raised by any deferred setter; cleared by `applyGLStates`. The flush is a
      *  fast no-op when false, so a draw that changed no render state pays
      *  nothing. */
@@ -847,21 +847,22 @@ rather than applying eagerly. Both the storage and the flush are tuned so an
 unused category costs a scene nothing:
 
 - **Storage — one index-array.** The whole deferred state lives in
-  `_state.rs`, a flat `Float64Array(46)`: slots `0..20` (the `@internal` `RS_*`
-  consts in `state.ts`) are the ACTUAL applied GL state, slots `21..41`
-  (`rs[RS_X + RS_DESIRED]`) the DESIRED twin, and slots `42..45` the standalone
+  `_state.rs`, a flat `Float64Array(52)`: slots `0..23` (the `@internal` `RS_*`
+  consts in `state.ts`) are the ACTUAL applied GL state, slots `24..47`
+  (`rs[RS_X + RS_DESIRED]`) the DESIRED twin, and slots `48..51` the standalone
   cached `gl.clearColor` RGBA. This replaced ~42 named fields
   (`blendEnabled` / `dBlendEnabled` / …): because the state is read/written across
   four modules, esbuild could not mangle those property names, so each long name
   shipped verbatim in every scene bundle. The `RS_*` consts are plain integers
   esbuild inlines to short literals (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` →
-  `rs[22]`), reclaiming ~2.4 KB raw per scene. Float64 (not Int32) keeps a
+  `rs[25]`), reclaiming ~2.4 KB raw per scene. Float64 (not Int32) keeps a
   `0xFFFFFFFF` stencil mask distinct from the `-1` unset sentinel.
 - **Setters** (`setBlendMode` / `setBlendState` / `disableBlend`, `setDepthState`,
-  `setCullState`, `setStencilState`, `setColorMask`) write ONLY the desired half
-  of `rs` and set `statesDirty = true`. They issue no `gl.*` and never touch the
-  actual half. Omitted setter fields leave their desired slot untouched
-  (merge-from-desired).
+  `setCullState`, `setStencilState`, `setStencilOpSeparate`, `setColorMask`) write
+  ONLY the desired half of `rs` and set `statesDirty = true`. They issue no
+  `gl.*` and never touch the actual half. Omitted setter fields leave their
+  desired slot untouched (merge-from-desired). `setStencilState` writes its op
+  fields to both faces; `setStencilOpSeparate` overrides the selected face.
 - **Per-category dispatch (tree-shakeable).** `applyGLStates(engine)` (the
   internal `apply-states.ts`, not exported from the barrel) owns NO reconciliation
   code — it is a tiny dispatcher. Each category's reconciler (`flushBlend` in
@@ -881,8 +882,10 @@ unused category costs a scene nothing:
   and the dispatcher clears `statesDirty`. The blend disabled/unset→enabled
   transition force-issues both `blendEquationSeparate` + `blendFuncSeparate`
   (Babylon's `AlphaState` does not track them while blending is off); thereafter
-  each is elided independently. The stencil func-triple and op-triple are each
-  issued as a unit.
+  each is elided independently. The stencil func-triple and each face's op-triple
+  are issued as units. Matching front/back desired operations use one
+  `gl.stencilOp`; differing operations use `gl.stencilOpSeparate` only for faces
+  whose desired triple changed.
 - **Flush sites** — `applyGLStates` is called immediately before every GPU op:
   `drawEffect` (effect-renderer), `renderSprites` (sprites), `drawIndexed` (mesh),
   and `clearEngine` before `gl.clear` (a clear respects the current write masks).
@@ -1404,8 +1407,9 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
 5. No observable / event emitter abstraction. Context-lost/restored use plain `cb[]`.
 6. Matrix / array uniform setters ARE shipped: `setEffectMatrix` / `setEffectMatrix3x3` / `setEffectFloatArray` / `setEffectFloatArray4` / `setEffectIntArray`, each a tree-shakable `export function`.
 7. Depth / stencil / cull / color-mask state setters ARE shipped via the
-   the depth-stencil module (`setDepthState` / `setStencilState` / `setCullState`
-   / `setColorMask` / `clearEngine`). Blend state is `setBlendMode(engine, mode)` /
+  the depth-stencil module (`setDepthState` / `setStencilState` /
+  `setStencilOpSeparate` / `setCullState` / `setColorMask` / `clearEngine`).
+  Blend state is `setBlendMode(engine, mode)` /
    `setBlendState` (§3.5.1) whose presets match `Constants.ALPHA_*`. `drawEffect`
    still does not touch blend, so fullscreen-effect parity is unchanged.
 8. No texture compression, no KTX, no DDS, no Basis.

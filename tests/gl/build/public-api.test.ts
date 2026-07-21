@@ -147,6 +147,7 @@ describe("babylon-lite-gl build output", () => {
             "setDepthState",
             "setCullState",
             "setStencilState",
+            "setStencilOpSeparate",
             "setColorMask",
             "clearEngine",
             "generateRenderTargetStencil",

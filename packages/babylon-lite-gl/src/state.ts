@@ -2,9 +2,9 @@ import type { GLEngineContext } from "./context.js";
 
 /* ─── Deferred render-state index-array layout ────────────────────────────────
  * The deferred render-state (blend / depth / cull / stencil / color-mask) lives
- * in a single flat `Float64Array(46)` on `GLState.rs`: slots `0..20` hold the
- * ACTUAL applied GL state, slots `21..41` (`RS_X + RS_DESIRED`) the DESIRED twin,
- * and slots `42..45` the standalone (no-desired-twin) cached `gl.clearColor` RGBA.
+ * in a single flat `Float64Array(52)` on `GLState.rs`: slots `0..23` hold the
+ * ACTUAL applied GL state, slots `24..47` (`RS_X + RS_DESIRED`) the DESIRED twin,
+ * and slots `48..51` the standalone (no-desired-twin) cached `gl.clearColor` RGBA.
  *
  * These `@internal` index consts are imported by blend.ts / depth-stencil.ts /
  * apply-states.ts. Because they are plain `const` integers, esbuild inlines each
@@ -36,16 +36,19 @@ import type { GLEngineContext } from "./context.js";
 /** @internal */ export const RS_STENCIL_OP_ZFAIL = 18;
 /** @internal */ export const RS_STENCIL_OP_ZPASS = 19;
 /** @internal */ export const RS_COLOR_MASK = 20;
-/** @internal Offset from an ACTUAL slot (`0..20`) to its DESIRED twin (`21..41`). */
-export const RS_DESIRED = 21;
-/* Standalone cached gl.clearColor RGBA slots (`42..45`) — NO desired twin; a
+/** @internal */ export const RS_STENCIL_BACK_OP_FAIL = 21;
+/** @internal */ export const RS_STENCIL_BACK_OP_ZFAIL = 22;
+/** @internal */ export const RS_STENCIL_BACK_OP_ZPASS = 23;
+/** @internal Offset from an ACTUAL slot (`0..23`) to its DESIRED twin (`24..47`). */
+export const RS_DESIRED = 24;
+/* Standalone cached gl.clearColor RGBA slots (`48..51`) — NO desired twin; a
  * simple apply-on-clear cache like viewport/scissor, stored in `rs` (not as named
  * GLState fields) so the index access mangles small instead of shipping
  * `.clearColorR` verbatim in every bundle. */
-/** @internal */ export const RS_CLEAR_R = 42;
-/** @internal */ export const RS_CLEAR_G = 43;
-/** @internal */ export const RS_CLEAR_B = 44;
-/** @internal */ export const RS_CLEAR_A = 45;
+/** @internal */ export const RS_CLEAR_R = 48;
+/** @internal */ export const RS_CLEAR_G = 49;
+/** @internal */ export const RS_CLEAR_B = 50;
+/** @internal */ export const RS_CLEAR_A = 51;
 
 /**
  * GL-state cache type. Owned by `GLEngineContext._state`.
@@ -95,9 +98,9 @@ export interface GLState {
     boundFramebuffer: WebGLFramebuffer | null;
     /**
      * Deferred render-state (blend / depth / cull / stencil / color-mask) packed
-     * into ONE flat `Float64Array(46)`. Slots `0..20` (indexed by the `RS_*`
+     * into ONE flat `Float64Array(52)`. Slots `0..23` (indexed by the `RS_*`
      * consts) are the ACTUAL applied GL state — what {@link applyGLStates} last
-     * wrote to the context; slots `21..41` (`rs[RS_X + RS_DESIRED]`) are the
+     * wrote to the context; slots `24..47` (`rs[RS_X + RS_DESIRED]`) are the
      * DESIRED twin the setters record. The setters write ONLY the desired half
      * (never `gl.*`, never the actual half) and raise `statesDirty`;
      * `applyGLStates` reconciles each desired → its actual twin right before a
@@ -186,11 +189,11 @@ function applyRenderStateSentinels(rs: Float64Array): void {
     rs[RS_CLEAR_R] = rs[RS_CLEAR_G] = rs[RS_CLEAR_B] = rs[RS_CLEAR_A] = -1;
 }
 
-/** Allocate the 46-slot deferred render-state array (21 actual + 21 desired + 4
+/** Allocate the 52-slot deferred render-state array (24 actual + 24 desired + 4
  *  standalone clearColor) initialised to its unset sentinels — a fresh
  *  `Float64Array` is already all `0`, so only the `-1` slots need writing. */
 function createRenderStateArray(): Float64Array {
-    const rs = new Float64Array(46);
+    const rs = new Float64Array(52);
     applyRenderStateSentinels(rs);
     return rs;
 }

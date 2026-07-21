@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createGLEngine } from "../../../packages/babylon-lite-gl/src/context";
-import { setDepthState, setCullState, setStencilState, setColorMask, clearEngine, generateRenderTargetStencil } from "../../../packages/babylon-lite-gl/src/depth-stencil";
+import {
+    setDepthState,
+    setCullState,
+    setStencilState,
+    setStencilOpSeparate,
+    setColorMask,
+    clearEngine,
+    generateRenderTargetStencil,
+} from "../../../packages/babylon-lite-gl/src/depth-stencil";
 import { applyGLStates } from "../../../packages/babylon-lite-gl/src/apply-states";
 import { createRenderTarget, disposeRenderTarget, resizeRenderTarget, bindRenderTarget } from "../../../packages/babylon-lite-gl/src/render-target";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
@@ -121,6 +129,47 @@ describe("lite-gl stencil state", () => {
         applyGLStates(engine);
         expect(callsNamed(mock, "stencilFunc")[0]?.args).toEqual([engine.gl.NOTEQUAL, 0, 0x3]);
     });
+
+    it("applies and caches separate front/back op triples, then returns to shared state", () => {
+        const { mock, engine } = makeEngine();
+        const keep = { opFail: engine.gl.KEEP, opZFail: engine.gl.KEEP, opZPass: engine.gl.KEEP };
+        setStencilState(engine, keep);
+        applyGLStates(engine);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.KEEP, engine.gl.KEEP, engine.gl.INCR_WRAP],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.KEEP, engine.gl.DECR_WRAP],
+        ]);
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
+
+        mock.clear();
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+
+        setStencilState(engine, keep);
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP]]);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+    });
+
+    it("treats FRONT_AND_BACK as a shared op update", () => {
+        const { mock, engine } = makeEngine();
+        setStencilState(engine, { opFail: engine.gl.KEEP, opZFail: engine.gl.KEEP, opZPass: engine.gl.KEEP });
+        applyGLStates(engine);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT_AND_BACK, { opZPass: engine.gl.INCR_WRAP });
+        applyGLStates(engine);
+
+        expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.KEEP, engine.gl.KEEP, engine.gl.INCR_WRAP]]);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+    });
 });
 
 describe("lite-gl color mask", () => {
@@ -182,6 +231,7 @@ describe("lite-gl depth/stencil: lost-context safety", () => {
         expect(() => {
             setDepthState(engine, { test: true });
             setStencilState(engine, { test: true });
+            setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
             setColorMask(engine, true, false, true, false);
             clearEngine(engine, { color: { r: 0, g: 0, b: 0 } });
         }).not.toThrow();
