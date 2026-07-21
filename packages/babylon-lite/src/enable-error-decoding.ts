@@ -6,10 +6,12 @@ import { decodeLiteError } from "./error-messages.js";
  *  To keep shipped bundles small, Babylon-Lite throws errors carrying a numeric code plus the
  *  values the message would have interpolated; the verbose message text lives in a separate
  *  chunk that is NOT loaded by default. Calling this once (e.g. in development, or in a global
- *  error handler) loads that table and installs a decoder, so every error thrown afterwards —
- *  caught or uncaught — reports its full message via `error.message`.
+ *  error handler) installs a decoder, so every error thrown afterwards — caught or uncaught —
+ *  reports its full message via `error.message`.
  *
- *  This pulls in the message table chunk; leave it out of production builds to keep them lean. */
+ *  Importing this module pulls in the message table chunk (calling the function only installs the
+ *  decoder); avoid *statically* importing it into production bundles you want to stay lean. A
+ *  global error handler can still `import()` it lazily when it needs full messages. */
 export function enableErrorDecoding(): void {
     _setLiteErrorDecoder(decodeLiteError);
 }
@@ -23,8 +25,9 @@ export function enableErrorDecoding(): void {
  *  message table. If the error was already decoded (decoding was enabled when it was thrown) or isn't
  *  a Babylon-Lite coded error, its message is returned unchanged (non-`Error` values are stringified).
  *
- *  Importing this pulls in the message table chunk (same as {@link enableErrorDecoding}); leave it
- *  out of production builds to keep them lean. */
+ *  Importing this module pulls in the message table chunk (same as {@link enableErrorDecoding}), so
+ *  avoid *statically* importing it into lean production bundles; the intended production pattern is
+ *  to `import()` it lazily from a `catch`/telemetry path only when an error actually fires. */
 export function decodeError(error: unknown): string {
     if (!(error instanceof Error)) {
         return String(error);
