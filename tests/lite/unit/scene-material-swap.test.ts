@@ -54,6 +54,7 @@ describe("scene material swap", () => {
         const scene = {
             surface: { engine: { _retirements: [] } },
             _materialSwapQueue: [mesh],
+            _groups: new Map(),
             _meshDisposables: new Map([[mesh, [disposeOld]]]),
             _renderables: [],
             _renderableVersion: 0,

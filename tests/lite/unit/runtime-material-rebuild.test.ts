@@ -77,10 +77,9 @@ describe("runtime material rebuild ownership", () => {
             scene._materialSwapQueue.push(mesh);
         }
 
-        const pending = processMaterialSwaps(scene) as Promise<void>;
-        await starts[0];
         let settled = false;
-        void pending.then(() => (settled = true));
+        const pending = (processMaterialSwaps(scene) as Promise<void>).then(() => (settled = true));
+        await starts[0];
 
         finishes[0]!();
         await starts[1];

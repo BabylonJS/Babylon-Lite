@@ -32,7 +32,7 @@ async function main(): Promise<void> {
     const numPerSide = 8;
     const size = 14;
     const ofst = size / (numPerSide - 1);
-    const instanceCount = numPerSide * numPerSide * numPerSide;
+    const instanceCount = numPerSide ** 3;
 
     const matricesData = new Float32Array(16 * instanceCount);
     const colorData = new Float32Array(4 * instanceCount);
@@ -53,10 +53,10 @@ async function main(): Promise<void> {
                 m[14] = -size / 2 + ofst * z;
                 matricesData.set(m, index * 16);
 
-                const coli = Math.floor(col);
+                const coli = col | 0;
                 colorData[index * 4 + 0] = ((coli & 0xff0000) >> 16) / 255;
                 colorData[index * 4 + 1] = ((coli & 0x00ff00) >> 8) / 255;
-                colorData[index * 4 + 2] = ((coli & 0x0000ff) >> 0) / 255;
+                colorData[index * 4 + 2] = (coli & 0xff) / 255;
                 colorData[index * 4 + 3] = 1.0;
 
                 index++;
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
 
     setThinInstances(box, matricesData, instanceCount);
     setThinInstanceColors(box, colorData);
-    if (new URLSearchParams(location.search).has("culling")) {
+    if (location.search.includes("culling")) {
         enableThinInstanceGpuCulling(box);
         canvas.dataset.gpuCulling = "thin-instances";
     }

@@ -10,16 +10,17 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
     if (scene._runtimeBuilds?.w) {
         return;
     }
+    let changed = 0;
     let pending: Promise<void> | undefined;
+    const renderables = scene._renderables;
     for (const mesh of q) {
-        const mat = mesh.material;
-        const builder = mat._buildGroup;
-        const runtimeBuild = mesh.thinInstances?._runtimeBuild;
+        const runtimeBuild = mesh._runtimeThinBuild;
         if (runtimeBuild) {
-            pending = runtimeBuild(scene, builder, mesh, pending);
+            pending = runtimeBuild(scene, mesh, pending);
             continue;
         }
-        const rebuild = scene._groups?.get(builder)?.r;
+        const mat = mesh.material;
+        const rebuild = scene._groups.get(mat._buildGroup)?.r;
         if (!rebuild) {
             continue;
         }
@@ -36,14 +37,21 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
             // records the old resources again; retire the teardown after the next submitted frame drains.
             retireGpuResources(scene.surface.engine, () => old.forEach((fn) => fn()));
         }
-        scene._renderables = scene._renderables.filter((renderable) => renderable.mesh !== mesh);
+        for (let i = renderables.length; i--;) {
+            if (renderables[i]!.mesh === mesh) {
+                renderables.splice(i, 1);
+            }
+        }
 
         // Per-material generation: the CSM caster-view cache keys off THIS (which material was rebuilt), not the
         // global _materialEpoch (which also bumps when an unrelated material is swapped), so swapping a non-caster
         // material doesn't force a full shadow rebuild. See ensureCsmShadowTaskState.
         mat._csmGen = (mat._csmGen || 0) + 1;
-        scene._renderables.push(rebuild(scene, mesh));
-        scene._renderables.sort((a, b) => a.order - b.order);
+        renderables.push(rebuild(scene, mesh));
+        changed = 1;
+    }
+    if (changed) {
+        renderables.sort((a, b) => a.order - b.order);
         scene._renderableVersion++;
         scene._materialEpoch++; // a caster's material UBOs were rebuilt → CSM-style view caches must fully rebuild
     }

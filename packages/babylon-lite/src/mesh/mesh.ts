@@ -102,6 +102,8 @@ export interface Mesh extends SceneNode {
     vat?: VatData | null;
     /** Morph target GPU data. Type-only — no module dependency. */
     morphTargets?: MorphTargetData | null;
+    /** @internal Materialize this thin-instanced mesh when it joins an already-built scene. */
+    _runtimeThinBuild?: (scene: import("../scene/scene-core.js").SceneContext, mesh: Mesh, pending?: Promise<void>) => Promise<void>;
     /** User-controlled render order. Lower = drawn first within phase.
      *  Only affects ordering within the opaque or transparent phase. */
     renderOrder?: number;
