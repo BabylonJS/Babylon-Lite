@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import * as path from "path";
-import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(268);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene268-npe-animations");
@@ -9,9 +9,6 @@ const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 test.skip(!!sceneConfig.skipParity, "Scene 268 skipped via skipParity in scene-config.json");
 
 test("Scene 268 — NPE particle system (Animations 2 sprite sheet) matches Babylon.js reference", async ({ page }, testInfo) => {
-    const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 268 });
-
     await page.goto("/scene268.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);

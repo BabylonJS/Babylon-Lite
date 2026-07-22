@@ -1,4 +1,4 @@
-import { useSpriteSheet, type SpriteSheet, type SpriteSheetConfig } from "../sprite-columns.js";
+import { useSpriteSheet, type SpriteSheetConfig } from "../sprite-columns.js";
 import type { SoaBlockEvaluator } from "../npe-build.js";
 
 /**
@@ -19,30 +19,19 @@ export const setupSpriteSheetBlock: SoaBlockEvaluator = {
             loop: typeof s.loop === "boolean" ? s.loop : true,
             changeSpeed: typeof s.spriteCellChangeSpeed === "number" ? s.spriteCellChangeSpeed : 1,
         };
-        const attach = (sheet: SpriteSheet): void => {
-            system._spriteSheet = {
-                cellWidth: typeof s.width === "number" ? s.width : 0,
-                cellHeight: typeof s.height === "number" ? s.height : 0,
-                cellIndex: sheet.cellIndex,
-                update: sheet.update,
-            };
-            const previousColorDead = system.createColorDead;
-            system.createColorDead = previousColorDead
-                ? (i) => {
-                      previousColorDead(i);
-                      sheet.birth(i);
-                  }
-                : sheet.birth;
+        const sheet = useSpriteSheet(buffer, config);
+        system._spriteSheet = {
+            cellWidth: typeof s.width === "number" ? s.width : 0,
+            cellHeight: typeof s.height === "number" ? s.height : 0,
+            cellIndex: sheet.cellIndex,
+            update: sheet.update,
         };
-
-        if (s.randomStartCell === true) {
-            ctx.addBuildPromise(
-                import("../sprite-columns-random.js").then(({ useRandomSpriteSheet }) => {
-                    attach(useRandomSpriteSheet(buffer, config));
-                })
-            );
-        } else {
-            attach(useSpriteSheet(buffer, config));
-        }
+        const previousColorDead = system.createColorDead;
+        system.createColorDead = previousColorDead
+            ? (i) => {
+                  previousColorDead(i);
+                  sheet.birth(i);
+              }
+            : sheet.birth;
     },
 };
