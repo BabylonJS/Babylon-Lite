@@ -16,21 +16,7 @@ export const COL_COLOR_G = "color.g";
 export const COL_COLOR_B = "color.b";
 export const COL_COLOR_A = "color.a";
 
-export const COL_INITIAL_COLOR_R = "initialColor.r";
-export const COL_INITIAL_COLOR_G = "initialColor.g";
-export const COL_INITIAL_COLOR_B = "initialColor.b";
-export const COL_INITIAL_COLOR_A = "initialColor.a";
-
-export const COL_COLOR_DEAD_R = "colorDead.r";
-export const COL_COLOR_DEAD_G = "colorDead.g";
-export const COL_COLOR_DEAD_B = "colorDead.b";
-export const COL_COLOR_DEAD_A = "colorDead.a";
-
 export const COL_COLOR_STEP_R = "colorStep.r";
 export const COL_COLOR_STEP_G = "colorStep.g";
 export const COL_COLOR_STEP_B = "colorStep.b";
 export const COL_COLOR_STEP_A = "colorStep.a";
-
-export const COL_INITIAL_DIR_X = "initialDir.x";
-export const COL_INITIAL_DIR_Y = "initialDir.y";
-export const COL_INITIAL_DIR_Z = "initialDir.z";

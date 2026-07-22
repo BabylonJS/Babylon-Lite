@@ -51,9 +51,9 @@ describe("SoA particle buffer (spike)", () => {
 
     it("sprite feature lives in columns and advances cellIndex over life", () => {
         const buffer = createParticleBuffer(4);
-        const sheet = useSpriteSheet(buffer, { startCellID: 0, endCellID: 3, loop: true, randomStartCell: false, changeSpeed: 1 });
-        // Five sprite columns now exist on THIS buffer; a non-sprite buffer would have none.
-        expect(buffer._columns.size).toBe(5);
+        const sheet = useSpriteSheet(buffer, { startCellID: 0, endCellID: 3, loop: true, changeSpeed: 1 });
+        // Static sheet configuration stays in the closure; only the per-particle render cell is a column.
+        expect(buffer._columns.size).toBe(1);
 
         const i = spawnParticle(buffer);
         buffer.lifeTime[i] = 1;

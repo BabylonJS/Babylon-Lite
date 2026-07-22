@@ -4,16 +4,19 @@
 >
 > This is the standalone, one-shot architecture document for the node-particle
 > module. **The goal is parity with Babylon.js's Node Particle Editor (NPE)** —
-> the particle-system analogue of the Node Material Editor — *not* with the full
+> the particle-system analogue of the Node Material Editor — _not_ with the full
 > classic CPU `ParticleSystem` (which can express more than an NPE graph can).
 > Lite has no imperative particle API; a user authors an NPE graph directly (or
 > loads one from the snippet server), Lite parses it into an immutable graph,
-> "compiles" the graph once into a flat list of per-particle closures, and runs
-> those closures each frame with a small deterministic simulation loop. NPE builds
+> "compiles" the graph once into indexed getters and fixed creation/update slots,
+> and runs those slots each frame with a deterministic simulation loop. NPE builds
 > a real Babylon `ParticleSystem`, so that loop is a faithful port of the
-> `ThinParticleSystem.animate` runtime such a system runs; the *scope* of what
+> `ThinParticleSystem.animate` runtime such a system runs; the _scope_ of what
 > Lite supports is bounded by what an NPE graph can express, block by block. Live
 > particles are bound to a camera-facing billboard sprite system for rendering.
+> Canonical particle scenes use the data-oriented runtime under `particle/soa/`;
+> the object runtime remains as the compatibility implementation and an exact
+> behavioural oracle while the remaining NPE blocks are migrated.
 >
 > This document contains the full specification needed to implement the module
 > from scratch — the determinism contract, the CPU runtime, the node-graph build,
@@ -33,7 +36,7 @@ one code path (the graph) and lets every block tree-shake independently.
 **Scope.** The target is NPE parity, block for block. Babylon's classic
 `ParticleSystem` supports features NPE does not (or exposes only via imperative
 setters); those are out of scope unless and until an NPE block exposes them.
-Every "gap" below is therefore an *NPE-expressible* behaviour not yet ported —
+Every "gap" below is therefore an _NPE-expressible_ behaviour not yet ported —
 never a classic-only feature.
 
 The non-negotiable requirement is **deterministic parity with Babylon.js**:
@@ -50,22 +53,24 @@ per-particle `Math.random()` sequence and the arithmetic identical to Babylon's.
   `ThinParticleSystem.animate` → `_update`. Parity is verified by seeding
   `Math.random`, stepping N frames, and comparing to Babylon-extracted ground
   truth at `1e-6`. There is **no GPU particle path**.
-- **The graph is compiled to closures.** The build walk runs once and produces
-  a tree of getter closures (`NpeGetter`, the analogue of Babylon's
-  `_storedFunction`) plus flat creation/update closure lists. The per-frame hot
-  loop never walks the graph.
-- **Pay-for-use.** Block evaluators are lazily `import()`-ed per class via
-  `npe-registry.ts`, so a scene bundles only the block classes its graph
-  references. Zero module-level allocations (no module-level `Map`/`Set`) so the
-  module is fully tree-shakeable (GUIDANCE §4).
+- **The graph is compiled to indexed operations.** The build walk runs once and
+  produces getter closures plus fixed creation slots and an ordered update list.
+  The SoA hot loop passes particle indices into these operations and never walks
+  the graph or allocates per-particle objects.
+- **Pay-for-use.** Block evaluators are lazily `import()`-ed per class. SoA uses
+  base, optional, serialized-variant, emitter, and local-shape registries; feature
+  columns are allocated only by the block/source that reads or writes them. A
+  world-space point emitter therefore loads neither local shape code nor local
+  position memory, and a non-cylinder system does not compute an inverse emitter
+  matrix. Modules have no top-level allocations.
 - **Pure state + standalone functions.** `Particle` and `ParticleSystem` are
   plain interfaces; all behaviour is standalone functions operating on them. No
   classes, no methods, no per-feature nullable `_properties` bag (Babylon uses
-  one; Lite uses a fixed-shape struct — see the `_initialDirection` gap).
+  one; Lite uses fixed fields and lazily allocated SoA columns).
 - **Author NPE directly.** The emitter transform, capacity, blend mode, etc. are
   caller-supplied or graph-encoded; there is no imperative configuration surface.
 
-## Architecture — Five Layers
+## Architecture — Runtime Layers
 
 ```
 particle.ts                    Runtime  — the Particle struct + pooling
@@ -80,6 +85,12 @@ node/node-particle.ts          API      — parseNodeParticleSetFromSnippet (pub
 node/npe-snippet.ts            API      — snippet-server fetch
 particle-billboard.ts          Render   — bind live particles -> billboard instances
 particle-scene.ts              Render   — register/start/stop + per-frame animate hook
+soa/particle-buffer.ts         Runtime  — typed-array base columns + lazy feature columns
+soa/animate.ts                 Runtime  — fixed creation slots + indexed update loop
+soa/npe-build.ts               Build    — root-reachable graph walk -> SoA operations
+soa/registry*.ts               Build    — lazy base/feature/variant/emitter/local dispatch
+soa/blocks/*.ts                Blocks   — zero-allocation indexed evaluators
+soa/soa-billboard.ts           Render   — upload live SoA columns to billboard instances
 math/mat4-transform.ts         Math     — transformCoordinates/Normal + mat4GetTranslation (emitter matrix)
 math/random-range.ts           Math     — randomRange (Scalar.RandomRange, with short-circuit)
 ```
@@ -89,6 +100,10 @@ Data flow: **snippet/JSON → `parseNodeParticleSource` → `ParticleGraph` →
 (live) `registerNodeParticleSet` → per-frame `animateParticleSystem` +
 `syncParticleBillboard`.**
 
+The canonical SoA path is **JSON → `parseNodeParticleSource` → `ParticleGraph` →
+`buildSoaParticleSet` → `SoaParticleSet { systems: SoaSystem[] }` →
+`animateSoa` + `syncSoaParticleBillboard`**.
+
 ## The Determinism Contract (read this first)
 
 Every rule here exists to keep Lite's `Math.random()` sequence and arithmetic
@@ -96,18 +111,21 @@ identical to Babylon's. Break any one and parity collapses.
 
 1. **Seeded RNG for tests.** Ground-truth is extracted from Babylon with
    `Math.random` overridden by a deterministic generator, and the Lite test
-   installs the identical generator *after build, before stepping*:
-   ```js
-   let seed = 1;
-   Math.random = () => { const x = Math.sin(seed++) * 10000; return x - Math.floor(x); };
-   ```
+   installs the identical generator _after build, before stepping_:
+    ```js
+    let seed = 1;
+    Math.random = () => {
+        const x = Math.sin(seed++) * 10000;
+        return x - Math.floor(x);
+    };
+    ```
 2. **`randomRange(min, max)` short-circuits.** When `min === max` it returns
    `min` **without calling `Math.random()`** (Babylon `Scalar.RandomRange`).
    Emitter shape blocks call it per component; equal bounds (a common default)
    must not advance the RNG. Expression: `Math.random() * (max - min) + min`.
 3. **`ParticleRandomBlock` never short-circuits.** Its `drawRandom` always draws
    per component even when `min === max` — the draw still advances the RNG. This
-   is the deliberate *opposite* of `randomRange`; do not route it through
+   is the deliberate _opposite_ of `randomRange`; do not route it through
    `randomRange`.
 4. **Fixed creation-slot order — the single most important invariant.** On every
    spawn the eight named slots run in this exact order regardless of graph build
@@ -122,16 +140,19 @@ identical to Babylon's. Break any one and parity collapses.
 6. **Emission accounting.** Per step: `newParticles = (emitRate * scaledUpdateSpeed) >> 0`;
    the fractional remainder accumulates in `_newPartsExcess`, and when it exceeds
    `1.0` the whole part is added and subtracted back. `scaledUpdateSpeed =
-   updateSpeed * ratio` (ratio = 1 for parity, real-frame-delta for live).
+updateSpeed * ratio` (ratio = 1 for parity, real-frame-delta for live).
 7. **Final-step age clamp.** When a particle would overshoot its lifetime, its
    last step is shortened so it lands exactly at `lifeTime`: `stepSpeed =
-   (oldDiff * stepSpeed) / diff`. The shortened `stepSpeed` is what
+(oldDiff * stepSpeed) / diff`. The shortened `stepSpeed` is what
    `_directionScale` holds for that step.
-8. **Update before create.** `animate` runs `updateExistingParticles` *then*
+8. **Update before create.** `animate` runs `updateExistingParticles` _then_
    `createNewParticles`.
-9. **Tolerance & extraction.** Compare at `1e-6`. Ground truth is produced by a
+9. **Tolerance & extraction.** The object runtime compares at `1e-6`; SoA
+   position/direction/feature columns are `Float32Array`, so repeated integration
+   compares at `1e-4`, while age/lifetime remain float64 and exact at lifecycle
+   boundaries. Ground truth is produced by a
    throwaway harness in the Babylon repo: build/convert a classic system, run
-   `ConvertToNodeParticleSystemSetAsync` (use conversion, *not* `Parse` — `Parse`
+   `ConvertToNodeParticleSystemSetAsync` (use conversion, _not_ `Parse` — `Parse`
    drops some `Color4` input values), `await npe.buildAsync(scene)` (populates
    `attachedBlocks` so `serialize()` emits blocks), null the system's `_scene`
    (ratio 1, no frame-id skip), seed, step, dump `serialize()` + states. Delete
@@ -140,6 +161,7 @@ identical to Babylon's. Break any one and parity collapses.
 ## The CPU Runtime
 
 ### `particle.ts`
+
 `Particle` is a pure-state struct mirroring Babylon's `Particle` field-for-field
 (so the graph evaluator reproduces identical motion). Public fields: `id`,
 `position`, `direction`, `color`, `colorDead`, `initialColor`, `colorStep`,
@@ -155,6 +177,7 @@ identical to Babylon's. Break any one and parity collapses.
   creation queue overwrites everything else on every spawn.
 
 ### `particle-system.ts`
+
 `ParticleSystem` is pure state: public config (`name`, `capacity`, `emitRate`,
 `updateSpeed` [default `1/60`], `targetStopDuration`, `blendMode`,
 `billboardMode`, `isBillboardBased`, `isLocal`, `emitter`, `texture`) plus
@@ -174,9 +197,46 @@ internal state (`_particles`, `_stock` [recycle pool], `_started`, `_stopped`,
 - `runCreationSlots` — the eight slots in fixed order (§4), skipping nulls.
 - `recycleParticle` — swap-with-last + `pop()` + push to `_stock` (O(1)).
 
+## The Data-Oriented Runtime (`particle/soa`)
+
+`ParticleBuffer` stores position and direction in six `Float32Array`s, age and
+lifetime in `Float64Array`s, and IDs in `Uint32Array`. Live particles occupy the
+dense range `[0, alive)`. `killParticle` swap-removes across `_all`, which contains
+the base arrays and every lazily-created feature column, so optional state recycles
+without feature-specific hooks. `column(buffer, name, ctor)` is the only feature
+allocation surface.
+
+`SoaSystem` owns the eight Babylon-ordered creation slots and an ordered
+`updateSteps` array. `animateSoa` performs update-before-create, final-step lifetime
+clamping, fractional emission accounting, and swap removal without per-frame
+allocation. Scratch-backed vector/color getters must copy an operand's components
+before evaluating another getter because two ports may share the same scratch.
+
+`buildSoaParticleSet` creates the system and buffer before traversing each root,
+then builds only blocks reachable from a `SystemBlock`. Common blocks use
+`registry.ts`; optional features use `registry-extra.ts`; rare serialized forms use
+`registry-variants.ts`; world emitter families use `registry-extra-emitters.ts`;
+local shape bodies use `registry-local-shapes.ts`. Local and world implementations
+are separate modules, so world systems contain no local-mode branches.
+
+`LocalPositionUpdated` (`0x18`) owns five lazy columns: local x/y/z, particle ID,
+and validity. Every local shape invokes the source's optional seed hook after it
+writes birth position, at the same point Babylon calls `_CreateLocalPositionData`.
+The local-only `finishLocalPosition` helper then mirrors Babylon's generic
+`_CreateIsLocalData` queue item by transforming the age-zero render position into
+world space before direction creation. Each subsequent source read advances local
+position by `direction * scaledStep`, transforms through the emitter world matrix,
+and writes/returns world position; creation-time reads after position use step zero.
+A read from inside position creation is invalid in Babylon because local position
+does not exist yet, so Lite throws before it can consume recycled slot data. ID
+validation makes the source independent of graph build order and safe under
+swap-remove/recycled slots. Systems without source `0x18` allocate none of these
+columns; world systems load neither source nor local-position helper.
+
 ## The Node-Graph Layer
 
 ### Getter model (`npe-types.ts`)
+
 `NpeGetter = (state: NpeBuildState) => ParticleValue` is the compiled form of a
 connection — Babylon's `_storedFunction`. `ParticleValue = number | Vec3 | Color4
 | Vec2 | ParticleSystem | Texture2D | null | undefined` (the system
@@ -188,6 +248,7 @@ live state. The parsed graph types are fully **immutable** (`readonly`,
 `ReadonlyMap`, `Readonly<Record>`), matching NME's `node-types.ts`.
 
 ### Parser (`npe-parser.ts`)
+
 `parseNodeParticleSource(source)` reads the Babylon serialize format
 (`{ blocks: [...] }`, each block `{ customType, id, name, inputs[] }`), strips
 the `BABYLON.` prefix from `customType`, normalizes inputs, keeps the whole raw
@@ -196,7 +257,9 @@ missing `blocks` array, a non-numeric id, or zero `SystemBlock`s. Tolerant of
 dangling `targetBlockId`s (they surface later as an unresolved connection).
 
 ### Build walk (`npe-build.ts`)
+
 `buildNodeParticleSet(engine, scene, graph, options)`:
+
 1. Preload the evaluator for each distinct `className` (parallel `import()`).
 2. Per `SystemBlock` root: fresh `NpeBuildState`, an `outputs` map
    (`"blockId:connectionName" -> getter`), and a `built` memo set. Build via a
@@ -206,13 +269,14 @@ dangling `targetBlockId`s (they surface later as an unresolved connection).
    update-queue order.
 3. `ctx.input(block, name, fallback)` resolves a port: connected getter →
    inline literal (`parseInputLiteral`) → `fallback` → `() => null`. A port that
-   is *connected but unresolvable* **throws** (`unresolved connection …`).
+   is _connected but unresolvable_ **throws** (`unresolved connection …`).
 4. Settle asset promises, then run each system's deferred `_resolveTexture`.
 
 Options: `emitter?: Vec3`, `emitterWorldMatrix?: Mat4` (precedence over
 `emitter`), `textureBaseUrl?`.
 
 ### Contextual & system sources (`npe-build-state.ts`)
+
 `getContextualValue(state, id)` and `getSystemValue(state, id)` are the runtime
 read layer (leaves of the getter tree). `SCALED_DIRECTION` and
 `SCALED_COLOR_STEP` compute into particle/system scratch and return by reference
@@ -220,13 +284,14 @@ read layer (leaves of the getter tree). `SCALED_DIRECTION` and
 `NodeParticleContextualSources`): Position `0x1`, Direction `0x2`, Age `0x3`,
 Lifetime `0x4`, Color `0x5`, ScaledDirection `0x6`, Scale `0x7`, AgeGradient
 `0x8`, Angle `0x9`, InitialColor `0x13`, ColorDead `0x14`, InitialDirection
-`0x15`, ColorStep `0x16`, ScaledColorStep `0x17`, Size `0x19`, DirectionScale
-`0x20`. System sources: Time `1`, Delta `2`, Emitter `3`. `ParticleInputBlock`
+`0x15`, ColorStep `0x16`, ScaledColorStep `0x17`, LocalPositionUpdated `0x18`,
+Size `0x19`, DirectionScale `0x20`. System sources: Time `1`, Delta `2`, Emitter `3`. `ParticleInputBlock`
 **validates the id at build time** (`isContextualSourceSupported` /
 `isSystemSourceSupported`, allocation-free switches) and throws for anything
 else, rather than silently returning `null` per frame.
 
 ### Registry (`npe-registry.ts`)
+
 `loadParticleBlockEvaluator(className)` — a flat `switch` where each arm is
 `return (await import("./blocks/x.js")).xBlock;`. `default:` throws
 `unsupported block class`. 18 blocks registered. (See the base+extra split gap.)
@@ -246,27 +311,28 @@ else, rather than silently returning `null` per frame.
   `direction *= emitPower`; the inherited-velocity add is omitted — no
   sub-emitters), `_createSize` (size + scale, scalar-or-Vector2), `_createAngle`,
   `_createColor`, `_createColorDead` (derives `colorStep = (colorDead −
-  initialColor) / lifeTime`). Registers `particle` → system.
+initialColor) / lifeTime`). Registers `particle` → system.
 - **Shape blocks** — fill `_createPosition` + `_createDirection`; register
   `output` → system. Each uses `randomRange` per component. Emitter transform is
   baked in via the world matrix (below):
-  - `BoxShapeBlock` — uniform point in `[minEmitBox, maxEmitBox]`; explicit
-    direction between `direction1`/`direction2`.
-  - `SphereShapeBlock` — spherical-coord point (`isHemispheric` flips y); radial
-    direction (jittered by `directionRandomizer`) unless both directions are
-    connected.
-  - `PointShapeBlock` — position = emitter (no draw); explicit direction.
-  - `ConeShapeBlock` — cone point from height/radius/azimuth
-    (`emitFromSpawnPointOnly`); radial direction, else explicit.
-  - `CylinderShapeBlock` — disc point (`sqrt` radius) at random height; direction
-    is the surface normal via **inverse-then-forward** world-matrix transform (the
-    azimuth is measured in the emitter's local frame). Azimuth jitter draws
-    `randomRange(-π/2, π/2)` even when the randomizer is 0.
-  - `MeshShapeBlock` — random triangle + barycentric point from
-    `serialized.cachedVertexData` (positions/indices/normals/colors); direction =
-    interpolated face normal (`useMeshNormalsForDirection`, default) else explicit.
-    Three raw `Math.random()` draws (face, then two barycentric). Empty geometry
-    emits nothing. The mesh's own `worldSpace` transform is not applied.
+    - `BoxShapeBlock` — uniform point in `[minEmitBox, maxEmitBox]`; explicit
+      direction between `direction1`/`direction2`.
+    - `SphereShapeBlock` — spherical-coord point (`isHemispheric` flips y); radial
+      direction (jittered by `directionRandomizer`) unless both directions are
+      connected.
+    - `PointShapeBlock` — position = emitter (no draw); explicit direction.
+    - `ConeShapeBlock` — cone point from height/radius/azimuth
+      (`emitFromSpawnPointOnly`); radial direction, else explicit.
+    - `CylinderShapeBlock` — disc point (`sqrt` radius) at random height; direction
+      is the surface normal via **inverse-then-forward** world-matrix transform (the
+      azimuth is measured in the emitter's local frame). Azimuth jitter draws
+      `randomRange(-π/2, π/2)` even when the randomizer is 0.
+    - `MeshShapeBlock` — random triangle + barycentric point from
+      `serialized.cachedVertexData` (positions/indices/normals/colors); direction =
+      interpolated face normal (`useMeshNormalsForDirection`, default) else explicit.
+      `useMeshColorForColor` makes interpolated vertex color own the birth color.
+      Three raw `Math.random()` draws (face, then two barycentric). Empty geometry
+      emits nothing. The mesh's own `worldSpace` transform is not applied.
 - **`ParticleInputBlock`** — a constant (`parseConstant`: INT/FLOAT/Vector2/
   Vector3/Color4), a contextual source, or a system source. Validates source ids.
 - **`ParticleRandomBlock`** — `drawRandom` (never short-circuits) with a lock
@@ -291,23 +357,28 @@ The emitter is a full `Mat4` world matrix (translation + rotation + scale),
 matching Babylon's `emitterWorldMatrix` (a mesh emitter's world matrix, or
 `Matrix.Translation` for a `Vector3`). `options.emitter` (`Vec3`) is the
 translation shorthand; `options.emitterWorldMatrix` (`Mat4`) is the full form.
-`NpeBuildState` carries `emitterWorldMatrix`, its inverse
-(`emitterInverseWorldMatrix`, for the cylinder), and `emitter` (the translation,
-returned by the `Emitter` source — Babylon `emitterPosition`).
+The object `NpeBuildState` carries `emitterWorldMatrix`, its inverse, and
+`emitter` (the translation returned by the `Emitter` source). SoA carries only
+the world matrix and translation in common build state; radial cylinder modules
+compute the inverse lazily, and directed cylinders never compute it.
 
-Shape blocks (non-local): position via `transformCoordinatesToRef(x,y,z, m, out)`
+World shape blocks: position via `transformCoordinatesToRef(x,y,z, m, out)`
 (point × matrix, with perspective divide), direction via
 `transformNormalToRef(x,y,z, m, out)` (upper 3×3). `isLocal` uses the raw values.
 `_initialDirection` takes the post-transform direction (Babylon
 `direction.clone()`). `Mat4` is column-major, translation at indices 12–14
 (matches Babylon), so the transform formulas port directly. A pure translation
 matrix makes `transformCoordinates` = `+translation` and `transformNormal` =
-identity, so translation-only emitters are numerically identical to the
-component-add form (the base determinism tests prove this).
+identity. Local shape modules seed optional local columns from raw emitter-space
+position, then transform the render position before direction creation; source
+`0x18` owns later per-step world transforms. Translation-only emitters are
+numerically identical to the component-add form (the base determinism tests prove
+this).
 
 ## Rendering
 
 ### `particle-billboard.ts`
+
 `createParticleBillboard(system)` builds a facing billboard system from the
 system texture (single-frame atlas), sized to `capacity`, with a blend
 descriptor from `blendForMode`. `syncParticleBillboard` clears and re-uploads
@@ -316,15 +387,16 @@ size·scale.y]`, `color`, `rotation = angle`, `frame: 0`.
 
 Blend mapping (`blendForMode`):
 
-| Babylon blend mode        | value | Billboard blend      |
-| ------------------------- | ----- | -------------------- |
-| `BLENDMODE_ONEONE`        | 0     | additive             |
-| `BLENDMODE_STANDARD`      | 1     | alpha                |
-| `BLENDMODE_ADD`           | 2     | additive             |
-| `BLENDMODE_MULTIPLY`      | 3     | additive **(gap)**   |
-| `BLENDMODE_MULTIPLYADD`   | 4     | additive **(gap)**   |
+| Babylon blend mode      | value | Billboard blend    |
+| ----------------------- | ----- | ------------------ |
+| `BLENDMODE_ONEONE`      | 0     | additive           |
+| `BLENDMODE_STANDARD`    | 1     | alpha              |
+| `BLENDMODE_ADD`         | 2     | additive           |
+| `BLENDMODE_MULTIPLY`    | 3     | additive **(gap)** |
+| `BLENDMODE_MULTIPLYADD` | 4     | additive **(gap)** |
 
 ### `particle-scene.ts`
+
 `registerNodeParticleSet(scene, set, { autoStart })` — the live path. Per system:
 create a billboard, add to scene, optionally start, and hook `onBeforeRender` to
 `animateParticleSystem(system, ratio)` + `syncParticleBillboard`, where `ratio =
@@ -332,6 +404,7 @@ deltaMs > 0 ? deltaMs / (1000/60) : 1` (frame-rate-independent, non-deterministi
 Deterministic parity scenes bypass this and step manually at `ratio = 1`.
 
 ### Public API (`node-particle.ts`, `npe-snippet.ts`)
+
 `parseNodeParticleSetFromSnippet(engine, scene, snippetId, { json?, snippetServer?,
 emitter?, emitterWorldMatrix?, textureBaseUrl? })` — parse (from JSON or the
 snippet server) and build. `fetchNodeParticleSnippet` unwraps
@@ -339,22 +412,22 @@ snippet server) and build. `fetchNodeParticleSnippet` unwraps
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js | Babylon Lite |
-|---|---|
-| `NodeParticleSystemSet` | `NodeParticleSet` (plain state) |
-| `NodeParticleSystemSet.buildAsync(scene)` | `buildNodeParticleSet(engine, scene, graph, …)` |
-| `NodeParticleBuildState` | `NpeBuildState` |
-| `_storedFunction` on a connection point | `NpeGetter` |
-| `NodeParticleBlock._build` | `ParticleBlockEvaluator.build` |
-| `ThinParticleSystem` / `ParticleSystem` | `ParticleSystem` (`particle-system.ts`) |
-| `ThinParticleSystem.animate` → `_update` | `animateParticleSystem` |
-| `_createQueueStart` linked list | fixed named `_createX` slots |
-| `_updateQueueStart` linked list | `_updateQueue` array |
-| `Particle` | `Particle` (`particle.ts`) |
-| `Scalar.RandomRange` | `randomRange` (`math/random-range.ts`) |
-| `Vector3.TransformCoordinates/NormalFromFloatsToRef` | `transformCoordinates/NormalToRef` |
-| `emitterWorldMatrix` / `emitterPosition` | `state.emitterWorldMatrix` / `state.emitter` |
-| billboard vertex emit | `FacingBillboardSpriteSystem` instance write |
+| Babylon.js                                           | Babylon Lite                                    |
+| ---------------------------------------------------- | ----------------------------------------------- |
+| `NodeParticleSystemSet`                              | `NodeParticleSet` (plain state)                 |
+| `NodeParticleSystemSet.buildAsync(scene)`            | `buildNodeParticleSet(engine, scene, graph, …)` |
+| `NodeParticleBuildState`                             | `NpeBuildState`                                 |
+| `_storedFunction` on a connection point              | `NpeGetter`                                     |
+| `NodeParticleBlock._build`                           | `ParticleBlockEvaluator.build`                  |
+| `ThinParticleSystem` / `ParticleSystem`              | `ParticleSystem` (`particle-system.ts`)         |
+| `ThinParticleSystem.animate` → `_update`             | `animateParticleSystem`                         |
+| `_createQueueStart` linked list                      | fixed named `_createX` slots                    |
+| `_updateQueueStart` linked list                      | `_updateQueue` array                            |
+| `Particle`                                           | `Particle` (`particle.ts`)                      |
+| `Scalar.RandomRange`                                 | `randomRange` (`math/random-range.ts`)          |
+| `Vector3.TransformCoordinates/NormalFromFloatsToRef` | `transformCoordinates/NormalToRef`              |
+| `emitterWorldMatrix` / `emitterPosition`             | `state.emitterWorldMatrix` / `state.emitter`    |
+| billboard vertex emit                                | `FacingBillboardSpriteSystem` instance write    |
 
 ## Gaps / Not Yet Supported (future work)
 
@@ -370,45 +443,24 @@ classic-`ParticleSystem`-only feature.
   CPU determinism tests).
 - **MULTIPLYADD blend (mode 4)** — "multiply then add" is not a single standard
   blend equation; needs a specific setup. Larger than MULTIPLY.
-- **Dynamic `emitRate`** — Lite reads `emitRate` once at build and freezes
-  `system.emitRate`; Babylon re-evaluates it every frame via `_calculateEmitRate`.
-  A graph animating emitRate would diverge. (`emitRate` *is* read correctly for
-  the constant case.)
-- **Sprite-sheet animation (Animations category)** — needs the `SpriteCellIndex`
-  contextual source `0x10`, `SetupSpriteSheetBlock`, `BasicSpriteUpdateBlock` /
-  `UpdateSpriteCellIndexBlock`, plus a multi-frame atlas + non-zero `frame` in the
-  billboard sync. `Particle.cellIndex` already exists.
-- **Gradients (Change category)** — `ParticleGradientBlock`,
-  `ParticleGradientValueBlock`, size/colour/velocity/angular/limit-velocity/drag
-  gradient update blocks. In Babylon these splice extra creation/update steps; in
-  Lite they land in the `_updateQueue` array or as value blocks. Adds ~0–2 new
-  creation slots at most (`isLocal`, sprite-cell) — the fixed-slot design scales
-  to the full NPE set (~8, not the classic API's ~16).
+- **Dynamic `emitRate` in SoA** — connected emit-rate graphs are rejected at
+  build time rather than silently frozen. The object runtime re-evaluates them;
+  the SoA replacement still needs the per-step system getter.
 - **Sub-emitters / triggers** — `_inheritedVelocityOffset` (the emit-power add
   Lite omits), `ParticleTriggerBlock`, teleport blocks.
 - **Noise / flow-map / attractor updates** — `UpdateNoiseBlock`,
   `UpdateFlowMapBlock`, `UpdateAttractorBlock` (each needs texture/data plumbing).
-- **`isLocal` rendering** — the `LocalPositionUpdated` source `0x18` and Babylon's
-  `_CreateLocalPositionData` are not ported; `isLocal` particles are handled only
-  at the shape-block branch level, untested.
 - **Mesh `worldSpace`** — the mesh emitter's own world matrix (distinct from the
   emitter world matrix) is not applied; geometry is sampled in mesh-local space.
-- **`_initialDirection` for non-zero emit power** — Babylon sets
-  `initialDirection = null` in the non-zero branch; Lite leaves it as the
-  (post-transform) emission direction because the struct field is non-nullable.
-  Only observable if a graph reads `InitialDirection` with non-zero emit power
-  (unexercised). Cheap deterministic patch: zero it in the else branch.
 - **`CustomShapeBlock`** — unsupportable: its generators are JS functions that
   never serialize.
 - **`CameraPosition` system source (4)** — not handled (returns null path).
 - **GPU particles** — no GPU simulation path exists or is planned here.
-- **Registry base+extra split** — the flat `npe-registry.ts` switch is fine at 18
-  blocks; when the block count approaches the full NPE set, adopt NME's
-  base + lazily-imported `-extra-*` sub-registry split (measure the always-fetched
-  registry chunk first).
+- **Object-runtime registry split** — the compatibility object's
+  `npe-registry.ts` remains flat; SoA already uses measured lazy family registries.
 - **Serialized-read helpers** — the repeated `typeof x === "number" ? x : default`
   guards match NME's convention; a shared `readNumber`/`readBoolean` helper would
-  be an ergonomic win but should be introduced across NME *and* particles together
+  be an ergonomic win but should be introduced across NME _and_ particles together
   (decide by measuring bundle size — size beats style-consistency in Lite).
 
 ## Test Specification
@@ -427,12 +479,18 @@ classic-`ParticleSystem`-only feature.
 - **Ground-truth extraction** — a throwaway harness in the Babylon repo (deleted
   after use); see contract §9. Convert (not `Parse`), `buildAsync`, rotated
   emitter mesh, null `_scene`, seed, step, dump graph + states.
+- **SoA emitter/local parity (vitest)** — `particle-soa-emitters-parity.test.ts`
+  covers all committed emitter oracles, volatile shared direction getters,
+  source-24 build order, mesh color/InitialDirection, and transformed local box,
+  point, sphere, cone, cylinder, and mesh behavior against the object oracle.
 - **Pixel parity (Playwright)** — per-scene `.spec.ts` load a lab scene, wait for
   `animationFrozen`, screenshot, compare to the committed golden via MAD ≤
   `scene-config.json` `maxMad`. Goldens are captured once from the Babylon oracle
   with seeded RNG + fixed frame stepping and are immutable.
 - **Bundle size** — per-scene manifest + ceiling in the bundle-size spec. `*-npe.ts`
   graph payload modules are excluded from bundle accounting (like `*-nme.ts`).
+  `particle-soa-bundle-content.test.ts` rejects unused local/emitter chunks and
+  rejects local-shape or matrix-inversion modules folded into fetched chunks.
 
 ## File Manifest
 
@@ -459,6 +517,23 @@ packages/babylon-lite/src/particle/
       particle-lerp-block.ts  particle-converter-block.ts  texture-source-block.ts
       update-position-block.ts  update-color-block.ts
       update-angle-block.ts  update-direction-block.ts
+  soa/
+    particle-buffer.ts             // dense base columns + lazy feature columns
+    animate.ts                     // SoaSystem + fixed-slot indexed simulation
+    npe-build.ts                   // root-reachable graph -> indexed operations
+    contextual.ts                  // common contextual sources
+    contextual-extra.ts            // lazy optional contextual sources
+    registry.ts                    // common block dispatch
+    registry-extra*.ts             // optional/basic/world-emitter dispatch
+    registry-variants.ts           // rare serialized variants
+    registry-local-shapes.ts       // local-only shape dispatch
+    local-position.ts              // local birth transform after optional source-24 seed
+    soa-billboard.ts               // SoA columns -> billboard instances
+    blocks/
+      box/point/sphere/cone/cylinder/mesh-shape-block.ts
+      box/point/sphere/cone/cylinder/mesh-shape-local-block.ts
+      particle-input-local-block.ts
+      create/update/value/gradient/sprite blocks
 
 packages/babylon-lite/src/math/
   random-range.ts                  // randomRange (Scalar.RandomRange)

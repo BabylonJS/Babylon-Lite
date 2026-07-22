@@ -12,21 +12,19 @@ describe("SoA sim loop (spike)", () => {
         system.emitRate = 100;
         system.updateSpeed = 0.1; // scaledUpdateSpeed = 0.1 per animateSoa(system, 1)
         const b = system.buffer;
-        system.createSteps = [
-            (i) => {
-                b.lifeTime[i] = 0.5;
-            },
-            (i) => {
-                b.posX[i] = 0;
-                b.posY[i] = 0;
-                b.posZ[i] = 0;
-            },
-            (i) => {
-                b.dirX[i] = 1;
-                b.dirY[i] = 0;
-                b.dirZ[i] = 0;
-            },
-        ];
+        system.createLifeTime = (i) => {
+            b.lifeTime[i] = 0.5;
+        };
+        system.createPosition = (i) => {
+            b.posX[i] = 0;
+            b.posY[i] = 0;
+            b.posZ[i] = 0;
+        };
+        system.createDirection = (i) => {
+            b.dirX[i] = 1;
+            b.dirY[i] = 0;
+            b.dirZ[i] = 0;
+        };
         system.updateSteps = [
             (i) => {
                 b.posX[i]! += b.dirX[i]! * system._scaledStep;
@@ -59,11 +57,9 @@ describe("SoA sim loop (spike)", () => {
         system.emitRate = 10;
         system.updateSpeed = 0.3; // 0.3 does not divide 1.0 evenly -> exercises the clamp
         const b = system.buffer;
-        system.createSteps = [
-            (i) => {
-                b.lifeTime[i] = 1;
-            },
-        ];
+        system.createLifeTime = (i) => {
+            b.lifeTime[i] = 1;
+        };
 
         startSoaSystem(system);
         for (let k = 0; k < 12; k++) {

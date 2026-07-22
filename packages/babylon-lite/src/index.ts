@@ -648,6 +648,14 @@ export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
 export { registerNodeParticleSet } from "./particle/particle-scene.js";
 export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
 
+// ─── Data-oriented (SoA) particle system — SPIKE ─────────────────────
+export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
+export type { SoaParticleSet, BuildSoaOptions } from "./particle/soa/npe-build.js";
+export { buildSoaParticleSet } from "./particle/soa/npe-build.js";
+export type { SoaSystem } from "./particle/soa/animate.js";
+export { startSoaSystem, stopSoaSystem, animateSoa } from "./particle/soa/animate.js";
+export { createSoaParticleBillboard, syncSoaParticleBillboard } from "./particle/soa/soa-billboard.js";
+
 // ─── Text ────────────────────────────────────────────────────────────
 export type { Font } from "./text/font.js";
 export { loadFont, createFontFromBuffer } from "./text/font.js";

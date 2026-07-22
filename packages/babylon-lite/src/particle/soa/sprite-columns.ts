@@ -14,7 +14,6 @@ export interface SpriteSheetConfig {
     startCellID: number;
     endCellID: number;
     loop: boolean;
-    randomStartCell: boolean;
     changeSpeed: number;
 }
 
@@ -37,44 +36,22 @@ function clamp01(value: number): number {
  * birth/update steps closing over them. Columns are keyed `sprite.*`, shared if attached more than once.
  */
 export function useSpriteSheet(buffer: ParticleBuffer, config: SpriteSheetConfig): SpriteSheet {
-    const initialStart = column(buffer, "sprite.initialStart", Uint16Array);
-    const initialEnd = column(buffer, "sprite.initialEnd", Uint16Array);
-    const initialLoop = column(buffer, "sprite.initialLoop", Uint8Array);
-    const randomOffset = column(buffer, "sprite.randomOffset", Float32Array);
     const cellIndex = column(buffer, "sprite.cellIndex", Uint16Array);
     const age = buffer.age;
     const lifeTime = buffer.lifeTime;
+    const start = config.startCellID;
+    const distance = config.endCellID - start + 1;
 
     return {
         cellIndex,
         birth(i: number): void {
-            initialStart[i] = config.startCellID;
-            initialEnd[i] = config.endCellID;
-            initialLoop[i] = config.loop ? 1 : 0;
-            randomOffset[i] = -1;
-            cellIndex[i] = config.startCellID;
+            cellIndex[i] = start;
         },
         update(i: number): void {
             const life = lifeTime[i]!;
-            let offsetAge = age[i]!;
-            let changeSpeed = config.changeSpeed;
-            if (config.randomStartCell) {
-                if (randomOffset[i]! < 0) {
-                    randomOffset[i] = Math.random() * life;
-                }
-                if (changeSpeed === 0) {
-                    // Speed 0 means "stay on the (random) start cell": use the offset as a fixed phase.
-                    changeSpeed = 1;
-                    offsetAge = randomOffset[i]!;
-                } else {
-                    offsetAge += randomOffset[i]!;
-                }
-            }
-            const start = initialStart[i]!;
-            const dist = initialEnd[i]! - start + 1;
-            const t = offsetAge * changeSpeed;
-            const ratio = initialLoop[i]! ? clamp01((t % life) / life) : clamp01(t / life);
-            cellIndex[i] = (start + ratio * dist) | 0;
+            const progress = age[i]! * config.changeSpeed;
+            const ratio = config.loop ? clamp01((progress % life) / life) : clamp01(progress / life);
+            cellIndex[i] = (start + ratio * distance) | 0;
         },
     };
 }

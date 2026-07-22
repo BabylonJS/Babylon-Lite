@@ -14,7 +14,7 @@
  */
 
 /** A particle column: one typed-array slot per particle index. */
-export type ParticleColumn = Float32Array | Uint32Array | Uint16Array | Uint8Array | Int32Array;
+export type ParticleColumn = Float64Array | Float32Array | Uint32Array | Uint16Array | Uint8Array | Int32Array;
 
 /** Pure-state Struct-of-Arrays particle store. Behaviour is provided by the standalone functions below. */
 export interface ParticleBuffer {
@@ -31,10 +31,14 @@ export interface ParticleBuffer {
     readonly dirX: Float32Array;
     readonly dirY: Float32Array;
     readonly dirZ: Float32Array;
-    /** Seconds since birth. */
-    readonly age: Float32Array;
-    /** Total lifespan in seconds. */
-    readonly lifeTime: Float32Array;
+    /**
+     * Seconds since birth. Float64: age accumulates every step and drives the integer sprite cell index and
+     * the exact death step, so it is kept at oracle precision (float32 accumulation drifts a cell at
+     * boundaries).
+     */
+    readonly age: Float64Array;
+    /** Total lifespan in seconds. Float64 to match `age` for exact lifecycle/cell-index parity. */
+    readonly lifeTime: Float64Array;
     /** Unique id assigned at spawn (stable ordering / keys). */
     readonly id: Uint32Array;
 
@@ -54,8 +58,8 @@ export function createParticleBuffer(capacity: number): ParticleBuffer {
     const dirX = new Float32Array(capacity);
     const dirY = new Float32Array(capacity);
     const dirZ = new Float32Array(capacity);
-    const age = new Float32Array(capacity);
-    const lifeTime = new Float32Array(capacity);
+    const age = new Float64Array(capacity);
+    const lifeTime = new Float64Array(capacity);
     const id = new Uint32Array(capacity);
     return {
         capacity,

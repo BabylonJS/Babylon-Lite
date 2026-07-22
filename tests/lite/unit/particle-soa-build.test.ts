@@ -1,0 +1,32 @@
+import { describe, expect, it } from "vitest";
+import { SCENE262_NPE_JSON } from "../../../lab/lite/src/shared/scene262-npe";
+import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
+import { buildSoaParticleSet } from "../../../packages/babylon-lite/src/particle/soa/npe-build";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+
+describe("SoA NPE build reachability", () => {
+    it("ignores detached unsupported and OncePerParticle blocks", async () => {
+        const source = JSON.parse(JSON.stringify(SCENE262_NPE_JSON)) as { blocks: Array<Record<string, unknown>> };
+        source.blocks.push(
+            { customType: "BABYLON.UnsupportedDetachedBlock", id: 10001, name: "detached unsupported", inputs: [], outputs: [] },
+            { customType: "BABYLON.ParticleRandomBlock", id: 10002, name: "detached once", lockMode: 3, inputs: [], outputs: [{ name: "output" }] }
+        );
+
+        const graph = parseNodeParticleSource(source);
+        const set = await buildSoaParticleSet({} as EngineContext, {} as SceneContext, graph, { emitter: { x: 0, y: 0, z: 0 } });
+        expect(set.systems).toHaveLength(1);
+        expect(set.systems[0]!.buffer._columns.has("random.10002.value")).toBe(false);
+    });
+
+    it("rejects connected dynamic emit rates instead of freezing their initial value", async () => {
+        const source = JSON.parse(JSON.stringify(SCENE262_NPE_JSON)) as { blocks: Array<Record<string, unknown>> };
+        const system = source.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;
+        const input = source.blocks.find((block) => block.customType === "BABYLON.ParticleInputBlock")!;
+        const emitRate = (system.inputs as Array<Record<string, unknown>>).find((entry) => entry.name === "emitRate")!;
+        emitRate.targetBlockId = input.id;
+        emitRate.targetConnectionName = "output";
+        const graph = parseNodeParticleSource(source);
+        await expect(buildSoaParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow("dynamic emitRate");
+    });
+});
