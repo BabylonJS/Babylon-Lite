@@ -28,15 +28,19 @@ describe("SoA NPE particle simulation (full Basic Properties) — deterministic 
         const graph = parseNodeParticleSource(graphJson);
         const set = await buildSoaParticleSet({} as EngineContext, {} as SceneContext, graph, { emitter: { x: 0, y: 0, z: 0 } });
         const system = set.systems[0]!;
+        const previousRandom = Math.random;
         let seed = 1;
         Math.random = () => {
             const x = Math.sin(seed++) * 10000;
             return x - Math.floor(x);
         };
-
-        startSoaSystem(system);
-        for (let step = 0; step < truth.N; step++) {
-            animateSoa(system, 1);
+        try {
+            startSoaSystem(system);
+            for (let step = 0; step < truth.N; step++) {
+                animateSoa(system, 1);
+            }
+        } finally {
+            Math.random = previousRandom;
         }
 
         const buffer = system.buffer;

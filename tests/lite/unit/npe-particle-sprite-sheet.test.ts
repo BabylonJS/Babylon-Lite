@@ -68,15 +68,19 @@ describe("NPE sprite-sheet animation — deterministic parity with Babylon.js", 
             expect(system).toBeTruthy();
             expect(system._spriteSheet, "sprite sheet configured by SetupSpriteSheetBlock").not.toBeNull();
 
+            const previousRandom = Math.random;
             let seed = 1;
             Math.random = () => {
                 const x = Math.sin(seed++) * 10000;
                 return x - Math.floor(x);
             };
-
-            startParticleSystem(system);
-            for (let i = 0; i < testCase.truth.N; i++) {
-                animateParticleSystem(system, 1);
+            try {
+                startParticleSystem(system);
+                for (let i = 0; i < testCase.truth.N; i++) {
+                    animateParticleSystem(system, 1);
+                }
+            } finally {
+                Math.random = previousRandom;
             }
 
             const lite = system._particles.slice().sort((a, b) => a.id - b.id);

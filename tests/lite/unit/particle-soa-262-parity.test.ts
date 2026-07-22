@@ -38,15 +38,19 @@ describe("SoA NPE particle simulation (Size) — deterministic parity with Babyl
         const system = set.systems[0]!;
         expect(system).toBeTruthy();
 
+        const previousRandom = Math.random;
         let seed = 1;
         Math.random = () => {
             const x = Math.sin(seed++) * 10000;
             return x - Math.floor(x);
         };
-
-        startSoaSystem(system);
-        for (let i = 0; i < truth.N; i++) {
-            animateSoa(system, 1);
+        try {
+            startSoaSystem(system);
+            for (let i = 0; i < truth.N; i++) {
+                animateSoa(system, 1);
+            }
+        } finally {
+            Math.random = previousRandom;
         }
 
         const buffer = system.buffer;

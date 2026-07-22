@@ -30,14 +30,19 @@ describe("SoA NPE particle simulation (Change - Size) — deterministic parity w
         const system = set.systems[0]!;
         expect(system).toBeTruthy();
 
+        const previousRandom = Math.random;
         let seed = 1;
         Math.random = () => {
             const x = Math.sin(seed++) * 10000;
             return x - Math.floor(x);
         };
-        startSoaSystem(system);
-        for (let i = 0; i < truth.N; i++) {
-            animateSoa(system, 1);
+        try {
+            startSoaSystem(system);
+            for (let i = 0; i < truth.N; i++) {
+                animateSoa(system, 1);
+            }
+        } finally {
+            Math.random = previousRandom;
         }
 
         const buffer = system.buffer;
@@ -80,34 +85,38 @@ describe("SoA NPE particle simulation (Change - Size) — deterministic parity w
         const graph = parseNodeParticleSource(SCENE264_NPE_JSON);
         const set = await buildSoaParticleSet({} as EngineContext, {} as SceneContext, graph, { emitter: { x: 0, y: 0, z: 0 } });
         const system = set.systems[0]!;
+        const previousRandom = Math.random;
         let seed = 1;
         Math.random = () => {
             const x = Math.sin(seed++) * 10000;
             return x - Math.floor(x);
         };
+        try {
+            startSoaSystem(system);
+            for (let i = 0; i < 300; i++) {
+                animateSoa(system, 1);
+            }
 
-        startSoaSystem(system);
-        for (let i = 0; i < 300; i++) {
-            animateSoa(system, 1);
-        }
+            const buffer = system.buffer;
+            expect(buffer._nextId).toBeGreaterThan(buffer.alive);
+            const cacheColumns = [...buffer._columns.entries()].filter(([name]) => /^random\.\d+\.(id|valid|value\d+)$/.test(name));
+            expect(cacheColumns.length).toBeGreaterThan(0);
+            for (const [, cache] of cacheColumns) {
+                expect(cache.length).toBe(buffer.capacity);
+            }
 
-        const buffer = system.buffer;
-        expect(buffer._nextId).toBeGreaterThan(buffer.alive);
-        const cacheColumns = [...buffer._columns.entries()].filter(([name]) => /^random\.\d+\.(id|valid|value\d+)$/.test(name));
-        expect(cacheColumns.length).toBeGreaterThan(0);
-        for (const [, cache] of cacheColumns) {
-            expect(cache.length).toBe(buffer.capacity);
-        }
-
-        const issuedIds = buffer._nextId;
-        stopSoaSystem(system);
-        for (let i = 0; i < 1000 && buffer.alive > 0; i++) {
-            animateSoa(system, 1);
-        }
-        expect(buffer.alive).toBe(0);
-        expect(buffer._nextId).toBe(issuedIds);
-        for (const [, cache] of cacheColumns) {
-            expect(cache.length).toBe(buffer.capacity);
+            const issuedIds = buffer._nextId;
+            stopSoaSystem(system);
+            for (let i = 0; i < 1000 && buffer.alive > 0; i++) {
+                animateSoa(system, 1);
+            }
+            expect(buffer.alive).toBe(0);
+            expect(buffer._nextId).toBe(issuedIds);
+            for (const [, cache] of cacheColumns) {
+                expect(cache.length).toBe(buffer.capacity);
+            }
+        } finally {
+            Math.random = previousRandom;
         }
     });
 });
