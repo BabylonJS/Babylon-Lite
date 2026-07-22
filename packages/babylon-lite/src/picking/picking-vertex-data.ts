@@ -267,7 +267,7 @@ function createPipeline(
     meshBGL: GPUBindGroupLayout,
     discardBGL: GPUBindGroupLayout | null,
     label: string,
-    vertexBuffers: readonly GPUVertexBufferLayout[]
+    vertexBuffers: GPUVertexBufferLayout[]
 ): GPURenderPipeline {
     const device = engine._device;
     const module = device.createShaderModule({ label: `${label}-shader`, code: shader });
