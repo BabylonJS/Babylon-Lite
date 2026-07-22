@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDynamicTexture, updateDynamicTexture, type DynamicTexture2D } from "../../../packages/babylon-lite/src/texture/dynamic-texture";
 import { rebuildDynamicTexture2D } from "../../../packages/babylon-lite/src/texture/dynamic-texture-recovery";
+import { acquireTexture, releaseTexture } from "../../../packages/babylon-lite/src/resource/gpu-pool";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
@@ -17,7 +18,7 @@ function fakeSource(width = 8, height = 8): HTMLCanvasElement {
     return { width, height } as unknown as HTMLCanvasElement;
 }
 
-function makeEngine(cap: Captured): EngineContext {
+function makeEngine(cap: Captured, opts: { throwOnCopy?: boolean } = {}): EngineContext {
     const device = {
         createTexture: (desc: GPUTextureDescriptor) => {
             cap.createDesc = desc;
@@ -33,6 +34,11 @@ function makeEngine(cap: Captured): EngineContext {
                 cap.writeCalls++;
             },
             copyExternalImageToTexture: (src: GPUCopyExternalImageSourceInfo, dst: GPUCopyExternalImageDestInfo, size: GPUExtent3DStrict) => {
+                if (opts.throwOnCopy) {
+                    // Mirrors WebGPU throwing InvalidStateError when the source (e.g. a
+                    // closed ImageBitmap/VideoFrame) is no longer usable.
+                    throw new DOMException("source is detached", "InvalidStateError");
+                }
                 cap.copyCalls.push({ src, dst, size });
             },
         },
@@ -189,6 +195,38 @@ describe("createDynamicTexture device-lost recovery", () => {
         expect((call.src as { source: unknown; flipY?: boolean }).source).toBe(source);
         expect((call.src as { flipY?: boolean }).flipY).toBe(false);
         expect((call.dst as { premultipliedAlpha?: boolean }).premultipliedAlpha).toBe(true);
+    });
+
+    it("survives a closed retained source: degrades to blank instead of aborting recovery", async () => {
+        const cap = newCap();
+        const engine = makeEngine(cap, { throwOnCopy: true });
+        withRecovery(engine);
+        const tex = createDynamicTexture(engine, 16, 16);
+        // Retain a source, then simulate the caller closing it: the next re-blit throws.
+        const source = fakeSource(16, 16);
+        (tex as unknown as { _recoverySource: { source: unknown } })._recoverySource.source = source;
+
+        // The rebuild must not propagate the InvalidStateError (which would abort the
+        // whole device recovery); it resolves with a valid, blank texture instead.
+        await expect(rebuildDynamicTexture2D(engine, tex)).resolves.toBeUndefined();
+        expect(tex.width).toBe(16);
+        expect(tex.height).toBe(16);
+        // The dead source reference is dropped so a later loss neither retries nor pins it.
+        expect((tex as unknown as { _recoverySource: { source: unknown } })._recoverySource.source).toBeNull();
+    });
+
+    it("restores the creation-time ownership ref so the rebuilt texture outlives its materials", async () => {
+        const cap = newCap();
+        const engine = makeEngine(cap);
+        withRecovery(engine);
+        const tex = createDynamicTexture(engine, 16, 16); // creation acquire → ref 1 on GPUTexture A
+
+        await rebuildDynamicTexture2D(engine, tex); // swaps to GPUTexture B and must re-acquire → ref 1
+
+        // Simulate a material acquiring then releasing the rebuilt texture. The restored
+        // creation ref must keep it alive (release returns false), not destroy it at 0.
+        acquireTexture(tex); // material binds → ref 2
+        expect(releaseTexture(tex)).toBe(false); // material unbinds → ref 1, survives
     });
 });
 

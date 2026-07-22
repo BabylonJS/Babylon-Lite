@@ -18,7 +18,7 @@
  */
 
 import { TU } from "../engine/gpu-flags.js";
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import { generateMipmaps } from "./generate-mipmaps.js";
 import type { Texture2D } from "./texture-2d.js";
 import type { EngineContext } from "../engine/engine.js";
@@ -44,12 +44,24 @@ export async function rebuildDynamicTexture2D(engine: EngineContext, tex: Textur
         usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
     });
     if (rec.source) {
-        engine._device.queue.copyExternalImageToTexture({ source: rec.source, flipY: rec.flipY }, { texture: rebuilt, premultipliedAlpha: rec.premultipliedAlpha }, [
-            width,
-            height,
-        ]);
-        if (levels > 1) {
-            generateMipmaps(engine, rebuilt);
+        // The retained source is the caller's own external-image object. Canvas-like
+        // sources (`HTMLCanvasElement`/`OffscreenCanvas`) persist, but an `ImageBitmap`
+        // or `VideoFrame` may have been `.close()`d after the last update — re-blitting a
+        // closed/detached source throws synchronously (`InvalidStateError`). Isolate that
+        // here so one dead source degrades this single texture to blank (its documented
+        // "before first update" state) instead of aborting the entire device recovery,
+        // and drop the reference so a later loss neither retries it nor pins a detached
+        // resource.
+        try {
+            engine._device.queue.copyExternalImageToTexture({ source: rec.source, flipY: rec.flipY }, { texture: rebuilt, premultipliedAlpha: rec.premultipliedAlpha }, [
+                width,
+                height,
+            ]);
+            if (levels > 1) {
+                generateMipmaps(engine, rebuilt);
+            }
+        } catch {
+            rec.source = null;
         }
     }
     tex.texture = rebuilt;
@@ -57,4 +69,11 @@ export async function rebuildDynamicTexture2D(engine: EngineContext, tex: Textur
     tex.sampler = getOrCreateSampler(engine, samplerDesc);
     tex.width = width;
     tex.height = height;
+    // Restore the creation-time ownership reference createDynamicTexture took on the
+    // original GPUTexture (its `acquireTexture(tex)`). Swapping in a fresh GPUTexture
+    // starts it at ref-count 0, so without this the rebuilt texture would carry only the
+    // material bindings' refs and be destroyed the instant the last material releases it —
+    // even though the caller still holds the DynamicTexture2D. Re-acquiring keeps it alive
+    // for the caller's own lifetime, exactly as at creation.
+    acquireTexture(tex);
 }
