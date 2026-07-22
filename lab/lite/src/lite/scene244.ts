@@ -22,7 +22,7 @@ async function main(): Promise<void> {
     attachControl(cam, canvas, scene);
 
     scene.fixedDeltaMs = 16.0;
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
     const seekTimeParam = parseFloat(params.get("seekTime") || "");
     let frameCount = 0;
     let seekDone = false;

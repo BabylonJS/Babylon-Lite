@@ -46,7 +46,7 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
         // Per-material generation: the CSM caster-view cache keys off THIS (which material was rebuilt), not the
         // global _materialEpoch (which also bumps when an unrelated material is swapped), so swapping a non-caster
         // material doesn't force a full shadow rebuild. See ensureCsmShadowTaskState.
-        mat._csmGen = -~mat._csmGen!;
+        mat._csmGen = 1 + (mat._csmGen || 0);
         changed = renderables.push(rebuild(scene, mesh));
     }
     if (changed) {
