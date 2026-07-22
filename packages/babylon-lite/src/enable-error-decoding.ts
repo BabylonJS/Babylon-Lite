@@ -32,8 +32,10 @@ export function decodeError(error: unknown): string {
     if (!(error instanceof Error)) {
         return String(error);
     }
+    // `lite` is arbitrary on an `unknown` error; require a real array before spreading it through
+    // the table so decodeError stays safe to call from telemetry paths (covers undefined too).
     const args = (error as LiteError).lite;
-    if (args === undefined) {
+    if (!Array.isArray(args)) {
         return error.message;
     }
     const match = /^#(\d+)$/.exec(error.message);

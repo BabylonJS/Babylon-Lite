@@ -40,6 +40,14 @@ describe("decodeError", () => {
         expect(decodeError(caught)).toBe("Error #5");
     });
 
+    it("returns the message unchanged when `lite` is present but not a real array", () => {
+        // A non-array `lite` (e.g. from user-land or structured logging) must not make the
+        // telemetry-safe decodeError throw, even for a `#<code>`-shaped message.
+        const error = new Error("#9") as Error & { lite: unknown };
+        error.lite = 123;
+        expect(decodeError(error)).toBe("#9");
+    });
+
     it("passes through an already-decoded error (message no longer a bare code)", () => {
         // When decoding was enabled at throw time the message is the full text, so there is no
         // `#<code>` to re-read — the message is returned as-is even though `lite` is present.
