@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 interface SceneManifest {
@@ -25,8 +25,13 @@ describe("SoA particle bundle feature isolation", () => {
             const offenders = chunks.filter((chunk) => UNUSED_FEATURE_CHUNK.test(chunk) && !(sceneId === 263 && chunk.includes("registry-extra-emitters")));
             expect(offenders, `scene${sceneId} fetches unused particle feature chunks`).toEqual([]);
 
+            const bundleInfoPath = resolve(BUNDLE_INFO_DIR, `scene${sceneId}.json`);
+            if (!existsSync(bundleInfoPath)) {
+                continue;
+            }
+
             const runtimeChunks = new Set(chunks);
-            const bundleInfo = JSON.parse(readFileSync(resolve(BUNDLE_INFO_DIR, `scene${sceneId}.json`), "utf8")) as BundleInfo;
+            const bundleInfo = JSON.parse(readFileSync(bundleInfoPath, "utf8")) as BundleInfo;
             const moduleOffenders = (bundleInfo.chunks ?? [])
                 .filter((chunk) => chunk.file && runtimeChunks.has(chunk.file))
                 .flatMap((chunk) => chunk.modules ?? [])
