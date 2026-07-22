@@ -116,6 +116,12 @@ function removeChildren(scene: SceneContext, node: SceneNode): void {
 /** Remove a mesh from the scene and destroy its GPU resources.
  *  Internal helper — `removeFromScene` dispatches here for the Mesh case. */
 function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
+    // Notify tasks that retain their own per-mesh bindings before this mesh's
+    // UBOs and shared geometry are destroyed below. The hook is optional so core
+    // scene removal does not statically import any feature task module.
+    for (const task of scene._frameGraph._tasks) {
+        task._removeMesh?.(mesh);
+    }
     const fns = scene._meshDisposables.get(mesh);
     // Whether this call actually mutated scene state — used to gate the renderable
     // version bump so a no-op removal (mesh never registered) doesn't needlessly

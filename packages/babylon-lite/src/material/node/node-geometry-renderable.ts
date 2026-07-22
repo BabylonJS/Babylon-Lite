@@ -332,7 +332,12 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
     const meshUboBytes = (96 + 16 * Math.ceil(MAX_LIGHTS / 4) + 15) & ~15;
     const meshUBO = device.createBuffer({ label: "node-geom-mesh-ubo", size: meshUboBytes, usage: BU.UNIFORM | BU.COPY_DST });
     const meshScratch = new F32(meshUboBytes / 4);
-    const packMeshWorld = engine._makePackMeshWorld?.(scene) ?? packMat4IntoF32;
+    // Floating-origin: pack world against the EFFECTIVE task camera (a `config.camera`
+    // override, else the scene camera) so Node meshes share the same origin as the
+    // task view/projection + positional lights. `view._camera` is a stable ref whose
+    // worldMatrix reads live.
+    const foScene = view._camera ? ({ camera: view._camera } as SceneContext) : scene;
+    const packMeshWorld = engine._makePackMeshWorld?.(foScene) ?? packMat4IntoF32;
 
     let needsAttrFlags = false;
     const writeMesh = (): void => {
@@ -351,6 +356,21 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
 
     const sortCenter: [number, number, number] = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!];
 
+    // Per-mesh geometry mesh UBO is an AUX/override packet owned by the geometry TASK,
+    // not the mesh's main material. Registering it on `_meshAuxDisposables` (NOT
+    // `_meshDisposables`) means a MAIN-material swap cannot destroy this live buffer
+    // mid-flight; a real `removeFromScene` still frees it, and the owning task retires
+    // the SAME closure on re-record/dispose. Idempotent WITHOUT a guard flag —
+    // `GPUBuffer.destroy()` is a no-op when already destroyed — but MUST NOT self-remove
+    // from the aux array (the scene drains iterate it live). The shared node UBO is
+    // per-VIEW and freed via `disposeNodeGeometryViewResources`.
+    const _disposePerMesh = (): void => {
+        meshUBO.destroy();
+    };
+    const auxList = scene._meshAuxDisposables.get(mesh) ?? [];
+    auxList.push(_disposePerMesh);
+    scene._meshAuxDisposables.set(mesh, auxList);
+
     const r: Renderable = {
         order: mesh.renderOrder ?? 100,
         isTransparent: false,
@@ -361,7 +381,7 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
             const nodeUBO = ensureGeometryNodeUBO(res, compile, eng as EngineContext, source);
             bindGroup = buildGeometryBindGroup(eng as EngineContext, source, compile, meshUBO, nodeUBO, view);
 
-            const update = (): void => {
+            const _baseUpdate = (): void => {
                 if (mesh.worldMatrixVersion !== lastWorldVersion || scene.lights.length !== lastLightsCount) {
                     writeMesh();
                     sortCenter[0] = mesh.worldMatrix[12]!;
@@ -371,6 +391,14 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
                     lastLightsCount = scene.lights.length;
                 }
             };
+            // Floating origin bakes the effective-camera offset into the world UBO, so
+            // a camera move alone makes it stale even when the mesh never moved. The FO
+            // wrapper forces a re-pack on effective-camera version change (identity/
+            // undefined for non-LWR engines, so no bytes/behaviour change there).
+            const _invalidate = (): void => {
+                lastWorldVersion = -1;
+            };
+            const update = engine._wrapRenderableForFO?.(_baseUpdate, foScene, _invalidate) ?? _baseUpdate;
             const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
                 if (mesh.visible === false) {
                     return 0;
@@ -388,5 +416,24 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
         },
     };
     r._worldCenter = sortCenter;
+    r._geometryDispose = _disposePerMesh;
     return r;
+}
+
+/** @internal Retire a Node geometry view's shared per-view resources cached on
+ *  `view._geometry`: the shared node UBO (a GPUBuffer that must be explicitly
+ *  destroyed) plus the per-signature compile cache (pipelines/BGLs reclaimed by GC).
+ *  Called by the owning geometry task when it discards the view on re-record/dispose.
+ *  Idempotent — the cache reference is dropped and the UBO nulled so a double call
+ *  (task retirement) is a no-op. */
+export function disposeNodeGeometryViewResources(view: NodeGeometryMaterialView): void {
+    const res = view._geometry as NodeGeometryViewResources | undefined;
+    if (!res) {
+        return;
+    }
+    res._nodeUBO?.destroy();
+    res._nodeUBO = null;
+    res._nodeUBOReady = false;
+    res._compileBySig.clear();
+    Object.defineProperty(view, "_geometry", { value: undefined, enumerable: false, configurable: true });
 }

@@ -65,6 +65,8 @@ export interface AccessorInterleave {
     /** @internal Raw bufferView bytes (shared across attributes). Retained after GPU upload
      *  so the CPU copy can be de-strided lazily on demand. */
     _slice?: Uint8Array;
+    /** @internal Shared lazy de-strided copy for every owner of this primitive. */
+    _cpu?: Float32Array;
 }
 
 /** Per-attribute interleave sources for a primitive (keys mirror MeshVbLayout). */
@@ -359,8 +361,6 @@ export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, ind
         receiveShadows: false,
         boundMin,
         boundMax,
-        skeleton: null,
-        morphTargets: null,
         _gpu: gpu,
         _flatNormal: m._flatNormal,
     } as unknown as Mesh;
@@ -452,17 +452,17 @@ export function installLazyCpu(mesh: any, m: GltfMeshData): void {
     }
 }
 
-/** Build a caching lazy-getter descriptor that de-strides `il` on first read. */
+/** Build a lazy shared-cache getter with a per-Mesh copy-on-write override. */
 function lazyCpuDesc(il: AccessorInterleave): PropertyDescriptor {
-    let cached: Float32Array | undefined;
+    let local: Float32Array | undefined;
     return {
         configurable: true,
         enumerable: true,
         get(): Float32Array {
-            return (cached ??= destrideToTight(il));
+            return local ?? (il._cpu ??= destrideToTight(il));
         },
         set(v: Float32Array): void {
-            cached = v;
+            local = v;
         },
     };
 }

@@ -1,11 +1,12 @@
 import { defineConfig, transformWithEsbuild, type Plugin } from "vite";
 import { basename, resolve } from "path";
-import { copyFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "fs";
 import dts from "vite-plugin-dts";
 import remapping from "@ampproject/remapping";
 import { trimInternalDts } from "../../scripts/vite-trim-internal-dts";
 import { wgslMinifyPlugin } from "../../scripts/wgsl-minify-plugin";
 import { stripManifoldNodeRequire } from "../../scripts/strip-manifold-node-require";
+import { liteErrorPlugin } from "../../scripts/lite-error-plugin";
 
 /**
  * api-extractor's trim pass works around #4260 by dropping top-level imports kept
@@ -114,6 +115,14 @@ function emitPackageJson(): Plugin {
                         types: "./index.d.ts",
                         import: "./lib/index.js",
                     },
+                    "./material/standard/enable-standard-vertex-colors": {
+                        types: "./material/standard/enable-standard-vertex-colors.d.ts",
+                        import: "./lib/material/standard/enable-standard-vertex-colors.js",
+                    },
+                    "./material/standard/enable-standard-mesh-features": {
+                        types: "./material/standard/enable-standard-mesh-features.d.ts",
+                        import: "./lib/material/standard/enable-standard-mesh-features.js",
+                    },
                 },
                 jsdelivr: "./dist/index.js",
                 unpkg: "./dist/index.js",
@@ -142,6 +151,22 @@ function emitPackageJson(): Plugin {
                 ...(provenance ? { babylonLiteRelease: provenance } : {}),
             };
             writeFileSync(resolve(PACKAGE_ROOT, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+            const standardTypesDir = resolve(PACKAGE_ROOT, "material/standard");
+            mkdirSync(standardTypesDir, { recursive: true });
+            writeFileSync(
+                resolve(standardTypesDir, "enable-standard-vertex-colors.d.ts"),
+                ["/** Enable RGBA mesh vertex colors for StandardMaterial. */", "export declare function enableStandardVertexColors(): void;", ""].join("\n")
+            );
+            writeFileSync(
+                resolve(standardTypesDir, "enable-standard-mesh-features.d.ts"),
+                [
+                    "/** Enable Standard skeletal skinning for matching meshes. */",
+                    "export declare function enableStandardSkeleton(): void;",
+                    "/** Enable optional Standard material UV translation. */",
+                    "export declare function enableStandardUvOffset(): void;",
+                    "",
+                ].join("\n")
+            );
             copyFileSync(resolve(__dirname, "README.md"), resolve(PACKAGE_ROOT, "README.md"));
             copyFileSync(resolve(__dirname, "../../LICENSE"), resolve(PACKAGE_ROOT, "LICENSE"));
         },
@@ -561,6 +586,7 @@ export default defineConfig(({ mode }) => {
             },
             plugins: [
                 stripManifoldNodeRequire(),
+                liteErrorPlugin(),
                 // `mangle: false` — strip WGSL whitespace/comments but do NOT short-rename
                 // identifiers (the per-chunk mangler is unsafe across the package's many
                 // code-split chunks). `templates: false` — only minify `?raw` `.wgsl` files,
@@ -624,6 +650,13 @@ export default defineConfig(({ mode }) => {
             format: "es" as const,
             plugins: () => [minifyInlinedWorker()],
         },
-        plugins: [stripManifoldNodeRequire(), wgslMinifyPlugin({ mangle: false, templates: false }), stripInlinedWorkerSourcemap(), emitPackageJson(), emitThirdPartyNotices()],
+        plugins: [
+            stripManifoldNodeRequire(),
+            liteErrorPlugin(),
+            wgslMinifyPlugin({ mangle: false, templates: false }),
+            stripInlinedWorkerSourcemap(),
+            emitPackageJson(),
+            emitThirdPartyNotices(),
+        ],
     };
 });

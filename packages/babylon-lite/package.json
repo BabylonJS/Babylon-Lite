@@ -34,6 +34,10 @@
         "./engine/device-lost-recovery-testing": {
             "import": "./src/engine/device-lost-recovery-testing.ts",
             "types": "./src/engine/device-lost-recovery-testing.ts"
+        },
+        "./material/standard/enable-standard-mesh-features": {
+            "import": "./src/material/standard/enable-standard-mesh-features.ts",
+            "types": "./src/material/standard/enable-standard-mesh-features.ts"
         }
     },
     "files": [
