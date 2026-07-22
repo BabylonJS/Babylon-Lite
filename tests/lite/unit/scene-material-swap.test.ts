@@ -63,6 +63,8 @@ describe("scene material swap", () => {
         expect(() => processMaterialSwaps(scene)).not.toThrow();
         expect(disposeOld).not.toHaveBeenCalled();
         expect(scene._materialSwapQueue).toHaveLength(0);
+        expect(scene._renderableVersion).toBe(0);
+        expect(scene._materialEpoch).toBe(0);
     });
 
     it("rescans a material group when a runtime-added mesh introduces thin instances", async () => {

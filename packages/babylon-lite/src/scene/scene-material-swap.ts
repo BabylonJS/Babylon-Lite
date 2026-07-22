@@ -43,10 +43,10 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
         // material doesn't force a full shadow rebuild. See ensureCsmShadowTaskState.
         mat._csmGen = (mat._csmGen || 0) + 1;
         scene._renderables.push(rebuild(scene, mesh));
+        scene._renderables.sort((a, b) => a.order - b.order);
+        scene._renderableVersion++;
+        scene._materialEpoch++; // a caster's material UBOs were rebuilt → CSM-style view caches must fully rebuild
     }
     q.length = 0;
-    scene._renderables.sort((a, b) => a.order - b.order);
-    scene._renderableVersion++;
-    scene._materialEpoch++; // a caster's material UBOs were rebuilt → CSM-style view caches must fully rebuild
     return pending;
 }
