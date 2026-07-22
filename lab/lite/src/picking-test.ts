@@ -8,6 +8,8 @@ const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 interface PickTestResults {
     ready: boolean;
     error: string | null;
+    primitiveIndexAvailable: boolean;
+    detailedPickingActive: boolean;
     centerPick: {
         hit: boolean;
         meshName: string | null;
@@ -26,19 +28,30 @@ interface PickTestResults {
     vertexDataDiscardPick: {
         hit: boolean;
     } | null;
+    worldAdjustedPick: {
+        hit: boolean;
+        distance: number;
+        pickedPoint: [number, number, number] | null;
+        faceId: number;
+    } | null;
 }
 
 const results: PickTestResults = {
     ready: false,
     error: null,
+    primitiveIndexAvailable: false,
+    detailedPickingActive: false,
     centerPick: null,
     missPick: null,
     vertexDataDiscardPick: null,
+    worldAdjustedPick: null,
 };
 (window as any).__pickTest = results;
 
 async function run(): Promise<void> {
     try {
+        const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+        results.primitiveIndexAvailable = adapter?.features.has("primitive-index") ?? false;
         const engine = await createEngine(canvas);
         const scene = createSceneContext(engine);
 
@@ -61,6 +74,7 @@ async function run(): Promise<void> {
         // Create picker with detailed picking enabled
         const picker = createGpuPicker(scene);
         enableDetailedPicking(picker);
+        results.detailedPickingActive = picker._detailedPicking;
 
         // Pick center of canvas — should hit the sphere
         const cx = canvas.clientWidth / 2;
@@ -92,6 +106,27 @@ return length(input.vertexData.xyz) > 0.5;
         });
         results.vertexDataDiscardPick = {
             hit: vertexDataDiscardInfo.hit,
+        };
+
+        const worldAdjustedInfo = await pickAsync(picker, cx, cy, {
+            discard: {
+                key: "world-adjust-storage",
+                wgsl: `
+fn shouldDiscardPick(input: PickDiscardInput) -> bool {
+return false;
+}`,
+                worldAdjustWgsl: `
+fn adjustPickWorld(input: PickWorldInput) -> vec3f {
+return input.worldPos + offsets[0].xyz;
+}`,
+                storage: [{ name: "offsets", type: "array<vec4f>", vertex: true, data: () => new Float32Array([0, 0, -1, 0]) }],
+            },
+        });
+        results.worldAdjustedPick = {
+            hit: worldAdjustedInfo.hit,
+            distance: worldAdjustedInfo.distance,
+            pickedPoint: worldAdjustedInfo.pickedPoint,
+            faceId: worldAdjustedInfo.faceId,
         };
 
         // Pick corner — should miss (background)

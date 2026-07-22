@@ -8,6 +8,9 @@ import { normalizeVec3 } from "../math/normalize-vec3.js";
  * @param useWorldCoordinates - if true, transform normal by world matrix (default: false)
  */
 export function getPickedNormal(info: PickingInfo, useWorldCoordinates = false): [number, number, number] | null {
+    if (info._normalsInvalid) {
+        return null;
+    }
     if (useWorldCoordinates && info.pickedNormalWorld) {
         return info.pickedNormalWorld;
     }
@@ -50,6 +53,9 @@ export function getPickedNormal(info: PickingInfo, useWorldCoordinates = false):
 }
 
 export function getPickedFaceNormal(info: PickingInfo, useWorldCoordinates = false): [number, number, number] | null {
+    if (info._normalsInvalid) {
+        return null;
+    }
     if (useWorldCoordinates) {
         return info.pickedFaceNormalWorld;
     }
