@@ -316,12 +316,16 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     }
 
     const features: GPUFeatureName[] = [];
-    if (adapter.features.has("float32-filterable")) {
-        features.push("float32-filterable");
-    }
     // Optional features are requested opportunistically so their public enable functions can activate
     // later without recreating the device. Unsupported adapters keep the corresponding feature inactive.
-    for (const f of ["texture-compression-astc", "texture-compression-bc", "texture-compression-etc2", "timestamp-query", "primitive-index"] as GPUFeatureName[]) {
+    for (const f of [
+        "float32-filterable",
+        "texture-compression-astc",
+        "texture-compression-bc",
+        "texture-compression-etc2",
+        "timestamp-query",
+        "primitive-index",
+    ] as GPUFeatureName[]) {
         if (adapter.features.has(f)) {
             features.push(f);
         }
