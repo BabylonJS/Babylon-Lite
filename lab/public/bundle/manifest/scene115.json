@@ -1,5 +1,5 @@
 {
-  "rawKB": 126.6,
+  "rawKB": 126.8,
   "gzipKB": 53.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -18,7 +18,7 @@
     "scene115-morph-fragment-yw-uCCvS.js",
     "scene115-pbr-renderable-29fnD-gQ.js",
     "scene115-pbr-template-ext-CiHpOV5G.js",
-    "scene115-picking-detailed-pipeline-CH9kgEac.js",
+    "scene115-picking-pipeline-C9DxnZjR.js",
     "scene115-shader-composer-DishuYLa.js",
     "scene115-singlelight-hemispheric-wgsl-BVltEFrU.js",
     "scene115-skeleton-fragment-B0VEBZFR.js",
