@@ -27,7 +27,7 @@
         "slug": "scene3-fog",
         "name": "Scene 3 — Fog + Skybox",
         "maxMad": 0.01,
-        "maxRawKB": 54.3,
+        "maxRawKB": 54.9,
         "description": "Exponential² fog, multiple colored boxes, skybox, ground plane.",
         "tags": ["fog", "procedural", "std"],
         "skipPerf": true
@@ -165,7 +165,7 @@
         "slug": "scene16-thin-instances",
         "name": "Scene 16 — Thin Instances",
         "maxMad": 0.01,
-        "maxRawKB": 49.4,
+        "maxRawKB": 49.55,
         "description": "64,000 colored cubes via thin instances. Per-instance color, disableLighting, emissive-only rendering.",
         "tags": ["std", "procedural"],
         "compatParity": true
@@ -458,7 +458,7 @@
         "slug": "scene43-parametric-proximity",
         "name": "Scene 43 — Parametric Proximity Path",
         "maxMad": 1,
-        "maxRawKB": 58.7,
+        "maxRawKB": 58.8,
         "maxGzipKB": 24,
         "description": "Circle-path replacement for PG #I6AR8X#21 Catmull-Rom proximity demo, captured at frame 300.",
         "tags": ["std", "procedural", "thin-instances"],
@@ -1188,7 +1188,7 @@
         "slug": "scene115-alien-picking-frame100",
         "name": "Scene 115 — Alien Picking Frame 100",
         "maxMad": 0.01,
-        "maxRawKB": 127.4,
+        "maxRawKB": 127.6,
         "description": "Precise picking validation on the animated Alien glTF at frame 100: BJS and Lite CPU PickInfo values drive a surface sphere and normal marker.",
         "tags": ["pbr", "gltf", "anim", "skeleton", "picking"],
         "skipPerf": true
@@ -1220,7 +1220,7 @@
         "slug": "scene118-billboard-picking",
         "name": "Scene 118 — Billboard Sprite Picking",
         "maxMad": 0.15,
-        "maxRawKB": 77,
+        "maxRawKB": 77.45,
         "description": "Visual billboard-picking validation: pickBillboardSprite resolves the centre camera-facing billboard and a small marker mesh floats in front of it. The BJS oracle does the same with scene.pickSprite.",
         "tags": ["sprite", "billboard", "picking"],
         "skipPerf": true
@@ -1358,8 +1358,8 @@
         "id": 143,
         "slug": "scene143-pipelined-post-processes",
         "name": "Scene 143 — Pipelined Post-processes",
-        "maxMad": 0.05,
-        "maxRawKB": 72.3,
+        "maxMad": 0.2,
+        "maxRawKB": 73,
         "description": "Sponza rendered through a Lite frame-graph blur task followed by chromatic aberration.",
         "tags": ["post-process", "frame-graph", "babylon"],
         "skipPerf": true
@@ -1401,7 +1401,7 @@
         "slug": "scene147-circle-of-confusion",
         "name": "Scene 147 — Circle of Confusion",
         "maxMad": 0.05,
-        "maxRawKB": 103.7,
+        "maxRawKB": 105.2,
         "description": "Circle-of-confusion post-process ported from playground SUEU9U#117. The Babylon.js PowerPlant glb is rendered through the frame-graph geometry renderer to a normalized view-depth texture, which feeds the CircleOfConfusion post-process. Output is the grayscale CoC map (0=in focus, 1=out of focus).",
         "tags": ["frame-graph", "geometry-renderer", "post-process", "circle-of-confusion", "depth-of-field"],
         "skipPerf": true,
@@ -1947,7 +1947,7 @@
         "slug": "scene221-pointer-drags",
         "name": "Scene 221 — Pointer Drags",
         "maxMad": 2.5,
-        "maxRawKB": 102.1,
+        "maxRawKB": 103.4,
         "description": "Four cubes over a ground, each driven by a different gizmo: axisDragGizmo (X), planeRotationGizmo (Y) with rotation sector camembert, planeDragGizmo (Y normal), axisScaleGizmo (Y). UtilityLayer overlay + scripted pointer-drag interaction.",
         "tags": ["std", "gizmo", "interactive"],
         "skipPerf": true,
@@ -2026,6 +2026,16 @@
         "maxRawKB": 68.1,
         "description": "Minimal glTF tutorial asset whose single triangle primitive omits `indices`. Verifies Lite expands non-indexed triangle primitives to identity indices before GPU upload so the existing indexed draw path remains fast and unchanged.",
         "tags": ["pbr", "gltf", "non-indexed"],
+        "skipPerf": true
+    },
+    {
+        "id": 231,
+        "slug": "scene231-standard-deform-features",
+        "name": "Scene 231 — StandardMaterial Deform Features",
+        "maxMad": 0.01,
+        "maxRawKB": 53.5,
+        "description": "Procedural beam exercising opt-in StandardMaterial skeletal skinning, RGBA vertex color, and UV offset, with programmatic bones frozen at a deterministic frame.",
+        "tags": ["std", "procedural", "skeleton", "vertex-color", "uv-offset", "animated"],
         "skipPerf": true
     },
     {

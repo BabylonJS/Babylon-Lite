@@ -17,6 +17,7 @@
 import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { release, retain } from "../resource/ref-count.js";
+import type { StorageBuffer } from "../resource/storage-buffer.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import { stopAnimation } from "../animation/animation-group.js";
 import type { SkeletonBinding, VatData } from "../animation/types.js";
@@ -64,6 +65,7 @@ export interface VatBakeResult {
 }
 
 const DEFAULT_FRAME_RATE = 60;
+let _vatTime: Float32Array | null = null;
 
 /** Number of baked frames for a clip (inclusive of frame 0). */
 function clipFrameCount(group: AnimationGroup): number {
@@ -292,6 +294,30 @@ export interface VatHandle {
      *  A = (fromRowA, toRowA, timeOffset, fpsA), B = (fromRowB, toRowB, blendWeight, fpsB), where blendWeight
      *  in [0,1] lerps A→B and B reuses A's timeOffset. Same per-instance VAT path as setInstances. */
     setInstancesBlend(params: Float32Array): void;
+}
+
+/** Publish the authoritative dual-clip instance params used by a custom VAT material.
+ *  Derived mesh passes consume this same buffer, so their animated geometry cannot drift. */
+export function setVatInstanceStorage(engine: EngineContext, mesh: Mesh, buffer: StorageBuffer | null): void {
+    const vat = mesh.vat;
+    if (!vat) {
+        throw new Error("setVatInstanceStorage: mesh has no VAT data.");
+    }
+    if (buffer && (buffer._destroyed || buffer._engine !== engine || !engine._storageBuffers?.has(buffer))) {
+        throw new Error("setVatInstanceStorage requires a live StorageBuffer from the same engine.");
+    }
+    vat._instanceStorage = buffer;
+}
+
+/** Set the absolute VAT clock shared by a custom material and derived mesh passes. */
+export function setVatTime(engine: EngineContext, mesh: Mesh, seconds: number): void {
+    const vat = mesh.vat;
+    if (!vat) {
+        throw new Error("setVatTime: mesh has no VAT data.");
+    }
+    const time = (_vatTime ??= new Float32Array(1));
+    time[0] = seconds;
+    engine._device.queue.writeBuffer(vat.settingsBuffer, 16, time);
 }
 
 /**

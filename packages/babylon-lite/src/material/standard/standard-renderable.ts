@@ -10,7 +10,7 @@ import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { Renderable, MeshGroupBuildResult } from "../../render/renderable.js";
 import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
-import type { StandardMaterialProps } from "./standard-material.js";
+import type { StandardMaterialProps, StandardSceneShaderContext } from "./standard-material.js";
 import { _computeStandardMaterialFeatures, _standardShaderVariantKey } from "./standard-material.js";
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
@@ -22,7 +22,18 @@ import {
     writeStdMaterialData,
     _stdVertexColorFragment,
 } from "./standard-pipeline.js";
-import { ESM_SHADOW_OUTPUT, NO_COLOR_OUTPUT, NEEDS_UV, NEEDS_UV2, HAS_OPACITY_TEXTURE, _getStdExts } from "./standard-flags.js";
+import {
+    ESM_SHADOW_OUTPUT,
+    NO_COLOR_OUTPUT,
+    NEEDS_UV,
+    NEEDS_UV2,
+    HAS_OPACITY_TEXTURE,
+    HAS_DIFFUSE_TEXTURE,
+    MATERIAL_ALPHA_BLEND,
+    VERTEX_ALPHA,
+    _getStdExtsSorted,
+} from "./standard-flags.js";
+import type { StdExt } from "./standard-flags.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
@@ -55,6 +66,8 @@ export interface StdFragmentFactories {
     morphFragment?: () => ShaderFragment;
     /** Present only when the scene has at least one culling-enabled thin-instance mesh. */
     cull?: typeof import("../../mesh/thin-instance-cull-binding.js");
+    /** Scene-driven Standard WGSL inputs (currently dynamic fog). */
+    sceneShader?: StandardSceneShaderContext | null;
 }
 
 /** Build Renderable(s) + a SceneUniformUpdater for a set of standard meshes.
@@ -62,8 +75,7 @@ export interface StdFragmentFactories {
  *  builder) for material swaps + per-pass material overrides. */
 export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[], factories: StdFragmentFactories): MeshGroupBuildResult {
     const engine = scene.surface.engine;
-    const device = engine._device;
-    const { tiSync, tiUpdate, tiFragment, shadowFragment, cull, morphFragment } = factories;
+    const { morphFragment, sceneShader = null } = factories;
 
     // Collect per-light shadow info.
     const shadowLights: { lightIndex: number; shadowType: "esm" | "pcf" | "csm"; gen: ShadowGenerator }[] = [];
@@ -78,16 +90,57 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
     // All receiving meshes in this build share the same shadow generators,
     // so keying the shadow BG by `bindings._shadowBGL` alone is correct.
     const shadowBGCache = new Map<GPUBindGroupLayout, GPUBindGroup>();
+
+    // Per-scene rebuild context. The Standard group builder is a process-wide
+    // singleton, so its `_rebuildSingle` must NOT close over a single scene's
+    // engine/device/fog(sceneShader)/shadow context — the last scene to build
+    // would otherwise poison every other scene's material swaps. Instead the
+    // context is stashed on the scene and re-derived per call from the scene
+    // passed to `rebuildSingle`, mirroring `_standardGeometryContext`.
+    const rebuildContext: StandardRebuildContext = {
+        _engine: engine,
+        _shadowLights: shadowLights,
+        _hasSomeShadows: hasSomeShadows,
+        _shadowBGCache: shadowBGCache,
+        _factories: factories,
+    };
+    (scene as SceneContext & { _standardRebuildContext?: StandardRebuildContext })._standardRebuildContext = rebuildContext;
+
     // Closure used both for the initial per-mesh build below AND for later
     // material-swap / per-pass-override rebuilds (set on standardGroupBuilder._rebuildSingle).
+    // It reads its engine/device/fog/shadow context from the *passed* scene so a
+    // singleton `_rebuildSingle` never cross-contaminates scenes.
     const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+        const rc = (s as SceneContext & { _standardRebuildContext?: StandardRebuildContext })._standardRebuildContext ?? rebuildContext;
+        const engine = rc._engine;
+        const device = engine._device;
+        const shadowLights = rc._shadowLights;
+        const hasSomeShadows = rc._hasSomeShadows;
+        const shadowBGCache = rc._shadowBGCache;
+        const { tiSync, tiUpdate, tiFragment, shadowFragment, cull, morphFragment, sceneShader = null } = rc._factories;
         const mat = (materialOverride ?? mesh.material) as StandardMaterialProps;
         const renderFeatures = (mat._renderFeatures ??= { features: _computeStandardMaterialFeatures(mat) }) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
-        const features = renderFeatures.features;
+        let features = renderFeatures.features;
         const shadowOutput = (features & (NO_COLOR_OUTPUT | ESM_SHADOW_OUTPUT)) !== 0;
         const receiveShadows = !shadowOutput && mesh.receiveShadows && hasSomeShadows;
         const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
+        // Vertex colour via the canonical `enableStandardVertexColors()` seam (master
+        // #430): RGB is always applied. Explicit vertex-alpha opt-in (Babylon
+        // `mesh.hasVertexAlpha`) layers on top — the mesh must carry a vertex-colour
+        // buffer AND opt in. Computed BEFORE the ext loop so the vertex-colour fragment
+        // composes with the correct alpha mode. Two effects:
+        //   • VERTEX_ALPHA        — the shader consumes `vColor.a` (alpha + alpha-test).
+        //   • MATERIAL_ALPHA_BLEND — the pipeline source-over blends, disables depth
+        //     write, and sorts the mesh into the transparent phase.
+        // RGB vertex colour is always applied regardless. `MATERIAL_ALPHA_BLEND` alone
+        // (e.g. a translucent `mat.alpha < 1` material) never enables VERTEX_ALPHA.
+        const hasVertexColor = !!mesh._gpu.colorBuffer && !!_stdVertexColorFragment;
+        const vertexAlphaBlend = !shadowOutput && hasVertexColor && mesh.hasVertexAlpha === true;
+        if (vertexAlphaBlend) {
+            features |= VERTEX_ALPHA | MATERIAL_ALPHA_BLEND;
+        }
+        const sortedExts = _getStdExtsSorted();
         // Build per-feature fragment list (deduped via pipeline cache).
         const frags: ShaderFragment[] = [];
         // Keep morph first: composeStandardShader uses the first fragment's patch
@@ -95,17 +148,26 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         if (meshFeatures & MSH_HAS_MORPH_TARGETS && morphFragment) {
             frags.push(morphFragment());
         }
-        const hasVertexColor = !!mesh._gpu.colorBuffer && !!_stdVertexColorFragment;
-        if (hasVertexColor) {
-            frags.push(_stdVertexColorFragment!());
-        }
-        for (const ext of _getStdExts().values()) {
+        const vertexBufferBinders: NonNullable<StdExt["_bindVertexBuffers"]>[] = [];
+        for (const ext of sortedExts) {
+            features |= ext._meshFeatures?.(meshFeatures) ?? 0;
             if (features & ext._feature) {
-                const f = ext._frag(features);
+                const f = ext._frag(features, meshFeatures);
                 if (f) {
                     frags.push(f);
                 }
+                if (ext._bindVertexBuffers) {
+                    vertexBufferBinders.push(ext._bindVertexBuffers);
+                }
             }
+        }
+        // Vertex colour LAST among texture-consuming fragments: its opt-in alpha-test
+        // reads the diffuse sample `_ds`, which the diffuse ext defines in its own AT
+        // slot, so the vertex-colour AT slot must be appended after the ext loop. Its
+        // `color` vertex attribute therefore follows the ext (skeleton) attributes, and
+        // the draw closure binds `colorBuffer` after the ext vertex-buffer binders.
+        if (hasVertexColor) {
+            frags.push(_stdVertexColorFragment!((features & HAS_DIFFUSE_TEXTURE) !== 0, vertexAlphaBlend));
         }
         let shaderKey = "";
         if (meshFeatures & MSH_RECEIVE_SHADOWS && shadowFragment) {
@@ -130,7 +192,16 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             }
         }
         const esmShadowDepthCode = (features & ESM_SHADOW_OUTPUT) !== 0 ? (mat as StandardMaterialProps & { readonly _esmShadowDepthCode: string })._esmShadowDepthCode : "";
-        const bindings = getOrCreateStandardBindings(engine, features, meshFeatures, frags, shaderKey, esmShadowDepthCode, (mat as StandardMaterialProps).stencil ?? null);
+        const bindings = getOrCreateStandardBindings(
+            engine,
+            features,
+            meshFeatures,
+            frags,
+            shaderKey,
+            esmShadowDepthCode,
+            (mat as StandardMaterialProps).stencil ?? null,
+            shadowOutput ? null : sceneShader
+        );
 
         const meshShadowGens = receiveShadows ? shadowLights.map((sl) => sl.gen) : [];
 
@@ -143,7 +214,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const matData = new F32(24);
         writeStdMaterialData(matData, mat, textureLevel);
         const materialUBO = createUniformBuffer(engine, matData);
-        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null);
+        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null, mesh);
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;
@@ -167,7 +238,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const needsUV2 = (features & NEEDS_UV2) !== 0;
         const hasThinInstances = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
         const hasInstanceColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
-        const isTransparent = !shadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || mat.alpha < 1);
+        const isTransparent = !shadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || mat.alpha < 1 || vertexAlphaBlend);
 
         const boundTextures = collectStdBoundTextures(mat);
         for (const t of boundTextures) {
@@ -236,8 +307,11 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             if (needsUV2 && g.uv2Buffer) {
                 pass.setVertexBuffer(slot++, g.uv2Buffer, vb?._u2?._offset);
             }
+            for (const bindVertexBuffers of vertexBufferBinders) {
+                slot = bindVertexBuffers(mesh, pass, slot);
+            }
             if (hasVertexColor) {
-                pass.setVertexBuffer(slot++, g.colorBuffer!);
+                pass.setVertexBuffer(slot++, g.colorBuffer!, vb?._c?._offset);
             }
 
             const ti = hasThinInstances ? mesh.thinInstances : null;
@@ -284,10 +358,42 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
     const renderables = meshes.map((m) => rebuildSingle(scene, m));
 
+    (scene as SceneContext & { _standardGeometryContext?: StandardGeometryContext })._standardGeometryContext = {
+        _sceneShader: sceneShader,
+        _morphFragment: morphFragment,
+    };
+
     scene._disposables.push(
         () => clearStandardPipelineCache(),
         () => clearSamplerCache(engine)
     );
 
     return { renderables, rebuildSingle };
+}
+
+/** @internal Per-scene Standard state reused by the geometry renderer. */
+export interface StandardGeometryContext {
+    /** @internal */
+    readonly _sceneShader: StandardSceneShaderContext | null;
+    /** @internal */
+    readonly _morphFragment?: () => ShaderFragment;
+}
+
+/** @internal Per-scene context consumed by the singleton Standard group builder's
+ *  `_rebuildSingle`. Stashed on the scene (`scene._standardRebuildContext`) so a
+ *  material-swap / per-pass-override rebuild derives its engine, device, fog
+ *  (`sceneShader`), shadow generators, and dynamically-imported fragment factories
+ *  from the scene being rebuilt — never from whichever scene last happened to build
+ *  through the shared singleton builder. */
+export interface StandardRebuildContext {
+    /** @internal */
+    readonly _engine: EngineContext;
+    /** @internal */
+    readonly _shadowLights: { lightIndex: number; shadowType: "esm" | "pcf" | "csm"; gen: ShadowGenerator }[];
+    /** @internal */
+    readonly _hasSomeShadows: boolean;
+    /** @internal */
+    readonly _shadowBGCache: Map<GPUBindGroupLayout, GPUBindGroup>;
+    /** @internal */
+    readonly _factories: StdFragmentFactories;
 }

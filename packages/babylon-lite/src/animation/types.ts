@@ -2,6 +2,7 @@
 // Designed for zero-allocation per-frame evaluation.
 
 import type { Mat4 } from "../math/types.js";
+import type { StorageBuffer } from "../resource/storage-buffer.js";
 
 // Interpolation modes (numeric for fast comparison in hot path)
 export const INTERP_LINEAR = 0;
@@ -200,6 +201,9 @@ export interface VatData {
      *  thin-instanced ⇒ the VAT vertex path reads its frame rows from this texture indexed by
      *  `@builtin(instance_index)` instead of the shared settings UBO. Set via the VatHandle. */
     instanceTexture?: GPUTexture | null;
+    /** @internal Authoritative dual-clip params used by a custom VAT material and every derived
+     *  mesh pass (including picking). Set through setVatInstanceStorage(). */
+    _instanceStorage?: StorageBuffer | null;
 }
 
 /** Morph target GPU data — delta storage buffer + weights storage buffer.

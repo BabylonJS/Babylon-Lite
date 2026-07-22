@@ -1,0 +1,10 @@
+{
+  "rawKB": 53.4,
+  "gzipKB": 21.1,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene231-standard-renderable-AosGaeKa.js",
+    "scene231-std-skeleton-fragment-BIMTVdV3.js",
+    "scene231.js"
+  ]
+}

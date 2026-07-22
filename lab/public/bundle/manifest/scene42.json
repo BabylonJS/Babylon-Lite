@@ -1,9 +1,9 @@
 {
-  "rawKB": 51.2,
-  "gzipKB": 20.3,
+  "rawKB": 51.3,
+  "gzipKB": 20.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene42-standard-renderable-BtfejaJL.js",
+    "scene42-standard-renderable-B4UXXrpa.js",
     "scene42.js"
   ]
 }

@@ -84,7 +84,10 @@ function candidateFor(node: ts.ThrowStatement, sf: ts.SourceFile): Candidate | n
     if (!args || args.length !== 1) {
         return null;
     }
-    const arg = args[0]!;
+    const arg = args[0];
+    if (!arg) {
+        return null;
+    }
 
     let tableFnSource: string;
     const argTexts: string[] = [];
@@ -136,7 +139,10 @@ export function liteErrorPlugin(): Plugin {
     const plans = new Map<string, FilePlan>(); // normalized abs path -> plan
     let tableModuleSource = "";
 
-    const normalize = (id: string): string => path.resolve(id.split("?")[0]!).replace(/\\/g, "/");
+    const normalize = (id: string): string => {
+        const queryStart = id.indexOf("?");
+        return path.resolve(queryStart === -1 ? id : id.slice(0, queryStart)).replace(/\\/g, "/");
+    };
 
     return {
         name: "lite-error",
@@ -210,9 +216,13 @@ export function liteErrorPlugin(): Plugin {
 
             let out = code;
             for (let i = candidates.length - 1; i >= 0; i--) {
-                const c = candidates[i]!;
+                const c = candidates[i];
+                const errorCode = plan.codes[i];
+                if (!c || errorCode === undefined) {
+                    this.error(`lite-error: missing rewrite candidate ${i} in ${id}`);
+                }
                 const callArgs = c.argTexts.length ? ", " + c.argTexts.join(", ") : "";
-                const replacement = `ThrowLiteError(${plan.codes[i]}${callArgs})`;
+                const replacement = `ThrowLiteError(${errorCode}${callArgs})`;
                 out = out.slice(0, c.start) + replacement + out.slice(c.end);
             }
             out = `import { ThrowLiteError } from "${plan.importSpecifier}";\n` + out;

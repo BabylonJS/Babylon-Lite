@@ -5,12 +5,12 @@
   "runtimeChunks": [
     "scene178-generate-mipmaps-CoUxFSi3.js",
     "scene178-gltf-ext-iridescence-b4LVniAM.js",
-    "scene178-gltf-feature-registry-DVNodLUZ.js",
+    "scene178-gltf-feature-registry-ChnQ51mU.js",
     "scene178-gltf-glb-parser-C64MI8ya.js",
     "scene178-ibl-fragment-CeRrvT96.js",
     "scene178-ibl-skybox-wgsl-CFIBOHHx.js",
     "scene178-iridescence-fragment-DhGVbSHo.js",
-    "scene178-pbr-renderable-DzpF9zX2.js",
+    "scene178-pbr-renderable-_nCUqZ0w.js",
     "scene178-rgbd-decode-DrDqC6lT.js",
     "scene178-scene-uniforms-FTYH6Ct0.js",
     "scene178.js"

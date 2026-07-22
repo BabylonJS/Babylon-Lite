@@ -7,6 +7,7 @@
  */
 
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { Material, StencilState } from "../material.js";
 import type { MaterialPlugin } from "../plugin/material-plugin.js";
 import {
@@ -97,6 +98,8 @@ export interface StandardMaterialProps extends Material {
     reflectionCoordMode: 1 | 2;
     /** UV tiling scale. Default [1, 1]. */
     uvScale: [number, number];
+    /** Optional UV translation applied after scale. Missing values behave as [0, 0]. */
+    uvOffset?: [number, number];
     /** Back-face culling. Default true (BJS convention). False = double-sided. */
     backFaceCulling: boolean;
     /** When true, skip all lighting and output emissive * diffuse * baseColor. Default false. */
@@ -170,8 +173,8 @@ export function _computeStandardMaterialFeatures(m: StandardMaterialProps): numb
 }
 
 /** @internal Key for Standard shader features, including mesh/pass features. */
-export function _standardFeatureKey(features: number, meshFeatures: number, variant = ""): string {
-    return variant ? `${features}:${meshFeatures}:${variant}` : `${features}:${meshFeatures}`;
+export function _standardFeatureKey(features: number, meshFeatures: number, sceneFeatures: number, variant = ""): string {
+    return variant ? `${features}:${meshFeatures}:${sceneFeatures}:${variant}` : `${features}:${meshFeatures}:${sceneFeatures}`;
 }
 
 /** @internal Key for Standard scene-driven shader variants not encoded in feature bits. */
@@ -186,6 +189,14 @@ export interface FogConfig {
     start: number;
     end: number;
     color: [number, number, number];
+}
+
+/** @internal Per-scene Standard shader inputs whose presence changes emitted WGSL. */
+export interface StandardSceneShaderContext {
+    /** @internal */
+    readonly _features: number;
+    /** @internal */
+    readonly _fragments: readonly ShaderFragment[];
 }
 
 export { collectStdBoundTextures } from "./collect-std-bound-textures.js";
