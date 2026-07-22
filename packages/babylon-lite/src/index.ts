@@ -40,8 +40,10 @@ export type { SceneContextOptions } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { getFloatingOriginOffset } from "./large-world/floating-origin.js";
 
-// Opt-in full error messages. By default Babylon-Lite throws compact coded errors to keep
-// bundles small; calling this loads the message table so errors report their full text.
+// Opt-in full error messages. By default Babylon-Lite throws compact coded errors to keep bundles
+// small; importing either of these pulls in the message table chunk (statically or via a lazy
+// `import()`), so full text is available — `enableErrorDecoding` installs a global decoder and
+// `decodeError` reconstructs a single caught error on demand.
 export { enableErrorDecoding, decodeError } from "./enable-error-decoding.js";
 
 // Subtree visibility toggle (used to hide a node before deferring its disposal,

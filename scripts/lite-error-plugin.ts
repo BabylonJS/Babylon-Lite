@@ -8,8 +8,9 @@
  * At build time it rewrites qualifying `throw new Error(<string|template>)` sites to
  * `ThrowLiteError(code, …interpArgs)` (see `src/lite-error.ts`) and gathers every original
  * message into a single generated `code → message` table that replaces the placeholder body of
- * `src/error-messages.ts`. That table is its own module/chunk and is only pulled in when an app
- * calls `enableErrorDecoding()` — so by default the bundle ships numeric codes, not prose.
+ * `src/error-messages.ts`. That table is its own module/chunk and is only pulled in when the app
+ * references a decoding entry point — `enableErrorDecoding()` (global decoder) or `decodeError()`
+ * (on-demand, single caught error) — so by default the bundle ships numeric codes, not prose.
  *
  * Determinism: codes are assigned in a stable order (relative file path, then source position)
  * during `buildStart`, independent of Vite's parallel per-module `transform` ordering, so the

@@ -3,7 +3,8 @@
  *  The browser/library build rewrites developer-facing `throw new Error("…")` call sites to
  *  `ThrowLiteError(code, …interpArgs)` (see `scripts/lite-error-plugin.ts`), moving the verbose
  *  message text out of every shipped bundle into a separate `code → message` table that is only
- *  loaded when the app opts in via {@link enableErrorDecoding}.
+ *  loaded when the app opts in — by referencing either {@link enableErrorDecoding} (global decoder)
+ *  or {@link decodeError} (on-demand, single caught error); importing either pulls in the table.
  *
  *  Until then a thrown error still self-describes: its message is `#<code>` (e.g. `#12`) and the
  *  runtime values the message would have interpolated are attached to the Error as a `lite`
