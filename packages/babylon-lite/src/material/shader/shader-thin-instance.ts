@@ -171,6 +171,7 @@ function createShaderInstancedRenderable(
             };
         },
     };
+    mesh._runtimeThinBuild = undefined;
     return r;
 }
 

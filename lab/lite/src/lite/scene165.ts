@@ -13,6 +13,7 @@ const fragmentSource = `struct VertexOutput{@builtin(position) position:vec4<f32
 async function main(): Promise<void> {
     const initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const data = canvas.dataset;
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
@@ -67,15 +68,15 @@ async function main(): Promise<void> {
     setThinInstanceColors(box, colorData);
     if (location.search === "?culling") {
         enableThinInstanceGpuCulling(box);
-        canvas.dataset.gpuCulling = "thin-instances";
+        data.gpuCulling = "thin-instances";
     }
     addToScene(scene, box);
 
     await registerScene(scene);
     await startEngine(engine);
-    canvas.dataset.drawCalls = String(engine.drawCallCount);
-    canvas.dataset.initMs = String(performance.now() - initStart);
-    canvas.dataset.ready = "true";
+    data.drawCalls = String(engine.drawCallCount);
+    data.initMs = String(performance.now() - initStart);
+    data.ready = "true";
 }
 
 main().catch((err) => {

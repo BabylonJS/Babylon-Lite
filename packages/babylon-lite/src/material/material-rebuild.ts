@@ -67,7 +67,7 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
     }
     const builder = material._buildGroup;
     const group = ctx._groups.get(builder);
-    if (mesh.thinInstances || ctx._runtimeBuilds?.w || (builder._materialFamily === "pbr" && (ctx._built || group?.r))) {
+    if (mesh._runtimeThinBuild || ctx._runtimeBuilds?.w || (builder._materialFamily === "pbr" && (ctx._built || group?.r))) {
         if (!ctx._built && !group?.r) {
             return false;
         }

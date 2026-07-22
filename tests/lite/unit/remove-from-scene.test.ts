@@ -147,6 +147,5 @@ describe("removeFromScene symmetry", () => {
         removeFromScene(scene, mesh);
         expect([...scene._groups.values()].every((group) => !group.includes(mesh))).toBe(true);
         expect(scene._materialSwapQueue).not.toContain(mesh);
-        expect(scene._materialSwapQueue).not.toContain(mesh);
     });
 });

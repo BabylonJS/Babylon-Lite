@@ -1,10 +1,10 @@
 {
-  "rawKB": 58.8,
+  "rawKB": 58.9,
   "gzipKB": 23.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene90-generate-mipmaps-SRXClq-S.js",
-    "scene90-standard-renderable-CZwvXdpp.js",
+    "scene90-standard-renderable-ClTJgb0i.js",
     "scene90.js"
   ]
 }

@@ -4,6 +4,7 @@ import { addToScene, startEngine, createEngine, createSceneContext, createArcRot
 async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const data = canvas.dataset;
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
@@ -35,17 +36,17 @@ async function main(): Promise<void> {
                 pauseAnimation(g);
             }
             seekDone = true;
-            canvas.dataset.animationFrozen = "true";
+            data.animationFrozen = "true";
         }
     });
 
     await registerScene(scene);
     await startEngine(engine);
     (window as any).__scene = scene;
-    canvas.dataset.camAlpha = String(cam.alpha);
-    canvas.dataset.camRadius = String(cam.radius);
-    canvas.dataset.initMs = String(performance.now() - __initStart);
-    canvas.dataset.ready = "true";
+    data.camAlpha = String(cam.alpha);
+    data.camRadius = String(cam.radius);
+    data.initMs = String(performance.now() - __initStart);
+    data.ready = "true";
 }
 
 main().catch(console.error);

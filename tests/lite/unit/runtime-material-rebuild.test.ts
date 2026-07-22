@@ -113,6 +113,7 @@ describe("runtime material rebuild ownership", () => {
         expect(builder._rebuildSingle).toBe(base);
         expect(Object.getOwnPropertyDescriptor(builder, "_rebuildSingle")?.get).toBeUndefined();
         expect(group.r).not.toBe(base);
+        expect(mesh._runtimeThinBuild).toBeUndefined();
     });
 
     it("deduplicates stable cleanup references without dropping distinct closures", async () => {
