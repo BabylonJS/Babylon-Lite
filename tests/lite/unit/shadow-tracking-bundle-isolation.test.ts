@@ -27,13 +27,16 @@ function runtimeModuleIds(scene: string): string[] {
 }
 
 describe("shadow deformation tracking bundle isolation", () => {
-    it("uses an opt-in hook instead of direct shadow bookkeeping in the shared skeleton updater", () => {
+    it("uses an opt-in hook instead of direct shadow bookkeeping in deformation writers", () => {
         const updater = readFileSync(join(ROOT, "packages", "babylon-lite", "src", "skeleton", "skeleton-updater.ts"), "utf-8");
+        const directUpdater = readFileSync(join(ROOT, "packages", "babylon-lite", "src", "skeleton", "update-skeleton-bone-matrices.ts"), "utf-8");
         const hook = readFileSync(join(ROOT, "packages", "babylon-lite", "src", "animation", "deformation-change-hooks.ts"), "utf-8");
 
-        expect(updater).not.toMatch(/runtime(?:Skeleton|MorphTargets)\._version\s*=/);
-        expect(updater).not.toContain("_onShadowCasterChanged");
-        expect(updater).toContain("_deformationChangeNotifier?.(");
+        for (const writer of [updater, directUpdater]) {
+            expect(writer).not.toMatch(/runtime(?:Skeleton|MorphTargets)\._version\s*=/);
+            expect(writer).not.toContain("_onShadowCasterChanged");
+            expect(writer).toContain("_deformationChangeNotifier?.(");
+        }
         expect(hook).not.toContain("_onShadowCasterChanged");
         expect(hook).not.toContain("_shadowVersion");
     });

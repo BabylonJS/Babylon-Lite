@@ -28,6 +28,7 @@ import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/
 import { renderPcfShadowMap, type PcfLightMatrix, type PcfTaskState } from "../../../packages/babylon-lite/src/shadow/pcf-shadow-task-hooks";
 import { createAnimationController } from "../../../packages/babylon-lite/src/skeleton/skeleton-updater";
 import { writeBoneTextures } from "../../../packages/babylon-lite/src/skeleton/skeleton-pose";
+import { updateSkeletonBoneMatrices } from "../../../packages/babylon-lite/src/skeleton/update-skeleton-bone-matrices";
 
 function identity(): Mat4 {
     return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) as unknown as Mat4;
@@ -303,6 +304,17 @@ describe("shadow caster dirty tracking", () => {
         const device = { queue: { writeTexture } } as unknown as GPUDevice;
 
         writeBoneTextures(device, [skeletonBinding], new Float32Array(identity()));
+
+        expect(changed).toHaveBeenCalledTimes(1);
+    });
+
+    it("notifies the opt-in shadow hook from updateSkeletonBoneMatrices", () => {
+        const changed = vi.fn();
+        const skeleton = makeSkeletonBinding(changed).runtimeSkeleton!;
+        const writeTexture = vi.fn();
+        const engine = { _device: { queue: { writeTexture } } } as unknown as EngineContext;
+
+        updateSkeletonBoneMatrices(engine, skeleton, new Float32Array(identity()));
 
         expect(changed).toHaveBeenCalledTimes(1);
     });
