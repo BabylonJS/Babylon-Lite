@@ -25,6 +25,7 @@ import { enableStandardSkeleton, enableStandardUvOffset } from "babylon-lite/mat
 import { enableStandardVertexColors } from "babylon-lite/material/standard/enable-standard-vertex-colors";
 import { createMeshFromData } from "babylon-lite/mesh/mesh-factories.js";
 import { createSkeleton } from "babylon-lite/skeleton/create-skeleton.js";
+import { updateSkeletonBoneMatrices } from "babylon-lite/skeleton/update-skeleton-bone-matrices.js";
 import { boneMatrixData, buildBeamData, buildCheckerPixels, CHECKER_SIZE, SKELETON_BONE_COUNT, UV_OFFSET } from "../shared/scene231-skin.js";
 
 async function main(): Promise<void> {
@@ -63,13 +64,12 @@ async function main(): Promise<void> {
     mesh.material = material;
 
     const boneData = boneMatrixData(0);
-    mesh.skeleton = createSkeleton(engine, beam.joints, beam.weights, SKELETON_BONE_COUNT, boneData);
+    const skeleton = createSkeleton(engine, beam.joints, beam.weights, SKELETON_BONE_COUNT, boneData);
+    mesh.skeleton = skeleton;
     addToScene(scene, mesh);
 
     // Per-frame programmatic bone animation: recompute the bone matrices as a pure
-    // function of the frame index and re-upload them to the skeleton's bone texture.
-    const boneTexWidth = SKELETON_BONE_COUNT * 4;
-    const boneTexture = mesh.skeleton.boneTexture;
+    // function of the frame index and upload them through the skeleton API.
     scene.fixedDeltaMs = 16.0;
 
     const params = new URLSearchParams(window.location.search);
@@ -84,7 +84,7 @@ async function main(): Promise<void> {
         }
         frame++;
         boneMatrixData(frame, boneData);
-        engine._device.queue.writeTexture({ texture: boneTexture }, boneData.buffer as ArrayBuffer, { bytesPerRow: boneTexWidth * 16 }, { width: boneTexWidth, height: 1 });
+        updateSkeletonBoneMatrices(engine, skeleton, boneData);
         if (freezeFrame >= 0 && frame >= freezeFrame) {
             frozen = true;
             canvas.dataset.animationFrozen = "true";

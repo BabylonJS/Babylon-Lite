@@ -1,6 +1,6 @@
 {
-  "rawKB": 126.7,
-  "gzipKB": 53,
+  "rawKB": 126.9,
+  "gzipKB": 53.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene115-create-morph-targets-BxcR5t59.js",
@@ -18,7 +18,7 @@
     "scene115-morph-fragment-core-BI6CqbCA.js",
     "scene115-pbr-renderable-D9ZC1YM4.js",
     "scene115-pbr-template-ext-CiHpOV5G.js",
-    "scene115-picking-detailed-pipeline-CH9kgEac.js",
+    "scene115-picking-pipeline-C9DxnZjR.js",
     "scene115-shader-composer-DishuYLa.js",
     "scene115-singlelight-hemispheric-wgsl-DWNiaetL.js",
     "scene115-skeleton-fragment-qFN-M46d.js",
