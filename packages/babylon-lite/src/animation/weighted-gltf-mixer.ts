@@ -4,6 +4,7 @@ import type { AnimationGltfMixer, AnimationGroup } from "./animation-group.js";
 import { ANIMATION_GROUP_TASK_CATEGORY, getAnimationGroupOwner, getAnimationGroups } from "./animation-group-task.js";
 import { setAnimationTaskCategoryHandler } from "./animation-manager.js";
 import type { AnimationManager } from "./animation-manager.js";
+import { _deformationChangeNotifier } from "./deformation-change-hooks.js";
 import type { NodeRest, SkeletonBinding } from "./types.js";
 import { PATH_ROTATION, PATH_SCALE, PATH_TRANSLATION } from "./types.js";
 import { evaluateSampler } from "./evaluate.js";
@@ -395,6 +396,8 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
 
         const texWidth = skel.boneCount * 4;
         device.queue.writeTexture({ texture: skel.boneTexture }, boneData.buffer, { bytesPerRow: texWidth * 16 }, { width: texWidth, height: 1 });
+        // Invalidate deformable shadow bounds after the completed pose is available to the caster.
+        _deformationChangeNotifier?.(skel.runtimeSkeleton);
     }
 }
 

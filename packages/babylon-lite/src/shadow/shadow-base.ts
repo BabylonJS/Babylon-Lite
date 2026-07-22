@@ -13,7 +13,7 @@ import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
-import { casterWorldAabb } from "./caster-world-aabb.js";
+import { casterBoundsVersion, casterWorldAabb } from "./caster-world-aabb.js";
 
 /** Write shadow generator state into a Float32Array(24) for UBO upload.
  *  Layout: [lightMatrix(16), depthValues.x, depthValues.y, 0, 0, shadowsInfo(4)] */
@@ -201,14 +201,15 @@ export function createSharedShadowUBO(
     return { ubo, data };
 }
 
-/** Sum caster transform versions plus non-transform geometry/count mutations. */
+/** Sum every state token that can change a cached shadow map. The optional-bounds
+ *  epoch forces one redraw when newly loaded bounds implementations become usable. */
 export function casterVersionSum(casterMeshes: readonly Mesh[]): number {
-    let sum = 0;
+    let sum = casterBoundsVersion();
     for (const mesh of casterMeshes) {
         // Bitwise coercion maps the absent optional version to zero without another branch.
         // Skeleton/morph pose versions cover deformable casters, whose vertices change every
         // frame while the world matrix stays fixed — without them the depth map would freeze.
-        sum += mesh.worldMatrixVersion + ~~(mesh.thinInstances?._version as number) + ~~(mesh.skeleton?._version as number) + ~~(mesh.morphTargets?._version as number);
+        sum += mesh.worldMatrixVersion + ~~(mesh.thinInstances?._version as number) + ~~(mesh.skeleton?._shadowVersion as number) + ~~(mesh.morphTargets?._shadowVersion as number);
     }
     return sum;
 }

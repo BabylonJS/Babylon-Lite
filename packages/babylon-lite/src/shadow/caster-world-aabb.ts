@@ -73,52 +73,68 @@ function worldAabbFromLocalBounds(bmin: readonly number[], bmax: readonly number
     return computeAabb(_corners, world);
 }
 
-// Lazily-resolved skinned-AABB function. The per-bone corner + morph math it needs
-// lives in `skinned-caster-aabb` (which pulls in `aabb-corners`); splitting it behind
-// a dynamic import keeps that ~0.8 KB out of static-caster shadow bundles entirely —
-// they never encounter a skinned caster, so `import()` never fires.
-let _skinnedCasterAabb: ((mesh: Mesh) => Aabb | null) | null = null;
-let _skinnedLoad: Promise<void> | null = null;
+// Optional bounds implementations are installed by the shadow scheduler's async preload.
+// Keeping them behind that boundary leaves this synchronous fitting helper side-effect free
+// and prevents static-caster shadow scenes from fetching deformable or thin-instance math.
+let _deformedCasterAabb: ((mesh: Mesh) => Aabb | null) | null = null;
+let _morphCasterLocalAabb: ((mesh: Mesh) => Aabb | null) | null = null;
+let _thinCasterAabb: ((mesh: Mesh, deformedLocal: Aabb | null | undefined) => Aabb | null) | null = null;
+// Shadow-map dirty checks include this epoch so installing an optional implementation
+// invalidates any map fitted before that implementation became available.
+let _casterBoundsVersion = 0;
 
-/** Enable the posed skinned-caster AABB path when any caster is skinned, otherwise a
- *  resolved no-op. Idempotent and awaitable: the returned promise resolves once the
- *  `import("./skinned-caster-aabb.js")` chunk is fetched and its function installed.
- *
- *  Driven from the async shadow preload (see `shadow-task._preload`), which awaits it
- *  before the first shadow frame, so a skinned caster's frustum tracks its posed
- *  geometry from frame one without `casterWorldAabb` ever touching the dynamic import
- *  on the hot path. Static-caster scenes never call it, so the chunk is never fetched.
- *  The skeleton check lives here (rather than in the filter-agnostic scheduler) so all
- *  skinned-caster knowledge stays in one module. */
-export function enableSkinnedCasterAabb(casterMeshes: readonly Mesh[]): Promise<void> {
-    for (const mesh of casterMeshes) {
-        const skeleton = mesh.skeleton;
-        if (skeleton && skeleton.weights && skeleton.boneMatrices) {
-            _skinnedLoad ??= import("./skinned-caster-aabb.js").then((mod) => {
-                _skinnedCasterAabb = mod.skinnedCasterAabb;
-            });
-            return _skinnedLoad;
-        }
-    }
-    return Promise.resolve();
+/** @internal Local caster bounds shared with optional bounds implementations. */
+export const _localCasterAabb = localCasterAabb;
+
+/** @internal Install the lazily loaded deformable bounds implementation. */
+export function _installDeformedCasterAabb(deformed: (mesh: Mesh) => Aabb | null, morphLocal: (mesh: Mesh) => Aabb | null): void {
+    _deformedCasterAabb = deformed;
+    _morphCasterLocalAabb = morphLocal;
+    _casterBoundsVersion++;
+}
+
+/** @internal Install the lazily loaded thin-instance bounds implementation. */
+export function _installThinCasterAabb(thin: (mesh: Mesh, deformedLocal: Aabb | null | undefined) => Aabb | null): void {
+    _thinCasterAabb = thin;
+    _casterBoundsVersion++;
+}
+
+/** Version of lazily-installed caster-bounds implementations. */
+export function casterBoundsVersion(): number {
+    return _casterBoundsVersion;
 }
 
 /** World-space AABB of a shadow caster, or `null` when it has no usable geometry.
  *
- *  When the skinned path is enabled (see `enableSkinnedCasterAabb`), a skinned caster
- *  returns its current posed bounds (per-bone corners folded through the live bone
- *  matrices) so the frustum follows a mesh the skeleton sweeps across the scene; the
- *  installed function returns `null` for non-skinned meshes, so static casters fall
- *  through. Prefers the mesh's local AABB (derived once from the CPU position mirror
+ *  When the deformable path is enabled, skinned and
+ *  morph-only casters return their current posed bounds. Thin-instanced casters union
+ *  the prototype's local bounds across every active instance transform. Static casters
+ *  prefer the mesh's local AABB (derived once from the CPU position mirror
  *  and cached), folding its 8 corners through the world matrix each call — correct for
  *  both local- and world-authored bounds and O(1) per refit. Falls back to transforming
  *  the stored bound corners for the rare mesh that has no CPU positions; that path
  *  assumes local bounds, preserving the historical behavior for procedural-style
  *  casters. */
 export function casterWorldAabb(mesh: Mesh): Aabb | null {
-    const skinned = _skinnedCasterAabb?.(mesh);
-    if (skinned) {
-        return skinned;
+    if (mesh.thinInstances && mesh.thinInstances.count > 0) {
+        if (!_thinCasterAabb) {
+            return null;
+        }
+        if (mesh.morphTargets && !_morphCasterLocalAabb) {
+            return null;
+        }
+        // The optional argument is intentionally tri-state: undefined means static
+        // prototype bounds, an AABB means posed morph bounds, and null means the
+        // deformable prototype has no usable geometry and must not fall back to static.
+        return _thinCasterAabb(mesh, mesh.morphTargets ? _morphCasterLocalAabb?.(mesh) : undefined);
+    }
+    const deformable = (mesh.skeleton && mesh.skeleton.weights && mesh.skeleton.boneMatrices) || mesh.morphTargets;
+    if (deformable && !_deformedCasterAabb) {
+        return null;
+    }
+    const deformed = _deformedCasterAabb?.(mesh);
+    if (deformed) {
+        return deformed;
     }
     const positions = mesh._cpuPositions;
     if (positions && positions.length >= 3) {

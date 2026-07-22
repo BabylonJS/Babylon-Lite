@@ -11,7 +11,31 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { Task } from "./task.js";
 import { _getShadowTaskCasterMeshes, _setShadowTaskInputPreloader } from "./shadow-inputs.js";
-import { enableSkinnedCasterAabb } from "../shadow/caster-world-aabb.js";
+
+interface ShadowInputLoad {
+    casterMeshes: readonly Mesh[];
+    // Three references per caster: qualifying skeleton, morph targets, thin instances.
+    // Tracking the references catches features added inside an unchanged caster array.
+    boundsInputs: readonly unknown[];
+    ready: boolean;
+    promise: Promise<void>;
+}
+
+const DEFORMABLE_CASTER_BOUNDS = 1;
+const THIN_INSTANCE_CASTER_BOUNDS = 2;
+
+let shadowInputLoads: WeakMap<ShadowGenerator, ShadowInputLoad> | null = null;
+
+function ensureShadowInputReady(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): boolean {
+    const load = shadowInputLoads?.get(shadowGenerator);
+    if (!load || !shadowInputMatches(load, casterMeshes)) {
+        // record/execute are synchronous, so start the scheduler-owned preload without
+        // awaiting it and gate rendering until a later call observes the completed load.
+        void preloadShadowTaskInput(shadowGenerator, casterMeshes);
+        return false;
+    }
+    return load.ready;
+}
 
 /** Scene-owned frame-graph task that schedules shadow-map generation across the scene's shadow generators. */
 export interface ShadowTask extends Task {
@@ -40,11 +64,7 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
                 const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
                 if (sg?._preloadShadowTask && casterMeshes) {
                     shadowGenerators.add(sg);
-                    loads.push(sg._preloadShadowTask(casterMeshes));
-                    // Install the skinned-caster AABB path here (awaited before the first frame) so a
-                    // skinned caster's shadow frustum tracks its posed geometry from frame one, without
-                    // pulling that math into scenes whose casters are all static.
-                    loads.push(enableSkinnedCasterAabb(casterMeshes));
+                    loads.push(preloadShadowTaskInput(sg, casterMeshes));
                 }
             }
             await Promise.all(loads);
@@ -54,7 +74,7 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
             for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
                 const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
-                if (sg?._ensureShadowTaskState && casterMeshes) {
+                if (sg?._ensureShadowTaskState && casterMeshes && ensureShadowInputReady(sg, casterMeshes)) {
                     shadowGenerators.add(sg);
                     const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
                     state._task.record();
@@ -66,7 +86,7 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
             for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
                 const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
-                if (sg?._ensureShadowTaskState && sg._renderShadowMap && casterMeshes) {
+                if (sg?._ensureShadowTaskState && sg._renderShadowMap && casterMeshes && ensureShadowInputReady(sg, casterMeshes)) {
                     shadowGenerators.add(sg);
                     const existing = sg._shadowTaskState ?? null;
                     const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
@@ -94,10 +114,80 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
     return task;
 }
 
-async function preloadShadowTaskInput(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): Promise<void> {
+function preloadShadowTaskInput(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): Promise<void> {
     // Runs when a generator's caster set is (re)supplied (e.g. the Viewer wiring casters after a model
-    // load), giving the skinned-AABB path a head start before rendering when a caster is skinned. The
-    // registration-time `_preload` above awaits the same load, so scenes built through it are correct
-    // from frame one regardless of this fire-and-forget call.
-    await Promise.all([shadowGenerator._preloadShadowTask?.(casterMeshes), enableSkinnedCasterAabb(casterMeshes)]);
+    // load), and when an existing caster gains deformable or thin-instance data. The registration-time
+    // `_preload` above awaits the same load, so scenes built through it are correct from frame one.
+    const existing = shadowInputLoads?.get(shadowGenerator);
+    if (existing && shadowInputMatches(existing, casterMeshes)) {
+        return existing.promise;
+    }
+    const { boundsFeatures, boundsInputs } = captureShadowInputFeatures(casterMeshes);
+    const promise = Promise.all([shadowGenerator._preloadShadowTask?.(casterMeshes), preloadOptionalCasterBounds(casterMeshes, boundsFeatures)]).then(() => {
+        const current = shadowInputLoads?.get(shadowGenerator);
+        // A newer input may have started loading while this promise was pending. Only the
+        // promise still registered for the generator is allowed to open the rendering gate.
+        if (current?.promise === promise) {
+            current.ready = true;
+        }
+    });
+    const load: ShadowInputLoad = { casterMeshes, boundsInputs, ready: false, promise };
+    (shadowInputLoads ??= new WeakMap()).set(shadowGenerator, load);
+    return promise;
+}
+
+function deformableSkeleton(mesh: Mesh): Mesh["skeleton"] | undefined {
+    const skeleton = mesh.skeleton;
+    // A skeleton object alone is not enough: posed CPU bounds require both vertex
+    // influences and the current CPU bone-matrix mirror.
+    return skeleton && skeleton.weights && skeleton.boneMatrices ? skeleton : undefined;
+}
+
+function shadowInputMatches(load: ShadowInputLoad, casterMeshes: readonly Mesh[]): boolean {
+    if (load.casterMeshes !== casterMeshes || load.boundsInputs.length !== casterMeshes.length * 3) {
+        return false;
+    }
+    for (let i = 0; i < casterMeshes.length; i++) {
+        const mesh = casterMeshes[i]!;
+        const offset = i * 3;
+        if (load.boundsInputs[offset] !== deformableSkeleton(mesh) || load.boundsInputs[offset + 1] !== mesh.morphTargets || load.boundsInputs[offset + 2] !== mesh.thinInstances) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function captureShadowInputFeatures(casterMeshes: readonly Mesh[]): { boundsFeatures: number; boundsInputs: unknown[] } {
+    let boundsFeatures = 0;
+    // Allocate the snapshot only when inputs change; matching record/execute calls scan it
+    // allocation-free in shadowInputMatches.
+    const boundsInputs = new Array<unknown>(casterMeshes.length * 3);
+    for (let i = 0; i < casterMeshes.length; i++) {
+        const mesh = casterMeshes[i]!;
+        const skeleton = deformableSkeleton(mesh);
+        const offset = i * 3;
+        boundsInputs[offset] = skeleton;
+        boundsInputs[offset + 1] = mesh.morphTargets;
+        boundsInputs[offset + 2] = mesh.thinInstances;
+        if (skeleton || mesh.morphTargets) {
+            boundsFeatures |= DEFORMABLE_CASTER_BOUNDS;
+        }
+        if (mesh.thinInstances) {
+            boundsFeatures |= THIN_INSTANCE_CASTER_BOUNDS;
+        }
+    }
+    return { boundsFeatures, boundsInputs };
+}
+
+function preloadOptionalCasterBounds(casterMeshes: readonly Mesh[], boundsFeatures: number): Promise<void> {
+    const loads: Promise<void>[] = [];
+    // These imports install synchronous implementations into caster-world-aabb. Keeping
+    // import ownership here makes record-time bounds lookup side-effect free.
+    if (boundsFeatures & DEFORMABLE_CASTER_BOUNDS) {
+        loads.push(import("../shadow/skinned-caster-aabb.js").then((mod) => mod.enableDeformableCasterAabb(casterMeshes)));
+    }
+    if (boundsFeatures & THIN_INSTANCE_CASTER_BOUNDS) {
+        loads.push(import("../shadow/thin-caster-aabb.js").then((mod) => mod.enableThinCasterAabb()));
+    }
+    return Promise.all(loads).then(() => {});
 }

@@ -7,6 +7,7 @@ import type { AnimationClip, NodeRest, SkeletonBinding, AnimatedNodeTarget } fro
 import type { MorphBinding } from "../animation/types.js";
 import type { AnimationGroupMask } from "../animation/animation-group-mask.js";
 import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS, PATH_POINTER } from "../animation/types.js";
+import { _deformationChangeNotifier } from "../animation/deformation-change-hooks.js";
 import { evaluateSampler } from "../animation/evaluate.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
@@ -192,10 +193,6 @@ export function createAnimationController(
 
     let cachedEngine: EngineContext | undefined;
     let uploadGpu = true;
-    // Time of the pose most recently uploaded to the GPU. Used to detect pose
-    // changes so shadow generators re-render the depth map not just during
-    // playback but also when the timeline is scrubbed while paused.
-    let lastAppliedTime = NaN;
 
     // ── Animation mask (include/exclude targets by name) ──────────────────────────
     // `maskedNodes[i] = 1` marks node i's channels to be skipped this playback, so the
@@ -278,15 +275,6 @@ export function createAnimationController(
                       }
                       const t = ctrl.time;
 
-                      // A pose is "dirty" (needs a shadow-map refresh) when it is
-                      // being uploaded to the GPU AND either playback is advancing
-                      // time or the timeline was scrubbed to a new time while paused.
-                      // A static paused pose keeps the same time, so the shadow map
-                      // stays cached.
-                      const poseDirty = uploadGpu && (ctrl.playing || t !== lastAppliedTime);
-                      if (uploadGpu) {
-                          lastAppliedTime = t;
-                      }
                       // 1. Reset to rest-pose TRS
                       for (let i = 0; i < numNodes; i++) {
                           const n = nodes[i]!;
@@ -349,13 +337,9 @@ export function createAnimationController(
                                           // Write the weights array after the immutable header.
                                           if (uploadGpu) {
                                               device!.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 16, morphUploadF32.buffer, 0, tc * 4);
-                                              // Bump the pose counter so shadow generators re-render the depth
-                                              // map while morph weights animate (morphing never dirties the
-                                              // world matrix). Gated on `poseDirty` so a static paused pose
-                                              // stays cached but a scrubbed one refreshes.
-                                              if (poseDirty && mb.runtimeMorphTargets) {
-                                                  mb.runtimeMorphTargets._version = (mb.runtimeMorphTargets._version ?? 0) + 1;
-                                              }
+                                              // Unmasked poses deduplicate by controller/time; masks bypass that
+                                              // because changing a mask can change the pose at a fixed time.
+                                              _deformationChangeNotifier?.(mb.runtimeMorphTargets, maskActive ? undefined : ctrl, t);
                                           }
                                       }
                                   }
@@ -445,13 +429,9 @@ export function createAnimationController(
                                   { bytesPerRow: texWidth * 16 },
                                   { width: texWidth, height: 1 }
                               );
-                              // Bump the pose counter so shadow generators re-render the depth map
-                              // while the skeleton animates (skinning never dirties the world matrix).
-                              // Gated on `poseDirty` so a static paused pose leaves the shadow map
-                              // cached but a scrubbed one refreshes.
-                              if (poseDirty && skel.runtimeSkeleton) {
-                                  skel.runtimeSkeleton._version = (skel.runtimeSkeleton._version ?? 0) + 1;
-                              }
+                              // Unmasked poses deduplicate by controller/time; masks bypass that
+                              // because changing a mask can change the pose at a fixed time.
+                              _deformationChangeNotifier?.(skel.runtimeSkeleton, maskActive ? undefined : ctrl, t);
                           }
                       }
                   },
