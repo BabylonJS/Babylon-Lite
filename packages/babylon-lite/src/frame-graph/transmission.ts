@@ -84,6 +84,28 @@ let blitDevice: GPUDevice | null = null;
 /** Enable scene-color transmission for every render task currently registered in a scene. PBR materials are marked for linear transmission, and a trailing image-processing task is appended when needed. */
 export function enableSceneTransmission(scene: SceneContext, engine: EngineContext): void {
     markPbrMaterialsLinear(scene);
+    enableSceneTransmissionTasks(scene, engine);
+}
+
+/** @internal Prepare linear PBR flags, then commit transmission only after renderable construction succeeds. */
+export function _t(scene: SceneContext, engine: EngineContext): readonly [commit: () => void, rollback: () => void] {
+    const states = scene.meshes.map((mesh) => {
+        const mat = mesh.material as { _linearImageProcessing?: boolean; _renderFeatures?: unknown };
+        return [mat, mat._linearImageProcessing] as const;
+    });
+    markPbrMaterialsLinear(scene);
+    return [
+        () => enableSceneTransmissionTasks(scene, engine),
+        () => {
+            for (const [mat, linear] of states) {
+                mat._linearImageProcessing = linear;
+                mat._renderFeatures = undefined;
+            }
+        },
+    ];
+}
+
+function enableSceneTransmissionTasks(scene: SceneContext, engine: EngineContext): void {
     let lastRenderTask: RenderTask | null = null;
     for (const task of scene._frameGraph._tasks) {
         if ("_renderables" in task) {

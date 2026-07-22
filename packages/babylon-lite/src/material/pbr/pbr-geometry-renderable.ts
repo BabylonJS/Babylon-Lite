@@ -89,7 +89,11 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const engine = scene.surface.engine;
     const device = engine._device;
 
-    const ctx = (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext;
+    const sceneState = scene as SceneContext & {
+        _pbrGeomContext?: _PbrGeometryContext;
+        _pbrMeshGeomContexts?: WeakMap<Mesh, _PbrGeometryContext>;
+    };
+    const ctx = sceneState._pbrMeshGeomContexts?.get(mesh) ?? sceneState._pbrGeomContext;
     if (!ctx) {
         throw new Error("buildPbrGeometryRenderable: scene has no PBR context. Ensure regular PBR meshes have been built before recording the geometry task.");
     }

@@ -222,7 +222,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     ]);
     if (hasTransmissionRefraction) {
         const mod = await import("./pbr-refraction.js");
-        await mod.registerPbrRefraction(scene as SceneContext, engine, _registerPbrExt);
+        await mod.R(scene as SceneContext, engine, _registerPbrExt);
     }
     await _drainPbrExts([
         [needsEmissiveColor, () => import("./fragments/emissive-fragment.js")],
@@ -328,11 +328,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // material-swap / per-pass-override rebuilds (set on pbrGroupBuilder._rebuildSingle).
     // Captures the per-scene context — no separate WeakMap needed.
     const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
-        const materialInput = (materialOverride ?? mesh.material) as PbrMaterialProps;
-        const mat = materialInput;
+        const mat = (materialOverride ?? mesh.material) as PbrMaterialProps;
         const renderFeatures = (mat._renderFeatures ??= _computePbrMaterialFeatures(mat)) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
-        const mi = mesh;
 
         const lr = writeMeshLightSelection(mesh, s.lights);
         const lightCount = lr > 0 ? 1 : -lr;
@@ -348,8 +346,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         // Genuine GPU interleaving. Tight meshes have `_vbLayout` undefined → vbKey ""
         // → composed shader, bindings, and pipeline cache keys are byte-identical to
         // today. Interleaved meshes carry a precomputed vbKey from the loader module.
-        const vbLayout = mi._gpu._vbLayout;
-        const vbKey = mi._gpu._vbKey ?? "";
+        const vbLayout = mesh._gpu._vbLayout;
+        const vbKey = mesh._gpu._vbKey ?? "";
         const uv2Mask = (mat as { _uv2Mask?: number })._uv2Mask ?? 0;
 
         const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey, uv2Mask);
@@ -475,10 +473,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             materialBindGroup: GPUBindGroup,
             cullBinding?: import("../../mesh/thin-instance-cull-binding.js").TiCullBinding
         ): number => {
-            if (!isOverride && mesh.material !== materialInput) {
+            if (!isOverride && mesh.material !== mat) {
                 return 0;
             }
-            const gpu = mi._gpu;
+            const gpu = mesh._gpu;
             pass.setBindGroup(1, materialBindGroup);
             if (shadowBindGroup) {
                 pass.setBindGroup(2, shadowBindGroup);

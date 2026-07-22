@@ -346,11 +346,11 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolvePendingMeshes(task: RenderTask, sc: SceneContext): void {
-    if (task._pendingMeshes.length === 0) {
+    if (!task._pendingMeshes.length) {
         return;
     }
     for (const { mesh, material } of task._pendingMeshes) {
-        const rebuild = material._buildGroup?._rebuildSingle;
+        const rebuild = sc._groups.get(material._buildGroup)?.r ?? material._buildGroup._rebuildSingle;
         if (!rebuild) {
             throw new Error();
         }

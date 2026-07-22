@@ -4,6 +4,8 @@ import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-
 import { addToScene } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { AssetContainer } from "../../../packages/babylon-lite/src/asset-container";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import type { MeshGroupBuilder } from "../../../packages/babylon-lite/src/render/renderable";
 
 function fakeScene(): SceneContext {
     return {
@@ -115,5 +117,36 @@ describe("removeFromScene symmetry", () => {
 
         expect(removeMesh).toHaveBeenCalledWith(mesh);
         expect(destroyed).toBe(true);
+    });
+
+    it("removes a mesh from every material group while a material migration is pending", () => {
+        const scene = fakeScene();
+        const oldBuilder = (() => undefined) as unknown as MeshGroupBuilder;
+        const newBuilder = (() => undefined) as unknown as MeshGroupBuilder;
+        const destroy = vi.fn();
+        const mesh = {
+            _gpu: {
+                positionBuffer: { destroy },
+                normalBuffer: { destroy },
+                uvBuffer: { destroy },
+                indexBuffer: { destroy },
+                tangentBuffer: null,
+                uv2Buffer: null,
+                colorBuffer: null,
+            },
+            material: { _buildGroup: newBuilder },
+            children: [],
+            parent: null,
+        } as unknown as Mesh;
+
+        scene.meshes.push(mesh);
+        scene._groups.set(oldBuilder, [mesh]);
+        scene._groups.set(newBuilder, []);
+        scene._materialSwapQueue.push(mesh);
+
+        removeFromScene(scene, mesh);
+        expect([...scene._groups.values()].every((group) => !group.includes(mesh))).toBe(true);
+        expect(scene._materialSwapQueue).not.toContain(mesh);
+        expect(scene._materialSwapQueue).not.toContain(mesh);
     });
 });

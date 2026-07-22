@@ -2,13 +2,25 @@ import type { SceneContext } from "./scene-core.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 /** @internal Drain _materialSwapQueue: dispose old resources and rebuild renderables. */
-export function processMaterialSwaps(scene: SceneContext): void {
+export function processMaterialSwaps(scene: SceneContext): Promise<void> | void {
     const q = scene._materialSwapQueue;
-    if (q.length === 0) {
+    if (!q[0]) {
         return;
     }
-    const engine = scene.surface.engine;
+    if (scene._runtimeBuilds?.w) {
+        return;
+    }
+    let pending: Promise<void> | undefined;
     for (const mesh of q) {
+        const mat = mesh.material;
+        const builder = mat._buildGroup;
+        const group = scene._groups?.get(builder);
+        if (mesh.thinInstances || (scene._groups && (!group?.r || builder._materialFamily === "pbr" || !group.includes(mesh)))) {
+            pending = import("./scene-runtime-mesh-build.js").then((module) => module.B(scene, builder, mesh));
+            continue;
+        }
+        const rebuild = group?.r ?? builder._rebuildSingle;
+
         const old = scene._meshDisposables.get(mesh);
         if (old) {
             scene._meshDisposables.delete(mesh);
@@ -19,41 +31,19 @@ export function processMaterialSwaps(scene: SceneContext): void {
             // plugin / shadow-receiver variant change swaps a planted mesh's material — e.g. planting a
             // fern or agave). The new renderable is rebuilt below and replaces the old one, so nothing
             // records the old resources again; retire the teardown after the next submitted frame drains.
-            retireGpuResources(engine, () => {
-                for (const fn of old) {
-                    fn();
-                }
-            });
+            retireGpuResources(scene.surface.engine, () => old.forEach((fn) => fn()));
         }
-        for (let i = scene._renderables.length - 1; i >= 0; i--) {
-            if (scene._renderables[i]!.mesh === mesh) {
-                scene._renderables.splice(i, 1);
-            }
-        }
+        scene._renderables = scene._renderables.filter((renderable) => renderable.mesh !== mesh);
 
-        const mat = mesh.material;
-        const builder = mat?._buildGroup;
-        if (!builder) {
-            continue;
-        }
-        const rebuild = builder._rebuildSingle;
-        if (!rebuild) {
-            continue;
-        }
         // Per-material generation: the CSM caster-view cache keys off THIS (which material was rebuilt), not the
         // global _materialEpoch (which also bumps when an unrelated material is swapped), so swapping a non-caster
         // material doesn't force a full shadow rebuild. See ensureCsmShadowTaskState.
-        (mat as { _csmGen?: number })._csmGen = ((mat as { _csmGen?: number })._csmGen ?? 0) + 1;
-        const renderable = rebuild(scene, mesh);
-        // Insert by `order` so the renderable list stays sorted (frame-graph
-        // tasks bucket opaque/direct/transparent at bind time).
-        let i = scene._renderables.length;
-        while (i > 0 && scene._renderables[i - 1]!.order > renderable.order) {
-            i--;
-        }
-        scene._renderables.splice(i, 0, renderable);
+        mat._csmGen = (mat._csmGen || 0) + 1;
+        scene._renderables.push(rebuild!(scene, mesh));
     }
     q.length = 0;
+    scene._renderables.sort((a, b) => a.order - b.order);
     scene._renderableVersion++;
     scene._materialEpoch++; // a caster's material UBOs were rebuilt → CSM-style view caches must fully rebuild
+    return pending;
 }
