@@ -1,9 +1,9 @@
 {
-  "rawKB": 49.4,
-  "gzipKB": 19.8,
+  "rawKB": 49.5,
+  "gzipKB": 20,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene16-standard-renderable-DDev7TwY.js",
+    "scene16-standard-renderable-DB1gNb-f.js",
     "scene16-thin-instance-fragment-CBn2miAC.js",
     "scene16-thin-instance-gpu-d2Yv33aN.js",
     "scene16.js"

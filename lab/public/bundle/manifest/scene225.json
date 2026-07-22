@@ -1,9 +1,9 @@
 {
-  "rawKB": 58,
-  "gzipKB": 23.3,
+  "rawKB": 58.1,
+  "gzipKB": 23.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene225-standard-renderable-CDHZKosb.js",
+    "scene225-standard-renderable-CKOrPdJM.js",
     "scene225.js"
   ]
 }
