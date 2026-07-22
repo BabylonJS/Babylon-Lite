@@ -21,8 +21,9 @@ interface ShadowInputLoad {
     promise: Promise<void>;
 }
 
-const DEFORMABLE_CASTER_BOUNDS = 1;
-const THIN_INSTANCE_CASTER_BOUNDS = 2;
+const SKINNED_CASTER_BOUNDS = 1;
+const MORPH_CASTER_BOUNDS = 2;
+const THIN_INSTANCE_CASTER_BOUNDS = 4;
 
 let shadowInputLoads: WeakMap<ShadowGenerator, ShadowInputLoad> | null = null;
 
@@ -169,8 +170,11 @@ function captureShadowInputFeatures(casterMeshes: readonly Mesh[]): { boundsFeat
         boundsInputs[offset] = skeleton;
         boundsInputs[offset + 1] = mesh.morphTargets;
         boundsInputs[offset + 2] = mesh.thinInstances;
-        if (skeleton || mesh.morphTargets) {
-            boundsFeatures |= DEFORMABLE_CASTER_BOUNDS;
+        if (skeleton) {
+            boundsFeatures |= SKINNED_CASTER_BOUNDS;
+        }
+        if (mesh.morphTargets) {
+            boundsFeatures |= MORPH_CASTER_BOUNDS;
         }
         if (mesh.thinInstances) {
             boundsFeatures |= THIN_INSTANCE_CASTER_BOUNDS;
@@ -183,8 +187,11 @@ function preloadOptionalCasterBounds(casterMeshes: readonly Mesh[], boundsFeatur
     const loads: Promise<void>[] = [];
     // These imports install synchronous implementations into caster-world-aabb. Keeping
     // import ownership here makes record-time bounds lookup side-effect free.
-    if (boundsFeatures & DEFORMABLE_CASTER_BOUNDS) {
-        loads.push(import("../shadow/skinned-caster-aabb.js").then((mod) => mod.enableDeformableCasterAabb(casterMeshes)));
+    if (boundsFeatures & SKINNED_CASTER_BOUNDS) {
+        loads.push(import("../shadow/skinned-caster-aabb.js").then((mod) => mod.enableSkinnedCasterAabb(casterMeshes)));
+    }
+    if (boundsFeatures & MORPH_CASTER_BOUNDS) {
+        loads.push(import("../shadow/morph-caster-aabb.js").then((mod) => mod.enableMorphCasterAabb(casterMeshes)));
     }
     if (boundsFeatures & THIN_INSTANCE_CASTER_BOUNDS) {
         loads.push(import("../shadow/thin-caster-aabb.js").then((mod) => mod.enableThinCasterAabb()));

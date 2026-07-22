@@ -45,7 +45,7 @@ describe.sequential("shadow caster bounds", () => {
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
         const mesh = makeMesh({ skeleton: makeSkeleton(10) });
 
-        const preload = import("../../../packages/babylon-lite/src/shadow/skinned-caster-aabb").then((mod) => mod.enableDeformableCasterAabb([mesh]));
+        const preload = import("../../../packages/babylon-lite/src/shadow/skinned-caster-aabb").then((mod) => mod.enableSkinnedCasterAabb([mesh]));
         const beforeLoad = casterWorldAabb(mesh);
         await preload;
         const afterLoad = casterWorldAabb(mesh);
@@ -58,14 +58,14 @@ describe.sequential("shadow caster bounds", () => {
     it("uses active morph weights for a morph-only caster", async () => {
         vi.resetModules();
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
-        const { enableDeformableCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/skinned-caster-aabb");
+        const { enableMorphCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/morph-caster-aabb");
         const morphTargets = {
             count: 1,
             weights: new Float32Array([0.5]),
             targets: [{ positions: new Float32Array([12, 0, 0, 12, 0, 0]), normals: null }],
         } as unknown as MorphTargetData;
         const mesh = makeMesh({ morphTargets });
-        await enableDeformableCasterAabb([mesh]);
+        enableMorphCasterAabb([mesh]);
 
         const aabb = casterWorldAabb(mesh);
 
@@ -76,7 +76,7 @@ describe.sequential("shadow caster bounds", () => {
     it("reuses cached morph delta ranges when animated weights change", async () => {
         vi.resetModules();
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
-        const { enableDeformableCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/skinned-caster-aabb");
+        const { enableMorphCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/morph-caster-aabb");
         let deltaReads = 0;
         // Getter-backed array-like data proves a weight-only update reuses the cached
         // per-target ranges instead of silently rescanning every morph delta.
@@ -101,7 +101,7 @@ describe.sequential("shadow caster bounds", () => {
             ],
         } as unknown as MorphTargetData;
         const mesh = makeMesh({ morphTargets });
-        enableDeformableCasterAabb([mesh]);
+        enableMorphCasterAabb([mesh]);
 
         expect(casterWorldAabb(mesh)?.[0][0]).toBeCloseTo(-1.5);
         expect(casterWorldAabb(mesh)?.[1][0]).toBeCloseTo(2.5);
@@ -118,9 +118,9 @@ describe.sequential("shadow caster bounds", () => {
     it("rebuilds cached skinned bounds after mutable geometry is replaced", async () => {
         vi.resetModules();
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
-        const { enableDeformableCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/skinned-caster-aabb");
+        const { enableSkinnedCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/skinned-caster-aabb");
         const mesh = makeMesh({ skeleton: makeSkeleton() });
-        await enableDeformableCasterAabb([mesh]);
+        enableSkinnedCasterAabb([mesh]);
 
         const original = casterWorldAabb(mesh);
         mesh._cpuPositions = new Float32Array([10, 0, 0, 12, 0, 0]);
@@ -209,7 +209,7 @@ describe.sequential("shadow caster bounds", () => {
     it("combines active morph bounds with every thin-instance transform", async () => {
         vi.resetModules();
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
-        const { enableDeformableCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/skinned-caster-aabb");
+        const { enableMorphCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/morph-caster-aabb");
         const { enableThinCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/thin-caster-aabb");
         const matrices = new Float32Array(32);
         matrices.set(identity(), 0);
@@ -228,7 +228,7 @@ describe.sequential("shadow caster bounds", () => {
                 _version: 1,
             } as unknown as ThinInstanceData,
         });
-        enableDeformableCasterAabb([mesh]);
+        enableMorphCasterAabb([mesh]);
         enableThinCasterAabb();
 
         const aabb = casterWorldAabb(mesh);

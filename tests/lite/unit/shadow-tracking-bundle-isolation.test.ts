@@ -49,12 +49,20 @@ describe("shadow deformation tracking bundle isolation", () => {
             "Directional-shadow scene must contain shadow caster bounds"
         ).toBe(true);
         expect(
-            staticShadowModules.some((id) => id.endsWith("/shadow/skinned-caster-aabb.js") || id.endsWith("/shadow/thin-caster-aabb.js")),
+            staticShadowModules.some(
+                (id) => id.endsWith("/shadow/skinned-caster-aabb.js") || id.endsWith("/shadow/morph-caster-aabb.js") || id.endsWith("/shadow/thin-caster-aabb.js")
+            ),
             "Static shadow scene must not load optional caster bounds"
         ).toBe(false);
         expect(
             runtimeModuleIds("scene5").some((id) => id.endsWith(casterBoundsModule)),
             "No-shadow skeleton scene must not contain shadow caster bounds"
         ).toBe(false);
+    });
+
+    it.skipIf(!existsSync(join(BUNDLE_DIR, "scene140.js")))("keeps skeletal bounds out of a morph-only shadow bundle", () => {
+        const modules = runtimeModuleIds("scene140");
+        expect(modules.some((id) => id.endsWith("/shadow/morph-caster-aabb.js"))).toBe(true);
+        expect(modules.some((id) => id.endsWith("/shadow/skinned-caster-aabb.js") || id.endsWith("/mesh/aabb-corners.js"))).toBe(false);
     });
 });
