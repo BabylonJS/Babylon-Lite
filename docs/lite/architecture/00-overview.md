@@ -62,6 +62,7 @@ Pages are ordered by how commonly Babylon Lite users reach for them — start wi
 | [40-material-stencil.md](40-material-stencil.md)                   | Material Stencil         | Opt-in `enableMaterialStencil` per-material stencil mask/test on Standard/PBR/Shader, zero-impact hook |
 | [41-audio-engine.md](41-audio-engine.md)                           | Audio Engine             | Web Audio playback, buses, 3D spatial, panning, analyser, microphone, unmute UI                       |
 | [42-physics.md](42-physics.md)                                     | Physics                  | Havok V2 world, bodies/shapes/aggregates, timestep & delta propagation, collision/trigger/query/character |
+| [49-error-handling.md](49-error-handling.md)                       | Error Handling           | Coded errors by default; `enableErrorDecoding` (always-on) vs `decodeError` (on-the-fly, e.g. telemetry)   |
 
 ---
 

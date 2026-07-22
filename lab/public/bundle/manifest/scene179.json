@@ -1,12 +1,12 @@
 {
-  "rawKB": 74,
-  "gzipKB": 30.3,
+  "rawKB": 73.7,
+  "gzipKB": 30.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene179-alpha-test-fragment-5wiD0rFT.js",
-    "scene179-generate-mipmaps-5DBI-Po-.js",
-    "scene179-gltf-json-asset-DHBJMSDr.js",
-    "scene179-pbr-renderable-dLmUnRSQ.js",
+    "scene179-alpha-test-fragment-BQ_UQdig.js",
+    "scene179-generate-mipmaps-DeEG6XrR.js",
+    "scene179-gltf-json-asset-DLlF5gVi.js",
+    "scene179-pbr-renderable-B26Qb-QL.js",
     "scene179.js"
   ]
 }

@@ -6,6 +6,7 @@ import remapping from "@ampproject/remapping";
 import { trimInternalDts } from "../../scripts/vite-trim-internal-dts";
 import { wgslMinifyPlugin } from "../../scripts/wgsl-minify-plugin";
 import { stripManifoldNodeRequire } from "../../scripts/strip-manifold-node-require";
+import { liteErrorPlugin } from "../../scripts/lite-error-plugin";
 
 /**
  * api-extractor's trim pass works around #4260 by dropping top-level imports kept
@@ -561,6 +562,7 @@ export default defineConfig(({ mode }) => {
             },
             plugins: [
                 stripManifoldNodeRequire(),
+                liteErrorPlugin(),
                 // `mangle: false` — strip WGSL whitespace/comments but do NOT short-rename
                 // identifiers (the per-chunk mangler is unsafe across the package's many
                 // code-split chunks). `templates: false` — only minify `?raw` `.wgsl` files,
@@ -624,6 +626,13 @@ export default defineConfig(({ mode }) => {
             format: "es" as const,
             plugins: () => [minifyInlinedWorker()],
         },
-        plugins: [stripManifoldNodeRequire(), wgslMinifyPlugin({ mangle: false, templates: false }), stripInlinedWorkerSourcemap(), emitPackageJson(), emitThirdPartyNotices()],
+        plugins: [
+            stripManifoldNodeRequire(),
+            liteErrorPlugin(),
+            wgslMinifyPlugin({ mangle: false, templates: false }),
+            stripInlinedWorkerSourcemap(),
+            emitPackageJson(),
+            emitThirdPartyNotices(),
+        ],
     };
 });

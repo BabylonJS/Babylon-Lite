@@ -23,7 +23,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import type { BillboardOrientation, BillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 import { BILLBOARD_INSTANCE_STRIDE_BYTES } from "../sprite/billboard-sprite.js";
-import { getPickingSceneBGL } from "./picking-pipeline.js";
+import { getPickingSceneBGL } from "./picking-scene-bgl.js";
 import type { PickContributor, PickPassContext } from "./pick-contributor.js";
 import { getViewMatrix } from "../camera/camera.js";
 
@@ -94,7 +94,7 @@ return B(r, -a);
     }
 }
 
-function makeBillboardPickWgsl(orientation: BillboardOrientation, isCutout: boolean): string {
+function makeBillboardPickWgsl(orientation: BillboardOrientation, isCutout: boolean, detailed: boolean): string {
     const cutoutBindings = isCutout
         ? `@group(1) @binding(1) var atlasTex: texture_2d<f32>;
 @group(1) @binding(2) var atlasSamp: sampler;`
@@ -150,7 +150,7 @@ out.pickId = bb.baseId + in.iid;
 ${uvAssign}
 return out;
 }
-struct FsOut { @location(0) color: vec4f, @location(1) depth: vec4f };
+struct FsOut { @location(0) color: vec4f, @location(1) depth: f32${detailed ? ", @location(2) detail: vec4u" : ""} };
 @fragment
 fn fs(in: O) -> FsOut {
 ${cutoutDiscard}
@@ -158,7 +158,7 @@ let id = in.pickId;
 let r = f32((id >> 16u) & 0xFFu) / 255.0;
 let g = f32((id >> 8u) & 0xFFu) / 255.0;
 let b = f32(id & 0xFFu) / 255.0;
-return FsOut(vec4f(r, g, b, 1.0), vec4f(in.p.z, 0.0, 0.0, 0.0));
+return FsOut(vec4f(r, g, b, 1.0), in.p.z${detailed ? ", vec4u(0xffffffffu, 0u, 0u, 0u)" : ""});
 }`;
 }
 
@@ -195,17 +195,17 @@ function getGroup1Bgl(engine: EngineContext, cache: BillboardPickCache, isCutout
     return bgl;
 }
 
-function getPickPipeline(engine: EngineContext, system: BillboardSpriteSystem): GPURenderPipeline {
+function getPickPipeline(engine: EngineContext, system: BillboardSpriteSystem, detailed: boolean): GPURenderPipeline {
     const cache = getCache(engine);
     const orientation = system._orientation;
     const isCutout = system._depthMode === "cutout";
-    const key = `${orientation}|${isCutout ? 1 : 0}`;
+    const key = `${orientation}|${isCutout ? 1 : 0}|${detailed ? "detailed" : "basic"}`;
     const cached = cache.pipelines.get(key);
     if (cached) {
         return cached;
     }
     const device = engine._device;
-    const module = device.createShaderModule({ label: `billboard-pick-${key}`, code: makeBillboardPickWgsl(orientation, isCutout) });
+    const module = device.createShaderModule({ label: `billboard-pick-${key}`, code: makeBillboardPickWgsl(orientation, isCutout, detailed) });
     const group1Bgl = getGroup1Bgl(engine, cache, isCutout);
     const pipeline = device.createRenderPipeline({
         label: `billboard-pick-pipeline-${key}`,
@@ -228,7 +228,13 @@ function getPickPipeline(engine: EngineContext, system: BillboardSpriteSystem): 
                 },
             ],
         },
-        fragment: { module, entryPoint: "fs", targets: [{ format: "rgba8unorm", writeMask: CW.ALL }, { format: "r32float" }] },
+        fragment: {
+            module,
+            entryPoint: "fs",
+            targets: detailed
+                ? [{ format: "rgba8unorm", writeMask: CW.ALL }, { format: "r32float" }, { format: "rgba32uint" }]
+                : [{ format: "rgba8unorm", writeMask: CW.ALL }, { format: "r32float" }],
+        },
         // Match the mesh picker: reverse-Z depth (clear 0, "greater") so a billboard occluded by a
         // mesh — or by a nearer billboard — loses the pick. Write depth so billboards occlude too.
         primitive: { topology: "triangle-list", cullMode: "none" },
@@ -305,7 +311,8 @@ export function drawBillboardForPicking(
     system: BillboardSpriteSystem,
     res: BillboardPickResources,
     baseId: number,
-    view: Mat4
+    view: Mat4,
+    detailed = false
 ): void {
     const device = engine._device;
     const count = system.count;
@@ -332,7 +339,7 @@ export function drawBillboardForPicking(
     packBillboardPickUbo(view, baseId, cutoff, system._axis, res.uboF32, res.uboU32);
     device.queue.writeBuffer(res.ubo, 0, res.uboScratch, 0, BILLBOARD_PICK_UBO_BYTES);
 
-    pass.setPipeline(getPickPipeline(engine, system));
+    pass.setPipeline(getPickPipeline(engine, system, detailed));
     pass.setBindGroup(1, res.bindGroup);
     pass.setIndexBuffer(res.indexBuffer, "uint16");
     pass.setVertexBuffer(0, res.instanceBuffer);
@@ -354,7 +361,7 @@ export function drawBillboardForPicking(
  */
 export function drawBillboardSystemForPicking(ctx: PickPassContext, system: BillboardSpriteSystem, res: BillboardPickResources, baseId: number): void {
     ctx.pass.setBindGroup(0, ctx.sceneBG);
-    drawBillboardForPicking(ctx.pass, ctx.engine, system, res, baseId, getViewMatrix(ctx.camera));
+    drawBillboardForPicking(ctx.pass, ctx.engine, system, res, baseId, getViewMatrix(ctx.camera), ctx.detailed);
 }
 
 /** Build the pick contributor for one billboard system. The picker calls this once (via the pick
