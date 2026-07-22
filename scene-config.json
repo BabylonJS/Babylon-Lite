@@ -2299,5 +2299,16 @@
         "description": "Full-frame affine RGBA vertex-color gradient on an unlit white StandardMaterial. Validates color-buffer binding, interpolation, and multiplication into StandardMaterial base color.",
         "tags": ["standard", "vertex-color", "procedural"],
         "skipPerf": true
+    },
+    {
+        "id": 268,
+        "slug": "scene268-npe-animations",
+        "name": "Scene 268 — NPE Particles: Animations 2 (sprite sheet)",
+        "maxMad": 0.01,
+        "maxRawKB": 45,
+        "description": "Node Particle Editor graph (a classic sprite-sheet ParticleSystem — isAnimationSheetEnabled with spriteCellChangeSpeed 30 over cells 0..9 of a 64×64 grid, looped — converted to NPE via ConvertToNodeParticleSystemSetAsync, mirroring Babylon.js visual test 'Particles - Animations 2', playground #CBXIIX#0) rendered as camera-facing additive billboards through the pay-for-use SoA particle runtime, with a deterministic seeded RNG and a frozen frame.",
+        "tags": ["npe", "particles", "billboards", "sprite-sheet"],
+        "skipPerf": true,
+        "compatParity": true
     }
 ]

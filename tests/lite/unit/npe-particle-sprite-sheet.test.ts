@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SCENE265_NPE_JSON as animations2Graph } from "../../../lab/lite/src/shared/scene265-npe";
+import { SCENE268_NPE_JSON as animations2Graph } from "../../../lab/lite/src/shared/scene268-npe";
 import animations2States from "./fixtures/sprite-sheet-states.json";
 import animations1Graph from "./fixtures/sprite-sheet-random-npe.json";
 import animations1States from "./fixtures/sprite-sheet-random-states.json";
@@ -24,6 +24,22 @@ interface BjsParticle {
 
 type StatesFixture = { N: number; count: number; particles: BjsParticle[] };
 
+function withoutSpriteSetup(graph: unknown): unknown {
+    const source = structuredClone(graph) as {
+        blocks: Array<{
+            customType: string;
+            inputs: Array<{ name: string; targetBlockId?: number; targetConnectionName?: string }>;
+        }>;
+    };
+    const setup = source.blocks.find((block) => block.customType === "BABYLON.SetupSpriteSheetBlock")!;
+    const update = source.blocks.find((block) => block.customType === "BABYLON.BasicSpriteUpdateBlock")!;
+    const setupParticle = setup.inputs.find((input) => input.name === "particle")!;
+    const updateParticle = update.inputs.find((input) => input.name === "particle")!;
+    updateParticle.targetBlockId = setupParticle.targetBlockId;
+    updateParticle.targetConnectionName = setupParticle.targetConnectionName;
+    return source;
+}
+
 /**
  * CPU determinism test for the sprite-sheet animation blocks (`SetupSpriteSheetBlock` +
  * `BasicSpriteUpdateBlock`), converted from the classic "Particles - Animations" systems. Two variants:
@@ -39,6 +55,11 @@ const CASES: { name: string; graph: unknown; truth: StatesFixture }[] = [
 ];
 
 describe("NPE sprite-sheet animation — deterministic parity with Babylon.js", () => {
+    it("rejects BasicSpriteUpdateBlock without SetupSpriteSheetBlock", async () => {
+        const graph = parseNodeParticleSource(withoutSpriteSetup(animations2Graph));
+        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow("BasicSpriteUpdateBlock requires SetupSpriteSheetBlock");
+    });
+
     for (const testCase of CASES) {
         it(`${testCase.name} reproduces Babylon.js states (incl. cellIndex) after ${testCase.truth.N} steps`, async () => {
             const graph = parseNodeParticleSource(testCase.graph);

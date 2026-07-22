@@ -1,0 +1,26 @@
+{
+  "rawKB": 41.9,
+  "gzipKB": 25.3,
+  "ignoredRawKB": 29.6,
+  "runtimeChunks": [
+    "scene268-basic-sprite-update-block-BO83ELHO.js",
+    "scene268-billboard-renderable-Dra5_vLM.js",
+    "scene268-box-shape-block-GpRjrMBZ.js",
+    "scene268-contextual-B2Lj888Y.js",
+    "scene268-create-particle-block-Ck2dBxWH.js",
+    "scene268-generate-mipmaps-BnaIWiv-.js",
+    "scene268-particle-converter-block-CVHvXC1Y.js",
+    "scene268-particle-input-block-idWojUbt.js",
+    "scene268-particle-lerp-block-DmOawfA2.js",
+    "scene268-particle-math-compact-block-ByPuhMSa.js",
+    "scene268-particle-random-block-BMyoDxwS.js",
+    "scene268-random-range-CfhNtuAB.js",
+    "scene268-registry-extra-6Az2hnF2.js",
+    "scene268-setup-sprite-sheet-block-DY4YuCm8.js",
+    "scene268-system-block-BbHhC8Zi.js",
+    "scene268-texture-source-block-BgW776xr.js",
+    "scene268-update-color-block-DU8lVeuG.js",
+    "scene268-update-position-block-DQ-fau8B.js",
+    "scene268.js"
+  ]
+}

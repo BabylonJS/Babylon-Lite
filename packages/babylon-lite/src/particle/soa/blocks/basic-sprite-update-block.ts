@@ -8,8 +8,12 @@ import type { SoaBlockEvaluator } from "../npe-build.js";
 export const basicSpriteUpdateBlock: SoaBlockEvaluator = {
     build(_block, ctx) {
         const system = ctx.state.system!;
+        const sheet = system._spriteSheet;
+        if (!sheet) {
+            throw new Error("SoA NodeParticle: BasicSpriteUpdateBlock requires SetupSpriteSheetBlock");
+        }
         system.updateSteps.push((i) => {
-            system._spriteSheet!.update(i);
+            sheet.update(i);
         });
     },
 };

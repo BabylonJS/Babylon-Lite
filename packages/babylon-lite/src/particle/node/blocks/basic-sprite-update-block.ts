@@ -50,6 +50,9 @@ function updateCellIndex(particle: Particle, system: ParticleSystem): void {
 export const basicSpriteUpdateBlock: ParticleBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.input(block, "particle")(ctx.state) as ParticleSystem;
+        if (!system._spriteSheet) {
+            throw new Error("NodeParticle: BasicSpriteUpdateBlock requires SetupSpriteSheetBlock");
+        }
         ctx.setOutput(block.id, "output", () => system);
         system._updateQueue.push(updateCellIndex);
     },

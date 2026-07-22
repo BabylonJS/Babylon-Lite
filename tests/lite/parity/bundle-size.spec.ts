@@ -203,8 +203,8 @@ for (const scene of SCENES) {
         // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
         // List excludes the sprite-using scenes (50-59, the 92-98 custom-shader scenes, and the
         // 117/118 sprite-picking scenes). 60-series are NME demos with no sprites; 1-40 are core 3D.
-        // 262/263/264/265 are NPE particle scenes (particles render as billboards).
-        const SPRITE_USING_IDS = new Set([50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 265]);
+        // 262/263/264/268 are NPE particle scenes (particles render as billboards).
+        const SPRITE_USING_IDS = new Set([50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 268]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));
             expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);

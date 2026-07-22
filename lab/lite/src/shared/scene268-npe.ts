@@ -1,9 +1,9 @@
-/** Scene 265 - NPE 'Animations 2' (sprite-sheet) graph. Converted from a classic sprite-sheet ParticleSystem
+/** Scene 268 - NPE 'Animations 2' (sprite-sheet) graph. Converted from a classic sprite-sheet ParticleSystem
  * (isAnimationSheetEnabled, spriteCellChangeSpeed=30, cells 0..9 of a 64x64 grid, looped) via
  * BABYLON.ConvertToNodeParticleSystemSetAsync (mirrors Babylon.js visual test 'Particles - Animations 2',
  * playground #CBXIIX#0). Adds SetupSpriteSheetBlock + BasicSpriteUpdateBlock to the NPE block set.
  * Checked-in scene data; excluded from bundle-size accounting like the *-nme.ts payloads. */
-export const SCENE265_NPE_JSON = {
+export const SCENE268_NPE_JSON = {
   "tags": null,
   "name": "npe",
   "editorData": null,
