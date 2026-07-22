@@ -37,9 +37,10 @@ one of the two APIs below.
 
 ## Option 1 — `enableErrorDecoding()`: full messages, always
 
-Call once (typically in development, or from a global error handler) to load the message table and install a
-decoder. From that point on, **every error thrown afterwards** — caught or uncaught — reports its full
-human-readable text via `error.message`, exactly like a normal `Error`.
+Import it and call it once (typically in development, or from a global error handler). Importing the
+function is what pulls the message-table chunk into your bundle; the call itself only installs the
+decoder. From that point on, **every error thrown afterwards** — caught or uncaught — reports its
+full human-readable text via `error.message`, exactly like a normal `Error`.
 
 ```typescript
 import { enableErrorDecoding } from "@babylonjs/lite";
@@ -51,9 +52,9 @@ enableErrorDecoding();
 //   Error: Mesh "hull" has no position data
 ```
 
-Because this pulls the message-table chunk into your bundle, **prefer to leave it out of production
-builds** — including it defeats the size win for every user who never hits an error. Guard it behind a
-dev/debug flag or a dynamic import if you want it only in development.
+Because importing this pulls the message-table chunk into your bundle, **prefer to leave it out of
+production builds** — including it defeats the size win for every user who never hits an error. Guard it
+behind a dev/debug flag or a dynamic import if you want it only in development.
 
 ## Option 2 — `decodeError(error)`: decode on the fly
 
