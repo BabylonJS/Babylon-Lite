@@ -13,7 +13,7 @@ function align4(value: number): number {
     return (value + 3) & ~3;
 }
 
-function makeSharedMeshGlb(): ArrayBuffer {
+function makeSharedMeshGlb(mode?: number): ArrayBuffer {
     const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
     const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
     const uvs = new Float32Array([0, 0, 1, 0, 0, 1]);
@@ -41,7 +41,7 @@ function makeSharedMeshGlb(): ArrayBuffer {
         meshes: [
             {
                 name: "shared",
-                primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3 }],
+                primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, ...(mode === undefined ? {} : { mode }) }],
             },
         ],
         buffers: [{ byteLength: binaryByteLength }],
@@ -143,5 +143,16 @@ describe("loadGltf geometry sharing", () => {
         for (const buffer of buffers) {
             expect(buffer.destroy).toHaveBeenCalledTimes(1);
         }
+    });
+
+    it("runs per-mesh feature hooks for every shared instance", async () => {
+        const { engine } = makeMockEngine();
+        const container = await loadGltf(engine, makeSharedMeshGlb(1));
+        const root = container.entities[0] as TransformNode;
+        const first = root.children[0]!.children[0] as Mesh & { _topology?: number };
+        const second = root.children[1]!.children[0] as Mesh & { _topology?: number };
+
+        expect(first._topology).toBe(2);
+        expect(second._topology).toBe(2);
     });
 });

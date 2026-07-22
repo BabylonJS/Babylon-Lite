@@ -349,8 +349,8 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
  *  retention) so the core loader's tight path stays byte-identical to the
  *  non-interleaved engine — keeping interleave bytes out of every glTF scene that
  *  doesn't use it. */
-export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, index: number, material: PbrMaterialProps, name?: string): Mesh {
-    const gpu = buildInterleavedGpu(engine, m);
+export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, index: number, material: PbrMaterialProps, name?: string, source?: Mesh): Mesh {
+    const gpu = source?._gpu ?? buildInterleavedGpu(engine, m);
 
     // AABB: fold strided positions straight from the slice; tight positions normally.
     const [boundMin, boundMax] = m._vb!._p ? computeAabbStrided(m._vb!._p, m._worldMatrix) : computeAabb(m._positions!, m._worldMatrix);
@@ -368,7 +368,7 @@ export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, ind
 
     // Lazy CPU geometry: the de-strided tight copy is built only on first read.
     installLazyCpu(mesh, m);
-    mesh._cpuIndices = m._indices instanceof U32 ? m._indices : new U32(m._indices);
+    mesh._cpuIndices = source?._cpuIndices ?? (m._indices instanceof U32 ? m._indices : new U32(m._indices));
     engine._dlr?.m(mesh, m._uv2s, m._tangents, m._colors, m._indices, gpu.indexFormat);
 
     return mesh as Mesh;

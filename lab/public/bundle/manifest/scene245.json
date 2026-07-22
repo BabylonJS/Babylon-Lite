@@ -1,6 +1,6 @@
 {
-  "rawKB": 102.7,
-  "gzipKB": 43.8,
+  "rawKB": 102,
+  "gzipKB": 43.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene245-create-skeleton-B1d1Zvek.js",
@@ -10,10 +10,10 @@
     "scene245-gltf-feature-animations-BgkqawnH.js",
     "scene245-gltf-feature-registry-ByfGwAN4.js",
     "scene245-gltf-feature-skeleton-DphJXmV5.js",
-    "scene245-gltf-interleave-pwzxRH6Z.js",
+    "scene245-gltf-interleave-KM-jw4Ig.js",
     "scene245-gltf-json-asset-IYSPgSvM.js",
     "scene245-gltf-normals-DYhLwXNX.js",
-    "scene245-gltf-share-BgbpAwNb.js",
+    "scene245-gltf-share-ldcC3-jB.js",
     "scene245-gltf-strided-attribute-CGKc0Sx6.js",
     "scene245-ibl-fragment-CeRrvT96.js",
     "scene245-pbr-renderable-DAlbvHXk.js",

@@ -1,6 +1,6 @@
 {
-  "rawKB": 154.5,
-  "gzipKB": 65.5,
+  "rawKB": 153.7,
+  "gzipKB": 65.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene253-alpha-test-fragment-BidgZtWl.js",
@@ -30,7 +30,7 @@
     "scene253-gltf-light-pointer-state-B7kFTRxK.js",
     "scene253-gltf-pbr-builder-ext-DLs5F1kM.js",
     "scene253-gltf-sampler-desc-BhDXLt_f.js",
-    "scene253-gltf-share-DxRtIf6S.js",
+    "scene253-gltf-share-DOWwQNCV.js",
     "scene253-ibl-fragment-CeRrvT96.js",
     "scene253-iridescence-fragment-khU0FmJi.js",
     "scene253-light-base-CUObfFW2.js",

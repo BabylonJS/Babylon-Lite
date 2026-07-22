@@ -1,5 +1,5 @@
 {
-  "rawKB": 99.5,
+  "rawKB": 99.6,
   "gzipKB": 42.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene246-gltf-feature-animations-DCiBFaYd.js",
     "scene246-gltf-feature-registry-CLmyOwku.js",
     "scene246-gltf-feature-skeleton-RaxrHYJ1.js",
-    "scene246-gltf-interleave-DVKyPNpn.js",
+    "scene246-gltf-interleave-Cx5yld1W.js",
     "scene246-gltf-json-asset-BUmDT4Zv.js",
     "scene246-gltf-multi-buffer-Dm-ko9S6.js",
     "scene246-gltf-normals-DYhLwXNX.js",
