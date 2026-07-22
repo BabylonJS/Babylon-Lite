@@ -151,7 +151,7 @@ function createPipeline(
     return engine._device.createRenderPipeline({
         label: `${label}-pipeline`,
         layout,
-        vertex: { module, entryPoint: "vs", buffers: vertexBuffers },
+        vertex: { module, entryPoint: "vs", buffers: vertexBuffers as GPUVertexBufferLayout[] },
         fragment: {
             module,
             entryPoint: "fs",

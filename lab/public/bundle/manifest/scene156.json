@@ -1,9 +1,9 @@
 {
-  "rawKB": 57.3,
-  "gzipKB": 22.4,
+  "rawKB": 57.5,
+  "gzipKB": 22.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene156-standard-renderable-DY6mfIuZ.js",
+    "scene156-standard-renderable-HAMTwRV1.js",
     "scene156.js"
   ]
 }

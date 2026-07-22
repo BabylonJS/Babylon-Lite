@@ -1,12 +1,12 @@
 {
-  "rawKB": 70,
-  "gzipKB": 27.3,
+  "rawKB": 70.2,
+  "gzipKB": 27.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene143-generate-mipmaps-CiyhUZPA.js",
     "scene143-normal-map-fragment-BkmuQI98.js",
     "scene143-point-light-CHHO5fr1.js",
-    "scene143-standard-renderable-BmN60Rwc.js",
+    "scene143-standard-renderable-C6DFtsoq.js",
     "scene143-std-ambient-fragment-CU5U7ir2.js",
     "scene143-std-opacity-fragment-CbaZz9IY.js",
     "scene143-std-reflection-fragment-BMQE51J5.js",

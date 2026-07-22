@@ -1,6 +1,6 @@
 import { defineConfig, transformWithEsbuild, type Plugin } from "vite";
 import { basename, resolve } from "path";
-import { copyFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "fs";
 import dts from "vite-plugin-dts";
 import remapping from "@ampproject/remapping";
 import { trimInternalDts } from "../../scripts/vite-trim-internal-dts";
@@ -115,6 +115,14 @@ function emitPackageJson(): Plugin {
                         types: "./index.d.ts",
                         import: "./lib/index.js",
                     },
+                    "./material/standard/enable-standard-vertex-colors": {
+                        types: "./material/standard/enable-standard-vertex-colors.d.ts",
+                        import: "./lib/material/standard/enable-standard-vertex-colors.js",
+                    },
+                    "./material/standard/enable-standard-mesh-features": {
+                        types: "./material/standard/enable-standard-mesh-features.d.ts",
+                        import: "./lib/material/standard/enable-standard-mesh-features.js",
+                    },
                 },
                 jsdelivr: "./dist/index.js",
                 unpkg: "./dist/index.js",
@@ -143,6 +151,22 @@ function emitPackageJson(): Plugin {
                 ...(provenance ? { babylonLiteRelease: provenance } : {}),
             };
             writeFileSync(resolve(PACKAGE_ROOT, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+            const standardTypesDir = resolve(PACKAGE_ROOT, "material/standard");
+            mkdirSync(standardTypesDir, { recursive: true });
+            writeFileSync(
+                resolve(standardTypesDir, "enable-standard-vertex-colors.d.ts"),
+                ["/** Enable RGBA mesh vertex colors for StandardMaterial. */", "export declare function enableStandardVertexColors(): void;", ""].join("\n")
+            );
+            writeFileSync(
+                resolve(standardTypesDir, "enable-standard-mesh-features.d.ts"),
+                [
+                    "/** Enable Standard skeletal skinning for matching meshes. */",
+                    "export declare function enableStandardSkeleton(): void;",
+                    "/** Enable optional Standard material UV translation. */",
+                    "export declare function enableStandardUvOffset(): void;",
+                    "",
+                ].join("\n")
+            );
             copyFileSync(resolve(__dirname, "README.md"), resolve(PACKAGE_ROOT, "README.md"));
             copyFileSync(resolve(__dirname, "../../LICENSE"), resolve(PACKAGE_ROOT, "LICENSE"));
         },

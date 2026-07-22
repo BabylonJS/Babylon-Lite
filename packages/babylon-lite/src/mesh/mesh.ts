@@ -113,6 +113,14 @@ export interface Mesh extends SceneNode {
     renderOnTop?: boolean;
     /** Thin instance data (CPU-side). GPU buffer managed by render system. */
     thinInstances?: ThinInstanceData | null;
+    /** Explicit opt-in that this mesh's RGBA vertex colours drive translucency
+     *  (Babylon `AbstractMesh.hasVertexAlpha`). When `true` and the mesh actually
+     *  carries a vertex-colour buffer, the Standard forward and geometry paths
+     *  treat it as alpha-blended: source-over blending, depth-write disabled, and
+     *  sorted into the transparent phase. Defaults to `false`/opaque. Set this
+     *  explicitly (or via a loader that knows the vertex-colour accessor is VEC4);
+     *  Lite never scans vertex buffers to infer it. */
+    hasVertexAlpha?: boolean;
     /** When `false`, the GPU picker skips this mesh.  Defaults to `true`
      *  (undefined behaves as pickable).  Mirrors BJS `AbstractMesh.isPickable`. */
     pickable?: boolean;
