@@ -195,9 +195,9 @@ export async function rebuildScenePbrPipelines(scene: SceneContext, force = fals
     }
 
     function dedupeGroupCleanup(scene: SceneContext, start: number): void {
-        const existing = new Set(scene._disposables.slice(0, start).map(String));
+        const existing = new Set(scene._disposables.slice(0, start));
         for (let i = scene._disposables.length - 1; i >= start; i--) {
-            if (existing.has(String(scene._disposables[i]))) {
+            if (existing.has(scene._disposables[i]!)) {
                 scene._disposables.splice(i, 1);
             }
         }

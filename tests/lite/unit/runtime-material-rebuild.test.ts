@@ -115,6 +115,33 @@ describe("runtime material rebuild ownership", () => {
         expect(group.r).not.toBe(base);
     });
 
+    it("deduplicates stable cleanup references without dropping distinct closures", async () => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        const stableCleanup = vi.fn();
+        const firstClosure = (): void => undefined;
+        let secondClosure!: () => void;
+        const base = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
+        const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
+            secondClosure = (): void => undefined;
+            scene._disposables.push(stableCleanup, secondClosure);
+            return { renderables: meshes.map(renderable), rebuildSingle: base };
+        }) as MeshGroupBuilder;
+        builder._materialFamily = "standard";
+        builder._rebuildSingle = base;
+        const mesh = { _gpu: {}, material: { _buildGroup: builder } as Material, children: [] } as unknown as Mesh;
+        const group = [mesh] as Mesh[] & { r?: NonNullable<MeshGroupBuilder["_rebuildSingle"]> };
+        group.r = base;
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, group);
+        scene._disposables.push(stableCleanup, firstClosure);
+
+        await B(scene, builder, mesh);
+
+        expect(scene._disposables.filter((dispose) => dispose === stableCleanup)).toHaveLength(1);
+        expect(scene._disposables).toContain(firstClosure);
+        expect(scene._disposables).toContain(secondClosure);
+    });
+
     it("serializes a synchronous material rebuild behind an active runtime mesh build", async () => {
         const engine = { _retirements: [] } as unknown as EngineContext;
         const scene = createScene(engine);

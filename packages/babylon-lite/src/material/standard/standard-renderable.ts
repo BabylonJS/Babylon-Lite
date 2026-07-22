@@ -364,8 +364,10 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
     };
 
     scene._disposables.push(
-        () => clearStandardPipelineCache(),
-        () => clearSamplerCache(engine)
+        (engine._standardCleanup ??= () => {
+            clearStandardPipelineCache();
+            clearSamplerCache(engine);
+        })
     );
 
     return { renderables, rebuildSingle };

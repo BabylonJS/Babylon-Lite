@@ -571,8 +571,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     };
 
     scene._disposables.push(
-        () => clearPbrPipelineCache(),
-        () => clearSamplerCache(engine)
+        (engine._pbrCleanup ??= () => {
+            clearPbrPipelineCache();
+            clearSamplerCache(engine);
+        })
     );
 
     return { renderables, rebuildSingle };

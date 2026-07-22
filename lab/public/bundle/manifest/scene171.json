@@ -5,11 +5,11 @@
   "runtimeChunks": [
     "scene171-generate-mipmaps-rDI5JKHy.js",
     "scene171-gltf-glb-parser-DB79Ki2B.js",
-    "scene171-pbr-renderable-C1zv72e2.js",
+    "scene171-pbr-renderable-DQqbZl_R.js",
     "scene171-recast-navigation-CYBQI-zY-Dry_z7x_.js",
     "scene171-shader-composer-DishuYLa.js",
     "scene171-singlelight-hemispheric-wgsl-Du7OFXSC.js",
-    "scene171-standard-renderable-DIJ_MbEi.js",
+    "scene171-standard-renderable-Dfxbs8Fz.js",
     "scene171-wgsl-fog-m3PkjS7i.js",
     "scene171.js"
   ]

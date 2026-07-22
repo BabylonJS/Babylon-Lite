@@ -4,10 +4,10 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene104-generate-mipmaps-CRj5GJHu.js",
-    "scene104-gltf-feature-registry-CP03UmTe.js",
+    "scene104-gltf-feature-registry-DPQ9aamM.js",
     "scene104-gltf-glb-parser-CTh-r32R.js",
     "scene104-shader-composer-DishuYLa.js",
-    "scene104-standard-renderable-BKSuVgtJ.js",
+    "scene104-standard-renderable-DAjMz3wU.js",
     "scene104-std-lightmap-fragment-DRRzYkfc.js",
     "scene104-wgsl-fog-m3PkjS7i.js",
     "scene104.js"
