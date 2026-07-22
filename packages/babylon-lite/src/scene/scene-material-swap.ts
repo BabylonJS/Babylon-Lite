@@ -10,7 +10,7 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
     if (scene._runtimeBuilds?.w) {
         return;
     }
-    let changed = 0;
+    let changed: number | undefined;
     let pending: Promise<void> | undefined;
     const renderables = scene._renderables;
     for (const mesh of q) {
@@ -46,9 +46,8 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
         // Per-material generation: the CSM caster-view cache keys off THIS (which material was rebuilt), not the
         // global _materialEpoch (which also bumps when an unrelated material is swapped), so swapping a non-caster
         // material doesn't force a full shadow rebuild. See ensureCsmShadowTaskState.
-        mat._csmGen = (mat._csmGen || 0) + 1;
-        renderables.push(rebuild(scene, mesh));
-        changed = 1;
+        mat._csmGen = -~mat._csmGen!;
+        changed = renderables.push(rebuild(scene, mesh));
     }
     if (changed) {
         renderables.sort((a, b) => a.order - b.order);

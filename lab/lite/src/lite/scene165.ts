@@ -43,7 +43,6 @@ async function main(): Promise<void> {
     m[10] = 1;
     m[15] = 1;
 
-    let col = 0;
     let index = 0;
     for (let x = 0; x < numPerSide; x++) {
         m[12] = -size / 2 + ofst * x;
@@ -53,21 +52,20 @@ async function main(): Promise<void> {
                 m[14] = -size / 2 + ofst * z;
                 matricesData.set(m, index * 16);
 
-                const coli = col | 0;
-                colorData[index * 4 + 0] = ((coli & 0xff0000) >> 16) / 255;
+                const coli = ((index * 0xffffff) / instanceCount) | 0;
+                colorData[index * 4] = ((coli & 0xff0000) >> 16) / 255;
                 colorData[index * 4 + 1] = ((coli & 0x00ff00) >> 8) / 255;
                 colorData[index * 4 + 2] = (coli & 0xff) / 255;
                 colorData[index * 4 + 3] = 1.0;
 
                 index++;
-                col += 0xffffff / instanceCount;
             }
         }
     }
 
     setThinInstances(box, matricesData, instanceCount);
     setThinInstanceColors(box, colorData);
-    if (location.search.includes("culling")) {
+    if (location.search === "?culling") {
         enableThinInstanceGpuCulling(box);
         canvas.dataset.gpuCulling = "thin-instances";
     }
