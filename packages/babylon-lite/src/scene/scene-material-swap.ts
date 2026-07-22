@@ -14,11 +14,15 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
     for (const mesh of q) {
         const mat = mesh.material;
         const builder = mat._buildGroup;
-        if (mesh.thinInstances) {
-            pending = import("./scene-runtime-mesh-build.js").then((module) => module.B(scene, builder, mesh));
+        const runtimeBuild = mesh.thinInstances?._runtimeBuild;
+        if (runtimeBuild) {
+            pending = runtimeBuild(scene, builder, mesh);
             continue;
         }
         const rebuild = scene._groups?.get(builder)?.r ?? builder._rebuildSingle;
+        if (!rebuild) {
+            continue;
+        }
 
         const old = scene._meshDisposables.get(mesh);
         if (old) {
@@ -38,7 +42,7 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
         // global _materialEpoch (which also bumps when an unrelated material is swapped), so swapping a non-caster
         // material doesn't force a full shadow rebuild. See ensureCsmShadowTaskState.
         mat._csmGen = (mat._csmGen || 0) + 1;
-        scene._renderables.push(rebuild!(scene, mesh));
+        scene._renderables.push(rebuild(scene, mesh));
     }
     q.length = 0;
     scene._renderables.sort((a, b) => a.order - b.order);

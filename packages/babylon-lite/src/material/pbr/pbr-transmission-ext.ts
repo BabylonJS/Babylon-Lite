@@ -5,6 +5,6 @@ import { _t, enableSceneTransmission } from "../../frame-graph/transmission.js";
 import { makeRefractionRttExt } from "./fragments/refraction-rtt-fragment.js";
 
 export function registerPbrTransmission(scene: SceneContext, engine: EngineContext, register: (ext: PbrExt) => void, dispersionSampleWgsl?: string): void {
-    (scene as SceneContext & { p?: (value: ReturnType<typeof _t>) => boolean }).p?.(_t(scene, engine)) || enableSceneTransmission(scene, engine);
+    scene._p?.(_t(scene, engine)) || enableSceneTransmission(scene, engine);
     register(makeRefractionRttExt(dispersionSampleWgsl));
 }

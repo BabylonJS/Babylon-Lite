@@ -4,6 +4,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import { rebuildMaterial } from "../../../packages/babylon-lite/src/material/material-rebuild";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { addToScene, buildScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
@@ -69,7 +70,8 @@ describe("runtime material rebuild ownership", () => {
         const standardMaterial = { _buildGroup: standardBuilder } as Material;
         const lateMaterial = { _buildGroup: lateBuilder } as Material;
         const standardMesh = { _gpu: {}, material: standardMaterial, children: [] } as unknown as Mesh;
-        const lateMesh = { _gpu: {}, material: lateMaterial, children: [], thinInstances: {} } as unknown as Mesh;
+        const lateMesh = { _gpu: {}, material: lateMaterial, children: [] } as unknown as Mesh;
+        setThinInstances(lateMesh, new Float32Array(16), 1);
 
         addToScene(scene, standardMesh);
         await buildScene(scene);

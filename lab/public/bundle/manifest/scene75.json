@@ -1,9 +1,9 @@
 {
-  "rawKB": 50.3,
-  "gzipKB": 20.1,
+  "rawKB": 49.3,
+  "gzipKB": 19.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene75-standard-renderable-DB39Ch25.js",
+    "scene75-standard-renderable-DNarMmIN.js",
     "scene75.js"
   ]
 }

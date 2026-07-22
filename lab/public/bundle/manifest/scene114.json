@@ -1,13 +1,16 @@
 {
-  "rawKB": 81.6,
-  "gzipKB": 32,
+  "rawKB": 83.8,
+  "gzipKB": 33.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene114-morph-fragment-DLjixOml.js",
-    "scene114-pbr-renderable-Eb-ATwWL.js",
+    "scene114-deformed-geometry-Brq5fz01.js",
+    "scene114-morph-fragment-DkVu8P6d.js",
+    "scene114-pbr-renderable-TsczipdH.js",
     "scene114-pbr-template-ext-CiHpOV5G.js",
-    "scene114-singlelight-hemispheric-wgsl-BsEg2HZs.js",
-    "scene114-skeleton-fragment-DZTsSSr9.js",
+    "scene114-picking-detailed-pipeline-B3GkgFFa.js",
+    "scene114-picking-pipeline-2gjcXSVW.js",
+    "scene114-singlelight-hemispheric-wgsl-CG69Vj-D.js",
+    "scene114-skeleton-fragment-CafKRsCv.js",
     "scene114-unlit-fragment-DWtvt7yQ.js",
     "scene114.js"
   ]

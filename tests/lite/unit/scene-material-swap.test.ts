@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { addToScene, buildScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
@@ -40,6 +41,25 @@ describe("scene material swap", () => {
         expect(scene._renderables.filter((renderable) => renderable.mesh === mesh)).toEqual([replacement]);
         expect(disposeOld).not.toHaveBeenCalled();
         expect(retirements).toHaveLength(1);
+    });
+
+    it("skips a queued mesh until its material group exposes a rebuild closure", () => {
+        const disposeOld = vi.fn();
+        const mesh = {
+            material: { _buildGroup: {} },
+        } as unknown as Mesh;
+        const scene = {
+            surface: { engine: { _retirements: [] } },
+            _materialSwapQueue: [mesh],
+            _meshDisposables: new Map([[mesh, [disposeOld]]]),
+            _renderables: [],
+            _renderableVersion: 0,
+            _materialEpoch: 0,
+        } as unknown as SceneContext;
+
+        expect(() => processMaterialSwaps(scene)).not.toThrow();
+        expect(disposeOld).not.toHaveBeenCalled();
+        expect(scene._materialSwapQueue).toHaveLength(0);
     });
 
     it("rescans a material group when a runtime-added mesh introduces thin instances", async () => {
@@ -83,7 +103,8 @@ describe("scene material swap", () => {
         }) as MeshGroupBuilder;
         const material = { _buildGroup: builder } as Material;
         const plainMesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
-        const instancedMesh = { _gpu: {}, material, children: [], thinInstances: {} } as unknown as Mesh;
+        const instancedMesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
+        setThinInstances(instancedMesh, new Float32Array(16), 1);
 
         addToScene(scene, plainMesh);
         await buildScene(scene);

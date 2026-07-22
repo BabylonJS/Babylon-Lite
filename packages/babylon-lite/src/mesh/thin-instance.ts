@@ -7,6 +7,12 @@ import { F32 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "./mesh.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
+import type { MeshGroupBuilder } from "../render/renderable.js";
+import type { SceneContext } from "../scene/scene-core.js";
+
+function buildRuntimeThinMesh(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh): Promise<void> {
+    return import("../scene/scene-runtime-mesh-build.js").then((module) => module.B(scene, builder, mesh));
+}
 
 /** @internal One render pass's far-bucket output published by the GPU culler for the LOD partner's draw. */
 export interface ThinInstanceLodBucket {
@@ -68,6 +74,8 @@ export interface ThinInstanceData {
     _drawArgsIndexCount?: number;
     /** @internal Last instance count observed by a cached direct draw or written to `_drawArgsBuffer`. */
     _drawArgsInstanceCount?: number;
+    /** @internal Materialize a thin-instanced mesh added after scene registration. */
+    _runtimeBuild: (scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh) => Promise<void>;
 
     /** @internal Lazy per-mesh F32 upload scratch. Allocated by thin-instance-gpu.ts only
      *  when `matrices` is F64-backed (HPM-on); F32-backed input takes a direct
@@ -117,6 +125,7 @@ export function setThinInstances(mesh: Mesh, matrices: Float32Array | Float64Arr
             _colorGpuBufferStorage: false,
             _colorGpuVersion: 0,
             _gpuCullingEnabled: false,
+            _runtimeBuild: buildRuntimeThinMesh,
         };
     } else {
         mesh.thinInstances.matrices = matrices;
@@ -207,6 +216,7 @@ export function addThinInstance(mesh: Mesh, matrix: Mat4): number {
             _colorGpuBufferStorage: false,
             _colorGpuVersion: 0,
             _gpuCullingEnabled: false,
+            _runtimeBuild: buildRuntimeThinMesh,
         };
         return 0;
     }

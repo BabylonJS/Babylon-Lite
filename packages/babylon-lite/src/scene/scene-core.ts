@@ -135,6 +135,8 @@ export interface SceneContext extends RenderingContext {
     _runtimeBuilds?: RuntimeSceneBuildHooks;
     /** @internal True after scene disposal; used to abort asynchronous recovery/rebuild work. */
     _z?: boolean;
+    /** @internal Temporary PBR transmission transaction sink used while rebuilding scene material groups. */
+    _p?: (value: readonly [commit: () => void, rollback: () => void]) => boolean;
 
     // ─── Dispose infrastructure ────────────────────────────────
     /** @internal Shared cleanup callbacks (scene UBOs, lights UBOs, etc.). Registered by builders. */

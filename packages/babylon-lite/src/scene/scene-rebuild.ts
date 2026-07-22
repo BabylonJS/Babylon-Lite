@@ -72,8 +72,7 @@ export async function rebuildScenePbrPipelines(scene: SceneContext, force = fals
             // overwrites each mesh's _meshDisposables with fresh teardown closures (re-acquiring textures).
             let result: MeshGroupBuildResult;
             let transmission: TransmissionTransaction | undefined;
-            const transactionScene = ctx as SceneContext & { p?: (value: TransmissionTransaction) => boolean };
-            transactionScene.p = (value) => {
+            ctx._p = (value) => {
                 transmission = value;
                 return true;
             };
@@ -101,7 +100,7 @@ export async function rebuildScenePbrPipelines(scene: SceneContext, force = fals
                 }
                 throw error;
             } finally {
-                delete transactionScene.p;
+                delete ctx._p;
             }
             if (ctx._z || runtime?._d()) {
                 transmission?.[1]();
