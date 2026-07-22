@@ -1,6 +1,6 @@
 {
   "rawKB": 61.2,
-  "gzipKB": 23.6,
+  "gzipKB": 23.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene128-shader-renderable-CvHJ-t60.js",

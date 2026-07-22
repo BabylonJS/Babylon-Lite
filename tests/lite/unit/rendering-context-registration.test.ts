@@ -132,24 +132,6 @@ describe("registerScene / unregisterScene", () => {
         expect(list).toEqual([]);
     });
 
-    it("defers scene resource cleanup until device recovery releases its admission gate", async () => {
-        const engine = makeMockEngine();
-        const scene = createSceneContext(engine);
-        const cleanup = vi.fn();
-        let release!: () => void;
-        scene._disposables.push(cleanup);
-        await registerScene(scene);
-        engine._rg = new Promise<void>((resolve) => (release = resolve));
-
-        disposeScene(scene);
-
-        expect(engine._renderingContexts).toEqual([]);
-        expect(cleanup).not.toHaveBeenCalled();
-
-        release();
-        await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
-    });
-
     it("does not register resources that finish building after scene disposal", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);

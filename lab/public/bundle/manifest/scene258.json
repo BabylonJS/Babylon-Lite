@@ -1,11 +1,11 @@
 {
-  "rawKB": 83.2,
+  "rawKB": 83.1,
   "gzipKB": 35,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene258-flat-normal-wgsl-Cm9mM4tC.js",
     "scene258-generate-mipmaps-DoX-rlWy.js",
-    "scene258-gltf-interleave-BJXI08Sq.js",
+    "scene258-gltf-interleave-D0H4lj0k.js",
     "scene258-gltf-json-asset-CcVVsCg7.js",
     "scene258-gltf-normals-DYhLwXNX.js",
     "scene258-gltf-uv-denorm-BTmmiHmh.js",

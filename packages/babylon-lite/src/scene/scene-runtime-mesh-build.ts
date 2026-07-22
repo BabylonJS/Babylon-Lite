@@ -42,10 +42,6 @@ export function B(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh): P
     if (scene._z || !scene.meshes.includes(mesh)) {
         return scene._runtimeBuilds?.all().catch(() => undefined) ?? Promise.resolve();
     }
-    const gate = scene.surface.engine._rg;
-    if (gate) {
-        return gate.then(() => B(scene, builder, mesh));
-    }
     moveRuntimeMeshToGroup(scene, builder, mesh);
     if (builder._materialFamily === "pbr" && (scene._built || scene._groups.get(builder)?.r)) {
         const hooks = scene._runtimeBuilds ?? installRuntimeBuilds(scene);
@@ -65,10 +61,6 @@ export function X<T>(scene: SceneContext, builder: MeshGroupBuilder, work: () =>
     if (scene._z) {
         return Promise.resolve(undefined as T);
     }
-    const gate = scene.surface.engine._rg;
-    if (gate) {
-        return gate.then(() => X(scene, builder, work));
-    }
     return (scene._runtimeBuilds ?? installRuntimeBuilds(scene)).exclusive(builder, work);
 }
 
@@ -86,10 +78,6 @@ function installRuntimeBuilds(scene: SceneContext): RuntimeSceneBuildHooks {
     const pbrState = scene as SceneContext & PbrGeometrySceneState;
     const hooks: RuntimeSceneBuildHooks = {
         queue: (builder, mesh) => {
-            const engine = scene.surface.engine;
-            if (engine._rg) {
-                return engine._rg.then(() => hooks.queue(builder, mesh));
-            }
             const generation = (state.generations.get(mesh) ?? 0) + 1;
             const material = mesh.material;
             state.generations.set(mesh, generation);
@@ -202,46 +190,8 @@ function installRuntimeBuilds(scene: SceneContext): RuntimeSceneBuildHooks {
             });
             return task;
         },
-        lock: async (meshes) => {
-            while (state.tail) {
-                await state.tail;
-            }
-            state.error = null;
-            for (const mesh of meshes) {
-                resetRuntimeRebuild(scene, state, mesh);
-                pbrState._pbrMeshGeomContexts?.delete(mesh);
-            }
-            let release = (): void => undefined;
-            const gate = new Promise<void>((resolve) => {
-                release = resolve;
-            });
-            state.tail = gate;
-            return () => {
-                if (state.tail === gate) {
-                    state.tail = null;
-                }
-                release();
-            };
-        },
     };
     scene._runtimeBuilds = hooks;
-    const engine = scene.surface.engine;
-    (engine._rs ??= new Set()).add(scene);
-    engine._r ??= async () => {
-        const unlocks: Array<() => void> = [];
-        try {
-            for (const context of engine._rs ?? []) {
-                const runtimeScene = context as SceneContext;
-                if (runtimeScene._runtimeBuilds) {
-                    unlocks.push(await runtimeScene._runtimeBuilds.lock(runtimeScene.meshes));
-                }
-            }
-        } catch (error) {
-            unlocks.reverse().forEach((unlock) => unlock());
-            throw error;
-        }
-        return () => unlocks.reverse().forEach((unlock) => unlock());
-    };
     (scene._beforeRender ??= []).push(() => {
         hooks._e();
     });
@@ -254,7 +204,6 @@ function installRuntimeBuilds(scene: SceneContext): RuntimeSceneBuildHooks {
         for (const builder of scene._groups.keys()) {
             _runtimeRebuilders?.get(builder)?.bases.delete(scene);
         }
-        engine._rs?.delete(scene);
         scene._runtimeBuilds = undefined;
         pbrState._pbrMeshGeomContexts = undefined;
     });

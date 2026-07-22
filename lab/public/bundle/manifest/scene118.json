@@ -1,12 +1,12 @@
 {
-  "rawKB": 76.9,
-  "gzipKB": 30.6,
+  "rawKB": 77.2,
+  "gzipKB": 30.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene118-billboard-pick-pipeline-efBlU1Ns.js",
     "scene118-billboard-renderable-BMoinrEu.js",
     "scene118-scene-uniforms-FTYH6Ct0.js",
-    "scene118-standard-renderable-DCGiwuk0.js",
+    "scene118-standard-renderable-CnrujisU.js",
     "scene118.js"
   ]
 }

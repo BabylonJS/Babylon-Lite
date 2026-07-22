@@ -1,5 +1,5 @@
 {
-  "rawKB": 89.6,
+  "rawKB": 89.5,
   "gzipKB": 36.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -14,7 +14,7 @@
     "scene145-shader-composer-BLINGJZD.js",
     "scene145-standard-material-DZAdEWMl.js",
     "scene145-standard-pipeline-DeRv_WnN.js",
-    "scene145-standard-renderable-d0k_cxHb.js",
+    "scene145-standard-renderable-B4dG4JBV.js",
     "scene145-std-ambient-fragment-eL4FH4kF.js",
     "scene145-std-cube-reflection-fragment-B4NEsWQM.js",
     "scene145-std-opacity-fragment-BtlMBSud.js",

@@ -62,7 +62,6 @@ export interface RuntimeSceneBuildHooks {
     /** @internal */
     _d(): boolean;
     exclusive<T>(builder: MeshGroupBuilder, work: () => Promise<T>): Promise<T>;
-    lock(meshes: readonly Mesh[]): Promise<() => void>;
 }
 
 /** @internal Scene-owned mesh group plus the rebuild closure captured by its completed build. */
@@ -375,7 +374,6 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
                 ctx._groups.set(build, group);
                 if (!ctx._built) {
                     ctx._deferredBuilders.push(async () => {
-                        group!.r = undefined;
                         const result = await build(ctx, group!);
                         ctx._renderables.push(...result.renderables);
                         if (result.updater) {
@@ -392,7 +390,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
             // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
             // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
-            if (ctx._built || "r" in group) {
+            if (ctx._built || group.r) {
                 enqueueMaterialSwap(ctx, mesh);
             }
         }
@@ -468,12 +466,7 @@ export function disposeScene(scene: SceneContext): void {
         ctx.shadowGenerators.length = 0;
         ctx.camera = null;
     };
-    const gate = ctx.surface.engine._rg;
-    if (gate) {
-        void gate.then(cleanup);
-    } else {
-        cleanup();
-    }
+    cleanup();
 }
 
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */

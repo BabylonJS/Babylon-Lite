@@ -14,12 +14,11 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
     for (const mesh of q) {
         const mat = mesh.material;
         const builder = mat._buildGroup;
-        const group = scene._groups?.get(builder);
-        if (mesh.thinInstances || (scene._groups && (!group?.r || builder._materialFamily === "pbr" || !group.includes(mesh)))) {
+        if (mesh.thinInstances) {
             pending = import("./scene-runtime-mesh-build.js").then((module) => module.B(scene, builder, mesh));
             continue;
         }
-        const rebuild = group?.r ?? builder._rebuildSingle;
+        const rebuild = scene._groups?.get(builder)?.r ?? builder._rebuildSingle;
 
         const old = scene._meshDisposables.get(mesh);
         if (old) {

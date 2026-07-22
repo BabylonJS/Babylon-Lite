@@ -56,12 +56,6 @@ export interface EngineContext extends SurfaceContext {
      *  module-internal mutators (`createSurface`, `disposeSurface`, `disposeEngine`)
      *  can splice into it without casting away the public readonly contract. */
     _surfaces: [SurfaceContext, ...SurfaceContext[]];
-    /** @internal Lock all lazy runtime mesh builders before device replacement. */
-    _r?: () => Promise<() => void>;
-    /** @internal Admission gate held while device recovery replaces GPU state. */
-    _rg?: Promise<void>;
-    /** @internal Scenes with lazily-installed runtime mesh builders, registered or not. */
-    _rs?: Set<RenderingContext>;
 
     /** Number of GPU draw calls in the last rendered frame, summed across all surfaces. */
     drawCallCount: number;
@@ -158,8 +152,6 @@ export interface EngineContext extends SurfaceContext {
     _cbs: GPUCommandBuffer[];
     /** @internal GPU resource disposers waiting for the next frame command buffer to be submitted. */
     _retirements?: Array<() => void> | null;
-    /** @internal In-flight retirement fence after submitted GPU work drains. */
-    _rf?: Promise<void>;
 
     /** @internal Per-frame floating-origin offset updater. Set when the engine
      *  was created with `useFloatingOrigin: true` (which requires
@@ -571,7 +563,7 @@ export function renderFrame(engine: EngineContext, delta: number): void {
     const retirements = engine._retirements;
     if (retirements) {
         engine._retirements = null;
-        void (engine._rf = retirements.reduce<Promise<void>>((fence, retire) => fence.then(retire, retire), queue.onSubmittedWorkDone()));
+        void retirements.reduce<Promise<void>>((fence, retire) => fence.then(retire, retire), queue.onSubmittedWorkDone());
     }
     engine.drawCallCount = drawCalls;
     // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
