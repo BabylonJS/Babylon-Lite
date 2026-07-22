@@ -75,12 +75,11 @@ let vatB = vatInstanceStorage[vatIdx + 1u];`
 let vatA = textureLoad(vatInstanceTex, vec2<i32>(vatIdx, 0), 0);
 let vatB = textureLoad(vatInstanceTex, vec2<i32>(vatIdx + 1, 0), 0);`;
     return `${reads}
-let vatRowA = vatFrameRow(vatA, vat.clock.x);
-let vatRowB = vatFrameRow(vec4<f32>(vatB.x, vatB.y, vatA.z, vatB.w), vat.clock.x);
-${vatSkinSum("vatInfA", "vatRowA", has8Bones)}
-${vatSkinSum("vatInfB", "vatRowB", has8Bones)}
-let vatBlend = vatB.z;
-var influence: mat4x4<f32> = vatInfA * (1.0 - vatBlend) + vatInfB * vatBlend;`;
+let rowA = vatFrameRow(vatA, vat.clock.x);
+let rowB = vatFrameRow(vec4f(vatB.x, vatB.y, vatA.z, vatB.w), vat.clock.x);
+${vatSkinSum("infA", "rowA", has8Bones)}
+${vatSkinSum("infB", "rowB", has8Bones)}
+var influence: mat4x4f = infA * (1.0 - vatB.z) + infB * vatB.z;`;
 }
 
 function makeVatSkinningCode(has8Bones: boolean, instanced: boolean): string {
