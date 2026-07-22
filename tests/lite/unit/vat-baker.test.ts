@@ -212,5 +212,10 @@ describe("VAT batching", () => {
         expect(queue.writeBuffer).toHaveBeenLastCalledWith(mesh.vat!.settingsBuffer, 16, expect.any(Float32Array));
         const time = queue.writeBuffer.mock.calls.at(-1)?.[2] as Float32Array;
         expect(time[0]).toBe(2.5);
+
+        setVatTime(engine, mesh, 4);
+        const reusedTime = queue.writeBuffer.mock.calls.at(-1)?.[2] as Float32Array;
+        expect(reusedTime).toBe(time);
+        expect(reusedTime[0]).toBe(4);
     });
 });

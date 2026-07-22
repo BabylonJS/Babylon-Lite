@@ -125,7 +125,7 @@ async function run(): Promise<void> {
         results.meshName = info.pickedMesh?.name ?? null;
         results.thinInstanceIndex = info.thinInstanceIndex;
         results.faceId = info.faceId;
-        results.detailed = picker._detailedPicking;
+        results.detailed = info.faceId >= 0;
         results.pickedPoint = info.pickedPoint;
         disposePicker(picker);
         stopEngine(engine);

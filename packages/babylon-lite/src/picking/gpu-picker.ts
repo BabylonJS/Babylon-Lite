@@ -277,14 +277,12 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     }
 
     let needsDeformedGeometry = false;
-    let needsVatProjection = false;
     let needsAdvancedPipeline = !!pickDiscard?.worldAdjustWgsl || !!pickDiscard?.vertexData || !!pickDiscard?.storage?.some((storage) => storage.vertex);
     let candidates: { readonly mesh: Mesh; readonly ignore: PickIgnore | null }[];
     if (ignored) {
         const prepared = (await import("./picking-ignore.js")).prepareIgnoredCandidates(scene.meshes, ignored, pickFilter, needsAdvancedPipeline);
         candidates = prepared.candidates;
         needsDeformedGeometry = prepared.deformed;
-        needsVatProjection = prepared.vat;
         needsAdvancedPipeline = prepared.advanced;
     } else {
         candidates = [];
@@ -292,11 +290,9 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             if (mesh.pickable !== false && (!pickFilter || pickFilter(mesh))) {
                 candidates.push({ mesh, ignore: null });
                 needsDeformedGeometry ||= !!(mesh.morphTargets || mesh.skeleton) && !!mesh._cpuPositions;
-                needsVatProjection ||= !!mesh.vat;
-                needsAdvancedPipeline ||= !!mesh.thinInstances || !!mesh._gpu._vbLayout?._p;
+                needsAdvancedPipeline ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?._p;
             }
         }
-        needsAdvancedPipeline ||= needsVatProjection;
     }
 
     const deformedGeometry = needsDeformedGeometry ? await import("./deformed-geometry.js") : null;

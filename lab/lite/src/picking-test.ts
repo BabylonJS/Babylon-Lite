@@ -1,7 +1,24 @@
 /** GPU Picking test — creates a sphere at origin, picks center & corner,
  *  tests both basic and detailed picking. Exposes results on window for Playwright. */
 
-import { createEngine, startEngine, stopEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createSphere, createStandardMaterial, addToScene, createGpuPicker, pickAsync, disposePicker, enableDetailedPicking, getPickedNormal, getPickedUV, registerScene } from "babylon-lite";
+import {
+    createEngine,
+    startEngine,
+    stopEngine,
+    createSceneContext,
+    createArcRotateCamera,
+    createHemisphericLight,
+    createSphere,
+    createStandardMaterial,
+    addToScene,
+    createGpuPicker,
+    pickAsync,
+    disposePicker,
+    enableDetailedPicking,
+    getPickedNormal,
+    getPickedUV,
+    registerScene,
+} from "babylon-lite";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 
@@ -74,12 +91,12 @@ async function run(): Promise<void> {
         // Create picker with detailed picking enabled
         const picker = createGpuPicker(scene);
         enableDetailedPicking(picker);
-        results.detailedPickingActive = picker._detailedPicking;
 
         // Pick center of canvas — should hit the sphere
         const cx = canvas.clientWidth / 2;
         const cy = canvas.clientHeight / 2;
         const centerInfo = await pickAsync(picker, cx, cy);
+        results.detailedPickingActive = centerInfo.faceId >= 0;
 
         results.centerPick = {
             hit: centerInfo.hit,

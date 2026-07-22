@@ -65,6 +65,7 @@ export interface VatBakeResult {
 }
 
 const DEFAULT_FRAME_RATE = 60;
+let _vatTime: Float32Array | null = null;
 
 /** Number of baked frames for a clip (inclusive of frame 0). */
 function clipFrameCount(group: AnimationGroup): number {
@@ -314,7 +315,9 @@ export function setVatTime(engine: EngineContext, mesh: Mesh, seconds: number): 
     if (!vat) {
         throw new Error("setVatTime: mesh has no VAT data.");
     }
-    engine._device.queue.writeBuffer(vat.settingsBuffer, 16, new Float32Array([seconds]));
+    const time = (_vatTime ??= new Float32Array(1));
+    time[0] = seconds;
+    engine._device.queue.writeBuffer(vat.settingsBuffer, 16, time);
 }
 
 /**

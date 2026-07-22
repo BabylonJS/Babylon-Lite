@@ -16,12 +16,10 @@ export function prepareIgnoredCandidates(
 ): {
     readonly candidates: { readonly mesh: Mesh; readonly ignore: PickIgnore | null }[];
     readonly deformed: boolean;
-    readonly vat: boolean;
     readonly advanced: boolean;
 } {
     const candidates: { mesh: Mesh; ignore: PickIgnore | null }[] = [];
     let deformed = false;
-    let vat = false;
     for (const mesh of meshes) {
         const entry = forMesh(ignore, mesh);
         if (mesh.pickable === false || (entry && entry.thinInstanceIndex === undefined && entry.thinInstanceRange === undefined) || (filter && !filter(mesh))) {
@@ -29,8 +27,7 @@ export function prepareIgnoredCandidates(
         }
         candidates.push({ mesh, ignore: entry });
         deformed ||= !!(mesh.morphTargets || mesh.skeleton) && !!mesh._cpuPositions;
-        vat ||= !!mesh.vat;
-        advanced ||= !!mesh.thinInstances || !!mesh._gpu._vbLayout?._p || entry?.thinInstanceIndex !== undefined || !!entry?.thinInstanceRange;
+        advanced ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?._p || entry?.thinInstanceIndex !== undefined || !!entry?.thinInstanceRange;
     }
-    return { candidates, deformed, vat, advanced: advanced || vat };
+    return { candidates, deformed, advanced };
 }
