@@ -91,15 +91,15 @@ export function enableSceneTransmission(scene: SceneContext, engine: EngineConte
 export function _t(scene: SceneContext, engine: EngineContext): readonly [commit: () => void, rollback: () => void] {
     const states = scene.meshes.map((mesh) => {
         const mat = mesh.material as { _linearImageProcessing?: boolean; _renderFeatures?: unknown };
-        return [mat, mat._linearImageProcessing] as const;
+        return [mat, mat._linearImageProcessing, mat._renderFeatures] as const;
     });
     markPbrMaterialsLinear(scene);
     return [
         () => enableSceneTransmissionTasks(scene, engine),
         () => {
-            for (const [mat, linear] of states) {
+            for (const [mat, linear, features] of states) {
                 mat._linearImageProcessing = linear;
-                mat._renderFeatures = undefined;
+                mat._renderFeatures = features;
             }
         },
     ];

@@ -73,7 +73,7 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
         }
         return import("../scene/scene-runtime-mesh-build.js").then(({ B }) => B(ctx, builder, mesh)).then(() => ctx._runtimeBuilds?._e(false));
     }
-    const resolved = group?.r ?? builder._rebuildSingle;
+    const resolved = group ? group.r : builder._rebuildSingle;
     if (!resolved) {
         return false;
     }

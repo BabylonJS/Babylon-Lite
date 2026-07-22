@@ -350,7 +350,8 @@ function resolvePendingMeshes(task: RenderTask, sc: SceneContext): void {
         return;
     }
     for (const { mesh, material } of task._pendingMeshes) {
-        const rebuild = sc._groups.get(material._buildGroup)?.r ?? material._buildGroup._rebuildSingle;
+        const group = sc._groups.get(material._buildGroup);
+        const rebuild = group ? group.r : material._buildGroup._rebuildSingle;
         if (!rebuild) {
             throw new Error();
         }

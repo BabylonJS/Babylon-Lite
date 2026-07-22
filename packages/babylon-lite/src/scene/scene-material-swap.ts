@@ -16,10 +16,10 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
         const builder = mat._buildGroup;
         const runtimeBuild = mesh.thinInstances?._runtimeBuild;
         if (runtimeBuild) {
-            pending = runtimeBuild(scene, builder, mesh);
+            pending = runtimeBuild(scene, builder, mesh, pending);
             continue;
         }
-        const rebuild = scene._groups?.get(builder)?.r ?? builder._rebuildSingle;
+        const rebuild = scene._groups?.get(builder)?.r;
         if (!rebuild) {
             continue;
         }

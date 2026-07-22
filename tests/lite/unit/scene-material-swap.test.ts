@@ -23,12 +23,15 @@ describe("scene material swap", () => {
             },
         } as unknown as Material;
         mesh.material = material;
+        const group = [mesh] as Mesh[] & { r?: NonNullable<MeshGroupBuilder["_rebuildSingle"]> };
+        group.r = material._buildGroup._rebuildSingle;
         const engine = {
             _retirements: retirements,
         } as unknown as EngineContext;
         const scene = {
             surface: { engine },
             _materialSwapQueue: [mesh],
+            _groups: new Map([[material._buildGroup, group]]),
             _meshDisposables: new Map([[mesh, [disposeOld]]]),
             _renderables: [other, oldMain, oldDuplicate],
             _renderableVersion: 4,

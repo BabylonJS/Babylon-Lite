@@ -10,6 +10,7 @@ import { addToScene, buildScene, type SceneContext } from "../../../packages/bab
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
 import { rebuildScenePbrPipelines } from "../../../packages/babylon-lite/src/scene/scene-rebuild";
 import { B } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build";
+import { _t } from "../../../packages/babylon-lite/src/frame-graph/transmission";
 
 function createScene(engine: EngineContext): SceneContext {
     return {
@@ -37,6 +38,84 @@ function renderable(mesh: Mesh): Renderable {
 }
 
 describe("runtime material rebuild ownership", () => {
+    it("restores cached material features when a transmission rebuild rolls back", () => {
+        const engine = {} as EngineContext;
+        const scene = createScene(engine);
+        const features = {};
+        const material = { _linearImageProcessing: false, _renderFeatures: features } as unknown as Material;
+        scene.meshes.push({ material } as Mesh);
+
+        const [, rollback] = _t(scene, engine);
+        expect((material as Material & { _renderFeatures?: unknown })._renderFeatures).toBeUndefined();
+
+        rollback();
+        expect((material as Material & { _linearImageProcessing?: boolean })._linearImageProcessing).toBe(false);
+        expect((material as Material & { _renderFeatures?: unknown })._renderFeatures).toBe(features);
+    });
+
+    it("waits for every thin-instance runtime build started by one swap drain", async () => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        const starts: Array<Promise<void>> = [];
+        const finishes: Array<() => void> = [];
+
+        for (let i = 0; i < 2; i++) {
+            let start!: () => void;
+            let finish!: () => void;
+            starts.push(new Promise<void>((resolve) => (start = resolve)));
+            const done = new Promise<void>((resolve) => (finish = resolve));
+            finishes.push(finish);
+            const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
+                start();
+                await done;
+                const rebuild = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
+                return { renderables: meshes.map(renderable), rebuildSingle: rebuild };
+            }) as MeshGroupBuilder;
+            builder._materialFamily = "standard";
+            const mesh = { _gpu: {}, material: { _buildGroup: builder } as Material, children: [] } as unknown as Mesh;
+            setThinInstances(mesh, new Float32Array(16), 1);
+            scene.meshes.push(mesh);
+            scene._materialSwapQueue.push(mesh);
+        }
+
+        const pending = processMaterialSwaps(scene) as Promise<void>;
+        await starts[0];
+        let settled = false;
+        void pending.then(() => (settled = true));
+
+        finishes[0]!();
+        await starts[1];
+        expect(settled).toBe(false);
+
+        finishes[1]!();
+        await pending;
+        expect(settled).toBe(true);
+    });
+
+    it("keeps the runtime dispatcher on the scene group instead of the shared builder", async () => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        const base = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
+        const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
+            const rebuild = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
+            builder._rebuildSingle = rebuild;
+            return { renderables: meshes.map(renderable), rebuildSingle: rebuild };
+        }) as MeshGroupBuilder;
+        builder._materialFamily = "standard";
+        builder._rebuildSingle = base;
+        const material = { _buildGroup: builder } as Material;
+        const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
+        setThinInstances(mesh, new Float32Array(16), 1);
+        const group = [mesh] as Mesh[] & { r?: NonNullable<MeshGroupBuilder["_rebuildSingle"]> };
+        group.r = base;
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, group);
+
+        await B(scene, builder, mesh);
+
+        expect(builder._rebuildSingle).toBe(base);
+        expect(Object.getOwnPropertyDescriptor(builder, "_rebuildSingle")?.get).toBeUndefined();
+        expect(group.r).not.toBe(base);
+    });
+
     it("serializes a synchronous material rebuild behind an active runtime mesh build", async () => {
         const engine = { _retirements: [] } as unknown as EngineContext;
         const scene = createScene(engine);

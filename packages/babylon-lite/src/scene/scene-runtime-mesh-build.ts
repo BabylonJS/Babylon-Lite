@@ -37,6 +37,12 @@ interface RuntimeRebuilder {
 let _builderTails: WeakMap<MeshGroupBuilder, Promise<void>> | null = null;
 let _runtimeRebuilders: WeakMap<MeshGroupBuilder, RuntimeRebuilder> | null = null;
 
+/** @internal Start one runtime build and return a promise covering it plus every earlier build in this drain. */
+export function A(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh, pending?: Promise<void>): Promise<void> {
+    const current = B(scene, builder, mesh);
+    return pending ? Promise.all([pending, current]).then(() => undefined) : current;
+}
+
 /** @internal Lazily install runtime-build state and materialize one post-build mesh. */
 export function B(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh): Promise<void> {
     if (scene._z || !scene.meshes.includes(mesh)) {
@@ -259,10 +265,7 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
         }
         throw error;
     } finally {
-        const runtime = _runtimeRebuilders?.get(builder);
-        if (!runtime) {
-            builder._rebuildSingle = previousRebuild;
-        }
+        builder._rebuildSingle = previousRebuild;
         if (builder._materialFamily === "pbr" && hadBuiltGroup) {
             pbrState._pbrGeomContext = previousPbrContext;
         }
@@ -333,13 +336,6 @@ function installRuntimeRebuild(
     if (!runtime) {
         const scenes = new WeakMap<SceneContext, WeakMap<Mesh, RuntimeRebuild>>();
         const bases = new WeakMap<SceneContext, RuntimeRebuild>();
-        const registry = {
-            bases,
-            dispatch: (() => {
-                throw new Error("Material runtime dispatcher is not initialized");
-            }) as RuntimeRebuild,
-            scenes,
-        };
         const dispatch: RuntimeRebuild = (targetScene, targetMesh, override) => {
             const specialized = scenes.get(targetScene)?.get(targetMesh);
             if (specialized) {
@@ -351,14 +347,8 @@ function installRuntimeRebuild(
             }
             throw new Error("Material group has not completed its initial build");
         };
-        registry.dispatch = dispatch;
-        runtime = registry;
+        runtime = { bases, dispatch, scenes };
         (_runtimeRebuilders ??= new WeakMap()).set(builder, runtime);
-        Object.defineProperty(builder, "_rebuildSingle", {
-            get: () => registry.dispatch,
-            set: () => undefined,
-            configurable: true,
-        });
     }
 
     let meshes = runtime.scenes.get(scene);
