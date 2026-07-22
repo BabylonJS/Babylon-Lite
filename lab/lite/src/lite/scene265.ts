@@ -1,79 +1,34 @@
-// Scene 265: Node Particle Editor — "Animations 2" (sprite-sheet).
-//
-// Builds a Node Particle graph (a classic sprite-sheet ParticleSystem converted to NPE) and renders its
-// particles as camera-facing additive billboards, each drawn on its current animation-sheet cell. The
-// simulation is stepped a fixed number of times with the RNG seeded deterministically, so the frame is
-// frozen and reproducible for pixel parity against the Babylon.js oracle.
+// Scene 265 — EnvironmentTest (cx20 gltf-test parity).
+// Exercises EXT_lights_image_based: the glTF carries its own image-based light
+// (irradiance SH9 + prefiltered specular cubemap), so we do NOT call
+// loadEnvironment — the extension installs the environment onto the scene.
+import { addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadGltf, attachControl, registerScene } from "babylon-lite";
 
-import {
-    addFacingBillboardSystem,
-    animateParticleSystem,
-    attachControl,
-    createArcRotateCamera,
-    createEngine,
-    createParticleBillboard,
-    createSceneContext,
-    parseNodeParticleSetFromSnippet,
-    registerScene,
-    startEngine,
-    startParticleSystem,
-    syncParticleBillboard,
-} from "babylon-lite";
-import { SCENE265_NPE_JSON } from "../shared/scene265-npe.js";
-
-/** Number of deterministic simulation steps before the frame is frozen. */
-const STEPS = 200;
+const MODEL_URL = "https://cx20.github.io/gltf-test/tutorialModels/EnvironmentTest/glTF-IBL/EnvironmentTest.gltf";
 
 async function main(): Promise<void> {
-    const initStart = performance.now();
+    const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
-    scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
+    scene.clearColor = { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
 
-    const camera = createArcRotateCamera(-Math.PI / 2, 1.2, 4, { x: -1, y: 0, z: 0 });
-    camera.nearPlane = 0.1;
-    camera.farPlane = 100;
-    scene.camera = camera;
-    attachControl(camera, canvas, scene);
+    const root = await loadGltf(engine, MODEL_URL);
+    addToScene(scene, root);
 
-    const set = await parseNodeParticleSetFromSnippet(engine, scene, "", {
-        json: SCENE265_NPE_JSON,
-        emitter: { x: 0, y: 0, z: 0 },
-        textureBaseUrl: "https://playground.babylonjs.com/",
-    });
-    const system = set.systems[0]!;
-
-    // Seed Math.random deterministically (matching the Babylon.js oracle), then step the simulation a
-    // fixed number of times for a frozen, reproducible frame.
-    let seed = 1;
-    Math.random = () => {
-        const x = Math.sin(seed++) * 10000;
-        return x - Math.floor(x);
-    };
-
-    startParticleSystem(system);
-    for (let i = 0; i < STEPS; i++) {
-        animateParticleSystem(system, 1);
-    }
-
-    const billboard = createParticleBillboard(system);
-    syncParticleBillboard(system, billboard);
-    addFacingBillboardSystem(scene, billboard);
+    const cam = createDefaultCamera(scene);
+    cam.alpha = Math.PI / 2;
+    cam.beta = Math.PI / 2.5;
+    attachControl(cam, canvas, scene);
 
     await registerScene(scene);
     await startEngine(engine);
-
-    canvas.dataset.drawCalls = String(engine.drawCallCount);
-    canvas.dataset.initMs = String(performance.now() - initStart);
-    canvas.dataset.animationFrozen = "true";
+    (window as any).__scene = scene;
+    canvas.dataset.camAlpha = String(cam.alpha);
+    canvas.dataset.camRadius = String(cam.radius);
+    canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 }
 
-main().catch((err) => {
-    console.error(err);
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
-    if (canvas) {
-        canvas.dataset.error = String(err instanceof Error ? err.message : err);
-    }
-});
+main().catch(console.error);

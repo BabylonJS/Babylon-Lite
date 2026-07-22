@@ -8,7 +8,7 @@ import type { Texture2D } from "../texture/texture-2d.js";
 import { recordMipmaps } from "../texture/generate-mipmaps.js";
 import { biasedMipLevelCount } from "../texture/mip-count.js";
 import type { DrawBinding } from "../render/renderable.js";
-import type { RenderTask } from "./render-task.js";
+import { drawList, type RenderTask } from "./render-task.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createImageProcessingTask } from "./image-processing-task.js";
 
@@ -574,23 +574,6 @@ function drawBaseTask(task: RenderTask, pass: GPURenderPassEncoder): number {
     pass.executeBundles(opaqueBundles);
     pass.setBindGroup(0, task._sceneBG);
     draws += drawList(pass, task._directBindings, eng);
-    return draws;
-}
-
-function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext): number {
-    let lp: GPURenderPipeline | null = null;
-    let draws = 0;
-    for (const b of list) {
-        const mesh = b.renderable.mesh;
-        if (mesh && mesh.visible === false) {
-            continue;
-        }
-        if (b.pipeline !== lp) {
-            enc.setPipeline(b.pipeline);
-            lp = b.pipeline;
-        }
-        draws += b.draw(enc, engine);
-    }
     return draws;
 }
 

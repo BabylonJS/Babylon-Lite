@@ -1,11 +1,11 @@
 import type { Mesh } from "./mesh.js";
 import { release } from "../resource/ref-count.js";
+import { _detachThinInstanceLodMesh } from "./thin-instance.js";
 
 /** Destroy all GPU resources owned by a mesh (vertex buffers, skeleton, morph targets).
- *  `_gpu`/`skeleton`/`morphTargets`/`thinInstances` may be SHARED with a clone made via
- *  `cloneTransformNode` (see resource/ref-count.ts) — each resource is only actually
- *  destroyed once its last owning mesh releases it, so a clone's still-in-use buffers
- *  are never freed out from under it (and never double-freed once both are disposed). */
+ *  `_gpu` may be shared across glTF nodes or mesh clones; skeleton/morph/thin-instance
+ *  resources may also be shared by clones. Each resource is destroyed only after its
+ *  last owning mesh releases it (see resource/ref-count.ts). */
 export function disposeMeshGpu(mesh: Mesh): void {
     const g = mesh._gpu;
     if (release(g)) {
@@ -19,6 +19,7 @@ export function disposeMeshGpu(mesh: Mesh): void {
     }
     const ti = mesh.thinInstances;
     if (ti && release(ti)) {
+        _detachThinInstanceLodMesh(mesh);
         ti._gpuBuffer?.destroy();
         ti._colorGpuBuffer?.destroy();
         ti._drawArgsBuffer?.destroy();

@@ -16,6 +16,7 @@ import { createSkeletonFragment } from "../../../packages/babylon-lite/src/mater
 import { createMorphFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/morph-fragment";
 import { createThinInstanceFragment } from "../../../packages/babylon-lite/src/shader/fragments/thin-instance-fragment";
 import { createPbrShadowFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/pbr-shadow-fragment";
+import { createShadowOnlyFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/shadow-only-fragment";
 import { createNormalMapFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/normal-map-fragment";
 import type { PbrTemplateConfig } from "../../../packages/babylon-lite/src/material/pbr/pbr-template";
 
@@ -93,6 +94,25 @@ describe("PBR template + fragments integration", () => {
         expect(result._fragmentWGSL).toContain("visibility_Ashikhmin");
         expect(result._fragmentWGSL).toContain("sheenColorFinal");
         expect(result._materialUboSpec!._offsets.has("sheenParams")).toBe(true);
+    });
+
+    it("composes PBR + shadow-only (BC color/alpha override + FA final-alpha override)", () => {
+        // The FA slot only exists in the template's alpha-blend branch, so shadow-only
+        // requires _hasAlphaBlend (which its detect() forces via PBR_HAS_ALPHA_BLEND).
+        const template = createPbrTemplate({ ...defaultPbrConfig, _hasAlphaBlend: true });
+        const result = composeShader(template, [createShadowOnlyFragment()]);
+        // BC slot overrides color/alpha with the shadow-only outputs.
+        expect(result._fragmentWGSL).toContain("color = material.shadowOnlyColor;");
+        expect(result._fragmentWGSL).toContain("material.shadowOnlyFalloff");
+        // FA slot overrides finalAlpha after the luminance fold.
+        expect(result._fragmentWGSL).toContain("finalAlpha = alpha * material.materialAlpha;");
+        // The FA override must appear AFTER the luminanceOverAlpha accumulation so it
+        // bypasses the environment/specular bleed into the shadow catcher's alpha.
+        const foldIdx = result._fragmentWGSL.indexOf("luminanceOverAlpha*luminanceOverAlpha");
+        const faIdx = result._fragmentWGSL.indexOf("finalAlpha = alpha * material.materialAlpha;");
+        expect(foldIdx).toBeGreaterThanOrEqual(0);
+        expect(faIdx).toBeGreaterThan(foldIdx);
+        expect(result._materialUboSpec!._offsets.has("shadowOnlyColor")).toBe(true);
     });
 
     it("composes PBR + IBL (env)", () => {

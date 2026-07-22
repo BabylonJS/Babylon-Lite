@@ -43,8 +43,74 @@ export abstract class Light extends Node {
         return "Light";
     }
 
-    public abstract get intensity(): number;
-    public abstract set intensity(value: number);
+    /**
+     * @internal When the light is disabled via {@link setEnabled}, its Lite
+     * intensity is forced to `0` (zero contribution) and the caller-visible
+     * intensity is parked here so {@link intensity} keeps reporting the real
+     * value and re-enabling restores it. `null` means the light is enabled.
+     */
+    private _disabledIntensity: number | null = null;
+
+    /** @internal Typed accessor for the Lite light's `intensity` scalar. */
+    private get _liteIntensity(): number {
+        return (this._lite as unknown as { intensity: number }).intensity;
+    }
+    private set _liteIntensity(value: number) {
+        (this._lite as unknown as { intensity: number }).intensity = value;
+        this._bumpLiteVersion();
+    }
+
+    /**
+     * @internal Lazily-resolved bump for the underlying Lite light's
+     * `_lightVersion` (see {@link ensureLightVersionBump}). Cached after first use.
+     */
+    private _liteVersionBump: (() => void) | null = null;
+
+    /**
+     * @internal Advance the underlying Lite light's `_lightVersion`. Lite's shared
+     * lights-UBO refresh is gated on the sum of every light's `_lightVersion`, and
+     * factory lights only bump it on observable direction/position writes — never on
+     * scalar `intensity` writes. Since these wrappers mutate `intensity` directly
+     * (both `intensity` and `setEnabled`), this makes those writes reach the GPU.
+     */
+    private _bumpLiteVersion(): void {
+        this._liteVersionBump ??= ensureLightVersionBump(this._lite);
+        this._liteVersionBump();
+    }
+
+    /**
+     * Babylon.js `light.intensity`. While the light is disabled the Lite light
+     * carries `0`, but the getter still returns the logical value the caller set.
+     */
+    public get intensity(): number {
+        return this._disabledIntensity ?? this._liteIntensity;
+    }
+    public set intensity(value: number) {
+        if (this._disabledIntensity !== null) {
+            this._disabledIntensity = value;
+        } else {
+            this._liteIntensity = value;
+        }
+    }
+
+    /**
+     * Babylon.js `light.setEnabled(false)` — toggle the light's contribution.
+     * Babylon Lite has no per-light enable flag, so a disabled light is expressed
+     * by zeroing its intensity in the shared lights UBO (and restoring it on
+     * re-enable). The logical intensity value is preserved across the toggle.
+     */
+    public override setEnabled(value: boolean): void {
+        if (value !== this.isEnabled()) {
+            if (!value) {
+                this._disabledIntensity = this._liteIntensity;
+                this._liteIntensity = 0;
+            } else if (this._disabledIntensity !== null) {
+                this._liteIntensity = this._disabledIntensity;
+                this._disabledIntensity = null;
+            }
+        }
+        super.setEnabled(value);
+    }
 
     /** Detach this light's shadow generator (compat for `light.shadowEnabled = false`). */
     public set shadowEnabled(enabled: boolean) {
@@ -60,6 +126,39 @@ export abstract class Light extends Node {
         this._lite.shadowGenerator = undefined;
         super.dispose();
     }
+}
+
+/**
+ * @internal Ensure the underlying Lite light exposes a `_bumpLightVersion()` that,
+ * when called, advances its `_lightVersion`, and return that bump function. Reuses a
+ * pre-existing `_bumpLightVersion` (e.g. installed by the glTF punctual-lights
+ * feature) when present; otherwise wraps the light's existing `_lightVersion` getter
+ * with an extra counter that the returned bump increments. Mirrors the shim pattern
+ * in `babylon-lite`'s `gltf-feature-lights-punctual.ts`.
+ */
+function ensureLightVersionBump(lite: LightBase): () => void {
+    const existing = (lite as { _bumpLightVersion?: () => void })._bumpLightVersion;
+    if (existing) {
+        return existing;
+    }
+    const baseGet = Object.getOwnPropertyDescriptor(lite, "_lightVersion")?.get;
+    let extra = 0;
+    Object.defineProperty(lite, "_lightVersion", {
+        get(): number {
+            return (baseGet ? (baseGet.call(lite) as number) : 0) + extra;
+        },
+        enumerable: false,
+        configurable: true,
+    });
+    const bump = (): void => {
+        extra++;
+    };
+    Object.defineProperty(lite, "_bumpLightVersion", {
+        value: bump,
+        enumerable: false,
+        configurable: true,
+    });
+    return bump;
 }
 
 function readColor(tuple: Tuple3): Color3 {
@@ -90,13 +189,6 @@ export class HemisphericLight extends Light {
 
     public override getClassName(): string {
         return "HemisphericLight";
-    }
-
-    public get intensity(): number {
-        return this._lite.intensity;
-    }
-    public set intensity(value: number) {
-        this._lite.intensity = value;
     }
 
     public get direction(): Vector3 {
@@ -144,13 +236,6 @@ export class DirectionalLight extends Light {
         return "DirectionalLight";
     }
 
-    public get intensity(): number {
-        return this._lite.intensity;
-    }
-    public set intensity(value: number) {
-        this._lite.intensity = value;
-    }
-
     public get direction(): Vector3 {
         return readVector(this._lite.direction);
     }
@@ -196,13 +281,6 @@ export class PointLight extends Light {
         return "PointLight";
     }
 
-    public get intensity(): number {
-        return this._lite.intensity;
-    }
-    public set intensity(value: number) {
-        this._lite.intensity = value;
-    }
-
     public get range(): number {
         return this._lite.range;
     }
@@ -246,13 +324,6 @@ export class SpotLight extends Light {
 
     public override getClassName(): string {
         return "SpotLight";
-    }
-
-    public get intensity(): number {
-        return this._lite.intensity;
-    }
-    public set intensity(value: number) {
-        this._lite.intensity = value;
     }
 
     public get angle(): number {

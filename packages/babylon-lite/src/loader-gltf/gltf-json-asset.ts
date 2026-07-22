@@ -27,7 +27,7 @@ export async function resolveExternalImage(uri: string, baseUrl: string): Promis
  *  `.bin` paths resolve against it. Without one (ArrayBuffer/Blob source), only self-contained `data:`/
  *  absolute URIs are resolvable — a bare relative path has no base and throws a clear error.
  *  @internal */
-function resolveBufferUri(uri: string, baseUrl: string): string {
+export function resolveBufferUri(uri: string, baseUrl: string): string {
     if (baseUrl) {
         return new URL(uri, baseUrl + "x").href;
     }

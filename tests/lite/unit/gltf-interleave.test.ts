@@ -77,6 +77,32 @@ describe("gltf-interleave", () => {
         expect(mesh._cpuPositions).toBe(mesh._cpuPositions);
     });
 
+    it("shares lazy CPU copies across meshes created from one cached primitive", async () => {
+        const { json, binChunk, primitive } = makeInterleavedAsset();
+        const m = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
+        const first: Record<string, unknown> = {};
+        const second: Record<string, unknown> = {};
+
+        expect(m._vb!._p!._cpu).toBeUndefined();
+        expect(m._vb!._n!._cpu).toBeUndefined();
+        installLazyCpu(first, m as never);
+        installLazyCpu(second, m as never);
+
+        expect(m._vb!._p!._cpu).toBeUndefined();
+        expect(m._vb!._n!._cpu).toBeUndefined();
+        const positions = first._cpuPositions;
+        const normals = first._cpuNormals;
+        expect(m._vb!._p!._cpu).toBe(positions);
+        expect(m._vb!._n!._cpu).toBe(normals);
+        expect(second._cpuPositions).toBe(positions);
+        expect(second._cpuNormals).toBe(normals);
+
+        const replacement = new Float32Array([7, 8, 9]);
+        second._cpuPositions = replacement;
+        expect(second._cpuPositions).toBe(replacement);
+        expect(first._cpuPositions).toBe(positions);
+    });
+
     it("computeAabbStrided folds the AABB directly from the strided slice", async () => {
         const { json, binChunk, primitive } = makeInterleavedAsset();
         const m = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;

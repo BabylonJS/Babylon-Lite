@@ -9,6 +9,7 @@
 // with the internal runner-iframe protocol or unrelated host traffic.
 
 import { snippetPath } from "./snippets";
+import { BASE } from "./base";
 
 export const EMBED_CHANNEL = "babylon-lite-playground";
 
@@ -169,5 +170,5 @@ export function openInPlaygroundUrl(payload: string, snippet: { id: string; vers
     if (snippet) {
         return `${location.origin}${snippetPath(snippet.id, snippet.version)}`;
     }
-    return `${location.origin}/#${CODE_HASH_PREFIX}${encodeCodeHash(payload)}`;
+    return `${location.origin}${BASE}#${CODE_HASH_PREFIX}${encodeCodeHash(payload)}`;
 }

@@ -111,6 +111,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasSomeThinInstances = false;
     let hasCullingTI = false;
     let hasAnyUnlit = false;
+    let hasAnyShadowOnly = false;
     let hasAnyUvTransform = false;
     let hasAnyUv2 = false;
     let hasAnyVertexColor = false;
@@ -135,9 +136,13 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasSomeThinInstances ||= !!m.thinInstances;
         hasCullingTI ||= !!m.thinInstances?._gpuCullingEnabled;
         hasAnyUnlit ||= !!mat.unlit;
+        hasAnyShadowOnly ||= !!mat.shadowOnly;
         hasAnyUvTransform ||= !!mat._hasUvTx;
-        // UV2 only counts when occlusion samples texcoord 1.
-        hasAnyUv2 ||= !!m._gpu.uv2Buffer && mat.occlusionTexCoord === 1;
+        // UV2 counts when ANY PBR channel samples texCoord 1 (occlusion included, via `_uv2Mask`
+        // bit 32) — precomputed as `_uv2Mask` on the material by the glTF slow path (0/undefined on
+        // the fast path). Occlusion-on-UV1 (incl. KHR_texture_basisu) always routes through that slow
+        // path, so its UV2 usage is already reflected here without a separate occlusionTexCoord check.
+        hasAnyUv2 ||= !!m._gpu.uv2Buffer && !!(mat as { _uv2Mask?: number })._uv2Mask;
         hasAnyVertexColor ||= !!m._gpu.colorBuffer;
         hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
         hasGammaAlbedo ||= !!mat.gammaAlbedo;
@@ -222,6 +227,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     await _drainPbrExts([
         [needsEmissiveColor, () => import("./fragments/emissive-fragment.js")],
         [hasAnyUnlit, () => import("./fragments/unlit-fragment.js")],
+        [hasAnyShadowOnly, () => import("./fragments/shadow-only-fragment.js")],
         [hasSomeSkeletons, () => import("./fragments/skeleton-fragment.js")],
         [hasSomeMorphs, () => import("./fragments/morph-fragment.js")],
         [hasAnyUvTransform, () => import("./fragments/uv-transform-fragment.js")],
@@ -344,9 +350,19 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         // today. Interleaved meshes carry a precomputed vbKey from the loader module.
         const vbLayout = mi._gpu._vbLayout;
         const vbKey = mi._gpu._vbKey ?? "";
+        const uv2Mask = (mat as { _uv2Mask?: number })._uv2Mask ?? 0;
 
-        const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey);
-        const bindings = getOrCreatePbrBindings(engine, features, features2, meshFeatures, sceneFeatures, composed, `${lightMode}:${singleLightType}${vbKey}`, mat.stencil ?? null);
+        const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey, uv2Mask);
+        const bindings = getOrCreatePbrBindings(
+            engine,
+            features,
+            features2,
+            meshFeatures,
+            sceneFeatures,
+            composed,
+            `${lightMode}:${singleLightType}${vbKey}:${uv2Mask}`,
+            mat.stencil ?? null
+        );
 
         // Mesh UBO (world matrix at offset 0; spec.totalBytes covers any extra fields).
         const meshUboData = new F32(composed._meshUboSpec._totalBytes / 4);

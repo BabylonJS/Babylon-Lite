@@ -62,6 +62,7 @@ Pages are ordered by how commonly Babylon Lite users reach for them — start wi
 | [40-material-stencil.md](40-material-stencil.md)                   | Material Stencil         | Opt-in `enableMaterialStencil` per-material stencil mask/test on Standard/PBR/Shader, zero-impact hook |
 | [41-audio-engine.md](41-audio-engine.md)                           | Audio Engine             | Web Audio playback, buses, 3D spatial, panning, analyser, microphone, unmute UI                       |
 | [42-physics.md](42-physics.md)                                     | Physics                  | Havok V2 world, bodies/shapes/aggregates, timestep & delta propagation, collision/trigger/query/character |
+| [49-error-handling.md](49-error-handling.md)                       | Error Handling           | Coded errors by default; `enableErrorDecoding` (always-on) vs `decodeError` (on-the-fly, e.g. telemetry)   |
 
 ---
 
@@ -370,6 +371,15 @@ createTube(engine: Engine, options: TubeOptions): Mesh
 createExtrudeShape(engine: Engine, options: ExtrudeShapeOptions): Mesh
 createGround(engine: Engine, options?: GroundOptions): Mesh
 createGroundFromHeightMap(engine: Engine, url: string, options: GroundOptions): Promise<Mesh>
+getMeshGeometry(mesh: Mesh): {
+    positions: Float32Array;
+    normals: Float32Array;
+    indices: Uint32Array;
+    uvs?: Float32Array;
+    uvs2?: Float32Array;
+    tangents?: Float32Array;
+    colors?: Float32Array;
+} | null
 
 // Materials
 createStandardMaterial(): StandardMaterialProps
@@ -381,6 +391,7 @@ createEsmDirectionalShadowGenerator(engine: Engine, light: DirectionalLight, con
 createPcfSpotlightShadowGenerator(engine: Engine, light: SpotLight, config?: PcfSpotlightShadowGeneratorConfig): ShadowGenerator
 createPcfDirectionalShadowGenerator(engine: Engine, light: DirectionalLight, config?: PcfDirectionalShadowGeneratorConfig): ShadowGenerator
 setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): void
+setShadowCasterMaxCascade(mesh: Mesh, maxCascade: number): void
 
 // Animation
 createAnimationController(skeleton, scene): AnimationController

@@ -45,6 +45,8 @@ standard-renderable.ts (buildStandardMeshRenderables):
 
 `standardGroupBuilder` detects which features are needed across all meshes and conditionally imports only the required fragment modules, plus `thin-instance-gpu.ts` when thin instances are present. This ensures zero bundle-size impact for unused features. It stores the `rebuildSingle` closure returned from `buildStandardMeshRenderables()` on `standardGroupBuilder._rebuildSingle` for material swaps, `rebuildMaterial()`, and per-pass material overrides.
 
+Standard mesh vertex colors use a stricter opt-in seam because automatic color-buffer detection would add a dynamic-import predicate to every Standard scene. `enableStandardVertexColors()` installs the fragment factory before `registerScene()`. When the function is absent from a bundle, `_stdVertexColorFragment` is statically null and all color-buffer branches fold away, keeping non-feature scenes byte-identical.
+
 ## Dynamic Feature Flags
 
 | Flag                         | Bit       | Condition                              | Shader effect                                                    |
@@ -72,6 +74,8 @@ standard-renderable.ts (buildStandardMeshRenderables):
 | `NEEDS_UV2`                  | derived   | Any `*_USES_UV2` flag                  | UV2 vertex attribute                                             |
 
 Thin-instance and shadow-receiver state are mesh feature bits in `material/mesh-features.ts`, separate from Standard material render features.
+
+Vertex colors use `MSH_HAS_VERTEX_COLOR` plus the installed `_stdVertexColorFragment` factory rather than a Standard material bit. Once enabled, every Standard mesh with `mesh._gpu.colorBuffer` receives the vertex-color shader variant and buffer binding.
 
 Pipelines are cached per `(features, format, msaaSamples, fragmentIds)` tuple.
 
@@ -133,6 +137,20 @@ export function collectStdBoundTextures(mat: StandardMaterialProps): Texture2D[]
 /** Create a pass-specific no-color material view over a Standard source material. */
 export function createStandardNoColorMaterialView(source: StandardMaterialProps): MaterialView;
 ```
+
+### Vertex Colors (`enable-standard-vertex-colors.ts`)
+
+```typescript
+import { enableStandardVertexColors } from "babylon-lite/material/standard/enable-standard-vertex-colors";
+
+/**
+ * Enable RGBA mesh vertex colors for StandardMaterial.
+ * Call once before registerScene().
+ */
+export function enableStandardVertexColors(): void;
+```
+
+The color buffer contract is four `f32` values per vertex. RGB multiplies the Standard base color; alpha multiplies the running material alpha. The same fragment participates in main-color, no-color/shadow, and Standard geometry-view shader composition.
 
 ### Pipeline (`standard-pipeline.ts`)
 
@@ -256,6 +274,7 @@ The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is st
 | --------------- | -------------- | -------- | ---------- | ------------------------------ | --------------------- |
 | UV              | `float32x2`    | 8 bytes  | `vertex`   | `@location(2)`                 | `NEEDS_UV`            |
 | UV2             | `float32x2`    | 8 bytes  | `vertex`   | `@location(3)`                 | `NEEDS_UV2`           |
+| Vertex color    | `float32x4`    | 16 bytes | `vertex`   | `@location(N)`                 | Vertex colors enabled and color buffer present |
 | Instance matrix | 4× `float32x4` | 64 bytes | `instance` | `@location(N)..@location(N+3)` | `THIN_INSTANCES`      |
 | Instance color  | `float32x4`    | 16 bytes | `instance` | `@location(N+4)`               | `THIN_INSTANCE_COLOR` |
 
@@ -476,6 +495,18 @@ All fragments live in `src/material/standard/fragments/` and export factory func
         - RGB mode (`fromRGB=true`): `alpha *= luminance(textureSample(...).rgb) * mat.opacityLevel`
         - Alpha mode: `alpha *= textureSample(...).a * mat.opacityLevel`
 
+### `std-vertex-color-fragment.ts` — Mesh Vertex Colors
+
+- **Factory**: `createStdVertexColorFragment(): ShaderFragment`
+- **ID**: `"std-vertex-color"`
+- **Vertex attribute**: `color: vec4<f32>` (`float32x4`, 16-byte stride)
+- **Varying**: `vColor: vec4<f32>`
+- **Vertex slot**:
+    - `VB` — `out.vColor = color`
+- **Fragment slot**:
+    - `AT` — `baseColor *= input.vColor.rgb; alpha *= input.vColor.a`
+- **Activation**: `enableStandardVertexColors()` installs the factory; only meshes with a color buffer use it.
+
 ### `std-reflection-fragment.ts` — Reflection Texture
 
 - **Factory**: `createStdReflectionFragment(): ShaderFragment`
@@ -511,6 +542,7 @@ vFogDistance = (scene.view × worldPos).xyz
 ```
 
 If NEEDS_UV: `vDiffuseUV = uv × uvScaleOffset.xy + uvScaleOffset.zw`
+If vertex colors are enabled and present: `vColor = color`
 If RECEIVE_SHADOWS: `vPositionFromLight = shadow.lightMatrix × worldPos`, `vDepthMetric = (lightClip.z + near) / far`
 
 ### Fragment Shader (composed by template + fragments)
@@ -531,6 +563,13 @@ diffuse = NdotL × lightDiffuse × attenuation
 H = normalize(V + L)
 specComp = pow(max(0, dot(N, H)), max(1, glossiness))
 specular = specComp × lightSpecular × attenuation
+```
+
+When vertex colors are enabled:
+
+```
+baseColor *= vColor.rgb
+alpha *= vColor.a
 ```
 
 #### ESM Shadow (if RECEIVE_SHADOWS)
@@ -640,6 +679,7 @@ registerScene(scene)       → runs deferred builders and builds frame graph
 | `fragment composition`            | Bump fragment injects perturbNormal helper + AC slot code   |
 | `shadow fragment ESM`             | ESM shadow factor computation per light                     |
 | `shadow fragment PCF`             | PCF shadow factor computation per light                     |
+| `scene267-standard-vertex-colors`  | Standard RGBA vertex-color interpolation matches BJS exactly |
 
 ## File Manifest
 
@@ -649,6 +689,7 @@ registerScene(scene)       → runs deferred builders and builds frame graph
 | `src/material/standard/standard-template.ts`                 | ~299 lines | `StandardTemplateConfig` + `createStandardTemplate()` — builds `ShaderTemplate` with Blinn-Phong lighting, fog, slot markers                                                            |
 | `src/material/standard/standard-pipeline.ts`                 | ~503 lines | Feature flags, `computeFeatures()`, `composeStandardShader()`, `getOrCreatePipeline()`, `createDynamicMeshGPU()`, `writeMaterialUBO()`, pipeline/shader caches, PCF shadow registration |
 | `src/material/standard/standard-renderable.ts`               | ~313 lines | `StdFragmentFactories` interface, `buildStandardMeshRenderables()` — composes shaders with fragments, creates Renderables, returns single-mesh rebuild closure                          |
+| `src/material/standard/enable-standard-vertex-colors.ts`     | ~24 lines  | Explicit process-global opt-in that installs Standard vertex-color support while preserving byte-identical non-feature bundles                                                        |
 | `src/material/standard/no-color-view.ts`                     | ~16 lines  | `createStandardNoColorMaterialView()` — pass-specific no-color material view helper                                                                                                     |
 | `src/material/standard/fragments/normal-map-fragment.ts`     | ~33 lines  | Cotangent-frame bump/normal mapping fragment (`AC` slot)                                                                                                                                |
 | `src/material/standard/fragments/std-emissive-fragment.ts`   | ~17 lines  | Emissive texture sampling fragment (`AT` slot)                                                                                                                                          |
@@ -656,6 +697,7 @@ registerScene(scene)       → runs deferred builders and builds frame graph
 | `src/material/standard/fragments/std-ambient-fragment.ts`    | ~18 lines  | Ambient/AO texture sampling fragment (`AD` slot, UV/UV2 aware)                                                                                                                          |
 | `src/material/standard/fragments/std-lightmap-fragment.ts`   | ~18 lines  | Additive lightmap fragment (`BC` slot, UV/UV2 aware)                                                                                                                                    |
 | `src/material/standard/fragments/std-opacity-fragment.ts`    | ~20 lines  | Opacity texture fragment (`AT` slot, RGB or alpha mode)                                                                                                                                 |
+| `src/material/standard/fragments/std-vertex-color-fragment.ts` | ~20 lines | RGBA vertex attribute/varying and base-color/alpha multiplication (`VB` + `AT` slots)                                                                                                   |
 | `src/material/standard/fragments/std-reflection-fragment.ts` | ~39 lines  | Spherical/planar reflection fragment (`AD` slot)                                                                                                                                        |
 | `src/material/standard/fragments/std-shadow-fragment.ts`     | ~155 lines | ESM/PCF shadow receiving fragment (per-light, `VB` + `AD` slots)                                                                                                                        |
 | `src/mesh/thin-instance-gpu.ts`                              | ~50 lines  | `syncThinInstanceBuffers()` — uploads instance matrix/color vertex buffers                                                                                                              |

@@ -1,6 +1,6 @@
 {
-  "rawKB": 15.8,
-  "gzipKB": 6.9,
+  "rawKB": 15.6,
+  "gzipKB": 6.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene50.js"

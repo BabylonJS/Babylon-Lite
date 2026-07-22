@@ -77,7 +77,8 @@ type PbrComposeFn = (
     _singleLightType?: string,
     _esmShadowDepthCode?: string,
     _vbStrides?: MeshVbLayout,
-    _vbKey?: string
+    _vbKey?: string,
+    _uv2Mask?: number
 ) => ComposedShader;
 
 /** Create a memoized shader composer for a given scene's resolved PBR deps. */
@@ -111,9 +112,10 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         singleLightType = "",
         _esmShadowDepthCode = "",
         vbStrides?: MeshVbLayout,
-        vbKey = ""
+        vbKey = "",
+        uv2Mask = 0
     ): ComposedShader {
-        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}`;
+        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}:${uv2Mask}`;
         const cached = cache.get(ckey);
         if (cached) {
             return cached;
@@ -145,7 +147,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
                       _hasUvTransform,
                       _hasVertexColor,
                       _hasUv2,
-                      _hasOcclusionUv2: _hasUv2,
+                      _uv2Mask: uv2Mask,
                       _features2: features2,
                       _hasAnyNormal,
                       _hasEmissiveTexture,
@@ -196,6 +198,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _features: features,
             _features2: features2,
             _meshFeatures: meshFeatures,
+            _uv2Mask: _hasUv2 ? uv2Mask : 0,
             _hasIbl: _hasIbl,
             _hasAnyNormal,
             _hasSpecularAA,

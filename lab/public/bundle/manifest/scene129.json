@@ -1,10 +1,10 @@
 {
-  "rawKB": 84.7,
-  "gzipKB": 32.1,
+  "rawKB": 86.2,
+  "gzipKB": 32.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene129-gs-picking-pipeline-RhdQBaXc.js",
-    "scene129-standard-renderable-DvSP5bxO.js",
+    "scene129-gs-picking-pipeline-C_h523Yk.js",
+    "scene129-standard-renderable-DMSgcKMu.js",
     "scene129.js"
   ]
 }

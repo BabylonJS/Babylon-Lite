@@ -14,10 +14,9 @@ import { TU, BU } from "../../engine/gpu-flags.js";
 import type { SceneNode } from "../../scene/scene-node.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { Mat4 } from "../../math/types.js";
-import { mat4Identity, mat4Compose } from "../../math/mat4.js";
 import { ObservableVec3 } from "../../math/observable-vec3.js";
 import { ObservableQuat } from "../../math/observable-quat.js";
-import { createWorldMatrixState, attachWorldMatrixState } from "../../scene/world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "../../scene/world-matrix-state.js";
 import { eulerToQuat, createEulerProxy } from "../../scene/scene-node.js";
 import { buildSplatGeometry, type SplatGeometry, type ParsedSplat } from "../../loader-splat/splat-data.js";
 
@@ -299,13 +298,7 @@ export function disposeGaussianSplattingMesh(mesh: GaussianSplattingMesh): void 
 // Same TRS + worldMatrix wiring as `initMeshTransform` in mesh/mesh.ts but
 // duplicated here to avoid pulling the Mesh module into the GS code path.
 function initSplatTransform(node: GaussianSplattingMesh): void {
-    const wm = createWorldMatrixState(() => {
-        const p = node.position,
-            rq = node.rotationQuaternion,
-            s = node.scaling;
-        const isIdentity = p.x === 0 && p.y === 0 && p.z === 0 && rq.x === 0 && rq.y === 0 && rq.z === 0 && rq.w === 1 && s.x === 1 && s.y === 1 && s.z === 1;
-        return isIdentity ? mat4Identity() : mat4Compose(p.x, p.y, p.z, rq.x, rq.y, rq.z, rq.w, s.x, s.y, s.z);
-    });
+    const wm = createWorldMatrixState(() => composeTrsLocalMatrix(node.position, node.rotationQuaternion, node.scaling));
     const onDirty = (): void => wm.markLocalDirty();
     const [iqx, iqy, iqz, iqw] = eulerToQuat(0, 0, 0);
     const rq = new ObservableQuat(iqx, iqy, iqz, iqw, onDirty);
