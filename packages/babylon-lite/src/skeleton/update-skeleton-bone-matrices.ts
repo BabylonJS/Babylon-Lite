@@ -9,6 +9,6 @@ export function updateSkeletonBoneMatrices(engine: EngineContext, skeleton: Skel
     if (boneMatrices !== skeleton.boneMatrices) {
         skeleton.boneMatrices.set(boneMatrices);
     }
-    const textureWidth = skeleton.boneCount * 4;
-    engine._device.queue.writeTexture({ texture: skeleton.boneTexture }, skeleton.boneMatrices.buffer, { bytesPerRow: textureWidth * 16 }, { width: textureWidth, height: 1 });
+    const textureWidth = skeleton.boneMatrices.length / 4;
+    engine._device.queue.writeTexture({ texture: skeleton.boneTexture }, skeleton.boneMatrices, { bytesPerRow: textureWidth * 16 }, { width: textureWidth, height: 1 });
 }
