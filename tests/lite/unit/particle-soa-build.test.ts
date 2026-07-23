@@ -3,12 +3,23 @@ import { SCENE262_NPE_JSON } from "../../../lab/lite/src/shared/scene262-npe";
 import changeEmitRateGraph from "./fixtures/change-emit-rate-npe.json";
 import changeEmitRateTruth from "./fixtures/change-emit-rate-states.json";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
+import { parseNodeParticleSetFromSnippet } from "../../../packages/babylon-lite/src/particle/node/node-particle";
 import { buildSoaParticleSet } from "../../../packages/babylon-lite/src/particle/soa/npe-build";
 import { animateSoa, startSoaSystem } from "../../../packages/babylon-lite/src/particle/soa/animate";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
 describe("SoA NPE build reachability", () => {
+    it("builds typed-array systems through the canonical inline-JSON API", async () => {
+        const set = await parseNodeParticleSetFromSnippet({} as EngineContext, {} as SceneContext, "", {
+            json: SCENE262_NPE_JSON,
+            emitter: { x: 0, y: 0, z: 0 },
+        });
+
+        expect(set.systems).toHaveLength(1);
+        expect(set.systems[0]!.buffer.posX).toBeInstanceOf(Float32Array);
+    });
+
     it("ignores detached unsupported and OncePerParticle blocks", async () => {
         const source = JSON.parse(JSON.stringify(SCENE262_NPE_JSON)) as { blocks: Array<Record<string, unknown>> };
         source.blocks.push(

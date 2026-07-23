@@ -639,23 +639,14 @@ export {
 } from "./sprite/sprite-renderer.js";
 
 // ─── Node Particles (NPE) ────────────────────────────────────────────
-export type { Particle } from "./particle/particle.js";
-export type { ParticleSystem } from "./particle/particle-system.js";
-export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
-export type { NodeParticleSet } from "./particle/node/npe-build.js";
-export type { ParseNodeParticleOptions } from "./particle/node/node-particle.js";
-export { parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
+export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
+export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
+export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
+export type { SoaSystem as ParticleSystem } from "./particle/soa/animate.js";
+export { animateSoa as animateParticleSystem, startSoaSystem as startParticleSystem, stopSoaSystem as stopParticleSystem } from "./particle/soa/animate.js";
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
 export { registerNodeParticleSet } from "./particle/particle-scene.js";
-export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
-
-// ─── Data-oriented (SoA) particle system — SPIKE ─────────────────────
-export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
-export type { SoaParticleSet, BuildSoaOptions } from "./particle/soa/npe-build.js";
-export { buildSoaParticleSet } from "./particle/soa/npe-build.js";
-export type { SoaSystem } from "./particle/soa/animate.js";
-export { startSoaSystem, stopSoaSystem, animateSoa } from "./particle/soa/animate.js";
-export { createSoaParticleBillboard, syncSoaParticleBillboard } from "./particle/soa/soa-billboard.js";
+export { createSoaParticleBillboard as createParticleBillboard, syncSoaParticleBillboard as syncParticleBillboard } from "./particle/soa/soa-billboard.js";
 
 // ─── Text ────────────────────────────────────────────────────────────
 export type { Font } from "./text/font.js";

@@ -21,9 +21,8 @@ function blendForMode(mode: number): BillboardBlendMode {
 }
 
 /**
- * Create a camera-facing billboard system that renders a {@link SoaSystem}'s particles using the system's
- * texture. Scene 262 has no animation sheet, so the texture is a single-frame atlas. The SoA analogue of
- * `createParticleBillboard`.
+ * Create a camera-facing billboard system that renders a particle system's live columns using its texture.
+ * A graph without an animation sheet uses the texture as a single-frame atlas.
  */
 export function createSoaParticleBillboard(system: SoaSystem): FacingBillboardSpriteSystem {
     const texture = system.texture;

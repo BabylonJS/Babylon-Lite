@@ -12,13 +12,13 @@ interface BundleInfo {
 
 const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
-const EXISTING_PARTICLE_SCENES = [262, 263, 264, 268];
+const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 268];
 const UNUSED_FEATURE_CHUNK =
     /registry-(variants|extra-basic|extra-emitters|extra-values|local-shapes)|update-(direction|angle)-block|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 
 describe("SoA particle bundle feature isolation", () => {
-    it("existing particle scenes do not fetch unused Basic, emitter, or local-space features", () => {
-        for (const sceneId of EXISTING_PARTICLE_SCENES) {
+    it("canonical particle scenes fetch neither legacy object code nor unused SoA features", () => {
+        for (const sceneId of CANONICAL_PARTICLE_SCENES) {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const chunks = manifest.runtimeChunks ?? [];
             expect(chunks.length, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
@@ -36,12 +36,14 @@ describe("SoA particle bundle feature isolation", () => {
                 .filter((chunk) => chunk.file && runtimeChunks.has(chunk.file))
                 .flatMap((chunk) => chunk.modules ?? [])
                 .map((module) => module.id ?? "")
-                .filter((id) =>
-                    /particle\/soa\/(registry-(extra-values|local-shapes)|local-position|blocks\/(system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|(box|point|sphere|cone|cylinder|mesh)-shape-local))|math\/mat4-invert/.test(
-                        id
-                    )
+                .filter(
+                    (id) =>
+                        /particle\/(?:particle(?:-system|-billboard)?\.ts|node\/(?:npe-build(?:-state)?|npe-registry)\.ts|node\/blocks\/)/.test(id) ||
+                        /particle\/soa\/(registry-(extra-values|local-shapes)|local-position|blocks\/(system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|(box|point|sphere|cone|cylinder|mesh)-shape-local))|math\/mat4-invert/.test(
+                            id
+                        )
                 );
-            expect(moduleOffenders, `scene${sceneId} folds unused dynamic-rate, value, local, or inverse-matrix code into fetched chunks`).toEqual([]);
+            expect(moduleOffenders, `scene${sceneId} fetches legacy object code or folds unused SoA features into runtime chunks`).toEqual([]);
         }
     });
 });

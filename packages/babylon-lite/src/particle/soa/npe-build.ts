@@ -1,5 +1,5 @@
 /**
- * Data-oriented Node-Particle build — SPIKE.
+ * Data-oriented Node-Particle build.
  *
  * Reuses the shared parser's {@link ParticleGraph} and mirrors the object runtime's `buildNodeParticleSet`
  * walk (post-order over inputs, so upstream outputs resolve before downstream reads, and update steps push
@@ -76,14 +76,14 @@ export interface SoaParticleSet {
     _graph: ParticleGraph;
 }
 
-/** Options for {@link buildSoaParticleSet}. */
+/** Options for building a node-particle set. */
 export interface BuildSoaOptions {
     emitter?: Vec3;
     emitterWorldMatrix?: Mat4;
     textureBaseUrl?: string;
 }
 
-/** Build the data-oriented particle systems from a parsed graph (SoA analogue of `buildNodeParticleSet`). */
+/** Build data-oriented particle systems from a parsed graph. */
 export async function buildSoaParticleSet(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options: BuildSoaOptions = {}): Promise<SoaParticleSet> {
     const systems: SoaSystem[] = [];
     const buildPromises: Promise<void>[] = [];

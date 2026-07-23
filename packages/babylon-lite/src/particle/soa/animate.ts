@@ -1,5 +1,5 @@
 /**
- * Data-oriented particle system + simulation loop — SPIKE.
+ * Data-oriented particle system and simulation loop.
  *
  * Mirrors the emission-count, update, lifetime-clamp, recycle, and creation logic of the object runtime's
  * `animateParticleSystem` exactly (same `Math.random` consumption and creation-step order), but operates on
@@ -117,8 +117,8 @@ export function stopSoaSystem(system: SoaSystem): void {
 }
 
 /**
- * Advance the simulation by one step. `scaledRatio` is the per-step multiplier on {@link SoaSystem.updateSpeed}
- * (scene animation ratio for a live frame, or the pre-warm step offset). Mirrors `animateParticleSystem`.
+ * Advance the simulation by one step. `scaledRatio` multiplies the system's `updateSpeed`
+ * (scene animation ratio for a live frame, or the pre-warm step offset).
  */
 export function animateSoa(system: SoaSystem, scaledRatio: number): void {
     if (!system._started) {

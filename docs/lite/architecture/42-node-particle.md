@@ -14,10 +14,11 @@
 > `ThinParticleSystem.animate` runtime such a system runs; the _scope_ of what
 > Lite supports is bounded by what an NPE graph can express, block by block. Live
 > particles are bound to a camera-facing billboard sprite system for rendering.
-> Canonical particle scenes use the data-oriented runtime under `particle/soa/`;
-> the object runtime remains as the compatibility implementation and an exact
-> behavioural oracle pending the atomic public-API cutover. SoA now implements
-> every block evaluator supported by that compatibility runtime.
+> The canonical public API and particle scenes use the data-oriented runtime
+> under `particle/soa/`. The object runtime is no longer exported; it remains
+> temporarily as an internal behavioural oracle while its tests are migrated,
+> after which its implementation files are deleted. SoA implements every block
+> evaluator supported by that legacy oracle.
 >
 > This document contains the full specification needed to implement the module
 > from scratch — the determinism contract, the CPU runtime, the node-graph build,
@@ -64,46 +65,47 @@ per-particle `Math.random()` sequence and the arithmetic identical to Babylon's.
   world-space point emitter therefore loads neither local shape code nor local
   position memory, and a non-cylinder system does not compute an inverse emitter
   matrix. Modules have no top-level allocations.
-- **Pure state + standalone functions.** `Particle` and `ParticleSystem` are
-  plain interfaces; all behaviour is standalone functions operating on them. No
-  classes, no methods, no per-feature nullable `_properties` bag (Babylon uses
-  one; Lite uses fixed fields and lazily allocated SoA columns).
+- **Pure state + standalone functions.** The public `ParticleSystem` type is
+  backed by dense SoA state; all behaviour is provided by standalone functions
+  operating on it. There are no per-particle objects, classes, methods, or
+  per-feature nullable `_properties` bag. Optional features allocate columns only
+  when their graph blocks require them.
 - **Author NPE directly.** The emitter transform, capacity, blend mode, etc. are
   caller-supplied or graph-encoded; there is no imperative configuration surface.
 
 ## Architecture — Runtime Layers
 
 ```
-particle.ts                    Runtime  — the Particle struct + pooling
-particle-system.ts             Runtime  — ParticleSystem state + animateParticleSystem + recycle
 node/npe-types.ts              Graph    — the (immutable) graph + build-context types + getter model
 node/npe-parser.ts             Graph    — serialized JSON  ->  immutable ParticleGraph
-node/npe-build.ts              Build    — post-order DFS: compile graph -> closures
-node/npe-build-state.ts        Build    — contextual/system data sources (runtime reads)
-node/npe-registry.ts           Build    — lazy per-block dispatch (tree-shaking)
-node/blocks/*.ts               Blocks   — the 18 block evaluators
-node/node-particle.ts          API      — parseNodeParticleSetFromSnippet (public entry)
+node/node-particle.ts          API      — canonical build + snippet entry points
 node/npe-snippet.ts            API      — snippet-server fetch
-particle-billboard.ts          Render   — bind live particles -> billboard instances
-particle-scene.ts              Render   — register/start/stop + per-frame animate hook
+particle-scene.ts              Render   — register canonical SoA systems with a scene
 soa/particle-buffer.ts         Runtime  — typed-array base columns + lazy feature columns
 soa/animate.ts                 Runtime  — fixed creation slots + indexed update loop
 soa/npe-build.ts               Build    — root-reachable graph walk -> SoA operations
 soa/registry*.ts               Build    — lazy base/feature/variant/emitter/local dispatch
 soa/blocks/*.ts                Blocks   — zero-allocation indexed evaluators
 soa/soa-billboard.ts           Render   — upload live SoA columns to billboard instances
+particle.ts                    Legacy   — internal object-oracle Particle state
+particle-system.ts             Legacy   — internal object-oracle simulation
+particle-billboard.ts          Legacy   — internal object-oracle billboard adapter
+node/npe-build*.ts             Legacy   — internal object-oracle graph build
+node/npe-registry.ts           Legacy   — internal object-oracle block dispatch
+node/blocks/*.ts               Legacy   — internal object-oracle evaluators
 math/mat4-transform.ts         Math     — transformCoordinates/Normal + mat4GetTranslation (emitter matrix)
 math/random-range.ts           Math     — randomRange (Scalar.RandomRange, with short-circuit)
 ```
 
-Data flow: **snippet/JSON → `parseNodeParticleSource` → `ParticleGraph` →
+Canonical data flow: **snippet/JSON → `parseNodeParticleSource` → `ParticleGraph` →
 `buildNodeParticleSet` → `NodeParticleSet { systems: ParticleSystem[] }` →
 (live) `registerNodeParticleSet` → per-frame `animateParticleSystem` +
 `syncParticleBillboard`.**
 
-The canonical SoA path is **JSON → `parseNodeParticleSource` → `ParticleGraph` →
-`buildSoaParticleSet` → `SoaParticleSet { systems: SoaSystem[] }` →
-`animateSoa` + `syncSoaParticleBillboard`**.
+The package root exports only those canonical names. Until the legacy oracle is
+deleted, they are zero-cost aliases over the internal `buildSoaParticleSet`,
+`SoaParticleSet`, `SoaSystem`, `animateSoa`, and SoA billboard symbols; the
+SoA-prefixed names are not part of the public package surface.
 
 ## The Determinism Contract (read this first)
 
@@ -139,22 +141,22 @@ identical to Babylon's. Break any one and parity collapses.
    That traversal order must match Babylon's update-chain order for multi-update
    graphs.
 6. **Emission accounting.** Per step, set `scaledUpdateSpeed = updateSpeed * ratio`,
-  evaluate a connected emit-rate graph from the current system time (or use the
-  constant `emitRate`), then compute `newParticles = (emitRate * scaledUpdateSpeed) >> 0`;
-  the fractional remainder accumulates in `_newPartsExcess`, and when it exceeds
-  `1.0` the whole part is added and subtracted back. The system-time accumulator
-  advances only after the rate is read. Ratio = 1 for parity and real-frame-delta
-  for live simulation.
+   evaluate a connected emit-rate graph from the current system time (or use the
+   constant `emitRate`), then compute `newParticles = (emitRate * scaledUpdateSpeed) >> 0`;
+   the fractional remainder accumulates in `_newPartsExcess`, and when it exceeds
+   `1.0` the whole part is added and subtracted back. The system-time accumulator
+   advances only after the rate is read. Ratio = 1 for parity and real-frame-delta
+   for live simulation.
 7. **Final-step age clamp.** When a particle would overshoot its lifetime, its
    last step is shortened so it lands exactly at `lifeTime`: `stepSpeed =
 (oldDiff * stepSpeed) / diff`. The shortened `stepSpeed` is what
    `_directionScale` holds for that step.
 8. **Update before create.** `animate` runs `updateExistingParticles` _then_
    `createNewParticles`.
-9. **Tolerance & extraction.** The object runtime compares at `1e-6`; SoA
-   position/direction/feature columns are `Float32Array`, so repeated integration
-   compares at `1e-4`, while age/lifetime remain float64 and exact at lifecycle
-   boundaries. Ground truth is produced by a
+9. **Tolerance & extraction.** Legacy-oracle tests compare object-valued state at
+   `1e-6`; canonical position/direction/feature columns are `Float32Array`, so
+   repeated integration compares at `1e-4`, while age/lifetime remain float64
+   and exact at lifecycle boundaries. Ground truth is produced by a
    throwaway harness in the Babylon repo: build/convert a classic system, run
    `ConvertToNodeParticleSystemSetAsync` (use conversion, _not_ `Parse` — `Parse`
    drops some `Color4` input values), `await npe.buildAsync(scene)` (populates
@@ -297,10 +299,11 @@ else, rather than silently returning `null` per frame.
 
 ### Registries
 
-The compatibility runtime uses the flat `npe-registry.ts`. SoA splits the same
-supported evaluator set across base, optional, emitter, value-utility, local-shape,
-and serialized-variant registries. Every arm remains a side-effect-free dynamic
-import, and unsupported classes fail during graph construction.
+The temporary legacy oracle uses the flat `npe-registry.ts`. The canonical runtime
+splits the same supported evaluator set across base, optional, emitter,
+value-utility, local-shape, and serialized-variant registries. Every arm remains a
+side-effect-free dynamic import, and unsupported classes fail during graph
+construction.
 
 ## Supported Blocks
 
@@ -411,10 +414,18 @@ Deterministic parity scenes bypass this and step manually at `ratio = 1`.
 
 ### Public API (`node-particle.ts`, `npe-snippet.ts`)
 
+`buildNodeParticleSet(engine, scene, graph, { emitter?, emitterWorldMatrix?,
+textureBaseUrl? })` — build a canonical `NodeParticleSet` backed by SoA systems.
+
 `parseNodeParticleSetFromSnippet(engine, scene, snippetId, { json?, snippetServer?,
 emitter?, emitterWorldMatrix?, textureBaseUrl? })` — parse (from JSON or the
 snippet server) and build. `fetchNodeParticleSnippet` unwraps
 `jsonPayload.nodeParticle`.
+
+`startParticleSystem`, `stopParticleSystem`, `animateParticleSystem`,
+`createParticleBillboard`, and `syncParticleBillboard` are the canonical
+standalone runtime/rendering functions. `registerNodeParticleSet` composes them
+for live scenes.
 
 ## Babylon.js Equivalence Map
 
@@ -422,12 +433,12 @@ snippet server) and build. `fetchNodeParticleSnippet` unwraps
 | ---------------------------------------------------- | ----------------------------------------------- |
 | `NodeParticleSystemSet`                              | `NodeParticleSet` (plain state)                 |
 | `NodeParticleSystemSet.buildAsync(scene)`            | `buildNodeParticleSet(engine, scene, graph, …)` |
-| `NodeParticleBuildState`                             | `NpeBuildState`                                 |
-| `_storedFunction` on a connection point              | `NpeGetter`                                     |
-| `NodeParticleBlock._build`                           | `ParticleBlockEvaluator.build`                  |
-| `ThinParticleSystem` / `ParticleSystem`              | `ParticleSystem` (`particle-system.ts`)         |
+| `NodeParticleBuildState`                             | `SoaBuildState`                                 |
+| `_storedFunction` on a connection point              | `SoaGetter`                                     |
+| `NodeParticleBlock._build`                           | `SoaBlockEvaluator.build`                       |
+| `ThinParticleSystem` / `ParticleSystem`              | `ParticleSystem` (`soa/animate.ts`)             |
 | `ThinParticleSystem.animate` → `_update`             | `animateParticleSystem`                         |
-| `_createQueueStart` linked list                      | fixed named `_createX` slots                    |
+| `_createQueueStart` linked list                      | fixed named creation slots                      |
 | `_updateQueueStart` linked list                      | `_updateQueue` array                            |
 | `Particle`                                           | `Particle` (`particle.ts`)                      |
 | `Scalar.RandomRange`                                 | `randomRange` (`math/random-range.ts`)          |
@@ -459,8 +470,6 @@ classic-`ParticleSystem`-only feature.
   never serialize.
 - **`CameraPosition` system source (4)** — not handled (returns null path).
 - **GPU particles** — no GPU simulation path exists or is planned here.
-- **Object-runtime registry split** — the compatibility object's
-  `npe-registry.ts` remains flat; SoA already uses measured lazy family registries.
 - **Serialized-read helpers** — the repeated `typeof x === "number" ? x : default`
   guards match NME's convention; a shared `readNumber`/`readBoolean` helper would
   be an ergonomic win but should be introduced across NME _and_ particles together
@@ -468,10 +477,11 @@ classic-`ParticleSystem`-only feature.
 
 ## Test Specification
 
-- **CPU determinism (vitest)** — `tests/lite/unit/npe-particle-*.test.ts`: parse a
-  graph fixture, build, seed `Math.random`, step `N`, sort by id, compare every
-  particle to the committed Babylon ground truth at `1e-6`. Covers size, basic
-  properties, sphere, and the four emitter shapes.
+- **Legacy-oracle determinism (vitest)** — `tests/lite/unit/npe-particle-*.test.ts`:
+  direct internal tests for the temporary object oracle. They parse a graph
+  fixture, build, seed `Math.random`, step `N`, sort by id, and compare every
+  particle to committed Babylon ground truth. Step 3 migrates these assertions to
+  the canonical runtime before the oracle is deleted.
 - **Emitter rotation (vitest)** — `npe-particle-emitter-rotation.test.ts`: the
   cylinder graph with a rotated + translated `emitterWorldMatrix`, compared to a
   Babylon oracle (the cylinder exercises `transformCoordinates` + the
@@ -498,51 +508,48 @@ classic-`ParticleSystem`-only feature.
   with seeded RNG + fixed frame stepping and are immutable.
 - **Bundle size** — per-scene manifest + ceiling in the bundle-size spec. `*-npe.ts`
   graph payload modules are excluded from bundle accounting (like `*-nme.ts`).
-  `particle-soa-bundle-content.test.ts` rejects unused local/emitter chunks and
-  rejects local-shape or matrix-inversion modules folded into fetched chunks.
+  `particle-soa-bundle-content.test.ts` rejects unused local/emitter chunks,
+  rejects local-shape or matrix-inversion modules folded into fetched chunks,
+  and rejects every legacy object-runtime module from canonical particle scenes.
 
 ## File Manifest
 
 ```
 packages/babylon-lite/src/particle/
-  particle.ts                      // Particle pure-state + pool reset
-  particle-system.ts               // ParticleSystem state + animateParticleSystem + recycle
-  particle-billboard.ts            // bind ParticleSystem -> FacingBillboardSpriteSystem instance buffer
-  particle-scene.ts                // register/start/stop + per-frame animate hook
+  particle.ts                      // LEGACY internal object-oracle Particle state
+  particle-system.ts               // LEGACY internal object-oracle simulation
+  particle-billboard.ts            // LEGACY internal object-oracle billboard adapter
+  particle-scene.ts                // PUBLIC canonical SoA live-scene registration
   node/
-    node-particle.ts               // PUBLIC parseNodeParticleSetFromSnippet + NodeParticleSet
-    npe-types.ts                   // immutable graph + build-context types + getter model
+    node-particle.ts               // PUBLIC canonical build/snippet API + NodeParticleSet
+    npe-types.ts                   // immutable shared serialized graph types
     npe-parser.ts                  // serialized JSON -> ParticleGraph
     npe-snippet.ts                 // snippet-server fetch
-    npe-build.ts                   // post-order build walk (graph -> closures)
-    npe-build-state.ts             // contextual/system sources + id validators
-    npe-registry.ts                // lazy per-block dispatch
+    npe-build.ts                   // LEGACY internal object-oracle build walk
+    npe-build-state.ts             // LEGACY internal object-oracle sources
+    npe-registry.ts                // LEGACY internal object-oracle dispatch
     blocks/
-      system-block.ts
-      create-particle-block.ts
-      box-shape-block.ts  sphere-shape-block.ts  point-shape-block.ts
-      cone-shape-block.ts  cylinder-shape-block.ts  mesh-shape-block.ts
-      particle-input-block.ts  particle-random-block.ts  particle-math-block.ts
-      particle-lerp-block.ts  particle-converter-block.ts  texture-source-block.ts
-      update-position-block.ts  update-color-block.ts
-      update-angle-block.ts  update-direction-block.ts
+      ...                          // LEGACY internal object-oracle evaluators
   soa/
     particle-buffer.ts             // dense base columns + lazy feature columns
-    animate.ts                     // SoaSystem + fixed-slot indexed simulation
-    npe-build.ts                   // root-reachable graph -> indexed operations
+    animate.ts                     // internal SoaSystem; public ParticleSystem alias
+    npe-build.ts                   // internal builder; public buildNodeParticleSet alias
     contextual.ts                  // common contextual sources
     contextual-extra.ts            // lazy optional contextual sources
     registry.ts                    // common block dispatch
-    registry-extra*.ts             // optional/basic/world-emitter dispatch
+    registry-extra*.ts             // optional/basic/world-emitter/value dispatch
     registry-variants.ts           // rare serialized variants
     registry-local-shapes.ts       // local-only shape dispatch
     local-position.ts              // local birth transform after optional source-24 seed
-    soa-billboard.ts               // SoA columns -> billboard instances
+    soa-billboard.ts               // internal adapters; public canonical aliases
     blocks/
+      system-block.ts  create-particle-block.ts  texture-source-block.ts
       box/point/sphere/cone/cylinder/mesh-shape-block.ts
       box/point/sphere/cone/cylinder/mesh-shape-local-block.ts
-      particle-input-local-block.ts
-      create/update/value/gradient/sprite blocks
+      particle-input*.ts  particle-random*.ts  particle-math*.ts
+      particle-lerp/converter/gradient/condition/float-to-int/vector-length blocks
+      setup-sprite-sheet*.ts  basic-sprite-update-block.ts
+      update-position/color/size/angle/direction blocks
 
 packages/babylon-lite/src/math/
   random-range.ts                  // randomRange (Scalar.RandomRange)

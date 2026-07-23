@@ -6,18 +6,18 @@
 
 import {
     addFacingBillboardSystem,
-    animateSoa,
+    animateParticleSystem,
     attachControl,
-    buildSoaParticleSet,
+    buildNodeParticleSet,
     createArcRotateCamera,
     createEngine,
+    createParticleBillboard,
     createSceneContext,
-    createSoaParticleBillboard,
     parseNodeParticleSource,
     registerScene,
     startEngine,
-    startSoaSystem,
-    syncSoaParticleBillboard,
+    startParticleSystem,
+    syncParticleBillboard,
 } from "babylon-lite";
 import { SCENE262_NPE_JSON } from "../shared/scene262-npe.js";
 
@@ -38,7 +38,7 @@ async function main(): Promise<void> {
     attachControl(camera, canvas, scene);
 
     const graph = parseNodeParticleSource(SCENE262_NPE_JSON);
-    const set = await buildSoaParticleSet(engine, scene, graph, {
+    const set = await buildNodeParticleSet(engine, scene, graph, {
         emitter: { x: 0, y: 0, z: 0 },
         textureBaseUrl: "https://playground.babylonjs.com/",
     });
@@ -52,13 +52,13 @@ async function main(): Promise<void> {
         return x - Math.floor(x);
     };
 
-    startSoaSystem(system);
+    startParticleSystem(system);
     for (let i = 0; i < STEPS; i++) {
-        animateSoa(system, 1);
+        animateParticleSystem(system, 1);
     }
 
-    const billboard = createSoaParticleBillboard(system);
-    syncSoaParticleBillboard(system, billboard);
+    const billboard = createParticleBillboard(system);
+    syncParticleBillboard(system, billboard);
     addFacingBillboardSystem(scene, billboard);
 
     await registerScene(scene);
