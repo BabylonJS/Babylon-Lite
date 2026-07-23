@@ -461,14 +461,6 @@ classic-`ParticleSystem`-only feature.
   `animationFrozen`, screenshot, compare to the committed golden via MAD ≤
   `scene-config.json` `maxMad`. Goldens are captured once from the Babylon oracle
   with seeded RNG + fixed frame stepping and are immutable.
-- **Live visual inspection** — `lab/lite/particle-live.html?scene=262|263|264|268`
-  builds the selected graph through the canonical API and registers it with the
-  real-time scene hook. This dedicated page keeps preview-only frame-loop code out
-  of the canonical parity scene bundles.
-- **Live performance comparison** — `PERF_PARTICLE_LIVE=true` selects the matched
-  Lite and Babylon.js live preview pages in `perf-raf.spec.ts`, restricted to
-  scenes 262, 263, 264, and 268. The report includes active particle counts next
-  to CPU RAF duration, FPS, initialization, draw calls, and heap.
 - **Bundle size** — per-scene manifest + ceiling in the bundle-size spec. `*-npe.ts`
   graph payload modules are excluded from bundle accounting (like `*-nme.ts`).
   `particle-soa-bundle-content.test.ts` rejects unused local/emitter chunks,
