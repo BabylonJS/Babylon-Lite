@@ -59,7 +59,7 @@ function getCache(mesh: Mesh): SkeletonBoundsCache | null {
 }
 
 const skeletonBoundsProvider: DeformableShadowBoundsProvider = {
-    kind: 2,
+    kind: 0,
     applies: (mesh) => !!mesh.skeleton?.weights && !!mesh.skeleton.boneMatrices,
     getLocalBounds(mesh) {
         const cache = getCache(mesh);

@@ -88,6 +88,7 @@ describe("shadow deformation opt-ins", () => {
 
         const shadowMesh = preload.mock.calls[0]![0][0] as Mesh;
         expect(shadowMesh).not.toBe(mesh);
+        expect(Object.getOwnPropertyDescriptor(shadowMesh, "worldMatrixVersion")?.configurable).toBe(true);
         expect(ensure.mock.calls[0]![2]).toBe(preload.mock.calls[0]![0]);
         expect(renderedCasters[0]![0]).toBe(shadowMesh);
         expect(shadowMesh.boundMin).toEqual([5, 0, 0]);
@@ -96,6 +97,9 @@ describe("shadow deformation opt-ins", () => {
         expect(mesh.boundMin).toEqual([100, 0, 0]);
 
         const firstVersion = shadowMesh.worldMatrixVersion;
+        generator._renderShadowMap!({} as EngineContext, state);
+        expect(shadowMesh.worldMatrixVersion).toBe(firstVersion);
+
         mesh.morphTargets!.weights[0] = 1;
         generator._renderShadowMap!({} as EngineContext, state);
 
@@ -103,6 +107,25 @@ describe("shadow deformation opt-ins", () => {
         expect(shadowMesh.boundMax).toEqual([13, 0, 0]);
         expect(shadowMesh.worldMatrixVersion).toBeGreaterThan(firstVersion);
         expect(state._casterMeshes).toBe(casters);
+    });
+
+    it("ignores empty morph targets with zero weight", async () => {
+        const { generator, preload } = createGenerator();
+        const mesh = createMesh({
+            morphTargets: {
+                count: 1,
+                weights: new Float32Array([0]),
+                weightsBuffer: {} as GPUBuffer,
+                targets: [{ positions: new Float32Array(), normals: null }],
+            } as unknown as MorphTargetData,
+        });
+
+        enableMorphTargetShadows(generator);
+        await generator._preloadShadowTask!([mesh]);
+
+        const shadowMesh = preload.mock.calls[0]![0][0] as Mesh;
+        expect(shadowMesh.boundMin).toEqual([-1, 0, 0]);
+        expect(shadowMesh.boundMax).toEqual([1, 0, 0]);
     });
 
     it("adapts only the enabled generator to live skeletal bounds", async () => {
@@ -149,6 +172,12 @@ describe("shadow deformation opt-ins", () => {
             } as unknown as MorphTargetData,
         });
         const skeletonMesh = createMesh({
+            morphTargets: {
+                count: 1,
+                weights: new Float32Array([1]),
+                weightsBuffer: {} as GPUBuffer,
+                targets: [{ positions: new Float32Array([2, 0, 0, 2, 0, 0]), normals: null }],
+            } as unknown as MorphTargetData,
             skeleton: {
                 boneCount: 1,
                 boneMatrices: translation(4),
@@ -160,9 +189,9 @@ describe("shadow deformation opt-ins", () => {
         });
         const casters = [morphMesh, skeletonMesh];
 
-        enableMorphTargetShadows(generator);
-        enableMorphTargetShadows(generator);
         enableSkeletonShadows(generator);
+        enableMorphTargetShadows(generator);
+        enableMorphTargetShadows(generator);
         await generator._preloadShadowTask!(casters);
         const state = generator._ensureShadowTaskState!({} as EngineContext, {} as SceneContext, casters);
         generator._renderShadowMap!({} as EngineContext, state);
@@ -172,7 +201,7 @@ describe("shadow deformation opt-ins", () => {
         expect(shadowMeshes[0]!.boundMin).toEqual([1, 0, 0]);
         expect(shadowMeshes[0]!.boundMax).toEqual([3, 0, 0]);
         expect(shadowMeshes[1]!.boundMin).toEqual([3, 0, 0]);
-        expect(shadowMeshes[1]!.boundMax).toEqual([5, 0, 0]);
+        expect(shadowMeshes[1]!.boundMax).toEqual([7, 0, 0]);
         expect(preload).toHaveBeenCalledTimes(1);
         expect(ensure).toHaveBeenCalledTimes(1);
     });

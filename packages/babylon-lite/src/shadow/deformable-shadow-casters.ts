@@ -12,6 +12,8 @@ interface ShadowMeshEntry {
     readonly source: Mesh;
     readonly shadow: Mesh;
     readonly provider: DeformableShadowBoundsProvider;
+    _bounds: string;
+    _version: number;
 }
 
 interface DeformableShadowState {
@@ -19,7 +21,6 @@ interface DeformableShadowState {
     readonly preload: NonNullable<ShadowGenerator["_preloadShadowTask"]>;
     readonly ensure: NonNullable<ShadowGenerator["_ensureShadowTaskState"]>;
     readonly render: NonNullable<ShadowGenerator["_renderShadowMap"]>;
-    poseVersion: number;
     sourceMeshes?: readonly Mesh[];
     shadowMeshes?: readonly Mesh[];
     entries?: ShadowMeshEntry[];
@@ -27,18 +28,25 @@ interface DeformableShadowState {
 
 let states: WeakMap<ShadowGenerator, DeformableShadowState> | null = null;
 
-function updateShadowMesh(entry: ShadowMeshEntry): void {
+function updateShadowMesh(entry: ShadowMeshEntry): boolean {
     const bounds = entry.provider.getLocalBounds(entry.source);
-    entry.shadow.boundMin = bounds?.[0] ?? entry.source.boundMin;
-    entry.shadow.boundMax = bounds?.[1] ?? entry.source.boundMax;
+    const min = bounds?.[0] ?? entry.source.boundMin;
+    const max = bounds?.[1] ?? entry.source.boundMax;
+    const signature = `${min}|${max}`;
+    const changed = entry._bounds !== signature;
+    entry._bounds = signature;
+    entry.shadow.boundMin = min;
+    entry.shadow.boundMax = max;
+    return changed;
 }
 
-function createShadowMesh(source: Mesh, provider: DeformableShadowBoundsProvider, state: DeformableShadowState): ShadowMeshEntry {
+function createShadowMesh(source: Mesh, provider: DeformableShadowBoundsProvider): ShadowMeshEntry {
     const shadow = Object.create(source) as Mesh;
+    const entry: ShadowMeshEntry = { source, shadow, provider, _bounds: "", _version: 0 };
     Object.defineProperty(shadow, "worldMatrixVersion", {
-        get: () => source.worldMatrixVersion + state.poseVersion,
+        configurable: true,
+        get: () => source.worldMatrixVersion + entry._version,
     });
-    const entry = { source, shadow, provider };
     updateShadowMesh(entry);
     return entry;
 }
@@ -49,11 +57,11 @@ function mapCasterMeshes(state: DeformableShadowState, casterMeshes: readonly Me
     }
     const entries: ShadowMeshEntry[] = [];
     const shadowMeshes = casterMeshes.map((mesh) => {
-        const provider = state.providers.find((candidate) => candidate.applies(mesh));
+        const provider = state.providers.find((candidate) => candidate?.applies(mesh));
         if (!provider) {
             return mesh;
         }
-        const entry = createShadowMesh(mesh, provider, state);
+        const entry = createShadowMesh(mesh, provider);
         entries.push(entry);
         return entry.shadow;
     });
@@ -78,9 +86,8 @@ function restoreSourceCasters(taskState: ShadowTaskInternalState, casterMeshes: 
 export function enableDeformableShadowBounds(generator: ShadowGenerator, provider: DeformableShadowBoundsProvider): void {
     let state = states?.get(generator);
     if (state) {
-        if (!state.providers.some((candidate) => candidate.kind === provider.kind)) {
-            state.providers.push(provider);
-            state.providers.sort((a, b) => b.kind - a.kind);
+        if (!state.providers[provider.kind]) {
+            state.providers[provider.kind] = provider;
             state.sourceMeshes = undefined;
         }
         return;
@@ -92,12 +99,12 @@ export function enableDeformableShadowBounds(generator: ShadowGenerator, provide
         throw new Error("Deformable shadows require a fully initialized shadow generator");
     }
     state = {
-        providers: [provider],
+        providers: [],
         preload,
         ensure,
         render,
-        poseVersion: 0,
     };
+    state.providers[provider.kind] = provider;
     (states ??= new WeakMap()).set(generator, state);
 
     generator._preloadShadowTask = (casterMeshes) => preload(mapCasterMeshes(state!, casterMeshes));
@@ -114,9 +121,10 @@ export function enableDeformableShadowBounds(generator: ShadowGenerator, provide
         if (!shadowMeshes || !sourceMeshes) {
             return render(engine, taskState);
         }
-        state!.poseVersion++;
         for (const entry of state!.entries ?? []) {
-            updateShadowMesh(entry);
+            if (updateShadowMesh(entry)) {
+                entry._version++;
+            }
         }
         taskState._casterMeshes = shadowMeshes;
         try {

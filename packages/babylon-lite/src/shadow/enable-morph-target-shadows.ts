@@ -62,10 +62,10 @@ const morphBoundsProvider: DeformableShadowBoundsProvider = {
         }
         for (let target = 0; target < morphTargets.count; target++) {
             const range = cache.targetRanges[target];
-            if (!range) {
+            const weight = morphTargets.weights[target] ?? 0;
+            if (!range || !weight) {
                 continue;
             }
-            const weight = morphTargets.weights[target] ?? 0;
             const targetMin = weight < 0 ? range[1] : range[0];
             const targetMax = weight < 0 ? range[0] : range[1];
             for (let axis = 0; axis < 3; axis++) {
