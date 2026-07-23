@@ -6,7 +6,7 @@ import type { SoaBlockEvaluator } from "../npe-build.js";
 /**
  * `SphereShapeBlock` (SoA) — emits inside a sphere (or hemisphere) and points particles radially outward,
  * with optional direction jitter. When both direction inputs are connected it uses their explicit random
- * range instead. Random draws and transforms mirror the object runtime; state is written directly into
+ * range instead. Random draws and transforms match Babylon.js; state is written directly into
  * columns and the per-spawn scratch is reused.
  */
 export const sphereShapeBlock: SoaBlockEvaluator = {

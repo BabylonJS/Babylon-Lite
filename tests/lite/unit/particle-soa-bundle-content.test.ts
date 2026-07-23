@@ -17,7 +17,7 @@ const UNUSED_FEATURE_CHUNK =
     /registry-(variants|extra-basic|extra-emitters|extra-values|local-shapes)|update-(direction|angle)-block|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 
 describe("SoA particle bundle feature isolation", () => {
-    it("canonical particle scenes fetch neither legacy object code nor unused SoA features", () => {
+    it("canonical particle scenes fetch neither removed object code nor unused SoA features", () => {
         for (const sceneId of CANONICAL_PARTICLE_SCENES) {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const chunks = manifest.runtimeChunks ?? [];
@@ -43,7 +43,7 @@ describe("SoA particle bundle feature isolation", () => {
                             id
                         )
                 );
-            expect(moduleOffenders, `scene${sceneId} fetches legacy object code or folds unused SoA features into runtime chunks`).toEqual([]);
+            expect(moduleOffenders, `scene${sceneId} fetches removed object code or folds unused SoA features into runtime chunks`).toEqual([]);
         }
     });
 });

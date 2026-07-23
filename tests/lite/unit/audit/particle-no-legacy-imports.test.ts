@@ -5,7 +5,7 @@ import { join, relative, sep } from "node:path";
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..");
 const TEST_ROOT = join(REPO_ROOT, "tests");
 const IMPORT_RE = /(?:from\s+|import\s*\()\s*["']([^"']+)["']/g;
-const LEGACY_PARTICLE_MODULE_RE = /\/particle\/(?:particle(?:-system|-billboard)?|node\/(?:npe-build(?:-state)?|npe-registry|blocks\/.+))$/;
+const REMOVED_PARTICLE_MODULE_RE = /\/particle\/(?:particle(?:-system|-billboard)?|node\/(?:npe-build(?:-state)?|npe-registry|blocks\/.+))$/;
 
 function* walkTypescript(directory: string): Generator<string> {
     for (const name of readdirSync(directory).sort()) {
@@ -20,13 +20,13 @@ function* walkTypescript(directory: string): Generator<string> {
 }
 
 describe("particle test ownership", () => {
-    it("does not import deletion-only object particle modules", () => {
+    it("does not import removed object particle modules", () => {
         const offenders: string[] = [];
         for (const path of walkTypescript(TEST_ROOT)) {
             const source = readFileSync(path, "utf8");
             for (const match of source.matchAll(IMPORT_RE)) {
                 const specifier = match[1]!.replace(/\.(?:js|ts)$/, "");
-                if (LEGACY_PARTICLE_MODULE_RE.test(specifier)) {
+                if (REMOVED_PARTICLE_MODULE_RE.test(specifier)) {
                     offenders.push(`${relative(REPO_ROOT, path).split(sep).join("/")}: ${match[1]}`);
                 }
             }

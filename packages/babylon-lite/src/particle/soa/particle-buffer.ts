@@ -1,5 +1,5 @@
 /**
- * Data-oriented particle storage (Struct-of-Arrays) — SPIKE.
+ * Data-oriented particle storage (Struct-of-Arrays).
  *
  * A particle is an index in `[0, alive)`. Every attribute is a pre-sized typed-array column owned by the
  * buffer, so the per-frame update loop reads and writes array slots by index and never allocates: the hot

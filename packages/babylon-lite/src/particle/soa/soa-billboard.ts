@@ -9,7 +9,7 @@ import type { SoaSystem } from "./animate.js";
 const BLENDMODE_ONEONE = 0; // Babylon.js BLENDMODE_ONEONE (pure additive, src·1 + dst)
 const BLENDMODE_STANDARD = 1; // Babylon.js BLENDMODE_STANDARD (alpha blend)
 
-/** Map a particle-system blend mode to a billboard blend descriptor (mirrors the object renderer). */
+/** Map a Babylon.js particle-system blend mode to a billboard blend descriptor. */
 function blendForMode(mode: number): BillboardBlendMode {
     if (mode === BLENDMODE_STANDARD) {
         return billboardBlendAlpha;

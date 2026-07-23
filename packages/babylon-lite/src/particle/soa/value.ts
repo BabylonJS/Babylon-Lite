@@ -1,10 +1,9 @@
 /**
- * Per-particle value and step types for the data-oriented particle runtime — SPIKE.
+ * Per-particle value and step types for the data-oriented particle runtime.
  *
  * A "value" in the node graph is read per particle by index. Scalars return a number; vectors and colours
- * return a REUSED scratch object (never a fresh allocation), so consumers must copy the result immediately
- * — exactly the discipline the object runtime already follows with `copyVec3`/`copyColor4`. This keeps the
- * value graph allocation-free without giving up its generality.
+ * return a reused scratch object (never a fresh allocation), so consumers must copy the result immediately.
+ * This keeps the value graph allocation-free without giving up its generality.
  */
 import type { Vec2, Vec3, Color4 } from "../../math/types.js";
 
@@ -13,9 +12,8 @@ export type SoaValue = number | Vec3 | Color4 | Vec2;
 
 /**
  * Reads a value for particle `i`. Scalars return a number; vectors and colours return a REUSED scratch
- * object (never a fresh allocation), so consumers must copy the result immediately — the same discipline
- * the object runtime already follows with `copyVec3`/`copyColor4`. This keeps the value graph allocation-
- * free without giving up its generality.
+ * object (never a fresh allocation), so consumers must copy the result immediately. This keeps the value
+ * graph allocation-free without giving up its generality.
  */
 export type SoaGetter = (i: number) => SoaValue;
 

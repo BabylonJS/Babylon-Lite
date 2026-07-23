@@ -1,11 +1,9 @@
 /**
- * Data-oriented contextual sources — SPIKE.
+ * Data-oriented contextual sources.
  *
- * The object runtime's `getContextualValue` returns per-particle state (position, colour, scaled direction,
- * …) as object references or per-step scratch. Here each source is instead a build-time factory that
- * captures the column(s) it reads and returns a getter which fills a REUSED scratch by particle index — so
- * the value graph stays allocation-free. Semantics (including which sources use the clamped per-particle
- * step vs the unclamped system step) mirror `getContextualValue` for 1e-6 parity.
+ * Each source is a build-time factory that captures the columns it reads and returns a getter which fills a
+ * reused scratch object by particle index. Semantics, including which sources use the clamped per-particle
+ * step versus the unclamped system step, match Babylon.js contextual-source evaluation.
  */
 import { column, type ParticleBuffer } from "./particle-buffer.js";
 import type { SoaSystem } from "./animate.js";
@@ -65,7 +63,7 @@ export function makeContextualGetter(buffer: ParticleBuffer, system: SoaSystem, 
             const y = buffer.dirY;
             const z = buffer.dirZ;
             const s: Vec3 = { x: 0, y: 0, z: 0 };
-            // Uses the per-particle clamped step (like the object runtime's `_directionScale`).
+            // Uses the per-particle clamped step (Babylon.js `_directionScale`).
             return (i) => {
                 const k = system._scaledStep;
                 s.x = x[i]! * k;
@@ -82,7 +80,7 @@ export function makeContextualGetter(buffer: ParticleBuffer, system: SoaSystem, 
             const b = column(buffer, C.COL_COLOR_STEP_B, Float32Array);
             const a = column(buffer, C.COL_COLOR_STEP_A, Float32Array);
             const s: Color4 = { r: 0, g: 0, b: 0, a: 0 };
-            // Uses the UNCLAMPED system step (matches the object runtime's `_scaledUpdateSpeed`).
+            // Uses the unclamped system step (Babylon.js `_scaledUpdateSpeed`).
             return (i) => {
                 const k = system._scaledUpdateSpeed;
                 s.r = r[i]! * k;

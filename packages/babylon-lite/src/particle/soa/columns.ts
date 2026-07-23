@@ -1,5 +1,5 @@
 /**
- * Shared feature-column names for the data-oriented particle runtime — SPIKE.
+ * Shared feature-column names for the data-oriented particle runtime.
  *
  * Contextual sources (readers) and blocks (writers) must agree on column names so they resolve the same
  * `column()` on a buffer. Base columns (position, direction, age, lifeTime, id) live on {@link ParticleBuffer}

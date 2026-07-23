@@ -1,5 +1,5 @@
 /**
- * Sprite-sheet feature as particle columns — SPIKE.
+ * Sprite-sheet feature as particle columns.
  *
  * This is the sprite-sheet animation expressed the data-oriented way: it owns a set of columns on the
  * particle buffer and returns birth/update steps that close over them. A system that never calls

@@ -1,10 +1,10 @@
 /**
  * Data-oriented Node-Particle build.
  *
- * Reuses the shared parser's {@link ParticleGraph} and mirrors the object runtime's `buildNodeParticleSet`
- * walk (post-order over inputs, so upstream outputs resolve before downstream reads, and update steps push
- * in traversal order). Block evaluators here produce column-writing {@link ParticleStep}s and index-based
- * {@link SoaGetter}s instead of object closures. One {@link SoaSystem} is produced per `SystemBlock` root.
+ * Reuses the shared parser's {@link ParticleGraph} and walks inputs in post-order, so upstream outputs
+ * resolve before downstream reads and update steps retain graph order. Block evaluators produce
+ * column-writing {@link ParticleStep}s and index-based {@link SoaGetter}s. One {@link SoaSystem} is produced
+ * per `SystemBlock` root.
  */
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
@@ -17,7 +17,7 @@ import { createSoaSystem, type SoaSystem } from "./animate.js";
 import type { SoaGetter, SoaValue } from "./value.js";
 import { loadSoaBlockEvaluator } from "./registry.js";
 
-/** Parse a literal value serialized directly on an unconnected input (mirrors the object build's helper). */
+/** Parse a literal value serialized directly on an unconnected input. */
 function parseInputLiteral(input: ParsedParticleInput): SoaValue | undefined {
     const value = input.value;
     if (value === undefined || value === null) {

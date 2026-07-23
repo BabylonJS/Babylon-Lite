@@ -7,7 +7,7 @@ import type { SoaBlockEvaluator } from "../npe-build.js";
  * `BoxShapeBlock` (SoA) — emits from a box: the position slot draws a uniform point in
  * `[minEmitBox, maxEmitBox]`, the direction slot a uniform direction between `direction1`/`direction2`,
  * each via `randomRange` (which skips the RNG when min === max). The emitter world matrix is baked into
- * birth position and direction. (isLocal is not handled in the spike; scene 262 is world-space.)
+ * birth position and direction. Local-space graphs use the separate local shape evaluator.
  */
 export const boxShapeBlock: SoaBlockEvaluator = {
     build(block, ctx) {

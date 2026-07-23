@@ -1,9 +1,9 @@
 /**
  * Data-oriented particle system and simulation loop.
  *
- * Mirrors the emission-count, update, lifetime-clamp, recycle, and creation logic of the object runtime's
- * `animateParticleSystem` exactly (same `Math.random` consumption and creation-step order), but operates on
- * a {@link ParticleBuffer} of columns via ordered {@link ParticleStep} lists. The creation and update steps
+ * Matches Babylon.js emission counting, update, lifetime-clamp, recycle, and creation semantics, including
+ * `Math.random` consumption and creation-step order, while operating on a {@link ParticleBuffer} of columns
+ * via ordered {@link ParticleStep} lists. The creation and update steps
  * are supplied by the graph build (or, in tests, hand-wired). Feature state lives in feature columns, so a
  * system pays nothing for features it does not use.
  */
@@ -50,7 +50,7 @@ export interface SoaSystem {
     /** Update steps, run in graph order on every live particle each frame. */
     updateSteps: ParticleStep[];
 
-    /** @internal Scaled step for the current particle (= the object runtime's `_directionScale`; clamped on the dying step). */
+    /** @internal Scaled step for the current particle (= Babylon.js `_directionScale`; clamped on the dying step). */
     _scaledStep: number;
     /** @internal Emit power of the most recently created particle (set by the creation slots). */
     _emitPower: number;
@@ -161,7 +161,7 @@ function updateExisting(system: SoaSystem, scaledUpdateSpeed: number): void {
         const previousAge = age[i]!;
         age[i] = previousAge + stepSpeed;
 
-        // Clamp the final partial step so a particle dies exactly at its lifetime (matches the object runtime).
+        // Clamp the final partial step so a particle dies exactly at its lifetime (matches Babylon.js).
         if (age[i]! > lifeTime[i]!) {
             const diff = age[i]! - previousAge;
             const oldDiff = lifeTime[i]! - previousAge;
@@ -190,7 +190,7 @@ function createNew(system: SoaSystem, count: number): void {
             break;
         }
         // Fixed Babylon.js creation-slot order (not graph order) — this is what keeps the per-particle
-        // `Math.random()` sequence aligned with the object runtime.
+        // `Math.random()` sequence aligned with Babylon.js.
         if (system.createLifeTime) {
             system.createLifeTime(i);
         }

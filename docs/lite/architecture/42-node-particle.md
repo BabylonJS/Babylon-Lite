@@ -14,11 +14,9 @@
 > `ThinParticleSystem.animate` runtime such a system runs; the _scope_ of what
 > Lite supports is bounded by what an NPE graph can express, block by block. Live
 > particles are bound to a camera-facing billboard sprite system for rendering.
-> The canonical public API and particle scenes use the data-oriented runtime
-> under `particle/soa/`. The object runtime is no longer exported or imported by
-> production code or tests. Its implementation files remain only for the final
-> deletion step. SoA implements every evaluator that existed in that legacy
-> implementation.
+> The canonical public API and particle scenes use the sole data-oriented runtime
+> under `particle/soa/`. The former object-per-particle implementation and its
+> duplicate evaluator tree have been deleted.
 >
 > This document contains the full specification needed to implement the module
 > from scratch — the determinism contract, the CPU runtime, the node-graph build,
@@ -77,7 +75,7 @@ per-particle `Math.random()` sequence and arithmetic aligned with Babylon's.
 ## Architecture — Runtime Layers
 
 ```
-node/npe-types.ts              Graph    — the (immutable) graph + build-context types + getter model
+node/npe-types.ts              Graph    — immutable parsed graph types
 node/npe-parser.ts             Graph    — serialized JSON  ->  immutable ParticleGraph
 node/node-particle.ts          API      — canonical build + snippet entry points
 node/npe-snippet.ts            API      — snippet-server fetch
@@ -88,12 +86,6 @@ soa/npe-build.ts               Build    — root-reachable graph walk -> SoA ope
 soa/registry*.ts               Build    — lazy base/feature/variant/emitter/local dispatch
 soa/blocks/*.ts                Blocks   — zero-allocation indexed evaluators
 soa/soa-billboard.ts           Render   — upload live SoA columns to billboard instances
-particle.ts                    Legacy   — internal object-oracle Particle state
-particle-system.ts             Legacy   — internal object-oracle simulation
-particle-billboard.ts          Legacy   — internal object-oracle billboard adapter
-node/npe-build*.ts             Legacy   — internal object-oracle graph build
-node/npe-registry.ts           Legacy   — internal object-oracle block dispatch
-node/blocks/*.ts               Legacy   — internal object-oracle evaluators
 math/mat4-transform.ts         Math     — transformCoordinates/Normal + mat4GetTranslation (emitter matrix)
 math/random-range.ts           Math     — randomRange (Scalar.RandomRange, with short-circuit)
 ```
@@ -103,11 +95,10 @@ Canonical data flow: **snippet/JSON → `parseNodeParticleSource` → `ParticleG
 (live) `registerNodeParticleSet` → per-frame `animateParticleSystem` +
 `syncParticleBillboard`.**
 
-The package root exports only those canonical names. Until the legacy files are
-deleted and the internals are renamed, they are zero-cost aliases over
-`buildSoaParticleSet`,
-`SoaParticleSet`, `SoaSystem`, `animateSoa`, and SoA billboard symbols; the
-SoA-prefixed names are not part of the public package surface.
+The package root exports only those canonical names. They are zero-cost aliases
+over the internal `buildSoaParticleSet`, `SoaParticleSet`, `SoaSystem`,
+`animateSoa`, and SoA billboard symbols; the internal prefix describes the
+storage layout and is not part of the public package surface.
 
 ## The Determinism Contract (read this first)
 
@@ -165,46 +156,7 @@ identical to Babylon's. Break any one and parity collapses.
    (ratio 1, no frame-id skip), seed, step, dump `serialize()` + states. Delete
    the harness afterward.
 
-## The CPU Runtime
-
-### `particle.ts`
-
-`Particle` is a pure-state struct mirroring Babylon's `Particle` field-for-field
-(so the graph evaluator reproduces identical motion). Public fields: `id`,
-`position`, `direction`, `color`, `colorDead`, `initialColor`, `colorStep`,
-`age`, `lifeTime`, `angle`, `size`, `scale {x,y}`, `cellIndex`. Scratch fields
-(`_`-prefixed, per-step intermediates read by contextual sources):
-`_directionScale`, `_scaledDirection`, `_initialDirection`, `_localPosition`.
-`Vec3`/`Color4` are plain objects, not classes.
-
-- `createParticle(id)` — fresh particle with defaults (colour white, size 1,
-  lifeTime 1).
-- `resetParticle(particle, id)` — recycle a pooled particle; clears only the
-  lifecycle scratch (`id`, `age`, `cellIndex`, `_directionScale`) because the
-  creation queue overwrites everything else on every spawn.
-
-### `particle-system.ts`
-
-`ParticleSystem` is pure state: public config (`name`, `capacity`, `emitRate`,
-`updateSpeed` [default `1/60`], `targetStopDuration`, `blendMode`,
-`billboardMode`, `isBillboardBased`, `isLocal`, `emitter`, `texture`) plus
-internal state (`_particles`, `_stock` [recycle pool], `_started`, `_stopped`,
-`_actualFrame`, `_newPartsExcess`, `_scaledUpdateSpeed`, `_emitPower`,
-`_nextParticleId`, `_scaledColorStep`), the eight named creation slots
-(`_createLifeTime` … `_createColorDead`, each `ParticleProcess | null`), and
-`_updateQueue: ParticleProcess[]`. `ParticleProcess = (particle, system) => void`.
-
-- `createParticleSystem(name, capacity)` — Babylon defaults; the graph overrides.
-- `startParticleSystem` / `stopParticleSystem`.
-- `animateParticleSystem(system, scaledRatio)` — one step (see contract §6–8).
-- `updateExistingParticles` — age + clamp (§7), set `_directionScale`, run
-  `_updateQueue`, recycle if `age >= lifeTime`.
-- `createNewParticles` — pull from `_stock` (or `createParticle`), assign a fresh
-  monotonic id, run `runCreationSlots`.
-- `runCreationSlots` — the eight slots in fixed order (§4), skipping nulls.
-- `recycleParticle` — swap-with-last + `pop()` + push to `_stock` (O(1)).
-
-## The Data-Oriented Runtime (`particle/soa`)
+## The CPU Runtime (`particle/soa`)
 
 `ParticleBuffer` stores position and direction in six `Float32Array`s, age and
 lifetime in `Float64Array`s, and IDs in `Uint32Array`. Live particles occupy the
@@ -213,15 +165,17 @@ the base arrays and every lazily-created feature column, so optional state recyc
 without feature-specific hooks. `column(buffer, name, ctor)` is the only feature
 allocation surface.
 
-`SoaSystem` owns the eight Babylon-ordered creation slots and an ordered
-`updateSteps` array. `animateSoa` performs update-before-create, final-step lifetime
-clamping, fractional emission accounting, optional per-step emit-rate evaluation,
-and swap removal without per-frame allocation. Scratch-backed vector/color getters
-must copy an operand's components before evaluating another getter because two ports
-may share the same scratch.
+Public `ParticleSystem` state is implemented internally by `SoaSystem`, which owns
+the eight Babylon-ordered creation slots and an ordered `updateSteps` array. Public
+`animateParticleSystem` delegates to `animateSoa`, which performs
+update-before-create, final-step lifetime clamping, fractional emission accounting,
+optional per-step emit-rate evaluation, and swap removal without per-frame
+allocation. Scratch-backed vector/color getters must copy an operand's components
+before evaluating another getter because two ports may share the same scratch.
 
-`buildSoaParticleSet` creates the system and buffer before traversing each root,
-then builds only blocks reachable from a `SystemBlock`. Common blocks use
+Public `buildNodeParticleSet` delegates to `buildSoaParticleSet`, which creates the
+system and buffer before traversing each root, then builds only blocks reachable
+from a `SystemBlock`. Common blocks use
 `registry.ts`; optional features use `registry-extra.ts`; rare serialized forms use
 `registry-variants.ts`; world emitter families use `registry-extra-emitters.ts`;
 local shape bodies use `registry-local-shapes.ts`. Local and world implementations
@@ -300,10 +254,9 @@ else, rather than silently returning `null` per frame.
 
 ### Registries
 
-The unused legacy implementation has a flat `npe-registry.ts` pending deletion.
-The canonical runtime splits its evaluator set across base, optional, emitter,
-value-utility, local-shape, and serialized-variant registries. Every arm remains
-a side-effect-free dynamic import, and unsupported classes fail during graph
+The runtime splits its evaluator set across base, optional, emitter,
+value-utility, local-shape, and serialized-variant registries. Every arm remains a
+side-effect-free dynamic import, and unsupported classes fail during graph
 construction.
 
 ## Supported Blocks
@@ -367,9 +320,8 @@ The emitter is a full `Mat4` world matrix (translation + rotation + scale),
 matching Babylon's `emitterWorldMatrix` (a mesh emitter's world matrix, or
 `Matrix.Translation` for a `Vector3`). `options.emitter` (`Vec3`) is the
 translation shorthand; `options.emitterWorldMatrix` (`Mat4`) is the full form.
-The object `NpeBuildState` carries `emitterWorldMatrix`, its inverse, and
-`emitter` (the translation returned by the `Emitter` source). SoA carries only
-the world matrix and translation in common build state; radial cylinder modules
+`SoaBuildState` carries `emitterWorldMatrix` and `emitter` (the translation
+returned by the `Emitter` source) in common build state. Radial cylinder modules
 compute the inverse lazily, and directed cylinders never compute it.
 
 World shape blocks: position via `transformCoordinatesToRef(x,y,z, m, out)`
@@ -387,13 +339,15 @@ this).
 
 ## Rendering
 
-### `particle-billboard.ts`
+### `soa/soa-billboard.ts`
 
 `createParticleBillboard(system)` builds a facing billboard system from the
-system texture (single-frame atlas), sized to `capacity`, with a blend
-descriptor from `blendForMode`. `syncParticleBillboard` clears and re-uploads
-every alive particle each frame: `position`, `sizeWorld = [size·scale.x,
-size·scale.y]`, `color`, `rotation = angle`, `frame: 0`.
+system texture, sized to `capacity`, with a blend descriptor from `blendForMode`.
+Graphs without sprite animation use a single-frame atlas; sprite graphs derive
+cell dimensions and frame indices from their lazy sprite handle.
+`syncParticleBillboard` clears and re-uploads every alive particle each frame:
+`position`, `sizeWorld = [size·scale.x, size·scale.y]`, `color`,
+`rotation = angle`, and the current `frame`.
 
 Blend mapping (`blendForMode`):
 
@@ -440,8 +394,8 @@ for live scenes.
 | `ThinParticleSystem` / `ParticleSystem`              | `ParticleSystem` (`soa/animate.ts`)             |
 | `ThinParticleSystem.animate` → `_update`             | `animateParticleSystem`                         |
 | `_createQueueStart` linked list                      | fixed named creation slots                      |
-| `_updateQueueStart` linked list                      | `_updateQueue` array                            |
-| `Particle`                                           | `Particle` (`particle.ts`)                      |
+| `_updateQueueStart` linked list                      | `updateSteps` array                             |
+| `Particle`                                           | dense slot across `ParticleBuffer` columns      |
 | `Scalar.RandomRange`                                 | `randomRange` (`math/random-range.ts`)          |
 | `Vector3.TransformCoordinates/NormalFromFloatsToRef` | `transformCoordinates/NormalToRef`              |
 | `emitterWorldMatrix` / `emitterPosition`             | `state.emitterWorldMatrix` / `state.emitter`    |
@@ -481,7 +435,7 @@ classic-`ParticleSystem`-only feature.
 - **Canonical determinism (vitest)** — `tests/lite/unit/npe-particle-*.test.ts`:
   build through the canonical API, seed `Math.random`, step `N`, snapshot typed
   arrays through `particle-test-utils.ts`, sort by id, and compare every particle
-  to committed Babylon ground truth. No test imports the legacy object runtime.
+  to committed Babylon ground truth. No test imports the removed object modules.
 - **Emitter rotation (vitest)** — `npe-particle-emitter-rotation.test.ts`: the
   cylinder graph with a rotated + translated `emitterWorldMatrix`, compared to a
   Babylon oracle (the cylinder exercises `transformCoordinates` + the
@@ -511,26 +465,18 @@ classic-`ParticleSystem`-only feature.
   graph payload modules are excluded from bundle accounting (like `*-nme.ts`).
   `particle-soa-bundle-content.test.ts` rejects unused local/emitter chunks,
   rejects local-shape or matrix-inversion modules folded into fetched chunks,
-  and rejects every legacy object-runtime module from canonical particle scenes.
+  and rejects removed object-runtime module paths from canonical particle scenes.
 
 ## File Manifest
 
 ```
 packages/babylon-lite/src/particle/
-  particle.ts                      // LEGACY unused; pending deletion
-  particle-system.ts               // LEGACY unused; pending deletion
-  particle-billboard.ts            // LEGACY unused; pending deletion
-  particle-scene.ts                // PUBLIC canonical SoA live-scene registration
+  particle-scene.ts                // PUBLIC canonical live-scene registration
   node/
     node-particle.ts               // PUBLIC canonical build/snippet API + NodeParticleSet
-    npe-types.ts                   // immutable shared serialized graph types
+    npe-types.ts                   // immutable serialized graph types
     npe-parser.ts                  // serialized JSON -> ParticleGraph
     npe-snippet.ts                 // snippet-server fetch
-    npe-build.ts                   // LEGACY unused; pending deletion
-    npe-build-state.ts             // LEGACY unused; pending deletion
-    npe-registry.ts                // LEGACY unused; pending deletion
-    blocks/
-      ...                          // LEGACY unused; pending deletion
   soa/
     particle-buffer.ts             // dense base columns + lazy feature columns
     animate.ts                     // internal SoaSystem; public ParticleSystem alias
