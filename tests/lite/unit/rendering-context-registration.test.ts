@@ -132,6 +132,17 @@ describe("registerScene / unregisterScene", () => {
         expect(list).toEqual([]);
     });
 
+    it("releases material group mesh references when disposing", () => {
+        const scene = createSceneContext(makeMockEngine());
+        const builder = vi.fn() as unknown as MeshGroupBuilder;
+        const mesh = { material: { _buildGroup: builder }, children: [] } as unknown as Mesh;
+        scene._groups.set(builder, [mesh]);
+
+        disposeScene(scene);
+
+        expect(scene._groups.size).toBe(0);
+    });
+
     it("does not register resources that finish building after scene disposal", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
