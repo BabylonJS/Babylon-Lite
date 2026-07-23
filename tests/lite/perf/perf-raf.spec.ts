@@ -5,11 +5,12 @@
  * across all scenes. Writes results to lab/public/perf-manifest.json
  * which the dashboard Perf tab consumes.
  *
- * Run:  npx playwright test tests/lite/parity/perf-raf.spec.ts
+ * Run:  npx playwright test tests/lite/perf/perf-raf.spec.ts
  *   or: pnpm test:perf
  *
- * Env:  PERF_SCENES=1,5,9   — run only specific scenes (default: all)
- *       PERF_DURATION=5      — measurement duration in seconds (default: 5)
+ * Env:  PERF_SCENES=1,5,9      — run only specific scenes (default: all)
+ *       PERF_DURATION=5        — measurement duration in seconds (default: 5)
+ *       PERF_PARTICLE_LIVE=true — compare live Lite/BJS particle previews (defaults to 262,263,264,268)
  *
  * How it works:
  *   1. Patches window.requestAnimationFrame BEFORE page scripts load
@@ -30,8 +31,11 @@ import type { BrowserContext } from "@playwright/test";
 const DURATION_SEC = Number(process.env.PERF_DURATION) || 5;
 const DURATION_MS = DURATION_SEC * 1000;
 const WARMUP_MS = 2000;
+const PARTICLE_LIVE = process.env.PERF_PARTICLE_LIVE === "true";
+const PARTICLE_SCENE_IDS = new Set([262, 263, 264, 268]);
 
 interface SceneDef {
+    id: number;
     name: string;
     label: string;
 }
@@ -45,15 +49,17 @@ interface SceneConfigEntry {
 const SCENE_CONFIG: SceneConfigEntry[] = JSON.parse(readFileSync(resolve(__dirname, "../../../scene-config.json"), "utf-8"));
 
 const ALL_SCENES: SceneDef[] = SCENE_CONFIG.map((entry) => ({
+    id: entry.id,
     name: `scene${entry.id}`,
     label: entry.name,
 }));
 
 const SELECTED = process.env.PERF_SCENES ? process.env.PERF_SCENES.split(",").map((s) => `scene${s.trim()}`) : null;
 
-const SCENES = SELECTED ? ALL_SCENES.filter((s) => SELECTED.includes(s.name)) : ALL_SCENES;
+const FILTERED_SCENES = SELECTED ? ALL_SCENES.filter((s) => SELECTED.includes(s.name)) : ALL_SCENES;
+const SCENES = PARTICLE_LIVE ? FILTERED_SCENES.filter((scene) => PARTICLE_SCENE_IDS.has(scene.id)) : FILTERED_SCENES;
 
-const MANIFEST_PATH = resolve(__dirname, "../../../lab/public/perf-manifest.json");
+const MANIFEST_PATH = resolve(__dirname, PARTICLE_LIVE ? "../../../lab/public/perf-particle-live-manifest.json" : "../../../lab/public/perf-manifest.json");
 
 // ── RAF instrumentation (injected before page scripts) ─────────────
 
@@ -81,6 +87,7 @@ interface SceneStats {
     fps: number;
     initTime: number;
     drawCalls: number;
+    particles: number;
     rafAvgMs: number;
     rafMedianMs: number;
     rafP95Ms: number;
@@ -108,7 +115,7 @@ async function warmupCache(context: BrowserContext, url: string): Promise<void> 
     await page.close();
 }
 
-function computeStats(timings: number[], durationMs: number): Omit<SceneStats, "initTime" | "drawCalls"> {
+function computeStats(timings: number[], durationMs: number): Omit<SceneStats, "initTime" | "drawCalls" | "particles"> {
     if (timings.length === 0) {
         return { fps: 0, rafAvgMs: 0, rafMedianMs: 0, rafP95Ms: 0, rafP99Ms: 0, frames: 0, memoryMB: 0 };
     }
@@ -164,6 +171,9 @@ async function measurePageOnce(context: BrowserContext, url: string, durationMs:
     const drawCalls = await page.evaluate(() => {
         return parseInt((document.querySelector("canvas") as HTMLCanvasElement).dataset.drawCalls || "0", 10);
     });
+    const particles = await page.evaluate(() => {
+        return parseInt((document.querySelector("canvas") as HTMLCanvasElement).dataset.particles || "0", 10);
+    });
 
     // Collect RAF timings
     await page.evaluate(() => {
@@ -192,6 +202,7 @@ async function measurePageOnce(context: BrowserContext, url: string, durationMs:
         ...stats,
         initTime: Math.round(initMs) / 1000,
         drawCalls,
+        particles,
         memoryMB,
     };
 }
@@ -218,8 +229,8 @@ test.describe("RAF Performance Benchmark", () => {
         test(`${scene.label}`, async ({ browser }) => {
             const { context, release } = await acquireContext(browser);
 
-            const liteUrl = `/${scene.name}.html`;
-            const bjsUrl = `/babylon-ref-${scene.name}.html`;
+            const liteUrl = PARTICLE_LIVE ? `/lite/particle-live.html?scene=${scene.id}` : `/${scene.name}.html`;
+            const bjsUrl = PARTICLE_LIVE ? `/lite/particle-live-bjs.html?scene=${scene.id}` : `/babylon-ref-${scene.name}.html`;
 
             // Pre-warm HTTP cache — both engines fetch the same external CDN assets
             // (BoomBox.glb, environmentSpecular.env, etc.). Without this, whichever
@@ -246,6 +257,7 @@ test.describe("RAF Performance Benchmark", () => {
                     `FPS ${lite.fps} / ${bjs.fps} | ` +
                     `Init ${lite.initTime}s / ${bjs.initTime}s | ` +
                     `Draw ${lite.drawCalls} / ${bjs.drawCalls} | ` +
+                    `Particles ${lite.particles} / ${bjs.particles} | ` +
                     `Mem ${lite.memoryMB}MB / ${bjs.memoryMB}MB`
             );
         });

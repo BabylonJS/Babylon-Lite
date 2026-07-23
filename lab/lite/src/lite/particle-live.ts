@@ -4,6 +4,7 @@ import {
     createArcRotateCamera,
     createEngine,
     createSceneContext,
+    onBeforeRender,
     parseNodeParticleSource,
     registerNodeParticleSet,
     registerScene,
@@ -32,6 +33,7 @@ async function loadPreview(sceneId: number): Promise<PreviewConfig> {
 }
 
 async function main(): Promise<void> {
+    const initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const sceneId = Number(new URLSearchParams(window.location.search).get("scene") ?? "262");
     const preview = await loadPreview(sceneId);
@@ -51,11 +53,19 @@ async function main(): Promise<void> {
         textureBaseUrl: "https://playground.babylonjs.com/",
     });
     registerNodeParticleSet(scene, set);
+    const system = set.systems[0]!;
+    onBeforeRender(scene, () => {
+        canvas.dataset.drawCalls = String(engine.drawCallCount);
+        canvas.dataset.particles = String(system.buffer.alive);
+    });
 
     await registerScene(scene);
     await startEngine(engine);
 
     document.title = `Babylon Lite - Live NPE Particles ${sceneId}`;
+    canvas.dataset.initMs = String(performance.now() - initStart);
+    canvas.dataset.drawCalls = String(engine.drawCallCount);
+    canvas.dataset.particles = String(system.buffer.alive);
     canvas.dataset.live = "true";
     canvas.dataset.scene = String(sceneId);
     canvas.dataset.ready = "true";

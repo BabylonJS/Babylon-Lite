@@ -196,6 +196,27 @@ pnpm build:perf-baseline
 pnpm test:perf
 ```
 
+### Live particle comparison: Lite vs Babylon.js
+
+The RAF benchmark has a focused live-particle mode for scenes 262, 263, 264,
+and 268. Unlike the frozen parity pages, both engines continuously simulate and
+render the same NPE graph. On PowerShell:
+
+```powershell
+$env:PERF_PARTICLE_LIVE = "true"
+$env:PERF_SCENES = "262,263,264,268"
+$env:PERF_DURATION = "10"
+pnpm exec playwright test --config playwright.perf.config.ts tests/lite/perf/perf-raf.spec.ts --workers=1
+```
+
+The console prints Lite/Babylon.js CPU-side RAF callback time, FPS,
+initialization time, draw calls, active particle count, and JavaScript heap. The
+results are also written to `lab/public/perf-particle-live-manifest.json`.
+Active counts are included because the engines can reach readiness on different
+simulation frames; compare timing only when the counts are reasonably close.
+This benchmark measures JavaScript work and WebGPU command submission, not
+asynchronous GPU completion.
+
 ### Running on BrowserStack
 
 ```sh
