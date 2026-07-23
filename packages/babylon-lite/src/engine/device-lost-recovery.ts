@@ -140,16 +140,8 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
     state.recovering = true;
     const wasRunning = !!engine._renderFn;
     stopEngine(engine);
-    let releaseAdmission!: () => void;
-    engine._rg = new Promise<void>((resolve) => (releaseAdmission = resolve));
-    let unlockRuntimeBuilds: (() => void) | undefined;
 
     try {
-        unlockRuntimeBuilds = await engine._r?.();
-        await engine._rf;
-        const retirements = engine._retirements;
-        engine._retirements = null;
-        retirements?.forEach((retire) => retire());
         const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
         if (!adapter) {
             throw new Error("WebGPU adapter not available during device recovery");
@@ -191,9 +183,6 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
         const { rebuildRegisteredScenes } = await import("./recovery-rebuild.js");
         await rebuildRegisteredScenes(engine);
     } finally {
-        unlockRuntimeBuilds?.();
-        engine._rg = undefined;
-        releaseAdmission();
         state.recovering = false;
     }
 
