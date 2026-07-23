@@ -25,7 +25,7 @@
  */
 import { U8 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
-import { createTexture2DFromPixels } from "../../texture/pixels-texture.js";
+import { _updatePixelsTextureRecoverySource, createTexture2DFromPixels } from "../../texture/pixels-texture.js";
 import type { SpriteAtlas, SpriteAtlasPackState, SpriteFrame, SpriteSampling } from "./sprite-atlas.js";
 
 /** One source frame for `createSpriteAtlasFromFrames` / `appendSpriteAtlasFrames`. The packed
@@ -324,6 +324,7 @@ export function appendSpriteAtlasFrames(engine: EngineContext, atlas: SpriteAtla
             { offset: dataOffset, bytesPerRow: srcStride, rowsPerImage: s.height },
             { width: s.width, height: s.height }
         );
+        _updatePixelsTextureRecoverySource(atlas.texture, s.pixels, placement.xs[i]!, placement.ys[i]!, s.width, s.height, dataOffset, srcStride);
         newIndices[i] = baseIndex + i;
         framesOut.push({
             name: s.name,

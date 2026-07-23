@@ -59,14 +59,16 @@ export function createTexture2DFromPixels(engine: EngineContext, data: Uint8Arra
 
     device.queue.writeTexture({ texture }, data as Uint8Array<ArrayBuffer>, { bytesPerRow: width * 4, rowsPerImage: height }, { width, height });
 
-    const sampler = getOrCreateSampler(engine, {
+    const samplerDesc: GPUSamplerDescriptor = {
         addressModeU: options.addressModeU ?? "clamp-to-edge",
         addressModeV: options.addressModeV ?? "clamp-to-edge",
         minFilter: options.minFilter ?? "nearest",
         magFilter: options.magFilter ?? "nearest",
-    });
+    };
+    const sampler = getOrCreateSampler(engine, samplerDesc);
 
     const tex: Texture2D = { texture, view: texture.createView(), sampler, width, height };
+    engine._dlr?.p(tex, data, width, height, format, samplerDesc);
     acquireTexture(tex);
     return tex;
 }
@@ -117,13 +119,15 @@ export function createRenderTexture2D(engine: EngineContext, width: number, heig
         format,
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST,
     });
-    const sampler = getOrCreateSampler(engine, {
+    const samplerDesc: GPUSamplerDescriptor = {
         addressModeU: options.addressModeU ?? "clamp-to-edge",
         addressModeV: options.addressModeV ?? "clamp-to-edge",
         minFilter: options.minFilter ?? "linear",
         magFilter: options.magFilter ?? "linear",
-    });
+    };
+    const sampler = getOrCreateSampler(engine, samplerDesc);
     const tex: Texture2D = { texture, view: texture.createView(), sampler, width, height };
+    engine._dlr?.r(tex, width, height, format, samplerDesc);
     acquireTexture(tex);
     return tex;
 }
@@ -157,6 +161,30 @@ export function updateTexture2DFromPixels(engine: EngineContext, tex: Texture2D,
         { bytesPerRow: width * 4, rowsPerImage: height },
         { width, height }
     );
+    _updatePixelsTextureRecoverySource(tex, data, x, y, width, height);
+}
+
+/** @internal Mirror a raw-pixel sub-region upload into the opt-in recovery copy. */
+export function _updatePixelsTextureRecoverySource(
+    tex: Texture2D,
+    data: Uint8Array,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    dataOffset = 0,
+    bytesPerRow = width * 4
+): void {
+    const source = tex._recoverySource;
+    if (source?.kind !== "pixels") {
+        return;
+    }
+    const rowBytes = width * 4;
+    for (let row = 0; row < height; row++) {
+        const srcStart = dataOffset + row * bytesPerRow;
+        const dstStart = ((y + row) * source.width + x) * 4;
+        source.data.set(data.subarray(srcStart, srcStart + rowBytes), dstStart);
+    }
 }
 
 /** Sampler / format overrides for `createTexture3DFromPixels()`. */

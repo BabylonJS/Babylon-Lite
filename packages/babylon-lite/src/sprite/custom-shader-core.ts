@@ -48,6 +48,8 @@ export interface SpriteLayerFx {
     update(params: readonly number[], deltaMs: number): void;
     /** Destroy the `SpriteFx` UBO buffer. */
     destroy(): void;
+    /** @internal Recreate the GPU attachment on a replacement device while preserving elapsed time. */
+    _rebuild(engine: EngineContext): SpriteLayerFx;
 }
 
 /** Valid WGSL identifier (used to validate extra-texture names before splicing them in). */
@@ -177,10 +179,14 @@ export function makeCustomShaderBindEntries(extras: readonly CustomShaderTexture
  * machinery and the plain path pays nothing.
  */
 export function createSpriteLayerFx(engine: EngineContext, label: string, extras: readonly CustomShaderTexture[]): SpriteLayerFx {
+    return createSpriteLayerFxWithElapsed(engine, label, extras, 0);
+}
+
+function createSpriteLayerFxWithElapsed(engine: EngineContext, label: string, extras: readonly CustomShaderTexture[], initialElapsedMs: number): SpriteLayerFx {
     const device = engine._device;
     const buffer = createEmptyUniformBuffer(engine, SPRITE_FX_UBO_BYTES, label);
     const scratch = new F32(SPRITE_FX_UBO_FLOATS);
-    let elapsedMs = 0;
+    let elapsedMs = initialElapsedMs;
     return {
         bindEntries(startBinding) {
             return makeCustomShaderBindEntries(extras, startBinding, buffer);
@@ -191,6 +197,9 @@ export function createSpriteLayerFx(engine: EngineContext, label: string, extras
         },
         destroy() {
             buffer.destroy();
+        },
+        _rebuild(nextEngine) {
+            return createSpriteLayerFxWithElapsed(nextEngine, label, extras, elapsedMs);
         },
     };
 }

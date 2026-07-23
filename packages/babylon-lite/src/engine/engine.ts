@@ -235,6 +235,8 @@ interface DeviceLostRecoveryCapture {
     u(tex: Texture2D, url: string, opts: Texture2DOptions): void;
     s(tex: Texture2D, r: number, g: number, b: number, a: number): void;
     b(tex: Texture2D, bitmap: ImageBitmap | null, srgb: boolean, mipMaps: boolean, fallback?: Uint8Array): void;
+    p(tex: Texture2D, data: Uint8Array, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void;
+    r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void;
     m(
         mesh: Mesh,
         uv2s: Float32Array | null | undefined,

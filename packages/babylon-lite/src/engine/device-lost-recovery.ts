@@ -2,6 +2,7 @@ import type { EngineContext } from "./engine.js";
 import { resizeEngine, startEngine, stopEngine } from "./engine.js";
 import { TU } from "./gpu-flags.js";
 import { _refreshScRT } from "./surface.js";
+import type { DeviceLostRecoveryHandle } from "./device-lost-recovery-types.js";
 
 /** @internal */
 export interface DeviceLostRecoveryRegistration {
@@ -9,6 +10,8 @@ export interface DeviceLostRecoveryRegistration {
     _kind: string;
     /** @internal */
     _recover: (engine: EngineContext) => void | Promise<void>;
+    /** @internal Lower values rebuild shared renderer resources before dependent scene graphs. */
+    _recoverOrder?: number;
     /** @internal */
     _enable?: (engine: EngineContext) => void;
     /** @internal */
@@ -22,11 +25,6 @@ export interface DeviceLostRecoveryRegistration {
 }
 
 /** @internal */
-export interface DeviceLostRecoveryHandle {
-    disable(): void;
-}
-
-/** @internal */
 export interface DeviceLostRecoveryState {
     /** @internal */
     _forceNextLoss: boolean;
@@ -36,6 +34,10 @@ export interface DeviceLostRecoveryState {
     _armedDevice: GPUDevice | null;
     /** @internal */
     _registrations: DeviceLostRecoveryRegistration[];
+    /** @internal Number of enabled context kinds retaining texture/mesh recovery sources. */
+    _captureRefs: number;
+    /** @internal Number of enabled context kinds retaining Scene mesh CPU geometry. */
+    _meshCaptureRefs: number;
 }
 
 function getState(engine: EngineContext): DeviceLostRecoveryState {
@@ -44,6 +46,8 @@ function getState(engine: EngineContext): DeviceLostRecoveryState {
         _requiredFeatures: [],
         _armedDevice: null,
         _registrations: [],
+        _captureRefs: 0,
+        _meshCaptureRefs: 0,
     });
 }
 
@@ -147,7 +151,8 @@ async function recoverDevice(engine: EngineContext, state: DeviceLostRecoverySta
     }
 
     resizeEngine(engine);
-    for (const handler of handlers.values()) {
+    const orderedHandlers = Array.from(handlers.values()).sort((a, b) => (a._recoverOrder ?? 0) - (b._recoverOrder ?? 0));
+    for (const handler of orderedHandlers) {
         await handler._recover(engine);
     }
     if (wasRunning) {

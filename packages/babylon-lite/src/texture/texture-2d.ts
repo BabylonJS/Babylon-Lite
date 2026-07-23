@@ -49,6 +49,21 @@ export type Texture2DRecoverySource =
     | { kind: "solid"; rgba: readonly [number, number, number, number] }
     | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array; samplerDesc: GPUSamplerDescriptor }
     | {
+          kind: "pixels";
+          data: Uint8Array;
+          width: number;
+          height: number;
+          format: GPUTextureFormat;
+          samplerDesc: GPUSamplerDescriptor;
+      }
+    | {
+          kind: "render";
+          width: number;
+          height: number;
+          format: GPUTextureFormat;
+          samplerDesc: GPUSamplerDescriptor;
+      }
+    | {
           /** A `createDynamicTexture` texture. Like the url/solid/bitmap kinds,
            *  this carries only the *data* needed to rebuild after device loss — no
            *  logic. The rebuild itself lives in the `dynamic-texture-recovery`

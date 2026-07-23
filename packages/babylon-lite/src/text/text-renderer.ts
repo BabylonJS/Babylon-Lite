@@ -518,3 +518,37 @@ export function disposeTextRenderer(tr: TextRenderer): void {
     tr._layerGpu.clear();
     tr._layers.length = 0;
 }
+
+/** @internal Recreate renderer-owned buffers and referenced glyph atlases on a replacement device. */
+export function _rebuildTextRendererGpu(tr: TextRenderer): void {
+    const engine = tr._surface.engine;
+    const device = engine._device;
+    tr._visibleBundles.length = 0;
+
+    for (const lg of tr._layerGpu.values()) {
+        lg.textU = createEmptyUniformBuffer(engine, TEXT_UBO_BYTES, "text-layer-ubo");
+        lg.instanceBuf = device.createBuffer({
+            label: "text-layer-instances",
+            size: lg.instanceCap * TEXT_INSTANCE_BYTES,
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        });
+        lg.pipeline = null;
+        lg.bindGroups.length = 0;
+        lg.bindGroupAtlasVersions.length = 0;
+        lg.uploadedDataVersion = -1;
+        lg.uploadedViewportW = 0;
+        lg.uploadedViewportH = 0;
+        lg.lastMvpInputs.fill(0);
+        lg.mvpUploaded = false;
+        lg.renderBundle = null;
+        lg.bundleLayoutVersion = -1;
+        lg.bundleDrawCalls = 0;
+    }
+
+    for (const layer of tr.layers) {
+        for (const group of layer.data._groups) {
+            ensureSharedAtlasGpu(device, group.curveSet.atlas);
+        }
+    }
+    textRendererUpdate(tr);
+}

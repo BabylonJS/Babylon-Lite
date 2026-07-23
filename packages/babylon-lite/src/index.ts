@@ -23,8 +23,10 @@ export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
 export { captureScreenshot } from "./engine/screenshot.js";
 export type { Screenshot } from "./engine/screenshot.js";
+export type { DeviceLostRecoveryCallbacks, DeviceLostRecoveryHandle } from "./engine/device-lost-recovery-types.js";
 export { enableDeviceLostSceneRecovery } from "./engine/device-lost-scene-recovery.js";
-export type { DeviceLostSceneRecoveryOptions, DeviceLostSceneRecoveryHandle } from "./engine/device-lost-scene-recovery.js";
+export { enableDeviceLostSpriteRecovery } from "./engine/device-lost-sprite-recovery.js";
+export { enableDeviceLostTextRecovery } from "./engine/device-lost-text-recovery.js";
 export {
     createSceneContext,
     createDefaultCamera,
