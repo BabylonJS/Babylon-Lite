@@ -14,13 +14,13 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
     let pending: Promise<void> | undefined;
     const renderables = scene._renderables;
     for (const mesh of q) {
-        const runtimeBuild = mesh._runtimeThinBuild;
+        const mat = mesh.material;
+        const runtimeBuild = mat && mesh._runtimeThinBuild;
         if (runtimeBuild) {
             pending = runtimeBuild(scene, mesh, pending);
             continue;
         }
-        const mat = mesh.material;
-        const rebuild = scene._groups.get(mat._buildGroup)?.r;
+        const rebuild = mat && scene._groups.get(mat._buildGroup)?.r;
         if (!rebuild) {
             continue;
         }

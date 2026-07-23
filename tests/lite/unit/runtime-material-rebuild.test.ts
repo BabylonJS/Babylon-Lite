@@ -38,6 +38,17 @@ function renderable(mesh: Mesh): Renderable {
 }
 
 describe("runtime material rebuild ownership", () => {
+    it("skips a queued mesh whose material was cleared", () => {
+        const runtimeBuild = vi.fn();
+        const mesh = { material: null, _runtimeThinBuild: runtimeBuild } as unknown as Mesh;
+        const scene = createScene({} as EngineContext);
+        scene._materialSwapQueue.push(mesh);
+
+        expect(() => processMaterialSwaps(scene)).not.toThrow();
+        expect(runtimeBuild).not.toHaveBeenCalled();
+        expect(scene._materialSwapQueue).toHaveLength(0);
+    });
+
     it("restores cached material features when a transmission rebuild rolls back", () => {
         const engine = {} as EngineContext;
         const scene = createScene(engine);
