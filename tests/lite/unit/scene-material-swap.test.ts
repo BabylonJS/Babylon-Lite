@@ -123,4 +123,64 @@ describe("scene material swap", () => {
             expect(renderable?.usesThinInstances).toBe(true);
         });
     });
+
+    it.each([
+        ["scene A then scene B", [0, 1]],
+        ["scene B then scene A", [1, 0]],
+    ] as const)("widens every built scene that shares a late thin-instanced mesh when draining %s", async (_label, drainOrder) => {
+        type TestRenderable = Renderable & { usesThinInstances: boolean };
+
+        const builder = (async (ctx: SceneContext, meshes: Mesh[]) => {
+            const supportsThinInstances = meshes.some((mesh) => !!mesh.thinInstances);
+            const rebuildSingle = (_scene: SceneContext, mesh: Mesh): TestRenderable =>
+                ({
+                    mesh,
+                    order: 100,
+                    isTransparent: false,
+                    usesThinInstances: supportsThinInstances,
+                }) as TestRenderable;
+            builder._rebuildSingle = rebuildSingle;
+            return {
+                renderables: meshes.map((mesh) => rebuildSingle(ctx, mesh)),
+                rebuildSingle,
+            };
+        }) as MeshGroupBuilder;
+        const material = { _buildGroup: builder } as Material;
+        const createBuiltScene = async (): Promise<SceneContext> => {
+            const scene = {
+                surface: { engine: { _retirements: [] } },
+                meshes: [],
+                lights: [],
+                _groups: new Map(),
+                _deferredBuilders: [],
+                _renderables: [],
+                _uniformUpdaters: [],
+                _disposables: [],
+                _meshDisposables: new Map(),
+                _meshAuxDisposables: new Map(),
+                _materialSwapQueue: [],
+                _renderableVersion: 0,
+                _materialEpoch: 0,
+                _built: false,
+            } as unknown as SceneContext;
+            addToScene(scene, { _gpu: {}, material, children: [] } as unknown as Mesh);
+            await buildScene(scene);
+            return scene;
+        };
+        const scenes = [await createBuiltScene(), await createBuiltScene()] as const;
+        const sharedMesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
+
+        setThinInstances(sharedMesh, new Float32Array(16), 1);
+        addToScene(scenes[0], sharedMesh);
+        addToScene(scenes[1], sharedMesh);
+
+        for (const index of drainOrder) {
+            await processMaterialSwaps(scenes[index]);
+        }
+
+        for (const scene of scenes) {
+            const renderable = scene._renderables.find((candidate) => candidate.mesh === sharedMesh) as TestRenderable | undefined;
+            expect(renderable?.usesThinInstances).toBe(true);
+        }
+    });
 });
