@@ -1,6 +1,6 @@
 {
   "rawKB": 97.3,
-  "gzipKB": 40.4,
+  "gzipKB": 40.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene242-animation-pointer-basecolor-C0cq9A_I.js",
@@ -13,7 +13,7 @@
     "scene242-gltf-feature-registry-C5uCuPvU.js",
     "scene242-gltf-json-asset-CUgSKPtS.js",
     "scene242-ibl-fragment-CeRrvT96.js",
-    "scene242-pbr-renderable-6k3Vt7R0.js",
+    "scene242-pbr-renderable-DyMcDIC2.js",
     "scene242-rgbd-decode-Ck0VLYV5.js",
     "scene242-scene-uniforms-FTYH6Ct0.js",
     "scene242-visibility-CCvf681l.js",

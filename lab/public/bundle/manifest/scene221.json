@@ -3,10 +3,10 @@
   "gzipKB": 37.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene221-shader-renderable-BjrD3cFY.js",
-    "scene221-standard-renderable-Dhqda_bM.js",
+    "scene221-scene-uniforms-CGHhMjxH.js",
+    "scene221-shader-renderable-CryoiMXf.js",
+    "scene221-standard-renderable-DRH21vJy.js",
     "scene221-swapchain-overlay-ilhN4El_.js",
-    "scene221-ubo-layout-CnrP4RZD.js",
     "scene221.js"
   ]
 }
