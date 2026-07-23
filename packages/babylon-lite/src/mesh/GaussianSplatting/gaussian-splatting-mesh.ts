@@ -87,8 +87,17 @@ export interface GaussianSplattingMesh extends SceneNode {
     readonly shDegree: number;
     /** @internal Sort worker. Owned by the mesh; terminated on dispose. */
     _worker: Worker;
-    /** @internal Scratch for the worker round-trip. high-32 = depth, low-32 = index. */
-    _depthMix: BigInt64Array;
+    /** @internal Free transferable order buffers ready to post to the sort
+     *  worker. Starts with two (double-buffered): a second sort job can be
+     *  posted while the previous result is still in transit, so the worker
+     *  never idles on the round-trip during continuous camera motion. Empty
+     *  means two sorts are already in flight. */
+    _orderPool: Uint32Array[];
+    /** @internal Latest sorted order received from the worker, awaiting GPU
+     *  upload. Consumed by `uploadPendingSplatOrder` on the next frame — at
+     *  most one upload per frame, and if a newer result lands before the
+     *  upload happens the stale one is dropped back into the pool unused. */
+    _pendingOrder: Uint32Array | null;
     /** Snapshot of the world matrix posted to the worker on the last sort.
      *  Used to decide whether a re-sort is needed this frame. Mirrors BJS
      *  `ICameraViewInfo.sortWorldMatrix`. */
@@ -98,8 +107,6 @@ export interface GaussianSplattingMesh extends SceneNode {
     _sortCameraForward: Float32Array;
     /** @internal Snapshot of the camera world-space position on the last sort. */
     _sortCameraPosition: Float32Array;
-    /** @internal True between postMessage and onmessage; throttles re-sort requests. */
-    _canPostToWorker: boolean;
     /** Resolves on the first sort completion. The lab scene awaits this
      *  before flagging `dataset.ready`. */
     readonly firstSortReady: Promise<void>;
@@ -194,11 +201,11 @@ export function createGaussianSplattingMesh(engine: EngineContext, name: string,
         boundMax: geom.boundMax.slice() as [number, number, number],
         shDegree: parsed.shDegree ?? 0,
         _worker: worker,
-        _depthMix: new BigInt64Array(vertexCount),
+        _orderPool: [new U32(vertexCount), new U32(vertexCount)],
+        _pendingOrder: null,
         _sortWorldMatrix: new F32(16),
         _sortCameraForward: new F32(3),
         _sortCameraPosition: new F32(3),
-        _canPostToWorker: true,
         firstSortReady,
         _firstSortResolve: firstResolve,
         _gs: {
@@ -251,9 +258,10 @@ export function createGaussianSplattingMesh(engine: EngineContext, name: string,
         mesh._worker.postMessage({ p: newGeom.positions, n: newGeom.vertexCount }, [newGeom.positions.buffer]);
         // Force a re-sort on the next eligible frame by zeroing the snapshot
         // state — any real camera/world state will differ by more than the
-        // gating threshold. (`_canPostToWorker` is left untouched — it's owned
-        // by the worker protocol and toggling it here would risk double-posting
-        // a `_depthMix` buffer that's still detached on the worker side.)
+        // gating threshold. (`_orderPool` is left untouched — in-flight sort
+        // jobs queued behind the init message still return their buffers via
+        // `onmessage`; their ordering may briefly be stale for the new data,
+        // which the forced re-sort corrects.)
         mesh._sortWorldMatrix.fill(0);
         mesh._sortCameraForward.fill(0);
         mesh._sortCameraPosition.fill(0);
@@ -268,15 +276,13 @@ export function createGaussianSplattingMesh(engine: EngineContext, name: string,
     worker.postMessage({ p: geom.positions, n: vertexCount }, [geom.positions.buffer]);
 
     worker.onmessage = (e: MessageEvent) => {
-        const data = e.data as { d: BigInt64Array };
-        mesh._depthMix = data.d;
-        const indices = new U32(data.d.buffer);
-        const cpu = mesh._gs._splatIndexCpu;
-        for (let j = 0; j < mesh.vertexCount; j++) {
-            cpu[j] = indices[2 * j]!;
+        const data = e.data as { o: Uint32Array };
+        // Latest wins: if an older result is still awaiting upload, drop it
+        // straight back into the pool — only the newest ordering reaches the GPU.
+        if (mesh._pendingOrder) {
+            mesh._orderPool.push(mesh._pendingOrder);
         }
-        queue.writeBuffer(mesh._gs._splatIndexBuffer, 0, cpu.buffer, 0, cpu.byteLength);
-        mesh._canPostToWorker = true;
+        mesh._pendingOrder = data.o;
         if (mesh._firstSortResolve) {
             mesh._firstSortResolve();
             mesh._firstSortResolve = null;
@@ -284,6 +290,82 @@ export function createGaussianSplattingMesh(engine: EngineContext, name: string,
     };
 
     return mesh;
+}
+
+/** Per-element threshold on the world matrix / camera forward / camera
+ *  position drift below which a re-sort is skipped. Mirrors BJS
+ *  `viewUpdateThreshold` default (`_DefaultViewUpdateThreshold = 1e-4`). */
+const SORT_EPS = 1e-4;
+
+/** Upload the latest sorted splat order (if one arrived since the last frame)
+ *  into the instance buffer, then recycle its transferable back into the pool.
+ *  Called once per frame from the renderable's `update` hook — results the
+ *  worker produced faster than the frame rate never cost an upload. */
+export function uploadPendingSplatOrder(queue: GPUQueue, mesh: GaussianSplattingMesh): void {
+    const order = mesh._pendingOrder;
+    if (!order) {
+        return;
+    }
+    mesh._pendingOrder = null;
+    const cpu = mesh._gs._splatIndexCpu;
+    for (let j = 0; j < mesh.vertexCount; j++) {
+        cpu[j] = order[j]!;
+    }
+    queue.writeBuffer(mesh._gs._splatIndexBuffer, 0, cpu.buffer, 0, cpu.byteLength);
+    mesh._orderPool.push(order);
+}
+
+/** Post a sort job to the worker when (a) a free order buffer is available
+ *  (at most two jobs in flight) and (b) the world matrix, camera-forward
+ *  vector or camera position drifted past `SORT_EPS` since the last posted
+ *  sort (mirrors BJS `_isSortStateDirty`, gaussianSplattingMeshBase.ts:849).
+ *  Shared by the base and SH pipelines. */
+export function postSplatSortIfDirty(mesh: GaussianSplattingMesh, world: Float32Array, cf0: number, cf1: number, cf2: number, cx: number, cy: number, cz: number): void {
+    if (mesh._orderPool.length === 0) {
+        return;
+    }
+
+    let dirty = false;
+    const lastW = mesh._sortWorldMatrix;
+    for (let i = 0; i < 16; i++) {
+        if (Math.abs(lastW[i]! - world[i]!) > SORT_EPS) {
+            dirty = true;
+            break;
+        }
+    }
+    if (!dirty) {
+        const lastCf = mesh._sortCameraForward;
+        if (Math.abs(lastCf[0]! - cf0) > SORT_EPS || Math.abs(lastCf[1]! - cf1) > SORT_EPS || Math.abs(lastCf[2]! - cf2) > SORT_EPS) {
+            dirty = true;
+        }
+    }
+    if (!dirty) {
+        const lastCp = mesh._sortCameraPosition;
+        if (Math.abs(lastCp[0]! - cx) > SORT_EPS || Math.abs(lastCp[1]! - cy) > SORT_EPS || Math.abs(lastCp[2]! - cz) > SORT_EPS) {
+            dirty = true;
+        }
+    }
+    if (!dirty) {
+        return;
+    }
+
+    mesh._sortWorldMatrix.set(world);
+    mesh._sortCameraForward[0] = cf0;
+    mesh._sortCameraForward[1] = cf1;
+    mesh._sortCameraForward[2] = cf2;
+    mesh._sortCameraPosition[0] = cx;
+    mesh._sortCameraPosition[1] = cy;
+    mesh._sortCameraPosition[2] = cz;
+    const order = mesh._orderPool.pop()!;
+    mesh._worker.postMessage(
+        {
+            m: new F32(world),
+            f: new F32([cf0, cf1, cf2]),
+            c: new F32([cx, cy, cz]),
+            o: order,
+        },
+        [order.buffer]
+    );
 }
 
 /** Free all GPU + worker resources owned by a GS mesh. */

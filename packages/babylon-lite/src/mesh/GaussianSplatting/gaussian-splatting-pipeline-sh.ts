@@ -36,7 +36,7 @@ import { targetSignatureKey } from "../../engine/render-target.js";
 import { getViewMatrix, getProjectionMatrix, getCameraPosition } from "../../camera/camera.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { getRenderTargetSize } from "../../engine/engine.js";
-import { disposeGaussianSplattingMesh, type GaussianSplattingMesh, type GsShaderFragment } from "./gaussian-splatting-mesh.js";
+import { disposeGaussianSplattingMesh, uploadPendingSplatOrder, postSplatSortIfDirty, type GaussianSplattingMesh, type GsShaderFragment } from "./gaussian-splatting-mesh.js";
 import { registerPickSource } from "../../picking/pick-contributor.js";
 import { applyGsFragments } from "./gaussian-splatting-pipeline.js";
 
@@ -406,13 +406,13 @@ export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: Ga
         return bg;
     };
 
-    const SORT_EPS = 1e-4;
-
     const update = (): void => {
         const cam = scene.camera;
         if (!cam) {
             return;
         }
+        uploadPendingSplatOrder(device.queue, mesh);
+
         const size = getRenderTargetSize(engine);
         const aspect = size.width / size.height;
         const view = getViewMatrix(cam) as unknown as Float32Array;
@@ -433,55 +433,7 @@ export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: Ga
         cpu[59] = 0;
         device.queue.writeBuffer(ubo, 0, cpu.buffer, 0, UBO_BYTES);
 
-        if (!mesh._canPostToWorker) {
-            return;
-        }
-
-        const cf0 = view[2]!,
-            cf1 = view[6]!,
-            cf2 = view[10]!;
-
-        let dirty = false;
-        const lastW = mesh._sortWorldMatrix;
-        for (let i = 0; i < 16; i++) {
-            if (Math.abs(lastW[i]! - world[i]!) > SORT_EPS) {
-                dirty = true;
-                break;
-            }
-        }
-        if (!dirty) {
-            const lastCf = mesh._sortCameraForward;
-            if (Math.abs(lastCf[0]! - cf0) > SORT_EPS || Math.abs(lastCf[1]! - cf1) > SORT_EPS || Math.abs(lastCf[2]! - cf2) > SORT_EPS) {
-                dirty = true;
-            }
-        }
-        if (!dirty) {
-            const lastCp = mesh._sortCameraPosition;
-            if (Math.abs(lastCp[0]! - camPos.x) > SORT_EPS || Math.abs(lastCp[1]! - camPos.y) > SORT_EPS || Math.abs(lastCp[2]! - camPos.z) > SORT_EPS) {
-                dirty = true;
-            }
-        }
-        if (!dirty) {
-            return;
-        }
-
-        mesh._sortWorldMatrix.set(world);
-        mesh._sortCameraForward[0] = cf0;
-        mesh._sortCameraForward[1] = cf1;
-        mesh._sortCameraForward[2] = cf2;
-        mesh._sortCameraPosition[0] = camPos.x;
-        mesh._sortCameraPosition[1] = camPos.y;
-        mesh._sortCameraPosition[2] = camPos.z;
-        mesh._canPostToWorker = false;
-        mesh._worker.postMessage(
-            {
-                m: new F32(world),
-                f: new F32([cf0, cf1, cf2]),
-                c: new F32([camPos.x, camPos.y, camPos.z]),
-                d: mesh._depthMix,
-            },
-            [mesh._depthMix.buffer]
-        );
+        postSplatSortIfDirty(mesh, world, view[2]!, view[6]!, view[10]!, camPos.x, camPos.y, camPos.z);
     };
 
     const r: Renderable = {
