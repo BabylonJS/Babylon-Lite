@@ -5,7 +5,7 @@ import { buildNodeParticleGraph } from "./particle-test-utils";
 
 /**
  * Regression guard for the `ParticleRandomBlock` `OncePerParticle` (lockMode 3) cache. Particle ids are
- * monotonic, so caching one draw per id in a system-wide map would grow unbounded. SoA stores one id,
+ * monotonic, so caching one draw per id in a system-wide map would grow unbounded. The runtime stores one id,
  * validity, and value column per block; each column is fixed at buffer capacity and a recycled slot's new
  * id invalidates its previous draw.
  */

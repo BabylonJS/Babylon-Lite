@@ -2,12 +2,12 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Vec3, Mat4 } from "../../math/types.js";
 import { parseNodeParticleSource } from "./npe-parser.js";
-import { buildSoaParticleSet as buildNodeParticleSet } from "../soa/npe-build.js";
-import type { SoaParticleSet as NodeParticleSet } from "../soa/npe-build.js";
+import { buildNodeParticleSet } from "./npe-build.js";
+import type { NodeParticleSet } from "./npe-build.js";
 
 export { buildNodeParticleSet };
 export type { NodeParticleSet };
-export type { BuildSoaOptions as BuildNodeParticleOptions } from "../soa/npe-build.js";
+export type { BuildNodeParticleOptions } from "./npe-build.js";
 
 /** Options for {@link parseNodeParticleSetFromSnippet}. */
 export interface ParseNodeParticleOptions {

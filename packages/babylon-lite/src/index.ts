@@ -642,11 +642,11 @@ export {
 export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
 export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
 export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
-export type { SoaSystem as ParticleSystem } from "./particle/soa/animate.js";
-export { animateSoa as animateParticleSystem, startSoaSystem as startParticleSystem, stopSoaSystem as stopParticleSystem } from "./particle/soa/animate.js";
+export type { ParticleSystem } from "./particle/particle-system.js";
+export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
 export { registerNodeParticleSet } from "./particle/particle-scene.js";
-export { createSoaParticleBillboard as createParticleBillboard, syncSoaParticleBillboard as syncParticleBillboard } from "./particle/soa/soa-billboard.js";
+export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
 
 // ─── Text ────────────────────────────────────────────────────────────
 export type { Font } from "./text/font.js";

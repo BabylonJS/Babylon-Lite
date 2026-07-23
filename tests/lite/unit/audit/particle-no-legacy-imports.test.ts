@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..");
+const SOURCE_ROOT = join(REPO_ROOT, "packages", "babylon-lite", "src");
 const TEST_ROOT = join(REPO_ROOT, "tests");
-const IMPORT_RE = /(?:from\s+|import\s*\()\s*["']([^"']+)["']/g;
-const REMOVED_PARTICLE_MODULE_RE = /\/particle\/(?:particle(?:-system|-billboard)?|node\/(?:npe-build(?:-state)?|npe-registry|blocks\/.+))$/;
+const RETIRED_PARTICLE_ROOT = join(SOURCE_ROOT, "particle", "soa");
+const IMPORT_RE = /\b(?:from\s+|import\s*(?:\(\s*)?)(["'])([^"']+)\1/g;
+const RETIRED_PARTICLE_PATH_RE = /\/particle\/soa(?:\/|$)/;
 
 function* walkTypescript(directory: string): Generator<string> {
     for (const name of readdirSync(directory).sort()) {
@@ -19,15 +21,19 @@ function* walkTypescript(directory: string): Generator<string> {
     }
 }
 
-describe("particle test ownership", () => {
-    it("does not import removed object particle modules", () => {
+describe("particle module ownership", () => {
+    it("does not restore the retired particle/soa path", () => {
+        expect(existsSync(RETIRED_PARTICLE_ROOT)).toBe(false);
+
         const offenders: string[] = [];
-        for (const path of walkTypescript(TEST_ROOT)) {
-            const source = readFileSync(path, "utf8");
-            for (const match of source.matchAll(IMPORT_RE)) {
-                const specifier = match[1]!.replace(/\.(?:js|ts)$/, "");
-                if (REMOVED_PARTICLE_MODULE_RE.test(specifier)) {
-                    offenders.push(`${relative(REPO_ROOT, path).split(sep).join("/")}: ${match[1]}`);
+        for (const root of [SOURCE_ROOT, TEST_ROOT]) {
+            for (const path of walkTypescript(root)) {
+                const source = readFileSync(path, "utf8");
+                for (const match of source.matchAll(IMPORT_RE)) {
+                    const specifier = match[2]!.replace(/\.(?:js|ts)$/, "");
+                    if (RETIRED_PARTICLE_PATH_RE.test(specifier)) {
+                        offenders.push(`${relative(REPO_ROOT, path).split(sep).join("/")}: ${match[2]}`);
+                    }
                 }
             }
         }

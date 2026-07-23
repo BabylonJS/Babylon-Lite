@@ -6,7 +6,7 @@ import {
     type BuildNodeParticleOptions,
     type ParticleSystem,
 } from "../../../packages/babylon-lite/src/index";
-import * as C from "../../../packages/babylon-lite/src/particle/soa/columns";
+import * as C from "../../../packages/babylon-lite/src/particle/particle-columns";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 

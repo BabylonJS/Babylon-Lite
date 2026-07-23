@@ -14,8 +14,9 @@
 > `ThinParticleSystem.animate` runtime such a system runs; the _scope_ of what
 > Lite supports is bounded by what an NPE graph can express, block by block. Live
 > particles are bound to a camera-facing billboard sprite system for rendering.
-> The canonical public API and particle scenes use the sole data-oriented runtime
-> under `particle/soa/`. The former object-per-particle implementation and its
+> Runtime, storage, and rendering modules live directly under `particle/`; the
+> graph compiler, registries, contextual values, and evaluators live under
+> `particle/node/`. The former object-per-particle implementation and its
 > duplicate evaluator tree have been deleted.
 >
 > This document contains the full specification needed to implement the module
@@ -56,17 +57,18 @@ per-particle `Math.random()` sequence and arithmetic aligned with Babylon's.
   truth at each column's documented precision. There is **no GPU particle path**.
 - **The graph is compiled to indexed operations.** The build walk runs once and
   produces getter closures plus fixed creation slots and an ordered update list.
-  The SoA hot loop passes particle indices into these operations and never walks
+  The simulation loop passes particle indices into these operations and never walks
   the graph or allocates per-particle objects.
-- **Pay-for-use.** Block evaluators are lazily `import()`-ed per class. SoA uses
-  base, optional, serialized-variant, emitter, and local-shape registries; feature
-  columns are allocated only by the block/source that reads or writes them. A
+- **Pay-for-use.** Block evaluators are lazily `import()`-ed per class. The NPE
+  compiler uses base, optional, serialized-variant, emitter, and local-shape
+  registries; feature columns are allocated only by the block/source that reads
+  or writes them. A
   world-space point emitter therefore loads neither local shape code nor local
   position memory, and a non-cylinder system does not compute an inverse emitter
   matrix. Modules have no top-level allocations.
 - **Pure state + standalone functions.** The public `ParticleSystem` type is
-  backed by dense SoA state; all behaviour is provided by standalone functions
-  operating on it. There are no per-particle objects, classes, methods, or
+  backed by dense typed-array state; all behaviour is provided by standalone
+  functions operating on it. There are no per-particle objects, classes, methods, or
   per-feature nullable `_properties` bag. Optional features allocate columns only
   when their graph blocks require them.
 - **Author NPE directly.** The emitter transform, capacity, blend mode, etc. are
@@ -79,13 +81,17 @@ node/npe-types.ts              Graph    — immutable parsed graph types
 node/npe-parser.ts             Graph    — serialized JSON  ->  immutable ParticleGraph
 node/node-particle.ts          API      — canonical build + snippet entry points
 node/npe-snippet.ts            API      — snippet-server fetch
-particle-scene.ts              Render   — register canonical SoA systems with a scene
-soa/particle-buffer.ts         Runtime  — typed-array base columns + lazy feature columns
-soa/animate.ts                 Runtime  — fixed creation slots + indexed update loop
-soa/npe-build.ts               Build    — root-reachable graph walk -> SoA operations
-soa/registry*.ts               Build    — lazy base/feature/variant/emitter/local dispatch
-soa/blocks/*.ts                Blocks   — zero-allocation indexed evaluators
-soa/soa-billboard.ts           Render   — upload live SoA columns to billboard instances
+node/npe-build.ts              Build    — root-reachable graph walk -> indexed operations
+node/npe-value.ts              Build    — per-particle getter and step types
+node/npe-contextual*.ts        Build    — contextual source getters
+node/npe-registry*.ts          Build    — lazy base/feature/variant/emitter/local dispatch
+node/blocks/*.ts               Blocks   — zero-allocation indexed evaluators
+particle-buffer.ts             Runtime  — typed-array base columns + lazy feature columns
+particle-columns.ts            Runtime  — optional feature-column names
+particle-system.ts             Runtime  — fixed creation slots + indexed update loop
+sprite-columns*.ts             Runtime  — optional sprite-sheet columns and updates
+particle-billboard.ts          Render   — upload live columns to billboard instances
+particle-scene.ts              Render   — register canonical systems with a scene
 math/mat4-transform.ts         Math     — transformCoordinates/Normal + mat4GetTranslation (emitter matrix)
 math/random-range.ts           Math     — randomRange (Scalar.RandomRange, with short-circuit)
 ```
@@ -95,10 +101,9 @@ Canonical data flow: **snippet/JSON → `parseNodeParticleSource` → `ParticleG
 (live) `registerNodeParticleSet` → per-frame `animateParticleSystem` +
 `syncParticleBillboard`.**
 
-The package root exports only those canonical names. They are zero-cost aliases
-over the internal `buildSoaParticleSet`, `SoaParticleSet`, `SoaSystem`,
-`animateSoa`, and SoA billboard symbols; the internal prefix describes the
-storage layout and is not part of the public package surface.
+The package root exports those canonical symbols directly. The Struct-of-Arrays
+storage layout is an implementation detail documented here rather than encoded
+in public or internal symbol names and module paths.
 
 ## The Determinism Contract (read this first)
 
@@ -156,7 +161,7 @@ identical to Babylon's. Break any one and parity collapses.
    (ratio 1, no frame-id skip), seed, step, dump `serialize()` + states. Delete
    the harness afterward.
 
-## The CPU Runtime (`particle/soa`)
+## The CPU Runtime (`particle/`)
 
 `ParticleBuffer` stores position and direction in six `Float32Array`s, age and
 lifetime in `Float64Array`s, and IDs in `Uint32Array`. Live particles occupy the
@@ -165,20 +170,19 @@ the base arrays and every lazily-created feature column, so optional state recyc
 without feature-specific hooks. `column(buffer, name, ctor)` is the only feature
 allocation surface.
 
-Public `ParticleSystem` state is implemented internally by `SoaSystem`, which owns
-the eight Babylon-ordered creation slots and an ordered `updateSteps` array. Public
-`animateParticleSystem` delegates to `animateSoa`, which performs
+`ParticleSystem` owns the eight Babylon-ordered creation slots and an ordered
+`updateSteps` array. `animateParticleSystem` performs
 update-before-create, final-step lifetime clamping, fractional emission accounting,
 optional per-step emit-rate evaluation, and swap removal without per-frame
 allocation. Scratch-backed vector/color getters must copy an operand's components
 before evaluating another getter because two ports may share the same scratch.
 
-Public `buildNodeParticleSet` delegates to `buildSoaParticleSet`, which creates the
-system and buffer before traversing each root, then builds only blocks reachable
-from a `SystemBlock`. Common blocks use
-`registry.ts`; optional features use `registry-extra.ts`; rare serialized forms use
-`registry-variants.ts`; world emitter families use `registry-extra-emitters.ts`;
-local shape bodies use `registry-local-shapes.ts`. Local and world implementations
+`buildNodeParticleSet` creates the system and buffer before traversing each root,
+then builds only blocks reachable from a `SystemBlock`. Common blocks use
+`npe-registry.ts`; optional features use `npe-registry-extra.ts`; rare serialized
+forms use `npe-registry-variants.ts`; world emitter families use
+`npe-registry-extra-emitters.ts`; local shape bodies use
+`npe-registry-local-shapes.ts`. Local and world implementations
 are separate modules, so world systems contain no local-mode branches.
 
 `LocalPositionUpdated` (`0x18`) owns five lazy columns: local x/y/z, particle ID,
@@ -197,17 +201,16 @@ columns; world systems load neither source nor local-position helper.
 
 ## The Node-Graph Layer
 
-### Getter model (`npe-types.ts`)
+### Getter model (`npe-value.ts`)
 
-`NpeGetter = (state: NpeBuildState) => ParticleValue` is the compiled form of a
-connection — Babylon's `_storedFunction`. `ParticleValue = number | Vec3 | Color4
-| Vec2 | ParticleSystem | Texture2D | null | undefined` (the system
-itself flows along the `particle`/`output` ports). `NpeBuildState` is **dual
-purpose**: build-time fields (`capacity`, `emitter`, `emitterWorldMatrix`,
-`emitterInverseWorldMatrix`, `scene`, `textureBaseUrl`) and run-time fields
-(`system`, `particle`) that the animate loop swaps per particle so getters read
-live state. The parsed graph types are fully **immutable** (`readonly`,
-`ReadonlyMap`, `Readonly<Record>`), matching NME's `node-types.ts`.
+`NpeGetter = (i: number) => NpeValue` is the compiled form of a connection, where
+`NpeValue = number | Vec2 | Vec3 | Color4`. Scalar getters return a number;
+vector and colour getters return reused scratch objects that consumers copy
+immediately. Particle-system flow is represented by build outputs rather than a
+runtime value object. `NpeBuildState` contains build-time system, buffer, emitter,
+matrix, scene, and texture-base state. The parsed graph types in `npe-types.ts`
+are fully **immutable** (`readonly`, `ReadonlyMap`, `Readonly<Record>`), matching
+NME's `node-types.ts`.
 
 ### Parser (`npe-parser.ts`)
 
@@ -237,12 +240,12 @@ dangling `targetBlockId`s (they surface later as an unresolved connection).
 Options: `emitter?: Vec3`, `emitterWorldMatrix?: Mat4` (precedence over
 `emitter`), `textureBaseUrl?`.
 
-### Contextual & system sources (`npe-build-state.ts`)
+### Contextual & system sources (`npe-contextual.ts`, `npe-contextual-extra.ts`)
 
-`getContextualValue(state, id)` and `getSystemValue(state, id)` are the runtime
-read layer (leaves of the getter tree). `SCALED_DIRECTION` and
-`SCALED_COLOR_STEP` compute into particle/system scratch and return by reference
-(zero-alloc, consume-immediately). Supported ids (hex, from Babylon
+`makeContextualGetter(buffer, system, id)` and its optional-source companion are
+the runtime read layer at the leaves of the getter tree. Scaled direction and
+scaled colour step compute into reused scratch and return by reference
+(zero-allocation, consume immediately). Supported ids (hex, from Babylon
 `NodeParticleContextualSources`): Position `0x1`, Direction `0x2`, Age `0x3`,
 Lifetime `0x4`, Color `0x5`, ScaledDirection `0x6`, Scale `0x7`, AgeGradient
 `0x8`, Angle `0x9`, InitialColor `0x13`, ColorDead `0x14`, InitialDirection
@@ -320,7 +323,7 @@ The emitter is a full `Mat4` world matrix (translation + rotation + scale),
 matching Babylon's `emitterWorldMatrix` (a mesh emitter's world matrix, or
 `Matrix.Translation` for a `Vector3`). `options.emitter` (`Vec3`) is the
 translation shorthand; `options.emitterWorldMatrix` (`Mat4`) is the full form.
-`SoaBuildState` carries `emitterWorldMatrix` and `emitter` (the translation
+`NpeBuildState` carries `emitterWorldMatrix` and `emitter` (the translation
 returned by the `Emitter` source) in common build state. Radial cylinder modules
 compute the inverse lazily, and directed cylinders never compute it.
 
@@ -339,7 +342,7 @@ this).
 
 ## Rendering
 
-### `soa/soa-billboard.ts`
+### `particle-billboard.ts`
 
 `createParticleBillboard(system)` builds a facing billboard system from the
 system texture, sized to `capacity`, with a blend descriptor from `blendForMode`.
@@ -370,7 +373,8 @@ Deterministic parity scenes bypass this and step manually at `ratio = 1`.
 ### Public API (`node-particle.ts`, `npe-snippet.ts`)
 
 `buildNodeParticleSet(engine, scene, graph, { emitter?, emitterWorldMatrix?,
-textureBaseUrl? })` — build a canonical `NodeParticleSet` backed by SoA systems.
+textureBaseUrl? })` — build a canonical `NodeParticleSet` backed by typed-array
+particle systems.
 
 `parseNodeParticleSetFromSnippet(engine, scene, snippetId, { json?, snippetServer?,
 emitter?, emitterWorldMatrix?, textureBaseUrl? })` — parse (from JSON or the
@@ -388,10 +392,10 @@ for live scenes.
 | ---------------------------------------------------- | ----------------------------------------------- |
 | `NodeParticleSystemSet`                              | `NodeParticleSet` (plain state)                 |
 | `NodeParticleSystemSet.buildAsync(scene)`            | `buildNodeParticleSet(engine, scene, graph, …)` |
-| `NodeParticleBuildState`                             | `SoaBuildState`                                 |
-| `_storedFunction` on a connection point              | `SoaGetter`                                     |
-| `NodeParticleBlock._build`                           | `SoaBlockEvaluator.build`                       |
-| `ThinParticleSystem` / `ParticleSystem`              | `ParticleSystem` (`soa/animate.ts`)             |
+| `NodeParticleBuildState`                             | `NpeBuildState`                                 |
+| `_storedFunction` on a connection point              | `NpeGetter`                                     |
+| `NodeParticleBlock._build`                           | `NpeBlockEvaluator.build`                       |
+| `ThinParticleSystem` / `ParticleSystem`              | `ParticleSystem` (`particle-system.ts`)         |
 | `ThinParticleSystem.animate` → `_update`             | `animateParticleSystem`                         |
 | `_createQueueStart` linked list                      | fixed named creation slots                      |
 | `_updateQueueStart` linked list                      | `updateSteps` array                             |
@@ -446,15 +450,15 @@ classic-`ParticleSystem`-only feature.
 - **Ground-truth extraction** — a throwaway harness in the Babylon repo (deleted
   after use); see contract §9. Convert (not `Parse`), `buildAsync`, rotated
   emitter mesh, null `_scene`, seed, step, dump graph + states.
-- **SoA emitter/local parity (vitest)** — `particle-soa-emitters-parity.test.ts`
+- **Emitter/local parity (vitest)** — `npe-particle-emitters-parity.test.ts`
   covers all committed emitter oracles, volatile shared direction getters,
   source-24 build order, mesh color/InitialDirection, and transformed local box,
   point, sphere, cone, cylinder, and mesh behavior through direct random-draw,
   local-column, and matrix-transform invariants.
-- **SoA behavioral-closure parity (vitest)** —
-  `particle-soa-change-emit-rate-parity.test.ts` validates per-step system-time
+- **Behavioral-closure parity (vitest)** —
+  `npe-particle-change-emit-rate-parity.test.ts` validates per-step system-time
   emit-rate gradients and float-to-int conversion;
-  `particle-soa-change-speed-limit-parity.test.ts` validates vector magnitude and
+  `npe-particle-change-speed-limit-parity.test.ts` validates vector magnitude and
   conditional selection. Both compare every live particle to committed Babylon
   state after 200 deterministic steps.
 - **Pixel parity (Playwright)** — per-scene `.spec.ts` load a lab scene, wait for
@@ -463,32 +467,35 @@ classic-`ParticleSystem`-only feature.
   with seeded RNG + fixed frame stepping and are immutable.
 - **Bundle size** — per-scene manifest + ceiling in the bundle-size spec. `*-npe.ts`
   graph payload modules are excluded from bundle accounting (like `*-nme.ts`).
-  `particle-soa-bundle-content.test.ts` rejects unused local/emitter chunks,
+  `npe-particle-bundle-content.test.ts` rejects unused local/emitter chunks,
   rejects local-shape or matrix-inversion modules folded into fetched chunks,
-  and rejects removed object-runtime module paths from canonical particle scenes.
+  and verifies canonical scenes preserve feature isolation.
 
 ## File Manifest
 
 ```
 packages/babylon-lite/src/particle/
   particle-scene.ts                // PUBLIC canonical live-scene registration
+  particle-system.ts               // canonical runtime state + simulation loop
+  particle-buffer.ts               // dense base columns + lazy feature columns
+  particle-columns.ts              // optional feature-column names
+  particle-billboard.ts            // billboard creation and live-column upload
+  sprite-columns.ts                // optional sprite-sheet state
+  sprite-columns-random.ts         // optional random-start sprite state
   node/
     node-particle.ts               // PUBLIC canonical build/snippet API + NodeParticleSet
     npe-types.ts                   // immutable serialized graph types
     npe-parser.ts                  // serialized JSON -> ParticleGraph
     npe-snippet.ts                 // snippet-server fetch
-  soa/
-    particle-buffer.ts             // dense base columns + lazy feature columns
-    animate.ts                     // internal SoaSystem; public ParticleSystem alias
-    npe-build.ts                   // internal builder; public buildNodeParticleSet alias
-    contextual.ts                  // common contextual sources
-    contextual-extra.ts            // lazy optional contextual sources
-    registry.ts                    // common block dispatch
-    registry-extra*.ts             // optional/basic/world-emitter/value dispatch
-    registry-variants.ts           // rare serialized variants
-    registry-local-shapes.ts       // local-only shape dispatch
-    local-position.ts              // local birth transform after optional source-24 seed
-    soa-billboard.ts               // internal adapters; public canonical aliases
+    npe-build.ts                   // graph compiler + canonical builder
+    npe-value.ts                   // index-based value getters and particle steps
+    npe-contextual.ts              // common contextual sources
+    npe-contextual-extra.ts        // lazy optional contextual sources
+    npe-registry.ts                // common block dispatch
+    npe-registry-extra*.ts         // optional/basic/world-emitter/value dispatch
+    npe-registry-variants.ts       // rare serialized variants
+    npe-registry-local-shapes.ts   // local-only shape dispatch
+    npe-local-position.ts          // local birth transform after optional source-24 seed
     blocks/
       system-block.ts  create-particle-block.ts  texture-source-block.ts
       box/point/sphere/cone/cylinder/mesh-shape-block.ts
