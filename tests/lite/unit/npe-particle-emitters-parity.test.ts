@@ -376,6 +376,16 @@ describe("NPE emitter shapes — deterministic parity with Babylon.js", () => {
         }
     });
 
+    it("rejects source 24 on a non-local particle system during build", async () => {
+        const source = structuredClone(directedSphereGraph) as RawGraph;
+        const system = source.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;
+        system.isLocal = false;
+
+        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(source))).rejects.toThrow(
+            "LocalPositionUpdated requires SystemBlock.isLocal"
+        );
+    });
+
     it("leaves InitialDirection at zero for mesh-normal emission", async () => {
         const source = structuredClone(meshGraph) as RawGraph;
         const systemBlock = source.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;

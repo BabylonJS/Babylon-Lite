@@ -1,10 +1,11 @@
 /**
- * Shared feature-column names for the data-oriented particle runtime.
+ * Shared column names for the data-oriented particle runtime.
  *
  * Contextual sources (readers) and blocks (writers) must agree on column names so they resolve the same
  * `column()` on a buffer. Base columns (position, direction, age, lifeTime, id) live on {@link ParticleBuffer}
- * directly; everything here is a feature column, allocated on demand only when a graph references it — so a
- * system that never uses colour, size, etc. allocates none of them.
+ * directly. {@link CreateParticleBlock} allocates the size, scale, angle, colour, and colour-step columns for
+ * every built particle system because rendering and lifecycle updates require them. Optional blocks and
+ * contextual sources define and allocate their additional columns in their owning feature modules.
  */
 export const COL_SIZE = "size";
 export const COL_ANGLE = "angle";

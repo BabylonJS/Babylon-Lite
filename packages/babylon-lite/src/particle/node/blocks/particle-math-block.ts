@@ -30,8 +30,7 @@ function applyScalar(op: number, a: number, b: number): number {
 
 /**
  * `ParticleMathBlock` — arithmetic on two inputs; scalar+vector splats the scalar. Writes results into
- * a reused scratch (never a fresh object) so it is allocation-free even on the update hot path. Mirrors the
- * object version's math and `adapt` semantics.
+ * a reused scratch value so it is allocation-free on the update path.
  */
 export const particleMathBlock: NpeBlockEvaluator = {
     build(block, ctx) {

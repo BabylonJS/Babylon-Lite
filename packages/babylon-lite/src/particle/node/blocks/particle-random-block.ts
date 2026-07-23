@@ -60,8 +60,8 @@ export function createRandomDraw(minGetter: NpeGetter, maxGetter: NpeGetter): Np
 /**
  * `ParticleRandomBlock` — a random value with a lock controlling re-draw frequency. `PerParticle`
  * (the default) draws once per particle, keyed by the particle id (read lazily from the buffer, since this
- * block can build before the buffer exists). Draws per component and never short-circuits — matching the
- * object version's RNG consumption exactly. Vector/colour results use reused scratch.
+ * block can build before the buffer exists). Draws per component and never short-circuits. Vector/colour
+ * results use reused scratch values.
  */
 export const particleRandomBlock: NpeBlockEvaluator = {
     build(block, ctx) {

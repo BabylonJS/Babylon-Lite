@@ -4,7 +4,8 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
 /**
  * `ParticleTextureSourceBlock` — loads the particle texture from its `url` and binds it onto the
  * system for the billboard renderer. The load is registered as a build promise so the set is only ready
- * once it settles. Mirrors the object version's URL resolution and invert-Y handling.
+ * once it settles. Relative URLs use the build's texture base URL, and the serialized invert-Y flag is
+ * converted to the texture loader's upload convention.
  */
 export const particleTextureSourceBlock: NpeBlockEvaluator = {
     build(block, ctx) {
@@ -24,8 +25,7 @@ export const particleTextureSourceBlock: NpeBlockEvaluator = {
                         const texture = await loadTexture2D(ctx.engine, url, { invertY: !blockInvertY });
                         state.system!.texture = texture;
                     } catch {
-                        // A failed texture load must not break the simulation; the particle renders untextured
-                        // (and headless/CPU-only builds have no device at all).
+                        // Texture failures do not prevent CPU simulation; billboard creation still requires a texture.
                     }
                 })()
             );

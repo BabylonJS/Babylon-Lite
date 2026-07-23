@@ -6,11 +6,10 @@
  * path is zero-garbage by construction, and there is no per-particle object (hence no hidden-class or
  * monomorphism concern).
  *
- * Base columns (position, direction, age, lifeTime, id) are always present. Every other attribute is a
- * *feature column* allocated on demand via {@link column}: a system that does not use a feature allocates
- * no column for it (zero memory), and that feature's code lives in its own module (zero bundle when the
- * feature is unused). This is the mechanism that lets particle systems avoid paying for features they do
- * not use while keeping the update loop allocation-free.
+ * Base columns (position, direction, age, lifeTime, id) are always present. {@link column} adds shared
+ * named columns: `CreateParticleBlock` requests the standard render/lifecycle set for every built system,
+ * while optional features request only their own additional state. Feature code remains in its owning
+ * module so an unused optional feature adds neither columns nor runtime module bytes.
  */
 
 /** A particle column: one typed-array slot per particle index. */
@@ -97,8 +96,7 @@ export function column<T extends ParticleColumn>(buffer: ParticleBuffer, name: s
 
 /**
  * Reserve a slot for a new particle and return its index, or `-1` when the buffer is full. Assigns a fresh
- * id and zeroes `age`; the caller's creation steps fill the remaining columns (mirroring the object system,
- * where the creation queue sets every field on a freshly pooled particle).
+ * id and zeroes `age`; the caller's creation steps must fill every other field they own.
  */
 export function spawnParticle(buffer: ParticleBuffer): number {
     if (buffer.alive >= buffer.capacity) {

@@ -9,7 +9,7 @@
  */
 import { column, type ParticleBuffer } from "./particle-buffer.js";
 
-/** Sprite-sheet configuration (mirrors the object system's `SpriteSheetConfig`). */
+/** Sprite-sheet configuration used by the indexed birth and update steps. */
 export interface SpriteSheetConfig {
     startCellID: number;
     endCellID: number;

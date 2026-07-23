@@ -7,6 +7,9 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
 export const particleInputLocalBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const state = ctx.state;
+        if (!state.isLocal) {
+            throw new Error("NodeParticle: LocalPositionUpdated requires SystemBlock.isLocal");
+        }
         const buffer = state.buffer!;
         const system = state.system!;
         const emitterWorldMatrix = state.emitterWorldMatrix;

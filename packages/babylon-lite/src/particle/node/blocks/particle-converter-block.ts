@@ -3,8 +3,7 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /**
  * `ParticleConverterBlock` — composes a Color4 from component inputs and exposes every projection
- * (`color`, `xyz`, `xy`, `zw`, `x`, `y`, `z`, `w`), r↔x g↔y b↔z a↔w. Fills reused scratch. Mirrors the
- * object version.
+ * (`color`, `xyz`, `xy`, `zw`, `x`, `y`, `z`, `w`), r↔x g↔y b↔z a↔w. Fills reused scratch values.
  */
 export const particleConverterBlock: NpeBlockEvaluator = {
     build(block, ctx) {

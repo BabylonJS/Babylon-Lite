@@ -6,7 +6,7 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
 /**
  * `CreateParticleBlock` — creates the {@link ParticleSystem} and fills the fixed creation slots
  * (lifetime/emit-power, size/scale, angle, colour, dead colour + the derived per-step colour ramp) as
- * column writes. Mirrors the object version; the shape block fills position/direction.
+ * column writes. The shape block fills position/direction.
  */
 export const createParticleBlock: NpeBlockEvaluator = {
     build(block, ctx) {
