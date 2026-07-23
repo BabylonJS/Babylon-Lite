@@ -29,7 +29,12 @@ const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-in
 const BUNDLE_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/manifest.json");
 const MASTER_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/master-manifest.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-const SCENES = allScenes.filter((s) => s.maxRawKB != null);
+const SCENES = allScenes.filter((s) => {
+    // Scene 114 conditionally loads the detailed-picking pipeline only when the adapter
+    // exposes and the device enables WebGPU's optional "primitive-index" feature. Its
+    // runtime-fetched bytes therefore vary by machine, so it cannot have one stable ceiling.
+    return s.id !== 114 && s.maxRawKB != null;
+});
 
 interface BundleInfoModule {
     id: string;
