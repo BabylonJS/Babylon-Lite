@@ -4,11 +4,11 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene222-gpu-pool-CHlSfwGp.js",
+    "scene222-scene-uniforms-Ha63NnVx.js",
     "scene222-shader-pipeline-cache-D29RDV1n.js",
-    "scene222-shader-renderable-DejaPQPm.js",
-    "scene222-standard-renderable-zz9EQk_a.js",
+    "scene222-shader-renderable-DsnMSq85.js",
+    "scene222-standard-renderable-CyOpLaDH.js",
     "scene222-swapchain-overlay-ilhN4El_.js",
-    "scene222-ubo-layout-Cs5YvLYZ.js",
     "scene222-uniform-copy-batch-BmzTReSM.js",
     "scene222.js"
   ]

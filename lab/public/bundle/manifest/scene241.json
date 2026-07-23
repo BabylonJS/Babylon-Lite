@@ -1,5 +1,5 @@
 {
-  "rawKB": 161.7,
+  "rawKB": 161.6,
   "gzipKB": 66.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -30,7 +30,7 @@
     "scene241-light-base-Dbzz8P-t.js",
     "scene241-light-matrix-CtsX4GmG.js",
     "scene241-pbr-refraction-BMkdqPUc.js",
-    "scene241-pbr-renderable-BBlLZaOg.js",
+    "scene241-pbr-renderable-B4FYHxiB.js",
     "scene241-pbr-template-ext-CiHpOV5G.js",
     "scene241-pbr-transmission-ext-Bn1wkYv3.js",
     "scene241-reflectance-fragment-BfpjgBTI.js",
