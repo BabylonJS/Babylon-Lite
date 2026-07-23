@@ -27,7 +27,7 @@ export function rebuildMaterial(scene: SceneContext, materialOrView: Material, o
             } else if (rebuilt && mesh.material) {
                 // Per-material generation (twin of scene-material-swap): lets the CSM detect when a CASTER's own
                 // material was rebuilt — and ONLY then rebuild its shadow views — instead of on the global epoch.
-                (mesh.material as { _csmGen?: number })._csmGen = ((mesh.material as { _csmGen?: number })._csmGen ?? 0) + 1;
+                mesh.material._csmGen = (mesh.material._csmGen ?? 0) + 1;
                 changed = true;
             }
         }
