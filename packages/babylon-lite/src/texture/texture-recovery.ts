@@ -109,14 +109,21 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     }
     tex.texture = texture;
     tex.view = texture.createView();
-    tex.sampler = getOrCreateSampler(engine, {
+    const samplerDescriptors = engine._deviceLostRecovery?._samplerDescriptors;
+    const capturedSamplerDesc = samplerDescriptors?.get(tex.sampler);
+    const samplerDesc = capturedSamplerDesc ?? {
         addressModeU: "repeat",
         addressModeV: "repeat",
         minFilter: "linear",
         magFilter: "linear",
         mipmapFilter: "linear",
         maxAnisotropy: 4,
-    });
+    };
+    const sampler = samplerDesc.lodMaxClamp === 0 ? engine._device.createSampler(samplerDesc) : getOrCreateSampler(engine, samplerDesc);
+    if (capturedSamplerDesc) {
+        samplerDescriptors!.set(sampler, capturedSamplerDesc);
+    }
+    tex.sampler = sampler;
     tex.width = width;
     tex.height = height;
 }

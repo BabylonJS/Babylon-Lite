@@ -31,6 +31,8 @@ export interface DeviceLostRecoveryState {
     _armedDevice: GPUDevice | null;
     /** @internal */
     _registrations: DeviceLostRecoveryRegistration[];
+    /** @internal Original descriptors for non-default samplers retained by recoverable textures. */
+    _samplerDescriptors: WeakMap<GPUSampler, GPUSamplerDescriptor>;
     /** @internal Number of enabled context kinds retaining texture/mesh recovery sources. */
     _captureRefs: number;
     /** @internal Number of enabled context kinds retaining Scene mesh CPU geometry. */
@@ -43,6 +45,7 @@ function getState(engine: EngineContext): DeviceLostRecoveryState {
         _requiredFeatures: [],
         _armedDevice: null,
         _registrations: [],
+        _samplerDescriptors: new WeakMap(),
         _captureRefs: 0,
         _meshCaptureRefs: 0,
     });

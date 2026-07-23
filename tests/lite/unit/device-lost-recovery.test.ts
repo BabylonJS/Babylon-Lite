@@ -6,6 +6,9 @@ import { enableDeviceLostSpriteRecovery } from "../../../packages/babylon-lite/s
 import { enableDeviceLostTextRecovery } from "../../../packages/babylon-lite/src/engine/device-lost-text-recovery.js";
 import type { EngineContext, RenderingContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface.js";
+import { buildSampledPbrTextures } from "../../../packages/babylon-lite/src/loader-gltf/gltf-sampler-desc.js";
+import { makeSamplerFor } from "../../../packages/babylon-lite/src/loader-gltf/gltf-sampler-desc.js";
+import type { GltfMaterialData } from "../../../packages/babylon-lite/src/loader-gltf/gltf-material.js";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import type { Texture2D, Texture2DOptions } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/texture-recovery.js";
@@ -193,6 +196,76 @@ describe("device-lost recovery context dispatch", () => {
             magFilter: "linear",
             mipmapFilter: "linear",
             maxAnisotropy: 4,
+        });
+        recovery.disable();
+    });
+
+    it("preserves non-default glTF sampler settings through recovery", async () => {
+        const samplerDescriptors: GPUSamplerDescriptor[] = [];
+        const device = {
+            features: new Set<GPUFeatureName>(),
+            lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+            createTexture: vi.fn(() => ({
+                createView: vi.fn(() => ({})),
+            })),
+            createSampler: vi.fn((descriptor: GPUSamplerDescriptor) => {
+                samplerDescriptors.push(descriptor);
+                return {};
+            }),
+            queue: {
+                writeTexture: vi.fn(),
+            },
+        } as unknown as GPUDevice;
+        const engine = { _device: device } as unknown as EngineContext;
+        const defaultSampler = {} as GPUSampler;
+        const bitmap = {} as ImageBitmap;
+        const texture = {
+            texture: {} as GPUTexture,
+            view: {} as GPUTextureView,
+            sampler: defaultSampler,
+            width: 1,
+            height: 1,
+        } as Texture2D;
+        const textureInfo = { index: 0 };
+        const material = {
+            _rawMatDef: {
+                pbrMetallicRoughness: {
+                    baseColorTexture: textureInfo,
+                    metallicRoughnessTexture: textureInfo,
+                },
+            },
+            _baseColorImage: bitmap,
+            _baseColorFactor: [1, 1, 1, 1],
+            _metallicRoughnessImage: bitmap,
+            _occlusionImage: bitmap,
+            _normalImage: null,
+            _emissiveImage: null,
+            _roughnessFactor: 1,
+            _metallicFactor: 1,
+        } as unknown as GltfMaterialData;
+        const recovery = enableDeviceLostSceneRecovery(engine);
+        engine._dlr!.b(texture, null, true, true, new Uint8Array([255, 255, 255, 255]));
+        const samplerFor = makeSamplerFor(
+            engine,
+            {
+                textures: [{ sampler: 0 }],
+                samplers: [{ wrapS: 33071, wrapT: 33648, magFilter: 9728, minFilter: 9728 }],
+            },
+            defaultSampler
+        );
+        const textures = buildSampledPbrTextures(engine, material, defaultSampler, vi.fn(), samplerFor, () => texture);
+
+        samplerDescriptors.length = 0;
+        await rebuildTexture2D(engine, textures.baseColorTexture);
+
+        expect(samplerDescriptors).toContainEqual({
+            addressModeU: "clamp-to-edge",
+            addressModeV: "mirror-repeat",
+            minFilter: "nearest",
+            magFilter: "nearest",
+            mipmapFilter: "linear",
+            lodMaxClamp: 0,
+            maxAnisotropy: 1,
         });
         recovery.disable();
     });
