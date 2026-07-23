@@ -1,6 +1,6 @@
 {
   "rawKB": 80.1,
-  "gzipKB": 33.1,
+  "gzipKB": 33,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene31-emissive-fragment-Ctrm57dn.js",
@@ -9,7 +9,7 @@
     "scene31-gltf-feature-registry-C1Z2esX5.js",
     "scene31-gltf-glb-parser-DaAVWeNj.js",
     "scene31-ibl-fragment-CeRrvT96.js",
-    "scene31-pbr-renderable-D-4xz-S4.js",
+    "scene31-pbr-renderable-BuktotoG.js",
     "scene31-rgbd-decode-CT6Q-rdi.js",
     "scene31-scene-uniforms-FTYH6Ct0.js",
     "scene31.js"

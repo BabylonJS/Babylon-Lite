@@ -1,6 +1,6 @@
 {
   "rawKB": 103.5,
-  "gzipKB": 42.4,
+  "gzipKB": 42.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene12-create-skeleton-Cgu8tE3J.js",
@@ -11,7 +11,7 @@
     "scene12-gltf-feature-skeleton-_mgvZ2J3.js",
     "scene12-gltf-glb-parser-yvHcYctJ.js",
     "scene12-ibl-fragment-CeRrvT96.js",
-    "scene12-pbr-renderable-BTAxg4fM.js",
+    "scene12-pbr-renderable-CpieKvbL.js",
     "scene12-reflectance-fragment-lq2B55Q8.js",
     "scene12-rgbd-decode-W1wB4Lvk.js",
     "scene12-scene-uniforms-FTYH6Ct0.js",
