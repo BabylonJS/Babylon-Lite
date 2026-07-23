@@ -1,7 +1,10 @@
+import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
+import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { SpriteRenderer } from "./sprite-renderer.js";
-import { _rebuildSpriteRendererGpu } from "./sprite-renderer.js";
+import { _getSpriteFxHook } from "./sprite-fx-hook.js";
+import { LAYER_UBO_BYTES, SHARED_SPRITE_INDEX_DATA, createSpriteInstanceBuffer, getOrCreateSpritePipeline } from "./sprite-pipeline.js";
 
 /**
  * Rebuild every registered SpriteRenderer on the replacement device.
@@ -35,6 +38,34 @@ export async function rebuildRegisteredSpriteRenderers(engine: EngineContext): P
         await Promise.all(Array.from(textures, (texture) => rebuildTexture2D(engine, texture)));
     }
     for (const renderer of renderers) {
-        _rebuildSpriteRendererGpu(renderer);
+        rebuildSpriteRendererGpu(renderer);
+    }
+}
+
+function rebuildSpriteRendererGpu(renderer: SpriteRenderer): void {
+    const engine = renderer._surface.engine;
+    const fxHook = _getSpriteFxHook();
+    renderer._indexBuffer = createMappedBuffer(engine, SHARED_SPRITE_INDEX_DATA, BU.INDEX);
+    renderer._targetView = renderer._target?.view ?? null;
+    renderer._visibleBundles.length = 0;
+
+    for (const lg of renderer._layerGpu.values()) {
+        lg.instanceBuffer = createSpriteInstanceBuffer(engine._device, lg.layer);
+        lg.instanceBufferCapacity = lg.layer._capacity;
+        lg.uniformBuffer = createEmptyUniformBuffer(engine, LAYER_UBO_BYTES);
+        lg.bindGroup = null;
+        lg.uploadedVersion = -1;
+        if (lg.fx) {
+            fxHook!.disposeFx(lg.fx);
+            lg.fx = fxHook!.createLayerFx(engine, "sprite-layer-fx-ubo", lg.layer);
+        }
+        lg.pipeline = null;
+        lg.lastUbo.fill(0);
+        lg.uboUploaded = false;
+        lg.renderBundle = null;
+        lg.bundleCount = -1;
+    }
+    for (const layer of renderer.layers) {
+        getOrCreateSpritePipeline(engine, renderer._pipelineCache, renderer._surface.format, 1, layer.blendMode, false, false, undefined, undefined, layer);
     }
 }

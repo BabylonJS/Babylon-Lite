@@ -1,16 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-    _assertDeviceLostRecoveryContextsSupported,
-    _enableDeviceLostRecovery,
-    markNextDeviceLossForRecovery,
-} from "../../../packages/babylon-lite/src/engine/device-lost-recovery.js";
+import { _enableDeviceLostRecovery, markNextDeviceLossForRecovery } from "../../../packages/babylon-lite/src/engine/device-lost-recovery.js";
 import { enableDeviceLostSceneRecovery } from "../../../packages/babylon-lite/src/engine/device-lost-scene-recovery.js";
 import { enableDeviceLostSpriteRecovery } from "../../../packages/babylon-lite/src/engine/device-lost-sprite-recovery.js";
 import { enableDeviceLostTextRecovery } from "../../../packages/babylon-lite/src/engine/device-lost-text-recovery.js";
 import type { EngineContext, RenderingContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface.js";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
+import type { Texture2D, Texture2DOptions } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 
 function context(kind: string): RenderingContext {
     return {
@@ -63,29 +60,36 @@ describe("device-lost recovery context dispatch", () => {
         expect(markNextDeviceLossForRecovery(engine)).toBe(false);
     });
 
-    it("accepts only rendering-context kinds with enabled recovery handlers", () => {
-        const engine = engineWith(context("scene"), context("scene"));
-
-        expect(() => _assertDeviceLostRecoveryContextsSupported(engine, new Map([["scene", true]]))).not.toThrow();
-    });
-
-    it("rejects an unsupported rendering-context kind instead of treating it as a scene", () => {
+    it("registers only requested handlers when unrelated context kinds are active", () => {
         const engine = engineWith(context("scene"), context("sprite-renderer"));
+        Object.assign(engine, {
+            _device: {
+                features: new Set<GPUFeatureName>(),
+                lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+            },
+        });
+        const scene = enableDeviceLostSceneRecovery(engine);
 
-        expect(() => _assertDeviceLostRecoveryContextsSupported(engine, new Map([["scene", true]]))).toThrow(
-            'Device-lost recovery is not enabled for rendering context kind "sprite-renderer"'
-        );
+        expect(engine._deviceLostRecovery?._registrations.map((registration) => registration._kind)).toEqual(["scene"]);
+        scene.disable();
     });
 
-    it("accepts mixed Scene, SpriteRenderer, and TextRenderer contexts only when every exact kind is enabled", () => {
-        const engine = engineWith(context("scene"), context("sprite-renderer"), context("text-renderer"));
-        const handlers = new Map([
-            ["scene", true],
-            ["sprite-renderer", true],
-            ["text-renderer", true],
-        ]);
+    it("does not remove another registration when its own entry is already absent", () => {
+        const engine = {
+            _device: {
+                features: new Set<GPUFeatureName>(),
+                lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+            },
+        } as unknown as EngineContext;
+        const sceneRegistration = { _kind: "scene", _recover: vi.fn() };
+        const spriteRegistration = { _kind: "sprite-renderer", _recover: vi.fn() };
+        const scene = _enableDeviceLostRecovery(engine, sceneRegistration);
+        _enableDeviceLostRecovery(engine, spriteRegistration);
+        engine._deviceLostRecovery!._registrations.splice(0, 1);
 
-        expect(() => _assertDeviceLostRecoveryContextsSupported(engine, handlers)).not.toThrow();
+        scene.disable();
+
+        expect(engine._deviceLostRecovery!._registrations).toEqual([spriteRegistration]);
     });
 
     it("keeps shared texture capture alive across repeated and cross-kind handles", () => {
@@ -137,5 +141,47 @@ describe("device-lost recovery context dispatch", () => {
         engine._dlr!.m(mesh, null, null, null, replacement, "uint16");
         expect(mesh._cpuGpuIndices).toBe(indices);
         sprite.disable();
+    });
+
+    it("captures URL texture options by value", () => {
+        const engine = {
+            _device: {
+                features: new Set<GPUFeatureName>(),
+                lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+            },
+        } as unknown as EngineContext;
+        const options: Texture2DOptions = { mipMaps: false };
+        const texture = {} as Texture2D;
+        const recovery = enableDeviceLostSceneRecovery(engine);
+
+        engine._dlr!.u(texture, "texture.png", options);
+        options.mipMaps = true;
+
+        expect(texture._recoverySource).toEqual({ kind: "url", url: "texture.png", opts: { mipMaps: false } });
+        recovery.disable();
+    });
+
+    it("retains the glTF sampler settings used before device loss", () => {
+        const engine = {
+            _device: {
+                features: new Set<GPUFeatureName>(),
+                lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+            },
+        } as unknown as EngineContext;
+        const texture = {} as Texture2D;
+        const recovery = enableDeviceLostSceneRecovery(engine);
+
+        engine._dlr!.b(texture, {} as ImageBitmap, true, true);
+
+        expect(texture._recoverySource).toMatchObject({
+            kind: "bitmap",
+            samplerDesc: {
+                minFilter: "linear",
+                magFilter: "linear",
+                mipmapFilter: "linear",
+                maxAnisotropy: 4,
+            },
+        });
+        recovery.disable();
     });
 });

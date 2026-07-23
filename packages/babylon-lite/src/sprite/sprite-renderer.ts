@@ -472,37 +472,8 @@ export function registerSpriteRenderer(sr: SpriteRenderer): void {
  * offscreen scene pass before the presenting pass.
  */
 export function setSpriteRendererTarget(sr: SpriteRenderer, target: Texture2D | null): void {
-    if (sr._surface.engine._dlr) {
-        sr._target = target;
-    } else if (sr._target !== undefined) {
-        sr._target = undefined;
-    }
+    sr._target = target;
     sr._targetView = target ? target.view : null;
-}
-
-/** @internal Recreate renderer-owned GPU resources on the engine's replacement device. */
-export function _rebuildSpriteRendererGpu(sr: SpriteRenderer): void {
-    const engine = sr._surface.engine;
-    sr._indexBuffer = createMappedBuffer(engine, SHARED_SPRITE_INDEX_DATA, BU.INDEX);
-    sr._targetView = sr._target?.view ?? null;
-    sr._visibleBundles.length = 0;
-
-    for (const lg of sr._layerGpu.values()) {
-        lg.instanceBuffer = createSpriteInstanceBuffer(engine._device, lg.layer);
-        lg.instanceBufferCapacity = lg.layer._capacity;
-        lg.uniformBuffer = createEmptyUniformBuffer(engine, LAYER_UBO_BYTES);
-        lg.bindGroup = null;
-        lg.uploadedVersion = -1;
-        lg.fx = lg.fx?._rebuild(engine) ?? null;
-        lg.pipeline = null;
-        lg.lastUbo.fill(0);
-        lg.uboUploaded = false;
-        lg.renderBundle = null;
-        lg.bundleCount = -1;
-    }
-    for (const layer of sr.layers) {
-        getOrCreateSpritePipeline(engine, sr._pipelineCache, sr._surface.format, 1, layer.blendMode, false, false, undefined, undefined, layer);
-    }
 }
 
 /** Splice the renderer out of its engine's `_renderingContexts`. No-op if not present. */
@@ -534,8 +505,6 @@ export function disposeSpriteRenderer(sr: SpriteRenderer): void {
     sr._visibleBundles.length = 0;
     sr._beforeUpdate.length = 0;
     sr._indexBuffer.destroy();
-    sr._target = undefined;
-    sr._targetView = null;
     // Release our refcount on the process-wide shared pipeline cache instead of
     // clearing it — other live `SpriteRenderer`s on this device still need the
     // compiled pipelines. The cache is cleared only when the last renderer is

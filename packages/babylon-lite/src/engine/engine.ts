@@ -1,6 +1,7 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { StorageBuffer } from "../resource/storage-buffer.js";
 import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
+import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
 import { _setHpmAllocator } from "../math/_matrix-allocator.js";
 import type { SurfaceContext, SurfaceOptions } from "./surface.js";
 import { _buildSurface, _refreshScRT, isDomCanvas, resizeSurface, setSurfaceSize } from "./surface.js";
@@ -235,8 +236,9 @@ interface DeviceLostRecoveryCapture {
     u(tex: Texture2D, url: string, opts: Texture2DOptions): void;
     s(tex: Texture2D, r: number, g: number, b: number, a: number): void;
     b(tex: Texture2D, bitmap: ImageBitmap | null, srgb: boolean, mipMaps: boolean, fallback?: Uint8Array): void;
-    p(tex: Texture2D, data: Uint8Array, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void;
+    p(tex: Texture2D, data: Uint8Array, options: PixelsTexture2DOptions): void;
     r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void;
+    w(tex: Texture2D, data: Uint8Array, x: number, y: number, width: number, height: number, dataOffset?: number, bytesPerRow?: number): void;
     m(
         mesh: Mesh,
         uv2s: Float32Array | null | undefined,

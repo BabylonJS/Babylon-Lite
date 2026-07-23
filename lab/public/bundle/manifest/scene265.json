@@ -4,13 +4,13 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene265-generate-mipmaps-DMQzJP2q.js",
-    "scene265-gltf-ext-lights-image-based-JnvtZyM-.js",
-    "scene265-gltf-feature-registry-By_ESAya.js",
-    "scene265-gltf-json-asset-CAPlmqIi.js",
+    "scene265-gltf-ext-lights-image-based-BNqefjGx.js",
+    "scene265-gltf-feature-registry-C9sAg7Wf.js",
+    "scene265-gltf-json-asset-B5qqjqex.js",
     "scene265-ibl-cubemap-upload-Cau-hWR3.js",
-    "scene265-ibl-env-assembly-DEPBT3np.js",
+    "scene265-ibl-env-assembly-AI18cahK.js",
     "scene265-ibl-fragment-CeRrvT96.js",
-    "scene265-pbr-renderable-C809VUUx.js",
+    "scene265-pbr-renderable-BnKeMPsF.js",
     "scene265.js"
   ]
 }

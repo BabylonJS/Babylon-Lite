@@ -1,9 +1,9 @@
 {
-  "rawKB": 63.5,
-  "gzipKB": 25.2,
+  "rawKB": 63.4,
+  "gzipKB": 25.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene94-billboard-renderable-DP7M1jjd.js",
+    "scene94-billboard-renderable-Bp2amHgu.js",
     "scene94-standard-renderable-BlkGwTQU.js",
     "scene94.js"
   ]

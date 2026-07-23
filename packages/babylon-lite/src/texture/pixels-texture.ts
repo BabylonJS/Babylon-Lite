@@ -68,7 +68,7 @@ export function createTexture2DFromPixels(engine: EngineContext, data: Uint8Arra
     const sampler = getOrCreateSampler(engine, samplerDesc);
 
     const tex: Texture2D = { texture, view: texture.createView(), sampler, width, height };
-    engine._dlr?.p(tex, data, width, height, format, samplerDesc);
+    engine._dlr?.p(tex, data, options);
     acquireTexture(tex);
     return tex;
 }
@@ -161,30 +161,7 @@ export function updateTexture2DFromPixels(engine: EngineContext, tex: Texture2D,
         { bytesPerRow: width * 4, rowsPerImage: height },
         { width, height }
     );
-    _updatePixelsTextureRecoverySource(tex, data, x, y, width, height);
-}
-
-/** @internal Mirror a raw-pixel sub-region upload into the opt-in recovery copy. */
-export function _updatePixelsTextureRecoverySource(
-    tex: Texture2D,
-    data: Uint8Array,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    dataOffset = 0,
-    bytesPerRow = width * 4
-): void {
-    const source = tex._recoverySource;
-    if (source?.kind !== "pixels") {
-        return;
-    }
-    const rowBytes = width * 4;
-    for (let row = 0; row < height; row++) {
-        const srcStart = dataOffset + row * bytesPerRow;
-        const dstStart = ((y + row) * source.width + x) * 4;
-        source.data.set(data.subarray(srcStart, srcStart + rowBytes), dstStart);
-    }
+    engine._dlr?.w(tex, data, x, y, width, height);
 }
 
 /** Sampler / format overrides for `createTexture3DFromPixels()`. */

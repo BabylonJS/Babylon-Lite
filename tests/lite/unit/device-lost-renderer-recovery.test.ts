@@ -142,7 +142,7 @@ function glyph(): GlyphCurves {
 }
 
 describe("SpriteRenderer device-lost recovery", () => {
-    it("rebuilds owned buffers, all used textures, target view, and FX state without touching another context kind", async () => {
+    it("rebuilds owned buffers, textures, target view, and FX with a fresh elapsed timer without touching another context kind", async () => {
         const oldProbe = makeDevice();
         const engine = makeEngine(oldProbe);
         const recovery = enableDeviceLostSpriteRecovery(engine);
@@ -192,7 +192,7 @@ describe("SpriteRenderer device-lost recovery", () => {
         expect(layer.count).toBe(1);
         expect(renderer._clear).toBe(false);
         expect(other.touched).toBe(false);
-        expect(newProbe.bufferWrites.find((write) => write.label === "sprite-layer-fx-ubo")?.firstFloat).toBeCloseTo(0.15);
+        expect(newProbe.bufferWrites.find((write) => write.label === "sprite-layer-fx-ubo")?.firstFloat).toBeCloseTo(0.05);
         recovery.disable();
     });
 });

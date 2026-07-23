@@ -71,7 +71,10 @@ export function _enableDeviceLostRecovery(engine: EngineContext, registration: D
                 return;
             }
             disabled = true;
-            registrations.splice(registrations.indexOf(registration), 1);
+            const index = registrations.indexOf(registration);
+            if (index >= 0) {
+                registrations.splice(index, 1);
+            }
             if (!registrations.some((current) => current._kind === registration._kind)) {
                 registration._disable?.(engine);
             }
@@ -123,7 +126,6 @@ async function recoverDevice(engine: EngineContext, state: DeviceLostRecoverySta
     const wasRunning = engine._renderFn !== null;
     stopEngine(engine);
 
-    _assertDeviceLostRecoveryContextsSupported(engine, handlers);
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
     if (!adapter) {
         throw new Error("WebGPU adapter not available during device recovery");
@@ -157,16 +159,5 @@ async function recoverDevice(engine: EngineContext, state: DeviceLostRecoverySta
     }
     if (wasRunning) {
         await startEngine(engine);
-    }
-}
-
-/** @internal Validate that every active rendering-context kind has an enabled recovery strategy. */
-export function _assertDeviceLostRecoveryContextsSupported(engine: EngineContext, handlers: ReadonlyMap<string, unknown>): void {
-    for (const surface of engine.surfaces) {
-        for (const context of surface._renderingContexts) {
-            if (!handlers.has(context._kind)) {
-                throw new Error(`Device-lost recovery is not enabled for rendering context kind "${context._kind}"`);
-            }
-        }
     }
 }

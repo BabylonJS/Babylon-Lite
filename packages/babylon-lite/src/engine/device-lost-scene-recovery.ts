@@ -9,7 +9,7 @@ import { clearSceneBGLCache } from "../render/scene-helpers.js";
  *
  * Device reacquisition is coordinated per engine so additional renderer-specific
  * recovery strategies can share the same replacement device. Active context kinds
- * without an enabled strategy cause recovery to fail explicitly.
+ * without an enabled strategy are intentionally left untouched.
  */
 export function enableDeviceLostSceneRecovery(engine: EngineContext, options: DeviceLostRecoveryCallbacks = {}): DeviceLostRecoveryHandle {
     return _enableDeviceLostRecovery(engine, {

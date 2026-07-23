@@ -1,11 +1,12 @@
 import type { EngineContext } from "./engine.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
 import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
 
 function attachRecoveryCapture(engine: EngineContext): void {
     engine._dlr = {
         u(tex: Texture2D, url: string, opts: Texture2DOptions): void {
-            tex._recoverySource = { kind: "url", url, opts };
+            tex._recoverySource = { kind: "url", url, opts: { ...opts } };
         },
         s(tex: Texture2D, r: number, g: number, b: number, a: number): void {
             tex._recoverySource = { kind: "solid", rgba: [r, g, b, a] };
@@ -22,22 +23,40 @@ function attachRecoveryCapture(engine: EngineContext): void {
                     addressModeV: "repeat",
                     minFilter: "linear",
                     magFilter: "linear",
-                    mipmapFilter: mipMaps ? "linear" : "nearest",
+                    mipmapFilter: "linear",
+                    maxAnisotropy: 4,
                 },
             };
         },
-        p(tex: Texture2D, data: Uint8Array, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void {
+        p(tex: Texture2D, data: Uint8Array, options: PixelsTexture2DOptions): void {
             tex._recoverySource = {
                 kind: "pixels",
-                data: new Uint8Array(data.subarray(0, width * height * 4)),
-                width,
-                height,
-                format,
-                samplerDesc,
+                data: new Uint8Array(data.subarray(0, tex.width * tex.height * 4)),
+                width: tex.width,
+                height: tex.height,
+                format: options.srgb ? "rgba8unorm-srgb" : "rgba8unorm",
+                samplerDesc: {
+                    addressModeU: options.addressModeU ?? "clamp-to-edge",
+                    addressModeV: options.addressModeV ?? "clamp-to-edge",
+                    minFilter: options.minFilter ?? "nearest",
+                    magFilter: options.magFilter ?? "nearest",
+                },
             };
         },
         r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void {
             tex._recoverySource = { kind: "render", width, height, format, samplerDesc };
+        },
+        w(tex: Texture2D, data: Uint8Array, x: number, y: number, width: number, height: number, dataOffset = 0, bytesPerRow = width * 4): void {
+            const source = tex._recoverySource;
+            if (source?.kind !== "pixels") {
+                return;
+            }
+            const rowBytes = width * 4;
+            for (let row = 0; row < height; row++) {
+                const srcStart = dataOffset + row * bytesPerRow;
+                const dstStart = ((y + row) * source.width + x) * 4;
+                source.data.set(data.subarray(srcStart, srcStart + rowBytes), dstStart);
+            }
         },
         m(
             mesh: Mesh,

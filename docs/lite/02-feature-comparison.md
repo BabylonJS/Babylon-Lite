@@ -320,7 +320,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | Fluid Rendering                         |  —   | ✅  |                                                                                                                                             |
 | Bones IK                                |  —   | ✅  |                                                                                                                                             |
 | Navigation Mesh                         |  ⚡  | ✅  | Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, and raycast (Scenes 170-175)                                        |
-| Device Lost Recovery                    |  ✅  | ✅  | Opt-in per-kind recovery for SceneContext, SpriteRenderer, and TextRenderer via their `enableDeviceLost*Recovery` APIs (Scene 164: Scene)  |
+| Device Lost Recovery                    |  ✅  | ✅  | Opt-in per-kind recovery for SceneContext, SpriteRenderer, and TextRenderer via their enableDeviceLost*Recovery APIs (Scene 164: Scene)     |
 | OffscreenCanvas / Worker Rendering      |  ✅  | ✅  | Engine runs unchanged on a DOM canvas or an OffscreenCanvas transferred to a Web Worker (Offscreen demo)                                    |
 | Text Rendering                          |  ✅  | ✅  | GPU text renderer with layered layout + editor (Scenes 180-181)                                                                             |
 | Gizmos                                  |  ✅  | ✅  | Position / rotation / scale, bounding-box, camera + light gizmos on a utility layer (Scenes 221-224)                                        |

@@ -9,9 +9,9 @@
 Device-lost recovery is an opt-in, engine-wide replacement-device workflow.
 Each public enabler registers exactly one rendering-context kind with the shared
 internal coordinator. The coordinator reacquires the `GPUDevice`, reconfigures
-all surfaces, and then dispatches only to enabled kind handlers. Recovery fails
-explicitly before device replacement when any registered `RenderingContext`
-kind has no enabled handler; no context is cast to another kind.
+all surfaces, and then dispatches only to enabled kind handlers. Context kinds
+without an enabled handler are intentionally skipped; no context is cast to
+another kind.
 
 ## Public API Surface
 
@@ -46,13 +46,15 @@ exported from the package root.
 | Text    | `text-renderer`   | `TextRenderer`      |
 
 On loss, the coordinator snapshots active registrations and collapses them to
-one handler per kind. It stops the engine, validates that every active context
-kind has a handler, requests one replacement device with the original features
-and storage limits, rebuilds engine storage buffers, reconfigures every
-surface, refreshes swapchain render targets, resizes contexts, invokes each
-kind handler, and restarts the engine only if it had been running. Callback
-order is `onLost` before replacement, `onRecovered` after rebuild and the first
-resumed frame, or `onRecoveryFailed` if any step rejects.
+one handler per kind. It stops the engine, requests one replacement device with
+the original features and storage limits, rebuilds engine storage buffers,
+reconfigures every surface, refreshes swapchain render targets, resizes
+contexts, invokes each registered kind handler, and restarts the engine only if
+it had been running. Context kinds without a registered recovery handler are
+left untouched; this permits applications to intentionally recover only a
+subset of independent rendering contexts. Callback order is `onLost` before
+replacement, `onRecovered` after rebuild and the first resumed frame, or
+`onRecoveryFailed` if any registered recovery step rejects.
 Standalone renderer handlers run before Scene rebuilding so a texture or glyph
 atlas shared with a scene is current before scene renderables recreate bindings.
 
@@ -87,9 +89,11 @@ the renderer:
 The renderer then recreates its shared index buffer and every existing
 per-layer instance buffer, layer UBO, custom-shader FX UBO, bind group,
 pipeline reference, and render bundle. CPU instance arrays, layer membership
-and ordering, visibility, transforms, dirty/version state, custom FX elapsed
-time, animation hooks, clear settings, and target selection remain intact.
-Device-keyed shader/pipeline caches naturally select new-device entries.
+and ordering, visibility, transforms, dirty/version state, animation hooks,
+clear settings, and target selection remain intact. Custom-shader FX elapsed
+time restarts at zero because preserving that closure-only accumulator would
+add recovery state to the normal custom-shader bundle. Device-keyed
+shader/pipeline caches naturally select new-device entries.
 
 URL, solid, bitmap, dynamic, raw-pixel, and empty render-target textures carry
 pure recovery data only when Scene or Sprite recovery capture is enabled.
@@ -130,7 +134,7 @@ module-level side effects; mutable caches remain null until an explicit call.
 
 ## State Machine / Lifecycle
 
-1. Enable all kinds that may be active on the engine.
+1. Enable each context kind the application wants to recover.
 2. For Scene/Sprite, enable before creating resources that require retained
    CPU/source data.
 3. Register contexts and render normally.
@@ -142,9 +146,9 @@ module-level side effects; mutable caches remain null until an explicit call.
 
 ## Test Specification
 
-- Coordinator unit tests cover exact-kind rejection, mixed Scene/Sprite/Text
-  acceptance, repeated registrations, idempotent disable, and shared capture
-  lifetime.
+- Coordinator unit tests cover mixed Scene/Sprite/Text registration, skipped
+  unregistered kinds, repeated registrations, safe idempotent disable, and
+  shared capture lifetime.
 - Sprite unit tests replace a fake device and assert new index, instance,
   uniform, FX, pipeline/bind-group/bundle state, recovered atlas/custom/target
   textures, preserved CPU/layer state, and exact-kind enumeration.

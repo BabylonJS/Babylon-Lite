@@ -1,15 +1,15 @@
 {
   "rawKB": 57.3,
-  "gzipKB": 24.1,
+  "gzipKB": 24.2,
   "ignoredRawKB": 6.4,
   "runtimeChunks": [
-    "scene63-_math-factory-B_6El6Ap.js",
+    "scene63-_math-factory-DUATOVO2.js",
     "scene63-fragment-output-CfRmfbPv.js",
-    "scene63-input-block-tJmuHgc3.js",
+    "scene63-input-block-DfO1qY0n.js",
     "scene63-light-block-CgTopKLU.js",
-    "scene63-node-registry-B8PohyzT.js",
-    "scene63-node-renderable-BLFLc9JN.js",
-    "scene63-transform-block-D02e9ae-.js",
+    "scene63-node-registry-vrNP7JVI.js",
+    "scene63-node-renderable-CziaJXKl.js",
+    "scene63-transform-block-DCRg5SH0.js",
     "scene63-vertex-output-C7G5u6Y0.js",
     "scene63.js"
   ]
