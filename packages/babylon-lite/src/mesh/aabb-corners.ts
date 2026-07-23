@@ -15,55 +15,26 @@ export interface BoneCornerBox {
     corners: Float32Array;
 }
 
+/** Rewrite an existing 8-corner buffer from an AABB. */
+export function setExtentCorners(corners: Float32Array, min: ArrayLike<number>, max: ArrayLike<number>): void {
+    for (let i = 0; i < 8; i++) {
+        corners[i * 3] = i & 1 ? max[0]! : min[0]!;
+        corners[i * 3 + 1] = i & 2 ? max[1]! : min[1]!;
+        corners[i * 3 + 2] = i & 4 ? max[2]! : min[2]!;
+    }
+}
+
 /** Build the 8 corners (as a flat 24-float buffer) of an AABB. */
 export function extentCorners(min: ArrayLike<number>, max: ArrayLike<number>): Float32Array {
     const c = new F32(24);
-    for (let i = 0; i < 8; i++) {
-        c[i * 3] = i & 1 ? max[0]! : min[0]!;
-        c[i * 3 + 1] = i & 2 ? max[1]! : min[1]!;
-        c[i * 3 + 2] = i & 4 ? max[2]! : min[2]!;
-    }
+    setExtentCorners(c, min, max);
     return c;
 }
 
-/** Per-vertex min/max positions, expanded by each morph target's deltas. */
-export function computeMorphedRange(mesh: Mesh, vertexCount: number): { minP: Float32Array; maxP: Float32Array } {
-    const positions = mesh._cpuPositions!;
-    const componentCount = vertexCount * 3;
-    const minP = new F32(positions.subarray(0, componentCount));
-    const maxP = new F32(minP);
-    const morph = mesh.morphTargets;
-    if (morph) {
-        // Bound each morph target independently against the base (per component). This mirrors Babylon.js
-        // core's `computeMaxExtents`, which takes the per-vertex AABB of {base, target0, target1, ...}
-        // where core's `MorphTarget.getPositions()` returns absolute positions and Lite stores deltas
-        // (base + delta == core's absolute target position). Matching core exactly is intentional: the
-        // full Viewer frames from core's result, so the ViewerLite camera must frame identically. Note
-        // this does NOT bound targets stacking together, but neither does core; if a wider conservative
-        // bound is ever wanted it should be changed in core first so the two stay in sync.
-        for (const target of morph.targets) {
-            const deltas = target.positions;
-            const count = Math.min(deltas.length, componentCount);
-            for (let i = 0; i < count; i++) {
-                const p = positions[i]! + deltas[i]!;
-                if (p < minP[i]!) {
-                    minP[i] = p;
-                }
-                if (p > maxP[i]!) {
-                    maxP[i] = p;
-                }
-            }
-        }
-    }
-    return { minP, maxP };
-}
-
 /** Build per-bone bind-space corner boxes for a skinned mesh, or `null` when the
- *  mesh is not skinned or has no CPU geometry. Each vertex's (morph-expanded)
- *  bind-pose range is accumulated into a box for every bone that influences it, so
- *  transforming those 8 corners per bone captures the skinned volume cheaply (8
- *  corners per bone, not every vertex). Built once from static bind data; the
- *  per-frame pose enters only through `boneMatrices` at transform time. */
+ *  mesh is not skinned or has no CPU geometry. Each vertex's bind-pose position is
+ *  accumulated into a box for every bone that influences it, so transforming those
+ *  8 corners per bone captures the skinned volume without a per-frame vertex scan. */
 export function buildSkinnedBoneCorners(mesh: Mesh): BoneCornerBox[] | null {
     const positions = mesh._cpuPositions;
     const skeleton = mesh.skeleton;
@@ -72,8 +43,6 @@ export function buildSkinnedBoneCorners(mesh: Mesh): BoneCornerBox[] | null {
     }
 
     const vertexCount = (positions.length / 3) | 0;
-    const { minP, maxP } = computeMorphedRange(mesh, vertexCount);
-
     const boneCount = skeleton.boneCount;
     const boneMin = new F32(boneCount * 3).fill(Number.POSITIVE_INFINITY);
     const boneMax = new F32(boneCount * 3).fill(Number.NEGATIVE_INFINITY);
@@ -87,23 +56,23 @@ export function buildSkinnedBoneCorners(mesh: Mesh): BoneCornerBox[] | null {
                 if (bone < boneCount) {
                     const bo = bone * 3;
                     const vo = vertex * 3;
-                    if (minP[vo]! < boneMin[bo]!) {
-                        boneMin[bo] = minP[vo]!;
+                    if (positions[vo]! < boneMin[bo]!) {
+                        boneMin[bo] = positions[vo]!;
                     }
-                    if (minP[vo + 1]! < boneMin[bo + 1]!) {
-                        boneMin[bo + 1] = minP[vo + 1]!;
+                    if (positions[vo + 1]! < boneMin[bo + 1]!) {
+                        boneMin[bo + 1] = positions[vo + 1]!;
                     }
-                    if (minP[vo + 2]! < boneMin[bo + 2]!) {
-                        boneMin[bo + 2] = minP[vo + 2]!;
+                    if (positions[vo + 2]! < boneMin[bo + 2]!) {
+                        boneMin[bo + 2] = positions[vo + 2]!;
                     }
-                    if (maxP[vo]! > boneMax[bo]!) {
-                        boneMax[bo] = maxP[vo]!;
+                    if (positions[vo]! > boneMax[bo]!) {
+                        boneMax[bo] = positions[vo]!;
                     }
-                    if (maxP[vo + 1]! > boneMax[bo + 1]!) {
-                        boneMax[bo + 1] = maxP[vo + 1]!;
+                    if (positions[vo + 1]! > boneMax[bo + 1]!) {
+                        boneMax[bo + 1] = positions[vo + 1]!;
                     }
-                    if (maxP[vo + 2]! > boneMax[bo + 2]!) {
-                        boneMax[bo + 2] = maxP[vo + 2]!;
+                    if (positions[vo + 2]! > boneMax[bo + 2]!) {
+                        boneMax[bo + 2] = positions[vo + 2]!;
                     }
                     boneUsed[bone] = 1;
                 }

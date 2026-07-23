@@ -2,10 +2,12 @@ import type { Aabb } from "../math/aabb.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 
+export type DeformableShadowBoundsKind = "skeleton" | "morph";
+
 export interface DeformableShadowBoundsProvider {
-    readonly kind: number;
+    readonly kind: DeformableShadowBoundsKind;
     applies(mesh: Mesh): boolean;
-    getLocalBounds(mesh: Mesh): Aabb | null;
+    getLocalBounds(mesh: Mesh, bounds?: Aabb | null): Aabb | null;
 }
 
 interface ShadowMeshEntry {
@@ -27,6 +29,19 @@ interface DeformableShadowState {
 }
 
 let states: WeakMap<ShadowGenerator, DeformableShadowState> | null = null;
+
+/** @internal Run the enabled bounds stages that precede `kind`. */
+export function getPreviousDeformableShadowBounds(generator: ShadowGenerator, mesh: Mesh, kind: DeformableShadowBoundsKind): Aabb | null {
+    const providers = states?.get(generator)?.providers;
+    let bounds: Aabb | null = null;
+    for (let i = providers?.length ?? 0, kindIndex = kind === "morph" ? 1 : 0; --i > kindIndex;) {
+        const provider = providers![i];
+        if (provider?.applies(mesh)) {
+            bounds = provider.getLocalBounds(mesh, bounds);
+        }
+    }
+    return bounds;
+}
 
 function updateShadowMesh(entry: ShadowMeshEntry): boolean {
     const bounds = entry.provider.getLocalBounds(entry.source);
@@ -84,10 +99,11 @@ function restoreSourceCasters(taskState: ShadowTaskInternalState, casterMeshes: 
 
 /** @internal Register one deformable-caster bounds provider on a shadow generator. */
 export function enableDeformableShadowBounds(generator: ShadowGenerator, provider: DeformableShadowBoundsProvider): void {
+    const kindIndex = provider.kind === "morph" ? 1 : 0;
     let state = states?.get(generator);
     if (state) {
-        if (!state.providers[provider.kind]) {
-            state.providers[provider.kind] = provider;
+        if (!state.providers[kindIndex]) {
+            state.providers[kindIndex] = provider;
             state.sourceMeshes = undefined;
         }
         return;
@@ -104,7 +120,7 @@ export function enableDeformableShadowBounds(generator: ShadowGenerator, provide
         ensure,
         render,
     };
-    state.providers[provider.kind] = provider;
+    state.providers[kindIndex] = provider;
     (states ??= new WeakMap()).set(generator, state);
 
     generator._preloadShadowTask = (casterMeshes) => preload(mapCasterMeshes(state!, casterMeshes));

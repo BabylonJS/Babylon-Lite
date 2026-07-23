@@ -61,4 +61,12 @@ describe("shadow deformation tracking bundle isolation", () => {
         expect(modules.some((id) => id.endsWith("/shadow/enable-morph-target-shadows.js"))).toBe(true);
         expect(modules.some((id) => id.endsWith("/shadow/enable-skeleton-shadows.js") || id.endsWith("/mesh/aabb-corners.js"))).toBe(false);
     });
+
+    it("keeps morph-target implementation out of the skeleton-only dependency path", () => {
+        const skeletonSource = readFileSync(join(ROOT, "packages", "babylon-lite", "src", "shadow", "enable-skeleton-shadows.ts"), "utf-8");
+        const cornerSource = readFileSync(join(ROOT, "packages", "babylon-lite", "src", "mesh", "aabb-corners.ts"), "utf-8");
+
+        expect(skeletonSource).not.toContain("updateMorphedBoneCorners");
+        expect(cornerSource).not.toContain("morphTargets");
+    });
 });

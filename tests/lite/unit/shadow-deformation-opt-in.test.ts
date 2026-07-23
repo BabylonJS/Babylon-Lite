@@ -161,6 +161,53 @@ describe("shadow deformation opt-ins", () => {
         expect(state._casterMeshes).toBe(casters);
     });
 
+    it("accumulates stacked morph targets before computing skeletal bounds", async () => {
+        const { generator, preload } = createGenerator();
+        const mesh = createMesh({
+            morphTargets: {
+                count: 2,
+                weights: new Float32Array([1, 1]),
+                weightsBuffer: {} as GPUBuffer,
+                targets: [
+                    { positions: new Float32Array([2, 0, 0, 2, 0, 0]), normals: null },
+                    { positions: new Float32Array([3, 0, 0, 3, 0, 0]), normals: null },
+                ],
+            } as unknown as MorphTargetData,
+            skeleton: {
+                boneCount: 1,
+                boneMatrices: translation(4),
+                joints: new Uint16Array([0, 0, 0, 0, 0, 0, 0, 0]),
+                weights: new Float32Array([1, 0, 0, 0, 1, 0, 0, 0]),
+                joints1: null,
+                weights1: null,
+            } as unknown as SkeletonData,
+        });
+
+        enableMorphTargetShadows(generator);
+        enableSkeletonShadows(generator);
+        await generator._preloadShadowTask!([mesh]);
+        const state = generator._ensureShadowTaskState!({} as EngineContext, {} as SceneContext, [mesh]);
+        generator._renderShadowMap!({} as EngineContext, state);
+
+        const shadowMesh = preload.mock.calls[0]![0][0] as Mesh;
+        expect(shadowMesh.boundMin).toEqual([3, 0, 0]);
+        expect(shadowMesh.boundMax).toEqual([10, 0, 0]);
+
+        mesh.morphTargets!.weights.set([0.5, 0.25]);
+        generator._renderShadowMap!({} as EngineContext, state);
+
+        expect(shadowMesh.boundMin).toEqual([3, 0, 0]);
+        expect(shadowMesh.boundMax).toEqual([6.75, 0, 0]);
+
+        const { generator: skeletonOnlyGenerator, preload: skeletonOnlyPreload } = createGenerator();
+        enableSkeletonShadows(skeletonOnlyGenerator);
+        await skeletonOnlyGenerator._preloadShadowTask!([mesh]);
+
+        const skeletonOnlyShadowMesh = skeletonOnlyPreload.mock.calls[0]![0][0] as Mesh;
+        expect(skeletonOnlyShadowMesh.boundMin).toEqual([3, 0, 0]);
+        expect(skeletonOnlyShadowMesh.boundMax).toEqual([5, 0, 0]);
+    });
+
     it("composes morph and skeleton opt-ins without wrapping the generator twice", async () => {
         const { generator, preload, ensure } = createGenerator();
         const morphMesh = createMesh({

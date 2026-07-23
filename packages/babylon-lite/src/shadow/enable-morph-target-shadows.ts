@@ -2,7 +2,8 @@ import type { MorphTargetData } from "../animation/types.js";
 import type { Aabb } from "../math/aabb.js";
 import { computeAabb } from "../math/compute-aabb.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { enableDeformableShadowBounds, type DeformableShadowBoundsProvider } from "./deformable-shadow-casters.js";
+import { enableDeformableShadowBounds } from "./deformable-shadow-casters.js";
+import type { DeformableShadowBoundsProvider } from "./deformable-shadow-casters.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 
 interface MorphBoundsCache {
@@ -43,7 +44,7 @@ function getCache(mesh: Mesh, morphTargets: MorphTargetData): MorphBoundsCache {
 }
 
 const morphBoundsProvider: DeformableShadowBoundsProvider = {
-    kind: 1,
+    kind: "morph",
     applies: (mesh) => !!mesh.morphTargets,
     getLocalBounds(mesh) {
         const morphTargets = mesh.morphTargets;
