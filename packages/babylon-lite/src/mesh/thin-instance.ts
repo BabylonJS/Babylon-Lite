@@ -9,8 +9,8 @@ import type { Mesh } from "./mesh.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 
-function buildRuntimeThinMesh(scene: SceneContext, mesh: Mesh, pending?: Promise<void>): Promise<void> {
-    return import("../scene/scene-runtime-mesh-build.js").then((module) => module.A(scene, mesh.material._buildGroup, mesh, pending)).catch((error) => console.error(error));
+function buildRuntimeThinMesh(scene: SceneContext, mesh: Mesh, pending?: Promise<void>, material = mesh.material): Promise<void> {
+    return import("../scene/scene-runtime-mesh-build.js").then((module) => module.A(scene, material, mesh, pending)).catch((error) => console.error(error));
 }
 
 /** @internal One render pass's far-bucket output published by the GPU culler for the LOD partner's draw. */

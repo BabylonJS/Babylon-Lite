@@ -88,7 +88,7 @@ export async function rebuildScenePbrPipelines(scene: SceneContext, force = fals
                             dispose();
                         }
                     }
-                    const live = ctx.meshes.includes(mesh) && mesh.material === materials.get(mesh) && mesh.material._buildGroup === builder && meshes.includes(mesh);
+                    const live = ctx.meshes.includes(mesh) && mesh.material === materials.get(mesh) && mesh.material?._buildGroup === builder && meshes.includes(mesh);
                     if (previous && live) {
                         ctx._meshDisposables.set(mesh, previous);
                     } else {
@@ -128,7 +128,7 @@ export async function rebuildScenePbrPipelines(scene: SceneContext, force = fals
                 dedupeGroupCleanup(ctx, cleanupStart);
             }
             const liveMeshes = new Set(
-                groupMeshes.filter((mesh) => ctx.meshes.includes(mesh) && mesh.material === materials.get(mesh) && mesh.material._buildGroup === builder && meshes.includes(mesh))
+                groupMeshes.filter((mesh) => ctx.meshes.includes(mesh) && mesh.material === materials.get(mesh) && mesh.material?._buildGroup === builder && meshes.includes(mesh))
             );
             const rebuiltMaterials = new Set<Material>();
             for (const mesh of groupMeshes) {

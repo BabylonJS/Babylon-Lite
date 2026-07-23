@@ -89,9 +89,9 @@ export function enableSceneTransmission(scene: SceneContext, engine: EngineConte
 
 /** @internal Prepare linear PBR flags, then commit transmission only after renderable construction succeeds. */
 export function _t(scene: SceneContext, engine: EngineContext): readonly [commit: () => void, rollback: () => void] {
-    const states = scene.meshes.map((mesh) => {
-        const mat = mesh.material as { _linearImageProcessing?: boolean; _renderFeatures?: unknown };
-        return [mat, mat._linearImageProcessing, mat._renderFeatures] as const;
+    const states = scene.meshes.flatMap((mesh) => {
+        const mat = mesh.material as { _linearImageProcessing?: boolean; _renderFeatures?: unknown } | null;
+        return mat ? [[mat, mat._linearImageProcessing, mat._renderFeatures] as const] : [];
     });
     markPbrMaterialsLinear(scene);
     return [

@@ -54,14 +54,33 @@ describe("runtime material rebuild ownership", () => {
         const scene = createScene(engine);
         const features = {};
         const material = { _linearImageProcessing: false, _renderFeatures: features } as unknown as Material;
-        scene.meshes.push({ material } as Mesh);
+        scene.meshes.push({ material } as Mesh, { material: null } as unknown as Mesh);
 
-        const [, rollback] = _t(scene, engine);
+        let transaction!: ReturnType<typeof _t>;
+        expect(() => (transaction = _t(scene, engine))).not.toThrow();
+        const [, rollback] = transaction;
         expect((material as Material & { _renderFeatures?: unknown })._renderFeatures).toBeUndefined();
 
         rollback();
         expect((material as Material & { _linearImageProcessing?: boolean })._linearImageProcessing).toBe(false);
         expect((material as Material & { _renderFeatures?: unknown })._renderFeatures).toBe(features);
+    });
+
+    it("abandons delayed thin materialization when the material is cleared", async () => {
+        const builder = vi.fn(async () => ({ renderables: [], rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh) })) as unknown as MeshGroupBuilder;
+        builder._materialFamily = "standard";
+        const mesh = { material: { _buildGroup: builder }, children: [] } as unknown as Mesh;
+        const scene = createScene({} as EngineContext);
+        const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        setThinInstances(mesh, new Float32Array(16), 1);
+
+        const pending = mesh._runtimeThinBuild!(scene, mesh);
+        (mesh as unknown as { material: Material | null }).material = null;
+        await pending;
+
+        expect(builder).not.toHaveBeenCalled();
+        expect(log).not.toHaveBeenCalled();
+        log.mockRestore();
     });
 
     it("waits for every thin-instance runtime build started by one swap drain", async () => {
@@ -271,6 +290,39 @@ describe("runtime material rebuild ownership", () => {
         expect(builtDispose).toHaveBeenCalledOnce();
         expect(oldDispose).toHaveBeenCalledOnce();
         expect(engine._retirements).toHaveLength(0);
+    });
+
+    it.each(["resolve", "reject"] as const)("handles a material cleared while a PBR rebuild will %s", async (outcome) => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        scene._built = true;
+        let finish!: () => void;
+        const gate = new Promise<void>((resolve) => (finish = resolve));
+        const failure = new Error("PBR rebuild failed");
+        const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
+            await gate;
+            if (outcome === "reject") {
+                throw failure;
+            }
+            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh) };
+        }) as MeshGroupBuilder;
+        builder._materialFamily = "pbr";
+        const material = { _buildGroup: builder } as Material;
+        const mesh = { material, children: [] } as unknown as Mesh;
+        const group = [mesh] as Mesh[] & { r?: NonNullable<MeshGroupBuilder["_rebuildSingle"]> };
+        group.r = (_scene, target) => renderable(target);
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, group);
+
+        const rebuild = rebuildScenePbrPipelines(scene);
+        await vi.waitFor(() => expect(scene._runtimeBuilds?.w).toBe(true));
+        (mesh as unknown as { material: Material | null }).material = null;
+        finish();
+
+        if (outcome === "reject") {
+            await expect(rebuild).rejects.toBe(failure);
+        } else {
+            await expect(rebuild).resolves.toBeUndefined();
+        }
     });
 
     it("detaches a merged packet before deferring its GPU disposer", async () => {

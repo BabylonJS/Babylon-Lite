@@ -38,8 +38,11 @@ let _builderTails: WeakMap<MeshGroupBuilder, Promise<void>> | null = null;
 let _runtimeRebuilders: WeakMap<MeshGroupBuilder, RuntimeRebuilder> | null = null;
 
 /** @internal Start one runtime build and return a promise covering it plus every earlier build in this drain. */
-export function A(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh, pending?: Promise<void>): Promise<void> {
-    const current = B(scene, builder, mesh);
+export function A(scene: SceneContext, material: Material | null, mesh: Mesh, pending?: Promise<void>): Promise<void> {
+    if (!material || mesh.material !== material) {
+        return pending ?? Promise.resolve();
+    }
+    const current = B(scene, material._buildGroup, mesh);
     return pending ? Promise.all([pending, current]).then(() => undefined) : current;
 }
 
