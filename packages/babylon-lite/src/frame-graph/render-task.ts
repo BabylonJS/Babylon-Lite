@@ -354,7 +354,7 @@ function resolvePendingMeshes(task: RenderTask, sc: SceneContext): void {
         const group = sc._groups.get(builder);
         const rebuild = group ? group.r : builder._rebuildSingle;
         if (!rebuild) {
-            throw Error("group.r");
+            throw Error();
         }
         const renderable = rebuild(sc, mesh, material);
         if (!task._renderables.includes(renderable)) {

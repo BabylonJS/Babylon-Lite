@@ -2,7 +2,6 @@
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, loadEnvironment, loadGltf, attachControl, registerScene, onBeforeRender, goToFrame, pauseAnimation } from "babylon-lite";
 
 async function main(): Promise<void> {
-    const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const data = canvas.dataset;
 
@@ -42,10 +41,6 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
     await startEngine(engine);
-    (window as any).__scene = scene;
-    data.camAlpha = String(cam.alpha);
-    data.camRadius = String(cam.radius);
-    data.initMs = String(performance.now() - __initStart);
     data.ready = "true";
 }
 
