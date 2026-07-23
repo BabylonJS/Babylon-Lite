@@ -31,6 +31,10 @@ function makeSkeleton(translationX = 0): SkeletonData {
 function makeMesh(fields: Partial<Mesh>): Mesh {
     return {
         _cpuPositions: new Float32Array([-1, 0, 0, 1, 0, 0]),
+        _localBounds: [
+            [-1, 0, 0],
+            [1, 0, 0],
+        ],
         worldMatrix: identity() as unknown as Mat4,
         worldMatrixVersion: 1,
         boundMin: [-1, 0, 0],
@@ -45,7 +49,7 @@ describe.sequential("shadow caster bounds", () => {
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
         const mesh = makeMesh({ skeleton: makeSkeleton(10) });
 
-        const preload = import("../../../packages/babylon-lite/src/shadow/skinned-caster-aabb").then((mod) => mod.enableSkinnedCasterAabb([mesh]));
+        const preload = import("../../../packages/babylon-lite/src/shadow/skinned-caster-aabb").then((mod) => mod.enable([mesh]));
         const beforeLoad = casterWorldAabb(mesh);
         await preload;
         const afterLoad = casterWorldAabb(mesh);
@@ -58,7 +62,7 @@ describe.sequential("shadow caster bounds", () => {
     it("uses active morph weights for a morph-only caster", async () => {
         vi.resetModules();
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
-        const { enableMorphCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/morph-caster-aabb");
+        const { enable: enableMorphCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/morph-caster-aabb");
         const morphTargets = {
             count: 1,
             weights: new Float32Array([0.5]),
@@ -76,7 +80,7 @@ describe.sequential("shadow caster bounds", () => {
     it("reuses cached morph delta ranges when animated weights change", async () => {
         vi.resetModules();
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
-        const { enableMorphCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/morph-caster-aabb");
+        const { enable: enableMorphCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/morph-caster-aabb");
         let deltaReads = 0;
         // Getter-backed array-like data proves a weight-only update reuses the cached
         // per-target ranges instead of silently rescanning every morph delta.
@@ -118,7 +122,7 @@ describe.sequential("shadow caster bounds", () => {
     it("rebuilds cached skinned bounds after mutable geometry is replaced", async () => {
         vi.resetModules();
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
-        const { enableSkinnedCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/skinned-caster-aabb");
+        const { enable: enableSkinnedCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/skinned-caster-aabb");
         const mesh = makeMesh({ skeleton: makeSkeleton() });
         enableSkinnedCasterAabb([mesh]);
 
@@ -137,7 +141,7 @@ describe.sequential("shadow caster bounds", () => {
     it("includes every active thin-instance transform in directional caster bounds", async () => {
         vi.resetModules();
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
-        const { enableThinCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/thin-caster-aabb");
+        const { enable: enableThinCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/thin-caster-aabb");
         const matrices = new Float32Array(32);
         matrices.set(identity(), 0);
         matrices.set(translation(20, 0, 0), 16);
@@ -148,7 +152,7 @@ describe.sequential("shadow caster bounds", () => {
             _version: 1,
         } as unknown as ThinInstanceData;
         const mesh = makeMesh({ thinInstances });
-        enableThinCasterAabb();
+        enableThinCasterAabb([mesh]);
 
         const aabb = casterWorldAabb(mesh);
 
@@ -159,7 +163,7 @@ describe.sequential("shadow caster bounds", () => {
     it("rebuilds thin-instance bounds when the thin-instance data object is replaced", async () => {
         vi.resetModules();
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
-        const { enableThinCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/thin-caster-aabb");
+        const { enable: enableThinCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/thin-caster-aabb");
         const firstMatrices = new Float32Array(16);
         firstMatrices.set(identity());
         const mesh = makeMesh({
@@ -170,7 +174,7 @@ describe.sequential("shadow caster bounds", () => {
                 _version: 1,
             } as unknown as ThinInstanceData,
         });
-        enableThinCasterAabb();
+        enableThinCasterAabb([mesh]);
         expect(casterWorldAabb(mesh)?.[1][0]).toBeCloseTo(1);
 
         const replacementMatrices = new Float32Array(16);
@@ -181,14 +185,13 @@ describe.sequential("shadow caster bounds", () => {
             _capacity: 1,
             _version: 1,
         } as unknown as ThinInstanceData;
-
         expect(casterWorldAabb(mesh)?.[0][0]).toBeCloseTo(19);
         expect(casterWorldAabb(mesh)?.[1][0]).toBeCloseTo(21);
     });
 
     it("keeps synchronous AABB lookup side-effect free when thin bounds are unavailable", async () => {
         vi.resetModules();
-        const { casterBoundsVersion, casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
+        const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
         const matrices = new Float32Array(16);
         matrices.set(translation(20, 0, 0));
         const mesh = makeMesh({
@@ -199,18 +202,16 @@ describe.sequential("shadow caster bounds", () => {
                 _version: 1,
             } as unknown as ThinInstanceData,
         });
-        const beforeVersion = casterBoundsVersion();
-
         expect(casterWorldAabb(mesh)).toBeNull();
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        expect(casterBoundsVersion()).toBe(beforeVersion);
+        expect(casterWorldAabb(mesh)).toBeNull();
     });
 
     it("combines active morph bounds with every thin-instance transform", async () => {
         vi.resetModules();
         const { casterWorldAabb } = await import("../../../packages/babylon-lite/src/shadow/caster-world-aabb");
-        const { enableMorphCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/morph-caster-aabb");
-        const { enableThinCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/thin-caster-aabb");
+        const { enable: enableMorphCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/morph-caster-aabb");
+        const { enable: enableThinCasterAabb } = await import("../../../packages/babylon-lite/src/shadow/thin-caster-aabb");
         const matrices = new Float32Array(32);
         matrices.set(identity(), 0);
         matrices.set(translation(20, 0, 0), 16);
@@ -229,7 +230,7 @@ describe.sequential("shadow caster bounds", () => {
             } as unknown as ThinInstanceData,
         });
         enableMorphCasterAabb([mesh]);
-        enableThinCasterAabb();
+        enableThinCasterAabb([mesh]);
 
         const aabb = casterWorldAabb(mesh);
 

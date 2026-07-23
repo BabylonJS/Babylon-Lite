@@ -38,6 +38,10 @@ function makeMeshData(nodeIndex: number, primitive: object, material: GltfMateri
         _vertexCount: 3,
         _indexCount: 3,
         _worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) as unknown as Mat4,
+        _localBounds: [
+            [0, 0, 0],
+            [1, 1, 0],
+        ],
         _material: material,
         _nodeIndex: nodeIndex,
         _primitive: primitive,

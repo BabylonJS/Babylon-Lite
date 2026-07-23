@@ -300,6 +300,7 @@ export async function buildInterleavedPartial(
         _vertexCount: vertexCount,
         _indexCount: indices.length,
         _worldMatrix: worldMatrix,
+        _localBounds: [json.accessors[attrs.POSITION].min, json.accessors[attrs.POSITION].max],
         _vb: vb,
         _nodeIndex: nodeIdx,
         _primitive: primitive,
@@ -361,6 +362,7 @@ export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, ind
         receiveShadows: false,
         boundMin,
         boundMax,
+        _localBounds: m._localBounds,
         _gpu: gpu,
         _flatNormal: m._flatNormal,
     } as unknown as Mesh;

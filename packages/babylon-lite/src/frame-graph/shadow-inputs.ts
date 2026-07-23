@@ -1,24 +1,36 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 
-let shadowTaskInputs: WeakMap<ShadowGenerator, readonly Mesh[]> | null = null;
-let shadowTaskInputPreloader: ((shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]) => Promise<void>) | null = null;
+/** @internal Scene-owned caster input and its asynchronous task/bounds readiness. */
+export interface ShadowTaskInput {
+    casterMeshes: readonly Mesh[];
+    /** Undefined before loading, a Promise while loading, null once ready. */
+    promise?: Promise<void> | null;
+}
 
-function getShadowTaskInputs(): WeakMap<ShadowGenerator, readonly Mesh[]> {
-    shadowTaskInputs ??= new WeakMap<ShadowGenerator, readonly Mesh[]>();
+let shadowTaskInputs: WeakMap<ShadowGenerator, ShadowTaskInput> | null = null;
+let shadowTaskInputPreloader: ((shadowGenerator: ShadowGenerator, input: ShadowTaskInput) => Promise<void>) | null = null;
+
+function getShadowTaskInputs(): WeakMap<ShadowGenerator, ShadowTaskInput> {
+    shadowTaskInputs ??= new WeakMap<ShadowGenerator, ShadowTaskInput>();
     return shadowTaskInputs;
 }
 
 /** Register scene-owned shadow caster inputs for a generator. */
 export function setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): void {
-    getShadowTaskInputs().set(shadowGenerator, casterMeshes);
+    const inputs = getShadowTaskInputs();
+    let input = inputs.get(shadowGenerator);
+    if (!input || input.casterMeshes !== casterMeshes) {
+        input = { casterMeshes };
+        inputs.set(shadowGenerator, input);
+    }
     if (shadowTaskInputPreloader) {
-        void shadowTaskInputPreloader(shadowGenerator, casterMeshes);
+        void shadowTaskInputPreloader(shadowGenerator, input);
     }
 }
 
 /** @internal */
-export function _getShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator): readonly Mesh[] | undefined {
+export function _getShadowTaskInput(shadowGenerator: ShadowGenerator): ShadowTaskInput | undefined {
     return shadowTaskInputs?.get(shadowGenerator);
 }
 
@@ -45,6 +57,6 @@ export function _getShadowCasterMaxCascade(mesh: Mesh): number {
 }
 
 /** @internal */
-export function _setShadowTaskInputPreloader(preloader: (shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]) => Promise<void>): void {
+export function _setShadowTaskInputPreloader(preloader: (shadowGenerator: ShadowGenerator, input: ShadowTaskInput) => Promise<void>): void {
     shadowTaskInputPreloader = preloader;
 }

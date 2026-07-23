@@ -58,6 +58,7 @@ function retainMeshGeometry(
     const [min, max] = computeAabb(positions);
     mesh.boundMin = isFinite(min[0]) ? min : undefined;
     mesh.boundMax = isFinite(max[0]) ? max : undefined;
+    mesh._localBounds = [min, max];
     mesh._cpuPositions = positions;
     mesh._cpuNormals = normals;
     mesh._cpuUvs = uvs?.length ? uvs : undefined;
@@ -127,6 +128,7 @@ export function createMeshFromData(
         receiveShadows: false,
         boundMin: isFinite(min[0]) ? min : undefined,
         boundMax: isFinite(max[0]) ? max : undefined,
+        _localBounds: [min, max],
         _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors),
     } as unknown as Mesh;
     initMeshTransform(mesh);
@@ -377,6 +379,7 @@ export function resizeMeshGeometry(
     const [min, max] = computeAabb(positions);
     mesh.boundMin = isFinite(min[0]) ? min : undefined;
     mesh.boundMax = isFinite(max[0]) ? max : undefined;
+    mesh._localBounds = [min, max];
 
     // Retain CPU geometry for detailed picking + device-loss recovery (mirror createMeshFromData).
     mesh._cpuPositions = positions;

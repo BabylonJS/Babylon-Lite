@@ -1,6 +1,7 @@
 import { F32, U32, U16, U8, DV } from "../engine/typed-arrays.js";
 import { BU } from "../engine/gpu-flags.js";
 import type { Mat4 } from "../math/types.js";
+import type { Aabb } from "../math/aabb.js";
 import { computeAabb } from "../math/compute-aabb.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";
@@ -72,6 +73,8 @@ export interface GltfMeshData {
     _indexCount: number;
     /** @internal */
     _worldMatrix: Mat4;
+    /** @internal */
+    _localBounds: Aabb;
     /** @internal */
     _material: GltfMaterialData;
     /** @internal Interleaved vertex sources (genuine GPU interleaving + lazy CPU de-stride).
@@ -464,6 +467,7 @@ async function extractAllMeshes(
                 _vertexCount: posData._count,
                 _indexCount: indices.length,
                 _worldMatrix: worldMatrix,
+                _localBounds: [_accs[attrs.POSITION].min, _accs[attrs.POSITION].max],
                 _nodeIndex: nodeIdx,
                 _primitive: primitive,
                 _decoded: decoded,
@@ -622,6 +626,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                     receiveShadows: false,
                     boundMin,
                     boundMax,
+                    _localBounds: m._localBounds,
                     _gpu: gpu,
                     _flatNormal: m._flatNormal,
                 } as unknown as Mesh;

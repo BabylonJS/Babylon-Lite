@@ -6,10 +6,11 @@ import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import type { Mat4Storage } from "../math/types.js";
 import type { Aabb } from "../math/aabb.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { MorphTargetData, SkeletonData } from "../animation/types.js";
+import { _installDeformationChangeNotifier } from "../animation/deformation-change-hooks.js";
 import type { BoneCornerBox } from "../mesh/aabb-corners.js";
 import { buildSkinnedBoneCorners, growCornersByMatrix } from "../mesh/aabb-corners.js";
-import { _installSkinnedCasterAabb } from "./caster-world-aabb.js";
-import { enableDeformationCasterTracking } from "./deformation-caster-tracking.js";
+import { _casterAabb } from "./caster-world-aabb.js";
 
 // Per-bone bind-space corner boxes for skinned casters, built once from static bind
 // data (positions/joints/weights/morph deltas never change) and reused every frame.
@@ -34,15 +35,22 @@ let _boneCornerCache: WeakMap<Mesh, BoneCornerCacheEntry> | null = null;
 // Scratch skinning matrix (`worldMatrix · boneMatrices[bone]`), reused per call.
 const _skinMatrix = new F32(16);
 
+function notifyShadowCasterChanged(data: SkeletonData | MorphTargetData | undefined): void {
+    if (data) {
+        data._shadowVersion = (data._shadowVersion ?? 0) + 1;
+    }
+}
+
 /** Install posed bounds and invalidation for skinned shadow casters. */
-export function enableSkinnedCasterAabb(casterMeshes: readonly Mesh[]): void {
+export function enable(casterMeshes: readonly Mesh[]): void {
     for (const mesh of casterMeshes) {
         const skeleton = mesh.skeleton;
         if (skeleton && skeleton.weights && skeleton.boneMatrices) {
-            enableDeformationCasterTracking(skeleton);
+            skeleton._shadowVersion ??= 1;
         }
     }
-    _installSkinnedCasterAabb(skinnedCasterAabb);
+    _installDeformationChangeNotifier(notifyShadowCasterChanged);
+    _casterAabb[0] = skinnedCasterAabb;
 }
 
 /** World-space AABB of a skinned caster at its current pose, or `null` when the

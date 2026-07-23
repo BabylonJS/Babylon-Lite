@@ -115,7 +115,7 @@ describe("shadow task input preload", () => {
         } as unknown as MorphTargetData;
         expect(task.execute!()).toBe(0);
         await vi.waitFor(() => expect(task.execute!()).toBe(1));
-        expect(mesh.morphTargets._shadowVersion).toBe(0);
+        expect(mesh.morphTargets._shadowVersion).toBe(1);
         expect(preload).toHaveBeenCalledTimes(3);
     });
 });

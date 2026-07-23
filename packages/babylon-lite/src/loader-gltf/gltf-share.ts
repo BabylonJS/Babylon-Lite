@@ -42,6 +42,7 @@ export async function share(
                     receiveShadows: false,
                     boundMin,
                     boundMax,
+                    _localBounds: m._localBounds,
                     _gpu: source._gpu,
                     _flatNormal: m._flatNormal,
                 } as unknown as Mesh;
@@ -74,6 +75,7 @@ export async function share(
                 receiveShadows: false,
                 boundMin,
                 boundMax,
+                _localBounds: m._localBounds,
                 _gpu: gpu,
                 _flatNormal: m._flatNormal,
             } as unknown as Mesh;

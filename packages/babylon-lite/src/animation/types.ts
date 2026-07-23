@@ -2,6 +2,7 @@
 // Designed for zero-allocation per-frame evaluation.
 
 import type { Mat4 } from "../math/types.js";
+import type { Aabb } from "../math/aabb.js";
 import type { StorageBuffer } from "../resource/storage-buffer.js";
 
 // Interpolation modes (numeric for fast comparison in hot path)
@@ -163,7 +164,7 @@ export interface SkeletonData {
     /** @internal Optional shadow-owned change hook. Absent unless this skeleton is used by
      *  a shadow caster, so no-shadow animation scenes carry no tracking state. */
     _onShadowCasterChanged?: (source?: object, poseToken?: number) => void;
-    /** @internal Shadow-owned deformation version installed alongside `_onShadowCasterChanged`. */
+    /** @internal Shadow-owned deformation version incremented by opt-in animation writers. */
     _shadowVersion?: number;
 }
 
@@ -220,7 +221,12 @@ export interface MorphTargetData {
     readonly count: number;
     /** Read-only storage buffer: 16-byte header (count, vertexCount) + one f32 weight per target. */
     readonly weightsBuffer: GPUBuffer;
-    readonly targets: readonly { positions: Float32Array; normals: Float32Array | null }[];
+    readonly targets: readonly {
+        readonly positions: Float32Array;
+        readonly normals: Float32Array | null;
+        /** @internal Cached shadow delta interval. */
+        _shadowDeltaRange?: Aabb;
+    }[];
     readonly weights: Float32Array<ArrayBuffer>;
     /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
      *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
@@ -228,6 +234,6 @@ export interface MorphTargetData {
     /** @internal Optional shadow-owned change hook. Absent unless these targets are used by
      *  a shadow caster, so no-shadow animation scenes carry no tracking state. */
     _onShadowCasterChanged?: (source?: object, poseToken?: number) => void;
-    /** @internal Shadow-owned deformation version installed alongside `_onShadowCasterChanged`. */
+    /** @internal Shadow-owned deformation version incremented by opt-in animation writers. */
     _shadowVersion?: number;
 }

@@ -8,6 +8,7 @@ import type { Material } from "../material/material.js";
 import type { SkeletonData, MorphTargetData, VatData } from "../animation/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
+import type { Aabb } from "../math/aabb.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "../scene/world-matrix-state.js";
 import type { SceneNode } from "../scene/scene-node.js";
@@ -151,6 +152,8 @@ export interface Mesh extends SceneNode {
     _cpuGpuIndices?: Uint16Array | Uint32Array;
     /** @internal */
     _cpuIndexFormat?: GPUIndexFormat;
+    /** @internal Authoritative local geometry bounds. */
+    _localBounds?: Aabb;
 }
 
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.

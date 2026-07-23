@@ -1,6 +1,13 @@
 import type { Aabb } from "../math/aabb.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { _installThinCasterAabb, _localCasterAabb } from "./caster-world-aabb.js";
+import { _casterAabb } from "./caster-world-aabb.js";
+
+declare module "../mesh/thin-instance.js" {
+    interface ThinInstanceData {
+        /** @internal Set when this specific instance slab has been enabled for shadow bounds. */
+        _shadowBoundsReady?: boolean;
+    }
+}
 
 const DEFAULT_MIN: [number, number, number] = [-0.5, -0.5, -0.5];
 const DEFAULT_MAX: [number, number, number] = [0.5, 0.5, 0.5];
@@ -57,16 +64,10 @@ function thinInstanceWorldAabb(mesh: Mesh, deformedLocal: Aabb | null | undefine
     } else if (deformedLocal) {
         bmin = deformedLocal[0];
         bmax = deformedLocal[1];
-    } else if (positions && positions.length >= 3) {
-        const local = _localCasterAabb(mesh, positions);
-        if (!local) {
-            return null;
-        }
-        bmin = local[0];
-        bmax = local[1];
     } else {
-        bmin = mesh.boundMin ?? DEFAULT_MIN;
-        bmax = mesh.boundMax ?? DEFAULT_MAX;
+        const local = mesh._localBounds;
+        bmin = local?.[0] ?? mesh.boundMin ?? DEFAULT_MIN;
+        bmax = local?.[1] ?? mesh.boundMax ?? DEFAULT_MAX;
     }
 
     const matrices = ti.matrices;
@@ -127,6 +128,11 @@ function thinInstanceWorldAabb(mesh: Mesh, deformedLocal: Aabb | null | undefine
 }
 
 /** Install thin-instance shadow-caster bounds. */
-export function enableThinCasterAabb(): void {
-    _installThinCasterAabb(thinInstanceWorldAabb);
+export function enable(casterMeshes: readonly Mesh[]): void {
+    for (const mesh of casterMeshes) {
+        if (mesh.thinInstances) {
+            mesh.thinInstances._shadowBoundsReady = true;
+        }
+    }
+    _casterAabb[2] = thinInstanceWorldAabb;
 }

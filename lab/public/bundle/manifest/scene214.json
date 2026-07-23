@@ -1,13 +1,13 @@
 {
-  "rawKB": 70,
-  "gzipKB": 27.9,
+  "rawKB": 68.9,
+  "gzipKB": 27.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene214-material-view-Dua1bl7W.js",
-    "scene214-no-color-view-OJ_S3bHJ.js",
-    "scene214-shadow-task-CiH5Mj4f.js",
-    "scene214-standard-renderable-BZjuetLz.js",
-    "scene214-std-shadow-fragment-DUILnYou.js",
+    "scene214-no-color-view-0Pqu7DTq.js",
+    "scene214-shadow-task-Dkw9mQD3.js",
+    "scene214-standard-renderable-BF6SumKM.js",
+    "scene214-std-shadow-fragment-DepU6U0P.js",
     "scene214.js"
   ]
 }
