@@ -309,6 +309,8 @@ export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-sh
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
 export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
+export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.js";
+export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
 export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────

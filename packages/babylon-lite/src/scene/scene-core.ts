@@ -45,6 +45,32 @@ export interface ImageProcessingConfig {
 /** A clipping plane expressed as the coefficients `[a, b, c, d]` of `a·x + b·y + c·z + d`. */
 export type ClipPlane = readonly [number, number, number, number];
 
+/** @internal Runtime mesh-build hooks installed only after a material group must widen its capabilities. */
+export interface RuntimeSceneBuildHooks {
+    queue(builder: MeshGroupBuilder, mesh: Mesh): Promise<void>;
+    all(): Promise<void>;
+    track(promise: Promise<void>): Promise<void>;
+    base(builder: MeshGroupBuilder, rebuild: NonNullable<MeshGroupBuilder["_rebuildSingle"]>): NonNullable<MeshGroupBuilder["_rebuildSingle"]>;
+    readonly w: boolean;
+    reset(mesh: Mesh): void;
+    remove(mesh: Mesh): void;
+    wait(meshes: readonly Mesh[]): Promise<void>;
+    /** @internal */
+    _e(clear?: boolean): void;
+    /** @internal */
+    _x(error: unknown): void;
+    /** @internal */
+    _d(): boolean;
+    exclusive<T>(builder: MeshGroupBuilder, work: () => Promise<T>): Promise<T>;
+}
+
+/** @internal Scene-owned mesh group plus the rebuild closure captured by its completed build. */
+export interface SceneMeshGroup extends Array<Mesh> {
+    r?: NonNullable<MeshGroupBuilder["_rebuildSingle"]>;
+}
+
+let _lateCleanup: WeakMap<SceneContext, () => 1> | null = null;
+
 /** Top-level scene context — pure state, no attached methods. */
 export interface SceneContext extends RenderingContext {
     /** @internal */
@@ -106,7 +132,13 @@ export interface SceneContext extends RenderingContext {
     /** @internal Deferred builders — registered by loaders/factories, run once at startEngine(). */
     _deferredBuilders: (() => void | Promise<void>)[];
     /** @internal Mesh group registry — maps builder to its mesh list (internal bookkeeping). */
-    _groups: Map<MeshGroupBuilder, Mesh[]>;
+    _groups: Map<MeshGroupBuilder, SceneMeshGroup>;
+    /** @internal Lazy runtime-build hooks; absent in scenes that never widen a material group post-build. */
+    _runtimeBuilds?: RuntimeSceneBuildHooks;
+    /** @internal True after scene disposal; used to abort asynchronous recovery/rebuild work. */
+    _z?: boolean;
+    /** @internal Temporary PBR transmission transaction sink used while rebuilding scene material groups. */
+    _p?: (value: readonly [commit: () => void, rollback: () => void]) => boolean;
 
     // ─── Dispose infrastructure ────────────────────────────────
     /** @internal Shared cleanup callbacks (scene UBOs, lights UBOs, etc.). Registered by builders. */
@@ -131,17 +163,10 @@ export interface SceneContext extends RenderingContext {
      *  were actually destroyed/recreated (which would otherwise leave their cached views dangling). */
     _materialEpoch: number;
     /** True once the initial deferred build (buildScene) has run. Meshes added after
-     *  this point are materialized via the per-frame swap drain rather than the
-     *  boot-only deferred-builder path. */
+     *  this point use either the per-frame rebuild drain or an isolated async build
+     *  when they widen the group's captured capabilities. */
     /** @internal */
     _built: boolean;
-    /** Builders whose deferred group build has COMPLETED. A mesh that joins one of these groups after the fact
-     *  (post-boot, or a glTF prop whose async load resolves DURING buildScene's drain and joins an already-built
-     *  group) is materialized via the per-frame swap drain: its group builder has already run and won't see it,
-     *  so without this it would cast shadows (it's in ctx.meshes) but never be drawn in the color pass. */
-    /** @internal */
-    _builtGroups: Set<MeshGroupBuilder>;
-
     // ─── Stashed internal state (typed to avoid `as any` casts) ────
     /** @internal */
     _envTextures?: EnvironmentTextures;
@@ -202,7 +227,6 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         _renderableVersion: 0,
         _materialEpoch: 0,
         _built: false,
-        _builtGroups: new Set(),
         _drawCallsPre: 0,
 
         _update(): void {
@@ -224,7 +248,7 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
                 cb(d);
             }
             if (ctx._materialSwapQueue.length) {
-                processMaterialSwaps(ctx);
+                void processMaterialSwaps(ctx);
             }
             for (const pp of ctx._prePasses) {
                 draws += pp.execute(encoder, eng);
@@ -351,27 +375,27 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
         if (build) {
             let group = ctx._groups.get(build);
             if (!group) {
-                group = [];
+                group = [] as SceneMeshGroup;
                 ctx._groups.set(build, group);
-                ctx._deferredBuilders.push(async () => {
-                    const result = await build(ctx, group!);
-                    ctx._renderables.push(...result.renderables);
-                    if (result.updater) {
-                        ctx._uniformUpdaters.push(result.updater);
-                    }
-                    // This group's meshes now have renderables; a mesh that joins it LATER (post-boot or
-                    // mid-drain) won't be seen by this builder and must be materialized via a swap instead.
-                    ctx._builtGroups.add(build);
-                });
+                if (!ctx._built) {
+                    ctx._deferredBuilders.push(async () => {
+                        const result = await build(ctx, group!);
+                        ctx._renderables.push(...result.renderables);
+                        if (result.updater) {
+                            ctx._uniformUpdaters.push(result.updater);
+                        }
+                        group!.r = result.rebuildSingle;
+                    });
+                }
             }
             group.push(mesh);
             // Materialize this mesh's renderable through the per-frame material-swap drain when the boot-only
             // deferred builder won't cover it: either after the initial build (`_built`), or when joining a group
-            // whose builder has ALREADY completed (`_builtGroups`) — e.g. a glTF prop whose async load resolves
+            // whose builder has ALREADY completed (`group.r`) — e.g. a glTF prop whose async load resolves
             // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
             // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
             // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
-            if (ctx._built || ctx._builtGroups.has(build)) {
+            if (ctx._built || group.r) {
                 enqueueMaterialSwap(ctx, mesh);
             }
         }
@@ -391,41 +415,64 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
 /** Release all GPU resources owned by this scene. */
 export function disposeScene(scene: SceneContext): void {
     const ctx = scene as SceneContext;
+    if (ctx._z) {
+        return;
+    }
+    ctx._z = true;
+    const lateCleanup = (_lateCleanup ??= new WeakMap());
+    lateCleanup.set(ctx, () => 1);
     unregisterRenderingContext(ctx.surface, ctx);
-    for (const fn of ctx._disposables) {
-        fn();
-    }
-    for (const fns of ctx._meshDisposables.values()) {
-        for (const fn of fns) {
+    const cleanup = (): void => {
+        lateCleanup.set(ctx, () => {
+            for (const fns of ctx._meshDisposables.values()) {
+                fns.forEach((dispose) => dispose());
+            }
+            for (const fns of ctx._meshAuxDisposables.values()) {
+                fns.forEach((dispose) => dispose());
+            }
+            ctx._meshDisposables.clear();
+            ctx._meshAuxDisposables.clear();
+            ctx._disposables.splice(0).forEach((dispose) => dispose());
+            ctx._renderables.length = ctx._uniformUpdaters.length = 0;
+            return 1;
+        });
+        for (const fn of ctx._disposables) {
             fn();
         }
-    }
-    ctx._meshDisposables.clear();
-    for (const fns of ctx._meshAuxDisposables.values()) {
-        for (const fn of fns) {
-            fn();
+        for (const fns of ctx._meshDisposables.values()) {
+            for (const fn of fns) {
+                fn();
+            }
         }
-    }
-    ctx._meshAuxDisposables.clear();
-    for (const mesh of ctx.meshes) {
-        // Free the mesh's shared GPU buffers only when this was its LAST owning scene.
-        if (unregisterMeshScene(ctx, mesh)) {
-            disposeMeshGpu(mesh);
+        ctx._meshDisposables.clear();
+        for (const fns of ctx._meshAuxDisposables.values()) {
+            for (const fn of fns) {
+                fn();
+            }
         }
-    }
-    ctx.meshes.length = 0;
-    ctx._renderables.length = 0;
-    ctx._prePasses.length = 0;
-    ctx._pickSources.length = 0;
-    ctx._uniformUpdaters.length = 0;
-    ctx._beforeRender.length = 0;
-    ctx._deferredBuilders.length = 0;
-    ctx._disposables.length = 0;
-    ctx._materialSwapQueue.length = 0;
-    ctx.lights.length = 0;
-    ctx.animationGroups.length = 0;
-    ctx.shadowGenerators.length = 0;
-    ctx.camera = null;
+        ctx._meshAuxDisposables.clear();
+        for (const mesh of ctx.meshes) {
+            // Free the mesh's shared GPU buffers only when this was its LAST owning scene.
+            if (unregisterMeshScene(ctx, mesh)) {
+                disposeMeshGpu(mesh);
+            }
+        }
+        ctx._groups.clear();
+        ctx.meshes.length = 0;
+        ctx._renderables.length = 0;
+        ctx._prePasses.length = 0;
+        ctx._pickSources.length = 0;
+        ctx._uniformUpdaters.length = 0;
+        ctx._beforeRender.length = 0;
+        ctx._deferredBuilders.length = 0;
+        ctx._disposables.length = 0;
+        ctx._materialSwapQueue.length = 0;
+        ctx.lights.length = 0;
+        ctx.animationGroups.length = 0;
+        ctx.shadowGenerators.length = 0;
+        ctx.camera = null;
+    };
+    cleanup();
 }
 
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */
@@ -435,18 +482,18 @@ export async function buildScene(scene: SceneContext): Promise<void> {
     // via the mesh.material setter (e.g. scene12 assigns each row's material AFTER addToScene). The deferred
     // builders below build every group's meshes fresh with their FINAL material, so those swaps are redundant;
     // processing them would insert a SECOND renderable per mesh (double-draw). Only swaps enqueued DURING the
-    // drain below — an async mesh that joins an already-built group (see addToScene/_builtGroups) — must survive.
+    // drain below — an async mesh that joins an already-built group (see addToScene/group.r) — must survive.
     ctx._materialSwapQueue.length = 0;
     while (ctx._deferredBuilders.length) {
-        const builders = [...ctx._deferredBuilders];
-        ctx._deferredBuilders = [];
-        await Promise.all(builders.map(async (b) => b()));
+        const builders = ctx._deferredBuilders.splice(0);
+        // Promise.all treats synchronous void results as already resolved.
+        // eslint-disable-next-line @typescript-eslint/await-thenable
+        await Promise.all(builders.map((b) => b()));
     }
     // Build the renderables for any meshes that joined an already-built group mid-drain (queued above) before
     // the first frame, instead of leaving them casting shadows but invisible in the color pass.
-    processMaterialSwaps(ctx);
-    ctx._renderableVersion++;
-    ctx._built = true;
+    await processMaterialSwaps(ctx);
+    _lateCleanup?.get(ctx)?.() || (ctx._runtimeBuilds?._e(), ctx._renderableVersion++, (ctx._built = true));
 }
 
 /**
@@ -463,13 +510,15 @@ export async function registerScene(scene: SceneContext): Promise<void> {
     }
     await buildScene(scene);
     ctx._renderables.sort(byOrder);
-    await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload): preload is Promise<void> => preload !== undefined));
+    // Promise.all treats tasks without a preload hook as already resolved.
+    // eslint-disable-next-line @typescript-eslint/await-thenable
+    await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()));
     ctx._frameGraph.build();
-    if (surface._renderingContexts.length) {
+    if (surface._renderingContexts[0]) {
         const overlay = await import("./swapchain-overlay.js");
         overlay.configureSwapchainOverlayScene(surface, ctx);
     }
-    registerRenderingContext(surface, ctx);
+    _lateCleanup?.get(ctx)?.() || registerRenderingContext(surface, ctx);
 }
 
 /**
@@ -486,13 +535,15 @@ export async function registerSceneWithShadowSupport(scene: SceneContext): Promi
     await buildScene(scene);
     ctx._renderables.sort(byOrder);
     await ensureShadowTask(surface.engine, ctx);
-    await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload): preload is Promise<void> => preload !== undefined));
+    // Promise.all treats tasks without a preload hook as already resolved.
+    // eslint-disable-next-line @typescript-eslint/await-thenable
+    await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()));
     ctx._frameGraph.build();
-    if (surface._renderingContexts.length) {
+    if (surface._renderingContexts[0]) {
         const overlay = await import("./swapchain-overlay.js");
         overlay.configureSwapchainOverlayScene(surface, ctx);
     }
-    registerRenderingContext(surface, ctx);
+    _lateCleanup?.get(ctx)?.() || registerRenderingContext(surface, ctx);
 }
 
 const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;

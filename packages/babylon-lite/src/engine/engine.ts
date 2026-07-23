@@ -137,6 +137,10 @@ export interface EngineContext extends SurfaceContext {
      *  loader-only PBR scenes pay zero bundle bytes. Device-lost recovery rebuilds it
      *  in place via the solid-texture recovery path. */
     _pbrFallbackTex?: Texture2D;
+    /** @internal Stable cache cleanup callbacks used by scene material groups. */
+    _pbrCleanup?: () => void;
+    /** @internal */
+    _standardCleanup?: () => void;
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
     /** @internal */

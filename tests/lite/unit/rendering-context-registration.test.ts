@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 import {
     isRenderingContextRegistered,
@@ -9,7 +9,10 @@ import {
 } from "../../../packages/babylon-lite/src/engine/engine";
 import { addTaskAtStart } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
-import { createSceneContext, disposeScene, registerScene, unregisterScene } from "../../../packages/babylon-lite/src/scene/scene";
+import { addToScene, createSceneContext, disposeScene, registerScene, unregisterScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import type { Material } from "../../../packages/babylon-lite/src/material/material";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUShaderStage" | "GPUBufferUsage" | "GPUTextureUsage"> & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
@@ -128,6 +131,62 @@ describe("registerScene / unregisterScene", () => {
         disposeScene(scene);
 
         expect(list).toEqual([]);
+    });
+
+    it("releases material group mesh references when disposing", () => {
+        const scene = createSceneContext(makeMockEngine());
+        const builder = vi.fn() as unknown as MeshGroupBuilder;
+        const mesh = { material: { _buildGroup: builder }, children: [] } as unknown as Mesh;
+        scene._groups.set(builder, [mesh]);
+
+        disposeScene(scene);
+
+        expect(scene._groups.size).toBe(0);
+    });
+
+    it("does not register resources that finish building after scene disposal", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const lateDispose = vi.fn();
+        const destroy = vi.fn();
+        let startBuild!: () => void;
+        let finishBuild!: () => void;
+        const started = new Promise<void>((resolve) => (startBuild = resolve));
+        const finish = new Promise<void>((resolve) => (finishBuild = resolve));
+        const builder = (async (ctx: SceneContext, meshes: Mesh[]) => {
+            startBuild();
+            await finish;
+            const rebuild = (_target: typeof ctx, mesh: Mesh): Renderable => ({ mesh, order: 100, isTransparent: false }) as Renderable;
+            for (const mesh of meshes) {
+                ctx._meshDisposables.set(mesh, [lateDispose]);
+            }
+            return { renderables: meshes.map((mesh) => rebuild(ctx, mesh)), rebuildSingle: rebuild };
+        }) as MeshGroupBuilder;
+        const material = { _buildGroup: builder } as Material;
+        const mesh = {
+            _gpu: {
+                positionBuffer: { destroy },
+                normalBuffer: { destroy },
+                uvBuffer: { destroy },
+                indexBuffer: { destroy },
+                tangentBuffer: null,
+                uv2Buffer: null,
+                colorBuffer: null,
+            },
+            material,
+            children: [],
+        } as unknown as Mesh;
+        addToScene(scene, mesh);
+
+        const registration = registerScene(scene);
+        await started;
+        disposeScene(scene);
+        finishBuild();
+        await registration;
+
+        expect(isRenderingContextRegistered(engine, scene)).toBe(false);
+        expect(scene._renderables).toHaveLength(0);
+        expect(lateDispose).toHaveBeenCalledOnce();
     });
 
     it("records frame-graph tasks added before scene registration", async () => {
