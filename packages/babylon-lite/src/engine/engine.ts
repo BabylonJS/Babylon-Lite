@@ -7,6 +7,7 @@ import { _buildSurface, _refreshScRT, isDomCanvas, resizeSurface, setSurfaceSize
 import type { GpuFrameTimer } from "./gpu-timer.js";
 import type { GpuTaskTimer } from "./gpu-task-timer.js";
 import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
+import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
 import { disposeGpuResourceRetirements } from "./gpu-resource-retirement.js";
 
 // `__BL_VERSION__` is replaced at build time with the resolved package version
@@ -138,6 +139,8 @@ export interface EngineContext extends SurfaceContext {
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
     /** @internal */
+    _deviceLostRecovery?: DeviceLostRecoveryState;
+    /** @internal */
     _animFrameId: number;
     /** @internal */
     _renderFn: ((now: number) => void) | null;
@@ -208,6 +211,8 @@ export interface EngineContext extends SurfaceContext {
  * own their own update / record logic. Engine knows nothing of scene internals.
  */
 export interface RenderingContext {
+    /** @internal Discriminator used by opt-in device-loss recovery handlers. */
+    readonly _kind: string;
     /** @internal Draw calls produced by pre-pass work during `_update` (shadows + pre-passes). */
     _drawCallsPre: number;
     /** Clear color used when this context is the first active one in a frame. */

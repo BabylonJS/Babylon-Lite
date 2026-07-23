@@ -47,6 +47,7 @@ describe("GPU resource retirement", () => {
             createView: vi.fn(() => ({}) as GPUTextureView),
         } as unknown as GPUTexture;
         const renderingContext: RenderingContext = {
+            _kind: "test",
             _drawCallsPre: 0,
             clearColor: { r: 0, g: 0, b: 0, a: 1 },
             _update: vi.fn(),

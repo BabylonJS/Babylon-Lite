@@ -23,6 +23,8 @@ export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
 export { captureScreenshot } from "./engine/screenshot.js";
 export type { Screenshot } from "./engine/screenshot.js";
+export { enableDeviceLostSceneRecovery } from "./engine/device-lost-scene-recovery.js";
+export type { DeviceLostSceneRecoveryOptions, DeviceLostSceneRecoveryHandle } from "./engine/device-lost-scene-recovery.js";
 export {
     createSceneContext,
     createDefaultCamera,

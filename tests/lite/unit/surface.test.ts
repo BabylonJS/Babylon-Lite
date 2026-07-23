@@ -89,6 +89,7 @@ function makeMockEngine(): EngineContext {
 
 function makeRenderingContext(onResize?: () => void): RenderingContext {
     return {
+        _kind: "test",
         _drawCallsPre: 0,
         clearColor: { r: 0, g: 0, b: 0, a: 1 },
         _update(): void {
