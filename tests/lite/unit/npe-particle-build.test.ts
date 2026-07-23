@@ -32,6 +32,16 @@ describe("NPE build reachability", () => {
         expect(set.systems[0]!.buffer.posX).toBeInstanceOf(Float32Array);
     });
 
+    it("uses the Babylon NPE update-speed default when it is not serialized", async () => {
+        const source = structuredClone(SCENE262_NPE_JSON) as { blocks: Array<Record<string, unknown>> };
+        const system = source.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;
+        delete system.updateSpeed;
+
+        const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(source));
+
+        expect(set.systems[0]!.updateSpeed).toBe(0.0167);
+    });
+
     it("ignores detached unsupported and OncePerParticle blocks", async () => {
         const source = JSON.parse(JSON.stringify(SCENE262_NPE_JSON)) as { blocks: Array<Record<string, unknown>> };
         source.blocks.push(

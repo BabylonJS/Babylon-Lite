@@ -1,10 +1,10 @@
 {
-  "rawKB": 41.7,
+  "rawKB": 41.6,
   "gzipKB": 25.2,
   "ignoredRawKB": 29.6,
   "runtimeChunks": [
     "scene268-basic-sprite-update-block-DSn0_OjD.js",
-    "scene268-billboard-renderable-B0pqbhWk.js",
+    "scene268-billboard-renderable-CPZyT3fn.js",
     "scene268-box-shape-block-GpRjrMBZ.js",
     "scene268-create-particle-block-Ck2dBxWH.js",
     "scene268-generate-mipmaps-BnaIWiv-.js",

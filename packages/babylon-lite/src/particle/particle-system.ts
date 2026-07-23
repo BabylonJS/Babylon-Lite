@@ -81,7 +81,7 @@ export function createParticleSystem(capacity: number): ParticleSystem {
     return {
         buffer: createParticleBuffer(capacity),
         emitRate: 10,
-        updateSpeed: 0.016666666666666666,
+        updateSpeed: 0.0167,
         targetStopDuration: 0,
         blendMode: 2,
         texture: null,
