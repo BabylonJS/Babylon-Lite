@@ -1,5 +1,5 @@
 {
-  "rawKB": 105.4,
+  "rawKB": 105.3,
   "gzipKB": 44.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene7-gltf-animation-DIyf0usL.js",
     "scene7-gltf-feature-animations-DKV_1Sen.js",
     "scene7-gltf-feature-extras-VHPteGay.js",
-    "scene7-gltf-feature-registry-CzQ9T38K.js",
+    "scene7-gltf-feature-registry-a5lxxKAJ.js",
     "scene7-gltf-feature-skeleton-D8V1wC59.js",
     "scene7-gltf-json-asset-DPeJvtBg.js",
     "scene7-ibl-fragment-CeRrvT96.js",
