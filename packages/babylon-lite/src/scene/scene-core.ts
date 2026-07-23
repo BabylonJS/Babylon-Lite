@@ -223,7 +223,7 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
             for (const cb of ctx._beforeRender) {
                 cb(d);
             }
-            if (ctx._materialSwapQueue.length > 0) {
+            if (ctx._materialSwapQueue.length) {
                 processMaterialSwaps(ctx);
             }
             for (const pp of ctx._prePasses) {
@@ -437,7 +437,7 @@ export async function buildScene(scene: SceneContext): Promise<void> {
     // processing them would insert a SECOND renderable per mesh (double-draw). Only swaps enqueued DURING the
     // drain below — an async mesh that joins an already-built group (see addToScene/_builtGroups) — must survive.
     ctx._materialSwapQueue.length = 0;
-    while (ctx._deferredBuilders.length > 0) {
+    while (ctx._deferredBuilders.length) {
         const builders = [...ctx._deferredBuilders];
         ctx._deferredBuilders = [];
         await Promise.all(builders.map(async (b) => b()));
@@ -465,7 +465,7 @@ export async function registerScene(scene: SceneContext): Promise<void> {
     ctx._renderables.sort(byOrder);
     await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload): preload is Promise<void> => preload !== undefined));
     ctx._frameGraph.build();
-    if (surface._renderingContexts.length > 0) {
+    if (surface._renderingContexts.length) {
         const overlay = await import("./swapchain-overlay.js");
         overlay.configureSwapchainOverlayScene(surface, ctx);
     }
@@ -488,7 +488,7 @@ export async function registerSceneWithShadowSupport(scene: SceneContext): Promi
     await ensureShadowTask(surface.engine, ctx);
     await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload): preload is Promise<void> => preload !== undefined));
     ctx._frameGraph.build();
-    if (surface._renderingContexts.length > 0) {
+    if (surface._renderingContexts.length) {
         const overlay = await import("./swapchain-overlay.js");
         overlay.configureSwapchainOverlayScene(surface, ctx);
     }

@@ -5,11 +5,11 @@
   "runtimeChunks": [
     "scene222-gpu-pool-CHlSfwGp.js",
     "scene222-shader-pipeline-cache-D29RDV1n.js",
-    "scene222-shader-renderable-ByHfRNH8.js",
+    "scene222-shader-renderable-Dspm2yMY.js",
     "scene222-standard-renderable-zz9EQk_a.js",
     "scene222-swapchain-overlay-ilhN4El_.js",
     "scene222-ubo-layout-Cs5YvLYZ.js",
-    "scene222-uniform-copy-batch-C-uys1Uz.js",
+    "scene222-uniform-copy-batch-DD4uo5AN.js",
     "scene222.js"
   ]
 }

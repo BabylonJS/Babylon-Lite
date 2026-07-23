@@ -3,13 +3,13 @@
   "gzipKB": 23.1,
   "ignoredRawKB": 4.3,
   "runtimeChunks": [
-    "scene64-_math-factory-CwUyqp43.js",
+    "scene64-_math-factory-BVVAAq_6.js",
     "scene64-fragment-output-CfRmfbPv.js",
-    "scene64-input-block-6dRm0FrQ.js",
+    "scene64-input-block-CjPkWVoQ.js",
     "scene64-morph-targets-CsnL5CDS.js",
-    "scene64-node-registry-C7XM3Q8T.js",
-    "scene64-node-renderable-D3Rqmv3y.js",
-    "scene64-transform-block-B0WVoEZd.js",
+    "scene64-node-registry-s2x4B9h-.js",
+    "scene64-node-renderable-CFBst0Yp.js",
+    "scene64-transform-block-B6sOvWYU.js",
     "scene64-vertex-output-C7G5u6Y0.js",
     "scene64.js"
   ]

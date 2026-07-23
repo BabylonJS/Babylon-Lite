@@ -258,7 +258,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
                 task._renderables.length = 0;
             }
             resolvePendingMeshes(task, sc);
-            task._autoFromScene = task._renderables.length === 0;
+            task._autoFromScene = !task._renderables.length;
             if (task._autoFromScene) {
                 task._renderables.push(...sc._renderables);
             }
@@ -346,7 +346,7 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolvePendingMeshes(task: RenderTask, sc: SceneContext): void {
-    if (task._pendingMeshes.length === 0) {
+    if (!task._pendingMeshes.length) {
         return;
     }
     for (const { mesh, material } of task._pendingMeshes) {
@@ -533,7 +533,7 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
 
     // Opaque: cached render bundle. Invalidated by scene mutation (_renderableVersion) or
     // the global visibility/resource epoch (_vis). The bundle records group(0) at its start.
-    if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || opaqueBundles.length === 0) {
+    if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || !opaqueBundles.length) {
         const desc = rt._descriptor;
         const be = eng._device.createRenderBundleEncoder({
             colorFormats: desc.format ? [desc.format] : [],
