@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { BU } from "../../../packages/babylon-lite/src/engine/gpu-flags.js";
+import { U32 } from "../../../packages/babylon-lite/src/engine/typed-arrays.js";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types.js";
 import { share } from "../../../packages/babylon-lite/src/loader-gltf/gltf-share.js";
-import type { GltfFeature, GltfLoadCtx } from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature.js";
+import type { GltfLoadCtx } from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature.js";
 import type { GltfMaterialData } from "../../../packages/babylon-lite/src/loader-gltf/gltf-material.js";
 import type { GltfMeshData } from "../../../packages/babylon-lite/src/loader-gltf/load-gltf.js";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose.js";
+import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import type { PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import { createMappedBuffer } from "../../../packages/babylon-lite/src/resource/gpu-buffers.js";
 
 function makeEngine() {
     const createBuffer = vi.fn((descriptor: GPUBufferDescriptor) => {
@@ -44,6 +48,30 @@ function makeMeshData(nodeIndex: number, primitive: object, material: GltfMateri
     };
 }
 
+function buildTightMesh(engine: EngineContext, meshData: GltfMeshData, material: PbrMaterialProps, name: string, source?: Mesh): Mesh {
+    const gpu: MeshGPU =
+        source?._gpu ??
+        ({
+            positionBuffer: createMappedBuffer(engine, meshData._positions!, BU.VERTEX),
+            normalBuffer: createMappedBuffer(engine, meshData._normals!, BU.VERTEX),
+            uvBuffer: createMappedBuffer(engine, meshData._uvs!, BU.VERTEX),
+            indexBuffer: createMappedBuffer(engine, meshData._indices, BU.INDEX),
+            indexCount: meshData._indexCount,
+            indexFormat: "uint16",
+        } satisfies MeshGPU);
+    const mesh = {
+        name,
+        material,
+        receiveShadows: false,
+        _gpu: gpu,
+    } as Mesh;
+    mesh._cpuPositions = meshData._positions!;
+    mesh._cpuNormals = meshData._normals!;
+    mesh._cpuUvs = meshData._uvs!;
+    mesh._cpuIndices = source?._cpuIndices ?? new U32(meshData._indices);
+    return mesh;
+}
+
 describe("glTF geometry sharing scope", () => {
     it("does not retain an owner from an inactive glTF scene", async () => {
         const primitive = {};
@@ -56,7 +84,7 @@ describe("glTF geometry sharing scope", () => {
         };
         const { createBuffer, engine } = makeEngine();
         const ctx = { _engine: engine, _json: json } as unknown as GltfLoadCtx;
-        const meshes = await share([makeMeshData(0, primitive, material), makeMeshData(1, primitive, material)], async () => ({}) as PbrMaterialProps, [] as GltfFeature[], ctx);
+        const meshes = await share([makeMeshData(0, primitive, material), makeMeshData(1, primitive, material)], async () => ({}) as PbrMaterialProps, buildTightMesh, [], ctx);
 
         expect(meshes[1]!._gpu).not.toBe(meshes[0]!._gpu);
         expect(meshes[0]!._gpu._refCount).toBeUndefined();

@@ -183,6 +183,7 @@ A few orientation notes for patterns that differ from Babylon.js. These are poin
 - **Parenting and hierarchies.** Build transform hierarchies with `createTransformNode()` and parent nodes to it; world matrices propagate lazily. `cloneTransformNode()` duplicates a node subtree. See **[Scene Hierarchy & Parenting](architecture/11-scene-hierarchy-parenting.md)**.
 - **Hiding things.** Toggle a node and its descendants with `setSubtreeVisible(node, false)` rather than disposing — useful for object pooling and show/hide without paying re-upload costs.
 - **Animation.** glTF animation clips arrive on the asset container as **animation groups** that `addToScene()` registers automatically; play, pause, seek, and loop them. See **[Animation](architecture/07-animation.md)**.
+- **Reading error messages.** To keep bundles lean, Lite errors are just numeric codes by default (`error.message` is `#<code>`). Call `enableErrorDecoding()` for full messages everywhere (great in dev, best avoided in production), or `decodeError(err)` to reconstruct a single caught error's full text on demand — e.g. dynamically imported inside a `catch` to log a production error for telemetry. See **[Error Handling](architecture/49-error-handling.md)**.
 
 ---
 

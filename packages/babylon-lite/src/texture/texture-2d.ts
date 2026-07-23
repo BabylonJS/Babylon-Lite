@@ -47,7 +47,30 @@ export interface Texture2D {
 export type Texture2DRecoverySource =
     | { kind: "url"; url: string; opts: Texture2DOptions }
     | { kind: "solid"; rgba: readonly [number, number, number, number] }
-    | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array; samplerDesc: GPUSamplerDescriptor };
+    | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array; samplerDesc: GPUSamplerDescriptor }
+    | {
+          /** A `createDynamicTexture` texture. Like the url/solid/bitmap kinds,
+           *  this carries only the *data* needed to rebuild after device loss — no
+           *  logic. The rebuild itself lives in the `dynamic-texture-recovery`
+           *  module, which device-lost-recovery dynamically imports only when a
+           *  dynamic texture actually needs rebuilding. So the create/update API
+           *  never bundles recovery code, and a scene that enables recovery but
+           *  never creates a dynamic texture never bundles the rebuild logic
+           *  either (it lands in a lazily-loaded chunk). `source` is the live
+           *  external image retained by the last `updateDynamicTexture` (a
+           *  persistent canvas survives loss and is re-blitted); it is null until
+           *  the first update. The caller owns the source's lifetime, so it is not
+           *  cleared here on texture release. */
+          kind: "dynamic";
+          width: number;
+          height: number;
+          format: GPUTextureFormat;
+          levels: number;
+          samplerDesc: GPUSamplerDescriptor;
+          source: GPUCopyExternalImageSource | null;
+          flipY: boolean;
+          premultipliedAlpha: boolean;
+      };
 
 /** Create a fresh Texture2D wrapper that shares GPU resources with `base`
  *  but carries its own UV transform. Use this when the same underlying image

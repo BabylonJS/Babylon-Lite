@@ -170,7 +170,7 @@ function serveReferenceImages(): Plugin {
             server.middlewares.use((req, res, next) => {
                 const url = (req.url ?? "").split("?")[0]; // strip query string
                 const liteHtmlCompat = url.match(
-                    /^\/((?:scene|bundle-scene|bundle-bjs-scene|babylon-ref-scene|bundle-baseline-scene)\d+|demo-[^/]+|dispose-test|leak-test|material-swap-test|picking-test|billboard-pick-test)\.html$/
+                    /^\/((?:scene|bundle-scene|bundle-bjs-scene|babylon-ref-scene|bundle-baseline-scene)\d+|demo-[^/]+|dispose-test|leak-test|material-swap-test|picking-test|vat-picking-test|billboard-pick-test)\.html$/
                 );
                 if (liteHtmlCompat) {
                     const name = liteHtmlCompat[1];

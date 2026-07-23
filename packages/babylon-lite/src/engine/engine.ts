@@ -135,6 +135,10 @@ export interface EngineContext extends SurfaceContext {
      *  loader-only PBR scenes pay zero bundle bytes. Device-lost recovery rebuilds it
      *  in place via the solid-texture recovery path. */
     _pbrFallbackTex?: Texture2D;
+    /** @internal Stable cache cleanup callbacks used by scene material groups. */
+    _pbrCleanup?: () => void;
+    /** @internal */
+    _standardCleanup?: () => void;
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
     /** @internal */
@@ -316,13 +320,16 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     }
 
     const features: GPUFeatureName[] = [];
-    if (adapter.features.has("float32-filterable")) {
-        features.push("float32-filterable");
-    }
-    // `timestamp-query` is requested opportunistically (like the compression features above) so a later
-    // `setGpuTimingEnabled` can measure GPU frame time. Requesting an available feature is free; the timer
-    // itself ships only when `setGpuTimingEnabled` is called. Devices without it just can't enable timing.
-    for (const f of ["texture-compression-astc", "texture-compression-bc", "texture-compression-etc2", "timestamp-query"] as GPUFeatureName[]) {
+    // Optional features are requested opportunistically so their public enable functions can activate
+    // later without recreating the device. Unsupported adapters keep the corresponding feature inactive.
+    for (const f of [
+        "float32-filterable",
+        "texture-compression-astc",
+        "texture-compression-bc",
+        "texture-compression-etc2",
+        "timestamp-query",
+        "primitive-index",
+    ] as GPUFeatureName[]) {
         if (adapter.features.has(f)) {
             features.push(f);
         }

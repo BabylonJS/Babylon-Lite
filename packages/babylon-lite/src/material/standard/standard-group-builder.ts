@@ -1,7 +1,36 @@
 import type { EngineContext } from "../../engine/engine.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
-import { _registerStdExt } from "./standard-flags.js";
-import type { StandardMaterialProps } from "./standard-material.js";
+import type { ShaderFragment } from "../../shader/fragment-types.js";
+import { _registerStdExt, STD_SCENE_FOG } from "./standard-flags.js";
+import type { StdExt } from "./standard-flags.js";
+import type { StandardMaterialProps, StandardSceneShaderContext } from "./standard-material.js";
+
+// ─── Durable opt-in mesh-feature preload seam ───────────────────────
+//
+// An opt-in Standard mesh-feature ext (e.g. skeletal skinning) must be present in the
+// GLOBAL ext registry not only for the initial group build but for any LATER
+// SYNCHRONOUS `_rebuildSingle` — a skeletal mesh added AFTER `registerScene` (material
+// swap / per-pass override) cannot itself `import()`. The old design gated the import
+// on `meshes.some(isSkeletal)` at initial-build time, so a scene whose first group had
+// no skeletal mesh never imported the fragment and late skeletal meshes silently
+// rendered bind-pose.
+//
+// Instead each enabler (`enableStandardSkeleton()`) calls `_preloadStdMeshExt()`, which
+// EAGERLY imports the fragment and registers the ext the moment the enabler runs
+// (before `registerScene`). Registration is global + persistent, so it is durable
+// across late mesh adds and material swaps. The group builder additionally awaits any
+// pending preloads before its first build as a backstop. Zero bytes when no enabler is
+// called — the enabler module (and this import) fully tree-shakes away.
+let _stdMeshExtPreloads: Promise<void>[] | null = null;
+
+/** @internal Eagerly import + globally register an opt-in Standard mesh-feature ext so
+ *  it is available for both the initial build and any later synchronous rebuild. */
+export function _preloadStdMeshExt(load: () => Promise<unknown>, key: string): void {
+    const promise = load().then((mod) => {
+        _registerStdExt((mod as Record<string, StdExt>)[key]!);
+    });
+    (_stdMeshExtPreloads ??= []).push(promise);
+}
 
 /** Lazy-imports the standard renderable builder and builds the pipeline. */
 // Material-property → fragment-module dispatch table. Each entry is a plain
@@ -40,6 +69,7 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         let shadowFragment: any;
         let morphFragment: any;
         let cull: typeof import("../../mesh/thin-instance-cull-binding.js") | undefined;
+        let fogFragment: ShaderFragment | null = null;
 
         const imports: Promise<any>[] = [];
         if (hasTI) {
@@ -76,6 +106,18 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
                 })
             );
         }
+        if (scene.fog) {
+            imports.push(
+                import("./std-fog-wgsl.js").then((m) => {
+                    fogFragment = m.createStandardFogFragment();
+                })
+            );
+        }
+        if (_stdMeshExtPreloads) {
+            for (const preload of _stdMeshExtPreloads) {
+                imports.push(preload);
+            }
+        }
         for (const [prop, load, key] of _STD_MAT_EXTS) {
             if (meshes.some((m) => !!(m.material as any)[prop])) {
                 imports.push(load().then((mod) => _registerStdExt(mod[key])));
@@ -86,7 +128,8 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         }
 
         const renderableMod = await import("./standard-renderable.js");
-        const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiUpdate, tiFragment, shadowFragment, morphFragment, cull });
+        const sceneShader: StandardSceneShaderContext | null = scene.fog ? { _features: STD_SCENE_FOG, _fragments: [fogFragment!] } : null;
+        const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiUpdate, tiFragment, shadowFragment, morphFragment, cull, sceneShader });
         // Wire the per-mesh rebuild closure used by material swap + per-pass override.
         builder._rebuildSingle = result.rebuildSingle;
         return result;

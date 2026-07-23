@@ -94,5 +94,13 @@
         "description": "Build-and-play sandbox for small block worlds. Drop blocks into a starter scene, reshape them with move, clone, resize, paint, and delete tools, then run your character through what you built.",
         "tags": ["game", "sandbox", "showcase"],
         "mobile": false
+    },
+    {
+        "slug": "racer",
+        "name": "Racer",
+        "description": "A clean-room TypeScript port of Kenney's open-source \"Starter Kit Racing\" Godot demo, rebuilt on Babylon Lite with Havok physics, selectable vehicles, lap timing, drift effects, and camera modes. Uses Kenney's included CC0 models, textures, sounds, and track art.",
+        "tags": ["game", "showcase"],
+        "fetch": "racer",
+        "mobile": true
     }
 ]

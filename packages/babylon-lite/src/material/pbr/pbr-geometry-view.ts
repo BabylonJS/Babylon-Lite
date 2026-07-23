@@ -16,6 +16,7 @@
 import { createMaterialView } from "../material-view.js";
 import type { MaterialView } from "../material.js";
 import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
+import type { Camera } from "../../camera/camera.js";
 import { PBR_HAS_ALPHA_BLEND } from "./pbr-flags.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 import { getPbrGeometryGroupBuilder } from "./pbr-geometry-renderable.js";
@@ -43,6 +44,11 @@ export interface PbrGeometryViewConfig {
     readonly gpUBO?: GPUBuffer | null;
     /** Flip culling direction. */
     readonly reverseCulling?: boolean;
+    /** Effective task camera. When the geometry task renders with a `config.camera`
+     *  override, the per-mesh world/previous-world packing and floating-origin
+     *  invalidation must use THIS camera so they share the same origin as the task's
+     *  view-projection. Falls back to `scene.camera` when unset. */
+    readonly camera?: Camera | null;
 }
 
 /** PBR material view that emits geometry textures instead of shaded colour. */
@@ -56,8 +62,17 @@ export interface PbrGeometryMaterialView extends MaterialView {
     readonly _gpUBO: GPUBuffer | null;
     /** @internal */
     readonly _reverseCulling: boolean;
+    /** @internal Effective task camera (see {@link PbrGeometryViewConfig.camera});
+     *  `null` when the task uses the scene's active camera. A plain reference — no
+     *  GPU resource, so nothing to dispose. */
+    readonly _camera: Camera | null;
     /** @internal Shared per-view resources cache populated lazily by the renderable
-     *  factory. Opaque to callers. */
+     *  factory. Opaque to callers. PBR's cached per-variant resources are composed
+     *  WGSL, bind-group layouts, pipeline layouts, shader modules and pipelines — all
+     *  GC-reclaimed when the owning geometry task drops this view. There are no
+     *  explicitly-destroyable GPU buffers here (the per-mesh mesh/material UBOs are
+     *  freed by the renderable's `_geometryDispose`), so — unlike the Standard and Node
+     *  views — this view intentionally exposes NO `_disposeGeometryResources`. */
     _geometry?: unknown;
 }
 
@@ -99,6 +114,7 @@ export function createPbrGeometryMaterialView(source: PbrMaterialProps, config: 
     Object.defineProperty(view, "_emitColor", { value: config.emitColor, enumerable: false });
     Object.defineProperty(view, "_gpUBO", { value: config.gpUBO ?? null, enumerable: false });
     Object.defineProperty(view, "_reverseCulling", { value: config.reverseCulling ?? false, enumerable: false });
+    Object.defineProperty(view, "_camera", { value: config.camera ?? null, enumerable: false });
     Object.defineProperty(view, "_buildGroup", { value: getPbrGeometryGroupBuilder(), enumerable: false });
     return view;
 }

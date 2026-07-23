@@ -16,9 +16,10 @@
 import { createMaterialView } from "../material-view.js";
 import type { MaterialView } from "../material.js";
 import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
+import type { Camera } from "../../camera/camera.js";
 import { NODE_GEOMETRY_OUTPUT } from "./node-flags.js";
 import type { NodeMaterial } from "./node-material.js";
-import { getNodeGeometryGroupBuilder } from "./node-geometry-renderable.js";
+import { getNodeGeometryGroupBuilder, disposeNodeGeometryViewResources } from "./node-geometry-renderable.js";
 
 /** Per-task ordered attachment list driving the geometry template. The array
  *  index is the MRT color-attachment slot used in `@location(i)`. */
@@ -38,6 +39,11 @@ export interface NodeGeometryViewConfig {
     readonly gpUBO?: GPUBuffer | null;
     /** Flip culling direction. */
     readonly reverseCulling?: boolean;
+    /** Effective task camera. When the geometry task renders with a `config.camera`
+     *  override, the per-mesh world packing and floating-origin invalidation must use
+     *  THIS camera so they share the same origin as the task's view-projection. Falls
+     *  back to `scene.camera` when unset. */
+    readonly camera?: Camera | null;
 }
 
 /** NodeMaterial view that emits geometry textures instead of shaded colour. */
@@ -48,8 +54,16 @@ export interface NodeGeometryMaterialView extends MaterialView {
     readonly _gpUBO: GPUBuffer | null;
     /** @internal */
     readonly _reverseCulling: boolean;
+    /** @internal Effective task camera (see {@link NodeGeometryViewConfig.camera});
+     *  `null` when the task uses the scene's active camera. A plain reference — no
+     *  GPU resource, so nothing to dispose. */
+    readonly _camera: Camera | null;
     /** @internal Shared per-view resources cache populated lazily by the renderable factory. */
     _geometry?: unknown;
+    /** @internal Retire the view's shared GPU resources (shared node UBO + compile
+     *  cache). Set by {@link createNodeGeometryMaterialView}; called by the owning
+     *  geometry task when it discards this view on re-record/dispose. Idempotent. */
+    _disposeGeometryResources?: () => void;
 }
 
 /** Wrap a NodeMaterial as a geometry-output view.
@@ -66,6 +80,8 @@ export function createNodeGeometryMaterialView(source: NodeMaterial, config: Nod
     Object.defineProperty(view, "_geometryAttachments", { value: config.attachments, enumerable: false });
     Object.defineProperty(view, "_gpUBO", { value: config.gpUBO ?? null, enumerable: false });
     Object.defineProperty(view, "_reverseCulling", { value: config.reverseCulling ?? false, enumerable: false });
+    Object.defineProperty(view, "_camera", { value: config.camera ?? null, enumerable: false });
     Object.defineProperty(view, "_buildGroup", { value: getNodeGeometryGroupBuilder(), enumerable: false });
+    Object.defineProperty(view, "_disposeGeometryResources", { value: () => disposeNodeGeometryViewResources(view), enumerable: false });
     return view;
 }
