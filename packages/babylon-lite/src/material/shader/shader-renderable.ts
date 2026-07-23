@@ -471,22 +471,27 @@ function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: Sh
     // packets stay in `_meshDisposables` (torn down + rebuilt by the swap drain). Both are drained on real removal.
     const map = aux ? scene._meshAuxDisposables : scene._meshDisposables;
     const list = map.get(mesh) ?? [];
-    list.push(() => {
-        packet._disposed = true;
-        if (packet._owner) {
-            const oi = packet._owner.indexOf(packet);
-            if (oi >= 0) {
-                packet._owner.splice(oi, 1);
-            }
-            packet._owner = undefined;
-        }
-        packet.systemUBO.destroy();
-        for (const tex of packet._boundTextures) {
-            releaseTexture(tex);
-        }
-        packet._boundTextures = [];
-        packet._boundStorageBuffers = [];
-    });
+    list.push(
+        Object.assign(
+            () => {
+                packet._disposed = true;
+                if (packet._owner) {
+                    const oi = packet._owner.indexOf(packet);
+                    if (oi >= 0) {
+                        packet._owner.splice(oi, 1);
+                    }
+                    packet._owner = undefined;
+                }
+                packet.systemUBO.destroy();
+                for (const tex of packet._boundTextures) {
+                    releaseTexture(tex);
+                }
+                packet._boundTextures = [];
+                packet._boundStorageBuffers = [];
+            },
+            { p: packet }
+        )
+    );
     map.set(mesh, list);
 }
 

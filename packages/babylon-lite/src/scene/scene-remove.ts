@@ -167,9 +167,7 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     }
     // Drop from the material group registry so a later full rebuild (e.g. device-lost
     // recovery) doesn't try to re-materialize a disposed mesh.
-    const build = mesh.material?._buildGroup;
-    const group = build ? scene._groups.get(build) : undefined;
-    if (group) {
+    for (const group of scene._groups.values()) {
         const gi = group.indexOf(mesh);
         if (gi >= 0) {
             group.splice(gi, 1);
@@ -180,6 +178,7 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     if (qi >= 0) {
         scene._materialSwapQueue.splice(qi, 1);
     }
+    scene._runtimeBuilds?.remove(mesh);
     // Deregister from the world-matrix push registry so a long-lived parent stops
     // retaining/traversing this disposed child on every invalidation. (The parent→
     // child reference is new with the push model; reparent already deregisters, but
