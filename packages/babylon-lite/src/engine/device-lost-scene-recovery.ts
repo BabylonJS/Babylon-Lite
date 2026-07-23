@@ -2,7 +2,6 @@ import type { EngineContext } from "./engine.js";
 import { _enableDeviceLostRecovery } from "./device-lost-recovery.js";
 import type { DeviceLostRecoveryCallbacks, DeviceLostRecoveryHandle } from "./device-lost-recovery-types.js";
 import { _releaseDeviceLostRecoveryCapture, _retainDeviceLostRecoveryCapture } from "./device-lost-recovery-capture.js";
-import { clearSceneBGLCache } from "../render/scene-helpers.js";
 
 /**
  * Enable best-effort WebGPU device-lost recovery for every registered SceneContext.
@@ -22,7 +21,6 @@ export function enableDeviceLostSceneRecovery(engine: EngineContext, options: De
             _releaseDeviceLostRecoveryCapture(currentEngine, true);
         },
         async _recover(currentEngine): Promise<void> {
-            clearSceneBGLCache();
             const { rebuildRegisteredScenes } = await import("./recovery-rebuild.js");
             await rebuildRegisteredScenes(currentEngine);
         },

@@ -120,8 +120,12 @@ TextRenderer does not dispose `TextData` or `GlyphStorage`.
 
 ## Lazy Rebuild Boundaries
 
-Public enabler modules contain only callback wiring, kind registration, and
-small capture coordination. Their `_recover` callbacks use dynamic imports:
+The coordinator keeps only registration, required-feature capture, and the
+`device.lost` listener in the steady-state bundle. A loss dynamically imports
+`engine/device-lost-recovery-run`, which acquires and configures the replacement
+device, dispatches recovery handlers, and restarts rendering. Public enabler
+modules contain only callback wiring, kind registration, and small capture
+coordination. Their `_recover` callbacks use further dynamic imports:
 
 - Scene imports `engine/recovery-rebuild`;
 - Sprite imports `sprite/sprite-recovery`, which may import texture recovery;
@@ -164,6 +168,7 @@ module-level side effects; mutable caches remain null until an explicit call.
 ## File Manifest
 
 - `engine/device-lost-recovery.ts` — internal engine coordinator.
+- `engine/device-lost-recovery-run.ts` — loss-only device replacement and handler dispatch.
 - `engine/device-lost-recovery-capture.ts` — ref-counted opt-in capture.
 - `engine/device-lost-scene-recovery.ts` — public Scene adapter.
 - `engine/device-lost-sprite-recovery.ts` — public Sprite adapter.

@@ -18,29 +18,15 @@ function attachRecoveryCapture(engine: EngineContext): void {
                 srgb,
                 mipMaps,
                 fallback,
-                samplerDesc: {
-                    addressModeU: "repeat",
-                    addressModeV: "repeat",
-                    minFilter: "linear",
-                    magFilter: "linear",
-                    mipmapFilter: "linear",
-                    maxAnisotropy: 4,
-                },
             };
         },
         p(tex: Texture2D, data: Uint8Array, options: PixelsTexture2DOptions): void {
             tex._recoverySource = {
                 kind: "pixels",
-                data: new Uint8Array(data.subarray(0, tex.width * tex.height * 4)),
+                data: data.slice(0, tex.width * tex.height * 4),
                 width: tex.width,
                 height: tex.height,
-                format: options.srgb ? "rgba8unorm-srgb" : "rgba8unorm",
-                samplerDesc: {
-                    addressModeU: options.addressModeU ?? "clamp-to-edge",
-                    addressModeV: options.addressModeV ?? "clamp-to-edge",
-                    minFilter: options.minFilter ?? "nearest",
-                    magFilter: options.magFilter ?? "nearest",
-                },
+                options: { ...options },
             };
         },
         r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void {

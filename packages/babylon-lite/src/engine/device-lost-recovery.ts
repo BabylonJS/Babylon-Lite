@@ -1,7 +1,4 @@
 import type { EngineContext } from "./engine.js";
-import { resizeEngine, startEngine, stopEngine } from "./engine.js";
-import { TU } from "./gpu-flags.js";
-import { _refreshScRT } from "./surface.js";
 import type { DeviceLostRecoveryHandle } from "./device-lost-recovery-types.js";
 
 /** @internal */
@@ -94,7 +91,7 @@ function arm(engine: EngineContext, state: DeviceLostRecoveryState): void {
         return;
     }
     state._armedDevice = device;
-    void device.lost.then(async (info) => {
+    void device.lost.then((info) => {
         if (state._registrations.length === 0 || state._armedDevice !== device) {
             return;
         }
@@ -104,60 +101,24 @@ function arm(engine: EngineContext, state: DeviceLostRecoveryState): void {
         state._forceNextLoss = false;
 
         const registrations = [...state._registrations];
-        const handlers = new Map(registrations.map((registration) => [registration._kind, registration]));
         for (const registration of registrations) {
             registration._onLost?.(info);
         }
-        try {
-            await recoverDevice(engine, state, handlers);
-            arm(engine, state);
-            for (const registration of registrations) {
-                registration._onRecovered?.();
-            }
-        } catch (error) {
-            for (const registration of registrations) {
-                registration._onRecoveryFailed?.(error);
-            }
-        }
+
+        void import("./device-lost-recovery-run.js")
+            .then(({ _runDeviceLostRecovery }) => _runDeviceLostRecovery(engine, state, registrations))
+            .then(
+                () => {
+                    arm(engine, state);
+                    for (const registration of registrations) {
+                        registration._onRecovered?.();
+                    }
+                },
+                (error) => {
+                    for (const registration of registrations) {
+                        registration._onRecoveryFailed?.(error);
+                    }
+                }
+            );
     });
-}
-
-async function recoverDevice(engine: EngineContext, state: DeviceLostRecoveryState, handlers: ReadonlyMap<string, DeviceLostRecoveryRegistration>): Promise<void> {
-    const wasRunning = engine._renderFn !== null;
-    stopEngine(engine);
-
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
-    if (!adapter) {
-        throw new Error("WebGPU adapter not available during device recovery");
-    }
-    const missingFeatures = state._requiredFeatures.filter((feature) => !adapter.features.has(feature));
-    if (missingFeatures.length) {
-        throw new Error(`WebGPU device recovery missing required features: ${missingFeatures.join(", ")}`);
-    }
-    engine._device = await adapter.requestDevice({
-        requiredFeatures: state._requiredFeatures,
-        requiredLimits: { ...engine._options?.requiredLimits, ...engine._storageRequiredLimits },
-    });
-    engine._rebuildStorageBuffers?.();
-
-    for (const surface of engine.surfaces) {
-        const usage = surface._swapchainCopySrc ? TU.RENDER_ATTACHMENT | TU.COPY_SRC : TU.RENDER_ATTACHMENT;
-        surface._context.configure({
-            device: engine._device,
-            format: surface._configureFormat,
-            alphaMode: surface._alphaMode,
-            usage,
-            viewFormats: [surface.format],
-        });
-        _refreshScRT(surface);
-    }
-
-    resizeEngine(engine);
-    const orderedHandlers = Array.from(handlers.values()).sort((a, b) => (a._recoverOrder ?? 0) - (b._recoverOrder ?? 0));
-    for (const handler of orderedHandlers) {
-        await handler._recover(engine);
-    }
-    if (wasRunning) {
-        await startEngine(engine);
-    }
 }

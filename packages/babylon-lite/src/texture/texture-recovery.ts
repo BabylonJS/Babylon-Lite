@@ -51,9 +51,10 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
         return;
     }
     if (source.kind === "pixels") {
+        const options = source.options;
         const texture = engine._device.createTexture({
             size: { width: source.width, height: source.height },
-            format: source.format,
+            format: options.srgb ? "rgba8unorm-srgb" : "rgba8unorm",
             usage: TU.TEXTURE_BINDING | TU.COPY_DST,
         });
         engine._device.queue.writeTexture(
@@ -64,7 +65,12 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
         );
         tex.texture = texture;
         tex.view = texture.createView();
-        tex.sampler = getOrCreateSampler(engine, source.samplerDesc);
+        tex.sampler = getOrCreateSampler(engine, {
+            addressModeU: options.addressModeU ?? "clamp-to-edge",
+            addressModeV: options.addressModeV ?? "clamp-to-edge",
+            minFilter: options.minFilter ?? "nearest",
+            magFilter: options.magFilter ?? "nearest",
+        });
         tex.width = source.width;
         tex.height = source.height;
         return;
@@ -103,7 +109,14 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     }
     tex.texture = texture;
     tex.view = texture.createView();
-    tex.sampler = getOrCreateSampler(engine, source.samplerDesc);
+    tex.sampler = getOrCreateSampler(engine, {
+        addressModeU: "repeat",
+        addressModeV: "repeat",
+        minFilter: "linear",
+        magFilter: "linear",
+        mipmapFilter: "linear",
+        maxAnisotropy: 4,
+    });
     tex.width = width;
     tex.height = height;
 }

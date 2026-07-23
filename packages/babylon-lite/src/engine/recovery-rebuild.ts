@@ -4,7 +4,7 @@ import { isRenderingContextRegistered } from "./engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
-import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
+import { clearSceneBGLCache, getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { ensureSceneLightState } from "../render/lights-ubo.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import type { Texture2D } from "../texture/texture-2d.js";
@@ -46,6 +46,7 @@ interface RecoverableRenderTask {
  * if an actual device loss occurs.
  */
 export async function rebuildRegisteredScenes(engine: EngineContext): Promise<void> {
+    clearSceneBGLCache();
     for (const surface of engine.surfaces) {
         for (const ctx of surface._renderingContexts) {
             if (ctx._kind !== "scene") {

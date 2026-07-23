@@ -8,6 +8,7 @@ import type { EngineContext, RenderingContext } from "../../../packages/babylon-
 import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface.js";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import type { Texture2D, Texture2DOptions } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
+import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/texture-recovery.js";
 
 function context(kind: string): RenderingContext {
     return {
@@ -161,26 +162,61 @@ describe("device-lost recovery context dispatch", () => {
         recovery.disable();
     });
 
-    it("retains the glTF sampler settings used before device loss", () => {
+    it("restores the glTF sampler settings used before device loss", async () => {
+        const samplerDescriptors: GPUSamplerDescriptor[] = [];
+        const engine = {
+            _device: {
+                features: new Set<GPUFeatureName>(),
+                lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+                createTexture: vi.fn(() => ({
+                    createView: vi.fn(() => ({})),
+                })),
+                createSampler: vi.fn((descriptor: GPUSamplerDescriptor) => {
+                    samplerDescriptors.push(descriptor);
+                    return {};
+                }),
+                queue: {
+                    writeTexture: vi.fn(),
+                },
+            },
+        } as unknown as EngineContext;
+        const texture = {} as Texture2D;
+        const recovery = enableDeviceLostSceneRecovery(engine);
+
+        engine._dlr!.b(texture, null, true, true, new Uint8Array([255, 255, 255, 255]));
+        await rebuildTexture2D(engine, texture);
+
+        expect(samplerDescriptors).toContainEqual({
+            addressModeU: "repeat",
+            addressModeV: "repeat",
+            minFilter: "linear",
+            magFilter: "linear",
+            mipmapFilter: "linear",
+            maxAnisotropy: 4,
+        });
+        recovery.disable();
+    });
+
+    it("captures raw pixels and their options by value", () => {
         const engine = {
             _device: {
                 features: new Set<GPUFeatureName>(),
                 lost: new Promise<GPUDeviceLostInfo>(() => undefined),
             },
         } as unknown as EngineContext;
-        const texture = {} as Texture2D;
-        const recovery = enableDeviceLostSceneRecovery(engine);
+        const texture = { width: 1, height: 1 } as Texture2D;
+        const data = new Uint8Array([1, 2, 3, 4]);
+        const options = { srgb: true, minFilter: "nearest" as GPUFilterMode };
+        const recovery = enableDeviceLostSpriteRecovery(engine);
 
-        engine._dlr!.b(texture, {} as ImageBitmap, true, true);
+        engine._dlr!.p(texture, data, options);
+        data[0] = 9;
+        options.minFilter = "linear";
 
         expect(texture._recoverySource).toMatchObject({
-            kind: "bitmap",
-            samplerDesc: {
-                minFilter: "linear",
-                magFilter: "linear",
-                mipmapFilter: "linear",
-                maxAnisotropy: 4,
-            },
+            kind: "pixels",
+            data: new Uint8Array([1, 2, 3, 4]),
+            options: { srgb: true, minFilter: "nearest" },
         });
         recovery.disable();
     });
