@@ -7,7 +7,8 @@ import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose";
 import { retain } from "../../../packages/babylon-lite/src/resource/ref-count";
-import { attachVat, bakeVatMany } from "../../../packages/babylon-lite/src/vat/vat-baker";
+import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
+import { attachVat, bakeVatMany, setVatInstanceStorage, setVatTime } from "../../../packages/babylon-lite/src/vat/vat-baker";
 
 function fakeBuffer(): GPUBuffer {
     return { destroy: vi.fn() } as unknown as GPUBuffer;
@@ -186,5 +187,35 @@ describe("VAT batching", () => {
         disposeMeshGpu(vatMesh);
         expect(skeleton.jointsBuffer.destroy).toHaveBeenCalledTimes(1);
         expect(skeleton.weightsBuffer.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("publishes authoritative instance storage and absolute time for derived VAT passes", () => {
+        const skeleton = makeSkeleton();
+        const mesh = makeMesh("vat", skeleton);
+        const { group } = makeGroup([binding(skeleton), binding(skeleton)], false);
+        const { engine, queue } = makeEngine();
+        const baked = bakeVatMany(engine, [{ mesh }], [group])[0]!;
+        attachVat(engine, mesh, baked);
+        const storage = {
+            byteLength: 32,
+            _buffer: fakeBuffer(),
+            _destroyed: false,
+            _data: new Uint8Array(32),
+            _engine: engine,
+        } as unknown as StorageBuffer;
+        engine._storageBuffers = new Set([storage]);
+
+        setVatInstanceStorage(engine, mesh, storage);
+        setVatTime(engine, mesh, 2.5);
+
+        expect(mesh.vat?._instanceStorage).toBe(storage);
+        expect(queue.writeBuffer).toHaveBeenLastCalledWith(mesh.vat!.settingsBuffer, 16, expect.any(Float32Array));
+        const time = queue.writeBuffer.mock.calls.at(-1)?.[2] as Float32Array;
+        expect(time[0]).toBe(2.5);
+
+        setVatTime(engine, mesh, 4);
+        const reusedTime = queue.writeBuffer.mock.calls.at(-1)?.[2] as Float32Array;
+        expect(reusedTime).toBe(time);
+        expect(reusedTime[0]).toBe(4);
     });
 });

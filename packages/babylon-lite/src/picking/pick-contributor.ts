@@ -38,11 +38,13 @@ export interface PickPassContext {
      *  A contributor that rebinds group 0 (e.g. GS) must expect the next contributor to rebind
      *  what it needs; contributors that reuse the mesh VP rebind this at the start of `draw`. */
     readonly sceneBG: GPUBindGroup;
-    /** Pick pixel + pick-viewport size (canvas space), for contributors that build their own pick matrix. */
+    /** Exact pick sample + pick-viewport size (canvas space), for contributors that build their own pick matrix. */
     readonly px: number;
     readonly py: number;
     readonly w: number;
     readonly h: number;
+    /** Whether this pass includes the optional packed detailed-result attachment. */
+    readonly detailed: boolean;
 }
 
 /** A pluggable pick handler for one optional pickable entity. Built lazily (once per picker) by a

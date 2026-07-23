@@ -30,8 +30,10 @@
 
 import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 import type { ComposedShader, ShaderFragment, Varying } from "../../shader/fragment-types.js";
+import { MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES } from "../mesh-features.js";
+import type { StandardSceneShaderContext } from "./standard-material.js";
 import { composeStandardShader } from "./standard-pipeline.js";
-import { HAS_SPECULAR_TEXTURE, MATERIAL_ALPHA_BLEND, SPECULAR_USES_UV2 } from "./standard-flags.js";
+import { HAS_SKELETON, HAS_SKELETON_8, HAS_SPECULAR_TEXTURE, MATERIAL_ALPHA_BLEND, SPECULAR_USES_UV2 } from "./standard-flags.js";
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
@@ -124,8 +126,25 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: bool
  *  Only included in the fragment list when an attachment actually needs it,
  *  so opaque-only / WORLD_POSITION-only configs add zero bytes vs the bare
  *  standard shader. */
-function createGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVaryings: boolean, needsLocalPosVarying: boolean): ShaderFragment {
-    const bindings = needsParamsUbo ? [{ _name: "gp", _type: { _kind: "uniform-buffer" as const }, _visibility: STAGE_FRAGMENT | STAGE_VERTEX }] : [];
+function createGeometryParamsFragment(
+    needsParamsUbo: boolean,
+    needsVelocityVaryings: boolean,
+    needsLocalPosVarying: boolean,
+    features: number,
+    meshFeatures: number
+): ShaderFragment {
+    const bindings: NonNullable<ShaderFragment["_bindings"]>[number][] = [];
+    if (needsParamsUbo) {
+        bindings.push({ _name: "gp", _type: { _kind: "uniform-buffer" as const }, _visibility: STAGE_FRAGMENT | STAGE_VERTEX });
+    }
+    const hasSkeletonVelocity = needsVelocityVaryings && (features & HAS_SKELETON) !== 0;
+    if (hasSkeletonVelocity) {
+        bindings.push({
+            _name: "previousBoneSampler",
+            _type: { _kind: "texture", _textureType: "texture_2d<f32>", _sampleType: "unfilterable-float" },
+            _visibility: STAGE_VERTEX,
+        });
+    }
     const helpers = needsParamsUbo ? `struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : "";
     const varyings: Varying[] = [];
     if (needsVelocityVaryings) {
@@ -134,21 +153,37 @@ function createGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVary
     if (needsLocalPosVarying) {
         varyings.push({ _name: "vLocalPos", _type: "vec3<f32>" });
     }
-    // Velocity needs the previous-world matrix on the mesh UBO too — but that
-    // is out of scope of this fragment (the standard mesh UBO does not have
-    // it). LINEAR_VELOCITY is therefore deferred behind a TODO; HillValley /
-    // scene 145 does not request it.
     const vbParts: string[] = [];
     if (needsVelocityVaryings) {
         vbParts.push(`out.vCurrentClip = scene.viewProjection * vec4<f32>(out.vp, 1.0);`);
-        vbParts.push(`out.vPreviousClip = gp.previousViewProjection * vec4<f32>(out.vp, 1.0);`);
+        if ((meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0) {
+            vbParts.push(`out.vPreviousClip = out.vCurrentClip;`);
+        } else {
+            const localPosition = (meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 ? "morphedPos" : "position";
+            if (hasSkeletonVelocity) {
+                vbParts.push(`${makePreviousSkinningCode((features & HAS_SKELETON_8) !== 0)}
+let previousWorldPos = mesh.previousWorld * previousInfluence * vec4<f32>(${localPosition}, 1.0);
+let trackedPreviousClip = gp.previousViewProjection * previousWorldPos;
+out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityEnabled > 0.5);`);
+            } else {
+                vbParts.push(`let previousWorldPos = mesh.previousWorld * vec4<f32>(${localPosition}, 1.0);
+let trackedPreviousClip = gp.previousViewProjection * previousWorldPos;
+out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityEnabled > 0.5);`);
+            }
+        }
     }
     if (needsLocalPosVarying) {
-        vbParts.push(`out.vLocalPos = position;`);
+        vbParts.push(`out.vLocalPos = ${(meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 ? "morphedPos" : "position"};`);
     }
     const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: vbParts.join("\n") } : {};
     return {
         _id: "~geometry-params",
+        _uboFields: needsVelocityVaryings
+            ? [
+                  { _name: "previousWorld", _type: "mat4x4<f32>" },
+                  { _name: "velocityEnabled", _type: "f32" },
+              ]
+            : [],
         _bindings: bindings,
         _helperFunctions: helpers,
         // gp UBO is also visible to the vertex stage when present, so the
@@ -157,6 +192,21 @@ function createGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVary
         _varyings: varyings,
         _vertexSlots: slots,
     };
+}
+
+function makePreviousSkinningCode(hasEightInfluences: boolean): string {
+    let code = `var previousInfluence = readMatrixFromRawSampler(previousBoneSampler, f32(joints[0])) * weights[0];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[1])) * weights[1];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[2])) * weights[2];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[3])) * weights[3];`;
+    if (hasEightInfluences) {
+        code += `
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[0])) * weights1[0];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[1])) * weights1[1];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[2])) * weights1[2];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[3])) * weights1[3];`;
+    }
+    return code;
 }
 
 /** Compose a Standard geometry-output shader.
@@ -177,18 +227,21 @@ export function composeStandardGeometryShader(
     extFragments: ShaderFragment[],
     attachments: readonly GeometryTextureType[],
     esmShadowDepthCode = "",
-    emitColor = false
+    emitColor = false,
+    sceneShader: StandardSceneShaderContext | null = null
 ): ComposedShader {
-    const wantsGp = needsGpUbo(attachments);
-    const wantsVelocity = needsVelocity(attachments);
-    const wantsLocalPos = needsLocalPos(attachments);
-    const fragments = wantsGp || wantsVelocity || wantsLocalPos ? [...extFragments, createGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos)] : extFragments;
-
     // Strip MATERIAL_ALPHA_BLEND so the standard fragment does NOT emit
     // ALPHA_COMBINE blend in its color output — we drive blending per
     // attachment in the geometry pipeline state instead.
     const stdFeatures = features & ~MATERIAL_ALPHA_BLEND;
-    const base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode);
+    const wantsGp = needsGpUbo(attachments);
+    const wantsVelocity = needsVelocity(attachments);
+    const wantsLocalPos = needsLocalPos(attachments);
+    const fragments =
+        wantsGp || wantsVelocity || wantsLocalPos
+            ? [...extFragments, createGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos, stdFeatures, meshFeatures)]
+            : extFragments;
+    const base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode, sceneShader);
 
     const hasSpecular = (features & HAS_SPECULAR_TEXTURE) !== 0;
     const specularUv = (features & SPECULAR_USES_UV2) !== 0 ? "input.vv" : "input.vu";

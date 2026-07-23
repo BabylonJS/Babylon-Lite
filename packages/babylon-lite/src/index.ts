@@ -40,6 +40,12 @@ export type { SceneContextOptions } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { getFloatingOriginOffset } from "./large-world/floating-origin.js";
 
+// Opt-in full error messages. By default Babylon-Lite throws compact coded errors to keep bundles
+// small; importing either of these pulls in the message table chunk (statically or via a lazy
+// `import()`), so full text is available — `enableErrorDecoding` installs a global decoder and
+// `decodeError` reconstructs a single caught error on demand.
+export { enableErrorDecoding, decodeError } from "./enable-error-decoding.js";
+
 // Subtree visibility toggle (used to hide a node before deferring its disposal,
 // e.g. streaming voxel chunks). Standalone module — bundled only when used.
 export { setSubtreeVisible } from "./scene/visibility.js";
@@ -208,6 +214,8 @@ export type { Texture3D, PixelsTexture3DOptions } from "./texture/pixels-texture
 export type { PixelsTexture2DOptions, RenderTexture2DOptions } from "./texture/pixels-texture.js";
 export { createTexture2DArray, uploadImageToArrayLayer, loadImageToArrayLayer, createTexture2DArrayFromUrls } from "./texture/texture-array.js";
 export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions } from "./texture/texture-array.js";
+export { createDynamicTexture, updateDynamicTexture } from "./texture/dynamic-texture.js";
+export type { DynamicTexture2D, DynamicTexture2DOptions, DynamicTextureUpdateOptions } from "./texture/dynamic-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
@@ -215,6 +223,8 @@ export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
 export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
+export { enableStandardSkeleton, enableStandardUvOffset } from "./material/standard/enable-standard-mesh-features.js";
+export { enableStandardVertexColors } from "./material/standard/enable-standard-vertex-colors.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export {
     createShaderMaterial,
@@ -295,6 +305,8 @@ export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-sh
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
 export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
+export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.js";
+export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
 export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
@@ -330,6 +342,7 @@ export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions,
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
 export { bakeVat, bakeVatMany, attachVat } from "./vat/vat-baker.js";
+export { setVatInstanceStorage, setVatTime } from "./vat/vat-baker.js";
 export type { VatBakeResult, VatBakeOptions, VatBakeTarget, VatClip, VatHandle } from "./vat/vat-baker.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
@@ -493,7 +506,7 @@ export { CAP_NONE, CAP_START, CAP_END, CAP_ALL } from "./mesh/create-tube.js";
 
 // ─── Picking ─────────────────────────────────────────────────────────
 export { createGpuPicker, pickAsync, disposePicker } from "./picking/gpu-picker.js";
-export type { GpuPicker, PickDiscardRule, PickOptions, PickVertexDataAttribute } from "./picking/gpu-picker.js";
+export type { GpuPicker, PickDiscardRule, PickIgnore, PickOptions, PickVertexDataAttribute } from "./picking/gpu-picker.js";
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";

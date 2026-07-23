@@ -87,6 +87,44 @@ export interface GltfMeshData {
     _decoded?: DecodedPrimitive;
 }
 
+/** Build one tightly-packed glTF mesh, optionally reusing a prior instance's
+ * immutable CPU/GPU geometry. Instance state and world-space bounds stay unique. */
+function buildTightGltfMesh(engine: EngineContext, meshData: GltfMeshData, material: PbrMaterialProps, name: string, source?: Mesh): Mesh {
+    const [boundMin, boundMax] = computeAabb(meshData._positions!, meshData._worldMatrix);
+    const indices = meshData._indices;
+    const uint32 = indices instanceof U32;
+    const gpu: MeshGPU = source
+        ? source._gpu
+        : ({
+              positionBuffer: createMappedBuffer(engine, meshData._positions!, BU.VERTEX),
+              normalBuffer: createMappedBuffer(engine, meshData._normals!, BU.VERTEX),
+              tangentBuffer: meshData._tangents ? createMappedBuffer(engine, meshData._tangents, BU.VERTEX) : null,
+              uvBuffer: createMappedBuffer(engine, meshData._uvs!, BU.VERTEX),
+              uv2Buffer: meshData._uv2s ? createMappedBuffer(engine, meshData._uv2s, BU.VERTEX) : null,
+              colorBuffer: meshData._colors ? createMappedBuffer(engine, meshData._colors, BU.VERTEX) : null,
+              indexBuffer: createMappedBuffer(engine, indices, BU.INDEX),
+              indexCount: meshData._indexCount,
+              indexFormat: (uint32 ? "uint32" : "uint16") as GPUIndexFormat,
+          } satisfies MeshGPU);
+
+    const mesh = {
+        name,
+        material,
+        receiveShadows: false,
+        boundMin,
+        boundMax,
+        _gpu: gpu,
+        _flatNormal: meshData._flatNormal,
+    } as unknown as Mesh;
+    initMeshTransform(mesh);
+    mesh._cpuPositions = meshData._positions!;
+    mesh._cpuNormals = meshData._normals!;
+    mesh._cpuUvs = meshData._uvs!;
+    mesh._cpuIndices = source ? source._cpuIndices : uint32 ? indices : new U32(indices);
+    engine._dlr?.m(mesh, meshData._uv2s, meshData._tangents, meshData._colors, indices, gpu.indexFormat);
+    return mesh;
+}
+
 /**
  * Load a glTF/GLB asset, parse it, and upload mesh + material data to GPU.
  * Registers a deferred PBR renderable builder and automatically parses glTF
@@ -588,57 +626,19 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
     };
 
     if (new Set(meshDatas.map((m) => m._primitive)).size < meshDatas.length) {
-        return import("./gltf-share.js").then((module) => module.share(meshDatas, buildPbrFromGltfMat, meshFeatures, ctx));
+        return import("./gltf-share.js").then((module) => module.share(meshDatas, buildPbrFromGltfMat, buildTightGltfMesh, meshFeatures, ctx));
     }
 
     return Promise.all(
         meshDatas.map(async (m, i): Promise<Mesh> => {
             const material = await buildPbrFromGltfMat(m._material);
-            const meshName = json.meshes[json.nodes[m._nodeIndex].mesh].name;
+            const meshName = json.meshes[json.nodes[m._nodeIndex].mesh].name || `gltf_mesh_${i}`;
 
             // Interleaved meshes are fully built by the dynamic module (kept out of
             // this bundle for non-interleaved scenes). The tight path below is
             // byte-identical to the non-interleaved engine.
-            let mesh: Mesh;
-            if (m._vb) {
-                mesh = (await loadInterleave()).buildInterleavedMesh(engine, m, i, material, meshName) as Mesh;
-            } else {
-                const [boundMin, boundMax] = computeAabb(m._positions!, m._worldMatrix);
-                const gpu: MeshGPU = {
-                    positionBuffer: createMappedBuffer(engine, m._positions!, BU.VERTEX),
-                    normalBuffer: createMappedBuffer(engine, m._normals!, BU.VERTEX),
-                    tangentBuffer: m._tangents ? createMappedBuffer(engine, m._tangents, BU.VERTEX) : null,
-                    uvBuffer: createMappedBuffer(engine, m._uvs!, BU.VERTEX),
-                    uv2Buffer: m._uv2s ? createMappedBuffer(engine, m._uv2s, BU.VERTEX) : null,
-                    colorBuffer: m._colors ? createMappedBuffer(engine, m._colors, BU.VERTEX) : null,
-                    indexBuffer: createMappedBuffer(engine, m._indices, BU.INDEX),
-                    indexCount: m._indexCount,
-                    indexFormat: (m._indices instanceof U32 ? "uint32" : "uint16") as GPUIndexFormat,
-                };
-
-                mesh = {
-                    name: meshName || `gltf_mesh_${i}`,
-                    material,
-                    receiveShadows: false,
-                    boundMin,
-                    boundMax,
-                    _gpu: gpu,
-                    _flatNormal: m._flatNormal,
-                } as unknown as Mesh;
-                initMeshTransform(mesh);
-
-                // Retain CPU geometry for detailed picking.
-                mesh._cpuPositions = m._positions!;
-                mesh._cpuNormals = m._normals!;
-                mesh._cpuUvs = m._uvs!;
-                mesh._cpuIndices = m._indices instanceof U32 ? m._indices : new U32(m._indices);
-                engine._dlr?.m(mesh, m._uv2s, m._tangents, m._colors, m._indices, gpu.indexFormat);
-            }
-
-            // Run all per-mesh feature hooks (skeleton, morph, …) in parallel.
-            // Each hook mutates `mesh` directly (e.g. attaches mesh.skeleton).
+            const mesh = m._vb ? (await loadInterleave()).buildInterleavedMesh(engine, m, i, material, meshName) : buildTightGltfMesh(engine, m, material, meshName);
             await Promise.all(meshFeatures.map((f) => f.applyMesh!(m, mesh, ctx)));
-
             return mesh;
         })
     );

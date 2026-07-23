@@ -3,17 +3,32 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { createGpuPicker, pickAsync } from "../../../packages/babylon-lite/src/picking/gpu-picker";
-import { getPickingPipelineSet } from "../../../packages/babylon-lite/src/picking/picking-pipeline";
-import { pickingShaderSource, pickingThinInstanceShaderSource } from "../../../packages/babylon-lite/src/picking/picking-shader";
-import { getPickingRegularPipeline, getPickingVertexDataPipelineSet, pickingVertexDataShaderSource } from "../../../packages/babylon-lite/src/picking/picking-vertex-data";
+import { getPickingPipelineSet as getBasicPickingPipelineSet } from "../../../packages/babylon-lite/src/picking/picking-pipeline";
+import { getPickingPipelineSet, getPickingRegularPipeline } from "../../../packages/babylon-lite/src/picking/picking-advanced-pipeline";
+import { pickingShaderSource } from "../../../packages/babylon-lite/src/picking/picking-shader";
+import { pickingShaderVariantSource, pickingThinInstanceShaderSource } from "../../../packages/babylon-lite/src/picking/picking-advanced-shader";
+import { enableDetailedPicking } from "../../../packages/babylon-lite/src/picking/detailed-picking";
+import { bindVatPickingProjection, getVatPickingProjection } from "../../../packages/babylon-lite/src/picking/vat-picking-pipeline";
+import { createVatPickProjectionWgsl } from "../../../packages/babylon-lite/src/material/pbr/fragments/vat-fragment";
 import type { PickDiscardRule, PickOptions } from "../../../packages/babylon-lite/src";
 import type { PickPipelineModule, PickSource } from "../../../packages/babylon-lite/src/picking/pick-contributor";
+import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
-function makeEngine(): {
+function wgslStruct(source: string, name: string): string {
+    const start = source.indexOf(`struct ${name} {`);
+    const end = source.indexOf("};", start);
+    if (start < 0 || end < 0) {
+        throw new Error(`Missing WGSL struct ${name}.`);
+    }
+    return source.slice(start, end + 2);
+}
+
+function makeEngine(features: readonly GPUFeatureName[] = ["primitive-index"]): {
     engine: EngineContext;
     device: {
+        features: Set<GPUFeatureName>;
         bindGroupLayouts: GPUBindGroupLayoutDescriptor[];
         shaderModules: GPUShaderModuleDescriptor[];
         pipelineLayouts: GPUPipelineLayoutDescriptor[];
@@ -21,6 +36,7 @@ function makeEngine(): {
     };
 } {
     const device = {
+        features: new Set(features),
         bindGroupLayouts: [] as GPUBindGroupLayoutDescriptor[],
         shaderModules: [] as GPUShaderModuleDescriptor[],
         pipelineLayouts: [] as GPUPipelineLayoutDescriptor[],
@@ -62,7 +78,7 @@ interface MockBufferRecord {
 }
 
 function makePickerEngine(): ReturnType<typeof makeEngine> & {
-    pass: { drawCalls: { group2Bound: boolean }[]; boundVertexSlots: number[] };
+    pass: { drawCalls: { group2Bound: boolean }[]; boundVertexSlots: number[]; setBindGroup(index: number): void };
     buffers: MockBufferRecord[];
     writes: { label: string | undefined; data: Float32Array }[];
 } {
@@ -124,6 +140,13 @@ function makePickerEngine(): ReturnType<typeof makeEngine> & {
             new Uint8Array(data)[2] = 1;
         } else if (descriptor.label === "pick-depth-staging") {
             new Float32Array(data)[0] = 0.5;
+        } else if (descriptor.label === "pick-detail-staging") {
+            const u32 = new Uint32Array(data);
+            const f32 = new Float32Array(data);
+            u32[0] = 0;
+            f32[1] = 0;
+            f32[2] = 0;
+            f32[3] = 0;
         }
         // Mirrors real WebGPU: a GPUBuffer allows only ONE outstanding map at a time — calling mapAsync
         // again before the previous map's unmap() throws. A tiny setTimeout (rather than resolving on the
@@ -206,6 +229,30 @@ function makePickScene(engine: EngineContext): { scene: Parameters<typeof create
     };
 }
 
+function attachMockVat(mesh: Mesh, opts: { eightBones?: boolean; instanceTexture?: boolean; instanceStorage?: StorageBuffer } = {}): void {
+    const texture = { createView: vi.fn(() => ({ label: "vat-view" })) } as unknown as GPUTexture;
+    const instanceTexture = opts.instanceTexture ? ({ createView: vi.fn(() => ({ label: "vat-instance-view" })) } as unknown as GPUTexture) : null;
+    mesh.vat = {
+        boneCount: 1,
+        texture,
+        frameCount: 1,
+        settingsBuffer: {} as GPUBuffer,
+        jointsBuffer: {} as GPUBuffer,
+        weightsBuffer: {} as GPUBuffer,
+        joints1Buffer: opts.eightBones ? ({} as GPUBuffer) : null,
+        weights1Buffer: opts.eightBones ? ({} as GPUBuffer) : null,
+        _textureResource: { texture },
+        _skinBuffers: {
+            jointsBuffer: {} as GPUBuffer,
+            weightsBuffer: {} as GPUBuffer,
+            joints1Buffer: opts.eightBones ? ({} as GPUBuffer) : null,
+            weights1Buffer: opts.eightBones ? ({} as GPUBuffer) : null,
+        },
+        instanceTexture,
+        _instanceStorage: opts.instanceStorage ?? null,
+    };
+}
+
 describe("picking shader API", () => {
     it("keeps the default picker shader non-discarding", () => {
         const regular = pickingShaderSource();
@@ -215,22 +262,109 @@ describe("picking shader API", () => {
         expect(regular).toContain("fragmentCoord: vec2f");
         expect(regular).toContain("fn shouldDiscardPick(input: PickDiscardInput) -> bool");
         expect(regular).toContain("return false;");
-        expect(regular).toContain("fn adjustPickWorld(worldPos: vec3f, instanceExtras: vec4f, thinInstanceIndex: u32) -> vec3f");
-        expect(regular).toContain("let wp = adjustPickWorld((mesh.world * vec4f(position, 1.0)).xyz, vec4f(0.0), 0xffffffffu);");
+        expect(regular).toContain("let wp = (mesh.world * vec4f(position, 1.0)).xyz;");
         expect(regular).toContain("out.hasThinInstance = 0u;");
         expect(regular).toContain("out.thinInstanceIndex = 0xffffffffu;");
-        expect(regular).not.toContain("vertexData");
+        expect(wgslStruct(regular, "PickDiscardInput")).not.toContain("vertexData");
+        expect(regular).not.toContain("PickWorldInput");
         expect(regular).toContain("PickDiscardInput(input.worldPos, scene.fragmentCoord");
 
         expect(thin).toContain("fn shouldDiscardPick(input: PickDiscardInput) -> bool");
         expect(thin).toContain("return false;");
-        expect(thin).toContain("let extras = vec4f(m[0].w, m[1].w, m[2].w, m[3].w);");
-        expect(thin).toContain("let wp = adjustPickWorld((world * vec4f(position, 1.0)).xyz, extras, instanceIndex);");
+        expect(thin).toContain("let packed = instances[instanceIndex];");
+        expect(thin).toContain("let extras = vec4f(packed[0].w, packed[1].w, packed[2].w, packed[3].w);");
+        expect(thin).toContain("let wp = adjustPickWorld(");
         expect(thin).toContain("out.hasThinInstance = 1u;");
         expect(thin).toContain("out.thinInstanceIndex = instanceIndex;");
         expect(thin).toContain("out.instanceExtras = extras;");
-        expect(thin).not.toContain("vertexData");
+        expect(wgslStruct(thin, "PickDiscardInput")).not.toContain("vertexData");
+        expect(thin).toContain("PickWorldInput");
         expect(thin).toContain("PickDiscardInput(input.worldPos, scene.fragmentCoord");
+    });
+
+    describe("VAT picking projection", () => {
+        it("uses the exact visible VAT transform as projected world and adjustment basis", () => {
+            const regular = createVatPickProjectionWgsl(false);
+            const thinTexture = createVatPickProjectionWgsl(true);
+            const thinStorage = createVatPickProjectionWgsl(true, true);
+
+            expect(regular.regularBody).toContain("let projectedTransform = mesh.world * influence;");
+            expect(regular.regularBody).toContain("let projectedWorld = (projectedTransform * vec4f(position, 1.0)).xyz;");
+            expect(thinTexture.thinBody).toContain("let projectedTransform = instanceWorld * tiMesh.world * influence;");
+            expect(thinTexture.thinBody).toContain("vatInstanceTex");
+            expect(thinStorage.thinBody).toContain("vatInstanceStorage");
+            expect(thinStorage.thinBody).toContain("joints1[3]");
+        });
+
+        it("builds regular 4-bone and thin 8-bone texture projections with group 3", () => {
+            const { engine, device } = makeEngine();
+            const { mesh } = makePickScene(engine);
+            attachMockVat(mesh);
+            const regularProjection = getVatPickingProjection(engine, mesh)!;
+            const regularSet = getPickingPipelineSet(engine, null, false, regularProjection);
+
+            expect(regularProjection.key).toBe("vat-4-texture");
+            expect(regularProjection.vertexBuffers).toHaveLength(2);
+            expect(device.pipelineLayouts.at(-1)?.bindGroupLayouts).toHaveLength(4);
+            expect(String(device.shaderModules.at(-2)?.code)).toContain("@group(3) @binding(0) var vatSampler");
+            expect(regularSet._vertexProjection).toBe(regularProjection);
+
+            mesh.thinInstances = { count: 1, matrices: IDENTITY, _gpuBuffer: {} as GPUBuffer } as NonNullable<Mesh["thinInstances"]>;
+            attachMockVat(mesh, { eightBones: true, instanceTexture: true });
+            const thinProjection = getVatPickingProjection(engine, mesh)!;
+            getPickingPipelineSet(engine, null, false, thinProjection);
+
+            expect(thinProjection.key).toBe("vat-8-texture");
+            expect(thinProjection.vertexBuffers).toHaveLength(4);
+            expect(String(device.shaderModules.at(-1)?.code)).toContain("@location(3) joints1: vec4<u32>");
+            expect(String(device.shaderModules.at(-1)?.code)).toContain("var vatInstanceTex: texture_2d<f32>");
+        });
+
+        it("binds VAT textures and skin attributes after the picker-owned vertex slots", () => {
+            const { engine, pass } = makePickerEngine();
+            const { mesh } = makePickScene(engine);
+            mesh.thinInstances = { count: 1, matrices: IDENTITY, _gpuBuffer: {} as GPUBuffer } as NonNullable<Mesh["thinInstances"]>;
+            attachMockVat(mesh, { eightBones: true, instanceTexture: true });
+            const projection = getVatPickingProjection(engine, mesh)!;
+            const pipeline = getPickingPipelineSet(engine, null, false, projection).thinInstancePipeline;
+            const setBindGroup = vi.spyOn(pass, "setBindGroup");
+
+            bindVatPickingProjection(engine, pass as unknown as GPURenderPassEncoder, pipeline, mesh, true, 2);
+
+            expect(setBindGroup).toHaveBeenCalledWith(3, expect.anything());
+            expect(pass.boundVertexSlots).toEqual([2, 3, 4, 5]);
+        });
+
+        it("binds authoritative per-instance StorageBuffer params and rejects missing thin VAT params", () => {
+            const { engine, pass } = makePickerEngine();
+            const { mesh } = makePickScene(engine);
+            mesh.thinInstances = { count: 1, matrices: IDENTITY, _gpuBuffer: {} as GPUBuffer } as NonNullable<Mesh["thinInstances"]>;
+            attachMockVat(mesh);
+            expect(getVatPickingProjection(engine, mesh)).toBeNull();
+
+            const raw = {} as GPUBuffer;
+            const storage = {
+                byteLength: 32,
+                _buffer: raw,
+                _destroyed: false,
+                _data: new Uint8Array(32),
+                _engine: engine,
+            } as unknown as StorageBuffer;
+            engine._storageBuffers = new Set([storage]);
+            attachMockVat(mesh, { instanceStorage: storage });
+            const projection = getVatPickingProjection(engine, mesh)!;
+            const pipeline = getPickingPipelineSet(engine, null, false, projection).thinInstancePipeline;
+            const createBindGroup = vi.spyOn(engine._device, "createBindGroup");
+
+            bindVatPickingProjection(engine, pass as unknown as GPURenderPassEncoder, pipeline, mesh, true, 1);
+
+            expect(projection.key).toBe("vat-4-storage");
+            expect(createBindGroup).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    entries: expect.arrayContaining([{ binding: 2, resource: { buffer: raw } }]),
+                })
+            );
+        });
     });
 
     it("injects a custom discard rule into regular and thin-instance picking shaders", () => {
@@ -248,25 +382,26 @@ return input.hasThinInstance == 1u && input.instanceExtras.x > 4.0;
             "if (shouldDiscardPick(PickDiscardInput(input.worldPos, scene.fragmentCoord, input.pickId, input.thinInstanceIndex, input.hasThinInstance, input.instanceExtras))) { discard; }";
         expect(regular).toContain(discardCall);
         expect(thin).toContain(discardCall);
-        expect(thin).toContain("let world = mat4x4f(");
-        expect(thin).toContain("vec4f(m[0].xyz, 0.0)");
-        expect(thin).toContain("vec4f(m[3].xyz, 1.0)");
+        expect(thin).toContain("let instanceWorld = mat4x4f(");
+        expect(thin).toContain("vec4f(packed[0].xyz, 0.0)");
+        expect(thin).toContain("vec4f(packed[3].xyz, 1.0)");
     });
 
     it("forwards optional regular-mesh vertex data as one flat padded vec4", () => {
-        const zero = pickingVertexDataShaderSource(false, { vertexDataComponents: 0 });
-        const uv = pickingVertexDataShaderSource(false, { vertexDataComponents: 2 });
-        const normal = pickingVertexDataShaderSource(false, { vertexDataComponents: 3 });
-        const tangent = pickingVertexDataShaderSource(false, { vertexDataComponents: 4 });
-        const thin = pickingVertexDataShaderSource(true, { vertexDataComponents: 0 });
+        const zero = pickingShaderVariantSource(false, { vertexDataComponents: 0, exposeVertexData: true });
+        const uv = pickingShaderVariantSource(false, { vertexDataComponents: 2, exposeVertexData: true });
+        const normal = pickingShaderVariantSource(false, { vertexDataComponents: 3, exposeVertexData: true });
+        const tangent = pickingShaderVariantSource(false, { vertexDataComponents: 4, exposeVertexData: true });
+        const thin = pickingShaderVariantSource(true, { vertexDataComponents: 0, exposeVertexData: true });
 
-        expect(zero).toContain("out.vertexData = vec4f(0.0);");
+        expect(zero).toContain("let vertexPayload = vec4f(0.0);");
+        expect(zero).toContain("out.vertexData = vertexPayload;");
         expect(uv).toContain("@location(5) vertexData: vec2f");
-        expect(uv).toContain("out.vertexData = vec4f(vertexData, 0.0, 0.0);");
+        expect(uv).toContain("let vertexPayload = vec4f(vertexData, 0.0, 0.0);");
         expect(normal).toContain("@location(5) vertexData: vec3f");
-        expect(normal).toContain("out.vertexData = vec4f(vertexData, 0.0);");
+        expect(normal).toContain("let vertexPayload = vec4f(vertexData, 0.0);");
         expect(tangent).toContain("@location(5) vertexData: vec4f");
-        expect(tangent).toContain("out.vertexData = vertexData;");
+        expect(tangent).toContain("let vertexPayload = vertexData;");
         for (const source of [uv, normal, tangent]) {
             expect(source).toContain("@location(5) @interpolate(flat) vertexData: vec4f");
         }
@@ -275,25 +410,46 @@ return input.hasThinInstance == 1u && input.instanceExtras.x > 4.0;
 
     it("injects a custom world adjustment into regular and thin-instance picking shaders", () => {
         const worldAdjustWgsl = `
-fn adjustPickWorld(worldPos: vec3f, instanceExtras: vec4f, thinInstanceIndex: u32) -> vec3f {
-if (thinInstanceIndex == 0xffffffffu) { return worldPos; }
-return worldPos + offsets[thinInstanceIndex].xyz + instanceExtras.xyz;
+fn adjustPickWorld(input: PickWorldInput) -> vec3f {
+if (input.thinInstanceIndex == 0xffffffffu) { return input.worldPos + input.basis0 * input.vertexData.x; }
+return input.worldPos + offsets[input.thinInstanceIndex].xyz + input.instanceExtras.xyz;
 }`;
         const options = {
             worldAdjustWgsl,
-            storage: [{ name: "offsets", type: "array<vec4f>" }],
+            storage: [{ name: "offsets", type: "array<vec4f>", vertex: true }],
+            vertexDataComponents: 0 as const,
+            exposeVertexData: false,
         };
 
-        const regular = pickingShaderSource(options);
-        const thin = pickingThinInstanceShaderSource(options);
+        const regular = pickingShaderVariantSource(false, options);
+        const thin = pickingShaderVariantSource(true, options);
 
         for (const source of [regular, thin]) {
             expect(source).toContain(worldAdjustWgsl);
             expect(source.match(/fn adjustPickWorld/g)).toHaveLength(1);
             expect(source).toContain("@group(2) @binding(0) var<storage, read> offsets: array<vec4f>;");
         }
-        expect(regular).toContain("adjustPickWorld((mesh.world * vec4f(position, 1.0)).xyz, vec4f(0.0), 0xffffffffu)");
-        expect(thin).toContain("adjustPickWorld((world * vec4f(position, 1.0)).xyz, extras, instanceIndex)");
+        expect(regular).toContain("PickWorldInput(projectedWorld, position, projectedTransform[0].xyz");
+        expect(regular).toContain("let vertexPayload = vec4f(0.0);");
+        expect(regular).toContain("vec4f(0.0), 0xffffffffu, 0u, vertexPayload");
+        expect(wgslStruct(regular, "PickDiscardInput")).not.toContain("vertexData");
+        expect(wgslStruct(regular, "PickWorldInput")).toContain("vertexData: vec4f");
+        expect(thin).toContain("PickWorldInput(projectedWorld, position, projectedTransform[0].xyz");
+        expect(thin).toContain("world: mat4x4f");
+        expect(thin).toContain("let instanceWorld = mat4x4f(");
+        expect(thin).toContain("let world = tiMesh.world * instanceWorld;");
+        expect(thin).toContain("extras, instanceIndex, 1u, vec4f(0.0)");
+        expect(wgslStruct(thin, "PickDiscardInput")).not.toContain("vertexData");
+    });
+
+    it("uses the requested primitive-index feature for detailed variants", () => {
+        const basic = pickingShaderVariantSource(false);
+        const detailed = pickingShaderVariantSource(false, { detailed: true });
+
+        expect(basic).not.toContain("enable primitive_index;");
+        expect(detailed).toContain("enable primitive_index;");
+        expect(detailed).toContain("@builtin(primitive_index) primitiveIndex: u32");
+        expect(detailed).toContain("@location(2) detail: vec4u");
     });
 });
 
@@ -302,25 +458,41 @@ describe("picking discard pipeline API", () => {
         const discard: PickDiscardRule = {
             key: "public-bindings",
             wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return input.pickId == 1u; }",
+            worldAdjustWgsl: "fn adjustPickWorld(input: PickWorldInput) -> vec3f { return input.worldPos; }",
             storage: [{ name: "clipData", type: "array<vec4<f32>>", data: () => new Float32Array(4) }],
             vertexData: "color",
         };
         const options: PickOptions = { discard };
 
         expect(options.discard).toBe(discard);
+        expect(options.discard?.worldAdjustWgsl).toBe(discard.worldAdjustWgsl);
     });
 
     it("caches the default regular/thin pipeline set per device", () => {
         const { engine, device } = makeEngine();
 
-        const first = getPickingPipelineSet(engine);
-        const second = getPickingPipelineSet(engine);
+        const first = getBasicPickingPipelineSet(engine);
+        const second = getBasicPickingPipelineSet(engine);
 
         expect(second).toBe(first);
         expect(first.discardBGL).toBeNull();
-        expect(device.renderPipelines).toHaveLength(2);
-        expect(device.shaderModules.map((m) => m.label)).toEqual(["picking-shader", "picking-ti-shader"]);
+        expect(device.renderPipelines).toHaveLength(1);
+        expect(device.shaderModules.map((m) => m.label)).toEqual(["picking-shader"]);
         expect(device.pipelineLayouts.every((layout) => Array.from(layout.bindGroupLayouts).length === 2)).toBe(true);
+    });
+
+    it("keeps detailed picking inactive when the device lacks primitive-index", () => {
+        const { engine, device } = makeEngine([]);
+        const { scene } = makePickScene(engine);
+        const picker = createGpuPicker(scene);
+
+        enableDetailedPicking(picker);
+        const set = getPickingPipelineSet(engine, null, true);
+
+        expect(picker._detailedPicking).toBe(false);
+        expect(set.detailed).toBe(false);
+        expect(device.renderPipelines.every((pipeline) => Array.from(pipeline.fragment!.targets).length === 2)).toBe(true);
+        expect(device.shaderModules.every((module) => !String(module.code).includes("enable primitive_index;"))).toBe(true);
     });
 
     it("creates a discard pipeline set with a group-2 layout and injected WGSL", () => {
@@ -328,17 +500,17 @@ describe("picking discard pipeline API", () => {
         const discard = {
             key: "clip-volume",
             wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return clipData[0].x > 0.0 && input.pickId == 7u; }",
-            storage: [{ name: "clipData", type: "array<vec4<f32>>" }],
+            storage: [{ name: "clipData", type: "array<vec4<f32>>", data: () => new Float32Array(4) }],
         };
 
-        const set = getPickingPipelineSet(engine, discard);
+        const set = getBasicPickingPipelineSet(engine, discard);
 
         expect(set.discardBGL).not.toBeNull();
         expect(device.bindGroupLayouts.find((layout) => layout.label === "picking-discard-clip-volume-bgl")).toMatchObject({
             label: "picking-discard-clip-volume-bgl",
             entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "read-only-storage" } }],
         });
-        expect(device.renderPipelines).toHaveLength(2);
+        expect(device.renderPipelines).toHaveLength(1);
         expect(device.shaderModules.every((module) => String(module.code).includes(discard.wgsl))).toBe(true);
         expect(device.shaderModules.every((module) => String(module.code).includes("@group(2) @binding(0) var<storage, read> clipData: array<vec4<f32>>;"))).toBe(true);
         expect(device.pipelineLayouts.every((layout) => Array.from(layout.bindGroupLayouts).length === 3)).toBe(true);
@@ -346,23 +518,57 @@ describe("picking discard pipeline API", () => {
 
     it("creates the requested regular vertex-data pipeline without changing thin-instance layout", () => {
         const { engine, device } = makeEngine();
-        const discard = {
+        const discard: PickDiscardRule = {
             key: "host-id-tangent",
             wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return input.vertexData.x > 0.0; }",
-            vertexData: "tangent" as const,
+            worldAdjustWgsl: "fn adjustPickWorld(input: PickWorldInput) -> vec3f { return input.worldPos + offsets[0].xyz; }",
+            storage: [{ name: "offsets", type: "array<vec4f>", vertex: true, data: () => new Float32Array(4) }],
+            vertexData: "tangent",
         };
 
-        const set = getPickingVertexDataPipelineSet(engine, discard);
+        const set = getPickingPipelineSet(engine, discard);
         getPickingRegularPipeline(engine, set, discard, undefined, { attribute: "tangent" });
 
         expect(device.renderPipelines).toHaveLength(3);
-        const dataPipelineDescriptor = device.renderPipelines.find((pipeline) => pipeline.label === "picking-host-id-tangent-vb-12-0-tangent-16-0-pipeline")!;
+        const dataPipelineDescriptor = device.renderPipelines.find((pipeline) => Array.from(pipeline.vertex.buffers ?? []).length === 2)!;
         expect(dataPipelineDescriptor.vertex.buffers).toEqual([
             { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] },
             { arrayStride: 16, attributes: [{ shaderLocation: 5, offset: 0, format: "float32x4" }] },
         ]);
-        const thinPipeline = device.renderPipelines.find((pipeline) => pipeline.label === "picking-ti-host-id-tangent-pipeline")!;
+        const thinPipeline = device.renderPipelines.find((pipeline) => pipeline.label === "picking-ti-host-id-tangent-affine-pipeline")!;
         expect(thinPipeline.vertex.buffers).toHaveLength(1);
+        expect(device.bindGroupLayouts.find((layout) => layout.label === "picking-discard-host-id-tangent-bgl")).toMatchObject({
+            entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT }],
+        });
+    });
+
+    it("uploads the base mesh world matrix for thin-instance vertex-stage picking", async () => {
+        const { engine, writes } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        const world = new Float32Array(IDENTITY);
+        world[12] = 2;
+        world[13] = 3;
+        world[14] = 4;
+        (mesh as unknown as { worldMatrix: Float32Array }).worldMatrix = world;
+        mesh.thinInstances = {
+            count: 1,
+            matrices: IDENTITY,
+            _gpuBuffer: {} as GPUBuffer,
+        } as NonNullable<Mesh["thinInstances"]>;
+        const discard: PickDiscardRule = {
+            key: "thin-world-adjust",
+            wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return false; }",
+            worldAdjustWgsl: "fn adjustPickWorld(input: PickWorldInput) -> vec3f { return input.worldPos; }",
+        };
+
+        await pickAsync(createGpuPicker(scene), 4, 4, { discard });
+
+        const write = writes.find((entry) => entry.label === "pick-thin-instance-ubo");
+        expect(write?.data).toHaveLength(20);
+        expect(Array.from(write!.data.subarray(0, 16))).toEqual(Array.from(world));
+        expect(new Uint32Array(write!.data.buffer)[16]).toBe(1);
+        expect(new Uint32Array(write!.data.buffer)[17]).toBe(0);
+        expect(new Uint32Array(write!.data.buffer)[18]).toBe(0);
     });
 
     it("binds discard group-2 resources before drawing a discard pipeline", async () => {
@@ -382,6 +588,174 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
         expect(pass.drawCalls).toEqual([{ group2Bound: true }]);
     });
 
+    it("decodes GPU primitive and local-position detail for world-adjusted picks", async () => {
+        const { engine } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        mesh._cpuPositions = new Float32Array([-1, -1, 0, 1, -1, 0, 0, 1, 0]);
+        mesh._cpuNormals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+        mesh._cpuIndices = new Uint32Array([0, 1, 2]);
+        const picker = createGpuPicker(scene);
+        enableDetailedPicking(picker);
+        const discard: PickDiscardRule = {
+            key: "detailed-world-adjust",
+            wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return false; }",
+            worldAdjustWgsl: "fn adjustPickWorld(input: PickWorldInput) -> vec3f { return input.worldPos; }",
+        };
+
+        const info = await pickAsync(picker, 4, 4, { discard });
+
+        expect(info.hit).toBe(true);
+        expect(info.pickedPoint).not.toBeNull();
+        expect(info.ray).not.toBeNull();
+        expect(info.faceId).toBe(0);
+        expect(info.bu).toBeCloseTo(0.25);
+        expect(info.bv).toBeCloseTo(0.25);
+        expect(info.pickedNormal).toBeNull();
+        expect(info.pickedFaceNormal).toBeNull();
+        expect(info._normalsInvalid).toBe(true);
+        const ray = info.ray!;
+        const dx = info.pickedPoint![0] - ray.origin[0];
+        const dy = info.pickedPoint![1] - ray.origin[1];
+        const dz = info.pickedPoint![2] - ray.origin[2];
+        expect(Math.abs(dy * ray.direction[2] - dz * ray.direction[1])).toBeLessThan(1e-5);
+        expect(Math.abs(dz * ray.direction[0] - dx * ray.direction[2])).toBeLessThan(1e-5);
+        expect(Math.abs(dx * ray.direction[1] - dy * ray.direction[0])).toBeLessThan(1e-5);
+    });
+
+    it("resolves mesh ids from the submitted draw snapshot", async () => {
+        const { engine } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        const second = {
+            ...mesh,
+            name: "second",
+            _gpu: { ...mesh._gpu },
+        } as Mesh;
+        scene.meshes.push(second);
+
+        const pending = pickAsync(createGpuPicker(scene), 4, 4);
+        await Promise.resolve();
+        mesh.visible = false;
+        scene.meshes.reverse();
+        const info = await pending;
+
+        expect(info.pickedMesh).toBe(mesh);
+    });
+
+    it("strips packed thin-instance w lanes when transforming detailed normals", async () => {
+        const { engine } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        const world = new Float32Array(IDENTITY);
+        world[12] = 10;
+        (mesh as unknown as { worldMatrix: Float32Array }).worldMatrix = world;
+        mesh._cpuPositions = new Float32Array([-1, -1, 0, 1, -1, 0, 0, 1, 0]);
+        mesh._cpuNormals = new Float32Array([1, 1, 0, 1, 1, 0, 1, 1, 0]);
+        mesh._cpuIndices = new Uint32Array([0, 1, 2]);
+        const packed = new Float32Array(IDENTITY);
+        packed[3] = 2;
+        mesh.thinInstances = {
+            count: 1,
+            matrices: packed,
+            _gpuBuffer: {} as GPUBuffer,
+        } as NonNullable<Mesh["thinInstances"]>;
+        const picker = createGpuPicker(scene);
+        enableDetailedPicking(picker);
+
+        const info = await pickAsync(picker, 4, 4);
+
+        expect(Math.abs(info.pickedNormalWorld![0])).toBeCloseTo(Math.SQRT1_2);
+        expect(Math.abs(info.pickedNormalWorld![1])).toBeCloseTo(Math.SQRT1_2);
+    });
+
+    it("preserves source vertex normal semantics for detailed morph picks", async () => {
+        const { engine } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        mesh._cpuPositions = new Float32Array([-1, -1, 0, 1, -1, 0, 0, 1, 0]);
+        mesh._cpuNormals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+        mesh._cpuIndices = new Uint32Array([0, 1, 2]);
+        mesh.morphTargets = {
+            count: 1,
+            targets: [
+                {
+                    positions: new Float32Array(9),
+                    normals: new Float32Array([1, 0, -1, 1, 0, -1, 1, 0, -1]),
+                },
+            ],
+            weights: new Float32Array([1]),
+            deltasBuffer: {} as GPUBuffer,
+            weightsBuffer: {} as GPUBuffer,
+        };
+        const picker = createGpuPicker(scene);
+        enableDetailedPicking(picker);
+
+        const info = await pickAsync(picker, 4, 4);
+
+        expect(Math.abs(info.pickedNormal![0])).toBeCloseTo(0);
+        expect(Math.abs(info.pickedNormal![2])).toBeCloseTo(1);
+    });
+
+    it("uses deformed positions for morphed thin-instance picks", async () => {
+        const { engine, buffers } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        mesh._cpuPositions = new Float32Array([-1, -1, 0, 1, -1, 0, 0, 1, 0]);
+        mesh.morphTargets = {
+            count: 1,
+            targets: [{ positions: new Float32Array(9), normals: null }],
+            weights: new Float32Array([1]),
+            deltasBuffer: {} as GPUBuffer,
+            weightsBuffer: {} as GPUBuffer,
+        };
+        mesh.thinInstances = {
+            count: 1,
+            matrices: IDENTITY,
+            _gpuBuffer: {} as GPUBuffer,
+            _version: 1,
+        } as NonNullable<Mesh["thinInstances"]>;
+
+        await pickAsync(createGpuPicker(scene), 4, 4);
+
+        expect(buffers.some(({ descriptor }) => descriptor.label === "pick-deformed-position")).toBe(true);
+    });
+
+    it("suppresses thin-instance detail if instance transforms change during readback", async () => {
+        const { engine } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        mesh._cpuPositions = new Float32Array([-1, -1, 0, 1, -1, 0, 0, 1, 0]);
+        mesh._cpuNormals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+        mesh._cpuIndices = new Uint32Array([0, 1, 2]);
+        mesh.thinInstances = {
+            count: 1,
+            matrices: IDENTITY,
+            _gpuBuffer: {} as GPUBuffer,
+            _version: 1,
+        } as NonNullable<Mesh["thinInstances"]>;
+        const picker = createGpuPicker(scene);
+        enableDetailedPicking(picker);
+
+        const pending = pickAsync(picker, 4, 4);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        mesh.thinInstances._version++;
+        const info = await pending;
+
+        expect(info.hit).toBe(true);
+        expect(info.faceId).toBe(-1);
+        expect(info.pickedNormal).toBeNull();
+    });
+
+    it("passes the ignored thin-instance identity to the GPU shader", async () => {
+        const { engine, writes } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        mesh.thinInstances = {
+            count: 2,
+            matrices: new Float32Array(32),
+            _gpuBuffer: {} as GPUBuffer,
+        } as NonNullable<Mesh["thinInstances"]>;
+
+        await pickAsync(createGpuPicker(scene), 4, 4, { ignore: { mesh, thinInstanceIndex: 1 } });
+
+        const write = writes.find((entry) => entry.label === "pick-thin-instance-ubo");
+        expect(new Uint32Array(write!.data.buffer)[17]).toBe(1);
+    });
+
     it("binds requested regular vertex data only when that mesh owns the buffer", async () => {
         const { engine, pass } = makePickerEngine();
         const { scene, mesh } = makePickScene(engine);
@@ -395,6 +769,31 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
         await pickAsync(createGpuPicker(scene), 4, 4, { discard });
 
         expect(pass.boundVertexSlots).toEqual([0, 1]);
+    });
+
+    it("does not materialize lazy CPU geometry for a basic non-deformed pick", async () => {
+        const { engine } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        const positions = vi.fn(() => new Float32Array(9));
+        const normals = vi.fn(() => new Float32Array(9));
+        Object.defineProperty(mesh, "_cpuPositions", { configurable: true, get: positions });
+        Object.defineProperty(mesh, "_cpuNormals", { configurable: true, get: normals });
+
+        await pickAsync(createGpuPicker(scene), 4, 4);
+
+        expect(positions).not.toHaveBeenCalled();
+        expect(normals).not.toHaveBeenCalled();
+    });
+
+    it("keeps invisible pickable collider meshes in the GPU pick pass", async () => {
+        const { engine } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        mesh.visible = false;
+
+        const info = await pickAsync(createGpuPicker(scene), 4, 4);
+
+        expect(info.hit).toBe(true);
+        expect(info.pickedMesh).toBe(mesh);
     });
 
     it("does not bind the zero-filled UV placeholder when the mesh has no UV attribute", async () => {
@@ -434,9 +833,7 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
 
         await pickAsync(createGpuPicker(scene), 4, 4, { discard });
 
-        const dataPipeline = device.renderPipelines.find(
-            (pipeline) => String(pipeline.label).includes("interleaved-uv-data-vb") && Array.from(pipeline.vertex.buffers ?? []).length === 2
-        );
+        const dataPipeline = device.renderPipelines.find((pipeline) => Array.from(pipeline.vertex.buffers ?? []).length === 2);
         expect(dataPipeline?.vertex.buffers).toEqual([
             { arrayStride: 32, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] },
             { arrayStride: 32, attributes: [{ shaderLocation: 5, offset: 24, format: "float32x2" }] },
@@ -496,9 +893,9 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
             },
         };
         await pickAsync(createGpuPicker(regularScene.scene), 4, 4, { discard });
-        const regularShader = regular.device.shaderModules.find((module) => String(module.label).includes("legacy-interleaved-vb"));
+        const regularShader = regular.device.shaderModules.find((module) => String(module.label).includes("picking-vb-") && String(module.code).includes(discard.wgsl));
         expect(regularShader?.code).toContain(discard.wgsl);
-        expect(regularShader?.code).not.toContain("vertexData");
+        expect(wgslStruct(String(regularShader?.code), "PickDiscardInput")).not.toContain("vertexData");
 
         const thin = makePickerEngine();
         const thinScene = makePickScene(thin.engine);
@@ -513,9 +910,9 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
             _gpuBuffer: {} as GPUBuffer,
         } as NonNullable<Mesh["thinInstances"]>;
         await pickAsync(createGpuPicker(thinScene.scene), 4, 4, { discard: { ...discard, key: "legacy-thin-interleaved" } });
-        const thinShader = thin.device.shaderModules.find((module) => String(module.label).includes("legacy-thin-interleaved-vb"));
+        const thinShader = thin.device.shaderModules.find((module) => String(module.label).includes("picking-ti-vb-") && String(module.code).includes(discard.wgsl));
         expect(thinShader?.code).toContain(discard.wgsl);
-        expect(thinShader?.code).not.toContain("vertexData");
+        expect(wgslStruct(String(thinShader?.code), "PickDiscardInput")).not.toContain("vertexData");
     });
 
     it("uploads the selected pixel center in original framebuffer coordinates", async () => {
@@ -564,6 +961,23 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
         expect(temporary.length).toBeGreaterThan(0);
         expect(temporary.every(({ destroy }) => destroy.mock.calls.length === 1)).toBe(true);
         expect(engine._retirements).toHaveLength(0);
+    });
+
+    it("recreates picker-owned resources when the engine device changes", async () => {
+        const first = makePickerEngine();
+        const { scene } = makePickScene(first.engine);
+        const picker = createGpuPicker(scene);
+        await pickAsync(picker, 4, 4);
+
+        const second = makePickerEngine();
+        first.engine._device = second.engine._device;
+        await pickAsync(picker, 4, 4);
+
+        const persistentLabels = new Set(["pick-color", "pick-depth-color", "pick-depth", "pick-color-staging", "pick-depth-staging", "pick-scene-ubo"]);
+        const firstPersistent = first.buffers.filter(({ descriptor }) => persistentLabels.has(String(descriptor.label ?? "")));
+        expect(firstPersistent.length).toBeGreaterThan(0);
+        expect(firstPersistent.every(({ destroy }) => destroy.mock.calls.length === 1)).toBe(true);
+        expect(picker._device).toBe(second.engine._device);
     });
 
     it("loads lazy pick contributors before creating an encoder that can capture replaceable mesh buffers", async () => {
@@ -621,10 +1035,10 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
         const first = makeEngine();
         const second = makeEngine();
 
-        getPickingPipelineSet(first.engine);
-        getPickingPipelineSet(second.engine);
+        getBasicPickingPipelineSet(first.engine);
+        getBasicPickingPipelineSet(second.engine);
 
-        expect(first.device.renderPipelines).toHaveLength(2);
-        expect(second.device.renderPipelines).toHaveLength(2);
+        expect(first.device.renderPipelines).toHaveLength(1);
+        expect(second.device.renderPipelines).toHaveLength(1);
     });
 });

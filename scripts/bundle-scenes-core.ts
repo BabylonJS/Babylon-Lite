@@ -1494,6 +1494,7 @@ export async function measurePage(
                 const c = document.querySelector("canvas");
                 return c?.dataset.ready === "true" || c?.dataset.error != null;
             },
+            undefined,
             { timeout: readyTimeoutMs }
         );
         notReadyReason = await page.evaluate(() => {
