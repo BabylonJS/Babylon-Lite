@@ -27,42 +27,38 @@ function runtimeModuleIds(scene: string): string[] {
 }
 
 describe("shadow deformation tracking bundle isolation", () => {
-    it("uses an opt-in hook instead of direct shadow bookkeeping in deformation writers", () => {
-        const updater = readFileSync(join(ROOT, "packages", "babylon-lite", "src", "skeleton", "skeleton-updater.ts"), "utf-8");
-        const directUpdater = readFileSync(join(ROOT, "packages", "babylon-lite", "src", "skeleton", "update-skeleton-bone-matrices.ts"), "utf-8");
-        const hook = readFileSync(join(ROOT, "packages", "babylon-lite", "src", "animation", "deformation-change-hooks.ts"), "utf-8");
-
-        for (const writer of [updater, directUpdater]) {
-            expect(writer).not.toMatch(/runtime(?:Skeleton|MorphTargets)\._version\s*=/);
-            expect(writer).not.toContain("_onShadowCasterChanged");
-            expect(writer).toContain("_deformationChangeNotifier?.(");
+    it("keeps deformable shadow tracking out of shared runtime modules", () => {
+        const sharedModules = [
+            join("animation", "weighted-gltf-mixer.ts"),
+            join("frame-graph", "shadow-task.ts"),
+            join("morph", "create-morph-targets.ts"),
+            join("shadow", "shadow-base.ts"),
+            join("skeleton", "skeleton-updater.ts"),
+            join("skeleton", "update-skeleton-bone-matrices.ts"),
+        ];
+        for (const file of sharedModules) {
+            const source = readFileSync(join(ROOT, "packages", "babylon-lite", "src", file), "utf-8");
+            expect(source).not.toContain("deformable-shadow-casters");
+            expect(source).not.toContain("enable-morph-target-shadows");
+            expect(source).not.toContain("enable-skeleton-shadows");
         }
-        expect(hook).not.toContain("_onShadowCasterChanged");
-        expect(hook).not.toContain("_shadowVersion");
     });
 
-    it.skipIf(!existsSync(join(BUNDLE_DIR, "scene4.js")))("keeps shadow tracking out of a no-shadow animation bundle", () => {
-        const casterBoundsModule = "/shadow/caster-world-aabb.js";
-        const staticShadowModules = runtimeModuleIds("scene4");
+    it.skipIf(!existsSync(join(BUNDLE_DIR, "scene4.js")))("keeps deformation support out of non-opted bundles", () => {
+        const optionalModule = /\/(?:shadow\/(?:deformable-shadow-casters|enable-(?:morph-target|skeleton)-shadows)|mesh\/aabb-corners)\.js$/;
         expect(
-            staticShadowModules.some((id) => id.endsWith(casterBoundsModule)),
-            "Directional-shadow scene must contain shadow caster bounds"
-        ).toBe(true);
-        expect(
-            staticShadowModules.some(
-                (id) => id.endsWith("/shadow/skinned-caster-aabb.js") || id.endsWith("/shadow/morph-caster-aabb.js") || id.endsWith("/shadow/thin-caster-aabb.js")
-            ),
-            "Static shadow scene must not load optional caster bounds"
+            runtimeModuleIds("scene4").some((id) => optionalModule.test(id)),
+            "Static shadow scene must not contain deformable shadow support"
         ).toBe(false);
         expect(
-            runtimeModuleIds("scene5").some((id) => id.endsWith(casterBoundsModule)),
-            "No-shadow skeleton scene must not contain shadow caster bounds"
+            runtimeModuleIds("scene5").some((id) => optionalModule.test(id)),
+            "No-shadow skeleton scene must not contain deformable shadow support"
         ).toBe(false);
     });
 
     it.skipIf(!existsSync(join(BUNDLE_DIR, "scene140.js")))("keeps skeletal bounds out of a morph-only shadow bundle", () => {
         const modules = runtimeModuleIds("scene140");
-        expect(modules.some((id) => id.endsWith("/shadow/morph-caster-aabb.js"))).toBe(true);
-        expect(modules.some((id) => id.endsWith("/shadow/skinned-caster-aabb.js") || id.endsWith("/mesh/aabb-corners.js"))).toBe(false);
+        expect(modules.some((id) => id.endsWith("/shadow/enable-morph-target-shadows.js"))).toBe(true);
+        expect(modules.some((id) => id.endsWith("/shadow/enable-skeleton-shadows.js") || id.endsWith("/mesh/aabb-corners.js"))).toBe(false);
     });
 });

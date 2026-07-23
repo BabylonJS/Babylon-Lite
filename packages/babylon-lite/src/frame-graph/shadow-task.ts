@@ -7,20 +7,10 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import type { Mesh } from "../mesh/mesh.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
-import { casterBoundsReady } from "../shadow/caster-world-aabb.js";
 import type { Task } from "./task.js";
-import { _getShadowTaskInput, _setShadowTaskInputPreloader, type ShadowTaskInput } from "./shadow-inputs.js";
-
-function ensureShadowInputReady(shadowGenerator: ShadowGenerator, input: ShadowTaskInput): boolean {
-    if (input.promise !== null || !input.casterMeshes.every(casterBoundsReady)) {
-        // record/execute are synchronous, so start the scheduler-owned preload without
-        // awaiting it and gate rendering until a later call observes the completed load.
-        void preloadShadowTaskInput(shadowGenerator, input);
-        return false;
-    }
-    return true;
-}
+import { _getShadowTaskCasterMeshes, _setShadowTaskInputPreloader } from "./shadow-inputs.js";
 
 /** Scene-owned frame-graph task that schedules shadow-map generation across the scene's shadow generators. */
 export interface ShadowTask extends Task {
@@ -46,10 +36,10 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
             const loads: Promise<void>[] = [];
             for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
-                const input = sg ? _getShadowTaskInput(sg) : null;
-                if (sg?._preloadShadowTask && input) {
+                const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
+                if (sg?._preloadShadowTask && casterMeshes) {
                     shadowGenerators.add(sg);
-                    loads.push(preloadShadowTaskInput(sg, input));
+                    loads.push(sg._preloadShadowTask(casterMeshes));
                 }
             }
             await Promise.all(loads);
@@ -58,10 +48,10 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
             task._passes.length = 0;
             for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
-                const input = sg ? _getShadowTaskInput(sg) : null;
-                if (sg?._ensureShadowTaskState && input && ensureShadowInputReady(sg, input)) {
+                const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
+                if (sg?._ensureShadowTaskState && casterMeshes) {
                     shadowGenerators.add(sg);
-                    const state = sg._ensureShadowTaskState(engine, scene, input.casterMeshes);
+                    const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
                     state._task.record();
                 }
             }
@@ -70,12 +60,12 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
             let draws = 0;
             for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
-                const input = sg ? _getShadowTaskInput(sg) : null;
-                if (sg?._ensureShadowTaskState && sg._renderShadowMap && input && ensureShadowInputReady(sg, input)) {
+                const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
+                if (sg?._ensureShadowTaskState && sg._renderShadowMap && casterMeshes) {
                     shadowGenerators.add(sg);
                     const existing = sg._shadowTaskState ?? null;
-                    const state = sg._ensureShadowTaskState(engine, scene, input.casterMeshes);
-                    if (!existing || existing._casterMeshes !== input.casterMeshes || recordedVersion.get(sg) !== scene._renderableVersion) {
+                    const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
+                    if (!existing || existing._casterMeshes !== casterMeshes || recordedVersion.get(sg) !== scene._renderableVersion) {
                         state._task.record();
                         recordedVersion.set(sg, scene._renderableVersion);
                     }
@@ -99,25 +89,6 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
     return task;
 }
 
-async function preloadShadowTaskInput(shadowGenerator: ShadowGenerator, input: ShadowTaskInput): Promise<void> {
-    // Runs when a generator's caster set is (re)supplied (e.g. the Viewer wiring casters after a model
-    // load), and when an existing caster gains deformable or thin-instance data. The registration-time
-    // `_preload` above awaits the same load, so scenes built through it are correct from frame one.
-    const casterMeshes = input.casterMeshes;
-    if (input.promise === null && casterMeshes.every(casterBoundsReady)) {
-        return;
-    }
-    if (input.promise) {
-        return input.promise;
-    }
-    return (input.promise = Promise.all([
-        shadowGenerator._preloadShadowTask!(casterMeshes),
-        // These imports install synchronous implementations into caster-world-aabb.
-        // Scheduler ownership keeps record-time bounds lookup side-effect free.
-        casterMeshes.some((mesh) => mesh.skeleton?.weights && mesh.skeleton.boneMatrices) && import("../shadow/skinned-caster-aabb.js").then((mod) => mod.enable(casterMeshes)),
-        casterMeshes.some((mesh) => mesh.morphTargets) && import("../shadow/morph-caster-aabb.js").then((mod) => mod.enable(casterMeshes)),
-        casterMeshes.some((mesh) => mesh.thinInstances) && import("../shadow/thin-caster-aabb.js").then((mod) => mod.enable(casterMeshes)),
-    ]).then(() => {
-        input.promise = null;
-    }));
+async function preloadShadowTaskInput(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): Promise<void> {
+    await shadowGenerator._preloadShadowTask?.(casterMeshes);
 }

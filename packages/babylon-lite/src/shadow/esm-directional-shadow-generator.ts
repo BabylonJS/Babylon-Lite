@@ -25,11 +25,21 @@ import {
     createShadowRenderTarget,
     updateShadowCameraBase,
     writeShadowUboFields,
-    type DirectionalLightMatrix,
 } from "./shadow-base.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import blurVertSrc from "../../shaders/shadow-blur.vertex.wgsl?raw";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
+
+export interface EsmLightMatrix {
+    /** @internal */
+    _view: Float32Array;
+    /** @internal */
+    _viewProj: Float32Array;
+    /** @internal */
+    _near: number;
+    /** @internal */
+    _far: number;
+}
 
 export interface EsmShadowTaskResources {
     /** @internal */
@@ -326,7 +336,7 @@ function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: E
     return draws;
 }
 
-function updateShadowCamera(state: EsmTaskState, matrix: DirectionalLightMatrix): void {
+function updateShadowCamera(state: EsmTaskState, matrix: EsmLightMatrix): void {
     state._cameraVersion++;
     updateShadowCameraBase(state._camera, state._cameraVersion, matrix._near, matrix._far, matrix._view, matrix._viewProj);
 }

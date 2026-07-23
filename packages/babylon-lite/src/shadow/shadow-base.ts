@@ -13,7 +13,6 @@ import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
-import { casterWorldAabb } from "./caster-world-aabb.js";
 
 /** Write shadow generator state into a Float32Array(24) for UBO upload.
  *  Layout: [lightMatrix(16), depthValues.x, depthValues.y, 0, 0, shadowsInfo(4)] */
@@ -78,24 +77,7 @@ export function multiply4x4(a: Float32Array, b: Float32Array): Float32Array {
     return out;
 }
 
-/** Light-space matrices for a directional shadow generator's ortho frustum. */
-export interface DirectionalLightMatrix {
-    /** @internal */
-    _view: Float32Array;
-    /** @internal */
-    _viewProj: Float32Array;
-    /** @internal */
-    _near: number;
-    /** @internal */
-    _far: number;
-}
-
-/** Fit a directional light's ortho frustum to its shadow casters and build the
- *  light view + view-projection matrices. Shared by the ESM and PCF directional
- *  generators (their frustum fit is identical). The frustum is fit to each caster's
- *  true world-space AABB (see `casterWorldAabb`) so both local-bounds procedural
- *  meshes and world-bounds glTF meshes are placed correctly; corners are made
- *  eye-relative (minus the floating-origin offset) before the light view transform. */
+/** Fit an orthographic directional-light projection to caster world-space bounds. */
 export function computeDirectionalLightMatrix(
     light: DirectionalLight,
     casterMeshes: readonly Mesh[],
@@ -104,23 +86,23 @@ export function computeDirectionalLightMatrix(
     offX = 0,
     offY = 0,
     offZ = 0
-): DirectionalLightMatrix {
+): { _view: Float32Array; _viewProj: Float32Array; _near: number; _far: number } {
     const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x - offX, light.position.y - offY, light.position.z - offZ);
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
     let maxY = -Infinity;
     for (const mesh of casterMeshes) {
-        const aabb = casterWorldAabb(mesh);
-        if (!aabb) {
-            continue;
-        }
-        const boundMin = aabb[0];
-        const boundMax = aabb[1];
+        const world = mesh.worldMatrix;
+        const boundMin = mesh.boundMin ?? [-0.5, -0.5, -0.5];
+        const boundMax = mesh.boundMax ?? [0.5, 0.5, 0.5];
         for (let corner = 0; corner < 8; corner++) {
-            const worldX = (corner & 1 ? boundMax[0] : boundMin[0]) - offX;
-            const worldY = (corner & 2 ? boundMax[1] : boundMin[1]) - offY;
-            const worldZ = (corner & 4 ? boundMax[2] : boundMin[2]) - offZ;
+            const localX = corner & 1 ? boundMax[0] : boundMin[0];
+            const localY = corner & 2 ? boundMax[1] : boundMin[1];
+            const localZ = corner & 4 ? boundMax[2] : boundMin[2];
+            const worldX = world[0]! * localX + world[4]! * localY + world[8]! * localZ + world[12]! - offX;
+            const worldY = world[1]! * localX + world[5]! * localY + world[9]! * localZ + world[13]! - offY;
+            const worldZ = world[2]! * localX + world[6]! * localY + world[10]! * localZ + world[14]! - offZ;
             const viewX = view[0]! * worldX + view[4]! * worldY + view[8]! * worldZ + view[12]!;
             const viewY = view[1]! * worldX + view[5]! * worldY + view[9]! * worldZ + view[13]!;
             minX = Math.min(minX, viewX);
@@ -201,14 +183,12 @@ export function createSharedShadowUBO(
     return { ubo, data };
 }
 
-/** Sum every state token that can change a cached shadow map. */
+/** Sum caster transform versions plus non-transform geometry/count mutations. */
 export function casterVersionSum(casterMeshes: readonly Mesh[]): number {
     let sum = 0;
     for (const mesh of casterMeshes) {
         // Bitwise coercion maps the absent optional version to zero without another branch.
-        // Skeleton/morph pose versions cover deformable casters, whose vertices change every
-        // frame while the world matrix stays fixed — without them the depth map would freeze.
-        sum += mesh.worldMatrixVersion + ~~(mesh.thinInstances?._version as number) + ~~(mesh.skeleton?._shadowVersion as number) + ~~(mesh.morphTargets?._shadowVersion as number);
+        sum += mesh.worldMatrixVersion + ~~(mesh.thinInstances?._version as number);
     }
     return sum;
 }

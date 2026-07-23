@@ -1,13 +1,7 @@
-// Shared AABB-corner primitives for world-space mesh bounds.
+// AABB-corner primitives for optional skeletal-shadow bounds.
 //
-// Two consumers fold a mesh's geometry into a world-space AABB from its bind-pose
-// corners: camera framing (`compute-max-extents`, swept across an animation) and
-// shadow-caster frustum fitting (`shadow/caster-world-aabb`, at the current pose).
-// Both need the same skinning-aware corner math, so it lives here once rather than
-// being duplicated: build per-bone bind-space corner boxes, then transform each box
-// by `worldMatrix · boneMatrices[bone]` — the exact skinning matrix the GPU uses —
-// growing a running min/max. Non-skinned helpers (`extentCorners`,
-// `computeMorphedRange`) are shared too so a single implementation serves both.
+// Build per-bone bind-space corner boxes, then transform each box by the live
+// `boneMatrices[bone]` used by the GPU, growing a running mesh-local min/max.
 //
 // Standalone and side-effect-free: only pulled into a bundle when imported.
 
@@ -143,19 +137,19 @@ export function buildSkinnedBoneCorners(mesh: Mesh): BoneCornerBox[] | null {
 
 /** Transform the 8 `corners` by `matrix` (column-major 4x4) and grow `min`/`max`
  *  (length-3 arrays) to include the transformed points. */
-export function growCornersByMatrix(corners: Float32Array, matrix: ArrayLike<number>, min: number[], max: number[]): void {
-    const m0 = matrix[0]!,
-        m1 = matrix[1]!,
-        m2 = matrix[2]!,
-        m4 = matrix[4]!,
-        m5 = matrix[5]!,
-        m6 = matrix[6]!,
-        m8 = matrix[8]!,
-        m9 = matrix[9]!,
-        m10 = matrix[10]!,
-        m12 = matrix[12]!,
-        m13 = matrix[13]!,
-        m14 = matrix[14]!;
+export function growCornersByMatrix(corners: Float32Array, matrix: ArrayLike<number>, min: number[], max: number[], offset = 0): void {
+    const m0 = matrix[offset]!,
+        m1 = matrix[offset + 1]!,
+        m2 = matrix[offset + 2]!,
+        m4 = matrix[offset + 4]!,
+        m5 = matrix[offset + 5]!,
+        m6 = matrix[offset + 6]!,
+        m8 = matrix[offset + 8]!,
+        m9 = matrix[offset + 9]!,
+        m10 = matrix[offset + 10]!,
+        m12 = matrix[offset + 12]!,
+        m13 = matrix[offset + 13]!,
+        m14 = matrix[offset + 14]!;
     for (let i = 0; i < 8; i++) {
         const lx = corners[i * 3]!;
         const ly = corners[i * 3 + 1]!;

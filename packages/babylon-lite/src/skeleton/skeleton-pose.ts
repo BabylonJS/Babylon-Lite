@@ -5,7 +5,6 @@
  *  to a build without bone control. Only imported by bone-control.ts. */
 
 import { F32, I32, U8 } from "../engine/typed-arrays.js";
-import { _deformationChangeNotifier } from "../animation/deformation-change-hooks.js";
 import type { NodeRest, SkeletonBinding } from "../animation/types.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
@@ -125,7 +124,5 @@ export function writeBoneTextures(device: GPUDevice, skeletons: readonly Skeleto
             { bytesPerRow: texWidth * 16 },
             { width: texWidth, height: 1 }
         );
-        // Invalidate deformable shadow bounds after the completed pose is available to the caster.
-        _deformationChangeNotifier?.(skel.runtimeSkeleton);
     }
 }

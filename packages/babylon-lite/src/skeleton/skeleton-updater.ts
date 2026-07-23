@@ -7,7 +7,6 @@ import type { AnimationClip, NodeRest, SkeletonBinding, AnimatedNodeTarget } fro
 import type { MorphBinding } from "../animation/types.js";
 import type { AnimationGroupMask } from "../animation/animation-group-mask.js";
 import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS, PATH_POINTER } from "../animation/types.js";
-import { _deformationChangeNotifier } from "../animation/deformation-change-hooks.js";
 import { evaluateSampler } from "../animation/evaluate.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
@@ -337,9 +336,6 @@ export function createAnimationController(
                                           // Write the weights array after the immutable header.
                                           if (uploadGpu) {
                                               device!.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 16, morphUploadF32.buffer, 0, tc * 4);
-                                              // Unmasked poses deduplicate by controller/time; masks bypass that
-                                              // because changing a mask can change the pose at a fixed time.
-                                              _deformationChangeNotifier?.(mb.runtimeMorphTargets, maskActive ? undefined : ctrl, t);
                                           }
                                       }
                                   }
@@ -429,9 +425,6 @@ export function createAnimationController(
                                   { bytesPerRow: texWidth * 16 },
                                   { width: texWidth, height: 1 }
                               );
-                              // Unmasked poses deduplicate by controller/time; masks bypass that
-                              // because changing a mask can change the pose at a fixed time.
-                              _deformationChangeNotifier?.(skel.runtimeSkeleton, maskActive ? undefined : ctrl, t);
                           }
                       }
                   },

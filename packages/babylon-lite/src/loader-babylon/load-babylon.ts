@@ -21,7 +21,6 @@ import { createTransformNode } from "../scene/transform-node.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import { uploadMeshToGPU, initMeshTransform } from "../mesh/mesh.js";
-import { computeAabb } from "../math/compute-aabb.js";
 import { loadTexture2D } from "../texture/texture-2d.js";
 // ─── .babylon JSON Types ───────────────────────────────────────────
 
@@ -379,7 +378,6 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                 if (md.localMatrix && bakeLocalMatrix) {
                     bakeLocalMatrix(positions, normals, md.localMatrix);
                 }
-                const localBounds = computeAabb(positions);
 
                 let matIds: string[] | null = null;
                 if (md.materialId) {
@@ -420,7 +418,6 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                         id: md.id,
                         material: mat,
                         receiveShadows: false,
-                        _localBounds: localBounds,
                         _gpu: gpu,
                     } as unknown as Mesh;
 

@@ -1,5 +1,4 @@
 import type { SkeletonData } from "../animation/types.js";
-import { _deformationChangeNotifier } from "../animation/deformation-change-hooks.js";
 import type { EngineContext } from "../engine/engine.js";
 
 /** Update a skeleton's CPU bone-matrix mirror and upload it to the GPU. */
@@ -12,6 +11,4 @@ export function updateSkeletonBoneMatrices(engine: EngineContext, skeleton: Skel
     }
     const textureWidth = skeleton.boneMatrices.length / 4;
     engine._device.queue.writeTexture({ texture: skeleton.boneTexture }, skeleton.boneMatrices, { bytesPerRow: textureWidth * 16 }, { width: textureWidth, height: 1 });
-    // Invalidate deformable shadow bounds after the CPU mirror and GPU pose agree.
-    _deformationChangeNotifier?.(skeleton);
 }

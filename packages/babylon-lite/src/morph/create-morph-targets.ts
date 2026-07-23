@@ -11,7 +11,6 @@
 
 import { F32, U32, U8 } from "../engine/typed-arrays.js";
 import { BU } from "../engine/gpu-flags.js";
-import { _deformationChangeNotifier } from "../animation/deformation-change-hooks.js";
 import type { MorphTargetData } from "../animation/types.js";
 import type { EngineContext } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
@@ -85,6 +84,4 @@ export function setMorphTargetWeights(engine: EngineContext, morphTargets: Morph
     }
     // Weights live after the 16-byte header in the weights storage buffer.
     engine._device.queue.writeBuffer(morphTargets.weightsBuffer, MORPH_WEIGHTS_HEADER_BYTES, morphTargets.weights);
-    // Invalidate deformable shadow bounds after the CPU mirror and GPU weights agree.
-    _deformationChangeNotifier?.(morphTargets);
 }
