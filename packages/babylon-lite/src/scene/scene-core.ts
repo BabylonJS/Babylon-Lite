@@ -454,6 +454,7 @@ export function disposeScene(scene: SceneContext): void {
                 disposeMeshGpu(mesh);
             }
         }
+        ctx._groups.clear();
         ctx.meshes.length = 0;
         ctx._renderables.length = 0;
         ctx._prePasses.length = 0;
