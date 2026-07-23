@@ -14,7 +14,7 @@ interface ShadowMeshEntry {
     readonly source: Mesh;
     readonly shadow: Mesh;
     readonly provider: DeformableShadowBoundsProvider;
-    _bounds: string;
+    readonly _bounds: (number | undefined)[];
     _version: number;
 }
 
@@ -30,7 +30,7 @@ interface DeformableShadowState {
 
 let states: WeakMap<ShadowGenerator, DeformableShadowState> | null = null;
 
-/** @internal Run the enabled bounds stages that precede `kind`. */
+/** @internal Compose enabled bounds stages that run before `kind`; earlier stages occupy higher provider indices. */
 export function getPreviousDeformableShadowBounds(generator: ShadowGenerator, mesh: Mesh, kind: DeformableShadowBoundsKind): Aabb | null {
     const providers = states?.get(generator)?.providers;
     let bounds: Aabb | null = null;
@@ -47,9 +47,13 @@ function updateShadowMesh(entry: ShadowMeshEntry): boolean {
     const bounds = entry.provider.getLocalBounds(entry.source);
     const min = bounds?.[0] ?? entry.source.boundMin;
     const max = bounds?.[1] ?? entry.source.boundMax;
-    const signature = `${min}|${max}`;
-    const changed = entry._bounds !== signature;
-    entry._bounds = signature;
+    const previous = entry._bounds;
+    let changed = false;
+    for (let i = 0; i < 3; i++) {
+        changed = !Object.is(previous[i], min?.[i]) || !Object.is(previous[i + 3], max?.[i]) || changed;
+        previous[i] = min?.[i];
+        previous[i + 3] = max?.[i];
+    }
     entry.shadow.boundMin = min;
     entry.shadow.boundMax = max;
     return changed;
@@ -57,7 +61,7 @@ function updateShadowMesh(entry: ShadowMeshEntry): boolean {
 
 function createShadowMesh(source: Mesh, provider: DeformableShadowBoundsProvider): ShadowMeshEntry {
     const shadow = Object.create(source) as Mesh;
-    const entry: ShadowMeshEntry = { source, shadow, provider, _bounds: "", _version: 0 };
+    const entry: ShadowMeshEntry = { source, shadow, provider, _bounds: [], _version: 0 };
     Object.defineProperty(shadow, "worldMatrixVersion", {
         configurable: true,
         get: () => source.worldMatrixVersion + entry._version,
