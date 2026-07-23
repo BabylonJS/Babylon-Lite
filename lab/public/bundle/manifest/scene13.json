@@ -1,9 +1,9 @@
 {
-  "rawKB": 83.7,
+  "rawKB": 83.8,
   "gzipKB": 34.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene13-background-ground-i19635W1.js",
+    "scene13-background-ground-BtYC9A0x.js",
     "scene13-generate-mipmaps-CtVZJxfl.js",
     "scene13-gltf-glb-parser-Cmo3v_yx.js",
     "scene13-ibl-fragment-CeRrvT96.js",

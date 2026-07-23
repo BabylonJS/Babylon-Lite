@@ -1,10 +1,10 @@
 {
-  "rawKB": 88.2,
+  "rawKB": 88.3,
   "gzipKB": 37,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene14-background-dds-skybox-5O3e6QVu.js",
-    "scene14-background-ground-DSqziL3M.js",
+    "scene14-background-dds-skybox-BZFherw9.js",
+    "scene14-background-ground-DWapkJab.js",
     "scene14-cubemap-skybox-material-D__KQ7QQ.js",
     "scene14-generate-mipmaps-DC9Kvgcn.js",
     "scene14-gltf-glb-parser-BUKpGZyL.js",

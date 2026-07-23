@@ -43,7 +43,6 @@ describe("device-lost recovery context dispatch", () => {
             _recover: vi.fn(),
             _enable: enable,
             _disable: disable,
-            _callbacks: {},
         };
 
         const first = _enableDeviceLostRecovery(engine, registration);

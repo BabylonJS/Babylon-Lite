@@ -1,5 +1,5 @@
 {
-  "rawKB": 111.5,
+  "rawKB": 111.6,
   "gzipKB": 45.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene144-gltf-ext-spec-gloss-D60sFZYX.js",
     "scene144-gltf-feature-animations-CeKIfwvE.js",
     "scene144-gltf-feature-extras-VHPteGay.js",
-    "scene144-gltf-feature-registry-DY9PVfia.js",
+    "scene144-gltf-feature-registry-BHbekeAr.js",
     "scene144-gltf-feature-skeleton-DZaO-ZaT.js",
     "scene144-gltf-glb-parser-BdFYWv6T.js",
     "scene144-gltf-pbr-builder-ext-CCaQI4H2.js",

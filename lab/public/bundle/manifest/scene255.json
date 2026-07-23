@@ -1,6 +1,6 @@
 {
   "rawKB": 94.2,
-  "gzipKB": 39.5,
+  "gzipKB": 39.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene255-create-skeleton-B2bD2bod.js",
@@ -8,7 +8,7 @@
     "scene255-generate-mipmaps-B7LdcXNp.js",
     "scene255-gltf-animation-BqkzokrD.js",
     "scene255-gltf-feature-animations-C6AHnpTF.js",
-    "scene255-gltf-feature-registry-B8BObPHz.js",
+    "scene255-gltf-feature-registry-BpGafgRC.js",
     "scene255-gltf-feature-skeleton-D6g01i7-.js",
     "scene255-gltf-json-asset-TQZDaNrM.js",
     "scene255-gltf-normals-DYhLwXNX.js",
