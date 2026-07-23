@@ -18,9 +18,11 @@ export const systemBlock: SoaBlockEvaluator = {
             system.blendMode = serialized.blendMode;
         }
 
-        const emitRate = ctx.input(block, "emitRate", () => 10)(0);
-        if (typeof emitRate === "number") {
-            system.emitRate = emitRate;
+        if (!ctx.isConnected(block, "emitRate")) {
+            const emitRate = ctx.input(block, "emitRate", () => 10)(0);
+            if (typeof emitRate === "number") {
+                system.emitRate = emitRate;
+            }
         }
 
         const targetStop = ctx.input(block, "targetStopDuration", () => 0)(0);

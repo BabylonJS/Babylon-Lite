@@ -3,7 +3,7 @@ import type { ScalarGetter } from "../value.js";
 
 /**
  * Build a scalar `OncePerParticle` cache. This module is loaded only for lock mode 3, so other random
- * modes pay neither its code nor its two feature columns. The particle id invalidates stale values when a
+ * modes pay neither its code nor its three feature columns. The particle id invalidates stale values when a
  * compacted slot is reused, avoiding a reset hook in the spawn loop.
  */
 export function createOnceRandomGetter(buffer: ParticleBuffer, blockId: number, draw: ScalarGetter): ScalarGetter {

@@ -17,6 +17,10 @@ import { createSoaSystem, type SoaSystem } from "./animate.js";
 import type { SoaGetter, SoaValue } from "./value.js";
 import { loadSoaBlockEvaluator } from "./registry.js";
 
+function isInputConnected(input: ParsedParticleInput | undefined): input is ParsedParticleInput & { targetBlockId: number; targetConnectionName: string } {
+    return input?.targetBlockId != null && input.targetConnectionName != null;
+}
+
 /** Parse a literal value serialized directly on an unconnected input. */
 function parseInputLiteral(input: ParsedParticleInput): SoaValue | undefined {
     const value = input.value;
@@ -128,7 +132,7 @@ export async function buildSoaParticleSet(engine: EngineContext, scene: SceneCon
             engine,
             input(block, name, fallback) {
                 const input = block.inputs.find((i) => i.name === name);
-                if (input && input.targetBlockId != null && input.targetConnectionName != null) {
+                if (isInputConnected(input)) {
                     const getter = outputs.get(`${input.targetBlockId}:${input.targetConnectionName}`);
                     if (getter) {
                         return getter;
@@ -145,7 +149,7 @@ export async function buildSoaParticleSet(engine: EngineContext, scene: SceneCon
             },
             isConnected(block, name) {
                 const input = block.inputs.find((i) => i.name === name);
-                return !!(input && input.targetBlockId != null);
+                return isInputConnected(input);
             },
             setOutput(blockId, name, getter) {
                 outputs.set(`${blockId}:${name}`, getter);
@@ -167,12 +171,12 @@ export async function buildSoaParticleSet(engine: EngineContext, scene: SceneCon
             // Recurse the `particle` chain first so the system + buffer exist before any value chain
             // (contextual sources, per-particle random) builds, regardless of serialized input order.
             for (const input of block.inputs) {
-                if (input.name === "particle" && input.targetBlockId != null) {
+                if (input.name === "particle" && isInputConnected(input)) {
                     await buildBlock(input.targetBlockId);
                 }
             }
             for (const input of block.inputs) {
-                if (input.name !== "particle" && input.targetBlockId != null) {
+                if (input.name !== "particle" && isInputConnected(input)) {
                     await buildBlock(input.targetBlockId);
                 }
             }
@@ -186,7 +190,7 @@ export async function buildSoaParticleSet(engine: EngineContext, scene: SceneCon
                 (block.className === "ParticleInputBlock" && contextualSource !== 0 && !((contextualSource <= 6 && contextualSource !== 2) || contextualSource === 0x17)) ||
                 (block.className === "ParticleRandomBlock" && block.serialized.lockMode === 3 && !scalarOnce) ||
                 (block.className === "ParticleMathBlock" && left?.targetBlockId === right?.targetBlockId && left?.targetConnectionName === right?.targetConnectionName) ||
-                (block.className === "SystemBlock" && block.inputs.some((input) => input.name === "emitRate" && input.targetBlockId != null)) ||
+                (block.className === "SystemBlock" && isInputConnected(block.inputs.find((input) => input.name === "emitRate"))) ||
                 (block.className === "SetupSpriteSheetBlock" && block.serialized.randomStartCell === true);
             const evaluator = scalarOnce
                 ? (await import("./blocks/particle-random-once-block.js")).particleRandomOnceBlock

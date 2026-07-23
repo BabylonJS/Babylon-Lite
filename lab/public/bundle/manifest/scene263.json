@@ -1,5 +1,5 @@
 {
-  "rawKB": 42,
+  "rawKB": 41.9,
   "gzipKB": 24.7,
   "ignoredRawKB": 27.5,
   "runtimeChunks": [
@@ -15,7 +15,7 @@
     "scene263-random-range-CfhNtuAB.js",
     "scene263-registry-extra-emitters-BKfW5BvN.js",
     "scene263-sphere-shape-block-zC4AGlU2.js",
-    "scene263-system-block-BbHhC8Zi.js",
+    "scene263-system-block-DtFNKeDy.js",
     "scene263-texture-source-block-B7yKhJMH.js",
     "scene263-update-color-block-C8fDLGYf.js",
     "scene263-update-position-block-DQ-fau8B.js",
