@@ -289,6 +289,30 @@ describe("RenderPassTask transparent sorting", () => {
         expect(task._renderables).toHaveLength(0);
     });
 
+    it("uses an override builder that is not registered as a scene group", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const rt = createRenderTarget({
+            lbl: "material-override",
+            dFormat: "depth24plus",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const task = createRenderTask({ name: "material-override", rt }, engine, scene);
+        const mesh = {} as Mesh;
+        const renderable = makeDrawOrderRenderable("override", {}, []);
+        const rebuildSingle = vi.fn(() => renderable);
+        const material = {
+            _buildGroup: { _rebuildSingle: rebuildSingle },
+        } as unknown as Material;
+
+        task.addMesh(mesh, { material });
+        task.record();
+
+        expect(rebuildSingle).toHaveBeenCalledWith(scene, mesh, material);
+        expect(task._renderables).toEqual([renderable]);
+    });
+
     it("re-records a cached bundle invalidated before scene registration", () => {
         const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
         const engine = makeMockEngine({ bundleDescriptors });

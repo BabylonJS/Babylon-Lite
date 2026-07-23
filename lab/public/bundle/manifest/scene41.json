@@ -5,12 +5,12 @@
   "runtimeChunks": [
     "scene41-generate-mipmaps-CrdYd9Zk.js",
     "scene41-gltf-ext-spec-gloss-D60sFZYX.js",
-    "scene41-gltf-feature-registry-D0Vc_dAr.js",
+    "scene41-gltf-feature-registry-BBcxth74.js",
     "scene41-gltf-glb-parser-D-pK9-q7.js",
     "scene41-gltf-sampler-desc-DVqYrkju.js",
+    "scene41-mesh-features-Dda6QcW-.js",
     "scene41-point-light-CvySeHAG.js",
-    "scene41-shader-composer-DishuYLa.js",
-    "scene41-standard-renderable-BoMYrLoF.js",
+    "scene41-standard-renderable-AIXG2apz.js",
     "scene41.js"
   ]
 }

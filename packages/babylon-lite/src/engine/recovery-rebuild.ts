@@ -49,7 +49,7 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
     for (const surface of engine.surfaces) {
         for (const ctx of surface._renderingContexts) {
             const scene = ctx as SceneContext;
-            if (!isRenderingContextRegistered(surface, scene)) {
+            if (!isRenderingContextRegistered(surface, scene) || scene._z) {
                 continue;
             }
             await rebuildSceneGpu(engine, scene);
@@ -60,9 +60,11 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
 async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Promise<void> {
     await rebuildSceneTextures(engine, scene);
     await _rebuildMeshes(engine, scene);
+    if (scene._z) {
+        return;
+    }
 
-    scene._renderables.length = 0;
-    scene._uniformUpdaters.length = 0;
+    scene._renderables.length = scene._uniformUpdaters.length = 0;
     scene._meshDisposables.clear();
     scene._meshAuxDisposables.clear();
     if (scene._lightGpuState) {
@@ -71,6 +73,10 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
 
     for (const [build, meshes] of scene._groups) {
         const result = await build(scene, meshes);
+        if (scene._z) {
+            return;
+        }
+        meshes.r = scene._runtimeBuilds?.base(build, result.rebuildSingle) ?? result.rebuildSingle;
         scene._renderables.push(...result.renderables);
         if (result.updater) {
             scene._uniformUpdaters.push(result.updater);

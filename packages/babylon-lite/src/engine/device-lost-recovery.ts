@@ -138,7 +138,7 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
         return;
     }
     state.recovering = true;
-    const wasRunning = engine._renderFn !== null;
+    const wasRunning = !!engine._renderFn;
     stopEngine(engine);
 
     try {

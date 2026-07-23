@@ -2,8 +2,8 @@
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, loadEnvironment, loadGltf, attachControl, registerScene, onBeforeRender, goToFrame, pauseAnimation } from "babylon-lite";
 
 async function main(): Promise<void> {
-    const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const data = canvas.dataset;
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
@@ -22,7 +22,7 @@ async function main(): Promise<void> {
     attachControl(cam, canvas, scene);
 
     scene.fixedDeltaMs = 16.0;
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
     const seekTimeParam = parseFloat(params.get("seekTime") || "");
     let frameCount = 0;
     let seekDone = false;
@@ -35,17 +35,13 @@ async function main(): Promise<void> {
                 pauseAnimation(g);
             }
             seekDone = true;
-            canvas.dataset.animationFrozen = "true";
+            data.animationFrozen = "true";
         }
     });
 
     await registerScene(scene);
     await startEngine(engine);
-    (window as any).__scene = scene;
-    canvas.dataset.camAlpha = String(cam.alpha);
-    canvas.dataset.camRadius = String(cam.radius);
-    canvas.dataset.initMs = String(performance.now() - __initStart);
-    canvas.dataset.ready = "true";
+    data.ready = "true";
 }
 
 main().catch(console.error);
