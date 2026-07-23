@@ -209,6 +209,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-    document.getElementById("renderCanvas")!.dataset.error = String(err);
+    document.querySelector("canvas")?.setAttribute("data-error", err);
     console.error(err);
 });
