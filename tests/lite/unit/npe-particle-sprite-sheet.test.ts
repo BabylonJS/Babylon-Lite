@@ -3,11 +3,7 @@ import { SCENE268_NPE_JSON as animations2Graph } from "../../../lab/lite/src/sha
 import animations2States from "./fixtures/sprite-sheet-states.json";
 import animations1Graph from "./fixtures/sprite-sheet-random-npe.json";
 import animations1States from "./fixtures/sprite-sheet-random-states.json";
-import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
-import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
-import { startParticleSystem, animateParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
-import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import { buildNodeParticleGraph, simulateNodeParticleGraph, snapshotParticles } from "./particle-test-utils";
 
 interface BjsParticle {
     id: number;
@@ -47,7 +43,7 @@ function withoutSpriteSetup(graph: unknown): unknown {
  *   • Animations 1 (#K9LJUG#0): `spriteRandomStartCell` — each particle draws a lazy `random() * lifeTime`
  *     cell offset on its first update, so this also proves the random-draw order matches Babylon.js.
  * For each, builds the graph, seeds `Math.random` like the oracle, steps the simulation, and asserts every
- * particle's motion matches the ground truth to 1e-6 and its integer animation `cellIndex` matches exactly.
+ * particle's motion matches the ground truth at Float32 precision and its integer animation `cellIndex` matches exactly.
  */
 const CASES: { name: string; graph: unknown; truth: StatesFixture }[] = [
     { name: "Animations 2 (change speed 30)", graph: animations2Graph, truth: animations2States as StatesFixture },
@@ -56,40 +52,21 @@ const CASES: { name: string; graph: unknown; truth: StatesFixture }[] = [
 
 describe("NPE sprite-sheet animation — deterministic parity with Babylon.js", () => {
     it("rejects BasicSpriteUpdateBlock without SetupSpriteSheetBlock", async () => {
-        const graph = parseNodeParticleSource(withoutSpriteSetup(animations2Graph));
-        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow("BasicSpriteUpdateBlock requires SetupSpriteSheetBlock");
+        await expect(buildNodeParticleGraph(withoutSpriteSetup(animations2Graph))).rejects.toThrow("BasicSpriteUpdateBlock requires SetupSpriteSheetBlock");
     });
 
     for (const testCase of CASES) {
         it(`${testCase.name} reproduces Babylon.js states (incl. cellIndex) after ${testCase.truth.N} steps`, async () => {
-            const graph = parseNodeParticleSource(testCase.graph);
-            const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph, { emitter: { x: 0, y: 0, z: 0 } });
-            const system = set.systems[0]!;
-            expect(system).toBeTruthy();
+            const system = await simulateNodeParticleGraph(testCase.graph, testCase.truth.N, { emitter: { x: 0, y: 0, z: 0 } });
             expect(system._spriteSheet, "sprite sheet configured by SetupSpriteSheetBlock").not.toBeNull();
 
-            const previousRandom = Math.random;
-            let seed = 1;
-            Math.random = () => {
-                const x = Math.sin(seed++) * 10000;
-                return x - Math.floor(x);
-            };
-            try {
-                startParticleSystem(system);
-                for (let i = 0; i < testCase.truth.N; i++) {
-                    animateParticleSystem(system, 1);
-                }
-            } finally {
-                Math.random = previousRandom;
-            }
-
-            const lite = system._particles.slice().sort((a, b) => a.id - b.id);
+            const lite = snapshotParticles(system);
             expect(lite.length, `${testCase.name} particle count`).toBe(testCase.truth.count);
 
             // Particles recycle slots over the run, so sort both sides by id before comparing.
             const truthParticles = testCase.truth.particles.slice().sort((a, b) => a.id - b.id);
 
-            const tol = 1e-6;
+            const tol = 1e-4;
             for (let i = 0; i < truthParticles.length; i++) {
                 const b = truthParticles[i]!;
                 const l = lite[i]!;

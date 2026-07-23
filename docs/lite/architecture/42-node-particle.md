@@ -15,10 +15,10 @@
 > Lite supports is bounded by what an NPE graph can express, block by block. Live
 > particles are bound to a camera-facing billboard sprite system for rendering.
 > The canonical public API and particle scenes use the data-oriented runtime
-> under `particle/soa/`. The object runtime is no longer exported; it remains
-> temporarily as an internal behavioural oracle while its tests are migrated,
-> after which its implementation files are deleted. SoA implements every block
-> evaluator supported by that legacy oracle.
+> under `particle/soa/`. The object runtime is no longer exported or imported by
+> production code or tests. Its implementation files remain only for the final
+> deletion step. SoA implements every evaluator that existed in that legacy
+> implementation.
 >
 > This document contains the full specification needed to implement the module
 > from scratch — the determinism contract, the CPU runtime, the node-graph build,
@@ -43,18 +43,19 @@ never a classic-only feature.
 
 The non-negotiable requirement is **deterministic parity with Babylon.js**:
 given the same graph and the same seeded `Math.random`, Lite must reproduce
-every particle's position, direction, colour, size, angle, and age to within
-`1e-6` of Babylon's output. That single requirement dictates almost every
+every particle's position, direction, colour, size, angle, and age to the
+precision of its storage: `1e-4` for Float32 columns and exact lifecycle
+boundaries for Float64 age/lifetime. That requirement dictates almost every
 design decision below — the fixed creation-slot order, the `randomRange`
 short-circuit, the emission accounting, and the age clamp all exist to keep the
-per-particle `Math.random()` sequence and the arithmetic identical to Babylon's.
+per-particle `Math.random()` sequence and arithmetic aligned with Babylon's.
 
 ## Pillars (front and centre)
 
 - **Deterministic CPU simulation.** The simulation is a direct port of
   `ThinParticleSystem.animate` → `_update`. Parity is verified by seeding
   `Math.random`, stepping N frames, and comparing to Babylon-extracted ground
-  truth at `1e-6`. There is **no GPU particle path**.
+  truth at each column's documented precision. There is **no GPU particle path**.
 - **The graph is compiled to indexed operations.** The build walk runs once and
   produces getter closures plus fixed creation slots and an ordered update list.
   The SoA hot loop passes particle indices into these operations and never walks
@@ -102,8 +103,9 @@ Canonical data flow: **snippet/JSON → `parseNodeParticleSource` → `ParticleG
 (live) `registerNodeParticleSet` → per-frame `animateParticleSystem` +
 `syncParticleBillboard`.**
 
-The package root exports only those canonical names. Until the legacy oracle is
-deleted, they are zero-cost aliases over the internal `buildSoaParticleSet`,
+The package root exports only those canonical names. Until the legacy files are
+deleted and the internals are renamed, they are zero-cost aliases over
+`buildSoaParticleSet`,
 `SoaParticleSet`, `SoaSystem`, `animateSoa`, and SoA billboard symbols; the
 SoA-prefixed names are not part of the public package surface.
 
@@ -153,10 +155,9 @@ identical to Babylon's. Break any one and parity collapses.
    `_directionScale` holds for that step.
 8. **Update before create.** `animate` runs `updateExistingParticles` _then_
    `createNewParticles`.
-9. **Tolerance & extraction.** Legacy-oracle tests compare object-valued state at
-   `1e-6`; canonical position/direction/feature columns are `Float32Array`, so
-   repeated integration compares at `1e-4`, while age/lifetime remain float64
-   and exact at lifecycle boundaries. Ground truth is produced by a
+9. **Tolerance & extraction.** Canonical position/direction/feature columns are
+   `Float32Array`, so repeated integration compares at `1e-4`, while age/lifetime
+   remain Float64 and exact at lifecycle boundaries. Ground truth is produced by a
    throwaway harness in the Babylon repo: build/convert a classic system, run
    `ConvertToNodeParticleSystemSetAsync` (use conversion, _not_ `Parse` — `Parse`
    drops some `Color4` input values), `await npe.buildAsync(scene)` (populates
@@ -299,10 +300,10 @@ else, rather than silently returning `null` per frame.
 
 ### Registries
 
-The temporary legacy oracle uses the flat `npe-registry.ts`. The canonical runtime
-splits the same supported evaluator set across base, optional, emitter,
-value-utility, local-shape, and serialized-variant registries. Every arm remains a
-side-effect-free dynamic import, and unsupported classes fail during graph
+The unused legacy implementation has a flat `npe-registry.ts` pending deletion.
+The canonical runtime splits its evaluator set across base, optional, emitter,
+value-utility, local-shape, and serialized-variant registries. Every arm remains
+a side-effect-free dynamic import, and unsupported classes fail during graph
 construction.
 
 ## Supported Blocks
@@ -477,11 +478,10 @@ classic-`ParticleSystem`-only feature.
 
 ## Test Specification
 
-- **Legacy-oracle determinism (vitest)** — `tests/lite/unit/npe-particle-*.test.ts`:
-  direct internal tests for the temporary object oracle. They parse a graph
-  fixture, build, seed `Math.random`, step `N`, sort by id, and compare every
-  particle to committed Babylon ground truth. Step 3 migrates these assertions to
-  the canonical runtime before the oracle is deleted.
+- **Canonical determinism (vitest)** — `tests/lite/unit/npe-particle-*.test.ts`:
+  build through the canonical API, seed `Math.random`, step `N`, snapshot typed
+  arrays through `particle-test-utils.ts`, sort by id, and compare every particle
+  to committed Babylon ground truth. No test imports the legacy object runtime.
 - **Emitter rotation (vitest)** — `npe-particle-emitter-rotation.test.ts`: the
   cylinder graph with a rotated + translated `emitterWorldMatrix`, compared to a
   Babylon oracle (the cylinder exercises `transformCoordinates` + the
@@ -495,7 +495,8 @@ classic-`ParticleSystem`-only feature.
 - **SoA emitter/local parity (vitest)** — `particle-soa-emitters-parity.test.ts`
   covers all committed emitter oracles, volatile shared direction getters,
   source-24 build order, mesh color/InitialDirection, and transformed local box,
-  point, sphere, cone, cylinder, and mesh behavior against the object oracle.
+  point, sphere, cone, cylinder, and mesh behavior through direct random-draw,
+  local-column, and matrix-transform invariants.
 - **SoA behavioral-closure parity (vitest)** —
   `particle-soa-change-emit-rate-parity.test.ts` validates per-step system-time
   emit-rate gradients and float-to-int conversion;
@@ -516,20 +517,20 @@ classic-`ParticleSystem`-only feature.
 
 ```
 packages/babylon-lite/src/particle/
-  particle.ts                      // LEGACY internal object-oracle Particle state
-  particle-system.ts               // LEGACY internal object-oracle simulation
-  particle-billboard.ts            // LEGACY internal object-oracle billboard adapter
+  particle.ts                      // LEGACY unused; pending deletion
+  particle-system.ts               // LEGACY unused; pending deletion
+  particle-billboard.ts            // LEGACY unused; pending deletion
   particle-scene.ts                // PUBLIC canonical SoA live-scene registration
   node/
     node-particle.ts               // PUBLIC canonical build/snippet API + NodeParticleSet
     npe-types.ts                   // immutable shared serialized graph types
     npe-parser.ts                  // serialized JSON -> ParticleGraph
     npe-snippet.ts                 // snippet-server fetch
-    npe-build.ts                   // LEGACY internal object-oracle build walk
-    npe-build-state.ts             // LEGACY internal object-oracle sources
-    npe-registry.ts                // LEGACY internal object-oracle dispatch
+    npe-build.ts                   // LEGACY unused; pending deletion
+    npe-build-state.ts             // LEGACY unused; pending deletion
+    npe-registry.ts                // LEGACY unused; pending deletion
     blocks/
-      ...                          // LEGACY internal object-oracle evaluators
+      ...                          // LEGACY unused; pending deletion
   soa/
     particle-buffer.ts             // dense base columns + lazy feature columns
     animate.ts                     // internal SoaSystem; public ParticleSystem alias

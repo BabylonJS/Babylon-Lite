@@ -20,17 +20,15 @@ import rotatedStates from "./fixtures/emitter-cylinder-rotated-states.json";
 import { SCENE262_NPE_JSON } from "../../../lab/lite/src/shared/scene262-npe";
 import { SCENE263_NPE_JSON } from "../../../lab/lite/src/shared/scene263-npe";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
-import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
-import { startParticleSystem, animateParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import { buildSoaParticleSet } from "../../../packages/babylon-lite/src/particle/soa/npe-build";
-import { startSoaSystem, animateSoa } from "../../../packages/babylon-lite/src/particle/soa/animate";
+import { startSoaSystem, stopSoaSystem, animateSoa } from "../../../packages/babylon-lite/src/particle/soa/animate";
 import { column } from "../../../packages/babylon-lite/src/particle/soa/particle-buffer";
 import * as C from "../../../packages/babylon-lite/src/particle/soa/columns";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
-import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
-import { transformCoordinatesToRef } from "../../../packages/babylon-lite/src/math/mat4-transform";
+import { transformCoordinatesToRef, transformNormalToRef } from "../../../packages/babylon-lite/src/math/mat4-transform";
+import { buildNodeParticleGraph, simulateNodeParticleGraph, snapshotParticles } from "./particle-test-utils";
 
 interface ExpectedParticle {
     id: number;
@@ -74,95 +72,16 @@ interface RawGraph {
     blocks: RawBlock[];
 }
 
-function seedRandom(): () => number {
+function seedRandom(): () => void {
+    const previousRandom = Math.random;
     let seed = 1;
     Math.random = () => {
         const x = Math.sin(seed++) * 10000;
         return x - Math.floor(x);
     };
-    return () => seed - 1;
-}
-
-async function expectSoaMatchesObject(source: unknown, steps: number, emitterWorldMatrix?: Mat4): Promise<void> {
-    const options = { emitter: { x: 0, y: 0, z: 0 }, emitterWorldMatrix };
-    const objectGraph = parseNodeParticleSource(source);
-    const objectSet = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, objectGraph, options);
-    const objectSystem = objectSet.systems[0]!;
-    const objectRoot = objectGraph.blocks.get(objectGraph.systemBlockIds[0]!)!;
-    if (objectRoot.serialized.isLocal === true) {
-        // The compatibility object runtime omits ThinParticleSystem's generic `_CreateIsLocalData` queue
-        // item. Restore it in the test oracle: save local position, transform render position, then restore
-        // the saved local state before direction creation (which may read LocalPositionUpdated).
-        const world = emitterWorldMatrix ?? mat4Identity();
-        const createPosition = objectSystem._createPosition;
-        const createDirection = objectSystem._createDirection;
-        let localX = 0;
-        let localY = 0;
-        let localZ = 0;
-        objectSystem._createPosition = (particle, system) => {
-            createPosition?.(particle, system);
-            localX = particle.position.x;
-            localY = particle.position.y;
-            localZ = particle.position.z;
-            transformCoordinatesToRef(localX, localY, localZ, world, particle.position);
-        };
-        objectSystem._createDirection = (particle, system) => {
-            particle._localPosition.x = localX;
-            particle._localPosition.y = localY;
-            particle._localPosition.z = localZ;
-            createDirection?.(particle, system);
-        };
-    }
-    const objectDrawCount = seedRandom();
-    startParticleSystem(objectSystem);
-    for (let i = 0; i < steps; i++) {
-        animateParticleSystem(objectSystem, 1);
-    }
-    const expected = objectSystem._particles.slice().sort((a, b) => a.id - b.id);
-    const expectedDraws = objectDrawCount();
-
-    const soaSet = await buildSoaParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(source), options);
-    const soaSystem = soaSet.systems[0]!;
-    const soaDrawCount = seedRandom();
-    startSoaSystem(soaSystem);
-    for (let i = 0; i < steps; i++) {
-        animateSoa(soaSystem, 1);
-    }
-
-    const buffer = soaSystem.buffer;
-    const colorR = column(buffer, C.COL_COLOR_R, Float32Array);
-    const colorG = column(buffer, C.COL_COLOR_G, Float32Array);
-    const colorB = column(buffer, C.COL_COLOR_B, Float32Array);
-    const colorA = column(buffer, C.COL_COLOR_A, Float32Array);
-    const size = column(buffer, C.COL_SIZE, Float32Array);
-    const scaleX = column(buffer, C.COL_SCALE_X, Float32Array);
-    const scaleY = column(buffer, C.COL_SCALE_Y, Float32Array);
-    const angle = column(buffer, C.COL_ANGLE, Float32Array);
-    const indices = Array.from({ length: buffer.alive }, (_, i) => i).sort((a, b) => buffer.id[a]! - buffer.id[b]!);
-    expect(indices).toHaveLength(expected.length);
-    expect(soaDrawCount()).toBe(expectedDraws);
-    const tolerance = 1e-4;
-    for (let i = 0; i < expected.length; i++) {
-        const particle = expected[i]!;
-        const index = indices[i]!;
-        expect(buffer.id[index]).toBe(particle.id);
-        expect(Math.abs(buffer.posX[index]! - particle.position.x)).toBeLessThan(tolerance);
-        expect(Math.abs(buffer.posY[index]! - particle.position.y)).toBeLessThan(tolerance);
-        expect(Math.abs(buffer.posZ[index]! - particle.position.z)).toBeLessThan(tolerance);
-        expect(Math.abs(buffer.dirX[index]! - particle.direction.x)).toBeLessThan(tolerance);
-        expect(Math.abs(buffer.dirY[index]! - particle.direction.y)).toBeLessThan(tolerance);
-        expect(Math.abs(buffer.dirZ[index]! - particle.direction.z)).toBeLessThan(tolerance);
-        expect(Math.abs(colorR[index]! - particle.color.r)).toBeLessThan(tolerance);
-        expect(Math.abs(colorG[index]! - particle.color.g)).toBeLessThan(tolerance);
-        expect(Math.abs(colorB[index]! - particle.color.b)).toBeLessThan(tolerance);
-        expect(Math.abs(colorA[index]! - particle.color.a)).toBeLessThan(tolerance);
-        expect(Math.abs(size[index]! - particle.size)).toBeLessThan(tolerance);
-        expect(Math.abs(scaleX[index]! - particle.scale.x)).toBeLessThan(tolerance);
-        expect(Math.abs(scaleY[index]! - particle.scale.y)).toBeLessThan(tolerance);
-        expect(Math.abs(angle[index]! - particle.angle)).toBeLessThan(tolerance);
-        expect(Math.abs(buffer.age[index]! - particle.age)).toBeLessThan(tolerance);
-        expect(Math.abs(buffer.lifeTime[index]! - particle.lifeTime)).toBeLessThan(tolerance);
-    }
+    return () => {
+        Math.random = previousRandom;
+    };
 }
 
 function makeLocal(source: unknown): RawGraph {
@@ -186,6 +105,65 @@ function makeLocal(source: unknown): RawGraph {
     return local;
 }
 
+async function expectTransformedLocalMatchesIdentity(source: unknown, steps: number, emitterWorldMatrix: Mat4, worldOrientedBirthDirection: boolean): Promise<void> {
+    const localSource = makeLocal(source);
+    const identitySystem = await simulateNodeParticleGraph(localSource, steps, { emitter: { x: 0, y: 0, z: 0 } });
+    const transformedSystem = await simulateNodeParticleGraph(localSource, steps, { emitterWorldMatrix });
+    const identity = snapshotParticles(identitySystem);
+    const transformed = snapshotParticles(transformedSystem);
+    expect(transformed).toHaveLength(identity.length);
+
+    const expectedPosition = { x: 0, y: 0, z: 0 };
+    const expectedDirection = { x: 0, y: 0, z: 0 };
+    const transformedIndices = new Map<number, number>();
+    for (let index = 0; index < transformedSystem.buffer.alive; index++) {
+        transformedIndices.set(transformedSystem.buffer.id[index]!, index);
+    }
+    const transformedLocalX = transformedSystem.buffer._columns.get("localPosition.x")!;
+    const transformedLocalY = transformedSystem.buffer._columns.get("localPosition.y")!;
+    const transformedLocalZ = transformedSystem.buffer._columns.get("localPosition.z")!;
+    const tolerance = 1e-4;
+    for (let index = 0; index < identity.length; index++) {
+        const localParticle = identity[index]!;
+        const worldParticle = transformed[index]!;
+        if (worldOrientedBirthDirection) {
+            const transformedIndex = transformedIndices.get(worldParticle.id)!;
+            transformCoordinatesToRef(
+                transformedLocalX[transformedIndex]!,
+                transformedLocalY[transformedIndex]!,
+                transformedLocalZ[transformedIndex]!,
+                emitterWorldMatrix,
+                expectedPosition
+            );
+        } else {
+            transformCoordinatesToRef(localParticle.position.x, localParticle.position.y, localParticle.position.z, emitterWorldMatrix, expectedPosition);
+            expectedDirection.x = localParticle.direction.x;
+            expectedDirection.y = localParticle.direction.y;
+            expectedDirection.z = localParticle.direction.z;
+        }
+        expect(worldParticle.id).toBe(localParticle.id);
+        expect(Math.abs(worldParticle.position.x - expectedPosition.x)).toBeLessThan(tolerance);
+        expect(Math.abs(worldParticle.position.y - expectedPosition.y)).toBeLessThan(tolerance);
+        expect(Math.abs(worldParticle.position.z - expectedPosition.z)).toBeLessThan(tolerance);
+        if (worldOrientedBirthDirection) {
+            transformNormalToRef(localParticle.direction.x, localParticle.direction.y, localParticle.direction.z, emitterWorldMatrix, expectedDirection);
+            expect(Math.abs(worldParticle.direction.x - expectedDirection.x)).toBeLessThan(tolerance);
+            expect(Math.abs(worldParticle.direction.y - expectedDirection.y)).toBeLessThan(tolerance);
+            expect(Math.abs(worldParticle.direction.z - expectedDirection.z)).toBeLessThan(tolerance);
+        } else {
+            expect(Math.abs(worldParticle.direction.x - expectedDirection.x)).toBeLessThan(tolerance);
+            expect(Math.abs(worldParticle.direction.y - expectedDirection.y)).toBeLessThan(tolerance);
+            expect(Math.abs(worldParticle.direction.z - expectedDirection.z)).toBeLessThan(tolerance);
+        }
+        expect(worldParticle.color).toEqual(localParticle.color);
+        expect(worldParticle.size).toBe(localParticle.size);
+        expect(worldParticle.scale).toEqual(localParticle.scale);
+        expect(worldParticle.angle).toBe(localParticle.angle);
+        expect(worldParticle.age).toBe(localParticle.age);
+        expect(worldParticle.lifeTime).toBe(localParticle.lifeTime);
+    }
+}
+
 describe("SoA NPE emitter shapes — deterministic parity with Babylon.js", () => {
     for (const testCase of CASES) {
         it(`${testCase.name} reproduces Babylon.js states after ${testCase.truth.N} steps`, async () => {
@@ -200,11 +178,14 @@ describe("SoA NPE emitter shapes — deterministic parity with Babylon.js", () =
             expect(system.buffer._columns.has("localPosition.y"), `${testCase.name} local-position allocation`).toBe(testCase.local === true);
             expect(system.buffer._columns.has("localPosition.z"), `${testCase.name} local-position allocation`).toBe(testCase.local === true);
 
-            seedRandom();
-
-            startSoaSystem(system);
-            for (let i = 0; i < testCase.truth.N; i++) {
-                animateSoa(system, 1);
+            const restoreRandom = seedRandom();
+            try {
+                startSoaSystem(system);
+                for (let i = 0; i < testCase.truth.N; i++) {
+                    animateSoa(system, 1);
+                }
+            } finally {
+                restoreRandom();
             }
 
             const buffer = system.buffer;
@@ -261,18 +242,23 @@ describe("SoA NPE emitter shapes — deterministic parity with Babylon.js", () =
         shape.cachedVertexData!.colors = Array.from({ length: vertexCount }, (_, i) => [i / vertexCount, (i % 3) / 2, (i % 5) / 4, 1]).flat();
         shape.useMeshColorForColor = true;
 
-        await expectSoaMatchesObject(source, 20);
-
         const graph = parseNodeParticleSource(source);
         const set = await buildSoaParticleSet({} as EngineContext, {} as SceneContext, graph, { emitter: { x: 0, y: 0, z: 0 } });
         const system = set.systems[0]!;
         expect(system.createColor).toBeNull();
 
-        seedRandom();
-        startSoaSystem(system);
-        animateSoa(system, 1);
+        const restoreRandom = seedRandom();
+        try {
+            startSoaSystem(system);
+            animateSoa(system, 1);
+        } finally {
+            restoreRandom();
+        }
 
         expect(system.buffer.alive).toBe(1);
+        expect(column(system.buffer, C.COL_COLOR_R, Float32Array)[0]).toBeLessThan(1);
+        expect(column(system.buffer, C.COL_COLOR_G, Float32Array)[0]).toBeGreaterThanOrEqual(0);
+        expect(column(system.buffer, C.COL_COLOR_B, Float32Array)[0]).toBeGreaterThanOrEqual(0);
         expect(column(system.buffer, C.COL_COLOR_A, Float32Array)[0]).toBeCloseTo(1);
     });
 
@@ -317,7 +303,24 @@ describe("SoA NPE emitter shapes — deterministic parity with Babylon.js", () =
             input.targetConnectionName = "output";
         }
 
-        await expectSoaMatchesObject(source, 8);
+        const system = await buildNodeParticleGraph(source, { emitter: { x: 0, y: 0, z: 0 } });
+        const draws = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+        let drawIndex = 0;
+        const previousRandom = Math.random;
+        Math.random = () => draws[drawIndex++]!;
+        try {
+            system.createDirection!(0);
+        } finally {
+            Math.random = previousRandom;
+        }
+
+        const between = (min: number, max: number, ratio: number): number => min + ratio * (max - min);
+        const first = [between(-2, 2, draws[0]!), between(-1, 3, draws[1]!), between(0, 4, draws[2]!)];
+        const second = [between(-2, 2, draws[3]!), between(-1, 3, draws[4]!), between(0, 4, draws[5]!)];
+        expect(drawIndex).toBe(9);
+        expect(system.buffer.dirX[0]).toBeCloseTo(between(first[0]!, second[0]!, draws[6]!), 6);
+        expect(system.buffer.dirY[0]).toBeCloseTo(between(first[1]!, second[1]!, draws[7]!), 6);
+        expect(system.buffer.dirZ[0]).toBeCloseTo(between(first[2]!, second[2]!, draws[8]!), 6);
     });
 
     it("seeds source 24 correctly when it builds before the local shape", async () => {
@@ -331,7 +334,26 @@ describe("SoA NPE emitter shapes — deterministic parity with Babylon.js", () =
         }
         const emitterWorldMatrix = new Float32Array((rotatedStates as EmitterFixture).emitterMatrix!) as unknown as Mat4;
 
-        await expectSoaMatchesObject(source, 40, emitterWorldMatrix);
+        const system = await buildNodeParticleGraph(source, { emitterWorldMatrix });
+        const previousRandom = Math.random;
+        let seed = 1;
+        Math.random = () => {
+            const value = Math.sin(seed++) * 10000;
+            return value - Math.floor(value);
+        };
+        try {
+            system.buffer.id[0] = 7;
+            system.createPosition!(0);
+            system.createDirection!(0);
+        } finally {
+            Math.random = previousRandom;
+        }
+
+        expect(system.buffer._columns.get("localPosition.valid")![0]).toBe(1);
+        expect(system.buffer._columns.get("localPosition.id")![0]).toBe(7);
+        expect(system.buffer.dirX[0]).toBeCloseTo(system.buffer.posX[0]!, 6);
+        expect(system.buffer.dirY[0]).toBeCloseTo(system.buffer.posY[0]!, 6);
+        expect(system.buffer.dirZ[0]).toBeCloseTo(system.buffer.posZ[0]!, 6);
     });
 
     it("rejects source 24 when position creation reads it before the local seed", async () => {
@@ -345,17 +367,21 @@ describe("SoA NPE emitter shapes — deterministic parity with Babylon.js", () =
         const set = await buildSoaParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(source));
         const system = set.systems[0]!;
         system.emitRate = 1000;
-        seedRandom();
-        startSoaSystem(system);
-        expect(() => animateSoa(system, 1)).toThrow("LocalPositionUpdated read before local shape position creation");
+        const restoreRandom = seedRandom();
+        try {
+            startSoaSystem(system);
+            expect(() => animateSoa(system, 1)).toThrow("LocalPositionUpdated read before local shape position creation");
+        } finally {
+            restoreRandom();
+        }
     });
 
     it("leaves InitialDirection at zero for mesh-normal emission", async () => {
         const source = structuredClone(meshGraph) as RawGraph;
-        const system = source.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;
+        const systemBlock = source.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;
         const shape = source.blocks.find((block) => block.customType === "BABYLON.MeshShapeBlock")!;
         const nextId = Math.max(...source.blocks.map((block) => block.id)) + 1;
-        const particleInput = system.inputs!.find((input) => input.name === "particle")!;
+        const particleInput = systemBlock.inputs!.find((input) => input.name === "particle")!;
         const previousParticleBlockId = particleInput.targetBlockId!;
         const previousParticleOutput = particleInput.targetConnectionName!;
         source.blocks.push(
@@ -383,18 +409,26 @@ describe("SoA NPE emitter shapes — deterministic parity with Babylon.js", () =
         directionInput.targetBlockId = nextId;
         directionInput.targetConnectionName = "output";
 
-        await expectSoaMatchesObject(source, 20);
+        const system = await simulateNodeParticleGraph(source, 20, { emitter: { x: 0, y: 0, z: 0 } });
+        // Update final-frame births once without creating replacements so UpdateDirection reads InitialDirection.
+        stopSoaSystem(system);
+        animateSoa(system, 1);
+        for (const particle of snapshotParticles(system)) {
+            expect(particle.direction.x).toBe(0);
+            expect(particle.direction.y).toBe(0);
+            expect(particle.direction.z).toBe(0);
+        }
     });
 
     it.each([
-        ["box", SCENE262_NPE_JSON],
-        ["point", pointGraph],
-        ["sphere", SCENE263_NPE_JSON],
-        ["cone", coneGraph],
-        ["cylinder", cylinderGraph],
-        ["mesh", meshGraph],
-    ])("matches transformed local-space %s emission", async (_name, source) => {
+        ["box", SCENE262_NPE_JSON, false],
+        ["point", pointGraph, false],
+        ["sphere", SCENE263_NPE_JSON, true],
+        ["cone", coneGraph, true],
+        ["cylinder", cylinderGraph, false],
+        ["mesh", meshGraph, false],
+    ])("matches transformed local-space %s emission", async (_name, source, worldOrientedBirthDirection) => {
         const emitterWorldMatrix = new Float32Array((rotatedStates as EmitterFixture).emitterMatrix!) as unknown as Mat4;
-        await expectSoaMatchesObject(makeLocal(source), 40, emitterWorldMatrix);
+        await expectTransformedLocalMatchesIdentity(source, 40, emitterWorldMatrix, worldOrientedBirthDirection);
     });
 });
