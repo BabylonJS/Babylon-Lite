@@ -353,7 +353,6 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         };
         r._worldCenter = sortCenter;
         let _lastUboVersion = mat._uboVersion;
-        mesh._runtimeThinBuild = undefined;
         return r;
     };
 

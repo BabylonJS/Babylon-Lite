@@ -150,7 +150,6 @@ export async function rebuildScenePbrPipelines(scene: SceneContext, force = fals
                 }
                 rebuiltMaterials.add(mesh.material);
                 ctx._runtimeBuilds?.reset(mesh);
-                mesh._runtimeThinBuild = undefined;
             }
             for (const material of rebuiltMaterials) {
                 material._csmGen = (material._csmGen ?? 0) + 1;

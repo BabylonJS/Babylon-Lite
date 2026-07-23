@@ -148,4 +148,33 @@ describe("removeFromScene symmetry", () => {
         expect([...scene._groups.values()].every((group) => !group.includes(mesh))).toBe(true);
         expect(scene._materialSwapQueue).not.toContain(mesh);
     });
+
+    it("keeps shared mesh GPU state until the last scene removal", () => {
+        const sceneA = fakeScene();
+        const sceneB = fakeScene();
+        const destroy = vi.fn();
+        const mesh = {
+            _gpu: {
+                positionBuffer: { destroy },
+                normalBuffer: { destroy: vi.fn() },
+                uvBuffer: { destroy: vi.fn() },
+                indexBuffer: { destroy: vi.fn() },
+                tangentBuffer: null,
+                uv2Buffer: null,
+                colorBuffer: null,
+            },
+            material: null,
+            children: [],
+            parent: null,
+        } as unknown as Mesh;
+
+        addToScene(sceneA, mesh);
+        addToScene(sceneB, mesh);
+
+        removeFromScene(sceneA, mesh);
+        expect(destroy).not.toHaveBeenCalled();
+
+        removeFromScene(sceneB, mesh);
+        expect(destroy).toHaveBeenCalledOnce();
+    });
 });

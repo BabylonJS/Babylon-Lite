@@ -55,6 +55,7 @@ describe("runtime material rebuild ownership", () => {
 
     it("waits for every thin-instance runtime build started by one swap drain", async () => {
         const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        scene._built = true;
         const starts: Array<Promise<void>> = [];
         const finishes: Array<() => void> = [];
 
@@ -73,7 +74,7 @@ describe("runtime material rebuild ownership", () => {
             builder._materialFamily = "standard";
             const mesh = { _gpu: {}, material: { _buildGroup: builder } as Material, children: [] } as unknown as Mesh;
             setThinInstances(mesh, new Float32Array(16), 1);
-            scene.meshes.push(mesh);
+            addToScene(scene, mesh);
             scene._materialSwapQueue.push(mesh);
         }
 
@@ -113,7 +114,7 @@ describe("runtime material rebuild ownership", () => {
         expect(builder._rebuildSingle).toBe(base);
         expect(Object.getOwnPropertyDescriptor(builder, "_rebuildSingle")?.get).toBeUndefined();
         expect(group.r).not.toBe(base);
-        expect(mesh._runtimeThinBuild).toBeUndefined();
+        expect(mesh._runtimeThinBuild).toBeTypeOf("function");
     });
 
     it("deduplicates stable cleanup references without dropping distinct closures", async () => {

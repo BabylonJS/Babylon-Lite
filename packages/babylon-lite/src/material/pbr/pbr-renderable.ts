@@ -547,7 +547,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                 };
             },
         };
-        mesh._runtimeThinBuild = undefined;
         if (sortCenter) {
             r._worldCenter = sortCenter;
         }

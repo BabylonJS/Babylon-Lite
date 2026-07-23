@@ -319,7 +319,6 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
     if (group && !hadBuiltGroup) {
         group.r = result.rebuildSingle;
     }
-    mesh._runtimeThinBuild = undefined;
     scene._renderables.sort(byOrder);
     scene._renderableVersion++;
     scene._materialEpoch++;
