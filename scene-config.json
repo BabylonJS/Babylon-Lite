@@ -37,7 +37,7 @@
         "slug": "scene4-shadows",
         "name": "Scene 4 — Shadows",
         "maxMad": 0.08,
-        "maxRawKB": 76,
+        "maxRawKB": 73,
         "description": "DirectionalLight, ESM shadow map with blur, heightmap ground, torus caster.",
         "tags": ["shadow", "procedural", "std"],
         "compatParity": true
@@ -184,7 +184,7 @@
         "slug": "scene18-spotlight-shadows",
         "name": "Scene 18 — PCF Shadows",
         "maxMad": 0.011,
-        "maxRawKB": 62.9,
+        "maxRawKB": 61,
         "description": "FreeCamera + SpotLight PCF shadow generator. Ground receives hard shadows from box.",
         "tags": ["std", "procedural", "shadow"],
         "skipPerf": true,
@@ -1148,7 +1148,7 @@
         "slug": "scene111-light-selection",
         "name": "Scene 111 — Light Selection Stress Test",
         "maxMad": 0.01,
-        "maxRawKB": 137,
+        "maxRawKB": 133.7,
         "description": "Stress scene for the scene-wide lights UBO: Standard, PBR, and NodeMaterial spheres on a shadow-receiving ground, 16 scene lights, per-mesh light inclusion sets, and three supported shadow generators.",
         "tags": ["std", "pbr", "nme", "procedural", "shadow"]
     },
@@ -1884,7 +1884,7 @@
         "slug": "scene214-cascaded-shadows",
         "name": "Scene 214 — Cascaded Shadow Maps",
         "maxMad": 0.4,
-        "maxRawKB": 70.6,
+        "maxRawKB": 69,
         "description": "A deterministic field of 200 green torus-knot casters (playground #KY0N7T#84) drops shadows onto a large Standard ground receiver, lit by a single DirectionalLight with a 4-cascade CascadedShadowGenerator (PCF5). A seeded PRNG places every knot identically to the Babylon.js CSM oracle; cascade Z bounds auto-fit the caster AABB.",
         "tags": ["shadows", "csm", "standard", "directional"],
         "skipPerf": true
@@ -1894,7 +1894,7 @@
         "slug": "scene215-cascaded-shadows-pbr",
         "name": "Scene 215 — Cascaded Shadow Maps (PBR)",
         "maxMad": 0.4,
-        "maxRawKB": 82.3,
+        "maxRawKB": 80.3,
         "description": "PBR counterpart of scene214: a deterministic field of 200 green PBR torus-knot casters drops cascaded shadows onto a large PBR ground receiver, lit by a single DirectionalLight with a 4-cascade CascadedShadowGenerator (PCF5). Proves CSM works on PBR receivers, not just Standard; a seeded PRNG matches the Babylon.js CSM oracle.",
         "tags": ["shadows", "csm", "pbr", "directional"],
         "skipPerf": true
