@@ -64,6 +64,8 @@ export interface SoaSystem {
     _stopped: boolean;
     /** @internal Accumulated simulated time, in update-speed units. */
     _actualFrame: number;
+    /** @internal Optional system-level emit-rate getter, installed only for a connected emit-rate graph. */
+    _emitRateGetter?: () => number;
     /** @internal Sprite-sheet feature handle, present only for sprite systems. */
     _spriteSheet?: SoaSpriteHandle;
     /** @internal Optional feature writer installed only when a graph reads ColorDead. */
@@ -124,9 +126,11 @@ export function animateSoa(system: SoaSystem, scaledRatio: number): void {
     }
 
     const scaledUpdateSpeed = system.updateSpeed * scaledRatio;
+    system._scaledUpdateSpeed = scaledUpdateSpeed;
 
-    let newParticles = (system.emitRate * scaledUpdateSpeed) >> 0;
-    system._newPartsExcess += system.emitRate * scaledUpdateSpeed - newParticles;
+    const emitRate = system._emitRateGetter ? system._emitRateGetter() : system.emitRate;
+    let newParticles = (emitRate * scaledUpdateSpeed) >> 0;
+    system._newPartsExcess += emitRate * scaledUpdateSpeed - newParticles;
     if (system._newPartsExcess > 1.0) {
         const extra = system._newPartsExcess >> 0;
         newParticles += extra;
@@ -151,7 +155,6 @@ function updateExisting(system: SoaSystem, scaledUpdateSpeed: number): void {
     const age = buffer.age;
     const lifeTime = buffer.lifeTime;
     const steps = system.updateSteps;
-    system._scaledUpdateSpeed = scaledUpdateSpeed;
 
     for (let i = 0; i < buffer.alive; i++) {
         let stepSpeed = scaledUpdateSpeed;

@@ -1,0 +1,88 @@
+import { describe, expect, it } from "vitest";
+import graphSource from "./fixtures/change-emit-rate-npe.json";
+import groundTruth from "./fixtures/change-emit-rate-states.json";
+import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
+import { buildSoaParticleSet } from "../../../packages/babylon-lite/src/particle/soa/npe-build";
+import { animateSoa, startSoaSystem } from "../../../packages/babylon-lite/src/particle/soa/animate";
+import { column } from "../../../packages/babylon-lite/src/particle/soa/particle-buffer";
+import * as C from "../../../packages/babylon-lite/src/particle/soa/columns";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+
+interface BjsParticle {
+    id: number;
+    position: [number, number, number];
+    direction: [number, number, number];
+    color: [number, number, number, number];
+    size: number;
+    scale: [number, number];
+    angle: number;
+    age: number;
+    lifeTime: number;
+}
+
+const truth = groundTruth as { N: number; count: number; particles: BjsParticle[] };
+
+describe("SoA NPE particle simulation (Change - Emit Rate) — deterministic parity with Babylon.js", () => {
+    it(`reproduces Babylon.js particle states after ${truth.N} deterministic steps`, async () => {
+        const graph = parseNodeParticleSource(graphSource);
+        const set = await buildSoaParticleSet({} as EngineContext, {} as SceneContext, graph, { emitter: { x: 0, y: 0, z: 0 } });
+        const system = set.systems[0]!;
+        expect(system._emitRateGetter).toBeDefined();
+
+        const previousRandom = Math.random;
+        let seed = 1;
+        Math.random = () => {
+            const x = Math.sin(seed++) * 10000;
+            return x - Math.floor(x);
+        };
+        try {
+            startSoaSystem(system);
+            for (let step = 0; step < truth.N; step++) {
+                animateSoa(system, 1);
+            }
+        } finally {
+            Math.random = previousRandom;
+        }
+
+        assertState(system, truth);
+    });
+});
+
+function assertState(system: Awaited<ReturnType<typeof buildSoaParticleSet>>["systems"][number], expectedState: typeof truth): void {
+    const buffer = system.buffer;
+    const size = column(buffer, C.COL_SIZE, Float32Array);
+    const scaleX = column(buffer, C.COL_SCALE_X, Float32Array);
+    const scaleY = column(buffer, C.COL_SCALE_Y, Float32Array);
+    const angle = column(buffer, C.COL_ANGLE, Float32Array);
+    const colorR = column(buffer, C.COL_COLOR_R, Float32Array);
+    const colorG = column(buffer, C.COL_COLOR_G, Float32Array);
+    const colorB = column(buffer, C.COL_COLOR_B, Float32Array);
+    const colorA = column(buffer, C.COL_COLOR_A, Float32Array);
+    const indices = Array.from({ length: buffer.alive }, (_, i) => i).sort((left, right) => buffer.id[left]! - buffer.id[right]!);
+    const expected = expectedState.particles.slice().sort((left, right) => left.id - right.id);
+    expect(indices).toHaveLength(expectedState.count);
+
+    const tolerance = 1e-4;
+    for (let i = 0; i < expected.length; i++) {
+        const index = indices[i]!;
+        const particle = expected[i]!;
+        expect(buffer.id[index], `particle ${i} id`).toBe(particle.id);
+        expect(buffer.posX[index], `particle ${i} position.x`).toBeCloseTo(particle.position[0], 4);
+        expect(buffer.posY[index], `particle ${i} position.y`).toBeCloseTo(particle.position[1], 4);
+        expect(buffer.posZ[index], `particle ${i} position.z`).toBeCloseTo(particle.position[2], 4);
+        expect(Math.abs(buffer.dirX[index]! - particle.direction[0]), `particle ${i} direction.x`).toBeLessThan(tolerance);
+        expect(Math.abs(buffer.dirY[index]! - particle.direction[1]), `particle ${i} direction.y`).toBeLessThan(tolerance);
+        expect(Math.abs(buffer.dirZ[index]! - particle.direction[2]), `particle ${i} direction.z`).toBeLessThan(tolerance);
+        expect(Math.abs(colorR[index]! - particle.color[0]), `particle ${i} color.r`).toBeLessThan(tolerance);
+        expect(Math.abs(colorG[index]! - particle.color[1]), `particle ${i} color.g`).toBeLessThan(tolerance);
+        expect(Math.abs(colorB[index]! - particle.color[2]), `particle ${i} color.b`).toBeLessThan(tolerance);
+        expect(Math.abs(colorA[index]! - particle.color[3]), `particle ${i} color.a`).toBeLessThan(tolerance);
+        expect(Math.abs(size[index]! - particle.size), `particle ${i} size`).toBeLessThan(tolerance);
+        expect(Math.abs(scaleX[index]! - particle.scale[0]), `particle ${i} scale.x`).toBeLessThan(tolerance);
+        expect(Math.abs(scaleY[index]! - particle.scale[1]), `particle ${i} scale.y`).toBeLessThan(tolerance);
+        expect(Math.abs(angle[index]! - particle.angle), `particle ${i} angle`).toBeLessThan(tolerance);
+        expect(Math.abs(buffer.age[index]! - particle.age), `particle ${i} age`).toBeLessThan(tolerance);
+        expect(Math.abs(buffer.lifeTime[index]! - particle.lifeTime), `particle ${i} lifetime`).toBeLessThan(tolerance);
+    }
+}

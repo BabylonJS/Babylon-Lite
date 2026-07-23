@@ -1,5 +1,5 @@
 {
-  "rawKB": 40.1,
+  "rawKB": 40.2,
   "gzipKB": 25.9,
   "ignoredRawKB": 34.4,
   "runtimeChunks": [
@@ -17,7 +17,7 @@
     "scene264-particle-random-block-BMyoDxwS.js",
     "scene264-particle-random-once-block-Dr7xsasC.js",
     "scene264-random-range-CfhNtuAB.js",
-    "scene264-registry-extra-CW5tjE_M.js",
+    "scene264-registry-extra-6v-lBaf3.js",
     "scene264-system-block-BbHhC8Zi.js",
     "scene264-texture-source-block-6tJsSKG2.js",
     "scene264-update-color-block-DV8xxIy6.js",

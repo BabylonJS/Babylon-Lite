@@ -2,9 +2,9 @@ import type { SoaBlockEvaluator } from "../npe-build.js";
 
 /**
  * `SystemBlock` (SoA) — the graph root. Applies update speed, blend mode, emit rate, and target stop
- * duration onto the {@link SoaSystem} built by the upstream `particle` chain. (The texture is bound by the
- * texture-source block; billboard/isLocal are not handled in the spike. Emit rate is read as a constant,
- * matching scene 262; a dynamic emit-rate gradient is not handled.)
+ * duration onto the {@link SoaSystem} built by the upstream `particle` chain. The texture is bound by the
+ * texture-source block. Connected emit-rate graphs use the serialized variant evaluator, which installs
+ * an optional per-step getter after applying this shared configuration.
  */
 export const systemBlock: SoaBlockEvaluator = {
     build(block, ctx) {

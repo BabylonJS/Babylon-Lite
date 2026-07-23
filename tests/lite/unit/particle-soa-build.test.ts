@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { SCENE262_NPE_JSON } from "../../../lab/lite/src/shared/scene262-npe";
+import changeEmitRateGraph from "./fixtures/change-emit-rate-npe.json";
+import changeEmitRateTruth from "./fixtures/change-emit-rate-states.json";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { buildSoaParticleSet } from "../../../packages/babylon-lite/src/particle/soa/npe-build";
+import { animateSoa, startSoaSystem } from "../../../packages/babylon-lite/src/particle/soa/animate";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
@@ -19,14 +22,28 @@ describe("SoA NPE build reachability", () => {
         expect(set.systems[0]!.buffer._columns.has("random.10002.value")).toBe(false);
     });
 
-    it("rejects connected dynamic emit rates instead of freezing their initial value", async () => {
-        const source = JSON.parse(JSON.stringify(SCENE262_NPE_JSON)) as { blocks: Array<Record<string, unknown>> };
-        const system = source.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;
-        const input = source.blocks.find((block) => block.customType === "BABYLON.ParticleInputBlock")!;
-        const emitRate = (system.inputs as Array<Record<string, unknown>>).find((entry) => entry.name === "emitRate")!;
-        emitRate.targetBlockId = input.id;
-        emitRate.targetConnectionName = "output";
-        const graph = parseNodeParticleSource(source);
-        await expect(buildSoaParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow("dynamic emitRate");
+    it("re-evaluates a connected emit-rate graph from system time", async () => {
+        const truth = changeEmitRateTruth as { N: number; count: number };
+        const graph = parseNodeParticleSource(changeEmitRateGraph);
+        const set = await buildSoaParticleSet({} as EngineContext, {} as SceneContext, graph, { emitter: { x: 0, y: 0, z: 0 } });
+        const system = set.systems[0]!;
+        expect(system._emitRateGetter).toBeDefined();
+
+        const previousRandom = Math.random;
+        let seed = 1;
+        Math.random = () => {
+            const x = Math.sin(seed++) * 10000;
+            return x - Math.floor(x);
+        };
+        try {
+            startSoaSystem(system);
+            for (let step = 0; step < truth.N; step++) {
+                animateSoa(system, 1);
+            }
+        } finally {
+            Math.random = previousRandom;
+        }
+
+        expect(system.buffer.alive).toBe(truth.count);
     });
 });

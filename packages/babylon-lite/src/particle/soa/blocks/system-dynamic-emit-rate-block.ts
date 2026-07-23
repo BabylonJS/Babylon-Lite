@@ -1,8 +1,15 @@
 import type { SoaBlockEvaluator } from "../npe-build.js";
+import { systemBlock } from "./system-block.js";
 
-/** Explicit rejection until dynamic emit-rate evaluation is implemented as an optional runtime feature. */
+/** `SystemBlock` evaluator for a connected emit-rate graph. */
 export const systemDynamicEmitRateBlock: SoaBlockEvaluator = {
-    build() {
-        throw new Error("SoA NodeParticle: dynamic emitRate is not implemented yet");
+    build(block, ctx) {
+        systemBlock.build(block, ctx);
+        const system = ctx.state.system!;
+        const emitRateGetter = ctx.input(block, "emitRate", () => system.emitRate);
+        system._emitRateGetter = () => {
+            const emitRate = emitRateGetter(0);
+            return typeof emitRate === "number" ? emitRate : system.emitRate;
+        };
     },
 };

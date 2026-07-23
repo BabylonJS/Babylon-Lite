@@ -14,6 +14,6 @@ export async function loadExtraBlockEvaluator(className: string): Promise<SoaBlo
         case "BasicSpriteUpdateBlock":
             return (await import("./blocks/basic-sprite-update-block.js")).basicSpriteUpdateBlock;
         default:
-            return (await import("./registry-extra-basic.js")).loadBasicBlockEvaluator(className);
+            return (await import("./registry-extra-remaining.js")).loadRemainingBlockEvaluator(className);
     }
 }

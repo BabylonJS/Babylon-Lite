@@ -16,7 +16,8 @@
 > particles are bound to a camera-facing billboard sprite system for rendering.
 > Canonical particle scenes use the data-oriented runtime under `particle/soa/`;
 > the object runtime remains as the compatibility implementation and an exact
-> behavioural oracle while the remaining NPE blocks are migrated.
+> behavioural oracle pending the atomic public-API cutover. SoA now implements
+> every block evaluator supported by that compatibility runtime.
 >
 > This document contains the full specification needed to implement the module
 > from scratch — the determinism contract, the CPU runtime, the node-graph build,
@@ -137,10 +138,13 @@ identical to Babylon's. Break any one and parity collapses.
    in the order the build walk visits them (post-order over each block's inputs).
    That traversal order must match Babylon's update-chain order for multi-update
    graphs.
-6. **Emission accounting.** Per step: `newParticles = (emitRate * scaledUpdateSpeed) >> 0`;
-   the fractional remainder accumulates in `_newPartsExcess`, and when it exceeds
-   `1.0` the whole part is added and subtracted back. `scaledUpdateSpeed =
-updateSpeed * ratio` (ratio = 1 for parity, real-frame-delta for live).
+6. **Emission accounting.** Per step, set `scaledUpdateSpeed = updateSpeed * ratio`,
+  evaluate a connected emit-rate graph from the current system time (or use the
+  constant `emitRate`), then compute `newParticles = (emitRate * scaledUpdateSpeed) >> 0`;
+  the fractional remainder accumulates in `_newPartsExcess`, and when it exceeds
+  `1.0` the whole part is added and subtracted back. The system-time accumulator
+  advances only after the rate is read. Ratio = 1 for parity and real-frame-delta
+  for live simulation.
 7. **Final-step age clamp.** When a particle would overshoot its lifetime, its
    last step is shortened so it lands exactly at `lifeTime`: `stepSpeed =
 (oldDiff * stepSpeed) / diff`. The shortened `stepSpeed` is what
@@ -208,9 +212,10 @@ allocation surface.
 
 `SoaSystem` owns the eight Babylon-ordered creation slots and an ordered
 `updateSteps` array. `animateSoa` performs update-before-create, final-step lifetime
-clamping, fractional emission accounting, and swap removal without per-frame
-allocation. Scratch-backed vector/color getters must copy an operand's components
-before evaluating another getter because two ports may share the same scratch.
+clamping, fractional emission accounting, optional per-step emit-rate evaluation,
+and swap removal without per-frame allocation. Scratch-backed vector/color getters
+must copy an operand's components before evaluating another getter because two ports
+may share the same scratch.
 
 `buildSoaParticleSet` creates the system and buffer before traversing each root,
 then builds only blocks reachable from a `SystemBlock`. Common blocks use
@@ -290,13 +295,14 @@ Size `0x19`, DirectionScale `0x20`. System sources: Time `1`, Delta `2`, Emitter
 `isSystemSourceSupported`, allocation-free switches) and throws for anything
 else, rather than silently returning `null` per frame.
 
-### Registry (`npe-registry.ts`)
+### Registries
 
-`loadParticleBlockEvaluator(className)` — a flat `switch` where each arm is
-`return (await import("./blocks/x.js")).xBlock;`. `default:` throws
-`unsupported block class`. 18 blocks registered. (See the base+extra split gap.)
+The compatibility runtime uses the flat `npe-registry.ts`. SoA splits the same
+supported evaluator set across base, optional, emitter, value-utility, local-shape,
+and serialized-variant registries. Every arm remains a side-effect-free dynamic
+import, and unsupported classes fail during graph construction.
 
-## The 18 Blocks
+## Supported Blocks
 
 - **`SystemBlock`** (root) — configures the already-built system from
   `serialized` (`updateSpeed`, `blendMode`, `billBoardMode`→`billboardMode`,
@@ -443,9 +449,6 @@ classic-`ParticleSystem`-only feature.
   CPU determinism tests).
 - **MULTIPLYADD blend (mode 4)** — "multiply then add" is not a single standard
   blend equation; needs a specific setup. Larger than MULTIPLY.
-- **Dynamic `emitRate` in SoA** — connected emit-rate graphs are rejected at
-  build time rather than silently frozen. The object runtime re-evaluates them;
-  the SoA replacement still needs the per-step system getter.
 - **Sub-emitters / triggers** — `_inheritedVelocityOffset` (the emit-power add
   Lite omits), `ParticleTriggerBlock`, teleport blocks.
 - **Noise / flow-map / attractor updates** — `UpdateNoiseBlock`,
@@ -483,6 +486,12 @@ classic-`ParticleSystem`-only feature.
   covers all committed emitter oracles, volatile shared direction getters,
   source-24 build order, mesh color/InitialDirection, and transformed local box,
   point, sphere, cone, cylinder, and mesh behavior against the object oracle.
+- **SoA behavioral-closure parity (vitest)** —
+  `particle-soa-change-emit-rate-parity.test.ts` validates per-step system-time
+  emit-rate gradients and float-to-int conversion;
+  `particle-soa-change-speed-limit-parity.test.ts` validates vector magnitude and
+  conditional selection. Both compare every live particle to committed Babylon
+  state after 200 deterministic steps.
 - **Pixel parity (Playwright)** — per-scene `.spec.ts` load a lab scene, wait for
   `animationFrozen`, screenshot, compare to the committed golden via MAD ≤
   `scene-config.json` `maxMad`. Goldens are captured once from the Babylon oracle

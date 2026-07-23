@@ -14,7 +14,7 @@ const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
 const EXISTING_PARTICLE_SCENES = [262, 263, 264, 268];
 const UNUSED_FEATURE_CHUNK =
-    /registry-(variants|extra-basic|extra-emitters|local-shapes)|update-(direction|angle)-block|random-once-typed|random-composed-typed|setup-sprite-sheet-random|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
+    /registry-(variants|extra-basic|extra-emitters|extra-values|local-shapes)|update-(direction|angle)-block|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 
 describe("SoA particle bundle feature isolation", () => {
     it("existing particle scenes do not fetch unused Basic, emitter, or local-space features", () => {
@@ -36,8 +36,12 @@ describe("SoA particle bundle feature isolation", () => {
                 .filter((chunk) => chunk.file && runtimeChunks.has(chunk.file))
                 .flatMap((chunk) => chunk.modules ?? [])
                 .map((module) => module.id ?? "")
-                .filter((id) => /particle\/soa\/(registry-local-shapes|local-position|blocks\/(box|point|sphere|cone|cylinder|mesh)-shape-local)|math\/mat4-invert/.test(id));
-            expect(moduleOffenders, `scene${sceneId} folds unused local or inverse-matrix code into fetched chunks`).toEqual([]);
+                .filter((id) =>
+                    /particle\/soa\/(registry-(extra-values|local-shapes)|local-position|blocks\/(system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|(box|point|sphere|cone|cylinder|mesh)-shape-local))|math\/mat4-invert/.test(
+                        id
+                    )
+                );
+            expect(moduleOffenders, `scene${sceneId} folds unused dynamic-rate, value, local, or inverse-matrix code into fetched chunks`).toEqual([]);
         }
     });
 });
