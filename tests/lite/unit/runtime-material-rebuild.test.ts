@@ -6,7 +6,7 @@ import { rebuildMaterial } from "../../../packages/babylon-lite/src/material/mat
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
-import { addToScene, buildScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { addToScene, buildScene, type RuntimeSceneBuildHooks, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
 import { rebuildScenePbrPipelines } from "../../../packages/babylon-lite/src/scene/scene-rebuild";
 import { B } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build";
@@ -193,6 +193,33 @@ describe("runtime material rebuild ownership", () => {
         await vi.waitFor(() => expect(scene._runtimeBuilds?.w).toBe(false));
         engine._retirements?.splice(0).forEach((retire) => retire());
         expect(oldDispose).toHaveBeenCalledOnce();
+    });
+
+    it("reports an asynchronous material rebuild failure", async () => {
+        const failure = new Error("async material rebuild failed");
+        const report = vi.fn();
+        const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const scene = createScene({} as EngineContext);
+        scene._built = true;
+        scene._runtimeBuilds = {
+            w: true,
+            queue: () => Promise.resolve(),
+            _e: () => {
+                throw failure;
+            },
+            _x: report,
+        } as unknown as RuntimeSceneBuildHooks;
+        const builder = (() => Promise.resolve({ renderables: [], rebuildSingle: (_target: SceneContext, target: Mesh) => renderable(target) })) as MeshGroupBuilder;
+        builder._materialFamily = "standard";
+        const material = { _buildGroup: builder } as Material;
+        const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
+        scene.meshes.push(mesh);
+
+        rebuildMaterial(scene, material);
+
+        await vi.waitFor(() => expect(report).toHaveBeenCalledWith(failure));
+        expect(log).toHaveBeenCalledWith(failure);
+        log.mockRestore();
     });
 
     it("disposes old PBR resources directly when a rebuild finishes after scene disposal", async () => {

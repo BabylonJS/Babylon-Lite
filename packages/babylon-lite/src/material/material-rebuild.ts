@@ -44,7 +44,10 @@ export function rebuildMaterial(scene: SceneContext, materialOrView: Material, o
                     scene._frameGraph.build();
                 }
             })
-            .catch(() => undefined);
+            .catch((error) => {
+                scene._runtimeBuilds?._x(error);
+                console.error(error);
+            });
     } else if (options?.rebuildFrameGraph) {
         scene._frameGraph.build();
     }
