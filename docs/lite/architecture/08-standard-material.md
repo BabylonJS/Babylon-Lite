@@ -44,23 +44,23 @@ standard-renderable.ts (buildStandardMeshRenderables):
 
 ## Opt-in Standard Mesh Feature Contract
 
-The deformation/vertex features are deliberately absent from the root barrel. Published consumers import them from the typed, tree-shakable subpath:
+The deformation/vertex feature enablers are explicit named exports from the root package entry:
 
 ```ts
 import {
     enableStandardSkeleton,
     enableStandardUvOffset,
-    enableStandardVertexColor,
-} from "@babylonjs/lite/material/standard/enable-standard-mesh-features";
+    enableStandardVertexColors,
+} from "@babylonjs/lite";
 ```
 
 Call each enabler before `registerScene()` when the scene creates matching Standard meshes/material state. Enablers are idempotent and have no import-time registration side effects:
 
 - `enableStandardSkeleton()` installs a mesh predicate and lazy fragment loader. The fragment reuses the material-agnostic shared skeleton shader fragment used by PBR; skeletal geometry velocity is a second lazy chunk loaded only by a velocity pass over a matching mesh.
-- `enableStandardVertexColor()` installs RGBA vertex-color composition and draw-time color-buffer binding.
+- `enableStandardVertexColors()` installs RGBA vertex-color composition and draw-time color-buffer binding.
 - `enableStandardUvOffset()` enables reads of `material.uvOffset`; absent offsets always resolve to `[0, 0]`.
 
-The enablers register only scalar callbacks and lazy loaders. No module allocates a `Map`/`Set` or registers an extension at import time. If the subpath is never imported, production scene bundles omit the deformation/offset chunks; a forward-only skeletal scene also does not load the geometry-velocity chunk.
+The enablers register only scalar callbacks and lazy loaders. No module allocates a `Map`/`Set` or registers an extension at import time. If these root exports are unused, production scene bundles omit the deformation/offset chunks; a forward-only skeletal scene also does not load the geometry-velocity chunk.
 
 ## `_buildGroup` Pattern
 
@@ -170,7 +170,7 @@ export function createStandardNoColorMaterialView(source: StandardMaterialProps)
 ### Vertex Colors (`enable-standard-vertex-colors.ts`)
 
 ```typescript
-import { enableStandardVertexColors } from "babylon-lite/material/standard/enable-standard-vertex-colors";
+import { enableStandardVertexColors } from "babylon-lite";
 
 /**
  * Enable RGBA mesh vertex colors for StandardMaterial.
@@ -181,14 +181,14 @@ export function enableStandardVertexColors(): void;
 
 The color buffer contract is four `f32` values per vertex. RGB always multiplies the Standard base color. Alpha is consumed only when the mesh opts in via `mesh.hasVertexAlpha` (Babylon `VERTEXALPHA`): the fragment then multiplies the running material alpha by `vColor.a`, folds `vColor.a` into the alpha-test cutoff, and the mesh source-over blends (depth-write off, transparent sort phase). Without the opt-in the vertex color is RGB-only. The same fragment participates in main-color, no-color/shadow, and Standard geometry-view shader composition.
 
-### Opt-in package subpath (`material/standard/enable-standard-mesh-features`)
+### Opt-in root exports
 
 ```typescript
 export function enableStandardSkeleton(): void;
 export function enableStandardUvOffset(): void;
 ```
 
-Skeletal skinning and UV translation opt-ins live on this subpath; RGBA vertex colors are enabled separately through `enableStandardVertexColors()` above. The source package export maps this subpath to the source module for workspace consumers. The emitted npm `package.json` maps it to the matching module-granular `lib/` file and a dedicated declaration file. The root `index.ts` does not re-export these functions, preventing unrelated root-barrel bundles from retaining the opt-in module.
+Skeletal skinning, UV translation, and RGBA vertex-color opt-ins are explicitly re-exported from the root `index.ts`. The source and emitted packages expose only the `"."` export; unused enablers and their lazy feature chunks are removed by tree-shaking.
 
 ### Pipeline (`standard-pipeline.ts`)
 
@@ -738,7 +738,7 @@ registerScene(scene)       → runs deferred builders and builds frame graph
 | `Standard skeleton composition`   | Shared 4/8-bone fragment, bone binding, and vertex layouts    |
 | `Standard vertex-color alpha`     | RGBA modulation precedes alpha-test and geometry mask         |
 | `geometry deformation`            | Geometry shader/layout/bind/draw variants include morph, skeleton, and vertex color |
-| `published feature subpath`       | Emitted package export has import + declaration targets       |
+| `root feature exports`            | Root declaration exposes each enabler with no package subpaths |
 | `single rebuild`                  | Material swap rebuilds one mesh without full scene teardown |
 | `fragment composition`            | Bump fragment injects perturbNormal helper + AC slot code   |
 | `shadow fragment ESM`             | ESM shadow factor computation per light                     |

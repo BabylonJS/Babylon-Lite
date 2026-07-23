@@ -23,6 +23,9 @@ export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
 export { captureScreenshot } from "./engine/screenshot.js";
 export type { Screenshot } from "./engine/screenshot.js";
+export { enableDeviceLostRecovery } from "./engine/device-lost-recovery.js";
+export type { DeviceLostRecoveryHandle, DeviceLostRecoveryOptions } from "./engine/device-lost-recovery.js";
+export { forceWebGpuDeviceLossForTesting } from "./engine/device-lost-recovery-testing.js";
 export {
     createSceneContext,
     createDefaultCamera,
@@ -283,6 +286,7 @@ export type { SceneNode } from "./scene/scene-node.js";
 export { loadBabylon } from "./loader-babylon/load-babylon.js";
 export { loadEnvironment } from "./loader-env/load-env.js";
 export { loadDdsEnvironment } from "./loader-env/load-dds-env.js";
+export { buildDdsSkyboxRenderable } from "./material/pbr/background-dds-skybox.js";
 export { loadHdrEnvironment } from "./loader-hdr/load-hdr.js";
 export { loadTexture2D, cloneTexture2D } from "./texture/texture-2d.js";
 export { loadSkybox } from "./loader-skybox/load-skybox.js";

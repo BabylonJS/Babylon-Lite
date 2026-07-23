@@ -5,6 +5,8 @@ import {
     createEngine,
     createSceneContext,
     createDefaultCamera,
+    enableDeviceLostRecovery,
+    forceWebGpuDeviceLossForTesting,
     loadGltf,
     createHemisphericLight,
     attachControl,
@@ -12,8 +14,6 @@ import {
     pauseAnimation,
     registerScene,
 } from "babylon-lite";
-import { enableDeviceLostRecovery } from "babylon-lite/engine/device-lost-recovery";
-import { forceWebGpuDeviceLossForTesting } from "babylon-lite/engine/device-lost-recovery-testing";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();

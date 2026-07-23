@@ -115,14 +115,6 @@ function emitPackageJson(): Plugin {
                         types: "./index.d.ts",
                         import: "./lib/index.js",
                     },
-                    "./material/standard/enable-standard-vertex-colors": {
-                        types: "./material/standard/enable-standard-vertex-colors.d.ts",
-                        import: "./lib/material/standard/enable-standard-vertex-colors.js",
-                    },
-                    "./material/standard/enable-standard-mesh-features": {
-                        types: "./material/standard/enable-standard-mesh-features.d.ts",
-                        import: "./lib/material/standard/enable-standard-mesh-features.js",
-                    },
                 },
                 jsdelivr: "./dist/index.js",
                 unpkg: "./dist/index.js",

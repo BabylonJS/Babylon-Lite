@@ -4,9 +4,8 @@
 // clearcoat enabled with IOR=2.0. No direct light — only IBL from DDS env +
 // default hemispheric light from createDefaultCamera equivalent.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createSphere, createPbrMaterial, createSolidTexture2D, attachControl, registerScene } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createSphere, createPbrMaterial, createSolidTexture2D, attachControl, loadDdsEnvironment, registerScene } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
-import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
