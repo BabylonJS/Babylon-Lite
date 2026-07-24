@@ -3,6 +3,7 @@ import type { SceneNode } from "../scene/scene-node.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import { mat4PerspectiveLHToRef } from "../math/mat4-perspective-lh-to-ref.js";
 import type { Mat4Storage } from "../math/types.js";
+import type { OrthographicBounds } from "./orthographic.js";
 
 /** Minimal camera contract — any camera that can provide view/projection matrices.
  *  Both ArcRotateCamera and FreeCamera implement this interface.
@@ -46,6 +47,9 @@ export interface Camera {
      *  leave the field undefined and `getViewMatrix` produces a standard view
      *  matrix. */
     _useFloatingOrigin?: boolean;
+    /** @internal Orthographic view-volume extents, set by `enableOrthographicCamera`.
+     *  Null/undefined means the camera projects perspectively through `fov`. */
+    _ortho?: OrthographicBounds | null;
 }
 
 /** Babylon-compatible normalized camera viewport. x/y/width/height are fractions of the render target. */
@@ -100,6 +104,17 @@ export function getViewMatrix(camera: Camera): Mat4 {
     return v as unknown as Mat4;
 }
 
+/** Orthographic projection writer, installed only by `enableOrthographicCamera`. Module-local with a
+ *  single exported setter: when `enableOrthographicCamera` is absent from the bundle the setter
+ *  tree-shakes, the bundler proves this is always null, and the orthographic branch below folds away —
+ *  perspective-only scenes stay byte-identical. */
+let _orthoProjector: ((camera: Camera, aspectRatio: number, out: Mat4Storage) => void) | null = null;
+
+/** @internal Install orthographic projection support (called by `enableOrthographicCamera`). */
+export function _installOrthographicProjector(write: (camera: Camera, aspectRatio: number, out: Mat4Storage) => void): void {
+    _orthoProjector = write;
+}
+
 /** Compute the projection matrix for a camera. Cached per worldMatrixVersion + aspect. */
 export function getProjectionMatrix(camera: Camera, aspectRatio: number): Mat4 {
     const ver = camera.worldMatrixVersion;
@@ -107,7 +122,11 @@ export function getProjectionMatrix(camera: Camera, aspectRatio: number): Mat4 {
         return camera._projCache as unknown as Mat4;
     }
     const p = camera._projCache;
-    mat4PerspectiveLHToRef(p, camera.fov, aspectRatio, camera.nearPlane, camera.farPlane);
+    if (_orthoProjector !== null && camera._ortho) {
+        _orthoProjector(camera, aspectRatio, p);
+    } else {
+        mat4PerspectiveLHToRef(p, camera.fov, aspectRatio, camera.nearPlane, camera.farPlane);
+    }
     camera._projVer = ver;
     camera._projAspect = aspectRatio;
     return p as unknown as Mat4;
