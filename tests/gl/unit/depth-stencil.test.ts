@@ -287,7 +287,7 @@ describe("lite-gl stencil state", () => {
     it("rejects an invalid separate-op face without dirtying state", () => {
         const { mock, engine } = makeEngine();
 
-        expect(() => setStencilOpSeparate(engine, engine.gl.ALWAYS, { opZPass: engine.gl.INCR_WRAP })).toThrow(/gl\.FRONT, gl\.BACK, or gl\.FRONT_AND_BACK/);
+        expect(() => setStencilOpSeparate(engine, engine.gl.ALWAYS, { opZPass: engine.gl.INCR_WRAP })).toThrow(/invalid face/);
         applyGLStates(engine);
 
         expect(callsNamed(mock, "stencilOp")).toHaveLength(0);

@@ -71,23 +71,53 @@ function parseSeekTime(): number | null {
     return Number.isFinite(seconds) ? seconds : null;
 }
 
-// PASS 1 — the mask shape. Discards outside the disc so the stencil REPLACE only
-// stamps `1` inside `length(vUv-0.5) < DISC_RADIUS`. Colour writes are masked off
-// during this pass, so the emitted colour is irrelevant.
+// PASS 1 — the mask shape. Discards outside the disc so the selected face's
+// depth-pass operation changes stencil only inside the radius. Colour writes are
+// masked off during this pass, so the emitted colour is irrelevant.
 const DISC_FRAGMENT = `#version 300 es
-precision highp float;in vec2 vUv;out vec4 glFragColor;void main(){float r=length(vUv-0.5);if(r>${DISC_RADIUS}){discard;}glFragColor=vec4(1.0);}`;
+precision highp float;
+in vec2 vUv;
+out vec4 glFragColor;
+void main() {
+    float r = length(vUv - 0.5);
+    if (r > ${DISC_RADIUS}) {
+        discard;
+    }
+    glFragColor = vec4(1.0, 1.0, 1.0, 1.0);
+}`;
 
 // PASS 2 — fullscreen animated radial gradient. Depends ONLY on r = length(vUv-0.5):
-// concentric animated rings tinted by a radial cosine palette. The stencil test
-// (EQUAL 1) clips it to the disc.
+// concentric animated rings tinted by a radial cosine palette. The NOTEQUAL 0
+// stencil test clips it to the nonzero winding region.
 const GRADIENT_FRAGMENT = `#version 300 es
-precision highp float;in vec2 vUv;out vec4 glFragColor;uniform float uTime;void main(){float r=length(vUv-0.5);float rings=0.5+0.5*cos(r*34.0-uTime*1.5);vec3 palette=0.5+0.5*cos(vec3(0.0,2.094,4.188)+r*6.2832+uTime*0.4);glFragColor=vec4(palette*rings,1.0);}`;
+precision highp float;
+in vec2 vUv;
+out vec4 glFragColor;
+uniform float uTime;
+void main() {
+    float r = length(vUv - 0.5);
+    float rings = 0.5 + 0.5 * cos(r * 34.0 - uTime * 1.5);
+    vec3 palette = 0.5 + 0.5 * cos(vec3(0.0, 2.094, 4.188) + r * 6.2832 + uTime * 0.4);
+    glFragColor = vec4(palette * rings, 1.0);
+}`;
 
 // COMPOSITE — sample the RT fullscreen and apply a radial screen-space vignette
 // (aspect-corrected so it stays circular; still symmetric under any axis flip,
 // so it too is orientation-agnostic).
 const COMPOSITE_FRAGMENT = `#version 300 es
-precision highp float;in vec2 vUv;out vec4 glFragColor;uniform vec2 uResolution;uniform sampler2D uRt;void main(){vec3 col=texture(uRt,vUv).rgb;vec2 q=vUv-0.5;q.x*=uResolution.x/max(uResolution.y,1.0);float r=length(q);col*=1.0-0.5*r*r;glFragColor=vec4(col,1.0);}`;
+precision highp float;
+in vec2 vUv;
+out vec4 glFragColor;
+uniform vec2 uResolution;
+uniform sampler2D uRt;
+void main() {
+    vec3 col = texture(uRt, vUv).rgb;
+    vec2 q = vUv - 0.5;
+    q.x *= uResolution.x / max(uResolution.y, 1.0);
+    float r = length(q);
+    col *= 1.0 - 0.5 * r * r;
+    glFragColor = vec4(col, 1.0);
+}`;
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const engine = createGLEngine(canvas, { alpha: false });
@@ -130,7 +160,7 @@ runRenderLoop(engine, () => {
     setStencilState(engine, { test: true, mask: 0xff });
     clearEngine(engine, { color: { r: CLEAR_R, g: CLEAR_G, b: CLEAR_B }, stencil: true });
 
-    // ── PASS 1: update both windings in one draw (no colour writes) ──
+    // ── PASS 1: configure both winding operations for one draw (no colour writes) ──
     setColorMask(engine, false, false, false, false);
     setStencilState(engine, {
         test: true,
@@ -146,7 +176,7 @@ runRenderLoop(engine, () => {
     applyEffectWrapper(discWrapper);
     drawEffect(engine);
 
-    // ── PASS 2: draw the gradient only where stencil == 1 (inside the disc) ──
+    // ── PASS 2: draw the gradient only where stencil is nonzero ──
     setColorMask(engine, true, true, true, true);
     setStencilState(engine, {
         test: true,
