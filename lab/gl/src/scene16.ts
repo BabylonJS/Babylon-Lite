@@ -7,6 +7,7 @@ import {
     createVertexBuffer,
     drawIndexed,
     isEffectReady,
+    onContextRestored,
     resizeGLEngine,
     runRenderLoop,
     setColorMask,
@@ -65,6 +66,12 @@ const freeze = new URLSearchParams(window.location.search).has("seekTime");
 const initStart = performance.now();
 let attributesBound = false;
 let firstFrameDrawn = false;
+let restoredFramePending = false;
+
+onContextRestored(engine, () => {
+    attributesBound = false;
+    restoredFramePending = true;
+});
 
 runRenderLoop(engine, () => {
     if (!isEffectReady(engine, effect)) {
@@ -119,6 +126,11 @@ runRenderLoop(engine, () => {
     setStencilState(engine, { ref: 0xff });
     setEffectFloat4(engine, effect, "color", 0.13, 0.55, 0.96, 1);
     drawIndexed(engine, indexBuffer, INDICES.length, 0);
+
+    if (restoredFramePending) {
+        restoredFramePending = false;
+        canvas.dataset.contextRestored = "true";
+    }
 
     if (!firstFrameDrawn) {
         firstFrameDrawn = true;

@@ -173,7 +173,7 @@ export function createMockGL(): MockGL {
         },
         getExtension: (name: string): unknown => {
             if (name === "KHR_parallel_shader_compile" && state.parallelAvailable) {
-                return PARALLEL_EXT;
+                return { ...PARALLEL_EXT };
             }
             if (state.extensions[name] === true) {
                 return { __ext: name };
