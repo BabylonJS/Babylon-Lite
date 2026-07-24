@@ -113,14 +113,14 @@ export interface GLDepthState {
 export interface GLStencilState {
     /** Enable/disable the stencil test (`gl.enable/disable(STENCIL_TEST)`). */
     test?: boolean;
-    /** Stencil write mask (`gl.stencilMask`). */
-    mask?: number;
     /** Comparison function (`gl.stencilFunc` arg 1), e.g. `gl.ALWAYS`. */
     func?: GLenum;
     /** Reference value (`gl.stencilFunc` arg 2). */
     ref?: number;
     /** Comparison mask (`gl.stencilFunc` arg 3). */
     funcMask?: number;
+    /** Stencil write mask (`gl.stencilMask`). */
+    mask?: number;
     /** Op when the stencil test fails (`gl.stencilOp` arg 1). */
     opFail?: GLenum;
     /** Op when the stencil test passes but depth fails (`gl.stencilOp` arg 2). */
@@ -179,17 +179,13 @@ function resetStencilBack(rs: Float64Array): void {
     setStencilOps(rs, BACK_OP_FAIL + BACK_DESIRED, rs[RS_STENCIL_OP_FAIL + RS_DESIRED]!, rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED]!, rs[RS_STENCIL_OP_ZPASS + RS_DESIRED]!);
 }
 
-function setStencilBack(s: GLEngineContext["_state"], face: GLenum, state: GLStencilOpState): void {
-    if ((state.opFail ?? state.opZFail ?? state.opZPass) === undefined) {
-        return;
-    }
-    const rs = s.rs;
+function ensureStencilBackCacheInitialized(rs: Float64Array): void {
     if (rs[RS_STENCIL_OP_FAIL + RS_DESIRED] === -1) {
         resetStencilBack(rs);
     }
-    if (face === FRONT) {
-        return;
-    }
+}
+
+function setDesiredStencilBackOps(rs: Float64Array, state: GLStencilOpState): void {
     if (state.opFail !== undefined) {
         rs[BACK_OP_FAIL + BACK_DESIRED] = state.opFail;
     }
@@ -201,6 +197,15 @@ function setStencilBack(s: GLEngineContext["_state"], face: GLenum, state: GLSte
     }
 }
 
+/** Mirror a shared stencil-op update to the lazily allocated back-face cache. */
+function mirrorSharedStencilOpsToBack(s: GLEngineContext["_state"], state: GLStencilOpState): void {
+    if ((state.opFail ?? state.opZFail ?? state.opZPass) === undefined) {
+        return;
+    }
+    ensureStencilBackCacheInitialized(s.rs);
+    setDesiredStencilBackOps(s.rs, state);
+}
+
 /** Lazily install back-face storage and the two-sided reconciler. */
 function enableSeparateStencil(s: GLEngineContext["_state"]): void {
     if (s._setStencilBack !== undefined) {
@@ -210,7 +215,7 @@ function enableSeparateStencil(s: GLEngineContext["_state"]): void {
     rs.set(s.rs);
     s.rs = rs;
     resetStencilBack(rs);
-    s._setStencilBack = setStencilBack;
+    s._setStencilBack = mirrorSharedStencilOpsToBack;
     s._flushStencil = flushStencilSeparate;
 }
 
@@ -289,9 +294,6 @@ export function setStencilState(engine: GLEngineContext, state: GLStencilState):
     if (state.test !== undefined) {
         s.rs[RS_STENCIL_TEST + RS_DESIRED] = state.test ? 1 : 0;
     }
-    if (state.mask !== undefined) {
-        s.rs[RS_STENCIL_MASK + RS_DESIRED] = state.mask;
-    }
     if (state.func !== undefined) {
         s.rs[RS_STENCIL_FUNC_FUNC + RS_DESIRED] = state.func;
     }
@@ -301,7 +303,10 @@ export function setStencilState(engine: GLEngineContext, state: GLStencilState):
     if (state.funcMask !== undefined) {
         s.rs[RS_STENCIL_FUNC_MASK + RS_DESIRED] = state.funcMask;
     }
-    s._setStencilBack?.(s, BACK, state);
+    if (state.mask !== undefined) {
+        s.rs[RS_STENCIL_MASK + RS_DESIRED] = state.mask;
+    }
+    s._setStencilBack?.(s, state);
     if ((state.opFail ?? state.opZFail ?? state.opZPass) !== undefined) {
         ensureStencilOpCacheInitialized(s.rs);
         if (state.opFail !== undefined) {
@@ -342,9 +347,12 @@ export function setStencilOpSeparate(engine: GLEngineContext, face: GLenum, stat
         return;
     }
     enableSeparateStencil(s);
-    s._setStencilBack!(s, face, state);
+    ensureStencilBackCacheInitialized(s.rs);
     if (face !== BACK) {
         setDesiredStencilOps(s.rs, state);
+    }
+    if (face !== FRONT) {
+        setDesiredStencilBackOps(s.rs, state);
     }
     s.statesDirty = true;
 }

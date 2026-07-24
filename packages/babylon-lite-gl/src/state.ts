@@ -146,8 +146,8 @@ export interface GLState {
     _flushDepthCull?: (engine: GLEngineContext) => void;
     /** @internal Stencil reconciler (Babylon's `_stencilState`). */
     _flushStencil?: (engine: GLEngineContext) => void;
-    /** @internal Lazy two-sided hook installed by `setStencilOpSeparate`. */
-    _setStencilBack?: (cache: GLState, face: GLenum, state: { opFail?: GLenum; opZFail?: GLenum; opZPass?: GLenum }) => void;
+    /** @internal Lazy hook that mirrors shared stencil operations to the back face. */
+    _setStencilBack?: (cache: GLState, state: { opFail?: GLenum; opZFail?: GLenum; opZPass?: GLenum }) => void;
     /** @internal Color-write-mask reconciler (Babylon's `setColorWrite`). */
     _flushColorMask?: (engine: GLEngineContext) => void;
     /** Scissor-test enable tri-state (`-1` unset, `0` off, `1` on). */

@@ -95,10 +95,11 @@ runRenderLoop(engine, () => {
     setColorMask(engine, false, false, false, false);
     setStencilState(engine, {
         test: true,
-        mask: 0xff,
         func: gl.ALWAYS,
         ref: 0,
         funcMask: 0xff,
+
+        mask: 0xff,
         opFail: gl.KEEP,
         opZFail: gl.KEEP,
         opZPass: gl.KEEP,
@@ -111,10 +112,11 @@ runRenderLoop(engine, () => {
     setColorMask(engine, true, true, true, true);
     setStencilState(engine, {
         test: true,
-        mask: 0x00,
         func: gl.EQUAL,
         ref: 1,
         funcMask: 0xff,
+
+        mask: 0x00,
         opFail: gl.KEEP,
         opZFail: gl.KEEP,
         opZPass: gl.KEEP,
