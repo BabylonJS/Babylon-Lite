@@ -127,6 +127,13 @@ describe("lite-gl stencil state", () => {
         expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.ZERO, engine.gl.ZERO, engine.gl.ZERO]]);
     });
 
+    it("initializes both faces to KEEP before a first partial shared update", () => {
+        const { mock, engine } = makeEngine();
+        setStencilState(engine, { opZPass: engine.gl.ZERO });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.KEEP, engine.gl.KEEP, engine.gl.ZERO]]);
+    });
+
     it("initializes both faces to KEEP before a first partial separate update", () => {
         const { mock, engine } = makeEngine();
         setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.ZERO });
@@ -175,7 +182,7 @@ describe("lite-gl stencil state", () => {
         expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
     });
 
-    it("collapses divergent faces before applying a partial shared op update", () => {
+    it("updates only the supplied shared operation on divergent faces", () => {
         const { mock, engine } = makeEngine();
         setStencilState(engine, { opFail: engine.gl.KEEP, opZFail: engine.gl.KEEP, opZPass: engine.gl.KEEP });
         setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
@@ -186,11 +193,14 @@ describe("lite-gl stencil state", () => {
         setStencilState(engine, { opFail: engine.gl.ZERO });
         applyGLStates(engine);
 
-        expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.ZERO, engine.gl.KEEP, engine.gl.INCR_WRAP]]);
-        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.ZERO, engine.gl.KEEP, engine.gl.INCR_WRAP],
+            [engine.gl.BACK, engine.gl.ZERO, engine.gl.KEEP, engine.gl.DECR_WRAP],
+        ]);
     });
 
-    it("treats FRONT_AND_BACK as a shared op update", () => {
+    it("coalesces a FRONT_AND_BACK update when the resulting face states match", () => {
         const { mock, engine } = makeEngine();
         setStencilState(engine, { opFail: engine.gl.KEEP, opZFail: engine.gl.KEEP, opZPass: engine.gl.KEEP });
         applyGLStates(engine);
@@ -201,6 +211,24 @@ describe("lite-gl stencil state", () => {
 
         expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.KEEP, engine.gl.KEEP, engine.gl.INCR_WRAP]]);
         expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+    });
+
+    it("updates only the supplied FRONT_AND_BACK operation on divergent faces", () => {
+        const { mock, engine } = makeEngine();
+        setStencilState(engine, { opFail: engine.gl.KEEP, opZFail: engine.gl.KEEP, opZPass: engine.gl.KEEP });
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT_AND_BACK, { opZFail: engine.gl.ZERO });
+        applyGLStates(engine);
+
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.KEEP, engine.gl.ZERO, engine.gl.INCR_WRAP],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.ZERO, engine.gl.DECR_WRAP],
+        ]);
     });
 
     it("rejects an invalid separate-op face without dirtying state", () => {

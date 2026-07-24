@@ -863,10 +863,12 @@ unused category costs a scene nothing:
   `setCullState`, `setStencilState`, `setStencilOpSeparate`, `setColorMask`) write
   ONLY the desired half of `rs` and set `statesDirty = true`. They issue no
   `gl.*` and never touch the actual half. Omitted setter fields leave their
-  desired slot untouched (merge-from-desired). `setStencilState` writes its op
-  fields to both faces; `setStencilOpSeparate` overrides the selected face. On
-  the first op update after engine creation or cache reset, both desired triples
-  are initialized to WebGL's `KEEP` defaults before the supplied fields merge.
+  desired slot untouched (merge-from-desired). `setStencilState` writes each
+  supplied op field to both faces; `setStencilOpSeparate` writes each supplied
+  op field to the selected face(s). Omitted op fields remain independently
+  unchanged on each face, including for `FRONT_AND_BACK`. On the first op update
+  after engine creation or cache reset, both desired triples are initialized to
+  WebGL's `KEEP` defaults before the supplied fields merge.
 - **Per-category dispatch (tree-shakeable).** `applyGLStates(engine)` (the
   internal `apply-states.ts`, not exported from the barrel) owns NO reconciliation
   code — it is a tiny dispatcher. Each category's reconciler (`flushBlend` in
