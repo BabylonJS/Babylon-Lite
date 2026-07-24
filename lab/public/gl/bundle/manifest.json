@@ -60,14 +60,14 @@
     "bjsGzipKB": 37.6
   },
   "scene11": {
-    "rawKB": 20,
-    "gzipKB": 6.8,
+    "rawKB": 19.5,
+    "gzipKB": 6.6,
     "bjsRawKB": 198.7,
     "bjsGzipKB": 50.3
   },
   "scene12": {
     "rawKB": 6.5,
-    "gzipKB": 2.6,
+    "gzipKB": 2.5,
     "bjsRawKB": 148.9,
     "bjsGzipKB": 37.3
   },

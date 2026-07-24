@@ -99,6 +99,17 @@ describe("lite-gl cull state", () => {
 });
 
 describe("lite-gl stencil state", () => {
+    it("allocates back-face slots only for a non-empty separate update", () => {
+        const { engine } = makeEngine();
+        expect(engine._state.rs).toHaveLength(46);
+        setStencilState(engine, { opZPass: engine.gl.KEEP });
+        expect(engine._state.rs).toHaveLength(46);
+        setStencilOpSeparate(engine, engine.gl.BACK, {});
+        expect(engine._state.rs).toHaveLength(46);
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        expect(engine._state.rs).toHaveLength(52);
+    });
+
     it("applies the func triple as a unit and caches it", () => {
         const { mock, engine } = makeEngine();
         setStencilState(engine, { test: true, mask: 0xff, func: engine.gl.ALWAYS, ref: 1, funcMask: 0xff });

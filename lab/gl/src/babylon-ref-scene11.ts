@@ -19,15 +19,14 @@ import "@babylonjs/core/Engines/Extensions/engine.renderTarget.js";
  *    (`generateDepthBuffer:true, generateStencilBuffer:true` → DEPTH24_STENCIL8 on
  *    DEPTH_STENCIL_ATTACHMENT), the same attachment lite-gl's
  *    `generateRenderTargetStencil` installs.
- *  - PASS 1 configures distinct front increment / back decrement depth-pass
- *    operations in one draw, with colour writes masked off. The EffectRenderer
- *    fullscreen quad is front-facing, matching lite-gl's parity geometry.
- *  - PASS 2 draws a fullscreen animated radial gradient where stencil is not 0,
+ *  - PASS 1 clears the RT and stamps stencil to 1 inside a centred disc with
+ *    `KEEP/KEEP/REPLACE`, while colour writes are masked off.
+ *  - PASS 2 draws a fullscreen animated radial gradient where stencil equals 1,
  *    with `KEEP/KEEP/KEEP` operations and colour writes back on.
  *  - COMPOSITE disables the stencil test and samples the RT fullscreen with the
  *    SAME aspect-corrected vignette.
- *  - The stencil state is driven through `engine.stencilState`, including its
- *    independent front/back operation fields.
+ *  - The stencil state is driven through `engine.stencilState`, with matching
+ *    front/back values equivalent to lite-gl's shared `setStencilState` path.
  *  - Every shape depends ONLY on `length(vUV - 0.5)` and the composite samples at
  *    the same UV, so the round-trip is invariant to any FBO sampling-origin /
  *    Y-flip difference between the two engines.
@@ -145,8 +144,8 @@ function parseSeekTime(): number | null {
         useShaderStore: false,
     });
 
-    /** Set shared stencil state with an optional distinct back depth-pass op. */
-    function setStencil(test: boolean, mask: number, func: number, ref: number, funcMask: number, fail: number, zfail: number, zpass: number, backZpass = zpass): void {
+    /** Set shared front/back stencil state. */
+    function setStencil(test: boolean, mask: number, func: number, ref: number, funcMask: number, fail: number, zfail: number, zpass: number): void {
         const st = engine.stencilState;
         st.stencilTest = test;
         st.stencilMask = mask;
@@ -159,7 +158,7 @@ function parseSeekTime(): number | null {
         st.stencilOpStencilDepthPass = zpass;
         st.stencilBackOpStencilFail = fail;
         st.stencilBackOpDepthFail = zfail;
-        st.stencilBackOpStencilDepthPass = backZpass;
+        st.stencilBackOpStencilDepthPass = zpass;
     }
 
     const seekTime = parseSeekTime();
@@ -172,7 +171,7 @@ function parseSeekTime(): number | null {
     discWrapper.onApplyObservable.add(() => {
         engine.setColorWrite(true);
         // Clear respects the global stencil write mask, so enable it first.
-        setStencil(true, 0xff, Constants.ALWAYS, 0, 0xff, Constants.KEEP, Constants.KEEP, Constants.INCR_WRAP, Constants.DECR_WRAP);
+        setStencil(true, 0xff, Constants.ALWAYS, 1, 0xff, Constants.KEEP, Constants.KEEP, Constants.REPLACE);
         engine.clear({ r: CLEAR_R, g: CLEAR_G, b: CLEAR_B, a: 1 }, true, false, true);
         // Disc pass writes stencil only (colour masked off).
         engine.setColorWrite(false);
@@ -181,7 +180,7 @@ function parseSeekTime(): number | null {
     // PASS 2 — gradient admitted only where stencil == 1 (inside the disc).
     gradientWrapper.onApplyObservable.add(() => {
         engine.setColorWrite(true);
-        setStencil(true, 0x00, Constants.NOTEQUAL, 0, 0xff, Constants.KEEP, Constants.KEEP, Constants.KEEP);
+        setStencil(true, 0x00, Constants.EQUAL, 1, 0xff, Constants.KEEP, Constants.KEEP, Constants.KEEP);
         gradientWrapper.effect.setFloat("uTime", currentTime);
     });
 

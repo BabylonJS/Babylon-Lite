@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { loadSceneConfig, measureSceneBundle } from "../../../scripts/bundle-scenes-gl-core";
+import { build } from "esbuild";
+import { loadSceneConfig, liteGlAlias, measureSceneBundle, repoRoot } from "../../../scripts/bundle-scenes-gl-core";
 
 /**
  * GL bundle-size ceilings — the WebGL analogue of the WebGPU
@@ -19,6 +20,30 @@ describe("babylon-lite-gl bundle size ceilings", () => {
     it("every GL scene declares a maxRawKB ceiling", () => {
         const missing = allScenes.filter((s) => s.maxRawKB == null).map((s) => s.slug);
         expect(missing, `scenes missing a maxRawKB ceiling in scene-config-webgl.json: ${missing.join(", ")}`).toEqual([]);
+    });
+
+    it("shared stencil consumers do not retain two-sided stencil code", async () => {
+        const result = await build({
+            stdin: {
+                contents: 'export { setStencilState } from "babylon-lite-gl";',
+                resolveDir: repoRoot,
+                sourcefile: "shared-stencil.ts",
+            },
+            bundle: true,
+            minify: true,
+            treeShaking: true,
+            format: "esm",
+            target: "esnext",
+            platform: "browser",
+            legalComments: "none",
+            alias: liteGlAlias,
+            write: false,
+        });
+        const output = result.outputFiles[0]!.text;
+        expect(output).toContain("stencilOp(");
+        expect(output).not.toContain("stencilOpSeparate");
+        expect(output).not.toContain("invalid face");
+        expect(output).not.toContain("Float64Array(52)");
     });
 
     for (const scene of scenes) {

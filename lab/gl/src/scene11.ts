@@ -15,7 +15,6 @@ import {
     clearEngine,
     generateRenderTargetStencil,
     setColorMask,
-    setStencilOpSeparate,
     setStencilState,
 } from "babylon-lite-gl";
 
@@ -27,13 +26,12 @@ import {
  *     `generateRenderTargetStencil(engine, rt)` replaces the depth-only
  *     renderbuffer with
  *     a packed DEPTH24_STENCIL8 attachment so the FBO carries a stencil plane.
- *   - PASS 1 (mask write): configures front depth-pass `INCR_WRAP` and back
- *     depth-pass `DECR_WRAP` for one stencil draw, with COLOR WRITES masked off.
- *     The fullscreen quad is front-facing; focused unit tests cover the matching
- *     back-face cache and flush paths.
- *   - PASS 2 (masked draw): with stencil `func = NOTEQUAL`, `ref = 0`, op
+ *   - PASS 1 (mask write): with stencil `func = ALWAYS`, `ref = 1`, op
+ *     `KEEP/KEEP/REPLACE` and COLOR WRITES MASKED OFF, a centred disc stamps
+ *     stencil to 1 while leaving the colour buffer untouched.
+ *   - PASS 2 (masked draw): with stencil `func = EQUAL`, `ref = 1`, op
  *     `KEEP/KEEP/KEEP` (no stencil writes) and colour writes back on, a fullscreen
- *     animated radial gradient is drawn only where the winding count is nonzero.
+ *     animated radial gradient is drawn only inside the stencil disc.
  *   - COMPOSITE binds the default framebuffer (`bindRenderTarget(engine, null)`),
  *     disables the stencil test and samples the RT fullscreen with an
  *     aspect-corrected radial vignette.
@@ -71,9 +69,8 @@ function parseSeekTime(): number | null {
     return Number.isFinite(seconds) ? seconds : null;
 }
 
-// PASS 1 — the mask shape. Discards outside the disc so the selected face's
-// depth-pass operation changes stencil only inside the radius. Colour writes are
-// masked off during this pass, so the emitted colour is irrelevant.
+// PASS 1 — the mask shape. Discards outside the disc so REPLACE stamps 1 only
+// inside the radius. Colour writes are masked off, so the emitted colour is irrelevant.
 const DISC_FRAGMENT = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -87,8 +84,8 @@ void main() {
 }`;
 
 // PASS 2 — fullscreen animated radial gradient. Depends ONLY on r = length(vUv-0.5):
-// concentric animated rings tinted by a radial cosine palette. The NOTEQUAL 0
-// stencil test clips it to the nonzero winding region.
+// concentric animated rings tinted by a radial cosine palette. EQUAL 1 clips it
+// to the disc.
 const GRADIENT_FRAGMENT = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -160,29 +157,28 @@ runRenderLoop(engine, () => {
     setStencilState(engine, { test: true, mask: 0xff });
     clearEngine(engine, { color: { r: CLEAR_R, g: CLEAR_G, b: CLEAR_B }, stencil: true });
 
-    // ── PASS 1: configure both winding operations for one draw (no colour writes) ──
+    // ── PASS 1: stamp stencil = 1 inside the disc (no colour writes) ──
     setColorMask(engine, false, false, false, false);
     setStencilState(engine, {
         test: true,
         mask: 0xff,
         func: gl.ALWAYS,
-        ref: 0,
+        ref: 1,
         funcMask: 0xff,
         opFail: gl.KEEP,
         opZFail: gl.KEEP,
+        opZPass: gl.REPLACE,
     });
-    setStencilOpSeparate(engine, gl.FRONT, { opZPass: gl.INCR_WRAP });
-    setStencilOpSeparate(engine, gl.BACK, { opZPass: gl.DECR_WRAP });
     applyEffectWrapper(discWrapper);
     drawEffect(engine);
 
-    // ── PASS 2: draw the gradient only where stencil is nonzero ──
+    // ── PASS 2: draw the gradient only where stencil == 1 ──
     setColorMask(engine, true, true, true, true);
     setStencilState(engine, {
         test: true,
         mask: 0x00,
-        func: gl.NOTEQUAL,
-        ref: 0,
+        func: gl.EQUAL,
+        ref: 1,
         funcMask: 0xff,
         opFail: gl.KEEP,
         opZFail: gl.KEEP,

@@ -113,7 +113,7 @@
         "id": 11,
         "slug": "gl-stencil",
         "name": "Scene 11 — Stencil Masking",
-        "description": "A stencil mask configures front INCR_WRAP and back DECR_WRAP operations for one draw, then renders a fullscreen pattern where the winding count is nonzero.",
+        "description": "A stencil mask is written into an offscreen render target, then a fullscreen pattern is drawn only where the shared stencil test passes.",
         "tags": ["stencil", "rtt"],
         "maxMad": 2.0,
         "maxRawKB": 20,

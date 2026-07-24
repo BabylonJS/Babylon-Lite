@@ -550,6 +550,12 @@ one `gl.stencilOp` when both desired tuples match, otherwise
 `gl.stencilOpSeparate` only for each changed face. This permits front
 `INCR_WRAP` and back `DECR_WRAP` in one unculled geometry draw.
 
+The two-sided path is a lazy opt-in. Engines start with the compact shared
+stencil cache and reconciler; the first non-empty `setStencilOpSeparate` call
+expands the state array by six appended back-face slots and installs the
+two-sided reconciler. A bundle that exports only `setStencilState` contains no
+`stencilOpSeparate` call, validation path, or 52-slot allocation.
+
 ### 3.6 Sprite renderer
 
 Re-exported from the barrel; `sideEffects: false` means consumers that don't draw
@@ -765,16 +771,18 @@ interface GLState {
 
     // ── Deferred render state (Babylon's applyStates model) ──────────────────
     // The blend / depth / cull / stencil / colorMask render-state lives in ONE
-    // flat Float64Array(52) instead of ~48 named fields. Slots 0..23 (indexed by
+    // flat Float64Array(46) instead of ~48 named fields. Slots 0..20 (indexed by
     // the @internal `RS_*` consts in state.ts) are the ACTUAL applied GL state;
-    // slots 24..47 (`rs[RS_X + RS_DESIRED]`) are the DESIRED twin the setters
-    // write; slots 48..51 are the standalone (no-desired-twin) cached gl.clearColor
+    // slots 21..41 (`rs[RS_X + RS_DESIRED]`) are the DESIRED twin the setters
+    // write; slots 42..45 are the standalone (no-desired-twin) cached gl.clearColor
     // RGBA. `applyGLStates` reconciles desired → actual right before each draw /
     // clear. Unset sentinels (both halves): -1 for the enable/mask toggles (and
-    // colorMask packed) plus the leading slot of each stencil-op triple, 0 for
-    // other factor/func/op slots. The first stencil-op update seeds each desired
+    // colorMask packed) plus the leading shared stencil-op slot, 0 for other
+    // factor/func/op slots. The first shared stencil-op update seeds its desired
     // triple to WebGL's KEEP defaults before merging partial fields, so explicit
-    // ZERO operations cannot be mistaken for untouched state.
+    // ZERO operations cannot be mistaken for untouched state. The two-sided API
+    // lazily replaces this with a 52-slot array whose six appended slots hold the
+    // actual + desired back-face operation tuples; base indices never move.
     //
     // WHY an index-array (not named fields): the deferred state is touched across
     // state.ts ↔ blend.ts ↔ depth-stencil.ts ↔ apply-states.ts, so esbuild cannot
@@ -784,7 +792,7 @@ interface GLState {
     // so the storage costs a single short array access everywhere. Float64 (not
     // Int32) because stencilMask / stencilFuncMask can be 0xFFFFFFFF, which Int32
     // stores as -1 — colliding with the -1 unset sentinel.
-    rs: Float64Array; // 52 = 24 actual + 24 desired + 4 clearColor
+    rs: Float64Array; // 46 base slots; lazily expanded to 52 by two-sided stencil
     /** Raised by any deferred setter; cleared by `applyGLStates`. The flush is a
      *  fast no-op when false, so a draw that changed no render state pays
      *  nothing. */
@@ -797,6 +805,7 @@ interface GLState {
     _flushBlend?: (engine: GLEngineContext) => void;
     _flushDepthCull?: (engine: GLEngineContext) => void;
     _flushStencil?: (engine: GLEngineContext) => void;
+    _setStencilBack?: (state: GLState, face: GLenum, ops: GLStencilOpState) => void;
     _flushColorMask?: (engine: GLEngineContext) => void;
 
     /** Lazy fullscreen quad — built on first applyEffectWrapper, then reused
@@ -870,26 +879,29 @@ rather than applying eagerly. Both the storage and the flush are tuned so an
 unused category costs a scene nothing:
 
 - **Storage — one index-array.** The whole deferred state lives in
-  `_state.rs`, a flat `Float64Array(52)`: slots `0..23` (the `@internal` `RS_*`
-  consts in `state.ts`) are the ACTUAL applied GL state, slots `24..47`
-  (`rs[RS_X + RS_DESIRED]`) the DESIRED twin, and slots `48..51` the standalone
+  `_state.rs`, a flat `Float64Array(46)`: slots `0..20` (the `@internal` `RS_*`
+  consts in `state.ts`) are the ACTUAL applied GL state, slots `21..41`
+  (`rs[RS_X + RS_DESIRED]`) the DESIRED twin, and slots `42..45` the standalone
   cached `gl.clearColor` RGBA. This replaced ~42 named fields
   (`blendEnabled` / `dBlendEnabled` / …): because the state is read/written across
   four modules, esbuild could not mangle those property names, so each long name
   shipped verbatim in every scene bundle. The `RS_*` consts are plain integers
   esbuild inlines to short literals (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` →
-  `rs[25]`), reclaiming ~2.4 KB raw per scene. Float64 (not Int32) keeps a
-  `0xFFFFFFFF` stencil mask distinct from the `-1` unset sentinel.
+  a short numeric access), reclaiming ~2.4 KB raw per scene. Float64 (not Int32)
+  keeps a `0xFFFFFFFF` stencil mask distinct from the `-1` unset sentinel. The
+  first two-sided stencil update copies these 46 slots into a 52-slot array and
+  uses appended slots `46..51` for back-face actual/desired operations.
 - **Setters** (`setBlendMode` / `setBlendState` / `disableBlend`, `setDepthState`,
   `setCullState`, `setStencilState`, `setStencilOpSeparate`, `setColorMask`) write
   ONLY the desired half of `rs` and set `statesDirty = true`. They issue no
   `gl.*` and never touch the actual half. Omitted setter fields leave their
-  desired slot untouched (merge-from-desired). `setStencilState` writes each
-  supplied op field to both faces; `setStencilOpSeparate` writes each supplied
-  op field to the selected face(s). Omitted op fields remain independently
-  unchanged on each face, including for `FRONT_AND_BACK`. On the first op update
-  after engine creation or cache reset, both desired triples are initialized to
-  WebGL's `KEEP` defaults before the supplied fields merge.
+  desired slot untouched (merge-from-desired). Before the lazy two-sided upgrade,
+  `setStencilState` writes one shared operation tuple and uses the compact
+  `gl.stencilOp` reconciler. After upgrade, its optional hook mirrors supplied op
+  fields to the back tuple. `setStencilOpSeparate` writes each supplied op field
+  only to the selected face(s); omitted fields remain independently unchanged.
+  First partial updates initialize the affected tuple(s) from WebGL's
+  `KEEP/KEEP/KEEP` defaults.
 - **Per-category dispatch (tree-shakeable).** `applyGLStates(engine)` (the
   internal `apply-states.ts`, not exported from the barrel) owns NO reconciliation
   code — it is a tiny dispatcher. Each category's reconciler (`flushBlend` in
@@ -902,7 +914,8 @@ unused category costs a scene nothing:
   slot its setter populates, a scene whose setter is absent tree-shakes that
   reconciler — and its GL code — out of the bundle: a clear-only scene like
   `gl-scissor` ships none of the four and `applyGLStates` collapses to four cheap
-  "is it installed?" checks.
+  "is it installed?" checks. Within stencil, `setStencilState` installs the
+  compact reconciler; only `setStencilOpSeparate` installs the two-sided one.
 - Each reconciler no-ops when `statesDirty` is false (or the context is
   lost/disposed — checked once in the dispatcher), otherwise issues only the GL
   calls whose desired slot differs from its actual twin, copies desired→actual,
