@@ -88,5 +88,11 @@
     "gzipKB": 7.5,
     "bjsRawKB": 330,
     "bjsGzipKB": 84.5
+  },
+  "scene16": {
+    "rawKB": 16.1,
+    "gzipKB": 5.8,
+    "bjsRawKB": 149.5,
+    "bjsGzipKB": 37.5
   }
 }
