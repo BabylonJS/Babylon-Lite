@@ -113,7 +113,7 @@
         "id": 11,
         "slug": "gl-stencil",
         "name": "Scene 11 — Stencil Masking",
-        "description": "A stencil mask written into an offscreen render target's stencil buffer (generateRenderTargetStencil from @babylonjs/lite-gl + setStencilState), then a fullscreen pattern drawn only where the stencil test passes.",
+        "description": "A stencil mask configures front INCR_WRAP and back DECR_WRAP operations for one draw, then renders a fullscreen pattern where the winding count is nonzero.",
         "tags": ["stencil", "rtt"],
         "maxMad": 2.0,
         "maxRawKB": 20,

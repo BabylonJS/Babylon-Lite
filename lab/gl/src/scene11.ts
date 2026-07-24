@@ -3,7 +3,6 @@ import {
     createEffectWrapper,
     createGLEngine,
     drawEffect,
-    executeWhenCompiled,
     isEffectReady,
     resizeGLEngine,
     runRenderLoop,
@@ -16,6 +15,7 @@ import {
     clearEngine,
     generateRenderTargetStencil,
     setColorMask,
+    setStencilOpSeparate,
     setStencilState,
 } from "babylon-lite-gl";
 
@@ -27,15 +27,13 @@ import {
  *     `generateRenderTargetStencil(engine, rt)` replaces the depth-only
  *     renderbuffer with
  *     a packed DEPTH24_STENCIL8 attachment so the FBO carries a stencil plane.
- *   - PASS 1 (mask write): with stencil `func = ALWAYS`, `ref = 1`, op
- *     `KEEP/KEEP/REPLACE` and COLOR WRITES MASKED OFF (`setColorMask(false…)`),
- *     a centred filled disc is drawn — the fragment `discard`s everywhere
- *     `length(vUv-0.5) >= R`, so the stencil plane ends up `1` only inside the
- *     disc and `0` outside, with the colour buffer untouched (still the clear).
- *   - PASS 2 (masked draw): with stencil `func = EQUAL`, `ref = 1`, op
+ *   - PASS 1 (mask write): configures front depth-pass `INCR_WRAP` and back
+ *     depth-pass `DECR_WRAP` for one stencil draw, with COLOR WRITES masked off.
+ *     The fullscreen quad is front-facing; focused unit tests cover the matching
+ *     back-face cache and flush paths.
+ *   - PASS 2 (masked draw): with stencil `func = NOTEQUAL`, `ref = 0`, op
  *     `KEEP/KEEP/KEEP` (no stencil writes) and colour writes back on, a fullscreen
- *     animated radial gradient is drawn — the stencil test admits it ONLY where
- *     the plane equals 1 (inside the disc). Outside stays the clear colour.
+ *     animated radial gradient is drawn only where the winding count is nonzero.
  *   - COMPOSITE binds the default framebuffer (`bindRenderTarget(engine, null)`),
  *     disables the stencil test and samples the RT fullscreen with an
  *     aspect-corrected radial vignette.
@@ -77,49 +75,19 @@ function parseSeekTime(): number | null {
 // stamps `1` inside `length(vUv-0.5) < DISC_RADIUS`. Colour writes are masked off
 // during this pass, so the emitted colour is irrelevant.
 const DISC_FRAGMENT = `#version 300 es
-precision highp float;
-in vec2 vUv;
-out vec4 glFragColor;
-void main() {
-    float r = length(vUv - 0.5);
-    if (r > ${DISC_RADIUS}) {
-        discard;
-    }
-    glFragColor = vec4(1.0, 1.0, 1.0, 1.0);
-}`;
+precision highp float;in vec2 vUv;out vec4 glFragColor;void main(){float r=length(vUv-0.5);if(r>${DISC_RADIUS}){discard;}glFragColor=vec4(1.0);}`;
 
 // PASS 2 — fullscreen animated radial gradient. Depends ONLY on r = length(vUv-0.5):
 // concentric animated rings tinted by a radial cosine palette. The stencil test
 // (EQUAL 1) clips it to the disc.
 const GRADIENT_FRAGMENT = `#version 300 es
-precision highp float;
-in vec2 vUv;
-out vec4 glFragColor;
-uniform float uTime;
-void main() {
-    float r = length(vUv - 0.5);
-    float rings = 0.5 + 0.5 * cos(r * 34.0 - uTime * 1.5);
-    vec3 palette = 0.5 + 0.5 * cos(vec3(0.0, 2.094, 4.188) + r * 6.2832 + uTime * 0.4);
-    glFragColor = vec4(palette * rings, 1.0);
-}`;
+precision highp float;in vec2 vUv;out vec4 glFragColor;uniform float uTime;void main(){float r=length(vUv-0.5);float rings=0.5+0.5*cos(r*34.0-uTime*1.5);vec3 palette=0.5+0.5*cos(vec3(0.0,2.094,4.188)+r*6.2832+uTime*0.4);glFragColor=vec4(palette*rings,1.0);}`;
 
 // COMPOSITE — sample the RT fullscreen and apply a radial screen-space vignette
 // (aspect-corrected so it stays circular; still symmetric under any axis flip,
 // so it too is orientation-agnostic).
 const COMPOSITE_FRAGMENT = `#version 300 es
-precision highp float;
-in vec2 vUv;
-out vec4 glFragColor;
-uniform vec2 uResolution;
-uniform sampler2D uRt;
-void main() {
-    vec3 col = texture(uRt, vUv).rgb;
-    vec2 q = vUv - 0.5;
-    q.x *= uResolution.x / max(uResolution.y, 1.0);
-    float r = length(q);
-    col *= 1.0 - 0.5 * r * r;
-    glFragColor = vec4(col, 1.0);
-}`;
+precision highp float;in vec2 vUv;out vec4 glFragColor;uniform vec2 uResolution;uniform sampler2D uRt;void main(){vec3 col=texture(uRt,vUv).rgb;vec2 q=vUv-0.5;q.x*=uResolution.x/max(uResolution.y,1.0);float r=length(q);col*=1.0-0.5*r*r;glFragColor=vec4(col,1.0);}`;
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const engine = createGLEngine(canvas, { alpha: false });
@@ -132,23 +100,16 @@ const rt = createRenderTarget(engine, { width: RT_SIZE, height: RT_SIZE, generat
 generateRenderTargetStencil(engine, rt);
 
 const discWrapper = createEffectWrapper(engine, {
-    name: "gl-scene11-stencil-disc",
     fragmentSource: DISC_FRAGMENT,
 });
 const gradientWrapper = createEffectWrapper(engine, {
-    name: "gl-scene11-stencil-gradient",
     fragmentSource: GRADIENT_FRAGMENT,
     uniformNames: ["uTime"],
 });
 const compositeWrapper = createEffectWrapper(engine, {
-    name: "gl-scene11-stencil-composite",
     fragmentSource: COMPOSITE_FRAGMENT,
     uniformNames: ["uResolution"],
     samplerNames: ["uRt"],
-});
-
-executeWhenCompiled(engine, compositeWrapper.effect, () => {
-    console.log("scene11: stencil-masking effects compiled");
 });
 
 const seekTime = parseSeekTime();
@@ -169,18 +130,19 @@ runRenderLoop(engine, () => {
     setStencilState(engine, { test: true, mask: 0xff });
     clearEngine(engine, { color: { r: CLEAR_R, g: CLEAR_G, b: CLEAR_B }, stencil: true });
 
-    // ── PASS 1: stamp stencil = 1 inside the disc (no colour writes) ──
+    // ── PASS 1: update both windings in one draw (no colour writes) ──
     setColorMask(engine, false, false, false, false);
     setStencilState(engine, {
         test: true,
         mask: 0xff,
         func: gl.ALWAYS,
-        ref: 1,
+        ref: 0,
         funcMask: 0xff,
         opFail: gl.KEEP,
         opZFail: gl.KEEP,
-        opZPass: gl.REPLACE,
     });
+    setStencilOpSeparate(engine, gl.FRONT, { opZPass: gl.INCR_WRAP });
+    setStencilOpSeparate(engine, gl.BACK, { opZPass: gl.DECR_WRAP });
     applyEffectWrapper(discWrapper);
     drawEffect(engine);
 
@@ -189,8 +151,8 @@ runRenderLoop(engine, () => {
     setStencilState(engine, {
         test: true,
         mask: 0x00,
-        func: gl.EQUAL,
-        ref: 1,
+        func: gl.NOTEQUAL,
+        ref: 0,
         funcMask: 0xff,
         opFail: gl.KEEP,
         opZFail: gl.KEEP,

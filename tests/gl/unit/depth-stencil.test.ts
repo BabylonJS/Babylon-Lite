@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createGLEngine } from "../../../packages/babylon-lite-gl/src/context";
+import { createGLEngine, wipeGLStateCache } from "../../../packages/babylon-lite-gl/src/context";
 import {
     setDepthState,
     setCullState,
@@ -144,6 +144,41 @@ describe("lite-gl stencil state", () => {
         ]);
     });
 
+    it("applies all supplied operations to only the selected face", () => {
+        const { mock, engine } = makeEngine();
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opFail: engine.gl.ZERO, opZFail: engine.gl.INCR_WRAP, opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.ZERO, engine.gl.INCR_WRAP, engine.gl.DECR_WRAP],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP],
+        ]);
+    });
+
+    it("does not issue an operation call for an empty update", () => {
+        const { mock, engine } = makeEngine();
+        setStencilOpSeparate(engine, engine.gl.FRONT, {});
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+    });
+
+    it("reinitializes both faces after the GL state cache is wiped", () => {
+        const { mock, engine } = makeEngine();
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        wipeGLStateCache(engine);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.ZERO });
+        applyGLStates(engine);
+
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.KEEP, engine.gl.KEEP, engine.gl.ZERO],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP],
+        ]);
+    });
+
     it("partial func update merges unspecified members from cache", () => {
         const { mock, engine } = makeEngine();
         setStencilState(engine, { func: engine.gl.ALWAYS, ref: 0, funcMask: 0x3 });
@@ -177,6 +212,24 @@ describe("lite-gl stencil state", () => {
         expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
 
         setStencilState(engine, keep);
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP]]);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+    });
+
+    it("flushes one changed face separately and coalesces when it converges", () => {
+        const { mock, engine } = makeEngine();
+        setStencilState(engine, { opFail: engine.gl.KEEP, opZFail: engine.gl.KEEP, opZPass: engine.gl.KEEP });
+        applyGLStates(engine);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([[engine.gl.FRONT, engine.gl.KEEP, engine.gl.KEEP, engine.gl.INCR_WRAP]]);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.KEEP });
         applyGLStates(engine);
         expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP]]);
         expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
@@ -306,6 +359,24 @@ describe("lite-gl depth/stencil: lost-context safety", () => {
             clearEngine(engine, { color: { r: 0, g: 0, b: 0 } });
         }).not.toThrow();
         expect(mock.log).toHaveLength(0);
+    });
+
+    it("reinitializes both faces after context restoration", () => {
+        const { mock, canvas, engine } = makeEngine();
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        fireLost(canvas);
+        fireRestored(canvas);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.ZERO });
+        applyGLStates(engine);
+
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.KEEP, engine.gl.ZERO],
+        ]);
     });
 });
 

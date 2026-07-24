@@ -529,6 +529,27 @@ code that never calls `setBlendMode` renders exactly as before (cloth/scan
 fullscreen parity is preserved). The first `setBlendMode` after creation /
 context-loss is never elided because the cache starts at the `-1` sentinel.
 
+### 3.5.2 Two-sided stencil operations
+
+```ts
+export interface GLStencilOpState {
+    opFail?: GLenum;
+    opZFail?: GLenum;
+    opZPass?: GLenum;
+}
+
+export function setStencilOpSeparate(engine: GLEngineContext, face: GLenum, state: GLStencilOpState): void;
+```
+
+`face` must be `gl.FRONT`, `gl.BACK`, or `gl.FRONT_AND_BACK`; any other value
+throws. Each supplied operation updates only the selected face(s), while omitted
+operations retain that face's desired value. The first partial operation after
+engine creation or cache reset initializes both face tuples from WebGL's
+`KEEP/KEEP/KEEP` defaults. The setter is deferred: the next draw or clear emits
+one `gl.stencilOp` when both desired tuples match, otherwise
+`gl.stencilOpSeparate` only for each changed face. This permits front
+`INCR_WRAP` and back `DECR_WRAP` in one unculled geometry draw.
+
 ### 3.6 Sprite renderer
 
 Re-exported from the barrel; `sideEffects: false` means consumers that don't draw

@@ -19,20 +19,15 @@ import "@babylonjs/core/Engines/Extensions/engine.renderTarget.js";
  *    (`generateDepthBuffer:true, generateStencilBuffer:true` → DEPTH24_STENCIL8 on
  *    DEPTH_STENCIL_ATTACHMENT), the same attachment lite-gl's
  *    `generateRenderTargetStencil` installs.
- *  - PASS 1 clears the RT (colour + stencil → 0) then stamps the stencil plane to
- *    1 inside a centred disc: stencil `func = ALWAYS`, `ref = 1`, op
- *    `KEEP/KEEP/REPLACE`, with colour writes masked OFF (`setColorWrite(false)`).
- *    The disc fragment `discard`s outside `length(vUV-0.5) >= R`, so only the
- *    inside is stamped — exactly lite-gl's PASS 1.
- *  - PASS 2 draws a fullscreen animated radial gradient with stencil
- *    `func = EQUAL`, `ref = 1`, op `KEEP/KEEP/KEEP` (no stencil writes) and colour
- *    writes back on, so it lands ONLY where the plane equals 1 (inside the disc).
+ *  - PASS 1 configures distinct front increment / back decrement depth-pass
+ *    operations in one draw, with colour writes masked off. The EffectRenderer
+ *    fullscreen quad is front-facing, matching lite-gl's parity geometry.
+ *  - PASS 2 draws a fullscreen animated radial gradient where stencil is not 0,
+ *    with `KEEP/KEEP/KEEP` operations and colour writes back on.
  *  - COMPOSITE disables the stencil test and samples the RT fullscreen with the
  *    SAME aspect-corrected vignette.
- *  - The stencil state is driven through `engine.stencilState` (front + back set
- *    identically, matching lite-gl's non-separate `gl.stencilFunc`/`gl.stencilOp`);
- *    the EffectRenderer machinery (fullscreen quad geometry, viewport, the `scale`
- *    uniform) is identical to the other GL references.
+ *  - The stencil state is driven through `engine.stencilState`, including its
+ *    independent front/back operation fields.
  *  - Every shape depends ONLY on `length(vUV - 0.5)` and the composite samples at
  *    the same UV, so the round-trip is invariant to any FBO sampling-origin /
  *    Y-flip difference between the two engines.
@@ -150,9 +145,8 @@ function parseSeekTime(): number | null {
         useShaderStore: false,
     });
 
-    /** Set the global stencil state (front + back identical, mirroring lite-gl's
-     *  non-separate gl.stencilFunc / gl.stencilOp). */
-    function setStencil(test: boolean, mask: number, func: number, ref: number, funcMask: number, fail: number, zfail: number, zpass: number): void {
+    /** Set shared stencil state with an optional distinct back depth-pass op. */
+    function setStencil(test: boolean, mask: number, func: number, ref: number, funcMask: number, fail: number, zfail: number, zpass: number, backZpass = zpass): void {
         const st = engine.stencilState;
         st.stencilTest = test;
         st.stencilMask = mask;
@@ -165,7 +159,7 @@ function parseSeekTime(): number | null {
         st.stencilOpStencilDepthPass = zpass;
         st.stencilBackOpStencilFail = fail;
         st.stencilBackOpDepthFail = zfail;
-        st.stencilBackOpStencilDepthPass = zpass;
+        st.stencilBackOpStencilDepthPass = backZpass;
     }
 
     const seekTime = parseSeekTime();
@@ -178,7 +172,7 @@ function parseSeekTime(): number | null {
     discWrapper.onApplyObservable.add(() => {
         engine.setColorWrite(true);
         // Clear respects the global stencil write mask, so enable it first.
-        setStencil(true, 0xff, Constants.ALWAYS, 1, 0xff, Constants.KEEP, Constants.KEEP, Constants.REPLACE);
+        setStencil(true, 0xff, Constants.ALWAYS, 0, 0xff, Constants.KEEP, Constants.KEEP, Constants.INCR_WRAP, Constants.DECR_WRAP);
         engine.clear({ r: CLEAR_R, g: CLEAR_G, b: CLEAR_B, a: 1 }, true, false, true);
         // Disc pass writes stencil only (colour masked off).
         engine.setColorWrite(false);
@@ -187,7 +181,7 @@ function parseSeekTime(): number | null {
     // PASS 2 — gradient admitted only where stencil == 1 (inside the disc).
     gradientWrapper.onApplyObservable.add(() => {
         engine.setColorWrite(true);
-        setStencil(true, 0x00, Constants.EQUAL, 1, 0xff, Constants.KEEP, Constants.KEEP, Constants.KEEP);
+        setStencil(true, 0x00, Constants.NOTEQUAL, 0, 0xff, Constants.KEEP, Constants.KEEP, Constants.KEEP);
         gradientWrapper.effect.setFloat("uTime", currentTime);
     });
 

@@ -70,6 +70,8 @@ const FRONT = 0x0404;
 const BACK = 0x0405;
 /** GL `gl.FRONT_AND_BACK`. */
 const FRONT_AND_BACK = 0x0408;
+/** Offset from a front-face operation slot to its back-face counterpart. */
+const STENCIL_BACK_OP_OFFSET = RS_STENCIL_BACK_OP_FAIL - RS_STENCIL_OP_FAIL;
 
 // ── Framebuffer / renderbuffer enums (used only by generateRenderTargetStencil).
 // Module-local consts mirror render-target.ts's constant style. Because the
@@ -139,7 +141,7 @@ export interface GLStencilOpState {
 
 /** Seed an untouched face's desired op triple with WebGL's KEEP defaults before
  *  applying a partial update. The leading desired slot is the lazy-init marker. */
-function ensureStencilOpDefaults(rs: Float64Array): void {
+function ensureStencilOpCacheInitialized(rs: Float64Array): void {
     if (rs[RS_STENCIL_OP_FAIL + RS_DESIRED] === -1) {
         rs[RS_STENCIL_OP_FAIL + RS_DESIRED] = KEEP;
         rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED] = KEEP;
@@ -150,6 +152,36 @@ function ensureStencilOpDefaults(rs: Float64Array): void {
         rs[RS_STENCIL_BACK_OP_ZFAIL + RS_DESIRED] = KEEP;
         rs[RS_STENCIL_BACK_OP_ZPASS + RS_DESIRED] = KEEP;
     }
+}
+
+/** Merge one operation into the selected face(s)' desired state. */
+function setDesiredStencilOp(rs: Float64Array, face: GLenum, opIndex: number, value: GLenum): void {
+    ensureStencilOpCacheInitialized(rs);
+    if (face !== BACK) {
+        rs[opIndex + RS_DESIRED] = value;
+    }
+    if (face !== FRONT) {
+        rs[opIndex + STENCIL_BACK_OP_OFFSET + RS_DESIRED] = value;
+    }
+}
+
+function setDesiredStencilOps(rs: Float64Array, face: GLenum, state: GLStencilOpState): void {
+    if (state.opFail !== undefined) {
+        setDesiredStencilOp(rs, face, RS_STENCIL_OP_FAIL, state.opFail);
+    }
+    if (state.opZFail !== undefined) {
+        setDesiredStencilOp(rs, face, RS_STENCIL_OP_ZFAIL, state.opZFail);
+    }
+    if (state.opZPass !== undefined) {
+        setDesiredStencilOp(rs, face, RS_STENCIL_OP_ZPASS, state.opZPass);
+    }
+}
+
+/** Store one complete GL operation tuple in the actual-state cache. */
+function setActualStencilOps(rs: Float64Array, opIndex: number, fail: GLenum, zfail: GLenum, zpass: GLenum): void {
+    rs[opIndex] = fail;
+    rs[opIndex + 1] = zfail;
+    rs[opIndex + 2] = zpass;
 }
 
 /** Options for {@link clearEngine}. */
@@ -239,21 +271,7 @@ export function setStencilState(engine: GLEngineContext, state: GLStencilState):
     if (state.funcMask !== undefined) {
         s.rs[RS_STENCIL_FUNC_MASK + RS_DESIRED] = state.funcMask;
     }
-    if (state.opFail !== undefined) {
-        ensureStencilOpDefaults(s.rs);
-        s.rs[RS_STENCIL_OP_FAIL + RS_DESIRED] = state.opFail;
-        s.rs[RS_STENCIL_BACK_OP_FAIL + RS_DESIRED] = state.opFail;
-    }
-    if (state.opZFail !== undefined) {
-        ensureStencilOpDefaults(s.rs);
-        s.rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED] = state.opZFail;
-        s.rs[RS_STENCIL_BACK_OP_ZFAIL + RS_DESIRED] = state.opZFail;
-    }
-    if (state.opZPass !== undefined) {
-        ensureStencilOpDefaults(s.rs);
-        s.rs[RS_STENCIL_OP_ZPASS + RS_DESIRED] = state.opZPass;
-        s.rs[RS_STENCIL_BACK_OP_ZPASS + RS_DESIRED] = state.opZPass;
-    }
+    setDesiredStencilOps(s.rs, FRONT_AND_BACK, state);
     s._flushStencil = flushStencil;
     s.statesDirty = true;
 }
@@ -268,44 +286,17 @@ export function setStencilState(engine: GLEngineContext, state: GLStencilState):
  * @param engine - The engine.
  * @param face - `gl.FRONT`, `gl.BACK`, or `gl.FRONT_AND_BACK`.
  * @param state - The operation fields to change for the selected face(s).
+ * @throws If `face` is not `gl.FRONT`, `gl.BACK`, or `gl.FRONT_AND_BACK`.
  */
 export function setStencilOpSeparate(engine: GLEngineContext, face: GLenum, state: GLStencilOpState): void {
     if (engine._isLost || engine._disposed) {
         return;
     }
     const s = engine._state;
-    const setFront = face === FRONT || face === FRONT_AND_BACK;
-    const setBack = face === BACK || face === FRONT_AND_BACK;
-    if (!setFront && !setBack) {
+    if (face !== FRONT && face !== BACK && face !== FRONT_AND_BACK) {
         throw new Error("lite-gl: stencil face must be gl.FRONT, gl.BACK, or gl.FRONT_AND_BACK");
     }
-    if (state.opFail !== undefined) {
-        ensureStencilOpDefaults(s.rs);
-        if (setFront) {
-            s.rs[RS_STENCIL_OP_FAIL + RS_DESIRED] = state.opFail;
-        }
-        if (setBack) {
-            s.rs[RS_STENCIL_BACK_OP_FAIL + RS_DESIRED] = state.opFail;
-        }
-    }
-    if (state.opZFail !== undefined) {
-        ensureStencilOpDefaults(s.rs);
-        if (setFront) {
-            s.rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED] = state.opZFail;
-        }
-        if (setBack) {
-            s.rs[RS_STENCIL_BACK_OP_ZFAIL + RS_DESIRED] = state.opZFail;
-        }
-    }
-    if (state.opZPass !== undefined) {
-        ensureStencilOpDefaults(s.rs);
-        if (setFront) {
-            s.rs[RS_STENCIL_OP_ZPASS + RS_DESIRED] = state.opZPass;
-        }
-        if (setBack) {
-            s.rs[RS_STENCIL_BACK_OP_ZPASS + RS_DESIRED] = state.opZPass;
-        }
-    }
+    setDesiredStencilOps(s.rs, face, state);
     s._flushStencil = flushStencil;
     s.statesDirty = true;
 }
@@ -458,35 +449,31 @@ function flushStencil(engine: GLEngineContext): void {
         rs[RS_STENCIL_FUNC_MASK] = dFuncMask;
         gl.stencilFunc(dFuncFunc, dFuncRef, dFuncMask);
     }
-    const dOpFail = rs[RS_STENCIL_OP_FAIL + RS_DESIRED]!;
-    const dOpZFail = rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED]!;
-    const dOpZPass = rs[RS_STENCIL_OP_ZPASS + RS_DESIRED]!;
-    const dBackOpFail = rs[RS_STENCIL_BACK_OP_FAIL + RS_DESIRED]!;
-    const dBackOpZFail = rs[RS_STENCIL_BACK_OP_ZFAIL + RS_DESIRED]!;
-    const dBackOpZPass = rs[RS_STENCIL_BACK_OP_ZPASS + RS_DESIRED]!;
-    const frontChanged = dOpFail !== rs[RS_STENCIL_OP_FAIL] || dOpZFail !== rs[RS_STENCIL_OP_ZFAIL] || dOpZPass !== rs[RS_STENCIL_OP_ZPASS];
-    const backChanged = dBackOpFail !== rs[RS_STENCIL_BACK_OP_FAIL] || dBackOpZFail !== rs[RS_STENCIL_BACK_OP_ZFAIL] || dBackOpZPass !== rs[RS_STENCIL_BACK_OP_ZPASS];
-    if ((frontChanged || backChanged) && dOpFail === dBackOpFail && dOpZFail === dBackOpZFail && dOpZPass === dBackOpZPass) {
-        rs[RS_STENCIL_OP_FAIL] = dOpFail;
-        rs[RS_STENCIL_OP_ZFAIL] = dOpZFail;
-        rs[RS_STENCIL_OP_ZPASS] = dOpZPass;
-        rs[RS_STENCIL_BACK_OP_FAIL] = dBackOpFail;
-        rs[RS_STENCIL_BACK_OP_ZFAIL] = dBackOpZFail;
-        rs[RS_STENCIL_BACK_OP_ZPASS] = dBackOpZPass;
-        gl.stencilOp(dOpFail, dOpZFail, dOpZPass);
-    } else {
-        if (frontChanged) {
-            rs[RS_STENCIL_OP_FAIL] = dOpFail;
-            rs[RS_STENCIL_OP_ZFAIL] = dOpZFail;
-            rs[RS_STENCIL_OP_ZPASS] = dOpZPass;
-            gl.stencilOpSeparate(FRONT, dOpFail, dOpZFail, dOpZPass);
-        }
-        if (backChanged) {
-            rs[RS_STENCIL_BACK_OP_FAIL] = dBackOpFail;
-            rs[RS_STENCIL_BACK_OP_ZFAIL] = dBackOpZFail;
-            rs[RS_STENCIL_BACK_OP_ZPASS] = dBackOpZPass;
-            gl.stencilOpSeparate(BACK, dBackOpFail, dBackOpZFail, dBackOpZPass);
-        }
+    const frontOpFail = rs[RS_STENCIL_OP_FAIL + RS_DESIRED]!;
+    const frontOpZFail = rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED]!;
+    const frontOpZPass = rs[RS_STENCIL_OP_ZPASS + RS_DESIRED]!;
+    const backOpFail = rs[RS_STENCIL_BACK_OP_FAIL + RS_DESIRED]!;
+    const backOpZFail = rs[RS_STENCIL_BACK_OP_ZFAIL + RS_DESIRED]!;
+    const backOpZPass = rs[RS_STENCIL_BACK_OP_ZPASS + RS_DESIRED]!;
+    const frontChanged = frontOpFail !== rs[RS_STENCIL_OP_FAIL] || frontOpZFail !== rs[RS_STENCIL_OP_ZFAIL] || frontOpZPass !== rs[RS_STENCIL_OP_ZPASS];
+    const backChanged = backOpFail !== rs[RS_STENCIL_BACK_OP_FAIL] || backOpZFail !== rs[RS_STENCIL_BACK_OP_ZFAIL] || backOpZPass !== rs[RS_STENCIL_BACK_OP_ZPASS];
+    if (!frontChanged && !backChanged) {
+        return;
+    }
+    const facesMatch = frontOpFail === backOpFail && frontOpZFail === backOpZFail && frontOpZPass === backOpZPass;
+    if (facesMatch) {
+        setActualStencilOps(rs, RS_STENCIL_OP_FAIL, frontOpFail, frontOpZFail, frontOpZPass);
+        setActualStencilOps(rs, RS_STENCIL_BACK_OP_FAIL, backOpFail, backOpZFail, backOpZPass);
+        gl.stencilOp(frontOpFail, frontOpZFail, frontOpZPass);
+        return;
+    }
+    if (frontChanged) {
+        setActualStencilOps(rs, RS_STENCIL_OP_FAIL, frontOpFail, frontOpZFail, frontOpZPass);
+        gl.stencilOpSeparate(FRONT, frontOpFail, frontOpZFail, frontOpZPass);
+    }
+    if (backChanged) {
+        setActualStencilOps(rs, RS_STENCIL_BACK_OP_FAIL, backOpFail, backOpZFail, backOpZPass);
+        gl.stencilOpSeparate(BACK, backOpFail, backOpZFail, backOpZPass);
     }
 }
 

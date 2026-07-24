@@ -88,6 +88,7 @@ describe("babylon-lite-gl build output", () => {
             throw new Error(`dist/index.d.ts has TypeScript errors:\n${dtsResult.stdout ?? ""}${dtsResult.stderr ?? ""}`);
         }
         expect(dtsResult.status).toBe(0);
+        expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLStencilOpState\b[^}]*\} from "\.\/depth-stencil\.js";/);
 
         // ── The barrel exposes the full converged runtime surface ───────────
         const mod = (await import(pathToFileURL(resolve(DIST, "index.js")).href)) as Record<string, unknown>;
