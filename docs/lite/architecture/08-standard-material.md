@@ -44,7 +44,7 @@ standard-renderable.ts (buildStandardMeshRenderables):
 
 ## Opt-in Standard Mesh Feature Contract
 
-The deformation/vertex feature enablers are explicit named exports from the root package entry:
+The deformation/vertex feature enablers are explicitly named exports from the root package entry:
 
 ```ts
 import {
