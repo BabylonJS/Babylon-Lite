@@ -19,10 +19,9 @@ import { createSplatSortScratch, sortSplatsBackToFront, type SplatSortScratch } 
  *                  be in flight while the previous result is still in transit —
  *                  the worker never idles on the round-trip during camera motion.
  *
- *  The sort itself is the adaptive-precision counting sort in
- *  `splat-sort-core.ts` (O(n), density-weighted key allocation) — see that
- *  module for the algorithm and the depth recipe
- *  `cameraForward · (world · localPos - cameraPos)`. */
+ *  The sort itself is the uniform-key counting (radix) sort in
+ *  `splat-sort-core.ts` (O(n)) — see that module for the algorithm and the
+ *  depth recipe `cameraForward · (world · localPos - cameraPos)`. */
 
 let positions: Float32Array | null = null;
 let vertexCount = 0;

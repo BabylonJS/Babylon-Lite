@@ -1,50 +1,48 @@
 import { F32, U32 } from "../engine/typed-arrays.js";
 
-/** Adaptive-precision counting sort for Gaussian-splat back-to-front ordering.
+/** Uniform-key counting (radix) sort for Gaussian-splat back-to-front ordering.
  *
  *  Pure logic shared by `splat-sort-worker.ts` (the runtime consumer) and the
  *  unit tests (which exercise it directly, since the worker module touches
  *  `self` at import time).
  *
- *  Technique (in the spirit of PlayCanvas' gsplat sort, re-derived for Lite):
+ *  Technique (the counting sort Babylon.js ships in
+ *  `gaussianSplattingSortWorker.ts`, re-derived for Lite's lean order buffer):
  *    1. One linear pass computes each splat's view depth
  *       `cameraForward · (world · localPos − cameraPos)` — collapsed to an
  *       affine kernel `a·x + b·y + c·z + d` — and tracks the finite min/max.
- *    2. A 32-bin coarse histogram measures splat density across the depth
- *       range, and each coarse bin is granted a slice of the key space
- *       proportional to its population (never less than one key), so depth
- *       precision concentrates where splats actually are instead of being
- *       spent uniformly across mostly-empty range.
- *    3. Key-space size adapts to the cloud: `2^clamp(round(log2(n/4)), 10, 20)`
- *       buckets — small clouds don't pay for a large count table, huge clouds
- *       keep enough precision to avoid visible popping.
- *    4. A stable counting sort scatters indices in descending-depth (back-to-
+ *    2. Depth is quantized to an integer key by a single uniform scale across
+ *       `2^clamp(round(log2(n/4)), 10, 20)` buckets. Every key is the same
+ *       width — `range / bucketCount` — so the worst-case ordering error is
+ *       uniformly tiny everywhere, independent of where the splats sit in the
+ *       depth range.
+ *    3. A stable counting sort scatters indices in descending-depth (back-to-
  *       front) order: O(n) instead of the O(n·log n) comparison sort (with
  *       BigInt compares) this replaces.
  *
- *  Splats whose quantized keys collide keep their original relative order
- *  (the scatter is stable); the quantization error is bounded by the widest
- *  per-bin bucket, which the density-proportional allocation keeps small
- *  exactly where it matters. Non-finite depths (NaN/Inf centres) map to the
- *  far end of the range, so corrupt splats draw first, behind everything. */
-
-/** Coarse histogram resolution for the adaptive key allocation. */
-const COARSE_BINS = 32;
+ *  Why uniform, not density-weighted: an earlier revision granted each of 32
+ *  coarse depth bins a slice of the key space proportional to its population,
+ *  to concentrate precision where splats are. Benchmarking all three candidates
+ *  (legacy BigInt sort, this uniform sort, and the density-weighted variant)
+ *  showed the density weighting is the same speed class but gives a *sparse*
+ *  coarse bin only one key — spanning 1/32 ≈ 3.1 % of the depth range — so a
+ *  splat crossing an empty gap in a clustered (i.e. real captured) scene can
+ *  pop by up to ~3 %. The uniform mapping is marginally faster (one fewer pass)
+ *  and keeps the worst-case error at one bucket (< 0.01 %) on every scene, so
+ *  it is the ordering the runtime uses. See PR #446 for the full comparison.
+ *
+ *  Splats whose quantized keys collide keep their original relative order (the
+ *  scatter is stable). Non-finite depths (NaN/Inf centres) map to the far end of
+ *  the range, so corrupt splats draw first, behind everything. */
 
 /** Per-cloud scratch reused across sorts. Sized once per `positions` upload. */
 export interface SplatSortScratch {
-    /** Per-splat view depth (pass 1), then reused to hold each splat's
-     *  integer sort key (pass 3) — keys are < 2^20 so f32 stores them exactly. */
+    /** Per-splat view depth (pass 1), then reused to hold each splat's integer
+     *  sort key (pass 2) — keys are < 2^20 so f32 stores them exactly. */
     depths: Float32Array;
     /** Counting-sort table, `2^bits` entries. Lazily (re)allocated because the
      *  bit count depends on the vertex count. */
     counts: Uint32Array | null;
-    /** Coarse density histogram. */
-    hist: Uint32Array;
-    /** First key of each coarse bin's slice of the key space. */
-    binBase: Uint32Array;
-    /** Number of keys granted to each coarse bin. */
-    binBuckets: Uint32Array;
 }
 
 /** Allocate the scratch for a cloud of `vertexCount` splats. */
@@ -52,9 +50,6 @@ export function createSplatSortScratch(vertexCount: number): SplatSortScratch {
     return {
         depths: new F32(vertexCount),
         counts: null,
-        hist: new U32(COARSE_BINS),
-        binBase: new U32(COARSE_BINS),
-        binBuckets: new U32(COARSE_BINS),
     };
 }
 
@@ -91,7 +86,7 @@ export function sortSplatsBackToFront(
     // out by the isFinite guard so a single corrupt splat can't destroy the
     // range for everyone else). Track min/max from the value ROUND-TRIPPED
     // through `depths` (a Float32Array) — not the f64 `dj` — so the range is
-    // consistent with the exact bytes passes 2/3 read back. Otherwise the
+    // consistent with the exact bytes pass 2 reads back. Otherwise the
     // nearest splat's f32-truncated depth can land just below an f64 `min`,
     // making `t < 0` and mis-routing it to the far end (drawn behind
     // everything instead of in front). ──────────────────────────────────────
@@ -121,19 +116,7 @@ export function sortSplatsBackToFront(
         return;
     }
 
-    // ── Pass 2: coarse density histogram over the depth range. ─────────────
-    const hist = scratch.hist;
-    hist.fill(0);
-    const coarseScale = COARSE_BINS / range;
-    for (let j = 0; j < vertexCount; j++) {
-        const t = (depths[j]! - min) * coarseScale;
-        // Non-finite → far end; `t >= COARSE_BINS` also catches depth == max.
-        const bin = t >= 0 ? (t >= COARSE_BINS ? COARSE_BINS - 1 : t | 0) : COARSE_BINS - 1;
-        hist[bin] = hist[bin]! + 1;
-    }
-
-    // ── Allocate key space per coarse bin ∝ density (≥1 key each, so the
-    // depth → key map stays strictly monotonic across bins). ────────────────
+    // Key space: 2^bits uniform buckets across the depth range.
     const bits = splatSortBucketBits(vertexCount);
     const bucketCount = 1 << bits;
     let counts = scratch.counts;
@@ -142,41 +125,35 @@ export function sortSplatsBackToFront(
     } else {
         counts.fill(0);
     }
-    const binBase = scratch.binBase;
-    const binBuckets = scratch.binBuckets;
-    const spare = bucketCount - COARSE_BINS;
-    let keyTotal = 0;
-    for (let i = 0; i < COARSE_BINS; i++) {
-        binBase[i] = keyTotal;
-        const share = 1 + (((hist[i]! / vertexCount) * spare) | 0);
-        binBuckets[i] = share;
-        keyTotal += share;
-    }
 
-    // ── Pass 3: per-splat adaptive key (ascending with depth) + counts.
-    // Keys overwrite `depths` in place — they are < 2^20, exact in f32. ─────
+    // ── Pass 2: per-splat uniform key (ascending with depth) + counts. Keys
+    // overwrite `depths` in place — they are < 2^20, exact in f32. The nearest
+    // splat maps to key 0 and the farthest to the top key, so the descending
+    // scatter below yields back-to-front order. ─────────────────────────────
+    const maxKey = bucketCount - 1;
+    const scale = maxKey / range;
     for (let j = 0; j < vertexCount; j++) {
-        const t = (depths[j]! - min) * coarseScale;
+        const sj = depths[j]!;
+        // Non-finite (NaN/Inf) → far end of the key space, drawn first (behind
+        // everything). Finite depths quantize uniformly; clamp guards against a
+        // depth == max (or float rounding) producing key > maxKey.
         let key: number;
-        if (t >= 0 && t < COARSE_BINS) {
-            const bin = t | 0;
-            let q = (binBuckets[bin]! * (t - bin)) | 0;
-            if (q >= binBuckets[bin]!) {
-                q = binBuckets[bin]! - 1;
+        if (Number.isFinite(sj)) {
+            key = ((sj - min) * scale) | 0;
+            if (key > maxKey) {
+                key = maxKey;
             }
-            key = binBase[bin]! + q;
         } else {
-            // depth == max, or non-finite: far end of the key space.
-            key = keyTotal - 1;
+            key = maxKey;
         }
         depths[j] = key;
         counts[key] = counts[key]! + 1;
     }
 
-    // ── Pass 4: suffix scan (highest key writes first ⇒ back-to-front) and
+    // ── Pass 3: suffix scan (highest key writes first ⇒ back-to-front) and
     // stable scatter (equal keys keep original splat order). ────────────────
     let pos = 0;
-    for (let k = keyTotal - 1; k >= 0; k--) {
+    for (let k = maxKey; k >= 0; k--) {
         const n = counts[k]!;
         counts[k] = pos;
         pos += n;

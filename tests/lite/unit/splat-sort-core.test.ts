@@ -106,9 +106,9 @@ describe("sortSplatsBackToFront", () => {
             minD = Math.min(minD, dj);
             maxD = Math.max(maxD, dj);
         }
-        // Widest possible bucket: a coarse bin granted a single key spans
-        // range/32. Depths along the output may only increase by less than that.
-        const tolerance = (maxD - minD) / 32 + 1e-6;
+        // Uniform keys: the widest bucket spans range / 2^bits. Depths along
+        // the output may only increase (an out-of-order step) by less than that.
+        const tolerance = (maxD - minD) / 2 ** splatSortBucketBits(n) + 1e-6;
         for (let j = 1; j < n; j++) {
             expect(depths[order[j]!]!).toBeLessThan(depths[order[j - 1]!]! + tolerance);
         }
