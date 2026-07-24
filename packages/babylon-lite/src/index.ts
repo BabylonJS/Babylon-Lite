@@ -777,6 +777,7 @@ export {
     setNavigationRandomSeed,
     getNavigationRandomSeed,
     raycast,
+    navRayBlocked,
     addBoxObstacle,
     addCylinderObstacle,
     removeObstacle,

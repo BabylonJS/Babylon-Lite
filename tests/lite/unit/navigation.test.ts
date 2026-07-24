@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createNavMeshFromSources, findClosestPointWithin } from "../../../packages/babylon-lite/src/navigation/navigation";
+import { createNavMeshFromSources, findClosestPointWithin, navRayBlocked } from "../../../packages/babylon-lite/src/navigation/navigation";
 import type { NavigationPlugin, NavMeshSource } from "../../../packages/babylon-lite/src/navigation/navigation";
 
 function createMockPlugin(capture: { positions?: number[]; indices?: number[]; navMeshQueryInput?: unknown }): NavigationPlugin {
@@ -70,5 +70,46 @@ describe("findClosestPointWithin", () => {
         const plugin = makeReadyPlugin(() => ({ success: false, point: { x: 0, y: 0, z: 0 } }));
 
         expect(findClosestPointWithin(plugin, { x: 99, y: 0, z: 99 }, { x: 1, y: 1, z: 1 })).toBeNull();
+    });
+});
+
+describe("navRayBlocked", () => {
+    const start = { x: 0, y: 0, z: 0 };
+    const end = { x: 2, y: 0, z: 0 };
+
+    function makeReadyPlugin(raycastResult: { success?: boolean; t?: number } | undefined, nearest = { success: true, nearestRef: 1 }): NavigationPlugin {
+        return {
+            _recast: {},
+            _generators: {},
+            _navMesh: { ok: true },
+            _navMeshQuery: {
+                findNearestPoly: () => nearest,
+                raycast: () => raycastResult,
+            },
+        };
+    }
+
+    it("returns false only when Detour reports that the full segment was reached", () => {
+        expect(navRayBlocked(makeReadyPlugin({ success: true, t: Number.MAX_VALUE }), start, end)).toBe(false);
+    });
+
+    it.each([
+        ["a failed raycast", { success: false, t: Number.MAX_VALUE }],
+        ["a non-finite distance", { success: true, t: Number.POSITIVE_INFINITY }],
+        ["a wall at the origin", { success: true, t: 0 }],
+        ["a wall inside the segment", { success: true, t: 0.5 }],
+        ["a wall at the endpoint", { success: true, t: 1 }],
+        ["a missing distance", { success: true }],
+        ["an invalid distance", { success: true, t: Number.NaN }],
+        ["a missing raycast result", undefined],
+    ])("fails closed for %s", (_label, result) => {
+        expect(navRayBlocked(makeReadyPlugin(result), start, end)).toBe(true);
+    });
+
+    it.each([
+        ["failed lookup", { success: false, nearestRef: 1 }],
+        ["missing polygon reference", { success: true, nearestRef: 0 }],
+    ])("fails closed for an unresolved start polygon: %s", (_label, nearest) => {
+        expect(navRayBlocked(makeReadyPlugin({ success: true, t: Number.MAX_VALUE }, nearest), start, end)).toBe(true);
     });
 });
