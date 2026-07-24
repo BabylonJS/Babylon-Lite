@@ -805,7 +805,7 @@ interface GLState {
     _flushBlend?: (engine: GLEngineContext) => void;
     _flushDepthCull?: (engine: GLEngineContext) => void;
     _flushStencil?: (engine: GLEngineContext) => void;
-    _setStencilBack?: (state: GLState, face: GLenum, ops: GLStencilOpState) => void;
+    _setStencilBack?: (state: GLState, ops: GLStencilOpState) => void;
     _flushColorMask?: (engine: GLEngineContext) => void;
 
     /** Lazy fullscreen quad — built on first applyEffectWrapper, then reused
