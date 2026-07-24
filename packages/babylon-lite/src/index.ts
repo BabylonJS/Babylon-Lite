@@ -23,9 +23,11 @@ export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
 export { captureScreenshot } from "./engine/screenshot.js";
 export type { Screenshot } from "./engine/screenshot.js";
-export { enableDeviceLostRecovery } from "./engine/device-lost-recovery.js";
-export type { DeviceLostRecoveryHandle, DeviceLostRecoveryOptions } from "./engine/device-lost-recovery.js";
 export { forceWebGpuDeviceLossForTesting } from "./engine/device-lost-recovery-testing.js";
+export type { DeviceLostRecoveryCallbacks, DeviceLostRecoveryHandle } from "./engine/device-lost-recovery-types.js";
+export { enableDeviceLostSceneRecovery } from "./engine/device-lost-scene-recovery.js";
+export { enableDeviceLostSpriteRecovery } from "./engine/device-lost-sprite-recovery.js";
+export { enableDeviceLostTextRecovery } from "./engine/device-lost-text-recovery.js";
 export {
     createSceneContext,
     createDefaultCamera,
@@ -309,6 +311,8 @@ export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-sh
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
 export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
+export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.js";
+export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
 export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────

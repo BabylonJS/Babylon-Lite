@@ -5,7 +5,6 @@ import {
     createEngine,
     createSceneContext,
     createDefaultCamera,
-    enableDeviceLostRecovery,
     forceWebGpuDeviceLossForTesting,
     loadGltf,
     createHemisphericLight,
@@ -13,6 +12,7 @@ import {
     goToFrame,
     pauseAnimation,
     registerScene,
+    enableDeviceLostSceneRecovery,
 } from "babylon-lite";
 
 async function main(): Promise<void> {
@@ -20,7 +20,7 @@ async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 
     const engine = await createEngine(canvas);
-    enableDeviceLostRecovery(engine, {
+    enableDeviceLostSceneRecovery(engine, {
         onLost() {
             canvas.dataset.deviceLost = "true";
         },

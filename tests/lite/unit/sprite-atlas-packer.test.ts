@@ -5,6 +5,7 @@ G.GPUTextureUsage ??= { RENDER_ATTACHMENT: 16, TEXTURE_BINDING: 4, COPY_DST: 8, 
 
 import { appendSpriteAtlasFrames, createSpriteAtlasFromFrames, type SpriteAtlasFrameSource } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas-packer";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { enableDeviceLostSpriteRecovery } from "../../../packages/babylon-lite/src/engine/device-lost-sprite-recovery";
 
 interface MockWriteTextureCall {
     destination: GPUTexelCopyTextureInfo;
@@ -44,6 +45,8 @@ function makeMockEngine(): MockEngineProbe {
         }),
     };
     const device = {
+        features: new Set<GPUFeatureName>(),
+        lost: new Promise<GPUDeviceLostInfo>(() => undefined),
         createTexture: vi.fn((descriptor: GPUTextureDescriptor) => {
             const size = descriptor.size as { width: number; height: number };
             const tex = {
@@ -116,6 +119,28 @@ describe("createSpriteAtlasFromFrames — sub-rect sources", () => {
         expect(Array.from(composited.subarray(2 * 4, 3 * 4))).toEqual([0, 0, 255, 255]);
         // Verify row 1, column 3 is blue's bottom-right corner.
         expect(Array.from(composited.subarray(1 * 16 + 3 * 4, 1 * 16 + 4 * 4))).toEqual([0, 0, 255, 255]);
+    });
+
+    it("retains appended atlas pixels only while device-loss capture is enabled", () => {
+        const probe = makeMockEngine();
+        const recovery = enableDeviceLostSpriteRecovery(probe.engine);
+        const red = makePaddedFrame(1, 1, [255, 0, 0, 255]);
+        const blue = makePaddedFrame(1, 1, [0, 0, 255, 255]);
+        const atlas = createSpriteAtlasFromFrames(probe.engine, [red], { paddingPx: 0, capacityPx: [2, 1] });
+
+        appendSpriteAtlasFrames(probe.engine, atlas, [blue]);
+
+        const source = atlas.texture._recoverySource;
+        expect(source?.kind).toBe("pixels");
+        if (source?.kind !== "pixels") {
+            throw new Error("expected retained pixel source");
+        }
+        expect(Array.from(source.data)).toEqual([255, 0, 0, 255, 0, 0, 255, 255]);
+
+        const withoutCapture = makeMockEngine();
+        const uncaptured = createSpriteAtlasFromFrames(withoutCapture.engine, [red], { paddingPx: 0 });
+        expect(uncaptured.texture._recoverySource).toBeUndefined();
+        recovery.disable();
     });
 
     it("rejects sub-rect rows that would spill past srcStrideBytes (srcX = 0)", () => {

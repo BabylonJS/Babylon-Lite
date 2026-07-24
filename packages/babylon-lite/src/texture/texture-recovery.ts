@@ -50,6 +50,44 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
         await rebuildDynamicTexture2D(engine, tex);
         return;
     }
+    if (source.kind === "pixels") {
+        const options = source.options;
+        const texture = engine._device.createTexture({
+            size: { width: source.width, height: source.height },
+            format: options.srgb ? "rgba8unorm-srgb" : "rgba8unorm",
+            usage: TU.TEXTURE_BINDING | TU.COPY_DST,
+        });
+        engine._device.queue.writeTexture(
+            { texture },
+            source.data as Uint8Array<ArrayBuffer>,
+            { bytesPerRow: source.width * 4, rowsPerImage: source.height },
+            { width: source.width, height: source.height }
+        );
+        tex.texture = texture;
+        tex.view = texture.createView();
+        tex.sampler = getOrCreateSampler(engine, {
+            addressModeU: options.addressModeU ?? "clamp-to-edge",
+            addressModeV: options.addressModeV ?? "clamp-to-edge",
+            minFilter: options.minFilter ?? "nearest",
+            magFilter: options.magFilter ?? "nearest",
+        });
+        tex.width = source.width;
+        tex.height = source.height;
+        return;
+    }
+    if (source.kind === "render") {
+        const texture = engine._device.createTexture({
+            size: { width: source.width, height: source.height },
+            format: source.format,
+            usage: TU.TEXTURE_BINDING | TU.RENDER_ATTACHMENT | TU.COPY_DST,
+        });
+        tex.texture = texture;
+        tex.view = texture.createView();
+        tex.sampler = getOrCreateSampler(engine, source.samplerDesc);
+        tex.width = source.width;
+        tex.height = source.height;
+        return;
+    }
     const width = source.bitmap?.width ?? 1;
     const height = source.bitmap?.height ?? 1;
     const format: GPUTextureFormat = source.srgb ? "rgba8unorm-srgb" : "rgba8unorm";
@@ -71,7 +109,21 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     }
     tex.texture = texture;
     tex.view = texture.createView();
-    tex.sampler = getOrCreateSampler(engine, source.samplerDesc);
+    const samplerDescriptors = engine._deviceLostRecovery?._samplerDescriptors;
+    const capturedSamplerDesc = samplerDescriptors?.get(tex.sampler);
+    const samplerDesc = capturedSamplerDesc ?? {
+        addressModeU: "repeat",
+        addressModeV: "repeat",
+        minFilter: "linear",
+        magFilter: "linear",
+        mipmapFilter: "linear",
+        maxAnisotropy: 4,
+    };
+    const sampler = samplerDesc.lodMaxClamp === 0 ? engine._device.createSampler(samplerDesc) : getOrCreateSampler(engine, samplerDesc);
+    if (capturedSamplerDesc) {
+        samplerDescriptors!.set(sampler, capturedSamplerDesc);
+    }
+    tex.sampler = sampler;
     tex.width = width;
     tex.height = height;
 }

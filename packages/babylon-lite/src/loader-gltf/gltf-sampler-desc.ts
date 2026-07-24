@@ -12,7 +12,8 @@ function gltfTexSamplerDesc(json: any, texInfo: any): GPUSamplerDescriptor {
     const s = json.textures?.[texInfo.index]?.sampler != null ? json.samplers?.[json.textures[texInfo.index].sampler] : undefined;
     const wrap = (m: number | undefined): GPUAddressMode => (m === 33071 ? "clamp-to-edge" : m === 33648 ? "mirror-repeat" : "repeat");
     const minF: number | undefined = s?.minFilter;
-    const minNearest = minF === 9728 || minF === 9984 || minF === 9986;
+    // Valid glTF filter enums alternate nearest (even) and linear (odd).
+    const minNearest = !!minF && minF % 2 === 0;
     const mipNearest = minF === 9984 || minF === 9985;
     // glTF non-mipmap min filters (9728 NEAREST, 9729 LINEAR) mean "sample mip 0 only".
     // The shared uploaded GPU texture always carries a full mip chain, so clamp the LOD
@@ -50,7 +51,9 @@ export function makeSamplerFor(engine: EngineContext, json: any, defaultSampler:
         // the LOD clamp, so caching it there could alias a full-mip sampler with identical
         // filter/wrap. These are rare (SDF/UI textures), so per-call creation is cheaper than
         // growing the universal sampler key — which would move every non-glTF scene's bundle.
-        return desc.lodMaxClamp === 0 ? engine._device.createSampler(desc) : getOrCreateSampler(engine, desc);
+        const sampler = desc.lodMaxClamp === 0 ? engine._device.createSampler(desc) : getOrCreateSampler(engine, desc);
+        engine._deviceLostRecovery?._samplerDescriptors.set(sampler, desc);
+        return sampler;
     };
 }
 
