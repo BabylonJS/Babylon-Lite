@@ -680,10 +680,10 @@ export function navRayBlocked(plugin: NavigationPlugin, start: Vec3, end: Vec3):
     }
     const r = q.raycast(nearest.nearestRef, start, end);
     // Detour t semantics: t in [0,1] = wall at parameter t (0 = blocked at the origin);
-    // FLT_MAX = the end was reached unobstructed. Fail closed: only a successful
-    // query with that explicit "reached the end" value proves clear.
+    // Finite FLT_MAX = the end was reached unobstructed. Fail closed: only a
+    // successful query with that "reached the end" value proves clear.
     const t = r?.t;
-    return !(r?.success === true && typeof t === "number" && t > 1);
+    return !(r?.success === true && typeof t === "number" && Number.isFinite(t) && t > 1);
 }
 
 // ─── Obstacles (tile-cache navmeshes only) ───────────────────────────

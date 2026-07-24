@@ -95,6 +95,7 @@ describe("navRayBlocked", () => {
 
     it.each([
         ["a failed raycast", { success: false, t: Number.MAX_VALUE }],
+        ["a non-finite distance", { success: true, t: Number.POSITIVE_INFINITY }],
         ["a wall at the origin", { success: true, t: 0 }],
         ["a wall inside the segment", { success: true, t: 0.5 }],
         ["a wall at the endpoint", { success: true, t: 1 }],
