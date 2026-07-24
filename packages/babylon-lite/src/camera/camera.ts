@@ -47,9 +47,10 @@ export interface Camera {
      *  leave the field undefined and `getViewMatrix` produces a standard view
      *  matrix. */
     _useFloatingOrigin?: boolean;
-    /** @internal Orthographic view-volume extents, set by `enableOrthographicCamera`.
-     *  Null/undefined means the camera projects perspectively through `fov`. */
-    _ortho?: OrthographicBounds | null;
+    /** Live orthographic view-volume extents, installed by `enableOrthographicCamera`
+     *  and mutable/animatable thereafter. Null or undefined means the camera projects
+     *  perspectively through `fov`. */
+    ortho?: OrthographicBounds | null;
 }
 
 /** Babylon-compatible normalized camera viewport. x/y/width/height are fractions of the render target. */
@@ -122,7 +123,7 @@ export function getProjectionMatrix(camera: Camera, aspectRatio: number): Mat4 {
         return camera._projCache as unknown as Mat4;
     }
     const p = camera._projCache;
-    if (_orthoProjector !== null && camera._ortho) {
+    if (_orthoProjector !== null && camera.ortho) {
         _orthoProjector(camera, aspectRatio, p);
     } else {
         mat4PerspectiveLHToRef(p, camera.fov, aspectRatio, camera.nearPlane, camera.farPlane);

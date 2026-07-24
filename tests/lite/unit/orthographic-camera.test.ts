@@ -1,17 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { getProjectionMatrix, type Camera } from "../../../packages/babylon-lite/src/camera/camera";
+import { getProjectionMatrix, getViewProjectionMatrix, type Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import { disableOrthographicCamera, enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic";
 import { mat4OrthoOffCenterLHToRef } from "../../../packages/babylon-lite/src/math/mat4-ortho-lh-to-ref";
 import type { Mat4, Mat4Storage } from "../../../packages/babylon-lite/src/math/types";
 
-/** Minimal `Camera` stand-in — the projection path only reads fov/near/far/`_ortho` and the caches. */
+/** Minimal `Camera` stand-in — the projection path only reads near/far/fov/`ortho` and the
+ *  caches. The world matrix is identity so the derived view matrix is identity too, which
+ *  lets the view-projection assertions read the projection directly. */
 function makeCamera(): Camera {
+    const world = new Float32Array(16);
+    world[0] = world[5] = world[10] = world[15] = 1;
     return {
         fov: 0.8,
         nearPlane: 1,
         farPlane: 100,
         children: [],
-        worldMatrix: new Float32Array(16) as unknown as Mat4,
+        worldMatrix: world as unknown as Mat4,
         worldMatrixVersion: 1,
         _viewCache: new Float32Array(16) as unknown as Mat4Storage,
         _projCache: new Float32Array(16) as unknown as Mat4Storage,
@@ -80,5 +84,48 @@ describe("orthographic projection", () => {
 
         enableOrthographicCamera(camera, { halfHeight: 3 });
         expect(project(getProjectionMatrix(camera, 1), 0, 6, camera.nearPlane)[1]).toBeCloseTo(2, 5);
+    });
+
+    it("applies live mutations of the bounds without moving the camera", () => {
+        const camera = makeCamera();
+        const ortho = enableOrthographicCamera(camera, { halfHeight: 6 });
+        expect(project(getProjectionMatrix(camera, 1), 0, 6, camera.nearPlane)[1]).toBeCloseTo(1, 5);
+
+        // The projection cache is keyed on worldMatrixVersion + aspect, neither of which
+        // changes here — the bounds setter must invalidate it on its own.
+        ortho.halfHeight = 3;
+        expect(project(getProjectionMatrix(camera, 1), 0, 6, camera.nearPlane)[1]).toBeCloseTo(2, 5);
+
+        // Same object is reachable from the camera, and the view-projection cache follows too.
+        expect(camera.ortho).toBe(ortho);
+        camera.ortho!.halfHeight = 12;
+        expect(project(getViewProjectionMatrix(camera, 1), 0, 6, camera.nearPlane)[1]).toBeCloseTo(0.5, 5);
+    });
+
+    it("switches a plane between derived and off-center by assigning null", () => {
+        const camera = makeCamera();
+        const ortho = enableOrthographicCamera(camera, { halfHeight: 4 });
+        expect(project(getProjectionMatrix(camera, 1), 4, 0, camera.nearPlane)[0]).toBeCloseTo(1, 5);
+
+        ortho.right = 8;
+        expect(project(getProjectionMatrix(camera, 1), 8, 0, camera.nearPlane)[0]).toBeCloseTo(1, 5);
+
+        ortho.right = null;
+        expect(project(getProjectionMatrix(camera, 1), 4, 0, camera.nearPlane)[0]).toBeCloseTo(1, 5);
+    });
+
+    it("exposes every bound as an own enumerable property so animation paths resolve", () => {
+        const camera = makeCamera();
+        const ortho = enableOrthographicCamera(camera);
+        // `resolvePropertyBinding` walks the path with `in` and writes `target[prop] = value`,
+        // so an animation targeting "ortho.halfHeight" needs the key to exist up front.
+        for (const key of ["halfHeight", "left", "right", "bottom", "top"]) {
+            expect(key in ortho, `"${key}" must be present for animation path resolution`).toBe(true);
+        }
+        expect(Object.keys(ortho)).toEqual(["halfHeight", "left", "right", "bottom", "top"]);
+
+        // Simulate the animation writer's plain assignment.
+        (ortho as unknown as Record<string, number>)["halfHeight"] = 5;
+        expect(project(getProjectionMatrix(camera, 1), 0, 5, camera.nearPlane)[1]).toBeCloseTo(1, 5);
     });
 });

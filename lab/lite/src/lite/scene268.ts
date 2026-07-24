@@ -40,8 +40,16 @@ async function main(): Promise<void> {
     const camera = createArcRotateCamera(-Math.PI / 2 + 0.4, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
     camera.nearPlane = 0.1;
     camera.farPlane = 100;
-    enableOrthographicCamera(camera, { halfHeight: ORTHO_HALF_HEIGHT });
+    const ortho = enableOrthographicCamera(camera, { halfHeight: ORTHO_HALF_HEIGHT });
     scene.camera = camera;
+
+    // The bounds object stays live: assigning to it (here from a URL override, but equally
+    // from a render loop or a property animation on "ortho.halfHeight") invalidates the
+    // projection cache on its own, without the camera having to move.
+    const zoom = parseFloat(new URLSearchParams(window.location.search).get("orthoHalfHeight") || "");
+    if (Number.isFinite(zoom)) {
+        ortho.halfHeight = zoom;
+    }
 
     const light = createHemisphericLight([0, 1, 0]);
     addToScene(scene, light);

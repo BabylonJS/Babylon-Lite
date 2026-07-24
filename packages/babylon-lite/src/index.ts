@@ -133,7 +133,7 @@ export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "
 export { createFreeCamera } from "./camera/free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
 export { enableOrthographicCamera, disableOrthographicCamera } from "./camera/orthographic.js";
-export type { OrthographicBounds } from "./camera/orthographic.js";
+export type { OrthographicBounds, OrthographicBoundsOptions } from "./camera/orthographic.js";
 
 // Geospatial (globe-orbit) camera
 export {

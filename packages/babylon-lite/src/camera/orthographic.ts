@@ -14,52 +14,102 @@ import { _installOrthographicProjector } from "./camera.js";
 import { mat4OrthoOffCenterLHToRef } from "../math/mat4-ortho-lh-to-ref.js";
 import type { Mat4Storage } from "../math/types.js";
 
-/** Orthographic view-volume extents, in world units.
+/** Live orthographic view-volume extents, in world units. Mutable and animatable:
+ *  every setter invalidates the camera's projection cache, so assigning a field —
+ *  by hand, from a render loop, or through a property animation targeting
+ *  `"ortho.halfHeight"` — takes effect on the next frame.
  *
- *  Any plane left undefined is derived from `halfHeight`: vertically as
- *  `±halfHeight`, horizontally as `±halfHeight * aspectRatio` — so the default
- *  volume tracks the render target's aspect ratio and never squashes the image.
- *  Supply explicit planes (Babylon's `orthoLeft` / `orthoRight` / `orthoBottom` /
- *  `orthoTop`) for an off-center volume. */
+ *  A plane left `null` is derived from `halfHeight`: vertically as `±halfHeight`,
+ *  horizontally as `±halfHeight * aspectRatio`, so the volume tracks the render
+ *  target's aspect ratio and never squashes the image. Set a plane to a number for
+ *  an off-center volume (Babylon's `orthoLeft` / `orthoRight` / `orthoBottom` /
+ *  `orthoTop`); set it back to `null` to return to the derived extent. */
 export interface OrthographicBounds {
-    /** Vertical half-extent of the view volume. Default 1. */
+    /** Vertical half-extent of the view volume. Halving it doubles the zoom. */
+    halfHeight: number;
+    /** Left clip plane, or null to derive `-halfHeight * aspectRatio`. */
+    left: number | null;
+    /** Right clip plane, or null to derive `halfHeight * aspectRatio`. */
+    right: number | null;
+    /** Bottom clip plane, or null to derive `-halfHeight`. */
+    bottom: number | null;
+    /** Top clip plane, or null to derive `halfHeight`. */
+    top: number | null;
+}
+
+/** Initial extents accepted by `enableOrthographicCamera`. Every field is optional;
+ *  omitted planes are derived from `halfHeight` (default 1). */
+export interface OrthographicBoundsOptions {
     halfHeight?: number;
-    /** Left clip plane. Default `-halfHeight * aspectRatio`. */
-    left?: number;
-    /** Right clip plane. Default `halfHeight * aspectRatio`. */
-    right?: number;
-    /** Bottom clip plane. Default `-halfHeight`. */
-    bottom?: number;
-    /** Top clip plane. Default `halfHeight`. */
-    top?: number;
+    left?: number | null;
+    right?: number | null;
+    bottom?: number | null;
+    top?: number | null;
+}
+
+const BOUND_KEYS = ["halfHeight", "left", "right", "bottom", "top"] as const;
+
+/** Build the live bounds object. Each field is an accessor that drops the camera's
+ *  projection + view-projection cache versions on change — the same invalidation the
+ *  camera's own transform setters rely on. Nothing in the shared `getProjectionMatrix`
+ *  cache check has to know about orthographic state, so perspective-only scenes are
+ *  unaffected. Properties are defined (not merely optional) so animation property
+ *  paths like `"ortho.halfHeight"` resolve. */
+function createOrthographicBounds(camera: Camera, options: OrthographicBoundsOptions): OrthographicBounds {
+    const values: Record<string, number | null> = {
+        halfHeight: options.halfHeight ?? 1,
+        left: options.left ?? null,
+        right: options.right ?? null,
+        bottom: options.bottom ?? null,
+        top: options.top ?? null,
+    };
+    const bounds = {} as OrthographicBounds;
+    for (const key of BOUND_KEYS) {
+        Object.defineProperty(bounds, key, {
+            get(): number | null {
+                return values[key]!;
+            },
+            set(v: number | null) {
+                if (values[key] !== v) {
+                    values[key] = v;
+                    camera._projVer = undefined;
+                    camera._vpVer = undefined;
+                }
+            },
+            enumerable: true,
+            configurable: true,
+        });
+    }
+    return bounds;
 }
 
 function writeOrthoProjection(camera: Camera, aspectRatio: number, out: Mat4Storage): void {
-    const b = camera._ortho!;
-    const halfHeight = b.halfHeight ?? 1;
+    const b = camera.ortho!;
+    const halfHeight = b.halfHeight;
     const halfWidth = halfHeight * aspectRatio;
     mat4OrthoOffCenterLHToRef(out, b.left ?? -halfWidth, b.right ?? halfWidth, b.bottom ?? -halfHeight, b.top ?? halfHeight, camera.nearPlane, camera.farPlane);
 }
 
-/** Switch a camera to an orthographic projection.
+/** Switch a camera to an orthographic projection, and return its live `ortho` bounds.
  *
- *  Call before `registerScene`, or at any time afterwards to change the extents —
- *  each call re-arms the camera's projection cache, so this is also how an
- *  orthographic camera zooms (`camera.fov` has no effect in this mode). Depth
- *  still comes from `camera.nearPlane` / `camera.farPlane`.
+ *  Depth still comes from `camera.nearPlane` / `camera.farPlane`; `camera.fov` has no
+ *  effect in this mode — an orthographic camera zooms by changing `halfHeight`.
  *
- *  With only `halfHeight` supplied the camera frames `2 * halfHeight` world units
- *  vertically, widened to the render target's aspect ratio. */
-export function enableOrthographicCamera(camera: Camera, bounds?: OrthographicBounds): void {
+ *  The returned object is also reachable as `camera.ortho`, and stays mutable (see
+ *  `OrthographicBounds`), so this only needs to be called once per camera. Calling it
+ *  again replaces the bounds with a fresh object. */
+export function enableOrthographicCamera(camera: Camera, bounds?: OrthographicBoundsOptions): OrthographicBounds {
     _installOrthographicProjector(writeOrthoProjection);
-    camera._ortho = bounds ?? {};
+    const ortho = createOrthographicBounds(camera, bounds ?? {});
+    camera.ortho = ortho;
     camera._projVer = undefined;
     camera._vpVer = undefined;
+    return ortho;
 }
 
 /** Switch a camera back to its perspective projection (driven by `camera.fov`). */
 export function disableOrthographicCamera(camera: Camera): void {
-    camera._ortho = null;
+    camera.ortho = null;
     // `mat4PerspectiveLHToRef` only writes the terms a perspective matrix needs, relying on the
     // rest of a freshly allocated (zeroed) cache. Clear the extra terms the orthographic writer
     // introduced so the perspective matrix is not rebuilt on top of an off-center, w=1 volume.
