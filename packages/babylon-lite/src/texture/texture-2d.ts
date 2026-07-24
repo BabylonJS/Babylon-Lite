@@ -10,6 +10,7 @@
 import { TU } from "../engine/gpu-flags.js";
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { EngineContext } from "../engine/engine.js";
+import type { PixelsTexture2DOptions } from "./pixels-texture.js";
 
 /** A loaded 2D texture: the GPU texture, its default view and sampler, pixel
  *  dimensions, and an optional per-texture UV transform. This is the public
@@ -47,7 +48,21 @@ export interface Texture2D {
 export type Texture2DRecoverySource =
     | { kind: "url"; url: string; opts: Texture2DOptions }
     | { kind: "solid"; rgba: readonly [number, number, number, number] }
-    | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array; samplerDesc: GPUSamplerDescriptor }
+    | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array }
+    | {
+          kind: "pixels";
+          data: Uint8Array;
+          width: number;
+          height: number;
+          options: PixelsTexture2DOptions;
+      }
+    | {
+          kind: "render";
+          width: number;
+          height: number;
+          format: GPUTextureFormat;
+          samplerDesc: GPUSamplerDescriptor;
+      }
     | {
           /** A `createDynamicTexture` texture. Like the url/solid/bitmap kinds,
            *  this carries only the *data* needed to rebuild after device loss — no

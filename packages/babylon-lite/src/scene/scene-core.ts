@@ -73,6 +73,8 @@ let _lateCleanup: WeakMap<SceneContext, () => 1> | null = null;
 
 /** Top-level scene context — pure state, no attached methods. */
 export interface SceneContext extends RenderingContext {
+    /** @internal */
+    readonly _kind: "scene";
     /** Surface this scene renders into. Set at scene-creation time and immutable
      *  afterwards — the default render task is sized and MSAA-matched to this surface,
      *  and `registerScene` attaches the scene to it. For the engine's primary surface
@@ -199,6 +201,7 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
 
     // Closures below capture `ctx` by-reference via this object.
     const ctxLocal: Omit<SceneContext, "_frameGraph"> = {
+        _kind: "scene",
         surface,
         clearColor: { r: 0.2, g: 0.2, b: 0.3, a: 1.0 },
         camera: null,

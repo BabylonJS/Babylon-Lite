@@ -1,12 +1,14 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { StorageBuffer } from "../resource/storage-buffer.js";
 import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
+import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
 import { _setHpmAllocator } from "../math/_matrix-allocator.js";
 import type { SurfaceContext, SurfaceOptions } from "./surface.js";
 import { _buildSurface, _refreshScRT, isDomCanvas, resizeSurface, setSurfaceSize } from "./surface.js";
 import type { GpuFrameTimer } from "./gpu-timer.js";
 import type { GpuTaskTimer } from "./gpu-task-timer.js";
 import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
+import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
 import { disposeGpuResourceRetirements } from "./gpu-resource-retirement.js";
 
 // `__BL_VERSION__` is replaced at build time with the resolved package version
@@ -142,6 +144,8 @@ export interface EngineContext extends SurfaceContext {
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
     /** @internal */
+    _deviceLostRecovery?: DeviceLostRecoveryState;
+    /** @internal */
     _animFrameId: number;
     /** @internal */
     _renderFn: ((now: number) => void) | null;
@@ -212,6 +216,8 @@ export interface EngineContext extends SurfaceContext {
  * own their own update / record logic. Engine knows nothing of scene internals.
  */
 export interface RenderingContext {
+    /** @internal Discriminator used by opt-in device-loss recovery handlers. */
+    readonly _kind: string;
     /** @internal Draw calls produced by pre-pass work during `_update` (shadows + pre-passes). */
     _drawCallsPre: number;
     /** Clear color used when this context is the first active one in a frame. */
@@ -234,6 +240,9 @@ interface DeviceLostRecoveryCapture {
     u(tex: Texture2D, url: string, opts: Texture2DOptions): void;
     s(tex: Texture2D, r: number, g: number, b: number, a: number): void;
     b(tex: Texture2D, bitmap: ImageBitmap | null, srgb: boolean, mipMaps: boolean, fallback?: Uint8Array): void;
+    p(tex: Texture2D, data: Uint8Array, options: PixelsTexture2DOptions): void;
+    r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void;
+    w(tex: Texture2D, data: Uint8Array, x: number, y: number, width: number, height: number, dataOffset?: number, bytesPerRow?: number): void;
     m(
         mesh: Mesh,
         uv2s: Float32Array | null | undefined,
