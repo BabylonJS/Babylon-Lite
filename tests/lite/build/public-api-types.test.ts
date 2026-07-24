@@ -1,5 +1,5 @@
 import { spawnSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "fs";
 import { resolve } from "path";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -22,6 +22,7 @@ const TSC_JS = resolve(ROOT, "node_modules/typescript/bin/tsc");
 // shared rolled-up `index.d.ts`; `--mode lib` emits the module-granular tree and the
 // publish-ready `package.json`. Both are required for the assertions below.
 beforeAll(() => {
+    rmSync(BUILD_DIR, { recursive: true, force: true });
     for (const mode of ["dist", "lib"]) {
         const build = spawnSync(NODE, [VITE_JS, "build", "--mode", mode], {
             cwd: PACKAGE_DIR,
@@ -112,6 +113,13 @@ describe("build/index.d.ts", () => {
         // consumers never need to install any of our build-time dependencies.
         const external = [...specifiers].filter((s) => !s.startsWith("./") && !s.startsWith("../"));
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
+    });
+
+    it("is the only declaration file in the published package", () => {
+        const declarationFiles = readdirSync(BUILD_DIR, { recursive: true, encoding: "utf-8" })
+            .filter((file) => file.endsWith(".d.ts"))
+            .sort();
+        expect(declarationFiles).toEqual(["index.d.ts"]);
     });
 });
 
