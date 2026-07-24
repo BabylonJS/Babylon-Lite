@@ -167,7 +167,7 @@
     {
         "id": 16,
         "slug": "gl-two-sided-stencil",
-        "name": "Scene 16 - Two-Sided Stencil",
+        "name": "Scene 16 — Two-Sided Stencil",
         "description": "One mixed-winding geometry draw applies INCR_WRAP to front faces and DECR_WRAP to back faces, then visualizes stencil values 1 and 255 with red and blue cover passes.",
         "tags": ["stencil", "mesh"],
         "maxMad": 0.5,

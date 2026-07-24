@@ -1,7 +1,7 @@
 import { ThinEngine } from "@babylonjs/core/Engines/thinEngine.js";
 import { Effect } from "@babylonjs/core/Materials/effect.js";
 
-/** Babylon.js reference for GL Scene 16 - Two-Sided Stencil. */
+/** Babylon.js reference for GL Scene 16 — Two-Sided Stencil. */
 
 const VERTEX_SOURCE = `
 attribute vec2 position;

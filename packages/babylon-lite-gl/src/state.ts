@@ -9,7 +9,7 @@ import type { GLEngineContext } from "./context.js";
  *
  * These `@internal` index consts are imported by blend.ts / depth-stencil.ts /
  * apply-states.ts. Because they are plain `const` integers, esbuild inlines each
- * to a 1–2 char literal (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` → `rs[25]`) when
+ * to a 1–2 char literal (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` → `rs[22]`) when
  * bundling a scene — far smaller than the old cross-module `.dBlendSrcRGB` named
  * props, which could not be mangled and shipped verbatim in every bundle.
  *
@@ -182,8 +182,8 @@ export interface GLState {
 }
 
 /** Indices in `rs` whose unset sentinel is `-1` (the tri-state enables, the
- *  `stencilMask` / `colorMask` caches, and the leading slot of each stencil-op
- *  triple). Every other slot defaults to `0`. The sentinel is written to BOTH
+ *  `stencilMask` / `colorMask` caches, and the leading shared stencil-op slot).
+ *  Every other slot defaults to `0`. The sentinel is written to BOTH
  *  the actual (`i`) and desired (`i + RS_DESIRED`) halves. Kept as a
  *  function-local literal so it stays a runtime value (no module-level
  *  allocation / side effect). */

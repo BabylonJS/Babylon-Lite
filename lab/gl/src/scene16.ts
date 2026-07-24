@@ -20,7 +20,7 @@ import {
 } from "babylon-lite-gl";
 
 /**
- * Scene 16 - Two-Sided Stencil.
+ * Scene 16 — Two-Sided Stencil.
  *
  * One indexed draw contains a CCW triangle on the left and a CW triangle on the
  * right. With culling disabled, the front triangle increments stencil from 0 to

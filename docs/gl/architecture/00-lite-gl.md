@@ -788,7 +788,7 @@ interface GLState {
     // state.ts ↔ blend.ts ↔ depth-stencil.ts ↔ apply-states.ts, so esbuild cannot
     // mangle named properties — each long name (`.dBlendSrcRGB`) would ship
     // verbatim, many times, in every scene bundle. The `RS_*` consts are plain
-    // integers esbuild inlines (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` → `rs[25]`),
+    // integers esbuild inlines (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` → `rs[22]`),
     // so the storage costs a single short array access everywhere. Float64 (not
     // Int32) because stencilMask / stencilFuncMask can be 0xFFFFFFFF, which Int32
     // stores as -1 — colliding with the -1 unset sentinel.
