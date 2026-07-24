@@ -1,10 +1,10 @@
 /**
  * Published opt-ins for Standard skeletal skinning and UV translation. Import
- * from `@babylonjs/lite/material/standard/enable-standard-mesh-features`.
+ * from the `@babylonjs/lite` root entry.
  *
  * RGBA vertex colours are enabled separately through the canonical
  * `enableStandardVertexColors()` from
- * `@babylonjs/lite/material/standard/enable-standard-vertex-colors`.
+ * the `@babylonjs/lite` root entry.
  */
 
 import { _preloadStdMeshExt } from "./standard-group-builder.js";

@@ -9,31 +9,6 @@
         ".": {
             "import": "./src/index.ts",
             "types": "./src/index.ts"
-        },
-        "./material/pbr/background-dds-skybox": {
-            "import": "./src/material/pbr/background-dds-skybox.ts"
-        },
-        "./material/pbr/pbr-thin-instance-ext": {
-            "import": "./src/material/pbr/pbr-thin-instance-ext.ts"
-        },
-        "./material/standard/enable-standard-vertex-colors": {
-            "import": "./src/material/standard/enable-standard-vertex-colors.ts",
-            "types": "./src/material/standard/enable-standard-vertex-colors.ts"
-        },
-        "./loader-env/load-dds-env": {
-            "import": "./src/loader-env/load-dds-env.ts"
-        },
-        "./light/clustered": {
-            "import": "./src/light/clustered.ts",
-            "types": "./src/light/clustered.ts"
-        },
-        "./engine/device-lost-recovery-testing": {
-            "import": "./src/engine/device-lost-recovery-testing.ts",
-            "types": "./src/engine/device-lost-recovery-testing.ts"
-        },
-        "./material/standard/enable-standard-mesh-features": {
-            "import": "./src/material/standard/enable-standard-mesh-features.ts",
-            "types": "./src/material/standard/enable-standard-mesh-features.ts"
         }
     },
     "files": [

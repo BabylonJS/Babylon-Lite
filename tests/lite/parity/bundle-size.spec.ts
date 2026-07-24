@@ -29,7 +29,11 @@ const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-in
 const BUNDLE_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/manifest.json");
 const MASTER_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/master-manifest.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-const SCENES = allScenes.filter((s) => s.maxRawKB != null);
+const SCENES = allScenes.filter((s) => {
+    // Scene 114 opts out because WebGPU's optional "primitive-index" feature
+    // changes which picking chunks the browser fetches across machines.
+    return !s.skipBundleSize && s.maxRawKB != null;
+});
 
 interface BundleInfoModule {
     id: string;

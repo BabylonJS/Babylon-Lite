@@ -59,6 +59,13 @@
 - Only internal modules (`_gpu`, pipeline builders, renderable builders) may touch GPU handles.
 - Scene setup code in `lab/lite/src/` is the user-facing reference — it must read like a high-level API demo, never like a WebGPU tutorial.
 
+### 4e. One Public Package Entry Point (Critical)
+
+- **`@babylonjs/lite` exposes exactly one package export: `"."`.** Both `packages/babylon-lite/package.json` and the publish-ready package metadata emitted by `packages/babylon-lite/vite.config.ts` must keep `exports` limited to that root entry.
+- **Never add a package subpath export.** When downstream code needs a public value or type, explicitly re-export it by name from `packages/babylon-lite/src/index.ts` and import it from `babylon-lite` (workspace consumers) or `@babylonjs/lite` (published consumers).
+- Root re-exports remain tree-shakable because the package is side-effect-free; alternate package entry points are not required for optional features.
+- `tests/lite/build/public-api-types.test.ts` enforces the root-only export map for both source and emitted package metadata. Do not weaken or bypass that assertion.
+
 ### 4c. Materials Own Shaders (Critical)
 
 - **Shaders are managed by materials, not by the render pipeline.**

@@ -16,13 +16,14 @@ import {
     createSceneContext,
     createStandardMaterial,
     createTexture2DFromPixels,
+    enableStandardSkeleton,
+    enableStandardUvOffset,
+    enableStandardVertexColors,
     onBeforeRender,
     registerScene,
     startEngine,
 } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
-import { enableStandardSkeleton, enableStandardUvOffset } from "babylon-lite/material/standard/enable-standard-mesh-features";
-import { enableStandardVertexColors } from "babylon-lite/material/standard/enable-standard-vertex-colors";
 import { createMeshFromData } from "babylon-lite/mesh/mesh-factories.js";
 import { createSkeleton } from "babylon-lite/skeleton/create-skeleton.js";
 import { updateSkeletonBoneMatrices } from "babylon-lite/skeleton/update-skeleton-bone-matrices.js";

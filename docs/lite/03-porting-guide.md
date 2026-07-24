@@ -221,7 +221,7 @@ addToScene(scene, sphere);
 PBR materials consume mesh vertex colors automatically. Standard materials use an explicit opt-in so scenes without vertex colors retain no feature code. Supply a tightly packed RGBA buffer (four floats per vertex), call `enableStandardVertexColors()` once, then register the scene.
 
 ```typescript
-import { enableStandardVertexColors } from "babylon-lite/material/standard/enable-standard-vertex-colors";
+import { enableStandardVertexColors } from "babylon-lite";
 
 const vertexCount = positions.length / 3;
 const colors = new Float32Array(vertexCount * 4);

@@ -4,9 +4,8 @@
 // Cube 2 (Std): default standard material, 2 thin instances (green/blue), negative X scale
 // Ground: 6×6 standard material
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createBox, createGround, createPbrMaterial, createStandardMaterial, createSolidTexture2D, loadTexture2D, setThinInstances, setThinInstanceColors, attachControl, mat4Identity, mat4Translation, mat4Compose, registerScene } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createBox, createGround, createPbrMaterial, createStandardMaterial, createSolidTexture2D, loadDdsEnvironment, loadTexture2D, setThinInstances, setThinInstanceColors, attachControl, mat4Identity, mat4Translation, mat4Compose, registerScene } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
-import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
