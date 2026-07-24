@@ -30,10 +30,9 @@ const BUNDLE_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/mani
 const MASTER_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/master-manifest.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
 const SCENES = allScenes.filter((s) => {
-    // Scene 114 conditionally loads the detailed-picking pipeline only when the adapter
-    // exposes and the device enables WebGPU's optional "primitive-index" feature. Its
-    // runtime-fetched bytes therefore vary by machine, so it cannot have one stable ceiling.
-    return s.id !== 114 && s.maxRawKB != null;
+    // Scene 114 opts out because WebGPU's optional "primitive-index" feature
+    // changes which picking chunks the browser fetches across machines.
+    return !s.skipBundleSize && s.maxRawKB != null;
 });
 
 interface BundleInfoModule {

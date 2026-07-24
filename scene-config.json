@@ -1179,6 +1179,7 @@
         "name": "Scene 114 — Morph/Skeleton Picking",
         "maxMad": 0.1,
         "maxRawKB": 86,
+        "skipBundleSize": true,
         "description": "Visual picking validation on morphed and skinned geometry: GPU and detailed picks drive marker positions from the deformed rendered surface.",
         "tags": ["pbr", "procedural", "morph", "skeleton", "picking"],
         "skipPerf": true
