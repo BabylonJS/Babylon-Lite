@@ -28,12 +28,12 @@ export interface EulerProxy {
 export interface SceneNode {
     name: string;
     children: SceneNode[];
-    position: ObservableVec3;
+    readonly position: ObservableVec3;
     /** Quaternion rotation — source of truth for the local matrix. */
-    rotationQuaternion: ObservableQuat;
+    readonly rotationQuaternion: ObservableQuat;
     /** Euler XYZ bidirectional proxy — reads decompose current quat; writes update quat atomically. */
-    rotation: EulerProxy;
-    scaling: ObservableVec3;
+    readonly rotation: EulerProxy;
+    readonly scaling: ObservableVec3;
     parent: IWorldMatrixProvider | null;
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;

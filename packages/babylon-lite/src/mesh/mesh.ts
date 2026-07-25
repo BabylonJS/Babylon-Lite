@@ -170,6 +170,8 @@ export interface Mesh extends SceneNode {
     _cpuIndexFormat?: GPUIndexFormat;
 }
 
+type MutableMesh = { -readonly [P in keyof Mesh]: Mesh[P] };
+
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.
  *  Used by all mesh creation paths (factories, loaders). */
 export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): void {
@@ -178,10 +180,10 @@ export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry
 
     const [iqx, iqy, iqz, iqw] = eulerToQuat(rx, ry, rz);
     const rq = new ObservableQuat(iqx, iqy, iqz, iqw, onWmDirty);
-    mesh.rotationQuaternion = rq;
-    mesh.rotation = createEulerProxy(rq);
-    mesh.position = new ObservableVec3(px, py, pz, onWmDirty);
-    mesh.scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
+    (mesh as MutableMesh).rotationQuaternion = rq;
+    (mesh as MutableMesh).rotation = createEulerProxy(rq);
+    (mesh as MutableMesh).position = new ObservableVec3(px, py, pz, onWmDirty);
+    (mesh as MutableMesh).scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
 
     if (!(mesh as unknown as Record<string, unknown>).children) {
         (mesh as unknown as Record<string, unknown>).children = [];
