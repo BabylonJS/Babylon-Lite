@@ -6,8 +6,6 @@ import animations1States from "./fixtures/sprite-sheet-random-states.json";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { startParticleSystem, animateParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
-import { column } from "../../../packages/babylon-lite/src/particle/particle-buffer";
-import * as C from "../../../packages/babylon-lite/src/particle/particle-columns";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
@@ -87,7 +85,7 @@ describe("NPE sprite-sheet animation — deterministic parity with Babylon.js", 
             }
 
             const buffer = system.buffer;
-            const size = column(buffer, C.COL_SIZE, Float32Array);
+            const size = buffer.size;
             const cellIndex = system._spriteSheet!.cellIndex;
 
             interface Row {

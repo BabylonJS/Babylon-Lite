@@ -1,5 +1,3 @@
-import { column } from "../../particle-buffer.js";
-import * as C from "../../particle-columns.js";
 import type { Vec2, Color4 } from "../../../math/types.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
@@ -26,18 +24,18 @@ export const createParticleBlock: NpeBlockEvaluator = {
         const dirX = buffer.dirX;
         const dirY = buffer.dirY;
         const dirZ = buffer.dirZ;
-        const size = column(buffer, C.COL_SIZE, Float32Array);
-        const scaleX = column(buffer, C.COL_SCALE_X, Float32Array);
-        const scaleY = column(buffer, C.COL_SCALE_Y, Float32Array);
-        const angle = column(buffer, C.COL_ANGLE, Float32Array);
-        const colR = column(buffer, C.COL_COLOR_R, Float32Array);
-        const colG = column(buffer, C.COL_COLOR_G, Float32Array);
-        const colB = column(buffer, C.COL_COLOR_B, Float32Array);
-        const colA = column(buffer, C.COL_COLOR_A, Float32Array);
-        const stepR = column(buffer, C.COL_COLOR_STEP_R, Float32Array);
-        const stepG = column(buffer, C.COL_COLOR_STEP_G, Float32Array);
-        const stepB = column(buffer, C.COL_COLOR_STEP_B, Float32Array);
-        const stepA = column(buffer, C.COL_COLOR_STEP_A, Float32Array);
+        const size = buffer.size;
+        const scaleX = buffer.scaleX;
+        const scaleY = buffer.scaleY;
+        const angle = buffer.angle;
+        const colR = buffer.colorR;
+        const colG = buffer.colorG;
+        const colB = buffer.colorB;
+        const colA = buffer.colorA;
+        const stepR = buffer.colorStepR;
+        const stepG = buffer.colorStepG;
+        const stepB = buffer.colorStepB;
+        const stepA = buffer.colorStepA;
 
         system.createLifeTime = (i) => {
             lifeTime[i] = lifeTimeGetter(i) as number;

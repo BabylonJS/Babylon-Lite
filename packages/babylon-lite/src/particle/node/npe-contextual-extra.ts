@@ -3,7 +3,6 @@ import type { ParticleSystem } from "../particle-system.js";
 import type { NpeGetter } from "./npe-value.js";
 import { color4Getter } from "./npe-contextual.js";
 import type { Vec2, Vec3 } from "../../math/types.js";
-import * as C from "../particle-columns.js";
 
 const CTX_DIRECTION = 0x0002;
 const CTX_SCALE = 0x0007;
@@ -33,16 +32,16 @@ export function makeExtraContextualGetter(buffer: ParticleBuffer, system: Partic
         case CTX_DIRECTION_SCALE:
             return () => system._scaledStep;
         case CTX_SIZE: {
-            const size = column(buffer, C.COL_SIZE, Float32Array);
+            const size = buffer.size;
             return (i) => size[i]!;
         }
         case CTX_ANGLE: {
-            const angle = column(buffer, C.COL_ANGLE, Float32Array);
+            const angle = buffer.angle;
             return (i) => angle[i]!;
         }
         case CTX_SCALE: {
-            const scaleX = column(buffer, C.COL_SCALE_X, Float32Array);
-            const scaleY = column(buffer, C.COL_SCALE_Y, Float32Array);
+            const scaleX = buffer.scaleX;
+            const scaleY = buffer.scaleY;
             const scratch: Vec2 = { x: 0, y: 0 };
             return (i) => {
                 scratch.x = scaleX[i]!;
@@ -55,10 +54,10 @@ export function makeExtraContextualGetter(buffer: ParticleBuffer, system: Partic
             const initialG = column(buffer, "initialColor.g", Float32Array);
             const initialB = column(buffer, "initialColor.b", Float32Array);
             const initialA = column(buffer, "initialColor.a", Float32Array);
-            const colorR = column(buffer, C.COL_COLOR_R, Float32Array);
-            const colorG = column(buffer, C.COL_COLOR_G, Float32Array);
-            const colorB = column(buffer, C.COL_COLOR_B, Float32Array);
-            const colorA = column(buffer, C.COL_COLOR_A, Float32Array);
+            const colorR = buffer.colorR;
+            const colorG = buffer.colorG;
+            const colorB = buffer.colorB;
+            const colorA = buffer.colorA;
             const previous = system.createColorDead;
             system.createColorDead = (i) => {
                 initialR[i] = colorR[i]!;
@@ -67,7 +66,7 @@ export function makeExtraContextualGetter(buffer: ParticleBuffer, system: Partic
                 initialA[i] = colorA[i]!;
                 previous?.(i);
             };
-            return color4Getter(buffer, "initialColor.r", "initialColor.g", "initialColor.b", "initialColor.a");
+            return color4Getter(initialR, initialG, initialB, initialA);
         }
         case CTX_COLOR_DEAD: {
             const deadR = column(buffer, "colorDead.r", Float32Array);
@@ -80,10 +79,10 @@ export function makeExtraContextualGetter(buffer: ParticleBuffer, system: Partic
                 deadB[i] = color.b;
                 deadA[i] = color.a;
             };
-            return color4Getter(buffer, "colorDead.r", "colorDead.g", "colorDead.b", "colorDead.a");
+            return color4Getter(deadR, deadG, deadB, deadA);
         }
         case CTX_COLOR_STEP:
-            return color4Getter(buffer, C.COL_COLOR_STEP_R, C.COL_COLOR_STEP_G, C.COL_COLOR_STEP_B, C.COL_COLOR_STEP_A);
+            return color4Getter(buffer.colorStepR, buffer.colorStepG, buffer.colorStepB, buffer.colorStepA);
         case CTX_INITIAL_DIRECTION: {
             if (system._suppressInitialDirectionCapture) {
                 const zero: Vec3 = { x: 0, y: 0, z: 0 };

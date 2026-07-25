@@ -6,7 +6,6 @@ import {
     type BuildNodeParticleOptions,
     type ParticleSystem,
 } from "../../../packages/babylon-lite/src/index";
-import * as C from "../../../packages/babylon-lite/src/particle/particle-columns";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
@@ -50,21 +49,14 @@ export async function simulateNodeParticleGraph(source: unknown, steps: number, 
 
 export function snapshotParticles(system: ParticleSystem): ParticleSnapshot[] {
     const buffer = system.buffer;
-    const feature = (name: string): Float32Array => {
-        const values = buffer._columns.get(name);
-        if (!(values instanceof Float32Array)) {
-            throw new Error(`Particle test expected Float32 column "${name}"`);
-        }
-        return values;
-    };
-    const size = feature(C.COL_SIZE);
-    const scaleX = feature(C.COL_SCALE_X);
-    const scaleY = feature(C.COL_SCALE_Y);
-    const angle = feature(C.COL_ANGLE);
-    const colorR = feature(C.COL_COLOR_R);
-    const colorG = feature(C.COL_COLOR_G);
-    const colorB = feature(C.COL_COLOR_B);
-    const colorA = feature(C.COL_COLOR_A);
+    const size = buffer.size;
+    const scaleX = buffer.scaleX;
+    const scaleY = buffer.scaleY;
+    const angle = buffer.angle;
+    const colorR = buffer.colorR;
+    const colorG = buffer.colorG;
+    const colorB = buffer.colorB;
+    const colorA = buffer.colorA;
     const cellIndex = system._spriteSheet?.cellIndex;
     const particles: ParticleSnapshot[] = [];
 

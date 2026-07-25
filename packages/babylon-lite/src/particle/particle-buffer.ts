@@ -6,10 +6,9 @@
  * path is zero-garbage by construction, and there is no per-particle object (hence no hidden-class or
  * monomorphism concern).
  *
- * Base columns (position, direction, age, lifeTime, id) are always present. {@link column} adds shared
- * named columns: `CreateParticleBlock` requests the standard render/lifecycle set for every built system,
- * while optional features request only their own additional state. Feature code remains in its owning
- * module so an unused optional feature adds neither columns nor runtime module bytes.
+ * Base simulation columns and standard NPE render/lifecycle columns are always present. {@link column}
+ * adds only optional feature state. Feature code remains in its owning module so an unused optional
+ * feature adds neither columns nor runtime module bytes.
  */
 
 /** A particle column: one typed-array slot per particle index. */
@@ -41,15 +40,29 @@ export interface ParticleBuffer {
     /** Unique id assigned at spawn (stable ordering / keys). */
     readonly id: Uint32Array;
 
-    /** @internal Feature columns by name; allocated on demand by {@link column}. */
+    /** Standard NPE render and lifecycle state. */
+    readonly size: Float32Array;
+    readonly angle: Float32Array;
+    readonly scaleX: Float32Array;
+    readonly scaleY: Float32Array;
+    readonly colorR: Float32Array;
+    readonly colorG: Float32Array;
+    readonly colorB: Float32Array;
+    readonly colorA: Float32Array;
+    readonly colorStepR: Float32Array;
+    readonly colorStepG: Float32Array;
+    readonly colorStepB: Float32Array;
+    readonly colorStepA: Float32Array;
+
+    /** @internal Optional feature columns by name; allocated on demand by {@link column}. */
     readonly _columns: Map<string, ParticleColumn>;
-    /** @internal Every column (base + feature), copied slot-wise on swap-remove. */
+    /** @internal Every column (base + standard + optional), copied slot-wise on swap-remove. */
     readonly _all: ParticleColumn[];
     /** @internal Monotonic id source. */
     _nextId: number;
 }
 
-/** Create a particle buffer with all base columns sized to `capacity`. */
+/** Create a particle buffer with all built-in columns sized to `capacity`. */
 export function createParticleBuffer(capacity: number): ParticleBuffer {
     const posX = new Float32Array(capacity);
     const posY = new Float32Array(capacity);
@@ -60,6 +73,18 @@ export function createParticleBuffer(capacity: number): ParticleBuffer {
     const age = new Float64Array(capacity);
     const lifeTime = new Float64Array(capacity);
     const id = new Uint32Array(capacity);
+    const size = new Float32Array(capacity);
+    const angle = new Float32Array(capacity);
+    const scaleX = new Float32Array(capacity);
+    const scaleY = new Float32Array(capacity);
+    const colorR = new Float32Array(capacity);
+    const colorG = new Float32Array(capacity);
+    const colorB = new Float32Array(capacity);
+    const colorA = new Float32Array(capacity);
+    const colorStepR = new Float32Array(capacity);
+    const colorStepG = new Float32Array(capacity);
+    const colorStepB = new Float32Array(capacity);
+    const colorStepA = new Float32Array(capacity);
     return {
         capacity,
         alive: 0,
@@ -72,14 +97,26 @@ export function createParticleBuffer(capacity: number): ParticleBuffer {
         age,
         lifeTime,
         id,
+        size,
+        angle,
+        scaleX,
+        scaleY,
+        colorR,
+        colorG,
+        colorB,
+        colorA,
+        colorStepR,
+        colorStepG,
+        colorStepB,
+        colorStepA,
         _columns: new Map(),
-        _all: [posX, posY, posZ, dirX, dirY, dirZ, age, lifeTime, id],
+        _all: [posX, posY, posZ, dirX, dirY, dirZ, age, lifeTime, id, size, angle, scaleX, scaleY, colorR, colorG, colorB, colorA, colorStepR, colorStepG, colorStepB, colorStepA],
         _nextId: 0,
     };
 }
 
 /**
- * Get (or lazily allocate) a feature column by name. The first caller allocates a typed array of the
+ * Get (or lazily allocate) an optional feature column by name. The first caller allocates a typed array of the
  * buffer's capacity and registers it for swap-remove; later callers with the same name share it. A buffer
  * whose systems never request a given column never allocates it — this is what makes unused features free.
  */

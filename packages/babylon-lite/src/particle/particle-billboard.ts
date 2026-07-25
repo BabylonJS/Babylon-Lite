@@ -2,8 +2,6 @@ import { createGridSpriteAtlas } from "../sprite/shared/sprite-atlas.js";
 import { createFacingBillboardSystem, addBillboardSpriteIndex, clearBillboardSprites } from "../sprite/billboard-sprite.js";
 import { billboardBlendAdditive, billboardBlendAlpha, billboardBlendOneOne } from "../sprite/billboard-blend.js";
 import type { BillboardBlendMode, FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
-import { column } from "./particle-buffer.js";
-import * as C from "./particle-columns.js";
 import type { ParticleSystem } from "./particle-system.js";
 
 const BLENDMODE_ONEONE = 0; // Babylon.js BLENDMODE_ONEONE (pure additive, src·1 + dst)
@@ -45,14 +43,14 @@ export function syncParticleBillboard(system: ParticleSystem, billboard: FacingB
     const posX = buffer.posX;
     const posY = buffer.posY;
     const posZ = buffer.posZ;
-    const size = column(buffer, C.COL_SIZE, Float32Array);
-    const scaleX = column(buffer, C.COL_SCALE_X, Float32Array);
-    const scaleY = column(buffer, C.COL_SCALE_Y, Float32Array);
-    const angle = column(buffer, C.COL_ANGLE, Float32Array);
-    const colR = column(buffer, C.COL_COLOR_R, Float32Array);
-    const colG = column(buffer, C.COL_COLOR_G, Float32Array);
-    const colB = column(buffer, C.COL_COLOR_B, Float32Array);
-    const colA = column(buffer, C.COL_COLOR_A, Float32Array);
+    const size = buffer.size;
+    const scaleX = buffer.scaleX;
+    const scaleY = buffer.scaleY;
+    const angle = buffer.angle;
+    const colR = buffer.colorR;
+    const colG = buffer.colorG;
+    const colB = buffer.colorB;
+    const colA = buffer.colorA;
     const cellIndex = system._spriteSheet ? system._spriteSheet.cellIndex : null;
 
     for (let i = 0; i < buffer.alive; i++) {

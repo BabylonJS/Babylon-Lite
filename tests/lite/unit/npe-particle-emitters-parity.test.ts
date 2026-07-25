@@ -22,8 +22,6 @@ import { SCENE263_NPE_JSON } from "../../../lab/lite/src/shared/scene263-npe";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { startParticleSystem, stopParticleSystem, animateParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
-import { column } from "../../../packages/babylon-lite/src/particle/particle-buffer";
-import * as C from "../../../packages/babylon-lite/src/particle/particle-columns";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
@@ -189,14 +187,14 @@ describe("NPE emitter shapes — deterministic parity with Babylon.js", () => {
             }
 
             const buffer = system.buffer;
-            const size = column(buffer, C.COL_SIZE, Float32Array);
-            const scaleX = column(buffer, C.COL_SCALE_X, Float32Array);
-            const scaleY = column(buffer, C.COL_SCALE_Y, Float32Array);
-            const angle = column(buffer, C.COL_ANGLE, Float32Array);
-            const colorR = column(buffer, C.COL_COLOR_R, Float32Array);
-            const colorG = column(buffer, C.COL_COLOR_G, Float32Array);
-            const colorB = column(buffer, C.COL_COLOR_B, Float32Array);
-            const colorA = column(buffer, C.COL_COLOR_A, Float32Array);
+            const size = buffer.size;
+            const scaleX = buffer.scaleX;
+            const scaleY = buffer.scaleY;
+            const angle = buffer.angle;
+            const colorR = buffer.colorR;
+            const colorG = buffer.colorG;
+            const colorB = buffer.colorB;
+            const colorA = buffer.colorA;
             const indices = Array.from({ length: buffer.alive }, (_, i) => i).sort((a, b) => buffer.id[a]! - buffer.id[b]!);
             const expected = testCase.truth.particles.slice().sort((a, b) => a.id - b.id);
             expect(indices.length, `${testCase.name} particle count`).toBe(testCase.truth.count);
@@ -256,10 +254,10 @@ describe("NPE emitter shapes — deterministic parity with Babylon.js", () => {
         }
 
         expect(system.buffer.alive).toBe(1);
-        expect(column(system.buffer, C.COL_COLOR_R, Float32Array)[0]).toBeLessThan(1);
-        expect(column(system.buffer, C.COL_COLOR_G, Float32Array)[0]).toBeGreaterThanOrEqual(0);
-        expect(column(system.buffer, C.COL_COLOR_B, Float32Array)[0]).toBeGreaterThanOrEqual(0);
-        expect(column(system.buffer, C.COL_COLOR_A, Float32Array)[0]).toBeCloseTo(1);
+        expect(system.buffer.colorR[0]).toBeLessThan(1);
+        expect(system.buffer.colorG[0]).toBeGreaterThanOrEqual(0);
+        expect(system.buffer.colorB[0]).toBeGreaterThanOrEqual(0);
+        expect(system.buffer.colorA[0]).toBeCloseTo(1);
     });
 
     it("copies a shared volatile direction bound before evaluating the second port", async () => {

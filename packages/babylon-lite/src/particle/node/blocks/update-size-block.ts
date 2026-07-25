@@ -1,8 +1,6 @@
-import { column } from "../../particle-buffer.js";
-import { COL_SIZE } from "../../particle-columns.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
-/** `UpdateSizeBlock` — write the evaluated size input into the on-demand size column each step. */
+/** `UpdateSizeBlock` — write the evaluated size input into the size column each step. */
 export const updateSizeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.state.system!;
@@ -11,7 +9,7 @@ export const updateSizeBlock: NpeBlockEvaluator = {
             return;
         }
         const sizeGetter = ctx.input(block, "size");
-        const size = column(buffer, COL_SIZE, Float32Array);
+        const size = buffer.size;
         system.updateSteps.push((i) => {
             size[i] = sizeGetter(i) as number;
         });

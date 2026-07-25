@@ -2,18 +2,13 @@ import { describe, expect, it } from "vitest";
 import { createParticleBuffer, column, spawnParticle, killParticle } from "../../../packages/babylon-lite/src/particle/particle-buffer";
 import { useSpriteSheet } from "../../../packages/babylon-lite/src/particle/sprite-columns";
 
-/**
- * SPIKE validation for the data-oriented (Struct-of-Arrays) particle store. Proves the three properties the
- * architecture is meant to deliver: pay-for-use (unused features allocate nothing), a correct compact
- * live-range via swap-remove, and the sprite feature living entirely in columns with matching cell math.
- */
 describe("Particle buffer", () => {
-    it("allocates only base columns until a feature is requested (pay-for-use)", () => {
+    it("allocates built-in state and no optional columns", () => {
         const buffer = createParticleBuffer(16);
-        // A system that uses no feature carries zero feature columns.
         expect(buffer._columns.size).toBe(0);
-        // Base columns only: posX/Y/Z, dirX/Y/Z, age, lifeTime, id.
-        expect(buffer._all.length).toBe(9);
+        expect(buffer._all.length).toBe(21);
+        expect(buffer.size).toBeInstanceOf(Float32Array);
+        expect(buffer.colorStepA).toBeInstanceOf(Float32Array);
     });
 
     it("column() allocates once and shares by name", () => {
@@ -23,7 +18,7 @@ describe("Particle buffer", () => {
         expect(a).toBe(b);
         expect(a.length).toBe(16);
         expect(buffer._columns.size).toBe(1);
-        expect(buffer._all.length).toBe(10);
+        expect(buffer._all.length).toBe(22);
     });
 
     it("spawn/kill keep a compact live range via swap-remove", () => {
@@ -34,6 +29,9 @@ describe("Particle buffer", () => {
         buffer.posX[i0] = 10;
         buffer.posX[i1] = 11;
         buffer.posX[i2] = 12;
+        buffer.size[i0] = 20;
+        buffer.size[i1] = 21;
+        buffer.size[i2] = 22;
         expect(buffer.alive).toBe(3);
 
         // Kill the first: the last live particle (12) is swapped into slot 0.
@@ -41,6 +39,8 @@ describe("Particle buffer", () => {
         expect(buffer.alive).toBe(2);
         expect(buffer.posX[0]).toBe(12);
         expect(buffer.posX[1]).toBe(11);
+        expect(buffer.size[0]).toBe(22);
+        expect(buffer.size[1]).toBe(21);
 
         // Full buffer returns -1 rather than allocating.
         spawnParticle(buffer);

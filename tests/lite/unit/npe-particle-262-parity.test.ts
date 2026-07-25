@@ -4,8 +4,6 @@ import { SCENE262_NPE_JSON } from "../../../lab/lite/src/shared/scene262-npe";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { startParticleSystem, animateParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
-import { column } from "../../../packages/babylon-lite/src/particle/particle-buffer";
-import * as C from "../../../packages/babylon-lite/src/particle/particle-columns";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
@@ -52,14 +50,14 @@ describe("NPE particle simulation (Size) — deterministic parity with Babylon.j
         }
 
         const buffer = system.buffer;
-        const size = column(buffer, C.COL_SIZE, Float32Array);
-        const scaleX = column(buffer, C.COL_SCALE_X, Float32Array);
-        const scaleY = column(buffer, C.COL_SCALE_Y, Float32Array);
-        const angle = column(buffer, C.COL_ANGLE, Float32Array);
-        const colR = column(buffer, C.COL_COLOR_R, Float32Array);
-        const colG = column(buffer, C.COL_COLOR_G, Float32Array);
-        const colB = column(buffer, C.COL_COLOR_B, Float32Array);
-        const colA = column(buffer, C.COL_COLOR_A, Float32Array);
+        const size = buffer.size;
+        const scaleX = buffer.scaleX;
+        const scaleY = buffer.scaleY;
+        const angle = buffer.angle;
+        const colR = buffer.colorR;
+        const colG = buffer.colorG;
+        const colB = buffer.colorB;
+        const colA = buffer.colorA;
 
         interface Row {
             id: number;

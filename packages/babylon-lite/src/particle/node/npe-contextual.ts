@@ -5,11 +5,10 @@
  * reused scratch object by particle index. Semantics, including which sources use the clamped per-particle
  * step versus the unclamped system step, match Babylon.js contextual-source evaluation.
  */
-import { column, type ParticleBuffer } from "../particle-buffer.js";
+import type { ParticleBuffer } from "../particle-buffer.js";
 import type { ParticleSystem } from "../particle-system.js";
 import type { NpeGetter } from "./npe-value.js";
 import type { Vec3, Color4 } from "../../math/types.js";
-import * as C from "../particle-columns.js";
 
 // Contextual source ids (Babylon.js `NodeParticleContextualSources`).
 const CTX_POSITION = 0x0001;
@@ -19,12 +18,8 @@ const CTX_COLOR = 0x0005;
 const CTX_SCALED_DIRECTION = 0x0006;
 const CTX_SCALED_COLOR_STEP = 0x0017;
 
-/** Build a scratch-backed Color4 getter for four feature columns. Shared with lazy contextual sources. */
-export function color4Getter(buffer: ParticleBuffer, rName: string, gName: string, bName: string, aName: string): NpeGetter {
-    const r = column(buffer, rName, Float32Array);
-    const g = column(buffer, gName, Float32Array);
-    const b = column(buffer, bName, Float32Array);
-    const a = column(buffer, aName, Float32Array);
+/** Build a scratch-backed Color4 getter for four component columns. */
+export function color4Getter(r: Float32Array, g: Float32Array, b: Float32Array, a: Float32Array): NpeGetter {
     const scratch: Color4 = { r: 0, g: 0, b: 0, a: 0 };
     return (i) => {
         scratch.r = r[i]!;
@@ -73,12 +68,12 @@ export function makeContextualGetter(buffer: ParticleBuffer, system: ParticleSys
             };
         }
         case CTX_COLOR:
-            return color4Getter(buffer, C.COL_COLOR_R, C.COL_COLOR_G, C.COL_COLOR_B, C.COL_COLOR_A);
+            return color4Getter(buffer.colorR, buffer.colorG, buffer.colorB, buffer.colorA);
         case CTX_SCALED_COLOR_STEP: {
-            const r = column(buffer, C.COL_COLOR_STEP_R, Float32Array);
-            const g = column(buffer, C.COL_COLOR_STEP_G, Float32Array);
-            const b = column(buffer, C.COL_COLOR_STEP_B, Float32Array);
-            const a = column(buffer, C.COL_COLOR_STEP_A, Float32Array);
+            const r = buffer.colorStepR;
+            const g = buffer.colorStepG;
+            const b = buffer.colorStepB;
+            const a = buffer.colorStepA;
             const s: Color4 = { r: 0, g: 0, b: 0, a: 0 };
             // Uses the unclamped system step (Babylon.js `_scaledUpdateSpeed`).
             return (i) => {

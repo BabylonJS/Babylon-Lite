@@ -15,7 +15,7 @@ The design requirements are:
 - Particle attributes use Struct-of-Arrays storage. A particle is an integer slot, not an allocated particle value.
 - Simulation order, random-number consumption, numeric storage, and lifecycle boundaries follow the Babylon.js compatibility contract and are verified against Babylon.js as the equivalence oracle.
 - Rendering always uses camera-facing billboard sprites.
-- Code and storage are pay-for-use. Reachable block evaluators are dynamically imported, and feature columns are allocated only by features that need them. Every normally built graph containing a reachable `CreateParticleBlock` allocates the twelve standard render/lifecycle columns described in section 4.
+- Code and optional storage are pay-for-use. Reachable block evaluators are dynamically imported, and optional feature columns are allocated only by features that need them. Every buffer contains the base simulation and standard NPE render/lifecycle columns described in section 4.
 - The indexed simulation path does not allocate per particle or per update. Graph getters return scalars or reused scratch values. Billboard synchronization does allocate transient values for each live particle.
 
 ## 2. Package-root API
@@ -115,7 +115,6 @@ The runtime layers are:
 
 ```text
 particle-buffer.ts       dense typed-array storage and slot lifecycle
-particle-columns.ts      shared names for the twelve standard Float32 columns
 particle-system.ts       mutable system state and CPU simulation
 sprite-columns*.ts       optional sprite cell state and animation
 particle-billboard.ts    conversion of live columns to billboard instances
@@ -146,9 +145,9 @@ The particle package owns no shader, material, render pipeline, bind group, or G
 
 ## 4. Particle storage
 
-### 4.1 Base columns
+### 4.1 Built-in columns
 
-`createParticleBuffer(capacity)` creates nine columns, each with exactly `capacity` elements:
+`createParticleBuffer(capacity)` creates 21 columns, each with exactly `capacity` elements:
 
 | Field | Typed array | Meaning |
 | --- | --- | --- |
@@ -157,6 +156,11 @@ The particle package owns no shader, material, render pipeline, bind group, or G
 | `age` | `Float64Array` | elapsed particle lifetime |
 | `lifeTime` | `Float64Array` | death threshold |
 | `id` | `Uint32Array` | spawn identity |
+| `size` | `Float32Array` | uniform particle size |
+| `angle` | `Float32Array` | billboard rotation |
+| `scaleX`, `scaleY` | `Float32Array` | per-axis size multipliers |
+| `colorR`, `colorG`, `colorB`, `colorA` | `Float32Array` | current render color |
+| `colorStepR`, `colorStepG`, `colorStepB`, `colorStepA` | `Float32Array` | color change per lifetime unit |
 
 `ParticleColumn` is the union `Float64Array | Float32Array | Uint32Array | Uint16Array | Uint8Array | Int32Array`.
 
@@ -175,13 +179,25 @@ interface ParticleBuffer {
     readonly age: Float64Array;
     readonly lifeTime: Float64Array;
     readonly id: Uint32Array;
+    readonly size: Float32Array;
+    readonly angle: Float32Array;
+    readonly scaleX: Float32Array;
+    readonly scaleY: Float32Array;
+    readonly colorR: Float32Array;
+    readonly colorG: Float32Array;
+    readonly colorB: Float32Array;
+    readonly colorA: Float32Array;
+    readonly colorStepR: Float32Array;
+    readonly colorStepG: Float32Array;
+    readonly colorStepB: Float32Array;
+    readonly colorStepA: Float32Array;
     readonly _columns: Map<string, ParticleColumn>;
     readonly _all: ParticleColumn[];
     _nextId: number;
 }
 ```
 
-Live particles occupy the dense interval `[0, buffer.alive)`. `_all` starts with the nine base arrays and receives every feature array.
+Live particles occupy the dense interval `[0, buffer.alive)`. `_all` starts with all 21 built-in arrays and receives every optional feature array.
 
 `spawnParticle` returns `-1` when `alive >= capacity`. On success it reserves `i = alive`, increments `alive`, writes `id[i] = _nextId++`, writes `age[i] = 0`, and returns `i`. It does not clear any other base or feature slot; creation steps must write every field they own.
 
@@ -189,19 +205,19 @@ Live particles occupy the dense interval `[0, buffer.alive)`. `_all` starts with
 
 `column(buffer, name, ctor)` returns the existing `_columns` entry when the string key exists. Otherwise it constructs `new ctor(capacity)`, stores it by name, and appends it to `_all`. Callers using the same string share the same array. The function does not verify that a later constructor matches the constructor used for the first allocation.
 
-### 4.2 Standard render/lifecycle columns
+### 4.2 Standard render/lifecycle fields
 
-A reachable `CreateParticleBlock` always requests these twelve `Float32Array` columns:
+Twelve of the built-in `Float32Array` fields provide the standard NPE creation and rendering state:
 
-| Column key | Constant |
+| State | Direct fields |
 | --- | --- |
-| `size` | `COL_SIZE` |
-| `angle` | `COL_ANGLE` |
-| `scale.x`, `scale.y` | `COL_SCALE_X`, `COL_SCALE_Y` |
-| `color.r`, `color.g`, `color.b`, `color.a` | `COL_COLOR_R`, `COL_COLOR_G`, `COL_COLOR_B`, `COL_COLOR_A` |
-| `colorStep.r`, `colorStep.g`, `colorStep.b`, `colorStep.a` | `COL_COLOR_STEP_R`, `COL_COLOR_STEP_G`, `COL_COLOR_STEP_B`, `COL_COLOR_STEP_A` |
+| Size | `size` |
+| Angle | `angle` |
+| Scale | `scaleX`, `scaleY` |
+| Color | `colorR`, `colorG`, `colorB`, `colorA` |
+| Color step | `colorStepR`, `colorStepG`, `colorStepB`, `colorStepA` |
 
-These columns are standard system storage because creation, color progression, and billboard rendering depend on them. `syncParticleBillboard` also requests the render subset defensively, so a manually assembled system can allocate missing render columns at synchronization time.
+`CreateParticleBlock` initializes these fields for each birth, contextual and update blocks read or modify them, and `syncParticleBillboard` reads the render subset directly. They are part of every buffer because the primary runtime contract is a renderable NPE particle system.
 
 ### 4.3 Feature-only columns
 
@@ -623,7 +639,7 @@ The builder has created the system before this evaluator runs. The evaluator:
 
 ### 9.2 CreateParticleBlock
 
-This block allocates all twelve standard columns and installs six creation slots. Shape blocks install position and direction.
+This block captures the twelve standard buffer fields and installs six creation slots. Shape blocks install position and direction.
 
 Input defaults are:
 
@@ -1122,12 +1138,11 @@ When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also insp
 
 ## 14. Exact file manifest
 
-### 14.1 Particle root: 7 files
+### 14.1 Particle root: 6 files
 
 ```text
 packages/babylon-lite/src/particle/particle-billboard.ts
 packages/babylon-lite/src/particle/particle-buffer.ts
-packages/babylon-lite/src/particle/particle-columns.ts
 packages/babylon-lite/src/particle/particle-scene.ts
 packages/babylon-lite/src/particle/particle-system.ts
 packages/babylon-lite/src/particle/sprite-columns-random.ts

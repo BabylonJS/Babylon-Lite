@@ -1,8 +1,6 @@
 import { randomRange } from "../../../math/random-range.js";
 import { transformCoordinatesToRef, transformNormalToRef } from "../../../math/mat4-transform.js";
 import type { Vec3 } from "../../../math/types.js";
-import { column } from "../../particle-buffer.js";
-import * as C from "../../particle-columns.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
 interface CachedVertexData {
@@ -45,10 +43,10 @@ export const meshShapeBlock: NpeBlockEvaluator = {
         let colorB: Float32Array | null = null;
         let colorA: Float32Array | null = null;
         if (useColors) {
-            colorR = column(buffer, C.COL_COLOR_R, Float32Array);
-            colorG = column(buffer, C.COL_COLOR_G, Float32Array);
-            colorB = column(buffer, C.COL_COLOR_B, Float32Array);
-            colorA = column(buffer, C.COL_COLOR_A, Float32Array);
+            colorR = buffer.colorR;
+            colorG = buffer.colorG;
+            colorB = buffer.colorB;
+            colorA = buffer.colorA;
             system.createColor = null;
         }
 

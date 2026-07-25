@@ -4,8 +4,6 @@ import { SCENE263_NPE_JSON } from "../../../lab/lite/src/shared/scene263-npe";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { startParticleSystem, animateParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
-import { column } from "../../../packages/babylon-lite/src/particle/particle-buffer";
-import * as C from "../../../packages/babylon-lite/src/particle/particle-columns";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
@@ -46,14 +44,14 @@ describe("NPE particle simulation (Sphere emitter) — deterministic parity with
         }
 
         const buffer = system.buffer;
-        const size = column(buffer, C.COL_SIZE, Float32Array);
-        const scaleX = column(buffer, C.COL_SCALE_X, Float32Array);
-        const scaleY = column(buffer, C.COL_SCALE_Y, Float32Array);
-        const angle = column(buffer, C.COL_ANGLE, Float32Array);
-        const colorR = column(buffer, C.COL_COLOR_R, Float32Array);
-        const colorG = column(buffer, C.COL_COLOR_G, Float32Array);
-        const colorB = column(buffer, C.COL_COLOR_B, Float32Array);
-        const colorA = column(buffer, C.COL_COLOR_A, Float32Array);
+        const size = buffer.size;
+        const scaleX = buffer.scaleX;
+        const scaleY = buffer.scaleY;
+        const angle = buffer.angle;
+        const colorR = buffer.colorR;
+        const colorG = buffer.colorG;
+        const colorB = buffer.colorB;
+        const colorA = buffer.colorA;
         const indices = Array.from({ length: buffer.alive }, (_, i) => i).sort((a, b) => buffer.id[a]! - buffer.id[b]!);
         expect(indices.length).toBe(truth.count);
 
