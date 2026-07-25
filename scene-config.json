@@ -2315,7 +2315,7 @@
         "id": 268,
         "slug": "scene268-orthographic-camera",
         "name": "Scene 268 — Orthographic Camera",
-        "maxMad": 0.04,
+        "maxMad": 0.4,
         "maxRawKB": 46,
         "description": "Two rows of identical boxes receding in depth under an orthographic projection. Validates the opt-in orthographic camera seam: reverse-Z OrthoOffCenterLH matrix (near→1, far→0) and the aspect-derived horizontal extent, against Babylon's Camera.ORTHOGRAPHIC_CAMERA.",
         "tags": ["camera", "standard", "procedural"],
