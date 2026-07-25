@@ -11,6 +11,7 @@
  */
 import type { Camera } from "./camera.js";
 import { _installOrthographicProjector } from "./camera.js";
+import { _markWorldMatrixDirty } from "../scene/world-matrix-state.js";
 import { mat4OrthoOffCenterLHToRef } from "../math/mat4-ortho-lh-to-ref.js";
 import type { Mat4Storage } from "../math/types.js";
 
@@ -47,33 +48,70 @@ export interface OrthographicBoundsOptions {
     top?: number | null;
 }
 
-const BOUND_KEYS = ["halfHeight", "left", "right", "bottom", "top"] as const;
+const PLANE_KEYS = ["left", "right", "bottom", "top"] as const;
 
-/** Build the live bounds object. Each field is an accessor that drops the camera's
- *  projection + view-projection cache versions on change — the same invalidation the
- *  camera's own transform setters rely on. Nothing in the shared `getProjectionMatrix`
- *  cache check has to know about orthographic state, so perspective-only scenes are
- *  unaffected. Properties are defined (not merely optional) so animation property
- *  paths like `"ortho.halfHeight"` resolve. */
+/** Invalidate everything downstream of the projection.
+ *
+ *  Clearing `_projVer` / `_vpVer` alone is *not* enough. Per-frame consumers gate their
+ *  GPU uploads on the camera's `worldMatrixVersion` — the forward pass's scene UBO
+ *  (`_writePassSceneUBO`) returns early when camera identity, `worldMatrixVersion`, aspect,
+ *  fog, image processing and environment are all unchanged, and ShaderMaterial / text / CSM
+ *  have equivalent gates. None of those inputs move when only the view volume changes, so a
+ *  steady-state scene would keep rendering with the previously uploaded view-projection even
+ *  though the matrix getters returned a fresh matrix.
+ *
+ *  Bumping the world-matrix version is what makes the change actually reach the GPU, and it
+ *  covers every projection-dependent cache at once instead of teaching each one about
+ *  orthographic state. The camera's transform is untouched; the only cost is recomputing a
+ *  view matrix to the same values on the frame a bound changes.
+ *
+ *  `_markWorldMatrixDirty` is a no-op for a camera that was never tagged with world-matrix
+ *  state (a hand-rolled object satisfying `Camera`), so the cache versions are cleared
+ *  directly as well — that keeps the matrix getters correct in that case too. */
+function invalidateProjection(camera: Camera): void {
+    _markWorldMatrixDirty(camera);
+    camera._projVer = undefined;
+    camera._vpVer = undefined;
+}
+
+/** Build the live bounds object. Each field is an accessor that invalidates the camera's
+ *  projection state on change. Nothing in the shared `getProjectionMatrix` cache check has to
+ *  know about orthographic state, so perspective-only scenes are unaffected. Properties are
+ *  defined (not merely optional) so animation property paths like `"ortho.halfHeight"`
+ *  resolve. `halfHeight` is deliberately a separate `number`-only accessor: the derived
+ *  extents multiply through it, so accepting `null` there would silently produce a degenerate
+ *  (NaN) projection, whereas `null` is meaningful on the four planes. */
 function createOrthographicBounds(camera: Camera, options: OrthographicBoundsOptions): OrthographicBounds {
-    const values: Record<string, number | null> = {
-        halfHeight: options.halfHeight ?? 1,
+    let halfHeight = options.halfHeight ?? 1;
+    const planes: Record<string, number | null> = {
         left: options.left ?? null,
         right: options.right ?? null,
         bottom: options.bottom ?? null,
         top: options.top ?? null,
     };
     const bounds = {} as OrthographicBounds;
-    for (const key of BOUND_KEYS) {
+    Object.defineProperty(bounds, "halfHeight", {
+        get(): number {
+            return halfHeight;
+        },
+        set(v: number) {
+            if (halfHeight !== v) {
+                halfHeight = v;
+                invalidateProjection(camera);
+            }
+        },
+        enumerable: true,
+        configurable: true,
+    });
+    for (const key of PLANE_KEYS) {
         Object.defineProperty(bounds, key, {
             get(): number | null {
-                return values[key]!;
+                return planes[key]!;
             },
             set(v: number | null) {
-                if (values[key] !== v) {
-                    values[key] = v;
-                    camera._projVer = undefined;
-                    camera._vpVer = undefined;
+                if (planes[key] !== v) {
+                    planes[key] = v;
+                    invalidateProjection(camera);
                 }
             },
             enumerable: true,
@@ -102,8 +140,7 @@ export function enableOrthographicCamera(camera: Camera, bounds?: OrthographicBo
     _installOrthographicProjector(writeOrthoProjection);
     const ortho = createOrthographicBounds(camera, bounds ?? {});
     camera.ortho = ortho;
-    camera._projVer = undefined;
-    camera._vpVer = undefined;
+    invalidateProjection(camera);
     return ortho;
 }
 
@@ -118,6 +155,5 @@ export function disableOrthographicCamera(camera: Camera): void {
     p[12] = 0;
     p[13] = 0;
     p[15] = 0;
-    camera._projVer = undefined;
-    camera._vpVer = undefined;
+    invalidateProjection(camera);
 }

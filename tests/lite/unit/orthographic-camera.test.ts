@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getProjectionMatrix, getViewProjectionMatrix, type Camera } from "../../../packages/babylon-lite/src/camera/camera";
+import { createArcRotateCamera, type ArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
 import { disableOrthographicCamera, enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic";
 import { mat4OrthoOffCenterLHToRef } from "../../../packages/babylon-lite/src/math/mat4-ortho-lh-to-ref";
 import type { Mat4, Mat4Storage } from "../../../packages/babylon-lite/src/math/types";
@@ -127,5 +128,99 @@ describe("orthographic projection", () => {
         // Simulate the animation writer's plain assignment.
         (ortho as unknown as Record<string, number>)["halfHeight"] = 5;
         expect(project(getProjectionMatrix(camera, 1), 0, 5, camera.nearPlane)[1]).toBeCloseTo(1, 5);
+    });
+
+    it("keeps halfHeight number-only so the derived extents cannot go NaN", () => {
+        const camera = makeCamera();
+        const ortho = enableOrthographicCamera(camera, { halfHeight: 4 });
+        // `null` is meaningful on the planes (derive from halfHeight) but would multiply
+        // through into a degenerate projection if accepted on halfHeight itself.
+        ortho.left = null;
+        expect(ortho.left).toBeNull();
+        expect(Number.isFinite(ortho.halfHeight)).toBe(true);
+        expect(Number.isFinite(project(getProjectionMatrix(camera, 1.5), 0, 0, camera.nearPlane)[2])).toBe(true);
+    });
+});
+
+/**
+ * Regression coverage for the steady-state upload path.
+ *
+ * Per-frame consumers do not call `getProjectionMatrix` unconditionally — the forward pass's
+ * scene UBO writer gates on `[camera, fog, worldMatrixVersion, aspect, envRotationY, exposure,
+ * contrast, envTextures]` and returns early when they all match the previous frame. Mutating a
+ * view volume moves none of those, so clearing `_projVer` / `_vpVer` alone would leave the GPU
+ * rendering the stale view-projection forever. These tests use a real camera (the version
+ * counter lives in its world-matrix state) and assert on `worldMatrixVersion`, which is the
+ * exact input those gates key on.
+ */
+describe("orthographic projection — steady-state invalidation", () => {
+    /** Mirror of the `_writePassSceneUBO` early-out, reduced to the camera-dependent inputs. */
+    function makeUboGate(camera: ArcRotateCamera, aspect: number) {
+        let lastCamera: unknown = null;
+        let lastVersion = -1;
+        let lastAspect = -1;
+        return function wouldRewriteSceneUbo(): boolean {
+            const wv = camera.worldMatrixVersion;
+            if (lastCamera === camera && lastVersion === wv && lastAspect === aspect) {
+                return false;
+            }
+            lastCamera = camera;
+            lastVersion = wv;
+            lastAspect = aspect;
+            return true;
+        };
+    }
+
+    it("re-uploads the scene UBO when a bound changes after steady state", () => {
+        const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
+        const ortho = enableOrthographicCamera(camera, { halfHeight: 6 });
+        const wouldRewriteSceneUbo = makeUboGate(camera, 16 / 9);
+
+        expect(wouldRewriteSceneUbo(), "first frame always writes").toBe(true);
+        expect(wouldRewriteSceneUbo(), "steady state skips the write").toBe(false);
+
+        ortho.halfHeight = 3;
+        expect(wouldRewriteSceneUbo(), "a zoom change must reach the GPU").toBe(true);
+
+        ortho.left = -20;
+        expect(wouldRewriteSceneUbo(), "an explicit plane must reach the GPU").toBe(true);
+
+        ortho.left = null;
+        expect(wouldRewriteSceneUbo(), "returning a plane to derived must reach the GPU").toBe(true);
+    });
+
+    it("re-uploads the scene UBO when ortho is toggled after steady state", () => {
+        const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
+        const wouldRewriteSceneUbo = makeUboGate(camera, 16 / 9);
+        expect(wouldRewriteSceneUbo()).toBe(true);
+        expect(wouldRewriteSceneUbo()).toBe(false);
+
+        enableOrthographicCamera(camera, { halfHeight: 6 });
+        expect(wouldRewriteSceneUbo(), "runtime enable must reach the GPU").toBe(true);
+        expect(wouldRewriteSceneUbo()).toBe(false);
+
+        disableOrthographicCamera(camera);
+        expect(wouldRewriteSceneUbo(), "runtime disable must reach the GPU").toBe(true);
+    });
+
+    it("does not disturb the camera transform when only the volume changes", () => {
+        const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
+        const ortho = enableOrthographicCamera(camera, { halfHeight: 6 });
+        const before = Array.from(camera.worldMatrix as unknown as Float32Array);
+
+        ortho.halfHeight = 2;
+
+        expect(Array.from(camera.worldMatrix as unknown as Float32Array)).toEqual(before);
+    });
+
+    it("does not bump the version when a bound is assigned its current value", () => {
+        const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
+        const ortho = enableOrthographicCamera(camera, { halfHeight: 6 });
+        const version = camera.worldMatrixVersion;
+
+        ortho.halfHeight = 6;
+        ortho.left = null;
+
+        expect(camera.worldMatrixVersion).toBe(version);
     });
 });
