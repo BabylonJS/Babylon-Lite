@@ -136,15 +136,18 @@ function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, 
         }
     };
 
+    const position = new ObservableVec3(px, py, pz, onWmDirty);
     const rq = new ObservableQuat(qx, qy, qz, qw, onWmDirty);
+    const rotation = createEulerProxy(rq);
+    const scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
 
     const node: SceneNode = {
         name,
         children: [],
-        position: new ObservableVec3(px, py, pz, onWmDirty),
+        position,
         rotationQuaternion: rq,
-        rotation: createEulerProxy(rq),
-        scaling: new ObservableVec3(sx, sy, sz, onWmDirty),
+        rotation,
+        scaling,
         get parent() {
             return wm.parent;
         },

@@ -1,6 +1,6 @@
 {
-  "rawKB": 97.3,
-  "gzipKB": 40.2,
+  "rawKB": 97.4,
+  "gzipKB": 40.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene37-generate-mipmaps-DaBvcePx.js",
@@ -22,5 +22,5 @@
     "scene37-uv-transform-fragment-B8ijWmAK.js",
     "scene37.js"
   ],
-  "rawBytes": 99670
+  "rawBytes": 99690
 }

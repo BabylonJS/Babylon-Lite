@@ -170,20 +170,20 @@ export interface Mesh extends SceneNode {
     _cpuIndexFormat?: GPUIndexFormat;
 }
 
-type MutableMesh = { -readonly [P in keyof Mesh]: Mesh[P] };
-
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.
  *  Used by all mesh creation paths (factories, loaders). */
-export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): void {
+export function initMeshTransform(partialMesh: Partial<Mesh> & { _flatNormal?: boolean }, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): Mesh {
     const wm = createWorldMatrixState(() => composeTrsLocalMatrix(mesh.position, mesh.rotationQuaternion, mesh.scaling));
     const onWmDirty = () => wm.markLocalDirty();
 
     const [iqx, iqy, iqz, iqw] = eulerToQuat(rx, ry, rz);
     const rq = new ObservableQuat(iqx, iqy, iqz, iqw, onWmDirty);
-    (mesh as MutableMesh).rotationQuaternion = rq;
-    (mesh as MutableMesh).rotation = createEulerProxy(rq);
-    (mesh as MutableMesh).position = new ObservableVec3(px, py, pz, onWmDirty);
-    (mesh as MutableMesh).scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
+    const rotationQuaternion = rq;
+    const rotation = createEulerProxy(rq);
+    const position = new ObservableVec3(px, py, pz, onWmDirty);
+    const scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
+
+    const mesh = { ...partialMesh, position, rotationQuaternion, rotation, scaling } as Mesh;
 
     if (!(mesh as unknown as Record<string, unknown>).children) {
         (mesh as unknown as Record<string, unknown>).children = [];
@@ -214,6 +214,7 @@ export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry
         enumerable: false,
     });
     attachWorldMatrixState(mesh, wm);
+    return mesh;
 }
 
 // ─── GPU Geometry Upload ─────────────────────────────────────────────

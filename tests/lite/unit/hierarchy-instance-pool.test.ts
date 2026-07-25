@@ -16,13 +16,12 @@ import { mat4Translation } from "../../../packages/babylon-lite/src/math/mat4-tr
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 
 function makeMesh(name: string): Mesh {
-    const mesh = {
+    const mesh = initMeshTransform({
         name,
-        material: {},
+        material: {} as Mesh["material"],
         receiveShadows: false,
-        _gpu: {},
-    } as unknown as Mesh;
-    initMeshTransform(mesh);
+        _gpu: {} as Mesh["_gpu"],
+    });
     return mesh;
 }
 

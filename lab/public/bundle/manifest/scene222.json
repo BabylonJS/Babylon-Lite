@@ -1,5 +1,5 @@
 {
-  "rawKB": 112.6,
+  "rawKB": 112.5,
   "gzipKB": 42.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -12,5 +12,5 @@
     "scene222-uniform-copy-batch-DrEP8HMR.js",
     "scene222.js"
   ],
-  "rawBytes": 115278
+  "rawBytes": 115235
 }

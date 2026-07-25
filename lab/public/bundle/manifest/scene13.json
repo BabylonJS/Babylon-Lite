@@ -1,6 +1,6 @@
 {
   "rawKB": 84.1,
-  "gzipKB": 35,
+  "gzipKB": 35.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene13-background-ground-ZOdeTpEl.js",
@@ -14,5 +14,5 @@
     "scene13-wgsl-helpers-BgB2AJrF.js",
     "scene13.js"
   ],
-  "rawBytes": 86132
+  "rawBytes": 86152
 }
