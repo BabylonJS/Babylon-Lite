@@ -294,9 +294,9 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
     const casterVersion = casterVersionSum(casterMeshes);
     const lightVersion = sg._light.worldMatrixVersion;
     const camVersion = _cameraChangeKey(camera);
-    // Effective aspect is part of the key: a viewport or canvas resize changes the camera
+    // Effective aspect is part of the key: a viewport or surface resize changes the camera
     // frustum the cascades are fit to while every version above stays put.
-    const camAspect = getEffectiveAspectRatio(camera, engine.canvas.width, engine.canvas.height);
+    const camAspect = csmCameraAspect(state._scene, camera);
     if (
         !cfg._forceRefreshEveryFrame &&
         casterVersion === state._lastCasterVersion &&
@@ -307,7 +307,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
         return 0;
     }
 
-    const cascades = _computeCsmCascades(engine, camera, sg._light as DirectionalLight, cfg, casterMeshes);
+    const cascades = _computeCsmCascades(state._scene, camera, sg._light as DirectionalLight, cfg, casterMeshes);
 
     _writeCsmUbo(state._uboData, cascades, cfg);
     sg._version++;
@@ -394,7 +394,19 @@ function orthoOffCenterLH(l: number, r: number, b: number, t: number, n: number,
     return m;
 }
 
-function _computeCsmCascades(engine: EngineContext, camera: Camera, light: DirectionalLight, cfg: CsmConfig, casterMeshes: readonly Mesh[]): CsmCascades {
+/** Effective aspect of the surface the scene actually renders into.
+ *
+ *  Not `engine.canvas`: a scene is bound to `scene.surface` (an `EngineContext` is itself a
+ *  `SurfaceContext`, so that is the canvas for the common single-surface case, but an
+ *  auxiliary surface created via `createSurface` has its own swapchain size). Fitting
+ *  cascades to the canvas would use a frustum the scene never draws. `getEffectiveAspectRatio`
+ *  additionally folds in the camera's normalized viewport, matching `_writePassSceneUBO`. */
+function csmCameraAspect(scene: SceneContext, camera: Camera): number {
+    const rt = scene.surface.scRT;
+    return getEffectiveAspectRatio(camera, rt._width, rt._height);
+}
+
+function _computeCsmCascades(scene: SceneContext, camera: Camera, light: DirectionalLight, cfg: CsmConfig, casterMeshes: readonly Mesh[]): CsmCascades {
     const near = camera.nearPlane;
     const far = camera.farPlane;
     const cameraRange = far - near;
@@ -434,9 +446,7 @@ function _computeCsmCascades(engine: EngineContext, camera: Camera, light: Direc
     }
 
     // Effective aspect, not the raw canvas ratio: a camera with a normalized viewport renders
-    // through a different projection, and cascades fit to the camera frustum must match the
-    // frustum the frame actually draws (the forward pass folds the viewport in the same way).
-    const aspect = getEffectiveAspectRatio(camera, engine.canvas.width, engine.canvas.height);
+    const aspect = csmCameraAspect(scene, camera);
     const vp = getViewProjectionMatrix(camera, aspect) as unknown as ArrayLike<number>;
     const inv = mat4Invert(vp as never);
     const invViewProj: ArrayLike<number> = (inv as unknown as ArrayLike<number>) ?? vp;
