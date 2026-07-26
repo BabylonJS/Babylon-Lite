@@ -593,7 +593,11 @@ export function _writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: 
     const fog = scene.fog;
     const img = scene.imageProcessing;
     const envRotationY = scene.envRotationY || 0;
-    const wv = camera.worldMatrixVersion;
+    // Change key = camera transform version + projection revision. Inlined rather than
+    // routed through `_cameraChangeKey` so simple scenes that pull in no projection-aware
+    // feature module do not carry that helper's definition: this module is in every bundle.
+    // See `_cameraChangeKey` in camera.ts for why the two counters are summed.
+    const wv = camera.worldMatrixVersion + (camera._projRev ?? 0);
     // `envTextures` identity is tracked so an environment loaded (or swapped) AFTER the scene has reached
     // steady state invalidates this cache. Its spherical-harmonics irradiance and `lodGenerationScale` are
     // written into the scene UBO below (via `_packSceneUniforms` + the env-SH contributor); without tracking

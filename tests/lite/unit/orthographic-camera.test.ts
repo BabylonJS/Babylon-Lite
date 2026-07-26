@@ -1,6 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { getProjectionMatrix, getViewProjectionMatrix, type Camera } from "../../../packages/babylon-lite/src/camera/camera";
-import { createArcRotateCamera, type ArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
+import { getProjectionMatrix, getViewProjectionMatrix, _cameraChangeKey, type Camera } from "../../../packages/babylon-lite/src/camera/camera";
+import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
+import { _writePassSceneUBO, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+
+const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & { GPUBufferUsage?: { UNIFORM: number; COPY_DST: number } };
+gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
+
+/** Mock engine whose `queue.writeBuffer` increments `writeCount.n`, so a test can observe
+ *  exactly when the scene UBO is re-packed. Mirrors `render-task-scene-ubo-guard.test.ts`. */
+function makeMockEngine(writeCount: { n: number }): EngineContext {
+    const device = {
+        createBuffer: (descriptor: GPUBufferDescriptor) => ({ descriptor, destroy: () => undefined }) as unknown as GPUBuffer,
+        createBindGroupLayout: (d: GPUBindGroupLayoutDescriptor) => d as unknown as GPUBindGroupLayout,
+        createBindGroup: (d: GPUBindGroupDescriptor) => d as unknown as GPUBindGroup,
+        queue: {
+            writeBuffer: () => {
+                writeCount.n++;
+            },
+        },
+    } as unknown as GPUDevice;
+
+    const scRT = {
+        _colorTexture: {},
+        _colorView: {},
+        _depthTexture: null,
+        _depthView: null,
+        _descriptor: { format: "bgra8unorm", samples: 1, size: { width: 800, height: 600 } },
+        _width: 800,
+        _height: 600,
+        _eager: true,
+    } as unknown as RenderTarget;
+
+    const eng = {
+        canvas: { width: 800, height: 600 } as HTMLCanvasElement,
+        msaaSamples: 1,
+        useFloatingOrigin: false,
+        useHighPrecisionMatrix: false,
+        format: "bgra8unorm",
+        _device: device,
+        scRT,
+    } as unknown as EngineContext;
+    Object.assign(eng, { engine: eng, surfaces: [eng], _surfaces: [eng] });
+    return eng;
+}
 import { disableOrthographicCamera, enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic";
 import { mat4OrthoOffCenterLHToRef } from "../../../packages/babylon-lite/src/math/mat4-ortho-lh-to-ref";
 import type { Mat4, Mat4Storage } from "../../../packages/babylon-lite/src/math/types";
@@ -35,9 +81,16 @@ function project(m: Mat4, x: number, y: number, z: number): [number, number, num
 
 describe("orthographic projection", () => {
     it("maps the view volume corners to NDC with reverse-Z depth", () => {
-        const m = new Float32Array(16) as unknown as Mat4Storage;
+        // Prefilled with sentinels: the writer must overwrite all 16 elements, so a stale
+        // value surviving anywhere is a failure. A zeroed array would hide that.
+        const m = new Float32Array(16).fill(-999) as unknown as Mat4Storage;
         mat4OrthoOffCenterLHToRef(m, -8, 8, -4.5, 4.5, 1, 101);
         const p = m as unknown as Mat4;
+
+        expect(
+            Array.from(m as unknown as Float32Array).some((v) => v === -999),
+            "every element must be written"
+        ).toBe(false);
 
         // near -> 1, far -> 0 (reverse-Z, matching mat4PerspectiveLHToRef).
         expect(project(p, 0, 0, 1)[2]).toBeCloseTo(1, 5);
@@ -146,81 +199,94 @@ describe("orthographic projection", () => {
  * Regression coverage for the steady-state upload path.
  *
  * Per-frame consumers do not call `getProjectionMatrix` unconditionally — the forward pass's
- * scene UBO writer gates on `[camera, fog, worldMatrixVersion, aspect, envRotationY, exposure,
- * contrast, envTextures]` and returns early when they all match the previous frame. Mutating a
- * view volume moves none of those, so clearing `_projVer` / `_vpVer` alone would leave the GPU
- * rendering the stale view-projection forever. These tests use a real camera (the version
- * counter lives in its world-matrix state) and assert on `worldMatrixVersion`, which is the
- * exact input those gates key on.
+ * scene UBO writer gates on `[camera, fog, cameraChangeKey, aspect, envRotationY, exposure,
+ * contrast, envTextures]` and returns early when they all match the previous frame. The
+ * camera transform does not move when a view volume changes, so clearing `_projVer` /
+ * `_vpVer` alone would leave the GPU rendering the stale view-projection forever.
+ *
+ * These drive the REAL `_writePassSceneUBO` against a mock device that counts
+ * `queue.writeBuffer` calls, so they also fail if someone drops the projection revision
+ * from the gate's key set — which a hand-written mirror of the early-out would not catch.
  */
-describe("orthographic projection — steady-state invalidation", () => {
-    /** Mirror of the `_writePassSceneUBO` early-out, reduced to the camera-dependent inputs. */
-    function makeUboGate(camera: ArcRotateCamera, aspect: number) {
-        let lastCamera: unknown = null;
-        let lastVersion = -1;
-        let lastAspect = -1;
-        return function wouldRewriteSceneUbo(): boolean {
-            const wv = camera.worldMatrixVersion;
-            if (lastCamera === camera && lastVersion === wv && lastAspect === aspect) {
-                return false;
-            }
-            lastCamera = camera;
-            lastVersion = wv;
-            lastAspect = aspect;
-            return true;
-        };
+describe("orthographic projection — steady-state scene UBO uploads", () => {
+    function setup() {
+        const writeCount = { n: 0 };
+        const engine = makeMockEngine(writeCount);
+        const scene = createSceneContext(engine) as SceneContext;
+        const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
+        scene.camera = camera;
+        const task = scene._frameGraph._tasks.find((t): t is RenderTask => "_su" in t)!;
+        writeCount.n = 0;
+        const write = () => _writePassSceneUBO(task, engine, scene, camera);
+        return { camera, write, writeCount };
     }
 
-    it("re-uploads the scene UBO when a bound changes after steady state", () => {
-        const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
+    it("re-uploads when a bound changes after steady state", () => {
+        const { camera, write, writeCount } = setup();
         const ortho = enableOrthographicCamera(camera, { halfHeight: 6 });
-        const wouldRewriteSceneUbo = makeUboGate(camera, 16 / 9);
 
-        expect(wouldRewriteSceneUbo(), "first frame always writes").toBe(true);
-        expect(wouldRewriteSceneUbo(), "steady state skips the write").toBe(false);
+        write();
+        expect(writeCount.n, "cold call packs once").toBe(1);
+        write();
+        expect(writeCount.n, "steady state skips the GPU write").toBe(1);
 
         ortho.halfHeight = 3;
-        expect(wouldRewriteSceneUbo(), "a zoom change must reach the GPU").toBe(true);
+        write();
+        expect(writeCount.n, "a zoom change must reach the GPU").toBe(2);
 
         ortho.left = -20;
-        expect(wouldRewriteSceneUbo(), "an explicit plane must reach the GPU").toBe(true);
+        write();
+        expect(writeCount.n, "an explicit plane must reach the GPU").toBe(3);
 
         ortho.left = null;
-        expect(wouldRewriteSceneUbo(), "returning a plane to derived must reach the GPU").toBe(true);
+        write();
+        expect(writeCount.n, "returning a plane to derived must reach the GPU").toBe(4);
+
+        write();
+        expect(writeCount.n, "settles back to steady state").toBe(4);
     });
 
-    it("re-uploads the scene UBO when ortho is toggled after steady state", () => {
-        const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
-        const wouldRewriteSceneUbo = makeUboGate(camera, 16 / 9);
-        expect(wouldRewriteSceneUbo()).toBe(true);
-        expect(wouldRewriteSceneUbo()).toBe(false);
+    it("re-uploads when ortho is toggled after steady state", () => {
+        const { camera, write, writeCount } = setup();
+        write();
+        write();
+        expect(writeCount.n).toBe(1);
 
         enableOrthographicCamera(camera, { halfHeight: 6 });
-        expect(wouldRewriteSceneUbo(), "runtime enable must reach the GPU").toBe(true);
-        expect(wouldRewriteSceneUbo()).toBe(false);
+        write();
+        expect(writeCount.n, "runtime enable must reach the GPU").toBe(2);
 
         disableOrthographicCamera(camera);
-        expect(wouldRewriteSceneUbo(), "runtime disable must reach the GPU").toBe(true);
+        write();
+        expect(writeCount.n, "runtime disable must reach the GPU").toBe(3);
     });
 
-    it("does not disturb the camera transform when only the volume changes", () => {
-        const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
+    it("does not re-upload when a bound is assigned its current value", () => {
+        const { camera, write, writeCount } = setup();
         const ortho = enableOrthographicCamera(camera, { halfHeight: 6 });
-        const before = Array.from(camera.worldMatrix as unknown as Float32Array);
-
-        ortho.halfHeight = 2;
-
-        expect(Array.from(camera.worldMatrix as unknown as Float32Array)).toEqual(before);
-    });
-
-    it("does not bump the version when a bound is assigned its current value", () => {
-        const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
-        const ortho = enableOrthographicCamera(camera, { halfHeight: 6 });
-        const version = camera.worldMatrixVersion;
+        write();
+        expect(writeCount.n).toBe(1);
 
         ortho.halfHeight = 6;
         ortho.left = null;
+        write();
+        expect(writeCount.n).toBe(1);
+    });
 
-        expect(camera.worldMatrixVersion).toBe(version);
+    it("signals projection changes without faking camera motion", () => {
+        const { camera } = setup();
+        const ortho = enableOrthographicCamera(camera, { halfHeight: 6 });
+        const transformVersion = camera.worldMatrixVersion;
+        const world = Array.from(camera.worldMatrix as unknown as Float32Array);
+        const key = _cameraChangeKey(camera);
+
+        ortho.halfHeight = 2;
+
+        // The change key must move so projection consumers re-upload...
+        expect(_cameraChangeKey(camera)).not.toBe(key);
+        // ...but the transform must not, or the camera's children would be invalidated and
+        // floating origin (`wrapRenderableForFO`) would rebase every renderable.
+        expect(camera.worldMatrixVersion).toBe(transformVersion);
+        expect(Array.from(camera.worldMatrix as unknown as Float32Array)).toEqual(world);
     });
 });

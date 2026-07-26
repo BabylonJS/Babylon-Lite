@@ -47,6 +47,22 @@ export interface Camera {
      *  leave the field undefined and `getViewMatrix` produces a standard view
      *  matrix. */
     _useFloatingOrigin?: boolean;
+    /** @internal Monotonic counter bumped whenever the *projection* changes
+     *  independently of the camera transform — today only by the orthographic
+     *  feature module (`enableOrthographicCamera` / `disableOrthographicCamera`
+     *  and every `ortho` bounds setter).
+     *
+     *  Projection-dependent per-frame consumers gate their GPU uploads on the
+     *  camera's `worldMatrixVersion`, which does not move when only the view
+     *  volume does; they fold this counter into the same key so the change
+     *  reaches the GPU. It is deliberately separate from `worldMatrixVersion`:
+     *  a projection change must NOT be mistaken for camera motion, which would
+     *  additionally invalidate the camera's children and — under floating
+     *  origin — retrigger origin rebasing across every renderable.
+     *
+     *  `undefined` on any camera that never used a non-perspective projection,
+     *  so consumer comparisons fold to `undefined === undefined`. */
+    _projRev?: number;
     /** Live orthographic view-volume extents, installed by `enableOrthographicCamera`
      *  and mutable/animatable thereafter. Null or undefined means the camera projects
      *  perspectively through `fov`. */
@@ -114,6 +130,27 @@ let _orthoProjector: ((camera: Camera, aspectRatio: number, out: Mat4Storage) =>
 /** @internal Install orthographic projection support (called by `enableOrthographicCamera`). */
 export function _installOrthographicProjector(write: (camera: Camera, aspectRatio: number, out: Mat4Storage) => void): void {
     _orthoProjector = write;
+}
+
+/** @internal Change key for projection-dependent per-frame consumers.
+ *
+ *  Most consumers gate their GPU uploads on `camera.worldMatrixVersion`, which does not
+ *  move when only the view volume changes (orthographic bounds), so they would keep
+ *  rendering a stale view-projection. They key on this instead.
+ *
+ *  Both terms are monotonically non-decreasing, so the sum is too and any change in
+ *  either strictly increases it — it cannot alias. (Same version-summing idiom as
+ *  `shadow-base.ts` and `gltf-feature-lights-punctual.ts`.) This relies on the `Camera`
+ *  contract that `worldMatrixVersion` never decreases; every in-engine camera satisfies
+ *  it (the counter only ever increments, including across reparenting), and a custom
+ *  `Camera` implementation must too or a change can be missed.
+ *
+ *  Deliberately NOT folded into `worldMatrixVersion` itself: a projection change must
+ *  not be mistaken for camera motion, which would invalidate the camera's children and,
+ *  under floating origin, retrigger origin rebasing across every renderable
+ *  (`wrapRenderableForFO`). Those consumers keep reading `worldMatrixVersion`. */
+export function _cameraChangeKey(camera: Camera): number {
+    return camera.worldMatrixVersion + (camera._projRev ?? 0);
 }
 
 /** Compute the projection matrix for a camera. Cached per worldMatrixVersion + aspect. */

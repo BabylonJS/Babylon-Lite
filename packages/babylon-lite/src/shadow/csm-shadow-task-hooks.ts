@@ -16,7 +16,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
-import { getViewProjectionMatrix } from "../camera/camera.js";
+import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import { buildLightViewMatrix, casterVersionSum, createShadowCamera, multiply4x4, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
@@ -74,6 +74,8 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _lastLightVersion: number;
     /** @internal */
     _lastCamVersion: number;
+    /** @internal Effective aspect ratio the cascades were last fit against. */
+    _lastCamAspect: number;
     /** @internal */
     _uboData: Float32Array;
     /** @internal */
@@ -271,6 +273,7 @@ export function ensureCsmShadowTaskState(
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastCamVersion: -1,
+        _lastCamAspect: -1,
         _uboData: new Float32Array(80),
         _casterMeshes: casterMeshes,
         _renderableVersion: scene._renderableVersion,
@@ -290,8 +293,17 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
     }
     const casterVersion = casterVersionSum(casterMeshes);
     const lightVersion = sg._light.worldMatrixVersion;
-    const camVersion = camera.worldMatrixVersion;
-    if (!cfg._forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion && camVersion === state._lastCamVersion) {
+    const camVersion = _cameraChangeKey(camera);
+    // Effective aspect is part of the key: a viewport or canvas resize changes the camera
+    // frustum the cascades are fit to while every version above stays put.
+    const camAspect = getEffectiveAspectRatio(camera, engine.canvas.width, engine.canvas.height);
+    if (
+        !cfg._forceRefreshEveryFrame &&
+        casterVersion === state._lastCasterVersion &&
+        lightVersion === state._lastLightVersion &&
+        camVersion === state._lastCamVersion &&
+        camAspect === state._lastCamAspect
+    ) {
         return 0;
     }
 
@@ -326,6 +338,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
     state._lastCasterVersion = casterVersion;
     state._lastLightVersion = lightVersion;
     state._lastCamVersion = camVersion;
+    state._lastCamAspect = camAspect;
     return state._task.execute?.() ?? 0;
 }
 
@@ -420,7 +433,10 @@ function _computeCsmCascades(engine: EngineContext, camera: Camera, light: Direc
         dz = 1e-13;
     }
 
-    const aspect = engine.canvas.width / engine.canvas.height;
+    // Effective aspect, not the raw canvas ratio: a camera with a normalized viewport renders
+    // through a different projection, and cascades fit to the camera frustum must match the
+    // frustum the frame actually draws (the forward pass folds the viewport in the same way).
+    const aspect = getEffectiveAspectRatio(camera, engine.canvas.width, engine.canvas.height);
     const vp = getViewProjectionMatrix(camera, aspect) as unknown as ArrayLike<number>;
     const inv = mat4Invert(vp as never);
     const invViewProj: ArrayLike<number> = (inv as unknown as ArrayLike<number>) ?? vp;

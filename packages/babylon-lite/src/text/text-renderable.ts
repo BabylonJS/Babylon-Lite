@@ -14,7 +14,7 @@ import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mat4, Mat4Storage, Vec3 } from "../math/types.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
-import { getViewProjectionMatrix, getEffectiveAspectRatio } from "../camera/camera.js";
+import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
@@ -250,7 +250,7 @@ function updateTextRenderable(r: TextRenderable, engine: EngineContext, gpu: Tex
     const camera = context._camera ?? null;
     if (camera) {
         const aspect = getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight);
-        const camVer = camera.worldMatrixVersion;
+        const camVer = _cameraChangeKey(camera);
         if (r._wmDirty || gpu.uploadedCameraVersion !== camVer || gpu.uploadedAspect !== aspect) {
             const vp = getViewProjectionMatrix(camera, aspect) as unknown as Float32Array;
             const wm = r._worldMatrix();

@@ -1895,7 +1895,7 @@
         "slug": "scene215-cascaded-shadows-pbr",
         "name": "Scene 215 — Cascaded Shadow Maps (PBR)",
         "maxMad": 0.4,
-        "maxRawKB": 80.3,
+        "maxRawKB": 80.5,
         "description": "PBR counterpart of scene214: a deterministic field of 200 green PBR torus-knot casters drops cascaded shadows onto a large PBR ground receiver, lit by a single DirectionalLight with a 4-cascade CascadedShadowGenerator (PCF5). Proves CSM works on PBR receivers, not just Standard; a seeded PRNG matches the Babylon.js CSM oracle.",
         "tags": ["shadows", "csm", "pbr", "directional"],
         "skipPerf": true
