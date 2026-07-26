@@ -203,7 +203,7 @@ the interactive physics.
 ## Dependencies
 
 `camera` (`Camera`, `getViewProjectionMatrix`), `scene/world-matrix-state`,
-`scene/parentable`, `math/_matrix-allocator`, `math/mat4-look-at-lh`,
+`scene/parentable`, `math/_matrix-allocator`, `math/mat4-look-at-world-lh`,
 `math/mat4-invert`, `picking/ray` (`createPickingRay`), `scene/scene-core`
 (`SceneContext` type + `_beforeRender`).
 

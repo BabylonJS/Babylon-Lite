@@ -39,7 +39,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { Material } from "../material/material.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
-import { getViewMatrix } from "../camera/camera.js";
+import { getViewMatrix, _cameraChangeKey } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { _packSceneUniforms } from "./scene-uniforms-pack.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
@@ -593,7 +593,9 @@ export function _writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: 
     const fog = scene.fog;
     const img = scene.imageProcessing;
     const envRotationY = scene.envRotationY || 0;
-    const wv = camera.worldMatrixVersion;
+    // Change key = camera transform version + projection revision, the latter covering both
+    // `fov` / `nearPlane` / `farPlane` writes and orthographic bounds. See `_cameraChangeKey`.
+    const wv = _cameraChangeKey(camera);
     // `envTextures` identity is tracked so an environment loaded (or swapped) AFTER the scene has reached
     // steady state invalidates this cache. Its spherical-harmonics irradiance and `lodGenerationScale` are
     // written into the scene UBO below (via `_packSceneUniforms` + the env-SH contributor); without tracking

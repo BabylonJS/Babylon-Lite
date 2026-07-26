@@ -11,7 +11,6 @@
  */
 import type { Camera } from "./camera.js";
 import { _installOrthographicProjector } from "./camera.js";
-import { _markWorldMatrixDirty } from "../scene/world-matrix-state.js";
 import { mat4OrthoOffCenterLHToRef } from "../math/mat4-ortho-lh-to-ref.js";
 import type { Mat4Storage } from "../math/types.js";
 
@@ -52,26 +51,25 @@ const PLANE_KEYS = ["left", "right", "bottom", "top"] as const;
 
 /** Invalidate everything downstream of the projection.
  *
- *  Clearing `_projVer` / `_vpVer` alone is *not* enough. Per-frame consumers gate their
- *  GPU uploads on the camera's `worldMatrixVersion` — the forward pass's scene UBO
- *  (`_writePassSceneUBO`) returns early when camera identity, `worldMatrixVersion`, aspect,
- *  fog, image processing and environment are all unchanged, and ShaderMaterial / text / CSM
- *  have equivalent gates. None of those inputs move when only the view volume changes, so a
- *  steady-state scene would keep rendering with the previously uploaded view-projection even
- *  though the matrix getters returned a fresh matrix.
+ *  Per-frame consumers gate their GPU uploads on a camera change key: the forward pass's
+ *  scene UBO (`_writePassSceneUBO`) returns early when camera identity, that key, aspect,
+ *  fog, image processing and environment are all unchanged — ShaderMaterial, text, clustered
+ *  lighting, TAA and CSM have equivalent gates, and the `camera.ts` matrix caches key on the
+ *  same value. The camera transform does not move when only the view volume changes, so
+ *  without this bump a steady-state scene would keep rendering the previously uploaded
+ *  view-projection.
  *
- *  Bumping the world-matrix version is what makes the change actually reach the GPU, and it
- *  covers every projection-dependent cache at once instead of teaching each one about
- *  orthographic state. The camera's transform is untouched; the only cost is recomputing a
- *  view matrix to the same values on the frame a bound changes.
+ *  Bumping `_projRev` is what makes the change reach the GPU: `_cameraChangeKey` folds it
+ *  into that key. It is deliberately a *separate* counter from `worldMatrixVersion` — marking
+ *  the camera transform dirty would additionally invalidate the camera's children and, under
+ *  floating origin, retrigger origin rebasing across every renderable (`wrapRenderableForFO`),
+ *  none of which a view-volume change warrants.
  *
- *  `_markWorldMatrixDirty` is a no-op for a camera that was never tagged with world-matrix
- *  state (a hand-rolled object satisfying `Camera`), so the cache versions are cleared
- *  directly as well — that keeps the matrix getters correct in that case too. */
+ *  Bounds are pushed here rather than polled by `_cameraChangeKey` (as `fov` / `nearPlane` /
+ *  `farPlane` are) because this module already owns accessors for them — pushing costs the
+ *  poll nothing and is exact. */
 function invalidateProjection(camera: Camera): void {
-    _markWorldMatrixDirty(camera);
-    camera._projVer = undefined;
-    camera._vpVer = undefined;
+    camera._projRev = (camera._projRev ?? 0) + 1;
 }
 
 /** Build the live bounds object. Each field is an accessor that invalidates the camera's
