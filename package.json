@@ -7,7 +7,7 @@
         "node": "^20.19.0 || ^22.13.0 || >=24"
     },
     "scripts": {
-        "dev": "pnpm --filter @babylon-lite/parity-harness dev",
+        "dev": "pnpm dev:lab",
         "dev:playground": "pnpm --filter @babylon-lite/playground dev",
         "dev:playground:watch": "pnpm --filter @babylon-lite/playground dev:watch",
         "build:playground": "pnpm --filter @babylon-lite/playground build",

@@ -31,6 +31,7 @@ Open **http://localhost:5174** to browse the scene gallery.
 
 | Command                    | Description                                                         |
 | -------------------------- | ------------------------------------------------------------------- |
+| `pnpm dev`                 | Alias for `pnpm dev:lab`                                            |
 | `pnpm dev:lab`             | Build bundle scenes + start the lab dev server                      |
 | `pnpm dev:playground`      | Start the Lite Playground dev server (http://localhost:5175)        |
 | `pnpm build:playground`    | Build the Lite Playground into `playground/dist`                    |
