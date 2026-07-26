@@ -181,16 +181,14 @@ onBeforeRender(scene, () => {
 });
 ```
 
-Each field is an accessor that invalidates the camera's projection state on change. That matters because the projection cache is keyed on `worldMatrixVersion` + aspect ratio — neither changes when only the extents do, so without the accessor the new bounds would not be picked up until the camera moved.
+Each field is an accessor that invalidates the camera's projection state on change. That matters because the projection cache is keyed on `_cameraChangeKey` + aspect ratio — neither moves when only the extents do, so without the accessor the new bounds would not be picked up until the camera moved.
 
 Invalidation goes through a dedicated projection revision, **not** merely clearing `_projVer` / `_vpVer` and **not** by marking the camera transform dirty. Clearing the matrix caches alone fixes the getters but not the frame: per-frame consumers gate their GPU uploads on a camera change key, and the forward pass's `_writePassSceneUBO` returns early while `[camera, fog, changeKey, aspect, envRotationY, exposure, contrast, envTextures]` are unchanged (ShaderMaterial, text, clustered lighting, TAA and CSM have equivalent gates). Changing a view volume moves none of those, so a steady-state scene would keep rendering the previously uploaded view-projection even though `getProjectionMatrix` returned a fresh matrix.
 
-Every bounds setter therefore bumps `camera._projRev`, and projection-dependent consumers key on `_cameraChangeKey(camera)`:
+Every bounds setter therefore bumps `camera._projRev`, and projection-dependent consumers key on `_cameraChangeKey(camera)`, which sums it with the transform version (and also polls `fov` / `nearPlane` / `farPlane` — see **Projection Change Detection**):
 
 ```typescript
-export function _cameraChangeKey(camera: Camera): number {
-    return camera.worldMatrixVersion + (camera._projRev ?? 0);
-}
+camera.worldMatrixVersion + (camera._projRev ?? 0);
 ```
 
 Both terms are monotonically non-decreasing, so the sum is too and any change in either strictly increases it — it cannot alias. (Same version-summing idiom as `shadow-base.ts` and `gltf-feature-lights-punctual.ts`.)
@@ -261,7 +259,7 @@ The local world matrix is: transpose(upper 3×3 of view) + eye position.
 
 ### FreeCamera Position & Orientation
 
-The FreeCamera's local world matrix is computed via `mat4LookAtLH(position, target, Vec3Up)`, then extracting the camera-to-world rotation (transpose of upper 3×3) plus position.
+The FreeCamera's local world matrix is computed via `mat4LookAtWorldLHToRef(_localMat, position, target, Vec3Up)` — see **World Matrix (all cameras)** below.
 
 Initial yaw/pitch are derived from the position→target direction:
 
@@ -282,15 +280,45 @@ _pitch = atan2(dy, sqrt(dx² + dz²))
 
 Both cameras use the same world-matrix-to-view inversion (described above). This is equivalent to `mat4LookAtLH(eye, target, Vec3Up)` for their respective eye/target values.
 
+### World Matrix (all cameras)
+
+A camera's local matrix is its **camera-to-world** matrix — cameras parent like any other node, and `getViewMatrix` inverts it per frame. `mat4LookAtWorldLHToRef(out, eye, target, up)` writes it directly as the columns `[xAxis, yAxis, zAxis, eye]`, where the basis is the same one `mat4LookAtLH` derives:
+
+```
+zAxis = normalize(target - eye)          // left-handed: +Z looks at the target
+xAxis = normalize(cross(up, zAxis))
+yAxis = cross(zAxis, xAxis)
+```
+
+All three factories (`ArcRotate`, `Free`, `Geospatial`) call it. They previously built a **view** matrix with `mat4LookAtLH` and inverted it back by hand — allocating a `Float32Array`, computing a translation column of three dot products that was immediately overwritten with the eye, then transposing the rotation — with the 17-line transpose block copy-pasted into each factory. Degenerate input (eye on target, or the view direction parallel to `up`) leaves an identity rotation with the eye translation, matching `mat4LookAtLH`'s identity fallback exactly.
+
 ### Projection Matrix
 
 Both cameras: `mat4PerspectiveLH(fov, aspectRatio, nearPlane, farPlane)` — left-handed perspective with reverse-Z zero-to-one depth (`nearPlane` maps to `1`, `farPlane` maps to `0`).
+
+### Projection Change Detection
+
+`fov`, `nearPlane` and `farPlane` are plain writable fields on a plain-data camera (pillar 4b′), so a write notifies nobody. Both the matrix caches in `camera.ts` and every projection-dependent per-frame consumer key on `_cameraChangeKey`, which **polls those three by value** and folds any drift into `camera._projRev`:
+
+```typescript
+export function _cameraChangeKey(camera: Camera): number {
+    if (camera._projFov !== camera.fov || camera._projNear !== camera.nearPlane || camera._projFar !== camera.farPlane) {
+        camera._projFov = camera.fov;
+        camera._projNear = camera.nearPlane;
+        camera._projFar = camera.farPlane;
+        camera._projRev = (camera._projRev ?? 0) + 1;
+    }
+    return camera.worldMatrixVersion + (camera._projRev ?? 0);
+}
+```
+
+Polling here rather than installing accessors in every camera factory keeps the projection contract in **one** place, costs nothing per camera type, and works for a hand-rolled object satisfying `Camera` — the same reasoning behind `world-matrix-state.ts` polling a foreign parent's version instead of pushing to it. Orthographic bounds are *pushed* instead (see below): that module already owns setters, so pushing is exact and costs the poll nothing.
 
 ### Orthographic Projection Seam (zero-cost opt-in)
 
 `camera.ts` holds a module-local `let _orthoProjector = null` plus a single `@internal` setter `_installOrthographicProjector()`, called only from `orthographic.ts`. `getProjectionMatrix` branches on `_orthoProjector !== null && camera.ortho`. When `enableOrthographicCamera` is absent from a bundle the setter tree-shakes, the bundler proves the projector is always `null`, and the entire orthographic branch folds away — perspective-only scenes stay byte-identical. This is the same seam pattern as `_stencilResolver` / `_stdVertexColorFragment` in `standard-pipeline.ts`.
 
-Cache invalidation for live bound changes is deliberately kept out of the shared path: the bounds setters bump `camera._projRev` and clear `_projVer` / `_vpVer`. Projection-dependent consumers read `_cameraChangeKey(camera)` in place of `camera.worldMatrixVersion`, which is a substitution rather than an extra comparison, so no per-frame gate grows a slot.
+Cache invalidation for live bound changes is deliberately kept out of the shared path: the bounds setters bump `camera._projRev`. Projection-dependent consumers read `_cameraChangeKey(camera)` in place of `camera.worldMatrixVersion`, which is a substitution rather than an extra comparison, so no per-frame gate grows a slot.
 
 `mat4OrthoOffCenterLHToRef` writes a reverse-Z `OrthoOffCenterLH` matrix so orthographic cameras share the engine's reverse-Z depth state (clear `0`, compare `greater`):
 
@@ -314,7 +342,7 @@ Still perspective-only, and therefore **not supported** with an orthographic cam
 | Gaussian splatting | `1/z` splat sizing and the linear-depth decode in `gs-depth-fragments.ts` |
 | Camera gizmo | Always draws a perspective frustum wireframe (`camera-gizmo.ts`) |
 
-Both enable/disable reset the projection state, as does every bounds setter — that is what lets extents change without the camera moving (the projection cache is otherwise keyed on `worldMatrixVersion` + aspect ratio).
+Both enable/disable reset the projection state, as does every bounds setter — that is what lets extents change without the camera moving (the projection cache is otherwise keyed on `_cameraChangeKey` + aspect ratio).
 
 ### View-Projection Matrix
 
@@ -560,9 +588,9 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 ## Dependencies
 
 - **`camera.ts` imports**: `Vec3`, `Mat4` from `../math/types.js`.
-- **`arc-rotate.ts` imports**: `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `mat4LookAtLH`, `mat4PerspectiveLH`, `mat4Multiply`, `mat4Identity` from `../math/mat4.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
+- **`arc-rotate.ts` imports**: `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `mat4LookAtWorldLHToRef` from `../math/mat4-look-at-world-lh.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
 - **`arc-rotate-controls.ts` imports**: `ArcRotateCamera` from `./arc-rotate.js`; `SceneContext`, `SceneContextInternal` from `../scene/scene.js`.
-- **`free-camera.ts` imports**: `Camera` from `./camera.js`; `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `mat4LookAtLH`, `mat4PerspectiveLH`, `mat4Multiply`, `mat4Identity` from `../math/mat4.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
+- **`free-camera.ts` imports**: `Camera` from `./camera.js`; `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `mat4LookAtWorldLHToRef` from `../math/mat4-look-at-world-lh.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
 - **`free-camera-controls.ts` imports**: `FreeCamera`, `FreeCameraInternal` from `./free-camera.js`; `SceneContext` from `../scene/scene.js`.
 - **Depended on by**: `scene.ts` (creates camera), render pipeline (reads camera matrices).
 
@@ -605,6 +633,12 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | `halfHeight is number-only`                    | Planes accept `null`; `halfHeight` cannot go degenerate        |
 | `null plane toggles derived/off-center`        | Assigning a number then `null` restores the derived extent     |
 | `bounds are own enumerable properties`         | Animation paths like `"ortho.halfHeight"` resolve and write    |
+| **Projection parameters**                      |                                                                |
+| `fov write rebuilds the projection`            | `m[5] = 1/tan(fov/2)` follows, camera at rest                  |
+| `near/far write rebuilds the projection`       | Reverse-Z depth terms `m[10]` / `m[14]` follow                 |
+| `propagates through the view-projection cache` | `getViewProjectionMatrix` is not stale either                  |
+| `steady-state scene UBO re-upload`             | Each of fov / near / far re-opens the real `_writePassSceneUBO` gate, under perspective and ortho |
+| `no-op rewrite does not re-upload`             | Rewriting a parameter with its current value skips the GPU write |
 
 ## File Manifest
 

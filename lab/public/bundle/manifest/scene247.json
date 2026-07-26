@@ -1,6 +1,6 @@
 {
-  "rawKB": 86.1,
-  "gzipKB": 36.2,
+  "rawKB": 86,
+  "gzipKB": 36.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene247-generate-mipmaps-Crazqgzv.js",
