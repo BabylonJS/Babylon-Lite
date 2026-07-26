@@ -990,9 +990,11 @@ export function measurementBrowserArgs(): string[] {
     return ["--force-color-profile=srgb", "--enable-unsafe-webgpu", ...swiftShaderArgs];
 }
 
-/** `--software` on the command line, or `BUNDLE_SOFTWARE_RENDER=1`. */
+/** `--software` on the command line, or `BUNDLE_SOFTWARE_RENDER=1`. Only an explicit
+ *  truthy value counts, so `BUNDLE_SOFTWARE_RENDER=0` disables it as one would expect. */
 function softwareRenderRequested(): boolean {
-    return process.argv.includes("--software") || !!process.env.BUNDLE_SOFTWARE_RENDER;
+    const env = process.env.BUNDLE_SOFTWARE_RENDER;
+    return process.argv.includes("--software") || env === "1" || env === "true";
 }
 
 /** Why some scenes' committed manifest is authored under the software renderer only.
@@ -1242,6 +1244,10 @@ export async function buildBundleScenes(): Promise<void> {
         }
     }
     reportCeilingHeadroom(scenesToBuild, manifest);
+    if (process.exitCode) {
+        console.error(`✘ Bundle scenes built to ${outDir}, but a ceiling was exceeded (total ${elapsed(t0)})`);
+        return;
+    }
     console.log(`✓ Bundle scenes + manifest built to ${outDir} (total ${elapsed(t0)})`);
 }
 

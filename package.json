@@ -18,7 +18,7 @@
         "build:lab-site": "tsx scripts/build-lab-site.ts",
         "build:pages-site": "tsx scripts/build-pages-site.ts",
         "build:bundle-scenes": "pnpm build:lib && tsx scripts/build-bundle-scenes.ts",
-        "build:bundle-manifest:device": "tsx scripts/build-bundle-scenes.ts --software --scenes scene113,scene114,scene115",
+        "build:bundle-manifest:device": "pnpm build:lib && tsx scripts/build-bundle-scenes.ts --software --scenes scene113,scene114,scene115",
         "build:bundle-scenes:gl": "tsx scripts/build-bundle-scenes-gl.ts",
         "build:bundle-demos": "tsx scripts/build-bundle-demos.ts",
         "build:bundle-demo": "tsx scripts/build-bundle-demo.ts",
