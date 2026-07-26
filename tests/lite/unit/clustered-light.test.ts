@@ -128,6 +128,7 @@ describe("clustered light tile assignment under orthographic projection", () => 
         createClusteredPointLight(container, { position: [0, 0, depth], diffuse: [1, 1, 1], range: 3, intensity: 2 });
         buildClusteredLightGpuState(engine, scene, container);
         const call = writeTexture.mock.calls.find((c) => (c[2] as GPUTexelCopyBufferLayout).bytesPerRow === (c[3] as GPUExtent3DDict).width * 4);
+        expect(call, "no single-component (mask) texture upload found — did the upload layout or row padding change?").toBeDefined();
         return Array.from(new Uint32Array(call![1] as ArrayBuffer));
     }
 
