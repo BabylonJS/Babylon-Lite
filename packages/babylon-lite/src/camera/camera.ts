@@ -61,8 +61,10 @@ export interface Camera {
      *  additionally invalidate the camera's children and — under floating
      *  origin — retrigger origin rebasing across every renderable.
      *
-     *  `undefined` until the first `_cameraChangeKey` call, so consumer
-     *  comparisons fold to `undefined === undefined`. */
+     *  Initialized on the first `_cameraChangeKey` call: the `fov` / `nearPlane` /
+     *  `farPlane` snapshot below starts `undefined`, so that first call always
+     *  observes a drift and bumps this to 1. Consumers therefore never read it
+     *  as `undefined` — they reach it only through `_cameraChangeKey`. */
     _projRev?: number;
     /** @internal Last `fov` / `nearPlane` / `farPlane` observed by `_cameraChangeKey`.
      *  These are plain writable fields on a plain-data camera (pillar 4b′), so a write
