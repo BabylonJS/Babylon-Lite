@@ -34,6 +34,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 | `new FreeCamera("cam", position, scene)`                            | `createFreeCamera(position, target)`                                                                        |
 | `scene.createDefaultCamera(true, true, true)`                       | `createDefaultCamera(scene)`                                                                                |
 | `camera.attachControl(canvas, true)`                                | `attachControl(camera, canvas, scene)` _(arc-rotate)_ / `attachFreeControl(camera, canvas, scene)` _(free)_ |
+| `camera.mode = Camera.ORTHOGRAPHIC_CAMERA`                          | `enableOrthographicCamera(camera, { halfHeight })`                                                          |
 | `new HemisphericLight("h", new Vector3(0,1,0), scene)`              | `createHemisphericLight([0,1,0], 1.0)`                                                                      |
 | `new DirectionalLight("d", new Vector3(0,-1,0), scene)`             | `createDirectionalLight([0,-1,0])`                                                                          |
 | `new SpotLight("s", pos, dir, angle, exp, scene)`                   | `createSpotLight(pos, dir, angle, exp)`                                                                     |

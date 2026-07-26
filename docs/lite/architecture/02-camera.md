@@ -138,6 +138,70 @@ export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera;
 export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void;
 ```
 
+### `orthographic.ts` — Opt-in Orthographic Projection
+
+```typescript
+/** Live orthographic view-volume extents, in world units. Mutable and animatable:
+ *  every setter invalidates the camera's projection cache. A plane left `null` is
+ *  derived from `halfHeight` (horizontally scaled by the render aspect ratio). */
+export interface OrthographicBounds {
+    halfHeight: number;
+    left: number | null;
+    right: number | null;
+    bottom: number | null;
+    top: number | null;
+}
+
+/** Initial extents — every field optional, omitted planes derived from `halfHeight` (default 1). */
+export interface OrthographicBoundsOptions {
+    halfHeight?: number;
+    left?: number | null;
+    right?: number | null;
+    bottom?: number | null;
+    top?: number | null;
+}
+
+/** Switch a camera to an orthographic projection; returns the live `camera.ortho` bounds. */
+export function enableOrthographicCamera(camera: Camera, bounds?: OrthographicBoundsOptions): OrthographicBounds;
+
+/** Switch a camera back to its perspective projection. */
+export function disableOrthographicCamera(camera: Camera): void;
+```
+
+Works with any camera that satisfies the `Camera` contract (ArcRotate, Free, Geospatial) — the projection is orthogonal to how the camera is positioned. Depth still comes from `camera.nearPlane` / `camera.farPlane`; `camera.fov` has no effect in this mode, so an orthographic camera zooms by changing `halfHeight`.
+
+#### Changing extents at runtime
+
+`enableOrthographicCamera` is called once. The bounds it returns (also reachable as `camera.ortho`) stay live, so extents can be driven every frame:
+
+```typescript
+const ortho = enableOrthographicCamera(camera, { halfHeight: 6 });
+onBeforeRender(scene, () => {
+    ortho.halfHeight = 6 + Math.sin(t) * 2; // zoom
+});
+```
+
+Each field is an accessor that invalidates the camera's projection state on change. That matters because the projection cache is keyed on `worldMatrixVersion` + aspect ratio — neither changes when only the extents do, so without the accessor the new bounds would not be picked up until the camera moved.
+
+Invalidation goes through `_markWorldMatrixDirty(camera)`, **not** merely clearing `_projVer` / `_vpVer`. Clearing the matrix caches alone fixes the getters but not the frame: per-frame consumers gate their GPU uploads on the camera's `worldMatrixVersion`, and the forward pass's `_writePassSceneUBO` returns early while `[camera, fog, worldMatrixVersion, aspect, envRotationY, exposure, contrast, envTextures]` are unchanged (ShaderMaterial, text and CSM have equivalent gates). Changing a view volume moves none of those, so a steady-state scene would keep rendering the previously uploaded view-projection even though `getProjectionMatrix` returned a fresh matrix. Bumping the world-matrix version covers every projection-dependent cache at once instead of teaching each one about orthographic state; the camera transform is untouched, and the only cost is recomputing a view matrix to the same values on the frame a bound changes. `_projVer` / `_vpVer` are still cleared directly as a fallback for hand-rolled `Camera` objects that were never tagged with world-matrix state.
+
+Because the fields are real own enumerable properties (defined via `Object.defineProperty`, not left optional), they also resolve as animation property paths. `resolvePropertyBinding` walks the path with `in` and writes through a plain `target[prop] = value` assignment, which lands on the setter:
+
+```typescript
+const clip = createPropertyAnimationClip("orthoZoom", [
+    {
+        path: "ortho.halfHeight",
+        keys: [
+            { frame: 0, value: 6 },
+            { frame: 60, value: 2 },
+        ],
+    },
+]);
+createPropertyAnimationGroup(manager, camera, clip, { fromFrame: 0, toFrame: 60, loop: true });
+```
+
+Setting a plane to a number produces an off-center volume (Babylon's `orthoLeft` / `orthoRight` / `orthoBottom` / `orthoTop`); setting it back to `null` returns it to the derived extent.
+
 ## Internal Architecture
 
 ### Shared World-Matrix Integration
@@ -209,6 +273,25 @@ Both cameras use the same world-matrix-to-view inversion (described above). This
 ### Projection Matrix
 
 Both cameras: `mat4PerspectiveLH(fov, aspectRatio, nearPlane, farPlane)` — left-handed perspective with reverse-Z zero-to-one depth (`nearPlane` maps to `1`, `farPlane` maps to `0`).
+
+### Orthographic Projection Seam (zero-cost opt-in)
+
+`camera.ts` holds a module-local `let _orthoProjector = null` plus a single `@internal` setter `_installOrthographicProjector()`, called only from `orthographic.ts`. `getProjectionMatrix` branches on `_orthoProjector !== null && camera.ortho`. When `enableOrthographicCamera` is absent from a bundle the setter tree-shakes, the bundler proves the projector is always `null`, and the entire orthographic branch folds away — perspective-only scenes stay byte-identical. This is the same seam pattern as `_stencilResolver` / `_stdVertexColorFragment` in `standard-pipeline.ts`.
+
+Cache invalidation for live bound changes is deliberately kept out of the shared path: the bounds setters call `_markWorldMatrixDirty(camera)` (plus clear `_projVer` / `_vpVer` as a fallback for untagged cameras), reusing the existing versioning rather than adding an ortho revision to `getProjectionMatrix`'s cache-key comparison and to every per-frame upload gate — which every scene executes.
+
+`mat4OrthoOffCenterLHToRef` writes a reverse-Z `OrthoOffCenterLH` matrix so orthographic cameras share the engine's reverse-Z depth state (clear `0`, compare `greater`):
+
+```
+m[0]  =  2 / (right - left)      m[12] = (left + right) / (left - right)
+m[5]  =  2 / (top - bottom)      m[13] = (top + bottom) / (bottom - top)
+m[10] = -1 / (far - near)        m[14] = far / (far - near)
+m[11] =  0                       m[15] = 1
+```
+
+`mat4PerspectiveLHToRef` only writes the terms a perspective matrix needs and relies on the rest of a freshly allocated (zeroed) cache. Since the orthographic writer additionally touches `m[12]`, `m[13]`, and `m[15]`, `disableOrthographicCamera` clears exactly those three before handing the shared `_projCache` back to the perspective writer. That cleanup lives in the lazy module so the shared perspective path pays nothing for it.
+
+Both enable/disable reset the projection state, as does every bounds setter — that is what lets extents change without the camera moving (the projection cache is otherwise keyed on `worldMatrixVersion` + aspect ratio).
 
 ### View-Projection Matrix
 
@@ -428,6 +511,11 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | `camera.inertialAlphaOffset`                         | `camera.inertialAlphaOffset`                                               |
 | `camera.getViewMatrix()`                             | `camera.getViewMatrix()`                                                   |
 | `camera.getProjectionMatrix(aspect)`                 | `camera.getProjectionMatrix()`                                             |
+| `enableOrthographicCamera(camera, bounds)`           | `camera.mode = Camera.ORTHOGRAPHIC_CAMERA`                                 |
+| `camera.ortho.left / right / bottom / top`           | `camera.orthoLeft / orthoRight / orthoBottom / orthoTop`                   |
+| `camera.ortho.halfHeight` (aspect-derived width)     | no equivalent — BJS defaults to half the render size in pixels             |
+| Animate path `"ortho.halfHeight"`                    | `Animation` on `orthoTop` / `orthoBottom` / …                              |
+| `disableOrthographicCamera(camera)`                  | `camera.mode = Camera.PERSPECTIVE_CAMERA`                                  |
 | `attachControl(camera, canvas, scene)`               | `camera.attachControl(canvas, true)`                                       |
 | `angularSensibility = 1000`                          | `camera.inputs.attached.pointers.angularSensibilityX/Y`                    |
 | `panningSensibility = 50`                            | `camera.inputs.attached.pointers.panningSensibility`                       |
@@ -480,6 +568,20 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | `target updated from yaw/pitch`                | Target re-derived each frame from orientation                  |
 | `world-to-view matrix consistency`             | View = inverse of world matrix                                 |
 | `cleanup removes 6 listeners + beforeRender`   | All handlers detached                                          |
+| **Orthographic**                               |                                                                |
+| `view volume corners → NDC`                    | Reverse-Z depth (near→1, far→0); x/y independent of depth      |
+| `off-center volume`                            | Volume midpoint projects to NDC origin                         |
+| `aspect-derived horizontal extent`             | `halfWidth = halfHeight * aspectRatio`                         |
+| `revert to perspective`                        | No stale `m[12] / m[13] / m[15]` left in the shared cache      |
+| `re-enable re-arms the projection cache`       | Changing `halfHeight` takes effect without a camera move       |
+| `live bound mutation`                          | `ortho.halfHeight = x` invalidates proj + viewProj caches      |
+| `steady-state scene UBO re-upload`             | Bound change bumps `worldMatrixVersion` so the gate reopens    |
+| `runtime enable/disable re-upload`             | Toggling after the first frame also reopens the gate           |
+| `transform untouched by volume change`         | `worldMatrix` is bit-identical after a bound change            |
+| `no-op assignment does not bump the version`   | Writing a bound its current value skips invalidation           |
+| `halfHeight is number-only`                    | Planes accept `null`; `halfHeight` cannot go degenerate        |
+| `null plane toggles derived/off-center`        | Assigning a number then `null` restores the derived extent     |
+| `bounds are own enumerable properties`         | Animation paths like `"ortho.halfHeight"` resolve and write    |
 
 ## File Manifest
 
@@ -490,3 +592,4 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | `src/camera/arc-rotate-controls.ts`  | ~220 lines | ArcRotate pointer/wheel/touch input with inertia model |
 | `src/camera/free-camera.ts`          | ~152 lines | FreeCamera data + world matrix + dirty tracking        |
 | `src/camera/free-camera-controls.ts` | ~184 lines | FreeCamera keyboard/mouse input with inertia           |
+| `src/camera/orthographic.ts`         | ~75 lines  | Opt-in orthographic projection (installs the seam)     |

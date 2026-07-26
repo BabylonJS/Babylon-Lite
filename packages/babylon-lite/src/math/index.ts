@@ -38,6 +38,7 @@ export { mat4Multiply } from "./mat4-multiply.js";
 export { mat4LookAtLH } from "./mat4-look-at-lh.js";
 export { mat4PerspectiveLH } from "./mat4-perspective-lh.js";
 export { mat4PerspectiveLHToRef } from "./mat4-perspective-lh-to-ref.js";
+export { mat4OrthoOffCenterLHToRef } from "./mat4-ortho-lh-to-ref.js";
 export { mat4Invert } from "./mat4-invert.js";
 export { mat4Scale } from "./mat4-scale.js";
 export { mat4Translation } from "./mat4-translation.js";
