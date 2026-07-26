@@ -1,6 +1,6 @@
 {
-  "rawKB": 40.6,
-  "gzipKB": 16,
+  "rawKB": 40.4,
+  "gzipKB": 15.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene160-shader-renderable-CLtKraz9.js",

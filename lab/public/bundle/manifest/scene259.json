@@ -1,6 +1,6 @@
 {
-  "rawKB": 77.1,
-  "gzipKB": 32.1,
+  "rawKB": 77,
+  "gzipKB": 32,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene259-emissive-fragment-DyblUsBd.js",

@@ -1,6 +1,6 @@
 {
-  "rawKB": 49.5,
-  "gzipKB": 20,
+  "rawKB": 49.4,
+  "gzipKB": 19.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene16-standard-renderable-DCT8tq93.js",

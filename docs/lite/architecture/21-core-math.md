@@ -103,6 +103,10 @@ export function mat4Multiply(a: Mat4, b: Mat4): Mat4;
 /** LookAt matrix (left-handed). */
 export function mat4LookAtLH(eye: Vec3, target: Vec3, up: Vec3): Mat4;
 
+/** Camera-to-world matrix for an eye looking at `target` — the inverse of `mat4LookAtLH`,
+ *  written in place. Used by every camera factory for its local world matrix. */
+export function mat4LookAtWorldLHToRef(out: Mat4Storage, eye: Vec3, target: Vec3, up: Vec3): void;
+
 /** Perspective projection (left-handed, zero-to-one depth). */
 export function mat4PerspectiveLH(fov: number, aspect: number, near: number, far: number): Mat4;
 
@@ -241,6 +245,19 @@ out[3]=0        out[7]=0        out[11]=0         out[15]=1
 
 Returns identity if `|target - eye| < 1e-10` or `|cross(up, zAxis)| < 1e-10`.
 
+### mat4LookAtWorldLHToRef(out, eye, target, up)
+
+The **inverse** of `mat4LookAtLH` — the camera-to-world matrix — written in place, with the same basis and the same degenerate fallbacks:
+
+```
+out[0]=xAxis.x  out[4]=yAxis.x  out[8]=zAxis.x   out[12]=eye.x
+out[1]=xAxis.y  out[5]=yAxis.y  out[9]=zAxis.y   out[13]=eye.y
+out[2]=xAxis.z  out[6]=yAxis.z  out[10]=zAxis.z  out[14]=eye.z
+out[3]=0        out[7]=0        out[11]=0        out[15]=1
+```
+
+This is what every camera factory needs (the engine stores a camera's world matrix and derives the view matrix from it in `getViewMatrix`), so building it directly avoids allocating a view matrix, computing a translation column of three dot products that is immediately discarded, and transposing the rotation back out. Leaves an identity rotation with the eye translation when `|target - eye| < 1e-10` or `|cross(up, zAxis)| < 1e-10`.
+
 ### mat4PerspectiveLH(fov, aspect, near, far)
 
 Left-handed perspective, depth range [0, 1]:
@@ -351,6 +368,7 @@ result[15] = 1
 | `mat4Multiply identity`                | `A × I = A`                                             |
 | `mat4Multiply associativity`           | `(A×B)×C ≈ A×(B×C)` within epsilon                      |
 | `mat4LookAtLH basic`                   | Eye at (0,0,-5), target (0,0,0): verify zAxis = (0,0,1) |
+| `mat4LookAtWorldLHToRef ≡ inverse`     | Element-for-element match with the transpose-of-look-at path it replaced, incl. both degenerate fallbacks |
 | `mat4PerspectiveLH`                    | Verify `m[0] = tan/aspect`, `m[10] = far/(far-near)`    |
 | `mat4Invert × m = identity`            | Verify `m × m⁻¹ ≈ I`                                    |
 | `mat4Invert returns null for singular` | Zero matrix → null                                      |

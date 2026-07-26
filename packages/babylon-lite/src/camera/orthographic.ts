@@ -51,27 +51,25 @@ const PLANE_KEYS = ["left", "right", "bottom", "top"] as const;
 
 /** Invalidate everything downstream of the projection.
  *
- *  Clearing `_projVer` / `_vpVer` alone is *not* enough. Per-frame consumers gate their
- *  GPU uploads on a camera change key, and the forward pass's scene UBO
- *  (`_writePassSceneUBO`) returns early when camera identity, that key, aspect, fog,
- *  image processing and environment are all unchanged — ShaderMaterial, text, clustered
- *  lighting, TAA and CSM have equivalent gates. The camera transform does not move when
- *  only the view volume changes, so a steady-state scene would keep rendering the
- *  previously uploaded view-projection even though the matrix getters returned a fresh
- *  matrix.
+ *  Per-frame consumers gate their GPU uploads on a camera change key: the forward pass's
+ *  scene UBO (`_writePassSceneUBO`) returns early when camera identity, that key, aspect,
+ *  fog, image processing and environment are all unchanged — ShaderMaterial, text, clustered
+ *  lighting, TAA and CSM have equivalent gates, and the `camera.ts` matrix caches key on the
+ *  same value. The camera transform does not move when only the view volume changes, so
+ *  without this bump a steady-state scene would keep rendering the previously uploaded
+ *  view-projection.
  *
  *  Bumping `_projRev` is what makes the change reach the GPU: `_cameraChangeKey` folds it
- *  into the version those consumers key on. It is deliberately a *separate* counter from
- *  `worldMatrixVersion` — marking the camera transform dirty would additionally invalidate
- *  the camera's children and, under floating origin, retrigger origin rebasing across
- *  every renderable (`wrapRenderableForFO`), none of which a view-volume change warrants.
+ *  into that key. It is deliberately a *separate* counter from `worldMatrixVersion` — marking
+ *  the camera transform dirty would additionally invalidate the camera's children and, under
+ *  floating origin, retrigger origin rebasing across every renderable (`wrapRenderableForFO`),
+ *  none of which a view-volume change warrants.
  *
- *  `_projVer` / `_vpVer` are cleared too because the matrix caches in `camera.ts` key on
- *  `worldMatrixVersion`, which by design does not move here. */
+ *  Bounds are pushed here rather than polled by `_cameraChangeKey` (as `fov` / `nearPlane` /
+ *  `farPlane` are) because this module already owns accessors for them — pushing costs the
+ *  poll nothing and is exact. */
 function invalidateProjection(camera: Camera): void {
     camera._projRev = (camera._projRev ?? 0) + 1;
-    camera._projVer = undefined;
-    camera._vpVer = undefined;
 }
 
 /** Build the live bounds object. Each field is an accessor that invalidates the camera's
