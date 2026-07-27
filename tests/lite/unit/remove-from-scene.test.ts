@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove";
 import { addToScene } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { AssetContainer } from "../../../packages/babylon-lite/src/asset-container";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import type { MeshGroupBuilder } from "../../../packages/babylon-lite/src/render/renderable";
 
 function fakeScene(): SceneContext {
     return {
@@ -18,6 +20,8 @@ function fakeScene(): SceneContext {
         _materialSwapQueue: [],
         _groups: new Map(),
         _meshDisposables: new Map(),
+        _meshAuxDisposables: new Map(),
+        _renderableVersion: 0,
         _frameGraph: { _tasks: [] },
     } as unknown as SceneContext;
 }
@@ -82,5 +86,95 @@ describe("removeFromScene symmetry", () => {
         // safe to call twice
         removeFromScene(scene, container);
         expect(scene._beforeRender).toHaveLength(0);
+    });
+
+    it("evicts task-local mesh bindings before destroying the mesh GPU", () => {
+        const scene = fakeScene();
+        let destroyed = false;
+        const buffer = () => ({ destroy: () => undefined });
+        const mesh = {
+            material: null,
+            children: [],
+            parent: null,
+            thinInstances: null,
+            skeleton: null,
+            vat: null,
+            morphTargets: null,
+            _gpu: {
+                positionBuffer: { destroy: () => (destroyed = true) },
+                normalBuffer: buffer(),
+                uvBuffer: buffer(),
+                indexBuffer: buffer(),
+            },
+        };
+        const removeMesh = vi.fn(() => {
+            expect(destroyed).toBe(false);
+        });
+        scene._frameGraph._tasks.push({ _removeMesh: removeMesh } as never);
+        addToScene(scene, mesh as never);
+
+        removeFromScene(scene, mesh as never);
+
+        expect(removeMesh).toHaveBeenCalledWith(mesh);
+        expect(destroyed).toBe(true);
+    });
+
+    it("removes a mesh from every material group while a material migration is pending", () => {
+        const scene = fakeScene();
+        const oldBuilder = (() => undefined) as unknown as MeshGroupBuilder;
+        const newBuilder = (() => undefined) as unknown as MeshGroupBuilder;
+        const destroy = vi.fn();
+        const mesh = {
+            _gpu: {
+                positionBuffer: { destroy },
+                normalBuffer: { destroy },
+                uvBuffer: { destroy },
+                indexBuffer: { destroy },
+                tangentBuffer: null,
+                uv2Buffer: null,
+                colorBuffer: null,
+            },
+            material: { _buildGroup: newBuilder },
+            children: [],
+            parent: null,
+        } as unknown as Mesh;
+
+        scene.meshes.push(mesh);
+        scene._groups.set(oldBuilder, [mesh]);
+        scene._groups.set(newBuilder, []);
+        scene._materialSwapQueue.push(mesh);
+
+        removeFromScene(scene, mesh);
+        expect([...scene._groups.values()].every((group) => !group.includes(mesh))).toBe(true);
+        expect(scene._materialSwapQueue).not.toContain(mesh);
+    });
+
+    it("keeps shared mesh GPU state until the last scene removal", () => {
+        const sceneA = fakeScene();
+        const sceneB = fakeScene();
+        const destroy = vi.fn();
+        const mesh = {
+            _gpu: {
+                positionBuffer: { destroy },
+                normalBuffer: { destroy: vi.fn() },
+                uvBuffer: { destroy: vi.fn() },
+                indexBuffer: { destroy: vi.fn() },
+                tangentBuffer: null,
+                uv2Buffer: null,
+                colorBuffer: null,
+            },
+            material: null,
+            children: [],
+            parent: null,
+        } as unknown as Mesh;
+
+        addToScene(sceneA, mesh);
+        addToScene(sceneB, mesh);
+
+        removeFromScene(sceneA, mesh);
+        expect(destroy).not.toHaveBeenCalled();
+
+        removeFromScene(sceneB, mesh);
+        expect(destroy).toHaveBeenCalledOnce();
     });
 });

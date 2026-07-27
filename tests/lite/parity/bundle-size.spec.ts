@@ -29,7 +29,11 @@ const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-in
 const BUNDLE_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/manifest.json");
 const MASTER_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/master-manifest.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-const SCENES = allScenes.filter((s) => s.maxRawKB != null);
+const SCENES = allScenes.filter((s) => {
+    // Scene 114 opts out because WebGPU's optional "primitive-index" feature
+    // changes which picking chunks the browser fetches across machines.
+    return !s.skipBundleSize && s.maxRawKB != null;
+});
 
 interface BundleInfoModule {
     id: string;
@@ -198,6 +202,20 @@ for (const scene of SCENES) {
                 runtimeModules.some((id) => /\/sprite\/billboard-renderable\.[jt]s$/.test(id)),
                 `${scene.slug} MUST include billboard-renderable; loaded modules: ${runtimeModules.join(", ")}`
             ).toBe(true);
+        }
+
+        // Orthographic projection is an opt-in seam: `camera.ts` holds a module-local projector that
+        // only `enableOrthographicCamera` installs, so the branch folds away for every perspective-only
+        // scene. Guard both directions — no other scene may pull the module in, and scene 268 must.
+        const ORTHO_SCENE_IDS = new Set([268]);
+        if (ORTHO_SCENE_IDS.has(scene.id)) {
+            expect(
+                runtimeModules.some((id) => /\/camera\/orthographic\.[jt]s$/.test(id)),
+                `${scene.slug} MUST include the orthographic camera module; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
+        } else {
+            const offenders = runtimeModules.filter((id) => /\/(camera\/orthographic|math\/mat4-ortho-lh-to-ref)\.[jt]s$/.test(id));
+            expect(offenders, `perspective-only ${scene.slug} must not load orthographic camera modules; found: ${offenders.join(", ")}`).toEqual([]);
         }
 
         // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.

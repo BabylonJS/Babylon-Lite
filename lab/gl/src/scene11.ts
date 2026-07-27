@@ -3,7 +3,6 @@ import {
     createEffectWrapper,
     createGLEngine,
     drawEffect,
-    executeWhenCompiled,
     isEffectReady,
     resizeGLEngine,
     runRenderLoop,
@@ -28,14 +27,11 @@ import {
  *     renderbuffer with
  *     a packed DEPTH24_STENCIL8 attachment so the FBO carries a stencil plane.
  *   - PASS 1 (mask write): with stencil `func = ALWAYS`, `ref = 1`, op
- *     `KEEP/KEEP/REPLACE` and COLOR WRITES MASKED OFF (`setColorMask(false…)`),
- *     a centred filled disc is drawn — the fragment `discard`s everywhere
- *     `length(vUv-0.5) >= R`, so the stencil plane ends up `1` only inside the
- *     disc and `0` outside, with the colour buffer untouched (still the clear).
+ *     `KEEP/KEEP/REPLACE` and COLOR WRITES MASKED OFF, a centred disc stamps
+ *     stencil to 1 while leaving the colour buffer untouched.
  *   - PASS 2 (masked draw): with stencil `func = EQUAL`, `ref = 1`, op
  *     `KEEP/KEEP/KEEP` (no stencil writes) and colour writes back on, a fullscreen
- *     animated radial gradient is drawn — the stencil test admits it ONLY where
- *     the plane equals 1 (inside the disc). Outside stays the clear colour.
+ *     animated radial gradient is drawn only inside the stencil disc.
  *   - COMPOSITE binds the default framebuffer (`bindRenderTarget(engine, null)`),
  *     disables the stencil test and samples the RT fullscreen with an
  *     aspect-corrected radial vignette.
@@ -73,9 +69,8 @@ function parseSeekTime(): number | null {
     return Number.isFinite(seconds) ? seconds : null;
 }
 
-// PASS 1 — the mask shape. Discards outside the disc so the stencil REPLACE only
-// stamps `1` inside `length(vUv-0.5) < DISC_RADIUS`. Colour writes are masked off
-// during this pass, so the emitted colour is irrelevant.
+// PASS 1 — the mask shape. Discards outside the disc so REPLACE stamps 1 only
+// inside the radius. Colour writes are masked off, so the emitted colour is irrelevant.
 const DISC_FRAGMENT = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -89,8 +84,8 @@ void main() {
 }`;
 
 // PASS 2 — fullscreen animated radial gradient. Depends ONLY on r = length(vUv-0.5):
-// concentric animated rings tinted by a radial cosine palette. The stencil test
-// (EQUAL 1) clips it to the disc.
+// concentric animated rings tinted by a radial cosine palette. EQUAL 1 clips it
+// to the disc.
 const GRADIENT_FRAGMENT = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -132,23 +127,16 @@ const rt = createRenderTarget(engine, { width: RT_SIZE, height: RT_SIZE, generat
 generateRenderTargetStencil(engine, rt);
 
 const discWrapper = createEffectWrapper(engine, {
-    name: "gl-scene11-stencil-disc",
     fragmentSource: DISC_FRAGMENT,
 });
 const gradientWrapper = createEffectWrapper(engine, {
-    name: "gl-scene11-stencil-gradient",
     fragmentSource: GRADIENT_FRAGMENT,
     uniformNames: ["uTime"],
 });
 const compositeWrapper = createEffectWrapper(engine, {
-    name: "gl-scene11-stencil-composite",
     fragmentSource: COMPOSITE_FRAGMENT,
     uniformNames: ["uResolution"],
     samplerNames: ["uRt"],
-});
-
-executeWhenCompiled(engine, compositeWrapper.effect, () => {
-    console.log("scene11: stencil-masking effects compiled");
 });
 
 const seekTime = parseSeekTime();
@@ -184,7 +172,7 @@ runRenderLoop(engine, () => {
     applyEffectWrapper(discWrapper);
     drawEffect(engine);
 
-    // ── PASS 2: draw the gradient only where stencil == 1 (inside the disc) ──
+    // ── PASS 2: draw the gradient only where stencil == 1 ──
     setColorMask(engine, true, true, true, true);
     setStencilState(engine, {
         test: true,

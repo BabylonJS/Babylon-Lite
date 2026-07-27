@@ -1,6 +1,6 @@
 import type { Camera, NormalizedViewport } from "./camera.js";
 import type { Vec3, Mat4 } from "../math/types.js";
-import { mat4LookAtLH } from "../math/mat4-look-at-lh.js";
+import { mat4LookAtWorldLHToRef } from "../math/mat4-look-at-world-lh.js";
 import { Vec3Up } from "../math/vec3-up.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
@@ -98,26 +98,7 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
     const _localMat: Mat4 = allocateMat4();
 
     function cameraLocalWorldMatrix(): Mat4 {
-        const eye = localEyePosition();
-        const v = mat4LookAtLH(eye, cam.target, Vec3Up);
-        const m = _localMat as unknown as Mat4Storage;
-        // Transpose upper 3×3 of view = camera-to-world rotation; translation = eye.
-        m[0] = v[0]!;
-        m[1] = v[4]!;
-        m[2] = v[8]!;
-        m[3] = 0;
-        m[4] = v[1]!;
-        m[5] = v[5]!;
-        m[6] = v[9]!;
-        m[7] = 0;
-        m[8] = v[2]!;
-        m[9] = v[6]!;
-        m[10] = v[10]!;
-        m[11] = 0;
-        m[12] = eye.x;
-        m[13] = eye.y;
-        m[14] = eye.z;
-        m[15] = 1;
+        mat4LookAtWorldLHToRef(_localMat as unknown as Mat4Storage, localEyePosition(), cam.target, Vec3Up);
         return _localMat;
     }
 

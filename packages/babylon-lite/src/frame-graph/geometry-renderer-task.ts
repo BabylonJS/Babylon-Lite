@@ -53,14 +53,18 @@ import type { NodeMaterial } from "../material/node/node-material.js";
 import type { NodeGeometryMaterialView, NodeGeometryViewConfig } from "../material/node/node-geometry-view.js";
 import type { DrawBinding, Renderable } from "../render/renderable.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
-import { ensureSceneLightState } from "../render/lights-ubo.js";
+import { ensureSceneLightState, getLightsUboSize, _writeTaskLightsData } from "../render/lights-ubo.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 import type { GeometryClearValue } from "./geometry-types.js";
 import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType } from "./geometry-types.js";
 import { _packSceneUniforms } from "./scene-uniforms-pack.js";
+import { getProjectionMatrix } from "../camera/camera.js";
+import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import type { Mat4Storage } from "../math/types.js";
 
 // ─── Public API ────────────────────────────────────────────────────────────
 
@@ -189,8 +193,22 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     _renderPassDescriptor: GPURenderPassDescriptor;
     _colorAttachments: GPURenderPassColorAttachment[];
     _depthAttachment: GPURenderPassDepthStencilAttachment | null;
-    /** Per-mesh previous-world snapshots for the velocity attachment. */
-    _previousWorlds: Map<Mesh, Float32Array>;
+    /** Meshes explicitly removed from this scene. Needed only for caller-supplied
+     *  `config.meshes`, which may contain off-scene meshes and therefore cannot be
+     *  filtered by `scene.meshes` alone. Cleared for a mesh when it is re-added. */
+    _removedMeshes: WeakSet<Mesh> | null;
+    /** Scene `_renderableVersion` captured at the last `_bound` (re)build. When the
+     *  scene mutates (mesh add/remove or material swap both bump `_renderableVersion`),
+     *  `execute` re-syncs `_bound` before drawing so a removed mesh is not drawn against
+     *  destroyed UBOs/vertex buffers and a swapped material's view is rebuilt — mirroring
+     *  the forward RenderTask's `_lastVersion` auto-resync. `-1` until first record. */
+    _boundVer: number;
+    /** Task-owned lights UBO holding positional light data relative to a
+     *  `config.camera` override under floating origin. Null when the task uses the
+     *  scene's active camera (it then binds the shared scene lights state, which is
+     *  already relative to that camera). */
+    _ownLightsUBO: GPUBuffer | null;
+    _ownLightsScratch: Float32Array | null;
     /** When true, the task owns the depth attachment via the MRT. */
     _ownedDepth: boolean;
     _excludedFromVelocity: Set<Mesh>;
@@ -373,7 +391,10 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _renderPassDescriptor: renderPassDescriptor,
         _colorAttachments: colorAttachments,
         _depthAttachment: null,
-        _previousWorlds: new Map(),
+        _removedMeshes: null,
+        _boundVer: -1,
+        _ownLightsUBO: null,
+        _ownLightsScratch: null,
         _ownedDepth: false,
         _excludedFromVelocity: new Set(),
         _needsVelocity: needsVelocity,
@@ -384,6 +405,10 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _createPbrGeometryView: null,
         _computePbrFeatures: null,
         _createNodeGeometryView: null,
+
+        _removeMesh(value: object): void {
+            (task._removedMeshes ??= new WeakSet()).add(value as Mesh);
+        },
 
         async _preload(): Promise<void> {
             const meshes = (config.meshes ?? sc.meshes) as readonly Mesh[];
@@ -407,6 +432,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                         const [viewMod, matMod] = await Promise.all([import("../material/standard/geometry-view.js"), import("../material/standard/standard-material.js")]);
                         task._createStandardGeometryView = viewMod.createStandardGeometryMaterialView;
                         task._computeStandardFeatures = matMod._computeStandardMaterialFeatures;
+                        await viewMod.preloadStandardGeometryFeatures(meshes, task._needsVelocity);
                     })()
                 );
             }
@@ -437,7 +463,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
             return executeTask(task, eng, sc, config);
         },
         dispose(): void {
-            disposeTask(task);
+            disposeTask(task, eng, sc);
         },
     };
     return task;
@@ -468,7 +494,7 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
         task._ownedDepthWrapper._height = mrt._height;
     }
 
-    const lightsUBO = ensureSceneLightState(eng, sc)._buffer;
+    const lightsUBO = _resolveTaskLightsUBO(task, eng, sc, config);
     task._sceneBG = eng._device.createBindGroup({
         layout: getSceneBindGroupLayout(eng),
         entries: [
@@ -476,36 +502,114 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
             { binding: 1, resource: { buffer: lightsUBO } },
         ],
     });
+    // Rebuild the per-mesh bindings/views (make-before-break, retiring the prior
+    // set's owned GPU resources) then sync the render-pass descriptor.
+    rebuildBoundMeshes(task, config, eng, sc);
+    rebuildRenderPassDescriptor(task, config);
+}
 
-    // Discard prior bindings/views; rebuild from the current mesh list.
-    task._bound.length = 0;
-    task._views.clear();
-    task._previousWorlds.clear();
-
-    const meshes = (config.meshes ?? sc.meshes) as readonly Mesh[];
+/** (Re)build the task's per-mesh `_bound` list + `_views` from the current mesh set,
+ *  retiring the prior set's owned GPU resources make-before-break, and record the
+ *  scene mutation version it reflects. Called at `record()` and again from `execute()`
+ *  whenever `sc._renderableVersion` advances (mesh removal or material swap) so the task
+ *  never draws a removed mesh's destroyed UBOs/vertex buffers or a swapped material's
+ *  stale view. The mesh source mirrors `record()`: the common auto path (`config.meshes`
+ *  omitted) reads `sc.meshes`; caller-supplied off-scene meshes remain supported, while
+ *  the task-local removal list excludes meshes explicitly removed through `removeFromScene`. */
+function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: GeometryRendererTaskConfig, eng: EngineContext, sc: SceneContext): void {
+    // Discard prior bindings/views, but retire their owned GPU resources instead
+    // of dropping the references and leaking (per-mesh geometry UBOs, skeletal
+    // velocity textures, and the views' shared material/UV UBOs). Make-before-
+    // break: capture the old set, build the new bindings/views below, then retire
+    // the old ones after the next submitted frame drains (a previously recorded
+    // command buffer may still reference them). Idempotent disposers keep this
+    // safe against the `_meshAuxDisposables` removal drain.
+    const oldBound = task._bound;
+    const oldViews = [...task._views.values()];
+    const nextBound: BoundMesh[] = [];
+    const nextViews = new Map<Material, StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView>();
+    const removed = task._removedMeshes;
+    const meshes = config.meshes ?? sc.meshes;
     const attachmentTypes = task._attachments.map((a) => a._type);
-    for (const mesh of meshes) {
-        const resolved = resolveSourceMaterial(task, mesh.material);
-        if (!resolved) {
-            continue;
+    try {
+        for (const mesh of meshes) {
+            if (removed?.has(mesh)) {
+                if (!sc.meshes.includes(mesh)) {
+                    continue;
+                }
+                removed.delete(mesh);
+            }
+            const resolved = resolveSourceMaterial(task, mesh.material);
+            if (!resolved) {
+                continue;
+            }
+            const view = ensureView(task, nextViews, resolved, attachmentTypes, config);
+            // Natural dispatch — view._buildGroup is the standard or PBR geometry
+            // builder, its _rebuildSingle returns the per-mesh geometry-MRT Renderable.
+            const renderable: Renderable = view._buildGroup._rebuildSingle!(sc, mesh, view);
+            const binding = renderable.bind(eng, task._signature as unknown as RenderTargetSignature);
+            nextBound.push({ _mesh: mesh, _binding: binding, _view: view });
         }
-        const view = ensureView(task, resolved, attachmentTypes, config);
-        // Natural dispatch — view._buildGroup is the standard or PBR geometry
-        // builder, its _rebuildSingle returns the per-mesh geometry-MRT Renderable.
-        const renderable: Renderable = view._buildGroup._rebuildSingle!(sc, mesh, view);
-        const binding = renderable.bind(eng, task._signature as unknown as RenderTargetSignature);
-        task._bound.push({ _mesh: mesh, _binding: binding, _view: view });
-        if (task._needsVelocity) {
-            task._previousWorlds.set(mesh, new F32(mesh.worldMatrix));
-        }
+    } catch (error) {
+        retireGeometryBindings(eng, sc, nextBound, [...nextViews.values()]);
+        throw error;
     }
 
     // Opaque first, then alpha-blended. The alpha pass uses ALPHA_COMBINE
     // with depth-write off — an opaque mesh drawn after a transparent one
     // would overwrite its contribution with src-alpha=1.0.
-    task._bound.sort((a, b) => (isAlphaBlend(a._binding.renderable) ? 1 : 0) - (isAlphaBlend(b._binding.renderable) ? 1 : 0));
+    nextBound.sort((a, b) => (isAlphaBlend(a._binding.renderable) ? 1 : 0) - (isAlphaBlend(b._binding.renderable) ? 1 : 0));
 
-    rebuildRenderPassDescriptor(task, config);
+    task._bound = nextBound;
+    task._views = nextViews;
+    task._boundVer = sc._renderableVersion;
+
+    if (oldBound.length > 0 || oldViews.length > 0) {
+        retireGeometryBindings(eng, sc, oldBound, oldViews);
+    }
+}
+
+/** Retire the GPU resources owned by a discarded set of geometry bindings/views.
+ *  Per-mesh renderables expose `_geometryDispose`; views expose
+ *  `_disposeGeometryResources`. Both are idempotent, so retiring here is safe even
+ *  when the mesh is later removed (which drains the same per-mesh disposer through
+ *  `_meshAuxDisposables`). The per-mesh disposers do NOT self-remove from the aux
+ *  list, so this function first detaches them SYNCHRONOUSLY (outside any scene drain,
+ *  so no iteration is corrupted) to keep the list from growing across re-records,
+ *  then defers the actual GPU frees via `retireGpuResources` so an in-flight frame's
+ *  command buffer never references a destroyed buffer. */
+function retireGeometryBindings(
+    eng: EngineContext,
+    sc: SceneContext,
+    bound: readonly BoundMesh[],
+    views: readonly (StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView)[]
+): void {
+    // Detach the owned aux disposers now (safe: not during a scene drain).
+    for (const b of bound) {
+        const dispose = b._binding.renderable._geometryDispose;
+        if (!dispose) {
+            continue;
+        }
+        const list = sc._meshAuxDisposables.get(b._mesh);
+        if (!list) {
+            continue;
+        }
+        const i = list.indexOf(dispose);
+        if (i >= 0) {
+            list.splice(i, 1);
+        }
+        if (list.length === 0) {
+            sc._meshAuxDisposables.delete(b._mesh);
+        }
+    }
+    retireGpuResources(eng, () => {
+        for (const b of bound) {
+            b._binding.renderable._geometryDispose?.();
+        }
+        for (const v of views) {
+            (v as StandardGeometryMaterialView)._disposeGeometryResources?.();
+        }
+    });
 }
 
 interface ResolvedMaterial {
@@ -515,11 +619,12 @@ interface ResolvedMaterial {
 
 function ensureView(
     task: GeometryRendererTaskInternal,
+    views: Map<Material, StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView>,
     resolved: ResolvedMaterial,
     attachmentTypes: readonly GeometryTextureType[],
     config: GeometryRendererTaskConfig
 ): StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView {
-    const cached = task._views.get(resolved._mat as Material);
+    const cached = views.get(resolved._mat as Material);
     if (cached) {
         return cached;
     }
@@ -528,14 +633,21 @@ function ensureView(
         emitColor: config.targetTexture !== undefined,
         gpUBO: task._paramsUBO,
         reverseCulling: config.reverseCulling,
+        // Effective task camera flows to EVERY geometry family so their world /
+        // previous-world packing + floating-origin invalidation share the same
+        // origin as the task's view/projection + positional lights.
+        camera: config.camera ?? null,
     };
     const view =
         resolved._family === "standard"
-            ? task._createStandardGeometryView!(resolved._mat as StandardMaterialProps, viewConfig)
+            ? task._createStandardGeometryView!(resolved._mat as StandardMaterialProps, {
+                  ...viewConfig,
+                  velocityExclusions: task._excludedFromVelocity,
+              })
             : resolved._family === "pbr"
               ? task._createPbrGeometryView!(resolved._mat as PbrMaterialProps, viewConfig)
               : task._createNodeGeometryView!(resolved._mat as NodeMaterial, viewConfig);
-    task._views.set(resolved._mat as Material, view);
+    views.set(resolved._mat as Material, view);
     return view;
 }
 
@@ -583,6 +695,60 @@ function rebuildRenderPassDescriptor(task: GeometryRendererTaskInternal, config:
     task._renderPassDescriptor.depthStencilAttachment = task._depthAttachment ?? undefined;
 }
 
+// ─── Effective-camera floating-origin coherence ──────────────────────────────
+
+/** Whether the task must maintain its OWN floating-origin state relative to a
+ *  `config.camera` override — a distinct positional-light and view origin. Only
+ *  meaningful under floating origin AND when an override camera is supplied; the
+ *  scene's active camera already carries the FO flag and the shared scene lights
+ *  are already offset against it. */
+function _usesOverrideFO(eng: EngineContext, config: GeometryRendererTaskConfig): boolean {
+    return !!eng.useFloatingOrigin && !!config.camera;
+}
+
+/** Resolve the lights UBO bound at scene-BG slot 1: the task-owned override-relative
+ *  UBO under override-FO (lazily allocated empty here, filled per-frame by
+ *  {@link _refreshTaskLightsUBO}), else the shared scene lights UBO. */
+function _resolveTaskLightsUBO(task: GeometryRendererTaskInternal, eng: EngineContext, sc: SceneContext, config: GeometryRendererTaskConfig): GPUBuffer {
+    if (!_usesOverrideFO(eng, config)) {
+        return ensureSceneLightState(eng, sc)._buffer;
+    }
+    if (!task._ownLightsUBO) {
+        task._ownLightsScratch = new F32(getLightsUboSize() / 4);
+        task._ownLightsUBO = createEmptyUniformBuffer(eng, getLightsUboSize());
+    }
+    return task._ownLightsUBO;
+}
+
+/** Per-frame fill of the task-owned lights UBO: positional lights offset by the
+ *  OVERRIDE camera (not the scene's active camera), so they share the same origin as
+ *  the task's world/view packing. No-op without override-FO. */
+function _refreshTaskLightsUBO(task: GeometryRendererTaskInternal, eng: EngineContext, sc: SceneContext, config: GeometryRendererTaskConfig): void {
+    const scratch = task._ownLightsScratch;
+    if (!scratch || !_usesOverrideFO(eng, config)) {
+        return;
+    }
+    _writeTaskLightsData(eng, scratch, { camera: config.camera!, lights: sc.lights } as unknown as SceneContext);
+    eng._device.queue.writeBuffer(task._ownLightsUBO!, 0, scratch as Float32Array<ArrayBuffer>);
+}
+
+/** Under floating origin, force the packed view (and view-projection at data[0..15])
+ *  origin-relative to the EFFECTIVE task camera, regardless of whether that camera
+ *  carries the scene's `_useFloatingOrigin` flag. A `config.camera` override never
+ *  becomes the scene's active camera, so `scene._update` never sets that flag on it
+ *  and `getViewMatrix` would otherwise leave the large absolute translation in —
+ *  desynced from the origin-relative mesh/previous-world/light packing. Zeroing the
+ *  view translation column (view is at data[16..31]; translation at 12..14 → 28..30)
+ *  and re-multiplying by the projection reproduces exactly what an FO-flagged camera
+ *  yields; for a camera that already carries the flag this is an idempotent no-op. */
+function _forceFoView(data: Float32Array, camera: Camera, aspect: number): void {
+    data[28] = 0;
+    data[29] = 0;
+    data[30] = 0;
+    const proj = getProjectionMatrix(camera, aspect) as unknown as Mat4Storage;
+    mat4MultiplyInto(data as unknown as Mat4Storage, 0, proj, 0, data as unknown as Mat4Storage, 16);
+}
+
 // ─── Execute ───────────────────────────────────────────────────────────────
 
 function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc: SceneContext, config: GeometryRendererTaskConfig): number {
@@ -594,8 +760,20 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     if (mrt._width === 0 || mrt._height === 0) {
         return 0;
     }
+    // Re-sync `_bound` before drawing when the scene mutated since the last (re)build.
+    // Mesh removal and material swap both bump `sc._renderableVersion`; without this a
+    // stale `_bound` entry would bind a removed mesh's destroyed UBOs/vertex buffers or
+    // a swapped material's old view. `rebuildBoundMeshes` retires the prior set
+    // make-before-break, so the frame just submitted stays valid. Mirrors the forward
+    // RenderTask's `_lastVersion` auto-resync in `prepareRenderTaskPass`.
+    if (sc._renderableVersion !== task._boundVer) {
+        rebuildBoundMeshes(task, config, eng, sc);
+    }
     const aspect = mrt._width / mrt._height;
     writeSceneUBO(task, eng, sc, camera, aspect);
+    // Positional light data must share the effective task camera's origin; under an
+    // override-FO the task owns its lights UBO and refreshes it here each frame.
+    _refreshTaskLightsUBO(task, eng, sc, config);
     if (task._needsParams) {
         writeParamsUBO(task, eng, camera);
     }
@@ -620,13 +798,6 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
             lastPipeline = pipeline;
         }
         draws += b._binding.draw(pass, eng);
-        // Snapshot previous-world for velocity attachment.
-        if (task._needsVelocity && !task._excludedFromVelocity.has(b._mesh)) {
-            const prev = task._previousWorlds.get(b._mesh);
-            if (prev) {
-                prev.set(b._mesh.worldMatrix);
-            }
-        }
     }
     pass.end();
     if (task._needsVelocity) {
@@ -646,6 +817,13 @@ function writeSceneUBO(task: GeometryRendererTaskInternal, eng: EngineContext, s
             c(data, sc);
         }
     }
+    // Force the view/view-projection origin-relative to the EFFECTIVE camera under
+    // floating origin (handles a `config.camera` override that never carried the
+    // scene's FO flag). Must run before capturing `_viewProjectionScratch` so the
+    // previous-frame VP used for velocity is also origin-relative.
+    if (eng.useFloatingOrigin) {
+        _forceFoView(data, camera, aspect);
+    }
     task._viewProjectionScratch.set(data.subarray(0, 16));
     eng._device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }
@@ -662,15 +840,27 @@ function writeParamsUBO(task: GeometryRendererTaskInternal, eng: EngineContext, 
 
 // ─── Dispose ───────────────────────────────────────────────────────────────
 
-function disposeTask(task: GeometryRendererTaskInternal): void {
+function disposeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc: SceneContext): void {
+    // Retire the per-mesh + per-view GPU resources this task still owns before
+    // dropping the references (otherwise the shared material/UV UBOs and per-mesh
+    // mesh UBOs leak on task teardown). Deferred so an in-flight frame that still
+    // references them submits safely first. Pass a DETACHED copy of `_bound` (and a
+    // views snapshot) because the deferred retirement runs after `task._bound` is
+    // emptied below — sharing the live array would leave the callback with nothing
+    // to dispose.
+    if (task._bound.length > 0 || task._views.size > 0) {
+        retireGeometryBindings(eng, sc, [...task._bound], [...task._views.values()]);
+    }
     task._passes.length = 0;
     task._bound.length = 0;
     task._views.clear();
-    task._previousWorlds.clear();
     disposeRenderTargetMrt(task._mrt);
     task._ownedDepth = false;
     task._sceneUBO.destroy();
     task._paramsUBO?.destroy();
+    task._ownLightsUBO?.destroy();
+    task._ownLightsUBO = null;
+    task._ownLightsScratch = null;
     task._wrapperTargets.length = 0;
 }
 

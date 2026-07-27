@@ -50,5 +50,9 @@
   "sandblox": {
     "rawKB": 113.2,
     "gzipKB": 40.9
+  },
+  "racer": {
+    "rawKB": 200.6,
+    "gzipKB": 77
   }
 }

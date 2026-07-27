@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Babylon Lite — Demo: Racer</title>
+        <link rel="icon" href="data:," />
+        <style>
+            html,
+            body {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background: #000;
+                overscroll-behavior: none;
+            }
+            canvas {
+                width: 100%;
+                height: 100%;
+                display: block;
+                touch-action: none;
+            }
+            .loading-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 10000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: #0b0809;
+                color: #f4ece9;
+                font-family:
+                    system-ui,
+                    -apple-system,
+                    "Segoe UI",
+                    Roboto,
+                    sans-serif;
+                transition: opacity 0.5s ease;
+            }
+            .loading-overlay.is-hidden {
+                opacity: 0;
+                pointer-events: none;
+            }
+            .loading-box {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 1rem;
+                text-align: center;
+                padding: 0 1rem;
+            }
+            .loading-spinner {
+                width: 54px;
+                height: 54px;
+                border-radius: 50%;
+                border: 4px solid rgba(224, 104, 75, 0.25);
+                border-top-color: #e0684b;
+                animation: lite-spin 0.9s linear infinite;
+            }
+            .loading-label {
+                font-size: 1.05rem;
+                font-weight: 600;
+            }
+            .loading-sub {
+                font-size: 0.8rem;
+                color: #b8a9a4;
+            }
+            @keyframes lite-spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                .loading-spinner {
+                    animation-duration: 2.4s;
+                }
+            }
+
+            .controls-hint {
+                position: fixed;
+                left: 50%;
+                bottom: 18px;
+                transform: translateX(-50%);
+                z-index: 20;
+                pointer-events: none;
+                padding: 8px 16px;
+                border-radius: 999px;
+                background: rgba(11, 8, 9, 0.55);
+                color: #f4ece9;
+                font-family:
+                    system-ui,
+                    -apple-system,
+                    "Segoe UI",
+                    Roboto,
+                    sans-serif;
+                font-size: 0.82rem;
+                letter-spacing: 0.02em;
+                white-space: nowrap;
+                backdrop-filter: blur(6px);
+            }
+            .controls-hint b {
+                color: #ffd27f;
+                font-weight: 600;
+            }
+            .credit {
+                position: fixed;
+                left: 12px;
+                bottom: 12px;
+                z-index: 21;
+                max-width: min(360px, calc(100vw - 24px));
+                padding: 5px 9px;
+                border-radius: 6px;
+                background: rgba(0, 0, 0, 0.45);
+                color: #e9e2df;
+                text-decoration: none;
+                backdrop-filter: blur(3px);
+                font:
+                    500 11px/1.3 system-ui,
+                    sans-serif;
+            }
+            .credit:hover {
+                background: rgba(0, 0, 0, 0.7);
+            }
+            .credit b {
+                font-weight: 700;
+            }
+            .racer-touch-controls {
+                position: fixed;
+                right: 0;
+                bottom: 0;
+                left: 0;
+                z-index: 30;
+                display: none;
+                align-items: flex-end;
+                justify-content: space-between;
+                padding: 12px max(14px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+                pointer-events: none;
+                user-select: none;
+                touch-action: none;
+            }
+            .racer-touch-cluster {
+                display: flex;
+                gap: 10px;
+                pointer-events: none;
+            }
+            .racer-touch-button {
+                width: 64px;
+                height: 64px;
+                padding: 0;
+                border: 2px solid rgba(255, 255, 255, 0.38);
+                border-radius: 12px;
+                background: rgba(11, 8, 9, 0.52);
+                color: #fff;
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+                backdrop-filter: blur(4px);
+                font:
+                    700 24px/1 system-ui,
+                    sans-serif;
+                pointer-events: auto;
+                touch-action: none;
+                -webkit-tap-highlight-color: transparent;
+            }
+            .racer-touch-button.is-active {
+                border-color: rgba(255, 226, 164, 0.95);
+                background: rgba(224, 104, 75, 0.86);
+                transform: translateY(1px);
+            }
+            @media (hover: none) and (pointer: coarse) {
+                .racer-touch-controls {
+                    display: flex;
+                }
+                .controls-hint,
+                .racer-camera-label,
+                .racer-vehicle-selector {
+                    display: none !important;
+                }
+                .credit {
+                    bottom: calc(90px + env(safe-area-inset-bottom));
+                    max-width: min(230px, calc(100vw - 24px));
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <!--
+    This page loads the production-BUNDLED demo (tree-shaken + minified) from
+    /bundle/demos/, NOT the raw TypeScript source. Run `pnpm build:bundle-demos`
+    (also part of `pnpm dev:lab`) to (re)generate the bundle this page references.
+  -->
+        <canvas id="renderCanvas"></canvas>
+        <div class="controls-hint"><b>W</b> accelerate · <b>S</b> brake / reverse · <b>A</b> <b>D</b> steer · <b>C</b> camera</div>
+        <a class="credit" href="https://github.com/KenneyNL/Starter-Kit-Racing" target="_blank" rel="noopener noreferrer">
+            Based on <b>Starter Kit Racing</b> by Kenney · CC0 assets
+        </a>
+        <div id="loadingOverlay" class="loading-overlay" role="status" aria-live="polite">
+            <div class="loading-box">
+                <div class="loading-spinner" aria-hidden="true"></div>
+                <div class="loading-label">Loading Racer…</div>
+                <div class="loading-sub">Loading Kenney&rsquo;s CC0 racing models, track, and audio.</div>
+            </div>
+        </div>
+        <script>
+            // Loading screen: hide once the demo signals ready (or errors) via the canvas
+            // data attributes it sets when its assets are loaded and the engine starts.
+            (function () {
+                var overlay = document.getElementById("loadingOverlay");
+                var canvas = document.getElementById("renderCanvas");
+                if (!overlay || !canvas) return;
+                var done = false;
+                var observer = null;
+                function hide() {
+                    if (done) return;
+                    done = true;
+                    if (observer) {
+                        observer.disconnect();
+                        observer = null;
+                    }
+                    overlay.classList.add("is-hidden");
+                    setTimeout(function () {
+                        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+                    }, 600);
+                }
+                function check() {
+                    if (canvas.dataset.ready === "true" || canvas.dataset.error) {
+                        hide();
+                        return true;
+                    }
+                    return false;
+                }
+                if (!check()) {
+                    observer = new MutationObserver(check);
+                    observer.observe(canvas, { attributes: true, attributeFilter: ["data-ready", "data-error"] });
+                    setTimeout(hide, 45000);
+                }
+            })();
+        </script>
+        <script type="module" src="/lite/bundle/demos/racer.js"></script>
+    </body>
+</html>

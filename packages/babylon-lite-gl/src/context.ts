@@ -40,7 +40,8 @@ export interface GLEngineOptions {
     failIfMajorPerformanceCaveat?: boolean;
 }
 
-/** Read-only WebGL2 capability limits, queried once at context creation. */
+/** Read-only WebGL2 capability limits, queried at creation and refreshed after
+ *  context restoration because extension objects do not survive context loss. */
 export interface GLEngineCaps {
     /** `gl.MAX_TEXTURE_SIZE` — largest supported texture dimension, in texels. */
     readonly maxTextureSize: number;
@@ -219,27 +220,7 @@ export function createGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, opti
         throw new Error("lite-gl: WebGL2 is not supported on this canvas");
     }
 
-    const parallelExt = gl.getExtension("KHR_parallel_shader_compile") as { COMPLETION_STATUS_KHR: number } | null;
-    // Probe color-buffer-float support. `getExtension` both queries AND enables
-    // the extension, so this call is what makes float/half-float attachments
-    // renderable for the render-target module.
-    const colorBufferFloat = gl.getExtension("EXT_color_buffer_float") !== null;
-    const colorBufferHalfFloat = gl.getExtension("EXT_color_buffer_half_float") !== null;
-    const floatLinear = gl.getExtension("OES_texture_float_linear") !== null;
-    const caps: GLEngineCaps = {
-        maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
-        maxTextureUnits: gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number,
-        parallelShaderCompile: parallelExt,
-        textureFloatRender: colorBufferFloat,
-        textureFloatLinearFiltering: floatLinear,
-        // In WebGL2, EXT_color_buffer_float also makes RGBA16F renderable; the
-        // half-float-only extension is the fallback for drivers exposing just it.
-        textureHalfFloatRender: colorBufferFloat || colorBufferHalfFloat,
-        // Half-float linear filtering is core in WebGL2 (no extension needed).
-        textureHalfFloatLinearFiltering: true,
-        // NPOT textures are core in WebGL2 — mips/wrap work at any size.
-        needPOTTextures: false,
-    };
+    const caps = queryCaps(gl);
 
     const engine: GLEngineContext = {
         canvas,
@@ -483,7 +464,9 @@ function handleContextLost(engine: GLEngineContext, e: Event): void {
         return;
     }
     engine._isLost = true;
-    engine._wasLoopActive = engine._rafId !== 0;
+    // `tick` clears `_rafId` while callbacks run, so a loss event delivered in
+    // that window still represents an active loop when callbacks remain.
+    engine._wasLoopActive = engine._loops.length > 0;
     if (engine._rafId !== 0) {
         cancelAnimationFrame(engine._rafId);
         engine._rafId = 0;
@@ -520,6 +503,7 @@ function handleContextRestored(engine: GLEngineContext): void {
     if (engine._disposed) {
         return;
     }
+    Object.assign(engine.caps, queryCaps(engine.gl));
     for (const eff of engine._effects) {
         if (!eff._disposed) {
             eff._restore(engine);
@@ -565,6 +549,25 @@ function handleContextRestored(engine: GLEngineContext): void {
             console.error("lite-gl: onRestored callback threw", err);
         }
     }
+}
+
+function queryCaps(gl: WebGL2RenderingContext): GLEngineCaps {
+    const parallelExt = gl.getExtension("KHR_parallel_shader_compile") as { COMPLETION_STATUS_KHR: number } | null;
+    // `getExtension` both queries and enables these capabilities, so they must
+    // be reacquired after context restoration before resources are rebuilt.
+    const colorBufferFloat = gl.getExtension("EXT_color_buffer_float") !== null;
+    const colorBufferHalfFloat = gl.getExtension("EXT_color_buffer_half_float") !== null;
+    const floatLinear = gl.getExtension("OES_texture_float_linear") !== null;
+    return {
+        maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
+        maxTextureUnits: gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number,
+        parallelShaderCompile: parallelExt,
+        textureFloatRender: colorBufferFloat,
+        textureFloatLinearFiltering: floatLinear,
+        textureHalfFloatRender: colorBufferFloat || colorBufferHalfFloat,
+        textureHalfFloatLinearFiltering: true,
+        needPOTTextures: false,
+    };
 }
 
 function clearObject(o: { [k: string]: unknown }): void {

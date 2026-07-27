@@ -1050,9 +1050,10 @@ export async function buildBundleScenes(): Promise<void> {
             resolve: {
                 // Resolve `babylon-lite` to the built `build/lib` tree (NOT the TS source)
                 // so the measured bundle reflects exactly what a consumer of the published
-                // package gets. Using the directory (not index.js) so sub-path imports like
-                // 'babylon-lite/loader-env/load-dds-env' resolve correctly. `build:lib` must
-                // run first unless explicit source fallback is enabled for legacy baselines.
+                // package gets. Using the directory (not index.js) also preserves internal,
+                // lab-only deep imports that are intentionally absent from the public package
+                // export map. `build:lib` must run first unless explicit source fallback is
+                // enabled for legacy baselines.
                 alias: {
                     "babylon-lite": liteAliasDir,
                 },
@@ -1494,6 +1495,7 @@ export async function measurePage(
                 const c = document.querySelector("canvas");
                 return c?.dataset.ready === "true" || c?.dataset.error != null;
             },
+            undefined,
             { timeout: readyTimeoutMs }
         );
         notReadyReason = await page.evaluate(() => {

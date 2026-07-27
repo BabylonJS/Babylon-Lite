@@ -74,9 +74,12 @@ export interface MeshGPU {
      *  Built once by the interleave module so the hot render path never assembles
      *  it. Undefined → tight mesh (empty suffix, byte-identical pipeline key). */
     readonly _vbKey?: string;
-    /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
-     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
+    /** @internal Extra-owner count when geometry is shared across glTF nodes or mesh clones.
+     *  See resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
     _refCount?: number;
+    /** @internal Rebuild one shared geometry per replacement device. Installed only
+     *  by the glTF sharing path, so ordinary meshes pay no recovery-state cost. */
+    _recoverShared?: (engine: EngineContext, mesh: Mesh, upload: (engine: EngineContext, mesh: Mesh) => MeshGPU) => MeshGPU;
 }
 
 // ─── Mesh ────────────────────────────────────────────────────────────
@@ -99,6 +102,8 @@ export interface Mesh extends SceneNode {
     vat?: VatData | null;
     /** Morph target GPU data. Type-only — no module dependency. */
     morphTargets?: MorphTargetData | null;
+    /** @internal Route this thin-instanced mesh through scene-local runtime materialization. */
+    _runtimeThinBuild?: (scene: import("../scene/scene-core.js").SceneContext, mesh: Mesh, pending?: Promise<void>) => Promise<void>;
     /** User-controlled render order. Lower = drawn first within phase.
      *  Only affects ordering within the opaque or transparent phase. */
     renderOrder?: number;
@@ -110,6 +115,14 @@ export interface Mesh extends SceneNode {
     renderOnTop?: boolean;
     /** Thin instance data (CPU-side). GPU buffer managed by render system. */
     thinInstances?: ThinInstanceData | null;
+    /** Explicit opt-in that this mesh's RGBA vertex colours drive translucency
+     *  (Babylon `AbstractMesh.hasVertexAlpha`). When `true` and the mesh actually
+     *  carries a vertex-colour buffer, the Standard forward and geometry paths
+     *  treat it as alpha-blended: source-over blending, depth-write disabled, and
+     *  sorted into the transparent phase. Defaults to `false`/opaque. Set this
+     *  explicitly (or via a loader that knows the vertex-colour accessor is VEC4);
+     *  Lite never scans vertex buffers to infer it. */
+    hasVertexAlpha?: boolean;
     /** When `false`, the GPU picker skips this mesh.  Defaults to `true`
      *  (undefined behaves as pickable).  Mirrors BJS `AbstractMesh.isPickable`. */
     pickable?: boolean;

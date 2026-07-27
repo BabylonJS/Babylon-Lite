@@ -13,7 +13,7 @@ Provides GPU-accelerated skeletal animation infrastructure. Creates bone texture
 ```typescript
 // create-skeleton.ts
 export function createSkeleton(
-    device: GPUDevice,
+    engine: EngineContext,
     joints: Uint16Array | Uint8Array, // 4 joint indices per vertex (JOINTS_0)
     weights: Float32Array, // 4 blend weights per vertex (WEIGHTS_0)
     boneCount: number, // number of bones (joints)
@@ -22,6 +22,13 @@ export function createSkeleton(
     weights1?: Float32Array | null // WEIGHTS_1 for 8-bone skinning
 ): SkeletonData;
 ```
+
+```typescript
+// update-skeleton-bone-matrices.ts
+export function updateSkeletonBoneMatrices(engine: EngineContext, skeleton: SkeletonData, boneMatrices: Float32Array): void;
+```
+
+`updateSkeletonBoneMatrices()` validates the matrix count, updates the skeleton's CPU mirror, and uploads the complete matrix set without exposing the underlying `GPUTexture` to scene code.
 
 ```typescript
 // skeleton-updater.ts
@@ -306,6 +313,7 @@ The internal `BoneOverride` map type is kept off the public API surface: public 
 | File                    | Purpose                                                                                                                         |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `create-skeleton.ts`    | GPU resource factory: creates bone texture + joint/weight vertex buffers from parsed glTF skin data                             |
+| `update-skeleton-bone-matrices.ts` | High-level programmatic bone-matrix update that keeps the CPU mirror and GPU texture synchronized                |
 | `skeleton-updater.ts`   | Per-frame animation evaluation: keyframe interpolation → hierarchy traversal → bone matrix computation → GPU upload             |
 | `skeleton-pose.ts`      | Shared bake primitives (topo order, rest reset, world matrices, bone-texture upload) used by the opt-in eager bone-control bake |
 | `bone-control.ts`       | Opt-in bone-control API: `enableBoneControl`, `getBoneByName`, `setBone*`, eager bake + per-frame override applier              |

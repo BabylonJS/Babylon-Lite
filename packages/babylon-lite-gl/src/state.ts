@@ -2,9 +2,10 @@ import type { GLEngineContext } from "./context.js";
 
 /* ─── Deferred render-state index-array layout ────────────────────────────────
  * The deferred render-state (blend / depth / cull / stencil / color-mask) lives
- * in a single flat `Float64Array(46)` on `GLState.rs`: slots `0..20` hold the
- * ACTUAL applied GL state, slots `21..41` (`RS_X + RS_DESIRED`) the DESIRED twin,
- * and slots `42..45` the standalone (no-desired-twin) cached `gl.clearColor` RGBA.
+ * in a flat `Float64Array(46)` on `GLState.rs`: slots `0..20` hold the ACTUAL
+ * applied GL state, slots `21..41` (`RS_X + RS_DESIRED`) the DESIRED twin, and
+ * slots `42..45` the standalone (no-desired-twin) cached `gl.clearColor` RGBA.
+ * `setStencilOpSeparate` lazily expands it to 52 slots for back-face operations.
  *
  * These `@internal` index consts are imported by blend.ts / depth-stencil.ts /
  * apply-states.ts. Because they are plain `const` integers, esbuild inlines each
@@ -95,7 +96,7 @@ export interface GLState {
     boundFramebuffer: WebGLFramebuffer | null;
     /**
      * Deferred render-state (blend / depth / cull / stencil / color-mask) packed
-     * into ONE flat `Float64Array(46)`. Slots `0..20` (indexed by the `RS_*`
+     * into a flat `Float64Array(46)`. Slots `0..20` (indexed by the `RS_*`
      * consts) are the ACTUAL applied GL state — what {@link applyGLStates} last
      * wrote to the context; slots `21..41` (`rs[RS_X + RS_DESIRED]`) are the
      * DESIRED twin the setters record. The setters write ONLY the desired half
@@ -108,12 +109,19 @@ export interface GLState {
      * Sentinels (identical for both halves): `-1` for the tri-state enables
      * (`RS_BLEND_ENABLED` / `RS_DEPTH_TEST` / `RS_DEPTH_MASK` / `RS_CULL_ENABLED`
      * / `RS_STENCIL_TEST`) and the mask caches (`RS_STENCIL_MASK` /
-     * `RS_COLOR_MASK`); `0` for every func / equation / op / ref slot (no GL enum
-     * is `0`). An unset desired equals its unset actual and is never flushed; the
-     * `-1` blend/test sentinels guarantee the first applied state is never elided.
+     * `RS_COLOR_MASK`), plus the leading stencil-op slot
+     * (`RS_STENCIL_OP_FAIL`); `0` for every other func / equation / op / ref
+     * slot. The leading op sentinel lets the first op
+     * setter seed omitted fields to WebGL's `KEEP` defaults before merging. An
+     * unset desired equals its unset actual and is never flushed; the `-1`
+     * blend/test sentinels guarantee the first applied state is never elided.
      * The blend func/equation slots are only trusted while `RS_BLEND_ENABLED` is
      * `1` — the disabled→enabled transition re-issues both (matching Babylon's
      * `AlphaState`, which does not track them while blending is off).
+     *
+     * `setStencilOpSeparate` lazily replaces this array with a 52-slot copy; the
+     * six appended slots cache actual and desired back-face operations without
+     * moving any base index.
      *
      * Float64 (not Int32): `RS_STENCIL_MASK` / `RS_STENCIL_FUNC_MASK` can be
      * `0xFFFFFFFF`, which Int32 stores as `-1` — colliding with the `-1` unset
@@ -138,6 +146,8 @@ export interface GLState {
     _flushDepthCull?: (engine: GLEngineContext) => void;
     /** @internal Stencil reconciler (Babylon's `_stencilState`). */
     _flushStencil?: (engine: GLEngineContext) => void;
+    /** @internal Lazy hook that mirrors shared stencil operations to the back face. */
+    _setStencilBack?: (cache: GLState, state: { opFail?: GLenum; opZFail?: GLenum; opZPass?: GLenum }) => void;
     /** @internal Color-write-mask reconciler (Babylon's `setColorWrite`). */
     _flushColorMask?: (engine: GLEngineContext) => void;
     /** Scissor-test enable tri-state (`-1` unset, `0` off, `1` on). */
@@ -171,13 +181,14 @@ export interface GLState {
     quadVao: WebGLVertexArrayObject | null;
 }
 
-/** Indices in `rs` whose unset sentinel is `-1` (the tri-state enables + the
- *  `stencilMask` / `colorMask` caches). Every other slot defaults to `0`. The
- *  sentinel is written to BOTH the actual (`i`) and desired (`i + RS_DESIRED`)
- *  halves. Kept as a function-local literal so it stays a runtime value (no
- *  module-level allocation / side effect). */
+/** Indices in `rs` whose unset sentinel is `-1` (the tri-state enables, the
+ *  `stencilMask` / `colorMask` caches, and the leading shared stencil-op slot).
+ *  Every other slot defaults to `0`. The sentinel is written to BOTH
+ *  the actual (`i`) and desired (`i + RS_DESIRED`) halves. Kept as a
+ *  function-local literal so it stays a runtime value (no module-level
+ *  allocation / side effect). */
 function applyRenderStateSentinels(rs: Float64Array): void {
-    for (const i of [RS_BLEND_ENABLED, RS_DEPTH_TEST, RS_DEPTH_MASK, RS_CULL_ENABLED, RS_STENCIL_TEST, RS_STENCIL_MASK, RS_COLOR_MASK]) {
+    for (const i of [RS_BLEND_ENABLED, RS_DEPTH_TEST, RS_DEPTH_MASK, RS_CULL_ENABLED, RS_STENCIL_TEST, RS_STENCIL_MASK, RS_STENCIL_OP_FAIL, RS_COLOR_MASK]) {
         rs[i] = -1;
         rs[i + RS_DESIRED] = -1;
     }

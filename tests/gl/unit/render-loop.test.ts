@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { createGLEngine, runRenderLoop, stopRenderLoop } from "../../../packages/babylon-lite-gl/src/index";
-import { createMockCanvas, createMockGL } from "./_lite-gl-mock";
+import { createMockCanvas, createMockGL, fireLost, fireRestored } from "./_lite-gl-mock";
 
 beforeAll(() => {
     // Node has no rAF — stub it to a deterministic no-op. runRenderLoop calls
@@ -49,5 +49,21 @@ describe("lite-gl render loop", () => {
         stopRenderLoop(engine, a);
         expect(engine._loops.length).toBe(1);
         expect(engine._loops[0]).toBe(b);
+    });
+
+    it("restarts after context loss delivered while a RAF callback is active", () => {
+        const mock = createMockGL();
+        const canvas = createMockCanvas(mock);
+        const engine = createGLEngine(canvas);
+        runRenderLoop(engine, () => undefined);
+
+        // `tick` sets this to zero before invoking callbacks. A context-loss
+        // event can therefore observe zero even though the loop is active.
+        engine._rafId = 0;
+        fireLost(canvas);
+        fireRestored(canvas);
+
+        expect(engine._loops).toHaveLength(1);
+        expect(engine._rafId).not.toBe(0);
     });
 });

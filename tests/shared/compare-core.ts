@@ -18,6 +18,8 @@ export interface SceneConfig {
     maxMad: number;
     maxRegionMad?: number;
     maxRawKB?: number;
+    /** Skip the bundle-size ceiling when runtime-loaded bytes are hardware-dependent. */
+    skipBundleSize?: boolean;
     /** Optional human-readable caveat rendered on lab cards (e.g. temporarily relaxed ceilings). */
     note?: string;
     /** Skip this scene in parity tests. */
