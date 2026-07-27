@@ -14,7 +14,7 @@ import { addAnimationGroup } from "../../../packages/babylon-lite/src/animation/
 import type { AnimationGltfMixer, AnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { enableAnimationBlending, setAnimationAdditive } from "../../../packages/babylon-lite/src/animation/weighted-gltf-mixer";
 import { AnimationGroupMaskMode, createAnimationGroupMask } from "../../../packages/babylon-lite/src/animation/animation-group-mask";
-import { INTERP_LINEAR, PATH_SCALE } from "../../../packages/babylon-lite/src/animation/types";
+import { INTERP_LINEAR, PATH_ROTATION, PATH_SCALE } from "../../../packages/babylon-lite/src/animation/types";
 import type { AnimationClip, NodeRest, SkeletonBinding, SkeletonData } from "../../../packages/babylon-lite/src/animation/types";
 import { enableBoneControl } from "../../../packages/babylon-lite/src/skeleton/bone-control";
 import type { BoneOverride } from "../../../packages/babylon-lite/src/skeleton/bone-control";
@@ -22,6 +22,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 
 const JOINT_NAME = "joint";
 const OVERRIDE_SCALE_MASK = 4;
+const OVERRIDE_ROTATION_MASK = 2;
 
 function identityMat4(): Float32Array {
     // prettier-ignore
@@ -64,6 +65,24 @@ function createScaleClip(): AnimationClip {
     };
 }
 
+/** Clip holding the joint at a constant 180° Y rotation, so the sampled value is
+ *  independent of time and equal to the rotation override used by the test below. */
+function createRotationClip(): AnimationClip {
+    return {
+        name: "rotation",
+        channels: [{ samplerIdx: 0, nodeIdx: 0, path: PATH_ROTATION }],
+        samplers: [
+            {
+                input: new Float32Array([0, 1]),
+                output: new Float32Array([0, 1, 0, 0, 0, 1, 0, 0]),
+                interpolation: INTERP_LINEAR,
+            },
+        ],
+        duration: 1,
+        frameRate: 60,
+    };
+}
+
 function createGroup(mixer: AnimationGltfMixer, weight: number): AnimationGroup {
     const group: AnimationGroup = {
         name: "clip",
@@ -71,7 +90,7 @@ function createGroup(mixer: AnimationGltfMixer, weight: number): AnimationGroup 
         frameRate: 60,
         isPlaying: true,
         currentTime: 0,
-        targetedAnimations: mixer[0].channels.map(() => ({ targetName: JOINT_NAME, nodeIndex: 0, path: "scale" })),
+        targetedAnimations: mixer[0].channels.map((ch) => ({ targetName: JOINT_NAME, nodeIndex: 0, path: ch.path === PATH_ROTATION ? "rotation" : "scale" })),
         speedRatio: 1,
         loopAnimation: true,
         weight,
@@ -150,6 +169,27 @@ describe("weighted glTF mixer — bone overrides and masks", () => {
         updateAnimationManager(manager, 500);
 
         expect(boneDiagonal(binding)).toEqual([-1.5, 1.5, 1.5, 1]);
+    });
+
+    it("blends a partial-weight rotation against the override, not the rest pose", () => {
+        // 180° Y rotation, matching the clip's constant sample exactly.
+        const overrides = new Map<number, BoneOverride>([[0, { mask: OVERRIDE_ROTATION_MASK, tx: 0, ty: 0, tz: 0, rx: 0, ry: 1, rz: 0, rw: 0, sx: 1, sy: 1, sz: 1 }]]);
+        const binding = createBinding(overrides);
+        const group = createGroup([createRotationClip(), [createRestNode()], [binding]], 0.5);
+
+        const manager = createManager();
+        addAnimationGroup(manager, group);
+        updateAnimationManager(manager, 500);
+
+        // Total rotation weight is 0.5, so the mixer slerps the accumulated rotation halfway
+        // back towards the pre-animation pose. That pose is the override (which equals the
+        // sample), so the joint keeps the full 180° Y turn — diag(1, 1, -1) after the RH→LH
+        // root transform negates X. Blending against the rest pose instead would yield a 90°
+        // turn, whose diagonal is (0, 1, 0).
+        const diagonal = boneDiagonal(binding);
+        expect(diagonal[0]).toBeCloseTo(1, 5);
+        expect(diagonal[1]).toBeCloseTo(1, 5);
+        expect(diagonal[2]).toBeCloseTo(-1, 5);
     });
 
     it("skips masked-out channels when accumulating a weighted group", () => {

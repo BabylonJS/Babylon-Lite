@@ -1512,7 +1512,7 @@
         "slug": "scene157-gltf-weighted-blend",
         "name": "Scene 157 — glTF Weighted Animation Blend",
         "maxMad": 0.02,
-        "maxRawKB": 95.6,
+        "maxRawKB": 95.8,
         "description": "One AnimationManager blends Xbot walk and run glTF animation groups with equal weights before a single skeleton upload.",
         "tags": ["pbr", "gltf", "anim"],
         "skipPerf": true,

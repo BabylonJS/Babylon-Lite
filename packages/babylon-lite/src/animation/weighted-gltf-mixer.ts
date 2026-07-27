@@ -31,6 +31,13 @@ interface WeightedGltfTarget {
     readonly nodes: readonly NodeRest[];
     readonly skeletons: readonly SkeletonBinding[];
     readonly overrides: ReadonlyMap<number, unknown> | undefined;
+    /** Per-node base rotation (quaternion) captured after the rest pose + bone overrides are
+     *  written and before accumulation. It is the "original value" the partial-weight rotation
+     *  slerp in `uploadTarget` blends against, so an overridden bone keeps its override for the
+     *  unanimated remainder — matching Babylon.js, which blends a weighted animation against the
+     *  target's current value, not its rest pose. Undefined unless bone control is active, so
+     *  blend-only scenes allocate nothing and keep using the node rest rotation. */
+    readonly baseRot: Float32Array | undefined;
     readonly trs: Float32Array;
     readonly localMat: Float32Array;
     readonly worldMat: Float32Array;
@@ -163,8 +170,22 @@ function resetWeightedGltfTarget(target: WeightedGltfTarget): void {
     // matching the single-clip controller path (skeleton-updater.ts). Routed through the same
     // null hook, so blend bundles without bone control pay only a branch.
     const overrides = target.overrides;
-    if (overrides !== undefined && overrides.size > 0) {
-        _boneApplier?.(overrides as ReadonlyMap<number, BoneOverride>, target.trs, target.nodes.length);
+    if (overrides !== undefined) {
+        if (overrides.size > 0) {
+            _boneApplier?.(overrides as ReadonlyMap<number, BoneOverride>, target.trs, target.nodes.length);
+        }
+        // Snapshot the post-override rotations: accumulation overwrites the rotation slot, but
+        // `uploadTarget` still needs the pre-animation value to slerp against at partial weight.
+        const baseRot = target.baseRot!;
+        const trs = target.trs;
+        for (let i = 0; i < target.nodes.length; i++) {
+            const src = i * TRS_STRIDE + R_OFF;
+            const dst = i * 4;
+            baseRot[dst] = trs[src]!;
+            baseRot[dst + 1] = trs[src + 1]!;
+            baseRot[dst + 2] = trs[src + 2]!;
+            baseRot[dst + 3] = trs[src + 3]!;
+        }
     }
 }
 
@@ -186,12 +207,14 @@ function getTarget(scratch: WeightedGltfScratch, mixer: AnimationGltfMixer): Wei
     if (!target) {
         const numNodes = nodes.length;
         const skeletons = mixer[GLTF_SKELETONS];
+        // Bone overrides ride on the shared runtime skeleton (stamped by enableBoneControl).
+        // Undefined unless bone control is active, so blend-only scenes pay nothing.
+        const overrides = skeletons.length > 0 ? skeletons[0]!.runtimeSkeleton?._overrides : undefined;
         target = {
             nodes,
             skeletons,
-            // Bone overrides ride on the shared runtime skeleton (stamped by enableBoneControl).
-            // Undefined unless bone control is active, so blend-only scenes pay nothing.
-            overrides: skeletons.length > 0 ? skeletons[0]!.runtimeSkeleton?._overrides : undefined,
+            overrides,
+            baseRot: overrides !== undefined ? new F32(numNodes * 4) : undefined,
             trs: new F32(numNodes * TRS_STRIDE),
             localMat: new F32(numNodes * 16),
             worldMat: new F32(numNodes * 16),
@@ -384,8 +407,16 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
         const rotationWeight = target.rWeight[i]!;
         if (rotationWeight > 0 && rotationWeight < 1) {
             const off = i * TRS_STRIDE + R_OFF;
+            // Blend the animated remainder against the pre-animation pose: the post-override
+            // base when bone control is active, otherwise the node's rest rotation.
+            const baseRot = target.baseRot;
             const node = nodes[i]!;
-            quatSlerpInto(trs, off, node.rx, node.ry, node.rz, node.rw, trs[off]!, trs[off + 1]!, trs[off + 2]!, trs[off + 3]!, rotationWeight);
+            const bo = i * 4;
+            const bx = baseRot ? baseRot[bo]! : node.rx;
+            const by = baseRot ? baseRot[bo + 1]! : node.ry;
+            const bz = baseRot ? baseRot[bo + 2]! : node.rz;
+            const bw = baseRot ? baseRot[bo + 3]! : node.rw;
+            quatSlerpInto(trs, off, bx, by, bz, bw, trs[off]!, trs[off + 1]!, trs[off + 2]!, trs[off + 3]!, rotationWeight);
         } else if (rotationWeight > 0) {
             normalizeQuaternionAt(trs, i * TRS_STRIDE + R_OFF);
         }
