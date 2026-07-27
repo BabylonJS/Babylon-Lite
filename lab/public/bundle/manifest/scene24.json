@@ -1,5 +1,5 @@
 {
-  "rawKB": 58.7,
+  "rawKB": 58.8,
   "gzipKB": 24.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -15,5 +15,5 @@
     "scene24-std-specular-fragment-DhCYMq1P.js",
     "scene24.js"
   ],
-  "rawBytes": 60156
+  "rawBytes": 60178
 }

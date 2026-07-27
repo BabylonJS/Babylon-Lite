@@ -9,8 +9,8 @@
     "scene146-generate-mipmaps-8fGshmNU.js",
     "scene146-gltf-json-asset-DkhJJ3wt.js",
     "scene146-ibl-fragment-CeRrvT96.js",
-    "scene146-pbr-geometry-view-BkRhiYay.js",
-    "scene146-pbr-renderable-mdIXWN8c.js",
+    "scene146-pbr-geometry-view-ckR5hWkd.js",
+    "scene146-pbr-renderable-B8jhABqy.js",
     "scene146-rgbd-decode-DoudQncg.js",
     "scene146-scene-uniforms-FTYH6Ct0.js",
     "scene146-shader-composer-DOjPUQGI.js",
@@ -19,5 +19,5 @@
     "scene146-wgsl-helpers-BxdFLrVn.js",
     "scene146.js"
   ],
-  "rawBytes": 112719
+  "rawBytes": 112741
 }

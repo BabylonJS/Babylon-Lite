@@ -62,7 +62,10 @@ export interface SceneContext {
 /** Add an entity or asset container to the scene. Auto-routes by type. */
 export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void;
 
-/** Remove an entity or asset container from the scene, undoing addToScene. Idempotent. */
+/** Remove an entity or asset container from the scene, undoing addToScene. Idempotent.
+ *  Removing a mesh from its LAST scene disposes it — every claim it holds on its shared GPU
+ *  resources is released, the ones it last owned are destroyed, and the mesh is retired for good
+ *  (re-adding it throws). See "Mesh GPU Lifetime". */
 export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void;
 
 /** Register a callback to run before each rendered frame. */
@@ -194,6 +197,16 @@ The `AssetContainer` branch is checked first (via `'entities' in entity`). For `
 
 The scene never branches on material type (PBR vs standard). Materials self-describe their builder via `material._buildGroup`, and the scene groups meshes by builder identity using an internal `Map<MeshGroupBuilder, Mesh[]>`. Each unique builder is registered as a deferred builder exactly once.
 
+### Mesh GPU Lifetime — `removeFromScene` Contract
+
+A mesh's GPU resources (geometry `_gpu`, skeleton, morph targets, thin instances) are **shared and ref-counted** (`resource/ref-count.ts`): several scenes may hold the same mesh, `cloneTransformNode` shares buffers with its clone, and the glTF loader shares one geometry across nodes referencing the same primitive.
+
+- `removeFromScene(scene, mesh)` / `disposeScene(scene)` unregister the scene from the mesh (`unregisterMeshScene`). Only when the mesh leaves its **last** scene is `disposeMeshGpu(mesh)` called, which releases the mesh's claim on each shared resource. Removing a mesh from one of several scenes holding it is not a disposal — re-adding it there is fine.
+- Each resource's buffers are destroyed when that release was the **last** claim on it; resources still owned by a clone or another glTF node survive.
+- **Disposal is terminal, for the mesh.** `disposeMeshGpu` marks the mesh `_disposed` and returns early on any repeat call, so the idempotent `removeFromScene` never releases a claim twice (a second release would report the surviving clone's claim as the last one and destroy buffers still in use). `addToScene` throws for a disposed mesh from then on: `Mesh "<name>" cannot be added: it was disposed when it left its last scene.`, and `cloneTransformNode` likewise refuses it — a clone of a disposed mesh could never release the claims cloning retains. The flag is per-mesh, not per-resource, because both failure modes are per-mesh: a sole owner would draw with destroyed handles, while a shared owner would release a second claim it no longer holds and free buffers a surviving sibling still renders with. It also covers resources destroyed independently of the shared geometry (a per-node skeleton or morph target whose geometry is shared) and stale handles left behind by device-loss recovery, which only rebuilds meshes still in a scene.
+- The guard runs before any scene state is mutated, so a rejected mesh add leaves the scene untouched. Adding a hierarchy or asset container is not transactional: entities processed before the offending mesh stay added.
+- Removing a mesh you intend to show again is therefore never valid unless another scene still holds it. Otherwise build a new mesh. To hide a mesh temporarily, prefer `mesh.visible = false` / `setSubtreeVisible` over removing it.
+
 ### Deferred Building & `_buildGroup` Pattern
 
 Materials carry a `_buildGroup: MeshGroupBuilder` function that knows how to create GPU pipelines, bind groups, and renderables for a batch of meshes sharing that material type. The flow:
@@ -258,17 +271,22 @@ Algorithm:
 
 ## Test Specification
 
-| Test                                        | Description                                                               |
-| ------------------------------------------- | ------------------------------------------------------------------------- |
-| `createSceneContext returns valid defaults` | Verify all fields match documented defaults                               |
-| `addToScene routes mesh`                    | Add Mesh → appears in `meshes`, builder registered in `_deferredBuilders` |
-| `addToScene routes light`                   | Add light → appears in `lights`                                           |
-| `addToScene routes shadow generator`        | Add ShadowGenerator → appears in `shadowGenerators` + `_prePasses`        |
-| `addToScene deduplicates builders`          | Two meshes with same `_buildGroup` → one deferred builder                 |
-| `createDefaultCamera with meshes`           | Provide meshes with known bounds, verify radius = diag\*1.5               |
-| `createDefaultCamera with no meshes`        | radius=1, center=(0,0,0)                                                  |
-| `deferred builders run at buildScene()`     | Register builder → verify called by `buildScene()`                        |
-| `buildScene() awaits async builders`        | Register async builder → verify awaited                                   |
+| Test                                         | Description                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------- |
+| `createSceneContext returns valid defaults`  | Verify all fields match documented defaults                               |
+| `addToScene routes mesh`                     | Add Mesh → appears in `meshes`, builder registered in `_deferredBuilders` |
+| `addToScene routes light`                    | Add light → appears in `lights`                                           |
+| `addToScene routes shadow generator`         | Add ShadowGenerator → appears in `shadowGenerators` + `_prePasses`        |
+| `addToScene deduplicates builders`           | Two meshes with same `_buildGroup` → one deferred builder                 |
+| `createDefaultCamera with meshes`            | Provide meshes with known bounds, verify radius = diag\*1.5               |
+| `createDefaultCamera with no meshes`         | radius=1, center=(0,0,0)                                                  |
+| `deferred builders run at buildScene()`      | Register builder → verify called by `buildScene()`                        |
+| `buildScene() awaits async builders`         | Register async builder → verify awaited                                   |
+| `addToScene rejects a disposed mesh`         | Remove a sole-owner mesh, re-add it → throws, scene left untouched        |
+| `addToScene rejects a disposed clone`        | Remove a mesh whose clone still owns the geometry, re-add it → throws     |
+| `removeFromScene stays idempotent`           | Remove a clone's source twice → the clone's geometry is never destroyed   |
+| `cloneTransformNode rejects a disposed mesh` | Clone a mesh removed from its last scene → throws instead of pinning it   |
+| `addToScene keeps multi-scene meshes`        | Remove a mesh from one of two scenes holding it → re-add succeeds         |
 
 ## File Manifest
 

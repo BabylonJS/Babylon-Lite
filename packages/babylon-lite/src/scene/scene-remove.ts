@@ -15,6 +15,17 @@ import type { RenderTask } from "../frame-graph/render-task.js";
  *  union as {@link addToScene}: a Mesh, light, camera, shadow generator, transform node,
  *  or a whole AssetContainer. Safe to call more than once (idempotent).
  *
+ *  **Mesh GPU lifetime contract.** Removing a mesh from its LAST scene disposes it: it releases
+ *  its claim on every GPU resource it owns (geometry, skeleton, morph targets, thin instances).
+ *  Those resources are shared and ref-counted, so each one survives while another owner remains —
+ *  another scene holding the same mesh, a `cloneTransformNode` clone, or another glTF node sharing
+ *  the primitive — and is destroyed once the last claim goes away. Either way the mesh itself is
+ *  retired permanently and `addToScene` throws if it is added back: its buffers may be gone, and
+ *  releasing a second claim it no longer holds would free buffers a surviving sibling still
+ *  renders with. Removing a mesh from one of SEVERAL scenes holding it is not a disposal, so
+ *  re-adding it there is fine. Otherwise create a new mesh — and to hide a mesh temporarily, set
+ *  `mesh.visible = false` (or `setSubtreeVisible`) instead of removing it.
+ *
  *  Standalone function for tree-shaking — only included when actually used. */
 export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
     // AssetContainer — undo addToScene(scene, container) field by field.

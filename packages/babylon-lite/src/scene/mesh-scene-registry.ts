@@ -57,8 +57,17 @@ function installMaterialSetter(mesh: Mesh): void {
 }
 
 /** @internal Register `scene` as an owner of `mesh`. Installs the material setter on the mesh's
- *  first registration only (re-adds just grow the subscriber set, reusing the one setter). */
+ *  first registration only (re-adds just grow the subscriber set, reusing the one setter).
+ *
+ *  Throws when the mesh was already disposed — leaving its last scene (or disposing that scene)
+ *  releases every claim it held on its shared GPU resources, destroying the ones it was the last
+ *  owner of. Lite never resurrects them, so a re-add would draw with dead handles (sole owner) or
+ *  release a claim it no longer holds and free buffers a sibling still uses (shared owner). Both
+ *  are silent corruption, so the failure is made loud here. */
 export function registerMeshScene(scene: SceneContext, mesh: Mesh): void {
+    if (mesh._disposed) {
+        throw new Error(`Mesh "${mesh.name}" cannot be added: it was disposed when it left its last scene. Create a new mesh instead.`);
+    }
     const map = (_meshScenes ??= new WeakMap());
     let scenes = map.get(mesh);
     if (!scenes) {

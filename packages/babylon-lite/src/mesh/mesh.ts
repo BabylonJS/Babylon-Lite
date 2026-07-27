@@ -131,6 +131,15 @@ export interface Mesh extends SceneNode {
 
     /** @internal */
     _gpu: MeshGPU;
+    /** @internal Set by `disposeMeshGpu`: this mesh released its claim on every GPU resource it
+     *  owned and is retired for good. Buffers whose last claim went away are already destroyed;
+     *  surviving ones now belong to their remaining owners only. Either way the mesh must never
+     *  re-enter a scene — it would draw with dead handles, or release a second claim it no longer
+     *  holds and free buffers a sibling still renders with. `addToScene` rejects it, repeat
+     *  `disposeMeshGpu` calls are no-ops (so the idempotent `removeFromScene` stays idempotent),
+     *  and `cloneTransformNode` refuses it — cloning retired geometry is the same bug wearing a
+     *  new name, and the clone's claims could never be released. */
+    _disposed?: boolean;
     /** @internal Reason cloning this mesh is currently forbidden. */
     _clone?: string;
     /** @internal Highest CSM cascade this mesh casts into; undefined means all cascades. */

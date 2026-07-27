@@ -10,14 +10,14 @@
     "scene73-fragment-output-CfRmfbPv.js",
     "scene73-generate-mipmaps-D-rpHMD1.js",
     "scene73-gltf-ext-clearcoat-BgaLgSgD.js",
-    "scene73-gltf-feature-registry-Dq5t-pSA.js",
+    "scene73-gltf-feature-registry-BlGbFkMu.js",
     "scene73-gltf-glb-parser-CzK8F7CW.js",
     "scene73-ibl-fragment-CeRrvT96.js",
     "scene73-input-block-CDf7C7a2.js",
     "scene73-node-env-BKUuQX2w.js",
     "scene73-node-renderable-KxpNMtGy.js",
     "scene73-pbr-metallic-roughness-block-full-CUhffh-6.js",
-    "scene73-pbr-renderable-CW8mK7bi.js",
+    "scene73-pbr-renderable-CPZpGeCB.js",
     "scene73-perturb-normal-Bqx-TYaB.js",
     "scene73-reflection-block-CIXuH-z0.js",
     "scene73-rgbd-decode-BSh_ziDi.js",
@@ -27,5 +27,5 @@
     "scene73-vertex-output-C7G5u6Y0.js",
     "scene73.js"
   ],
-  "rawBytes": 144782
+  "rawBytes": 144804
 }

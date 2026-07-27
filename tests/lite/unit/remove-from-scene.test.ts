@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove";
 import { addToScene } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
+import { ObservableVec3 } from "../../../packages/babylon-lite/src/math/observable-vec3";
+import { ObservableQuat } from "../../../packages/babylon-lite/src/math/observable-quat";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { AssetContainer } from "../../../packages/babylon-lite/src/asset-container";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
@@ -176,5 +179,170 @@ describe("removeFromScene symmetry", () => {
 
         removeFromScene(sceneB, mesh);
         expect(destroy).toHaveBeenCalledOnce();
+    });
+
+    it("rejects re-adding a disposed mesh, leaving the scene untouched", () => {
+        const scene = fakeScene();
+        const destroy = vi.fn();
+        const mesh = {
+            name: "retired",
+            _gpu: {
+                positionBuffer: { destroy },
+                normalBuffer: { destroy: vi.fn() },
+                uvBuffer: { destroy: vi.fn() },
+                indexBuffer: { destroy: vi.fn() },
+                tangentBuffer: null,
+                uv2Buffer: null,
+                colorBuffer: null,
+            },
+            material: null,
+            children: [],
+            parent: null,
+        } as unknown as Mesh;
+
+        addToScene(scene, mesh);
+        removeFromScene(scene, mesh);
+        expect(destroy).toHaveBeenCalledOnce();
+
+        expect(() => addToScene(scene, mesh)).toThrow(/was disposed/);
+        expect(scene.meshes).toHaveLength(0);
+        // A brand-new scene is no escape hatch — disposal is a property of the mesh.
+        expect(() => addToScene(fakeScene(), mesh)).toThrow(/was disposed/);
+    });
+
+    it("rejects re-adding a disposed clone so its sibling's geometry is never double-released", () => {
+        const scene = fakeScene();
+        const gpu = {
+            positionBuffer: { destroy: vi.fn() },
+            normalBuffer: { destroy: vi.fn() },
+            uvBuffer: { destroy: vi.fn() },
+            indexBuffer: { destroy: vi.fn() },
+            tangentBuffer: null,
+            uv2Buffer: null,
+            colorBuffer: null,
+        };
+        const source = {
+            name: "source",
+            _gpu: gpu,
+            material: null,
+            children: [],
+            parent: null,
+            position: new ObservableVec3(0, 0, 0, () => {}),
+            rotationQuaternion: new ObservableQuat(0, 0, 0, 1, () => {}),
+            scaling: new ObservableVec3(1, 1, 1, () => {}),
+        } as unknown as Mesh;
+        const clone = cloneTransformNode(source) as Mesh;
+        expect(source._gpu._refCount).toBe(2);
+
+        addToScene(scene, source);
+        addToScene(scene, clone);
+        removeFromScene(scene, source);
+        // The clone still owns the geometry, so nothing was destroyed.
+        expect(gpu.positionBuffer.destroy).not.toHaveBeenCalled();
+
+        // Re-adding the source would let it release a second claim it no longer holds,
+        // destroying buffers the clone still renders with.
+        expect(() => addToScene(scene, source)).toThrow(/was disposed/);
+        expect(scene.meshes).toEqual([clone]);
+
+        removeFromScene(scene, clone);
+        expect(gpu.positionBuffer.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("stays idempotent for a disposed mesh instead of double-releasing its clone's geometry", () => {
+        const scene = fakeScene();
+        const gpu = {
+            positionBuffer: { destroy: vi.fn() },
+            normalBuffer: { destroy: vi.fn() },
+            uvBuffer: { destroy: vi.fn() },
+            indexBuffer: { destroy: vi.fn() },
+            tangentBuffer: null,
+            uv2Buffer: null,
+            colorBuffer: null,
+        };
+        const source = {
+            name: "source",
+            _gpu: gpu,
+            material: null,
+            children: [],
+            parent: null,
+            position: new ObservableVec3(0, 0, 0, () => {}),
+            rotationQuaternion: new ObservableQuat(0, 0, 0, 1, () => {}),
+            scaling: new ObservableVec3(1, 1, 1, () => {}),
+        } as unknown as Mesh;
+        const clone = cloneTransformNode(source) as Mesh;
+
+        addToScene(scene, source);
+        addToScene(scene, clone);
+        removeFromScene(scene, source);
+        // The second removal must not release a second claim — the clone still renders with it.
+        removeFromScene(scene, source);
+        expect(gpu.positionBuffer.destroy).not.toHaveBeenCalled();
+        expect(source._gpu._refCount).toBe(1);
+
+        removeFromScene(scene, clone);
+        expect(gpu.positionBuffer.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("rejects a disposed mesh whose per-node skeleton died while its shared geometry survived", () => {
+        const scene = fakeScene();
+        const gpu = {
+            positionBuffer: { destroy: vi.fn() },
+            normalBuffer: { destroy: vi.fn() },
+            uvBuffer: { destroy: vi.fn() },
+            indexBuffer: { destroy: vi.fn() },
+            tangentBuffer: null,
+            uv2Buffer: null,
+            colorBuffer: null,
+            // Shared with a second glTF node referencing the same primitive.
+            _refCount: 2,
+        };
+        const boneTexture = { destroy: vi.fn() };
+        const mesh = {
+            name: "skinned",
+            _gpu: gpu,
+            material: null,
+            children: [],
+            parent: null,
+            // Per-node skeleton: not shared, so it dies with this mesh.
+            skeleton: { boneTexture, jointsBuffer: { destroy: vi.fn() }, weightsBuffer: { destroy: vi.fn() }, _skinBuffers: {} },
+        } as unknown as Mesh;
+
+        addToScene(scene, mesh);
+        removeFromScene(scene, mesh);
+        expect(gpu.positionBuffer.destroy).not.toHaveBeenCalled();
+        expect(boneTexture.destroy).toHaveBeenCalledOnce();
+
+        expect(() => addToScene(scene, mesh)).toThrow(/was disposed/);
+    });
+
+    it("keeps a mesh addable while another scene still holds it", () => {
+        const sceneA = fakeScene();
+        const sceneB = fakeScene();
+        const destroy = vi.fn();
+        const mesh = {
+            name: "shared",
+            _gpu: {
+                positionBuffer: { destroy },
+                normalBuffer: { destroy: vi.fn() },
+                uvBuffer: { destroy: vi.fn() },
+                indexBuffer: { destroy: vi.fn() },
+                tangentBuffer: null,
+                uv2Buffer: null,
+                colorBuffer: null,
+            },
+            material: null,
+            children: [],
+            parent: null,
+        } as unknown as Mesh;
+
+        addToScene(sceneA, mesh);
+        addToScene(sceneB, mesh);
+        removeFromScene(sceneA, mesh);
+        expect(destroy).not.toHaveBeenCalled();
+
+        // sceneB still holds the mesh, so it was never disposed and the re-add is legal.
+        expect(() => addToScene(sceneA, mesh)).not.toThrow();
+        expect(sceneA.meshes).toContain(mesh);
     });
 });

@@ -5,13 +5,13 @@
   "runtimeChunks": [
     "scene265-generate-mipmaps-DMQzJP2q.js",
     "scene265-gltf-ext-lights-image-based-BNqefjGx.js",
-    "scene265-gltf-feature-registry-CtiM24Kn.js",
+    "scene265-gltf-feature-registry-Cw3OgsQ0.js",
     "scene265-gltf-json-asset-B5qqjqex.js",
     "scene265-ibl-cubemap-upload-Cau-hWR3.js",
     "scene265-ibl-env-assembly-AI18cahK.js",
     "scene265-ibl-fragment-CeRrvT96.js",
-    "scene265-pbr-renderable-eU1iFJht.js",
+    "scene265-pbr-renderable-CcWO503m.js",
     "scene265.js"
   ],
-  "rawBytes": 81697
+  "rawBytes": 81721
 }

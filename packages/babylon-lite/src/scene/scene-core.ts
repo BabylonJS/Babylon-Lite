@@ -334,6 +334,11 @@ export function addDeferredSceneRenderables(
  * routing bytes here.
  * @param scene - The owning scene (pillar 4b: entities never reference the scene themselves).
  * @param entity - The entity (or asset container) to add.
+ * @throws When `entity` is a mesh that was already disposed — `removeFromScene` (or
+ * `disposeScene`) releases a mesh's claim on its GPU resources when it leaves its LAST scene, and
+ * a disposed mesh is retired for good. Create a new mesh instead of re-adding it. The mesh itself
+ * is rejected before any scene state is touched; when adding a hierarchy or asset container,
+ * entities processed before the offending mesh stay added.
  */
 export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
     const ctx = scene as SceneContext;
@@ -369,8 +374,10 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
     }
     if ("_gpu" in entity && "material" in entity) {
         const mesh = entity as unknown as Mesh;
-        ctx.meshes.push(mesh);
+        // Register BEFORE mutating scene state: registering a disposed mesh throws, and the
+        // scene must be left untouched when it does.
         registerMeshScene(ctx, mesh);
+        ctx.meshes.push(mesh);
         const build = mesh.material ? (mesh.material as unknown as { _buildGroup?: MeshGroupBuilder })._buildGroup : undefined;
         if (build) {
             let group = ctx._groups.get(build);
