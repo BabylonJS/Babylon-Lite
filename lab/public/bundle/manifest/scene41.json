@@ -1,5 +1,5 @@
 {
-  "rawKB": 92.2,
+  "rawKB": 92.3,
   "gzipKB": 36.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -13,5 +13,5 @@
     "scene41-standard-renderable-AIXG2apz.js",
     "scene41.js"
   ],
-  "rawBytes": 94459
+  "rawBytes": 94553
 }

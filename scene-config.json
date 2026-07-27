@@ -2323,5 +2323,16 @@
         "description": "Two rows of identical boxes receding in depth under an orthographic projection. Validates the opt-in orthographic camera seam: reverse-Z OrthoOffCenterLH matrix (near→1, far→0) and the aspect-derived horizontal extent, against Babylon's Camera.ORTHOGRAPHIC_CAMERA.",
         "tags": ["camera", "standard", "procedural"],
         "skipPerf": true
+    },
+    {
+        "id": 269,
+        "slug": "scene269-setparent-mirrored-root",
+        "name": "Scene 269 — setParent Mirrored Root",
+        "maxMad": 0.1,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 82.5,
+        "description": "glTF Node_NegativeScale_01 reparented under a user-created transform node via setParent(). The loader's __root__ carries the RH→LH flip as a negative scale, so the reparent decomposes a negative-determinant matrix; a decomposition that drops the reflection renders the whole model mirrored (forum topic 63859).",
+        "tags": ["gltf", "transform"],
+        "skipPerf": true
     }
 ]

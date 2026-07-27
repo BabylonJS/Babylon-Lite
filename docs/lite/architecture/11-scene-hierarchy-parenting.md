@@ -43,6 +43,16 @@ parent's `children` and appended to the new parent's, so traversal helpers (`set
 cascade, cloning, camera bounds) see the new hierarchy. Setting `child.parent` directly drives
 the transform math but does **not** touch `children` — push manually if you need traversal too.
 
+**Mirrored children are preserved.** The glTF loader's synthetic `__root__` carries the RH→LH
+handedness flip as `scaling = (-1, 1, 1)`, so its local transform has a negative determinant.
+`mat4Decompose` keeps that reflection (folded onto a negative Y scale, as Babylon.js does), so
+reparenting a loaded model under a user-created transform node renders identically to before.
+
+**Limitation — matrix-backed nodes.** A node created with `createSceneNodeFromMatrix` (used for
+glTF nodes that declare a raw `matrix` instead of TRS) always reports its captured matrix and
+ignores `position`/`rotationQuaternion`/`scaling`. `setParent` only writes TRS, so it cannot
+move such a node. Reparent its TRS-backed parent instead.
+
 ### TransformNode (`scene/transform-node.ts`)
 
 ```typescript

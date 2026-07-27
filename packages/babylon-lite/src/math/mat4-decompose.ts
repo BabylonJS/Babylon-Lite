@@ -16,18 +16,30 @@ export interface DecomposedTransform {
 
 /**
  * Decompose a column-major 4×4 affine matrix into translation, rotation (unit
- * quaternion), and scale. Assumes a TRS matrix (no shear). Mirror image (negative
- * determinant) matrices are not specially handled — the returned scale is always
- * non-negative, matching the rest of the engine's decompose usage.
+ * quaternion), and scale. Assumes a non-singular TRS matrix (no shear).
+ *
+ * Mirror image (negative determinant) matrices are preserved: the reflection is
+ * folded into a negative Y scale, matching Babylon.js `Matrix.decompose`. The
+ * decomposition is therefore lossless — recomposing the returned TRS reproduces
+ * the original matrix — but it is *canonical*, not sign-faithful: a matrix built
+ * from a negative X or Z scale decomposes to a negative Y scale plus a different
+ * rotation.
  * @param m - Column-major 4×4 matrix.
  * @returns A new translation/rotation/scale triple.
  */
 export function mat4Decompose(m: Mat4): DecomposedTransform {
     const sx = Math.hypot(m[0]!, m[1]!, m[2]!);
-    const sy = Math.hypot(m[4]!, m[5]!, m[6]!);
+    const syAbs = Math.hypot(m[4]!, m[5]!, m[6]!);
     const sz = Math.hypot(m[8]!, m[9]!, m[10]!);
+    // Scalar triple product of the basis columns. A negative determinant means the basis is
+    // mirrored; carrying that sign on one axis keeps the remaining basis a proper rotation, so
+    // the quaternion extraction below stays valid and the reflection survives recomposition.
+    const det = m[0]! * (m[5]! * m[10]! - m[6]! * m[9]!) + m[1]! * (m[6]! * m[8]! - m[4]! * m[10]!) + m[2]! * (m[4]! * m[9]! - m[5]! * m[8]!);
+    const sy = det < 0 ? -syAbs : syAbs;
     const invSx = sx > 1e-8 ? 1 / sx : 0;
-    const invSy = sy > 1e-8 ? 1 / sy : 0;
+    // Guard on the magnitude, divide by the signed scale — otherwise a mirrored basis would
+    // fail the epsilon test and zero out the Y column.
+    const invSy = syAbs > 1e-8 ? 1 / sy : 0;
     const invSz = sz > 1e-8 ? 1 / sz : 0;
     // Strip scale from the basis columns, then extract the rotation quaternion.
     const q = _quatFromRotationBasis(m[0]! * invSx, m[4]! * invSy, m[8]! * invSz, m[1]! * invSx, m[5]! * invSy, m[9]! * invSz, m[2]! * invSx, m[6]! * invSy, m[10]! * invSz);
