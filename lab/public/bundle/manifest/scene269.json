@@ -1,5 +1,5 @@
 {
-  "rawKB": 43,
+  "rawKB": 43.1,
   "gzipKB": 17.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,5 +8,5 @@
     "scene269-uniform-copy-batch-DhOf_gUs.js",
     "scene269.js"
   ],
-  "rawBytes": 44067
+  "rawBytes": 44088
 }

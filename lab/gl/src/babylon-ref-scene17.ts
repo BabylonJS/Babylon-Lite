@@ -6,8 +6,10 @@ import { ThinEngine } from "@babylonjs/core/Engines/thinEngine.js";
 
 const QUAD = new Float32Array([-0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5]);
 const INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
-const RED: readonly [number, number, number] = [0.95, 0.12, 0.16];
-const GREEN: readonly [number, number, number] = [0.1, 0.85, 0.32];
+// Must match lab/gl/src/scene17.ts: exact 8-bit colours whose per-channel sums are even, so the 50/50
+// alpha-to-coverage MSAA resolve never lands on an implementation-defined .5 rounding boundary.
+const RED: readonly [number, number, number] = [242 / 255, 31 / 255, 41 / 255];
+const GREEN: readonly [number, number, number] = [26 / 255, 217 / 255, 83 / 255];
 // Must match lab/gl/src/scene17.ts: rows are separated so no cross-row card overlap exists, because a
 // depth tie resolves differently under reverse-Z "greater-equal" (WebGPU) than under strict LESS.
 const ROWS = [

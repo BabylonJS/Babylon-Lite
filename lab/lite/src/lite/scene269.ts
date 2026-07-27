@@ -27,8 +27,12 @@ const VERTEX_SOURCE = `struct VertexOutput{@builtin(position) position:vec4<f32>
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{let c=cos(shaderUniforms.angle);let s=sin(shaderUniforms.angle);let local=input.position.xy*1.65;let rotated=vec2<f32>(local.x*c-local.y*s,local.x*s+local.y*c);let world=shaderUniforms.center+rotated;var out:VertexOutput;out.position=vec4<f32>(world.x/3.3,world.y/2.2,shaderUniforms.depth,1.0);return out;}`;
 const FRAGMENT_SOURCE = `@fragment fn mainFragment()->@location(0) vec4<f32>{return vec4<f32>(shaderUniforms.color,shaderUniforms.opacity);}`;
 
-const RED: readonly [number, number, number] = [0.95, 0.12, 0.16];
-const GREEN: readonly [number, number, number] = [0.1, 0.85, 0.32];
+// Exact 8-bit colours (n/255) whose per-channel sums are even. A 0.5-alpha alpha-to-coverage mix covers
+// 2 of 4 samples, so the MSAA resolve averages these two colours; an average landing on .5 has an
+// implementation-defined rounding direction, which makes software rasterizers disagree with a GPU-captured
+// golden by 1 LSB. Even sums keep every resolved channel an exact integer.
+const RED: readonly [number, number, number] = [242 / 255, 31 / 255, 41 / 255];
+const GREEN: readonly [number, number, number] = [26 / 255, 217 / 255, 83 / 255];
 // Rows sit far enough apart that no card ever overlaps a card from the other row. Cross-row overlap
 // would land on identical depth values, and a depth tie resolves differently under reverse-Z
 // "greater-equal" (WebGPU) than under strict LESS (WebGL2) — diverging the backends for reasons that

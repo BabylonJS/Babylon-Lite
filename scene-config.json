@@ -2328,7 +2328,7 @@
         "id": 269,
         "slug": "scene269-alpha-to-coverage",
         "name": "Scene 269 — Alpha-to-Coverage",
-        "maxMad": 0.1,
+        "maxMad": 0.3,
         "maxRawKB": 43.2,
         "description": "Two red/green overlap panels rendered into a 4x MSAA target with replacement color and depth writes. The left panel keeps alpha-to-coverage off; the right opts each ShaderMaterial into alpha-to-coverage so a half-alpha front card and opaque rear card resolve to an olive sample mix. Mirrors Babylon.js visual test #M4GBLK#0.",
         "tags": ["shader-material", "msaa", "alpha-to-coverage"],

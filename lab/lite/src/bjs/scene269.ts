@@ -47,8 +47,10 @@ void main(void) {
     gl_FragColor = vec4(color, opacity);
 }`;
 
-const RED = new Color3(0.95, 0.12, 0.16);
-const GREEN = new Color3(0.1, 0.85, 0.32);
+// Must match lab/lite/src/lite/scene269.ts: exact 8-bit colours whose per-channel sums are even, so the
+// 50/50 alpha-to-coverage MSAA resolve never lands on an implementation-defined .5 rounding boundary.
+const RED = new Color3(242 / 255, 31 / 255, 41 / 255);
+const GREEN = new Color3(26 / 255, 217 / 255, 83 / 255);
 // Must match lab/lite/src/lite/scene269.ts: rows are separated so no cross-row card overlap exists,
 // because a depth tie resolves differently under reverse-Z "greater-equal" than under strict LESS.
 const ROWS = [
