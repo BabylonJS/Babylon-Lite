@@ -1169,6 +1169,7 @@
         "name": "Scene 113 — Picking Precision",
         "maxMad": 0.3,
         "maxRawKB": 68,
+        "deviceDependentChunks": true,
         "description": "Visual picking validation: one detailed sphere pick places a tiny surface marker at the picked point and a small oriented box along the picked normal.",
         "tags": ["std", "procedural", "picking"],
         "skipPerf": true
@@ -1179,6 +1180,7 @@
         "name": "Scene 114 — Morph/Skeleton Picking",
         "maxMad": 0.1,
         "maxRawKB": 86,
+        "deviceDependentChunks": true,
         "skipBundleSize": true,
         "description": "Visual picking validation on morphed and skinned geometry: GPU and detailed picks drive marker positions from the deformed rendered surface.",
         "tags": ["pbr", "procedural", "morph", "skeleton", "picking"],
@@ -1190,6 +1192,7 @@
         "name": "Scene 115 — Alien Picking Frame 100",
         "maxMad": 0.01,
         "maxRawKB": 127.6,
+        "deviceDependentChunks": true,
         "description": "Precise picking validation on the animated Alien glTF at frame 100: BJS and Lite CPU PickInfo values drive a surface sphere and normal marker.",
         "tags": ["pbr", "gltf", "anim", "skeleton", "picking"],
         "skipPerf": true
