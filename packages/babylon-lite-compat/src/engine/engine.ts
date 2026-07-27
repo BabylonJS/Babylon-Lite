@@ -340,6 +340,31 @@ export abstract class AbstractEngine {
         return unsupported("WebGPUEngine.endFrame", "Babylon Lite's frame graph owns the frame loop; drive rendering with `runRenderLoop`.");
     }
 
+    /**
+     * Babylon.js `engine.currentSampleCount` — the MSAA sample count of the current render target.
+     * Babylon Lite manages MSAA internally and exposes no public sample-count accessor, so this
+     * needs a tree-shakeable Lite core addition before it can report a real value.
+     */
+    public get currentSampleCount(): never {
+        return unsupported("AbstractEngine.currentSampleCount", "Babylon Lite manages MSAA internally and exposes no public sample-count accessor.");
+    }
+
+    /**
+     * Babylon.js `engine.getAlphaToCoverage()` — alpha-to-coverage state. Babylon Lite does not
+     * expose an engine-level alpha-to-coverage toggle, so this is unsupported.
+     */
+    public getAlphaToCoverage(): never {
+        return unsupported("AbstractEngine.getAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
+    }
+
+    /**
+     * Babylon.js `engine.setAlphaToCoverage(enable)` — toggle alpha-to-coverage. Babylon Lite does
+     * not expose an engine-level alpha-to-coverage toggle, so this is unsupported.
+     */
+    public setAlphaToCoverage(_enable: boolean): never {
+        return unsupported("AbstractEngine.setAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
+    }
+
     private async _start(): Promise<void> {
         if (this._started) {
             return;
