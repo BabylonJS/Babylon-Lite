@@ -202,6 +202,12 @@ function getTarget(scratch: WeightedGltfScratch, mixer: AnimationGltfMixer): Wei
             active: false,
         };
         scratch.targets.set(nodes, target);
+        // The per-tick reset pass runs over `scratch.targets` BEFORE any group is accumulated,
+        // so a target created during this tick would otherwise stay zero-filled for every
+        // component no channel writes — masked-out channels and overridden-but-unanimated
+        // bones would collapse to a zero matrix on the first tick only. Seed it here so tick 1
+        // matches every subsequent tick.
+        resetWeightedGltfTarget(target);
     }
     return target;
 }
