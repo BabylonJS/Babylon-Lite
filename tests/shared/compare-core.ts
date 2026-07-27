@@ -48,6 +48,13 @@ export interface RegionResult extends CompareResult {
     regionPixels: number;
 }
 
+export interface CompareRect {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+}
+
 /** Parse a PNG file into {width, height, data: Uint8Array (RGBA)} */
 function loadPng(path: string): { width: number; height: number; data: Uint8Array } {
     const buf = fs.readFileSync(path);
@@ -99,6 +106,68 @@ export function compareImages(actualPath: string, referencePath: string): Compar
         mad: sumDiff / total,
         maxDiff,
     };
+}
+
+/** Compare one or more rectangular image regions. Throws when clipped regions overlap. */
+export function compareImageRects(actualPath: string, referencePath: string, rects: readonly CompareRect[]): CompareResult {
+    const actual = loadPng(actualPath);
+    const ref = loadPng(referencePath);
+    const w = Math.min(actual.width, ref.width);
+    const h = Math.min(actual.height, ref.height);
+
+    const clippedRects = rects.map((rect, index) => {
+        const clipped = {
+            x0: Math.max(0, Math.floor(rect.x)),
+            y0: Math.max(0, Math.floor(rect.y)),
+            x1: Math.min(w, Math.ceil(rect.x + rect.width)),
+            y1: Math.min(h, Math.ceil(rect.y + rect.height)),
+        };
+        if (clipped.x0 >= clipped.x1 || clipped.y0 >= clipped.y1) {
+            throw new Error(`compareImageRects: rectangle ${index} selects no pixels`);
+        }
+        return clipped;
+    });
+    for (let left = 0; left < clippedRects.length; left++) {
+        for (let right = left + 1; right < clippedRects.length; right++) {
+            const a = clippedRects[left]!;
+            const b = clippedRects[right]!;
+            if (Math.max(a.x0, b.x0) < Math.min(a.x1, b.x1) && Math.max(a.y0, b.y0) < Math.min(a.y1, b.y1)) {
+                throw new Error(`compareImageRects: rectangles ${left} and ${right} overlap`);
+            }
+        }
+    }
+
+    let exactMatch = 0;
+    let within1 = 0;
+    let within3 = 0;
+    let within5 = 0;
+    let sumDiff = 0;
+    let maxDiff = 0;
+    let totalPixels = 0;
+
+    for (const rect of clippedRects) {
+        for (let y = rect.y0; y < rect.y1; y++) {
+            for (let x = rect.x0; x < rect.x1; x++) {
+                const ai = (y * actual.width + x) * 4;
+                const ri = (y * ref.width + x) * 4;
+                let pixMax = 0;
+                let pixSum = 0;
+                for (let c = 0; c < 3; c++) {
+                    const d = Math.abs(actual.data[ai + c]! - ref.data[ri + c]!);
+                    pixSum += d;
+                    pixMax = Math.max(pixMax, d);
+                }
+                sumDiff += pixSum / 3;
+                maxDiff = Math.max(maxDiff, pixMax);
+                if (pixMax === 0) exactMatch++;
+                if (pixMax <= 1) within1++;
+                if (pixMax <= 3) within3++;
+                if (pixMax <= 5) within5++;
+                totalPixels++;
+            }
+        }
+    }
+    return { totalPixels, exactMatch, within1, within3, within5, mad: sumDiff / totalPixels, maxDiff };
 }
 
 /**

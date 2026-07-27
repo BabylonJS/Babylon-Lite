@@ -16,7 +16,7 @@
 >   `_lite-gl-mock.ts`) — run via the `gl-unit` Vitest project
 >   (`pnpm test:unit:gl`). There is no in-package `test/` folder.
 > - **Lab:** `lab/gl/` (WebGL experience), selected by the lab experience toggle.
-> - **Docs:** this file, `docs/gl/architecture/00-lite-gl.md`.
+> - **Docs:** this core design and focused optional-module documents in this directory, including `01-alpha-to-coverage.md`.
 
 ---
 
@@ -63,7 +63,7 @@ Non-goals:
 
 ## 3. Public API Surface
 
-All signatures are final. Exhaustive — these are the only exports.
+The sections below exhaustively describe the original core surface. Optional, separately tree-shakable modules may add explicit root exports documented in adjacent architecture files; see `01-alpha-to-coverage.md`.
 
 ### 3.0 Naming & API-shape conventions
 
@@ -810,9 +810,9 @@ kept in sync with actual GL state. Two protocols enforce that:
   unset sentinels with `statesDirty=false`). Resetting both halves means the
   first setter after a restore re-marks `statesDirty` and the next
   `applyGLStates` re-issues from scratch. The `\_flush*`reconciler slots are NOT
-cleared (they are pure function refs; a post-restore setter re-installs the
-same ref idempotently, and`statesDirty=false`gates the flush until then).
-Setters become no-ops while`\_isLost`. See §4.7.
+  cleared (they are pure function refs; a post-restore setter re-installs the
+  same ref idempotently, and`statesDirty=false`gates the flush until then).
+  Setters become no-ops while`\_isLost`. See §4.7.
 
 ### 4.2 Cache contract — which GL calls are elided
 
@@ -1451,9 +1451,7 @@ export function createBaseEffectState(canvasOrCtx: HTMLCanvasElement | GLEngineC
         return { engine: canvasOrCtx, canvas: getRenderingCanvas(canvasOrCtx), ownsContext: false };
     }
     return {
-        engine: createGLEngine(canvasOrCtx, {
-            /* defaults */
-        }),
+        engine: createGLEngine(canvasOrCtx, {/* defaults */}),
         canvas: canvasOrCtx,
         ownsContext: true,
     };

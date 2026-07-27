@@ -39,6 +39,10 @@ import {
     _getStdExtsSorted,
 } from "./standard-flags.js";
 import { MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
+import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
+
+// Reserved by alpha-to-coverage.ts; duplicated locally so the optional bit never enters standard-flags.ts.
+const ALPHA_TO_COVERAGE = 1 << 23;
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
  *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
@@ -265,7 +269,10 @@ export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTa
                   },
               }
             : {}),
-        multisample: { count: sig._sampleCount },
+        multisample:
+            _getAlphaToCoverageResolver() && (features & ALPHA_TO_COVERAGE) !== 0 && sig._sampleCount > 1
+                ? { count: sig._sampleCount, alphaToCoverageEnabled: true }
+                : { count: sig._sampleCount },
         primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
     });
 

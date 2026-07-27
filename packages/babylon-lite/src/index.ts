@@ -266,6 +266,8 @@ export { NeutralToneMapping } from "./material/pbr/pbr-neutral-wgsl.js";
 export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
 export { enableMaterialStencil } from "./material/enable-material-stencil.js";
+export { getAlphaToCoverage, setAlphaToCoverage } from "./render/alpha-to-coverage.js";
+export type { AlphaToCoverageTarget } from "./render/alpha-to-coverage.js";
 export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────

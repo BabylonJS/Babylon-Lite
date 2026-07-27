@@ -38,8 +38,12 @@ import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
+import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
+
+// Reserved by alpha-to-coverage.ts; duplicated locally so ordinary Standard scenes never import the feature module.
+const STANDARD_ALPHA_TO_COVERAGE = 1 << 23;
 
 /** Scratch buffer for material UBO writes (24 floats = 96 bytes). Reused across
  *  every Standard renderable since binding updates are single-threaded per frame. */
@@ -121,7 +125,8 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const mat = (materialOverride ?? mesh.material) as StandardMaterialProps;
         const renderFeatures = (mat._renderFeatures ??= { features: _computeStandardMaterialFeatures(mat) }) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
-        let features = renderFeatures.features;
+        const alphaToCoverageResolver = _getAlphaToCoverageResolver();
+        let features = renderFeatures.features | (alphaToCoverageResolver?.(mat) ? STANDARD_ALPHA_TO_COVERAGE : 0);
         const shadowOutput = (features & (NO_COLOR_OUTPUT | ESM_SHADOW_OUTPUT)) !== 0;
         const receiveShadows = !shadowOutput && mesh.receiveShadows && hasSomeShadows;
         const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);

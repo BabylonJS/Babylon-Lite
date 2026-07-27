@@ -163,5 +163,16 @@
         "maxRawKB": 21.5,
         "skipParity": false,
         "skipPerf": false
+    },
+    {
+        "id": 17,
+        "slug": "gl-alpha-to-coverage",
+        "name": "Scene 17 — Alpha-to-Coverage",
+        "description": "Two red/green overlap panels on an antialiased WebGL2 canvas. The left panel keeps SAMPLE_ALPHA_TO_COVERAGE disabled; the right enables it so a half-alpha front card and opaque rear card resolve to an olive sample mix. Mirrors Babylon.js visual test #M4GBLK#0 and WebGPU Scene 268.",
+        "tags": ["mesh", "depth", "msaa", "alpha-to-coverage"],
+        "maxMad": 0.1,
+        "maxRawKB": 18,
+        "skipParity": false,
+        "skipPerf": true
     }
 ]

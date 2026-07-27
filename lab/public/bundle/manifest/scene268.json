@@ -1,0 +1,11 @@
+{
+  "rawKB": 43.1,
+  "gzipKB": 17.4,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene268-shader-pipeline-cache-BNXlCNA3.js",
+    "scene268-shader-renderable-CRZ1L15I.js",
+    "scene268-uniform-copy-batch-CkjSc3LG.js",
+    "scene268.js"
+  ]
+}

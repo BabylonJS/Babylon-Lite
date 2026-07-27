@@ -7,6 +7,7 @@ import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
 import { _getSpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.js";
 import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
+import { _getAlphaToCoverageResolver } from "../render/alpha-to-coverage-hook.js";
 
 /** @internal */
 export interface SpritePipelineDeviceCache {
@@ -157,13 +158,27 @@ export function getOrCreateSpritePipeline(
 ): GPURenderPipeline {
     const deviceCache = getSpritePipelineDeviceCache(engine, cache);
     const resolvedDepthStencilFormat = normalizeDepthStencilFormat(hasDepth, depthStencilFormat);
-    const key = spritePipelineKey(format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, layer);
+    const alphaToCoverageResolver = _getAlphaToCoverageResolver();
+    const alphaToCoverage = hasDepth && depthWrite && sampleCount > 1 && !!layer && !!alphaToCoverageResolver?.(layer);
+    const key = spritePipelineKey(format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, alphaToCoverage, layer);
     const cached = deviceCache._pipelines.get(key);
     if (cached) {
         return cached;
     }
 
-    const pipeline = buildSpritePipeline(engine, deviceCache, format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, sceneBindGroupLayout, layer);
+    const pipeline = buildSpritePipeline(
+        engine,
+        deviceCache,
+        format,
+        sampleCount,
+        blendMode,
+        hasDepth,
+        depthWrite,
+        resolvedDepthStencilFormat,
+        alphaToCoverage,
+        sceneBindGroupLayout,
+        layer
+    );
     deviceCache._pipelines.set(key, pipeline);
     return pipeline;
 }
@@ -222,12 +237,13 @@ function spritePipelineKey(
     hasDepth: boolean,
     depthWrite: boolean,
     depthStencilFormat: GPUTextureFormat | null,
+    alphaToCoverage: boolean,
     layer?: Sprite2DLayer
 ): string {
     const customKey = layer ? (_getSpriteFxHook()?.pipelineKeyPart(layer) ?? "") : "";
     const uvKey = layer?._uvScrollAttr ? "1" : "0";
     const cgKey = layer ? (_getSpriteCoverageGammaHook()?.pipelineKeyPart(layer) ?? "0") : "0";
-    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}:uv${uvKey}:cg${cgKey}`;
+    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:${alphaToCoverage ? "a" : "n"}:cs${customKey}:uv${uvKey}:cg${cgKey}`;
 }
 
 function getShaderModule(engine: EngineContext, cache: SpritePipelineDeviceCache, hasDepth: boolean, layer?: Sprite2DLayer): GPUShaderModule {
@@ -260,6 +276,7 @@ function buildSpritePipeline(
     hasDepth: boolean,
     depthWrite: boolean,
     depthStencilFormat: GPUTextureFormat | null,
+    alphaToCoverage: boolean,
     sceneBindGroupLayout?: GPUBindGroupLayout,
     layer?: Sprite2DLayer
 ): GPURenderPipeline {
@@ -316,10 +333,10 @@ function buildSpritePipeline(
         fragment: {
             module,
             entryPoint: "fs",
-            targets: [{ format, blend: blendMode._descriptor, writeMask: CW.ALL }],
+            targets: [alphaToCoverage ? { format, writeMask: CW.ALL } : { format, blend: blendMode._descriptor, writeMask: CW.ALL }],
         },
         primitive: { topology: "triangle-list", cullMode: "none" },
-        multisample: { count: sampleCount },
+        multisample: alphaToCoverage ? { count: sampleCount, alphaToCoverageEnabled: true } : { count: sampleCount },
     };
     if (hasDepth) {
         descriptor.depthStencil = {

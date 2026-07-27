@@ -11,8 +11,8 @@ import type { Browser } from "@playwright/test";
 import { captureGolden as captureGoldenCore, shouldSkipParity, type SceneConfig, type CaptureGoldenOptions } from "../../shared/compare-core";
 
 // Re-export the experience-agnostic comparison surface unchanged.
-export { compareImages, compareRegion, generateDiffMap, attachCompareArtifacts, shouldSkipParity, waitForCanvasReady } from "../../shared/compare-core";
-export type { SceneConfig, CompareResult, RegionResult, CaptureGoldenOptions } from "../../shared/compare-core";
+export { compareImages, compareImageRects, compareRegion, generateDiffMap, attachCompareArtifacts, shouldSkipParity, waitForCanvasReady } from "../../shared/compare-core";
+export type { SceneConfig, CompareRect, CompareResult, RegionResult, CaptureGoldenOptions } from "../../shared/compare-core";
 
 let _sceneConfigCache: SceneConfig[] | null = null;
 

@@ -571,8 +571,8 @@
         "name": "Scene 53 — Depth-Hosted Sprites Mixed With 3D",
         "maxMad": 0.02,
         "maxRawKB": 59.4,
-        "description": "Two boxes at different camera-distances + a Sprite2DLayer added via addToScene with depth: \"test-write\" and per-instance z. The front box occludes the sprite; the sprite occludes the back box. BJS reference uses SpriteManager sprites projected to the same pixel centers and depths for parity.",
-        "tags": ["sprites", "2d", "depth"],
+        "description": "Two boxes at different camera-distances + an alpha-to-coverage Sprite2DLayer added via addToScene with depth: \"test-write\" and per-instance z. The front box occludes the sprite; the sprite occludes the back box. BJS reference uses SpriteManager sprites projected to the same pixel centers and depths for parity.",
+        "tags": ["sprites", "2d", "depth", "alpha-to-coverage"],
         "skipPerf": true,
         "compatParity": true
     },
@@ -614,8 +614,8 @@
         "name": "Scene 57 — Cutout Billboards",
         "maxMad": 0.02,
         "maxRawKB": 64.5,
-        "description": "Hard-alpha world-space billboard cards rendered with blendMode: \"cutout\", alpha cutoff, and depth writes. Front cutout pixels occlude later overlapping cards and opaque geometry while transparent holes leave the background visible.",
-        "tags": ["sprites", "billboards", "depth"],
+        "description": "Hard-alpha world-space billboard cards rendered with the cutout depth-write path and alpha-to-coverage. Front covered samples occlude later overlapping cards and opaque geometry while transparent holes leave the background visible.",
+        "tags": ["sprites", "billboards", "depth", "alpha-to-coverage"],
         "skipPerf": true,
         "compatParity": true
     },
@@ -2309,6 +2309,16 @@
         "maxRawKB": 43,
         "description": "Full-frame affine RGBA vertex-color gradient on an unlit white StandardMaterial. Validates color-buffer binding, interpolation, and multiplication into StandardMaterial base color.",
         "tags": ["standard", "vertex-color", "procedural"],
+        "skipPerf": true
+    },
+    {
+        "id": 268,
+        "slug": "scene268-alpha-to-coverage",
+        "name": "Scene 268 — Alpha-to-Coverage",
+        "maxMad": 0.1,
+        "maxRawKB": 43.2,
+        "description": "Two red/green overlap panels rendered into a 4x MSAA target with replacement color and depth writes. The left panel keeps alpha-to-coverage off; the right opts each ShaderMaterial into alpha-to-coverage so a half-alpha front card and opaque rear card resolve to an olive sample mix. Mirrors Babylon.js visual test #M4GBLK#0.",
+        "tags": ["shader-material", "msaa", "alpha-to-coverage"],
         "skipPerf": true
     }
 ]

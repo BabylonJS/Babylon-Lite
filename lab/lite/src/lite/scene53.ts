@@ -40,6 +40,7 @@ import {
     loadSpriteAtlas,
     onBeforeRender,
     registerScene,
+    setAlphaToCoverage,
     startEngine,
     updateSprite2DIndex,
 } from "babylon-lite";
@@ -92,6 +93,7 @@ async function main(): Promise<void> {
         capacity: 4,
         depth: "test-write",
     });
+    setAlphaToCoverage(sprites, true);
     const spriteIndices = addPerInstanceZSprites(sprites, canvas);
     let lastLayoutWidth = canvas.width;
     let lastLayoutHeight = canvas.height;

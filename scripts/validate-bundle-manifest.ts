@@ -14,10 +14,9 @@
  * HEAD`. Sizes are rounded to whole KB before comparison (matching the PR delta
  * comment), so sub-KB gzip jitter does not cause spurious failures.
  *
- * It also compares each scene's `runtimeChunks` set. Chunk filenames carry a
- * content hash, so they change whenever a PR alters code that actually lands in
- * that scene's bundle (its own scene code or a shared module it imports). This
- * catches content-only changes that leave the rounded KB sizes unchanged.
+ * It also compares each scene's logical `runtimeChunks` set. Vite's trailing
+ * content hashes are ignored so content-only changes do not churn every
+ * manifest; adding or removing a runtime chunk is still detected.
  *
  * Exit code 1 (with a helpful message) when the committed manifest is stale.
  *
@@ -43,10 +42,14 @@ function roundToWholeKB(kb: number | undefined): number {
     return Math.round(kb ?? 0);
 }
 
+function logicalRuntimeChunk(chunk: string): string {
+    return chunk.replace(/-[A-Za-z0-9_-]{8}\.js$/, ".js");
+}
+
 /** Compare two chunk lists as order-independent sets. Returns null when equal. */
 function diffRuntimeChunks(committed: string[] | undefined, built: string[] | undefined): string | null {
-    const committedSet = new Set(committed ?? []);
-    const builtSet = new Set(built ?? []);
+    const committedSet = new Set((committed ?? []).map(logicalRuntimeChunk));
+    const builtSet = new Set((built ?? []).map(logicalRuntimeChunk));
 
     const added = [...builtSet].filter((c) => !committedSet.has(c)).sort();
     const removed = [...committedSet].filter((c) => !builtSet.has(c)).sort();

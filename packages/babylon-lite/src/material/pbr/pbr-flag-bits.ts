@@ -64,3 +64,4 @@ export const PBR2_ESM_SHADOW_OUTPUT = 1 << 16;
 //   1<<27  PBR2_HAS_ANISO_TEX                    (anisotropy-fragment.ts)
 //   1<<28  PBR2_OCCL_UV_SPLIT                   (uv-transform-fragment.ts + pbr-template-ext.ts)
 //   1<<30  PBR2_HAS_SHADOW_ONLY                 (shadow-only-fragment.ts)
+//   1<<31  PBR2_ALPHA_TO_COVERAGE                (render/alpha-to-coverage.ts)

@@ -22,6 +22,10 @@ import { PBR_HAS_NORMAL_MAP, PBR_HAS_EMISSIVE, PBR_HAS_SPEC_GLOSS, PBR_HAS_DOUBL
 import { MSH_HAS_TANGENTS, MSH_HAS_UV2 } from "../mesh-features.js";
 import { REVERSE_DEPTH_COMPARE, targetSignatureKey } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
+import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
+
+// Reserved by alpha-to-coverage.ts; duplicated locally so the optional bit never enters pbr-flag-bits.ts.
+const PBR2_ALPHA_TO_COVERAGE = 1 << 31;
 
 // ─── Shader Bindings (sig-independent) ──────────────────────────────
 
@@ -184,7 +188,10 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
                   },
               }
             : {}),
-        multisample: { count: sig._sampleCount },
+        multisample:
+            _getAlphaToCoverageResolver() && (features2 & PBR2_ALPHA_TO_COVERAGE) !== 0 && sig._sampleCount > 1
+                ? { count: sig._sampleCount, alphaToCoverageEnabled: true }
+                : { count: sig._sampleCount },
         primitive: _primitiveResolver
             ? _primitiveResolver(meshFeatures, hasDoubleSided)
             : { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },
