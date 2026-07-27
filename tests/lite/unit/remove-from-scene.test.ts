@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove";
 import { addToScene } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { AssetContainer } from "../../../packages/babylon-lite/src/asset-container";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
@@ -9,7 +10,7 @@ import type { MeshGroupBuilder } from "../../../packages/babylon-lite/src/render
 
 function fakeScene(): SceneContext {
     return {
-        surface: { engine: {} },
+        surface: { engine: { _retirements: null } },
         camera: null,
         lights: [],
         meshes: [],
@@ -26,6 +27,15 @@ function fakeScene(): SceneContext {
     } as unknown as SceneContext;
 }
 
+/** `removeFromScene` defers GPU teardown until after the next frame submits, so unit tests that
+ *  assert destruction have to drain the engine's retirement list first. Mirrors what the real
+ *  `renderFrame` / `disposeEngine` drain does, minus the queue fence. */
+function drainRetirements(...scenes: SceneContext[]): void {
+    for (const scene of scenes) {
+        disposeGpuResourceRetirements(scene.surface.engine);
+    }
+}
+
 describe("removeFromScene symmetry", () => {
     it("removes a light, clears its shadow generator, disposes its task and detaches parent", () => {
         const scene = fakeScene();
@@ -39,6 +49,9 @@ describe("removeFromScene symmetry", () => {
         removeFromScene(scene, light as never);
         expect(scene.lights).toHaveLength(0);
         expect(scene.shadowGenerators).toHaveLength(0);
+        // The shadow task's render targets/UBOs are retired, not destroyed mid-frame.
+        expect(disposed).toBe(0);
+        drainRetirements(scene);
         expect(disposed).toBe(1);
         expect(light.parent).toBeNull();
         // idempotent
@@ -116,6 +129,9 @@ describe("removeFromScene symmetry", () => {
         removeFromScene(scene, mesh as never);
 
         expect(removeMesh).toHaveBeenCalledWith(mesh);
+        // Teardown is retired until after the next submit, so nothing is destroyed synchronously.
+        expect(destroyed).toBe(false);
+        drainRetirements(scene);
         expect(destroyed).toBe(true);
     });
 
@@ -172,9 +188,56 @@ describe("removeFromScene symmetry", () => {
         addToScene(sceneB, mesh);
 
         removeFromScene(sceneA, mesh);
+        drainRetirements(sceneA);
         expect(destroy).not.toHaveBeenCalled();
 
         removeFromScene(sceneB, mesh);
+        drainRetirements(sceneB);
+        expect(destroy).toHaveBeenCalledOnce();
+
+        // Idempotent: a repeat removal must not release the shared GPU state a second time.
+        removeFromScene(sceneB, mesh);
+        drainRetirements(sceneB);
+        expect(destroy).toHaveBeenCalledOnce();
+    });
+
+    it("does not release a clone's shared GPU state again when a removed mesh is re-added", () => {
+        const scene = fakeScene();
+        const destroy = vi.fn();
+        // One `_gpu` object owned by two meshes, exactly as `cloneTransformNode` leaves it: the clone
+        // calls `retain`, so the ref count starts at 2.
+        const gpu = {
+            positionBuffer: { destroy },
+            normalBuffer: { destroy: vi.fn() },
+            uvBuffer: { destroy: vi.fn() },
+            indexBuffer: { destroy: vi.fn() },
+            tangentBuffer: null,
+            uv2Buffer: null,
+            colorBuffer: null,
+            _refCount: 2,
+        };
+        const base = { _gpu: gpu, material: null, children: [], parent: null } as unknown as Mesh;
+        const clone = { _gpu: gpu, material: null, children: [], parent: null } as unknown as Mesh;
+
+        addToScene(scene, base);
+        addToScene(scene, clone);
+
+        // First removal drops the base's claim (2 → 1); the clone still renders with the buffers.
+        removeFromScene(scene, base);
+        drainRetirements(scene);
+        expect(destroy).not.toHaveBeenCalled();
+
+        // Re-adding does NOT mint a new claim on the shared resources — a `Mesh` holds exactly one
+        // for its whole lifetime — so removing it again must not release a second time. If it did,
+        // the count would hit 0 and destroy buffers the clone is still using.
+        addToScene(scene, base);
+        removeFromScene(scene, base);
+        drainRetirements(scene);
+        expect(destroy).not.toHaveBeenCalled();
+
+        // The clone is the last real owner, so its removal is what frees the buffers.
+        removeFromScene(scene, clone);
+        drainRetirements(scene);
         expect(destroy).toHaveBeenCalledOnce();
     });
 });

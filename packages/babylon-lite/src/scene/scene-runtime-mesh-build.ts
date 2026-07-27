@@ -46,6 +46,29 @@ export function A(scene: SceneContext, material: Material | null, mesh: Mesh, pe
     return pending ? Promise.all([pending, current]).then(() => undefined) : current;
 }
 
+/** @internal Materialize a drain's worth of meshes whose material group has never been built.
+ *
+ *  Entry point for `processMaterialSwaps`, reached through a dynamic import so the runtime-build
+ *  subtree stays out of scenes that never introduce a material family at runtime.
+ *
+ *  Builds are chained rather than coalesced per group. For the PBR family `B` rebuilds the whole
+ *  group, so N meshes joining one brand-new group produce N redundant rebuilds — but `exclusive()`
+ *  serializes them and each is make-before-break, so the end state is correct, and this is a rare
+ *  runtime path. Coalescing them would have to exclude meshes that arrived through the
+ *  `mesh.material` setter (which only enqueues): those are not in the target group yet, and only
+ *  their own `moveRuntimeMeshToGroup` call puts them there. */
+export function F(scene: SceneContext, meshes: readonly Mesh[], pending?: Promise<void>): Promise<void> {
+    let chain = pending;
+    for (const mesh of meshes) {
+        chain = A(scene, mesh.material, mesh, chain);
+    }
+    // Route a build failure through the scene's runtime-build error hook, which rethrows it from the
+    // next `onBeforeRender` — the caller only catches module-load failures.
+    return (chain ?? Promise.resolve()).catch((error: unknown) => {
+        scene._runtimeBuilds?._x(error);
+    });
+}
+
 /** @internal Lazily install runtime-build state and materialize one post-build mesh. */
 export function B(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh): Promise<void> {
     if (scene._z || !scene.meshes.includes(mesh)) {

@@ -1,18 +1,18 @@
 {
-  "rawKB": 85.6,
-  "gzipKB": 35.1,
+  "rawKB": 85.9,
+  "gzipKB": 35.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene21-background-hdr-skybox-Dz5EiTm5.js",
     "scene21-cubemap-skybox-material-EC0oWalF.js",
-    "scene21-generate-mipmaps-CILcKAb-.js",
+    "scene21-generate-mipmaps-CmBDPpqp.js",
     "scene21-gltf-glb-parser-Ccv3em_1.js",
     "scene21-ibl-fragment-CeRrvT96.js",
-    "scene21-pbr-renderable-BnxN1OU3.js",
+    "scene21-pbr-renderable-I53Ycdwr.js",
     "scene21-rgbd-decode-Ch0-b_Qv.js",
     "scene21-scene-uniforms-FTYH6Ct0.js",
-    "scene21-sheen-fragment-C2VjeVge.js",
+    "scene21-sheen-fragment-C8hk8gou.js",
     "scene21.js"
   ],
-  "rawBytes": 87610
+  "rawBytes": 87967
 }

@@ -11,6 +11,12 @@ const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
 };
 gpuGlobals.GPUBufferUsage ??= { VERTEX: 0x20, COPY_DST: 0x8, STORAGE: 0x80, INDIRECT: 0x100 } as unknown as GPUBufferUsage;
 
+/** Let every queued microtask settle. The retirement fence is reached through a short promise chain,
+ *  so a single `await Promise.resolve()` is not enough to observe its effects. */
+function flushMicrotasks(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function makeThinInstances(): ThinInstanceData {
     return {
         matrices: new Float32Array(32),
@@ -99,19 +105,23 @@ describe("GPU resource retirement", () => {
         thinInstances._gpuBuffer = oldBuffer;
 
         syncThinInstanceGpuData(engine, thinInstances, false);
-        await Promise.resolve();
+        await flushMicrotasks();
 
         expect(queue.onSubmittedWorkDone).not.toHaveBeenCalled();
         expect(oldBuffer.destroy).not.toHaveBeenCalled();
 
         renderFrame(engine, 16);
 
+        // The fence is acquired in a microtask (so a `stopEngine()` issued from inside
+        // `onBeforeRender` still fences behind this frame's submit), so it lands after the submit.
+        expect(events).toEqual(["submit"]);
+        await flushMicrotasks();
         expect(events).toEqual(["submit", "fence"]);
         expect(oldBuffer.destroy).not.toHaveBeenCalled();
 
         resolveSubmittedWork();
         await submittedWorkDone;
-        await Promise.resolve();
+        await flushMicrotasks();
 
         expect(oldBuffer.destroy).toHaveBeenCalledTimes(1);
     });

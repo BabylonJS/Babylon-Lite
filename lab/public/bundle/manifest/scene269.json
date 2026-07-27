@@ -1,0 +1,10 @@
+{
+  "rawKB": 54.7,
+  "rawBytes": 55965,
+  "gzipKB": 21.2,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene269-standard-renderable-QY8072sb.js",
+    "scene269.js"
+  ]
+}

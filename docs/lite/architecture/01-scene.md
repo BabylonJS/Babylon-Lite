@@ -207,6 +207,38 @@ Materials carry a `_buildGroup: MeshGroupBuilder` function that knows how to cre
 
 This decouples scene setup from GPU resource creation, ensures all assets are loaded before pipelines are built, and keeps scene.ts entirely material-agnostic.
 
+### Runtime Adds & Removals (after `registerScene`)
+
+Deferred builders only run at boot, inside `buildScene()`. Anything added afterwards goes through the
+per-frame material-swap queue (`processMaterialSwaps`, drained from the scene's `_update` hook), which
+covers two distinct cases:
+
+- **The material's group already exists and has been built** (`group.r` is set) — the mesh's renderable
+  is rebuilt synchronously in that same frame, so there is no missing-mesh flash.
+- **The material's group has never been built** — either the mesh is the FIRST of its material family in
+  this scene, or `mesh.material` was reassigned to a family with no group at all (the material setter only
+  enqueues; it never creates a group). These are handed to the runtime build path
+  (`scene-runtime-mesh-build.ts`, dynamically imported so static scenes do not bundle it), which
+  materializes the group: PBR rebuilds the whole group via `rebuildScenePbrPipelines`, other families
+  build the single mesh and install the group's rebuild function.
+
+> **Introducing a material family at runtime is ASYNCHRONOUS.** It requires a dynamic module import plus
+> shader compilation and a full group build, so the mesh becomes visible some frames after `addToScene`
+> returns — `addToScene` itself returns `void` and offers no readiness signal. Adding at least one mesh of
+> each material family before `registerScene` keeps everything synchronous. Build failures surface through
+> the scene's before-render error hook rather than being swallowed.
+
+`removeFromScene` mirrors this asymmetry on the teardown side: scene bookkeeping (list splices, group and
+frame-graph eviction, renderable-version bump) is synchronous, but **GPU teardown is deferred** —
+per-mesh/material UBOs, texture releases and shared geometry buffers are retired via `retireGpuResources`
+and only destroyed after the next `queue.submit` has drained. This makes `removeFromScene` legal from
+inside `onBeforeRender` (destroying mid-frame hits "Destroyed texture / Buffer used in a submit") and
+preserves make-before-break for resources shared with another mesh: a rebuild re-acquires the texture
+before the deferred release lands, so its ref count never dips to zero. Because the free is deferred, the
+right to release a mesh's shared buffers is taken as a one-shot, revocable claim
+(`claimMeshGpuDisposal` / `consumeMeshGpuDisposal`), so a repeat removal, a re-add, or a `disposeScene`
+in between cannot free the same buffers twice.
+
 ### Hidden State (accessed via `(scene as any)`)
 
 | Property       | Set by              | Type                  | Purpose                                   |
@@ -269,6 +301,8 @@ Algorithm:
 | `createDefaultCamera with no meshes`        | radius=1, center=(0,0,0)                                                  |
 | `deferred builders run at buildScene()`     | Register builder → verify called by `buildScene()`                        |
 | `buildScene() awaits async builders`        | Register async builder → verify awaited                                   |
+| `scene268-runtime-mesh-swap`                | Remove a textured mesh + add a clone sharing its material from `onBeforeRender` → no destroyed-resource submit, matches BJS |
+| `scene269-runtime-material-family`          | Add the first PBR mesh to a built StandardMaterial-only scene → the mesh renders instead of being silently dropped |
 
 ## File Manifest
 

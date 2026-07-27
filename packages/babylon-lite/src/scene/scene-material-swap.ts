@@ -1,4 +1,5 @@
 import type { SceneContext } from "./scene-core.js";
+import type { Mesh } from "../mesh/mesh.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 /** @internal Drain _materialSwapQueue: dispose old resources and rebuild renderables. */
@@ -12,16 +13,32 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
     }
     let changed: number | undefined;
     let pending: Promise<void> | undefined;
+    // Meshes whose material group has never been built (see the `!rebuild` branch below). Lazily
+    // allocated so a drain without any such mesh — the overwhelmingly common case — allocates nothing.
+    // Everything else about this path (coalescing, dispatch) lives in the lazily-imported runtime build
+    // module, so scenes that never introduce a material family at runtime pay only this one branch.
+    let firstBuilds: Mesh[] | undefined;
     const renderables = scene._renderables;
     for (const mesh of q) {
         const mat = mesh.material;
-        const runtimeBuild = mat && mesh._runtimeThinBuild;
+        if (!mat) {
+            continue;
+        }
+        const runtimeBuild = mesh._runtimeThinBuild;
         if (runtimeBuild) {
             pending = runtimeBuild(scene, mesh, pending);
             continue;
         }
-        const rebuild = mat && scene._groups.get(mat._buildGroup)?.r;
+        const rebuild = scene._groups.get(mat._buildGroup)?.r;
         if (!rebuild) {
+            // No built group for this material. Either the mesh was added at runtime as the FIRST of
+            // its material family (`addToScene` creates the group but pushes no deferred builder once
+            // `_built` — deferred builders only run at boot), or its material was just reassigned to a
+            // family with no group at all (the `mesh.material` setter only enqueues, it never creates
+            // a group). Both used to fall through here and then be discarded when the queue is cleared
+            // below: a silently invisible mesh, no error, no warning. Hand them to the runtime build
+            // path instead, which knows how to materialize a never-built group.
+            (firstBuilds ??= []).push(mesh);
             continue;
         }
 
@@ -55,5 +72,11 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
         scene._materialEpoch++; // a caster's material UBOs were rebuilt → CSM-style view caches must fully rebuild
     }
     q.length = 0;
-    return pending;
+    // Dynamically imported (like `mesh/thin-instance.ts`) so scenes that never introduce a material
+    // family at runtime keep `scene-runtime-mesh-build.ts` — and, transitively, `scene-rebuild.ts` —
+    // out of their bundle. The build is asynchronous (module fetch, then shader compilation and a
+    // full group build), so the mesh becomes visible some frames later rather than in this one.
+    // `F` routes build failures through the scene's runtime-build error hook; this catch only covers
+    // a failure to fetch the chunk itself, which must not surface as an unhandled rejection.
+    return firstBuilds ? import("./scene-runtime-mesh-build.js").then(({ F }) => F(scene, firstBuilds, pending), console.error) : pending;
 }

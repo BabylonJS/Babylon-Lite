@@ -1,6 +1,6 @@
 {
-  "rawKB": 57.9,
-  "gzipKB": 26.5,
+  "rawKB": 58.3,
+  "gzipKB": 26.7,
   "ignoredRawKB": 8,
   "runtimeChunks": [
     "scene86-_math-factory-DnOnx8fp.js",
@@ -23,5 +23,5 @@
     "scene86-vertex-output-C7G5u6Y0.js",
     "scene86.js"
   ],
-  "rawBytes": 59318
+  "rawBytes": 59685
 }

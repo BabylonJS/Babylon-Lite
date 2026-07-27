@@ -5,7 +5,7 @@ import type { Camera } from "../camera/camera.js";
 import type { LightBase } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
-import { registerMeshScene, unregisterMeshScene, enqueueMaterialSwap } from "./mesh-scene-registry.js";
+import { registerMeshScene, claimMeshGpuDisposal, consumeMeshGpuDisposal, enqueueMaterialSwap } from "./mesh-scene-registry.js";
 import { processMaterialSwaps } from "./scene-material-swap.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import { tickAnimation } from "../animation/animation-tick.js";
@@ -452,8 +452,12 @@ export function disposeScene(scene: SceneContext): void {
         }
         ctx._meshAuxDisposables.clear();
         for (const mesh of ctx.meshes) {
-            // Free the mesh's shared GPU buffers only when this was its LAST owning scene.
-            if (unregisterMeshScene(ctx, mesh)) {
+            // Free the mesh's shared GPU buffers only when this was its LAST owning scene. Routed
+            // through the same one-shot claim `removeFromScene` uses, so a deferred free still in
+            // flight for this mesh (removed, then the scene disposed before the retirement drained)
+            // cannot free the same buffers a second time.
+            const token = claimMeshGpuDisposal(ctx, mesh);
+            if (consumeMeshGpuDisposal(mesh, token)) {
                 disposeMeshGpu(mesh);
             }
         }

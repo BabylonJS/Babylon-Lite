@@ -1,21 +1,21 @@
 {
-  "rawKB": 92,
-  "gzipKB": 38.3,
+  "rawKB": 92.3,
+  "gzipKB": 38.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene99-animation-group-B3M-fVFD.js",
-    "scene99-create-skeleton-DSdmwoOJ.js",
+    "scene99-animation-group-CBUBecdu.js",
+    "scene99-create-skeleton-BjCn0X7A.js",
     "scene99-generate-mipmaps-FBQAYUBo.js",
-    "scene99-gltf-animation-CcNV0wtm.js",
-    "scene99-gltf-feature-animations-CfOxrbKf.js",
-    "scene99-gltf-feature-registry-P4Kj78eP.js",
-    "scene99-gltf-feature-skeleton-CCcFBha1.js",
+    "scene99-gltf-animation-WrF90-zp.js",
+    "scene99-gltf-feature-animations-UDDwrFSV.js",
+    "scene99-gltf-feature-registry-BCWvKyPa.js",
+    "scene99-gltf-feature-skeleton-B8WGUpZm.js",
     "scene99-gltf-glb-parser-Bz7upPhi.js",
-    "scene99-multilight-wgsl-C74_-VgZ.js",
-    "scene99-pbr-renderable-DSdPBJtt.js",
-    "scene99-skeleton-fragment-5aZqnpxb.js",
+    "scene99-multilight-wgsl-4pz_3te0.js",
+    "scene99-pbr-renderable-Dl6rfgyn.js",
+    "scene99-skeleton-fragment-C25OifiQ.js",
     "scene99-types-BVAXdTdf.js",
     "scene99.js"
   ],
-  "rawBytes": 94193
+  "rawBytes": 94546
 }
