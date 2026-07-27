@@ -1,6 +1,6 @@
 {
   "rawKB": 86.6,
-  "gzipKB": 35.4,
+  "gzipKB": 35.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene28-clearcoat-fragment-Ca_EE0k4.js",
@@ -14,5 +14,5 @@
     "scene28-scene-uniforms-FTYH6Ct0.js",
     "scene28.js"
   ],
-  "rawBytes": 88687
+  "rawBytes": 88700
 }

@@ -9,7 +9,7 @@
     "scene247-gltf-feature-registry-hUs9dlrC.js",
     "scene247-gltf-json-asset-CwaZbRaS.js",
     "scene247-gltf-multi-buffer-Dr3S8Xur.js",
-    "scene247-gltf-share-ch49n_RP.js",
+    "scene247-gltf-share-DF9ijqo2.js",
     "scene247-ibl-fragment-CeRrvT96.js",
     "scene247-pbr-renderable-_BYU0sBP.js",
     "scene247-rgbd-decode-BGfzKZhs.js",
@@ -18,5 +18,5 @@
     "scene247-thin-instance-gpu-BoNgOgQp.js",
     "scene247.js"
   ],
-  "rawBytes": 88021
+  "rawBytes": 88043
 }

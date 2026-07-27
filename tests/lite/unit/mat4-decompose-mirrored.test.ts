@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mat4Decompose } from "../../../packages/babylon-lite/src/math/mat4-decompose";
 import { mat4Compose } from "../../../packages/babylon-lite/src/math/mat4-compose";
-import { createSceneNode } from "../../../packages/babylon-lite/src/scene/scene-node";
+import { createSceneNode, createSceneNodeFromMatrix } from "../../../packages/babylon-lite/src/scene/scene-node";
 import { setParent } from "../../../packages/babylon-lite/src/scene/set-parent";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 
@@ -75,7 +75,7 @@ describe("mat4Decompose — mirrored (negative determinant) matrices", () => {
         expect(scale.z).toBeCloseTo(3, 5);
     });
 
-    it("keeps the existing degenerate-scale behaviour (zero axis produces a finite result)", () => {
+    it("tolerates a degenerate axis: the result stays finite (documented contract)", () => {
         const { rotation, scale } = mat4Decompose(mat4Compose(0, 0, 0, qx, qy, qz, qw, 1, 0, 1));
         expect(Math.abs(scale.y)).toBeLessThan(1e-7);
         for (const c of [rotation.x, rotation.y, rotation.z, rotation.w]) {
@@ -135,5 +135,51 @@ describe("setParent — mirrored child", () => {
         // setParent preserves the ancestor's world transform, so the whole subtree — mirror
         // included — must stay exactly where it was.
         expectMatrixClose(leaf.worldMatrix, before, 1e-4);
+    });
+});
+
+/**
+ * A node created from a raw matrix (glTF `node.matrix`) reports that matrix as its local transform
+ * and ignores its TRS triple, so `setParent` could not move it at all. It now hands control back to
+ * the TRS triple, which is safe because the matrix is decomposed into exactly the transform it
+ * replaces.
+ */
+describe("setParent — matrix-backed node", () => {
+    /** glTF Node_NegativeScale_01 "Node1": diag(-1, 1, 1) mirror plus a translation. */
+    const MIRROR_MATRIX = [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 2, 0, 1];
+
+    it("preserves the world matrix of a mirrored matrix node under a transformed parent", () => {
+        const [qx, qy, qz, qw] = quatAxisAngle(0, 1, 0, -Math.PI / 9);
+        const parent = createSceneNode("newRoot", -2, 0, 5, qx, qy, qz, qw, 0.85, 0.85, 0.85);
+        const node = createSceneNodeFromMatrix("Node1", MIRROR_MATRIX as unknown as Parameters<typeof createSceneNodeFromMatrix>[1]);
+        const before = snapshot(node.worldMatrix);
+
+        setParent(node, parent);
+
+        expectMatrixClose(node.worldMatrix, before, 1e-4);
+    });
+
+    it("becomes TRS-driven after reparenting, so later transform writes take effect", () => {
+        const node = createSceneNodeFromMatrix("Node1", MIRROR_MATRIX as unknown as Parameters<typeof createSceneNodeFromMatrix>[1]);
+        setParent(node, createSceneNode("newRoot"));
+
+        node.position.set(7, -1, 4);
+
+        expect(node.worldMatrix[12]!).toBeCloseTo(7, 4);
+        expect(node.worldMatrix[13]!).toBeCloseTo(-1, 4);
+        expect(node.worldMatrix[14]!).toBeCloseTo(4, 4);
+        // The mirror survived the hand-off to TRS.
+        expect(node.scaling.x * node.scaling.y * node.scaling.z).toBeLessThan(0);
+    });
+
+    it("carries its subtree along when reparented", () => {
+        const node = createSceneNodeFromMatrix("Node1", MIRROR_MATRIX as unknown as Parameters<typeof createSceneNodeFromMatrix>[1]);
+        const child = createSceneNode("mesh", 1, 0, 0);
+        child.parent = node;
+        const before = snapshot(child.worldMatrix);
+
+        setParent(node, createSceneNode("newRoot", 3, 0, 0, 0, 0, 0, 1, 2, 2, 2));
+
+        expectMatrixClose(child.worldMatrix, before, 1e-4);
     });
 });

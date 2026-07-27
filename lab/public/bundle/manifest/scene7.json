@@ -1,6 +1,6 @@
 {
   "rawKB": 105.3,
-  "gzipKB": 44.6,
+  "gzipKB": 44.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene7-background-ground-xk_lrMSs.js",
@@ -23,5 +23,5 @@
     "scene7-wgsl-helpers-BgB2AJrF.js",
     "scene7.js"
   ],
-  "rawBytes": 107780
+  "rawBytes": 107794
 }

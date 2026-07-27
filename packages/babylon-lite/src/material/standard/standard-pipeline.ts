@@ -66,6 +66,17 @@ export function _installStandardUvOffsetResolver(resolve: (material: StandardMat
     _uvOffsetResolver = resolve;
 }
 
+/** Primitive-state resolver, installed only by the lazy primitive/winding module (non-triangle
+ *  topology or mirrored meshes). Module-local with a single exported setter: when nothing installs
+ *  it the setter tree-shakes, the bundler proves this is always null, and the ternary in
+ *  `getOrCreateStandardPipeline` folds to the plain triangle-list default — every ordinary Standard
+ *  scene stays byte-identical. */
+let _stdPrimitiveResolver: ((meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState) | null = null;
+/** @internal Install the Standard primitive-state resolver. */
+export function _installStdPrimitiveResolver(resolve: (meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState): void {
+    _stdPrimitiveResolver = resolve;
+}
+
 // ─── Composer Path (Phase 1) ────────────────────────────────────────
 // Converts feature bitmask → StandardTemplateConfig → ComposedShader.
 // This produces identical WGSL to the old string-builder path but via
@@ -266,7 +277,9 @@ export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTa
               }
             : {}),
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
+        primitive: _stdPrimitiveResolver
+            ? _stdPrimitiveResolver(bindings._meshFeatures, (features & DOUBLE_SIDED) !== 0)
+            : { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
     });
 
     bindings._pipelines.set(key, pipeline);

@@ -50,6 +50,18 @@ import { _setActivePbrGeometryAttachments } from "./pbr-geometry-view.js";
  *  keeps the module free of top-level side effects so an unused geometry path
  *  tree-shakes away. */
 let _pbrGeometryGroupBuilder: MeshGroupBuilder | null = null;
+
+/** Mirrored-mesh front-face resolution for the geometry pass, installed only by the lazy winding
+ *  module. Module-local with a single exported setter: when nothing installs it the setter
+ *  tree-shakes, the bundler proves this is always null, and the `frontFace` ternary below folds to
+ *  the plain `"ccw"` literal — unmirrored geometry scenes stay byte-identical.
+ *  @internal */
+let _geometryWinding: ((meshFeatures: number) => GPUFrontFace) | null = null;
+/** @internal Install geometry-pass winding resolution. */
+export function _installPbrGeometryWinding(resolve: (meshFeatures: number) => GPUFrontFace): void {
+    _geometryWinding = resolve;
+}
+
 export function getPbrGeometryGroupBuilder(): MeshGroupBuilder {
     if (_pbrGeometryGroupBuilder) {
         return _pbrGeometryGroupBuilder;
@@ -478,7 +490,11 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
               }
             : undefined,
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" },
+        // A mirrored mesh has reversed triangle winding, exactly as in the forward pass — without
+        // this its depth/normal/velocity output would be culled away. Resolution goes through the
+        // opt-in hook so unmirrored bundles fold the whole thing to the plain "ccw" literal. The
+        // variant key already includes meshFeatures, so a winding change gets its own pipeline.
+        primitive: { topology: "triangle-list", cullMode, frontFace: _geometryWinding ? _geometryWinding(res._meshFeatures) : "ccw" },
     });
     res._pipelines.set(key, pipeline);
     return pipeline;

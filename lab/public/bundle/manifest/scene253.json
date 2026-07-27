@@ -1,6 +1,6 @@
 {
   "rawKB": 153.7,
-  "gzipKB": 65.2,
+  "gzipKB": 65.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene253-alpha-test-fragment-BidgZtWl.js",
@@ -30,7 +30,7 @@
     "scene253-gltf-light-pointer-state-B7kFTRxK.js",
     "scene253-gltf-pbr-builder-ext-DLs5F1kM.js",
     "scene253-gltf-sampler-desc-CJ9AGAsX.js",
-    "scene253-gltf-share-DOWwQNCV.js",
+    "scene253-gltf-share-ib1sbZka.js",
     "scene253-ibl-fragment-CeRrvT96.js",
     "scene253-iridescence-fragment-khU0FmJi.js",
     "scene253-light-base-CUObfFW2.js",
@@ -52,5 +52,5 @@
     "scene253-visibility-DzpaYEgE.js",
     "scene253.js"
   ],
-  "rawBytes": 157395
+  "rawBytes": 157422
 }

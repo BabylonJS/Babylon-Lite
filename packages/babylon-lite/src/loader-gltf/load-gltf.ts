@@ -638,6 +638,12 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
             // this bundle for non-interleaved scenes). The tight path below is
             // byte-identical to the non-interleaved engine.
             const mesh = m._vb ? (await loadInterleave()).buildInterleavedMesh(engine, m, i, material, meshName) : buildTightGltfMesh(engine, m, material, meshName);
+            // glTF geometry is authored for the negative-determinant space created by the RH→LH
+            // `__root__` flip, so an ordinary glTF mesh has a NEGATIVE world determinant. The
+            // mirrored-mesh opt-in reverses winding for meshes whose CURRENT determinant disagrees
+            // with this. Set here rather than inside a builder so the tight and interleaved paths
+            // are both covered (gltf-share.ts marks its own meshes for the shared-geometry path).
+            mesh._authoredSign = -1;
             await Promise.all(meshFeatures.map((f) => f.applyMesh!(m, mesh, ctx)));
             return mesh;
         })

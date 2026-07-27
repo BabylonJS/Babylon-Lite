@@ -48,10 +48,16 @@ handedness flip as `scaling = (-1, 1, 1)`, so its local transform has a negative
 `mat4Decompose` keeps that reflection (folded onto a negative Y scale, as Babylon.js does), so
 reparenting a loaded model under a user-created transform node renders identically to before.
 
-**Limitation — matrix-backed nodes.** A node created with `createSceneNodeFromMatrix` (used for
-glTF nodes that declare a raw `matrix` instead of TRS) always reports its captured matrix and
-ignores `position`/`rotationQuaternion`/`scaling`. `setParent` only writes TRS, so it cannot
-move such a node. Reparent its TRS-backed parent instead.
+**Matrix-backed nodes are reparented too.** A node created with `createSceneNodeFromMatrix` (used
+for glTF nodes that declare a raw `matrix` instead of TRS) reports that matrix as its local
+transform and ignores `position`/`rotationQuaternion`/`scaling`. `setParent` clears `_localMatrix`
+and writes the decomposed TRS instead, handing control back to the TRS triple — the decomposition
+reproduces exactly the matrix it replaces, so the node does not move beyond the reparent itself.
+
+**Parent links come from `addToScene`.** The glTF loader fills `children` arrays but leaves `parent`
+unset; `addToScene` walks the tree and assigns it. `setParent` needs the real parent chain to read a
+node's world transform, so reparent a *nested* loaded node only after its container has been added.
+Reparenting the container's own root beforehand is fine — its parent is null either way.
 
 ### TransformNode (`scene/transform-node.ts`)
 

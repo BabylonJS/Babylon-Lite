@@ -1,19 +1,21 @@
 {
-  "rawKB": 82.1,
-  "rawBytes": 84106,
-  "gzipKB": 34.2,
+  "rawKB": 89,
+  "rawBytes": 91117,
+  "gzipKB": 36.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene269-flat-normal-wgsl-Cm9mM4tC.js",
-    "scene269-generate-mipmaps-CslSSfYz.js",
+    "scene269-generate-mipmaps-k2_xW3FF.js",
     "scene269-gltf-feature-primitive-BMqT3MMH.js",
-    "scene269-gltf-feature-registry-DlqLXJCs.js",
-    "scene269-gltf-json-asset-DQMHscqF.js",
+    "scene269-gltf-feature-registry-DGdXaA4A.js",
+    "scene269-gltf-json-asset-BfPLGPkS.js",
     "scene269-gltf-normals-DYhLwXNX.js",
     "scene269-ibl-fragment-CeRrvT96.js",
-    "scene269-pbr-renderable-C1jKd1hM.js",
-    "scene269-rgbd-decode-r3rQaFgb.js",
+    "scene269-pbr-renderable-6EFq5eXU.js",
+    "scene269-rgbd-decode-B5CHzau_.js",
     "scene269-scene-uniforms-FTYH6Ct0.js",
+    "scene269-singlelight-hemispheric-wgsl-Bf_DDk4J.js",
+    "scene269-std-mirrored-support-BoGCaMmN.js",
     "scene269.js"
   ]
 }
