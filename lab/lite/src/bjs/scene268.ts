@@ -49,9 +49,11 @@ void main(void) {
 
 const RED = new Color3(0.95, 0.12, 0.16);
 const GREEN = new Color3(0.1, 0.85, 0.32);
+// Must match lab/lite/src/lite/scene268.ts: rows are separated so no cross-row card overlap exists,
+// because a depth tie resolves differently under reverse-Z "greater-equal" than under strict LESS.
 const ROWS = [
-    { y: 0.85, redInFront: true, redRotation: -0.08, greenRotation: 0.1 },
-    { y: -0.85, redInFront: false, redRotation: 0.1, greenRotation: -0.07 },
+    { y: 1.05, redInFront: true, redRotation: -0.08, greenRotation: 0.1 },
+    { y: -1.05, redInFront: false, redRotation: 0.1, greenRotation: -0.07 },
 ] as const;
 
 function createCardMaterial(scene: Scene, center: Vector2, rotation: number, depth: number, color: Color3, opacity: number): ShaderMaterial {

@@ -29,9 +29,13 @@ const QUAD = new Float32Array([-0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5]);
 const INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
 const RED: readonly [number, number, number] = [0.95, 0.12, 0.16];
 const GREEN: readonly [number, number, number] = [0.1, 0.85, 0.32];
+// Rows sit far enough apart that no card ever overlaps a card from the other row. Cross-row overlap
+// would land on identical depth values, and a depth tie resolves differently under reverse-Z
+// "greater-equal" (WebGPU) than under strict LESS (WebGL2) — diverging the backends for reasons that
+// have nothing to do with alpha-to-coverage.
 const ROWS = [
-    { y: 0.85, redInFront: true, redRotation: -0.08, greenRotation: 0.1 },
-    { y: -0.85, redInFront: false, redRotation: 0.1, greenRotation: -0.07 },
+    { y: 1.05, redInFront: true, redRotation: -0.08, greenRotation: 0.1 },
+    { y: -1.05, redInFront: false, redRotation: 0.1, greenRotation: -0.07 },
 ] as const;
 
 const VERTEX_SHADER = `#version 300 es

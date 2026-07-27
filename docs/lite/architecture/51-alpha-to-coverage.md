@@ -139,7 +139,7 @@ The per-owner API is intentional: WebGPU alpha-to-coverage is pipeline state, wh
 4. Focused pipeline tests verify depth-writing text/Sprite2D/cutout-billboard variants enable A2C, omit blending, and remain disabled at 1x or without depth writes.
 5. Scene 53 exercises an A2C depth-writing Sprite2D layer on real WebGPU; its hard-alpha atlas remains pixel-identical to the Babylon.js SpriteManager oracle.
 6. Scene 57 exercises A2C cutout billboards on real WebGPU; its hard-alpha atlas remains pixel-identical to the Babylon.js alpha-test oracle.
-7. Scene 268 renders red/green overlap with A2C off and on. Four 96×96 interior patches permit at most one channel-value difference from the Babylon.js WebGPU golden; full-image MAD remains informational because raster-edge sample patterns are backend-dependent.
+7. Scene 268 renders red/green overlap with A2C off and on, and is compared against the Babylon.js WebGPU golden with the standard full-image MAD gate. The two demo rows are separated so no card overlaps a card from the other row: cross-row overlap would produce identical depth values, and a depth tie resolves differently under reverse-Z `greater-equal` than under strict `LESS`, which would desynchronize the WebGPU and WebGL2 scenes for reasons unrelated to alpha-to-coverage.
 8. Rebuilding existing Shader, Standard, PBR, text, and sprite scenes that do not import A2C must preserve their measured production runtime sizes.
 
 ## File Manifest
