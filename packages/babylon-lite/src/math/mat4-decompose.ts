@@ -3,6 +3,7 @@
 
 import type { Mat4, Quat, Vec3 } from "./types.js";
 import { _quatFromRotationBasis } from "./quat-from-rotation-matrix.js";
+import { mat4Determinant3 } from "./mat4-determinant3.js";
 
 /** Result of {@link mat4Decompose}: a TRS triple. */
 export interface DecomposedTransform {
@@ -36,11 +37,10 @@ export function mat4Decompose(m: Mat4): DecomposedTransform {
     const sx = Math.hypot(m[0]!, m[1]!, m[2]!);
     const syAbs = Math.hypot(m[4]!, m[5]!, m[6]!);
     const sz = Math.hypot(m[8]!, m[9]!, m[10]!);
-    // Scalar triple product of the basis columns. A negative determinant means the basis is
-    // mirrored; carrying that sign on one axis keeps the remaining basis a proper rotation, so
-    // the quaternion extraction below stays valid and the reflection survives recomposition.
-    const det = m[0]! * (m[5]! * m[10]! - m[6]! * m[9]!) + m[1]! * (m[6]! * m[8]! - m[4]! * m[10]!) + m[2]! * (m[4]! * m[9]! - m[5]! * m[8]!);
-    const sy = det < 0 ? -syAbs : syAbs;
+    // A negative determinant means the basis is mirrored; carrying that sign on one axis keeps the
+    // remaining basis a proper rotation, so the quaternion extraction below stays valid and the
+    // reflection survives recomposition.
+    const sy = mat4Determinant3(m) < 0 ? -syAbs : syAbs;
     const invSx = sx > 1e-8 ? 1 / sx : 0;
     // Guard on the magnitude, divide by the signed scale — otherwise a mirrored basis would
     // fail the epsilon test and zero out the Y column.

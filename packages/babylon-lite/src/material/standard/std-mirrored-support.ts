@@ -15,12 +15,11 @@ import { _installWindingRule, _resolvePrimitive, _windingFrontFace } from "../pb
 import { _installStdPrimitiveResolver } from "./standard-pipeline.js";
 import { _installStdGeometryWinding } from "./standard-geometry-renderable.js";
 import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
+import { mat4Determinant3 } from "../../math/mat4-determinant3.js";
 
-/** Sign of the upper-left 3x3 determinant (scalar triple product of the basis columns). Negative
- *  means the transform mirrors the geometry. */
+/** Sign of the upper-left 3x3 determinant. Negative means the transform mirrors the geometry. */
 function detSign(m: Mat4): number {
-    const d = m[0]! * (m[5]! * m[10]! - m[6]! * m[9]!) + m[1]! * (m[6]! * m[8]! - m[4]! * m[10]!) + m[2]! * (m[4]! * m[9]! - m[5]! * m[8]!);
-    return d < 0 ? -1 : 1;
+    return mat4Determinant3(m) < 0 ? -1 : 1;
 }
 
 /** A mesh is mirrored when its current world determinant disagrees with the sign its geometry was
