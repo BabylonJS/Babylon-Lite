@@ -19,20 +19,14 @@ import "@babylonjs/core/Engines/Extensions/engine.renderTarget.js";
  *    (`generateDepthBuffer:true, generateStencilBuffer:true` → DEPTH24_STENCIL8 on
  *    DEPTH_STENCIL_ATTACHMENT), the same attachment lite-gl's
  *    `generateRenderTargetStencil` installs.
- *  - PASS 1 clears the RT (colour + stencil → 0) then stamps the stencil plane to
- *    1 inside a centred disc: stencil `func = ALWAYS`, `ref = 1`, op
- *    `KEEP/KEEP/REPLACE`, with colour writes masked OFF (`setColorWrite(false)`).
- *    The disc fragment `discard`s outside `length(vUV-0.5) >= R`, so only the
- *    inside is stamped — exactly lite-gl's PASS 1.
- *  - PASS 2 draws a fullscreen animated radial gradient with stencil
- *    `func = EQUAL`, `ref = 1`, op `KEEP/KEEP/KEEP` (no stencil writes) and colour
- *    writes back on, so it lands ONLY where the plane equals 1 (inside the disc).
+ *  - PASS 1 clears the RT and stamps stencil to 1 inside a centred disc with
+ *    `KEEP/KEEP/REPLACE`, while colour writes are masked off.
+ *  - PASS 2 draws a fullscreen animated radial gradient where stencil equals 1,
+ *    with `KEEP/KEEP/KEEP` operations and colour writes back on.
  *  - COMPOSITE disables the stencil test and samples the RT fullscreen with the
  *    SAME aspect-corrected vignette.
- *  - The stencil state is driven through `engine.stencilState` (front + back set
- *    identically, matching lite-gl's non-separate `gl.stencilFunc`/`gl.stencilOp`);
- *    the EffectRenderer machinery (fullscreen quad geometry, viewport, the `scale`
- *    uniform) is identical to the other GL references.
+ *  - The stencil state is driven through `engine.stencilState`, with matching
+ *    front/back values equivalent to lite-gl's shared `setStencilState` path.
  *  - Every shape depends ONLY on `length(vUV - 0.5)` and the composite samples at
  *    the same UV, so the round-trip is invariant to any FBO sampling-origin /
  *    Y-flip difference between the two engines.
@@ -150,8 +144,7 @@ function parseSeekTime(): number | null {
         useShaderStore: false,
     });
 
-    /** Set the global stencil state (front + back identical, mirroring lite-gl's
-     *  non-separate gl.stencilFunc / gl.stencilOp). */
+    /** Set shared front/back stencil state. */
     function setStencil(test: boolean, mask: number, func: number, ref: number, funcMask: number, fail: number, zfail: number, zpass: number): void {
         const st = engine.stencilState;
         st.stencilTest = test;
