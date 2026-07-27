@@ -1,5 +1,5 @@
 {
-  "rawKB": 67.9,
+  "rawKB": 67.8,
   "gzipKB": 28.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -7,8 +7,9 @@
     "scene229-generate-mipmaps-BUUxuE5u.js",
     "scene229-gltf-json-asset-CSEBW2rO.js",
     "scene229-gltf-normals-DYhLwXNX.js",
-    "scene229-pbr-renderable-BnFxgdwz.js",
+    "scene229-pbr-renderable-BZ2Qqohb.js",
     "scene229-unlit-fragment-DWtvt7yQ.js",
     "scene229.js"
-  ]
+  ],
+  "rawBytes": 69446
 }

@@ -1,9 +1,10 @@
 {
-  "rawKB": 59.2,
+  "rawKB": 59,
   "gzipKB": 23.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene102-standard-renderable-BrfrHFTG.js",
+    "scene102-standard-renderable--_hWNp-k.js",
     "scene102.js"
-  ]
+  ],
+  "rawBytes": 60466
 }

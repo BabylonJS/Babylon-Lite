@@ -94,16 +94,17 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 
 ## Cameras
 
-| Feature                   | Lite | BJS | Notes                                                                           |
-| ------------------------- | :--: | :-: | ------------------------------------------------------------------------------- |
-| Arc Rotate Camera         |  ✅  | ✅  | Orbit / zoom / pan / inertia                                                    |
-| Auto-Framing (fitToScene) |  ✅  | ✅  | Default camera for loaded models                                                |
-| Free Camera               |  ✅  | ✅  | Scene 18, 24, 25 — WASD/arrow controls                                          |
-| Geospatial Camera         |  ✅  | ✅  | Globe-orbit camera (center/yaw/pitch/radius) with fly-to + controls (Scene 225) |
-| Follow Camera             |  —   | ✅  |                                                                                 |
-| Universal Camera          |  —   | ✅  |                                                                                 |
-| VR / XR Camera            |  —   | ✅  |                                                                                 |
-| Device Orientation Camera |  —   | ✅  |                                                                                 |
+| Feature                   | Lite | BJS | Notes                                                                                                              |
+| ------------------------- | :--: | :-: | ------------------------------------------------------------------------------------------------------------------ |
+| Arc Rotate Camera         |  ✅  | ✅  | Orbit / zoom / pan / inertia                                                                                       |
+| Auto-Framing (fitToScene) |  ✅  | ✅  | Default camera for loaded models                                                                                   |
+| Free Camera               |  ✅  | ✅  | Scene 18, 24, 25 — WASD/arrow controls                                                                             |
+| Geospatial Camera         |  ✅  | ✅  | Globe-orbit camera (center/yaw/pitch/radius) with fly-to + controls (Scene 225)                                    |
+| Orthographic Projection   |  ✅  | ✅  | Any camera via enableOrthographicCamera() opt-in; live/animatable bounds, aspect-derived or off-center (Scene 268) |
+| Follow Camera             |  —   | ✅  |                                                                                                                    |
+| Universal Camera          |  —   | ✅  |                                                                                                                    |
+| VR / XR Camera            |  —   | ✅  |                                                                                                                    |
+| Device Orientation Camera |  —   | ✅  |                                                                                                                    |
 
 ---
 

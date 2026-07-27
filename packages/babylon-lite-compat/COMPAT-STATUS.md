@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `958a8dbed4e263d412ee9255ae747299043de19f`
-- **Last sync date:** 2026-07-10
+- **Last synced BJS commit:** `7ddc62e2ee59b2f034db81c73e04f3804cbc7222`
+- **Last sync date:** 2026-07-17
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -91,6 +91,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `engine.getCaps()` (compressed-format flags `astc` / `s3tc` / `etc2`)                                                                                                                 | ✅ Full          | engine (derived from the Lite WebGPU device's enabled features)                                                                                                               |
 | `AbstractEngine.Version` / `AbstractEngine.NpmPackage` (static)                                                                                                                        | ✅ Full          | engine (reports the underlying Babylon Lite runtime `VERSION`, wrapped as `@babylonjs/lite-compat@<version>` for `NpmPackage`)                                                 |
 | `engine.beginFrame` / `endFrame`                                                                                                                                                      | ❌ Not supported | —                                                                                                                                                                             |
+| `engine.currentSampleCount` / `getAlphaToCoverage` / `setAlphaToCoverage`                                                                                                             | 🔧 Needs Lite core | engine (new BJS `9.17` MSAA/alpha-to-coverage engine surface; Lite manages MSAA internally and exposes no public sample-count accessor or engine-level A2C toggle — throwing stubs) |
 | `NullEngine`                                                                                                                                                                          | ✅ Full          | [engine/engine.ts](src/engine/engine.ts) (backed by Lite's real device-less `createNullEngine`; scene built with `defaultRenderTask: false` — no swapchain/GPU resource — and advanced via Lite `stepScene`, which fires the same before-render hook as the GPU path) |
 | `AbstractScene` / `Scene`                                                                                                                                                             | ⚡ Partial       | [scene/scene.ts](src/scene/scene.ts) over [scene/abstract-scene.ts](src/scene/abstract-scene.ts) (entity collections on `AbstractScene`, as in BJS)                           |
 | `scene.clearColor` / `activeCamera` / `imageProcessingConfiguration`                                                                                                                  | ✅ Full          | scene                                                                                                                                                                         |
@@ -169,6 +170,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `Mesh` / `AbstractMesh` (transform, material, visibility)                                                       | ⚡ Partial         | meshes                                                                                                                                                                                                                                     |
 | `GroundMesh`                                                                                                    | ⚡ Partial         | meshes (no CPU height query)                                                                                                                                                                                                               |
 | `GaussianSplattingMesh` (`loadFileAsync` / `splatsData` / `updateData` / `bakeCurrentTransformIntoVertices`)    | ⚡ Partial         | [meshes/gaussian-splatting.ts](src/meshes/gaussian-splatting.ts) — over Lite `loadSplat`/`loadSOG`/`loadSPZ`; loader routes `.ply`/`.splat`/`.sog`/`.spz` URLs; live transforms + `updateData(flipY)`; pickable via the compat `GPUPicker` |
+| `GaussianSplattingMesh.safeOrbitCameraLimits` + `ISafeOrbitCameraLimits`                                        | 🔧 Needs Lite core | gaussian-splatting (new BJS `9.17` Adobe safe-orbit metadata surface; field + interface exposed for shape parity, defaults `null` — Lite's splat loaders don't parse the safe-orbit metadata block, so populating it needs a non-tree-shakeable Lite loader change) |
 | `GaussianSplattingStream` / `GaussianSplattingWorkBuffer` (`setSplatIndexRanges` / `renderedSplatCount`)        | ❌ Not supported   | new in BJS `efdee76` (GS LOD streaming PR #18563); SOG-octree LOD streaming + GPU work-buffer decode + per-splat interval rendering are not in Lite's GS path                                                                              |
 | `InstancedMesh`                                                                                                 | ❌ Not supported   | throwing stub; use thin instances                                                                                                                                                                                                          |
 | `VertexData`                                                                                                    | ⚡ Partial         | meshes (CPU data container)                                                                                                                                                                                                                |
@@ -386,6 +388,8 @@ candidate rows for the next audit passes — until wrapped they either carry a
 | WebXR                                          | ❌ Not supported (no XR in Lite)           |
 | `HighlightLayer` / `GlowLayer` / `Decal`       | ❌ Not supported (not in Lite)             |
 | `SceneSerializer`                              | ❌ Not supported                           |
+| `@serialize` / `serializeAs*` decorators (`serializeAsVector4`, `serializeAsColor3`, …) + `GetDirectStore` / `GetMergedStore` / `GetDirectStoreFromMetadata` / `SerializedFieldType` / `SerializedPropertyMetadata` | ❌ Not supported (serialization metadata subsystem — Lite has no serializer; ported scenes never apply these; part of the `SceneSerializer` ❌ bucket) |
+| `FlowGraph` / `FlowGraphCoordinator` (`edit`, `EditorURL`, `IFlowGraphEditorLaunchOptions`, `OnFlowGraph{Added,Removed}Observable`, blocks) | ❌ Not supported (node-based scripting subsystem; no Babylon Lite equivalent) |
 
 ---
 

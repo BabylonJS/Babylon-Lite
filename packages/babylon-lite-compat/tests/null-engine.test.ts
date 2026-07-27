@@ -4,6 +4,7 @@ import { NullEngine, WebGPUEngine, AbstractEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
 import { Animation } from "../src/animations/animation";
 import { Color3, Color4 } from "../src/math/color";
+import { LiteCompatError } from "../src/error";
 import { stepScene } from "babylon-lite";
 
 /**
@@ -19,6 +20,16 @@ describe("NullEngine (headless)", () => {
         expect(engine).toBeInstanceOf(AbstractEngine);
         expect(engine._headless).toBe(true);
         expect(engine.isWebGPU).toBe(true);
+    });
+
+    it("throws LiteCompatError for the MSAA / alpha-to-coverage engine APIs (no Lite backing)", () => {
+        const engine = new NullEngine();
+        expect(() => engine.currentSampleCount).toThrow(LiteCompatError);
+        expect(() => engine.currentSampleCount).toThrow(/currentSampleCount/);
+        expect(() => engine.getAlphaToCoverage()).toThrow(LiteCompatError);
+        expect(() => engine.getAlphaToCoverage()).toThrow(/getAlphaToCoverage/);
+        expect(() => engine.setAlphaToCoverage(true)).toThrow(LiteCompatError);
+        expect(() => engine.setAlphaToCoverage(true)).toThrow(/setAlphaToCoverage/);
     });
 
     it("constructs a Scene with no GPU context", () => {

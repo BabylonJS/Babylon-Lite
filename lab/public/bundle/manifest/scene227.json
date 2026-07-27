@@ -1,9 +1,10 @@
 {
-  "rawKB": 48.4,
+  "rawKB": 48.3,
   "gzipKB": 19.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene227-standard-renderable-CerX-0_4.js",
+    "scene227-standard-renderable-CprDe3mU.js",
     "scene227.js"
-  ]
+  ],
+  "rawBytes": 49448
 }

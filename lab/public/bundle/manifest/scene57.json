@@ -1,5 +1,5 @@
 {
-  "rawKB": 60.2,
+  "rawKB": 60,
   "gzipKB": 24.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -7,5 +7,6 @@
     "scene57-scene-uniforms-FTYH6Ct0.js",
     "scene57-standard-renderable-Yh7JywoO.js",
     "scene57.js"
-  ]
+  ],
+  "rawBytes": 61490
 }

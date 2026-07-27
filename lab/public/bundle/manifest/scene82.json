@@ -1,6 +1,6 @@
 {
-  "rawKB": 64.7,
-  "gzipKB": 29.2,
+  "rawKB": 64.6,
+  "gzipKB": 29.1,
   "ignoredRawKB": 8.4,
   "runtimeChunks": [
     "scene82-_math-factory-BApNjtOd.js",
@@ -23,5 +23,6 @@
     "scene82-voronoi-noise-block-qKswGW4q.js",
     "scene82-worley-noise-3d-block-DvnzjY-o.js",
     "scene82.js"
-  ]
+  ],
+  "rawBytes": 66192
 }

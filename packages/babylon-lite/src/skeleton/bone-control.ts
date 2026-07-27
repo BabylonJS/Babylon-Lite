@@ -306,6 +306,14 @@ async function buildSkeletons(ctx: GltfLoadCtx, meshes: Mesh[], overrides: Map<n
     // (each with its own GPU bone texture in Lite), so we must refresh them all —
     // matching Babylon.js, where the shared skeleton updates every mesh at once.
     const allBindings: SkeletonBinding[] = groups.flatMap((g) => g.bindings);
+    // Bridge the asset-wide override map onto each shared runtime skeleton (mesh.skeleton),
+    // which the optional weighted-blend mixer also holds — so a manager-blended clip can
+    // honour bone overrides. Stamped in this opt-in chunk to keep the always-loaded animation
+    // path byte-identical for scenes that never use bone control. Every binding here has a
+    // runtime skeleton (bindings are only created for meshes that have one).
+    for (const b of allBindings) {
+        b.runtimeSkeleton!._overrides = overrides;
+    }
     const bake = (): void => {
         resetTRS(nodes, numNodes, currentTRS);
         if (overrides.size > 0) {

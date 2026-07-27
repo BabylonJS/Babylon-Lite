@@ -3,6 +3,7 @@ import type { SceneNode } from "../scene/scene-node.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import { mat4PerspectiveLHToRef } from "../math/mat4-perspective-lh-to-ref.js";
 import type { Mat4Storage } from "../math/types.js";
+import type { OrthographicBounds } from "./orthographic.js";
 
 /** Minimal camera contract — any camera that can provide view/projection matrices.
  *  Both ArcRotateCamera and FreeCamera implement this interface.
@@ -46,6 +47,38 @@ export interface Camera {
      *  leave the field undefined and `getViewMatrix` produces a standard view
      *  matrix. */
     _useFloatingOrigin?: boolean;
+    /** @internal Monotonic counter bumped whenever the *projection* changes
+     *  independently of the camera transform: by `_cameraChangeKey` when it
+     *  observes a `fov` / `nearPlane` / `farPlane` write, and by the orthographic
+     *  feature module (`enableOrthographicCamera` / `disableOrthographicCamera`
+     *  and every `ortho` bounds setter).
+     *
+     *  Projection-dependent per-frame consumers gate their GPU uploads on the
+     *  camera's `worldMatrixVersion`, which does not move when only the view
+     *  volume does; they fold this counter into the same key so the change
+     *  reaches the GPU. It is deliberately separate from `worldMatrixVersion`:
+     *  a projection change must NOT be mistaken for camera motion, which would
+     *  additionally invalidate the camera's children and — under floating
+     *  origin — retrigger origin rebasing across every renderable.
+     *
+     *  Initialized on the first `_cameraChangeKey` call: the `fov` / `nearPlane` /
+     *  `farPlane` snapshot below starts `undefined`, so that first call always
+     *  observes a drift and bumps this to 1. Consumers therefore never read it
+     *  as `undefined` — they reach it only through `_cameraChangeKey`. */
+    _projRev?: number;
+    /** @internal Last `fov` / `nearPlane` / `farPlane` observed by `_cameraChangeKey`.
+     *  These are plain writable fields on a plain-data camera (pillar 4b′), so a write
+     *  cannot notify anyone; the change key polls them by value instead and bumps
+     *  `_projRev` when they drift. See `_cameraChangeKey`. */
+    _projFov?: number;
+    /** @internal See `_projFov`. */
+    _projNear?: number;
+    /** @internal See `_projFov`. */
+    _projFar?: number;
+    /** Live orthographic view-volume extents, installed by `enableOrthographicCamera`
+     *  and mutable/animatable thereafter. Null or undefined means the camera projects
+     *  perspectively through `fov`. */
+    ortho?: OrthographicBounds | null;
 }
 
 /** Babylon-compatible normalized camera viewport. x/y/width/height are fractions of the render target. */
@@ -100,22 +133,74 @@ export function getViewMatrix(camera: Camera): Mat4 {
     return v as unknown as Mat4;
 }
 
-/** Compute the projection matrix for a camera. Cached per worldMatrixVersion + aspect. */
+/** Orthographic projection writer, installed only by `enableOrthographicCamera`. Module-local with a
+ *  single exported setter: when `enableOrthographicCamera` is absent from the bundle the setter
+ *  tree-shakes, the bundler proves this is always null, and the orthographic branch below folds away —
+ *  perspective-only scenes stay byte-identical. */
+let _orthoProjector: ((camera: Camera, aspectRatio: number, out: Mat4Storage) => void) | null = null;
+
+/** @internal Install orthographic projection support (called by `enableOrthographicCamera`). */
+export function _installOrthographicProjector(write: (camera: Camera, aspectRatio: number, out: Mat4Storage) => void): void {
+    _orthoProjector = write;
+}
+
+/** @internal Change key for every projection-dependent per-frame consumer, and for the
+ *  projection matrix caches themselves.
+ *
+ *  Consumers gate their GPU uploads on a version number. `camera.worldMatrixVersion` alone
+ *  is not that number: it does not move when only the view volume changes, so a steady-state
+ *  scene keeps rendering a stale view-projection after a `fov`, `nearPlane`, `farPlane` or
+ *  orthographic-bounds write.
+ *
+ *  `fov` / `nearPlane` / `farPlane` are plain writable fields on a plain-data camera
+ *  (pillar 4b′) — a write cannot notify anyone — so this polls them by value and folds a
+ *  drift into `_projRev`. Polling here rather than installing accessors in every camera
+ *  factory keeps the projection contract in ONE place, costs nothing per camera type, and
+ *  works for a hand-rolled object satisfying `Camera` (the same reason
+ *  `world-matrix-state.ts` polls a foreign parent's version instead of pushing to it).
+ *  Orthographic bounds are pushed, not polled: that module owns setters already.
+ *
+ *  Both terms of the returned sum are monotonically non-decreasing, so the sum is too and
+ *  any change in either strictly increases it — it cannot alias. (Same version-summing idiom
+ *  as `shadow-base.ts` and `gltf-feature-lights-punctual.ts`.) This relies on the `Camera`
+ *  contract that `worldMatrixVersion` never decreases; every in-engine camera satisfies it
+ *  (the counter only ever increments, including across reparenting), and a custom `Camera`
+ *  implementation must too or a change can be missed.
+ *
+ *  Deliberately NOT folded into `worldMatrixVersion` itself: a projection change must not be
+ *  mistaken for camera motion, which would invalidate the camera's children and, under
+ *  floating origin, retrigger origin rebasing across every renderable (`wrapRenderableForFO`).
+ *  Those consumers keep reading `worldMatrixVersion`. */
+export function _cameraChangeKey(camera: Camera): number {
+    if (camera._projFov !== camera.fov || camera._projNear !== camera.nearPlane || camera._projFar !== camera.farPlane) {
+        camera._projFov = camera.fov;
+        camera._projNear = camera.nearPlane;
+        camera._projFar = camera.farPlane;
+        camera._projRev = (camera._projRev ?? 0) + 1;
+    }
+    return camera.worldMatrixVersion + (camera._projRev ?? 0);
+}
+
+/** Compute the projection matrix for a camera. Cached per `_cameraChangeKey` + aspect. */
 export function getProjectionMatrix(camera: Camera, aspectRatio: number): Mat4 {
-    const ver = camera.worldMatrixVersion;
+    const ver = _cameraChangeKey(camera);
     if (camera._projVer === ver && camera._projAspect === aspectRatio) {
         return camera._projCache as unknown as Mat4;
     }
     const p = camera._projCache;
-    mat4PerspectiveLHToRef(p, camera.fov, aspectRatio, camera.nearPlane, camera.farPlane);
+    if (_orthoProjector !== null && camera.ortho) {
+        _orthoProjector(camera, aspectRatio, p);
+    } else {
+        mat4PerspectiveLHToRef(p, camera.fov, aspectRatio, camera.nearPlane, camera.farPlane);
+    }
     camera._projVer = ver;
     camera._projAspect = aspectRatio;
     return p as unknown as Mat4;
 }
 
-/** Compute the view-projection matrix for a camera. Cached per worldMatrixVersion + aspect. */
+/** Compute the view-projection matrix for a camera. Cached per `_cameraChangeKey` + aspect. */
 export function getViewProjectionMatrix(camera: Camera, aspectRatio: number): Mat4 {
-    const ver = camera.worldMatrixVersion;
+    const ver = _cameraChangeKey(camera);
     if (camera._vpVer === ver && camera._vpAspect === aspectRatio) {
         return camera._vpCache as unknown as Mat4;
     }

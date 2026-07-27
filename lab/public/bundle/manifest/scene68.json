@@ -1,6 +1,6 @@
 {
-  "rawKB": 89.3,
-  "gzipKB": 35.3,
+  "rawKB": 89.2,
+  "gzipKB": 35.2,
   "ignoredRawKB": 11.4,
   "runtimeChunks": [
     "scene68-_math-factory-BeBEFbRS.js",
@@ -16,5 +16,6 @@
     "scene68-transform-block-DB_xSvh7.js",
     "scene68-vertex-output-C7G5u6Y0.js",
     "scene68.js"
-  ]
+  ],
+  "rawBytes": 91335
 }

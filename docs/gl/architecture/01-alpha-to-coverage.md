@@ -96,7 +96,7 @@ unseen engine (reported false)
 2. Tests assert lost/disposed safety and reapplication after context restoration.
 3. Tests assert `gl.SAMPLES` normalization (`0 -> 1`, `4 -> 4`).
 4. Tests assert `wipeGLStateCache` invalidates the optional applied-state cache.
-5. GL Scene 17 renders matching red/green overlap panels with A2C disabled/enabled and is compared against the ThinEngine golden with the standard full-image MAD gate. Its rows are separated exactly like WebGPU Scene 268 so no cross-row card overlap can create a depth tie, which strict `LESS` and reverse-Z `greater-equal` would otherwise resolve to different winners.
+5. GL Scene 17 renders matching red/green overlap panels with A2C disabled/enabled and is compared against the ThinEngine golden with the standard full-image MAD gate. Its rows are separated exactly like WebGPU Scene 269 so no cross-row card overlap can create a depth tie, which strict `LESS` and reverse-Z `greater-equal` would otherwise resolve to different winners.
 6. Existing GL scenes remain below unchanged size ceilings; the feature module appears only in Scene 17's bundle.
 
 ## File Manifest

@@ -1,6 +1,6 @@
 {
-  "rawKB": 65,
-  "gzipKB": 29.2,
+  "rawKB": 64.9,
+  "gzipKB": 29.1,
   "ignoredRawKB": 7,
   "runtimeChunks": [
     "scene81-_math-factory-DhoX_cdf.js",
@@ -19,5 +19,6 @@
     "scene81-triplanar-block-BsmOH9oT.js",
     "scene81-vertex-output-C7G5u6Y0.js",
     "scene81.js"
-  ]
+  ],
+  "rawBytes": 66442
 }

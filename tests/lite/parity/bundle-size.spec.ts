@@ -204,6 +204,20 @@ for (const scene of SCENES) {
             ).toBe(true);
         }
 
+        // Orthographic projection is an opt-in seam: `camera.ts` holds a module-local projector that
+        // only `enableOrthographicCamera` installs, so the branch folds away for every perspective-only
+        // scene. Guard both directions — no other scene may pull the module in, and scene 268 must.
+        const ORTHO_SCENE_IDS = new Set([268]);
+        if (ORTHO_SCENE_IDS.has(scene.id)) {
+            expect(
+                runtimeModules.some((id) => /\/camera\/orthographic\.[jt]s$/.test(id)),
+                `${scene.slug} MUST include the orthographic camera module; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
+        } else {
+            const offenders = runtimeModules.filter((id) => /\/(camera\/orthographic|math\/mat4-ortho-lh-to-ref)\.[jt]s$/.test(id));
+            expect(offenders, `perspective-only ${scene.slug} must not load orthographic camera modules; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
         // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
         // List excludes the sprite-using scenes (50-59, the 92-98 custom-shader scenes, and the
         // 117/118 sprite-picking scenes). 60-series are NME demos with no sprites; 1-40 are core 3D.

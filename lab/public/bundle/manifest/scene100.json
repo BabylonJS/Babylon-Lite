@@ -1,9 +1,10 @@
 {
-  "rawKB": 50.4,
-  "gzipKB": 20.3,
+  "rawKB": 50.3,
+  "gzipKB": 20.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene100-standard-renderable-BLTkerT6.js",
+    "scene100-standard-renderable-D4DsjsB1.js",
     "scene100.js"
-  ]
+  ],
+  "rawBytes": 51517
 }

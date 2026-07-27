@@ -1,0 +1,12 @@
+{
+  "rawKB": 43,
+  "gzipKB": 17.4,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene269-shader-pipeline-cache-BxAjLEFF.js",
+    "scene269-shader-renderable-MyU0CHF8.js",
+    "scene269-uniform-copy-batch-DhOf_gUs.js",
+    "scene269.js"
+  ],
+  "rawBytes": 44067
+}

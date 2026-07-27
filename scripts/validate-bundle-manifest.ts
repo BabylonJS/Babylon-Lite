@@ -11,12 +11,15 @@
  * This script is meant to run in CI AFTER `pnpm build:bundle-scenes`, which
  * overwrites the working-tree per-scene files with freshly measured sizes. It
  * compares those freshly built files against the versions committed at `git
- * HEAD`. Sizes are rounded to whole KB before comparison (matching the PR delta
- * comment), so sub-KB gzip jitter does not cause spurious failures.
+ * HEAD`. Raw size is compared exactly, in bytes (`rawBytes`), because `rawKB` is
+ * rounded to 0.1 KB and hides sub-50-byte drift. gzip stays rounded to whole KB:
+ * its output varies with the zlib build, so an exact check would fail spuriously
+ * across environments.
  *
- * It also compares each scene's logical `runtimeChunks` set. Vite's trailing
- * content hashes are ignored so content-only changes do not churn every
- * manifest; adding or removing a runtime chunk is still detected.
+ * It also compares each scene's `runtimeChunks` set. Chunk filenames carry a
+ * content hash, so they change whenever a PR alters code that actually lands in
+ * that scene's bundle (its own scene code or a shared module it imports). This
+ * catches content-only changes that leave the rounded KB sizes unchanged.
  *
  * Exit code 1 (with a helpful message) when the committed manifest is stale.
  *
@@ -32,6 +35,7 @@ const LEGACY_MANIFEST_REL_PATH = "lab/public/bundle/manifest.json";
 
 interface ManifestEntry {
     rawKB?: number;
+    rawBytes?: number;
     gzipKB?: number;
     runtimeChunks?: string[];
 }
@@ -42,14 +46,33 @@ function roundToWholeKB(kb: number | undefined): number {
     return Math.round(kb ?? 0);
 }
 
-function logicalRuntimeChunk(chunk: string): string {
-    return chunk.replace(/-[A-Za-z0-9_-]{8}\.js$/, ".js");
+/** Compare raw size as exactly as both sides allow.
+ *
+ *  `rawBytes` is exact and deterministic (a sum of fetched file lengths), so when both
+ *  sides carry it they are compared byte-for-byte: `rawKB` alone is rounded to 0.1 KB and
+ *  hides sub-50-byte drift, which is precisely how a stale manifest slipped through on a
+ *  zero-headroom scene. Entries committed before `rawBytes` existed fall back to the old
+ *  whole-KB comparison rather than failing spuriously.
+ *
+ *  gzip is deliberately NOT compared exactly: its output varies with the zlib build, so an
+ *  exact check would fail across environments. It stays rounded to whole KB. */
+function diffRawSize(committed: ManifestEntry, built: ManifestEntry): string | null {
+    if (committed.rawBytes != null && built.rawBytes != null) {
+        if (committed.rawBytes !== built.rawBytes) {
+            const delta = built.rawBytes - committed.rawBytes;
+            return `committed raw=${committed.rawBytes}B → rebuilt raw=${built.rawBytes}B (${delta > 0 ? "+" : ""}${delta} bytes)`;
+        }
+        return null;
+    }
+    const committedRaw = roundToWholeKB(committed.rawKB);
+    const builtRaw = roundToWholeKB(built.rawKB);
+    return committedRaw === builtRaw ? null : `committed raw=${committedRaw}KB → rebuilt raw=${builtRaw}KB`;
 }
 
 /** Compare two chunk lists as order-independent sets. Returns null when equal. */
 function diffRuntimeChunks(committed: string[] | undefined, built: string[] | undefined): string | null {
-    const committedSet = new Set((committed ?? []).map(logicalRuntimeChunk));
-    const builtSet = new Set((built ?? []).map(logicalRuntimeChunk));
+    const committedSet = new Set(committed ?? []);
+    const builtSet = new Set(built ?? []);
 
     const added = [...builtSet].filter((c) => !committedSet.has(c)).sort();
     const removed = [...committedSet].filter((c) => !builtSet.has(c)).sort();
@@ -170,13 +193,15 @@ function main(): void {
             continue;
         }
 
-        const builtRaw = roundToWholeKB(builtEntry.rawKB);
-        const committedRaw = roundToWholeKB(committedEntry.rawKB);
+        const rawDiff = diffRawSize(committedEntry, builtEntry);
+        if (rawDiff !== null) {
+            mismatches.push(`  ${key}: ${rawDiff}`);
+        }
+
         const builtGzip = roundToWholeKB(builtEntry.gzipKB);
         const committedGzip = roundToWholeKB(committedEntry.gzipKB);
-
-        if (builtRaw !== committedRaw || builtGzip !== committedGzip) {
-            mismatches.push(`  ${key}: committed raw=${committedRaw}KB gzip=${committedGzip}KB → rebuilt raw=${builtRaw}KB gzip=${builtGzip}KB`);
+        if (builtGzip !== committedGzip) {
+            mismatches.push(`  ${key}: committed gzip=${committedGzip}KB → rebuilt gzip=${builtGzip}KB`);
         }
 
         const chunkDiff = diffRuntimeChunks(committedEntry.runtimeChunks, builtEntry.runtimeChunks);
@@ -189,8 +214,16 @@ function main(): void {
         console.error(
             `Bundle manifest validation FAILED: per-scene manifest under ${MANIFEST_DIR_REL_PATH}/ is stale.\n` +
                 `This PR changes per-scene bundle output but did not commit the updated manifest files.\n` +
-                `Run 'pnpm build:bundle-scenes' locally and commit the regenerated ${MANIFEST_DIR_REL_PATH}/<scene>.json files.\n\n` +
-                `Differences (committed vs rebuilt; sizes rounded to whole KB):\n` +
+                `Run 'pnpm build:bundle-scenes' locally and commit the regenerated ${MANIFEST_DIR_REL_PATH}/<scene>.json files.\n` +
+                `\n` +
+                `If the differing scenes are flagged 'deviceDependentChunks' in scene-config.json (113/114/115), a\n` +
+                `plain local build deliberately leaves them alone: their chunk set depends on the GPU, so only a\n` +
+                `software-renderer measurement matches CI. Regenerate those with:\n` +
+                `    pnpm build:bundle-manifest:device\n` +
+                `(that needs a working SwiftShader WebGPU stack — fine on Linux/CI, unreliable on Windows. If it\n` +
+                `cannot run, restore those files to their committed values: they are CI-authored.)\n` +
+                `\n` +
+                `Differences (committed vs rebuilt; raw compared exactly in bytes, gzip rounded to whole KB):\n` +
                 mismatches.join("\n")
         );
         process.exit(1);

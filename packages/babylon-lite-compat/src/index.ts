@@ -65,6 +65,7 @@ export { CSG, CSG2, InitializeCSG2Async } from "./meshes/csg.js";
 export { MeshoptCompression } from "./meshes/compression.js";
 export { MorphTarget, MorphTargetManager } from "./morph/morph.js";
 export { GaussianSplattingMesh } from "./meshes/gaussian-splatting.js";
+export type { ISafeOrbitCameraLimits } from "./meshes/gaussian-splatting.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export {

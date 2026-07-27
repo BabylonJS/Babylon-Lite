@@ -1,9 +1,10 @@
 {
-  "rawKB": 57.4,
+  "rawKB": 57.3,
   "gzipKB": 23.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene53-standard-renderable-D7rp_Htr.js",
     "scene53.js"
-  ]
+  ],
+  "rawBytes": 58637
 }

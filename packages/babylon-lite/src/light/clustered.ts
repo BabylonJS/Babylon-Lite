@@ -1,6 +1,6 @@
 import { F32, U32 } from "../engine/typed-arrays.js";
 import { TU, SS } from "../engine/gpu-flags.js";
-import { getProjectionMatrix, getViewMatrix, type Camera } from "../camera/camera.js";
+import { getProjectionMatrix, getViewMatrix, getEffectiveAspectRatio, _cameraChangeKey, type Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
@@ -224,6 +224,7 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
     let lastCameraVersion = -1;
     let lastTargetWidth = 0;
     let lastTargetHeight = 0;
+    let lastAspect = -1;
     let lastContainerVersion = -1;
     let lastLightCount = -1;
     const state: ClusteredLightGpuState = {
@@ -237,11 +238,18 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
             }
             const safeWidth = Math.max(1, targetWidth);
             const safeHeight = Math.max(1, targetHeight);
+            // Effective aspect, not the raw target ratio: a camera with a normalized viewport
+            // renders through a different projection than width/height implies, and the forward
+            // pass already folds the viewport in (`_writePassSceneUBO`). Binning lights from a
+            // projection the frame never uses puts them in the wrong tiles. It is also part of
+            // the dirty key below, since a viewport change moves it with everything else equal.
+            const aspect = getEffectiveAspectRatio(activeCamera, safeWidth, safeHeight);
             if (
                 activeCamera === lastCamera &&
-                activeCamera.worldMatrixVersion === lastCameraVersion &&
+                _cameraChangeKey(activeCamera) === lastCameraVersion &&
                 safeWidth === lastTargetWidth &&
                 safeHeight === lastTargetHeight &&
+                aspect === lastAspect &&
                 container._version === lastContainerVersion &&
                 container.pointLights.length === lastLightCount
             ) {
@@ -252,9 +260,10 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
             }
             let topologyDirty =
                 activeCamera !== lastCamera ||
-                activeCamera.worldMatrixVersion !== lastCameraVersion ||
+                _cameraChangeKey(activeCamera) !== lastCameraVersion ||
                 safeWidth !== lastTargetWidth ||
                 safeHeight !== lastTargetHeight ||
+                aspect !== lastAspect ||
                 container.pointLights.length !== lastLightCount;
             let lightDataDirty = topologyDirty;
             if (container._version !== lastContainerVersion || container.pointLights.length !== lastLightCount) {
@@ -299,7 +308,6 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
                 lightDataDirty = true;
                 sliceData.fill(0);
                 activeLights.length = 0;
-                const aspect = safeWidth / safeHeight;
                 const view = getViewMatrix(activeCamera);
                 const proj = getProjectionMatrix(activeCamera, aspect);
                 const nearZ = activeCamera.nearPlane;
@@ -356,9 +364,10 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
                 }
             }
             lastCamera = activeCamera;
-            lastCameraVersion = activeCamera.worldMatrixVersion;
+            lastCameraVersion = _cameraChangeKey(activeCamera);
             lastTargetWidth = safeWidth;
             lastTargetHeight = safeHeight;
+            lastAspect = aspect;
             lastContainerVersion = container._version;
             lastLightCount = container.pointLights.length;
         },
@@ -467,7 +476,24 @@ function projectedSphereBounds(
     let maxNdcX = 1;
     let minNdcY = -1;
     let maxNdcY = 1;
-    if (vz > range) {
+    // proj[11] is 1 for a perspective projection and 0 for an orthographic one — a
+    // projection-agnostic discriminator that needs no coupling to the camera module.
+    // Under orthographic projection the silhouette is depth-independent: the sphere maps
+    // to an axis-aligned box of exactly its own radius, offset by the (possibly
+    // off-center) projection translation in proj[12]/proj[13], which the perspective
+    // path below ignores entirely.
+    if (proj[11] === 0) {
+        const sx = proj[0]!;
+        const sy = proj[5]!;
+        const cx = sx * vx + proj[12]!;
+        const cy = sy * vy + proj[13]!;
+        const rx = Math.abs(sx * range);
+        const ry = Math.abs(sy * range);
+        minNdcX = Math.max(cx - rx, -1);
+        maxNdcX = Math.min(cx + rx, 1);
+        minNdcY = Math.max(cy - ry, -1);
+        maxNdcY = Math.min(cy + ry, 1);
+    } else if (vz > range) {
         const x0 = projectedSphereEdge(vx, vz, rangeSq, proj[0]!, -1);
         const x1 = projectedSphereEdge(vx, vz, rangeSq, proj[0]!, 1);
         minNdcX = Math.min(x0, x1);

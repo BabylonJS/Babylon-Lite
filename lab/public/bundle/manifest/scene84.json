@@ -1,5 +1,5 @@
 {
-  "rawKB": 82.6,
+  "rawKB": 82.5,
   "gzipKB": 35.4,
   "ignoredRawKB": 5.5,
   "runtimeChunks": [
@@ -17,11 +17,12 @@
     "scene84-node-renderable-B84oBv9y.js",
     "scene84-screen-size-block-yVY2pHhh.js",
     "scene84-screen-space-block-Cfi3u-na.js",
-    "scene84-standard-renderable-sAU65t3F.js",
+    "scene84-standard-renderable-BePAGRiq.js",
     "scene84-transform-block-DrLlp92c.js",
     "scene84-twirl-block-tQLhuAc6.js",
     "scene84-vector-splitter-BB8dPQl7.js",
     "scene84-vertex-output-C7G5u6Y0.js",
     "scene84.js"
-  ]
+  ],
+  "rawBytes": 84438
 }

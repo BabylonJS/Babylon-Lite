@@ -23,7 +23,7 @@ import {
 } from "babylon-lite-gl";
 import type { GLMeshVao } from "babylon-lite-gl";
 
-/** Scene 17 — Alpha-to-Coverage, matching WebGPU Scene 268 and Babylon.js visual test #M4GBLK#0. */
+/** Scene 17 — Alpha-to-Coverage, matching WebGPU Scene 269 and Babylon.js visual test #M4GBLK#0. */
 
 const QUAD = new Float32Array([-0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5]);
 const INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);

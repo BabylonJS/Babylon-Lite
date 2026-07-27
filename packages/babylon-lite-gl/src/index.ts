@@ -119,8 +119,8 @@ export { GLBlendMode, GLBlendEquation, setBlendMode, setBlendState, disableBlend
 export type { GLBlendState } from "./blend.js";
 
 // ─── Depth / stencil / color-mask / clear ────────────────────────────
-export { setDepthState, setCullState, setStencilState, setColorMask, clearEngine, generateRenderTargetStencil } from "./depth-stencil.js";
-export type { GLDepthState, GLStencilState, GLClearOptions } from "./depth-stencil.js";
+export { setDepthState, setCullState, setStencilState, setStencilOpSeparate, setColorMask, clearEngine, generateRenderTargetStencil } from "./depth-stencil.js";
+export type { GLDepthState, GLStencilState, GLStencilOpState, GLClearOptions } from "./depth-stencil.js";
 
 // ─── Scissor ─────────────────────────────────────────────────────────
 export { setScissor, disableScissor } from "./scissor.js";

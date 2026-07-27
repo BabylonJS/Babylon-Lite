@@ -8,7 +8,7 @@ import type { Material } from "../material.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import { createEmptyUniformBuffer } from "../../resource/gpu-buffers.js";
 import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
-import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix } from "../../camera/camera.js";
+import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix, _cameraChangeKey } from "../../camera/camera.js";
 import type { Camera } from "../../camera/camera.js";
 import { mat4MultiplyInto } from "../../math/mat4-multiply-into.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
@@ -294,7 +294,7 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
     // a camera that only moves some frames — these per-packet writeBuffers dominate CPU frame time in
     // large scenes, and the skipped ones are byte-identical rewrites of what the UBO already holds.
     const camera = context._camera ?? scene.camera;
-    const cameraVersion = camera ? camera.worldMatrixVersion : -1;
+    const cameraVersion = camera ? _cameraChangeKey(camera) : -1;
     const meshWmVersion = packet.mesh.worldMatrixVersion;
     // alphaCutoff is compared by VALUE, not by the material's uniform version: animated materials bump
     // that version every frame (time uniforms and the like live in the CUSTOM ubo, which has its own

@@ -1,6 +1,6 @@
 {
   "rawKB": 105.3,
-  "gzipKB": 44.7,
+  "gzipKB": 44.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene7-background-ground-xk_lrMSs.js",
@@ -10,17 +10,18 @@
     "scene7-gltf-animation-DIyf0usL.js",
     "scene7-gltf-feature-animations-DKV_1Sen.js",
     "scene7-gltf-feature-extras-VHPteGay.js",
-    "scene7-gltf-feature-registry-hH-3H-v5.js",
+    "scene7-gltf-feature-registry-DP2xG2jd.js",
     "scene7-gltf-feature-skeleton-D8V1wC59.js",
     "scene7-gltf-json-asset-D2SvNo-5.js",
     "scene7-ibl-fragment-CeRrvT96.js",
-    "scene7-pbr-renderable-D-pl8LFA.js",
+    "scene7-pbr-renderable-kpA1gLZ_.js",
     "scene7-rgbd-decode-B_BnEftW.js",
     "scene7-scene-uniforms-FTYH6Ct0.js",
     "scene7-singlelight-hemispheric-wgsl-SlUPa83x.js",
-    "scene7-skeleton-fragment-ZHrnwDXC.js",
+    "scene7-skeleton-fragment-BESk2g7y.js",
     "scene7-skybox.vertex-Ban7q6IM-D1KSfOUq.js",
     "scene7-wgsl-helpers-BgB2AJrF.js",
     "scene7.js"
-  ]
+  ],
+  "rawBytes": 107784
 }
