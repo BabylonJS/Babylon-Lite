@@ -1,5 +1,5 @@
 {
-  "rawKB": 88.1,
+  "rawKB": 88.2,
   "gzipKB": 37,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -16,5 +16,5 @@
     "scene14-wgsl-helpers-BgB2AJrF.js",
     "scene14.js"
   ],
-  "rawBytes": 90187
+  "rawBytes": 90352
 }
