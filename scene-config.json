@@ -2346,9 +2346,9 @@
         "skipPerf": true
     },
     {
-        "id": 271,
-        "slug": "scene271-runtime-mesh-swap",
-        "name": "Scene 271 — Runtime Mesh Swap (Shared Texture)",
+        "id": 272,
+        "slug": "scene272-runtime-mesh-swap",
+        "name": "Scene 272 — Runtime Mesh Swap (Shared Texture)",
         "maxMad": 0.04,
         "maxRawKB": 60,
         "description": "From inside onBeforeRender, removes a textured mesh and adds a clone that shares its material — and therefore its ref-counted diffuse texture. Regression guard for removeFromScene destroying GPU resources mid-frame, which dropped the shared texture to refcount zero and left the clone's freshly rebuilt binding pointing at a destroyed GPUTexture (\"Destroyed texture used in a submit\", black canvas).",
@@ -2356,9 +2356,9 @@
         "skipPerf": true
     },
     {
-        "id": 272,
-        "slug": "scene272-runtime-material-family",
-        "name": "Scene 272 — Runtime Material Family",
+        "id": 273,
+        "slug": "scene273-runtime-material-family",
+        "name": "Scene 273 — Runtime Material Family",
         "maxMad": 0.06,
         "maxRawKB": 85,
         "description": "Registers a StandardMaterial-only scene, then adds the first PBR mesh from inside onBeforeRender. Regression guard for the material-swap drain silently discarding meshes whose material group was never built at registerScene time, which left the mesh with no renderable at all — invisible, with no error or warning.",
