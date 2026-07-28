@@ -1,6 +1,6 @@
 {
-  "rawKB": 133.4,
-  "gzipKB": 54.2,
+  "rawKB": 133.2,
+  "gzipKB": 54,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene244-animation-pointer-ext-BzwNBmKS.js",
@@ -11,15 +11,15 @@
     "scene244-gltf-ext-dielectric-C6hvXXiF.js",
     "scene244-gltf-ext-uv-transform-YGWG8v_J.js",
     "scene244-gltf-feature-animation-pointer-qDm0Z3TM.js",
-    "scene244-gltf-feature-animations-Cf271ZSV.js",
-    "scene244-gltf-feature-registry-DABBNvAf.js",
+    "scene244-gltf-feature-animations-C2GSfgeK.js",
+    "scene244-gltf-feature-registry-C71dSlF4.js",
     "scene244-gltf-json-asset-CmoMUPwG.js",
     "scene244-gltf-pbr-builder-ext-C9QW-XNy.js",
     "scene244-ibl-fragment-CeRrvT96.js",
-    "scene244-pbr-refraction-B6a8H8xs.js",
-    "scene244-pbr-renderable-DMZ1KCcO.js",
+    "scene244-pbr-refraction-H_XsCYhA.js",
+    "scene244-pbr-renderable-Brhxv2-k.js",
     "scene244-pbr-template-ext-CiHpOV5G.js",
-    "scene244-pbr-transmission-ext-uZYYqsQ8.js",
+    "scene244-pbr-transmission-ext-7X-zwlvn.js",
     "scene244-reflectance-fragment-BxPD1Afl.js",
     "scene244-rgbd-decode-BeAjygUm.js",
     "scene244-scene-uniforms-FTYH6Ct0.js",
@@ -28,5 +28,5 @@
     "scene244-visibility-D-ONJwR8.js",
     "scene244.js"
   ],
-  "rawBytes": 136633
+  "rawBytes": 136364
 }

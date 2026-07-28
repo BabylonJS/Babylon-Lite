@@ -1,23 +1,25 @@
 {
-  "rawKB": 103.5,
-  "gzipKB": 42.3,
+  "rawKB": 103.9,
+  "gzipKB": 42.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene12-create-skeleton-CO_r2LCi.js",
     "scene12-generate-mipmaps-BIXsXPpU.js",
-    "scene12-gltf-animation-CZNCsOVr.js",
-    "scene12-gltf-feature-animations-CiVyNw6v.js",
-    "scene12-gltf-feature-registry-CHQ4sWdK.js",
-    "scene12-gltf-feature-skeleton-yTqcn85p.js",
+    "scene12-gltf-animation-CHR7VJuv.js",
+    "scene12-gltf-feature-animations-DtO42sbJ.js",
+    "scene12-gltf-feature-registry-D2HmPcrC.js",
+    "scene12-gltf-feature-skeleton-CLRGjOaU.js",
     "scene12-gltf-glb-parser-BWKwsvg4.js",
+    "scene12-gpu-resource-retirement-BLli2eDe.js",
     "scene12-ibl-fragment-CeRrvT96.js",
-    "scene12-pbr-renderable-DuJlu3S9.js",
+    "scene12-pbr-renderable-CjcCi-XK.js",
     "scene12-reflectance-fragment-Dlj4uGTx.js",
     "scene12-rgbd-decode-Dv_uzcWF.js",
+    "scene12-scene-material-swap-C0hiS3UA.js",
     "scene12-scene-uniforms-FTYH6Ct0.js",
     "scene12-singlelight-directional-wgsl-IxKJMY1n.js",
     "scene12-skeleton-fragment-CXMUy5Kl.js",
     "scene12.js"
   ],
-  "rawBytes": 105944
+  "rawBytes": 106367
 }

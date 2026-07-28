@@ -1,12 +1,14 @@
 {
-  "rawKB": 50.9,
-  "rawBytes": 52156,
-  "gzipKB": 20.5,
+  "rawKB": 51.4,
+  "rawBytes": 52587,
+  "gzipKB": 20.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene270-standard-pipeline-Ctk-DPHC.js",
-    "scene270-standard-renderable-CSRb4j3_.js",
-    "scene270-std-mirrored-support-Bnp1yNX9.js",
+    "scene270-gpu-resource-retirement-BLli2eDe.js",
+    "scene270-scene-material-swap-2FDy0g7F.js",
+    "scene270-standard-pipeline-Ch3P2cdS.js",
+    "scene270-standard-renderable-C6M-aylz.js",
+    "scene270-std-mirrored-support-CGa9u586.js",
     "scene270.js"
   ]
 }

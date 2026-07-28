@@ -6,7 +6,6 @@ import type { LightBase } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { registerMeshScene, unregisterMeshScene, enqueueMaterialSwap } from "./mesh-scene-registry.js";
-import { processMaterialSwaps } from "./scene-material-swap.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import { tickAnimation } from "../animation/animation-tick.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
@@ -178,6 +177,13 @@ export interface SceneContext extends RenderingContext {
     _meshAuxDisposables: Map<Mesh, (() => void)[]>;
     /** @internal Meshes whose material was changed via setter — drained before each render frame. */
     _materialSwapQueue: Mesh[];
+    /** @internal Drain for `_materialSwapQueue`, installed by `enqueueMaterialSwap` the first time this
+     *  scene queues a swap. Keeping it a seam rather than a static import means a scene that never
+     *  re-materials a mesh after adding it never pulls `scene-material-swap.js` into its bundle. The first
+     *  call resolves a dynamic import (so it lands on the next frame, still drawing the previous
+     *  renderable — no missing-mesh flash); it then replaces itself with the loaded implementation, so
+     *  every later drain is synchronous exactly as before. */
+    _drainSwaps?: (scene: SceneContext) => Promise<void> | void;
     /** @internal Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
     _renderableVersion: number;
     /** @internal Monotonic counter bumped ONLY when a material's renderables are rebuilt/swapped (material
@@ -272,7 +278,9 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
                 cb(d);
             }
             if (ctx._materialSwapQueue.length) {
-                void processMaterialSwaps(ctx);
+                // The seam's first call resolves a dynamic import (see `enqueueMaterialSwap`); it latches
+                // the in-flight load and re-arms on failure, so firing it again on the next frame is safe.
+                void ctx._drainSwaps?.(ctx)?.catch?.(() => undefined);
             }
             for (const pp of ctx._prePasses) {
                 draws += pp.execute(encoder, eng);
@@ -517,7 +525,7 @@ export async function buildScene(scene: SceneContext): Promise<void> {
     }
     // Build the renderables for any meshes that joined an already-built group mid-drain (queued above) before
     // the first frame, instead of leaving them casting shadows but invisible in the color pass.
-    await processMaterialSwaps(ctx);
+    await ctx._drainSwaps?.(ctx);
     _lateCleanup?.get(ctx)?.() || (ctx._runtimeBuilds?._e(), ctx._renderableVersion++, (ctx._built = true));
     // Light/shadow topology changed since the last build (hook installed by `removeFromScene`): re-run the
     // group builders so the baked light indices, light-count permutation and shadow bind groups match.

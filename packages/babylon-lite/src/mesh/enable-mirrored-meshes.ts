@@ -36,5 +36,12 @@ import type { SceneContext } from "../scene/scene-core.js";
  * @param scene - Scene whose meshes should be watched for mirroring at runtime.
  */
 export async function enableMirroredMeshes(scene: SceneContext): Promise<void> {
-    (await import("../material/standard/std-mirrored-support.js")).installMirroredMeshSupport(scene);
+    const [mirrored, swap] = await Promise.all([import("../material/standard/std-mirrored-support.js"), import("../scene/scene-material-swap.js")]);
+    // The watcher enqueues a material swap when a transform's determinant flips, and that rebuild must
+    // land in the SAME frame: the already-built renderable's pipeline has the now-wrong `frontFace`, so
+    // leaving it one more frame draws the mesh inside-out. Installing the drain here (rather than letting
+    // the first enqueue fetch it) keeps it synchronous from the very first flip, while scenes that never
+    // opt into mirrored meshes still never load the swap machinery at all.
+    scene._drainSwaps = swap.processMaterialSwaps;
+    mirrored.installMirroredMeshSupport(scene);
 }

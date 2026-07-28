@@ -1,15 +1,16 @@
 {
-  "rawKB": 52,
-  "gzipKB": 21.3,
+  "rawKB": 51.8,
+  "gzipKB": 21.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene204-_mat4-storage-f64-7Hs0bt2y.js",
     "scene204-floating-origin-GYPpgH2l.js",
+    "scene204-gpu-resource-retirement-BLli2eDe.js",
     "scene204-pack-mat4-with-offset-BS-Lz8k7.js",
-    "scene204-standard-renderable-K2_oczmt.js",
+    "scene204-standard-renderable-H_l96iZD.js",
     "scene204-thin-instance-fragment-CBn2miAC.js",
-    "scene204-thin-instance-gpu-DMvEkqgI.js",
+    "scene204-thin-instance-gpu-xwou8DV3.js",
     "scene204.js"
   ],
-  "rawBytes": 53203
+  "rawBytes": 53050
 }

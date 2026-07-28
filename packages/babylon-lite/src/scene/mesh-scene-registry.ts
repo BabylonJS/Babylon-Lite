@@ -19,14 +19,51 @@ let _meshScenes: WeakMap<Mesh, Set<SceneContext>> | null = null;
 /** @internal Queue a mesh for renderable (re)build on the next frame's material-swap drain.
  *  Shared by the material setter (runtime material change) and addToScene (runtime mesh add).
  *  Dedup is per-(scene, mesh) via swap-queue membership — a single shared mesh may be queued
- *  in several scenes at once. The queue is drained synchronously each frame by the render loop
- *  (`processMaterialSwaps`), so the rebuilt renderable is present the SAME frame the old one is
- *  removed — no one-frame missing-mesh flash on the first swap (e.g. re-tinting a wall). */
+ *  in several scenes at once.
+ *
+ *  Enqueuing also INSTALLS the drain (`scene._drainSwaps`) the first time a scene needs one, so
+ *  `scene-core` carries no static import of the swap machinery: a scene that never re-materials a
+ *  mesh after adding it — the common case — leaves `scene-material-swap.js` out of its bundle
+ *  entirely. The very first drain awaits a dynamic import and therefore lands on the next frame;
+ *  every later one is the same synchronous call as before, because the loaded implementation
+ *  replaces the seam. That first frame still draws the mesh with its PREVIOUS renderable (the old
+ *  one is only removed by the drain itself), so there is no missing-mesh flash. */
 export function enqueueMaterialSwap(scene: SceneContext, mesh: Mesh): void {
     if (scene._materialSwapQueue.includes(mesh)) {
         return;
     }
     scene._materialSwapQueue.push(mesh);
+    scene._drainSwaps ??= loadDrain;
+}
+
+/** First-drain seam: fetch the real implementation, put it in place of this stub so subsequent
+ *  frames drain synchronously, then run it.
+ *
+ *  The render loop calls the seam on every frame the queue is non-empty, so the in-flight import is
+ *  latched: without it a slow fetch would start a fresh import per frame. A failed import (offline,
+ *  chunk 404) clears the latch and leaves the seam installed, so the next frame retries instead of
+ *  wedging the scene — and the rejection is handled here rather than escaping the `void` call in
+ *  `_update`. */
+let _pending: WeakMap<SceneContext, Promise<void>> | null = null;
+
+function loadDrain(scene: SceneContext): Promise<void> {
+    const pending = (_pending ??= new WeakMap()).get(scene);
+    if (pending) {
+        return pending;
+    }
+    const load = import("./scene-material-swap.js").then(
+        async ({ processMaterialSwaps }) => {
+            _pending?.delete(scene);
+            scene._drainSwaps = processMaterialSwaps;
+            await processMaterialSwaps(scene);
+        },
+        (error: unknown) => {
+            _pending?.delete(scene);
+            throw error;
+        }
+    );
+    _pending.set(scene, load);
+    return load;
 }
 
 /** Install a property setter on `mesh.material` that, on reassignment, enqueues a renderable

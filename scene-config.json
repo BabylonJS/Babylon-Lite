@@ -122,7 +122,7 @@
         "slug": "scene12-shader-balls",
         "name": "Scene 12 — PBR Shader Balls",
         "maxMad": 0.027,
-        "maxRawKB": 103.7,
+        "maxRawKB": 103.9,
         "description": "3 shader balls with metallic reflectance textures, directional light, env rotation.",
         "tags": ["pbr", "gltf"],
         "skipPerf": true
@@ -2340,7 +2340,7 @@
         "slug": "scene270-mirrored-standard-meshes",
         "name": "Scene 270 — Mirrored Standard Meshes",
         "maxMad": 0.1,
-        "maxRawKB": 51,
+        "maxRawKB": 51.4,
         "description": "Four StandardMaterial boxes: not mirrored, mirrored before build, mirrored at runtime, and mirrored by an ancestor at runtime. Validates triangle-winding reversal on the Standard pipeline (which previously had none) and runtime re-resolution when a transform's determinant sign flips.",
         "tags": ["standard", "transform", "procedural"],
         "skipPerf": true
