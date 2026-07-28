@@ -85,4 +85,36 @@ describe("compat engine startup ordering", () => {
         expect(error).toHaveBeenCalledWith(expect.stringContaining("utility layer blew up"));
         error.mockRestore();
     });
+
+    // A thunk that throws before returning a promise is not caught by a trailing `.catch`, so both
+    // late-work paths have to invoke it inside the guard.
+    it("does not fail startup when late work throws synchronously", async () => {
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        startEngineMock.mockResolvedValue();
+        const engine = makeEngine();
+        engine._registerLateWork((() => {
+            throw new Error("sync utility layer blew up");
+        }) as () => Promise<void>);
+
+        await expect(engine._start()).resolves.toBeUndefined();
+        expect(error).toHaveBeenCalledWith(expect.stringContaining("sync utility layer blew up"));
+        error.mockRestore();
+    });
+
+    it("reports a synchronous throw from late work registered after startup", async () => {
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        startEngineMock.mockResolvedValue();
+        const engine = makeEngine();
+        await engine._start();
+
+        expect(() =>
+            engine._registerLateWork((() => {
+                throw new Error("post-startup sync blew up");
+            }) as () => Promise<void>)
+        ).not.toThrow();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(error).toHaveBeenCalledWith(expect.stringContaining("post-startup sync blew up"));
+        error.mockRestore();
+    });
 });

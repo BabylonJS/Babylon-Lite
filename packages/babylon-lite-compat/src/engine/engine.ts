@@ -44,10 +44,17 @@ import type { Scene } from "../scene/scene.js";
 /**
  * Late work (utility-layer registration) is best-effort: it must never fail engine startup, and it
  * runs from two places — folded into `_startCore` when registered before startup completes, and
- * immediately after. Both report failures the same way so a rejection can never escape unattributed.
+ * immediately after. Both go through this helper, so neither a rejection nor a synchronous throw
+ * can escape unattributed.
  */
-function reportLateWorkFailure(error: unknown): void {
-    Logger.Error(`Late engine work failed: ${error instanceof Error ? error.message : String(error)}`);
+async function runLateWork(work: () => Promise<void>): Promise<void> {
+    // `work()` is invoked inside the try so a synchronous throw is reported the same way as a
+    // rejection; a trailing `.catch` on the returned promise would never see it.
+    try {
+        await work();
+    } catch (error) {
+        Logger.Error(`Late engine work failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
 }
 
 export abstract class AbstractEngine {
@@ -279,7 +286,7 @@ export abstract class AbstractEngine {
             // There is no startup promise left to fold this into. Surface a rejection through the
             // logger rather than letting it escape as an unhandled rejection, which is hard to
             // attribute back to the registering feature.
-            void work().catch(reportLateWorkFailure);
+            void runLateWork(work);
             return;
         }
         this._lateWork.push(work);
@@ -424,7 +431,7 @@ export abstract class AbstractEngine {
         // would otherwise poison `_startPromise` forever and resurface as an unhandled rejection
         // from `runRenderLoop`, which only does `void this._start()`.
         if (this._lateWork.length > 0) {
-            await Promise.all(this._lateWork.map((w) => w().catch(reportLateWorkFailure)));
+            await Promise.all(this._lateWork.map(runLateWork));
             this._lateWork.length = 0;
         }
     }
