@@ -636,6 +636,8 @@ function concat(a: ArrayLike<number> | null, b: ArrayLike<number> | null): numbe
 interface BoxOptions {
     size?: number;
     width?: number;
+    height?: number;
+    depth?: number;
 }
 interface SphereOptions {
     diameter?: number;
@@ -685,7 +687,7 @@ function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
 /** Babylon.js `MeshBuilder` — factory namespace for primitive meshes. */
 export const MeshBuilder = {
     CreateBox(name: string, options: BoxOptions, scene: Scene): Mesh {
-        const lite = createBox(engineOf(scene), options.size ?? options.width ?? 1);
+        const lite = createBox(engineOf(scene), options);
         return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 

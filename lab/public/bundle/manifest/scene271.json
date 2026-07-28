@@ -1,7 +1,7 @@
 {
-  "rawKB": 68.5,
-  "rawBytes": 70128,
-  "gzipKB": 26.9,
+  "rawKB": 68.4,
+  "rawBytes": 70011,
+  "gzipKB": 27,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene271-material-view-Dua1bl7W.js",
