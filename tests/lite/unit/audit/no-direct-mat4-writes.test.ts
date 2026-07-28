@@ -10,7 +10,7 @@
  *
  * The audit uses a conservative line-by-line regex. False positives are
  * resolved by extending the allowlist with a comment explaining WHY the file
- * (or specific `file:statement`) is deferred. Each allowlist entry must carry a
+ * (or specific `file:source-line`) is deferred. Each allowlist entry must carry a
  * follow-up reference (architecture D4 or M0-followup) so reviewers can audit
  * the suppression list trivially.
  */
@@ -61,12 +61,13 @@ const FILE_ALLOWLIST = new Set<string>([
     "packages/babylon-lite/src/material/pbr/background-solid-skybox.ts",
 ]);
 
-/** Statement-level allowlist `relPath:trimmedStatement` for specific writes
- *  that are correct under the substrate. Matching the statement rather than
- *  its line keeps unrelated edits above it from invalidating the exemption.
+/** Source-line allowlist `relPath:trimmedSourceLine` for specific writes that
+ *  are correct under the substrate. Matching the exact trimmed source line
+ *  rather than its line number keeps unrelated edits above it from invalidating
+ *  the exemption while still requiring review if any code on the line changes.
  *  Adding to this list requires the same justification standard as
  *  FILE_ALLOWLIST. */
-const STATEMENT_ALLOWLIST = new Set<string>([
+const SOURCE_LINE_ALLOWLIST = new Set<string>([
     // `addThinInstance` seeds the per-mesh F32 capacity buffer from an opaque
     // Mat4. `.set(matrix, 0)` performs an in-spec element-wise downcast that
     // produces the same F32 bytes packMat4IntoF32 would write for offset 0.
@@ -109,7 +110,7 @@ interface Violation {
 }
 
 function isAllowlisted(violation: Violation): boolean {
-    return STATEMENT_ALLOWLIST.has(`${violation.relPath}:${violation.snippet}`);
+    return SOURCE_LINE_ALLOWLIST.has(`${violation.relPath}:${violation.snippet}`);
 }
 
 function relFromRepoRoot(abs: string): string {
@@ -164,7 +165,7 @@ function scanSourceTree(): Violation[] {
 const sourceViolations = scanSourceTree();
 
 describe("audit: no direct mat4 GPU writes outside allowlist", () => {
-    it("keeps reviewed statements allowlisted when source lines move", () => {
+    it("keeps reviewed source lines allowlisted when line numbers move", () => {
         const violation: Violation = {
             relPath: "packages/babylon-lite/src/mesh/thin-instance.ts",
             line: 1,
@@ -181,7 +182,7 @@ describe("audit: no direct mat4 GPU writes outside allowlist", () => {
             const msg = sourceViolations.map((violation) => `  ${violation.relPath}:${violation.line}: ${violation.snippet}`).join("\n");
             throw new Error(
                 `Found ${sourceViolations.length} direct mat4 GPU write(s) outside the allowlist.\n` +
-                    `Route the write through packMat4IntoF32, or add the file/statement to the audit allowlist with a justification comment.\n\n` +
+                    `Route the write through packMat4IntoF32, or add the file/source-line to the audit allowlist with a justification comment.\n\n` +
                     msg
             );
         }
