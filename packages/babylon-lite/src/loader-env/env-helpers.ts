@@ -6,13 +6,19 @@ import { getBilinearSampler, getTrilinearSampler } from "../resource/samplers.js
 /** Fetch and decode the BRDF lookup texture with URL-specific diagnostics. */
 export async function loadBrdfImage(url: string): Promise<ImageBitmap> {
     const response = await fetch(url);
-    // SPA dev servers answer a missing asset with a 200 HTML fallback, so a bare
-    // `createImageBitmap` fails as an opaque `InvalidStateError` naming nothing.
     const blob = await response.blob();
-    if (!response.ok || blob.type.includes("html")) {
-        throw new Error(`BRDF LUT '${url}' is not an image (${response.status} ${blob.type}).`);
+    try {
+        // A bare `createImageBitmap` rejects as an opaque `InvalidStateError` naming nothing, so
+        // every decode failure — SPA 200 HTML fallback, text/plain, corrupt PNG — funnels into the
+        // diagnostic below. A non-OK status is rejected even when the body happens to decode, so a
+        // 404 placeholder image cannot silently stand in for the LUT.
+        if (response.ok) {
+            return await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+        }
+    } catch {
+        // Fall through to the shared diagnostic.
     }
-    return createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    throw new Error(`BRDF LUT '${url}' is not an image (${response.status} ${blob.type}).`);
 }
 
 /** Assemble the EnvironmentTextures object from pre-computed components */

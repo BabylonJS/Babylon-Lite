@@ -37,4 +37,31 @@ describe("loadBrdfImage", () => {
         await expect(loadBrdfImage("https://cdn.example.com/brdf.png")).resolves.toBe(image);
         expect(createImageBitmapMock).toHaveBeenCalledOnce();
     });
+
+    it("reports a clear error when a 200 response is not a decodable image", async () => {
+        vi.stubGlobal(
+            "createImageBitmap",
+            vi.fn(async () => {
+                throw new DOMException("The source image could not be decoded", "InvalidStateError");
+            })
+        );
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png" } }))
+        );
+
+        await expect(loadBrdfImage("/brdf-lut.png")).rejects.toThrow(/BRDF LUT '\/brdf-lut\.png' is not an image \(200 image\/png/);
+    });
+
+    it("rejects a non-OK response even when its body decodes as an image", async () => {
+        const createImageBitmapMock = vi.fn(async () => ({}) as ImageBitmap);
+        vi.stubGlobal("createImageBitmap", createImageBitmapMock);
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => new Response(new Uint8Array([137, 80, 78, 71]), { status: 404, headers: { "content-type": "image/png" } }))
+        );
+
+        await expect(loadBrdfImage("/brdf-lut.png")).rejects.toThrow(/BRDF LUT '\/brdf-lut\.png' is not an image \(404 image\/png/);
+        expect(createImageBitmapMock).not.toHaveBeenCalled();
+    });
 });

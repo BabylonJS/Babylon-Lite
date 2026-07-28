@@ -37,6 +37,7 @@ import {
 import type { EngineContext, EngineOptions, RenderCanvas } from "babylon-lite";
 
 import { LiteCompatError, unsupported } from "../error.js";
+import { Logger } from "../misc/misc-utils.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
 
@@ -262,7 +263,10 @@ export abstract class AbstractEngine {
     /** @internal Register work that must run after the main scene is rendering. */
     public _registerLateWork(work: () => Promise<void>): void {
         if (this._running) {
-            void work();
+            // Already running, so there is no startup promise left to fold this into. Surface a
+            // rejection through the logger rather than letting it escape as an unhandled rejection,
+            // which is hard to attribute back to the registering feature.
+            void work().catch((error: unknown) => Logger.Error(`Late engine work failed: ${error instanceof Error ? error.message : String(error)}`));
             return;
         }
         this._lateWork.push(work);
