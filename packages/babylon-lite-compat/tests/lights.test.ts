@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DirectionalLight, HemisphericLight, PointLight, SpotLight } from "../src/lights/lights";
+import { Node } from "../src/node/node";
 import { Vector3 } from "../src/math/vector";
 
 /**
@@ -62,6 +63,79 @@ describe("Light.setEnabled visibility toggle", () => {
         light.setEnabled(false);
         expect(light._lite.intensity).toBe(0);
         light.setEnabled(true);
+        expect(light._lite.intensity).toBeCloseTo(0.7);
+    });
+});
+
+describe("Light enabled state tracks ancestors", () => {
+    /** Minimal parent node — lights only need something with an enabled flag above them. */
+    class Holder extends Node {
+        public constructor(name: string) {
+            super(name);
+        }
+    }
+
+    it("zeroes intensity when an ancestor is disabled and restores it when re-enabled", () => {
+        const root = new Holder("root");
+        const light = new DirectionalLight("d", new Vector3(0, -1, 0));
+        light.intensity = 0.8;
+        light.parent = root;
+
+        root.setEnabled(false);
+        expect(light.isEnabled()).toBe(false);
+        expect(light._lite.intensity).toBe(0);
+        expect(light.intensity).toBeCloseTo(0.8);
+
+        root.setEnabled(true);
+        expect(light._lite.intensity).toBeCloseTo(0.8);
+    });
+
+    it("keeps a light dark after its ancestor is re-enabled if the light was disabled meanwhile", () => {
+        // Regression: keying the intensity swap off the ancestor-aware `isEnabled()` made
+        // this a no-op, so the light stayed at full intensity and lit the scene again as
+        // soon as the ancestor came back — despite being logically disabled.
+        const root = new Holder("root");
+        const light = new PointLight("p", new Vector3(0, 1, 0));
+        light.intensity = 1;
+        light.parent = root;
+
+        root.setEnabled(false);
+        light.setEnabled(false);
+        root.setEnabled(true);
+
+        expect(light.isEnabled(false)).toBe(false);
+        expect(light._lite.intensity).toBe(0);
+    });
+
+    it("does not light up when enabled underneath a disabled ancestor", () => {
+        const root = new Holder("root");
+        const light = new SpotLight("s", new Vector3(0, 5, 0), new Vector3(0, -1, 0), Math.PI / 4, 2);
+        light.intensity = 0.5;
+        light.parent = root;
+
+        light.setEnabled(false);
+        root.setEnabled(false);
+        light.setEnabled(true);
+
+        // Own flag is back on, but the ancestor still gates it.
+        expect(light.isEnabled(false)).toBe(true);
+        expect(light.isEnabled()).toBe(false);
+        expect(light._lite.intensity).toBe(0);
+
+        root.setEnabled(true);
+        expect(light._lite.intensity).toBeCloseTo(0.5);
+    });
+
+    it("reparenting under a disabled node zeroes the light", () => {
+        const off = new Holder("off");
+        off.setEnabled(false);
+        const light = new HemisphericLight("h", new Vector3(0, 1, 0));
+        light.intensity = 0.7;
+
+        light.parent = off;
+        expect(light._lite.intensity).toBe(0);
+
+        light.parent = null;
         expect(light._lite.intensity).toBeCloseTo(0.7);
     });
 });

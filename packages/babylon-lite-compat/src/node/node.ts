@@ -80,6 +80,9 @@ export abstract class Node {
         if (this._parent === value) {
             return;
         }
+        // Reparenting can flip this subtree's effective enabled state (e.g. moving a
+        // node under a disabled ancestor), so diff it the same way `setEnabled` does.
+        const captured = this._captureEffectiveEnabled();
         if (this._parent) {
             const i = this._parent._children.indexOf(this);
             if (i !== -1) {
@@ -90,6 +93,7 @@ export abstract class Node {
         if (value && !value._children.includes(this)) {
             value._children.push(this);
         }
+        this._settleEffectiveEnabled(captured);
     }
 
     /** @internal Whether this node is an `AbstractMesh` (overridden there) — drives `getChildMeshes`. */
@@ -153,18 +157,50 @@ export abstract class Node {
         if (this._enabled === value) {
             return;
         }
-        // Snapshot the effective state of this node and every descendant before the
-        // change so we can fire the effective-enabled observable only where it flips.
-        const subtree = [this, ...this.getDescendants(false)];
-        const before = subtree.map((n) => n.isEnabled(true));
+        const captured = this._captureEffectiveEnabled();
         this._enabled = value;
+        this._settleEffectiveEnabled(captured);
         this._onEnabledStateChangedObservable?.notifyObservers(value);
+    }
+
+    /**
+     * @internal Hook fired on this node when its **effective** enabled state — the value
+     * {@link isEnabled}() returns — flips, whether because its own flag changed or an
+     * ancestor's did. Subclasses that mirror the state onto a Lite object (`Light` zeroes
+     * its intensity, `AbstractMesh` hides itself) override this instead of `setEnabled`,
+     * so ancestor-driven changes are handled too. Runs after the whole subtree's state has
+     * settled and before any observable fires.
+     */
+    protected _onEffectiveEnabledChanged(_effective: boolean): void {}
+
+    /**
+     * @internal Snapshot this node's subtree and each member's effective enabled state,
+     * ready for {@link _settleEffectiveEnabled} to diff against once the change lands.
+     */
+    private _captureEffectiveEnabled(): { subtree: Node[]; before: boolean[] } {
+        const subtree = [this, ...this.getDescendants(false)];
+        return { subtree, before: subtree.map((n) => n.isEnabled(true)) };
+    }
+
+    /**
+     * @internal Re-evaluate a captured subtree: run `_onEffectiveEnabledChanged` on every
+     * node whose effective state flipped, then fire their observables. Hooks run before any
+     * observer so the whole subtree is consistent by the time user code sees the change.
+     */
+    private _settleEffectiveEnabled({ subtree, before }: { subtree: Node[]; before: boolean[] }): void {
+        const flipped: { node: Node; now: boolean }[] = [];
         for (let i = 0; i < subtree.length; i++) {
             const node = subtree[i]!;
             const now = node.isEnabled(true);
             if (now !== before[i]) {
-                node._onEffectiveEnabledStateChangedObservable?.notifyObservers(now);
+                flipped.push({ node, now });
             }
+        }
+        for (const { node, now } of flipped) {
+            node._onEffectiveEnabledChanged(now);
+        }
+        for (const { node, now } of flipped) {
+            node._onEffectiveEnabledStateChangedObservable?.notifyObservers(now);
         }
     }
 
