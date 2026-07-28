@@ -11,10 +11,16 @@ const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
 };
 gpuGlobals.GPUBufferUsage ??= { VERTEX: 0x20, COPY_DST: 0x8, STORAGE: 0x80, INDIRECT: 0x100 } as unknown as GPUBufferUsage;
 
-/** Advance the pending promise chain. The retirement flush reaches its fence through several
- *  `then` hops (one of which adopts a returned promise, costing extra turns), so a single
- *  `await Promise.resolve()` is not enough to observe its effects. Deliberately timer-free: this
- *  drains queued microtasks rather than yielding to a macrotask, which keeps the test deterministic. */
+/** Let the retirement flush's deferred work settle.
+ *
+ *  `flushGpuResourceRetirements` defers via `queueMicrotask`, and only inside that callback does it
+ *  acquire the queue fence (`onSubmittedWorkDone()`) and attach the `.then` that finally runs the
+ *  batch. So observing the fence takes one turn, and observing the batch takes the fence promise
+ *  settling plus another turn — more than a single `await Promise.resolve()` either way. A fixed
+ *  number of turns covers both without depending on the exact hop count.
+ *
+ *  Deliberately timer-free: this drains queued microtasks rather than yielding to a macrotask, which
+ *  keeps the test deterministic and off real timers. */
 async function flushMicrotasks(turns = 10): Promise<void> {
     for (let i = 0; i < turns; i++) {
         await Promise.resolve();
