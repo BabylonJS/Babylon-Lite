@@ -336,9 +336,10 @@ export function addDeferredSceneRenderables(
  * @param entity - The entity (or asset container) to add.
  * @throws When `entity` is a mesh that was already disposed — `removeFromScene` (or
  * `disposeScene`) releases a mesh's claim on its GPU resources when it leaves its LAST scene, and
- * a disposed mesh is retired for good. Create a new mesh instead of re-adding it. The mesh itself
- * is rejected before any scene state is touched; when adding a hierarchy or asset container,
- * entities processed before the offending mesh stay added.
+ * calling the public `disposeMeshGpu(mesh)` yourself does the same. A disposed mesh is retired for
+ * good; create a new mesh instead of re-adding it. The mesh itself is rejected before any scene
+ * state is touched; when adding a hierarchy or asset container, entities processed before the
+ * offending mesh stay added.
  */
 export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
     const ctx = scene as SceneContext;
