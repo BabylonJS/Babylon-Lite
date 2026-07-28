@@ -28,6 +28,12 @@ interface VehicleControllerModule {
     VehicleController: new (vehicle: TestVehicle) => TestVehicleController;
 }
 
+// Keep this import non-literal so the tests TypeScript project does not
+// recursively typecheck unrelated demo dependencies. Loading it during module
+// setup keeps Vite transformation outside the individual test timeout.
+const vehicleModule = "../../../lab/lite/src/demos/racer/vehicle.js";
+const { VehicleController } = (await import(vehicleModule)) as VehicleControllerModule;
+
 function makeVehicle(bodyY: number): TestVehicle {
     const root = createTransformNode("vehicle");
     const body = createTransformNode("body");
@@ -45,12 +51,7 @@ function makeVehicle(bodyY: number): TestVehicle {
 }
 
 describe("VehicleController", () => {
-    it("does not accumulate body height when the same vehicle is reselected", async () => {
-        // Keep this import non-literal so the tests TypeScript project does not
-        // recursively typecheck the demo's package-subpath imports; Vitest still
-        // loads and exercises the real controller at runtime.
-        const vehicleModule = "../../../lab/lite/src/demos/racer/vehicle.js";
-        const { VehicleController } = (await import(vehicleModule)) as VehicleControllerModule;
+    it("does not accumulate body height when the same vehicle is reselected", () => {
         const vehicle = makeVehicle(0.4);
         const controller = new VehicleController(vehicle);
 
@@ -64,5 +65,5 @@ describe("VehicleController", () => {
 
         expect(vehicle.body?.position.y).toBeCloseTo(0.45);
         expect(vehicle.bodyRestY).toBe(0.4);
-    }, 15_000);
+    });
 });

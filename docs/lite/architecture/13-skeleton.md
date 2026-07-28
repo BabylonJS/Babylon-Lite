@@ -237,7 +237,7 @@ export function getBoneByName(skeleton: Skeleton, name: string): Bone | undefine
 export function setBonePosition(skeleton: Skeleton, bone: Bone, x, y, z): void;
 export function setBoneRotationQuaternion(skeleton: Skeleton, bone: Bone, x, y, z, w): void;
 export function setBoneScaling(skeleton: Skeleton, bone: Bone, x, y, z): void;
-export function setBoneVisible(skeleton: Skeleton, bone: Bone, visible: boolean): void; // scale→0 hide
+export function setBoneVisible(skeleton: Skeleton, bone: Bone, visible: boolean): void; // scale→0 hide, beats animation
 export function clearBoneOverride(skeleton: Skeleton, bone: Bone): void;
 export interface Skeleton {
     readonly bones: readonly Bone[]; /* +@internal */
@@ -261,9 +261,19 @@ if (head) setBoneVisible(skel, head, false); // hide the head + everything under
 - **Eager bake.** Each `setBone*` immediately recomputes the asset's bone matrices from
   the rest pose + overrides and uploads the bone textures, so overrides apply even with
   **no** animation playing (static models).
-- **Animation wins per-component.** When a clip plays, the per-frame tick re-applies
+- **Animation wins per-component — except visibility.** When a clip plays, the per-frame
+  tick re-applies the `setBonePosition` / `setBoneRotationQuaternion` / `setBoneScaling`
   overrides right after the rest reset and **before** channel evaluation, so any component
   a clip animates overwrites the override; components the clip does not touch keep it.
+  `setBoneVisible(…, false)` is different: it is a visibility control, so it is re-applied
+  **after** channel evaluation (zeroing the bone's scale) in every pose path — the
+  single-clip controller (`skeleton-updater.ts`), the weighted manager blend
+  (`weighted-gltf-mixer.ts` → `uploadTarget`), and the eager bake. Without this a hidden
+  bone would pop back the moment a clip with a scale track on it played, and virtually
+  every rig in the wild bakes a constant scale track onto **every** bone (all Mixamo
+  exports, e.g. Xbot.glb, carry translation + rotation + scale on all 67 joints).
+  Visibility is tracked by its own `BoneOverride.mask` bit (8), so showing a bone again
+  leaves any explicit `setBoneScaling` override intact.
 - **One handle per skin, re-bakes every mesh.** A glTF skin split across multiple meshes
   (e.g. Xbot's `Beta_Joints` + `Beta_Surface`) produces one bone texture _per mesh_ in
   Lite, hence one `Skeleton` handle per skinned mesh on `container.skeletons`. The override
