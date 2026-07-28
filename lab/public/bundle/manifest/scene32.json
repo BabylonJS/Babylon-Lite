@@ -1,5 +1,5 @@
 {
-  "rawKB": 79.8,
+  "rawKB": 79.9,
   "gzipKB": 33,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -14,5 +14,5 @@
     "scene32-unlit-fragment-DWtvt7yQ.js",
     "scene32.js"
   ],
-  "rawBytes": 81748
+  "rawBytes": 81789
 }

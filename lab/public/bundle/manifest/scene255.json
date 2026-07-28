@@ -1,6 +1,6 @@
 {
   "rawKB": 94.1,
-  "gzipKB": 39.5,
+  "gzipKB": 39.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene255-create-skeleton-B2bD2bod.js",
@@ -19,5 +19,5 @@
     "scene255-skeleton-fragment-Bt_lOxko.js",
     "scene255.js"
   ],
-  "rawBytes": 96361
+  "rawBytes": 96398
 }

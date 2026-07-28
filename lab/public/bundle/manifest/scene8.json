@@ -1,6 +1,6 @@
 {
-  "rawKB": 74.5,
-  "gzipKB": 30,
+  "rawKB": 74.4,
+  "gzipKB": 29.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene8-background-hdr-skybox-SLLLfGoG.js",
@@ -11,5 +11,5 @@
     "scene8-singlelight-point-wgsl-2QlXbmIF.js",
     "scene8.js"
   ],
-  "rawBytes": 76244
+  "rawBytes": 76159
 }

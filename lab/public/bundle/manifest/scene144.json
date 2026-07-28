@@ -1,6 +1,6 @@
 {
   "rawKB": 111.4,
-  "gzipKB": 45.5,
+  "gzipKB": 45.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene144-create-skeleton-BCmd8Vv0.js",
@@ -22,5 +22,5 @@
     "scene144-texture-2d-DQo3n8D6.js",
     "scene144.js"
   ],
-  "rawBytes": 114083
+  "rawBytes": 114124
 }

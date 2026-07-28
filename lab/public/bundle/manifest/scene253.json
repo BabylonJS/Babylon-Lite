@@ -1,6 +1,6 @@
 {
-  "rawKB": 153.7,
-  "gzipKB": 65.2,
+  "rawKB": 153.8,
+  "gzipKB": 65.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene253-alpha-test-fragment-BidgZtWl.js",
@@ -52,5 +52,5 @@
     "scene253-visibility-DzpaYEgE.js",
     "scene253.js"
   ],
-  "rawBytes": 157395
+  "rawBytes": 157441
 }

@@ -1,5 +1,5 @@
 {
-  "rawKB": 90.9,
+  "rawKB": 91,
   "gzipKB": 38.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -17,5 +17,5 @@
     "scene240-scene-uniforms-FTYH6Ct0.js",
     "scene240.js"
   ],
-  "rawBytes": 93104
+  "rawBytes": 93145
 }

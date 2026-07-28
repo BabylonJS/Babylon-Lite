@@ -1,6 +1,6 @@
 {
   "rawKB": 110.1,
-  "gzipKB": 45.4,
+  "gzipKB": 45.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene146-alpha-test-fragment-BzpCe4sy.js",
@@ -19,5 +19,5 @@
     "scene146-wgsl-helpers-BxdFLrVn.js",
     "scene146.js"
   ],
-  "rawBytes": 112719
+  "rawBytes": 112764
 }
