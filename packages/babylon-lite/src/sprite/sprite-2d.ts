@@ -166,7 +166,14 @@ export interface Sprite2DProps {
     frame?: number;
     rotation?: number;
     color?: [number, number, number, number];
+    /**
+     * Absolute horizontal orientation, not a toggle: `true` mirrors the sprite, `false`
+     * restores it, and omitting the flag preserves whatever orientation the sprite already
+     * has (including across a `frame` change). Re-sending the same value every frame is a
+     * no-op.
+     */
     flipX?: boolean;
+    /** Absolute vertical orientation. See {@link Sprite2DProps.flipX}. */
     flipY?: boolean;
     visible?: boolean;
     /** Reserved for clip animation. Accepted but unused today. */
@@ -309,8 +316,9 @@ function setSprite2DCount(layer: Sprite2DLayer, count: number): void {
  *
  * Resolution rules (per field): `props` value if given, else (on add) the default, else `prev`.
  * `frame` is a higher-level intent: when supplied it stomps the four UV slots from the atlas
- * (then `flipX`/`flipY` swap them). It does **not** by itself imply a size change — `sizePx`
- * remains independent — but on add, a missing `sizePx` falls back to `frame.sourceSizePx`.
+ * (the sprite's current `flipX`/`flipY` orientation is then re-applied on top). It does **not**
+ * by itself imply a size change — `sizePx` remains independent — but on add, a missing `sizePx`
+ * falls back to `frame.sourceSizePx`.
  *
  * **Visibility model (the part that needs explaining):**
  *   - `_savedSize[slot]` always stores the sprite's *true* size (unaffected by visibility).
@@ -363,7 +371,10 @@ function writeInstance(layer: Sprite2DLayer, slotIndex: number, props: Partial<S
     }
 
     // ── UVs (frame stomps; else preserved; else default [0,0,1,1] on add) ───────────────
-    // flipX/flipY apply on top, by swapping the U/V endpoints.
+    // flipX/flipY are absolute orientation flags, not toggles: they are resolved against
+    // the flip already baked into the endpoints, so re-sending the same value every frame
+    // is idempotent. Omitting them preserves the current orientation (so a frame change
+    // keeps the existing flip, matching `setSprite2DFrameIndex` and the billboard path).
     let uMin: number;
     let vMin: number;
     let uMax: number;
@@ -384,15 +395,29 @@ function writeInstance(layer: Sprite2DLayer, slotIndex: number, props: Partial<S
         uMax = prev![6]!;
         vMax = prev![7]!;
     }
-    if (props.flipX === true) {
-        const t = uMin;
+    // Flip currently baked into the (possibly preserved) UV endpoints.
+    const currentFlipX = uMin > uMax;
+    const currentFlipY = vMin > vMax;
+    // Flip carried over from the previous instance (used when the flag is omitted,
+    // so a frame change keeps the existing flip).
+    const prevFlipX = !isAdd && prev![4]! > prev![6]!;
+    const prevFlipY = !isAdd && prev![5]! > prev![7]!;
+    // Resolve the desired flip. The explicit `=== true` test (rather than a
+    // `boolean !== flag` XOR) keeps both operands genuine booleans so terser's
+    // `booleans_as_integers` pass cannot turn the flag into a number and break the
+    // strict comparison (a boolean is never `!==`-equal to the integer 0/1 it maps
+    // a flag onto).
+    const wantsFlipX = props.flipX !== undefined ? props.flipX === true : prevFlipX;
+    const wantsFlipY = props.flipY !== undefined ? props.flipY === true : prevFlipY;
+    if (currentFlipX !== wantsFlipX) {
+        const previousMinU = uMin;
         uMin = uMax;
-        uMax = t;
+        uMax = previousMinU;
     }
-    if (props.flipY === true) {
-        const t = vMin;
+    if (currentFlipY !== wantsFlipY) {
+        const previousMinV = vMin;
         vMin = vMax;
-        vMax = t;
+        vMax = previousMinV;
     }
 
     // ── Rotation ────────────────────────────────────────────────────────────────────────
