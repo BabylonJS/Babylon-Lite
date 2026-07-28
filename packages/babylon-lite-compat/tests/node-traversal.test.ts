@@ -23,8 +23,17 @@ class TestNode extends Node {
     }
 }
 
-function createTestMesh(name: string): AbstractMesh {
-    const lite = { name, visible: true, children: [], receiveShadows: false } as unknown as LiteMesh;
+function createTestMesh(name: string, onChildrenRead?: () => void): AbstractMesh {
+    const children: LiteMesh[] = [];
+    const lite = { name, visible: true, children, receiveShadows: false } as unknown as LiteMesh;
+    if (onChildrenRead) {
+        Object.defineProperty(lite, "children", {
+            get: () => {
+                onChildrenRead();
+                return children;
+            },
+        });
+    }
     return new AbstractMesh(name, lite);
 }
 
@@ -116,5 +125,26 @@ describe("Node enabled hierarchy", () => {
         expect(locallyDisabledMesh.isEnabled()).toBe(false);
         expect(locallyDisabledMesh.isVisible).toBe(true);
         expect(locallyDisabledMesh._lite.visible).toBe(false);
+    });
+
+    it("does not retraverse Lite subtrees already cascaded by an ancestor mesh", () => {
+        let childrenReads = 0;
+        const root = new TransformNode("root");
+        const parentMesh = createTestMesh("parent", () => childrenReads++);
+        const childMesh = createTestMesh("child", () => childrenReads++);
+        const grandchildMesh = createTestMesh("grandchild", () => childrenReads++);
+        parentMesh.parent = root;
+        childMesh.parent = parentMesh;
+        grandchildMesh.parent = childMesh;
+        parentMesh._lite.children.push(childMesh._lite);
+        childMesh._lite.children.push(grandchildMesh._lite);
+        childrenReads = 0;
+
+        root.setEnabled(false);
+
+        expect(childrenReads).toBe(3);
+        expect(parentMesh._lite.visible).toBe(false);
+        expect(childMesh._lite.visible).toBe(false);
+        expect(grandchildMesh._lite.visible).toBe(false);
     });
 });

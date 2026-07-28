@@ -276,7 +276,10 @@ export class AbstractMesh extends TransformNode {
 
     /** @internal Apply local visibility and effective enabled state to Lite. */
     private _syncVisibility(enabled: boolean): void {
-        setMeshVisible(this._lite, this._visible && enabled);
+        const visible = this._visible && enabled;
+        if (this._lite.visible !== visible) {
+            setMeshVisible(this._lite, visible);
+        }
     }
 
     /**
