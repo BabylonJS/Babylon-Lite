@@ -1,5 +1,5 @@
 {
-  "rawKB": 48.6,
+  "rawKB": 48.7,
   "gzipKB": 19.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,5 +9,5 @@
     "scene201-standard-renderable-CZ_RoX6C.js",
     "scene201.js"
   ],
-  "rawBytes": 49726
+  "rawBytes": 49891
 }

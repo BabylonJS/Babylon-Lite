@@ -1,6 +1,6 @@
 {
-  "rawKB": 89.6,
-  "gzipKB": 36.6,
+  "rawKB": 89.8,
+  "gzipKB": 36.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene26-emissive-fragment-BMT6zA1W.js",
@@ -14,5 +14,5 @@
     "scene26-subsurface-fragment-5spzwJYM.js",
     "scene26.js"
   ],
-  "rawBytes": 91796
+  "rawBytes": 91961
 }

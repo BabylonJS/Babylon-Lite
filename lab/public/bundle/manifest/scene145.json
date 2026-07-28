@@ -1,5 +1,5 @@
 {
-  "rawKB": 89,
+  "rawKB": 89.2,
   "gzipKB": 36.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -22,5 +22,5 @@
     "scene145-std-specular-fragment-DwjAhaXY.js",
     "scene145.js"
   ],
-  "rawBytes": 91137
+  "rawBytes": 91298
 }

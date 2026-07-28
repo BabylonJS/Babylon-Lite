@@ -1,10 +1,10 @@
 {
-  "rawKB": 57,
-  "gzipKB": 22.9,
+  "rawKB": 57.1,
+  "gzipKB": 23,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene53-standard-renderable-DaD1sbsL.js",
     "scene53.js"
   ],
-  "rawBytes": 58331
+  "rawBytes": 58490
 }

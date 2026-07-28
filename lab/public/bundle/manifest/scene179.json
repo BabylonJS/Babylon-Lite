@@ -1,6 +1,6 @@
 {
-  "rawKB": 73.7,
-  "gzipKB": 30.3,
+  "rawKB": 73.9,
+  "gzipKB": 30.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene179-alpha-test-fragment-DkE2fbK8.js",
@@ -9,5 +9,5 @@
     "scene179-pbr-renderable-B6FUknqX.js",
     "scene179.js"
   ],
-  "rawBytes": 75497
+  "rawBytes": 75664
 }
