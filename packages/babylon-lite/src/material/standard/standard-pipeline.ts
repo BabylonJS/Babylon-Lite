@@ -66,9 +66,12 @@ export function _installStandardUvOffsetResolver(resolve: (material: StandardMat
     _uvOffsetResolver = resolve;
 }
 
-/** Primitive-state resolver, installed only by the lazy primitive/winding module (non-triangle
- *  topology or mirrored meshes). Module-local with a single exported setter: when nothing installs
- *  it the setter tree-shakes, the bundler proves this is always null, and the ternary in
+/** Primitive-state resolver, installed only by `std-mirrored-support` — i.e. the
+ *  `enableMirroredMeshes()` opt-in — so that a mirrored Standard mesh gets its triangle winding
+ *  reversed. (The shared resolver it installs also threads non-triangle topology, but that only
+ *  ever comes from glTF primitives, which are PBR; a Standard mesh always resolves to a
+ *  triangle list.) Module-local with a single exported setter: when the opt-in is absent the setter
+ *  tree-shakes, the bundler proves this is always null, and the ternary in
  *  `getOrCreateStandardPipeline` folds to the plain triangle-list default — every ordinary Standard
  *  scene stays byte-identical. */
 let _stdPrimitiveResolver: ((meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState) | null = null;
