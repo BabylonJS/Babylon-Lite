@@ -1,6 +1,6 @@
 {
-  "rawKB": 94.2,
-  "gzipKB": 39.9,
+  "rawKB": 94.4,
+  "gzipKB": 40,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene164-create-morph-targets-HFpNUWQ3.js",
@@ -10,7 +10,7 @@
     "scene164-gltf-color-normalize-4-WGzPL2.js",
     "scene164-gltf-feature-animations-BH772iga.js",
     "scene164-gltf-feature-morph-7lwtFhBO.js",
-    "scene164-gltf-feature-registry-CjG_Pwjc.js",
+    "scene164-gltf-feature-registry-gDOVnbQM.js",
     "scene164-gltf-feature-skeleton-D5viflFM.js",
     "scene164-gltf-json-asset-75Nkbggr.js",
     "scene164-morph-fragment-kOMKSw_A.js",
@@ -21,5 +21,5 @@
     "scene164-skeleton-fragment-CAH9_0jy.js",
     "scene164.js"
   ],
-  "rawBytes": 96479
+  "rawBytes": 96641
 }

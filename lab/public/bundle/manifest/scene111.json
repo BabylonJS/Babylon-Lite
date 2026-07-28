@@ -1,5 +1,5 @@
 {
-  "rawKB": 132,
+  "rawKB": 132.2,
   "gzipKB": 53.9,
   "ignoredRawKB": 6.4,
   "runtimeChunks": [
@@ -29,5 +29,5 @@
     "scene111-vertex-output-C7G5u6Y0.js",
     "scene111.js"
   ],
-  "rawBytes": 135218
+  "rawBytes": 135363
 }

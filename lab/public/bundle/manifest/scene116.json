@@ -1,6 +1,6 @@
 {
-  "rawKB": 75.8,
-  "gzipKB": 31.1,
+  "rawKB": 75.9,
+  "gzipKB": 31.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene116-pbr-renderable-C5dA6Px4.js",
@@ -11,5 +11,5 @@
     "scene116-unlit-fragment-DWtvt7yQ.js",
     "scene116.js"
   ],
-  "rawBytes": 77583
+  "rawBytes": 77739
 }

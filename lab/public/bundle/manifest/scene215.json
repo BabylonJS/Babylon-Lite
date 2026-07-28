@@ -1,6 +1,6 @@
 {
-  "rawKB": 80.2,
-  "gzipKB": 32.4,
+  "rawKB": 80.4,
+  "gzipKB": 32.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene215-material-view-Dua1bl7W.js",
@@ -12,5 +12,5 @@
     "scene215-singlelight-directional-wgsl-DzV54v_g.js",
     "scene215.js"
   ],
-  "rawBytes": 82165
+  "rawBytes": 82318
 }

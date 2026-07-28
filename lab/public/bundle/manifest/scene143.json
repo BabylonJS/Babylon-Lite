@@ -1,6 +1,6 @@
 {
-  "rawKB": 70.1,
-  "gzipKB": 27.5,
+  "rawKB": 70.3,
+  "gzipKB": 27.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene143-generate-mipmaps-CiyhUZPA.js",
@@ -13,5 +13,5 @@
     "scene143-std-specular-fragment-BugkvqOj.js",
     "scene143.js"
   ],
-  "rawBytes": 71799
+  "rawBytes": 71957
 }
