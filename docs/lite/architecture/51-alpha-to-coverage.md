@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Provide opt-in WebGPU alpha-to-coverage for multisampled Standard, PBR, and Shader material pipelines and for the depth-writing text/sprite pipeline owners that benefit most from it. Alpha-to-coverage converts fragment alpha into a per-sample coverage mask before depth/stencil and color writes. It is useful for depth-writing antialiased text, cutout sprites, foliage, and ordered opaque surfaces, but uncommon enough that applications which do not request it must retain byte-identical production bundles.
+Provide opt-in WebGPU alpha-to-coverage for multisampled Standard, PBR, and Shader material pipelines and for the depth-writing text/sprite pipeline owners that benefit most from it. Alpha-to-coverage converts fragment alpha into a per-sample coverage mask before depth/stencil and color writes. It is useful for depth-writing antialiased text, cutout sprites, foliage, and ordered opaque surfaces, but uncommon enough that applications which do not request it must carry none of its code and keep their existing bundle sizes.
 
 The feature owns only multisample coverage state. It does **not** silently enable alpha blending, change fragment alpha, or change a material's depth-write policy. A caller that wants the common opaque-replacement A2C mode emits fractional alpha while keeping blending disabled and depth writes enabled.
 
@@ -29,7 +29,7 @@ Both functions and `AlphaToCoverageTarget` are explicitly re-exported from the p
 Effective target paths are deliberately narrower than every text/sprite API:
 
 - `StandardMaterialProps`, `PbrMaterialProps`, and `ShaderMaterial`: main-pass material pipelines.
-- `TextRenderable`: effective only when it participates in depth and the scene target is multisampled. The A2C variant uses replacement color plus per-sample depth writes, matching Babylon.js MSDF text with `writeToDepthBuffer`.
+- `TextRenderable`: effective only when it participates in depth and the scene target is multisampled. The A2C variant uses replacement color plus per-sample depth writes.
 - `Sprite2DLayer`: effective only for a scene-hosted `depth: "test-write"` layer on a multisampled target.
 - `BillboardSpriteSystem`: effective only for a depth-writing cutout system on a multisampled target.
 - Standalone `TextRenderer` and `SpriteRenderer` HUD passes render directly to a 1x swapchain and continue to use alpha blending; they are not `AlphaToCoverageTarget`s.
@@ -58,11 +58,11 @@ For each main-pass material family:
 
 PBR and Standard bindings are shared by feature keys, so the optional module encodes A2C into otherwise-reserved feature bits already covered by their existing cache keys: Standard bit 23 and PBR `features2` bit 31. Bit 31 is distinct from sheen roughness texture bit 29. The constants remain extension-local rather than entering the always-shared flag modules. Shader bindings may be shared across equivalent material instances, so the Shader pipeline key itself includes the resolved A2C state through its existing `variantKey`.
 
-No frame hot path reads mutable A2C state: it is baked into immutable pipelines during binding/registration. This is the WebGPU-native replacement for Babylon.js's imperative engine state.
+No frame hot path reads mutable A2C state: it is baked into immutable pipelines during binding/registration.
 
 ### Text pipeline integration
 
-The ordinary Slug text fragment and premultiplied-alpha blend remain byte/behavior compatible. A separate A2C Slug fragment keeps full glyph RGB and puts analytic coverage only in alpha. That source is retained only when the null resolver hook can select an A2C text owner. The A2C `TextRenderable` variant:
+The ordinary Slug text fragment and its premultiplied-alpha blend are left unchanged. A separate A2C Slug fragment keeps full glyph RGB and puts analytic coverage only in alpha. That source is retained only when the null resolver hook can select an A2C text owner. The A2C `TextRenderable` variant:
 
 1. requires depth writes and `sampleCount > 1`;
 2. adds an A2C discriminator to the text pipeline key;

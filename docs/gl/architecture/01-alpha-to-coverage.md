@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Provide optional WebGL2 `SAMPLE_ALPHA_TO_COVERAGE` state for multisampled draw framebuffers. The module mirrors Babylon.js's opt-in ThinEngine extension while preserving Lite-GL's function-based API, context-owned state discipline, context-loss behavior, and zero bytes for consumers that do not import the feature.
+Provide optional WebGL2 `SAMPLE_ALPHA_TO_COVERAGE` state for multisampled draw framebuffers. The module uses the function-based engine-first API, owns its state per context, survives context loss, and contributes zero bytes to consumers that do not import it.
 
 ## Public API Surface
 
@@ -46,7 +46,7 @@ The first state allocation also appends a callback to the engine's lazily alloca
 
 This state is independent of `GLState.rs`: no other Lite-GL module mutates `SAMPLE_ALPHA_TO_COVERAGE`, so adding it to the always-present deferred-state array/dispatcher would charge every consumer for a niche feature. Keeping the state entirely in the optional module gives non-users literally zero runtime bytes and zero hot-path checks.
 
-`getCurrentSampleCount` reads `gl.SAMPLES` for the currently bound draw framebuffer and returns `Math.max(1, value)`. A non-multisampled framebuffer commonly reports `0`, which is normalized to Babylon's single-sample value `1`.
+`getCurrentSampleCount` reads `gl.SAMPLES` for the currently bound draw framebuffer and returns `Math.max(1, value)`. A non-multisampled framebuffer commonly reports `0`, which is normalized to `1` so callers can gate on `> 1`.
 
 ## Pipeline / GL Configuration
 

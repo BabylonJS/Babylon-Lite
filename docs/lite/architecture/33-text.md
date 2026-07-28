@@ -147,9 +147,9 @@ Scene-attached text can opt into alpha-to-coverage with
 `setAlphaToCoverage(renderable, true)` before it is added/registered. The option
 is effective only when `ignoreDepth === false` and the scene target is
 multisampled. That variant uses straight RGB, analytic glyph coverage as alpha,
-replacement color (no blend), and per-sample depth writes, matching Babylon.js
-MSDF text's `writeToDepthBuffer` A2C path. Standalone `TextRenderer` layers draw
-to a 1x swapchain and retain ordinary straight-alpha blending.
+replacement color (no blend), and per-sample depth writes. Standalone
+`TextRenderer` layers draw to a 1x swapchain and retain ordinary straight-alpha
+blending.
 
 ### Tier 3b — `TextRenderer` + `TextLayer` (standalone 2D)
 

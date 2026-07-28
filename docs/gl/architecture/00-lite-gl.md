@@ -63,7 +63,7 @@ Non-goals:
 
 ## 3. Public API Surface
 
-The sections below exhaustively describe the original core surface. Optional, separately tree-shakable modules may add explicit root exports documented in adjacent architecture files; see `01-alpha-to-coverage.md`.
+The sections below exhaustively describe the core surface. Optional, separately tree-shakable modules add explicit root exports documented in adjacent architecture files; see `01-alpha-to-coverage.md`.
 
 ### 3.0 Naming & API-shape conventions
 
