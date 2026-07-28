@@ -1,5 +1,5 @@
 /**
- * Scene 270 — Introducing a new material family at runtime.
+ * Scene 272 — Introducing a new material family at runtime.
  *
  * Registers a StandardMaterial-only scene, then adds the first PBR mesh from inside
  * `onBeforeRender`.
@@ -16,17 +16,17 @@ import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(270);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene270-runtime-material-family");
+const sceneConfig = getSceneConfig(272);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene272-runtime-material-family");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 270 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 272 skipped via skipParity in scene-config.json");
 
-test("Scene 270 — a PBR mesh added at runtime renders and matches Babylon.js", async ({ page }, testInfo) => {
+test("Scene 272 — a PBR mesh added at runtime renders and matches Babylon.js", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 270, timeout: 60_000 });
+    await captureGolden(browser, { sceneId: 272, timeout: 60_000 });
 
-    await page.goto("/scene270.html");
+    await page.goto("/scene272.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.added === "true", { timeout: 20_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(200);

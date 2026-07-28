@@ -301,8 +301,8 @@ Algorithm:
 | `createDefaultCamera with no meshes`        | radius=1, center=(0,0,0)                                                  |
 | `deferred builders run at buildScene()`     | Register builder → verify called by `buildScene()`                        |
 | `buildScene() awaits async builders`        | Register async builder → verify awaited                                   |
-| `scene269-runtime-mesh-swap`                | Remove a textured mesh + add a clone sharing its material from `onBeforeRender` → no destroyed-resource submit, matches BJS |
-| `scene270-runtime-material-family`          | Add the first PBR mesh to a built StandardMaterial-only scene → the mesh renders instead of being silently dropped |
+| `scene271-runtime-mesh-swap`                | Remove a textured mesh + add a clone sharing its material from `onBeforeRender` → no destroyed-resource submit, matches BJS |
+| `scene272-runtime-material-family`          | Add the first PBR mesh to a built StandardMaterial-only scene → the mesh renders instead of being silently dropped |
 
 ## File Manifest
 

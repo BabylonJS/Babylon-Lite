@@ -1,5 +1,5 @@
 /**
- * Scene 269 — Runtime mesh swap with a shared material texture.
+ * Scene 271 — Runtime mesh swap with a shared material texture.
  *
  * Removes a textured mesh and adds a clone that shares its material — and therefore its ref-counted
  * diffuse texture — from inside `onBeforeRender`, i.e. in the middle of a frame.
@@ -17,17 +17,17 @@ import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(269);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene269-runtime-mesh-swap");
+const sceneConfig = getSceneConfig(271);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene271-runtime-mesh-swap");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 269 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 271 skipped via skipParity in scene-config.json");
 
-test("Scene 269 — runtime mesh swap keeps the shared texture alive and matches Babylon.js", async ({ page }, testInfo) => {
+test("Scene 271 — runtime mesh swap keeps the shared texture alive and matches Babylon.js", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 269 });
+    await captureGolden(browser, { sceneId: 271 });
 
-    await page.goto("/scene269.html");
+    await page.goto("/scene271.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.swapped === "true", { timeout: 20_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(200);

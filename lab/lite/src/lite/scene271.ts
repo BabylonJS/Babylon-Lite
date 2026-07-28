@@ -1,4 +1,4 @@
-// Scene 269 — Runtime mesh swap with a shared material texture.
+// Scene 271 — Runtime mesh swap with a shared material texture.
 //
 // Regression scene for the forum repro at
 // https://forum.babylonjs.com/t/addtoscene-removefromscene-and-what-seems-to-be-a-bit-of-inconsistency/63783
