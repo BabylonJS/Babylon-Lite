@@ -1,6 +1,6 @@
 {
   "rawKB": 77.2,
-  "gzipKB": 32.1,
+  "gzipKB": 32.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene259-emissive-fragment-DWJPXVsM.js",
@@ -14,5 +14,5 @@
     "scene259-scene-uniforms-FTYH6Ct0.js",
     "scene259.js"
   ],
-  "rawBytes": 79003
+  "rawBytes": 79056
 }

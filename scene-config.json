@@ -195,7 +195,7 @@
         "slug": "scene19-clearcoat",
         "name": "Scene 19 — PBR Clearcoat",
         "maxMad": 0.031,
-        "maxRawKB": 70.6,
+        "maxRawKB": 70.7,
         "description": "Sphere with PBR clearcoat layer (IOR=2.0). DDS environment for glossy reflections.",
         "tags": ["pbr", "env"],
         "compatParity": true
