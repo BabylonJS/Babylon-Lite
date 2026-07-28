@@ -260,7 +260,7 @@ export class AbstractMesh extends TransformNode {
     }
     public set isVisible(value: boolean) {
         this._visible = value;
-        setMeshVisible(this._lite, value);
+        this._syncVisibility(this.isEnabled());
     }
 
     public get receiveShadows(): boolean {
@@ -270,9 +270,13 @@ export class AbstractMesh extends TransformNode {
         this._lite.receiveShadows = value;
     }
 
-    public override setEnabled(enabled: boolean): void {
-        super.setEnabled(enabled);
-        this.isVisible = enabled;
+    protected override _onEffectiveEnabledStateChanged(enabled: boolean): void {
+        this._syncVisibility(enabled);
+    }
+
+    /** @internal Apply local visibility and effective enabled state to Lite. */
+    private _syncVisibility(enabled: boolean): void {
+        setMeshVisible(this._lite, this._visible && enabled);
     }
 
     /**
