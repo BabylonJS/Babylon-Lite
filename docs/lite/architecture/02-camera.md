@@ -4,25 +4,31 @@
 
 ## Purpose
 
-The Camera module provides two camera implementations as plain data objects with derived matrix methods, plus companion control functions that wire DOM events to mutate camera properties. Cameras are pure data — they know nothing about the scene or DOM until controls are attached. Both cameras implement the shared `Camera` interface and integrate with the scene's world-matrix hierarchy via `IWorldMatrixProvider` / `IParentable`.
+The Camera module provides two camera implementations as plain data objects, plus standalone matrix helpers and companion control functions that wire DOM events to mutate camera properties. Cameras are pure data — they know nothing about the scene or DOM until controls are attached. Both cameras implement the shared `Camera` interface and integrate with the scene's world-matrix hierarchy via `IWorldMatrixProvider` / `IParentable`.
 
 ## Public API Surface
 
 ### `camera.ts` — Shared Camera Contract
 
 ```typescript
-/** Minimal camera contract — any camera that can provide view/projection matrices.
+/** Minimal camera contract — any camera with world and projection state.
  *  Both ArcRotateCamera and FreeCamera implement this interface.
  *  Plain data, no scene knowledge (pillar 4b). */
 export interface Camera {
     fov: number;
     nearPlane: number;
     farPlane: number;
-    getViewMatrix(): Mat4;
-    getProjectionMatrix(aspectRatio: number): Mat4;
-    getViewProjectionMatrix(aspectRatio: number): Mat4;
-    getPosition(): Vec3;
+    viewport?: NormalizedViewport;
+    children: SceneNode[];
+    readonly worldMatrix: Mat4;
+    readonly worldMatrixVersion: number;
+    ortho?: OrthographicBounds | null;
 }
+
+export function getViewMatrix(camera: Camera): Mat4;
+export function getProjectionMatrix(camera: Camera, aspectRatio: number): Mat4;
+export function getViewProjectionMatrix(camera: Camera, aspectRatio: number): Mat4;
+export function getCameraPosition(camera: Camera): Vec3;
 ```
 
 ### `arc-rotate.ts`
@@ -30,7 +36,7 @@ export interface Camera {
 ```typescript
 /** ArcRotateCamera — orbits around a target point.
  *  Uses Babylon.js convention: left-handed, alpha=rotation around Y, beta=elevation.
- *  Plain data + methods. Does NOT know about the scene.
+ *  Plain data. Does NOT know about the scene.
  *
  *  Push-based dirty tracking: alpha/beta/radius use Object.defineProperty,
  *  target uses ObservableVec3. Changes call wm.markLocalDirty() immediately.
@@ -59,11 +65,6 @@ export interface ArcRotateCamera extends IWorldMatrixProvider, IParentable {
     parent: IWorldMatrixProvider | null;
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
-
-    getViewMatrix(): Mat4;
-    getProjectionMatrix(aspectRatio: number): Mat4;
-    getViewProjectionMatrix(aspectRatio: number): Mat4;
-    getPosition(): Vec3;
 }
 
 /** Create a bare ArcRotateCamera with given params. Pure data, no scene knowledge. */
@@ -94,7 +95,7 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
 ```typescript
 /** FreeCamera — positioned in world space, looking at a target point.
  *  Matches Babylon.js FreeCamera: position + target, left-handed.
- *  Plain data + methods. Does NOT know about the scene.
+ *  Plain data. Does NOT know about the scene.
  *
  *  Push-based dirty tracking: position and target use ObservableVec3,
  *  _yaw/_pitch use Object.defineProperty. */
@@ -228,7 +229,7 @@ viewMatrix[12..14] = -(rotation^T × eye)
 viewMatrix[15]     = 1
 ```
 
-`getPosition()` reads translation from the final world matrix: `{ x: w[12], y: w[13], z: w[14] }`.
+`getCameraPosition(camera)` reads translation from the final world matrix: `{ x: w[12], y: w[13], z: w[14] }`.
 
 ### ArcRotateCamera Position Calculation
 
@@ -599,8 +600,8 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | Test                                           | Description                                                    |
 | ---------------------------------------------- | -------------------------------------------------------------- |
 | **ArcRotate**                                  |                                                                |
-| `getPosition at alpha=-π/2, beta=π/2`          | Camera should be at `(target.x, target.y, target.z + radius)`  |
-| `getPosition at alpha=0, beta=π/2`             | Camera at `(target.x + radius, target.y, target.z)`            |
+| `getCameraPosition at alpha=-π/2, beta=π/2`    | Camera should be at `(target.x, target.y, target.z + radius)`  |
+| `getCameraPosition at alpha=0, beta=π/2`       | Camera at `(target.x + radius, target.y, target.z)`            |
 | `getViewMatrix is valid LH lookAt`             | Multiply view × position should give NDC-like coords           |
 | `getProjectionMatrix aspect ratio`             | Verify `m[0] = tan/aspect`, `m[5] = tan`                       |
 | `getViewProjectionMatrix = proj × view`        | Compare with manual multiply                                   |
