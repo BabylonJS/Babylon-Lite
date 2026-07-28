@@ -28,7 +28,8 @@ import { TRS_STRIDE, T_OFF, R_OFF, S_OFF, computeTopoOrder, resetTRS, computeNod
 import { _installBoneControl } from "./bone-control-hooks.js";
 
 /** @internal Per-bone local-transform override. `mask` bits: 1 = translation,
- *  2 = rotation, 4 = scale. Only the masked components are applied. */
+ *  2 = rotation, 4 = scale, 8 = hidden. Bits 1/2/4 are applied before channel
+ *  evaluation (animation wins); bit 8 is applied after it (visibility wins). */
 export interface BoneOverride {
     mask: number;
     tx: number;
@@ -119,16 +120,26 @@ export function setBoneScaling(skeleton: Skeleton, bone: Bone, x: number, y: num
 
 /** Show or hide the sub-tree driven by a bone, the Babylon.js way: hiding scales
  *  the bone to zero (collapsing it and its descendant bones to a point so the
- *  skinned triangles degenerate and disappear); showing clears the scale override
- *  so the bone returns to its animated / rest scale. */
+ *  skinned triangles degenerate and disappear).
+ *
+ *  Unlike {@link setBoneScaling}, visibility is **not** a transform override that
+ *  animation can overwrite — it is re-applied AFTER channel evaluation, so a hidden
+ *  bone stays hidden while clips play. This matters in practice because most rigs
+ *  (every Mixamo export, for instance) bake a constant scale track onto every bone,
+ *  which would otherwise restore the bone to full size on the next frame.
+ *
+ *  Showing clears only the hidden state; any explicit {@link setBoneScaling} override
+ *  is left untouched. */
 export function setBoneVisible(skeleton: Skeleton, bone: Bone, visible: boolean): void {
     if (!visible) {
-        setBoneScaling(skeleton, bone, 0, 0, 0);
+        const o = ensureOverride(skeleton, bone);
+        o.mask |= 8;
+        skeleton._bake();
         return;
     }
     const o = skeleton._overrides.get(bone._nodeIndex);
-    if (o) {
-        o.mask &= ~4;
+    if (o && o.mask & 8) {
+        o.mask &= ~8;
         if (o.mask === 0) {
             skeleton._overrides.delete(bone._nodeIndex);
         }
@@ -145,15 +156,26 @@ export function clearBoneOverride(skeleton: Skeleton, bone: Bone): void {
 
 // ─── Opt-in wiring ───────────────────────────────────────────────────
 
-/** Per-frame applier hook: write the masked override TRS into the working buffer
- *  (called by the animation tick after the rest reset, before channel eval). */
-function applyOverridesToTRS(overrides: ReadonlyMap<number, BoneOverride>, currentTRS: Float32Array, numNodes: number): void {
+/** Per-frame applier hook. Two phases:
+ *   • `hiddenOnly` unset — write the masked translation/rotation/scale overrides into the
+ *     working buffer after the rest reset, before channel eval (so animation wins).
+ *   • `hiddenOnly = true` — collapse hidden bones to zero scale after channel eval, so
+ *     `setBoneVisible` survives clips that animate the bone's scale. */
+function applyOverridesToTRS(overrides: ReadonlyMap<number, BoneOverride>, currentTRS: Float32Array, numNodes: number, hiddenOnly?: boolean): void {
     for (const [ni, o] of overrides) {
         if (ni < 0 || ni >= numNodes) {
             continue;
         }
         const off = ni * TRS_STRIDE;
         const m = o.mask;
+        if (hiddenOnly === true) {
+            if (m & 8) {
+                currentTRS[off + S_OFF] = 0;
+                currentTRS[off + S_OFF + 1] = 0;
+                currentTRS[off + S_OFF + 2] = 0;
+            }
+            continue;
+        }
         if (m & 1) {
             currentTRS[off + T_OFF] = o.tx;
             currentTRS[off + T_OFF + 1] = o.ty;
@@ -318,6 +340,7 @@ async function buildSkeletons(ctx: GltfLoadCtx, meshes: Mesh[], overrides: Map<n
         resetTRS(nodes, numNodes, currentTRS);
         if (overrides.size > 0) {
             applyOverridesToTRS(overrides, currentTRS, numNodes);
+            applyOverridesToTRS(overrides, currentTRS, numNodes, true);
         }
         computeNodeWorldMatrices(nodes, numNodes, topoOrder, currentTRS, localMat, worldMat);
         writeBoneTextures(device, allBindings, worldMat);
