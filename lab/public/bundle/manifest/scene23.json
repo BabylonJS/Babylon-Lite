@@ -1,6 +1,6 @@
 {
-  "rawKB": 78.2,
-  "gzipKB": 32.3,
+  "rawKB": 78.3,
+  "gzipKB": 32.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene23-anisotropy-fragment-CbNkTpSR.js",
@@ -14,5 +14,5 @@
     "scene23-wgsl-helpers-BgB2AJrF.js",
     "scene23.js"
   ],
-  "rawBytes": 80044
+  "rawBytes": 80197
 }

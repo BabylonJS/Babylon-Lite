@@ -1,6 +1,6 @@
 {
-  "rawKB": 112,
-  "gzipKB": 42.2,
+  "rawKB": 112.2,
+  "gzipKB": 42.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene222-gpu-pool-CHlSfwGp.js",
@@ -12,5 +12,5 @@
     "scene222-uniform-copy-batch-BmzTReSM.js",
     "scene222.js"
   ],
-  "rawBytes": 114715
+  "rawBytes": 114881
 }

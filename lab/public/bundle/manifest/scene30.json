@@ -1,6 +1,6 @@
 {
-  "rawKB": 103.5,
-  "gzipKB": 42.9,
+  "rawKB": 103.6,
+  "gzipKB": 43,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene30-alpha-test-fragment-B7zfvtRz.js",
@@ -8,7 +8,7 @@
     "scene30-gltf-ext-dielectric-C6hvXXiF.js",
     "scene30-gltf-ext-uv-transform-DQN5DAiE.js",
     "scene30-gltf-feature-draco-BSbw1ZBU.js",
-    "scene30-gltf-feature-registry-C-AXi6Gu.js",
+    "scene30-gltf-feature-registry-CFYGIERh.js",
     "scene30-gltf-glb-parser-CPRfMQrD.js",
     "scene30-gltf-pbr-builder-ext-Cso-2meH.js",
     "scene30-ibl-fragment-CeRrvT96.js",
@@ -22,5 +22,5 @@
     "scene30-uv-transform-fragment-B8ijWmAK.js",
     "scene30.js"
   ],
-  "rawBytes": 105949
+  "rawBytes": 106118
 }
