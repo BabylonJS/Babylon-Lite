@@ -1,5 +1,5 @@
 import type { addToScene, SceneContext } from "./scene-core.js";
-import { claimMeshGpuDisposal, consumeMeshGpuDisposal } from "./mesh-scene-registry.js";
+import { unregisterMeshScene } from "./mesh-scene-registry.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { LightBase } from "../light/types.js";
 import type { Camera } from "../camera/camera.js";
@@ -15,6 +15,17 @@ import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 /** Remove an entity from the scene, undoing what `addToScene` did. Accepts the same
  *  union as {@link addToScene}: a Mesh, light, camera, shadow generator, transform node,
  *  or a whole AssetContainer. Safe to call more than once (idempotent).
+ *
+ *  **Mesh GPU lifetime contract.** Removing a mesh from its LAST scene disposes it: it releases
+ *  its claim on every GPU resource it owns (geometry, skeleton, morph targets, thin instances).
+ *  Those resources are shared and ref-counted, so each one survives while another owner remains —
+ *  another scene holding the same mesh, a `cloneTransformNode` clone, or another glTF node sharing
+ *  the primitive — and is destroyed once the last claim goes away. Either way the mesh itself is
+ *  retired permanently and `addToScene` throws if it is added back: its buffers may be gone, and
+ *  releasing a second claim it no longer holds would free buffers a surviving sibling still
+ *  renders with. Removing a mesh from one of SEVERAL scenes holding it is not a disposal, so
+ *  re-adding it there is fine. Otherwise create a new mesh — and to hide a mesh temporarily, set
+ *  `mesh.visible = false` (or `setSubtreeVisible`) instead of removing it.
  *
  *  Standalone function for tree-shaking — only included when actually used. */
 export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
@@ -341,16 +352,12 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     }
     // Free the mesh's shared GPU buffers only when this was its LAST owning scene — a single
     // `Mesh` may be added to several scenes, and `disposeMeshGpu` destroys buffers they all share.
-    // The claim is one-shot and revocable: because the free is deferred, the mesh may be removed
-    // again, re-added, or the scene disposed before it runs, and only the still-current claim may
-    // proceed (a plain orphan check would free the same buffers twice — see `claimMeshGpuDisposal`).
-    const token = claimMeshGpuDisposal(scene, mesh);
-    if (token) {
-        teardown.push(() => {
-            if (consumeMeshGpuDisposal(mesh, token)) {
-                disposeMeshGpu(mesh);
-            }
-        });
+    // Ownership is dropped synchronously (so a second removal already sees the mesh unowned), while
+    // the destruction itself is deferred with the rest of the teardown. `disposeMeshGpu` is
+    // idempotent via `mesh._disposed`, so a repeat removal queued before this one drains cannot
+    // release a shared resource twice.
+    if (unregisterMeshScene(scene, mesh)) {
+        teardown.push(() => disposeMeshGpu(mesh));
     }
     if (teardown.length) {
         retireMeshTeardown(scene, teardown);

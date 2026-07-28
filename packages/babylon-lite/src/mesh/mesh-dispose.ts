@@ -1,32 +1,22 @@
 import type { Mesh } from "./mesh.js";
-import { release, retain } from "../resource/ref-count.js";
+import { release } from "../resource/ref-count.js";
 import { _detachThinInstanceLodMesh } from "./thin-instance.js";
-
-/** The shared, ref-counted GPU resources a mesh can co-own with a clone or a sibling glTF node.
- *  `retainMeshGpu` and `disposeMeshGpu` must walk exactly the same set, and only the OUTER objects:
- *  nested resources (`_skinBuffers`, `_textureResource`) are released only when their owner's own
- *  release reports the last claim, so they must not be retained independently. */
-function sharedResources(mesh: Mesh): (object | null | undefined)[] {
-    return [mesh._gpu, mesh.skeleton, mesh.vat, mesh.morphTargets, mesh.thinInstances];
-}
-
-/** @internal Register one more owner of a mesh's shared GPU resources.
- *  Used when a clone is created, and when a mesh that had already released its claim is added back
- *  to a scene — a mesh that is registered in any scene must always hold a claim, or a sibling's
- *  removal would see itself as the last owner and destroy buffers this mesh still renders with. */
-export function retainMeshGpu(mesh: Mesh): void {
-    for (const resource of sharedResources(mesh)) {
-        if (resource) {
-            retain(resource);
-        }
-    }
-}
 
 /** Destroy all GPU resources owned by a mesh (vertex buffers, skeleton, morph targets).
  *  `_gpu` may be shared across glTF nodes or mesh clones; skeleton/morph/thin-instance
  *  resources may also be shared by clones. Each resource is destroyed only after its
- *  last owning mesh releases it (see resource/ref-count.ts). */
+ *  last owning mesh releases it (see resource/ref-count.ts).
+ *
+ *  Every claim this mesh held is released here, exactly once, so the mesh is retired for good:
+ *  it is marked `_disposed`, repeat calls are no-ops, and `addToScene` rejects it from then on
+ *  (see `scene/mesh-scene-registry.ts`). That keeps the failure loud instead of silently drawing
+ *  with destroyed handles, and keeps the ref-counts honest — a second release from the same mesh
+ *  would free buffers a surviving sibling still renders with. Create a new mesh instead. */
 export function disposeMeshGpu(mesh: Mesh): void {
+    if (mesh._disposed) {
+        return;
+    }
+    mesh._disposed = true;
     const g = mesh._gpu;
     if (release(g)) {
         g.positionBuffer.destroy();

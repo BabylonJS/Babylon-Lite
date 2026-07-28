@@ -5,7 +5,7 @@
 
 import type { Mesh } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
-import { retainMeshGpu } from "../mesh/mesh-dispose.js";
+import { retain } from "../resource/ref-count.js";
 import type { SceneNode } from "./scene-node.js";
 import { createSceneNode, createSceneNodeFromMatrix } from "./scene-node.js";
 
@@ -62,6 +62,12 @@ function cloneMeshNode(mesh: Mesh): Mesh {
     if (mesh._clone) {
         throw Error(mesh._clone);
     }
+    // A disposed mesh already released its claims and may hold destroyed handles. Cloning it
+    // would retain claims the clone can never release (it cannot enter a scene, so nothing
+    // ever disposes it), pinning the buffers forever — reject it here instead.
+    if (mesh._disposed) {
+        throw Error(`Mesh "${mesh.name}" cannot be cloned: it was disposed when it left its last scene.`);
+    }
     const meshClone = {
         ...mesh,
         name: mesh.name + "_clone",
@@ -75,7 +81,11 @@ function cloneMeshNode(mesh: Mesh): Mesh {
     // spread above. Register the extra ownership for all shared GPU resources so `disposeMeshGpu`
     // only destroys their buffers once the LAST owning mesh (source or clone) releases them —
     // otherwise disposing one mesh would free buffers the other still renders with.
-    retainMeshGpu(mesh);
+    for (const r of [mesh._gpu, mesh.skeleton, mesh.vat, mesh.morphTargets, mesh.thinInstances]) {
+        if (r) {
+            retain(r);
+        }
+    }
     initMeshTransform(meshClone, mesh.position.x, mesh.position.y, mesh.position.z, 0, 0, 0, mesh.scaling.x, mesh.scaling.y, mesh.scaling.z);
     // Copy the source rotation as a QUATERNION — the Euler round-trip (mesh.rotation.x/y/z) is lossy
     // near gimbal lock and would skew the clone. set() marks the world matrix dirty so it recomputes.

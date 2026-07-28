@@ -1,6 +1,6 @@
 {
-  "rawKB": 52.4,
-  "gzipKB": 21.4,
+  "rawKB": 52,
+  "gzipKB": 21.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene204-_mat4-storage-f64-7Hs0bt2y.js",
@@ -11,5 +11,5 @@
     "scene204-thin-instance-gpu-DMvEkqgI.js",
     "scene204.js"
   ],
-  "rawBytes": 53671
+  "rawBytes": 53228
 }

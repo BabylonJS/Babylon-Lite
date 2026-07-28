@@ -1,12 +1,12 @@
 {
-  "rawKB": 51.4,
-  "rawBytes": 52608,
-  "gzipKB": 20.7,
+  "rawKB": 51,
+  "rawBytes": 52188,
+  "gzipKB": 20.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene270-standard-pipeline-X9vqV9jn.js",
-    "scene270-standard-renderable-C0MX5ii5.js",
-    "scene270-std-mirrored-support-CgSCeJ5i.js",
+    "scene270-standard-pipeline-Ctk-DPHC.js",
+    "scene270-standard-renderable-CSRb4j3_.js",
+    "scene270-std-mirrored-support-Bnp1yNX9.js",
     "scene270.js"
   ]
 }

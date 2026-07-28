@@ -1,5 +1,4 @@
 import type { Mesh } from "../mesh/mesh.js";
-import { retainMeshGpu } from "../mesh/mesh-dispose.js";
 import type { SceneContext } from "./scene-core.js";
 
 /** Per-mesh set of scenes the mesh currently belongs to. Kept OFF the `Mesh` data object
@@ -58,8 +57,17 @@ function installMaterialSetter(mesh: Mesh): void {
 }
 
 /** @internal Register `scene` as an owner of `mesh`. Installs the material setter on the mesh's
- *  first registration only (re-adds just grow the subscriber set, reusing the one setter). */
+ *  first registration only (re-adds just grow the subscriber set, reusing the one setter).
+ *
+ *  Throws when the mesh was already disposed — leaving its last scene (or disposing that scene)
+ *  releases every claim it held on its shared GPU resources, destroying the ones it was the last
+ *  owner of. Lite never resurrects them, so a re-add would draw with dead handles (sole owner) or
+ *  release a claim it no longer holds and free buffers a sibling still uses (shared owner). Both
+ *  are silent corruption, so the failure is made loud here. */
 export function registerMeshScene(scene: SceneContext, mesh: Mesh): void {
+    if (mesh._disposed) {
+        throw new Error(`Mesh "${mesh.name}" cannot be added: it was disposed when it left its last scene. Create a new mesh instead.`);
+    }
     const map = (_meshScenes ??= new WeakMap());
     let scenes = map.get(mesh);
     if (!scenes) {
@@ -67,67 +75,16 @@ export function registerMeshScene(scene: SceneContext, mesh: Mesh): void {
         installMaterialSetter(mesh);
     }
     scenes.add(scene);
-    // A mesh that already released its claim is being added back. Take a fresh one: a mesh registered
-    // in any scene must always own its shared GPU resources, or a sibling clone's removal would see
-    // itself as the last owner and destroy buffers this mesh is still rendering with.
-    if (_meshGpuFreed?.delete(mesh)) {
-        retainMeshGpu(mesh);
-    }
 }
 
-/** Per-mesh disposal-claim generation. Each claim mints the next value, so only the most recent
- *  claim can still redeem. Lazily allocated, kept off the `Mesh` object like `_meshScenes`
- *  (pillar 4b). */
-let _meshDisposeGen: WeakMap<Mesh, number> | null = null;
-
-/** Meshes that have released their claim on the shared GPU resources. A `Mesh` owns exactly ONE
- *  claim while it belongs to at least one scene — taken when it is created, by `retain` when it is
- *  cloned, and re-taken by `registerMeshScene` if it is added back after a removal (see
- *  `resource/ref-count.ts`). Tracking the released state keeps the release one-shot per claim, so a
- *  repeat `removeFromScene` cannot decrement a second time and destroy buffers a sibling clone is
- *  still rendering with. */
-let _meshGpuFreed: WeakSet<Mesh> | null = null;
-
-/** @internal Deregister `scene` from `mesh` and, when that leaves the mesh orphaned, claim the right
- *  to free its shared GPU buffers. Returns a non-zero token to hand to {@link consumeMeshGpuDisposal},
- *  or `0` when the mesh still belongs to another scene.
- *
- *  A claim rather than a plain "is it orphaned?" boolean, because the free is retired to after the
- *  next frame submit. Between the claim and the retirement the mesh may be removed again, re-added,
- *  or the whole scene disposed; a boolean cannot tell those apart and would free the same buffers
- *  twice (`release` in `resource/ref-count.ts` reports "last owner" on every call once the count is
- *  undefined or 1, so a double free is silent and destroys buffers a sibling clone still renders
- *  with). Each claim SUPERSEDES the previous one rather than being refused, so an unredeemed claim —
- *  e.g. one whose retirement was dropped by `discardGpuResourceRetirements` during device-lost
- *  recovery — cannot wedge the mesh and block every later free. An untracked mesh (never registered)
- *  still yields a claim, so its buffers are released as before. */
-export function claimMeshGpuDisposal(scene: SceneContext, mesh: Mesh): number {
+/** @internal Deregister `scene` from `mesh`. Returns `true` when the mesh now belongs to NO
+ *  scene — the signal that the caller may free the mesh's shared GPU buffers (`disposeMeshGpu`).
+ *  An untracked mesh (never registered) also returns `true` so its buffers are still released. */
+export function unregisterMeshScene(scene: SceneContext, mesh: Mesh): boolean {
     const scenes = _meshScenes?.get(mesh);
-    if (scenes) {
-        scenes.delete(scene);
-        if (scenes.size > 0) {
-            return 0;
-        }
+    if (!scenes) {
+        return true;
     }
-    // Already released by an earlier removal — `removeFromScene` is idempotent, and freeing twice
-    // would drop a clone-shared resource's ref count to zero and destroy live buffers.
-    if (_meshGpuFreed?.has(mesh)) {
-        return 0;
-    }
-    const gens = (_meshDisposeGen ??= new WeakMap());
-    const token = (gens.get(mesh) ?? 0) + 1;
-    gens.set(mesh, token);
-    return token;
-}
-
-/** @internal Redeem a token from {@link claimMeshGpuDisposal}: `true` means "free the mesh's shared
- *  GPU buffers now". Only the most recent claim qualifies, so when several removals race a single
- *  drain exactly one of them frees. And only while the mesh is STILL orphaned — it may have been
- *  re-added since the claim, in which case the buffers are live again and must not be freed. */
-export function consumeMeshGpuDisposal(mesh: Mesh, token: number): boolean {
-    if (_meshDisposeGen?.get(mesh) !== token || _meshScenes?.get(mesh)?.size) {
-        return false;
-    }
-    (_meshGpuFreed ??= new WeakSet()).add(mesh);
-    return true;
+    scenes.delete(scene);
+    return scenes.size === 0;
 }
