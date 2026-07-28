@@ -51,10 +51,12 @@ import { _setActivePbrGeometryAttachments } from "./pbr-geometry-view.js";
  *  tree-shakes away. */
 let _pbrGeometryGroupBuilder: MeshGroupBuilder | null = null;
 
-/** Mirrored-mesh front-face resolution for the geometry pass, installed only by the lazy winding
- *  module. Module-local with a single exported setter: when nothing installs it the setter
- *  tree-shakes, the bundler proves this is always null, and the `frontFace` ternary below folds to
- *  the plain `"ccw"` literal — unmirrored geometry scenes stay byte-identical.
+/** Mirrored-mesh front-face resolution for the geometry pass. Installed by the lazy
+ *  `pbr-primitive-resolver` module — which the glTF primitive feature loads for assets containing a
+ *  negative-scale node, and which the `enableMirroredMeshes()` opt-in also pulls in. Module-local
+ *  with a single exported setter: when neither path is present the setter tree-shakes, the bundler
+ *  proves this is always null, and the `frontFace` ternary below folds to the plain `"ccw"` literal
+ *  — unmirrored geometry scenes stay byte-identical.
  *  @internal */
 let _geometryWinding: ((meshFeatures: number) => GPUFrontFace) | null = null;
 /** @internal Install geometry-pass winding resolution. */

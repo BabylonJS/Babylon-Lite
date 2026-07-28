@@ -130,10 +130,12 @@ interface StandardGeometryViewResources {
     _upUBO: GPUBuffer | null;
 }
 
-/** Mirrored-mesh front-face resolution for the geometry pass, installed only by the lazy winding
- *  module. Module-local with a single exported setter: when nothing installs it the setter
- *  tree-shakes, the bundler proves this is always null, and the `frontFace` ternary below folds to
- *  the plain `"ccw"` literal — unmirrored geometry scenes stay byte-identical.
+/** Mirrored-mesh front-face resolution for the geometry pass. Installed only by
+ *  `std-mirrored-support`, i.e. the `enableMirroredMeshes()` opt-in — the glTF loader's built-in
+ *  winding pass never reaches Standard materials. Module-local with a single exported setter: when
+ *  the opt-in is absent the setter tree-shakes, the bundler proves this is always null, and the
+ *  `frontFace` ternary below folds to the plain `"ccw"` literal — unmirrored geometry scenes stay
+ *  byte-identical.
  *  @internal */
 let _geometryWinding: ((meshFeatures: number) => GPUFrontFace) | null = null;
 /** @internal Install geometry-pass winding resolution. */
