@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `7ddc62e2ee59b2f034db81c73e04f3804cbc7222`
-- **Last sync date:** 2026-07-17
+- **Last synced BJS commit:** `25150bf46e78f099f7552f8ddcee6e26a2416de6`
+- **Last sync date:** 2026-07-28
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -68,7 +68,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | -------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Vector2` / `Vector3` / `Vector4`                  | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
 | `Color3` / `Color4`                                | ✅ Full    | [math/color.ts](src/math/color.ts)                                                                                                                              |
-| `Quaternion`                                       | ✅ Full    | [math/quaternion.ts](src/math/quaternion.ts) (incl. `FromRotationMatrix` / `FromRotationMatrixToRef` / `fromRotationMatrix` over Lite `quatFromRotationMatrix`) |
+| `Quaternion`                                       | ✅ Full    | [math/quaternion.ts](src/math/quaternion.ts) (incl. `FromRotationMatrix` / `FromRotationMatrixToRef` / `fromRotationMatrix` over Lite `quatFromRotationMatrix`, and `toRotationMatrix` over Lite `mat4FromQuat`) |
 | `Matrix`                                           | ✅ Full    | [math/matrix.ts](src/math/matrix.ts) (incl. `decompose` — BJS-accurate scale/negative-determinant handling, rotation via Lite `quatFromRotationMatrix`)         |
 | `Vector3.TransformCoordinates` / `TransformNormal` | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
 | `Vector3.Center` / `CenterToRef`                   | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |

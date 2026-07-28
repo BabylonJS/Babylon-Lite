@@ -268,6 +268,29 @@ describe("Quaternion", () => {
         expect(returned).toBe(toRef);
         expect(inPlace.asArray()).toEqual(toRef.asArray());
     });
+
+    it("writes a rotation matrix via toRotationMatrix (inverse of fromRotationMatrix)", () => {
+        const src = Quaternion.RotationYawPitchRoll(0.7, -0.4, 0.2).normalize();
+        const result = new Matrix();
+        const returned = src.toRotationMatrix(result);
+        expect(returned).toBe(result);
+
+        // toRotationMatrix must match the rotation part produced by Matrix.Compose
+        // (identity scale, zero translation).
+        const expected = Matrix.Compose(new Vector3(1, 1, 1), src, new Vector3());
+        for (let i = 0; i < 16; i++) {
+            expect(result.m[i]).toBeCloseTo(expected.m[i]!, 5);
+        }
+
+        // Round-trip: matrix back to a quaternion recovers the source rotation.
+        const back = Quaternion.FromRotationMatrix(result);
+        const dot = back.x * src.x + back.y * src.y + back.z * src.z + back.w * src.w;
+        const sign = dot < 0 ? -1 : 1;
+        expect(back.x * sign).toBeCloseTo(src.x, 5);
+        expect(back.y * sign).toBeCloseTo(src.y, 5);
+        expect(back.z * sign).toBeCloseTo(src.z, 5);
+        expect(back.w * sign).toBeCloseTo(src.w, 5);
+    });
 });
 
 describe("Scalar / constants", () => {
