@@ -1,5 +1,5 @@
 {
-  "rawKB": 94.1,
+  "rawKB": 94.2,
   "gzipKB": 39.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -19,5 +19,5 @@
     "scene255-skeleton-fragment-Bt_lOxko.js",
     "scene255.js"
   ],
-  "rawBytes": 96389
+  "rawBytes": 96412
 }

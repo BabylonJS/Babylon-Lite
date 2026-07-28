@@ -71,7 +71,7 @@ export abstract class AbstractEngine {
     protected readonly _scenes: Scene[] = [];
     protected readonly _loopCallbacks: Array<() => void> = [];
     protected _initialized = false;
-    private _running = false;
+    private _startupComplete = false;
     private _startPromise: Promise<void> | null = null;
     /** @internal Active `requestAnimationFrame` id for the scene-less loop, if any. */
     protected _rafId: number | null = null;
@@ -262,10 +262,14 @@ export abstract class AbstractEngine {
 
     /** @internal Register work that must run after the main scene is rendering. */
     public _registerLateWork(work: () => Promise<void>): void {
-        if (this._running) {
-            // Already running, so there is no startup promise left to fold this into. Surface a
-            // rejection through the logger rather than letting it escape as an unhandled rejection,
-            // which is hard to attribute back to the registering feature.
+        // This gates on startup having completed, not on the render loop currently spinning:
+        // `_lateWork` is only ever drained by `_startCore`, so once startup is past that point
+        // queueing would strand the work forever — including after a `stopRenderLoop`, where the
+        // registering feature (e.g. a utility layer) still needs to be wired up for the next frame.
+        if (this._startupComplete) {
+            // There is no startup promise left to fold this into. Surface a rejection through the
+            // logger rather than letting it escape as an unhandled rejection, which is hard to
+            // attribute back to the registering feature.
             void work().catch((error: unknown) => Logger.Error(`Late engine work failed: ${error instanceof Error ? error.message : String(error)}`));
             return;
         }
@@ -405,7 +409,7 @@ export abstract class AbstractEngine {
         // layers are overlays and can join on a subsequent frame; awaiting them
         // here would deadlock any registration path that depends on the first frame.
         await startEngine(this._lite);
-        this._running = true;
+        this._startupComplete = true;
         // Late work now runs after the main render loop has started.
         if (this._lateWork.length > 0) {
             await Promise.all(this._lateWork.map((w) => w()));

@@ -6,7 +6,7 @@
  * `/brdf-lut.png` asset or configure a URL.
  *
  * Generated from `packages/babylon-lite/assets/brdf-lut.png`; kept in sync by
- * `tests/brdf-lut-data.test.ts`. Imported lazily so the payload is only paid for by
+ * `packages/babylon-lite-compat/tests/brdf-lut-data.test.ts`. Imported lazily so the payload is only paid for by
  * apps that actually load an environment.
  */
 export const BRDF_LUT_DATA_URL =

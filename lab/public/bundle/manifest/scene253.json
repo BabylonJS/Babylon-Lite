@@ -1,5 +1,5 @@
 {
-  "rawKB": 153.7,
+  "rawKB": 153.8,
   "gzipKB": 65.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -52,5 +52,5 @@
     "scene253-visibility-DzpaYEgE.js",
     "scene253.js"
   ],
-  "rawBytes": 157432
+  "rawBytes": 157455
 }

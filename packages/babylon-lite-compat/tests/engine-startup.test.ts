@@ -16,7 +16,7 @@ import type { EngineContext } from "babylon-lite";
 import { WebGPUEngine } from "../src/engine/engine";
 
 interface TestEngine {
-    _running: boolean;
+    _startupComplete: boolean;
     _startPromise: Promise<void> | null;
     _startupWork: Array<() => Promise<void>>;
     _lateWork: Array<() => Promise<void>>;
@@ -28,7 +28,7 @@ interface TestEngine {
 
 function makeEngine(): TestEngine {
     const engine = Object.create(WebGPUEngine.prototype) as TestEngine;
-    engine._running = false;
+    engine._startupComplete = false;
     engine._startPromise = null;
     engine._startupWork = [];
     engine._lateWork = [];
