@@ -36,7 +36,8 @@ export function retireGpuResources(engine: EngineContext, retirement: GpuResourc
  *  `onBeforeRender` still fences behind the in-flight frame's submit — `renderFrame` is synchronous,
  *  so the microtask lands after it. If the fence rejects (the device was lost), the batch is left in
  *  `_retiring` for recovery or teardown to claim rather than being run late against rebuilt
- *  resources. */export function flushGpuResourceRetirements(engine: EngineContext): void {
+ *  resources. */
+export function flushGpuResourceRetirements(engine: EngineContext): void {
     const batch = engine._retirements;
     if (!batch) {
         return;
