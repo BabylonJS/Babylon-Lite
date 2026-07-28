@@ -9,7 +9,7 @@ import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lit
 import { addToScene, buildScene, type RuntimeSceneBuildHooks, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
 import { rebuildScenePbrPipelines } from "../../../packages/babylon-lite/src/scene/scene-rebuild";
-import { B } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build";
+import { _startRuntimeMeshBuild } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build";
 import { _t } from "../../../packages/babylon-lite/src/frame-graph/transmission";
 
 function createScene(engine: EngineContext): SceneContext {
@@ -139,7 +139,7 @@ describe("runtime material rebuild ownership", () => {
         scene.meshes.push(mesh);
         scene._groups.set(builder, group);
 
-        await B(scene, builder, mesh);
+        await _startRuntimeMeshBuild(scene, builder, mesh);
 
         expect(builder._rebuildSingle).toBe(base);
         expect(Object.getOwnPropertyDescriptor(builder, "_rebuildSingle")?.get).toBeUndefined();
@@ -167,7 +167,7 @@ describe("runtime material rebuild ownership", () => {
         scene._groups.set(builder, group);
         scene._disposables.push(stableCleanup, firstClosure);
 
-        await B(scene, builder, mesh);
+        await _startRuntimeMeshBuild(scene, builder, mesh);
 
         expect(scene._disposables.filter((dispose) => dispose === stableCleanup)).toHaveLength(1);
         expect(scene._disposables).toContain(firstClosure);
@@ -349,7 +349,7 @@ describe("runtime material rebuild ownership", () => {
         scene._meshDisposables.set(mesh, [oldDispose]);
         scene._renderables.push({ order: 100, isTransparent: false } as Renderable);
 
-        await B(scene, builder, mesh);
+        await _startRuntimeMeshBuild(scene, builder, mesh);
 
         expect(packet._disposed).toBe(true);
         expect(packet._owner).toBeUndefined();

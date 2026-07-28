@@ -177,8 +177,8 @@ export async function rebuildScenePbrPipelines(scene: SceneContext, force = fals
             retireOld(oldDisposers);
         };
 
-        const { X } = await import("./scene-runtime-mesh-build.js");
-        await X(ctx, builder, rebuild);
+        const { _withExclusiveGroupBuild } = await import("./scene-runtime-mesh-build.js");
+        await _withExclusiveGroupBuild(ctx, builder, rebuild);
         if (ctx._z || runtime?._d()) {
             return;
         }

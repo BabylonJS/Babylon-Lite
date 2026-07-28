@@ -2,23 +2,19 @@
  * Runtime (post-boot) mesh building: materializing a mesh's renderable after the scene has already
  * been built, and serializing those builds against full material-group rebuilds.
  *
- * ## Why the exported functions are single letters
+ * Reached only through `await import(...)`, so scenes that never add a mesh — or never introduce a
+ * material family — at runtime keep this module, and transitively `scene-rebuild.ts`, out of their
+ * bundle. Its cross-chunk entry points are:
  *
- * `A`, `B`, `F` and `X` are the module's cross-chunk entry points. This module is only ever reached
- * through `await import(...)`, so those names survive into the shipped bundle **twice** — once in
- * this chunk's export list and once in the importing chunk's destructuring — and, unlike the
- * `_lowerCamel` fields used throughout the codebase, ES module export names are NOT touched by the
- * Terser property mangler (it rewrites property accesses, not module bindings; see
- * `terserPropertyManglePlugin` in `scripts/bundle-scenes-core.ts`, `regex: /^_[a-z]/`).
+ * - {@link _queueRuntimeMeshBuild} — queue one runtime build, chained onto the drain's pending work.
+ * - {@link _startRuntimeMeshBuild} — start (and lazily install) the build machinery for one mesh.
+ * - {@link _buildUnbuiltGroupMeshes} — materialize meshes whose material group was never built.
+ * - {@link _withExclusiveGroupBuild} — serialize a whole-group rebuild against the per-mesh builds.
  *
- * Descriptive names were measured: they cost 26-35 bytes per scene across every bundle that reaches
- * this module, which pushed zero-headroom scenes over their ceilings. Hence the initials, with the
- * real name documented on each function:
- *
- * - `A` — **add**: queue one runtime build for a mesh, chained onto the drain's pending work.
- * - `B` — **build**: start (and lazily install) the runtime build machinery for one mesh.
- * - `F` — **family**: materialize meshes whose material group has never been built.
- * - `X` — **exclusive**: serialize a whole-group rebuild against the per-mesh builds.
+ * Unlike the `_lowerCamel` *fields* elsewhere in the codebase, these export names are not shortened
+ * by the Terser property mangler (it rewrites property accesses, not module bindings), so they do
+ * cost a small number of bytes in every bundle that reaches this module. That is a deliberate,
+ * approved trade for readability.
  */
 import type { Mesh } from "../mesh/mesh.js";
 import type { MeshGroupBuilder, MeshGroupBuildResult, Renderable } from "../render/renderable.js";
@@ -60,11 +56,11 @@ let _builderTails: WeakMap<MeshGroupBuilder, Promise<void>> | null = null;
 let _runtimeRebuilders: WeakMap<MeshGroupBuilder, RuntimeRebuilder> | null = null;
 
 /** @internal Start one runtime build and return a promise covering it plus every earlier build in this drain. */
-export function A(scene: SceneContext, material: Material | null, mesh: Mesh, pending?: Promise<void>): Promise<void> {
+export function _queueRuntimeMeshBuild(scene: SceneContext, material: Material | null, mesh: Mesh, pending?: Promise<void>): Promise<void> {
     if (!material || mesh.material !== material) {
         return pending ?? Promise.resolve();
     }
-    const current = B(scene, material._buildGroup, mesh);
+    const current = _startRuntimeMeshBuild(scene, material._buildGroup, mesh);
     return pending ? Promise.all([pending, current]).then(() => undefined) : current;
 }
 
@@ -79,10 +75,10 @@ export function A(scene: SceneContext, material: Material | null, mesh: Mesh, pe
  *  runtime path. Coalescing them would have to exclude meshes that arrived through the
  *  `mesh.material` setter (which only enqueues): those are not in the target group yet, and only
  *  their own `moveRuntimeMeshToGroup` call puts them there. */
-export function F(scene: SceneContext, meshes: readonly Mesh[], pending?: Promise<void>): Promise<void> {
+export function _buildUnbuiltGroupMeshes(scene: SceneContext, meshes: readonly Mesh[], pending?: Promise<void>): Promise<void> {
     let chain = pending;
     for (const mesh of meshes) {
-        chain = A(scene, mesh.material, mesh, chain);
+        chain = _queueRuntimeMeshBuild(scene, mesh.material, mesh, chain);
     }
     // Route a build failure through the scene's runtime-build error hook, which rethrows it from the
     // next `onBeforeRender` — the caller only catches module-load failures.
@@ -92,7 +88,7 @@ export function F(scene: SceneContext, meshes: readonly Mesh[], pending?: Promis
 }
 
 /** @internal Lazily install runtime-build state and materialize one post-build mesh. */
-export function B(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh): Promise<void> {
+export function _startRuntimeMeshBuild(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh): Promise<void> {
     if (scene._z || !scene.meshes.includes(mesh)) {
         return scene._runtimeBuilds?.all().catch(() => undefined) ?? Promise.resolve();
     }
@@ -111,7 +107,7 @@ export function B(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh): P
 }
 
 /** @internal Serialize a full material-group rebuild against lazy per-mesh builds. */
-export function X<T>(scene: SceneContext, builder: MeshGroupBuilder, work: () => Promise<T>): Promise<T> {
+export function _withExclusiveGroupBuild<T>(scene: SceneContext, builder: MeshGroupBuilder, work: () => Promise<T>): Promise<T> {
     if (scene._z) {
         return Promise.resolve(undefined as T);
     }

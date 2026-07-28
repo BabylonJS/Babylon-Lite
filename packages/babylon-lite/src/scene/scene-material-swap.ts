@@ -81,7 +81,7 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
     // full group build), so the mesh becomes visible some frames later rather than in this one.
     const builds = firstBuilds;
     return import("./scene-runtime-mesh-build.js").then(
-        ({ F }) => F(scene, builds, pending),
+        ({ _buildUnbuiltGroupMeshes }) => _buildUnbuiltGroupMeshes(scene, builds, pending),
         (error: unknown) => {
             // The chunk itself failed to load. Route it the same way a build failure goes — the whole
             // point of this path is that a mesh must never disappear silently. `_runtimeBuilds` is
