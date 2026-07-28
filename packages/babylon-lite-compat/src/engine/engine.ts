@@ -37,6 +37,7 @@ import {
 import type { EngineContext, EngineOptions, RenderCanvas } from "babylon-lite";
 
 import { LiteCompatError, unsupported } from "../error.js";
+import { Logger } from "../misc/misc-utils.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
 
@@ -82,6 +83,9 @@ export abstract class AbstractEngine {
 
     /** Babylon.js `engine.onResizeObservable` — fires after `resize()` / `setSize()`. */
     public readonly onResizeObservable = new Observable<AbstractEngine>();
+
+    /** Optional startup failure hook; left undefined unless an app opts in. */
+    public onStartupError: ((error: unknown) => void) | undefined;
 
     /** @internal Babylon.js hardware-scaling level. Babylon Lite manages device-pixel-ratio itself; stored for parity. */
     private _hardwareScalingLevel = 1;
@@ -279,23 +283,27 @@ export abstract class AbstractEngine {
         for (const scene of this._scenes) {
             onBeforeRender(scene._lite, () => callback());
         }
-        void this._start().then(() => {
-            // Scene-less render loops (e.g. the `SpriteRenderer` 2D path) have no
-            // scene before-render hook to drive the callback. Run them on a
-            // `requestAnimationFrame` loop so per-frame work (e.g. sprite-sheet
-            // animation that mutates `cellIndex` each tick) actually advances.
-            // Babylon Lite's own render loop draws the registered sprite renderer;
-            // we just need to push the updated sprite data before each frame.
-            if (this._scenes.length === 0 && this._rafId === null && typeof requestAnimationFrame === "function") {
-                const tick = (): void => {
-                    for (const cb of this._loopCallbacks) {
-                        cb();
-                    }
+        void this._start()
+            .then(() => {
+                // Scene-less render loops (e.g. the `SpriteRenderer` 2D path) have no
+                // scene before-render hook to drive the callback. Run them on a
+                // `requestAnimationFrame` loop so per-frame work (e.g. sprite-sheet
+                // animation that mutates `cellIndex` each tick) actually advances.
+                // Babylon Lite's own render loop draws the registered sprite renderer;
+                // we just need to push the updated sprite data before each frame.
+                if (this._scenes.length === 0 && this._rafId === null && typeof requestAnimationFrame === "function") {
+                    const tick = (): void => {
+                        for (const cb of this._loopCallbacks) {
+                            cb();
+                        }
+                        this._rafId = requestAnimationFrame(tick);
+                    };
                     this._rafId = requestAnimationFrame(tick);
-                };
-                this._rafId = requestAnimationFrame(tick);
-            }
-        });
+                }
+            })
+            .catch((error: unknown) => {
+                this._reportStartupError(error);
+            });
     }
 
     public stopRenderLoop(): void {
@@ -405,6 +413,22 @@ export abstract class AbstractEngine {
         if (!this._initialized) {
             throw new LiteCompatError(`${this.constructor.name}.${api}`, "Call `await engine.initAsync()` before using the engine.");
         }
+    }
+
+    private _reportStartupError(error: unknown): void {
+        Logger.Error(`${this.constructor.name}.runRenderLoop startup failed: ${this._formatStartupError(error)}`);
+        try {
+            this.onStartupError?.(error);
+        } catch (hookError) {
+            Logger.Error(`${this.constructor.name}.onStartupError callback failed: ${this._formatStartupError(hookError)}`);
+        }
+    }
+
+    private _formatStartupError(error: unknown): string {
+        if (error instanceof Error) {
+            return error.message ? `${error.name}: ${error.message}` : error.name;
+        }
+        return String(error);
     }
 }
 
