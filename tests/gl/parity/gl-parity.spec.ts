@@ -41,7 +41,11 @@ for (const entry of loadSceneConfigAll()) {
             await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
             await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
             if (entry.id === 17) {
-                expect(await page.locator("canvas").getAttribute("data-sample-count")).toBe("4");
+                // WebGL2 chooses the default framebuffer's sample count, so assert only that MSAA is
+                // actually active — alpha-to-coverage is a no-op at one sample, which would silently
+                // turn this into a non-test. The scene itself already adapts to whatever count it gets.
+                const sampleCount = Number(await page.locator("canvas").getAttribute("data-sample-count")) || 0;
+                expect(sampleCount, "alpha-to-coverage needs a multisampled default framebuffer").toBeGreaterThan(1);
             }
             await page.waitForTimeout(300);
 
