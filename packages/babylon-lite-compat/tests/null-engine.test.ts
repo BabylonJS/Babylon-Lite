@@ -5,6 +5,7 @@ import { Scene } from "../src/scene/scene";
 import { Animation } from "../src/animations/animation";
 import { Color3, Color4 } from "../src/math/color";
 import { LiteCompatError } from "../src/error";
+import { MeshBuilder } from "../src/meshes/meshes";
 import { stepScene } from "babylon-lite";
 
 /**
@@ -52,6 +53,27 @@ describe("NullEngine (headless)", () => {
         expect(scene._lite._beforeRender.length).toBeGreaterThan(0);
         // `defaultRenderTask: false` → no render task was appended to the frame graph.
         expect(scene._lite._frameGraph._tasks.length).toBe(0);
+        scene.dispose();
+    });
+
+    it("forwards independent box dimensions to Babylon Lite", () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        (engine._lite as unknown as { _device: GPUDevice })._device = {
+            createBuffer: ({ size }: GPUBufferDescriptor) => {
+                const mapped = new ArrayBuffer(Number(size));
+                return {
+                    getMappedRange: () => mapped,
+                    unmap: () => undefined,
+                    destroy: () => undefined,
+                } as unknown as GPUBuffer;
+            },
+        } as unknown as GPUDevice;
+        const box = MeshBuilder.CreateBox("panel", { width: 598, height: 18, depth: 530 }, scene);
+        const bounds = box.getBoundingInfo();
+
+        expect(bounds.minimum.asArray()).toEqual([-299, -9, -265]);
+        expect(bounds.maximum.asArray()).toEqual([299, 9, 265]);
         scene.dispose();
     });
 

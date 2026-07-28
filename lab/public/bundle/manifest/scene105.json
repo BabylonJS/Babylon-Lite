@@ -1,6 +1,6 @@
 {
-  "rawKB": 101.8,
-  "gzipKB": 39.5,
+  "rawKB": 101.7,
+  "gzipKB": 39.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene105-generate-mipmaps-C9h2y71s.js",
@@ -11,5 +11,5 @@
     "scene105-std-lightmap-fragment-DZa36yDz.js",
     "scene105.js"
   ],
-  "rawBytes": 104277
+  "rawBytes": 104169
 }
