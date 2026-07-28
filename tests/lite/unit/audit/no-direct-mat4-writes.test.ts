@@ -10,7 +10,7 @@
  *
  * The audit uses a conservative line-by-line regex. False positives are
  * resolved by extending the allowlist with a comment explaining WHY the file
- * (or specific `file:line`) is deferred. Each allowlist entry must carry a
+ * (or specific `file:statement`) is deferred. Each allowlist entry must carry a
  * follow-up reference (architecture D4 or M0-followup) so reviewers can audit
  * the suppression list trivially.
  */
@@ -181,7 +181,7 @@ describe("audit: no direct mat4 GPU writes outside allowlist", () => {
             const msg = sourceViolations.map((violation) => `  ${violation.relPath}:${violation.line}: ${violation.snippet}`).join("\n");
             throw new Error(
                 `Found ${sourceViolations.length} direct mat4 GPU write(s) outside the allowlist.\n` +
-                    `Route the write through packMat4IntoF32, or add the file/line to the audit allowlist with a justification comment.\n\n` +
+                    `Route the write through packMat4IntoF32, or add the file/statement to the audit allowlist with a justification comment.\n\n` +
                     msg
             );
         }
