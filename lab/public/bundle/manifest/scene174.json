@@ -3,14 +3,14 @@
   "gzipKB": 39.4,
   "ignoredRawKB": 1485.2,
   "runtimeChunks": [
-    "scene174-generate-mipmaps-B6Zd_Pnc.js",
+    "scene174-generate-mipmaps-yLOoUuIw.js",
     "scene174-gltf-glb-parser-DSegmBgG.js",
     "scene174-mesh-features-Dda6QcW-.js",
-    "scene174-pbr-renderable-Dxo2qwbk.js",
+    "scene174-pbr-renderable-D7y00rq1.js",
     "scene174-recast-navigation-CYBQI-zY-Dry_z7x_.js",
-    "scene174-singlelight-hemispheric-wgsl-DRRifmYd.js",
-    "scene174-standard-renderable-z7tnf6zH.js",
+    "scene174-singlelight-hemispheric-wgsl-kfMxUQtb.js",
+    "scene174-standard-renderable-DUNvOMQm.js",
     "scene174.js"
   ],
-  "rawBytes": 98246
+  "rawBytes": 98201
 }
