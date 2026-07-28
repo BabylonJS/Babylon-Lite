@@ -19,12 +19,19 @@ export interface DecomposedTransform {
  * Decompose a column-major 4×4 affine matrix into translation, rotation (unit
  * quaternion), and scale. Assumes a shear-free TRS matrix.
  *
- * Mirror image (negative determinant) matrices are preserved: the reflection is
- * folded into a negative Y scale, matching Babylon.js `Matrix.decompose`. The
- * decomposition is therefore lossless — recomposing the returned TRS reproduces
- * the original matrix — but it is *canonical*, not sign-faithful: a matrix built
- * from a negative X or Z scale decomposes to a negative Y scale plus a different
- * rotation.
+ * **Behaviour change:** earlier versions documented and returned an always
+ * non-negative `scale`, silently dropping the reflection carried by a mirrored
+ * (negative determinant) matrix. `scale.y` is now negative for such a matrix.
+ * Callers that assumed non-negative components — for example feeding `scale`
+ * straight into a size or extent — must take `Math.abs` themselves; callers that
+ * recompose the TRS get the correct mirrored transform back instead of an
+ * un-mirrored one.
+ *
+ * Mirror image matrices are preserved by folding the reflection into a negative
+ * Y scale, matching Babylon.js `Matrix.decompose`. The decomposition is therefore
+ * lossless — recomposing the returned TRS reproduces the original matrix — but it
+ * is *canonical*, not sign-faithful: a matrix built from a negative X or Z scale
+ * decomposes to a negative Y scale plus a different rotation.
  *
  * A degenerate axis (scale magnitude below 1e-8) is tolerated rather than
  * rejected: its basis column is treated as zero, so the returned rotation stays

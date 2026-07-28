@@ -127,12 +127,15 @@ export function mat4Compose(tx: number, ty: number, tz: number, qx: number, qy: 
 
 /** Decompose a column-major affine Mat4 into translation/rotation(quaternion)/scale.
  *  Shared by setParent(), the gizmo/Gaussian-splat rotation extraction, and the Havok
- *  compound-shape path. Mirrored (negative determinant) matrices are preserved by
- *  folding the reflection onto a negative Y scale, matching Babylon.js
- *  `Matrix.decompose` — lossless, but canonical rather than sign-faithful (a negative
- *  X scale comes back as negative Y + a different rotation). Assumes a shear-free TRS
- *  matrix; a degenerate axis (scale below 1e-8) yields a finite but meaningless
- *  rotation rather than an error. */
+ *  compound-shape path. **Behaviour change:** earlier versions always returned a
+ *  non-negative scale and silently dropped the reflection of a mirrored matrix;
+ *  `scale.y` is now negative for one, so callers assuming non-negative components
+ *  must take `Math.abs` themselves. Mirrored matrices are preserved by folding the
+ *  reflection onto a negative Y scale, matching Babylon.js `Matrix.decompose` —
+ *  lossless, but canonical rather than sign-faithful (a negative X scale comes back
+ *  as negative Y + a different rotation). Assumes a shear-free TRS matrix; a
+ *  degenerate axis (scale below 1e-8) yields a finite but meaningless rotation
+ *  rather than an error. */
 export function mat4Decompose(m: Mat4): { translation: Vec3; rotation: Quat; scale: Vec3 };
 
 /** Unit quaternion from the rotation part of a column-major Mat4 (Babylon.js
