@@ -8,9 +8,9 @@
     "scene255-generate-mipmaps-CwS-SesP.js",
     "scene255-gltf-animation-BdNI7eQz.js",
     "scene255-gltf-feature-animations-DWGTy8Ey.js",
-    "scene255-gltf-feature-registry-6R50xG94.js",
+    "scene255-gltf-feature-registry-B5MV3-ie.js",
     "scene255-gltf-feature-skeleton-DXWdHHtm.js",
-    "scene255-gltf-json-asset-be-2_IM0.js",
+    "scene255-gltf-json-asset-BJyr96Ic.js",
     "scene255-gltf-normals-DYhLwXNX.js",
     "scene255-ibl-fragment-CeRrvT96.js",
     "scene255-pbr-renderable-BYwx8UFk.js",
@@ -19,5 +19,5 @@
     "scene255-skeleton-fragment-D_AicIQL.js",
     "scene255.js"
   ],
-  "rawBytes": 96895
+  "rawBytes": 96858
 }

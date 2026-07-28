@@ -9,7 +9,7 @@
     "scene144-gltf-ext-spec-gloss-D60sFZYX.js",
     "scene144-gltf-feature-animations-BA72qFAq.js",
     "scene144-gltf-feature-extras-VHPteGay.js",
-    "scene144-gltf-feature-registry-DPfuXDpf.js",
+    "scene144-gltf-feature-registry-C-VXKspC.js",
     "scene144-gltf-feature-skeleton-Bb1mH-ve.js",
     "scene144-gltf-glb-parser-5J2K-QXc.js",
     "scene144-gltf-pbr-builder-ext-CfC-j6Ec.js",
@@ -22,5 +22,5 @@
     "scene144-texture-2d-DQo3n8D6.js",
     "scene144.js"
   ],
-  "rawBytes": 114619
+  "rawBytes": 114593
 }

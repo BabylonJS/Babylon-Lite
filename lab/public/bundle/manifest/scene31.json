@@ -6,7 +6,7 @@
     "scene31-emissive-fragment-hx1-6YeZ.js",
     "scene31-generate-mipmaps-B8GEe_zm.js",
     "scene31-gltf-ext-emissive-strength-CButLZnK.js",
-    "scene31-gltf-feature-registry-D56CwI2k.js",
+    "scene31-gltf-feature-registry-dg7Yex97.js",
     "scene31-gltf-glb-parser-DzBScCtC.js",
     "scene31-ibl-fragment-CeRrvT96.js",
     "scene31-pbr-renderable-sJ4M65hD.js",
@@ -14,5 +14,5 @@
     "scene31-scene-uniforms-FTYH6Ct0.js",
     "scene31.js"
   ],
-  "rawBytes": 82452
+  "rawBytes": 82426
 }
