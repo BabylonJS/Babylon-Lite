@@ -1,22 +1,23 @@
 /**
  * Babylon.js-compatible 2D **texture array** wrappers over Babylon Lite's
- * `createTexture2DArray` / `uploadImageToArrayLayer` / `loadImageToArrayLayer` /
- * `createTexture2DArrayFromUrls`.
+ * `createTexture2DArray` / `createTexture2DArrayFromPixels` /
+ * `updateTexture2DArrayFromPixels` / `uploadImageToArrayLayer` /
+ * `loadImageToArrayLayer` / `createTexture2DArrayFromUrls`.
  *
  * A texture array is a single GPU texture holding N same-size, same-format layers
  * (sampled in a shader as `texture_2d_array<f32>` with an explicit layer index).
  * Babylon.js exposes the raw-bytes constructor on `RawTexture2DArray` plus the
- * image-source helper functions in `rawTexture2DArray.functions`. Babylon Lite
- * backs the image-source path directly; the raw-bytes upload path (a full
- * multi-layer `ArrayBufferView`) has no Lite equivalent, so it throws.
+ * image-source helper functions in `rawTexture2DArray.functions`. Both paths are
+ * backed by Babylon Lite: raw multi-layer bytes go through Lite's pixel upload,
+ * decoded image sources through Lite's external-image copy.
  */
 
-import { createTexture2DArray, uploadImageToArrayLayer, loadImageToArrayLayer, createTexture2DArrayFromUrls } from "babylon-lite";
+import { createTexture2DArray, createTexture2DArrayFromPixels, updateTexture2DArrayFromPixels, loadImageToArrayLayer, createTexture2DArrayFromUrls } from "babylon-lite";
 import type { Texture2DArray } from "babylon-lite";
 
-import { unsupported } from "../error.js";
+import { Constants } from "../misc/engine-constants.js";
 import type { Scene } from "../scene/scene.js";
-import { BaseTexture } from "./textures.js";
+import { BaseTexture, toRgbaBytes } from "./textures.js";
 
 /** The decoded image sources WebGPU (and therefore Lite) can upload into a layer. */
 type ImageSource = ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | HTMLVideoElement | ImageData | VideoFrame;
@@ -25,13 +26,18 @@ type ImageSource = ImageBitmap | HTMLImageElement | HTMLCanvasElement | Offscree
  * Babylon.js `RawTexture2DArray` — a 2D array texture. Backed by Babylon Lite's
  * `Texture2DArray`.
  *
- * The image-source path is fully supported (construct empty with `data = null`,
- * then fill layers via {@link UploadImageToTexture2DArrayLayer} /
- * {@link LoadImageToTexture2DArrayLayerAsync}, or build in one call with
- * {@link CreateTexture2DArrayFromImageUrlsAsync}). Passing raw multi-layer pixel
- * bytes (`data !== null`), and the raw-bytes `update` / `updateMipLevel` /
- * `CreateRGBATexture` helpers, throw — Lite's array API uploads decoded image
- * sources, not raw byte buffers.
+ * Both Babylon.js construction paths work: pass raw multi-layer RGBA8 bytes
+ * (`data !== null`) for a CPU-generated array, or construct empty (`data = null`)
+ * and fill layers from decoded image sources via
+ * {@link UploadImageToTexture2DArrayLayer} /
+ * {@link LoadImageToTexture2DArrayLayerAsync}, or build the whole array in one call
+ * with {@link CreateTexture2DArrayFromImageUrlsAsync}.
+ *
+ * Babylon Lite's array path is RGBA8-only, so `format` / `textureType` /
+ * `samplingMode` are recorded for API parity but the upload always treats `data` as
+ * tightly-packed `width * height * depth * 4` RGBA bytes (layer-major). Raw-byte
+ * uploads are not Y-flipped (matching the compat `RawTexture` / `RawTexture3D`
+ * pixel paths), so `invertY` is recorded but not applied to `data`.
  */
 export class RawTexture2DArray extends BaseTexture {
     /** @internal The underlying Lite 2D-array handle (aliases `_lite`). */
@@ -40,8 +46,6 @@ export class RawTexture2DArray extends BaseTexture {
     public readonly is2DArray = true;
     /** @internal Owning compat scene. */
     public _sceneRef: Scene;
-    /** @internal Number of array layers. */
-    public _layers: number;
 
     public constructor(
         data: ArrayBufferView | null,
@@ -60,16 +64,11 @@ export class RawTexture2DArray extends BaseTexture {
     ) {
         super();
         this._sceneRef = scene;
-        this._layers = depth;
-        if (data !== null) {
-            // A non-null `data` is a raw multi-layer byte buffer — Babylon Lite's array API
-            // uploads decoded image sources, not raw bytes, so it cannot back this path.
-            unsupported(
-                "RawTexture2DArray (raw-bytes constructor)",
-                "Babylon Lite's texture-array API uploads decoded image sources. Construct with `data = null` and fill layers via `UploadImageToTexture2DArrayLayer` / `CreateTexture2DArrayFromImageUrlsAsync`."
-            );
-        }
-        const tex = createTexture2DArray(scene.getEngine()._lite, width, height, depth, { mipMaps: generateMipMaps });
+        const engine = scene.getEngine()._lite;
+        const tex =
+            data === null
+                ? createTexture2DArray(engine, width, height, depth, { mipMaps: generateMipMaps })
+                : createTexture2DArrayFromPixels(engine, toRgbaBytes(data, width, height, depth), width, height, depth, { mipMaps: generateMipMaps });
         this._liteArray = tex;
         this._lite = tex;
     }
@@ -80,7 +79,7 @@ export class RawTexture2DArray extends BaseTexture {
 
     /** Babylon.js `RawTexture2DArray.depth` — the number of array layers. */
     public get depth(): number {
-        return this._layers;
+        return this._liteArray?.layers ?? 0;
     }
 
     /** The scene this texture belongs to (Babylon.js `ThinTexture.getScene`). */
@@ -88,20 +87,32 @@ export class RawTexture2DArray extends BaseTexture {
         return this._sceneRef;
     }
 
-    /** Babylon.js `RawTexture2DArray.update(data)` — raw-bytes re-upload; not backable by Lite. */
-    public update(_data: ArrayBufferView): never {
-        return unsupported(
-            "RawTexture2DArray.update",
-            "Babylon Lite's texture-array API has no raw-bytes upload; upload decoded image sources with `UploadImageToTexture2DArrayLayer`."
-        );
+    /**
+     * Babylon.js `RawTexture2DArray.getInternalTexture()` — the backend handle the compat
+     * engine's texture methods accept (Lite's `Texture2DArray`).
+     */
+    public override getInternalTexture(): Texture2DArray | null {
+        return this._liteArray ?? null;
     }
 
-    /** Babylon.js `RawTexture2DArray.updateMipLevel(data, mipLevel)` — raw-bytes upload; not backable. */
-    public updateMipLevel(_data: ArrayBufferView, _mipLevel: number): never {
-        return unsupported(
-            "RawTexture2DArray.updateMipLevel",
-            "Babylon Lite's texture-array API has no raw-bytes upload; upload decoded image sources with `UploadImageToTexture2DArrayLayer`."
-        );
+    /** Babylon.js `RawTexture2DArray.update(data)` — replace the base mip of every layer. */
+    public update(data: ArrayBufferView): void {
+        this.updateMipLevel(data, 0);
+    }
+
+    /**
+     * Babylon.js `RawTexture2DArray.updateMipLevel(data, mipLevel)` — replace one mip level of
+     * every layer. Level dimensions are `max(1, size >> mipLevel)`; writing level 0 of a
+     * mipmapped array regenerates the rest of the chain, exactly as Babylon.js does.
+     */
+    public updateMipLevel(data: ArrayBufferView, mipLevel: number): void {
+        const array = this._liteArray;
+        if (!array) {
+            return;
+        }
+        const width = Math.max(1, array.width >> mipLevel);
+        const height = Math.max(1, array.height >> mipLevel);
+        updateTexture2DArrayFromPixels(this._sceneRef.getEngine()._lite, array, toRgbaBytes(data, width, height, array.layers), mipLevel);
     }
 
     public override whenReadyAsync(): Promise<void> {
@@ -111,7 +122,7 @@ export class RawTexture2DArray extends BaseTexture {
     /**
      * @internal Reconcile the image-URL construction path
      * ({@link CreateTexture2DArrayFromImageUrlsAsync}) into the single BJS-named
-     * class without re-running the raw-bytes constructor.
+     * class without re-running the allocating constructor.
      */
     public static _fromLite(liteArray: Texture2DArray, format: number, scene: Scene): RawTexture2DArray {
         const tex: RawTexture2DArray = Object.create(RawTexture2DArray.prototype);
@@ -119,28 +130,24 @@ export class RawTexture2DArray extends BaseTexture {
         (tex as { is2DArray: boolean }).is2DArray = true;
         tex.format = format;
         tex._sceneRef = scene;
-        tex._layers = liteArray.layers;
         tex._liteArray = liteArray;
         tex._lite = liteArray;
         return tex;
     }
 
-    /** Babylon.js `RawTexture2DArray.CreateRGBATexture` — raw-bytes factory; not backable by Lite. */
+    /** Babylon.js `RawTexture2DArray.CreateRGBATexture` — RGBA raw-bytes factory. */
     public static CreateRGBATexture(
-        _data: ArrayBufferView,
-        _width: number,
-        _height: number,
-        _depth: number,
-        _scene: Scene,
-        _generateMipMaps = true,
-        _invertY = false,
-        _samplingMode = 3,
-        _type = 0
-    ): never {
-        return unsupported(
-            "RawTexture2DArray.CreateRGBATexture",
-            "Babylon Lite's texture-array API uploads decoded image sources, not raw bytes; use `CreateTexture2DArrayFromImageUrlsAsync`."
-        );
+        data: ArrayBufferView,
+        width: number,
+        height: number,
+        depth: number,
+        scene: Scene,
+        generateMipMaps = true,
+        invertY = false,
+        samplingMode = Constants.TEXTURE_TRILINEAR_SAMPLINGMODE,
+        type = Constants.TEXTURETYPE_UNSIGNED_BYTE
+    ): RawTexture2DArray {
+        return new RawTexture2DArray(data, width, height, depth, Constants.TEXTUREFORMAT_RGBA, scene, generateMipMaps, invertY, samplingMode, type);
     }
 }
 
@@ -164,29 +171,30 @@ export interface ICreateTexture2DArrayFromImageUrlsOptions extends IUploadImageT
     imageBitmapOptions?: ImageBitmapOptions;
 }
 
-/** @internal Resolve the engine handle a texture-array was created against. */
-function engineOf(texture: RawTexture2DArray): import("babylon-lite").EngineContext {
-    return texture.getScene().getEngine()._lite;
-}
-
-/** @internal Guard that the layer index is a valid integer for the texture. */
-function assertLive(texture: RawTexture2DArray): Texture2DArray {
-    if (!texture._liteArray) {
+/** @internal Resolve the live Lite array handle a compat texture wraps. */
+function liteArrayOf(texture: RawTexture2DArray): Texture2DArray {
+    const array = texture.getInternalTexture();
+    if (!array) {
         throw new Error("Cannot upload to a 2D array texture that has no internal texture.");
     }
-    return texture._liteArray;
+    return array;
 }
 
 /**
  * Babylon.js `UploadImageToTexture2DArrayLayer` — upload a decoded image source
- * into one layer of a texture array. Forwards to Lite's `uploadImageToArrayLayer`.
+ * into one layer of a texture array. Routes through the engine's
+ * `updateTextureArrayLayerFromImageSource` (as Babylon.js does), which forwards to
+ * Lite's `uploadImageToArrayLayer`.
  */
 export function UploadImageToTexture2DArrayLayer(texture: RawTexture2DArray, source: ImageSource, layer: number, options?: IUploadImageToTexture2DArrayLayerOptions): void {
-    const array = assertLive(texture);
-    uploadImageToArrayLayer(engineOf(texture), array, layer, source as GPUCopyExternalImageSource, {
-        invertY: options?.invertY ?? false,
-        premultiplyAlpha: options?.premultiplyAlpha ?? false,
-    });
+    const array = liteArrayOf(texture);
+    if (!Number.isInteger(layer) || layer < 0 || layer >= texture.depth) {
+        throw new Error(`Layer ${layer} is out of range for a 2D array texture with ${texture.depth} layers.`);
+    }
+    texture
+        .getScene()
+        .getEngine()
+        .updateTextureArrayLayerFromImageSource(array, source as GPUCopyExternalImageSource, layer, options?.invertY ?? false, options?.premultiplyAlpha ?? false);
 }
 
 /**
@@ -199,8 +207,8 @@ export async function LoadImageToTexture2DArrayLayerAsync(
     layer: number,
     options?: IUploadImageToTexture2DArrayLayerOptions
 ): Promise<void> {
-    const array = assertLive(texture);
-    await loadImageToArrayLayer(engineOf(texture), array, layer, url, {
+    const array = liteArrayOf(texture);
+    await loadImageToArrayLayer(texture.getScene().getEngine()._lite, array, layer, url, {
         invertY: options?.invertY ?? false,
         premultiplyAlpha: options?.premultiplyAlpha ?? false,
     });
@@ -210,13 +218,20 @@ export async function LoadImageToTexture2DArrayLayerAsync(
  * Babylon.js `CreateTexture2DArrayFromImageUrlsAsync` — create a texture array and
  * fill each layer from a list of image URLs. Forwards to Lite's
  * `createTexture2DArrayFromUrls`, then wraps the result in a `RawTexture2DArray`.
+ *
+ * Lite's per-layer upload defaults to `invertY = true` (the Babylon.js *material*
+ * convention); the Babylon.js helper defaults to `false`, so the flag is always
+ * passed explicitly rather than left to the Lite default.
  */
 export async function CreateTexture2DArrayFromImageUrlsAsync(
     scene: Scene,
     urls: readonly [string, ...string[]],
     options?: ICreateTexture2DArrayFromImageUrlsOptions
 ): Promise<RawTexture2DArray> {
-    const liteArray = await createTexture2DArrayFromUrls(scene.getEngine()._lite, urls, { mipMaps: options?.generateMipMaps ?? true });
-    // Babylon.js defaults the format to TEXTUREFORMAT_RGBA (5).
-    return RawTexture2DArray._fromLite(liteArray, 5, scene);
+    const liteArray = await createTexture2DArrayFromUrls(scene.getEngine()._lite, urls, {
+        mipMaps: options?.generateMipMaps ?? true,
+        invertY: options?.invertY ?? false,
+        premultiplyAlpha: options?.premultiplyAlpha ?? false,
+    });
+    return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
 }

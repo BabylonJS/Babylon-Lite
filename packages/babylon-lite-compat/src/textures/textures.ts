@@ -79,6 +79,15 @@ export abstract class BaseTexture {
         return "BaseTexture";
     }
 
+    /**
+     * Babylon.js `BaseTexture.getInternalTexture()` — the backend texture handle. Babylon.js
+     * returns an `InternalTexture`; the compat layer's equivalent is the Lite texture handle,
+     * which is what the compat engine's texture methods accept.
+     */
+    public getInternalTexture(): Texture2D | null {
+        return this._lite ?? null;
+    }
+
     public abstract whenReadyAsync(): Promise<void>;
 
     public dispose(): void {
@@ -318,11 +327,13 @@ export class RawTexture3D extends BaseTexture {
 
 /**
  * @internal Coerce a raw `ArrayBufferView` (or a bare `Uint8Array`) into the tightly
- * packed `width * height * depth * 4` RGBA8 `Uint8Array` Babylon Lite's
- * `createTexture3DFromPixels` expects. Babylon.js allows a `null` data argument
+ * packed `width * height * depth * 4` RGBA8 `Uint8Array` Babylon Lite's raw-pixel
+ * texture factories expect (`createTexture3DFromPixels`,
+ * `createTexture2DArrayFromPixels`). Babylon.js allows a `null` data argument
  * (an empty texture); Lite requires bytes, so `null` becomes a zero-filled volume.
+ * For a 2D array, `depth` is the layer count.
  */
-function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number, depth: number): Uint8Array {
+export function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number, depth: number): Uint8Array {
     const expected = width * height * depth * 4;
     if (data === null) {
         return new Uint8Array(expected);

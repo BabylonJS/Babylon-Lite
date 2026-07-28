@@ -91,7 +91,8 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `engine.getCaps()` (compressed-format flags `astc` / `s3tc` / `etc2`)                                                                                                                 | ✅ Full          | engine (derived from the Lite WebGPU device's enabled features)                                                                                                               |
 | `AbstractEngine.Version` / `AbstractEngine.NpmPackage` (static)                                                                                                                        | ✅ Full          | engine (reports the underlying Babylon Lite runtime `VERSION`, wrapped as `@babylonjs/lite-compat@<version>` for `NpmPackage`)                                                 |
 | `engine.beginFrame` / `endFrame`                                                                                                                                                      | ❌ Not supported | —                                                                                                                                                                             |
-| `engine.currentSampleCount` / `getAlphaToCoverage` / `setAlphaToCoverage` / `updateTextureArrayLayerFromImageSource`                                                                    | 🔧 Needs Lite core | engine (BJS `9.17` MSAA/alpha-to-coverage engine surface; Lite manages MSAA internally and exposes no public sample-count accessor or engine-level A2C toggle — throwing stubs. `updateTextureArrayLayerFromImageSource` (new BJS `9.17` engine extension) is unsupported at the engine level; the array-layer upload path is instead served by the higher-level `UploadImageToTexture2DArrayLayer` / `LoadImageToTexture2DArrayLayerAsync` helpers below, which forward to Lite's texture-array API) |
+| `engine.currentSampleCount` / `getAlphaToCoverage` / `setAlphaToCoverage`                                                                    | 🔧 Needs Lite core | engine (BJS `9.17` MSAA/alpha-to-coverage engine surface; Lite manages MSAA internally and exposes no public sample-count accessor or engine-level A2C toggle — throwing stubs) |
+| `engine.updateTextureArrayLayerFromImageSource`                                                                                             | ✅ Full          | [engine/engine.ts](src/engine/engine.ts) (new BJS `9.17` engine extension; forwards to Lite `uploadImageToArrayLayer`. Takes the Lite `Texture2DArray` returned by `BaseTexture.getInternalTexture()` where BJS takes an `InternalTexture`, so `UploadImageToTexture2DArrayLayer` routes through it exactly as BJS does) |
 | `NullEngine`                                                                                                                                                                          | ✅ Full          | [engine/engine.ts](src/engine/engine.ts) (backed by Lite's real device-less `createNullEngine`; scene built with `defaultRenderTask: false` — no swapchain/GPU resource — and advanced via Lite `stepScene`, which fires the same before-render hook as the GPU path) |
 | `AbstractScene` / `Scene`                                                                                                                                                             | ⚡ Partial       | [scene/scene.ts](src/scene/scene.ts) over [scene/abstract-scene.ts](src/scene/abstract-scene.ts) (entity collections on `AbstractScene`, as in BJS)                           |
 | `scene.clearColor` / `activeCamera` / `imageProcessingConfiguration`                                                                                                                  | ✅ Full          | scene                                                                                                                                                                         |
@@ -256,7 +257,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `Texture` (2D, URL)                                                        | ✅ Full          | [textures/textures.ts](src/textures/textures.ts) (async load awaited at build; honours `invertY` / `noMipmap` / `samplingMode` on the material path; `.basis` URLs route through Lite `loadBasisTexture2D`, compressed `.ktx` URLs through `loadKtxTexture2D`) |
 | `RawTexture`                                                               | ✅ Full          | textures (Lite pixel texture)                                                                                                                                                                                                                                  |
 | `RawTexture3D`                                                             | ✅ Full          | textures (Lite `createTexture3DFromPixels` — RGBA8 volumetric texture / colour-grading LUT; `width`/`height`/`depth` getters, `update` re-upload; `format` recorded for parity)                                                                                 |
-| `RawTexture2DArray` (+ `UploadImageToTexture2DArrayLayer` / `LoadImageToTexture2DArrayLayerAsync` / `CreateTexture2DArrayFromImageUrlsAsync` from BJS `9.17` `rawTexture2DArray.functions`) | ⚡ Partial       | [textures/raw-texture-2d-array.ts](src/textures/raw-texture-2d-array.ts) — image-source path over Lite `createTexture2DArray` / `uploadImageToArrayLayer` / `loadImageToArrayLayer` / `createTexture2DArrayFromUrls` (construct empty with `data = null`, fill layers from decoded sources / URLs). The raw multi-layer **byte-buffer** path (`data !== null`, `update` / `updateMipLevel` / `CreateRGBATexture`) throws — Lite's array API uploads decoded image sources, not raw bytes |
+| `RawTexture2DArray` (+ `UploadImageToTexture2DArrayLayer` / `LoadImageToTexture2DArrayLayerAsync` / `CreateTexture2DArrayFromImageUrlsAsync` from BJS `9.17` `rawTexture2DArray.functions`) | ✅ Full          | [textures/raw-texture-2d-array.ts](src/textures/raw-texture-2d-array.ts) — raw-bytes path over Lite `createTexture2DArrayFromPixels` / `updateTexture2DArrayFromPixels` (constructor `data !== null`, `update`, `updateMipLevel`, `CreateRGBATexture`), image-source path over Lite `createTexture2DArray` / `uploadImageToArrayLayer` / `loadImageToArrayLayer` / `createTexture2DArrayFromUrls`. RGBA8-only, so `format` / `textureType` / `samplingMode` are recorded for parity; raw-byte uploads are not Y-flipped (same as `RawTexture` / `RawTexture3D`) |
 | `DynamicTexture` (canvas-backed)                                           | ✅ Full          | textures (Lite `createDynamicTexture` / `updateDynamicTexture` — canvas blitted straight to the GPU via `copyExternalImageToTexture`, no `getImageData` readback)                                                                                              |
 | `CubeTexture` (`CreateFromPrefilteredData`, `isReady`, `onLoadObservable`) | ⚡ Partial       | textures (URL handle → Lite `loadEnvironment` at engine start)                                                                                                                                                                                                 |
 | `HDRCubeTexture`                                                           | ⚡ Partial       | textures (`.hdr` equirect environment handle → Lite `loadHdrEnvironment` at engine start, mirroring `CubeTexture`; standalone GPU HDR-cube object not exposed)                                                                                                 |
@@ -478,58 +479,10 @@ blending (157, 158) now work; the remaining tractable work is the assorted
 single-API gaps. The glTF model-framing cluster and the procedural
 large-world-rendering scenes are now resolved.
 
-> **Task 2 re-check (2026-06-24):** the new Lite capabilities landed since the last
-> sync — opt-in bone control (#268), `AnimationGroupMask` (#269), the AudioV2 port
-> (#273), physics collision/trigger events + raycast + character controller, the
-> standalone `loadKtx2Texture2D` (#263), per-material stencil (#257), and the
-> `mat4Decompose` / `quatFromRotationMatrix` / vec3-ref math helpers — were
-> cross-referenced against the blocker table above. **None clears a
-> previously-skipped scene's blocker:** scene 114 still needs _manual_
-> `Skeleton`/`Bone` construction plus sync skinned `scene.pick` (the new bone-control
-> API only poses loader-built skeletons); scene 40 is a compat-wrapper gap
-> (`PhysicsAggregate` not yet wrapped), not a Lite-core unblock; and audio scenes
-> have no pixel oracle. So no scene moved into the working list this run — Task 2 is
-> dormant, as expected when no Lite change unblocks a scene.
->
-> **Task 2 re-check (2026-06-26):** the only commit to land since the last sync
-> (#313, "Move Lite gl ping pong out of the package") touches `packages/babylon-lite-gl/`
-> and the `lab/gl` WebGL track only — **nothing under `packages/babylon-lite/src/**`**,
-> so no new Lite capability came online. No previously-skipped scene is newly
-> unblocked; Task 2 stays dormant this run.
->
-> **Task 2 re-check (2026-06-29):** no commit has touched `packages/babylon-lite/src/**`
-> since the last status commit (`10fab1290`), so no new Lite capability came online
-> this run. This run was triggered by issue #332 ([compat] `createHavokWorld` physics
-> speed depends on the display refresh rate), which is a compat-wrapper gap, not a Lite
-> unblock — addressed under Task 3 by wrapping `HavokPlugin` (with BJS-matching
-> `useDeltaForWorldStep` delta stepping) over the existing public Lite physics API. No
-> previously-skipped scene is newly unblocked; Task 2 stays dormant.
->
-> **Task 2 re-check (2026-07-09):** the two commits touching
-> `packages/babylon-lite/src/**` since the last status commit are #389
-> (animation fix — decouples `crossFadeAnimationGroups`/`fadeAnimationWeight` into a
-> mixer-neutral `animation-weight-fade.ts` and stops double-driving manager-owned
-> glTF groups; public export paths unchanged) and #388 (audio — per-instance
-> `pitch`/`playbackRate` on Lite's `playSound`, a Lite-only extra not present in the
-> BJS `IStaticSoundPlayOptions` surface). **Neither adds a new Lite public export**
-> (`git diff` of `index.ts` shows only a module-path change for the moved fade
-> functions), so no previously-skipped scene is newly unblocked. The compat blend
-> path already enables blending explicitly (`enableAnimationBlending` on a
-> scene-owned `AnimationManager`) and detaches each group's `_ctrl`, so #389's
-> behaviour change (fades no longer implicitly enable a mixer) requires no compat
-> change. Task 2 stays dormant.
->
-> **Task 2 re-check (2026-07-28):** the Lite changes since the last status commit are
-> #456 (`setParent` preserves mirrored transforms — a `mat4Decompose` sign fix; compat
-> has its own BJS-accurate `Matrix.decompose`, so no compat change) and #460 (Sprite2D
-> `flipX`/`flipY` made absolute — a Lite bugfix behind the existing sprite wrapper, no
-> new API). The one **new Lite public export** is `enableMirroredMeshes` (#456),
-> which adds triangle-winding reversal for negative-determinant (mirrored) Standard /
-> procedural meshes and runtime mirroring changes. This is now wrapped: the compat
-> engine calls `enableMirroredMeshes(scene)` per scene before `registerScene`, so a
-> ported `mesh.scaling.x = -1` renders upright like Babylon.js instead of inside-out.
-> Cross-referenced against the blocker table: **no not-working scene is blocked on
-> mirrored meshes rendering inside-out** (glTF-loaded mirrored nodes already worked via
-> the loader's load-time winding handling, and `_authoredSign` prevents the opt-in from
-> double-flipping them), so no previously-skipped scene is newly unblocked. Task 2 stays
-> dormant; the winding wrapper is a Task 3 parity improvement, not a scene unblock.
+**Task 2 status — dormant.** No Lite change to date has cleared a blocker in the table
+above, so no previously-skipped scene has been unblocked by a Lite capability. Each run
+re-checks the newest Lite exports against this table and edits the rows in place.
+
+> **This file records current state, not history.** Do not append dated run notes,
+> changelogs, or "re-check" entries — revise the affected rows and prose instead. Git
+> history and the PR description carry the per-run narrative.

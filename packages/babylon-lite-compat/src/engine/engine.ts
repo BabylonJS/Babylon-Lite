@@ -33,9 +33,10 @@ import {
     onBeforeRender,
     createNullEngine,
     stepScene,
+    uploadImageToArrayLayer,
     VERSION,
 } from "babylon-lite";
-import type { EngineContext, EngineOptions, RenderCanvas } from "babylon-lite";
+import type { EngineContext, EngineOptions, RenderCanvas, Texture2DArray } from "babylon-lite";
 
 import { LiteCompatError, unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
@@ -367,17 +368,17 @@ export abstract class AbstractEngine {
     }
 
     /**
-     * Babylon.js `engine.updateTextureArrayLayerFromImageSource(...)` — the low-level engine
-     * extension that uploads a decoded image source into a 2D array texture layer. Babylon Lite
-     * exposes this through the higher-level `UploadImageToTexture2DArrayLayer` /
-     * `LoadImageToTexture2DArrayLayerAsync` helpers (which forward to Lite's texture-array API)
-     * rather than a raw engine-level `InternalTexture` method, so the engine method is unsupported.
+     * Babylon.js `engine.updateTextureArrayLayerFromImageSource(texture, source, layer, invertY, premultiplyAlpha)`
+     * — the engine extension that uploads a decoded image source into one layer of a 2D array
+     * texture. Forwards to Babylon Lite's `uploadImageToArrayLayer`.
+     *
+     * Babylon.js passes an `InternalTexture`; the compat layer's equivalent handle is the Lite
+     * `Texture2DArray` returned by `RawTexture2DArray.getInternalTexture()`, so ported code that
+     * goes through `UploadImageToTexture2DArrayLayer` (which is exactly what Babylon.js's helper
+     * does) works unchanged.
      */
-    public updateTextureArrayLayerFromImageSource(_texture: unknown, _source: unknown, _layer: number, _invertY?: boolean, _premultiplyAlpha?: boolean): never {
-        return unsupported(
-            "AbstractEngine.updateTextureArrayLayerFromImageSource",
-            "Use the `UploadImageToTexture2DArrayLayer` / `LoadImageToTexture2DArrayLayerAsync` helpers, which forward to Babylon Lite's texture-array API."
-        );
+    public updateTextureArrayLayerFromImageSource(texture: Texture2DArray, source: GPUCopyExternalImageSource, layer: number, invertY = false, premultiplyAlpha = false): void {
+        uploadImageToArrayLayer(this._lite, texture, layer, source, { invertY, premultiplyAlpha });
     }
 
     private async _start(): Promise<void> {

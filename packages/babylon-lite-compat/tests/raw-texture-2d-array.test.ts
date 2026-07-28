@@ -2,24 +2,35 @@ import { describe, expect, it, vi } from "vitest";
 
 /**
  * `RawTexture2DArray` + the `rawTexture2DArray.functions` helpers wrap Babylon
- * Lite's texture-array API (`createTexture2DArray` / `uploadImageToArrayLayer` /
- * `loadImageToArrayLayer` / `createTexture2DArrayFromUrls`). The real uploads need
- * a GPU device, so these tests mock the Lite factories to plain handles and verify
- * the compat surface GPU-free: forwarding + option mapping, the supported vs.
- * throwing (raw-bytes) paths, and the `_fromLite` construction path.
+ * Lite's texture-array API (`createTexture2DArray` / `createTexture2DArrayFromPixels`
+ * / `updateTexture2DArrayFromPixels` / `uploadImageToArrayLayer` /
+ * `loadImageToArrayLayer` / `createTexture2DArrayFromUrls`). The real uploads need a
+ * GPU device, so these tests mock the Lite factories to plain handles and verify the
+ * compat surface GPU-free: forwarding, option mapping (notably BJS's `invertY = false`
+ * default vs. Lite's `true`), the raw-bytes paths, and `_fromLite` construction.
  */
 vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
+    const makeArray = (width: number, height: number, layers: number) => ({ width, height, layers, _tag: "array" });
     return {
         ...actual,
-        createTexture2DArray: vi.fn((_engine: unknown, width: number, height: number, layers: number) => ({ width, height, layers, _tag: "array" })),
+        createTexture2DArray: vi.fn((_engine: unknown, width: number, height: number, layers: number) => makeArray(width, height, layers)),
+        createTexture2DArrayFromPixels: vi.fn((_engine: unknown, _data: Uint8Array, width: number, height: number, layers: number) => makeArray(width, height, layers)),
+        updateTexture2DArrayFromPixels: vi.fn(),
         uploadImageToArrayLayer: vi.fn(),
         loadImageToArrayLayer: vi.fn(async () => undefined),
-        createTexture2DArrayFromUrls: vi.fn(async (_engine: unknown, urls: readonly string[]) => ({ width: 4, height: 4, layers: urls.length, _tag: "array" })),
+        createTexture2DArrayFromUrls: vi.fn(async (_engine: unknown, urls: readonly string[]) => makeArray(4, 4, urls.length)),
     };
 });
 
-import { createTexture2DArray, uploadImageToArrayLayer, loadImageToArrayLayer, createTexture2DArrayFromUrls } from "babylon-lite";
+import {
+    createTexture2DArray,
+    createTexture2DArrayFromPixels,
+    updateTexture2DArrayFromPixels,
+    uploadImageToArrayLayer,
+    loadImageToArrayLayer,
+    createTexture2DArrayFromUrls,
+} from "babylon-lite";
 import {
     RawTexture2DArray,
     UploadImageToTexture2DArrayLayer,
@@ -27,16 +38,27 @@ import {
     CreateTexture2DArrayFromImageUrlsAsync,
 } from "../src/textures/raw-texture-2d-array";
 import { BaseTexture } from "../src/textures/textures";
-import { LiteCompatError } from "../src/error";
+import { AbstractEngine } from "../src/engine/engine";
 
 const createArrayMock = vi.mocked(createTexture2DArray);
+const createFromPixelsMock = vi.mocked(createTexture2DArrayFromPixels);
+const updateFromPixelsMock = vi.mocked(updateTexture2DArrayFromPixels);
 const uploadMock = vi.mocked(uploadImageToArrayLayer);
 const loadMock = vi.mocked(loadImageToArrayLayer);
 const fromUrlsMock = vi.mocked(createTexture2DArrayFromUrls);
 
 const liteEngine = {};
+
+/**
+ * A scene stand-in whose engine borrows the real `AbstractEngine.updateTextureArrayLayerFromImageSource`
+ * implementation, so the image-source helpers are exercised through the same engine
+ * hop Babylon.js takes (helper → engine extension → backend upload).
+ */
 function fakeScene(): { getEngine(): { _lite: object } } {
-    const engine = { _lite: liteEngine };
+    const engine = {
+        _lite: liteEngine,
+        updateTextureArrayLayerFromImageSource: AbstractEngine.prototype.updateTextureArrayLayerFromImageSource,
+    };
     return { getEngine: () => engine };
 }
 
@@ -45,27 +67,78 @@ const fakeSource = {} as ImageBitmap;
 describe("RawTexture2DArray", () => {
     it("is a BaseTexture flagged 2DArray, and allocates an empty Lite array (data = null)", () => {
         createArrayMock.mockClear();
+        createFromPixelsMock.mockClear();
         const tex = new RawTexture2DArray(null, 8, 4, 3, 5, fakeScene() as never, true);
         expect(tex).toBeInstanceOf(BaseTexture);
         expect(tex.getClassName()).toBe("RawTexture2DArray");
         expect(tex.is2DArray).toBe(true);
         expect(tex.format).toBe(5);
         expect(tex.depth).toBe(3);
+        expect(createFromPixelsMock).not.toHaveBeenCalled();
         expect(createArrayMock).toHaveBeenCalledTimes(1);
         const call = createArrayMock.mock.calls[0]!;
         expect([call[1], call[2], call[3]]).toEqual([8, 4, 3]);
         expect(call[4]).toEqual({ mipMaps: true });
     });
 
-    it("throws for the raw-bytes constructor path (data !== null)", () => {
-        expect(() => new RawTexture2DArray(new Uint8Array(4), 1, 1, 1, 5, fakeScene() as never)).toThrow(LiteCompatError);
+    it("uploads raw multi-layer bytes through Lite's pixel path (data !== null)", () => {
+        createArrayMock.mockClear();
+        createFromPixelsMock.mockClear();
+        const data = new Uint8Array(2 * 2 * 3 * 4).fill(7);
+        const tex = new RawTexture2DArray(data, 2, 2, 3, 5, fakeScene() as never, false);
+        expect(tex.depth).toBe(3);
+        expect(createArrayMock).not.toHaveBeenCalled();
+        expect(createFromPixelsMock).toHaveBeenCalledTimes(1);
+        const call = createFromPixelsMock.mock.calls[0]!;
+        expect(call[0]).toBe(liteEngine);
+        expect(call[1]).toEqual(data);
+        expect([call[2], call[3], call[4]]).toEqual([2, 2, 3]);
+        expect(call[5]).toEqual({ mipMaps: false });
     });
 
-    it("throws on the raw-bytes update / updateMipLevel / CreateRGBATexture helpers", () => {
-        const tex = new RawTexture2DArray(null, 1, 1, 1, 5, fakeScene() as never);
-        expect(() => tex.update(new Uint8Array(4))).toThrow(LiteCompatError);
-        expect(() => tex.updateMipLevel(new Uint8Array(4), 0)).toThrow(LiteCompatError);
-        expect(() => RawTexture2DArray.CreateRGBATexture(new Uint8Array(4), 1, 1, 1, fakeScene() as never)).toThrow(LiteCompatError);
+    it("coerces a non-Uint8Array view and trims to width*height*layers*4", () => {
+        createFromPixelsMock.mockClear();
+        // 2 extra trailing bytes past the 1x1x2 RGBA payload must not be uploaded.
+        const view = new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8, 9, 9]);
+        new RawTexture2DArray(view, 1, 1, 2, 5, fakeScene() as never);
+        expect(Array.from(createFromPixelsMock.mock.calls[0]![1])).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    });
+
+    it("update() re-uploads the base mip of every layer", () => {
+        updateFromPixelsMock.mockClear();
+        const tex = new RawTexture2DArray(null, 4, 4, 2, 5, fakeScene() as never);
+        const data = new Uint8Array(4 * 4 * 2 * 4).fill(3);
+        tex.update(data);
+        expect(updateFromPixelsMock).toHaveBeenCalledTimes(1);
+        const call = updateFromPixelsMock.mock.calls[0]!;
+        expect(call[0]).toBe(liteEngine);
+        expect(call[1]).toBe(tex._liteArray);
+        expect(call[2]).toEqual(data);
+        expect(call[3]).toBe(0);
+    });
+
+    it("updateMipLevel() sizes the payload to the requested mip level", () => {
+        updateFromPixelsMock.mockClear();
+        const tex = new RawTexture2DArray(null, 8, 8, 2, 5, fakeScene() as never);
+        // Mip 1 of an 8x8x2 array is 4x4x2 RGBA = 128 bytes.
+        tex.updateMipLevel(new Uint8Array(256).fill(1), 1);
+        const call = updateFromPixelsMock.mock.calls[0]!;
+        expect(call[2].length).toBe(4 * 4 * 2 * 4);
+        expect(call[3]).toBe(1);
+    });
+
+    it("CreateRGBATexture builds an RGBA-format array from raw bytes", () => {
+        createFromPixelsMock.mockClear();
+        const tex = RawTexture2DArray.CreateRGBATexture(new Uint8Array(1 * 1 * 2 * 4), 1, 1, 2, fakeScene() as never);
+        expect(tex).toBeInstanceOf(RawTexture2DArray);
+        expect(tex.format).toBe(5);
+        expect(tex.depth).toBe(2);
+        expect(createFromPixelsMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("exposes the Lite array handle as the internal texture", () => {
+        const tex = new RawTexture2DArray(null, 4, 4, 2, 5, fakeScene() as never);
+        expect(tex.getInternalTexture()).toBe(tex._liteArray);
     });
 
     it("resolves whenReadyAsync immediately", async () => {
@@ -75,7 +148,7 @@ describe("RawTexture2DArray", () => {
 });
 
 describe("UploadImageToTexture2DArrayLayer", () => {
-    it("forwards the source/layer to Lite with BJS default invertY = false", () => {
+    it("forwards the source/layer to Lite via the engine extension, with BJS default invertY = false", () => {
         uploadMock.mockClear();
         const tex = new RawTexture2DArray(null, 4, 4, 2, 5, fakeScene() as never);
         UploadImageToTexture2DArrayLayer(tex, fakeSource, 1);
@@ -93,6 +166,15 @@ describe("UploadImageToTexture2DArrayLayer", () => {
         const tex = new RawTexture2DArray(null, 4, 4, 2, 5, fakeScene() as never);
         UploadImageToTexture2DArrayLayer(tex, fakeSource, 0, { invertY: true, premultiplyAlpha: true });
         expect(uploadMock.mock.calls[0]![4]).toEqual({ invertY: true, premultiplyAlpha: true });
+    });
+
+    it("rejects out-of-range / non-integer layers like Babylon.js", () => {
+        uploadMock.mockClear();
+        const tex = new RawTexture2DArray(null, 4, 4, 2, 5, fakeScene() as never);
+        expect(() => UploadImageToTexture2DArrayLayer(tex, fakeSource, 2)).toThrow(/out of range/);
+        expect(() => UploadImageToTexture2DArrayLayer(tex, fakeSource, -1)).toThrow(/out of range/);
+        expect(() => UploadImageToTexture2DArrayLayer(tex, fakeSource, 1.5)).toThrow(/out of range/);
+        expect(uploadMock).not.toHaveBeenCalled();
     });
 });
 
@@ -117,10 +199,18 @@ describe("CreateTexture2DArrayFromImageUrlsAsync", () => {
         expect(fromUrlsMock).toHaveBeenCalledTimes(1);
         const call = fromUrlsMock.mock.calls[0]!;
         expect(call[1]).toEqual(["a.png", "b.png", "c.png"]);
-        expect(call[2]).toEqual({ mipMaps: false });
+        // Lite's per-layer upload defaults invertY to true; BJS defaults it to false,
+        // so the flag must be passed explicitly rather than left to the Lite default.
+        expect(call[2]).toEqual({ mipMaps: false, invertY: false, premultiplyAlpha: false });
         expect(tex).toBeInstanceOf(RawTexture2DArray);
         expect(tex.depth).toBe(3);
         expect(tex.format).toBe(5);
         expect(tex.getScene()).toBeDefined();
+    });
+
+    it("threads invertY / premultiplyAlpha into the Lite call", async () => {
+        fromUrlsMock.mockClear();
+        await CreateTexture2DArrayFromImageUrlsAsync(fakeScene() as never, ["a.png"], { invertY: true, premultiplyAlpha: true });
+        expect(fromUrlsMock.mock.calls[0]![2]).toEqual({ mipMaps: true, invertY: true, premultiplyAlpha: true });
     });
 });
