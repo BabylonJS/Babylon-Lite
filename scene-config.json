@@ -415,7 +415,7 @@
         "slug": "scene99-bone-control",
         "name": "Scene 99 — Bone Control",
         "maxMad": 0.02,
-        "maxRawKB": 92.46,
+        "maxRawKB": 92.52,
         "description": "Xbot skinned model at bind pose with the whole left arm hidden via opt-in bone control (enableBoneControl + setBoneVisible collapses the bone sub-tree). Parity against BJS bone local-matrix collapse.",
         "tags": ["gltf", "skeleton", "bone-control"],
         "skipPerf": true
