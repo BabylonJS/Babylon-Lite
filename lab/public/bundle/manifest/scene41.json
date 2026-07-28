@@ -1,6 +1,6 @@
 {
-  "rawKB": 92.6,
-  "gzipKB": 37,
+  "rawKB": 92.7,
+  "gzipKB": 37.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene41-generate-mipmaps-CgeJhw5E.js",
@@ -13,5 +13,5 @@
     "scene41-standard-renderable-CHKczKbe.js",
     "scene41.js"
   ],
-  "rawBytes": 94844
+  "rawBytes": 94877
 }

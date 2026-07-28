@@ -1,5 +1,5 @@
 {
-  "rawKB": 92.7,
+  "rawKB": 92.8,
   "gzipKB": 38.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -16,5 +16,5 @@
     "scene254-singlelight-hemispheric-wgsl-Co-BExJe.js",
     "scene254.js"
   ],
-  "rawBytes": 94956
+  "rawBytes": 94988
 }

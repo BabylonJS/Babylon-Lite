@@ -1,3 +1,25 @@
+/**
+ * Runtime (post-boot) mesh building: materializing a mesh's renderable after the scene has already
+ * been built, and serializing those builds against full material-group rebuilds.
+ *
+ * ## Why the exported functions are single letters
+ *
+ * `A`, `B`, `F` and `X` are the module's cross-chunk entry points. This module is only ever reached
+ * through `await import(...)`, so those names survive into the shipped bundle **twice** — once in
+ * this chunk's export list and once in the importing chunk's destructuring — and, unlike the
+ * `_lowerCamel` fields used throughout the codebase, ES module export names are NOT touched by the
+ * Terser property mangler (it rewrites property accesses, not module bindings; see
+ * `terserPropertyManglePlugin` in `scripts/bundle-scenes-core.ts`, `regex: /^_[a-z]/`).
+ *
+ * Descriptive names were measured: they cost 26-35 bytes per scene across every bundle that reaches
+ * this module, which pushed zero-headroom scenes over their ceilings. Hence the initials, with the
+ * real name documented on each function:
+ *
+ * - `A` — **add**: queue one runtime build for a mesh, chained onto the drain's pending work.
+ * - `B` — **build**: start (and lazily install) the runtime build machinery for one mesh.
+ * - `F` — **family**: materialize meshes whose material group has never been built.
+ * - `X` — **exclusive**: serialize a whole-group rebuild against the per-mesh builds.
+ */
 import type { Mesh } from "../mesh/mesh.js";
 import type { MeshGroupBuilder, MeshGroupBuildResult, Renderable } from "../render/renderable.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";

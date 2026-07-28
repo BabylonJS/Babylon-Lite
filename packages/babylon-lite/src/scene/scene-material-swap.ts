@@ -72,11 +72,26 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
         scene._materialEpoch++; // a caster's material UBOs were rebuilt → CSM-style view caches must fully rebuild
     }
     q.length = 0;
+    if (!firstBuilds) {
+        return pending;
+    }
     // Dynamically imported (like `mesh/thin-instance.ts`) so scenes that never introduce a material
     // family at runtime keep `scene-runtime-mesh-build.ts` — and, transitively, `scene-rebuild.ts` —
     // out of their bundle. The build is asynchronous (module fetch, then shader compilation and a
     // full group build), so the mesh becomes visible some frames later rather than in this one.
-    // `F` routes build failures through the scene's runtime-build error hook; this catch only covers
-    // a failure to fetch the chunk itself, which must not surface as an unhandled rejection.
-    return firstBuilds ? import("./scene-runtime-mesh-build.js").then(({ F }) => F(scene, firstBuilds, pending), console.error) : pending;
+    const builds = firstBuilds;
+    return import("./scene-runtime-mesh-build.js").then(
+        ({ F }) => F(scene, builds, pending),
+        (error: unknown) => {
+            // The chunk itself failed to load. Route it the same way a build failure goes — the whole
+            // point of this path is that a mesh must never disappear silently. `_runtimeBuilds` is
+            // installed by the build, so it may not exist yet when the import is what failed.
+            const hooks = scene._runtimeBuilds;
+            if (hooks) {
+                hooks._x(error);
+            } else {
+                console.error(error);
+            }
+        }
+    );
 }

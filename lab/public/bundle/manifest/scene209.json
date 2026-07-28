@@ -1,5 +1,5 @@
 {
-  "rawKB": 54.7,
+  "rawKB": 54.8,
   "gzipKB": 22.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,5 +10,5 @@
     "scene209-standard-renderable-DFmmS3h3.js",
     "scene209.js"
   ],
-  "rawBytes": 56026
+  "rawBytes": 56064
 }

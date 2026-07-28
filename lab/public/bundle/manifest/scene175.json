@@ -1,6 +1,6 @@
 {
-  "rawKB": 94.6,
-  "gzipKB": 38.8,
+  "rawKB": 94.7,
+  "gzipKB": 38.9,
   "ignoredRawKB": 1485.2,
   "runtimeChunks": [
     "scene175-generate-mipmaps-D2YsW0LY.js",
@@ -12,5 +12,5 @@
     "scene175-standard-renderable-XeVoXcLp.js",
     "scene175.js"
   ],
-  "rawBytes": 96903
+  "rawBytes": 96935
 }

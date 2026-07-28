@@ -1,5 +1,5 @@
 {
-  "rawKB": 94.4,
+  "rawKB": 94.5,
   "gzipKB": 39.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -19,5 +19,5 @@
     "scene255-skeleton-fragment-DDKQS8_z.js",
     "scene255.js"
   ],
-  "rawBytes": 96711
+  "rawBytes": 96743
 }

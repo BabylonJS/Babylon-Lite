@@ -1,5 +1,5 @@
 {
-  "rawKB": 60.1,
+  "rawKB": 60.2,
   "gzipKB": 24.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,5 +8,5 @@
     "scene98-standard-renderable-CWwRPX8d.js",
     "scene98.js"
   ],
-  "rawBytes": 61586
+  "rawBytes": 61618
 }

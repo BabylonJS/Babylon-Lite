@@ -1,5 +1,5 @@
 {
-  "rawKB": 97.6,
+  "rawKB": 97.7,
   "gzipKB": 40.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -19,5 +19,5 @@
     "scene219-thin-instance-gpu-Boul_gpr.js",
     "scene219.js"
   ],
-  "rawBytes": 99987
+  "rawBytes": 100033
 }

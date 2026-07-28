@@ -1,5 +1,5 @@
 {
-  "rawKB": 91.5,
+  "rawKB": 91.6,
   "gzipKB": 36.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -12,5 +12,5 @@
     "scene47-standard-renderable-CyFglxEn.js",
     "scene47.js"
   ],
-  "rawBytes": 93719
+  "rawBytes": 93751
 }

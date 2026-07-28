@@ -36,8 +36,7 @@ export function retireGpuResources(engine: EngineContext, retirement: GpuResourc
  *  `onBeforeRender` still fences behind the in-flight frame's submit — `renderFrame` is synchronous,
  *  so the microtask lands after it. If the fence rejects (the device was lost), the batch is left in
  *  `_retiring` for recovery or teardown to claim rather than being run late against rebuilt
- *  resources. */
-export function flushGpuResourceRetirements(engine: EngineContext): void {
+ *  resources. */export function flushGpuResourceRetirements(engine: EngineContext): void {
     const batch = engine._retirements;
     if (!batch) {
         return;
@@ -45,16 +44,18 @@ export function flushGpuResourceRetirements(engine: EngineContext): void {
     engine._retirements = null;
     const inFlight = (engine._retiring ??= []);
     inFlight.push(batch);
-    void Promise.resolve()
-        .then(() => engine._device.queue.onSubmittedWorkDone())
-        .then(() => {
-            const index = inFlight.indexOf(batch);
-            if (index >= 0) {
-                inFlight.splice(index, 1);
-            }
-            runBatch(batch);
-        })
-        .catch(() => undefined);
+    queueMicrotask(() => {
+        void engine._device.queue
+            .onSubmittedWorkDone()
+            .then(() => {
+                const index = inFlight.indexOf(batch);
+                if (index >= 0) {
+                    inFlight.splice(index, 1);
+                }
+                runBatch(batch);
+            })
+            .catch(() => undefined);
+    });
 }
 
 /** @internal Run every outstanding retirement synchronously — both the batch still accumulating and

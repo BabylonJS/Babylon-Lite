@@ -1,5 +1,5 @@
 {
-  "rawKB": 99.1,
+  "rawKB": 99.2,
   "gzipKB": 37.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,5 +9,5 @@
     "scene221-swapchain-overlay-ilhN4El_.js",
     "scene221.js"
   ],
-  "rawBytes": 101505
+  "rawBytes": 101537
 }

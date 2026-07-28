@@ -1,5 +1,5 @@
 {
-  "rawKB": 109.6,
+  "rawKB": 109.7,
   "gzipKB": 43.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -16,5 +16,5 @@
     "scene148-singlelight-hemispheric-wgsl-Dl8TI5wG.js",
     "scene148.js"
   ],
-  "rawBytes": 112265
+  "rawBytes": 112297
 }

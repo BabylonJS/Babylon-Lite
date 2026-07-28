@@ -1,6 +1,6 @@
 {
   "rawKB": 89.1,
-  "gzipKB": 37.5,
+  "gzipKB": 37.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene11-create-skeleton-DHuWcHsz.js",
@@ -18,5 +18,5 @@
     "scene11-skeleton-fragment-DjlpJuLf.js",
     "scene11.js"
   ],
-  "rawBytes": 91216
+  "rawBytes": 91247
 }

@@ -1,6 +1,6 @@
 {
   "rawKB": 70.7,
-  "gzipKB": 28.9,
+  "gzipKB": 29,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene19-clearcoat-fragment-CPsIQniL.js",
@@ -10,5 +10,5 @@
     "scene19-singlelight-hemispheric-wgsl-B2Zus5m2.js",
     "scene19.js"
   ],
-  "rawBytes": 72414
+  "rawBytes": 72446
 }

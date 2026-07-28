@@ -1,10 +1,10 @@
 {
-  "rawKB": 51.7,
+  "rawKB": 51.8,
   "gzipKB": 20.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene25-standard-renderable-CMcnwB4L.js",
     "scene25.js"
   ],
-  "rawBytes": 52971
+  "rawBytes": 53003
 }
