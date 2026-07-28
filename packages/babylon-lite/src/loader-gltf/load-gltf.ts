@@ -2,6 +2,7 @@ import { F32, U32, U16, U8, DV } from "../engine/typed-arrays.js";
 import { BU } from "../engine/gpu-flags.js";
 import type { Mat4 } from "../math/types.js";
 import { computeAabb } from "../math/compute-aabb.js";
+import { mat4Determinant3 } from "../math/mat4-determinant3.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";
 import type { AssetContainer } from "../asset-container.js";
@@ -286,16 +287,7 @@ function assetUsesGltfFeatures(json: any) {
         // with negative 3x3 determinant) may need the negative-winding feature. This mirrors the
         // registry's `hasNegDetNode` predicate so a positive-determinant `matrix` node — extremely
         // common, e.g. TextureSettingsTest — does NOT needlessly pull the feature registry.
-        (json.nodes as any[] | undefined)?.some((n: any) =>
-            n.scale
-                ? n.scale[0] * n.scale[1] * n.scale[2] < 0
-                : n.matrix
-                  ? n.matrix[0] * (n.matrix[5] * n.matrix[10] - n.matrix[6] * n.matrix[9]) +
-                        n.matrix[1] * (n.matrix[6] * n.matrix[8] - n.matrix[4] * n.matrix[10]) +
-                        n.matrix[2] * (n.matrix[4] * n.matrix[9] - n.matrix[5] * n.matrix[8]) <
-                    0
-                  : false
-        ) ||
+        (json.nodes as any[] | undefined)?.some((n: any) => (n.scale ? n.scale[0] * n.scale[1] * n.scale[2] < 0 : n.matrix ? mat4Determinant3(n.matrix) < 0 : false)) ||
         // Non-triangle primitive topology (POINTS/LINES/LINE_STRIP/TRIANGLE_STRIP).
         anyPrimitive(json, (p) => p.mode !== undefined && p.mode !== 4) ||
         needsOrmComposite(json)
@@ -638,6 +630,12 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
             // this bundle for non-interleaved scenes). The tight path below is
             // byte-identical to the non-interleaved engine.
             const mesh = m._vb ? (await loadInterleave()).buildInterleavedMesh(engine, m, i, material, meshName) : buildTightGltfMesh(engine, m, material, meshName);
+            // glTF geometry is authored for the negative-determinant space created by the RH→LH
+            // `__root__` flip, so an ordinary glTF mesh has a NEGATIVE world determinant. The
+            // mirrored-mesh opt-in reverses winding for meshes whose CURRENT determinant disagrees
+            // with this. Set here rather than inside a builder so the tight and interleaved paths
+            // are both covered (gltf-share.ts marks its own meshes for the shared-geometry path).
+            mesh._authoredSign = -1;
             await Promise.all(meshFeatures.map((f) => f.applyMesh!(m, mesh, ctx)));
             return mesh;
         })
