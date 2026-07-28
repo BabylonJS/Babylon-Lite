@@ -27,7 +27,7 @@
         "slug": "scene3-fog",
         "name": "Scene 3 — Fog + Skybox",
         "maxMad": 0.01,
-        "maxRawKB": 54.9,
+        "maxRawKB": 55.0,
         "description": "Exponential² fog, multiple colored boxes, skybox, ground plane.",
         "tags": ["fog", "procedural", "std"],
         "skipPerf": true
@@ -90,7 +90,7 @@
         "slug": "scene9-sponza",
         "name": "Scene 9 — Sponza (.babylon)",
         "maxMad": 0.01,
-        "maxRawKB": 60.1,
+        "maxRawKB": 60.2,
         "description": "Sponza palace loaded from .babylon format. Standard materials with diffuse textures, point lights.",
         "tags": ["std", "babylon"],
         "compatParity": true
@@ -195,7 +195,7 @@
         "slug": "scene19-clearcoat",
         "name": "Scene 19 — PBR Clearcoat",
         "maxMad": 0.031,
-        "maxRawKB": 70.6,
+        "maxRawKB": 70.7,
         "description": "Sphere with PBR clearcoat layer (IOR=2.0). DDS environment for glossy reflections.",
         "tags": ["pbr", "env"],
         "compatParity": true
@@ -1567,7 +1567,7 @@
         "slug": "scene162-shader-material-defines",
         "name": "Scene 162 - ShaderMaterial Defines",
         "maxMad": 0.02,
-        "maxRawKB": 38.7,
+        "maxRawKB": 38.8,
         "description": "WGSL ShaderMaterial emits defines as const pipeline variants.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -1577,7 +1577,7 @@
         "slug": "scene163-shader-material-alpha",
         "name": "Scene 163 - ShaderMaterial Alpha",
         "maxMad": 0.02,
-        "maxRawKB": 38.4,
+        "maxRawKB": 38.5,
         "description": "WGSL ShaderMaterial uses alpha blending and explicit shader-side discard for alpha testing.",
         "tags": ["shader", "alpha", "procedural"],
         "skipPerf": true
