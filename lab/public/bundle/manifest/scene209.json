@@ -1,5 +1,5 @@
 {
-  "rawKB": 54.4,
+  "rawKB": 54.5,
   "gzipKB": 22.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,5 +10,5 @@
     "scene209-standard-renderable-xpp8iiFV.js",
     "scene209.js"
   ],
-  "rawBytes": 55671
+  "rawBytes": 55837
 }

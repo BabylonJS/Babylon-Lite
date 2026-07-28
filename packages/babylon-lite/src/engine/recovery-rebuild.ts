@@ -81,6 +81,7 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
             return;
         }
         meshes.r = scene._runtimeBuilds?.base(build, result.rebuildSingle) ?? result.rebuildSingle;
+        meshes.o = result.renderables;
         scene._renderables.push(...result.renderables);
         if (result.updater) {
             scene._uniformUpdaters.push(result.updater);

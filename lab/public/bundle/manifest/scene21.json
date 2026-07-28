@@ -1,5 +1,5 @@
 {
-  "rawKB": 85.6,
+  "rawKB": 85.7,
   "gzipKB": 35.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -14,5 +14,5 @@
     "scene21-sheen-fragment-C8hk8gou.js",
     "scene21.js"
   ],
-  "rawBytes": 87626
+  "rawBytes": 87790
 }

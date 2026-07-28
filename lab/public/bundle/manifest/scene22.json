@@ -1,6 +1,6 @@
 {
-  "rawKB": 97.7,
-  "gzipKB": 39.5,
+  "rawKB": 97.9,
+  "gzipKB": 39.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene22-esm-shadow-view-BpdnPOo5.js",
@@ -17,5 +17,5 @@
     "scene22-standard-renderable--Wd3wjFx.js",
     "scene22.js"
   ],
-  "rawBytes": 100043
+  "rawBytes": 100208
 }

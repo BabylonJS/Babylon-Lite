@@ -1,5 +1,5 @@
 {
-  "rawKB": 89.7,
+  "rawKB": 89.8,
   "gzipKB": 36.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -14,5 +14,5 @@
     "scene26-subsurface-fragment-5spzwJYM.js",
     "scene26.js"
   ],
-  "rawBytes": 91834
+  "rawBytes": 91999
 }
