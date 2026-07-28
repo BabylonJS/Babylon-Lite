@@ -10,9 +10,20 @@ export type ObserverCallback<T> = (eventData: T) => void;
 
 export class Observable<T> {
     private _observers: ObserverCallback<T>[] = [];
+    private _hasNotified = false;
+    private _lastNotifiedValue: T | undefined;
+
+    public constructor(
+        private _onObserverAdded?: (observer: ObserverCallback<T>) => void,
+        public notifyIfTriggered = false
+    ) {}
 
     public add(callback: ObserverCallback<T>): ObserverCallback<T> {
         this._observers.push(callback);
+        this._onObserverAdded?.(callback);
+        if (this._hasNotified && this.notifyIfTriggered && this._lastNotifiedValue !== undefined) {
+            callback(this._lastNotifiedValue);
+        }
         return callback;
     }
 
@@ -21,8 +32,7 @@ export class Observable<T> {
             this.removeCallback(wrapper);
             callback(eventData);
         };
-        this._observers.push(wrapper);
-        return wrapper;
+        return this.add(wrapper);
     }
 
     public remove(callback: ObserverCallback<T> | null | undefined): boolean {
@@ -39,6 +49,10 @@ export class Observable<T> {
     }
 
     public notifyObservers(eventData?: T): void {
+        if (this.notifyIfTriggered) {
+            this._hasNotified = true;
+            this._lastNotifiedValue = eventData;
+        }
         // Iterate a copy so observers can add/remove during notification.
         for (const observer of this._observers.slice()) {
             observer(eventData as T);
@@ -51,5 +65,12 @@ export class Observable<T> {
 
     public clear(): void {
         this._observers = [];
+        this._onObserverAdded = undefined;
+        this.cleanLastNotifiedState();
+    }
+
+    public cleanLastNotifiedState(): void {
+        this._hasNotified = false;
+        this._lastNotifiedValue = undefined;
     }
 }

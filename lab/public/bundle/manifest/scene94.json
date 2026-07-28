@@ -1,11 +1,11 @@
 {
-  "rawKB": 63.9,
-  "gzipKB": 25.4,
+  "rawKB": 63.4,
+  "gzipKB": 25.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene94-billboard-renderable-DAF457dT.js",
-    "scene94-standard-renderable-5xIAR14w.js",
+    "scene94-standard-renderable-CH2iJ5Rr.js",
     "scene94.js"
   ],
-  "rawBytes": 65438
+  "rawBytes": 64876
 }

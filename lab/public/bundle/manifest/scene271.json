@@ -1,14 +1,14 @@
 {
-  "rawKB": 70.3,
-  "rawBytes": 72036,
-  "gzipKB": 27.5,
+  "rawKB": 68.4,
+  "rawBytes": 70011,
+  "gzipKB": 27,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene271-material-view-Dua1bl7W.js",
-    "scene271-no-color-view-z4x3oixz.js",
-    "scene271-scene-runtime-mesh-build-Bt1ptJn_.js",
+    "scene271-no-color-view-hPRUPSiZ.js",
+    "scene271-scene-runtime-mesh-build-DVPU22Bh.js",
     "scene271-shadow-task-27m5gE6W.js",
-    "scene271-standard-renderable-CXE8Hsh-.js",
+    "scene271-standard-renderable-ooQ5DSu9.js",
     "scene271-std-shadow-fragment-pwyXRo4i.js",
     "scene271.js"
   ]

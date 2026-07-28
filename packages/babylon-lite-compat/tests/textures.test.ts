@@ -1,6 +1,49 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resolveKtxUrl, CubeTexture, HDRCubeTexture } from "../src/textures/textures";
+const liteMocks = vi.hoisted(() => ({
+    loadTexture2D: vi.fn(),
+    loadBasisTexture2D: vi.fn(),
+    loadKtxTexture2D: vi.fn(),
+    createTexture2DFromPixels: vi.fn(),
+    updateTexture2DFromPixels: vi.fn(),
+    createTexture3DFromPixels: vi.fn(),
+    createDynamicTexture: vi.fn(),
+    updateDynamicTexture: vi.fn(),
+}));
+
+vi.mock("babylon-lite", () => liteMocks);
+
+import { resolveKtxUrl, CubeTexture, HDRCubeTexture, Texture } from "../src/textures/textures";
+
+type Deferred<T> = {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (error: unknown) => void;
+};
+
+function deferred<T>(): Deferred<T> {
+    let resolve!: (value: T) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return { promise, resolve, reject };
+}
+
+function engineWrapper(): { _lite: object } {
+    return { _lite: {} };
+}
+
+function textureHandle(): unknown {
+    return { id: "texture" };
+}
+
+beforeEach(() => {
+    for (const mock of Object.values(liteMocks)) {
+        mock.mockReset();
+    }
+});
 
 /**
  * `resolveKtxUrl` recognises a pre-resolved compressed `.ktx` URL (the single
@@ -26,6 +69,91 @@ describe("resolveKtxUrl", () => {
         expect(resolveKtxUrl("https://h/UVgrid.png")).toBeNull();
         expect(resolveKtxUrl("https://h/UVgrid.ktx")).toBeNull(); // no recognised format suffix
         expect(resolveKtxUrl("https://h/model.basis")).toBeNull();
+    });
+});
+
+describe("Texture onLoadObservable", () => {
+    it("does not allocate the observable when nobody subscribes", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+
+        const tex = new Texture("https://h/albedo.png", engineWrapper());
+        expect((tex as unknown as { _onLoadObservable?: unknown })._onLoadObservable).toBeUndefined();
+
+        load.resolve(textureHandle());
+        await tex.whenReadyAsync();
+
+        expect(tex.isReady()).toBe(true);
+        expect((tex as unknown as { _onLoadObservable?: unknown })._onLoadObservable).toBeUndefined();
+    });
+
+    it("fires once with the constructor onLoad callback and whenReadyAsync", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+        let onLoadCalls = 0;
+        let observerCalls = 0;
+        const events: string[] = [];
+
+        const tex = new Texture("https://h/albedo.png", engineWrapper(), undefined, undefined, undefined, () => {
+            events.push("onLoad");
+            onLoadCalls++;
+        });
+        tex.onLoadObservable.add((observed) => {
+            events.push("observable");
+            observerCalls++;
+            expect(observed).toBe(tex);
+        });
+
+        load.resolve(textureHandle());
+        await tex.whenReadyAsync();
+
+        expect(tex.isReady()).toBe(true);
+        expect(onLoadCalls).toBe(1);
+        expect(observerCalls).toBe(1);
+        expect(events).toEqual(["observable", "onLoad"]);
+    });
+
+    it("fires immediately for subscribers attached after the texture is ready", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+        const tex = new Texture("https://h/albedo.png", engineWrapper());
+
+        load.resolve(textureHandle());
+        await tex.whenReadyAsync();
+
+        let addCalls = 0;
+        let addOnceCalls = 0;
+        tex.onLoadObservable.add((observed) => {
+            addCalls++;
+            expect(observed).toBe(tex);
+        });
+        tex.onLoadObservable.addOnce((observed) => {
+            addOnceCalls++;
+            expect(observed).toBe(tex);
+        });
+
+        expect(addCalls).toBe(1);
+        expect(addOnceCalls).toBe(1);
+    });
+
+    it("does not double-fire when a constructor onLoad callback subscribes", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+        let observerCalls = 0;
+        const state: { tex?: Texture } = {};
+
+        const tex = new Texture("https://h/albedo.png", engineWrapper(), undefined, undefined, undefined, () => {
+            state.tex!.onLoadObservable.add((observed) => {
+                observerCalls++;
+                expect(observed).toBe(state.tex);
+            });
+        });
+        state.tex = tex;
+
+        load.resolve(textureHandle());
+        await tex.whenReadyAsync();
+
+        expect(observerCalls).toBe(1);
     });
 });
 
