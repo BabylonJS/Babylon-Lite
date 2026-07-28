@@ -70,4 +70,19 @@ describe("compat engine startup ordering", () => {
 
         expect(registered).toHaveBeenCalledOnce();
     });
+
+    // Late work is best-effort: a rejection must not poison `_startPromise`, which
+    // `runRenderLoop` only ever consumes with `void this._start()`.
+    it("does not fail startup when late work rejects", async () => {
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        startEngineMock.mockResolvedValue();
+        const engine = makeEngine();
+        engine._registerLateWork(async () => {
+            throw new Error("utility layer blew up");
+        });
+
+        await expect(engine._start()).resolves.toBeUndefined();
+        expect(error).toHaveBeenCalledWith(expect.stringContaining("utility layer blew up"));
+        error.mockRestore();
+    });
 });

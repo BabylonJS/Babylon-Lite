@@ -580,12 +580,21 @@ export class Scene extends AbstractScene {
             return await getBrdfLutUrl();
         }
         // Compat `Texture` records its source URL as `name`; `CubeTexture`-likes expose `url`.
-        const url = (override as unknown as { url?: string }).url ?? override.name;
+        // Procedural textures (`RawTexture`, `DynamicTexture`) have no source at all and leave
+        // `name` empty, which would otherwise resolve to a fetch of the page itself.
+        const url = ((override as unknown as { url?: string }).url ?? override.name).trim();
+        if (!url) {
+            Logger.Warn(
+                `scene.environmentBRDFTexture: the assigned ${override.getClassName()} has no source URL, so the built-in LUT is used instead. ` +
+                    `Assign a \`Texture\` created from a URL to override it.`
+            );
+            return await getBrdfLutUrl();
+        }
         // Babylon.js also publishes `.dds` LUTs, but Babylon Lite decodes the BRDF LUT with
         // `createImageBitmap`, which cannot read DDS. Warn and keep the built-in LUT rather
         // than failing engine startup — the default is the same correlated-MS variant most
         // apps select anyway, so the scene still renders correctly.
-        if (url.toLowerCase().endsWith(".dds")) {
+        if (url.split(/[?#]/)[0]!.toLowerCase().endsWith(".dds")) {
             Logger.Warn(
                 `scene.environmentBRDFTexture '${url}': Babylon Lite decodes the BRDF LUT from an RGBD-encoded PNG and cannot read DDS, ` +
                     `so the built-in LUT is used instead. Use the PNG variant (e.g. https://assets.babylonjs.com/environments/correlatedMSBRDF_RGBD.png) to silence this.`

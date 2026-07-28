@@ -76,6 +76,34 @@ describe("compat scene environment", () => {
         warn.mockRestore();
     });
 
+    it("detects a DDS BRDF texture through a query string", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const scene = new Scene(new NullEngine());
+        scene.createDefaultEnvironment({ createSkybox: false, createGround: false });
+        scene.environmentBRDFTexture = { name: "https://cdn.example.com/correlatedMSBRDF.dds?v=2#lut" } as never;
+
+        await scene._loadPendingEnvironment();
+
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("cannot read DDS"));
+        expect(loadEnvironmentMock).toHaveBeenCalledWith(scene._lite, expect.any(String), expect.objectContaining({ brdfUrl: BRDF_LUT_DATA_URL }));
+        warn.mockRestore();
+    });
+
+    // A procedural texture (`RawTexture`, `DynamicTexture`) has no source URL, and its empty
+    // `name` would otherwise resolve to a fetch of the page itself.
+    it("falls back to the built-in LUT, with a warning, for a texture with no source URL", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const scene = new Scene(new NullEngine());
+        scene.createDefaultEnvironment({ createSkybox: false, createGround: false });
+        scene.environmentBRDFTexture = { name: "  ", getClassName: () => "RawTexture" } as never;
+
+        await scene._loadPendingEnvironment();
+
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("RawTexture has no source URL"));
+        expect(loadEnvironmentMock).toHaveBeenCalledWith(scene._lite, expect.any(String), expect.objectContaining({ brdfUrl: BRDF_LUT_DATA_URL }));
+        warn.mockRestore();
+    });
+
     it("defaults environmentBRDFTexture to null", () => {
         expect(new Scene(new NullEngine()).environmentBRDFTexture).toBeNull();
     });

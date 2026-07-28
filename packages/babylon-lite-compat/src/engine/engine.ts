@@ -41,6 +41,15 @@ import { Logger } from "../misc/misc-utils.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
 
+/**
+ * Late work (utility-layer registration) is best-effort: it must never fail engine startup, and it
+ * runs from two places — folded into `_startCore` when registered before startup completes, and
+ * immediately after. Both report failures the same way so a rejection can never escape unattributed.
+ */
+function reportLateWorkFailure(error: unknown): void {
+    Logger.Error(`Late engine work failed: ${error instanceof Error ? error.message : String(error)}`);
+}
+
 export abstract class AbstractEngine {
     /**
      * Babylon.js `AbstractEngine.Version` — reports the underlying Babylon Lite
@@ -270,7 +279,7 @@ export abstract class AbstractEngine {
             // There is no startup promise left to fold this into. Surface a rejection through the
             // logger rather than letting it escape as an unhandled rejection, which is hard to
             // attribute back to the registering feature.
-            void work().catch((error: unknown) => Logger.Error(`Late engine work failed: ${error instanceof Error ? error.message : String(error)}`));
+            void work().catch(reportLateWorkFailure);
             return;
         }
         this._lateWork.push(work);
@@ -411,8 +420,11 @@ export abstract class AbstractEngine {
         await startEngine(this._lite);
         this._startupComplete = true;
         // Late work now runs after the main render loop has started.
+        // Late work is explicitly allowed to fail without taking startup with it: a rejection here
+        // would otherwise poison `_startPromise` forever and resurface as an unhandled rejection
+        // from `runRenderLoop`, which only does `void this._start()`.
         if (this._lateWork.length > 0) {
-            await Promise.all(this._lateWork.map((w) => w()));
+            await Promise.all(this._lateWork.map((w) => w().catch(reportLateWorkFailure)));
             this._lateWork.length = 0;
         }
     }
