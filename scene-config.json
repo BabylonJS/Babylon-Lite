@@ -2323,5 +2323,26 @@
         "description": "Two rows of identical boxes receding in depth under an orthographic projection. Validates the opt-in orthographic camera seam: reverse-Z OrthoOffCenterLH matrix (near→1, far→0) and the aspect-derived horizontal extent, against Babylon's Camera.ORTHOGRAPHIC_CAMERA.",
         "tags": ["camera", "standard", "procedural"],
         "skipPerf": true
+    },
+    {
+        "id": 269,
+        "slug": "scene269-setparent-mirrored-root",
+        "name": "Scene 269 — setParent Mirrored Root",
+        "maxMad": 0.45,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 89.5,
+        "description": "glTF Node_NegativeScale_01 exercised through setParent(): the loader root (mirrored by the RH→LH flip) and a `matrix`-declared node are each reparented onto a fresh transform node that is then moved, plus a PBR box mirrored at runtime. Covers signed decomposition (forum topic 63859), matrix-backed reparenting, and runtime winding re-resolution.",
+        "tags": ["gltf", "transform"],
+        "skipPerf": true
+    },
+    {
+        "id": 270,
+        "slug": "scene270-mirrored-standard-meshes",
+        "name": "Scene 270 — Mirrored Standard Meshes",
+        "maxMad": 0.1,
+        "maxRawKB": 51,
+        "description": "Four StandardMaterial boxes: not mirrored, mirrored before build, mirrored at runtime, and mirrored by an ancestor at runtime. Validates triangle-winding reversal on the Standard pipeline (which previously had none) and runtime re-resolution when a transform's determinant sign flips.",
+        "tags": ["standard", "transform", "procedural"],
+        "skipPerf": true
     }
 ]
