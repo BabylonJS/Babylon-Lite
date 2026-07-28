@@ -1,10 +1,10 @@
 {
   "rawKB": 47.5,
-  "gzipKB": 19,
+  "gzipKB": 19.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene15-standard-renderable-rPw2aEm-.js",
     "scene15.js"
   ],
-  "rawBytes": 48608
+  "rawBytes": 48595
 }

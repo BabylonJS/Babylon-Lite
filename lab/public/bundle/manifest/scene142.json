@@ -1,10 +1,10 @@
 {
-  "rawKB": 60.7,
-  "gzipKB": 22.9,
+  "rawKB": 60.6,
+  "gzipKB": 22.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene142-standard-renderable-ZLnQhHRL.js",
     "scene142.js"
   ],
-  "rawBytes": 62125
+  "rawBytes": 62105
 }

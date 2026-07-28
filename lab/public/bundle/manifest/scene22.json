@@ -1,5 +1,5 @@
 {
-  "rawKB": 97.9,
+  "rawKB": 97.8,
   "gzipKB": 39.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -17,5 +17,5 @@
     "scene22-standard-renderable--Wd3wjFx.js",
     "scene22.js"
   ],
-  "rawBytes": 100208
+  "rawBytes": 100194
 }

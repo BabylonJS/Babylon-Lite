@@ -1,5 +1,5 @@
 {
-  "rawKB": 43.4,
+  "rawKB": 43.3,
   "gzipKB": 25,
   "ignoredRawKB": 27.6,
   "runtimeChunks": [
@@ -22,5 +22,5 @@
     "scene263-vec3-ref-BQ9hm9R5.js",
     "scene263.js"
   ],
-  "rawBytes": 44405
+  "rawBytes": 44374
 }
