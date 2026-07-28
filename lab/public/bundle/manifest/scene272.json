@@ -1,0 +1,12 @@
+{
+  "rawKB": 59.6,
+  "rawBytes": 60994,
+  "gzipKB": 24,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene272-scene-runtime-mesh-build-GRCn418V.js",
+    "scene272-shader-composer-qxmZVcOJ.js",
+    "scene272-standard-renderable-CrBq28ol.js",
+    "scene272.js"
+  ]
+}

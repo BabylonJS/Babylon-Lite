@@ -1,5 +1,5 @@
 {
-  "rawKB": 53.7,
+  "rawKB": 53.8,
   "gzipKB": 21.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -7,5 +7,5 @@
     "scene231-std-skeleton-fragment-BIMTVdV3.js",
     "scene231.js"
   ],
-  "rawBytes": 55039
+  "rawBytes": 55042
 }
