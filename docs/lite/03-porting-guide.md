@@ -264,6 +264,11 @@ It also keeps working when the mirroring changes at runtime: each frame the watc
 meshes whose world matrix actually changed (an integer version compare), computes a determinant for
 those alone, and rebuilds a pipeline only when the sign really flipped.
 
+Only that runtime watcher is scoped to the scene you pass — the pipeline-side winding resolution is
+installed process-wide on the first call, so in a multi-scene app the other scenes also stop
+rendering mirrored meshes inside-out, but they will not track a mirroring that changes after their
+renderables are built unless you call it for them too.
+
 ### 11. Removing & Disposing Entities
 
 BJS uses `mesh.dispose()` on individual objects. Lite uses `removeFromScene()` which removes the mesh from the scene and destroys all its GPU resources (buffers, textures, skeleton data).
