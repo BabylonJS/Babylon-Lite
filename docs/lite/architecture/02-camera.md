@@ -18,8 +18,11 @@ export interface Camera {
     fov: number;
     nearPlane: number;
     farPlane: number;
+    viewport?: NormalizedViewport;
+    children: SceneNode[];
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
+    ortho?: OrthographicBounds | null;
 }
 
 export function getViewMatrix(camera: Camera): Mat4;
@@ -33,7 +36,7 @@ export function getCameraPosition(camera: Camera): Vec3;
 ```typescript
 /** ArcRotateCamera — orbits around a target point.
  *  Uses Babylon.js convention: left-handed, alpha=rotation around Y, beta=elevation.
- *  Plain data + methods. Does NOT know about the scene.
+ *  Plain data. Does NOT know about the scene.
  *
  *  Push-based dirty tracking: alpha/beta/radius use Object.defineProperty,
  *  target uses ObservableVec3. Changes call wm.markLocalDirty() immediately.
@@ -92,7 +95,7 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
 ```typescript
 /** FreeCamera — positioned in world space, looking at a target point.
  *  Matches Babylon.js FreeCamera: position + target, left-handed.
- *  Plain data + methods. Does NOT know about the scene.
+ *  Plain data. Does NOT know about the scene.
  *
  *  Push-based dirty tracking: position and target use ObservableVec3,
  *  _yaw/_pitch use Object.defineProperty. */
