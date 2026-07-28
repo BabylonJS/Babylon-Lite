@@ -1,6 +1,6 @@
 {
   "rawKB": 103.7,
-  "gzipKB": 43,
+  "gzipKB": 43.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene30-alpha-test-fragment-B7zfvtRz.js",
@@ -22,5 +22,5 @@
     "scene30-uv-transform-fragment-B8ijWmAK.js",
     "scene30.js"
   ],
-  "rawBytes": 106142
+  "rawBytes": 106202
 }
