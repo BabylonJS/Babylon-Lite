@@ -1,23 +1,23 @@
 {
-  "rawKB": 141.9,
-  "gzipKB": 57.7,
+  "rawKB": 141.5,
+  "gzipKB": 57.5,
   "ignoredRawKB": 3.3,
   "runtimeChunks": [
     "scene73-_math-factory-C7IfuSt9.js",
     "scene73-clearcoat-block-BPLkmxQ1.js",
-    "scene73-clearcoat-fragment-BTUHxM0Y.js",
+    "scene73-clearcoat-fragment-B4Nd9bAs.js",
     "scene73-color-splitter-lxr8PeYi.js",
     "scene73-fragment-output-CfRmfbPv.js",
     "scene73-generate-mipmaps-CJGADMtK.js",
     "scene73-gltf-ext-clearcoat-BgaLgSgD.js",
-    "scene73-gltf-feature-registry-Q7PQf74Q.js",
+    "scene73-gltf-feature-registry-CxcAHYGZ.js",
     "scene73-gltf-glb-parser-CzK8F7CW.js",
     "scene73-ibl-fragment-CeRrvT96.js",
     "scene73-input-block-CDf7C7a2.js",
     "scene73-node-env-BKUuQX2w.js",
     "scene73-node-renderable-KxpNMtGy.js",
     "scene73-pbr-metallic-roughness-block-full-CUhffh-6.js",
-    "scene73-pbr-renderable-QTjZk8RS.js",
+    "scene73-pbr-renderable-vmb7kaPk.js",
     "scene73-perturb-normal-Bqx-TYaB.js",
     "scene73-reflection-block-CIXuH-z0.js",
     "scene73-rgbd-decode-BSh_ziDi.js",
@@ -27,5 +27,5 @@
     "scene73-vertex-output-C7G5u6Y0.js",
     "scene73.js"
   ],
-  "rawBytes": 145325
+  "rawBytes": 144875
 }

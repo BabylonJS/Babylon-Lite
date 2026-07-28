@@ -1,20 +1,20 @@
 {
-  "rawKB": 82.9,
-  "gzipKB": 34.1,
+  "rawKB": 82.5,
+  "gzipKB": 33.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene27-generate-mipmaps-BYzB1g85.js",
+    "scene27-generate-mipmaps-DajduvTz.js",
     "scene27-gltf-ext-dielectric-C6hvXXiF.js",
-    "scene27-gltf-feature-registry-D29ST9XZ.js",
-    "scene27-gltf-feature-variants-iIAQmf6C.js",
+    "scene27-gltf-feature-registry-yAILeJY4.js",
+    "scene27-gltf-feature-variants-02wts4Qq.js",
     "scene27-gltf-glb-parser-DJVUqR7n.js",
-    "scene27-gltf-pbr-builder-ext-ws3zROCS.js",
-    "scene27-gltf-variants-CUrk4X5k.js",
-    "scene27-pbr-renderable-CMUSyJ4J.js",
-    "scene27-reflectance-fragment-BCUsDb7K.js",
-    "scene27-singlelight-hemispheric-wgsl-CY3dPlaq.js",
+    "scene27-gltf-pbr-builder-ext-CJZZOk7m.js",
+    "scene27-gltf-variants-CSluq-D_.js",
+    "scene27-pbr-renderable-DnAOS8jU.js",
+    "scene27-reflectance-fragment-D1I3peJK.js",
+    "scene27-singlelight-hemispheric-wgsl-DXZfFHGp.js",
     "scene27-texture-2d-DQo3n8D6.js",
     "scene27.js"
   ],
-  "rawBytes": 84939
+  "rawBytes": 84475
 }
