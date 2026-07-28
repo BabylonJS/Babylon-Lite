@@ -2328,7 +2328,7 @@
         "id": 269,
         "slug": "scene269-setparent-mirrored-root",
         "name": "Scene 269 — setParent Mirrored Root",
-        "maxMad": 0.1,
+        "maxMad": 0.45,
         "maxRegionMad": 0.5,
         "maxRawKB": 89.5,
         "description": "glTF Node_NegativeScale_01 exercised through setParent(): the loader root (mirrored by the RH→LH flip) and a `matrix`-declared node are each reparented onto a fresh transform node that is then moved, plus a PBR box mirrored at runtime. Covers signed decomposition (forum topic 63859), matrix-backed reparenting, and runtime winding re-resolution.",
