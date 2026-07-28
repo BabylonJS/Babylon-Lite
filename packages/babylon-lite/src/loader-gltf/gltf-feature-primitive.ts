@@ -6,6 +6,7 @@
  *  culling). The common triangle-list positive-winding case never loads this module, so the core
  *  loader + pipeline chunks stay byte-identical. */
 import "../material/pbr/pbr-primitive-resolver.js";
+import { mat4Determinant3 } from "../math/mat4-determinant3.js";
 import type { GltfFeature } from "./gltf-feature.js";
 
 const feature: GltfFeature = {
@@ -22,8 +23,7 @@ const feature: GltfFeature = {
         // reversed triangle winding; flag it so the pipeline culls "front" (matching BJS, which flips
         // sideOrientation on negative determinant). Normal meshes have a negative world determinant.
         const wm = meshData._worldMatrix as unknown as ArrayLike<number>;
-        const det3 = wm[0]! * (wm[5]! * wm[10]! - wm[6]! * wm[9]!) + wm[1]! * (wm[6]! * wm[8]! - wm[4]! * wm[10]!) + wm[2]! * (wm[4]! * wm[9]! - wm[5]! * wm[8]!);
-        if (det3 > 0) {
+        if (mat4Determinant3(wm) > 0) {
             (mesh as { _reverseWinding?: boolean })._reverseWinding = true;
         }
     },
