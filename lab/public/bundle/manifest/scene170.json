@@ -1,5 +1,5 @@
 {
-  "rawKB": 51.3,
+  "rawKB": 51.2,
   "gzipKB": 20.5,
   "ignoredRawKB": 1485.2,
   "runtimeChunks": [
@@ -7,5 +7,5 @@
     "scene170-standard-renderable-DwB4suLI.js",
     "scene170.js"
   ],
-  "rawBytes": 52530
+  "rawBytes": 52438
 }

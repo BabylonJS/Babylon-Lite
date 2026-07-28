@@ -1,6 +1,6 @@
 {
-  "rawKB": 43.3,
-  "gzipKB": 25,
+  "rawKB": 43.8,
+  "gzipKB": 25.2,
   "ignoredRawKB": 27.6,
   "runtimeChunks": [
     "scene263-billboard-renderable-CyTArMwM.js",
@@ -22,5 +22,5 @@
     "scene263-vec3-ref-BQ9hm9R5.js",
     "scene263.js"
   ],
-  "rawBytes": 44374
+  "rawBytes": 44872
 }

@@ -46,22 +46,34 @@ describe("scene material swap", () => {
         expect(retirements).toHaveLength(1);
     });
 
-    it("skips a queued mesh until its material group exposes a rebuild closure", () => {
+    it("hands a queued mesh whose material group was never built to the runtime build path", async () => {
         const disposeOld = vi.fn();
         const mesh = {
             material: { _buildGroup: {} },
         } as unknown as Mesh;
         const scene = {
             surface: { engine: { _retirements: [] } },
-            _materialSwapQueue: [mesh],
+            // Empty: the mesh's material family has no group at all, which is what happens when
+            // `mesh.material` is reassigned to a brand-new family (the setter only enqueues).
             _groups: new Map(),
+            // `B()` bails out on a mesh the scene does not own, which keeps this unit test to the
+            // dispatch decision rather than a full group build.
+            meshes: [],
+            _materialSwapQueue: [mesh],
             _meshDisposables: new Map([[mesh, [disposeOld]]]),
             _renderables: [],
             _renderableVersion: 0,
             _materialEpoch: 0,
         } as unknown as SceneContext;
 
-        expect(() => processMaterialSwaps(scene)).not.toThrow();
+        // Previously this mesh was silently discarded when the queue was cleared — no renderable, no
+        // error. It is now routed to the runtime build path instead.
+        const pending = processMaterialSwaps(scene);
+        expect(pending).toBeInstanceOf(Promise);
+        await pending;
+
+        // The in-place rebuild path must not have run: no renderable was replaced, so the old
+        // resources are still live and the caches must not be invalidated.
         expect(disposeOld).not.toHaveBeenCalled();
         expect(scene._materialSwapQueue).toHaveLength(0);
         expect(scene._renderableVersion).toBe(0);

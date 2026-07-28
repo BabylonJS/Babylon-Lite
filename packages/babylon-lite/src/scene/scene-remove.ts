@@ -10,6 +10,7 @@ import type { AssetContainer } from "../asset-container.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { removeMeshFromTask } from "../frame-graph/render-task.js";
 import type { RenderTask } from "../frame-graph/render-task.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 /** Remove an entity from the scene, undoing what `addToScene` did. Accepts the same
  *  union as {@link addToScene}: a Mesh, light, camera, shadow generator, transform node,
@@ -91,6 +92,67 @@ export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | 
 type _ParamsEqual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type _AssertTrue<T extends true> = T;
 declare const _removeMatchesAdd: _AssertTrue<_ParamsEqual<Parameters<typeof addToScene>, Parameters<typeof removeFromScene>>>;
+
+/** A merged (multi-mesh) renderable's draw packet, reachable from the per-mesh disposer that owns it.
+ *  Mirrors the shape `material/shader/shader-renderable.ts` attaches and `scene-runtime-mesh-build.ts`
+ *  detaches — kept as a local structural type so this module pulls in neither. */
+interface DetachablePacket {
+    _disposed: boolean;
+    _owner?: DetachablePacket[];
+}
+type DetachableDisposer = (() => void) & { p?: DetachablePacket };
+
+/** Retire a mesh's GPU teardown, but take its DRAW-VISIBILITY bookkeeping out synchronously first.
+ *
+ *  A renderable that merges several meshes sharing one material has `mesh: undefined`, so the
+ *  synchronous `_renderables` sweep in `removeMeshFromScene` cannot find it. Its packet keeps being
+ *  drawn while `_disposed` is false, so deferring the whole disposer would leave a removed mesh
+ *  visible until the retirement fence resolves — a frame or more later. Marking the packet disposed
+ *  and unlinking it from its owner list is pure CPU bookkeeping and safe to do mid-frame; only the
+ *  actual GPU destruction has to wait. Twin of the detach in `scene-runtime-mesh-build.ts`. */
+function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]): void {
+    for (const dispose of teardown) {
+        const packet = (dispose as DetachableDisposer).p;
+        if (packet) {
+            packet._disposed = true;
+            const owner = packet._owner;
+            if (owner) {
+                const index = owner.indexOf(packet);
+                if (index >= 0) {
+                    owner.splice(index, 1);
+                }
+                packet._owner = undefined;
+            }
+        }
+    }
+    retireSceneGpu(scene, () => {
+        for (const fn of teardown) {
+            fn();
+        }
+    });
+}
+
+/** Run GPU teardown only after the next frame submission has drained.
+ *
+ *  `removeFromScene` is legal from inside `onBeforeRender` — i.e. in the MIDDLE of a frame, before
+ *  the frame graph records and before `queue.submit`. Destroying a texture or buffer there hits the
+ *  WebGPU validation errors "Destroyed texture used in a submit" / "Buffer used in submit while
+ *  destroyed", either via the frame already in flight or, worse, via a renderable rebuilt later in
+ *  the SAME `_update` (a mesh sharing the removed mesh's material re-acquires a texture whose
+ *  GPUTexture is already dead — ref-counting cannot resurrect it).
+ *
+ *  Deferring also restores make-before-break for shared resources: the rebuild re-acquires the
+ *  texture (+1) before this release (-1) lands, so the refcount never dips to zero.
+ *
+ *  Mirrors `retireOld` in `scene-rebuild.ts` and the retirements in `scene-material-swap.ts` — a
+ *  scene already being disposed has no further frame to wait for, so it tears down synchronously. */
+function retireSceneGpu(scene: SceneContext, teardown: () => void): void {
+    if (scene._z) {
+        teardown();
+        return;
+    }
+    retireGpuResources(scene.surface.engine, teardown);
+}
 
 /** Drop a shadow generator from the scene and retire its task resources exactly once.
  *  The disposable render task lives on the lazily-created task state, not the generator
@@ -222,11 +284,13 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     // version bump so a no-op removal (mesh never registered) doesn't needlessly
     // invalidate the cached opaque bundle.
     let didMutate = false;
+    // GPU teardown collected here and retired as ONE closure after the next frame submit (see
+    // `retireSceneGpu`). The map entries are still dropped synchronously, so a rebuild later in this
+    // same frame installs fresh disposables without racing these.
+    const teardown: (() => void)[] = [];
     if (fns) {
         didMutate = true;
-        for (const fn of fns) {
-            fn();
-        }
+        teardown.push(...fns);
         scene._meshDisposables.delete(mesh);
     }
     // AUX (override) view packets — depth/SSAO no-colour views another task registered on this mesh. A material
@@ -234,9 +298,7 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     const auxFns = scene._meshAuxDisposables.get(mesh);
     if (auxFns) {
         didMutate = true;
-        for (const fn of auxFns) {
-            fn();
-        }
+        teardown.push(...auxFns);
         scene._meshAuxDisposables.delete(mesh);
     }
     const mi2 = scene.meshes.indexOf(mesh);
@@ -290,7 +352,14 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     }
     // Free the mesh's shared GPU buffers only when this was its LAST owning scene — a single
     // `Mesh` may be added to several scenes, and `disposeMeshGpu` destroys buffers they all share.
+    // Ownership is dropped synchronously (so a second removal already sees the mesh unowned), while
+    // the destruction itself is deferred with the rest of the teardown. `disposeMeshGpu` is
+    // idempotent via `mesh._disposed`, so a repeat removal queued before this one drains cannot
+    // release a shared resource twice.
     if (unregisterMeshScene(scene, mesh)) {
-        disposeMeshGpu(mesh);
+        teardown.push(() => disposeMeshGpu(mesh));
+    }
+    if (teardown.length) {
+        retireMeshTeardown(scene, teardown);
     }
 }

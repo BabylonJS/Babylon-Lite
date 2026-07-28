@@ -1,5 +1,5 @@
 {
-  "rawKB": 59.8,
+  "rawKB": 59.7,
   "gzipKB": 24.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -13,5 +13,5 @@
     "scene207-std-shadow-fragment-pwyXRo4i.js",
     "scene207.js"
   ],
-  "rawBytes": 61279
+  "rawBytes": 61174
 }

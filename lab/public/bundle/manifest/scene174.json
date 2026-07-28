@@ -1,5 +1,5 @@
 {
-  "rawKB": 96,
+  "rawKB": 95.9,
   "gzipKB": 39.5,
   "ignoredRawKB": 1485.2,
   "runtimeChunks": [
@@ -12,5 +12,5 @@
     "scene174-standard-renderable-DUNvOMQm.js",
     "scene174.js"
   ],
-  "rawBytes": 98355
+  "rawBytes": 98244
 }

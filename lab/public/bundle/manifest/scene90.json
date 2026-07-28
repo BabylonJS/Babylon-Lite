@@ -1,5 +1,5 @@
 {
-  "rawKB": 58.9,
+  "rawKB": 58.8,
   "gzipKB": 23.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -7,5 +7,5 @@
     "scene90-standard-renderable-BFcsrzjv.js",
     "scene90.js"
   ],
-  "rawBytes": 60350
+  "rawBytes": 60239
 }
