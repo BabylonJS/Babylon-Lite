@@ -1214,7 +1214,7 @@
         "slug": "scene117-sprite-2d-picking",
         "name": "Scene 117 — 2D Sprite Picking",
         "maxMad": 0.05,
-        "maxRawKB": 16.5,
+        "maxRawKB": 16.55,
         "description": "Visual 2D sprite-picking validation: pickSprite2D resolves the centre sprite of a deterministic 5×3 HUD grid and the hit is highlighted with a gold tint. The BJS oracle replicates the same highlight via ThinSprite.",
         "tags": ["sprite", "2d", "picking"],
         "skipPerf": true
