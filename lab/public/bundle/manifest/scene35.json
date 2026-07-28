@@ -5,15 +5,15 @@
   "runtimeChunks": [
     "scene35-generate-mipmaps-ByfC6wwV.js",
     "scene35-gltf-feature-gpu-instancing-B1FUWCvI.js",
-    "scene35-gltf-feature-registry-BlSLjo98.js",
+    "scene35-gltf-feature-registry-CojYk6rM.js",
     "scene35-gltf-glb-parser-CK3Suivb.js",
     "scene35-ibl-fragment-CeRrvT96.js",
-    "scene35-pbr-renderable-DRBQdbiM.js",
+    "scene35-pbr-renderable-SH8_vG5R.js",
     "scene35-rgbd-decode-BRXFAjBk.js",
     "scene35-scene-uniforms-FTYH6Ct0.js",
     "scene35-thin-instance-fragment-CBn2miAC.js",
     "scene35-thin-instance-gpu-CQCO7tJe.js",
     "scene35.js"
   ],
-  "rawBytes": 85792
+  "rawBytes": 85814
 }

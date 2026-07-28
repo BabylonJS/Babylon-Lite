@@ -272,4 +272,29 @@ describe("mesh clone GPU buffer ownership", () => {
         expect(() => disposeMeshGpu(clone)).not.toThrow();
         expect(skel.boneTexture.destroy).toHaveBeenCalledTimes(1);
     });
+
+    it("refuses to clone a disposed mesh instead of pinning its buffers with an unreleasable claim", () => {
+        const gpu: MeshGPU = {
+            positionBuffer: fakeBuffer(),
+            normalBuffer: fakeBuffer(),
+            uvBuffer: fakeBuffer(),
+            indexBuffer: fakeBuffer(),
+            indexCount: 3,
+            indexFormat: "uint16",
+        };
+        const src = makeMesh(gpu);
+        const clone = cloneTransformNode(src) as Mesh;
+
+        // `src` leaves its last scene: its claim is released, the clone keeps the geometry alive.
+        disposeMeshGpu(src);
+        expect(gpu.positionBuffer.destroy).not.toHaveBeenCalled();
+
+        // A clone of `src` could never be added to a scene, so its retained claim would never be
+        // released — the geometry would outlive its last real owner.
+        expect(() => cloneTransformNode(src)).toThrow("was disposed");
+        expect(gpu._refCount).toBe(1);
+
+        disposeMeshGpu(clone);
+        expect(gpu.positionBuffer.destroy).toHaveBeenCalledTimes(1);
+    });
 });
