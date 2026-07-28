@@ -74,11 +74,16 @@ export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => voi
 /** Register a callback to run when `disposeScene(scene)` is called. */
 export function onSceneDispose(scene: SceneContext, cb: () => void): void;
 
-/** Build deferred GPU resources, build the frame graph, and register the scene for rendering. */
+/** Build deferred GPU resources, build the frame graph, and register the scene for rendering.
+ *  Rebuilds the scene first when its light/shadow topology changed since the initial build. */
 export function registerScene(scene: SceneContext): Promise<void>;
 
 /** Remove the scene from the engine render list without disposing scene-owned resources. */
 export function unregisterScene(scene: SceneContext): void;
+
+/** Re-run every material group builder in place so renderables pick up the current light/shadow
+ *  topology. No-op before the initial build. */
+export function rebuildSceneRenderables(scene: SceneContext): Promise<void>;
 
 /** Release all GPU resources owned by this scene. */
 export function disposeScene(scene: SceneContext): void;
@@ -244,6 +249,48 @@ Algorithm:
 8. Set `minZ = radius * 0.01`, `maxZ = radius * 1000`.
 9. Assign `scene.camera = cam`.
 
+## Lifecycle: What Is Baked At Build Time
+
+`registerScene` / `registerSceneWithShadowSupport` run the deferred group builders **once**
+(`_built`); `unregisterScene` only detaches the scene from its surface's render list, so a
+re-registration re-attaches rather than re-builds. What each category costs:
+
+| Change after the initial build                                    | Takes effect                                                                                                            |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Light position / direction / colour / intensity                   | Immediately — the lights UBO is refreshed from `_lightVersion` every frame                                              |
+| **Removing** or swapping a light                                  | Data: next frame (`_lightListVersion` invalidates the UBO). Baked state: rebuilt automatically on the next registration |
+| Removing a shadow generator                                       | Rebuilt automatically on the next registration                                                                          |
+| **Adding** a light, or attaching a generator to an existing light | Data: next frame (the light count changes). Baked state: only via an explicit `rebuildSceneRenderables(scene)`          |
+| `mesh.material = …`                                               | Next frame, via the material-swap drain                                                                                 |
+
+Baked per renderable at build time: the per-mesh light **index** list, the single- vs multi-light
+shader permutation, whether the mesh receives shadows, and the shadow bind group of the generator
+attached to each light. `rebuildSceneRenderables(scene)` re-runs the group builders so all of it is
+recomputed. `removeFromScene` installs a rebuild hook that `buildScene` runs, so a **removal** is
+picked up automatically on the scene's next registration and the natural flow works:
+
+```ts
+unregisterScene(scene);
+removeFromScene(scene, oldLight); // its shadow generator goes with it — arms the rebuild
+addToScene(scene, newLight); // with its own generator
+await registerSceneWithShadowSupport(scene); // rebuilds, then re-attaches
+```
+
+A scene that only **adds** a light to an already-built scene installs no hook (keeping `addToScene`
+free of rebuild bytes for every scene that never mutates topology) — call `rebuildSceneRenderables`
+explicitly in that case.
+
+Removing a shadow generator does **not** free its GPU resources inline: receiver renderables built
+before the removal still bind them, so the teardown is queued on `_pendingTopologyRetirements` and
+drained by an all-family rebuild (after the replacement bind groups exist) or by `disposeScene`. A
+family-scoped rebuild (image processing → PBR only) deliberately never drains it.
+
+Only group-owned renderables are replaced. Feature-owned entries in `_renderables` (skybox, ground,
+HDR backdrop, Gaussian splats) are preserved: each `SceneMeshGroup` records its last build's output
+in `group.o` — a group's meshes can be merged into one combined renderable with no `mesh`
+back-reference, so ownership cannot be recovered by mesh identity. Node materials that captured
+`shadowGenerators` at parse time keep their own references and are out of scope for a topology swap.
+
 ## Babylon.js Equivalence Map
 
 | Babylon Lite                    | Babylon.js                                                        |
@@ -282,6 +329,11 @@ Algorithm:
 | `createDefaultCamera with no meshes`         | radius=1, center=(0,0,0)                                                  |
 | `deferred builders run at buildScene()`      | Register builder → verify called by `buildScene()`                        |
 | `buildScene() awaits async builders`         | Register async builder → verify awaited                                   |
+| `rebuildSceneRenderables no-op pre-build`    | `_built === false` → builders not re-run                                  |
+| `rebuildSceneRenderables preserves features` | Skybox/ground renderables survive; group output replaced                  |
+| `rebuildSceneRenderables regroups meshes`    | Material-swapped mesh rebuilt by its CURRENT family builder               |
+| `rebuild retires old disposers after build`  | Make-before-break ordering; `_meshAuxDisposables` untouched               |
+| `light removal marks topology dirty`         | `_lightListVersion` bumped, rebuild hook installed, teardown deferred     |
 | `addToScene rejects a disposed mesh`         | Remove a sole-owner mesh, re-add it → throws, scene left untouched        |
 | `addToScene rejects a disposed clone`        | Remove a mesh whose clone still owns the geometry, re-add it → throws     |
 | `removeFromScene stays idempotent`           | Remove a clone's source twice → the clone's geometry is never destroyed   |

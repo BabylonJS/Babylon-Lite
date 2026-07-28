@@ -63,7 +63,11 @@ export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | 
         spliceOut(scene.lights, entity as LightBase);
         const sg = (entity as LightBase).shadowGenerator;
         if (sg) {
+            // `disposeShadowGenerator` marks the topology itself — marking here too would bump the light-list
+            // version twice for one removal and trigger a redundant UBO reupload.
             disposeShadowGenerator(scene, sg);
+        } else {
+            markTopologyDirty(scene);
         }
     } else if ("fov" in entity && "nearPlane" in entity) {
         // Camera — clear the scene reference if this camera is the active one.
@@ -88,15 +92,95 @@ type _ParamsEqual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : f
 type _AssertTrue<T extends true> = T;
 declare const _removeMatchesAdd: _AssertTrue<_ParamsEqual<Parameters<typeof addToScene>, Parameters<typeof removeFromScene>>>;
 
-/** Drop a shadow generator from the scene and dispose its task resources exactly once.
+/** Drop a shadow generator from the scene and retire its task resources exactly once.
  *  The disposable render task lives on the lazily-created task state, not the generator
- *  itself; nulling the state afterwards keeps repeat removals a safe no-op. */
+ *  itself; nulling the state afterwards keeps repeat removals a safe no-op.
+ *
+ *  The teardown is DEFERRED, not run inline: receiver renderables built before the removal still
+ *  bind this generator's shadow resources, so they must be replaced by a rebuild first
+ *  (make-before-break). `rebuildSceneRenderables` drains the queue after the new bind groups exist;
+ *  `disposeScene` drains it as a fallback when the app never rebuilds. */
 function disposeShadowGenerator(scene: SceneContext, sg: ShadowGenerator): void {
     spliceOut(scene.shadowGenerators, sg);
-    if (sg._shadowTaskState) {
-        sg._shadowTaskState._task.dispose();
-        sg._shadowTaskState = undefined;
+    // The shadow task discovers generators through `light.shadowGenerator`, not `scene.shadowGenerators`
+    // — a generator removed on its own must be unlinked from its light or it keeps being rendered.
+    const light = sg._light as LightBase | undefined;
+    if (light && light.shadowGenerator === sg) {
+        light.shadowGenerator = undefined;
     }
+    markTopologyDirty(scene);
+    const state = sg._shadowTaskState;
+    if (state) {
+        sg._shadowTaskState = undefined;
+        queueTopologyRetirement(scene, () => state._task.dispose());
+    }
+}
+
+/** Queue GPU teardown that must wait until a rebuild has replaced the bind groups still referencing it.
+ *  The first queued entry also registers the scene-dispose fallback, so an app that never rebuilds does not
+ *  leak the resources — and `disposeScene` itself stays free of any topology-rebuild bytes. */
+function queueTopologyRetirement(scene: SceneContext, retirement: () => void): void {
+    if (!scene._pendingTopologyRetirements) {
+        scene._pendingTopologyRetirements = [];
+        scene._disposables.push(() => drainOnDispose(scene));
+    }
+    scene._pendingTopologyRetirements.push(retirement);
+}
+
+/** Scene-dispose fallback for retirements no rebuild ever drained. Disposing inline would risk
+ *  "used in submit while destroyed" for a frame still in flight, and the engine's per-frame retirement queue
+ *  can no longer help (the scene is already unregistered, so `renderFrame` returns before draining it), so
+ *  wait for the GPU to finish its submitted work first. Falls back to inline when there is no live device. */
+function drainOnDispose(scene: SceneContext): void {
+    const pending = scene._pendingTopologyRetirements?.splice(0);
+    if (!pending?.length) {
+        return;
+    }
+    // Every retirement must run even if one throws: a single failing disposer must not strand the rest (and
+    // must not surface as an unhandled rejection), mirroring how the engine drains its own retirement queue.
+    const run = (): void => {
+        for (const dispose of pending) {
+            try {
+                dispose();
+            } catch {
+                // Best-effort cleanup: the resource may already be gone after device loss.
+            }
+        }
+    };
+    const device = scene.surface.engine._device;
+    if (device) {
+        void device.queue.onSubmittedWorkDone().then(run, run);
+    } else {
+        run();
+    }
+}
+
+/** Flag the scene for a renderable rebuild: the baked light index list, light-count permutation and
+ *  shadow bind groups no longer match the scene's lights.
+ *
+ *  Bumps the light-list version so the lights UBO reuploads even when a light was SWAPPED for another
+ *  (same count, and the per-light version sums can match), and installs the rebuild entry point that
+ *  `buildScene` calls on the scene's next registration. The hook keeps the rebuild code out of every
+ *  scene that never mutates topology — `scene-core` only carries an optional call. */
+function markTopologyDirty(scene: SceneContext): void {
+    scene._lightListVersion = (scene._lightListVersion ?? 0) + 1;
+    if (scene._built) {
+        scene._rebuildHook = rebuildOnNextBuild;
+    }
+}
+
+/** Rebuild entry point installed on a topology change. Lazily imported so the rebuild machinery is only
+ *  fetched by apps that actually mutate a built scene's lights.
+ *
+ *  Clears the hook only once the rebuild has completed against the CURRENT topology: the light list is
+ *  keyed by `_lightListVersion`, so a removal that lands while the rebuild is in flight (or a rebuild that
+ *  throws) leaves the hook armed for the next registration instead of silently dropping the change. */
+async function rebuildOnNextBuild(scene: SceneContext): Promise<void> {
+    const { rebuildSceneRenderables } = await import("./scene-rebuild.js");
+    // The rebuild disarms this hook itself, but only once it has fully applied against the topology it
+    // started from: a rejection, a group left on its previous build, or a removal landing mid-flight all
+    // leave it installed so the next registration retries.
+    await rebuildSceneRenderables(scene);
 }
 
 /** Remove the first occurrence of `item` from `arr` if present. */
