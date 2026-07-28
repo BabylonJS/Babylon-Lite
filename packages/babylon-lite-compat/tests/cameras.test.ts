@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
-import { FreeCamera, GeospatialCamera } from "../src/cameras/cameras";
+import { FreeCamera, GeospatialCamera, ArcRotateCamera } from "../src/cameras/cameras";
 import { Vector3 } from "../src/math/vector";
-import type { FreeCamera as LiteFreeCamera } from "babylon-lite";
+import type { FreeCamera as LiteFreeCamera, ArcRotateCamera as LiteArcRotateCamera } from "babylon-lite";
 
 /**
  * Minimal stand-in for a Lite free camera (the shape `parseBabylonCamera` returns
@@ -64,6 +64,40 @@ describe("Camera adoption (loaded .babylon cameras)", () => {
         scene._lite.camera = fakeLiteCamera();
         scene._surfaceLoadedCamera();
         expect(scene.activeCamera).toBe(first);
+    });
+});
+
+describe("ArcRotateCamera input tuning delegates to the Lite camera", () => {
+    function fakeLiteArcRotate(): LiteArcRotateCamera {
+        return {
+            alpha: 1,
+            beta: 1,
+            radius: 10,
+            target: { x: 0, y: 0, z: 0, set() {} },
+            wheelPrecision: 3,
+            angularSensibility: 1000,
+            panningSensibility: 50,
+        } as unknown as LiteArcRotateCamera;
+    }
+
+    it("forwards wheelPrecision / angularSensibility / panningSensibility writes to _lite", () => {
+        const lite = fakeLiteArcRotate();
+        const cam = ArcRotateCamera._adopt("cam", lite);
+
+        // A Babylon.js app sets these (often right after attachControl). The write
+        // must reach the underlying Lite camera, not land on the wrapper instance.
+        cam.wheelPrecision = 150;
+        cam.angularSensibility = 2000;
+        cam.panningSensibility = 25;
+
+        expect(lite.wheelPrecision).toBe(150);
+        expect(lite.angularSensibility).toBe(2000);
+        expect(lite.panningSensibility).toBe(25);
+
+        // Reads reflect the underlying Lite camera too.
+        expect(cam.wheelPrecision).toBe(150);
+        expect(cam.angularSensibility).toBe(2000);
+        expect(cam.panningSensibility).toBe(25);
     });
 });
 
