@@ -1,5 +1,5 @@
 {
-  "rawKB": 103.7,
+  "rawKB": 103.6,
   "gzipKB": 43,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -22,5 +22,5 @@
     "scene30-uv-transform-fragment-B8ijWmAK.js",
     "scene30.js"
   ],
-  "rawBytes": 106142
+  "rawBytes": 106122
 }

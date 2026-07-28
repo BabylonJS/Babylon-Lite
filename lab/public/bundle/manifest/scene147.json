@@ -1,5 +1,5 @@
 {
-  "rawKB": 103.5,
+  "rawKB": 103.4,
   "gzipKB": 41.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -16,5 +16,5 @@
     "scene147-shader-composer-8GPw9fSv.js",
     "scene147.js"
   ],
-  "rawBytes": 105945
+  "rawBytes": 105926
 }
