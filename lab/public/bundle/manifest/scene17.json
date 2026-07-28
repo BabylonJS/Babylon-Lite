@@ -1,6 +1,6 @@
 {
-  "rawKB": 86.7,
-  "gzipKB": 36,
+  "rawKB": 86.8,
+  "gzipKB": 36.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene17-generate-mipmaps-DNSbr_z3.js",
@@ -14,5 +14,5 @@
     "scene17-thin-instance-gpu-BmCYehED.js",
     "scene17.js"
   ],
-  "rawBytes": 88785
+  "rawBytes": 88839
 }

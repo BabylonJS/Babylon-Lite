@@ -1,5 +1,5 @@
 {
-  "rawKB": 97.2,
+  "rawKB": 97.3,
   "gzipKB": 40.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -19,5 +19,5 @@
     "scene242-visibility-DU1iwHhR.js",
     "scene242.js"
   ],
-  "rawBytes": 99536
+  "rawBytes": 99596
 }

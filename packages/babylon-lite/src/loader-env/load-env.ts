@@ -1,7 +1,7 @@
 import { F32, U8 } from "../engine/typed-arrays.js";
 import type { SceneContext } from "../scene/scene.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
-import { assembleEnvironmentTextures } from "./env-helpers.js";
+import { assembleEnvironmentTextures, loadBrdfImage } from "./env-helpers.js";
 import { mipLevelCount } from "../texture/mip-count.js";
 import { computeSceneSize } from "../material/pbr/scene-size.js";
 import { registerEnvSceneUniforms } from "../scene/scene-ubo-extras.js";
@@ -53,9 +53,7 @@ export async function loadEnvironment(
 
     // Fetch .env and BRDF PNG in parallel
     const envPromise = fetch(url).then((r) => r.arrayBuffer());
-    const brdfPromise = fetch(options.brdfUrl)
-        .then((r) => r.blob())
-        .then((b) => createImageBitmap(b, { premultiplyAlpha: "none", colorSpaceConversion: "none" }));
+    const brdfPromise = loadBrdfImage(options.brdfUrl);
 
     const envBuffer = await envPromise;
     const { faceBlobs, irradianceSH, width, mipCount } = parseEnvFile(envBuffer);

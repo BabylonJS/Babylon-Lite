@@ -3,7 +3,7 @@ import { TU } from "../engine/gpu-flags.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { EnvironmentTextures } from "./load-env.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
-import { assembleEnvironmentTextures } from "./env-helpers.js";
+import { assembleEnvironmentTextures, loadBrdfImage } from "./env-helpers.js";
 import { shToPolynomial } from "../math/spherical-harmonics.js";
 import { registerEnvSceneUniforms } from "../scene/scene-ubo-extras.js";
 
@@ -198,9 +198,7 @@ export async function loadDdsEnvironment(scene: SceneContext, url: string, optio
 
     // Fetch DDS and BRDF PNG in parallel
     const ddsPromise = fetch(url).then((r) => r.arrayBuffer());
-    const brdfPromise = fetch(options.brdfUrl)
-        .then((r) => r.blob())
-        .then((b) => createImageBitmap(b, { premultiplyAlpha: "none", colorSpaceConversion: "none" }));
+    const brdfPromise = loadBrdfImage(options.brdfUrl);
 
     const buf = await ddsPromise;
 
