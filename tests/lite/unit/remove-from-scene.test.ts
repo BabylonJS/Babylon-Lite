@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove";
 import { addToScene } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import { ObservableVec3 } from "../../../packages/babylon-lite/src/math/observable-vec3";
 import { ObservableQuat } from "../../../packages/babylon-lite/src/math/observable-quat";
@@ -12,7 +13,7 @@ import type { MeshGroupBuilder } from "../../../packages/babylon-lite/src/render
 
 function fakeScene(): SceneContext {
     return {
-        surface: { engine: {} },
+        surface: { engine: { _retirements: null } },
         camera: null,
         lights: [],
         meshes: [],
@@ -28,6 +29,15 @@ function fakeScene(): SceneContext {
         _disposables: [],
         _frameGraph: { _tasks: [] },
     } as unknown as SceneContext;
+}
+
+/** `removeFromScene` defers GPU teardown until after the next frame submits (so it is safe to call
+ *  from `onBeforeRender`), so tests that assert destruction have to drain the engine's retirement
+ *  list first. Mirrors what `renderFrame` / `disposeEngine` do, minus the queue fence. */
+function drainRetirements(...scenes: SceneContext[]): void {
+    for (const scene of scenes) {
+        disposeGpuResourceRetirements(scene.surface.engine);
+    }
 }
 
 describe("removeFromScene symmetry", () => {
@@ -127,6 +137,9 @@ describe("removeFromScene symmetry", () => {
         removeFromScene(scene, mesh as never);
 
         expect(removeMesh).toHaveBeenCalledWith(mesh);
+        // Teardown is retired until after the next submit, so nothing is destroyed synchronously.
+        expect(destroyed).toBe(false);
+        drainRetirements(scene);
         expect(destroyed).toBe(true);
     });
 
@@ -183,9 +196,11 @@ describe("removeFromScene symmetry", () => {
         addToScene(sceneB, mesh);
 
         removeFromScene(sceneA, mesh);
+        drainRetirements(sceneA);
         expect(destroy).not.toHaveBeenCalled();
 
         removeFromScene(sceneB, mesh);
+        drainRetirements(sceneB);
         expect(destroy).toHaveBeenCalledOnce();
     });
 
@@ -210,6 +225,7 @@ describe("removeFromScene symmetry", () => {
 
         addToScene(scene, mesh);
         removeFromScene(scene, mesh);
+        drainRetirements(scene);
         expect(destroy).toHaveBeenCalledOnce();
 
         expect(() => addToScene(scene, mesh)).toThrow(/was disposed/);
@@ -245,6 +261,7 @@ describe("removeFromScene symmetry", () => {
         addToScene(scene, source);
         addToScene(scene, clone);
         removeFromScene(scene, source);
+        drainRetirements(scene);
         // The clone still owns the geometry, so nothing was destroyed.
         expect(gpu.positionBuffer.destroy).not.toHaveBeenCalled();
 
@@ -254,6 +271,7 @@ describe("removeFromScene symmetry", () => {
         expect(scene.meshes).toEqual([clone]);
 
         removeFromScene(scene, clone);
+        drainRetirements(scene);
         expect(gpu.positionBuffer.destroy).toHaveBeenCalledOnce();
     });
 
@@ -285,10 +303,12 @@ describe("removeFromScene symmetry", () => {
         removeFromScene(scene, source);
         // The second removal must not release a second claim — the clone still renders with it.
         removeFromScene(scene, source);
+        drainRetirements(scene);
         expect(gpu.positionBuffer.destroy).not.toHaveBeenCalled();
         expect(source._gpu._refCount).toBe(1);
 
         removeFromScene(scene, clone);
+        drainRetirements(scene);
         expect(gpu.positionBuffer.destroy).toHaveBeenCalledOnce();
     });
 
@@ -318,6 +338,7 @@ describe("removeFromScene symmetry", () => {
 
         addToScene(scene, mesh);
         removeFromScene(scene, mesh);
+        drainRetirements(scene);
         expect(gpu.positionBuffer.destroy).not.toHaveBeenCalled();
         expect(boneTexture.destroy).toHaveBeenCalledOnce();
 
