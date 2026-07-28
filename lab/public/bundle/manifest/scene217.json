@@ -1,13 +1,13 @@
 {
-  "rawKB": 78.1,
-  "gzipKB": 31.6,
+  "rawKB": 78.6,
+  "gzipKB": 31.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene217-multilight-wgsl-ha4VqrXz.js",
-    "scene217-pbr-renderable--6nCfyjv.js",
+    "scene217-pbr-renderable-CVO9mmuf.js",
     "scene217-shader-composer-CRnzWPZ6.js",
-    "scene217-standard-renderable-Bk-03qbL.js",
+    "scene217-standard-renderable-dA-Hl1JZ.js",
     "scene217.js"
   ],
-  "rawBytes": 79999
+  "rawBytes": 80457
 }

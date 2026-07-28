@@ -1,10 +1,10 @@
 {
-  "rawKB": 81.1,
-  "rawBytes": 83090,
+  "rawKB": 81.2,
+  "rawBytes": 83114,
   "gzipKB": 33.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene273-pbr-renderable-CNewND4R.js",
+    "scene273-pbr-renderable-Z-UVEJ61.js",
     "scene273-scene-rebuild-CeuhZI1A.js",
     "scene273-scene-runtime-mesh-build-DL5iLJcV.js",
     "scene273-shader-composer-qxmZVcOJ.js",

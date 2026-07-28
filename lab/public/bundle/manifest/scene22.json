@@ -1,6 +1,6 @@
 {
-  "rawKB": 97.9,
-  "gzipKB": 39.6,
+  "rawKB": 98.3,
+  "gzipKB": 39.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene22-esm-shadow-view-BpdnPOo5.js",
@@ -8,14 +8,14 @@
     "scene22-material-view-Dua1bl7W.js",
     "scene22-multilight-wgsl-Ci23qBxe.js",
     "scene22-no-color-view-CXRYDInI.js",
-    "scene22-pbr-renderable-BgoRqYnJ.js",
+    "scene22-pbr-renderable-DxYFqrKy.js",
     "scene22-pbr-shadow-fragment-CSEDArnD.js",
     "scene22-pbr-template-gamma-CVmXdy8B.js",
     "scene22-shader-composer-qxmZVcOJ.js",
     "scene22-shadow-fragment-core-Dbe1xNkt.js",
     "scene22-shadow-task-Yvrdp5XB.js",
-    "scene22-standard-renderable--Wd3wjFx.js",
+    "scene22-standard-renderable-CZttc1Ha.js",
     "scene22.js"
   ],
-  "rawBytes": 100227
+  "rawBytes": 100698
 }
