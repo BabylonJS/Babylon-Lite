@@ -1,9 +1,9 @@
 {
-  "rawKB": 16.1,
-  "gzipKB": 7.1,
+  "rawKB": 16,
+  "gzipKB": 7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene51.js"
   ],
-  "rawBytes": 16529
+  "rawBytes": 16390
 }

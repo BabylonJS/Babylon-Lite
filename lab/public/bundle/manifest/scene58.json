@@ -1,9 +1,9 @@
 {
-  "rawKB": 18.4,
+  "rawKB": 18.3,
   "gzipKB": 7.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene58.js"
   ],
-  "rawBytes": 18845
+  "rawBytes": 18714
 }
