@@ -1,6 +1,6 @@
 {
-  "rawKB": 58.9,
-  "gzipKB": 24.6,
+  "rawKB": 59.4,
+  "gzipKB": 24.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene24-bake-local-matrix-67U-IT8C.js",
@@ -8,12 +8,12 @@
     "scene24-generate-mipmaps-BaRC2la_.js",
     "scene24-parse-camera-KKjDq8vh.js",
     "scene24-point-light-Dzvg6X6L.js",
-    "scene24-standard-renderable-5k9amIke.js",
+    "scene24-standard-renderable-CMEysbEQ.js",
     "scene24-std-ambient-fragment-qLXGuA_5.js",
     "scene24-std-cube-reflection-fragment-BvaSxSYn.js",
     "scene24-std-opacity-fragment-BWB8M-CF.js",
     "scene24-std-specular-fragment-DhCYMq1P.js",
     "scene24.js"
   ],
-  "rawBytes": 60319
+  "rawBytes": 60788
 }

@@ -353,14 +353,14 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                 retireOld(oldDisposers);
             };
 
-            const { _withExclusiveGroupBuild } = await import("./scene-runtime-mesh-build.js");
+            const { withExclusiveGroupBuild } = await import("./scene-runtime-mesh-build.js");
             // A merged build that raced concurrent mutation is retried against the settled membership. The
             // attempt count is bounded: if the group keeps moving, its previous output is dropped rather than
             // left drawing meshes whose buffers may already be freed.
             const MAX_ATTEMPTS = 3;
             for (let attempt = 1; ; attempt++) {
                 unstable = false;
-                await _withExclusiveGroupBuild(ctx, builder, rebuild);
+                await withExclusiveGroupBuild(ctx, builder, rebuild);
                 if (ctx._z || runtime?._d()) {
                     aborted = true;
                     return;
