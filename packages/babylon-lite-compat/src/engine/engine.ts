@@ -29,6 +29,7 @@ import {
     disposeEngine,
     registerScene,
     registerSceneWithShadowSupport,
+    enableMirroredMeshes,
     onBeforeRender,
     createNullEngine,
     stepScene,
@@ -365,6 +366,20 @@ export abstract class AbstractEngine {
         return unsupported("AbstractEngine.setAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
     }
 
+    /**
+     * Babylon.js `engine.updateTextureArrayLayerFromImageSource(...)` — the low-level engine
+     * extension that uploads a decoded image source into a 2D array texture layer. Babylon Lite
+     * exposes this through the higher-level `UploadImageToTexture2DArrayLayer` /
+     * `LoadImageToTexture2DArrayLayerAsync` helpers (which forward to Lite's texture-array API)
+     * rather than a raw engine-level `InternalTexture` method, so the engine method is unsupported.
+     */
+    public updateTextureArrayLayerFromImageSource(_texture: unknown, _source: unknown, _layer: number, _invertY?: boolean, _premultiplyAlpha?: boolean): never {
+        return unsupported(
+            "AbstractEngine.updateTextureArrayLayerFromImageSource",
+            "Use the `UploadImageToTexture2DArrayLayer` / `LoadImageToTexture2DArrayLayerAsync` helpers, which forward to Babylon Lite's texture-array API."
+        );
+    }
+
     private async _start(): Promise<void> {
         if (this._started) {
             return;
@@ -386,6 +401,12 @@ export abstract class AbstractEngine {
             scene._flushPendingAdds();
             scene._buildMorphTargets();
             await scene._loadPendingEnvironment();
+            // Babylon.js reverses triangle winding for negative-determinant (mirrored) world
+            // transforms so a `scaling.x = -1` mesh renders upright rather than inside-out. Enable
+            // Lite's equivalent opt-in per scene (after all assets are added, before registerScene)
+            // to match that behaviour for Standard/procedural meshes; non-mirrored meshes are
+            // unaffected, and the glTF loader's own load-time winding handling is not double-flipped.
+            await enableMirroredMeshes(scene._lite);
             if (scene._hasShadows()) {
                 await registerSceneWithShadowSupport(scene._lite);
             } else {

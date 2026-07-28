@@ -30,6 +30,8 @@ describe("NullEngine (headless)", () => {
         expect(() => engine.getAlphaToCoverage()).toThrow(/getAlphaToCoverage/);
         expect(() => engine.setAlphaToCoverage(true)).toThrow(LiteCompatError);
         expect(() => engine.setAlphaToCoverage(true)).toThrow(/setAlphaToCoverage/);
+        expect(() => engine.updateTextureArrayLayerFromImageSource({}, {}, 0)).toThrow(LiteCompatError);
+        expect(() => engine.updateTextureArrayLayerFromImageSource({}, {}, 0)).toThrow(/updateTextureArrayLayerFromImageSource/);
     });
 
     it("constructs a Scene with no GPU context", () => {

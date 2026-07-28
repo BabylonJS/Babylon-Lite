@@ -79,3 +79,59 @@ describe("Node scene-graph traversal", () => {
         expect(child.isDisposed()).toBe(true);
     });
 });
+
+describe("Node enabled-state observables", () => {
+    it("isEnabled(false) reports the own flag; the default checks ancestors", () => {
+        const root = new TestNode("root");
+        const child = new TestNode("child");
+        child.parent = root;
+
+        root.setEnabled(false);
+        expect(child.isEnabled(false)).toBe(true); // own flag unchanged
+        expect(child.isEnabled()).toBe(false); // ancestor disabled → not effectively enabled
+        expect(child.isEnabled(true)).toBe(false);
+    });
+
+    it("onEnabledStateChangedObservable fires only on the node's own flag change", () => {
+        const node = new TestNode("n");
+        const seen: boolean[] = [];
+        node.onEnabledStateChangedObservable.add((v) => seen.push(v));
+
+        node.setEnabled(false);
+        node.setEnabled(false); // no-op, no notification
+        node.setEnabled(true);
+        expect(seen).toEqual([false, true]);
+    });
+
+    it("onEffectiveEnabledStateChangedObservable fires on a node when an ancestor flips it", () => {
+        const root = new TestNode("root");
+        const child = new TestNode("child");
+        child.parent = root;
+        const seen: boolean[] = [];
+        child.onEffectiveEnabledStateChangedObservable.add((v) => seen.push(v));
+
+        root.setEnabled(false); // child's effective state flips to false
+        root.setEnabled(true); // and back to true
+        expect(seen).toEqual([false, true]);
+    });
+
+    it("the effective observable does not fire when the effective state is unchanged", () => {
+        const root = new TestNode("root");
+        const child = new TestNode("child");
+        child.parent = root;
+        child.setEnabled(false); // child already off
+        const seen: boolean[] = [];
+        child.onEffectiveEnabledStateChangedObservable.add((v) => seen.push(v));
+
+        // Toggling the ancestor cannot change the child's effective state (still off).
+        root.setEnabled(false);
+        root.setEnabled(true);
+        expect(seen).toEqual([]);
+    });
+
+    it("lazily allocates the observables (same instance on repeat access)", () => {
+        const node = new TestNode("n");
+        expect(node.onEnabledStateChangedObservable).toBe(node.onEnabledStateChangedObservable);
+        expect(node.onEffectiveEnabledStateChangedObservable).toBe(node.onEffectiveEnabledStateChangedObservable);
+    });
+});

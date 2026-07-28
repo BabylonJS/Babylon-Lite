@@ -2,6 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import { Observable } from "../src/misc/observable";
 import { Tools } from "../src/misc/tools";
+import { Constants } from "../src/misc/engine-constants";
+
+describe("Constants", () => {
+    it("carries the Babylon.js numeric alpha-blend constants (incl. ALPHA_REPLACE_COLOR = 21)", () => {
+        expect(Constants.ALPHA_DISABLE).toBe(0);
+        expect(Constants.ALPHA_ONEONE).toBe(6);
+        expect(Constants.ALPHA_PREMULTIPLIED).toBe(7);
+        expect(Constants.ALPHA_REPLACE_COLOR).toBe(21);
+    });
+});
 
 describe("Observable", () => {
     it("notifies all observers", () => {
