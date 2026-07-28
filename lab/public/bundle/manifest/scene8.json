@@ -1,5 +1,5 @@
 {
-  "rawKB": 74.6,
+  "rawKB": 74.5,
   "gzipKB": 30,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -11,5 +11,5 @@
     "scene8-singlelight-point-wgsl-2QlXbmIF.js",
     "scene8.js"
   ],
-  "rawBytes": 76341
+  "rawBytes": 76322
 }
