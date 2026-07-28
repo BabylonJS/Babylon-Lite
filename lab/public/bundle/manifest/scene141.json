@@ -1,6 +1,6 @@
 {
-  "rawKB": 122,
-  "gzipKB": 50.6,
+  "rawKB": 121.8,
+  "gzipKB": 50.5,
   "ignoredRawKB": 6.4,
   "runtimeChunks": [
     "scene141-_math-factory-DkfnO9Se.js",
@@ -15,16 +15,16 @@
     "scene141-node-registry-BDSK2ra4.js",
     "scene141-node-renderable-HdoKdPDy.js",
     "scene141-node-shadow-xbpSTfVl.js",
-    "scene141-pbr-renderable-D_YET24o.js",
+    "scene141-pbr-renderable-32IYavRj.js",
     "scene141-pbr-shadow-fragment-DHDAZ1HL.js",
     "scene141-shader-composer-nU4_w_gR.js",
     "scene141-shadow-fragment-core-Dbe1xNkt.js",
     "scene141-shadow-task-D7JQvILi.js",
     "scene141-singlelight-directional-wgsl-BwMbwENc.js",
-    "scene141-standard-renderable-C0Tnqg_V.js",
+    "scene141-standard-renderable-BgjGHYy9.js",
     "scene141-transform-block-Bm9H4Yvp.js",
     "scene141-vertex-output-C7G5u6Y0.js",
     "scene141.js"
   ],
-  "rawBytes": 124920
+  "rawBytes": 124694
 }

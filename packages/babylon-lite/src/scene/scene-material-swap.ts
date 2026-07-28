@@ -1,5 +1,6 @@
 import type { SceneContext } from "./scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { Renderable } from "../render/renderable.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 /** @internal Drain _materialSwapQueue: dispose old resources and rebuild renderables. */
@@ -29,7 +30,11 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
             pending = runtimeBuild(scene, mesh, pending);
             continue;
         }
-        const rebuild = scene._groups.get(mat._buildGroup)?.r;
+        // `mat` is non-null here (guarded above), so the group lookup needs no extra check. `group` is
+        // kept — not just its rebuild closure — because the group's tracked output (`o`) is updated
+        // below.
+        const group = scene._groups.get(mat._buildGroup);
+        const rebuild = group?.r;
         if (!rebuild) {
             // No built group for this material. Either the mesh was added at runtime as the FIRST of
             // its material family (`addToScene` creates the group but pushes no deferred builder once
@@ -54,9 +59,11 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
             // records the old resources again; retire the teardown after the next submitted frame drains.
             retireGpuResources(scene.surface.engine, () => old.forEach((fn) => fn()));
         }
+        const o = group?.o;
+        let dead: Renderable | undefined;
         for (let i = renderables.length; i--;) {
             if (renderables[i]!.mesh === mesh) {
-                renderables.splice(i, 1);
+                dead = renderables.splice(i, 1)[0];
             }
         }
 
@@ -64,7 +71,16 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
         // global _materialEpoch (which also bumps when an unrelated material is swapped), so swapping a non-caster
         // material doesn't force a full shadow rebuild. See ensureCsmShadowTaskState.
         mat._csmGen = 1 + (mat._csmGen || 0);
-        changed = renderables.push(rebuild(scene, mesh));
+        const built = rebuild(scene, mesh);
+        // Keep the group's tracked output in sync (see SceneMeshGroup.o): a topology rebuild drops the
+        // previous output by identity, so a swap-built renderable missing from `o` would survive it and
+        // double-draw (NodeMaterial's opaque output is merged and carries no `mesh` to match on). The
+        // superseded entry is REPLACED, not appended, so repeated swaps cannot retain dead renderables.
+        if (o) {
+            const oi = dead ? o.indexOf(dead) : -1;
+            oi < 0 ? o.push(built) : (o[oi] = built);
+        }
+        changed = renderables.push(built);
     }
     if (changed) {
         renderables.sort((a, b) => a.order - b.order);

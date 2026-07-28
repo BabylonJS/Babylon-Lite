@@ -2057,7 +2057,7 @@
         "slug": "scene241-animation-pointer-uvs",
         "name": "Scene 241 — AnimationPointerUVs",
         "maxMad": 1.3,
-        "maxRawKB": 161.88,
+        "maxRawKB": 161.9,
         "description": "AnimationPointerUVs.gltf — cx20 gltf-test. KHR_animation_pointer UV-transform across 82 materials.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2343,6 +2343,16 @@
         "maxRawKB": 51.16,
         "description": "Four StandardMaterial boxes: not mirrored, mirrored before build, mirrored at runtime, and mirrored by an ancestor at runtime. Validates triangle-winding reversal on the Standard pipeline (which previously had none) and runtime re-resolution when a transform's determinant sign flips.",
         "tags": ["standard", "transform", "procedural"],
+        "skipPerf": true
+    },
+    {
+        "id": 271,
+        "slug": "scene271-shadow-light-rebuild",
+        "name": "Scene 271 — Shadow Light Rebuild",
+        "maxMad": 0.2,
+        "maxRawKB": 75,
+        "description": "Spotlight hard shadows (PCF) where the shadow-casting light is SWAPPED after the scene was built: the scene renders with spot light A, then removes it, adds spot light B on the opposite side with its own PCF generator, and re-registers. Renderables bake the per-mesh light index list, the light-count shader permutation and the shadow bind group at build time, so this validates the in-place rebuild (rebuildSceneRenderables) plus the lights-UBO invalidation on a light identity swap. The Babylon.js reference renders the final light-B configuration directly. The image is almost entirely soft gradients (spot falloff over a flat ground plus the PCF penumbra), so per-pixel results differ by ~1 LSB across GPUs: it measures 0.000 locally and ~0.13 on the CI browser, hence the 0.2 ceiling — still far stricter than the other soft-shadow scenes (140: 0.25, 214/215: 0.40).",
+        "tags": ["standard", "shadows", "spotlight", "rebuild"],
         "skipPerf": true
     },
     {

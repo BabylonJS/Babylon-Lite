@@ -1,25 +1,25 @@
 {
-  "rawKB": 97.5,
-  "gzipKB": 41.2,
+  "rawKB": 97.3,
+  "gzipKB": 41.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene243-create-morph-targets-C_lcfVOA.js",
-    "scene243-generate-mipmaps-KbCCRZ6n.js",
-    "scene243-gltf-animation-DJ3gYapg.js",
-    "scene243-gltf-feature-animations-Dm9_q1zy.js",
+    "scene243-generate-mipmaps-B1cBmVIq.js",
+    "scene243-gltf-animation-CW2RtszH.js",
+    "scene243-gltf-feature-animations-DEzjKlz6.js",
     "scene243-gltf-feature-extras-VHPteGay.js",
     "scene243-gltf-feature-morph-BCUQi4W_.js",
-    "scene243-gltf-feature-registry-BHMadaoT.js",
+    "scene243-gltf-feature-registry-DH6Nqpr8.js",
     "scene243-gltf-json-asset-C-PjB6Pa.js",
-    "scene243-gltf-pbr-builder-ext-Dcy7_zeN.js",
+    "scene243-gltf-pbr-builder-ext-CSoWSIal.js",
     "scene243-ibl-fragment-CeRrvT96.js",
-    "scene243-morph-fragment-CXifeQIL.js",
-    "scene243-pbr-renderable-BsLRKycC.js",
+    "scene243-morph-fragment-BFEP5Miy.js",
+    "scene243-pbr-renderable-DkPhA3tz.js",
     "scene243-pbr-template-ext-CiHpOV5G.js",
     "scene243-rgbd-decode-DDQmA7q4.js",
     "scene243-scene-uniforms-FTYH6Ct0.js",
     "scene243-texture-2d-DQo3n8D6.js",
     "scene243.js"
   ],
-  "rawBytes": 99865
+  "rawBytes": 99652
 }

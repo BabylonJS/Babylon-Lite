@@ -191,6 +191,15 @@ function installRuntimeBuilds(scene: SceneContext): RuntimeSceneBuildHooks {
             clearRuntimeRebuild(scene, state, mesh);
             pbrState._pbrMeshGeomContexts?.delete(mesh);
         },
+        dropBase: (builder) => {
+            const runtime = _runtimeRebuilders?.get(builder);
+            if (runtime) {
+                // Both the per-scene base and every per-mesh specialisation derived from it are stale: they
+                // captured the discarded build's shadow bindings and light permutation.
+                runtime.bases.delete(scene);
+                runtime.scenes.delete(scene);
+            }
+        },
         wait: async (meshes) => {
             const pending = new Set<Promise<void>>();
             for (const mesh of meshes) {
@@ -348,6 +357,12 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
         });
     }
     scene._renderables.push(...result.renderables);
+    // Keep the group's tracked output in sync: a later topology rebuild drops the previous output by
+    // identity, and a runtime-built renderable that is missing from it would survive and double-draw.
+    const runtimeGroup = scene._groups.get(builder);
+    if (runtimeGroup) {
+        runtimeGroup.o = [...(runtimeGroup.o ?? []).filter((renderable) => renderable.mesh !== mesh), ...result.renderables];
+    }
     if (result.updater) {
         scene._uniformUpdaters.push(result.updater);
     }

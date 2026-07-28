@@ -23,6 +23,7 @@ function fakeScene(): SceneContext {
         _meshDisposables: new Map(),
         _meshAuxDisposables: new Map(),
         _renderableVersion: 0,
+        _disposables: [],
         _frameGraph: { _tasks: [] },
     } as unknown as SceneContext;
 }
@@ -37,7 +38,7 @@ function drainRetirements(...scenes: SceneContext[]): void {
 }
 
 describe("removeFromScene symmetry", () => {
-    it("removes a light, clears its shadow generator, disposes its task and detaches parent", () => {
+    it("removes a light, clears its shadow generator, queues its teardown and detaches parent", () => {
         const scene = fakeScene();
         let disposed = 0;
         // Real ShadowGenerator stores the disposable render task under _shadowTaskState._task.
@@ -49,14 +50,18 @@ describe("removeFromScene symmetry", () => {
         removeFromScene(scene, light as never);
         expect(scene.lights).toHaveLength(0);
         expect(scene.shadowGenerators).toHaveLength(0);
-        // The shadow task's render targets/UBOs are retired, not destroyed mid-frame.
+        // Teardown is DEFERRED: receiver renderables built before the removal still bind this
+        // generator's resources until a rebuild replaces them (see scene-rebuild.ts).
         expect(disposed).toBe(0);
-        drainRetirements(scene);
-        expect(disposed).toBe(1);
+        expect(scene._pendingTopologyRetirements).toHaveLength(1);
         expect(light.parent).toBeNull();
         // idempotent
         removeFromScene(scene, light as never);
         expect(scene.lights).toHaveLength(0);
+        expect(scene._pendingTopologyRetirements).toHaveLength(1);
+        for (const fn of scene._pendingTopologyRetirements!) {
+            fn();
+        }
         expect(disposed).toBe(1);
     });
 

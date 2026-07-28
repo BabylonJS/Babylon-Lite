@@ -1,10 +1,10 @@
 {
-  "rawKB": 46.2,
-  "gzipKB": 18.7,
+  "rawKB": 46,
+  "gzipKB": 18.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene268-standard-renderable-Der_FsoM.js",
+    "scene268-standard-renderable-BaQyCxGB.js",
     "scene268.js"
   ],
-  "rawBytes": 47289
+  "rawBytes": 47062
 }

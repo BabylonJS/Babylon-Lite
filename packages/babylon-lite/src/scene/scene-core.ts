@@ -54,6 +54,10 @@ export interface RuntimeSceneBuildHooks {
     readonly w: boolean;
     reset(mesh: Mesh): void;
     remove(mesh: Mesh): void;
+    /** Forget every rebuild closure cached for this builder in this scene. Called when a group's output is
+     *  dropped: the cached closures baked the light/shadow topology of the build being discarded, so
+     *  re-dispatching through them would bind resources the rebuild is about to retire. */
+    dropBase(builder: MeshGroupBuilder): void;
     wait(meshes: readonly Mesh[]): Promise<void>;
     /** @internal */
     _e(clear?: boolean): void;
@@ -67,6 +71,12 @@ export interface RuntimeSceneBuildHooks {
 /** @internal Scene-owned mesh group plus the rebuild closure captured by its completed build. */
 export interface SceneMeshGroup extends Array<Mesh> {
     r?: NonNullable<MeshGroupBuilder["_rebuildSingle"]>;
+    /** Renderables this group's last build produced. `_renderables` also holds feature-owned entries
+     *  (skybox, ground, HDR, Gaussian splats), and a group's meshes can be MERGED into a single renderable
+     *  whose `mesh` is undefined — so a rebuild cannot recover ownership by mesh identity and would leave
+     *  the stale merged renderable drawing alongside its replacement. Kept on the group (next to `r`) so
+     *  every path that replaces a group's output updates it in the same place. */
+    o?: Renderable[];
 }
 
 let _lateCleanup: WeakMap<SceneContext, () => 1> | null = null;
@@ -133,6 +143,20 @@ export interface SceneContext extends RenderingContext {
     _deferredBuilders: (() => void | Promise<void>)[];
     /** @internal Mesh group registry — maps builder to its mesh list (internal bookkeeping). */
     _groups: Map<MeshGroupBuilder, SceneMeshGroup>;
+    /** @internal Monotonic counter bumped when a light is REMOVED from the scene (see `removeFromScene`).
+     *  The lights-UBO refresh compares it separately from the per-light version sum: without it, swapping
+     *  one light for another (same count, and the sums can match) leaves the UBO holding the removed
+     *  light's data. Adds alone are covered by the count change. */
+    _lightListVersion?: number;
+    /** @internal Rebuild entry point installed by `removeFromScene` when light/shadow topology changed after
+     *  the initial build. Renderables bake the light index list, the light-count shader permutation and the
+     *  shadow bind group at build time, so the scene must be rebuilt for the change to take effect. Called
+     *  by `buildScene`, i.e. on the next registration — scenes that never mutate topology never install it,
+     *  and the rebuild code stays out of their bundle. */
+    _rebuildHook?: (scene: SceneContext) => Promise<void>;
+    /** @internal GPU teardown deferred until a rebuild has replaced the bind groups that still reference the
+     *  removed resources (make-before-break). Drained by the topology rebuild and by `disposeScene`. */
+    _pendingTopologyRetirements?: (() => void)[];
     /** @internal Lazy runtime-build hooks; absent in scenes that never widen a material group post-build. */
     _runtimeBuilds?: RuntimeSceneBuildHooks;
     /** @internal True after scene disposal; used to abort asynchronous recovery/rebuild work. */
@@ -381,6 +405,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
                     ctx._deferredBuilders.push(async () => {
                         const result = await build(ctx, group!);
                         ctx._renderables.push(...result.renderables);
+                        group!.o = result.renderables;
                         if (result.updater) {
                             ctx._uniformUpdaters.push(result.updater);
                         }
@@ -498,6 +523,9 @@ export async function buildScene(scene: SceneContext): Promise<void> {
     // the first frame, instead of leaving them casting shadows but invisible in the color pass.
     await processMaterialSwaps(ctx);
     _lateCleanup?.get(ctx)?.() || (ctx._runtimeBuilds?._e(), ctx._renderableVersion++, (ctx._built = true));
+    // Light/shadow topology changed since the last build (hook installed by `removeFromScene`): re-run the
+    // group builders so the baked light indices, light-count permutation and shadow bind groups match.
+    await ctx._rebuildHook?.(ctx);
 }
 
 /**
