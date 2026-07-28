@@ -42,6 +42,59 @@ describe("Observable", () => {
         obs.notifyObservers();
         expect(cb).toHaveBeenCalledTimes(1);
     });
+
+    it("replays the last notification to late subscribers when notifyIfTriggered is enabled", () => {
+        const obs = new Observable<number>(undefined, true);
+        const seen: number[] = [];
+
+        obs.notifyObservers(3);
+        obs.add((n) => seen.push(n));
+        obs.notifyObservers(5);
+
+        expect(seen).toEqual([3, 5]);
+    });
+
+    it("does not replay to late subscribers by default", () => {
+        const obs = new Observable<number>();
+        const seen: number[] = [];
+
+        obs.notifyObservers(3);
+        obs.add((n) => seen.push(n));
+
+        expect(seen).toEqual([]);
+    });
+
+    it("replays addOnce late subscribers once when notifyIfTriggered is enabled", () => {
+        const obs = new Observable<number>(undefined, true);
+        const seen: number[] = [];
+
+        obs.notifyObservers(3);
+        obs.addOnce((n) => seen.push(n));
+        obs.notifyObservers(5);
+
+        expect(seen).toEqual([3]);
+    });
+
+    it("does not replay an undefined last notification, matching Babylon.js", () => {
+        const obs = new Observable<void>(undefined, true);
+        const cb = vi.fn();
+
+        obs.notifyObservers();
+        obs.add(cb);
+
+        expect(cb).not.toHaveBeenCalled();
+    });
+
+    it("clears the last notified state", () => {
+        const obs = new Observable<number>(undefined, true);
+        const seen: number[] = [];
+
+        obs.notifyObservers(3);
+        obs.cleanLastNotifiedState();
+        obs.add((n) => seen.push(n));
+
+        expect(seen).toEqual([]);
+    });
 });
 
 describe("Tools", () => {
