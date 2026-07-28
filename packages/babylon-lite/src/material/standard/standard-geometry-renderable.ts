@@ -130,6 +130,19 @@ interface StandardGeometryViewResources {
     _upUBO: GPUBuffer | null;
 }
 
+/** Mirrored-mesh front-face resolution for the geometry pass. Installed only by
+ *  `std-mirrored-support`, i.e. the `enableMirroredMeshes()` opt-in — the glTF loader's built-in
+ *  winding pass never reaches Standard materials. Module-local with a single exported setter: when
+ *  the opt-in is absent the setter tree-shakes, the bundler proves this is always null, and the
+ *  `frontFace` ternary below folds to the plain `"ccw"` literal — unmirrored geometry scenes stay
+ *  byte-identical.
+ *  @internal */
+let _geometryWinding: ((meshFeatures: number) => GPUFrontFace) | null = null;
+/** @internal Install geometry-pass winding resolution. */
+export function _installStdGeometryWinding(resolve: (meshFeatures: number) => GPUFrontFace): void {
+    _geometryWinding = resolve;
+}
+
 function _variantKey(features: number, meshFeatures: number, sceneFeatures: number): string {
     return `${features}:${meshFeatures}:${sceneFeatures}`;
 }
@@ -597,8 +610,12 @@ function _getOrCreateGeometryPipeline(
             : undefined,
         multisample: { count: sig._sampleCount },
         // Geometry MRT renders to offscreen targets, so it needs the same
-        // Render upright — front face is always "ccw".
-        primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" },
+        // Render upright — "ccw" unless the mesh is mirrored, in which case its triangle winding is
+        // reversed exactly as in the forward pass and its depth/normal/velocity output would
+        // otherwise be culled away. Resolution goes through the opt-in hook so unmirrored bundles
+        // fold the whole thing to the plain "ccw" literal. The variant key already includes
+        // meshFeatures, so a winding change gets its own pipeline.
+        primitive: { topology: "triangle-list", cullMode, frontFace: _geometryWinding ? _geometryWinding(res._meshFeatures) : "ccw" },
     });
     res._pipelines.set(key, pipeline);
     return pipeline;

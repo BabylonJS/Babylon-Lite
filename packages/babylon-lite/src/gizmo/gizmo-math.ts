@@ -11,6 +11,7 @@ import { dotVec3 } from "../math/dot-vec3.js";
 import { lengthVec3 } from "../math/length-vec3.js";
 import { normalizeVec3 } from "../math/normalize-vec3-object.js";
 import { mat4Invert } from "../math/mat4-invert.js";
+import { mat4Decompose } from "../math/mat4-decompose.js";
 
 /** Re-exported under the gizmo namespace so call sites that already import a
  *  gizmo helper don't have to add a second import for the shared lite math. */
@@ -177,37 +178,13 @@ export function worldDeltaToLocal(node: SceneNode, dx: number, dy: number, dz: n
     };
 }
 
-/** Extract a unit rotation quaternion from a 4×4 world matrix.  Removes scale
- *  by normalising each upper-3×3 column independently before applying the
- *  Shoemake quaternion-from-matrix conversion. */
+/** Extract a unit rotation quaternion from a 4×4 world matrix. Delegates to `mat4Decompose`,
+ *  which strips per-axis scale AND folds a mirrored basis (negative determinant) onto a signed
+ *  axis — normalising the columns independently would otherwise hand an improper basis to the
+ *  quaternion conversion and return garbage for any mirrored node. */
 export function rotationQuatFromMatrix(m: Mat4): [number, number, number, number] {
-    const sx = Math.hypot(m[0]!, m[1]!, m[2]!) || 1;
-    const sy = Math.hypot(m[4]!, m[5]!, m[6]!) || 1;
-    const sz = Math.hypot(m[8]!, m[9]!, m[10]!) || 1;
-    const m00 = m[0]! / sx,
-        m01 = m[4]! / sy,
-        m02 = m[8]! / sz;
-    const m10 = m[1]! / sx,
-        m11 = m[5]! / sy,
-        m12 = m[9]! / sz;
-    const m20 = m[2]! / sx,
-        m21 = m[6]! / sy,
-        m22 = m[10]! / sz;
-    const trace = m00 + m11 + m22;
-    if (trace > 0) {
-        const s = 0.5 / Math.sqrt(trace + 1);
-        return [(m21 - m12) * s, (m02 - m20) * s, (m10 - m01) * s, 0.25 / s];
-    }
-    if (m00 > m11 && m00 > m22) {
-        const s = 2 * Math.sqrt(1 + m00 - m11 - m22);
-        return [0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s];
-    }
-    if (m11 > m22) {
-        const s = 2 * Math.sqrt(1 + m11 - m00 - m22);
-        return [(m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s];
-    }
-    const s = 2 * Math.sqrt(1 + m22 - m00 - m11);
-    return [(m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s];
+    const q = mat4Decompose(m).rotation;
+    return [q.x, q.y, q.z, q.w];
 }
 
 /** Convert a world-space rotation quaternion `dq` (e.g. rotation produced by a

@@ -140,6 +140,11 @@ export interface Mesh extends SceneNode {
      *  and `cloneTransformNode` refuses it — cloning retired geometry is the same bug wearing a
      *  new name, and the clone's claims could never be released. */
     _disposed?: boolean;
+    /** @internal Sign of the world-matrix 3x3 determinant the geometry's triangle winding was
+     *  authored for. Procedural meshes default to `+1`; the glTF loader marks its meshes `-1`
+     *  because they live under the RH→LH `__root__` flip. `enableMirroredMeshes()` reverses winding
+     *  whenever a mesh's current world determinant sign disagrees with this. */
+    _authoredSign?: number;
     /** @internal Reason cloning this mesh is currently forbidden. */
     _clone?: string;
     /** @internal Highest CSM cascade this mesh casts into; undefined means all cascades. */
