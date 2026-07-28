@@ -1,6 +1,6 @@
 {
-  "rawKB": 60.6,
-  "gzipKB": 24.4,
+  "rawKB": 60.8,
+  "gzipKB": 24.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene18-generate-mipmaps-CORvzSVx.js",
@@ -11,5 +11,5 @@
     "scene18-std-shadow-fragment-pwyXRo4i.js",
     "scene18.js"
   ],
-  "rawBytes": 62099
+  "rawBytes": 62278
 }

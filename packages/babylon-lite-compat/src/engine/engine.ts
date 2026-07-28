@@ -39,8 +39,25 @@ import {
 import type { EngineContext, EngineOptions, RenderCanvas, Texture2DArray } from "babylon-lite";
 
 import { LiteCompatError, unsupported } from "../error.js";
+import { Logger } from "../misc/misc-utils.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
+
+/**
+ * Late work (utility-layer registration) is best-effort: it must never fail engine startup, and it
+ * runs from two places — folded into `_startCore` when registered before startup completes, and
+ * immediately after. Both go through this helper, so neither a rejection nor a synchronous throw
+ * can escape unattributed.
+ */
+async function runLateWork(work: () => Promise<void>): Promise<void> {
+    // `work()` is invoked inside the try so a synchronous throw is reported the same way as a
+    // rejection; a trailing `.catch` on the returned promise would never see it.
+    try {
+        await work();
+    } catch (error) {
+        Logger.Error(`Late engine work failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
 
 export abstract class AbstractEngine {
     /**
@@ -72,7 +89,8 @@ export abstract class AbstractEngine {
     protected readonly _scenes: Scene[] = [];
     protected readonly _loopCallbacks: Array<() => void> = [];
     protected _initialized = false;
-    private _started = false;
+    private _startupComplete = false;
+    private _startPromise: Promise<void> | null = null;
     /** @internal Active `requestAnimationFrame` id for the scene-less loop, if any. */
     protected _rafId: number | null = null;
 
@@ -101,10 +119,9 @@ export abstract class AbstractEngine {
     private readonly _startupWork: Array<() => Promise<void>> = [];
 
     /**
-     * @internal Deferred work awaited *after* the main scenes are registered but
-     * before the engine starts — e.g. utility-layer (gizmo) registration, which
-     * must happen after its gizmos are created and after the main scene is
-     * registered (Babylon Lite's `registerUtilityLayer` ordering).
+     * @internal Deferred work awaited after the main engine renders its first frame
+     * — e.g. utility-layer registration, which must follow the main scene but must
+     * not block engine startup.
      */
     private readonly _lateWork: Array<() => Promise<void>> = [];
 
@@ -261,8 +278,19 @@ export abstract class AbstractEngine {
         this._startupWork.push(work);
     }
 
-    /** @internal Register deferred work awaited after the main scenes register but before the engine starts. */
+    /** @internal Register work that must run after the main scene is rendering. */
     public _registerLateWork(work: () => Promise<void>): void {
+        // This gates on startup having completed, not on the render loop currently spinning:
+        // `_lateWork` is only ever drained by `_startCore`, so once startup is past that point
+        // queueing would strand the work forever — including after a `stopRenderLoop`, where the
+        // registering feature (e.g. a utility layer) still needs to be wired up for the next frame.
+        if (this._startupComplete) {
+            // There is no startup promise left to fold this into. Surface a rejection through the
+            // logger rather than letting it escape as an unhandled rejection, which is hard to
+            // attribute back to the registering feature.
+            void runLateWork(work);
+            return;
+        }
         this._lateWork.push(work);
     }
 
@@ -381,11 +409,12 @@ export abstract class AbstractEngine {
         uploadImageToArrayLayer(this._lite, texture, layer, source, { invertY, premultiplyAlpha });
     }
 
-    private async _start(): Promise<void> {
-        if (this._started) {
-            return;
-        }
-        this._started = true;
+    private _start(): Promise<void> {
+        this._startPromise ??= this._startCore();
+        return this._startPromise;
+    }
+
+    private async _startCore(): Promise<void> {
         // Run deferred startup work (e.g. sprite-atlas loads) first, so any
         // resources a render context needs exist before the first frame.
         if (this._startupWork.length > 0) {
@@ -414,13 +443,19 @@ export abstract class AbstractEngine {
                 await registerScene(scene._lite);
             }
         }
-        // Late work runs after the main scenes are registered (e.g. utility-layer
-        // gizmo registration, which Babylon Lite registers after the main scene).
+        // Start the main render loop before utility-layer registration. Utility
+        // layers are overlays and can join on a subsequent frame; awaiting them
+        // here would deadlock any registration path that depends on the first frame.
+        await startEngine(this._lite);
+        this._startupComplete = true;
+        // Late work now runs after the main render loop has started.
+        // Late work is explicitly allowed to fail without taking startup with it: a rejection here
+        // would otherwise poison `_startPromise` forever and resurface as an unhandled rejection
+        // from `runRenderLoop`, which only does `void this._start()`.
         if (this._lateWork.length > 0) {
-            await Promise.all(this._lateWork.map((w) => w()));
+            await Promise.all(this._lateWork.map(runLateWork));
             this._lateWork.length = 0;
         }
-        await startEngine(this._lite);
     }
 
     private _ensureInitialized(api: string): void {

@@ -1,6 +1,6 @@
 {
-  "rawKB": 48.5,
-  "gzipKB": 19.7,
+  "rawKB": 48.7,
+  "gzipKB": 19.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene201-_mat4-storage-f64-BubF55_X.js",
@@ -9,5 +9,5 @@
     "scene201-standard-renderable-CZ_RoX6C.js",
     "scene201.js"
   ],
-  "rawBytes": 49704
+  "rawBytes": 49891
 }

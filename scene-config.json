@@ -27,7 +27,7 @@
         "slug": "scene3-fog",
         "name": "Scene 3 — Fog + Skybox",
         "maxMad": 0.01,
-        "maxRawKB": 54.9,
+        "maxRawKB": 55.0,
         "description": "Exponential² fog, multiple colored boxes, skybox, ground plane.",
         "tags": ["fog", "procedural", "std"],
         "skipPerf": true
@@ -90,7 +90,7 @@
         "slug": "scene9-sponza",
         "name": "Scene 9 — Sponza (.babylon)",
         "maxMad": 0.01,
-        "maxRawKB": 60.1,
+        "maxRawKB": 60.2,
         "description": "Sponza palace loaded from .babylon format. Standard materials with diffuse textures, point lights.",
         "tags": ["std", "babylon"],
         "compatParity": true
@@ -165,7 +165,7 @@
         "slug": "scene16-thin-instances",
         "name": "Scene 16 — Thin Instances",
         "maxMad": 0.01,
-        "maxRawKB": 49.55,
+        "maxRawKB": 49.65,
         "description": "64,000 colored cubes via thin instances. Per-instance color, disableLighting, emissive-only rendering.",
         "tags": ["std", "procedural"],
         "compatParity": true
@@ -195,7 +195,7 @@
         "slug": "scene19-clearcoat",
         "name": "Scene 19 — PBR Clearcoat",
         "maxMad": 0.031,
-        "maxRawKB": 70.6,
+        "maxRawKB": 70.7,
         "description": "Sphere with PBR clearcoat layer (IOR=2.0). DDS environment for glossy reflections.",
         "tags": ["pbr", "env"],
         "compatParity": true
@@ -362,7 +362,7 @@
         "slug": "scene35-gltf-instancing",
         "name": "Scene 35 — EXT_mesh_gpu_instancing",
         "maxMad": 0.02,
-        "maxRawKB": 83.9,
+        "maxRawKB": 84,
         "description": "SimpleInstancing.glb (EXT_mesh_gpu_instancing) — 5×5×5 grid of 125 unit cubes driven by per-instance TRS accessors. Default IBL env. Matches PG #YG3BBF#57.",
         "tags": ["pbr", "gltf", "env", "gpu-instancing"],
         "compatParity": true
@@ -1288,7 +1288,7 @@
         "slug": "scene125-gs-bake-transform",
         "name": "Scene 125 — Gaussian Splatting bakeCurrentTransformIntoVertices",
         "maxMad": 1,
-        "maxRawKB": 37.9,
+        "maxRawKB": 38,
         "description": "Loads Halo_Believe.splat, applies position/rotation/scale, calls bakeCurrentTransformIntoVertices(), verifies rendering.",
         "tags": ["gaussian-splatting", "bake-transform"],
         "skipPerf": true,
@@ -1567,7 +1567,7 @@
         "slug": "scene162-shader-material-defines",
         "name": "Scene 162 - ShaderMaterial Defines",
         "maxMad": 0.02,
-        "maxRawKB": 38.7,
+        "maxRawKB": 38.8,
         "description": "WGSL ShaderMaterial emits defines as const pipeline variants.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -1577,7 +1577,7 @@
         "slug": "scene163-shader-material-alpha",
         "name": "Scene 163 - ShaderMaterial Alpha",
         "maxMad": 0.02,
-        "maxRawKB": 38.4,
+        "maxRawKB": 38.5,
         "description": "WGSL ShaderMaterial uses alpha blending and explicit shader-side discard for alpha testing.",
         "tags": ["shader", "alpha", "procedural"],
         "skipPerf": true
@@ -1831,7 +1831,7 @@
         "slug": "scene209-floating-origin-physics",
         "name": "Scene 209 — LWR Physics",
         "maxMad": 0.5,
-        "maxRawKB": 54.5,
+        "maxRawKB": 54.6,
         "maxGzipKB": 22,
         "description": "Havok Physics V2 sphere drop at world (~5e6, *, ~5e6) with useFloatingOrigin=true: multi-region floating origin simulates in local coordinates so the float32 solver stays precise at huge coordinates.",
         "tags": ["hpm", "lwr", "floating-origin", "physics", "procedural"],
@@ -2037,7 +2037,7 @@
         "slug": "scene231-standard-deform-features",
         "name": "Scene 231 — StandardMaterial Deform Features",
         "maxMad": 0.01,
-        "maxRawKB": 53.5,
+        "maxRawKB": 53.6,
         "description": "Procedural beam exercising opt-in StandardMaterial skeletal skinning, RGBA vertex color, and UV offset, with programmatic bones frozen at a deterministic frame.",
         "tags": ["std", "procedural", "skeleton", "vertex-color", "uv-offset", "animated"],
         "skipPerf": true
@@ -2057,7 +2057,7 @@
         "slug": "scene241-animation-pointer-uvs",
         "name": "Scene 241 — AnimationPointerUVs",
         "maxMad": 1.3,
-        "maxRawKB": 161.8,
+        "maxRawKB": 161.9,
         "description": "AnimationPointerUVs.gltf — cx20 gltf-test. KHR_animation_pointer UV-transform across 82 materials.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2343,6 +2343,16 @@
         "maxRawKB": 51,
         "description": "Four StandardMaterial boxes: not mirrored, mirrored before build, mirrored at runtime, and mirrored by an ancestor at runtime. Validates triangle-winding reversal on the Standard pipeline (which previously had none) and runtime re-resolution when a transform's determinant sign flips.",
         "tags": ["standard", "transform", "procedural"],
+        "skipPerf": true
+    },
+    {
+        "id": 271,
+        "slug": "scene271-shadow-light-rebuild",
+        "name": "Scene 271 — Shadow Light Rebuild",
+        "maxMad": 0.2,
+        "maxRawKB": 75,
+        "description": "Spotlight hard shadows (PCF) where the shadow-casting light is SWAPPED after the scene was built: the scene renders with spot light A, then removes it, adds spot light B on the opposite side with its own PCF generator, and re-registers. Renderables bake the per-mesh light index list, the light-count shader permutation and the shadow bind group at build time, so this validates the in-place rebuild (rebuildSceneRenderables) plus the lights-UBO invalidation on a light identity swap. The Babylon.js reference renders the final light-B configuration directly. The image is almost entirely soft gradients (spot falloff over a flat ground plus the PCF penumbra), so per-pixel results differ by ~1 LSB across GPUs: it measures 0.000 locally and ~0.13 on the CI browser, hence the 0.2 ceiling — still far stricter than the other soft-shadow scenes (140: 0.25, 214/215: 0.40).",
+        "tags": ["standard", "shadows", "spotlight", "rebuild"],
         "skipPerf": true
     }
 ]
