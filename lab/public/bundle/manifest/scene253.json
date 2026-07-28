@@ -24,7 +24,7 @@
     "scene253-gltf-feature-extras-VHPteGay.js",
     "scene253-gltf-feature-lights-punctual-k4-uUyV6.js",
     "scene253-gltf-feature-morph-OgvZWqfo.js",
-    "scene253-gltf-feature-registry-9vdqvA7F.js",
+    "scene253-gltf-feature-registry-BFMK9vDu.js",
     "scene253-gltf-feature-skeleton-KwoOUoy7.js",
     "scene253-gltf-json-asset-CANLjMGE.js",
     "scene253-gltf-light-pointer-state-B7kFTRxK.js",
@@ -35,16 +35,16 @@
     "scene253-iridescence-fragment-CgAw-QNj.js",
     "scene253-light-base-ClJ8rhI7.js",
     "scene253-light-matrix-BpE3lP6k.js",
-    "scene253-morph-fragment-n41Wd_9J.js",
+    "scene253-morph-fragment-DJOVindv.js",
     "scene253-multilight-wgsl-CtBHqtAZ.js",
     "scene253-pbr-refraction-E6fdKDrk.js",
-    "scene253-pbr-renderable-B7msQPq-.js",
+    "scene253-pbr-renderable-HM1vMyFX.js",
     "scene253-pbr-template-ext-CiHpOV5G.js",
     "scene253-pbr-transmission-ext-Dl-_wNne.js",
     "scene253-reflectance-fragment-Dv6u_XBj.js",
     "scene253-rgbd-decode-hJNa3Ibl.js",
     "scene253-scene-uniforms-FTYH6Ct0.js",
-    "scene253-skeleton-fragment-CSKgzy60.js",
+    "scene253-skeleton-fragment-BEKghfXz.js",
     "scene253-spot-light-FVONncEV.js",
     "scene253-texture-2d-DQo3n8D6.js",
     "scene253-unlit-fragment-DWtvt7yQ.js",
@@ -52,5 +52,5 @@
     "scene253-visibility-favbdhRY.js",
     "scene253.js"
   ],
-  "rawBytes": 157417
+  "rawBytes": 157428
 }
