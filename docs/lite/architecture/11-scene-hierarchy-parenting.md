@@ -98,7 +98,7 @@ interface Mesh extends IWorldMatrixProvider, IParentable {
 
 Both `ArcRotateCamera` and `FreeCamera` extend `IWorldMatrixProvider, IParentable`.
 Camera `worldMatrix` is the camera-to-world transform (inverse of view matrix).
-`getViewMatrix()` and `getPosition()` derive from `worldMatrix`.
+`getViewMatrix(camera)` and `getCameraPosition(camera)` derive from `worldMatrix`.
 
 ### Lights
 

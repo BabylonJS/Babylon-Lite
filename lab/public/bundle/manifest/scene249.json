@@ -1,6 +1,6 @@
 {
-  "rawKB": 78.5,
-  "gzipKB": 32.7,
+  "rawKB": 78.6,
+  "gzipKB": 32.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene249-alpha-test-fragment-bxzu9jfI.js",
@@ -14,5 +14,5 @@
     "scene249-scene-uniforms-FTYH6Ct0.js",
     "scene249.js"
   ],
-  "rawBytes": 80419
+  "rawBytes": 80486
 }

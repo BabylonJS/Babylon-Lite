@@ -1,6 +1,6 @@
 {
-  "rawKB": 83.8,
-  "gzipKB": 34.8,
+  "rawKB": 83.9,
+  "gzipKB": 34.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene35-generate-mipmaps-ByfC6wwV.js",
@@ -15,5 +15,5 @@
     "scene35-thin-instance-gpu-CQCO7tJe.js",
     "scene35.js"
   ],
-  "rawBytes": 85809
+  "rawBytes": 85874
 }

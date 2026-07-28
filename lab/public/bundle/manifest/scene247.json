@@ -1,5 +1,5 @@
 {
-  "rawKB": 86,
+  "rawKB": 86.1,
   "gzipKB": 36.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -18,5 +18,5 @@
     "scene247-thin-instance-gpu-PSVyNW_a.js",
     "scene247.js"
   ],
-  "rawBytes": 88048
+  "rawBytes": 88117
 }

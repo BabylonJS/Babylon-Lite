@@ -1,6 +1,6 @@
 {
-  "rawKB": 88,
-  "gzipKB": 37,
+  "rawKB": 88.1,
+  "gzipKB": 37.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene1-background-dds-skybox-DOO6iPkP.js",
@@ -16,5 +16,5 @@
     "scene1-wgsl-helpers-BgB2AJrF.js",
     "scene1.js"
   ],
-  "rawBytes": 90150
+  "rawBytes": 90191
 }

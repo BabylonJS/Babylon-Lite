@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
-import { FreeCamera, GeospatialCamera, ArcRotateCamera } from "../src/cameras/cameras";
+import { ArcRotateCamera, FreeCamera, GeospatialCamera } from "../src/cameras/cameras";
 import { Vector3 } from "../src/math/vector";
 import type { FreeCamera as LiteFreeCamera, ArcRotateCamera as LiteArcRotateCamera } from "babylon-lite";
 
@@ -23,6 +23,15 @@ function fakeLiteCamera(): LiteFreeCamera {
 }
 
 describe("Camera adoption (loaded .babylon cameras)", () => {
+    it("propagates first-camera auto-activation to the Lite scene", () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero(), scene);
+
+        expect(scene.activeCamera).toBe(camera);
+        expect(scene._lite.camera).toBe(camera._lite);
+    });
+
     it("FreeCamera._adopt wraps an existing Lite camera without creating a new one", () => {
         const lite = fakeLiteCamera();
         const cam = FreeCamera._adopt("Camera01", lite);
