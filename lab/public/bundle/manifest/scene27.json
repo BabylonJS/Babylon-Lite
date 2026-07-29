@@ -1,6 +1,6 @@
 {
   "rawKB": 82.9,
-  "gzipKB": 34.1,
+  "gzipKB": 34,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene27-generate-mipmaps-BYzB1g85.js",
@@ -16,5 +16,5 @@
     "scene27-texture-2d-DQo3n8D6.js",
     "scene27.js"
   ],
-  "rawBytes": 84918
+  "rawBytes": 84905
 }

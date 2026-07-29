@@ -1,6 +1,6 @@
 {
   "rawKB": 133.9,
-  "gzipKB": 54.4,
+  "gzipKB": 54.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene244-animation-pointer-ext-tWfsRkCa.js",
@@ -28,5 +28,5 @@
     "scene244-visibility-BcAL-WaI.js",
     "scene244.js"
   ],
-  "rawBytes": 137115
+  "rawBytes": 137116
 }

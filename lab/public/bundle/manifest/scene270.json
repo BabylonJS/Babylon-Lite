@@ -1,7 +1,7 @@
 {
   "rawKB": 51.3,
-  "rawBytes": 52529,
-  "gzipKB": 20.7,
+  "rawBytes": 52523,
+  "gzipKB": 20.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene270-standard-pipeline-X9vqV9jn.js",
