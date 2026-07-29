@@ -83,6 +83,13 @@ export {
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { BaseTexture, Texture, RawTexture, RawTexture3D, DynamicTexture, CubeTexture, HDRCubeTexture, RenderTargetTexture } from "./textures/textures.js";
+export {
+    RawTexture2DArray,
+    UploadImageToTexture2DArrayLayer,
+    LoadImageToTexture2DArrayLayerAsync,
+    CreateTexture2DArrayFromImageUrlsAsync,
+} from "./textures/raw-texture-2d-array.js";
+export type { IUploadImageToTexture2DArrayLayerOptions, ICreateTexture2DArrayFromImageUrlsOptions } from "./textures/raw-texture-2d-array.js";
 
 // ─── Loading ─────────────────────────────────────────────────────────
 export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync } from "./loading/scene-loader.js";
