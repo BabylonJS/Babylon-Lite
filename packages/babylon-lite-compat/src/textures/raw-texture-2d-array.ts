@@ -16,6 +16,7 @@ import { createTexture2DArray, createTexture2DArrayFromPixels, updateTexture2DAr
 import type { Texture2DArray } from "babylon-lite";
 
 import { Constants } from "../misc/engine-constants.js";
+import { unsupported } from "../error.js";
 import type { Scene } from "../scene/scene.js";
 import { BaseTexture, toRgbaBytes } from "./textures.js";
 
@@ -234,4 +235,36 @@ export async function CreateTexture2DArrayFromImageUrlsAsync(
         premultiplyAlpha: options?.premultiplyAlpha ?? false,
     });
     return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
+}
+
+/** Babylon.js `ICreateTexture2DArrayFromKTX2Options` (BJS `9.17`). */
+export interface ICreateTexture2DArrayFromKTX2Options {
+    /** Generate a full mip chain (true by default). */
+    generateMipMaps?: boolean;
+    /** Sampling mode (recorded for parity; Lite uses trilinear). */
+    samplingMode?: number;
+    /** Store the texture with the Y axis inverted (false by default). */
+    invertY?: boolean;
+}
+
+/**
+ * Babylon.js `CreateTexture2DArrayFromKTX2Async` (BJS `9.17`) — decode a single
+ * KTX2 container holding several array layers into a `RawTexture2DArray`.
+ *
+ * 🔧 Needs Lite core. The sibling image-URL helper is Lite-backed, but the KTX2
+ * variant has a structural blocker: Lite's only KTX2 decode path
+ * (`loadKtx2Texture2D`) produces a single 2D texture and its `Ktx2DecodedData`
+ * shape exposes no `layerCount` / per-layer mip layout, so it cannot surface the
+ * array layers this helper needs. Backing it means a new decoder-format-aware Lite
+ * decode path that slices the transcoder's level-by-level / layer-by-layer output
+ * and force-RGBA-uploads it via `createTexture2DArrayFromPixels` — a
+ * design-subjective addition (layer/mip slicing semantics) inside the already-
+ * bundled KTX2 decoder module, not a mechanical wrapper. Throws until Lite exposes
+ * that path.
+ */
+export function CreateTexture2DArrayFromKTX2Async(_scene: Scene, _data: string | ArrayBufferView, _options?: ICreateTexture2DArrayFromKTX2Options): never {
+    return unsupported(
+        "CreateTexture2DArrayFromKTX2Async",
+        "Lite's KTX2 decode path (`loadKtx2Texture2D`) yields a single 2D texture and exposes no per-layer array output; array-KTX2 decode needs a new decoder-format-aware Lite path (design-subjective layer/mip slicing)."
+    );
 }

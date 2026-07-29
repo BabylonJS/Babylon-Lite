@@ -36,8 +36,10 @@ import {
     UploadImageToTexture2DArrayLayer,
     LoadImageToTexture2DArrayLayerAsync,
     CreateTexture2DArrayFromImageUrlsAsync,
+    CreateTexture2DArrayFromKTX2Async,
 } from "../src/textures/raw-texture-2d-array";
 import { BaseTexture } from "../src/textures/textures";
+import { LiteCompatError } from "../src/error";
 import { AbstractEngine } from "../src/engine/engine";
 
 const createArrayMock = vi.mocked(createTexture2DArray);
@@ -212,5 +214,17 @@ describe("CreateTexture2DArrayFromImageUrlsAsync", () => {
         fromUrlsMock.mockClear();
         await CreateTexture2DArrayFromImageUrlsAsync(fakeScene() as never, ["a.png"], { invertY: true, premultiplyAlpha: true });
         expect(fromUrlsMock.mock.calls[0]![2]).toEqual({ mipMaps: true, invertY: true, premultiplyAlpha: true });
+    });
+});
+
+/**
+ * `CreateTexture2DArrayFromKTX2Async` is a justified throwing stub: Lite's only
+ * KTX2 decode path (`loadKtx2Texture2D`) produces a single 2D texture and exposes
+ * no per-layer array output, so array-KTX2 decode is a `🔧 Needs Lite core` gap
+ * (a decoder-format-aware Lite path) rather than a mechanical wrapper.
+ */
+describe("CreateTexture2DArrayFromKTX2Async", () => {
+    it("throws a LiteCompatError until Lite exposes an array-KTX2 decode path", () => {
+        expect(() => CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "cubes.ktx2")).toThrow(LiteCompatError);
     });
 });

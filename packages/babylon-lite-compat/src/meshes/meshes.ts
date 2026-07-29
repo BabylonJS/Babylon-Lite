@@ -27,6 +27,7 @@ import {
     createTube,
     createExtrudeShape,
     createTransformNode,
+    cloneTransformNode,
     setParent,
     setThinInstances,
     setThinInstanceColors,
@@ -538,9 +539,32 @@ export class Mesh extends AbstractMesh {
         }
     }
 
-    /** Deep mesh clone — not yet wrapped. */
-    public clone(): never {
-        return unsupported("Mesh.clone", "Mesh cloning is not yet wrapped in the compat layer.");
+    /**
+     * Babylon.js `mesh.clone(name, newParent?, doNotCloneChildren?)` — a new mesh
+     * that shares this mesh's geometry. Forwards to Lite's `cloneTransformNode`,
+     * which shares the `_gpu`/skeleton/morph/thin-instance resources with the clone
+     * under ref-counting (so both meshes own the buffers and they survive until the
+     * last is disposed). Lite hardcodes a `_clone` name suffix, so we rename the
+     * clone to `name`; the source material is kept (BJS shares it by reference), and
+     * the clone is registered with the same compat scene through its own wrapper.
+     * `newParent` reparents the clone (default: no parent, matching BJS).
+     * `doNotCloneChildren` drops the descendants Lite always clones.
+     */
+    public clone(name = "", newParent: Node | null = null, doNotCloneChildren?: boolean): Mesh {
+        const scene = this._scene;
+        const liteClone = cloneTransformNode(this._lite) as LiteMesh;
+        liteClone.name = name;
+        const clone = new Mesh(name, liteClone, scene);
+        // BJS keeps the source material (shared by reference); override the
+        // `scene.defaultMaterial` the AbstractMesh constructor assigned.
+        clone.material = this.material;
+        if (scene) {
+            addPrimitive(clone, scene, doNotCloneChildren ? () => pruneClonedDescendants(scene, liteClone) : undefined);
+        }
+        if (newParent) {
+            clone.parent = newParent;
+        }
+        return clone;
     }
 
     /** Level-of-detail — unsupported (no LOD system in Babylon Lite). */
@@ -677,7 +701,7 @@ function engineOf(scene: Scene): EngineContext {
  * a mesh into a render group at add time, so we defer the add until engine start
  * (via `scene._deferAdd`) to let those assignments settle.
  */
-function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
+function addPrimitive(mesh: Mesh, scene: Scene, afterAdd?: () => void): Mesh {
     scene._deferAdd(() => {
         const mat = mesh.material;
         mat?._ensureRenderable(engineOf(scene));
@@ -687,8 +711,23 @@ function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
             mesh._lite.material = mat._lite as never;
         }
         addToScene(scene._lite, mesh._lite);
+        afterAdd?.();
     });
     return mesh;
+}
+
+/**
+ * Drop the descendants Lite's `cloneTransformNode` always clones, for
+ * `mesh.clone(..., doNotCloneChildren = true)`. `addToScene` already registered
+ * them (it recurses into `children`), so `removeFromScene` here releases their
+ * shared, ref-counted GPU claims — the source keeps its buffers — and detaches
+ * them, leaving the clone a lone node with no leak.
+ */
+function pruneClonedDescendants(scene: Scene, liteClone: LiteMesh): void {
+    for (const child of [...liteClone.children]) {
+        removeFromScene(scene._lite, child as never);
+    }
+    liteClone.children.length = 0;
 }
 
 /** Babylon.js `MeshBuilder` — factory namespace for primitive meshes. */
