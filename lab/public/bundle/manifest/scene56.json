@@ -1,5 +1,5 @@
 {
-  "rawKB": 60.2,
+  "rawKB": 60.3,
   "gzipKB": 24.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,5 +8,5 @@
     "scene56-standard-renderable-BG_VF11b.js",
     "scene56.js"
   ],
-  "rawBytes": 61658
+  "rawBytes": 61696
 }

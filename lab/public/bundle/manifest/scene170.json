@@ -1,5 +1,5 @@
 {
-  "rawKB": 51.6,
+  "rawKB": 51.7,
   "gzipKB": 20.7,
   "ignoredRawKB": 1485.2,
   "runtimeChunks": [
@@ -7,5 +7,5 @@
     "scene170-standard-renderable-HyHe8-bQ.js",
     "scene170.js"
   ],
-  "rawBytes": 52872
+  "rawBytes": 52907
 }

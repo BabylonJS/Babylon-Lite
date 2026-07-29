@@ -9,15 +9,15 @@
     "scene211-gltf-ext-quantization-DTtElLs7.js",
     "scene211-gltf-feature-animations-BisubEwH.js",
     "scene211-gltf-feature-meshopt-BxBnPoqa.js",
-    "scene211-gltf-feature-registry-DZgFqX9y.js",
+    "scene211-gltf-feature-registry-CxYpS-Rf.js",
     "scene211-gltf-feature-skeleton-BtnE3ACq.js",
-    "scene211-gltf-json-asset-Dat5Ap8P.js",
-    "scene211-gltf-multi-buffer-CYOVKm0o.js",
+    "scene211-gltf-json-asset-T03W-2QH.js",
+    "scene211-gltf-multi-buffer-CBbIh8uw.js",
     "scene211-gltf-sampler-denorm-8Qd5zsOW.js",
-    "scene211-pbr-renderable-CMJyUhJ5.js",
+    "scene211-pbr-renderable-Bys8w3D-.js",
     "scene211-singlelight-hemispheric-wgsl-DJoiVzVD.js",
-    "scene211-skeleton-fragment-BYKvd6v2.js",
+    "scene211-skeleton-fragment-CyURHm8z.js",
     "scene211.js"
   ],
-  "rawBytes": 93036
+  "rawBytes": 93058
 }

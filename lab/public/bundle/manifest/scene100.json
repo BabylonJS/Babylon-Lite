@@ -1,10 +1,10 @@
 {
-  "rawKB": 50.9,
+  "rawKB": 51,
   "gzipKB": 20.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene100-standard-renderable-K_axebKe.js",
     "scene100.js"
   ],
-  "rawBytes": 52138
+  "rawBytes": 52174
 }
