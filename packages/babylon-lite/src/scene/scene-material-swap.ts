@@ -1,15 +1,13 @@
 import type { SceneContext } from "./scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { Material } from "../material/material.js";
 import type { Renderable } from "../render/renderable.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 /** @internal Drain _materialSwapQueue: dispose old resources and rebuild renderables. */
 export function processMaterialSwaps(scene: SceneContext): Promise<void> | void {
     const q = scene._materialSwapQueue;
-    if (!q[0]) {
-        return;
-    }
-    if (scene._runtimeBuilds?.w) {
+    if (!q[0] || scene._runtimeBuilds?.w) {
         return;
     }
     let changed: number | undefined;
@@ -18,7 +16,7 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
     // allocated so a drain without any such mesh — the overwhelmingly common case — allocates nothing.
     // Everything else about this path (coalescing, dispatch) lives in the lazily-imported runtime build
     // module, so scenes that never introduce a material family at runtime pay only this one branch.
-    let firstBuilds: Mesh[] | undefined;
+    let firstBuilds: (Mesh | [Mesh, Material])[] | undefined;
     const renderables = scene._renderables;
     for (const mesh of q) {
         const mat = mesh.material;
@@ -46,7 +44,10 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
             (firstBuilds ??= []).push(mesh);
             continue;
         }
-
+        if (group._w?.(mesh)) {
+            (firstBuilds ??= []).push([mesh, mat]);
+            continue;
+        }
         const old = scene._meshDisposables.get(mesh);
         if (old) {
             scene._meshDisposables.delete(mesh);
@@ -59,7 +60,7 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
             // records the old resources again; retire the teardown after the next submitted frame drains.
             retireGpuResources(scene.surface.engine, () => old.forEach((fn) => fn()));
         }
-        const o = group?.o;
+        const o = group.o;
         let dead: Renderable | undefined;
         for (let i = renderables.length; i--;) {
             if (renderables[i]!.mesh === mesh) {
@@ -70,14 +71,14 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
         // Per-material generation: the CSM caster-view cache keys off THIS (which material was rebuilt), not the
         // global _materialEpoch (which also bumps when an unrelated material is swapped), so swapping a non-caster
         // material doesn't force a full shadow rebuild. See ensureCsmShadowTaskState.
-        mat._csmGen = 1 + (mat._csmGen || 0);
+        mat._csmGen = -~mat._csmGen!;
         const built = rebuild(scene, mesh);
         // Keep the group's tracked output in sync (see SceneMeshGroup.o): a topology rebuild drops the
         // previous output by identity, so a swap-built renderable missing from `o` would survive it and
         // double-draw (NodeMaterial's opaque output is merged and carries no `mesh` to match on). The
         // superseded entry is REPLACED, not appended, so repeated swaps cannot retain dead renderables.
         if (o) {
-            const oi = dead ? o.indexOf(dead) : -1;
+            const oi = o.indexOf(dead!);
             oi < 0 ? o.push(built) : (o[oi] = built);
         }
         changed = renderables.push(built);
@@ -97,7 +98,7 @@ export function processMaterialSwaps(scene: SceneContext): Promise<void> | void 
     // full group build), so the mesh becomes visible some frames later rather than in this one.
     const builds = firstBuilds;
     return import("./scene-runtime-mesh-build.js").then(
-        ({ buildUnbuiltGroupMeshes }) => buildUnbuiltGroupMeshes(scene, builds, pending),
+        ({ C }) => C(scene, builds, pending),
         (error: unknown) => {
             // The chunk itself failed to load. Route it the same way a build failure goes — the whole
             // point of this path is that a mesh must never disappear silently. `_runtimeBuilds` is

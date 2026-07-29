@@ -1,20 +1,20 @@
 {
-  "rawKB": 103.9,
+  "rawKB": 103.8,
   "gzipKB": 41.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene147-directional-light-Cwfx9Emu.js",
     "scene147-generate-mipmaps-BcrYUTQy.js",
     "scene147-gltf-feature-lights-punctual-D-p7pR9i.js",
-    "scene147-gltf-feature-registry-CL1B6yLR.js",
+    "scene147-gltf-feature-registry-C6WGbZ7J.js",
     "scene147-gltf-glb-parser-Ctl3KJNN.js",
     "scene147-gltf-light-pointer-state-B7kFTRxK.js",
     "scene147-multilight-wgsl-CLgjeQ_G.js",
-    "scene147-pbr-geometry-view-DIaiaxmr.js",
-    "scene147-pbr-renderable-C7iAEFr-.js",
+    "scene147-pbr-geometry-view-Dis_zZdc.js",
+    "scene147-pbr-renderable-BgqS3V63.js",
     "scene147-scene-uniforms-Ha63NnVx.js",
     "scene147-shader-composer-8GPw9fSv.js",
     "scene147.js"
   ],
-  "rawBytes": 106410
+  "rawBytes": 106306
 }

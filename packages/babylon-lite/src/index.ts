@@ -395,7 +395,7 @@ export { mat4Invert } from "./math/mat4-invert.js";
 export { mat4Multiply } from "./math/mat4-multiply.js";
 export { mat4LookAtLH } from "./math/mat4-look-at-lh.js";
 export { mat4PerspectiveLH } from "./math/mat4-perspective-lh.js";
-export { mat4FromQuat } from "./math/mat4-from-quat.js";
+export { mat4FromQuat, mat4FromQuatInto } from "./math/mat4-from-quat.js";
 export { quatFromRotationMatrix } from "./math/quat-from-rotation-matrix.js";
 export { quatFromLookDirectionRH } from "./math/quat-from-look-direction-rh.js";
 export { mat4Decompose } from "./math/mat4-decompose.js";

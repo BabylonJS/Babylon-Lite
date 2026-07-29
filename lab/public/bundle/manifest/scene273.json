@@ -1,12 +1,12 @@
 {
-  "rawKB": 81.1,
-  "rawBytes": 83020,
-  "gzipKB": 33.3,
+  "rawKB": 80.9,
+  "rawBytes": 82866,
+  "gzipKB": 33.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene273-pbr-renderable-BiB6E4Kw.js",
-    "scene273-scene-rebuild-CeuhZI1A.js",
-    "scene273-scene-runtime-mesh-build-DL5iLJcV.js",
+    "scene273-pbr-renderable-BWKD7JLG.js",
+    "scene273-scene-rebuild-UORNb8ue.js",
+    "scene273-scene-runtime-mesh-build-DBbHF9DR.js",
     "scene273-shader-composer-qxmZVcOJ.js",
     "scene273-singlelight-hemispheric-wgsl-urd_wPyK.js",
     "scene273-standard-renderable-CE94kyFw.js",

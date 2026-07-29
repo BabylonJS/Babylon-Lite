@@ -1,10 +1,10 @@
 {
   "rawKB": 31.8,
-  "gzipKB": 13.4,
+  "gzipKB": 13.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene55-billboard-renderable-Cd-grSiO.js",
     "scene55.js"
   ],
-  "rawBytes": 32572
+  "rawBytes": 32536
 }

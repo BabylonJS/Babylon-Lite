@@ -1,5 +1,5 @@
 {
-  "rawKB": 62.5,
+  "rawKB": 62.4,
   "gzipKB": 25.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -11,5 +11,5 @@
     "scene206-standard-renderable-IGLP4f9w.js",
     "scene206.js"
   ],
-  "rawBytes": 63984
+  "rawBytes": 63941
 }
