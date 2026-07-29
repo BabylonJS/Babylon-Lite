@@ -34,7 +34,9 @@ import {
 import type { PhysicsShape } from "@babylonjs/core/Physics/v2/physicsShape";
 import "@babylonjs/core/Physics/joinedPhysicsEngineComponent";
 import "@babylonjs/core/Meshes/Builders/groundBuilder";
-import "@babylonjs/loaders/glTF";
+// glTF 2.0 loader only: register the SceneLoader plugin + wire the v2 factory without pulling the glTF 1.0 loader from the barrel.
+import "@babylonjs/loaders/glTF/2.0";
+import "@babylonjs/loaders/glTF/glTFFileLoader";
 
 const PHYSICS_FPS = 60;
 const HEIGHTMAP_URL = "https://playground.babylonjs.com/textures/heightMap.png";

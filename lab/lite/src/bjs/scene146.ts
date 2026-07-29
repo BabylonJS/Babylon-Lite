@@ -16,7 +16,9 @@ import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imagePro
 import { Scene } from "@babylonjs/core/scene";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
-import "@babylonjs/loaders/glTF";
+// glTF 2.0 loader only: register the SceneLoader plugin + wire the v2 factory without pulling the glTF 1.0 loader from the barrel.
+import "@babylonjs/loaders/glTF/2.0";
+import "@babylonjs/loaders/glTF/glTFFileLoader";
 import { FrameGraph } from "@babylonjs/core/FrameGraph/frameGraph";
 import { FrameGraphClearTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/clearTextureTask";
 import { FrameGraphGeometryRendererTask } from "@babylonjs/core/FrameGraph/Tasks/Rendering/geometryRendererTask";
