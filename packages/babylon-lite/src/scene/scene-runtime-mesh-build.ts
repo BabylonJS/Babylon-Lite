@@ -6,13 +6,13 @@
  * material family — at runtime keep this module, and transitively `scene-rebuild.ts`, out of their
  * bundle. Its cross-chunk entry points are:
  *
- * - {@link queueRuntimeMeshBuild} — queue one runtime build, chained onto the drain's pending work.
- * - {@link startRuntimeMeshBuild} — start (and lazily install) the build machinery for one mesh.
- * - {@link buildUnbuiltGroupMeshes} — materialize meshes whose material group was never built.
- * - {@link withExclusiveGroupBuild} — serialize a whole-group rebuild against the per-mesh builds.
+ * - {@link A} — queue one runtime build, chained onto the drain's pending work.
+ * - {@link B} — start (and lazily install) the build machinery for one mesh.
+ * - {@link C} — materialize meshes whose material group was never built.
+ * - {@link X} — serialize a whole-group rebuild against the per-mesh builds.
  *
- * These four names must NOT start with `_` followed by a lowercase letter, however `@internal` they
- * are. Destructuring a dynamic import is a property access, so the Terser property mangler
+ * These four export names are intentionally terse and must NOT start with `_` followed by a lowercase
+ * letter. Destructuring a dynamic import is a property access, so the Terser property mangler
  * (`terserPropertyManglePlugin` in `scripts/bundle-scenes-core.ts`, `regex: /^_[a-z]/`) rewrites the
  * IMPORT side — while the export declaration, being a module binding, keeps its original name. The
  * two then no longer match and the import silently resolves to `undefined`, breaking every scene
@@ -60,11 +60,11 @@ let _builderTails: WeakMap<MeshGroupBuilder, Promise<void>> | null = null;
 let _runtimeRebuilders: WeakMap<MeshGroupBuilder, RuntimeRebuilder> | null = null;
 
 /** @internal Start one runtime build and return a promise covering it plus every earlier build in this drain. */
-export function queueRuntimeMeshBuild(scene: SceneContext, material: Material | null, mesh: Mesh, pending?: Promise<void>): Promise<void> {
+export function A(scene: SceneContext, material: Material | null, mesh: Mesh, pending?: Promise<void>): Promise<void> {
     if (!material || mesh.material !== material) {
         return pending ?? Promise.resolve();
     }
-    const current = startRuntimeMeshBuild(scene, material._buildGroup, mesh);
+    const current = B(scene, material._buildGroup, mesh);
     return pending ? Promise.all([pending, current]).then(() => undefined) : current;
 }
 
@@ -79,10 +79,12 @@ export function queueRuntimeMeshBuild(scene: SceneContext, material: Material | 
  *  runtime path. Coalescing them would have to exclude meshes that arrived through the
  *  `mesh.material` setter (which only enqueues): those are not in the target group yet, and only
  *  their own `moveRuntimeMeshToGroup` call puts them there. */
-export function buildUnbuiltGroupMeshes(scene: SceneContext, meshes: readonly Mesh[], pending?: Promise<void>): Promise<void> {
+export function C(scene: SceneContext, meshes: readonly (Mesh | [Mesh, Material])[], pending?: Promise<void>): Promise<void> {
     let chain = pending;
-    for (const mesh of meshes) {
-        chain = queueRuntimeMeshBuild(scene, mesh.material, mesh, chain);
+    for (const entry of meshes) {
+        const pair = Array.isArray(entry);
+        const mesh = pair ? entry[0] : entry;
+        chain = A(scene, pair ? entry[1] : mesh.material, mesh, chain);
     }
     // Route a build failure through the scene's runtime-build error hook, which rethrows it from the
     // next `onBeforeRender` — the caller only catches module-load failures.
@@ -92,7 +94,7 @@ export function buildUnbuiltGroupMeshes(scene: SceneContext, meshes: readonly Me
 }
 
 /** @internal Lazily install runtime-build state and materialize one post-build mesh. */
-export function startRuntimeMeshBuild(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh): Promise<void> {
+export function B(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh): Promise<void> {
     if (scene._z || !scene.meshes.includes(mesh)) {
         return scene._runtimeBuilds?.all().catch(() => undefined) ?? Promise.resolve();
     }
@@ -111,7 +113,7 @@ export function startRuntimeMeshBuild(scene: SceneContext, builder: MeshGroupBui
 }
 
 /** @internal Serialize a full material-group rebuild against lazy per-mesh builds. */
-export function withExclusiveGroupBuild<T>(scene: SceneContext, builder: MeshGroupBuilder, work: () => Promise<T>): Promise<T> {
+export function X<T>(scene: SceneContext, builder: MeshGroupBuilder, work: () => Promise<T>): Promise<T> {
     if (scene._z) {
         return Promise.resolve(undefined as T);
     }

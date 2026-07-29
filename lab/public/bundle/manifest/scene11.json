@@ -1,5 +1,5 @@
 {
-  "rawKB": 89.2,
+  "rawKB": 89.1,
   "gzipKB": 37.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,14 +9,14 @@
     "scene11-gltf-ext-spec-gloss-D60sFZYX.js",
     "scene11-gltf-feature-animations-C7UZCNpY.js",
     "scene11-gltf-feature-extras-VHPteGay.js",
-    "scene11-gltf-feature-registry-DFWswzcW.js",
+    "scene11-gltf-feature-registry-DmDB9ak5.js",
     "scene11-gltf-feature-skeleton-DzqLJNf9.js",
     "scene11-gltf-glb-parser-DkzNAISh.js",
     "scene11-gltf-sampler-desc-BhDLgho4.js",
-    "scene11-pbr-renderable-DNj0puSb.js",
+    "scene11-pbr-renderable-J51KmNbA.js",
     "scene11-singlelight-hemispheric-wgsl-B_Y4cleJ.js",
-    "scene11-skeleton-fragment-CH37--8w.js",
+    "scene11-skeleton-fragment-C15rDGdn.js",
     "scene11.js"
   ],
-  "rawBytes": 91316
+  "rawBytes": 91237
 }

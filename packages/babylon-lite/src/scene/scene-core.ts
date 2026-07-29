@@ -77,6 +77,8 @@ export interface SceneMeshGroup extends Array<Mesh> {
      *  the stale merged renderable drawing alongside its replacement. Kept on the group (next to `r`) so
      *  every path that replaces a group's output updates it in the same place. */
     o?: Renderable[];
+    /** @internal Optional widening predicate for material capabilities not captured by `r`. */
+    _w?: ((mesh: Mesh) => unknown) | null;
 }
 
 let _lateCleanup: WeakMap<SceneContext, () => 1> | null = null;

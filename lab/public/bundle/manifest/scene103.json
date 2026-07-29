@@ -1,5 +1,5 @@
 {
-  "rawKB": 63.1,
+  "rawKB": 63,
   "gzipKB": 25.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,5 +8,5 @@
     "scene103-thin-instance-gpu-BRZG8wwf.js",
     "scene103.js"
   ],
-  "rawBytes": 64564
+  "rawBytes": 64506
 }

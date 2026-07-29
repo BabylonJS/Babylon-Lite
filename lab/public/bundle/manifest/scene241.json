@@ -21,7 +21,7 @@
     "scene241-gltf-feature-animation-pointer-DcUorbJp.js",
     "scene241-gltf-feature-animations-3BUp5O0X.js",
     "scene241-gltf-feature-lights-punctual-DYJmo4M5.js",
-    "scene241-gltf-feature-registry-BjXErZ-C.js",
+    "scene241-gltf-feature-registry-CWH1FP4d.js",
     "scene241-gltf-json-asset-h2nlumGd.js",
     "scene241-gltf-light-pointer-state-B7kFTRxK.js",
     "scene241-gltf-pbr-builder-ext-gbDFjJEh.js",
@@ -30,7 +30,7 @@
     "scene241-light-base-BpyK7ED4.js",
     "scene241-light-matrix-CtsX4GmG.js",
     "scene241-pbr-refraction-D8houi5b.js",
-    "scene241-pbr-renderable-B7rkCACr.js",
+    "scene241-pbr-renderable-DG_bTJMr.js",
     "scene241-pbr-template-ext-CiHpOV5G.js",
     "scene241-pbr-transmission-ext--zzBNHdn.js",
     "scene241-reflectance-fragment-B1IUP2So.js",
@@ -45,5 +45,5 @@
     "scene241-visibility-CKB7eGDU.js",
     "scene241.js"
   ],
-  "rawBytes": 166034
+  "rawBytes": 165956
 }
