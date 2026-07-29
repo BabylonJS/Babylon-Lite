@@ -8,7 +8,7 @@
     "scene30-gltf-ext-dielectric-C6hvXXiF.js",
     "scene30-gltf-ext-uv-transform-DQN5DAiE.js",
     "scene30-gltf-feature-draco-BSbw1ZBU.js",
-    "scene30-gltf-feature-registry-BRBkL2yZ.js",
+    "scene30-gltf-feature-registry-DsiC2_3f.js",
     "scene30-gltf-glb-parser-CPRfMQrD.js",
     "scene30-gltf-pbr-builder-ext-CqZZdTfz.js",
     "scene30-ibl-fragment-CeRrvT96.js",
@@ -22,5 +22,5 @@
     "scene30-uv-transform-fragment-B8ijWmAK.js",
     "scene30.js"
   ],
-  "rawBytes": 106649
+  "rawBytes": 106623
 }
