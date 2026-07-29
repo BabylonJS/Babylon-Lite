@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
     createTexture2DArray,
+    createTexture2DArrayFromPixels,
+    updateTexture2DArrayFromPixels,
     uploadImageToArrayLayer,
     loadImageToArrayLayer,
     createTexture2DArrayFromUrls,
@@ -13,6 +15,7 @@ interface Captured {
     viewDesc?: GPUTextureViewDescriptor;
     samplerDesc?: GPUSamplerDescriptor;
     copyCalls: Array<{ src: GPUCopyExternalImageSourceInfo; dst: GPUCopyExternalImageDestInfo; size: GPUExtent3DStrict }>;
+    writeCalls?: Array<{ dst: GPUTexelCopyTextureInfo; data: ArrayBufferView; layout: GPUTexelCopyBufferLayout; size: GPUExtent3DStrict }>;
 }
 
 // A fake external-image source (an ImageBitmap stand-in) with a close() spy.
@@ -21,20 +24,27 @@ function fakeSource(width = 4, height = 4): ImageBitmap {
 }
 
 function makeEngine(cap: Captured): EngineContext {
+    cap.writeCalls ??= [];
     const device = {
         createTexture: (desc: GPUTextureDescriptor) => {
             cap.createDesc = desc;
             return {
                 mipLevelCount: desc.mipLevelCount ?? 1,
+                format: desc.format,
                 createView: (v?: GPUTextureViewDescriptor) => ((cap.viewDesc = v), { _kind: "view" }),
                 destroy: () => undefined,
             } as unknown as GPUTexture;
         },
         createSampler: (desc: GPUSamplerDescriptor) => ((cap.samplerDesc = desc), { _kind: "sampler" } as unknown as GPUSampler),
+        createCommandEncoder: () => ({ finish: () => ({ _kind: "commandBuffer" }) }) as unknown as GPUCommandEncoder,
         queue: {
             copyExternalImageToTexture: (src: GPUCopyExternalImageSourceInfo, dst: GPUCopyExternalImageDestInfo, size: GPUExtent3DStrict) => {
                 cap.copyCalls.push({ src, dst, size });
             },
+            writeTexture: (dst: GPUTexelCopyTextureInfo, data: ArrayBufferView, layout: GPUTexelCopyBufferLayout, size: GPUExtent3DStrict) => {
+                cap.writeCalls!.push({ dst, data, layout, size });
+            },
+            submit: () => undefined,
         },
     };
     return { _device: device as unknown as GPUDevice } as unknown as EngineContext;
@@ -224,5 +234,85 @@ describe("createTexture2DArrayFromUrls", () => {
             // @ts-expect-error empty array is not assignable to readonly [string, ...string[]]
             createTexture2DArrayFromUrls(makeEngine({ copyCalls: [] }), []);
         expect(typeof _typecheck).toBe("function");
+    });
+
+    it("threads invertY / premultiplyAlpha into every layer upload", async () => {
+        const cap: Captured = { copyCalls: [] };
+        const engine = makeEngine(cap);
+        const bmps = [fakeSource(8, 8), fakeSource(8, 8)];
+        let n = 0;
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve({} as Blob) }));
+        const bitmapMock = vi.fn().mockImplementation(() => Promise.resolve(bmps[n++]));
+        vi.stubGlobal("createImageBitmap", bitmapMock);
+
+        await createTexture2DArrayFromUrls(engine, ["a.png", "b.png"], { mipMaps: false, invertY: false, premultiplyAlpha: true });
+
+        expect(bitmapMock.mock.calls[0]![1]).toEqual({ premultiplyAlpha: "premultiply", colorSpaceConversion: "none" });
+        for (const call of cap.copyCalls) {
+            expect((call.src as { flipY?: boolean }).flipY).toBe(false);
+            expect((call.dst as { premultipliedAlpha?: boolean }).premultipliedAlpha).toBe(true);
+        }
+        vi.unstubAllGlobals();
+    });
+});
+
+describe("createTexture2DArrayFromPixels", () => {
+    it("writes every layer of the base mip in one writeTexture", () => {
+        const cap: Captured = { copyCalls: [] };
+        const engine = makeEngine(cap);
+        const data = new Uint8Array(4 * 4 * 3 * 4).fill(9);
+
+        const tex = createTexture2DArrayFromPixels(engine, data, 4, 4, 3, { mipMaps: false });
+
+        expect(tex.layers).toBe(3);
+        expect(cap.createDesc?.size).toEqual({ width: 4, height: 4, depthOrArrayLayers: 3 });
+        expect(cap.writeCalls).toHaveLength(1);
+        const call = cap.writeCalls![0]!;
+        expect(call.dst).toEqual({ texture: tex.texture, mipLevel: 0 });
+        expect(call.layout).toEqual({ bytesPerRow: 16, rowsPerImage: 4 });
+        expect(call.size).toEqual({ width: 4, height: 4, depthOrArrayLayers: 3 });
+        expect(call.data).toBe(data);
+    });
+
+    it("rejects a buffer that is too short for all layers", () => {
+        const engine = makeEngine({ copyCalls: [] });
+        expect(() => createTexture2DArrayFromPixels(engine, new Uint8Array(4 * 4 * 4), 4, 4, 3, { mipMaps: false })).toThrow(/data too short/);
+    });
+
+    it("still validates the array dimensions", () => {
+        const engine = makeEngine({ copyCalls: [] });
+        expect(() => createTexture2DArrayFromPixels(engine, new Uint8Array(4), 0, 1, 1)).toThrow(/>= 1/);
+    });
+});
+
+describe("updateTexture2DArrayFromPixels", () => {
+    it("sizes an explicit mip level to max(1, size >> mip) and does not regenerate it", () => {
+        const cap: Captured = { copyCalls: [] };
+        const engine = makeEngine(cap);
+        const tex: Texture2DArray = createTexture2DArray(engine, 8, 8, 2); // 4 mip levels
+        cap.writeCalls = [];
+
+        updateTexture2DArrayFromPixels(engine, tex, new Uint8Array(4 * 4 * 2 * 4), 1);
+
+        const call = cap.writeCalls![0]!;
+        expect(call.dst).toEqual({ texture: tex.texture, mipLevel: 1 });
+        expect(call.layout).toEqual({ bytesPerRow: 16, rowsPerImage: 4 });
+        expect(call.size).toEqual({ width: 4, height: 4, depthOrArrayLayers: 2 });
+    });
+
+    it("rejects a mip level outside the chain", () => {
+        const cap: Captured = { copyCalls: [] };
+        const engine = makeEngine(cap);
+        const tex = createTexture2DArray(engine, 4, 4, 1, { mipMaps: false });
+        expect(() => updateTexture2DArrayFromPixels(engine, tex, new Uint8Array(64), 1)).toThrow(/\[0, 1\)/);
+        expect(() => updateTexture2DArrayFromPixels(engine, tex, new Uint8Array(64), -1)).toThrow(/\[0, 1\)/);
+        expect(() => updateTexture2DArrayFromPixels(engine, tex, new Uint8Array(64), 0.5)).toThrow(/integer/);
+    });
+
+    it("rejects a buffer that is too short for the mip level", () => {
+        const cap: Captured = { copyCalls: [] };
+        const engine = makeEngine(cap);
+        const tex = createTexture2DArray(engine, 8, 8, 2, { mipMaps: false });
+        expect(() => updateTexture2DArrayFromPixels(engine, tex, new Uint8Array(16))).toThrow(/data too short/);
     });
 });

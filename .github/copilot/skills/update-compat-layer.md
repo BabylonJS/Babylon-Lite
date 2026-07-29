@@ -17,15 +17,70 @@ where the feature lives in compat:
 
 1. **Wrap existing Lite behaviour** — translate the BJS call into the equivalent Lite
    call(s). Preferred whenever Lite already does it.
-2. **Add the capability to Lite, then wrap it** — it is fine to add new functionality
-   (even a genuinely new feature) to `packages/babylon-lite/`, **provided it is 100%
-   tree-shakeable** (zero impact on existing scene bundle sizes). The feature lives in
-   Lite; compat just wraps it.
-3. **Otherwise throw** — if the capability can't be added to Lite within the
-   tree-shakeability constraint, ship a throwing `unsupported(...)` stub and record a
-   `🔧`/`❌` row.
+2. **Add the capability to Lite, then wrap it** — it is fine, and **expected**, to add
+   new functionality to `packages/babylon-lite/`, **provided it is 100% tree-shakeable**
+   (zero impact on existing scene bundle sizes) **and the addition is small, contained,
+   and objective**. The feature lives in Lite; compat just wraps it. This is the
+   **normal** answer whenever Lite doesn't already do it — a routine part of the run,
+   not a last resort or an escalation.
+3. **Otherwise throw** — when the capability cannot be added to Lite within the
+   tree-shakeability constraint, or the addition would be large/subjective (see below).
+   Ship a throwing `unsupported(...)` stub and record a `🔧`/`❌` row.
 
 A wrapper that does feature work itself is a **defect**, even if its tests pass.
+
+**"Lite doesn't have it today" is never a reason to throw** — it is precisely the
+trigger for move 2. Move 3 needs a _structural_ blocker, and you must be able to name
+it. A purely additive, tree-shakeable Lite addition costs an existing consumer nothing,
+so the bar for making one is low; the bar for declining to is high.
+
+**But move 2 is only for _mechanical_ additions.** You are extending someone else's
+engine unattended, so add only what has an obvious, uncontroversial implementation:
+
+- **Small and contained** — on the order of one or two functions in one module, using
+  Lite's existing primitives. No new subsystem, no new concept in Lite's model, no
+  change to an existing signature or behaviour.
+- **Objective** — a competent engine author would write essentially the same thing.
+  Good signs: an exact BJS/WebGPU semantic to mirror, or an existing Lite sibling to
+  copy one dimension across (`createTexture3DFromPixels` → `createTexture2DArrayFromPixels`).
+- **No open design questions** — if you find yourself choosing a caching strategy, a
+  scheduling/lifetime policy, a new public shape with no precedent, or picking between
+  several defensible architectures, **stop**. That is a design decision for the Lite
+  maintainers, not for this run.
+
+If it fails any of these, take move 3 and record `🔧 Needs Lite core` with a one-line
+sketch of the design question — that row is the ask, and a human resolves it.
+
+### Choosing your move (work this before writing any `unsupported(...)`)
+
+Stop at the first hit; record the outcome in your run summary.
+
+1. **Does Lite already do it?** Grep `packages/babylon-lite/src/index.ts` and the source
+   tree for related verbs/nouns, and check the native lab port
+   (`lab/lite/src/lite/sceneN.ts`) — if the port renders it, Lite backs it. → **move 1**.
+2. **Does compat already wrap a sibling of the same shape?** Find the analogous BJS
+   symbol already wrapped here (e.g. `RawTexture3D` for `RawTexture2DArray`, `Texture`
+   for `DynamicTexture`, `Mesh` for a new mesh variant) and read what Lite call it
+   forwards to. A working sibling **proves the shape is backable** and usually names the
+   exact Lite function — or its one-dimension-different twin — to reuse. → **move 1**,
+   or **move 2** for the variant.
+3. **Is the blocker inside compat rather than Lite?** If Lite can do the work but compat
+   has no way to _reach_ it — a missing accessor, no handle to pass through, an absent
+   `@internal` factory, a BJS helper that needs the internal texture/mesh/buffer — that
+   is a **compat plumbing gap you must fix**, not a Lite limitation. Add the accessor.
+   → **move 1**.
+4. **Can a small, mechanical, brand-new Lite export back it?** If it is real engine/GPU
+   behaviour Lite doesn't expose, and it clears the small/contained/objective bar above,
+   add it as a new independently-importable export (see "Adding the capability to
+   Lite"). → **move 2**.
+5. **Only if none of the above** → **move 3**. A valid structural blocker is concrete:
+   the code would have to live in a module existing scene bundles already pull in; it
+   needs engine state Lite deliberately doesn't expose; it depends on an out-of-scope
+   package; an A/B build showed a real size delta; or the Lite work would be large or
+   design-subjective. Write that reason in the stub's code comment **and** the
+   `COMPAT-STATUS.md` row. "No Lite equivalent exists", "Lite's API uploads X, not Y",
+   or "would need new Lite core work" are **not** valid reasons — they are restatements
+   of move 2's precondition.
 
 **Be comprehensive, not minimal.** Address the _entire_ delta and _all_ newly-possible
 gaps each run, not a cherry-picked item. The "land at least one" phrasing below is a
@@ -171,12 +226,17 @@ that hits only the floor while other implementable gaps remain is **incomplete**
       (`lab/lite/src/lite/sceneN.ts`) — if its port renders the feature, Lite **can**
       back it (the port is a copy-able recipe); "no compat wrapper yet" ≠ "Lite can't
       do it". Driving such a scene to parity is Task 2 (only if newly unblocked).
-    - Apply the three moves from the Cardinal rule: **wrap** if Lite backs it; **add
-      a tree-shakeable capability to Lite then wrap** if it doesn't but can (including
-      exposing an existing internal via a compat-only accessor); else **throw** an
-      `unsupported(...)` stub (standalone class in
-      `src/unsupported/unsupported-apis.ts`, or a throwing method) plus a matrix row —
-      never a bare "not exported" error, and never feature logic in compat.
+    - **Then search compat for a sibling of the same shape** — the analogous BJS symbol
+      already wrapped here, and what Lite call it forwards to. A Lite-backed sibling is
+      the strongest available evidence that this symbol is backable too.
+    - Work the **"Choosing your move"** procedure from the Cardinal rule in order:
+      **wrap** if Lite backs it; **fix the compat plumbing** if the only thing missing
+      is a way to reach Lite; **add a tree-shakeable capability to Lite then wrap** if
+      Lite genuinely lacks it (including exposing an existing internal via a
+      compat-only accessor); else **throw** an `unsupported(...)` stub (standalone class
+      in `src/unsupported/unsupported-apis.ts`, or a throwing method) plus a matrix row
+      — never a bare "not exported" error, and never feature logic in compat. Every
+      stub must carry a named structural reason.
     - If genuinely out of scope per the Scope section → ignore it (no row).
 
 ---
@@ -216,18 +276,39 @@ or newly added there), **never in the compat package**:
   `unsupported(...)` rather than omitting the symbol — do **not** fake behaviour.
 
 **Adding the capability to Lite (move 2 from the Cardinal rule)** must be 100%
-tree-shakeable so existing bundles are untouched:
+tree-shakeable so existing bundles are untouched, and small/contained/objective per the
+Cardinal rule. Done this way it is cheap, routine, and provably zero-risk:
 
 - Add **new, separately-exported** symbol(s) to Lite that **nothing in Lite's own
   scenes, demos, or other modules imports** — only compat imports them. A brand-new
   export no existing bundle references is dropped by tree-shaking, so it can't change
   any ceiling — true whether it merely exposes an existing internal via a clean getter
   or implements a new feature outright.
-- Do **not** modify or add code to an existing Lite function/class/module already
-  pulled into scene bundles; new functionality goes into new, independently-importable
-  paths.
+- **Cheap up-front proof (do this before writing the code, to pick your move).** A
+  module is safe to extend if nothing that lands in a scene bundle imports it. List its
+  importers:
+    ```
+    git grep -l "<module-file>.js" -- packages/babylon-lite/src lab/lite/src playground
+    ```
+    The Lite barrel `packages/babylon-lite/src/index.ts` always appears and doesn't
+    count (re-exports are tree-shaken). **Any other hit** — a scene, a demo, or another
+    Lite module — means the file is already in bundles: put your addition in a **new**
+    file instead. No other hits means the addition **cannot** move a bundle, so move 2
+    is available. Confirm with the bundle build at the end of the run, but decide here;
+    don't defer the decision to the build.
+- **Purely additive only.** Do **not** modify or add code to an existing Lite
+  function/class/module already pulled into scene bundles; new functionality goes into
+  new, independently-importable paths. Because the addition is additive and unreferenced
+  by existing code paths, it cannot change rendering — no Lite parity run is required
+  (and per the Guardrails you must not run one). If you find yourself needing to change
+  an existing hot path, that is a genuine structural blocker → move 3.
 - Prefer reading Lite's **public** fields over `_`-prefixed internals; if the clean
   surface is missing, a new compat-only tree-shakeable export is the fix.
+- **Match BJS defaults when forwarding.** Lite and BJS often pick different defaults for
+  the same optional argument (e.g. BJS `invertY = false` vs Lite `invertY = true`).
+  Never let a forwarded call fall through to Lite's default — read both signatures and
+  pass the BJS value explicitly, or thread an option through so you can. A silent
+  default mismatch is an API-parity bug that no throwing-stub test will catch.
 
 Prove zero impact before finishing (see "Test coverage" for the rigorous A/B build).
 If any scene's size moves, the addition isn't tree-shakeable — revert it and record
@@ -246,6 +327,16 @@ For every wrapper you add or extend, add or update a test in
   Lite object, enum mappings, and error-throwing stubs.
 - Do **not** write tests that require a real GPU device or a live `createEngine`
   — those belong to the Lite parity/perf suites, not here.
+- **Never assert `.toThrow()` on a surface that moves 1–4 could back.** A green
+  `expect(...).toThrow(LiteCompatError)` test on a backable API cements the defect and
+  makes the run _look_ validated — it is worse than no test. Only assert throwing for a
+  stub you justified with a named structural blocker; if you later implement the
+  surface, delete the throw assertion rather than leaving both.
+- For a Lite-backed wrapper, test the **forwarding contract**: mock the Lite function
+  and assert it was called with the translated arguments — including the **BJS default
+  values** for optional parameters you didn't pass. Where a BJS helper hops through the
+  engine, exercise the real hop (e.g. borrow `AbstractEngine.prototype.<method>` in the
+  fake scene) so the whole chain is covered rather than the top of it.
 
 Run the suite and the typecheck before finishing:
 
@@ -260,23 +351,36 @@ pnpm exec prettier --check "packages/babylon-lite-compat/**/*.ts"
 All must pass.
 
 **If (and only if) you added anything to `packages/babylon-lite/` core this run,**
-also prove it is tree-shakeable with a clean A/B build — the committed manifest can
-be stale, so compare two fresh builds that differ _only_ by your Lite change:
+prove it is tree-shakeable with a bundle build. The tracked baseline is the **per-scene**
+manifest set `lab/public/bundle/manifest/<scene>.json` (the aggregate
+`lab/public/bundle/manifest.json` is generated and git-ignored — don't diff that).
 
 ```
-# 1. Build WITH your change, save the manifest
+# 1. Build WITH your change (~15 min), then ask git whether any scene moved
 pnpm build:bundle-scenes
-copy lab/public/bundle/manifest.json with.json
-# 2. Revert ONLY your Lite-core files, rebuild, save the baseline
-git stash push -- packages/babylon-lite/src/<your-files>
-pnpm build:bundle-scenes
-copy lab/public/bundle/manifest.json base.json
-git stash pop
-# 3. The two manifests must be byte-identical (per-scene rawKB/gzipKB unchanged)
+git status --porcelain lab/public/bundle/manifest
 ```
 
-If any scene's size differs between the two builds, the Lite addition is **not**
-tree-shakeable — revert it and record `🔧 Needs Lite core` instead.
+- **No output → done.** Your build reproduced the committed per-scene bytes exactly, so
+  your addition changed nothing. This is the expected result for a purely additive,
+  unimported export, and it needs only the one build.
+- **Any file listed → attribute the delta before concluding anything.** The committed
+  baseline can be stale (someone else's change), so re-run without your Lite files:
+    ```
+    git stash push -- packages/babylon-lite/src/<your-files>
+    pnpm build:bundle-scenes
+    git status --porcelain lab/public/bundle/manifest   # same files still dirty?
+    git stash pop
+    ```
+    Same set dirty both ways → pre-existing drift, not yours (commit the regenerated
+    manifests). Dirty only **with** your change → the addition is **not**
+    tree-shakeable; revert it and record `🔧 Needs Lite core`.
+
+A non-zero exit from `build:bundle-scenes` means a **ceiling** was exceeded — that is a
+hard stop, and raising a ceiling requires explicit user approval.
+
+The build also regenerates the tracked per-scene manifests, so include any that
+legitimately changed in your commit.
 
 ---
 
@@ -293,6 +397,14 @@ Lite change unblocked a scene. Do not finish until:
       remaining `❌`/`🔧` rows were all re-checked this run and confirmed un-backable.
       State which floor outcome you hit (added API / upgraded stub / proof of
       completeness) and confirm nothing implementable was left.
+- [ ] **(Task 3)** Every `unsupported(...)` stub you wrote or left in place this run
+      carries a named **structural** blocker (not "Lite has no equivalent"), and no test
+      asserts `.toThrow()` on a surface moves 1–4 could back.
+- [ ] Any Lite addition this run is small, contained, and objective (no new subsystem,
+      no open design question) — otherwise it was left as `🔧 Needs Lite core` with the
+      design question stated.
+- [ ] `COMPAT-STATUS.md` grew no log: no dated run note, "re-check" entry, or changelog
+      section was appended; every update edits state in place.
 - [ ] **(Task 3)** Every `@babylonjs/core` + `@babylonjs/loaders` symbol maps to a row
       (`✅`/`⚡`/`🔧`/`❌`) — ledger empty — and none resolves to a bare "not exported"
       error (each is wrapped or a throwing stub).
@@ -309,13 +421,21 @@ If any box is unchecked, the run is not done.
 
 ## Update `COMPAT-STATUS.md` (required, last step)
 
+**`COMPAT-STATUS.md` records current state, never history.** Edit existing rows and
+prose in place. Do **not** append dated run notes, "Task N re-check (YYYY-MM-DD)"
+entries, changelog blocks, or any other append-only log — the file must not grow by one
+section per run. Git history, the PR description, and your run summary carry the
+per-run narrative; anything a future run needs must be expressed as _state_ (a row, a
+blocker entry, a status line), not as an entry in a log.
+
 Update the part each task touched:
 
 1. **(Task 3)** Update changed feature rows and add rows for any newly enumerated
    core/loaders symbols (even unsupported ones).
 2. **(Task 2, only if a scene was unblocked)** Update the **Lab scene coverage**
    section — move newly-working scenes into the working list (bump the count) and
-   revise/remove blocker rows.
+   revise/remove blocker rows. When nothing was unblocked, the existing "Task 2 status"
+   line already says so — leave it alone rather than adding a note saying it again.
 3. **(Task 1)** Set `Last synced BJS commit` to `NEW_BJS_SHA` and `Last sync date` to
    today; update `Lite compat package version` if it changed.
 
@@ -331,17 +451,34 @@ and ships to npm, so add no per-symbol rows and no internal-doc links.
 
 - **Cardinal rule (restated):** compat is a pure API layer — feature logic lives in
   Lite, never in compat. A wrapper that does feature work itself is a defect even if
-  its tests pass. Any Lite addition to support compat must be 100% tree-shakeable.
+  its tests pass. Any Lite addition to support compat must be 100% tree-shakeable —
+  and making one is a **normal, expected** outcome, not an escalation.
+- **Every `unsupported(...)` needs a named structural reason.** Before writing one,
+  work the "Choosing your move" procedure and state in the code comment and the matrix
+  row _why_ moves 1–4 are unavailable. "Lite has no equivalent" is the trigger for
+  move 2, not a justification for move 3. An unjustified stub is a defect on par with
+  putting feature logic in compat.
+- **Lite additions stay mechanical.** Move 2 covers small, contained, objective
+  additions only. Anything that introduces a subsystem, a new concept in Lite's model,
+  or a real design choice is a `🔧 Needs Lite core` row for a human — not unattended
+  engine design.
+- **`COMPAT-STATUS.md` is state, not a log.** Never append dated run notes or
+  changelog entries; revise rows and prose in place so the file stays a constant size.
 - **Exact API parity:** exported symbols carry the identical BJS name and public
   member shapes, so ported code runs against the compat barrel without renaming a
-  single import or member. A divergent public name is a parity bug.
+  single import or member. A divergent public name is a parity bug. Optional-parameter
+  **defaults** are part of that shape — forward BJS's value, never Lite's.
 - The compat package is **opt-in and excluded from Lite bundle-size ceilings**, but
   must stay free of module-level side effects so it never bloats a non-importing
   consumer.
 - Do not run `pnpm test:perf` or the Lite parity suite; they are unrelated to compat
-  work.
+  work. A purely additive, unimported Lite export cannot change rendering, so the
+  bundle build above is the only proof required. (The parity suite also rewrites
+  `reference/**` golden images, which are immutable — another reason not to run it.)
 - Keep wrappers honest: a feature is `✅ Full`/`⚡ Partial` only if it actually works
-  by delegating to Lite. When in doubt, mark `🔧`/`❌` and throw.
+  by delegating to Lite. Mark `🔧`/`❌` and throw only after the decision procedure
+  turned up a real blocker — "in doubt" means you checked and hit a wall, not that you
+  didn't check.
 - **When Task 2 fires, land the scene — don't just unblock it:** drive it to MAD ≈ 0
   and into the working list (expect a chain of several gaps). If nothing was
   unblocked, zero scene work is correct.

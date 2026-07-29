@@ -1,5 +1,5 @@
 {
-  "rawKB": 96.3,
+  "rawKB": 96.2,
   "gzipKB": 39.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -15,5 +15,5 @@
     "scene158-skeleton-fragment-BIhS5Dau.js",
     "scene158.js"
   ],
-  "rawBytes": 98560
+  "rawBytes": 98553
 }

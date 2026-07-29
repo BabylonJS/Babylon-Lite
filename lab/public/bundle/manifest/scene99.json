@@ -1,6 +1,6 @@
 {
   "rawKB": 92.4,
-  "gzipKB": 38.6,
+  "gzipKB": 38.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene99-animation-group-CrkQsD22.js",
@@ -17,5 +17,5 @@
     "scene99-types-BVAXdTdf.js",
     "scene99.js"
   ],
-  "rawBytes": 94634
+  "rawBytes": 94622
 }
