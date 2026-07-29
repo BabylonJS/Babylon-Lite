@@ -43,6 +43,11 @@ export class AssetContainer {
     /** @internal Underlying Babylon Lite asset container. */
     public readonly _lite: LiteAssetContainer;
 
+    /** @internal Canonical `LoadedMesh` wrappers, built once so repeated `meshes`
+     *  reads (and cross-references from the scene) return stable identities rather
+     *  than fresh objects each call. */
+    private _meshes: LoadedMesh[] | undefined;
+
     public constructor(lite: LiteAssetContainer) {
         this._lite = lite;
     }
@@ -51,9 +56,14 @@ export class AssetContainer {
         return this._lite.animationGroups ?? [];
     }
 
-    /** Flat list of renderable meshes (Babylon.js-shaped handles over the loaded node tree). */
+    /**
+     * Flat list of renderable meshes (Babylon.js-shaped handles over the loaded node
+     * tree). The container's contents are fixed once loaded, so the canonical wrappers
+     * are built on first read and reused — matching Babylon.js, where `container.meshes`
+     * returns the same `AbstractMesh` instances every call (wrapper identity).
+     */
     public get meshes(): LoadedMesh[] {
-        return collectLoadedMeshes(this._lite);
+        return (this._meshes ??= collectLoadedMeshes(this._lite));
     }
 
     /** Add every entity, animation group, camera, and clear colour to the scene. */
