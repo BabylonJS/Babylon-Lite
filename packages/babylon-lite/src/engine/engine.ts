@@ -9,7 +9,7 @@ import type { GpuFrameTimer } from "./gpu-timer.js";
 import type { GpuTaskTimer } from "./gpu-task-timer.js";
 import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
 import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
-import { disposeGpuResourceRetirements } from "./gpu-resource-retirement.js";
+import { disposeGpuResourceRetirements, flushGpuResourceRetirements } from "./gpu-resource-retirement.js";
 
 // `__BL_VERSION__` is replaced at build time with the resolved package version
 // by the lite Vite build (see `define` in packages/babylon-lite/vite.config.ts).
@@ -160,6 +160,9 @@ export interface EngineContext extends SurfaceContext {
     _cbs: GPUCommandBuffer[];
     /** @internal GPU resource disposers waiting for the next frame command buffer to be submitted. */
     _retirements?: Array<() => void> | null;
+    /** @internal Retirement batches whose queue fence has not resolved yet. Kept reachable so engine
+     *  teardown and device-lost recovery can still claim and run them synchronously. */
+    _retiring?: Array<Array<() => void>> | null;
 
     /** @internal Per-frame floating-origin offset updater. Set when the engine
      *  was created with `useFloatingOrigin: true` (which requires
@@ -483,7 +486,13 @@ export function startEngine(engine: EngineContext): Promise<void> {
                 firstRafFrame = false;
                 resolve();
             }
-            engine._animFrameId = requestAnimationFrame(engine._renderFn!);
+            // `stopEngine()` may have been called from inside this frame (e.g. from an
+            // `onBeforeRender` callback), which nulls `_renderFn` and zeroes `_animFrameId`.
+            // Re-arming unconditionally would both throw on `requestAnimationFrame(null)` and
+            // resurrect the loop the caller just stopped.
+            if (engine._renderFn) {
+                engine._animFrameId = requestAnimationFrame(engine._renderFn);
+            }
         };
         engine._animFrameId = requestAnimationFrame(engine._renderFn);
     });
@@ -496,12 +505,20 @@ export function stopEngine(engine: EngineContext): void {
     }
     engine._animFrameId = 0;
     engine._renderFn = null;
+    // No further frame will submit, so retirements queued by (say) a `removeFromScene` issued right
+    // before the stop would otherwise sit pending until `disposeEngine`. Flush them behind a fence.
+    flushGpuResourceRetirements(engine);
 }
 
 /** Release all engine-owned GPU resources (device + every attached surface's swapchain
  *  context). Rendering contexts own their own GPU resources (frame graphs, render
  *  targets) and dispose them separately. */
 export function disposeEngine(engine: EngineContext): void {
+    // Drain BEFORE stopping: teardown at engine disposal must stay synchronous, because the device is
+    // destroyed below. `stopEngine` otherwise takes the retirement list for its fenced flush, which
+    // would defer the teardown past `device.destroy()` — and `onSubmittedWorkDone()` on a destroyed
+    // device never usefully resolves. Draining first leaves that flush a no-op.
+    disposeGpuResourceRetirements(engine);
     stopEngine(engine);
     const surfaces = engine._surfaces;
     for (const s of surfaces) {
@@ -509,7 +526,6 @@ export function disposeEngine(engine: EngineContext): void {
         s._context.unconfigure();
     }
     surfaces.length = 0;
-    disposeGpuResourceRetirements(engine);
     engine._disposeStorageBuffers?.();
     engine._device.destroy();
 }
@@ -525,6 +541,10 @@ export function renderFrame(engine: EngineContext, delta: number): void {
         total += surfaces[i]!._renderingContexts.length;
     }
     if (total === 0) {
+        // Nothing left to draw (e.g. the last scene was unregistered). No submit will happen this frame,
+        // so any retirement queued by that removal has to be drained behind a fence instead of waiting
+        // for a `queue.submit` that will never come.
+        flushGpuResourceRetirements(engine);
         return;
     }
 
@@ -571,13 +591,8 @@ export function renderFrame(engine: EngineContext, delta: number): void {
     // frame's recorded GPU work (a no-op short-circuit when timing is disabled).
     engine._gpuTimerEnd?.(finalEncoder);
     engine._cbs[0] = finalEncoder.finish();
-    const queue = engine._device.queue;
-    queue.submit(engine._cbs);
-    const retirements = engine._retirements;
-    if (retirements) {
-        engine._retirements = null;
-        void retirements.reduce<Promise<void>>((fence, retire) => fence.then(retire, retire), queue.onSubmittedWorkDone());
-    }
+    engine._device.queue.submit(engine._cbs);
+    flushGpuResourceRetirements(engine);
     engine.drawCallCount = drawCalls;
     // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
     // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.

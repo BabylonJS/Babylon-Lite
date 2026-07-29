@@ -507,6 +507,7 @@ export type {
     PropertyAnimationTrackOptions,
 } from "./animation/property-animation.js";
 export type { AnimationClip, GltfAnimationData } from "./animation/types.js";
+export type { BoxOptions } from "./mesh/create-box.js";
 export type { SphereOptions } from "./mesh/create-sphere.js";
 export type { TorusOptions } from "./mesh/create-torus.js";
 export type { GroundOptions } from "./mesh/create-ground.js";

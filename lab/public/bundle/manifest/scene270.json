@@ -1,7 +1,7 @@
 {
-  "rawKB": 51,
-  "rawBytes": 52188,
-  "gzipKB": 20.5,
+  "rawKB": 50.9,
+  "rawBytes": 52072,
+  "gzipKB": 20.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene270-standard-pipeline-Ctk-DPHC.js",

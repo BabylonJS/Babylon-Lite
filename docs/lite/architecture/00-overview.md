@@ -479,10 +479,6 @@ interface ArcRotateCamera {
     inertialRadiusOffset: number;
     inertialPanningX: number;
     inertialPanningY: number;
-    getViewMatrix(): Mat4;
-    getProjectionMatrix(aspectRatio: number): Mat4;
-    getViewProjectionMatrix(aspectRatio: number): Mat4;
-    getPosition(): Vec3;
 }
 
 interface FreeCamera {
@@ -494,15 +490,16 @@ interface FreeCamera {
     fov: number;
     nearPlane: number;
     farPlane: number;
-    getViewMatrix(): Mat4;
-    getProjectionMatrix(aspectRatio: number): Mat4;
-    getViewProjectionMatrix(aspectRatio: number): Mat4;
-    getPosition(): Vec3;
 }
 
 interface Camera {
     /* Union: ArcRotateCamera | FreeCamera */
 }
+
+function getViewMatrix(camera: Camera): Mat4;
+function getProjectionMatrix(camera: Camera, aspectRatio: number): Mat4;
+function getViewProjectionMatrix(camera: Camera, aspectRatio: number): Mat4;
+function getCameraPosition(camera: Camera): Vec3;
 
 // ─── Lights ──────────────────────────────────────────────────────────
 interface LightBase {

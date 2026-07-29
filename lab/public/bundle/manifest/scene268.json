@@ -1,10 +1,10 @@
 {
-  "rawKB": 46,
+  "rawKB": 45.9,
   "gzipKB": 18.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene268-standard-renderable-BaQyCxGB.js",
     "scene268.js"
   ],
-  "rawBytes": 47079
+  "rawBytes": 46961
 }

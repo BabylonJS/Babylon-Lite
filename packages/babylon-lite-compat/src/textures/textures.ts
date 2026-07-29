@@ -98,6 +98,7 @@ export abstract class BaseTexture {
 
 export class Texture extends BaseTexture {
     private readonly _ready: Promise<void>;
+    private _onLoadObservable: Observable<Texture> | undefined;
     /** Babylon.js sampling-mode constants (numeric parity). */
     public static readonly NEAREST_SAMPLINGMODE = 1;
     public static readonly BILINEAR_SAMPLINGMODE = 2;
@@ -169,6 +170,7 @@ export class Texture extends BaseTexture {
 
         this._ready = loadCompatTexture(engine, url, loadOpts).then((tex) => {
             this._lite = tex;
+            this._notifyLoadObservable();
             if (onLoad) {
                 onLoad();
             }
@@ -208,6 +210,25 @@ export class Texture extends BaseTexture {
 
     public override whenReadyAsync(): Promise<void> {
         return this._ready;
+    }
+
+    /** Babylon.js `Texture.onLoadObservable`, allocated only when code subscribes. */
+    public get onLoadObservable(): Observable<Texture> {
+        let observable = this._onLoadObservable;
+        if (!observable) {
+            observable = new Observable<Texture>(undefined, true);
+            this._onLoadObservable = observable;
+            if (this.isReady()) {
+                observable.notifyObservers(this);
+            }
+        }
+        return observable;
+    }
+
+    private _notifyLoadObservable(): void {
+        if (this._onLoadObservable) {
+            this._onLoadObservable.notifyObservers(this);
+        }
     }
 
     /** Babylon.js `BaseTexture.isReady()` — true once the GPU handle has resolved. */

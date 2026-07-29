@@ -1,5 +1,5 @@
 {
-  "rawKB": 49.8,
+  "rawKB": 49.7,
   "gzipKB": 20.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,5 +9,5 @@
     "scene203-standard-renderable-y266HOp7.js",
     "scene203.js"
   ],
-  "rawBytes": 50959
+  "rawBytes": 50842
 }

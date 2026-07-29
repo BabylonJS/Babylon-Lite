@@ -486,6 +486,9 @@ export function disposeScene(scene: SceneContext): void {
         ctx._meshAuxDisposables.clear();
         for (const mesh of ctx.meshes) {
             // Free the mesh's shared GPU buffers only when this was its LAST owning scene.
+            // `disposeMeshGpu` is idempotent (`mesh._disposed`), so a deferred free still in flight
+            // for this mesh — removed, then the scene disposed before the retirement drained —
+            // cannot release the same shared resource a second time.
             if (unregisterMeshScene(ctx, mesh)) {
                 disposeMeshGpu(mesh);
             }
