@@ -1,5 +1,5 @@
 {
-  "rawKB": 97.5,
+  "rawKB": 97.4,
   "gzipKB": 40.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,7 +8,7 @@
     "scene37-gltf-ext-dielectric-C6hvXXiF.js",
     "scene37-gltf-ext-sheen-Dv23b_3T.js",
     "scene37-gltf-ext-uv-transform-hVTzf5Q9.js",
-    "scene37-gltf-feature-registry-B6eslyME.js",
+    "scene37-gltf-feature-registry-CAvTlG4G.js",
     "scene37-gltf-glb-parser-BvLkUAFg.js",
     "scene37-gltf-pbr-builder-ext-DBkuxTnO.js",
     "scene37-ibl-fragment-CeRrvT96.js",
@@ -22,5 +22,5 @@
     "scene37-uv-transform-fragment-B8ijWmAK.js",
     "scene37.js"
   ],
-  "rawBytes": 99802
+  "rawBytes": 99771
 }
