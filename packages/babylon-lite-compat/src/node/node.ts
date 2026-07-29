@@ -13,7 +13,6 @@
 
 import type { Scene } from "../scene/scene.js";
 import type { WebGPUEngine } from "../engine/engine.js";
-import { Observable } from "../misc/observable.js";
 
 let _uniqueIdCounter = 0;
 
@@ -36,10 +35,6 @@ export abstract class Node {
     protected _enabled = true;
     /** @internal */
     protected _disposed = false;
-    /** @internal Lazily-allocated so nodes that never observe enabled changes pay no cost. */
-    private _onEnabledStateChangedObservable: Observable<boolean> | null = null;
-    /** @internal Lazily-allocated effective-enabled observable. */
-    private _onEffectiveEnabledStateChangedObservable: Observable<boolean> | null = null;
 
     protected constructor(name: string, scene?: Scene) {
         this.name = name;
@@ -133,56 +128,12 @@ export abstract class Node {
         return this.getDescendants(directDescendantsOnly, (node) => node._isMeshNode() && (!predicate || predicate(node)));
     }
 
-    public isEnabled(checkAncestors = true): boolean {
-        if (checkAncestors === false) {
-            return this._enabled;
-        }
-        // Effective enabled state: false if this node or any ancestor is disabled.
-        if (!this._enabled) {
-            return false;
-        }
-        for (let node = this._parent; node; node = node._parent) {
-            if (!node._enabled) {
-                return false;
-            }
-        }
-        return true;
+    public isEnabled(): boolean {
+        return this._enabled;
     }
 
     public setEnabled(value: boolean): void {
-        if (this._enabled === value) {
-            return;
-        }
-        // Snapshot the effective state of this node and every descendant before the
-        // change so we can fire the effective-enabled observable only where it flips.
-        const subtree = [this, ...this.getDescendants(false)];
-        const before = subtree.map((n) => n.isEnabled(true));
         this._enabled = value;
-        this._onEnabledStateChangedObservable?.notifyObservers(value);
-        for (let i = 0; i < subtree.length; i++) {
-            const node = subtree[i]!;
-            const now = node.isEnabled(true);
-            if (now !== before[i]) {
-                node._onEffectiveEnabledStateChangedObservable?.notifyObservers(now);
-            }
-        }
-    }
-
-    /**
-     * Babylon.js `node.onEnabledStateChangedObservable` — fires when this node's own
-     * enabled flag changes (via {@link setEnabled}), not when an ancestor's does.
-     */
-    public get onEnabledStateChangedObservable(): Observable<boolean> {
-        return (this._onEnabledStateChangedObservable ??= new Observable<boolean>());
-    }
-
-    /**
-     * Babylon.js `node.onEffectiveEnabledStateChangedObservable` — fires whenever the
-     * value returned by {@link isEnabled}() (with ancestor checks) changes, including
-     * changes caused by an ancestor's enabled state. Created on first access.
-     */
-    public get onEffectiveEnabledStateChangedObservable(): Observable<boolean> {
-        return (this._onEffectiveEnabledStateChangedObservable ??= new Observable<boolean>());
     }
 
     public isDisposed(): boolean {
