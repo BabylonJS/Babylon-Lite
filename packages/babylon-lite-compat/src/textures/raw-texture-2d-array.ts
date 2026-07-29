@@ -17,6 +17,7 @@ import type { Texture2DArray } from "babylon-lite";
 
 import { Constants } from "../misc/engine-constants.js";
 import type { Scene } from "../scene/scene.js";
+import { LiteCompatError } from "../error.js";
 import { BaseTexture, toRgbaBytes } from "./textures.js";
 
 /** The decoded image sources WebGPU (and therefore Lite) can upload into a layer. */
@@ -234,4 +235,35 @@ export async function CreateTexture2DArrayFromImageUrlsAsync(
         premultiplyAlpha: options?.premultiplyAlpha ?? false,
     });
     return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
+}
+
+/** Babylon.js `ICreateTexture2DArrayFromKTX2Options`. */
+export interface ICreateTexture2DArrayFromKTX2Options {
+    /** Generate a full mip chain (true by default). */
+    generateMipMaps?: boolean;
+    /** Sampling mode (recorded for parity; Lite uses trilinear). */
+    samplingMode?: number;
+    /** Store the texture with the Y axis inverted (false by default). */
+    invertY?: boolean;
+}
+
+/**
+ * Babylon.js `CreateTexture2DArrayFromKTX2Async` — build a 2D array texture from a
+ * single multi-layer KTX2 file (transcoded to RGBA).
+ *
+ * 🔧 Needs Lite core. Babylon Lite's KTX2 decode path (`texture/ktx2-loader.ts`)
+ * is single-layer only: its decoded-data shape has no `layerCount`, its CDN decoder
+ * glue is module-private, and that module is already pulled into KTX2 scene bundles
+ * — so multi-layer KTX2 → array decode with per-layer array-mip regeneration cannot
+ * be added as a small tree-shakeable export. It is a decode-subsystem extension with
+ * open design questions (a `🔧 Needs Lite core` item), not a mechanical wrapper, so
+ * this throws rather than silently returning a wrong texture.
+ */
+export function CreateTexture2DArrayFromKTX2Async(_scene: Scene, _data: string | ArrayBufferView, _options?: ICreateTexture2DArrayFromKTX2Options): Promise<RawTexture2DArray> {
+    return Promise.reject(
+        new LiteCompatError(
+            "CreateTexture2DArrayFromKTX2Async",
+            "Babylon Lite's KTX2 decoder is single-layer (texture/ktx2-loader.ts has no layerCount and its decoder glue is module-private); multi-layer KTX2 → array decode needs a new Lite decode path. Use CreateTexture2DArrayFromImageUrlsAsync with per-layer images instead."
+        )
+    );
 }

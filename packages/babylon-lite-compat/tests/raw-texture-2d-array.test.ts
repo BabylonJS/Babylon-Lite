@@ -36,9 +36,11 @@ import {
     UploadImageToTexture2DArrayLayer,
     LoadImageToTexture2DArrayLayerAsync,
     CreateTexture2DArrayFromImageUrlsAsync,
+    CreateTexture2DArrayFromKTX2Async,
 } from "../src/textures/raw-texture-2d-array";
 import { BaseTexture } from "../src/textures/textures";
 import { AbstractEngine } from "../src/engine/engine";
+import { LiteCompatError } from "../src/error";
 
 const createArrayMock = vi.mocked(createTexture2DArray);
 const createFromPixelsMock = vi.mocked(createTexture2DArrayFromPixels);
@@ -212,5 +214,14 @@ describe("CreateTexture2DArrayFromImageUrlsAsync", () => {
         fromUrlsMock.mockClear();
         await CreateTexture2DArrayFromImageUrlsAsync(fakeScene() as never, ["a.png"], { invertY: true, premultiplyAlpha: true });
         expect(fromUrlsMock.mock.calls[0]![2]).toEqual({ mipMaps: true, invertY: true, premultiplyAlpha: true });
+    });
+});
+
+describe("CreateTexture2DArrayFromKTX2Async", () => {
+    // 🔧 Needs Lite core: Lite's KTX2 decode path is single-layer (no layerCount and
+    // its decoder glue is module-private), so multi-layer KTX2 → array decode cannot
+    // be backed by a mechanical wrapper. The stub throws until Lite gains that path.
+    it("throws a LiteCompatError until Lite exposes a multi-layer KTX2 decode path", async () => {
+        await expect(CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "atlas.ktx2")).rejects.toBeInstanceOf(LiteCompatError);
     });
 });

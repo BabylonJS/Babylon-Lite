@@ -5,7 +5,7 @@
   "runtimeChunks": [
     "scene41-generate-mipmaps-CwF4YsJB.js",
     "scene41-gltf-ext-spec-gloss-D60sFZYX.js",
-    "scene41-gltf-feature-registry-CBrpdekJ.js",
+    "scene41-gltf-feature-registry-CxVePgmX.js",
     "scene41-gltf-glb-parser-B45AG9UF.js",
     "scene41-gltf-sampler-desc-BaZGySA_.js",
     "scene41-mesh-features-Dda6QcW-.js",
@@ -13,5 +13,5 @@
     "scene41-standard-renderable-BjajUQ2d.js",
     "scene41.js"
   ],
-  "rawBytes": 94878
+  "rawBytes": 94883
 }

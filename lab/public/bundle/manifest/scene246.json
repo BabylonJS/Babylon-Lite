@@ -8,7 +8,7 @@
     "scene246-generate-mipmaps-BdMtDSMF.js",
     "scene246-gltf-animation-NnQVJBYD.js",
     "scene246-gltf-feature-animations-DWJWoTT5.js",
-    "scene246-gltf-feature-registry-CFKHRmuD.js",
+    "scene246-gltf-feature-registry-oWc7pBtE.js",
     "scene246-gltf-feature-skeleton-xpb4slfP.js",
     "scene246-gltf-interleave-Cx5yld1W.js",
     "scene246-gltf-json-asset-Dl53bm1i.js",
@@ -16,10 +16,10 @@
     "scene246-gltf-normals-DYhLwXNX.js",
     "scene246-gltf-strided-attribute-R3NdoKEL.js",
     "scene246-ibl-fragment-CeRrvT96.js",
-    "scene246-pbr-renderable-DTpM2bnm.js",
+    "scene246-pbr-renderable-CZg35hHr.js",
     "scene246-rgbd-decode-C8g2iZPi.js",
     "scene246-scene-uniforms-FTYH6Ct0.js",
-    "scene246-skeleton-fragment-Bk7i-bkv.js",
+    "scene246-skeleton-fragment--qWRiYRX.js",
     "scene246.js"
   ],
   "rawBytes": 102225

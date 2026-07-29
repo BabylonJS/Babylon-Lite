@@ -193,6 +193,7 @@ export {
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
 export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
+export { mergeMeshGeometry } from "./mesh/merge-mesh-geometry.js";
 export { getMeshGeometry } from "./mesh/get-mesh-geometry.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
