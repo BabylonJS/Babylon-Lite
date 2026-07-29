@@ -7,7 +7,7 @@ export { mat4OrthoOffCenterLHToRef } from "./mat4-ortho-lh-to-ref.js";
 export { mat4Invert } from "./mat4-invert.js";
 export { mat4Scale } from "./mat4-scale.js";
 export { mat4Translation } from "./mat4-translation.js";
-export { mat4FromQuat } from "./mat4-from-quat.js";
+export { mat4FromQuat, mat4FromQuatInto } from "./mat4-from-quat.js";
 export { mat4Compose } from "./mat4-compose.js";
 export { mat4ComposeInto } from "./mat4-compose-into.js";
 export { mat4MultiplyInto } from "./mat4-multiply-into.js";
