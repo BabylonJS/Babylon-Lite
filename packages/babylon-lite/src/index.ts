@@ -232,6 +232,7 @@ export { createStandardMaterial } from "./material/standard/create-standard-mate
 export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
 export { enableStandardSkeleton, enableStandardUvOffset } from "./material/standard/enable-standard-mesh-features.js";
 export { enableStandardVertexColors } from "./material/standard/enable-standard-vertex-colors.js";
+export { enableMirroredMeshes } from "./mesh/enable-mirrored-meshes.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export {
     createShaderMaterial,
@@ -260,7 +261,7 @@ export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
 export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
-export { rebuildScenePbrPipelines } from "./scene/scene-rebuild.js";
+export { rebuildScenePbrPipelines, rebuildSceneRenderables } from "./scene/scene-rebuild.js";
 export type { ToneMapping } from "./material/pbr/tone-mapping.js";
 export { StandardToneMapping } from "./material/pbr/tone-mapping.js";
 export { AcesToneMapping } from "./material/pbr/pbr-aces-wgsl.js";
@@ -501,6 +502,7 @@ export type {
     PropertyAnimationTrackOptions,
 } from "./animation/property-animation.js";
 export type { AnimationClip, GltfAnimationData } from "./animation/types.js";
+export type { BoxOptions } from "./mesh/create-box.js";
 export type { SphereOptions } from "./mesh/create-sphere.js";
 export type { TorusOptions } from "./mesh/create-torus.js";
 export type { GroundOptions } from "./mesh/create-ground.js";
@@ -560,7 +562,7 @@ export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/sh
 export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
 export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
-export { spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
+export { spriteBlendOpaque, spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
 export {
     createSprite2DLayer,
     addSprite2DIndex,

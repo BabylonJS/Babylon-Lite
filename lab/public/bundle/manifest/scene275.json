@@ -1,0 +1,10 @@
+{
+  "rawKB": 41.9,
+  "rawBytes": 42906,
+  "gzipKB": 15.4,
+  "ignoredRawKB": 680.2,
+  "runtimeChunks": [
+    "scene275-text-shaper-Cie-Mnk-.js",
+    "scene275.js"
+  ]
+}

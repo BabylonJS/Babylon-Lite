@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Provide opt-in WebGPU alpha-to-coverage for multisampled Standard, PBR, and Shader material pipelines and for the depth-writing text/sprite pipeline owners that benefit most from it. Alpha-to-coverage converts fragment alpha into a per-sample coverage mask before depth/stencil and color writes. It is useful for depth-writing antialiased text, cutout sprites, foliage, and ordered opaque surfaces, but uncommon enough that applications which do not request it must carry none of its code and keep their existing bundle sizes.
+Provide opt-in WebGPU alpha-to-coverage for multisampled Standard, PBR, and Shader material pipelines and for the depth-writing text/sprite pipeline owners that benefit most from it. Alpha-to-coverage converts fragment alpha into a per-sample coverage mask before depth/stencil and color writes. It is useful for depth-writing antialiased text, cutout sprites, foliage, and ordered opaque surfaces. Applications that do not request it retain only the small resolver seams in pipeline-owner modules; the feature state and behavior are tree-shaken.
 
 The feature owns only multisample coverage state. It does **not** silently enable alpha blending, change fragment alpha, or change a material's depth-write policy. A caller that wants the common opaque-replacement A2C mode emits fractional alpha while keeping blending disabled and depth writes enabled.
 
@@ -45,18 +45,19 @@ Effective target paths are deliberately narrower than every text/sprite API:
 - `setAlphaToCoverage(target, false)` deletes the target without allocating;
 - `getAlphaToCoverage()` and the internal resolver return `false` while the set is absent.
 
-The module installs its internal resolver into `alpha-to-coverage-hook.ts` when the first target is enabled. Shader, Standard, PBR, text, and sprite pipeline owners read that null-by-default hook instead of importing the complete feature module merely to ask whether a target is enabled. When the setter is absent, minification folds the null hook and every A2C descriptor/cache-key branch away. Existing material scenes are production-bundle negative controls and retain their measured runtime sizes.
+The module installs its internal resolver into `alpha-to-coverage-hook.ts` when the first target is enabled. Shader, Standard, PBR, text, and sprite pipeline owners read that null-by-default hook instead of importing the complete feature module merely to ask whether a target is enabled. When the setter is absent, minification folds the resolver branches away. The remaining seams move typical existing scene bundles by only a few raw bytes and must stay within their existing ceilings.
 
 ### Material pipeline integration
 
 For each main-pass material family:
 
-1. Resolve the material's A2C request while building bindings/pipeline state.
-2. Include an A2C discriminator in every cache key that could otherwise share a pipeline between enabled and disabled materials.
-3. Emit `multisample.alphaToCoverageEnabled = true` only when the material is enabled **and** the target signature has `_sampleCount > 1`.
-4. Leave single-sample descriptors disabled (WebGPU fallback behavior).
+1. Resolve the material's A2C request while building the renderable.
+2. Keep shader composition, bind-group layouts, and bind groups shared between enabled and disabled materials. When the A2C resolver is installed, the shared bindings also reuse GPU shader modules across normal/A2C variants; without A2C, module creation follows the existing per-pipeline path.
+3. Add an A2C discriminator only to the render-pipeline key.
+4. Emit `multisample.alphaToCoverageEnabled = true` only when the material is enabled **and** the target signature has `_sampleCount > 1`.
+5. Leave single-sample descriptors disabled (WebGPU fallback behavior).
 
-PBR and Standard bindings are shared by feature keys, so the optional module encodes A2C into otherwise-reserved feature bits already covered by their existing cache keys: Standard bit 23 and PBR `features2` bit 31. Bit 31 is distinct from sheen roughness texture bit 29. The constants remain extension-local rather than entering the always-shared flag modules. Shader bindings may be shared across equivalent material instances, so the Shader pipeline key itself includes the resolved A2C state through its existing `variantKey`.
+Standard, PBR, and Shader bindings are shared across A2C states because A2C does not change shader source or resource layout. Their pipeline keys alone include the resolved A2C state.
 
 No frame hot path reads mutable A2C state: it is baked into immutable pipelines during binding/registration.
 
@@ -73,7 +74,7 @@ Covered samples therefore receive the glyph's full RGB and depth while analytic 
 
 ### Sprite pipeline integration
 
-For a depth-hosted `Sprite2DLayer`, A2C is effective only when `depth === "test-write"` and the target is multisampled. The existing layer object is the pipeline owner and cache discriminator. The A2C variant omits its configured blend descriptor, writes replacement color/depth, and enables sample coverage. Pure-2D/HUD layers remain 1x blended paths.
+For a depth-hosted `Sprite2DLayer`, A2C is effective only when `depth === "test-write"` and the target is multisampled. The existing layer object is the pipeline owner and cache discriminator. A2C preserves the selected blend descriptor; callers wanting replacement color/depth use `spriteBlendOpaque` explicitly. Pure-2D/HUD layers remain 1x paths.
 
 For a `BillboardSpriteSystem`, A2C is effective only for the depth-writing `cutout` mode and a multisampled target. Its A2C shader variant removes the binary `alphaCutoff` discard so texture alpha drives the sample mask continuously; its pipeline uses replacement color and per-sample depth writes. Transparent/additive billboard modes retain their existing blend paths.
 
@@ -115,7 +116,7 @@ Disposal needs no explicit cleanup because the `WeakSet` does not retain targets
 | ----------------------------------------------- | ------------------------------------------------------------------ |
 | `engine.setAlphaToCoverage(true)` before a draw | `setAlphaToCoverage(pipelineOwner, true)` before registration      |
 | `engine.getAlphaToCoverage()`                   | `getAlphaToCoverage(pipelineOwner)`                                |
-| WebGPU pipeline cache A2C bit                   | Material feature/variant key or text/sprite owner key              |
+| WebGPU pipeline cache A2C bit                   | Pipeline variant key or text/sprite owner key                      |
 | MSDF `writeToDepthBuffer`                       | depth-writing A2C `TextRenderable`                                 |
 | A2C + `ALPHA_REPLACE_COLOR`                     | A2C pipeline variant with no blend descriptor                      |
 | `alphaToCoverageEnabled && sampleCount > 1`     | same WebGPU descriptor rule, additionally gated by depth ownership |
@@ -136,20 +137,21 @@ The per-owner API is intentional: WebGPU alpha-to-coverage is pipeline state, wh
 1. Focused unit tests verify enabled 4x Shader pipelines set `alphaToCoverageEnabled: true`.
 2. The same test verifies 1x pipelines remain disabled.
 3. Equivalent Shader materials with opposite A2C state must not share a pipeline.
-4. Focused pipeline tests verify depth-writing text/Sprite2D/cutout-billboard variants enable A2C, omit blending, and remain disabled at 1x or without depth writes.
-5. Scene 53 exercises an A2C depth-writing Sprite2D layer on real WebGPU; its hard-alpha atlas remains pixel-identical to the Babylon.js SpriteManager oracle.
-6. Scene 57 exercises A2C cutout billboards on real WebGPU; its hard-alpha atlas remains pixel-identical to the Babylon.js alpha-test oracle.
-7. Scene 269 renders red/green overlap with A2C off and on, and is compared against the Babylon.js WebGPU golden with the standard full-image MAD gate. The two demo rows are separated so no card overlaps a card from the other row: cross-row overlap would produce identical depth values, and a depth tie resolves differently under reverse-Z `greater-equal` than under strict `LESS`, which would desynchronize the WebGPU and WebGL2 scenes for reasons unrelated to alpha-to-coverage.
-8. Rebuilding existing Shader, Standard, PBR, text, and sprite scenes that do not import A2C must preserve their measured production runtime sizes.
+4. Focused tests build real Standard/PBR renderables through the public setter, verify shader bindings/modules remain shared, and verify only the multisampled pipeline variant changes.
+5. Scene 53 verifies the depth-hosted Sprite2D integration uses explicit `spriteBlendOpaque` with A2C; its hard-alpha atlas is not fractional-coverage proof.
+6. Scene 57 verifies the cutout billboard A2C pipeline on WebGPU; its binary atlas is not fractional-coverage proof.
+7. Scene 274 renders red/green overlap with A2C off and on, and is compared against the Babylon.js WebGPU golden with the standard full-image MAD gate. The two demo rows are separated so no card overlaps a card from the other row: cross-row overlap would produce identical depth values, and a depth tie resolves differently under reverse-Z `greater-equal` than under strict `LESS`, which would desynchronize the WebGPU and WebGL2 scenes for reasons unrelated to alpha-to-coverage.
+8. Scene 275 provides the fractional-coverage proof: overlapping depth-writing MSDF text runs through the dedicated Slug A2C fragment shader and asserts that partial glyph-edge samples mix front/rear colors.
+9. Rebuilding existing Shader, Standard, PBR, text, and sprite scenes that do not import A2C must keep their small raw-byte movement within existing ceilings.
 
 ## File Manifest
 
 - `render/alpha-to-coverage.ts` — public target state functions plus internal lazy resolver installation.
 - `render/alpha-to-coverage-hook.ts` — null-by-default seam used by all optional A2C pipeline owners.
-- `material/pbr/pbr-pipeline.ts` — interprets the reserved PBR feature bit and emits the descriptor.
-- `material/pbr/pbr-renderable.ts` — encodes material state into PBR `features2`.
-- `material/standard/standard-pipeline.ts` — interprets the reserved Standard feature bit and emits the descriptor.
-- `material/standard/standard-renderable.ts` — encodes material state into Standard features.
+- `material/pbr/pbr-pipeline.ts` — shares PBR shader resources and emits the A2C pipeline variant.
+- `material/pbr/pbr-renderable.ts` — resolves per-material A2C state for pipeline selection.
+- `material/standard/standard-pipeline.ts` — shares Standard shader resources and emits the A2C pipeline variant.
+- `material/standard/standard-renderable.ts` — resolves per-material A2C state for pipeline selection.
 - `material/shader/shader-pipeline.ts` — Shader cache-key and descriptor seam.
 - `text/_gpu/text-pipeline.ts` — premultiplied-alpha normal variant and replacement-color A2C variant.
 - `text/shaders/slug-a2c.frag.wgsl` — A2C output variant (full RGB, coverage in alpha only).
@@ -158,4 +160,5 @@ The per-owner API is intentional: WebGPU alpha-to-coverage is pipeline state, wh
 - `sprite/billboard-pipeline.ts` — cutout billboard shader/cache/descriptor seam.
 - `index.ts` — explicit root exports.
 - `tests/lite/unit/alpha-to-coverage.test.ts` — focused pipeline tests.
-- `lab/lite/src/{bjs,lite}/scene269.ts` and parity assets — WebGPU visual parity scene.
+- `lab/lite/src/{bjs,lite}/scene274.ts` and parity assets — material A2C visual parity scene.
+- `lab/lite/src/{bjs,lite}/scene275.ts` and parity assets — depth-writing MSDF text A2C visual parity scene.

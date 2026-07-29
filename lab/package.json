@@ -11,7 +11,7 @@
     "babylon-lite": "workspace:*"
   },
   "devDependencies": {
-    "@babylonjs/addons": "^9.5.0",
+    "@babylonjs/addons": "9.17.0",
     "@babylonjs/core": "^9.5.0",
     "@babylonjs/havok": "^1.3.12",
     "@babylonjs/loaders": "^9.5.0",

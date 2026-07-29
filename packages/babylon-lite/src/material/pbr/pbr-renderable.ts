@@ -41,12 +41,8 @@ import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 import type { PbrLightMode } from "./pbr-compose.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
-import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
-
-// Reserved by alpha-to-coverage.ts; duplicated locally so ordinary PBR scenes never import the feature module.
-const PBR2_ALPHA_TO_COVERAGE = 1 << 31;
 
 type SingleLightType = "hemispheric" | "directional" | "spot" | "point";
 interface SingleLightWgslModule {
@@ -339,8 +335,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const lr = writeMeshLightSelection(mesh, s.lights);
         const lightCount = lr > 0 ? 1 : -lr;
         const features = renderFeatures.features;
-        const alphaToCoverageResolver = _getAlphaToCoverageResolver();
-        const features2 = (renderFeatures.features2 ?? 0) | (alphaToCoverageResolver?.(mat) ? PBR2_ALPHA_TO_COVERAGE : 0);
+        const features2 = renderFeatures.features2 ?? 0;
         const shadowOutput = (features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) !== 0;
         const receiveShadows = !shadowOutput && mesh.receiveShadows && hasSomeShadows;
         const lightMode: PbrLightMode = lightCount === 0 ? 0 : lightCount === 1 && !receiveShadows ? 1 : 2;
@@ -537,7 +532,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             _transmissive: needsTaskRefraction,
             mesh,
             bind(eng, sig) {
-                const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings);
+                const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings, mat);
                 const materialBindGroup = needsTaskRefraction
                     ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
                     : materialBindGroupStatic!;

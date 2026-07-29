@@ -1,130 +1,106 @@
-import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
+// BJS reference for scene 269 — mirrored-transform coverage.
+// Mirrors the Lite scene exactly: same camera, environment, tone mapping and three object groups.
+// Babylon handles all of these natively (setParent decomposes with a signed scale, glTF `matrix`
+// nodes are decomposed to TRS at load, and sideOrientation is recomputed from the world determinant),
+// so it is a clean reference for the Lite fixes.
+
+import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
-import { WebGPUCacheRenderPipeline } from "@babylonjs/core/Engines/WebGPU/webgpuCacheRenderPipeline";
-import { Effect } from "@babylonjs/core/Materials/effect";
-import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
+import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
+import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
+import "@babylonjs/core/Loading/loadingScreen";
+import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
+import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
+import { CubeTexture } from "@babylonjs/core/Materials/Textures/cubeTexture";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
-import { Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
+import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+import type { Node } from "@babylonjs/core/node";
 import { Scene } from "@babylonjs/core/scene";
+import "@babylonjs/loaders/glTF";
 
-interface PipelineInternals {
-    _alphaToCoverageEnabled: boolean;
-    _buildRenderPipelineDescriptor(effect: Effect, topology: GPUPrimitiveTopology, sampleCount: number): GPURenderPipelineDescriptor;
-    setAlphaToCoverage(enabled: boolean): void;
+const MODEL_DIR = "/gltf-assets/Node_NegativeScale/";
+const MODEL_FILE = "Node_NegativeScale_01.gltf";
+
+/** Apply a yaw + uniform scale + translation to a transform node. */
+function place(node: TransformNode, x: number, y: number, z: number, yaw: number, scale: number): void {
+    node.position.set(x, y, z);
+    node.rotationQuaternion = new Quaternion(0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2));
+    node.scaling.set(scale, scale, scale);
 }
 
-// The lab currently pins an older Babylon.js package whose pipeline cache already tracks the A2C
-// state/key but predates the descriptor assignment. Backport that one assignment for the golden.
-const pipelinePrototype = WebGPUCacheRenderPipeline.prototype as unknown as PipelineInternals;
-const buildRenderPipelineDescriptor = pipelinePrototype._buildRenderPipelineDescriptor;
-pipelinePrototype._buildRenderPipelineDescriptor = function (effect: Effect, topology: GPUPrimitiveTopology, sampleCount: number): GPURenderPipelineDescriptor {
-    const descriptor = buildRenderPipelineDescriptor.call(this, effect, topology, sampleCount);
-    descriptor.multisample!.alphaToCoverageEnabled = this._alphaToCoverageEnabled && sampleCount > 1;
-    return descriptor;
-};
-
-Effect.ShadersStore["scene269VertexShader"] = `
-precision highp float;
-attribute vec3 position;
-uniform vec2 center;
-uniform float angle;
-uniform float depth;
-void main(void) {
-    float c = cos(angle);
-    float s = sin(angle);
-    vec2 local = position.xy * 1.65;
-    vec2 rotated = vec2(local.x * c - local.y * s, local.x * s + local.y * c);
-    vec2 world = center + rotated;
-    gl_Position = vec4(world.x / 3.3, world.y / 2.2, depth, 1.0);
-}`;
-
-Effect.ShadersStore["scene269FragmentShader"] = `
-precision highp float;
-uniform vec3 color;
-uniform float opacity;
-void main(void) {
-    gl_FragColor = vec4(color, opacity);
-}`;
-
-// Must match lab/lite/src/lite/scene269.ts: exact 8-bit colours whose per-channel sums are even, so the
-// 50/50 alpha-to-coverage MSAA resolve never lands on an implementation-defined .5 rounding boundary.
-const RED = new Color3(242 / 255, 31 / 255, 41 / 255);
-const GREEN = new Color3(26 / 255, 217 / 255, 83 / 255);
-// Must match lab/lite/src/lite/scene269.ts: rows are separated so no cross-row card overlap exists,
-// because a depth tie resolves differently under reverse-Z "greater-equal" than under strict LESS.
-const ROWS = [
-    { y: 1.05, redInFront: true, redRotation: -0.08, greenRotation: 0.1 },
-    { y: -1.05, redInFront: false, redRotation: 0.1, greenRotation: -0.07 },
-] as const;
-
-function createCardMaterial(scene: Scene, center: Vector2, rotation: number, depth: number, color: Color3, opacity: number): ShaderMaterial {
-    const material = new ShaderMaterial(
-        "a2c-card",
-        scene,
-        { vertex: "scene269", fragment: "scene269" },
-        { attributes: ["position"], uniforms: ["center", "angle", "depth", "color", "opacity"] }
-    );
-    material.backFaceCulling = false;
-    material.forceDepthWrite = true;
-    material.setVector2("center", center);
-    material.setFloat("angle", rotation);
-    material.setFloat("depth", depth);
-    material.setColor3("color", color);
-    material.setFloat("opacity", opacity);
-    return material;
-}
-
-function addPanel(scene: Scene, x: number, renderingGroupId: number): void {
-    let alphaIndex = 0;
-    for (const row of ROWS) {
-        const redFront = row.redInFront;
-        const red = MeshBuilder.CreatePlane("red-card", { size: 1 }, scene);
-        red.material = createCardMaterial(scene, new Vector2(x - 0.08, row.y - 0.04), row.redRotation, redFront ? 0.6 : 0.4, RED, redFront ? 0.5 : 1);
-        red.renderingGroupId = renderingGroupId;
-        red.alphaIndex = alphaIndex++;
-
-        const green = MeshBuilder.CreatePlane("green-card", { size: 1 }, scene);
-        green.material = createCardMaterial(scene, new Vector2(x + 0.08, row.y + 0.04), row.greenRotation, redFront ? 0.4 : 0.6, GREEN, redFront ? 1 : 0.5);
-        green.renderingGroupId = renderingGroupId;
-        green.alphaIndex = alphaIndex++;
-    }
-}
-
-(async function () {
-    const initStart = performance.now();
+void (async function () {
+    const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true, premultipliedAlpha: false });
+    const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
-    engine.useReverseDepthBuffer = true;
+    engine.displayLoadingUI = function () {};
 
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(0.035, 0.045, 0.07, 1);
-    scene.activeCamera = new FreeCamera("camera", new Vector3(0, 0, -10), scene);
+    scene.clearColor = new Color4(0.2, 0.2, 0.3, 1.0);
 
-    addPanel(scene, -1.65, 0);
-    addPanel(scene, 1.65, 1);
+    const camera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 3.2, 42, new Vector3(0, 1, 0), scene);
+    camera.minZ = 1;
+    camera.maxZ = 1000;
+    camera.attachControl(canvas, true);
 
-    const pipelineCache = engine._cacheRenderPipeline as unknown as PipelineInternals;
-    let previousAlphaToCoverage = false;
-    scene.onBeforeRenderingGroupObservable.add((info) => {
-        previousAlphaToCoverage = pipelineCache._alphaToCoverageEnabled;
-        pipelineCache.setAlphaToCoverage(info.renderingGroupId === 1 && engine.currentSampleCount > 1);
-    });
-    scene.onAfterRenderingGroupObservable.add(() => {
-        pipelineCache.setAlphaToCoverage(previousAlphaToCoverage);
-    });
+    new HemisphericLight("light", new Vector3(0, 1, 0), scene);
 
-    const eng = engine as unknown as { _drawCalls?: { fetchNewFrame: () => void; current: number } };
-    scene.onBeforeRenderObservable.add(() => eng._drawCalls?.fetchNewFrame());
-    scene.onAfterRenderObservable.add(() => {
-        canvas.dataset.drawCalls = String(eng._drawCalls?.current ?? 0);
-    });
+    const envTex = CubeTexture.CreateFromPrefilteredData("https://assets.babylonjs.com/core/environments/environmentSpecular.env", scene);
+    envTex.gammaSpace = false;
+    scene.environmentTexture = envTex;
+    scene.environmentIntensity = 1.0;
+
+    scene.imageProcessingConfiguration.toneMappingEnabled = true;
+    scene.imageProcessingConfiguration.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_STANDARD;
+    scene.imageProcessingConfiguration.exposure = 0.8;
+    scene.imageProcessingConfiguration.contrast = 1.2;
+
+    const byName = (nodes: Node[], name: string): TransformNode => nodes.find((n) => n.name === name) as TransformNode;
+
+    // ── 1. Mirrored glTF root reparented, then the new parent is moved ────────
+    const resultA = await SceneLoader.ImportMeshAsync("", MODEL_DIR, MODEL_FILE, scene);
+    const rootA = byName([...resultA.transformNodes, ...resultA.meshes], "__root__");
+    const newRootA = new TransformNode("newRootA", scene);
+    rootA.setParent(newRootA);
+    place(newRootA, -13, 0, 0, Math.PI / 7, 0.8);
+
+    // ── 2. Matrix-declared glTF node pulled out, then its new parent is moved ─
+    const resultB = await SceneLoader.ImportMeshAsync("", MODEL_DIR, MODEL_FILE, scene);
+    const nodesB = [...resultB.transformNodes, ...resultB.meshes];
+    byName(nodesB, "__root__").position.set(-5, 0, -14);
+    const newRootB = new TransformNode("newRootB", scene);
+    byName(nodesB, "Node1").setParent(newRootB);
+    place(newRootB, -5, 0, 2, -Math.PI / 9, 0.8);
+
+    // ── 3. PBR box mirrored at runtime ────────────────────────────────────────
+    const pbrBox = CreateBox("pbrBox", { size: 3 }, scene);
+    pbrBox.position.set(6, 1.5, 0);
+    const pbrMat = new PBRMaterial("pbrMat", scene);
+    pbrMat.albedoColor = new Color3(0.85, 0.35, 0.25);
+    pbrMat.metallic = 0.0;
+    pbrMat.roughness = 0.45;
+    pbrBox.material = pbrMat;
 
     await scene.whenReadyAsync();
+
+    // Same runtime mirror as Lite. Babylon re-derives sideOrientation from the world matrix, so no
+    // pipeline rebuild is needed on this side.
+    pbrBox.scaling.set(-1, 1, 1);
+
+    const eng = engine as any;
+    scene.onBeforeRenderObservable.add(() => {
+        if (eng._drawCalls) {
+            eng._drawCalls.fetchNewFrame();
+        }
+    });
+    scene.onAfterRenderObservable.add(() => {
+        canvas.dataset.drawCalls = String(eng._drawCalls ? eng._drawCalls.current : 0);
+    });
     engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
     await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
-    canvas.dataset.sampleCount = String(engine.currentSampleCount);
-    canvas.dataset.initMs = String(performance.now() - initStart);
+    canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 })().catch(console.error);

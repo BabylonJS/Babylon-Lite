@@ -14,6 +14,7 @@ import { computeAabb } from "../math/compute-aabb.js";
 import { createSphereData } from "./create-sphere.js";
 import type { SphereOptions } from "./create-sphere.js";
 import { createBoxData } from "./create-box.js";
+import type { BoxOptions } from "./create-box.js";
 import { createTorusData } from "./create-torus.js";
 import type { TorusOptions } from "./create-torus.js";
 import { createTorusKnotData } from "./create-torus-knot.js";
@@ -468,8 +469,8 @@ export function createSphere(engine: EngineContext, options?: SphereOptions): Me
 }
 
 /** Create a box mesh. Caller must assign material. */
-export function createBox(engine: EngineContext, size = 1): Mesh {
-    const data = createBoxData(size);
+export function createBox(engine: EngineContext, options: number | BoxOptions = 1): Mesh {
+    const data = createBoxData(options);
     return createMeshFromData(engine as EngineContext, "box", data.positions, data.normals, data.indices, data.uvs);
 }
 

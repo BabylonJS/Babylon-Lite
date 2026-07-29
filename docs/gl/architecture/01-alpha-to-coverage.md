@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Provide optional WebGL2 `SAMPLE_ALPHA_TO_COVERAGE` state for multisampled draw framebuffers. The module uses the function-based engine-first API, owns its state per context, survives context loss, and contributes zero bytes to consumers that do not import it.
+Provide optional WebGL2 `SAMPLE_ALPHA_TO_COVERAGE` state for multisampled draw framebuffers. The module uses the function-based engine-first API, owns its state per context, survives context loss, and is imported only by consumers that use the feature.
 
 ## Public API Surface
 
@@ -44,7 +44,7 @@ Lost/disposed contexts receive no GL call. A lost context still retains the requ
 
 The first state allocation also appends a callback to the engine's lazily allocated `_stateCacheInvalidators` list. When a host invalidates Lite-GL's shared cache after touching raw GL state, that callback resets `applied` to `null`; the next same-value setter therefore reissues `gl.enable`/`gl.disable` instead of trusting stale optional state. Engines that use no such optional feature never allocate the list.
 
-This state is independent of `GLState.rs`: no other Lite-GL module mutates `SAMPLE_ALPHA_TO_COVERAGE`, so adding it to the always-present deferred-state array/dispatcher would charge every consumer for a niche feature. Keeping the state entirely in the optional module gives non-users literally zero runtime bytes and zero hot-path checks.
+This state is independent of `GLState.rs`: no other Lite-GL module mutates `SAMPLE_ALPHA_TO_COVERAGE`, so it remains in the optional module rather than the always-present deferred-state array/dispatcher.
 
 `getCurrentSampleCount` reads `gl.SAMPLES` for the currently bound draw framebuffer and returns `Math.max(1, value)`. A non-multisampled framebuffer commonly reports `0`, which is normalized to `1` so callers can gate on `> 1`.
 
@@ -96,7 +96,7 @@ unseen engine (reported false)
 2. Tests assert lost/disposed safety and reapplication after context restoration.
 3. Tests assert `gl.SAMPLES` normalization (`0 -> 1`, `4 -> 4`).
 4. Tests assert `wipeGLStateCache` invalidates the optional applied-state cache.
-5. GL Scene 17 renders matching red/green overlap panels with A2C disabled/enabled and is compared against the ThinEngine golden with the standard full-image MAD gate. Its rows are separated exactly like WebGPU Scene 269 so no cross-row card overlap can create a depth tie, which strict `LESS` and reverse-Z `greater-equal` would otherwise resolve to different winners.
+5. GL Scene 17 renders matching red/green overlap panels with A2C disabled/enabled and is compared against the ThinEngine golden with the standard full-image MAD gate. Its rows are separated exactly like WebGPU Scene 274 so no cross-row card overlap can create a depth tie, which strict `LESS` and reverse-Z `greater-equal` would otherwise resolve to different winners.
 6. Existing GL scenes remain below unchanged size ceilings; the feature module appears only in Scene 17's bundle.
 
 ## File Manifest

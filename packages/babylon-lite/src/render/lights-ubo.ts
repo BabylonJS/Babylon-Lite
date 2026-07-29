@@ -72,6 +72,10 @@ export interface SceneLightGpuState {
     _scratch: Float32Array;
     /** @internal */
     _version: number;
+    /** @internal Scene light-list version the UBO was written at. Tracked SEPARATELY from `_version`:
+     *  summing it into the per-light version sum lets the two cancel out (a removed light's version can
+     *  offset the list bump), which would leave the removed light's data uploaded. */
+    _listVersion: number;
     /** @internal */
     _lightCount: number;
     /** @internal */
@@ -94,6 +98,7 @@ export function ensureSceneLightState(engine: EngineContext, scene: SceneContext
         _buffer: createUniformBuffer(engine, scratch),
         _scratch: scratch,
         _version: computeLightsVersion(scene.lights) + (engine._lightFoVersion?.(scene) ?? 0),
+        _listVersion: scene._lightListVersion ?? 0,
         _lightCount: scene.lights.length,
         _byteSize: byteSize,
     };
@@ -111,8 +116,13 @@ export function ensureSceneLightState(engine: EngineContext, scene: SceneContext
 export function refreshSceneLightsUBO(engine: EngineContext, scene: SceneContext): GPUBuffer {
     const state = ensureSceneLightState(engine, scene);
     const version = computeLightsVersion(scene.lights) + (engine._lightFoVersion?.(scene) ?? 0);
-    if (version !== state._version || scene.lights.length !== state._lightCount) {
+    // The per-light version sum alone cannot see a light being SWAPPED for another (same count, and the two
+    // sums can match), which left the UBO holding the removed light's data. The list version is compared
+    // separately rather than summed in, so the two counters can never cancel each other out.
+    const listVersion = scene._lightListVersion ?? 0;
+    if (version !== state._version || listVersion !== state._listVersion || scene.lights.length !== state._lightCount) {
         state._version = version;
+        state._listVersion = listVersion;
         state._lightCount = scene.lights.length;
         fillLightsData(state._scratch, scene.lights);
         engine._applyLightFoOffset?.(state._scratch, scene);

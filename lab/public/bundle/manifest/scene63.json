@@ -1,6 +1,6 @@
 {
-  "rawKB": 57.2,
-  "gzipKB": 24.1,
+  "rawKB": 57.9,
+  "gzipKB": 24.4,
   "ignoredRawKB": 6.4,
   "runtimeChunks": [
     "scene63-_math-factory-DUATOVO2.js",
@@ -13,5 +13,5 @@
     "scene63-vertex-output-C7G5u6Y0.js",
     "scene63.js"
   ],
-  "rawBytes": 58606
+  "rawBytes": 59256
 }

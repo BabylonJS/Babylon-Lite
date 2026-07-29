@@ -8,7 +8,7 @@ interface AlphaToCoverageState {
 }
 
 // Optional feature state is allocated only after the first setter call. The weak key prevents this
-// module from extending engine lifetime, and non-importing consumers retain zero bytes/runtime state.
+// module from extending engine lifetime, and non-importing consumers allocate no feature state.
 let _states: WeakMap<GLEngineContext, AlphaToCoverageState> | null = null;
 
 /** Enable or disable WebGL2 sample alpha-to-coverage. Repeated state is elided. */

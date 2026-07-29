@@ -333,7 +333,7 @@ function buildSpritePipeline(
         fragment: {
             module,
             entryPoint: "fs",
-            targets: [alphaToCoverage ? { format, writeMask: CW.ALL } : { format, blend: blendMode._descriptor, writeMask: CW.ALL }],
+            targets: [{ format, blend: blendMode._descriptor, writeMask: CW.ALL }],
         },
         primitive: { topology: "triangle-list", cullMode: "none" },
         multisample: alphaToCoverage ? { count: sampleCount, alphaToCoverageEnabled: true } : { count: sampleCount },

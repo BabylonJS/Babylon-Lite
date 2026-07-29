@@ -1,10 +1,10 @@
 {
-  "rawKB": 53.8,
-  "gzipKB": 21.1,
+  "rawKB": 54.3,
+  "gzipKB": 21.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene261-standard-renderable-DRv_z46A.js",
+    "scene261-standard-renderable-BDD27p3e.js",
     "scene261.js"
   ],
-  "rawBytes": 55072
+  "rawBytes": 55616
 }

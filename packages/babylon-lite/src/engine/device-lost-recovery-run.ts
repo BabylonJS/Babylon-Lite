@@ -1,5 +1,6 @@
 import type { EngineContext } from "./engine.js";
 import { resizeEngine, startEngine, stopEngine } from "./engine.js";
+import { disposeGpuResourceRetirements } from "./gpu-resource-retirement.js";
 import { TU } from "./gpu-flags.js";
 import { _refreshScRT } from "./surface.js";
 import type { DeviceLostRecoveryRegistration, DeviceLostRecoveryState } from "./device-lost-recovery.js";
@@ -13,6 +14,16 @@ export async function _runDeviceLostRecovery(engine: EngineContext, state: Devic
 
     const wasRunning = engine._renderFn !== null;
     stopEngine(engine);
+    // Run every outstanding retirement NOW, before any handler rebuilds anything. They must not be
+    // dropped — each also carries logical ref-count releases (texture pool counts, and a removed
+    // mesh's claim on its shared geometry) whose loss would leave resources unfreeable. And they
+    // must not run later: the disposers capture `Texture2D` wrappers whose `texture` field the
+    // recovery handlers replace in place, so a late `releaseTexture` would destroy a freshly
+    // recovered texture. Here every wrapper still points at the dead, device-lost objects, so the
+    // destroy calls are no-ops while the counts settle correctly. This has to live here rather than
+    // in any single handler, because handlers run in `_recoverOrder` and an earlier one (sprites,
+    // order 0) would otherwise rebuild textures before a later one (scenes, order 100) drained.
+    disposeGpuResourceRetirements(engine);
 
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
     if (!adapter) {

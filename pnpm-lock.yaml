@@ -116,8 +116,8 @@ importers:
         version: link:../packages/babylon-lite
     devDependencies:
       '@babylonjs/addons':
-        specifier: ^9.5.0
-        version: 9.8.0(@babylonjs/core@9.5.0)
+        specifier: 9.17.0
+        version: 9.17.0(@babylonjs/core@9.5.0)
       '@babylonjs/core':
         specifier: ^9.5.0
         version: 9.5.0
@@ -374,8 +374,8 @@ packages:
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
 
-  '@babylonjs/addons@9.8.0':
-    resolution: {integrity: sha512-aJ2l/VjQnExM4adGLblGjU/6UNOFIVGJ/AZy358ZDsPeQmxaIDgIeziCawuG3isaE7JMvH0pJNOd5Cvns02KXg==}
+  '@babylonjs/addons@9.17.0':
+    resolution: {integrity: sha512-GEYdHM3xf6cl2qOZoYPGkv/ac6DRJaSJSF1NVlcDNiQGfgCwApUwRWcfgl98E4f+lNyXCq4zLJgfMIqNIoMpkw==}
     peerDependencies:
       '@babylonjs/core': ^9.0.0
 
@@ -4260,7 +4260,7 @@ snapshots:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
 
-  '@babylonjs/addons@9.8.0(@babylonjs/core@9.5.0)':
+  '@babylonjs/addons@9.17.0(@babylonjs/core@9.5.0)':
     dependencies:
       '@babylonjs/core': 9.5.0
 

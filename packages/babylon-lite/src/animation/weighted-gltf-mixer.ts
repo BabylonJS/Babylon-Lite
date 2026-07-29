@@ -403,6 +403,13 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
     const device = manager.engine._device;
     const { nodes, trs, localMat, worldMat } = target;
 
+    // Re-apply bone visibility AFTER accumulation, mirroring the single-clip controller
+    // path (skeleton-updater.ts): hiding must beat clips that animate the bone's scale.
+    const overrides = target.overrides;
+    if (overrides !== undefined && overrides.size > 0) {
+        _boneApplier?.(overrides as ReadonlyMap<number, BoneOverride>, trs, nodes.length, true);
+    }
+
     for (let i = 0; i < nodes.length; i++) {
         const rotationWeight = target.rWeight[i]!;
         if (rotationWeight > 0 && rotationWeight < 1) {

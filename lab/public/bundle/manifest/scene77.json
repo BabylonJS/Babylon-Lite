@@ -1,6 +1,6 @@
 {
-  "rawKB": 57.7,
-  "gzipKB": 24.9,
+  "rawKB": 58.4,
+  "gzipKB": 25.2,
   "ignoredRawKB": 7,
   "runtimeChunks": [
     "scene77-_math-factory-BvVaj8-f.js",
@@ -21,5 +21,5 @@
     "scene77-vertex-output-C7G5u6Y0.js",
     "scene77.js"
   ],
-  "rawBytes": 59123
+  "rawBytes": 59767
 }

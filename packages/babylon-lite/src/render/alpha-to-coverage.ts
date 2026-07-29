@@ -12,8 +12,8 @@ export type AlphaToCoverageTarget = StandardMaterialProps | PbrMaterialProps | S
 type SupportedAlphaToCoverageTarget<T extends AlphaToCoverageTarget> = T extends NodeMaterial ? never : T;
 
 // Target membership is private to this optional module. Keeping the WeakSet lazy means importing
-// the package root allocates nothing; when the public setter is tree-shaken, pipeline resolver calls
-// fold to false and non-users retain no A2C code or measured bundle-size cost.
+// the package root allocates nothing; when the public setter is tree-shaken, the feature implementation
+// is removed and only the tiny null resolver seams remain in pipeline-owner modules.
 let _enabledTargets: WeakSet<object> | null = null;
 
 /**

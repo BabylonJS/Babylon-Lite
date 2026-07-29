@@ -240,7 +240,36 @@ enableStandardVertexColors();
 await registerScene(scene);
 ```
 
-### 10. Removing & Disposing Entities
+### 10. Mirrored (Negatively Scaled) Meshes Are Opt-In
+
+Babylon flips `sideOrientation` automatically whenever a mesh's world-matrix determinant turns
+negative. Lite's glTF loader already reverses winding for negative-scale nodes it finds at load
+time, but the remaining cases go through an explicit opt-in so scenes that never mirror anything
+carry no winding code. Call `await enableMirroredMeshes(scene)` once — after your assets are added
+and before `registerScene()` — when you mirror a Standard-material mesh, a procedural mesh, or
+change a mesh's mirroring after load.
+
+```typescript
+import { enableMirroredMeshes } from "babylon-lite";
+
+const box = createBox(engine, 2);
+box.scaling.set(-1, 1, 1); // mirrored — winding is reversed for you
+addToScene(scene, box);
+
+await enableMirroredMeshes(scene);
+await registerScene(scene);
+```
+
+It also keeps working when the mirroring changes at runtime: each frame the watcher only looks at
+meshes whose world matrix actually changed (an integer version compare), computes a determinant for
+those alone, and rebuilds a pipeline only when the sign really flipped.
+
+Only that runtime watcher is scoped to the scene you pass — the pipeline-side winding resolution is
+installed process-wide on the first call, so in a multi-scene app the other scenes also stop
+rendering mirrored meshes inside-out, but they will not track a mirroring that changes after their
+renderables are built unless you call it for them too.
+
+### 11. Removing & Disposing Entities
 
 BJS uses `mesh.dispose()` on individual objects. Lite uses `removeFromScene()` which removes the mesh from the scene and destroys all its GPU resources (buffers, textures, skeleton data).
 
@@ -316,6 +345,7 @@ await startEngine(engine);
 | **Assign camera explicitly**    | Either use `createDefaultCamera(scene)` (auto-assigns) or set `scene.camera = myCamera` manually.                                                                                             |
 | **Materials are optional**      | `createStandardMaterial()` / `createPbrMaterial()` return props objects. Assign to `mesh.material`.                                                                                           |
 | **Standard vertex colors**      | Supply four floats (RGBA) per vertex and call `enableStandardVertexColors()` before `registerScene()`. PBR vertex colors remain automatic.                                                   |
+| **Mirrored meshes**             | Call `await enableMirroredMeshes(scene)` before `registerScene()` when you give a mesh (or an ancestor) a negative scale, so its triangle winding is reversed. glTF negative-scale nodes are already handled at load time. |
 | **WebGPU only**                 | No WebGL fallback. `createEngine()` throws if WebGPU is unavailable.                                                                                                                          |
 | **No `dispose()` on meshes**    | Use `removeFromScene(scene, mesh)` to remove a single mesh and destroy its GPU resources. Use `disposeScene(scene)` + `disposeEngine(engine)` to tear down everything.                        |
 | **Tree-shakable imports**       | Import only what you use. Unused features are stripped from the bundle.                                                                                                                       |
