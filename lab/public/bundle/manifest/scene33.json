@@ -6,7 +6,7 @@
     "scene33-generate-mipmaps-ysS4vyzD.js",
     "scene33-gltf-ext-dielectric-C6hvXXiF.js",
     "scene33-gltf-feature-lights-punctual-DgRdWmlT.js",
-    "scene33-gltf-feature-registry-BIyoZgme.js",
+    "scene33-gltf-feature-registry-Cnqlz8uL.js",
     "scene33-gltf-glb-parser-D4DERHwD.js",
     "scene33-gltf-light-pointer-state-B7kFTRxK.js",
     "scene33-gltf-sampler-desc-D-67mIj3.js",
@@ -14,12 +14,12 @@
     "scene33-light-base-B7HN_7C7.js",
     "scene33-multilight-wgsl-CBu6p_7G.js",
     "scene33-pbr-refraction-B5UM6uRt.js",
-    "scene33-pbr-renderable-dfBcfrtr.js",
+    "scene33-pbr-renderable-CDEpjPGb.js",
     "scene33-pbr-transmission-ext-BpxGMShc.js",
     "scene33-point-light-D5Fl0aQR.js",
     "scene33-rgbd-decode-CBCiayil.js",
     "scene33-scene-uniforms-FTYH6Ct0.js",
     "scene33.js"
   ],
-  "rawBytes": 106406
+  "rawBytes": 106415
 }

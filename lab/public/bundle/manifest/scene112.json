@@ -9,11 +9,11 @@
     "scene112-generate-mipmaps-pWw2s9cL.js",
     "scene112-gltf-ext-basisu-CGPLxF4s.js",
     "scene112-gltf-ext-dielectric-C6hvXXiF.js",
-    "scene112-gltf-feature-registry-CaiPUJzx.js",
+    "scene112-gltf-feature-registry-3cgV-xh4.js",
     "scene112-gltf-json-asset-zTiCuPC9.js",
     "scene112-ibl-fragment-CeRrvT96.js",
     "scene112-pbr-refraction-BMdiGdWC.js",
-    "scene112-pbr-renderable-BVwx4Ts0.js",
+    "scene112-pbr-renderable-DJG1x1oF.js",
     "scene112-pbr-transmission-ext-DW1b_IKQ.js",
     "scene112-rgbd-decode-CFyrlDIY.js",
     "scene112-scene-uniforms-FTYH6Ct0.js",
@@ -21,5 +21,5 @@
     "scene112-wgsl-helpers-BgB2AJrF.js",
     "scene112.js"
   ],
-  "rawBytes": 122644
+  "rawBytes": 122649
 }

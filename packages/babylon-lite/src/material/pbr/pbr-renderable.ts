@@ -581,7 +581,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         })
     );
 
-    return { renderables, rebuildSingle };
+    return { renderables, rebuildSingle, _G: hasGammaAlbedo };
 }
 
 /** @internal Per-scene PBR context stashed on the singleton `pbrGroupBuilder`

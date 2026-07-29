@@ -261,7 +261,7 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                 transmission?.[0]();
                 builder._rebuildSingle = result.rebuildSingle;
                 meshes.r = ctx._runtimeBuilds?.base(builder, result.rebuildSingle) ?? result.rebuildSingle;
-                if (builder._materialFamily === "pbr" && groupMeshes.some((mesh) => (mesh.material as { gammaAlbedo?: boolean } | null)?.gammaAlbedo)) {
+                if (builder._materialFamily === "pbr" && result._G) {
                     meshes._w = null;
                 }
                 if (hadBuiltGroup) {

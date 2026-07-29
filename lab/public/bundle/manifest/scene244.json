@@ -12,12 +12,12 @@
     "scene244-gltf-ext-uv-transform-YGWG8v_J.js",
     "scene244-gltf-feature-animation-pointer-bwuK5QO-.js",
     "scene244-gltf-feature-animations-6j36Wz9a.js",
-    "scene244-gltf-feature-registry-C45tlLh_.js",
+    "scene244-gltf-feature-registry-Dl0Oo03M.js",
     "scene244-gltf-json-asset-CmoMUPwG.js",
     "scene244-gltf-pbr-builder-ext-Cs5PHlG2.js",
     "scene244-ibl-fragment-CeRrvT96.js",
     "scene244-pbr-refraction-DFGA7nfE.js",
-    "scene244-pbr-renderable-BDiQQyEY.js",
+    "scene244-pbr-renderable-D_MF-Kzs.js",
     "scene244-pbr-template-ext-CiHpOV5G.js",
     "scene244-pbr-transmission-ext-DjiWTBVp.js",
     "scene244-reflectance-fragment-D94Ii1em.js",
@@ -28,5 +28,5 @@
     "scene244-visibility-BcAL-WaI.js",
     "scene244.js"
   ],
-  "rawBytes": 137072
+  "rawBytes": 137079
 }

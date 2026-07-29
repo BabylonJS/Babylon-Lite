@@ -337,11 +337,19 @@ describe("runtime material rebuild ownership", () => {
         scene._materialSwapQueue.push(thinMesh, mesh);
 
         const pending = processMaterialSwaps(scene) as Promise<void>;
+        let settled = false;
+        void pending.then(() => (settled = true));
         mesh.material = replacementMaterial;
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+        expect(settled).toBe(false);
+        expect(priorDone).toBe(false);
+        expect(rebuiltMeshes).toEqual([]);
         finishPrior();
         await pending;
 
         expect(priorDone).toBe(true);
+        expect(settled).toBe(true);
         expect(rebuiltMeshes).toEqual([]);
     });
 
@@ -425,7 +433,7 @@ describe("runtime material rebuild ownership", () => {
             if (outcome === "reject") {
                 throw failure;
             }
-            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh) };
+            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _G: true };
         }) as MeshGroupBuilder;
         builder._materialFamily = "pbr";
         const material = { _buildGroup: builder, gammaAlbedo: true } as Material & { gammaAlbedo: boolean };
@@ -446,6 +454,35 @@ describe("runtime material rebuild ownership", () => {
             await expect(rebuild).resolves.toBeUndefined();
             expect(group._w).toBeNull();
         }
+    });
+
+    it("keeps PBR gamma widening armed when a non-gamma rebuild races a gamma material change", async () => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        scene._built = true;
+        let finish!: () => void;
+        const gate = new Promise<void>((resolve) => (finish = resolve));
+        const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
+            const capturedGamma = meshes.some((mesh) => (mesh.material as { gammaAlbedo?: boolean } | null)?.gammaAlbedo);
+            await gate;
+            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _G: capturedGamma };
+        }) as MeshGroupBuilder;
+        builder._materialFamily = "pbr";
+        const material = { _buildGroup: builder, gammaAlbedo: false } as Material & { gammaAlbedo: boolean };
+        const mesh = { material, children: [] } as unknown as Mesh;
+        const group = [mesh] as SceneMeshGroup;
+        const widen = (target: Mesh): boolean => !!(target.material as typeof material | null)?.gammaAlbedo;
+        group.r = (_scene, target) => renderable(target);
+        group._w = widen;
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, group);
+
+        const rebuild = rebuildScenePbrPipelines(scene);
+        await vi.waitFor(() => expect(scene._runtimeBuilds?.w).toBe(true));
+        material.gammaAlbedo = true;
+        finish();
+        await rebuild;
+
+        expect(group._w).toBe(widen);
     });
 
     it("detaches a merged packet before deferring its GPU disposer", async () => {
