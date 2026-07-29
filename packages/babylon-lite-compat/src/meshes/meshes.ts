@@ -270,13 +270,9 @@ export class AbstractMesh extends TransformNode {
         this._lite.receiveShadows = value;
     }
 
-    /**
-     * Babylon Lite has no per-mesh enable flag, so a disabled mesh is expressed by hiding
-     * it. This tracks the **effective** enabled state, so disabling an ancestor hides this
-     * mesh too — matching Babylon.js, where `isEnabled()` gates the whole subtree.
-     */
-    protected override _onEffectiveEnabledChanged(effective: boolean): void {
-        this.isVisible = effective;
+    public override setEnabled(enabled: boolean): void {
+        super.setEnabled(enabled);
+        this.isVisible = enabled;
     }
 
     /**

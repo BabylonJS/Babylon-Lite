@@ -98,23 +98,18 @@ export abstract class Light extends Node {
      * Babylon Lite has no per-light enable flag, so a disabled light is expressed
      * by zeroing its intensity in the shared lights UBO (and restoring it on
      * re-enable). The logical intensity value is preserved across the toggle.
-     *
-     * This tracks the **effective** enabled state rather than the light's own flag, so
-     * disabling an ancestor zeroes the light too — matching Babylon.js, where the
-     * renderer skips any light whose ancestor-aware `isEnabled()` is false. Keying off
-     * the own flag instead would let a light that is logically disabled keep
-     * contributing once a disabled ancestor was re-enabled.
      */
-    protected override _onEffectiveEnabledChanged(effective: boolean): void {
-        if (!effective) {
-            if (this._disabledIntensity === null) {
+    public override setEnabled(value: boolean): void {
+        if (value !== this.isEnabled()) {
+            if (!value) {
                 this._disabledIntensity = this._liteIntensity;
                 this._liteIntensity = 0;
+            } else if (this._disabledIntensity !== null) {
+                this._liteIntensity = this._disabledIntensity;
+                this._disabledIntensity = null;
             }
-        } else if (this._disabledIntensity !== null) {
-            this._liteIntensity = this._disabledIntensity;
-            this._disabledIntensity = null;
         }
+        super.setEnabled(value);
     }
 
     /** Detach this light's shadow generator (compat for `light.shadowEnabled = false`). */
