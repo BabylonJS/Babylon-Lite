@@ -5,8 +5,6 @@
 // mesh writes its alpha-modulated depth into the depth RT for soft-edged splats.
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
-// TEMP (BJS 9.15+ pure/non-pure split): restores the createDepthStencilTexture side-effect dropped by tree-shaking; remove once upstream re-adds the transitive registration (open BJS PR).
-import "@babylonjs/core/Engines/AbstractEngine/abstractEngine.texture";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Effect } from "@babylonjs/core/Materials/effect";
 import { Color4 } from "@babylonjs/core/Maths/math.color";
@@ -16,14 +14,6 @@ import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
 import { Scene } from "@babylonjs/core/scene";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import "@babylonjs/core/Rendering/depthRendererSceneComponent";
-// TEMP (BJS 9.15+ pure/non-pure split): the depth renderer's WGSL shaders are no
-// longer registered transitively, so under WebGPU they 404 and the depth map renders
-// black. Import the depth + Gaussian-splatting-depth WGSL shaders explicitly; remove
-// once upstream re-adds the transitive registration (open BJS PR).
-import "@babylonjs/core/ShadersWGSL/depth.vertex";
-import "@babylonjs/core/ShadersWGSL/depth.fragment";
-import "@babylonjs/core/ShadersWGSL/gaussianSplattingDepth.vertex";
-import "@babylonjs/core/ShadersWGSL/gaussianSplattingDepth.fragment";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
 import "@babylonjs/core/Materials/standardMaterial";
 
