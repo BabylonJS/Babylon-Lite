@@ -1,16 +1,16 @@
 {
-  "rawKB": 90.7,
+  "rawKB": 90.6,
   "gzipKB": 37.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene29-generate-mipmaps-C0ljVA3A.js",
     "scene29-gltf-ext-sheen-Dv23b_3T.js",
     "scene29-gltf-ext-uv-transform-tUSEOqA7.js",
-    "scene29-gltf-feature-registry-BDUekVJ3.js",
+    "scene29-gltf-feature-registry-DU31v5cg.js",
     "scene29-gltf-json-asset-JowKGjPS.js",
     "scene29-gltf-pbr-builder-ext-0Tgp6igg.js",
     "scene29-ibl-fragment-CeRrvT96.js",
-    "scene29-pbr-renderable-DFVQk8Jg.js",
+    "scene29-pbr-renderable-CNAse2e5.js",
     "scene29-pbr-template-ext-CiHpOV5G.js",
     "scene29-rgbd-decode-CwmTpUIN.js",
     "scene29-scene-uniforms-FTYH6Ct0.js",
@@ -19,5 +19,5 @@
     "scene29-uv-transform-fragment-B8ijWmAK.js",
     "scene29.js"
   ],
-  "rawBytes": 92900
+  "rawBytes": 92823
 }

@@ -1,5 +1,5 @@
 {
-  "rawKB": 60.6,
+  "rawKB": 60.5,
   "gzipKB": 24.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -13,5 +13,5 @@
     "scene9-std-specular-fragment-lgpgl8DR.js",
     "scene9.js"
   ],
-  "rawBytes": 62007
+  "rawBytes": 61966
 }

@@ -1,5 +1,5 @@
 {
-  "rawKB": 87.6,
+  "rawKB": 87.5,
   "gzipKB": 34.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,5 +8,5 @@
     "scene129-standard-renderable-B7mhWrbs.js",
     "scene129.js"
   ],
-  "rawBytes": 89675
+  "rawBytes": 89641
 }
