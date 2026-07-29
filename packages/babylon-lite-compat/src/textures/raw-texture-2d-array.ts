@@ -16,6 +16,7 @@ import { createTexture2DArray, createTexture2DArrayFromPixels, updateTexture2DAr
 import type { Texture2DArray } from "babylon-lite";
 
 import { Constants } from "../misc/engine-constants.js";
+import { unsupported } from "../error.js";
 import type { Scene } from "../scene/scene.js";
 import { BaseTexture, toRgbaBytes } from "./textures.js";
 
@@ -234,4 +235,38 @@ export async function CreateTexture2DArrayFromImageUrlsAsync(
         premultiplyAlpha: options?.premultiplyAlpha ?? false,
     });
     return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
+}
+
+/**
+ * Babylon.js `ICreateTexture2DArrayFromKTX2Options` — creation settings for
+ * {@link CreateTexture2DArrayFromKTX2Async}.
+ */
+export interface ICreateTexture2DArrayFromKTX2Options {
+    /** Defines if mip levels should be generated (true by default). */
+    generateMipMaps?: boolean;
+    /** Defines the sampling mode to use (`Texture.TRILINEAR_SAMPLINGMODE` by default). */
+    samplingMode?: number;
+    /** Defines if the texture must be stored with the Y axis inverted (false by default). */
+    invertY?: boolean;
+}
+
+/**
+ * Babylon.js `CreateTexture2DArrayFromKTX2Async` (BJS `10.x` `rawTexture2DArray.functions`)
+ * — decode a single multi-layer KTX2 container to an RGBA 2D array texture.
+ *
+ * 🔧 Needs Lite core. Babylon Lite exposes KTX2 decoding only as a single-`Texture2D`
+ * upload (`loadKtx2Texture2D` / `uploadKtx2Texture2D`) driven by an internal decoder
+ * in `texture/ktx2-loader.ts`, a module already pulled into KTX2 scene bundles (via
+ * the `KHR_texture_basisu` glTF extension `gltf-ext-basisu.ts`). There is no public
+ * layered-RGBA decode primitive to assemble a multi-layer array, and adding one would
+ * mean modifying that hot-path module (or duplicating its decoder-loading internals)
+ * plus deciding layer/mip assembly — beyond a mechanical, tree-shakeable additive
+ * export. Compat cannot implement the transcode itself (feature logic must live in
+ * Lite), so this throws until Lite adds a layered KTX2 decode export.
+ */
+export function CreateTexture2DArrayFromKTX2Async(_scene: Scene, _data: string | ArrayBufferView, _options?: ICreateTexture2DArrayFromKTX2Options): Promise<RawTexture2DArray> {
+    return unsupported(
+        "CreateTexture2DArrayFromKTX2Async",
+        "Babylon Lite decodes KTX2 only to a single Texture2D via an internal decoder in a module already bundled by the KHR_texture_basisu glTF path; it exposes no layered-RGBA array decode to back a multi-layer KTX2. Needs a new tree-shakeable Lite export."
+    );
 }

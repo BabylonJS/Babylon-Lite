@@ -31,8 +31,8 @@ function deferred<T>(): Deferred<T> {
     return { promise, resolve, reject };
 }
 
-function engineWrapper(): { _lite: object } {
-    return { _lite: {} };
+function engineWrapper(): never {
+    return { _lite: {} } as never;
 }
 
 function textureHandle(): unknown {

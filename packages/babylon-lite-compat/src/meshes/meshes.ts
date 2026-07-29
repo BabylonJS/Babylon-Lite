@@ -353,6 +353,35 @@ export class AbstractMesh extends TransformNode {
         resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, undefined, this._lastTangents, this._lastColors);
     }
 
+    /**
+     * Babylon.js `mesh.getIndices()` — read back the mesh's index (topology) buffer.
+     * Babylon Lite retains the indices on the mesh as a `Uint32Array` (for picking +
+     * device-loss recovery), so we return that directly; a mesh with no geometry
+     * returns `null`.
+     */
+    public getIndices(_copyWhenShared?: boolean, _forceCopy?: boolean): Uint32Array | null {
+        return this._lite._cpuIndices ?? null;
+    }
+
+    /**
+     * Babylon.js `mesh.setIndices(indices)` — replace the mesh's index (topology)
+     * buffer. Babylon Lite re-uploads the geometry in place via `resizeMeshGeometry`,
+     * keeping the existing position/normal/uv/tangent/color attributes and swapping
+     * only the indices. Returns the mesh for chaining.
+     */
+    public setIndices(indices: number[] | Uint16Array | Uint32Array | Int32Array, _totalVertices?: number | null, _updatable?: boolean): this {
+        const engine = this._scene?.getEngine()._lite;
+        const lite = this._lite;
+        if (!engine || !lite._cpuPositions) {
+            return this;
+        }
+        const u32 = indices instanceof Uint32Array ? indices : Uint32Array.from(indices);
+        const positions = lite._cpuPositions;
+        const normals = lite._cpuNormals ?? computeFlatNormals(positions, u32);
+        resizeMeshGeometry(engine, this._lite, positions, normals, u32, lite._cpuUvs, undefined, this._lastTangents, this._lastColors);
+        return this;
+    }
+
     /** @internal Retained tangent/color buffers so successive `setVerticesData` calls keep both. */
     private _lastTangents: Float32Array | undefined;
     private _lastColors: Float32Array | undefined;
