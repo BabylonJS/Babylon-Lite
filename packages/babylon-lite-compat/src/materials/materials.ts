@@ -56,6 +56,21 @@ export abstract class Material {
         return "Material";
     }
 
+    /** The scene this material was constructed against (Babylon.js `Material.getScene`). */
+    public getScene(): Scene | undefined {
+        return this._scene;
+    }
+
+    /**
+     * The textures currently bound to this material (Babylon.js
+     * `Material.getActiveTextures`). The base material owns no texture slots, so
+     * this returns an empty array; each subclass overrides it to enumerate its own
+     * slots and those of its extensions.
+     */
+    public getActiveTextures(): BaseTexture[] {
+        return [];
+    }
+
     protected _markDirty(): void {
         markMaterialUboDirty(this._lite);
     }
@@ -205,6 +220,21 @@ export class StandardMaterial extends PushMaterial {
     private _bumpTexture: BaseTexture | null = null;
     private _emissiveTexture: BaseTexture | null = null;
 
+    /** Enumerate the standard-material texture slots that are bound (Babylon.js `getActiveTextures`). */
+    public override getActiveTextures(): BaseTexture[] {
+        const textures: BaseTexture[] = [];
+        if (this._diffuseTexture) {
+            textures.push(this._diffuseTexture);
+        }
+        if (this._bumpTexture) {
+            textures.push(this._bumpTexture);
+        }
+        if (this._emissiveTexture) {
+            textures.push(this._emissiveTexture);
+        }
+        return textures;
+    }
+
     /**
      * @internal Re-bind texture maps to the Lite material. Babylon.js `Texture`s
      * load asynchronously, so when `material.diffuseTexture = new Texture(url)` ran
@@ -314,12 +344,23 @@ export class PBRSheenConfiguration {
         this._markDirty();
     }
 
-    /** Babylon.js `sheen.texture`. Binds the Lite handle if the texture has resolved. */
-    public set texture(value: { _lite?: Texture2D } | null) {
+    /** Babylon.js `sheen.texture`. Retains the wrapper and binds the Lite handle if the texture has resolved. */
+    public get texture(): BaseTexture | null {
+        return this._texture;
+    }
+    public set texture(value: BaseTexture | null) {
+        this._texture = value;
         if (value?._lite) {
             this._props.texture = value._lite;
             this._markDirty();
         }
+    }
+
+    private _texture: BaseTexture | null = null;
+
+    /** Enumerate the sheen texture slot for `Material.getActiveTextures`. */
+    public getActiveTextures(): BaseTexture[] {
+        return this._texture ? [this._texture] : [];
     }
 }
 
@@ -444,6 +485,21 @@ export class PBRMaterial extends PushMaterial {
     }
 
     private _albedoTexture: BaseTexture | null = null;
+
+    /**
+     * Enumerate every bound PBR texture slot, including extension sub-configurations
+     * (Babylon.js `PBRMaterial.getActiveTextures`).
+     */
+    public override getActiveTextures(): BaseTexture[] {
+        const textures: BaseTexture[] = [];
+        if (this._albedoTexture) {
+            textures.push(this._albedoTexture);
+        }
+        if (this._sheen) {
+            textures.push(...this._sheen.getActiveTextures());
+        }
+        return textures;
+    }
 
     public get metallic(): number {
         return this._lite.metallicFactor ?? 1;
