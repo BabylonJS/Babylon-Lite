@@ -6,7 +6,7 @@
     "scene249-alpha-test-fragment-Da7VMvml.js",
     "scene249-generate-mipmaps-CGMz57qV.js",
     "scene249-gltf-color-normalize-4-WGzPL2.js",
-    "scene249-gltf-json-asset-D9BO86nM.js",
+    "scene249-gltf-json-asset-4LgA1-9c.js",
     "scene249-ibl-fragment-CeRrvT96.js",
     "scene249-pbr-renderable-CQMDjAHn.js",
     "scene249-pbr-template-ext-CiHpOV5G.js",
@@ -14,5 +14,5 @@
     "scene249-scene-uniforms-FTYH6Ct0.js",
     "scene249.js"
   ],
-  "rawBytes": 80934
+  "rawBytes": 80897
 }

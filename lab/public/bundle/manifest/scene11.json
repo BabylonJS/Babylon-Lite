@@ -9,7 +9,7 @@
     "scene11-gltf-ext-spec-gloss-D60sFZYX.js",
     "scene11-gltf-feature-animations-C7UZCNpY.js",
     "scene11-gltf-feature-extras-VHPteGay.js",
-    "scene11-gltf-feature-registry-DQ5K_4ci.js",
+    "scene11-gltf-feature-registry-DFWswzcW.js",
     "scene11-gltf-feature-skeleton-DzqLJNf9.js",
     "scene11-gltf-glb-parser-DkzNAISh.js",
     "scene11-gltf-sampler-desc-BhDLgho4.js",
@@ -18,5 +18,5 @@
     "scene11-skeleton-fragment-CH37--8w.js",
     "scene11.js"
   ],
-  "rawBytes": 91342
+  "rawBytes": 91316
 }
