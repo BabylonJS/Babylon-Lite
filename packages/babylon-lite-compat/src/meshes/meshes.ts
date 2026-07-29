@@ -283,26 +283,39 @@ export class AbstractMesh extends TransformNode {
     }
 
     /**
-     * Babylon.js `mesh.getBoundingInfo()` — local-space AABB of this mesh. Babylon
-     * Lite stores `boundMin`/`boundMax` (local space) on factory- and loader-built
-     * meshes; when absent (e.g. a placeholder mesh whose bounds were never computed)
-     * we fold the retained CPU positions through Lite's `computeAabb`. A mesh with
-     * no geometry returns a degenerate zero-size box.
+     * Babylon.js `mesh.getBoundingInfo()` — the mesh's AABB. `minimum`/`maximum`
+     * are the local-space bounds; the returned `BoundingInfo`'s world members
+     * (`minimumWorld`/`maximumWorld`/`centerWorld`/…) are derived by transforming
+     * the eight local corners by the mesh's world matrix, so a mesh at (1,2,3)
+     * reports correctly-offset world bounds. Babylon Lite stores `boundMin`/
+     * `boundMax` (local space) on factory- and loader-built meshes; when absent
+     * (e.g. a placeholder mesh whose bounds were never computed) we fold the
+     * retained CPU positions through Lite's `computeAabb`. A mesh with no geometry
+     * returns a degenerate zero-size box.
      */
     public getBoundingInfo(): BoundingInfo {
+        const world = this._worldMatrixForBounds();
         const lo = this._lite.boundMin;
         const hi = this._lite.boundMax;
         if (lo && hi) {
-            return new BoundingInfo(new Vector3(lo[0], lo[1], lo[2]), new Vector3(hi[0], hi[1], hi[2]));
+            return new BoundingInfo(new Vector3(lo[0], lo[1], lo[2]), new Vector3(hi[0], hi[1], hi[2]), world);
         }
         const positions = this._lite._cpuPositions;
         if (positions && positions.length >= 3 && positions.length % 3 === 0) {
             const [min, max] = computeAabb(positions);
             if (Number.isFinite(min[0]) && Number.isFinite(min[1]) && Number.isFinite(min[2]) && Number.isFinite(max[0]) && Number.isFinite(max[1]) && Number.isFinite(max[2])) {
-                return new BoundingInfo(new Vector3(min[0], min[1], min[2]), new Vector3(max[0], max[1], max[2]));
+                return new BoundingInfo(new Vector3(min[0], min[1], min[2]), new Vector3(max[0], max[1], max[2]), world);
             }
         }
-        return new BoundingInfo(new Vector3(0, 0, 0), new Vector3(0, 0, 0));
+        return new BoundingInfo(new Vector3(0, 0, 0), new Vector3(0, 0, 0), world);
+    }
+
+    /** Compat handle over Babylon Lite's world matrix for bounds derivation. Returns
+     *  `undefined` when the Lite node hasn't computed one (world bounds fall back to
+     *  local). */
+    private _worldMatrixForBounds(): Matrix | undefined {
+        const wm = this._lite.worldMatrix;
+        return wm ? Matrix.FromArray(wm) : undefined;
     }
 
     /**

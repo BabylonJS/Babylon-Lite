@@ -18,6 +18,7 @@ import type { Texture2DArray } from "babylon-lite";
 import { Constants } from "../misc/engine-constants.js";
 import type { Scene } from "../scene/scene.js";
 import { BaseTexture, toRgbaBytes } from "./textures.js";
+import { unsupported } from "../error.js";
 
 /** The decoded image sources WebGPU (and therefore Lite) can upload into a layer. */
 type ImageSource = ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | HTMLVideoElement | ImageData | VideoFrame;
@@ -234,4 +235,35 @@ export async function CreateTexture2DArrayFromImageUrlsAsync(
         premultiplyAlpha: options?.premultiplyAlpha ?? false,
     });
     return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
+}
+
+/** Babylon.js `ICreateTexture2DArrayFromKTX2Options` (BJS 9.17 `rawTexture2DArray.functions`). */
+export interface ICreateTexture2DArrayFromKTX2Options {
+    /** Defines if mip levels should be generated (true by default). */
+    generateMipMaps?: boolean;
+    /** Defines the sampling mode to use (`Texture.TRILINEAR_SAMPLINGMODE` by default). */
+    samplingMode?: number;
+    /** Defines if the texture must be stored with the Y axis inverted (false by default). */
+    invertY?: boolean;
+}
+
+/**
+ * Babylon.js `CreateTexture2DArrayFromKTX2Async` — decode a single multi-layer KTX2
+ * container (multiple array layers) into a 2D array texture.
+ *
+ * 🔧 Needs Lite core. Faithfully backing this requires the KTX2 file decoded into
+ * per-layer RGBA pixel data, but Babylon Lite's KTX2 decoder glue (`loadKtx2Decoder`
+ * and its `Ktx2DecodedData` model) is private to `texture/ktx2-loader.ts` and models
+ * only a single-layer mip chain — it exposes no `layerCount`/`layerIndex`, so there is
+ * no way to slice the container into array layers. `loadKtx2Texture2D` likewise yields
+ * one `Texture2D`, not an array. Adding layer-aware decode means editing
+ * `ktx2-loader.ts`, which the glTF `KHR_texture_basisu` extension already pulls into
+ * scene bundles, so the capability cannot be added tree-shakeably from a new file.
+ * Throws until Lite exposes a layer-aware KTX2 decode.
+ */
+export function CreateTexture2DArrayFromKTX2Async(_scene: Scene, _data: string | ArrayBufferView, _options?: ICreateTexture2DArrayFromKTX2Options): Promise<RawTexture2DArray> {
+    return unsupported(
+        "CreateTexture2DArrayFromKTX2Async",
+        "Lite's KTX2 decoder is single-layer and private to the bundled ktx2-loader module; decoding a multi-layer KTX2 into a 2D array texture needs a layer-aware Lite core decode."
+    );
 }

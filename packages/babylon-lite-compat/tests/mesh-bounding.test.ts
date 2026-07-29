@@ -22,6 +22,16 @@ describe("AbstractMesh.getBoundingInfo", () => {
         expect(info.maximum.asArray()).toEqual([1, 2, 3]);
     });
 
+    it("derives world-space bounds from the Lite mesh world matrix", () => {
+        // A mesh at (1,2,3): local bounds unchanged, world bounds offset by it.
+        const worldMatrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 2, 3, 1]);
+        const info = getBounds({ boundMin: [-1, -1, -1], boundMax: [1, 1, 1], worldMatrix });
+        expect(info.minimum.asArray()).toEqual([-1, -1, -1]);
+        expect(info.boundingBox.minimumWorld.asArray()).toEqual([0, 1, 2]);
+        expect(info.boundingBox.maximumWorld.asArray()).toEqual([2, 3, 4]);
+        expect(info.boundingBox.centerWorld.asArray()).toEqual([1, 2, 3]);
+    });
+
     it("folds CPU positions through computeAabb when bounds are absent", () => {
         const positions = new Float32Array([-2, 0, 0, 4, 1, 0, 0, -3, 5]);
         const info = getBounds({ _cpuPositions: positions });

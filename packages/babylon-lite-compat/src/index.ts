@@ -88,8 +88,9 @@ export {
     UploadImageToTexture2DArrayLayer,
     LoadImageToTexture2DArrayLayerAsync,
     CreateTexture2DArrayFromImageUrlsAsync,
+    CreateTexture2DArrayFromKTX2Async,
 } from "./textures/raw-texture-2d-array.js";
-export type { IUploadImageToTexture2DArrayLayerOptions, ICreateTexture2DArrayFromImageUrlsOptions } from "./textures/raw-texture-2d-array.js";
+export type { IUploadImageToTexture2DArrayLayerOptions, ICreateTexture2DArrayFromImageUrlsOptions, ICreateTexture2DArrayFromKTX2Options } from "./textures/raw-texture-2d-array.js";
 
 // ─── Loading ─────────────────────────────────────────────────────────
 export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync } from "./loading/scene-loader.js";

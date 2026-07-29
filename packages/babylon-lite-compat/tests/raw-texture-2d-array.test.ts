@@ -36,9 +36,11 @@ import {
     UploadImageToTexture2DArrayLayer,
     LoadImageToTexture2DArrayLayerAsync,
     CreateTexture2DArrayFromImageUrlsAsync,
+    CreateTexture2DArrayFromKTX2Async,
 } from "../src/textures/raw-texture-2d-array";
 import { BaseTexture } from "../src/textures/textures";
 import { AbstractEngine } from "../src/engine/engine";
+import { LiteCompatError } from "../src/error";
 
 const createArrayMock = vi.mocked(createTexture2DArray);
 const createFromPixelsMock = vi.mocked(createTexture2DArrayFromPixels);
@@ -212,5 +214,14 @@ describe("CreateTexture2DArrayFromImageUrlsAsync", () => {
         fromUrlsMock.mockClear();
         await CreateTexture2DArrayFromImageUrlsAsync(fakeScene() as never, ["a.png"], { invertY: true, premultiplyAlpha: true });
         expect(fromUrlsMock.mock.calls[0]![2]).toEqual({ mipMaps: true, invertY: true, premultiplyAlpha: true });
+    });
+});
+
+describe("CreateTexture2DArrayFromKTX2Async", () => {
+    // 🔧 Needs Lite core: Lite's KTX2 decoder is single-layer and private to the
+    // bundled ktx2-loader module, so decoding a multi-layer KTX2 into a 2D array
+    // texture is not backable today. It throws loudly rather than mis-decoding.
+    it("throws a LiteCompatError until Lite exposes a layer-aware KTX2 decode", () => {
+        expect(() => CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "layers.ktx2")).toThrow(LiteCompatError);
     });
 });
