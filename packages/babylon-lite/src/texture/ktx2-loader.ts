@@ -13,7 +13,7 @@ import type { Texture2D } from "./texture-2d.js";
 import { getCompressedFormat } from "./compressed-formats.js";
 import type { CompressedFormatInfo } from "./compressed-formats.js";
 
-interface Ktx2DecoderCaps {
+export interface Ktx2DecoderCaps {
     astc: boolean;
     bptc: boolean;
     s3tc: boolean;
@@ -26,6 +26,8 @@ interface Ktx2DecodedMip {
     width: number;
     height: number;
     data: Uint8Array;
+    /** For multi-layer (array) containers: the array layer this mip belongs to. */
+    layerIndex?: number;
 }
 
 interface Ktx2DecodedData {
@@ -36,12 +38,17 @@ interface Ktx2DecodedData {
     hasAlpha: boolean;
     transcoderName: string;
     errors?: string;
+    /** Number of array layers when the container holds a 2D array (\>1); otherwise undefined/1. */
+    layerCount?: number;
     mipmaps: Ktx2DecodedMip[];
 }
 
-interface Ktx2Decoder {
+/** @internal Shared decoder handle type (used by the tree-shakeable 2D-array KTX2 helper). */
+export interface Ktx2Decoder {
     decode(data: Uint8Array, caps: Ktx2DecoderCaps, options?: { forceRGBA?: boolean }): Promise<Ktx2DecodedData>;
 }
+
+export type { Ktx2DecodedData, Ktx2DecodedMip };
 
 interface Ktx2DecoderModule {
     KTX2Decoder: new () => Ktx2Decoder;
@@ -69,7 +76,8 @@ let _ktx2DecoderPromise: Promise<Ktx2Decoder> | null = null;
 const GL_RGBA8 = 0x8058;
 const GL_R8 = 0x8229;
 const GL_RG8 = 0x822b;
-const RGBA_CAPS: Ktx2DecoderCaps = { astc: false, bptc: false, s3tc: false, pvrtc: false, etc2: false, etc1: false };
+/** @internal RGBA8 (uncompressed) transcode caps — used by the tree-shakeable 2D-array KTX2 helper. */
+export const RGBA_CAPS: Ktx2DecoderCaps = { astc: false, bptc: false, s3tc: false, pvrtc: false, etc2: false, etc1: false };
 
 /** Build the decoder's transcode-target caps from the device's enabled compressed-texture features, so the
  *  Basis transcoder emits a GPU-compressed format (BC7/BC3/ETC2/ASTC) instead of uncompressed RGBA8 — a few
@@ -90,7 +98,8 @@ function deviceKtx2Caps(engine: EngineContext): Ktx2DecoderCaps {
     };
 }
 
-function loadKtx2Decoder(): Promise<Ktx2Decoder> {
+/** @internal Load (once) and cache the shared KTX2/Basis decoder, honoring `setKtx2DecoderUrl`. */
+export function loadKtx2Decoder(): Promise<Ktx2Decoder> {
     if (_ktx2DecoderPromise) {
         return _ktx2DecoderPromise;
     }

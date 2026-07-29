@@ -233,6 +233,8 @@ export type { DynamicTexture2D, DynamicTexture2DOptions, DynamicTextureUpdateOpt
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
+export { createTexture2DArrayFromKtx2 } from "./texture/ktx2-texture-array.js";
+export type { Ktx2TextureArrayOptions } from "./texture/ktx2-texture-array.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
