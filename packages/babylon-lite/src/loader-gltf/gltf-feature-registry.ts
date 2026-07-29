@@ -17,6 +17,7 @@
  */
 import type { GltfFeature } from "./gltf-feature.js";
 import type { GltfMatExtCtx, GltfMaterialData } from "./gltf-material.js";
+import { mat4Determinant3 } from "../math/mat4-determinant3.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { anyPrimitive, needsOrmComposite } from "./gltf-parser.js";
 
@@ -128,8 +129,7 @@ function hasNegDetNode(json: any): boolean {
             return n.scale[0] * n.scale[1] * n.scale[2] < 0;
         }
         if (n.matrix) {
-            const m = n.matrix;
-            return m[0] * (m[5] * m[10] - m[6] * m[9]) + m[1] * (m[6] * m[8] - m[4] * m[10]) + m[2] * (m[4] * m[9] - m[5] * m[8]) < 0;
+            return mat4Determinant3(n.matrix) < 0;
         }
         return false;
     });

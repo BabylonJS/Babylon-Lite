@@ -50,6 +50,20 @@ import { _setActivePbrGeometryAttachments } from "./pbr-geometry-view.js";
  *  keeps the module free of top-level side effects so an unused geometry path
  *  tree-shakes away. */
 let _pbrGeometryGroupBuilder: MeshGroupBuilder | null = null;
+
+/** Mirrored-mesh front-face resolution for the geometry pass. Installed by the lazy
+ *  `pbr-primitive-resolver` module — which the glTF primitive feature loads for assets containing a
+ *  negative-scale node, and which the `enableMirroredMeshes()` opt-in also pulls in. Module-local
+ *  with a single exported setter: when neither path is present the setter tree-shakes, the bundler
+ *  proves this is always null, and the `frontFace` ternary below folds to the plain `"ccw"` literal
+ *  — unmirrored geometry scenes stay byte-identical.
+ *  @internal */
+let _geometryWinding: ((meshFeatures: number) => GPUFrontFace) | null = null;
+/** @internal Install geometry-pass winding resolution. */
+export function _installPbrGeometryWinding(resolve: (meshFeatures: number) => GPUFrontFace): void {
+    _geometryWinding = resolve;
+}
+
 export function getPbrGeometryGroupBuilder(): MeshGroupBuilder {
     if (_pbrGeometryGroupBuilder) {
         return _pbrGeometryGroupBuilder;
@@ -89,7 +103,11 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const engine = scene.surface.engine;
     const device = engine._device;
 
-    const ctx = (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext;
+    const sceneState = scene as SceneContext & {
+        _pbrGeomContext?: _PbrGeometryContext;
+        _pbrMeshGeomContexts?: WeakMap<Mesh, _PbrGeometryContext>;
+    };
+    const ctx = sceneState._pbrMeshGeomContexts?.get(mesh) ?? sceneState._pbrGeomContext;
     if (!ctx) {
         throw new Error("buildPbrGeometryRenderable: scene has no PBR context. Ensure regular PBR meshes have been built before recording the geometry task.");
     }
@@ -474,7 +492,11 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
               }
             : undefined,
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" },
+        // A mirrored mesh has reversed triangle winding, exactly as in the forward pass — without
+        // this its depth/normal/velocity output would be culled away. Resolution goes through the
+        // opt-in hook so unmirrored bundles fold the whole thing to the plain "ccw" literal. The
+        // variant key already includes meshFeatures, so a winding change gets its own pipeline.
+        primitive: { topology: "triangle-list", cullMode, frontFace: _geometryWinding ? _geometryWinding(res._meshFeatures) : "ccw" },
     });
     res._pipelines.set(key, pipeline);
     return pipeline;

@@ -66,6 +66,20 @@ export function _installStandardUvOffsetResolver(resolve: (material: StandardMat
     _uvOffsetResolver = resolve;
 }
 
+/** Primitive-state resolver, installed only by `std-mirrored-support` — i.e. the
+ *  `enableMirroredMeshes()` opt-in — so that a mirrored Standard mesh gets its triangle winding
+ *  reversed. (The shared resolver it installs also threads non-triangle topology, but that only
+ *  ever comes from glTF primitives, which are PBR; a Standard mesh always resolves to a
+ *  triangle list.) Module-local with a single exported setter: when the opt-in is absent the setter
+ *  tree-shakes, the bundler proves this is always null, and the ternary in
+ *  `getOrCreateStandardPipeline` folds to the plain triangle-list default — every ordinary Standard
+ *  scene stays byte-identical. */
+let _stdPrimitiveResolver: ((meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState) | null = null;
+/** @internal Install the Standard primitive-state resolver. */
+export function _installStdPrimitiveResolver(resolve: (meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState): void {
+    _stdPrimitiveResolver = resolve;
+}
+
 // ─── Composer Path (Phase 1) ────────────────────────────────────────
 // Converts feature bitmask → StandardTemplateConfig → ComposedShader.
 // This produces identical WGSL to the old string-builder path but via
@@ -266,7 +280,9 @@ export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTa
               }
             : {}),
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
+        primitive: _stdPrimitiveResolver
+            ? _stdPrimitiveResolver(bindings._meshFeatures, (features & DOUBLE_SIDED) !== 0)
+            : { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
     });
 
     bindings._pipelines.set(key, pipeline);

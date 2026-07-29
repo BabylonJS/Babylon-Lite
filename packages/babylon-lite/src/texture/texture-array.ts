@@ -12,6 +12,10 @@
  * The whole feature is a set of free functions with zero module-level side
  * effects, so an app that never touches texture arrays strips it entirely, and
  * an app that already holds an `ImageBitmap` never bundles the URL-fetch path.
+ * Layers can be filled from decoded image sources
+ * ({@link uploadImageToArrayLayer} / {@link loadImageToArrayLayer} /
+ * {@link createTexture2DArrayFromUrls}) or from raw CPU-generated RGBA8 bytes
+ * ({@link createTexture2DArrayFromPixels} / {@link updateTexture2DArrayFromPixels}).
  *
  * There is no built-in material that samples an array layer, so consuming a
  * `Texture2DArray` means sampling it from your own WGSL: declare a sampler with
@@ -44,7 +48,7 @@
 
 import { TU } from "../engine/gpu-flags.js";
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
-import { generateMipmaps } from "./generate-mipmaps.js";
+import { generateMipmaps, recordMipmaps } from "./generate-mipmaps.js";
 import { mipLevelCount } from "./mip-count.js";
 import type { Texture2D } from "./texture-2d.js";
 import type { EngineContext } from "../engine/engine.js";
@@ -82,6 +86,9 @@ export interface ArrayLayerUploadOptions {
     /** Treat the destination as premultiplied-alpha. Default false (straight RGBA). */
     premultiplyAlpha?: boolean;
 }
+
+/** Sampler, format and per-layer upload options for `createTexture2DArrayFromUrls()`. */
+export interface TextureArrayFromUrlsOptions extends TextureArrayOptions, ArrayLayerUploadOptions {}
 
 /**
  * Create an empty 2D texture array of `layers` same-size RGBA8 layers, ready to
@@ -192,10 +199,14 @@ export async function loadImageToArrayLayer(engine: EngineContext, tex: Texture2
  *
  * @param engine - Engine context.
  * @param urls - One image URL per layer (`urls.length` \>= 1).
- * @param options - Sampler / format overrides.
+ * @param options - Sampler / format overrides, plus the per-layer `invertY` / `premultiplyAlpha` upload flags applied to every layer.
  * @returns A promise resolving to the populated `Texture2DArray`.
  */
-export async function createTexture2DArrayFromUrls(engine: EngineContext, urls: readonly [string, ...string[]], options: TextureArrayOptions = {}): Promise<Texture2DArray> {
+export async function createTexture2DArrayFromUrls(
+    engine: EngineContext,
+    urls: readonly [string, ...string[]],
+    options: TextureArrayFromUrlsOptions = {}
+): Promise<Texture2DArray> {
     // allSettled (not all): a rejected fetch/decode must not leak the layers that
     // already decoded — Promise.all would reject on the first failure and orphan
     // every fulfilled ImageBitmap. Close the fulfilled ones, then rethrow.
@@ -205,7 +216,7 @@ export async function createTexture2DArrayFromUrls(engine: EngineContext, urls: 
             if (!r.ok) {
                 throw new Error(`createTexture2DArrayFromUrls: fetch failed for ${url} (${r.status})`);
             }
-            return createImageBitmap(await r.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+            return createImageBitmap(await r.blob(), { premultiplyAlpha: options.premultiplyAlpha ? "premultiply" : "none", colorSpaceConversion: "none" });
         })
     );
 
@@ -234,8 +245,81 @@ export async function createTexture2DArrayFromUrls(engine: EngineContext, urls: 
 
     const tex = createTexture2DArray(engine, width, height, bitmaps.length, options);
     for (const [i, bmp] of bitmaps.entries()) {
-        uploadImageToArrayLayer(engine, tex, i, bmp);
+        uploadImageToArrayLayer(engine, tex, i, bmp, options);
         bmp.close();
     }
     return tex;
+}
+
+/**
+ * Create a 2D texture array from a tightly-packed RGBA8 byte buffer covering **every**
+ * layer — the array analog of `createTexture3DFromPixels`, and the raw-bytes
+ * counterpart to {@link createTexture2DArrayFromUrls}. Use it when the layer contents
+ * are CPU-generated (procedural tiles, decoded asset payloads, lookup tables) rather
+ * than decoded images.
+ *
+ * If the array is created with mipmaps, a full mip chain is generated for each layer
+ * after the upload.
+ *
+ * @param engine - Engine context.
+ * @param data - `width * height * layers * 4` bytes, RGBA8, layer-major (all of layer 0's rows, then layer 1's, ...).
+ * @param width - Layer width in texels (\>= 1).
+ * @param height - Layer height in texels (\>= 1).
+ * @param layers - Number of array layers (\>= 1).
+ * @param options - Sampler / format overrides.
+ */
+export function createTexture2DArrayFromPixels(
+    engine: EngineContext,
+    data: Uint8Array,
+    width: number,
+    height: number,
+    layers: number,
+    options: TextureArrayOptions = {}
+): Texture2DArray {
+    const tex = createTexture2DArray(engine, width, height, layers, options);
+    updateTexture2DArrayFromPixels(engine, tex, data);
+    return tex;
+}
+
+/**
+ * Re-upload one mip level of every layer of a texture array from a tightly-packed
+ * RGBA8 byte buffer. This is the runtime counterpart to
+ * {@link createTexture2DArrayFromPixels}.
+ *
+ * Uploading the base level (`mipLevel = 0`) of a mipmapped array regenerates the rest
+ * of the chain; uploading an explicit higher level writes only that level, so an
+ * application can author its own mip chain level by level.
+ *
+ * @param engine - Engine context.
+ * @param tex - Target texture array (from `createTexture2DArray` / `createTexture2DArrayFromPixels`).
+ * @param data - `mipWidth * mipHeight * tex.layers * 4` bytes, RGBA8, layer-major.
+ * @param mipLevel - Destination mip level (default 0). Level dimensions are `max(1, size >> mipLevel)`.
+ */
+export function updateTexture2DArrayFromPixels(engine: EngineContext, tex: Texture2DArray, data: Uint8Array, mipLevel = 0): void {
+    if (mipLevel < 0 || mipLevel >= tex.texture.mipLevelCount || (mipLevel | 0) !== mipLevel) {
+        throw new Error(`updateTexture2DArrayFromPixels: mipLevel must be an integer in [0, ${tex.texture.mipLevelCount}) (got ${mipLevel})`);
+    }
+    const width = Math.max(1, tex.width >> mipLevel);
+    const height = Math.max(1, tex.height >> mipLevel);
+    const expected = width * height * tex.layers * 4;
+    if (data.length < expected) {
+        throw new Error(`updateTexture2DArrayFromPixels: data too short — need ${expected} bytes for ${width}x${height}x${tex.layers} RGBA at mip ${mipLevel}, got ${data.length}`);
+    }
+
+    engine._device.queue.writeTexture(
+        { texture: tex.texture, mipLevel },
+        data,
+        { bytesPerRow: width * 4, rowsPerImage: height },
+        { width, height, depthOrArrayLayers: tex.layers }
+    );
+
+    // Only a base-level upload invalidates the rest of the chain; an explicit
+    // higher-level write is the caller authoring that level themselves.
+    if (mipLevel === 0 && tex.texture.mipLevelCount > 1) {
+        const encoder = engine._device.createCommandEncoder();
+        for (let layer = 0; layer < tex.layers; layer++) {
+            recordMipmaps(engine, tex.texture, encoder, layer);
+        }
+        engine._device.queue.submit([encoder.finish()]);
+    }
 }

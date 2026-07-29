@@ -63,6 +63,7 @@ Pages are ordered by how commonly Babylon Lite users reach for them — start wi
 | [41-audio-engine.md](41-audio-engine.md)                           | Audio Engine             | Web Audio playback, buses, 3D spatial, panning, analyser, microphone, unmute UI                       |
 | [42-physics.md](42-physics.md)                                     | Physics                  | Havok V2 world, bodies/shapes/aggregates, timestep & delta propagation, collision/trigger/query/character |
 | [49-error-handling.md](49-error-handling.md)                       | Error Handling           | Coded errors by default; `enableErrorDecoding` (always-on) vs `decodeError` (on-the-fly, e.g. telemetry)   |
+| [50-device-lost-recovery.md](50-device-lost-recovery.md)           | Device Lost Recovery     | Opt-in Scene, SpriteRenderer, and TextRenderer recovery after WebGPU device loss                           |
 
 ---
 
@@ -478,10 +479,6 @@ interface ArcRotateCamera {
     inertialRadiusOffset: number;
     inertialPanningX: number;
     inertialPanningY: number;
-    getViewMatrix(): Mat4;
-    getProjectionMatrix(aspectRatio: number): Mat4;
-    getViewProjectionMatrix(aspectRatio: number): Mat4;
-    getPosition(): Vec3;
 }
 
 interface FreeCamera {
@@ -493,15 +490,16 @@ interface FreeCamera {
     fov: number;
     nearPlane: number;
     farPlane: number;
-    getViewMatrix(): Mat4;
-    getProjectionMatrix(aspectRatio: number): Mat4;
-    getViewProjectionMatrix(aspectRatio: number): Mat4;
-    getPosition(): Vec3;
 }
 
 interface Camera {
     /* Union: ArcRotateCamera | FreeCamera */
 }
+
+function getViewMatrix(camera: Camera): Mat4;
+function getProjectionMatrix(camera: Camera, aspectRatio: number): Mat4;
+function getViewProjectionMatrix(camera: Camera, aspectRatio: number): Mat4;
+function getCameraPosition(camera: Camera): Vec3;
 
 // ─── Lights ──────────────────────────────────────────────────────────
 interface LightBase {
@@ -888,6 +886,7 @@ Indices `[col*4+row]` — matches WGSL `mat4x4<f32>` storage.
 | `mat4Invert(m)`                                | `→ Mat4 \| null` | Full 4x4 inverse via cofactors                |
 | `mat4Compose(tx,ty,tz, qx,qy,qz,qw, sx,sy,sz)` | `→ Mat4`         | TRS composition                               |
 | `mat4FromQuat(qx,qy,qz,qw)`                    | `→ Mat4`         | Quaternion to rotation matrix                 |
+| `mat4FromQuatInto(out, qx,qy,qz,qw)`           | `→ out`          | Zero-allocation quaternion to rotation matrix |
 
 **LookAtLH formula** (matches Babylon.js `Matrix.LookAtLHToRef`):
 

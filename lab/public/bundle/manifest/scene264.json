@@ -1,14 +1,14 @@
 {
-  "rawKB": 39.5,
-  "gzipKB": 25.6,
+  "rawKB": 40,
+  "gzipKB": 25.8,
   "ignoredRawKB": 34.4,
   "runtimeChunks": [
-    "scene264-billboard-renderable-BbSackzY.js",
+    "scene264-billboard-renderable-Dcx5vSlm.js",
     "scene264-box-shape-block-7TKVoyPd.js",
     "scene264-create-particle-block-CiseX6ot.js",
     "scene264-generate-mipmaps-BUwhAVC8.js",
     "scene264-npe-contextual-DcCy6blJ.js",
-    "scene264-npe-registry-extra-BD-EKNjz.js",
+    "scene264-npe-registry-extra-s2Pbaui-.js",
     "scene264-particle-converter-block-CVHvXC1Y.js",
     "scene264-particle-gradient-block-RP12ZwVR.js",
     "scene264-particle-gradient-value-block-DAYsb4x-.js",
@@ -24,5 +24,6 @@
     "scene264-update-position-block-DQ-fau8B.js",
     "scene264-update-size-block-BNfghVaW.js",
     "scene264.js"
-  ]
+  ],
+  "rawBytes": 40937
 }

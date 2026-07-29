@@ -23,6 +23,11 @@ export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
 export { captureScreenshot } from "./engine/screenshot.js";
 export type { Screenshot } from "./engine/screenshot.js";
+export { forceWebGpuDeviceLossForTesting } from "./engine/device-lost-recovery-testing.js";
+export type { DeviceLostRecoveryCallbacks, DeviceLostRecoveryHandle } from "./engine/device-lost-recovery-types.js";
+export { enableDeviceLostSceneRecovery } from "./engine/device-lost-scene-recovery.js";
+export { enableDeviceLostSpriteRecovery } from "./engine/device-lost-sprite-recovery.js";
+export { enableDeviceLostTextRecovery } from "./engine/device-lost-text-recovery.js";
 export {
     createSceneContext,
     createDefaultCamera,
@@ -127,6 +132,8 @@ export { interpolateArcRotateCamera } from "./camera/arc-rotate-interpolate.js";
 export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "./camera/arc-rotate-interpolate.js";
 export { createFreeCamera } from "./camera/free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
+export { enableOrthographicCamera, disableOrthographicCamera } from "./camera/orthographic.js";
+export type { OrthographicBounds, OrthographicBoundsOptions } from "./camera/orthographic.js";
 
 // Geospatial (globe-orbit) camera
 export {
@@ -212,8 +219,17 @@ export { createTexture2DFromPixels, updateTexture2DFromPixels, createRenderTextu
 export { createTexture3DFromPixels } from "./texture/pixels-texture.js";
 export type { Texture3D, PixelsTexture3DOptions } from "./texture/pixels-texture.js";
 export type { PixelsTexture2DOptions, RenderTexture2DOptions } from "./texture/pixels-texture.js";
-export { createTexture2DArray, uploadImageToArrayLayer, loadImageToArrayLayer, createTexture2DArrayFromUrls } from "./texture/texture-array.js";
-export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions } from "./texture/texture-array.js";
+export {
+    createTexture2DArray,
+    createTexture2DArrayFromPixels,
+    updateTexture2DArrayFromPixels,
+    uploadImageToArrayLayer,
+    loadImageToArrayLayer,
+    createTexture2DArrayFromUrls,
+} from "./texture/texture-array.js";
+export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions, TextureArrayFromUrlsOptions } from "./texture/texture-array.js";
+export { createDynamicTexture, updateDynamicTexture } from "./texture/dynamic-texture.js";
+export type { DynamicTexture2D, DynamicTexture2DOptions, DynamicTextureUpdateOptions } from "./texture/dynamic-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
@@ -221,6 +237,9 @@ export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
 export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
+export { enableStandardSkeleton, enableStandardUvOffset } from "./material/standard/enable-standard-mesh-features.js";
+export { enableStandardVertexColors } from "./material/standard/enable-standard-vertex-colors.js";
+export { enableMirroredMeshes } from "./mesh/enable-mirrored-meshes.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export {
     createShaderMaterial,
@@ -249,7 +268,7 @@ export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
 export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
-export { rebuildScenePbrPipelines } from "./scene/scene-rebuild.js";
+export { rebuildScenePbrPipelines, rebuildSceneRenderables } from "./scene/scene-rebuild.js";
 export type { ToneMapping } from "./material/pbr/tone-mapping.js";
 export { StandardToneMapping } from "./material/pbr/tone-mapping.js";
 export { AcesToneMapping } from "./material/pbr/pbr-aces-wgsl.js";
@@ -279,6 +298,7 @@ export type { SceneNode } from "./scene/scene-node.js";
 export { loadBabylon } from "./loader-babylon/load-babylon.js";
 export { loadEnvironment } from "./loader-env/load-env.js";
 export { loadDdsEnvironment } from "./loader-env/load-dds-env.js";
+export { buildDdsSkyboxRenderable } from "./material/pbr/background-dds-skybox.js";
 export { loadHdrEnvironment } from "./loader-hdr/load-hdr.js";
 export { loadTexture2D, cloneTexture2D } from "./texture/texture-2d.js";
 export { loadSkybox } from "./loader-skybox/load-skybox.js";
@@ -301,6 +321,8 @@ export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-sh
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
 export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
+export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.js";
+export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
 export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
@@ -378,7 +400,7 @@ export { mat4Invert } from "./math/mat4-invert.js";
 export { mat4Multiply } from "./math/mat4-multiply.js";
 export { mat4LookAtLH } from "./math/mat4-look-at-lh.js";
 export { mat4PerspectiveLH } from "./math/mat4-perspective-lh.js";
-export { mat4FromQuat } from "./math/mat4-from-quat.js";
+export { mat4FromQuat, mat4FromQuatInto } from "./math/mat4-from-quat.js";
 export { quatFromRotationMatrix } from "./math/quat-from-rotation-matrix.js";
 export { quatFromLookDirectionRH } from "./math/quat-from-look-direction-rh.js";
 export { mat4Decompose } from "./math/mat4-decompose.js";
@@ -485,6 +507,7 @@ export type {
     PropertyAnimationTrackOptions,
 } from "./animation/property-animation.js";
 export type { AnimationClip, GltfAnimationData } from "./animation/types.js";
+export type { BoxOptions } from "./mesh/create-box.js";
 export type { SphereOptions } from "./mesh/create-sphere.js";
 export type { TorusOptions } from "./mesh/create-torus.js";
 export type { GroundOptions } from "./mesh/create-ground.js";
@@ -764,6 +787,7 @@ export {
     setNavigationRandomSeed,
     getNavigationRandomSeed,
     raycast,
+    navRayBlocked,
     addBoxObstacle,
     addCylinderObstacle,
     removeObstacle,

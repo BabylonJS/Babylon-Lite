@@ -44,10 +44,10 @@ export abstract class Light extends Node {
     }
 
     /**
-     * @internal When the light is disabled via {@link setEnabled}, its Lite
-     * intensity is forced to `0` (zero contribution) and the caller-visible
-     * intensity is parked here so {@link intensity} keeps reporting the real
-     * value and re-enabling restores it. `null` means the light is enabled.
+     * @internal When the light is effectively disabled, its Lite intensity is
+     * forced to `0` (zero contribution) and the caller-visible intensity is
+     * parked here so {@link intensity} keeps reporting the real value and
+     * re-enabling restores it. `null` means the light is effectively enabled.
      */
     private _disabledIntensity: number | null = null;
 
@@ -93,23 +93,17 @@ export abstract class Light extends Node {
         }
     }
 
-    /**
-     * Babylon.js `light.setEnabled(false)` — toggle the light's contribution.
-     * Babylon Lite has no per-light enable flag, so a disabled light is expressed
-     * by zeroing its intensity in the shared lights UBO (and restoring it on
-     * re-enable). The logical intensity value is preserved across the toggle.
-     */
-    public override setEnabled(value: boolean): void {
-        if (value !== this.isEnabled()) {
-            if (!value) {
+    /** @internal Materialize local and inherited enabled state in Babylon Lite. */
+    protected override _onEffectiveEnabledStateChanged(enabled: boolean): void {
+        if (!enabled) {
+            if (this._disabledIntensity === null) {
                 this._disabledIntensity = this._liteIntensity;
                 this._liteIntensity = 0;
-            } else if (this._disabledIntensity !== null) {
-                this._liteIntensity = this._disabledIntensity;
-                this._disabledIntensity = null;
             }
+        } else if (this._disabledIntensity !== null) {
+            this._liteIntensity = this._disabledIntensity;
+            this._disabledIntensity = null;
         }
-        super.setEnabled(value);
     }
 
     /** Detach this light's shadow generator (compat for `light.shadowEnabled = false`). */

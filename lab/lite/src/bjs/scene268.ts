@@ -1,69 +1,64 @@
-// BJS reference for scene 268: builds the same NPE sprite-sheet graph as Lite, seeds the RNG
-// identically, steps the simulation a fixed number of times, and renders the frozen frame.
+// Babylon.js reference for Scene 268: Orthographic Camera Projection.
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import { Camera } from "@babylonjs/core/Cameras/camera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
-import { Color4 } from "@babylonjs/core/Maths/math.color";
+import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { Scene } from "@babylonjs/core/scene";
-import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
-import { NodeParticleSystemSet } from "@babylonjs/core/Particles/Node/nodeParticleSystemSet";
-import "@babylonjs/core/Particles/Node/Blocks";
-import "@babylonjs/core/Shaders/particles.vertex";
-import "@babylonjs/core/Shaders/particles.fragment";
-import { SCENE268_NPE_JSON } from "../shared/scene268-npe.js";
 
-const STEPS = 200;
+const ORTHO_HALF_HEIGHT = 6;
+const ROW_X = [-4, 4];
+const DEPTHS = [-7, -3.5, 0, 3.5, 7];
+const COLORS = [
+    new Color3(0.85, 0.25, 0.25),
+    new Color3(0.9, 0.6, 0.2),
+    new Color3(0.35, 0.75, 0.4),
+    new Color3(0.25, 0.55, 0.9),
+    new Color3(0.65, 0.35, 0.85),
+];
 
 (async function () {
-    const initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
 
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(0, 0, 0, 1);
+    scene.clearColor = new Color4(0.06, 0.07, 0.1, 1);
 
-    const camera = new ArcRotateCamera("cam", -Math.PI / 2, 1.2, 4, new Vector3(-1, 0, 0), scene);
+    const camera = new ArcRotateCamera("camera", -Math.PI / 2 + 0.4, Math.PI / 3, 30, Vector3.Zero(), scene);
     camera.minZ = 0.1;
     camera.maxZ = 100;
 
-    const set = NodeParticleSystemSet.Parse(SCENE268_NPE_JSON);
-    const built = await set.buildAsync(scene);
-    const system = built.systems[0] as ParticleSystem;
-    system.particleTexture = new Texture("https://playground.babylonjs.com/textures/player.png", scene, false, false);
-    system.preWarmStepOffset = 1;
+    // Lite derives the horizontal extent from the render aspect ratio; mirror that here so
+    // both engines describe the same world-space view volume.
+    const halfWidth = ORTHO_HALF_HEIGHT * (engine.getRenderWidth() / engine.getRenderHeight());
+    camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+    camera.orthoLeft = -halfWidth;
+    camera.orthoRight = halfWidth;
+    camera.orthoBottom = -ORTHO_HALF_HEIGHT;
+    camera.orthoTop = ORTHO_HALF_HEIGHT;
+    scene.activeCamera = camera;
 
-    let seed = 1;
-    Math.random = () => {
-        const x = Math.sin(seed++) * 10000;
-        return x - Math.floor(x);
-    };
-    system.start();
-    for (let i = 0; i < STEPS; i++) {
-        system.animate(true);
+    new HemisphericLight("light", new Vector3(0, 1, 0), scene);
+
+    for (const x of ROW_X) {
+        for (let i = 0; i < DEPTHS.length; i++) {
+            const box = CreateBox("box", { size: 2 }, scene);
+            box.position.set(x, 0, DEPTHS[i]!);
+            const material = new StandardMaterial("box-mat", scene);
+            material.diffuseColor = COLORS[i]!;
+            material.specularColor = Color3.Black();
+            box.material = material;
+        }
     }
-    system.updateSpeed = 0;
-
-    const engineWithDrawCalls = engine as unknown as { _drawCalls?: { current: number; fetchNewFrame?: () => void } };
-    scene.onBeforeRenderObservable.add(() => {
-        engineWithDrawCalls._drawCalls?.fetchNewFrame?.();
-    });
-    scene.onAfterRenderObservable.add(() => {
-        canvas.dataset.drawCalls = String(engineWithDrawCalls._drawCalls?.current ?? 0);
-    });
 
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
     await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
-    canvas.dataset.initMs = String(performance.now() - initStart);
     canvas.dataset.ready = "true";
-})().catch((err) => {
-    console.error(err);
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
-    if (canvas) {
-        canvas.dataset.error = String(err);
-    }
-});
+})().catch(console.error);

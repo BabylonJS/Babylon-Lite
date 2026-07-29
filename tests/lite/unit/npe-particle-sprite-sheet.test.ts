@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SCENE268_NPE_JSON as animations2Graph } from "../../../lab/lite/src/shared/scene268-npe";
+import { SCENE274_NPE_JSON as animations2Graph } from "../../../lab/lite/src/shared/scene274-npe";
 import animations2States from "./fixtures/sprite-sheet-states.json";
 import animations1Graph from "./fixtures/sprite-sheet-random-npe.json";
 import animations1States from "./fixtures/sprite-sheet-random-states.json";

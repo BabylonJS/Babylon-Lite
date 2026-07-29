@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { _rebuildMeshes } from "../../../packages/babylon-lite/src/engine/device-lost-recovery.js";
+import { _rebuildMeshes } from "../../../packages/babylon-lite/src/engine/recovery-rebuild.js";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { _installSharedRecovery } from "../../../packages/babylon-lite/src/loader-gltf/gltf-share.js";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose.js";

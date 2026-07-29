@@ -1,9 +1,10 @@
 {
-  "rawKB": 50.3,
-  "gzipKB": 20,
+  "rawKB": 50.8,
+  "gzipKB": 20.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene228-standard-renderable-DTuv5gAM.js",
+    "scene228-standard-renderable-BVZs45u7.js",
     "scene228.js"
-  ]
+  ],
+  "rawBytes": 51993
 }

@@ -160,6 +160,12 @@ export interface SkeletonData {
     _refCount?: number;
     /** @internal Shared ownership for skin vertex buffers reused by VAT data. */
     readonly _skinBuffers: SkinBufferData;
+    /** @internal Shared node-index → bone override map, stamped by `enableBoneControl`'s
+     *  skeleton builder when bone control is active. Bridges user bone overrides to the
+     *  optional weighted-blend mixer (which reuses this shared runtime skeleton), so a
+     *  blended clip honours overrides without any always-loaded plumbing. Undefined on the
+     *  default path. Typed `unknown` value to keep the internal `BoneOverride` shape private. */
+    _overrides?: ReadonlyMap<number, unknown>;
 }
 
 /** @internal Ref-counted skin vertex buffers shared by live skeletons and VAT data. */

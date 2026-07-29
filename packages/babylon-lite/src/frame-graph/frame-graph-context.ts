@@ -34,6 +34,7 @@ export function createFrameGraphContext(surface: SurfaceContext, options?: Frame
     const engine = surface.engine;
     const update = options?.update;
     const ctx: FrameGraphContextInternal = {
+        _kind: "frame-graph-context",
         name: options?.name ?? "frame-graph",
         surface,
         frameGraph: createFrameGraph(engine),

@@ -36,7 +36,9 @@ export interface SceneNode {
     parent: IWorldMatrixProvider | null;
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
-    /** @internal Raw local matrix for glTF matrix nodes. */
+    /** @internal Raw local matrix for glTF matrix nodes. While set, it IS the local transform and
+     *  `position`/`rotationQuaternion`/`scaling` are ignored. Clearing it hands control back to the
+     *  TRS triple (what `setParent` does so it can move a `matrix`-declared glTF node). */
     _localMatrix?: Mat4;
     /** Self-visibility. Undefined/true = visible; `false` skips render + camera AABB.
      *  Cascade is materialized at write-time by `setSubtreeVisible`. */
@@ -144,14 +146,13 @@ export function createSceneNodeFromMatrix(name: string, matrix: Mat4): SceneNode
 }
 
 function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): SceneNode {
+    // Read the raw matrix off the node, not off a captured local: clearing `_localMatrix`
+    // (setParent on a glTF `matrix` node) must switch the node back to TRS-driven.
     const wm = createWorldMatrixState(() => {
-        if (matrix) {
-            return matrix;
-        }
-        return composeTrsLocalMatrix(node.position, node.rotationQuaternion, node.scaling);
+        return node._localMatrix ?? composeTrsLocalMatrix(node.position, node.rotationQuaternion, node.scaling);
     });
     const onWmDirty = () => {
-        if (!matrix) {
+        if (!node._localMatrix) {
             wm.markLocalDirty();
         }
     };

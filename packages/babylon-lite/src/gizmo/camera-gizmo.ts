@@ -13,7 +13,6 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Camera } from "../camera/camera.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import type { Mat4 } from "../math/types.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
@@ -22,7 +21,7 @@ import { createTransformNode } from "../scene/transform-node.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import { attachFollowTarget } from "./gizmo-core.js";
-import { quatFromBjsEuler } from "./gizmo-math.js";
+import { quatFromBjsEuler, rotationQuatFromMatrix } from "./gizmo-math.js";
 import type { UtilityLayer } from "./utility-layer.js";
 
 /** BJS `CameraGizmo._Scale` — applied to the camera body so it keeps a
@@ -329,7 +328,7 @@ export function createCameraGizmo(engine: EngineContext, layer: UtilityLayer, op
         () => (gizmo.attachedCamera ? cameraAsSceneNode(gizmo.attachedCamera) : null),
         null,
         (_target, wm) => {
-            const [qx, qy, qz, qw] = quatFromMat4Upper3x3(wm);
+            const [qx, qy, qz, qw] = rotationQuatFromMatrix(wm);
             root.rotationQuaternion.set(qx, qy, qz, qw);
             // Distance-scale the camera body (BJS Gizmo distance scaling ×
             // CameraGizmo._Scale).
@@ -381,37 +380,4 @@ export function disposeCameraGizmo(gizmo: CameraGizmo, layer: UtilityLayer): voi
  *  observable vec3s, but `attachFollowTarget` only reads `.worldMatrix`. */
 function cameraAsSceneNode(cam: Camera): SceneNode {
     return cam as unknown as SceneNode;
-}
-
-/** Extract the rotation quaternion from the upper-left 3×3 of a 4×4 world
- *  matrix.  Removes per-axis scale by normalizing each column. */
-function quatFromMat4Upper3x3(m: Mat4): [number, number, number, number] {
-    const sx = Math.hypot(m[0]!, m[1]!, m[2]!) || 1;
-    const sy = Math.hypot(m[4]!, m[5]!, m[6]!) || 1;
-    const sz = Math.hypot(m[8]!, m[9]!, m[10]!) || 1;
-    const m00 = m[0]! / sx,
-        m01 = m[4]! / sy,
-        m02 = m[8]! / sz;
-    const m10 = m[1]! / sx,
-        m11 = m[5]! / sy,
-        m12 = m[9]! / sz;
-    const m20 = m[2]! / sx,
-        m21 = m[6]! / sy,
-        m22 = m[10]! / sz;
-    // Standard Shoemake quaternion-from-matrix.
-    const trace = m00 + m11 + m22;
-    if (trace > 0) {
-        const s = 0.5 / Math.sqrt(trace + 1);
-        return [(m21 - m12) * s, (m02 - m20) * s, (m10 - m01) * s, 0.25 / s];
-    }
-    if (m00 > m11 && m00 > m22) {
-        const s = 2 * Math.sqrt(1 + m00 - m11 - m22);
-        return [0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s];
-    }
-    if (m11 > m22) {
-        const s = 2 * Math.sqrt(1 + m11 - m00 - m22);
-        return [(m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s];
-    }
-    const s = 2 * Math.sqrt(1 + m22 - m00 - m11);
-    return [(m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s];
 }

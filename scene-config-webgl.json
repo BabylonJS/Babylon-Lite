@@ -113,7 +113,7 @@
         "id": 11,
         "slug": "gl-stencil",
         "name": "Scene 11 — Stencil Masking",
-        "description": "A stencil mask written into an offscreen render target's stencil buffer (generateRenderTargetStencil from @babylonjs/lite-gl + setStencilState), then a fullscreen pattern drawn only where the stencil test passes.",
+        "description": "A stencil mask is written into an offscreen render target, then a fullscreen pattern is drawn only where the shared stencil test passes.",
         "tags": ["stencil", "rtt"],
         "maxMad": 2.0,
         "maxRawKB": 20,
@@ -161,6 +161,17 @@
         "tags": ["sprites"],
         "maxMad": 2.0,
         "maxRawKB": 21.5,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 16,
+        "slug": "gl-two-sided-stencil",
+        "name": "Scene 16 — Two-Sided Stencil",
+        "description": "One mixed-winding geometry draw applies INCR_WRAP to front faces and DECR_WRAP to back faces, then visualizes stencil values 1 and 255 with red and blue cover passes.",
+        "tags": ["stencil", "mesh"],
+        "maxMad": 0.5,
+        "maxRawKB": 16.5,
         "skipParity": false,
         "skipPerf": false
     }

@@ -1083,7 +1083,7 @@ The current unit categories are:
 
 - Buffer and lifecycle: base-only allocation, string-key column sharing, dense spawn/swap-remove, capacity, emission, integration, death clamp, and sprite-column math.
 - Build behavior: inline JSON, root reachability, detached-block isolation, two-field connection criteria, dynamic emit-rate laziness, and system-time reevaluation.
-- Canonical graph state: scenes 262, 263, 264, and 268; full Basic Properties; Size; Sphere; and deterministic/random-start sprite variants.
+- Canonical graph state: scenes 262, 263, 264, and 274; full Basic Properties; Size; Sphere; and deterministic/random-start sprite variants.
 - Change graphs: Size, Color, Speed, Angular Speed, multi-stop Angular Speed, Drag, Emit Rate, Lifetime, Start Size, and Speed Limit.
 - Emitters: Point, Box, Sphere, directed Sphere, Hemisphere, Cone, directed Cone, Cylinder, directed Cylinder, Mesh, rotated Cylinder, all six transformed local shapes, mesh vertex color, mesh InitialDirection, shared volatile bounds, and local source build/read guards.
 - Value correctness: shared-scratch Math, Lerp/Gradient endpoints, Random min/max aliasing, lock modes, Uint32 id edge cases, and capacity-bounded OncePerParticle caches.
@@ -1113,11 +1113,11 @@ All four Lite scenes seed after build, run 200 ratio-1 steps, synchronize one bi
 | 262 `scene262-npe-size` | Basic Properties - Size, Box | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)` | `0.01` | `44.1 KB` |
 | 263 `scene263-npe-sphere` | Sphere emitter | alpha `-pi/2`, beta `1.2`, radius `14`, target origin | `0.01` | `44.1 KB` |
 | 264 `scene264-npe-change-size` | Gradient, GradientValue, UpdateSize | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01` | `44.1 KB` |
-| 268 `scene268-npe-animations` | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30 | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)` | `0.01` | `45.0 KB` |
+| 274 `scene274-npe-animations` | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30 | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)` | `0.01` | `45.0 KB` |
 
 Each camera uses near plane `0.1` and far plane `100`. Each scene sets both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start.
 
-Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, and 264 invoke the shared golden-capture helper before opening the Lite page; specification 268 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all four scenes.
+Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, and 264 invoke the shared golden-capture helper before opening the Lite page; specification 274 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all four scenes.
 
 ### 13.4 Bundle manifests and conditional content
 
@@ -1125,12 +1125,12 @@ Current tracked measurements are:
 
 | Scene | Runtime raw | Runtime gzip | Ignored graph payload raw | Ceiling |
 | --- | ---: | ---: | ---: | ---: |
-| 262 | `39.3 KB` | `23.8 KB` | `28.5 KB` | `44.1 KB` |
-| 263 | `41.4 KB` | `24.4 KB` | `27.5 KB` | `44.1 KB` |
-| 264 | `39.5 KB` | `25.6 KB` | `34.4 KB` | `44.1 KB` |
-| 268 | `41.1 KB` | `25.0 KB` | `29.6 KB` | `45.0 KB` |
+| 262 | `39.7 KB` | `24.1 KB` | `28.5 KB` | `44.1 KB` |
+| 263 | `41.8 KB` | `24.7 KB` | `27.5 KB` | `44.1 KB` |
+| 264 | `40.0 KB` | `25.8 KB` | `34.4 KB` | `44.1 KB` |
+| 274 | `41.5 KB` | `25.2 KB` | `29.6 KB` | `45.0 KB` |
 
-Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, and 268 as sprite users because particles render through billboard sprite modules.
+Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, and 274 as sprite users because particles render through billboard sprite modules.
 
 The particle bundle-content test always requires a nonempty runtime chunk list for each of the four scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, direction/angle update, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 alone may fetch `npe-registry-extra-emitters` because it uses Sphere.
 
@@ -1248,11 +1248,11 @@ scene-config.json
 lab/lite/src/lite/scene262.ts
 lab/lite/src/lite/scene263.ts
 lab/lite/src/lite/scene264.ts
-lab/lite/src/lite/scene268.ts
+lab/lite/src/lite/scene274.ts
 lab/lite/src/shared/scene262-npe.ts
 lab/lite/src/shared/scene263-npe.ts
 lab/lite/src/shared/scene264-npe.ts
-lab/lite/src/shared/scene268-npe.ts
+lab/lite/src/shared/scene274-npe.ts
 lab/public/bundle/manifest/scene262.json
 lab/public/bundle/manifest/scene263.json
 lab/public/bundle/manifest/scene264.json
@@ -1260,6 +1260,6 @@ lab/public/bundle/manifest/scene268.json
 tests/lite/parity/scenes/scene262-npe-size.spec.ts
 tests/lite/parity/scenes/scene263-npe-sphere.spec.ts
 tests/lite/parity/scenes/scene264-npe-change-size.spec.ts
-tests/lite/parity/scenes/scene268-npe-animations.spec.ts
+tests/lite/parity/scenes/scene274-npe-animations.spec.ts
 tests/lite/unit/npe-particle-bundle-content.test.ts
 ```

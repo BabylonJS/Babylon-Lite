@@ -351,6 +351,14 @@ export function createAnimationController(
                           }
                       }
 
+                      // 2a. Re-apply bone visibility AFTER channel evaluation. Hiding a bone
+                      // is a visibility control, not a transform override, so it must beat the
+                      // clip — most rigs (every Mixamo export) bake a constant scale track onto
+                      // every bone, which would otherwise un-hide the bone on the next frame.
+                      if (boneOverrides !== undefined && boneOverrides.size > 0) {
+                          _boneApplier?.(boneOverrides as ReadonlyMap<number, BoneOverride>, currentTRS, numNodes, true);
+                      }
+
                       // 2b. Apply plain node-TRS channels to the live scene graph so
                       // node-animated meshes (and their descendants) move. Skeleton
                       // joints + skinned-mesh chains are excluded (handled by the bone

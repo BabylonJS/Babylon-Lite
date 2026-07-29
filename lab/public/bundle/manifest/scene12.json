@@ -1,22 +1,23 @@
 {
-  "rawKB": 103.5,
-  "gzipKB": 42.4,
+  "rawKB": 104,
+  "gzipKB": 42.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene12-create-skeleton-Cgu8tE3J.js",
-    "scene12-generate-mipmaps-BggEZgIi.js",
-    "scene12-gltf-animation-CHR7VJuv.js",
-    "scene12-gltf-feature-animations-DtO42sbJ.js",
-    "scene12-gltf-feature-registry-CTOUnXQL.js",
-    "scene12-gltf-feature-skeleton-_mgvZ2J3.js",
-    "scene12-gltf-glb-parser-yvHcYctJ.js",
+    "scene12-create-skeleton-CO_r2LCi.js",
+    "scene12-generate-mipmaps-BeuA_ap5.js",
+    "scene12-gltf-animation-CZNCsOVr.js",
+    "scene12-gltf-feature-animations-CiVyNw6v.js",
+    "scene12-gltf-feature-registry-DYJUoq1Z.js",
+    "scene12-gltf-feature-skeleton-yTqcn85p.js",
+    "scene12-gltf-glb-parser-BWKwsvg4.js",
     "scene12-ibl-fragment-CeRrvT96.js",
-    "scene12-pbr-renderable-BkiqBK1t.js",
-    "scene12-reflectance-fragment-lq2B55Q8.js",
-    "scene12-rgbd-decode-W1wB4Lvk.js",
+    "scene12-pbr-renderable-B2sr8gFV.js",
+    "scene12-reflectance-fragment-DCD0BBZS.js",
+    "scene12-rgbd-decode-Dv_uzcWF.js",
     "scene12-scene-uniforms-FTYH6Ct0.js",
-    "scene12-singlelight-directional-wgsl-BN0OWK2-.js",
-    "scene12-skeleton-fragment-DEO1NHCq.js",
+    "scene12-singlelight-directional-wgsl-PfV3pjNy.js",
+    "scene12-skeleton-fragment-B3HcVmlw.js",
     "scene12.js"
-  ]
+  ],
+  "rawBytes": 106450
 }

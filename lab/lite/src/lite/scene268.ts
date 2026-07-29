@@ -1,72 +1,74 @@
-// Scene 268: Node Particle Editor - Animations 2 (sprite sheet).
+// Scene 268 — Orthographic Camera Projection
+//
+// Two rows of identical boxes recede along +Z. Under a perspective projection the far
+// boxes would shrink and the rows would converge; the orthographic projection installed by
+// `enableOrthographicCamera` keeps every box the same on-screen size and the rows parallel.
+//
+// The view volume is described by `halfHeight` only, so the horizontal extent is derived
+// from the render-target aspect ratio each frame (no squashing on resize).
 
 import {
-    addFacingBillboardSystem,
-    animateParticleSystem,
-    attachControl,
-    buildNodeParticleSet,
+    addToScene,
     createArcRotateCamera,
+    createBox,
     createEngine,
-    createParticleBillboard,
+    createHemisphericLight,
     createSceneContext,
-    parseNodeParticleSource,
+    createStandardMaterial,
+    enableOrthographicCamera,
     registerScene,
     startEngine,
-    startParticleSystem,
-    syncParticleBillboard,
 } from "babylon-lite";
-import { SCENE268_NPE_JSON } from "../shared/scene268-npe.js";
 
-const STEPS = 200;
+const ORTHO_HALF_HEIGHT = 6;
+const ROW_X = [-4, 4];
+const DEPTHS = [-7, -3.5, 0, 3.5, 7];
+const COLORS: [number, number, number][] = [
+    [0.85, 0.25, 0.25],
+    [0.9, 0.6, 0.2],
+    [0.35, 0.75, 0.4],
+    [0.25, 0.55, 0.9],
+    [0.65, 0.35, 0.85],
+];
 
 async function main(): Promise<void> {
-    const initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
-    scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
+    scene.clearColor = { r: 0.06, g: 0.07, b: 0.1, a: 1 };
 
-    const camera = createArcRotateCamera(-Math.PI / 2, 1.2, 4, { x: -1, y: 0, z: 0 });
+    const camera = createArcRotateCamera(-Math.PI / 2 + 0.4, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
     camera.nearPlane = 0.1;
     camera.farPlane = 100;
+    const ortho = enableOrthographicCamera(camera, { halfHeight: ORTHO_HALF_HEIGHT });
     scene.camera = camera;
-    attachControl(camera, canvas, scene);
 
-    const graph = parseNodeParticleSource(SCENE268_NPE_JSON);
-    const set = await buildNodeParticleSet(engine, scene, graph, {
-        emitter: { x: 0, y: 0, z: 0 },
-        textureBaseUrl: "https://playground.babylonjs.com/",
-    });
-    const system = set.systems[0]!;
-
-    let seed = 1;
-    Math.random = () => {
-        const x = Math.sin(seed++) * 10000;
-        return x - Math.floor(x);
-    };
-
-    startParticleSystem(system);
-    for (let i = 0; i < STEPS; i++) {
-        animateParticleSystem(system, 1);
+    // The bounds object stays live: assigning to it (here from a URL override, but equally
+    // from a render loop or a property animation on "ortho.halfHeight") invalidates the
+    // projection cache on its own, without the camera having to move.
+    const zoom = parseFloat(new URLSearchParams(window.location.search).get("orthoHalfHeight") || "");
+    if (Number.isFinite(zoom)) {
+        ortho.halfHeight = zoom;
     }
 
-    const billboard = createParticleBillboard(system);
-    syncParticleBillboard(system, billboard);
-    addFacingBillboardSystem(scene, billboard);
+    const light = createHemisphericLight([0, 1, 0]);
+    addToScene(scene, light);
+
+    for (const x of ROW_X) {
+        for (let i = 0; i < DEPTHS.length; i++) {
+            const box = createBox(engine, 2);
+            box.position.set(x, 0, DEPTHS[i]!);
+            const material = createStandardMaterial();
+            material.diffuseColor = COLORS[i]!;
+            material.specularColor = [0, 0, 0];
+            box.material = material;
+            addToScene(scene, box);
+        }
+    }
 
     await registerScene(scene);
     await startEngine(engine);
-
-    canvas.dataset.drawCalls = String(engine.drawCallCount);
-    canvas.dataset.initMs = String(performance.now() - initStart);
-    canvas.dataset.animationFrozen = "true";
     canvas.dataset.ready = "true";
 }
 
-main().catch((err) => {
-    console.error(err);
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
-    if (canvas) {
-        canvas.dataset.error = String(err instanceof Error ? err.message : err);
-    }
-});
+main().catch(console.error);
