@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { Mesh as LiteMesh } from "babylon-lite";
+import { AbstractMesh, TransformNode } from "../src/meshes/meshes";
 import { Node } from "../src/node/node";
 
 /**
@@ -19,6 +21,20 @@ class TestNode extends Node {
     protected override _isMeshNode(): boolean {
         return this._mesh;
     }
+}
+
+function createTestMesh(name: string, onChildrenRead?: () => void): AbstractMesh {
+    const children: LiteMesh[] = [];
+    const lite = { name, visible: true, children, receiveShadows: false } as unknown as LiteMesh;
+    if (onChildrenRead) {
+        Object.defineProperty(lite, "children", {
+            get: () => {
+                onChildrenRead();
+                return children;
+            },
+        });
+    }
+    return new AbstractMesh(name, lite);
 }
 
 describe("Node scene-graph traversal", () => {
@@ -77,5 +93,58 @@ describe("Node scene-graph traversal", () => {
         child.dispose();
         expect(root.getChildren()).toEqual([]);
         expect(child.isDisposed()).toBe(true);
+    });
+});
+
+describe("Node enabled hierarchy", () => {
+    it("inherits ancestor state without overwriting a descendant's local state", () => {
+        const root = new TransformNode("root");
+        const group = new TransformNode("group");
+        const enabledMesh = createTestMesh("enabled");
+        const locallyDisabledMesh = createTestMesh("locally-disabled");
+        group.parent = root;
+        enabledMesh.parent = group;
+        locallyDisabledMesh.parent = group;
+        locallyDisabledMesh.setEnabled(false);
+
+        root.setEnabled(false);
+
+        expect(group.isEnabled(false)).toBe(true);
+        expect(enabledMesh.isEnabled(false)).toBe(true);
+        expect(group.isEnabled()).toBe(false);
+        expect(enabledMesh.isEnabled()).toBe(false);
+        expect(enabledMesh.isVisible).toBe(true);
+        expect(enabledMesh._lite.visible).toBe(false);
+
+        root.setEnabled(true);
+
+        expect(group.isEnabled()).toBe(true);
+        expect(enabledMesh.isEnabled()).toBe(true);
+        expect(enabledMesh._lite.visible).toBe(true);
+        expect(locallyDisabledMesh.isEnabled(false)).toBe(false);
+        expect(locallyDisabledMesh.isEnabled()).toBe(false);
+        expect(locallyDisabledMesh.isVisible).toBe(true);
+        expect(locallyDisabledMesh._lite.visible).toBe(false);
+    });
+
+    it("does not retraverse Lite subtrees already cascaded by an ancestor mesh", () => {
+        let childrenReads = 0;
+        const root = new TransformNode("root");
+        const parentMesh = createTestMesh("parent", () => childrenReads++);
+        const childMesh = createTestMesh("child", () => childrenReads++);
+        const grandchildMesh = createTestMesh("grandchild", () => childrenReads++);
+        parentMesh.parent = root;
+        childMesh.parent = parentMesh;
+        grandchildMesh.parent = childMesh;
+        parentMesh._lite.children.push(childMesh._lite);
+        childMesh._lite.children.push(grandchildMesh._lite);
+        childrenReads = 0;
+
+        root.setEnabled(false);
+
+        expect(childrenReads).toBe(3);
+        expect(parentMesh._lite.visible).toBe(false);
+        expect(childMesh._lite.visible).toBe(false);
+        expect(grandchildMesh._lite.visible).toBe(false);
     });
 });
