@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { EngineContext } from "babylon-lite";
 
 const liteMocks = vi.hoisted(() => ({
     loadTexture2D: vi.fn(),
@@ -31,8 +32,8 @@ function deferred<T>(): Deferred<T> {
     return { promise, resolve, reject };
 }
 
-function engineWrapper(): { _lite: object } {
-    return { _lite: {} };
+function engineWrapper(): { _lite: EngineContext } {
+    return { _lite: {} as EngineContext };
 }
 
 function textureHandle(): unknown {

@@ -182,7 +182,9 @@ describe("WebGPU alpha-to-coverage", () => {
         const enabledMaterial = createPbrMaterial();
         const normalMaterial = createPbrMaterial();
         setAlphaToCoverage(enabledMaterial, true);
-        const { renderables } = await buildPbrRenderables(scene, [makeMesh(enabledMaterial), makeMesh(normalMaterial)], undefined);
+        const meshes = [makeMesh(enabledMaterial), makeMesh(normalMaterial)];
+        scene._groups.set(enabledMaterial._buildGroup, meshes);
+        const { renderables } = await buildPbrRenderables(scene, meshes, undefined);
 
         const enabledPipeline = renderables[0]!.bind(engine, multisampledSignature).pipeline;
         const normalPipeline = renderables[1]!.bind(engine, multisampledSignature).pipeline;
@@ -220,7 +222,9 @@ describe("WebGPU alpha-to-coverage", () => {
         const pbr = createPbrMaterial({ alphaBlend: true, alpha: 0.5 });
         setAlphaToCoverage(pbr, true);
         const pbrScene = createSceneContext(engine, { defaultRenderTask: false });
-        const pbrPipeline = (await buildPbrRenderables(pbrScene, [makeMesh(pbr)], undefined)).renderables[0]!.bind(engine, multisampledSignature).pipeline;
+        const pbrMeshes = [makeMesh(pbr)];
+        pbrScene._groups.set(pbr._buildGroup, pbrMeshes);
+        const pbrPipeline = (await buildPbrRenderables(pbrScene, pbrMeshes, undefined)).renderables[0]!.bind(engine, multisampledSignature).pipeline;
 
         for (const pipeline of [shaderPipeline, standardPipeline, pbrPipeline]) {
             expect(alphaToCoverageEnabled(pipeline)).toBe(true);
