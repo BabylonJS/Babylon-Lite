@@ -1,5 +1,5 @@
 {
-  "rawKB": 51.9,
+  "rawKB": 51.8,
   "gzipKB": 20.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -7,5 +7,5 @@
     "scene36-std-emissive-fragment-DthzsVUc.js",
     "scene36.js"
   ],
-  "rawBytes": 53097
+  "rawBytes": 53087
 }

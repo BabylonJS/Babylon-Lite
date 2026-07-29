@@ -1,6 +1,6 @@
 {
   "rawKB": 98.3,
-  "gzipKB": 40.9,
+  "gzipKB": 41,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene34-generate-mipmaps-Dnax5ZdE.js",
@@ -19,5 +19,5 @@
     "scene34-visibility-CRkrFthj.js",
     "scene34.js"
   ],
-  "rawBytes": 100620
+  "rawBytes": 100611
 }
