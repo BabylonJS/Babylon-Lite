@@ -408,6 +408,7 @@ export type { DecomposedTransform } from "./math/mat4-decompose.js";
 export type { Vec2, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";
+export { eulerToQuat, quatToEulerXYZ } from "./math/quat-euler.js";
 export type { GltfMetadata, LiteMetadata } from "./metadata.js";
 
 // ─── Color ───────────────────────────────────────────────────────────
