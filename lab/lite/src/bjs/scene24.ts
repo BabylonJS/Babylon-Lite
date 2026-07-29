@@ -3,10 +3,6 @@ import "@babylonjs/core/Loading/loadingScreen";
 import "@babylonjs/core/Loading/Plugins/babylonFileLoader";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 import { Scene } from "@babylonjs/core/scene";
-// The .babylon loader (babylonFileLoader) re-registers the camera/light/material parsers
-// transitively again as of BJS #18717 (9.17.1+), but NOT the CubeTexture parser — keep it
-// explicit so the skybox reflection texture parses.
-import "@babylonjs/core/Materials/Textures/cubeTexture";
 import "@babylonjs/loaders";
 
 (async function () {
