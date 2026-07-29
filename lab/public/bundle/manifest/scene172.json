@@ -1,11 +1,11 @@
 {
-  "rawKB": 59.5,
-  "gzipKB": 23.6,
-  "ignoredRawKB": 1485.2,
+  "rawKB": 59.9,
+  "gzipKB": 23.7,
+  "ignoredRawKB": 1483.8,
   "runtimeChunks": [
-    "scene172-recast-navigation-CYBQI-zY-Dry_z7x_.js",
-    "scene172-standard-renderable-LdAXNV9J.js",
+    "scene172-recast-navigation-Ddkygka3-B-kBz3cE.js",
+    "scene172-standard-renderable-DQWpUBKk.js",
     "scene172.js"
   ],
-  "rawBytes": 60920
+  "rawBytes": 61381
 }

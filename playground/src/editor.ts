@@ -1,6 +1,7 @@
 import * as monaco from "monaco-editor";
-import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
+import editorWorker from "monaco-editor/editor/editor.worker?worker";
+import tsWorker from "monaco-editor/language/typescript/ts.worker?worker";
+import * as monacoTypeScript from "monaco-editor/languages/features/typescript/register.js";
 import type { BuildDiagnostic } from "./transpile";
 import { withBase } from "./base";
 // The WebGPU type definitions are bundled as raw text so Monaco can resolve the
@@ -18,12 +19,12 @@ self.MonacoEnvironment = {
     },
 };
 
-const ts = monaco.languages.typescript.typescriptDefaults;
+const ts = monacoTypeScript.typescriptDefaults;
 
 ts.setCompilerOptions({
-    target: monaco.languages.typescript.ScriptTarget.ESNext,
-    module: monaco.languages.typescript.ModuleKind.ESNext,
-    moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+    target: monacoTypeScript.ScriptTarget.ESNext,
+    module: monacoTypeScript.ModuleKind.ESNext,
+    moduleResolution: monacoTypeScript.ModuleResolutionKind.NodeJs,
     strict: true,
     allowNonTsExtensions: true,
     noEmit: true,
@@ -318,7 +319,7 @@ function exposeDevDiagnostics(getModel: () => monaco.editor.ITextModel | undefin
         if (!model) {
             return { error: "no entry model" };
         }
-        const worker = await monaco.languages.typescript.getTypeScriptWorker();
+        const worker = await monacoTypeScript.getTypeScriptWorker();
         const client = await worker(model.uri);
         const engineDtsUri = "file:///node_modules/@babylonjs/lite/index.d.ts";
         const [mainSemantic, mainSyntactic, engineSemantic] = await Promise.all([
