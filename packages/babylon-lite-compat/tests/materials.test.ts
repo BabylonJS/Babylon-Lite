@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { StandardMaterial } from "../src/materials/materials";
+import { StandardMaterial, PBRMaterial, PBRMetallicRoughnessMaterial, PBRSpecularGlossinessMaterial } from "../src/materials/materials";
+import { NodeMaterial } from "../src/materials/node-material";
+import { Color3 } from "../src/math/color";
+import type { Scene } from "../src/scene/scene";
 import type { BaseTexture } from "../src/textures/textures";
 
 /** Minimal stand-in for a resolved compat texture (only `_lite` is read by the setters). */
@@ -31,5 +34,100 @@ describe("StandardMaterial texture proxies", () => {
         mat.emissiveTexture = tex;
         expect(mat._lite.diffuseTexture).toBe(tex._lite);
         expect(mat._lite.emissiveTexture).toBe(tex._lite);
+    });
+});
+
+describe("Material.clone", () => {
+    it("StandardMaterial.clone copies data, shares textures, and gets its own renderable", () => {
+        const mat = new StandardMaterial("src");
+        mat.diffuseColor = new Color3(0.1, 0.2, 0.3);
+        mat.alpha = 0.5;
+        mat.alphaCutOff = 0.25;
+        mat.disableLighting = true;
+        mat.backFaceCulling = false;
+        mat.transparencyMode = 2;
+        mat.useAlphaFromDiffuseTexture = true;
+        const tex = fakeTexture();
+        mat.diffuseTexture = tex;
+
+        const clone = mat.clone("clone");
+
+        expect(clone).toBeInstanceOf(StandardMaterial);
+        expect(clone).not.toBe(mat);
+        expect(clone.name).toBe("clone");
+        // Own Lite renderable (distinct props object → distinct UBO/build state).
+        expect(clone._lite).not.toBe(mat._lite);
+        // Data copied.
+        expect(clone.diffuseColor.r).toBeCloseTo(0.1);
+        expect(clone.alpha).toBe(0.5);
+        expect(clone.alphaCutOff).toBe(0.25);
+        expect(clone.disableLighting).toBe(true);
+        expect(clone.backFaceCulling).toBe(false);
+        expect(clone.transparencyMode).toBe(2);
+        expect(clone.useAlphaFromDiffuseTexture).toBe(true);
+        // Texture shared by reference.
+        expect(clone.diffuseTexture).toBe(tex);
+        expect(clone._lite.diffuseTexture).toBe(tex._lite);
+        // Colour arrays are independent (mutating the clone must not alias the source).
+        clone.diffuseColor = new Color3(0.9, 0.9, 0.9);
+        expect(mat.diffuseColor.r).toBeCloseTo(0.1);
+    });
+
+    it("PBRMaterial.clone copies scalars and gives independent sub-configurations", () => {
+        const mat = new PBRMaterial("src");
+        mat.metallic = 0.25;
+        mat.roughness = 0.75;
+        mat.albedoColor = new Color3(0.2, 0.4, 0.6);
+        mat.clearCoat.isEnabled = true;
+        mat.clearCoat.intensity = 0.4;
+
+        const clone = mat.clone("clone");
+
+        expect(clone).toBeInstanceOf(PBRMaterial);
+        expect(clone._lite).not.toBe(mat._lite);
+        expect(clone.metallic).toBe(0.25);
+        expect(clone.roughness).toBe(0.75);
+        expect(clone.albedoColor.g).toBeCloseTo(0.4);
+        expect(clone.clearCoat.isEnabled).toBe(true);
+        expect(clone.clearCoat.intensity).toBeCloseTo(0.4);
+        // Sub-config object is copied, not shared.
+        expect(clone._lite.clearCoat).not.toBe(mat._lite.clearCoat);
+        clone.clearCoat.intensity = 0.9;
+        expect(mat.clearCoat.intensity).toBeCloseTo(0.4);
+    });
+
+    it("PBRMetallicRoughnessMaterial.clone returns the correct subclass", () => {
+        const mat = new PBRMetallicRoughnessMaterial("src");
+        mat.baseColor = new Color3(1, 0, 0);
+        const clone = mat.clone("clone");
+        expect(clone).toBeInstanceOf(PBRMetallicRoughnessMaterial);
+        expect(clone.getClassName()).toBe("PBRMetallicRoughnessMaterial");
+        expect(clone.baseColor.r).toBeCloseTo(1);
+    });
+
+    it("PBRSpecularGlossinessMaterial.clone returns the correct subclass", () => {
+        const mat = new PBRSpecularGlossinessMaterial("src");
+        mat.glossiness = 0.8;
+        const clone = mat.clone("clone");
+        expect(clone).toBeInstanceOf(PBRSpecularGlossinessMaterial);
+        expect(clone.getClassName()).toBe("PBRSpecularGlossinessMaterial");
+        expect(clone.glossiness).toBeCloseTo(0.8);
+    });
+
+    it("NodeMaterial.clone reuses the source graph + overrides and registers the clone", () => {
+        const register = vi.fn();
+        const scene = { _registerNodeMaterial: register } as unknown as Scene;
+        const mat = new NodeMaterial("src", scene, { foo: "bar" });
+        const tex = fakeTexture();
+        mat.getBlockByName("albedo").texture = tex as never;
+
+        const clone = mat.clone("clone");
+
+        expect(clone).toBeInstanceOf(NodeMaterial);
+        expect(clone).not.toBe(mat);
+        expect(clone.name).toBe("clone");
+        expect(register).toHaveBeenCalledWith(clone);
+        // Texture override shared by reference.
+        expect(clone.getBlockByName("albedo").texture).toBe(tex);
     });
 });

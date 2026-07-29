@@ -47,14 +47,31 @@ export class NodeMaterial {
 
     private readonly _json: object | string;
     private readonly _textureOverrides: Record<string, TextureLike> = {};
+    private readonly _scene: Scene;
 
-    public constructor(name: string, _scene: Scene, json: object | string = {}) {
+    public constructor(name: string, scene: Scene, json: object | string = {}) {
         this.name = name;
+        this._scene = scene;
         this._json = json;
     }
 
     public getClassName(): string {
         return "NodeMaterial";
+    }
+
+    /**
+     * Babylon.js `NodeMaterial.clone(name)`. Reuses the same NME source graph and the
+     * captured per-block texture overrides (textures shared by reference, as
+     * Babylon.js does), registering the clone with the scene so it parses/compiles its
+     * own Lite node material (own renderable) at engine start.
+     */
+    public clone(name: string): NodeMaterial {
+        const cloned = new NodeMaterial(name, this._scene, this._json);
+        for (const [block, tex] of Object.entries(this._textureOverrides)) {
+            cloned._textureOverrides[block] = tex;
+        }
+        this._scene._registerNodeMaterial(cloned);
+        return cloned;
     }
 
     /** Babylon.js `getBlockByName(name)` — returns a proxy that captures texture overrides. */

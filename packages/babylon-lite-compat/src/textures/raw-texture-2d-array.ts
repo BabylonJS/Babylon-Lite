@@ -16,6 +16,7 @@ import { createTexture2DArray, createTexture2DArrayFromPixels, updateTexture2DAr
 import type { Texture2DArray } from "babylon-lite";
 
 import { Constants } from "../misc/engine-constants.js";
+import { unsupported } from "../error.js";
 import type { Scene } from "../scene/scene.js";
 import { BaseTexture, toRgbaBytes } from "./textures.js";
 
@@ -234,4 +235,42 @@ export async function CreateTexture2DArrayFromImageUrlsAsync(
         premultiplyAlpha: options?.premultiplyAlpha ?? false,
     });
     return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
+}
+
+/**
+ * Babylon.js `ICreateTexture2DArrayFromKTX2Options` (BJS 9.18
+ * `rawTexture2DArray.functions`) — creation settings for
+ * {@link CreateTexture2DArrayFromKTX2Async}.
+ */
+export interface ICreateTexture2DArrayFromKTX2Options {
+    /** Generate mip levels (true by default). */
+    generateMipMaps?: boolean;
+    /** Sampling mode (`Texture.TRILINEAR_SAMPLINGMODE` by default). */
+    samplingMode?: number;
+    /** Store the texture with the Y axis inverted (false by default). */
+    invertY?: boolean;
+}
+
+/**
+ * Babylon.js `CreateTexture2DArrayFromKTX2Async` (BJS 9.18) — build a 2D array
+ * texture from a single multi-layer KTX2 container.
+ *
+ * Throws `LiteCompatError`: Babylon Lite's KTX2 path (`loadKtx2Texture2D`) only
+ * models a **single-layer** texture — its internal `Ktx2DecodedData` carries a flat
+ * `mipmaps` list with no `layerCount`, and there is no KTX2 → 2D-array upload path.
+ * Backing the multi-layer container would require either extending Lite's internal,
+ * non-exported KTX2 decoder surface with a new public array shape, or duplicating its
+ * global-script decoder-bootstrap into compat — neither is a mechanical addition, and
+ * modifying the bundled `ktx2-loader` hot path is out of bounds. Use
+ * {@link CreateTexture2DArrayFromImageUrlsAsync} with per-layer images instead.
+ */
+export async function CreateTexture2DArrayFromKTX2Async(
+    _scene: Scene,
+    _data: string | ArrayBufferView,
+    _options?: ICreateTexture2DArrayFromKTX2Options
+): Promise<RawTexture2DArray> {
+    return unsupported(
+        "CreateTexture2DArrayFromKTX2Async",
+        "Babylon Lite's KTX2 decoder only models a single-layer texture (no layerCount / no 2D-array upload path). Use CreateTexture2DArrayFromImageUrlsAsync with per-layer images instead."
+    );
 }
