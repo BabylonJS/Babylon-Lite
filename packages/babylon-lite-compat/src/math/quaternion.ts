@@ -5,7 +5,7 @@
  * Babylon Lite `{ x, y, z, w }` quaternion shape used on transform nodes.
  */
 
-import { quatFromRotationMatrix } from "babylon-lite";
+import { mat4FromQuatInto, quatFromRotationMatrix } from "babylon-lite";
 import type { Mat4 } from "babylon-lite";
 
 import { Vector3 } from "./vector.js";
@@ -75,6 +75,15 @@ export class Quaternion {
         this.z = q.z;
         this.w = q.w;
         return this;
+    }
+
+    /**
+     * Babylon.js `Quaternion.toRotationMatrix` — write this quaternion's rotation
+     * into `result`.
+     */
+    public toRotationMatrix<T extends Matrix>(result: T): T {
+        mat4FromQuatInto(result.m, this.x, this.y, this.z, this.w);
+        return result;
     }
 
     public clone(): Quaternion {

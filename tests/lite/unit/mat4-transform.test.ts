@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { transformCoordinatesToRef, transformNormalToRef, mat4GetTranslationToRef } from "../../../packages/babylon-lite/src/math/mat4-transform";
 import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
 import { mat4Translation } from "../../../packages/babylon-lite/src/math/mat4-translation";
+import { mat4FromQuatInto } from "../../../packages/babylon-lite/src/math/mat4-from-quat";
 import type { Mat4, Vec3 } from "../../../packages/babylon-lite/src/math/types";
 
 /** Build a Mat4 from 16 column-major numbers (test-only). */
@@ -64,5 +65,20 @@ describe("mat4 vec transforms", () => {
         const out: Vec3 = { x: 0, y: 0, z: 0 };
         mat4GetTranslationToRef(mat4Translation(4, -5, 6), out);
         expect(out).toEqual({ x: 4, y: -5, z: 6 });
+    });
+
+    it("mat4FromQuatInto writes into existing storage and resets translation", () => {
+        const out = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 7, 8, 9, 1]);
+        const returned = mat4FromQuatInto(out, 0, 0, Math.sin(Math.PI / 4), Math.cos(Math.PI / 4));
+
+        expect(returned).toBe(out);
+        expect(out[0]).toBeCloseTo(0, 6);
+        expect(out[1]).toBeCloseTo(1, 6);
+        expect(out[4]).toBeCloseTo(-1, 6);
+        expect(out[5]).toBeCloseTo(0, 6);
+        expect(out[12]).toBe(0);
+        expect(out[13]).toBe(0);
+        expect(out[14]).toBe(0);
+        expect(out[15]).toBe(1);
     });
 });

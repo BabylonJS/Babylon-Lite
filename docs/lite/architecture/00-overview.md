@@ -886,6 +886,7 @@ Indices `[col*4+row]` — matches WGSL `mat4x4<f32>` storage.
 | `mat4Invert(m)`                                | `→ Mat4 \| null` | Full 4x4 inverse via cofactors                |
 | `mat4Compose(tx,ty,tz, qx,qy,qz,qw, sx,sy,sz)` | `→ Mat4`         | TRS composition                               |
 | `mat4FromQuat(qx,qy,qz,qw)`                    | `→ Mat4`         | Quaternion to rotation matrix                 |
+| `mat4FromQuatInto(out, qx,qy,qz,qw)`           | `→ out`          | Zero-allocation quaternion to rotation matrix |
 
 **LookAtLH formula** (matches Babylon.js `Matrix.LookAtLHToRef`):
 
