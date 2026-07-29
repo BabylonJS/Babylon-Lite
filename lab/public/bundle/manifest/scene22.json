@@ -8,7 +8,7 @@
     "scene22-material-view-Dua1bl7W.js",
     "scene22-multilight-wgsl-Ci23qBxe.js",
     "scene22-no-color-view-CXRYDInI.js",
-    "scene22-pbr-renderable-DxYFqrKy.js",
+    "scene22-pbr-renderable-DoNLFXZA.js",
     "scene22-pbr-shadow-fragment-CSEDArnD.js",
     "scene22-pbr-template-gamma-CVmXdy8B.js",
     "scene22-shader-composer-qxmZVcOJ.js",
@@ -17,5 +17,5 @@
     "scene22-standard-renderable-CZttc1Ha.js",
     "scene22.js"
   ],
-  "rawBytes": 100698
+  "rawBytes": 100617
 }

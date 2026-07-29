@@ -261,6 +261,9 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                 transmission?.[0]();
                 builder._rebuildSingle = result.rebuildSingle;
                 meshes.r = ctx._runtimeBuilds?.base(builder, result.rebuildSingle) ?? result.rebuildSingle;
+                if (builder._materialFamily === "pbr" && groupMeshes.some((mesh) => (mesh.material as { gammaAlbedo?: boolean } | null)?.gammaAlbedo)) {
+                    meshes._w = null;
+                }
                 if (hadBuiltGroup) {
                     dedupeGroupCleanup(ctx, cleanupStart);
                 }
@@ -353,14 +356,14 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                 retireOld(oldDisposers);
             };
 
-            const { withExclusiveGroupBuild } = await import("./scene-runtime-mesh-build.js");
+            const { X } = await import("./scene-runtime-mesh-build.js");
             // A merged build that raced concurrent mutation is retried against the settled membership. The
             // attempt count is bounded: if the group keeps moving, its previous output is dropped rather than
             // left drawing meshes whose buffers may already be freed.
             const MAX_ATTEMPTS = 3;
             for (let attempt = 1; ; attempt++) {
                 unstable = false;
-                await withExclusiveGroupBuild(ctx, builder, rebuild);
+                await X(ctx, builder, rebuild);
                 if (ctx._z || runtime?._d()) {
                     aborted = true;
                     return;

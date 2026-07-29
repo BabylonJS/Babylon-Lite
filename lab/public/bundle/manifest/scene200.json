@@ -1,10 +1,10 @@
 {
-  "rawKB": 47.3,
-  "gzipKB": 19.1,
+  "rawKB": 47.7,
+  "gzipKB": 19.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene200-standard-renderable-BMQsAcMO.js",
+    "scene200-standard-renderable-UQmMR8hA.js",
     "scene200.js"
   ],
-  "rawBytes": 48432
+  "rawBytes": 48847
 }
