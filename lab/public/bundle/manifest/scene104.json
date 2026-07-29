@@ -4,12 +4,12 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene104-generate-mipmaps-54_-V6nt.js",
-    "scene104-gltf-feature-registry-D7xKng68.js",
+    "scene104-gltf-feature-registry-DC9bc5L_.js",
     "scene104-gltf-glb-parser-LgX4YXgJ.js",
     "scene104-mesh-features-Dda6QcW-.js",
     "scene104-standard-renderable-Cl849vPY.js",
     "scene104-std-lightmap-fragment-BcOGvaSO.js",
     "scene104.js"
   ],
-  "rawBytes": 103939
+  "rawBytes": 103913
 }

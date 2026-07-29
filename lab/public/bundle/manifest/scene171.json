@@ -1,5 +1,5 @@
 {
-  "rawKB": 95.8,
+  "rawKB": 95.7,
   "gzipKB": 39.3,
   "ignoredRawKB": 1483.8,
   "runtimeChunks": [
@@ -12,5 +12,5 @@
     "scene171-standard-renderable-Bw0PRSHT.js",
     "scene171.js"
   ],
-  "rawBytes": 98055
+  "rawBytes": 98029
 }
