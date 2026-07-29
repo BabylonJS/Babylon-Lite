@@ -9,7 +9,7 @@
  * material properties are intentionally omitted.
  */
 
-import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty, createSolidTexture2D } from "babylon-lite";
+import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty, createSolidTexture2D, rebuildMaterial } from "babylon-lite";
 import type { StandardMaterialProps, PbrMaterialProps, ClearCoatProps, SheenProps, AnisotropyProps, IridescenceProps, Texture2D, EngineContext } from "babylon-lite";
 
 import { Color3 } from "../math/color.js";
@@ -67,6 +67,46 @@ export abstract class Material {
      */
     public _ensureRenderable(_engine: EngineContext): void {
         // No-op for the base/standard material.
+    }
+
+    /**
+     * @internal Adopt an owning scene discovered when the material is first assigned
+     * to a mesh (Babylon.js allows `new StandardMaterial(name)` with no scene, then
+     * `mesh.material = mat`). Needed so the texture-readiness path can reconcile the
+     * material into the running scene. Registers with the scene the first time.
+     */
+    public _adoptScene(scene: Scene): void {
+        if (!this._scene) {
+            this._scene = scene;
+            scene._registerMaterial(this);
+        }
+    }
+
+    /**
+     * @internal Reconcile this material into its scene when the scene is already
+     * live: finalize GPU-facing resources ({@link _ensureRenderable}) and rebuild
+     * the renderables of every mesh using it. A no-op before engine start (the
+     * boot-time build handles those meshes) or when the material has no scene.
+     * Shared by the mesh `material` setter and the texture-readiness callback.
+     */
+    public _refreshInScene(): void {
+        const scene = this._scene;
+        if (!scene?._hasStarted) {
+            return;
+        }
+        this._ensureRenderable(scene.getEngine()._lite);
+        rebuildMaterial(scene._lite, this._lite);
+    }
+
+    /**
+     * @internal Rebind + rebuild this material once an asynchronously loaded texture
+     * assigned to it becomes GPU-ready. Babylon.js `Texture`s load in the background,
+     * so a texture assigned to a material (or a material assigned to a mesh) before
+     * the load resolves must go back through the rebuild path once the handle exists.
+     * Fires immediately when the texture is already ready (then gated by scene state).
+     */
+    protected _watchTexture(texture: { _onReady?: (listener: () => void) => void } | null): void {
+        texture?._onReady?.(() => this._refreshInScene());
     }
 
     public dispose(): void {
@@ -159,6 +199,7 @@ export class StandardMaterial extends PushMaterial {
     public set diffuseTexture(texture: BaseTexture | null) {
         this._diffuseTexture = texture;
         this._lite.diffuseTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        this._watchTexture(texture);
         this._markDirty();
     }
 
@@ -189,6 +230,7 @@ export class StandardMaterial extends PushMaterial {
     public set bumpTexture(texture: BaseTexture | null) {
         this._bumpTexture = texture;
         this._lite.bumpTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        this._watchTexture(texture);
         this._markDirty();
     }
 
@@ -198,6 +240,7 @@ export class StandardMaterial extends PushMaterial {
     public set emissiveTexture(texture: BaseTexture | null) {
         this._emissiveTexture = texture;
         this._lite.emissiveTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        this._watchTexture(texture);
         this._markDirty();
     }
 
@@ -440,6 +483,7 @@ export class PBRMaterial extends PushMaterial {
     }
     public set albedoTexture(texture: BaseTexture | null) {
         this._albedoTexture = texture;
+        this._watchTexture(texture);
         this._markDirty();
     }
 

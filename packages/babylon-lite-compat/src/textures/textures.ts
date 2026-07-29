@@ -75,8 +75,36 @@ export abstract class BaseTexture {
     /** @internal The underlying Lite texture handle. Undefined until the async load resolves. */
     public _lite: Texture2D | undefined;
 
+    /** @internal One-shot listeners fired when the GPU handle first resolves (see {@link _onReady}). */
+    private _readyListeners: Array<() => void> | undefined;
+
     public getClassName(): string {
         return "BaseTexture";
+    }
+
+    /**
+     * @internal Register a callback fired once this texture's GPU handle resolves.
+     * Owning compat materials use it to rebind and rebuild once an asynchronously
+     * loaded texture becomes available. Fires immediately if the handle already
+     * exists; otherwise queues until {@link _notifyReady}. One-shot per listener.
+     */
+    public _onReady(listener: () => void): void {
+        if (this._lite) {
+            listener();
+            return;
+        }
+        (this._readyListeners ??= []).push(listener);
+    }
+
+    /** @internal Fire and clear the readiness listeners (called by subclasses once `_lite` resolves). */
+    protected _notifyReady(): void {
+        const listeners = this._readyListeners;
+        if (listeners) {
+            this._readyListeners = undefined;
+            for (const listener of listeners) {
+                listener();
+            }
+        }
     }
 
     /**
@@ -171,6 +199,9 @@ export class Texture extends BaseTexture {
         this._ready = loadCompatTexture(engine, url, loadOpts).then((tex) => {
             this._lite = tex;
             this._notifyLoadObservable();
+            // Rebind + rebuild any material this texture was assigned to before the
+            // load resolved (see BaseTexture._onReady / Material._watchTexture).
+            this._notifyReady();
             if (onLoad) {
                 onLoad();
             }
