@@ -1,6 +1,6 @@
 {
-  "rawKB": 98.3,
-  "gzipKB": 39.8,
+  "rawKB": 98.4,
+  "gzipKB": 39.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene22-esm-shadow-view-BpdnPOo5.js",
@@ -13,9 +13,9 @@
     "scene22-pbr-template-gamma-CVmXdy8B.js",
     "scene22-shader-composer-qxmZVcOJ.js",
     "scene22-shadow-fragment-core-Dbe1xNkt.js",
-    "scene22-shadow-task-Yvrdp5XB.js",
+    "scene22-shadow-task-Crx9uGiW.js",
     "scene22-standard-renderable-wBGGANmr.js",
     "scene22.js"
   ],
-  "rawBytes": 100622
+  "rawBytes": 100730
 }
