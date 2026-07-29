@@ -15,9 +15,8 @@ import { AppendSceneAsync } from "@babylonjs/core/Loading/sceneLoader";
 import { Scene } from "@babylonjs/core/scene";
 import type { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import "@babylonjs/core/Helpers/sceneHelpers";
-// glTF 2.0 loader only: register the SceneLoader plugin + wire the v2 factory without pulling the glTF 1.0 loader from the barrel.
+// glTF 2.0 loader only: as of BJS 9.17.1, importing "/glTF/2.0" registers the SceneLoader plugin and wires the v2 factory without pulling the glTF 1.0 loader from the barrel.
 import "@babylonjs/loaders/glTF/2.0";
-import "@babylonjs/loaders/glTF/glTFFileLoader";
 import { FrameGraph } from "@babylonjs/core/FrameGraph/frameGraph";
 import { FrameGraphClearTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/clearTextureTask";
 import { FrameGraphGeometryRendererTask } from "@babylonjs/core/FrameGraph/Tasks/Rendering/geometryRendererTask";
