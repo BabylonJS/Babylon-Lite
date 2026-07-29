@@ -6,8 +6,8 @@
     "scene254-generate-mipmaps-CO7DFb3U.js",
     "scene254-gltf-animation-WU-R3ods.js",
     "scene254-gltf-feature-animations-BWpXxloW.js",
-    "scene254-gltf-feature-registry-j7AINoKB.js",
-    "scene254-gltf-json-asset-Ak7EtHRE.js",
+    "scene254-gltf-feature-registry-BYpCC6Gi.js",
+    "scene254-gltf-json-asset-CuuycPiY.js",
     "scene254-gltf-sampler-denorm-BzFzUiaO.js",
     "scene254-ibl-fragment-CeRrvT96.js",
     "scene254-pbr-renderable-c0ChfRU3.js",
@@ -16,5 +16,5 @@
     "scene254-singlelight-hemispheric-wgsl-CqFh488F.js",
     "scene254.js"
   ],
-  "rawBytes": 95145
+  "rawBytes": 95108
 }
