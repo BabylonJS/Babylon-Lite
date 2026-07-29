@@ -30,6 +30,7 @@
 import { F32 } from "../engine/typed-arrays.js";
 import { TU } from "../engine/gpu-flags.js";
 import brdfLutWGSL from "../../shaders/hdr-brdf-lut.compute.wgsl?raw";
+import { resolveBufferUri } from "./gltf-uri.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
 import type { SceneContext } from "../scene/scene-core.js";
@@ -144,9 +145,8 @@ export async function resolveImage(json: any, binChunk: DataView, imageIdx: numb
         const blob = new Blob([slice as ArrayBuffer], { type: image.mimeType ?? "image/png" });
         return createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
     }
-
     if (image.uri) {
-        const imageUrl = new URL(image.uri, baseUrl + "x").href;
+        const imageUrl = resolveBufferUri(image.uri, baseUrl);
         const response = await fetch(imageUrl);
         if (!response.ok) {
             throw new Error(`Failed to load image: ${response.status} ${response.statusText}`);

@@ -5,7 +5,7 @@
   "runtimeChunks": [
     "scene266-generate-mipmaps-VcAE7FCP.js",
     "scene266-gltf-feature-primitive-BcZmWV7D.js",
-    "scene266-gltf-feature-registry-kptPvzV8.js",
+    "scene266-gltf-feature-registry-CojLNuzg.js",
     "scene266-gltf-glb-parser-D-h9Fgu9.js",
     "scene266-gltf-share-D0T73tB6.js",
     "scene266-ibl-fragment-CeRrvT96.js",
@@ -14,5 +14,5 @@
     "scene266-scene-uniforms-FTYH6Ct0.js",
     "scene266.js"
   ],
-  "rawBytes": 82338
+  "rawBytes": 82312
 }

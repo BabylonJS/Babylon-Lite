@@ -122,6 +122,9 @@ export function mat4Translation(x: number, y: number, z: number): Mat4;
 /** Create a rotation matrix from a quaternion. */
 export function mat4FromQuat(qx: number, qy: number, qz: number, qw: number): Mat4;
 
+/** Write a rotation matrix from a quaternion into an existing matrix buffer. */
+export function mat4FromQuatInto<T extends Float32Array | Float64Array>(out: T, qx: number, qy: number, qz: number, qw: number): T;
+
 /** Compose TRS (translation * rotation * scale) into a single Mat4. */
 export function mat4Compose(tx: number, ty: number, tz: number, qx: number, qy: number, qz: number, qw: number, sx: number, sy: number, sz: number): Mat4;
 
@@ -311,6 +314,9 @@ out = identity with out[12]=x, out[13]=y, out[14]=z
 
 ### mat4FromQuat(qx, qy, qz, qw)
 
+`mat4FromQuatInto(out, qx, qy, qz, qw)` writes the same 16 values into an
+existing matrix buffer and returns `out`.
+
 ```
 xx=qx*qx  yy=qy*qy  zz=qz*qz
 xy=qx*qy  xz=qx*qz  yz=qy*qz
@@ -359,6 +365,7 @@ result[15] = 1
 | `mat4PerspectiveLH(fov,ar,n,f)` | `BABYLON.Matrix.PerspectiveFovLH(fov,ar,n,f)`        |
 | `mat4Invert(m)`                 | `m.invert()` / `BABYLON.Matrix.Invert(m)`            |
 | `mat4FromQuat(qx,qy,qz,qw)`     | `BABYLON.Matrix.FromQuaternion(q)`                   |
+| `mat4FromQuatInto(out,...)`     | `BABYLON.Matrix.FromQuaternionToRef(q,out)`          |
 | `mat4Compose(t,r,s)`            | `BABYLON.Matrix.Compose(scale,rotation,translation)` |
 | Column-major layout             | Column-major layout (same)                           |
 | Left-handed                     | Left-handed (same)                                   |
@@ -383,6 +390,7 @@ result[15] = 1
 | `mat4Invert returns null for singular` | Zero matrix → null                                      |
 | `mat4FromQuat identity`                | Quat (0,0,0,1) → identity matrix                        |
 | `mat4FromQuat 90° around Y`            | Verify correct rotation                                 |
+| `mat4FromQuatInto`                     | Writes into existing storage with no replacement         |
 | `mat4Compose T×R×S`                    | Compare with manual multiply of separate matrices       |
 | `normalizeVec3 zero`                   | Returns (0,0,0) for zero vector                         |
 | `crossVec3 X×Y=Z`                      | (1,0,0) × (0,1,0) = (0,0,1)                             |

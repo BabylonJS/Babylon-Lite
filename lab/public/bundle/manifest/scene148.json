@@ -6,7 +6,7 @@
     "scene148-directional-light-CLC0TyGx.js",
     "scene148-generate-mipmaps-DwUUAYSG.js",
     "scene148-gltf-feature-lights-punctual-BnlPhELg.js",
-    "scene148-gltf-feature-registry-B-vgFF96.js",
+    "scene148-gltf-feature-registry-B8wHW9Lw.js",
     "scene148-gltf-glb-parser-CFOh2GWe.js",
     "scene148-gltf-light-pointer-state-B7kFTRxK.js",
     "scene148-pbr-geometry-view-BxLmGxJJ.js",
@@ -16,5 +16,5 @@
     "scene148-singlelight-hemispheric-wgsl-Dl8TI5wG.js",
     "scene148.js"
   ],
-  "rawBytes": 112375
+  "rawBytes": 112349
 }
