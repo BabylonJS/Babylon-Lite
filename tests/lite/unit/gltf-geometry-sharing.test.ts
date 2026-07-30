@@ -154,11 +154,11 @@ describe("loadGltf geometry sharing", () => {
         const { engine } = makeMockEngine();
         const container = await loadGltf(engine, makeSharedMeshGlb(1));
         const root = container.entities[0] as TransformNode;
-        const first = root.children[0]!.children[0] as Mesh & { _topology?: number };
-        const second = root.children[1]!.children[0] as Mesh & { _topology?: number };
+        const first = root.children[0]!.children[0] as Mesh & { _primitiveFeatures?: number };
+        const second = root.children[1]!.children[0] as Mesh & { _primitiveFeatures?: number };
 
-        expect(first._topology).toBe(2);
-        expect(second._topology).toBe(2);
+        expect(first._primitiveFeatures).toBe(2 << 12);
+        expect(second._primitiveFeatures).toBe(2 << 12);
     });
 });
 
