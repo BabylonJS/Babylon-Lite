@@ -20,6 +20,7 @@ vi.mock("babylon-lite", async (importActual) => {
         uploadImageToArrayLayer: vi.fn(),
         loadImageToArrayLayer: vi.fn(async () => undefined),
         createTexture2DArrayFromUrls: vi.fn(async (_engine: unknown, urls: readonly string[]) => makeArray(4, 4, urls.length)),
+        createTexture2DArrayFromKtx2: vi.fn(async () => makeArray(16, 16, 4)),
     };
 });
 
@@ -30,6 +31,7 @@ import {
     uploadImageToArrayLayer,
     loadImageToArrayLayer,
     createTexture2DArrayFromUrls,
+    createTexture2DArrayFromKtx2,
 } from "babylon-lite";
 import {
     RawTexture2DArray,
@@ -41,6 +43,7 @@ import {
 import { BaseTexture } from "../src/textures/textures";
 import { LiteCompatError } from "../src/error";
 import { AbstractEngine } from "../src/engine/engine";
+import { Constants } from "../src/misc/engine-constants";
 
 const createArrayMock = vi.mocked(createTexture2DArray);
 const createFromPixelsMock = vi.mocked(createTexture2DArrayFromPixels);
@@ -48,6 +51,7 @@ const updateFromPixelsMock = vi.mocked(updateTexture2DArrayFromPixels);
 const uploadMock = vi.mocked(uploadImageToArrayLayer);
 const loadMock = vi.mocked(loadImageToArrayLayer);
 const fromUrlsMock = vi.mocked(createTexture2DArrayFromUrls);
+const fromKtx2Mock = vi.mocked(createTexture2DArrayFromKtx2);
 
 const liteEngine = {};
 
@@ -215,12 +219,65 @@ describe("CreateTexture2DArrayFromImageUrlsAsync", () => {
         await CreateTexture2DArrayFromImageUrlsAsync(fakeScene() as never, ["a.png"], { invertY: true, premultiplyAlpha: true });
         expect(fromUrlsMock.mock.calls[0]![2]).toEqual({ mipMaps: true, invertY: true, premultiplyAlpha: true });
     });
+});
 
-    // 🔧 Needs Lite core: Lite's public KTX2 surface decodes only single 2D textures,
-    // so per-layer RGBA array decode has no backing yet (structural blocker documented
-    // on the stub). Assert the throwing stub until Lite exposes the array decode.
-    it("CreateTexture2DArrayFromKTX2Async throws a LiteCompatError pending a Lite decoder addition", async () => {
-        await expect(CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "cubes.ktx2")).rejects.toThrow(/KTX2/);
+describe("CreateTexture2DArrayFromKTX2Async", () => {
+    it("forwards a pre-fetched buffer to Lite's createTexture2DArrayFromKtx2 (BJS default generateMipMaps = true)", async () => {
+        fromKtx2Mock.mockClear();
+        const buffer = new Uint8Array([1, 2, 3, 4]);
+        const tex = await CreateTexture2DArrayFromKTX2Async(fakeScene() as never, buffer);
+        expect(fromKtx2Mock).toHaveBeenCalledTimes(1);
+        const call = fromKtx2Mock.mock.calls[0]!;
+        expect(call[0]).toBe(liteEngine);
+        expect(call[1]).toBe(buffer);
+        expect(call[2]).toEqual({
+            generateMipMaps: true,
+            invertY: false,
+            minFilter: "linear",
+            magFilter: "linear",
+            mipmapFilter: "linear",
+        });
+        expect(tex).toBeInstanceOf(RawTexture2DArray);
+        expect(tex.depth).toBe(4);
+        expect(tex.format).toBe(5);
+    });
+
+    it("threads an explicit generateMipMaps = false through", async () => {
+        fromKtx2Mock.mockClear();
+        await CreateTexture2DArrayFromKTX2Async(fakeScene() as never, new Uint8Array(4), {
+            generateMipMaps: false,
+            invertY: true,
+            samplingMode: Constants.TEXTURE_NEAREST_SAMPLINGMODE,
+        });
+        expect(fromKtx2Mock.mock.calls[0]![2]).toEqual({
+            generateMipMaps: false,
+            invertY: true,
+            minFilter: "nearest",
+            magFilter: "nearest",
+            mipmapFilter: "nearest",
+        });
+    });
+
+    it("fetches a URL string, then forwards the decoded bytes", async () => {
+        fromKtx2Mock.mockClear();
+        const bytes = new Uint8Array([9, 9, 9, 9]).buffer;
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: true, arrayBuffer: async () => bytes } as Response);
+        try {
+            await CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "atlas.ktx2");
+            expect(fetchSpy).toHaveBeenCalledWith("atlas.ktx2");
+            expect(Array.from(fromKtx2Mock.mock.calls[0]![1] as Uint8Array)).toEqual([9, 9, 9, 9]);
+        } finally {
+            fetchSpy.mockRestore();
+        }
+    });
+
+    it("rejects a failed URL fetch", async () => {
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: false, status: 404, statusText: "Not Found" } as Response);
+        try {
+            await expect(CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "missing.ktx2")).rejects.toThrow(/Failed to fetch KTX2/);
+        } finally {
+            fetchSpy.mockRestore();
+        }
     });
 });
 
