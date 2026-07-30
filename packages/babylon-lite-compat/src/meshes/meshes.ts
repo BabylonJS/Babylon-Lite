@@ -544,45 +544,58 @@ export class Mesh extends AbstractMesh {
      * that shares this mesh's geometry. Forwards to Lite's `cloneTransformNode`,
      * which shares the `_gpu`/skeleton/morph/thin-instance resources with the clone
      * under ref-counting (so both meshes own the buffers and they survive until the
-     * last is disposed). Lite hardcodes a `_clone` name suffix, so we rename the
-     * clone to `name`; the source material is kept (BJS shares it by reference), and
-     * the clone is registered with the same compat scene through its own wrapper.
-     * `newParent` reparents the clone (default: no parent, matching BJS).
+     * last is disposed). Lite hardcodes a `_clone` name suffix, so a non-empty
+     * `name` replaces it; the source material is kept (BJS shares it by reference),
+     * and the clone is registered with the same compat scene through its own wrapper.
+     * An omitted `newParent` keeps the source parent, while explicit `null` detaches.
      * `doNotCloneChildren` drops the descendants Lite always clones.
      */
-    public clone(name = "", newParent: Node | null = null, doNotCloneChildren?: boolean): Mesh {
+    public clone(name?: string, newParent?: Node | null, doNotCloneChildren?: boolean): Mesh {
         const scene = this._scene;
         const liteClone = cloneTransformNode(this._lite) as LiteMesh;
-        liteClone.name = name;
-        const clone = Mesh._wrapCloneHierarchy(this, liteClone, scene, null, doNotCloneChildren === true);
+        if (name) {
+            liteClone.name = name;
+        }
+        const wrappedClone = Mesh._wrapCloneHierarchy(this, liteClone, scene, null, doNotCloneChildren === true);
+        if (!(wrappedClone instanceof Mesh)) {
+            throw new Error("Mesh.clone produced a non-mesh root.");
+        }
+        const clone = wrappedClone;
         if (scene) {
             addPrimitive(clone, scene, doNotCloneChildren ? () => pruneClonedDescendants(scene, liteClone) : undefined);
         }
-        const parent = newParent ?? this.parent;
+        const parent = newParent === undefined ? this.parent : newParent;
         if (parent) {
             clone.parent = parent;
         }
         return clone;
     }
 
-    private static _wrapCloneHierarchy(source: Mesh | undefined, lite: LiteMesh, scene: Scene | undefined, parent: Mesh | null, skipChildren: boolean): Mesh {
-        const wrapper = new Mesh(lite.name ?? "", lite);
-        wrapper._scene = scene;
-        if (scene) {
-            scene._registerMesh(wrapper);
+    private static _wrapCloneHierarchy(source: Node | undefined, lite: SceneNode, scene: Scene | undefined, parent: TransformNode | null, skipChildren: boolean): TransformNode {
+        const isMesh = "_gpu" in lite && "material" in lite;
+        const wrapper = isMesh ? new Mesh(lite.name ?? "", lite as LiteMesh) : new TransformNode(lite.name ?? "", scene, lite);
+        if (wrapper instanceof Mesh) {
+            wrapper._scene = scene;
+            if (scene) {
+                scene._registerMesh(wrapper);
+            }
         }
-        wrapper._linkParent(parent);
+        wrapper.parent = parent;
         if (source) {
-            wrapper.id = source.id;
             wrapper.metadata = source.metadata;
-            wrapper.material = source.material;
-            wrapper.isVisible = source.isVisible;
             wrapper.setEnabled(source.isEnabled(false));
+            if (wrapper instanceof Mesh && source instanceof Mesh) {
+                wrapper.material = source.material;
+                wrapper.isVisible = source.isVisible;
+            }
         }
         if (!skipChildren) {
-            const sourceChildren = source?._children.filter((child): child is Mesh => child instanceof Mesh) ?? [];
+            const sourceLiteChildren = liteNodeOf(source ?? null)?.children ?? [];
+            const sourceChildren = source?.getChildren(undefined, true) ?? [];
             for (let i = 0; i < lite.children.length; i++) {
-                Mesh._wrapCloneHierarchy(sourceChildren[i], lite.children[i] as LiteMesh, scene, wrapper, false);
+                const sourceLiteChild = sourceLiteChildren[i];
+                const sourceChild = sourceChildren.find((child) => liteNodeOf(child) === sourceLiteChild);
+                Mesh._wrapCloneHierarchy(sourceChild, lite.children[i]!, scene, wrapper, false);
             }
         }
         return wrapper;
