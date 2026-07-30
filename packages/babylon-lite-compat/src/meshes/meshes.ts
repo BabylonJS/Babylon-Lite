@@ -769,6 +769,9 @@ function engineOf(scene: Scene): EngineContext {
  */
 function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
     scene._deferAdd(() => {
+        if (mesh.isDisposed()) {
+            return;
+        }
         const mat = mesh.material;
         mat?._ensureRenderable(engineOf(scene));
         // Re-bind in case the material's Lite handle resolved late (async-parsed

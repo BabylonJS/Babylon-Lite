@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * `Mesh.MergeMeshes` forwards to Babylon Lite's tree-shakeable `mergeMeshGeometry`
@@ -13,10 +13,19 @@ vi.mock("babylon-lite", async (importActual) => {
     return {
         ...actual,
         mergeMeshGeometry: vi.fn((_engine: unknown, name: string) => ({ name, _tag: "merged" })),
+        createMeshFromData: vi.fn((_engine: unknown, name: string) => ({
+            name,
+            _cpuPositions: new Float32Array(9),
+            _cpuNormals: new Float32Array(9),
+            _cpuIndices: new Uint32Array([0, 1, 2]),
+            children: [],
+        })),
+        addToScene: vi.fn(),
+        removeFromScene: vi.fn(),
     };
 });
 
-import { mergeMeshGeometry } from "babylon-lite";
+import { addToScene, mergeMeshGeometry } from "babylon-lite";
 import { LiteCompatError } from "../src/error";
 
 // Imported after the mock so `Mesh` picks up the stubbed `mergeMeshGeometry`.
@@ -32,16 +41,33 @@ interface FakeMeshOptions {
     uv2?: boolean;
 }
 
-function fakeScene(): { getEngine(): { _lite: object }; defaultMaterial: undefined; _deferAdd(fn: () => void): void; _lite: object } {
+function fakeScene(): {
+    getEngine(): { _lite: object };
+    defaultMaterial: undefined;
+    pendingAdds: Array<() => void>;
+    _deferAdd(fn: () => void): void;
+    flushPendingAdds(): void;
+    _unregisterNode(node: unknown): void;
+    _lite: object;
+} {
+    const pendingAdds: Array<() => void> = [];
     return {
         getEngine: () => ({ _lite: { _tag: "engine" } }),
         defaultMaterial: undefined,
-        _deferAdd: () => undefined,
+        pendingAdds,
+        _deferAdd: (fn) => pendingAdds.push(fn),
+        flushPendingAdds: () => {
+            for (const add of pendingAdds.splice(0)) {
+                add();
+            }
+        },
+        _unregisterNode: vi.fn(),
         _lite: { _tag: "scene" },
     };
 }
 
 const scene = fakeScene();
+const addToSceneMock = vi.mocked(addToScene);
 
 function fakeMesh(opts: FakeMeshOptions = {}): InstanceType<typeof Mesh> {
     const lite: Record<string, unknown> = { name: opts.name ?? "m" };
@@ -65,6 +91,12 @@ function fakeMesh(opts: FakeMeshOptions = {}): InstanceType<typeof Mesh> {
 }
 
 describe("Mesh.MergeMeshes", () => {
+    beforeEach(() => {
+        scene.pendingAdds.length = 0;
+        addToSceneMock.mockClear();
+        mergeMock.mockClear();
+    });
+
     it("forwards engine, the first mesh's name, and each source's Lite handle", () => {
         mergeMock.mockClear();
         const a = fakeMesh({ name: "alpha" });
@@ -94,6 +126,17 @@ describe("Mesh.MergeMeshes", () => {
         const c = fakeMesh();
         Mesh.MergeMeshes([c], false);
         expect(c.dispose).not.toHaveBeenCalled();
+    });
+
+    it("does not re-add a source disposed by a pre-start merge", () => {
+        const source = new Mesh("source", scene as never);
+
+        Mesh.MergeMeshes([source]);
+        scene.flushPendingAdds();
+
+        expect(source.isDisposed()).toBe(true);
+        expect(addToSceneMock).toHaveBeenCalledTimes(1);
+        expect(addToSceneMock).not.toHaveBeenCalledWith(scene._lite, source._lite);
     });
 
     it("returns null when a 16-bit-index merge would exceed 65535 vertices (Babylon.js parity)", () => {

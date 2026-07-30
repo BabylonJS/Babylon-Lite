@@ -1,6 +1,6 @@
 {
-  "rawKB": 127,
-  "gzipKB": 53.3,
+  "rawKB": 127.2,
+  "gzipKB": 53.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene115-create-morph-targets-BxcR5t59.js",
@@ -11,19 +11,18 @@
     "scene115-gltf-color-normalize-4-WGzPL2.js",
     "scene115-gltf-feature-animations-B4dSWyOG.js",
     "scene115-gltf-feature-morph-DLWJRlR1.js",
-    "scene115-gltf-feature-registry-Ce1WKD3a.js",
+    "scene115-gltf-feature-registry-CvCXXB3b.js",
     "scene115-gltf-feature-skeleton-vHn6d4rM.js",
     "scene115-gltf-json-asset-DkZ91Cxg.js",
     "scene115-mesh-features-Dda6QcW-.js",
-    "scene115-morph-fragment-DMDSgfc9.js",
-    "scene115-morph-fragment-core-DvyN4iIo.js",
-    "scene115-pbr-renderable-C6TWT3oL.js",
+    "scene115-morph-fragment-Ck00lP_G.js",
+    "scene115-morph-fragment-core-Bg5FFLic.js",
+    "scene115-pbr-renderable-DK3klzCO.js",
     "scene115-pbr-template-ext-CiHpOV5G.js",
     "scene115-picking-pipeline-C9DxnZjR.js",
     "scene115-singlelight-hemispheric-wgsl-Nr1eJWuy.js",
     "scene115-skeleton-fragment-IH2zNkLF.js",
     "scene115-standard-renderable-DRVlyzJ-.js",
     "scene115.js"
-  ],
-  "rawBytes": 130058
+  ]
 }

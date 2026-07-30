@@ -227,6 +227,8 @@ export {
     uploadImageToArrayLayer,
     loadImageToArrayLayer,
     createTexture2DArrayFromUrls,
+    uploadKtx2Texture2DArray,
+    loadKtx2Texture2DArray,
 } from "./texture/texture-array.js";
 export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions, TextureArrayFromUrlsOptions } from "./texture/texture-array.js";
 export { createDynamicTexture, updateDynamicTexture } from "./texture/dynamic-texture.js";
@@ -409,6 +411,7 @@ export type { DecomposedTransform } from "./math/mat4-decompose.js";
 export type { Vec2, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";
+export { eulerToQuat, quatToEulerXYZ } from "./math/quat-euler.js";
 export type { GltfMetadata, LiteMetadata } from "./metadata.js";
 
 // ─── Color ───────────────────────────────────────────────────────────

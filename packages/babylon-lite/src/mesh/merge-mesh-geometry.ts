@@ -104,8 +104,8 @@ export function mergeMeshGeometry(engine: EngineContext, name: string, meshes: r
             g = wm[2]!,
             h = wm[6]!,
             i = wm[10]!;
-        // Cofactor matrix = det * (M^-1)^T; transforming normals by it (then
-        // renormalizing) is correct for non-uniform scale / shear.
+        // Cofactor matrix = det * (M^-1)^T. Its determinant sign is applied
+        // below to recover the correctly oriented inverse-transpose.
         const c00 = e * i - f * h,
             c01 = f * g - d * i,
             c02 = d * h - e * g,
@@ -115,6 +115,9 @@ export function mergeMeshGeometry(engine: EngineContext, name: string, meshes: r
             c20 = b * f - c * e,
             c21 = c * d - a * f,
             c22 = a * e - b * d;
+        const determinant = a * c00 + b * c01 + c * c02;
+        const normalSign = determinant < 0 ? -1 : 1;
+        const reverseWinding = normalSign !== (mesh._authoredSign ?? 1);
 
         const meshVertexStart = pOff / 3;
         for (let v = 0; v < src.length; v += 3) {
@@ -129,9 +132,9 @@ export function mergeMeshGeometry(engine: EngineContext, name: string, meshes: r
                 const nx = srcNormals[v]!,
                     ny = srcNormals[v + 1]!,
                     nz = srcNormals[v + 2]!;
-                let tx = nx * c00 + ny * c01 + nz * c02;
-                let ty = nx * c10 + ny * c11 + nz * c12;
-                let tz = nx * c20 + ny * c21 + nz * c22;
+                let tx = (nx * c00 + ny * c01 + nz * c02) * normalSign;
+                let ty = (nx * c10 + ny * c11 + nz * c12) * normalSign;
+                let tz = (nx * c20 + ny * c21 + nz * c22) * normalSign;
                 const len = Math.hypot(tx, ty, tz) || 1;
                 tx /= len;
                 ty /= len;
@@ -154,8 +157,10 @@ export function mergeMeshGeometry(engine: EngineContext, name: string, meshes: r
         const meshIdx = mesh._cpuIndices!;
         const n = meshIdx.length;
         const idxStart = iOff;
-        for (let k = 0; k < n; k++) {
+        for (let k = 0; k < n; k += 3) {
             indices[iOff++] = meshIdx[k]! + vertBase;
+            indices[iOff++] = meshIdx[k + (reverseWinding ? 2 : 1)]! + vertBase;
+            indices[iOff++] = meshIdx[k + (reverseWinding ? 1 : 2)]! + vertBase;
         }
 
         if (!srcNormals) {
