@@ -13,6 +13,8 @@ const liteMocks = vi.hoisted(() => ({
 
 vi.mock("babylon-lite", () => liteMocks);
 
+import type { EngineContext } from "babylon-lite";
+
 import { resolveKtxUrl, CubeTexture, HDRCubeTexture, Texture } from "../src/textures/textures";
 import type { EngineContext } from "babylon-lite";
 
@@ -155,6 +157,39 @@ describe("Texture onLoadObservable", () => {
         await tex.whenReadyAsync();
 
         expect(observerCalls).toBe(1);
+    });
+
+    it("notifies attached materials after constructor onLoad configuration", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+        const state: { tex?: Texture } = {};
+        const observedScales: number[] = [];
+        const tex = new Texture("https://h/albedo.png", engineWrapper(), undefined, undefined, undefined, () => {
+            state.tex!.uScale = 2;
+        });
+        state.tex = tex;
+        tex._onReady(() => observedScales.push(tex.uScale));
+
+        load.resolve(textureHandle());
+        await tex.whenReadyAsync();
+
+        expect(observedScales).toEqual([2]);
+    });
+
+    it("notifies attached materials even when an onLoadObservable observer throws", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+        const tex = new Texture("https://h/albedo.png", engineWrapper());
+        let readyCalls = 0;
+        tex.onLoadObservable.add(() => {
+            throw new Error("observer failed");
+        });
+        tex._onReady(() => readyCalls++);
+
+        load.resolve(textureHandle());
+        await expect(tex.whenReadyAsync()).rejects.toThrow("observer failed");
+
+        expect(readyCalls).toBe(1);
     });
 });
 

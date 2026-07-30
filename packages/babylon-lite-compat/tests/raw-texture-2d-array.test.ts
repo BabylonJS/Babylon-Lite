@@ -220,6 +220,7 @@ describe("CreateTexture2DArrayFromImageUrlsAsync", () => {
         await CreateTexture2DArrayFromImageUrlsAsync(fakeScene() as never, ["a.png"], { invertY: true, premultiplyAlpha: true });
         expect(fromUrlsMock.mock.calls[0]![2]).toEqual({ mipMaps: true, invertY: true, premultiplyAlpha: true });
     });
+
 });
 
 describe("CreateTexture2DArrayFromKTX2Async", () => {
