@@ -822,6 +822,20 @@ export const MeshBuilder = {
     CreateText(): never {
         return unsupported("MeshBuilder.CreateText", "Extruded font meshes are not implemented in Babylon Lite. For 2D/SDF text use the native `createTextRenderable` API.");
     },
+
+    CreateTiledBox(): never {
+        return unsupported(
+            "MeshBuilder.CreateTiledBox",
+            "Tiled box geometry is not implemented in Babylon Lite. Its per-face tile-pattern UV layout (tile size, alignment, per-tile flip/rotate patterns) is a non-trivial vertex-data generator with pattern design choices — not a mechanical addition — so it needs a Lite core mesh-builder decision."
+        );
+    },
+
+    CreateTiledPlane(): never {
+        return unsupported(
+            "MeshBuilder.CreateTiledPlane",
+            "Tiled plane geometry is not implemented in Babylon Lite. Its per-tile UV layout (tile size, alignment, per-tile flip/rotate patterns) is a non-trivial vertex-data generator with pattern design choices — not a mechanical addition — so it needs a Lite core mesh-builder decision."
+        );
+    },
 };
 
 // ── Standalone builder functions (Babylon.js `@babylonjs/core/Meshes/Builders/*`) ──
@@ -862,4 +876,14 @@ export function CreateTorus(name: string, options: object, scene: Scene): Mesh {
 /** Babylon.js `CreateDisc(name, options, scene)` (discBuilder). */
 export function CreateDisc(name: string, options: object, scene: Scene): Mesh {
     return MeshBuilder.CreateDisc(name, options, scene);
+}
+
+/** Babylon.js `CreateTiledBox(name, options, scene)` (tiledBoxBuilder) — throwing stub (see `MeshBuilder.CreateTiledBox`). */
+export function CreateTiledBox(): never {
+    return MeshBuilder.CreateTiledBox();
+}
+
+/** Babylon.js `CreateTiledPlane(name, options, scene)` (tiledPlaneBuilder) — throwing stub (see `MeshBuilder.CreateTiledPlane`). */
+export function CreateTiledPlane(): never {
+    return MeshBuilder.CreateTiledPlane();
 }

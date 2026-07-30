@@ -20,6 +20,8 @@ vi.mock("babylon-lite", async (importActual) => {
         uploadImageToArrayLayer: vi.fn(),
         loadImageToArrayLayer: vi.fn(async () => undefined),
         createTexture2DArrayFromUrls: vi.fn(async (_engine: unknown, urls: readonly string[]) => makeArray(4, 4, urls.length)),
+        loadKtx2Texture2DArray: vi.fn(async () => makeArray(4, 4, 6)),
+        uploadKtx2Texture2DArray: vi.fn(async () => makeArray(4, 4, 6)),
     };
 });
 
@@ -30,12 +32,15 @@ import {
     uploadImageToArrayLayer,
     loadImageToArrayLayer,
     createTexture2DArrayFromUrls,
+    loadKtx2Texture2DArray,
+    uploadKtx2Texture2DArray,
 } from "babylon-lite";
 import {
     RawTexture2DArray,
     UploadImageToTexture2DArrayLayer,
     LoadImageToTexture2DArrayLayerAsync,
     CreateTexture2DArrayFromImageUrlsAsync,
+    CreateTexture2DArrayFromKTX2Async,
 } from "../src/textures/raw-texture-2d-array";
 import { BaseTexture } from "../src/textures/textures";
 import { AbstractEngine } from "../src/engine/engine";
@@ -46,6 +51,8 @@ const updateFromPixelsMock = vi.mocked(updateTexture2DArrayFromPixels);
 const uploadMock = vi.mocked(uploadImageToArrayLayer);
 const loadMock = vi.mocked(loadImageToArrayLayer);
 const fromUrlsMock = vi.mocked(createTexture2DArrayFromUrls);
+const loadKtx2Mock = vi.mocked(loadKtx2Texture2DArray);
+const uploadKtx2Mock = vi.mocked(uploadKtx2Texture2DArray);
 
 const liteEngine = {};
 
@@ -212,5 +219,40 @@ describe("CreateTexture2DArrayFromImageUrlsAsync", () => {
         fromUrlsMock.mockClear();
         await CreateTexture2DArrayFromImageUrlsAsync(fakeScene() as never, ["a.png"], { invertY: true, premultiplyAlpha: true });
         expect(fromUrlsMock.mock.calls[0]![2]).toEqual({ mipMaps: true, invertY: true, premultiplyAlpha: true });
+    });
+});
+
+describe("CreateTexture2DArrayFromKTX2Async", () => {
+    it("fetches a KTX2 url via Lite's loadKtx2Texture2DArray and wraps the result", async () => {
+        loadKtx2Mock.mockClear();
+        uploadKtx2Mock.mockClear();
+        const tex = await CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "array.ktx2");
+        expect(loadKtx2Mock).toHaveBeenCalledTimes(1);
+        expect(loadKtx2Mock.mock.calls[0]![0]).toBe(liteEngine);
+        expect(loadKtx2Mock.mock.calls[0]![1]).toBe("array.ktx2");
+        expect(uploadKtx2Mock).not.toHaveBeenCalled();
+        expect(tex).toBeInstanceOf(RawTexture2DArray);
+        expect(tex.depth).toBe(6);
+        expect(tex.format).toBe(5);
+    });
+
+    it("uploads already-fetched KTX2 bytes via Lite's uploadKtx2Texture2DArray", async () => {
+        loadKtx2Mock.mockClear();
+        uploadKtx2Mock.mockClear();
+        const bytes = new Uint8Array([1, 2, 3, 4]);
+        const tex = await CreateTexture2DArrayFromKTX2Async(fakeScene() as never, bytes);
+        expect(uploadKtx2Mock).toHaveBeenCalledTimes(1);
+        expect(uploadKtx2Mock.mock.calls[0]![0]).toBe(liteEngine);
+        expect(loadKtx2Mock).not.toHaveBeenCalled();
+        expect(tex).toBeInstanceOf(RawTexture2DArray);
+    });
+
+    it("passes only the view's own slice when data is an offset ArrayBufferView", async () => {
+        uploadKtx2Mock.mockClear();
+        const backing = new Uint8Array([9, 9, 1, 2, 3, 4, 9]);
+        const view = new Uint8Array(backing.buffer, 2, 4);
+        await CreateTexture2DArrayFromKTX2Async(fakeScene() as never, view);
+        const passed = new Uint8Array(uploadKtx2Mock.mock.calls[0]![1] as ArrayBuffer);
+        expect(Array.from(passed)).toEqual([1, 2, 3, 4]);
     });
 });

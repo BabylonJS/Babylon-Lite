@@ -60,7 +60,7 @@ export { Light, HemisphericLight, DirectionalLight, PointLight, SpotLight } from
 
 // ─── Meshes ──────────────────────────────────────────────────────────
 export { Mesh, AbstractMesh, TransformNode, GroundMesh, InstancedMesh, VertexData, VertexBuffer, MeshBuilder } from "./meshes/meshes.js";
-export { CreateBox, CreateSphere, CreateGround, CreatePlane, CreateCylinder, CreateTorus, CreateDisc } from "./meshes/meshes.js";
+export { CreateBox, CreateSphere, CreateGround, CreatePlane, CreateCylinder, CreateTorus, CreateDisc, CreateTiledBox, CreateTiledPlane } from "./meshes/meshes.js";
 export { CSG, CSG2, InitializeCSG2Async } from "./meshes/csg.js";
 export { MeshoptCompression } from "./meshes/compression.js";
 export { MorphTarget, MorphTargetManager } from "./morph/morph.js";
@@ -88,8 +88,9 @@ export {
     UploadImageToTexture2DArrayLayer,
     LoadImageToTexture2DArrayLayerAsync,
     CreateTexture2DArrayFromImageUrlsAsync,
+    CreateTexture2DArrayFromKTX2Async,
 } from "./textures/raw-texture-2d-array.js";
-export type { IUploadImageToTexture2DArrayLayerOptions, ICreateTexture2DArrayFromImageUrlsOptions } from "./textures/raw-texture-2d-array.js";
+export type { IUploadImageToTexture2DArrayLayerOptions, ICreateTexture2DArrayFromImageUrlsOptions, ICreateTexture2DArrayFromKTX2Options } from "./textures/raw-texture-2d-array.js";
 
 // ─── Loading ─────────────────────────────────────────────────────────
 export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync } from "./loading/scene-loader.js";

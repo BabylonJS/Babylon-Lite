@@ -12,7 +12,15 @@
  * decoded image sources through Lite's external-image copy.
  */
 
-import { createTexture2DArray, createTexture2DArrayFromPixels, updateTexture2DArrayFromPixels, loadImageToArrayLayer, createTexture2DArrayFromUrls } from "babylon-lite";
+import {
+    createTexture2DArray,
+    createTexture2DArrayFromPixels,
+    updateTexture2DArrayFromPixels,
+    loadImageToArrayLayer,
+    createTexture2DArrayFromUrls,
+    loadKtx2Texture2DArray,
+    uploadKtx2Texture2DArray,
+} from "babylon-lite";
 import type { Texture2DArray } from "babylon-lite";
 
 import { Constants } from "../misc/engine-constants.js";
@@ -171,6 +179,16 @@ export interface ICreateTexture2DArrayFromImageUrlsOptions extends IUploadImageT
     imageBitmapOptions?: ImageBitmapOptions;
 }
 
+/** Babylon.js `ICreateTexture2DArrayFromKTX2Options`. */
+export interface ICreateTexture2DArrayFromKTX2Options {
+    /** Generate a full mip chain (true by default). */
+    generateMipMaps?: boolean;
+    /** Sampling mode (recorded for parity; Lite uploads the container's own mip chain). */
+    samplingMode?: number;
+    /** Store the texture with the Y axis inverted (false by default). */
+    invertY?: boolean;
+}
+
 /** @internal Resolve the live Lite array handle a compat texture wraps. */
 function liteArrayOf(texture: RawTexture2DArray): Texture2DArray {
     const array = texture.getInternalTexture();
@@ -233,5 +251,30 @@ export async function CreateTexture2DArrayFromImageUrlsAsync(
         invertY: options?.invertY ?? false,
         premultiplyAlpha: options?.premultiplyAlpha ?? false,
     });
+    return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
+}
+
+/**
+ * Babylon.js `CreateTexture2DArrayFromKTX2Async` — build a texture array from a single
+ * KTX2 container holding every layer (`layerCount >= 1`). The single-file counterpart to
+ * {@link CreateTexture2DArrayFromImageUrlsAsync}. Forwards to Lite's
+ * `loadKtx2Texture2DArray` (URL) / `uploadKtx2Texture2DArray` (already-fetched bytes),
+ * then wraps the result in a `RawTexture2DArray`.
+ *
+ * Babylon.js transcodes the container to uncompressed RGBA because its raw-array path
+ * cannot upload compressed layers; Lite keeps the array GPU-compressed (WebGPU's
+ * `writeTexture` uploads compressed layers directly). The result samples identically, so
+ * `format` is reported as `TEXTUREFORMAT_RGBA` for parity. `generateMipMaps` /
+ * `samplingMode` / `invertY` are recorded for parity but Lite uploads the container's
+ * authored mip chain as-is (per the codec-decoded convention it stores the data unflipped
+ * with `invertY = true`; sample arrays with your own `v = 1 - v` WGSL, GUIDANCE §8 path 2).
+ */
+export async function CreateTexture2DArrayFromKTX2Async(scene: Scene, data: string | ArrayBufferView, options?: ICreateTexture2DArrayFromKTX2Options): Promise<RawTexture2DArray> {
+    void options;
+    const engine = scene.getEngine()._lite;
+    const liteArray =
+        typeof data === "string"
+            ? await loadKtx2Texture2DArray(engine, data)
+            : await uploadKtx2Texture2DArray(engine, data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer);
     return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
 }
