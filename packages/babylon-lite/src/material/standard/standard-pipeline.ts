@@ -39,6 +39,7 @@ import {
     _getStdExtsSorted,
 } from "./standard-flags.js";
 import { MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
+import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
  *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
@@ -132,6 +133,10 @@ export interface StandardShaderBindings {
     _shadowBGL: GPUBindGroupLayout | null;
     /** @internal */
     _composed: ComposedShader;
+    /** @internal Shared across normal/A2C pipeline variants only when the A2C resolver is installed. */
+    _a2cVertModule?: GPUShaderModule;
+    /** @internal */
+    _a2cFragModule?: GPUShaderModule;
     /** @internal Pre-baked partial depth-stencil descriptor for this material's stencil state. Present (and
      *  the cache key carries the resolved `_key`) only when `enableMaterialStencil` was called — otherwise the
      *  field is never assigned and the whole stencil path folds out of stencil-free bundles. */
@@ -229,9 +234,16 @@ export function getOrCreateStandardBindings(
 }
 
 /** Get-or-build a sig-specific pipeline on top of a shader bindings. Called at bind() time. */
-export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTargetSignature, bindings: StandardShaderBindings): GPURenderPipeline {
+export function getOrCreateStandardPipeline(
+    engine: EngineContext,
+    sig: RenderTargetSignature,
+    bindings: StandardShaderBindings,
+    material: StandardMaterialProps
+): GPURenderPipeline {
     ensureDevice(engine);
-    const key = targetSignatureKey(sig);
+    const alphaToCoverageResolver = _getAlphaToCoverageResolver();
+    const useAlphaToCoverage = sig._sampleCount > 1 && !!alphaToCoverageResolver?.(material);
+    const key = `${targetSignatureKey(sig)}${useAlphaToCoverage ? ":a2c" : ""}`;
     const cached = bindings._pipelines.get(key);
     if (cached) {
         return cached;
@@ -243,10 +255,17 @@ export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTa
     const sceneBGL = getSceneBindGroupLayout(engine);
     const bgls: GPUBindGroupLayout[] = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
 
-    const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
+    const vertModule = alphaToCoverageResolver
+        ? (bindings._a2cVertModule ??= device.createShaderModule({ code: composed._vertexWGSL }))
+        : device.createShaderModule({ code: composed._vertexWGSL });
     const noColorOutput = (features & NO_COLOR_OUTPUT) !== 0;
     const esmShadowOutput = (features & ESM_SHADOW_OUTPUT) !== 0;
-    const fragModule = !sig._colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
+    const fragModule =
+        !sig._colorFormat && !noColorOutput
+            ? null
+            : alphaToCoverageResolver
+              ? (bindings._a2cFragModule ??= device.createShaderModule({ code: composed._fragmentWGSL }))
+              : device.createShaderModule({ code: composed._fragmentWGSL });
 
     const needsBlend = !esmShadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || (features & MATERIAL_ALPHA_BLEND) !== 0);
     const colorTarget: GPUColorTargetState | null = noColorOutput
@@ -279,7 +298,7 @@ export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTa
                   },
               }
             : {}),
-        multisample: { count: sig._sampleCount },
+        multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
         primitive: _stdPrimitiveResolver
             ? _stdPrimitiveResolver(bindings._meshFeatures, (features & DOUBLE_SIDED) !== 0)
             : { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },

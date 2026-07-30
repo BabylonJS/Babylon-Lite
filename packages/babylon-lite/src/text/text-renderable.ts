@@ -122,7 +122,7 @@ function ensureGpu(r: TextRenderable, engine: EngineContext, target: RenderTarge
     }
     const depthFormat = target._depthStencilFormat ?? null;
     const depthWrite = !r.ignoreDepth;
-    const { pipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite);
+    const { pipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r);
     const key = targetSig(target);
     let gpu = r._gpu;
     if (gpu && gpu.device !== device) {
@@ -185,7 +185,7 @@ function ensureInstanceCapacity(device: GPUDevice, gpu: TextRenderableGpu, neede
 
 function bindTextRenderable(r: TextRenderable, engine: EngineContext, target: RenderTargetSignature): DrawBinding {
     const gpu = ensureGpu(r, engine, target);
-    const { cache } = getOrCreateTextPipeline(engine, target._colorFormat!, target._sampleCount === 1 ? 1 : 4, target._depthStencilFormat ?? null, !r.ignoreDepth);
+    const { cache } = getOrCreateTextPipeline(engine, target._colorFormat!, target._sampleCount === 1 ? 1 : 4, target._depthStencilFormat ?? null, !r.ignoreDepth, r);
     const quadVertex = cache.quadVertexBuffer;
     const bindGroupLayout = cache.bindGroupLayout;
 

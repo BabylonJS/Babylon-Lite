@@ -197,6 +197,9 @@ export interface GLEngineContext {
      * @internal
      */
     _scheduleFrame: ((engine: GLEngineContext) => void) | null;
+    /** Optional feature-owned state-cache invalidators. Allocated lazily by the first feature that needs one.
+     * @internal */
+    _stateCacheInvalidators?: (() => void)[];
 }
 
 /** Acquire a WebGL2 context on the canvas and build the pure-state handle.
@@ -318,6 +321,7 @@ export function disposeGLEngine(engine: GLEngineContext): void {
     engine._currentRenderTarget = null;
     engine._onLost.length = 0;
     engine._onRestored.length = 0;
+    engine._stateCacheInvalidators?.splice(0);
 }
 
 /** Match drawing-buffer size to (clientSize × devicePixelRatio / _hsl). No-op
@@ -392,6 +396,12 @@ export function wipeGLStateCache(engine: GLEngineContext): void {
         return;
     }
     resetGLStateCache(engine._state);
+    const invalidators = engine._stateCacheInvalidators;
+    if (invalidators) {
+        for (const invalidate of invalidators) {
+            invalidate();
+        }
+    }
 }
 
 /** Drawing-buffer width in physical pixels (`canvas.width`). */
