@@ -16,6 +16,7 @@ vi.mock("babylon-lite", async (importActual) => {
             name: src.name + "_clone",
             material: src.material,
             children,
+            visible: true,
         })),
         addToScene: vi.fn(),
         removeFromScene: vi.fn(),
@@ -30,14 +31,17 @@ const addToSceneMock = vi.mocked(addToScene);
 const removeFromSceneMock = vi.mocked(removeFromScene);
 
 /** Minimal compat `Scene` stand-in exposing only what `Mesh.clone` touches. */
-function fakeScene(): { _lite: object; getEngine(): { _lite: object }; defaultMaterial: null; _deferAdd(add: () => void): void } {
+function fakeScene(): { _lite: object; registered: unknown[]; getEngine(): { _lite: object }; defaultMaterial: null; _deferAdd(add: () => void): void; _registerMesh(mesh: unknown): void } {
     const engine = { _lite: {} };
+    const registered: unknown[] = [];
     return {
         _lite: { tag: "scene-lite" },
+        registered,
         getEngine: () => engine,
         defaultMaterial: null,
         // The mesh under test is created after engine start, so run adds inline.
         _deferAdd: (add: () => void) => add(),
+        _registerMesh: (mesh: unknown) => registered.push(mesh),
     };
 }
 
@@ -49,11 +53,27 @@ function fakeMaterial(): { _lite: object; _ensureRenderable: () => void } {
 /** Build a source `Mesh` wrapper without the GPU-backed constructor path. */
 function sourceMesh(scene: ReturnType<typeof fakeScene>, material: unknown, liteChildren: unknown[] = []): Mesh {
     const mesh = Object.create(Mesh.prototype) as Mesh;
-    const lite = { name: "source", material: (material as { _lite: unknown })._lite, children: liteChildren };
-    Object.assign(mesh as unknown as Record<string, unknown>, { _lite: lite, _scene: scene, _material: material, _children: [] });
+    const lite = { name: "source", material: (material as { _lite: unknown })._lite, children: liteChildren, visible: true };
+    Object.assign(mesh as unknown as Record<string, unknown>, {
+        name: "source",
+        id: "source-id",
+        metadata: null,
+        _lite: lite,
+        _scene: scene,
+        _material: material,
+        _children: [],
+        _enabled: true,
+        _parentEnabled: true,
+        _visible: true,
+    });
     cloneTransformNodeMock.mockImplementation((src: unknown) => {
         const s = src as { name: string; material?: unknown };
-        return { name: s.name + "_clone", material: s.material, children: [...liteChildren] } as never;
+        return {
+            name: s.name + "_clone",
+            material: s.material,
+            visible: true,
+            children: liteChildren.map((child) => ({ ...(child as object), children: [] })),
+        } as never;
     });
     return mesh;
 }
@@ -92,8 +112,11 @@ describe("Mesh.clone", () => {
         removeFromSceneMock.mockClear();
         const scene = fakeScene();
         const src = sourceMesh(scene, fakeMaterial(), [{ name: "childA" }, { name: "childB" }]);
-        src.clone("copy");
+        const clone = src.clone("copy");
         expect(removeFromSceneMock).not.toHaveBeenCalled();
+        expect(clone.getChildMeshes()).toHaveLength(2);
+        expect(scene.registered).toContain(clone.getChildMeshes()[0]);
+        expect(scene.registered).toContain(clone.getChildMeshes()[1]);
     });
 
     it("prunes the cloned descendants when doNotCloneChildren is true", () => {
@@ -117,5 +140,23 @@ describe("Mesh.clone", () => {
 
         const clone = src.clone("copy", newParent);
         expect((clone as unknown as { _lite: { parent: unknown } })._lite.parent).toBe((newParent as unknown as { _node: unknown })._node);
+    });
+
+    it("copies wrapper state and retains the source parent by default", () => {
+        const scene = fakeScene();
+        const src = sourceMesh(scene, fakeMaterial());
+        const parent = new TransformNode("parent");
+        src.parent = parent;
+        src.id = "custom-id";
+        src.metadata = { tag: "metadata" };
+        Object.assign(src as unknown as Record<string, unknown>, { _enabled: false, _visible: false });
+
+        const clone = src.clone("copy");
+
+        expect(clone.parent).toBe(parent);
+        expect(clone.id).toBe("custom-id");
+        expect(clone.metadata).toBe(src.metadata);
+        expect(clone.isEnabled(false)).toBe(false);
+        expect(clone.isVisible).toBe(false);
     });
 });

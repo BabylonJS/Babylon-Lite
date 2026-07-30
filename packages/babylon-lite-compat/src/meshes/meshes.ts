@@ -554,17 +554,38 @@ export class Mesh extends AbstractMesh {
         const scene = this._scene;
         const liteClone = cloneTransformNode(this._lite) as LiteMesh;
         liteClone.name = name;
-        const clone = new Mesh(name, liteClone, scene);
-        // BJS keeps the source material (shared by reference); override the
-        // `scene.defaultMaterial` the AbstractMesh constructor assigned.
-        clone.material = this.material;
+        const clone = Mesh._wrapCloneHierarchy(this, liteClone, scene, null, doNotCloneChildren === true);
         if (scene) {
             addPrimitive(clone, scene, doNotCloneChildren ? () => pruneClonedDescendants(scene, liteClone) : undefined);
         }
-        if (newParent) {
-            clone.parent = newParent;
+        const parent = newParent ?? this.parent;
+        if (parent) {
+            clone.parent = parent;
         }
         return clone;
+    }
+
+    private static _wrapCloneHierarchy(source: Mesh | undefined, lite: LiteMesh, scene: Scene | undefined, parent: Mesh | null, skipChildren: boolean): Mesh {
+        const wrapper = new Mesh(lite.name ?? "", lite);
+        wrapper._scene = scene;
+        if (scene) {
+            scene._registerMesh(wrapper);
+        }
+        wrapper._linkParent(parent);
+        if (source) {
+            wrapper.id = source.id;
+            wrapper.metadata = source.metadata;
+            wrapper.material = source.material;
+            wrapper.isVisible = source.isVisible;
+            wrapper.setEnabled(source.isEnabled(false));
+        }
+        if (!skipChildren) {
+            const sourceChildren = source?._children.filter((child): child is Mesh => child instanceof Mesh) ?? [];
+            for (let i = 0; i < lite.children.length; i++) {
+                Mesh._wrapCloneHierarchy(sourceChildren[i], lite.children[i] as LiteMesh, scene, wrapper, false);
+            }
+        }
+        return wrapper;
     }
 
     /** Level-of-detail — unsupported (no LOD system in Babylon Lite). */
