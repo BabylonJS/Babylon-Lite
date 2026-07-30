@@ -1205,8 +1205,6 @@
         "maxRawKB": 82,
         "description": "Frame-graph RTT demo for Standard and PBR material views with shadow-depth feature overrides; the normal source materials render in the main pass and the depth RTTs are displayed on planes.",
         "tags": ["std", "pbr", "frame-graph", "rtt", "shadow"],
-        "skipParity": true,
-        "skipParityReason": "Quarantined for dep-bump PR: committed golden predates an upstream Babylon.js rendering shift. At @babylonjs 9.17.1 Lite matches a freshly-captured reference at MAD=0.000, but the committed (immutable) golden differs by MAD~0.288. Not a Lite regression and not a #18717 side-effect issue; refreshing the committed golden needs user sign-off per the golden-immutability guardrail.",
         "skipParityOnCI": true,
         "skipPerf": true,
         "skipNotes": "Scene 116 parity is skipped on CI because the BJS reference capture is flaky on CI/BrowserStack: the shadow-depth RTT observables can complete and the page can mark ready while the preview planes still occasionally sample an empty depth texture, producing a bad live reference image rather than a Babylon Lite regression. Local parity still runs and force-recaptures the golden on each test run. The scene remains in the lab/bundle config and can be re-enabled once the BJS reference readiness signal is reliable on CI."
@@ -1368,8 +1366,6 @@
         "maxRawKB": 73,
         "description": "Sponza rendered through a Lite frame-graph blur task followed by chromatic aberration.",
         "tags": ["post-process", "frame-graph", "babylon"],
-        "skipParity": true,
-        "skipParityReason": "Quarantined for dep-bump PR: committed golden (present on master) predates an upstream Babylon.js post-process rendering shift. At @babylonjs 9.17.1 Lite matches a freshly-captured reference at MAD=0.004, but master's committed (immutable) golden differs by MAD~0.153. Not a Lite regression; refreshing the committed golden needs user sign-off per the golden-immutability guardrail.",
         "skipPerf": true
     },
     {
