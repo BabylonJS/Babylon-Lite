@@ -103,6 +103,10 @@ export function mat4Multiply(a: Mat4, b: Mat4): Mat4;
 /** LookAt matrix (left-handed). */
 export function mat4LookAtLH(eye: Vec3, target: Vec3, up: Vec3): Mat4;
 
+/** Camera-to-world matrix for an eye looking at `target` — the inverse of `mat4LookAtLH`,
+ *  written in place. Used by every camera factory for its local world matrix. */
+export function mat4LookAtWorldLHToRef(out: Mat4Storage, eye: Vec3, target: Vec3, up: Vec3): void;
+
 /** Perspective projection (left-handed, zero-to-one depth). */
 export function mat4PerspectiveLH(fov: number, aspect: number, near: number, far: number): Mat4;
 
@@ -118,11 +122,23 @@ export function mat4Translation(x: number, y: number, z: number): Mat4;
 /** Create a rotation matrix from a quaternion. */
 export function mat4FromQuat(qx: number, qy: number, qz: number, qw: number): Mat4;
 
+/** Write a rotation matrix from a quaternion into an existing matrix buffer. */
+export function mat4FromQuatInto<T extends Float32Array | Float64Array>(out: T, qx: number, qy: number, qz: number, qw: number): T;
+
 /** Compose TRS (translation * rotation * scale) into a single Mat4. */
 export function mat4Compose(tx: number, ty: number, tz: number, qx: number, qy: number, qz: number, qw: number, sx: number, sy: number, sz: number): Mat4;
 
 /** Decompose a column-major affine Mat4 into translation/rotation(quaternion)/scale.
- *  Shared by setParent() and the Havok compound-shape path. */
+ *  Shared by setParent(), the gizmo/Gaussian-splat rotation extraction, and the Havok
+ *  compound-shape path. **Behaviour change:** earlier versions always returned a
+ *  non-negative scale and silently dropped the reflection of a mirrored matrix;
+ *  `scale.y` is now negative for one, so callers assuming non-negative components
+ *  must take `Math.abs` themselves. Mirrored matrices are preserved by folding the
+ *  reflection onto a negative Y scale, matching Babylon.js `Matrix.decompose` —
+ *  lossless, but canonical rather than sign-faithful (a negative X scale comes back
+ *  as negative Y + a different rotation). Assumes a shear-free TRS matrix; a
+ *  degenerate axis (scale below 1e-8) yields a finite but meaningless rotation
+ *  rather than an error. */
 export function mat4Decompose(m: Mat4): { translation: Vec3; rotation: Quat; scale: Vec3 };
 
 /** Unit quaternion from the rotation part of a column-major Mat4 (Babylon.js
@@ -241,6 +257,19 @@ out[3]=0        out[7]=0        out[11]=0         out[15]=1
 
 Returns identity if `|target - eye| < 1e-10` or `|cross(up, zAxis)| < 1e-10`.
 
+### mat4LookAtWorldLHToRef(out, eye, target, up)
+
+The **inverse** of `mat4LookAtLH` — the camera-to-world matrix — written in place, with the same basis and the same degenerate fallbacks:
+
+```
+out[0]=xAxis.x  out[4]=yAxis.x  out[8]=zAxis.x   out[12]=eye.x
+out[1]=xAxis.y  out[5]=yAxis.y  out[9]=zAxis.y   out[13]=eye.y
+out[2]=xAxis.z  out[6]=yAxis.z  out[10]=zAxis.z  out[14]=eye.z
+out[3]=0        out[7]=0        out[11]=0        out[15]=1
+```
+
+This is what every camera factory needs (the engine stores a camera's world matrix and derives the view matrix from it in `getViewMatrix`), so building it directly avoids allocating a view matrix, computing a translation column of three dot products that is immediately discarded, and transposing the rotation back out. Leaves an identity rotation with the eye translation when `|target - eye| < 1e-10` or `|cross(up, zAxis)| < 1e-10`.
+
 ### mat4PerspectiveLH(fov, aspect, near, far)
 
 Left-handed perspective, depth range [0, 1]:
@@ -284,6 +313,9 @@ out = identity with out[12]=x, out[13]=y, out[14]=z
 ```
 
 ### mat4FromQuat(qx, qy, qz, qw)
+
+`mat4FromQuatInto(out, qx, qy, qz, qw)` writes the same 16 values into an
+existing matrix buffer and returns `out`.
 
 ```
 xx=qx*qx  yy=qy*qy  zz=qz*qz
@@ -333,6 +365,7 @@ result[15] = 1
 | `mat4PerspectiveLH(fov,ar,n,f)` | `BABYLON.Matrix.PerspectiveFovLH(fov,ar,n,f)`        |
 | `mat4Invert(m)`                 | `m.invert()` / `BABYLON.Matrix.Invert(m)`            |
 | `mat4FromQuat(qx,qy,qz,qw)`     | `BABYLON.Matrix.FromQuaternion(q)`                   |
+| `mat4FromQuatInto(out,...)`     | `BABYLON.Matrix.FromQuaternionToRef(q,out)`          |
 | `mat4Compose(t,r,s)`            | `BABYLON.Matrix.Compose(scale,rotation,translation)` |
 | Column-major layout             | Column-major layout (same)                           |
 | Left-handed                     | Left-handed (same)                                   |
@@ -351,11 +384,13 @@ result[15] = 1
 | `mat4Multiply identity`                | `A × I = A`                                             |
 | `mat4Multiply associativity`           | `(A×B)×C ≈ A×(B×C)` within epsilon                      |
 | `mat4LookAtLH basic`                   | Eye at (0,0,-5), target (0,0,0): verify zAxis = (0,0,1) |
+| `mat4LookAtWorldLHToRef ≡ inverse`     | Element-for-element match with the transpose-of-look-at path it replaced, incl. both degenerate fallbacks |
 | `mat4PerspectiveLH`                    | Verify `m[0] = tan/aspect`, `m[10] = far/(far-near)`    |
 | `mat4Invert × m = identity`            | Verify `m × m⁻¹ ≈ I`                                    |
 | `mat4Invert returns null for singular` | Zero matrix → null                                      |
 | `mat4FromQuat identity`                | Quat (0,0,0,1) → identity matrix                        |
 | `mat4FromQuat 90° around Y`            | Verify correct rotation                                 |
+| `mat4FromQuatInto`                     | Writes into existing storage with no replacement         |
 | `mat4Compose T×R×S`                    | Compare with manual multiply of separate matrices       |
 | `normalizeVec3 zero`                   | Returns (0,0,0) for zero vector                         |
 | `crossVec3 X×Y=Z`                      | (1,0,0) × (0,1,0) = (0,0,1)                             |

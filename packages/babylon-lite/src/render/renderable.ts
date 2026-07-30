@@ -77,6 +77,11 @@ export interface Renderable {
     _worldCenter?: [number, number, number];
     /** @internal Material reference at build time — for detecting material swaps. */
     _lastMaterial?: any;
+    /** @internal Retire this renderable's owned GPU resources (per-mesh geometry
+     *  UBOs, skeletal-velocity textures, bound-texture releases). Populated only by
+     *  the geometry-renderer path so its owning task can retire per-mesh resources
+     *  on re-record/dispose. Idempotent. */
+    _geometryDispose?: () => void;
     /**
      * Resolve target-specific GPU state (pipeline) and return a `DrawBinding` whose
      * `draw` closure captures that state. Called by the render pass task at build/insert
@@ -104,6 +109,8 @@ export interface SceneUniformUpdater {
 export interface MeshGroupBuildResult {
     renderables: Renderable[];
     updater?: SceneUniformUpdater;
+    /** @internal True when this build result captured gamma-albedo PBR support. */
+    _G?: boolean;
     /** Closure used to rebuild a single mesh — captures the per-scene context
      *  (composer, BG caches, lights UBO, …) so material swaps and per-pass overrides
      *  reuse the same setup. The group builder stores it on itself as

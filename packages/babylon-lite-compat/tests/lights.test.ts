@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DirectionalLight, HemisphericLight, PointLight, SpotLight } from "../src/lights/lights";
 import { Vector3 } from "../src/math/vector";
+import { TransformNode } from "../src/meshes/meshes";
 
 /**
  * The light wrappers forward to Babylon Lite's device-free light factories, so
@@ -63,6 +64,27 @@ describe("Light.setEnabled visibility toggle", () => {
         expect(light._lite.intensity).toBe(0);
         light.setEnabled(true);
         expect(light._lite.intensity).toBeCloseTo(0.7);
+    });
+
+    it("inherits parent state without overwriting its local enabled flag", () => {
+        const parent = new TransformNode("parent");
+        const light = new DirectionalLight("d", new Vector3(0, -1, 0));
+        light.intensity = 0.8;
+        light.parent = parent;
+
+        parent.setEnabled(false);
+        expect(light.isEnabled(false)).toBe(true);
+        expect(light.isEnabled()).toBe(false);
+        expect(light.intensity).toBeCloseTo(0.8);
+        expect(light._lite.intensity).toBe(0);
+
+        light.setEnabled(false);
+        parent.setEnabled(true);
+        expect(light.isEnabled(false)).toBe(false);
+        expect(light._lite.intensity).toBe(0);
+
+        light.setEnabled(true);
+        expect(light._lite.intensity).toBeCloseTo(0.8);
     });
 });
 

@@ -146,10 +146,11 @@ comparisonSampler, csmUBO]` (binding order 0,1,2). The 2d-array view dimension i
 Receiver, per CSM light (suffix `_<lightIndex>`, `N` = baked cascade count):
 
 ```wgsl
-// cascade select from camera-view-space depth (vf.z), LH
+// cascade select from camera-view-space depth, LH
+let viewZ = (scene.view * vec4(vp, 1.0)).z;
 var idx = -1; var diff = 0.0;
 for (var i = 0; i < N; i++) {
-    diff = csmInfo.viewFrustumZ[i] - vf.z;
+    diff = csmInfo.viewFrustumZ[i] - viewZ;
     if (diff >= 0.0) { idx = i; break; }
 }
 if (idx < 0) { idx = N - 1; }
@@ -179,8 +180,11 @@ The `0.99999994` clamp is critical: fragments projecting beyond a cascade's far 
 must compare strictly _less than_ the cleared shadow-map value (1.0) so they read as
 **lit**, not shadowed.
 
-`vp` (world position) and `vf` (camera-view-space position) are existing base
-varyings — CSM reuses them instead of emitting N per-cascade light-space varyings.
+`vp` is the existing world-position varying. Standard CSM derives camera-view-space
+depth from `scene.view × vec4(vp, 1)` in the fragment shader. It must not depend on
+the fog-only `vf` varying, so a non-fog CSM material composes without retaining fog
+WGSL or requiring fog-generated vertex output. CSM still avoids emitting N
+per-cascade light-space varyings.
 
 ## CSM Math (`csm-shadow-task-hooks.ts`)
 

@@ -146,6 +146,39 @@ describe("attachControl — pinch / touch handling", () => {
         expect(camera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
     });
 
+    it("reads wheelPrecision LIVE, so a value set after attachControl takes effect", () => {
+        // Babylon.js allows setting wheelPrecision after attachControl; the wheel
+        // handler must read it live rather than snapshotting it at attach time.
+        // Default wheelPrecision = 3: deltaY 120, radius 10 → -=(120*10)/(3*1000)=-0.4.
+        fire(canvas, "wheel", { deltaY: 120, preventDefault: vi.fn() });
+        expect(camera.inertialRadiusOffset).toBeCloseTo(-0.4, 5);
+
+        camera.inertialRadiusOffset = 0;
+        // Raise wheelPrecision to 30 (10× slower zoom) AFTER attach.
+        camera.wheelPrecision = 30;
+        fire(canvas, "wheel", { deltaY: 120, preventDefault: vi.fn() });
+        // Now -=(120*10)/(30*1000) = -0.04, i.e. 10× smaller — the late value was honored.
+        expect(camera.inertialRadiusOffset).toBeCloseTo(-0.04, 5);
+    });
+
+    it("reads angularSensibility LIVE, so a value set after attachControl takes effect", () => {
+        // Raise angularSensibility to 2000 (2× slower orbit) AFTER attach.
+        camera.angularSensibility = 2000;
+        fire(canvas, "pointerdown", pointerEvent({ button: 0, clientX: 0, clientY: 0, pointerId: 1 }));
+        fire(canvas, "pointermove", pointerEvent({ clientX: 10, clientY: 0, pointerId: 1 }));
+        // dx = 10 / 2000 = 0.005 (half of the default-sensibility 0.01).
+        expect(camera.inertialAlphaOffset).toBeCloseTo(-0.005, 5);
+    });
+
+    it("reads panningSensibility LIVE, so a value set after attachControl takes effect", () => {
+        // Lower panningSensibility to 25 (2× faster pan) AFTER attach.
+        camera.panningSensibility = 25;
+        fire(canvas, "pointerdown", pointerEvent({ button: 2, clientX: 0, clientY: 0, pointerId: 1 }));
+        fire(canvas, "pointermove", pointerEvent({ clientX: 10, clientY: 0, pointerId: 1 }));
+        // dx = 10 → inertialPanningX += -10/25 = -0.4 (default 50 would give -0.2).
+        expect(camera.inertialPanningX).toBeCloseTo(-0.4, 5);
+    });
+
     it("registers touch/gesture listeners as non-passive so preventDefault is honored", () => {
         // Re-attach with a spy canvas to inspect the options passed to addEventListener.
         const seen: Record<string, AddEventListenerOptions | undefined> = {};

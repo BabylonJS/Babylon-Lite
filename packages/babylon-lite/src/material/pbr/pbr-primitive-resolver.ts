@@ -10,6 +10,7 @@
 import type { Mesh } from "../../mesh/mesh.js";
 import { _installMeshFeatureExtra } from "../mesh-features.js";
 import { _installPbrPrimitiveResolver } from "./pbr-pipeline.js";
+import { _installPbrGeometryWinding } from "./pbr-geometry-renderable.js";
 
 /** Mesh world transform has a positive determinant (mirrored vs the RH→LH root): its triangle
  *  winding is reversed, so back-face culling must flip (cull "front"). */
@@ -21,10 +22,21 @@ const MSH_TOPOLOGY_SHIFT = 12;
  *  pipeline's `stripIndexFormat` to match the index buffer for indexed strip draws. */
 const MSH_INDEX_U32 = 1 << 15;
 
+/** Winding rule installed by the `enableMirroredMeshes()` opt-in. It derives winding from the live
+ *  world determinant instead of the loader's one-shot flag, so it also covers procedural meshes and
+ *  meshes whose transform is mirrored after load. Null (the default) keeps the loader-seeded
+ *  behaviour, so glTF-only scenes are unaffected.
+ *  @internal */
+let _windingRule: ((mesh: Mesh) => boolean) | null = null;
+/** @internal Install the mirrored-mesh winding rule (called by `enableMirroredMeshes()`). */
+export function _installWindingRule(rule: (mesh: Mesh) => boolean): void {
+    _windingRule = rule;
+}
+
 // Encode the topology + negative-winding bits from the per-mesh flags set by the loader/feature.
 _installMeshFeatureExtra((mesh: Mesh): number => {
     let f = 0;
-    if ((mesh as { _reverseWinding?: boolean })._reverseWinding) {
+    if (_windingRule ? _windingRule(mesh) : (mesh as { _reverseWinding?: boolean })._reverseWinding) {
         f |= MSH_REVERSE_WINDING;
     }
     const topo = (mesh as { _topology?: number })._topology;
@@ -39,10 +51,20 @@ _installMeshFeatureExtra((mesh: Mesh): number => {
     return f;
 });
 
-_installPbrPrimitiveResolver((meshFeatures, hasDoubleSided): GPUPrimitiveState => {
-    // A mirrored mesh (positive world determinant, e.g. KHR negative node scale) has reversed
-    // triangle winding, so back-face culling must cull the FRONT face instead. Matches BJS, which
-    // flips sideOrientation when the world matrix determinant is negative.
+/** Shared primitive-state resolution. Also used by the Standard pipeline through the
+ *  `enableMirroredMeshes()` opt-in.
+ *  @internal */
+export function _resolvePrimitive(meshFeatures: number, hasDoubleSided: boolean): GPUPrimitiveState {
+    // `reverseWinding` marks a mesh mirrored relative to Lite's world space: the loader sets it when
+    // the node's world-matrix determinant is positive. (Lite applies a RH→LH root flip with det < 0,
+    // so an un-mirrored glTF node lands at a negative world determinant and a mirrored one — e.g. KHR
+    // negative node scale — at a positive one.) A mirrored mesh has reversed triangle winding, so we
+    // flip the pipeline's `frontFace` (ccw→cw) rather than the cull face: WebGPU derives
+    // `@builtin(front_facing)` from `frontFace`, so this keeps the double-sided shader's front-facing
+    // normal flip correct (a cullMode flip would leave front_facing evaluated against the un-mirrored
+    // ccw winding, wrongly inverting the shading normal on the visible outer surface → black). BJS
+    // handles the same case by flipping sideOrientation (the GL front-face winding); it states the
+    // condition as a negative determinant because it measures the sign in its own opposite-handed space.
     const reverseWinding = (meshFeatures & MSH_REVERSE_WINDING) !== 0;
     // Non-triangle-list primitive topology. Points and lines have no faces to cull; for a strip the
     // material's culling still applies.
@@ -55,7 +77,18 @@ _installPbrPrimitiveResolver((meshFeatures, hasDoubleSided): GPUPrimitiveState =
     return {
         topology,
         ...(stripIndexFormat ? { stripIndexFormat } : undefined),
-        cullMode: noCull || hasDoubleSided ? "none" : reverseWinding ? "front" : "back",
-        frontFace: "ccw",
+        cullMode: noCull || hasDoubleSided ? "none" : "back",
+        frontFace: reverseWinding ? "cw" : "ccw",
     };
-});
+}
+
+/** @internal Front face for a mesh in a geometry (depth/normal/velocity) pass. Shared with the
+ *  Standard geometry pipeline through the mirrored-mesh opt-in. */
+export function _windingFrontFace(meshFeatures: number): GPUFrontFace {
+    return meshFeatures & MSH_REVERSE_WINDING ? "cw" : "ccw";
+}
+
+_installPbrPrimitiveResolver(_resolvePrimitive);
+// A mirrored mesh is mirrored in every pass: without this its depth/normal/velocity output would be
+// culled away in the geometry pass just as it would in the forward one.
+_installPbrGeometryWinding(_windingFrontFace);

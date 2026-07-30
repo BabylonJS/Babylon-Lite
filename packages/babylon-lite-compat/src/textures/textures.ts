@@ -8,8 +8,17 @@
  * `Texture.LoadAsync`) so the GPU handle is present when the material binds.
  */
 
-import { loadTexture2D, loadBasisTexture2D, loadKtxTexture2D, createTexture2DFromPixels, updateTexture2DFromPixels, createTexture3DFromPixels } from "babylon-lite";
-import type { Texture2D, Texture2DOptions, EngineContext, Texture3D } from "babylon-lite";
+import {
+    loadTexture2D,
+    loadBasisTexture2D,
+    loadKtxTexture2D,
+    createTexture2DFromPixels,
+    updateTexture2DFromPixels,
+    createTexture3DFromPixels,
+    createDynamicTexture,
+    updateDynamicTexture,
+} from "babylon-lite";
+import type { Texture2D, Texture2DOptions, EngineContext, Texture3D, DynamicTexture2D } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
@@ -70,6 +79,15 @@ export abstract class BaseTexture {
         return "BaseTexture";
     }
 
+    /**
+     * Babylon.js `BaseTexture.getInternalTexture()` — the backend texture handle. Babylon.js
+     * returns an `InternalTexture`; the compat layer's equivalent is the Lite texture handle,
+     * which is what the compat engine's texture methods accept.
+     */
+    public getInternalTexture(): Texture2D | null {
+        return this._lite ?? null;
+    }
+
     public abstract whenReadyAsync(): Promise<void>;
 
     public dispose(): void {
@@ -80,6 +98,7 @@ export abstract class BaseTexture {
 
 export class Texture extends BaseTexture {
     private readonly _ready: Promise<void>;
+    private _onLoadObservable: Observable<Texture> | undefined;
     /** Babylon.js sampling-mode constants (numeric parity). */
     public static readonly NEAREST_SAMPLINGMODE = 1;
     public static readonly BILINEAR_SAMPLINGMODE = 2;
@@ -151,6 +170,7 @@ export class Texture extends BaseTexture {
 
         this._ready = loadCompatTexture(engine, url, loadOpts).then((tex) => {
             this._lite = tex;
+            this._notifyLoadObservable();
             if (onLoad) {
                 onLoad();
             }
@@ -190,6 +210,25 @@ export class Texture extends BaseTexture {
 
     public override whenReadyAsync(): Promise<void> {
         return this._ready;
+    }
+
+    /** Babylon.js `Texture.onLoadObservable`, allocated only when code subscribes. */
+    public get onLoadObservable(): Observable<Texture> {
+        let observable = this._onLoadObservable;
+        if (!observable) {
+            observable = new Observable<Texture>(undefined, true);
+            this._onLoadObservable = observable;
+            if (this.isReady()) {
+                observable.notifyObservers(this);
+            }
+        }
+        return observable;
+    }
+
+    private _notifyLoadObservable(): void {
+        if (this._onLoadObservable) {
+            this._onLoadObservable.notifyObservers(this);
+        }
     }
 
     /** Babylon.js `BaseTexture.isReady()` — true once the GPU handle has resolved. */
@@ -309,11 +348,13 @@ export class RawTexture3D extends BaseTexture {
 
 /**
  * @internal Coerce a raw `ArrayBufferView` (or a bare `Uint8Array`) into the tightly
- * packed `width * height * depth * 4` RGBA8 `Uint8Array` Babylon Lite's
- * `createTexture3DFromPixels` expects. Babylon.js allows a `null` data argument
+ * packed `width * height * depth * 4` RGBA8 `Uint8Array` Babylon Lite's raw-pixel
+ * texture factories expect (`createTexture3DFromPixels`,
+ * `createTexture2DArrayFromPixels`). Babylon.js allows a `null` data argument
  * (an empty texture); Lite requires bytes, so `null` becomes a zero-filled volume.
+ * For a 2D array, `depth` is the layer count.
  */
-function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number, depth: number): Uint8Array {
+export function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number, depth: number): Uint8Array {
     const expected = width * height * depth * 4;
     if (data === null) {
         return new Uint8Array(expected);
@@ -327,7 +368,9 @@ function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number
 /**
  * Babylon.js `DynamicTexture` — a canvas-backed texture. Draw into
  * `getContext()`, then call `update()` to upload the canvas pixels to the GPU.
- * Backed by Babylon Lite's pixel-texture path.
+ * Backed by Babylon Lite's `createDynamicTexture` / `updateDynamicTexture`, which
+ * blit the canvas straight to the GPU via `copyExternalImageToTexture` (no
+ * `getImageData` CPU readback).
  */
 export class DynamicTexture extends BaseTexture {
     private readonly _scene: Scene;
@@ -335,6 +378,9 @@ export class DynamicTexture extends BaseTexture {
     private readonly _context: CanvasRenderingContext2D;
     private readonly _width: number;
     private readonly _height: number;
+    /** @internal Branded Lite dynamic texture; aliases `_lite` and is the only
+     *  handle `updateDynamicTexture` accepts. */
+    private readonly _dyn: DynamicTexture2D;
 
     public constructor(name: string, options: { width: number; height: number }, scene: Scene) {
         super();
@@ -350,6 +396,10 @@ export class DynamicTexture extends BaseTexture {
             throw new Error("DynamicTexture: 2D canvas context unavailable.");
         }
         this._context = ctx;
+        // Allocate the GPU texture up front (blank until the first draw+update),
+        // matching Babylon.js where the texture exists immediately after construction.
+        this._dyn = createDynamicTexture(scene.getEngine()._lite, options.width, options.height);
+        this._lite = this._dyn;
     }
 
     public override getClassName(): string {
@@ -377,15 +427,14 @@ export class DynamicTexture extends BaseTexture {
         this.update();
     }
 
-    /** Upload the current canvas pixels to the GPU. */
-    public update(): void {
-        const image = this._context.getImageData(0, 0, this._width, this._height);
-        const data = new Uint8Array(image.data.buffer);
-        if (!this._lite) {
-            this._lite = createTexture2DFromPixels(this._scene.getEngine()._lite, data, this._width, this._height);
-        } else {
-            updateTexture2DFromPixels(this._scene.getEngine()._lite, this._lite, data);
-        }
+    /**
+     * Blit the current canvas pixels straight to the GPU texture (no CPU readback).
+     * @param invertY - Flip V so a top-down canvas samples upright. Default `true` (Babylon.js parity).
+     * @param premulAlpha - Treat the upload as premultiplied alpha. Default `false`.
+     * @param _allowGPUOptimization - Accepted for Babylon.js signature parity; the blit is already GPU-direct, so this is a no-op.
+     */
+    public update(invertY: boolean = true, premulAlpha: boolean = false, _allowGPUOptimization: boolean = false): void {
+        updateDynamicTexture(this._scene.getEngine()._lite, this._dyn, this._canvas, { invertY, premultiplyAlpha: premulAlpha });
     }
 
     public override whenReadyAsync(): Promise<void> {

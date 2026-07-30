@@ -144,7 +144,10 @@ export function createMockGL(): MockGL {
         NOTEQUAL: 0x0205,
         KEEP: 0x1e00,
         INCR_WRAP: 0x8507,
+        DECR_WRAP: 0x8508,
+        FRONT: 0x0404,
         BACK: 0x0405,
+        FRONT_AND_BACK: 0x0408,
         // ──── pixel store + blend equations ──────────────────────────────
         UNPACK_ALIGNMENT: 0x0cf5,
         UNPACK_PREMULTIPLY_ALPHA_WEBGL: 0x9241,
@@ -170,7 +173,7 @@ export function createMockGL(): MockGL {
         },
         getExtension: (name: string): unknown => {
             if (name === "KHR_parallel_shader_compile" && state.parallelAvailable) {
-                return PARALLEL_EXT;
+                return { ...PARALLEL_EXT };
             }
             if (state.extensions[name] === true) {
                 return { __ext: name };
@@ -410,6 +413,9 @@ export function createMockGL(): MockGL {
         },
         stencilOp: (fail: number, zfail: number, zpass: number): void => {
             rec("stencilOp", fail, zfail, zpass);
+        },
+        stencilOpSeparate: (face: number, fail: number, zfail: number, zpass: number): void => {
+            rec("stencilOpSeparate", face, fail, zfail, zpass);
         },
         stencilMask: (m: number): void => {
             rec("stencilMask", m);

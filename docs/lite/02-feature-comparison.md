@@ -47,6 +47,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | PBR Metallic-Roughness                     |  ✅  | ✅  | Full GGX / Smith / Schlick BRDF                                                                                                                                                        |
 | PBR Specular-Glossiness                    |  ✅  | ✅  | KHR_materials_pbrSpecularGlossiness                                                                                                                                                    |
 | Standard Material (Blinn-Phong)            |  ✅  | ✅  | Diffuse, specular, ambient, emissive                                                                                                                                                   |
+| Mesh Vertex Colors                         |  ✅  | ✅  | PBR automatic; Standard via enableStandardVertexColors() opt-in (Scene 267)                                                                                                            |
 | Background Material                        |  ✅  | ✅  | Ground plane + skybox rendering                                                                                                                                                        |
 | Normal Mapping                             |  ✅  | ✅  | Cotangent frame, invertNormalMapX                                                                                                                                                      |
 | Emissive Textures                          |  ✅  | ✅  |                                                                                                                                                                                        |
@@ -93,16 +94,17 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 
 ## Cameras
 
-| Feature                   | Lite | BJS | Notes                                                                           |
-| ------------------------- | :--: | :-: | ------------------------------------------------------------------------------- |
-| Arc Rotate Camera         |  ✅  | ✅  | Orbit / zoom / pan / inertia                                                    |
-| Auto-Framing (fitToScene) |  ✅  | ✅  | Default camera for loaded models                                                |
-| Free Camera               |  ✅  | ✅  | Scene 18, 24, 25 — WASD/arrow controls                                          |
-| Geospatial Camera         |  ✅  | ✅  | Globe-orbit camera (center/yaw/pitch/radius) with fly-to + controls (Scene 225) |
-| Follow Camera             |  —   | ✅  |                                                                                 |
-| Universal Camera          |  —   | ✅  |                                                                                 |
-| VR / XR Camera            |  —   | ✅  |                                                                                 |
-| Device Orientation Camera |  —   | ✅  |                                                                                 |
+| Feature                   | Lite | BJS | Notes                                                                                                              |
+| ------------------------- | :--: | :-: | ------------------------------------------------------------------------------------------------------------------ |
+| Arc Rotate Camera         |  ✅  | ✅  | Orbit / zoom / pan / inertia                                                                                       |
+| Auto-Framing (fitToScene) |  ✅  | ✅  | Default camera for loaded models                                                                                   |
+| Free Camera               |  ✅  | ✅  | Scene 18, 24, 25 — WASD/arrow controls                                                                             |
+| Geospatial Camera         |  ✅  | ✅  | Globe-orbit camera (center/yaw/pitch/radius) with fly-to + controls (Scene 225)                                    |
+| Orthographic Projection   |  ✅  | ✅  | Any camera via enableOrthographicCamera() opt-in; live/animatable bounds, aspect-derived or off-center (Scene 268) |
+| Follow Camera             |  —   | ✅  |                                                                                                                    |
+| Universal Camera          |  —   | ✅  |                                                                                                                    |
+| VR / XR Camera            |  —   | ✅  |                                                                                                                    |
+| Device Orientation Camera |  —   | ✅  |                                                                                                                    |
 
 ---
 
@@ -319,7 +321,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | Fluid Rendering                         |  —   | ✅  |                                                                                                                                             |
 | Bones IK                                |  —   | ✅  |                                                                                                                                             |
 | Navigation Mesh                         |  ⚡  | ✅  | Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, and raycast (Scenes 170-175)                                        |
-| Device Lost Recovery                    |  ✅  | ✅  | Opt-in automatic WebGPU device-loss recovery (Scene 164)                                                                                    |
+| Device Lost Recovery                    |  ✅  | ✅  | Opt-in per-kind WebGPU device-loss recovery via enableDeviceLost*Recovery APIs (Scene 164: Scene)                                           |
 | OffscreenCanvas / Worker Rendering      |  ✅  | ✅  | Engine runs unchanged on a DOM canvas or an OffscreenCanvas transferred to a Web Worker (Offscreen demo)                                    |
 | Text Rendering                          |  ✅  | ✅  | GPU text renderer with layered layout + editor (Scenes 180-181)                                                                             |
 | Gizmos                                  |  ✅  | ✅  | Position / rotation / scale, bounding-box, camera + light gizmos on a utility layer (Scenes 221-224)                                        |

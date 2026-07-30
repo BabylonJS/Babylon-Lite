@@ -21,16 +21,21 @@ pnpm install
 # 2. Install Playwright browsers (needed for parity & bundle-size tests)
 pnpm exec playwright install
 
-# 3. Start the dev server (builds bundle scenes, then launches Vite on port 5174)
-pnpm dev:lab
+# 3. Start the dev server (launches Vite on port 5174, scenes served from source)
+pnpm dev
 ```
 
 Open **http://localhost:5174** to browse the scene gallery.
+
+Scene and demo pages are served live from source, so this is the loop for engine work. The
+**Bundle** tab additionally needs the production bundles — build them with `pnpm dev:lab`
+(same server, preceded by a full bundle build) or with the tab's **Regenerate** button.
 
 ## Available Scripts
 
 | Command                    | Description                                                         |
 | -------------------------- | ------------------------------------------------------------------- |
+| `pnpm dev`                 | Start the lab dev server on live source (http://localhost:5174)     |
 | `pnpm dev:lab`             | Build bundle scenes + start the lab dev server                      |
 | `pnpm dev:playground`      | Start the Lite Playground dev server (http://localhost:5175)        |
 | `pnpm build:playground`    | Build the Lite Playground into `playground/dist`                    |
@@ -132,7 +137,7 @@ rm -rf node_modules/playwright
 
 ### 404 for `/bundle/manifest.json`
 
-Run `pnpm build:bundle-scenes` (or use `pnpm dev:lab` which does this automatically).
+The dev server synthesizes this from the tracked per-scene files in `lab/public/bundle/manifest/`, so it should not 404 under `pnpm dev`. If the **bundle** pages themselves are missing or stale, run `pnpm build:bundle-scenes` (or use `pnpm dev:lab`, which does this automatically), or hit **Regenerate** in the lab's Bundle tab.
 
 ### 404 for `test-actual.png` images
 

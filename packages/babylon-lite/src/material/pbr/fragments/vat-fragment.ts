@@ -61,11 +61,31 @@ ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[3]), ${row}) * wei
 const VAT_INSTANCE_PLACEMENT = `let vatInstWorld = mat4x4<f32>(world0, world1, world2, world3);
 finalWorld = vatInstWorld * mesh.world * influence;`;
 
+function vatRegularInfluence(has8Bones: boolean): string {
+    return `let vatRow = vatFrameRow(vat.params, vat.clock.x);
+${vatSkinSum("influence", "vatRow", has8Bones)}`;
+}
+
+function vatInstancedInfluence(has8Bones: boolean, instanceIndex: string, storage = false): string {
+    const reads = storage
+        ? `let vatIdx = ${instanceIndex} * 2u;
+let vatA = vatInstanceStorage[vatIdx];
+let vatB = vatInstanceStorage[vatIdx + 1u];`
+        : `let vatIdx = i32(${instanceIndex}) * 2;
+let vatA = textureLoad(vatInstanceTex, vec2<i32>(vatIdx, 0), 0);
+let vatB = textureLoad(vatInstanceTex, vec2<i32>(vatIdx + 1, 0), 0);`;
+    return `${reads}
+let rowA = vatFrameRow(vatA, vat.clock.x);
+let rowB = vatFrameRow(vec4f(vatB.x, vatB.y, vatA.z, vatB.w), vat.clock.x);
+${vatSkinSum("infA", "rowA", has8Bones)}
+${vatSkinSum("infB", "rowB", has8Bones)}
+var influence: mat4x4f = infA * (1.0 - vatB.z) + infB * vatB.z;`;
+}
+
 function makeVatSkinningCode(has8Bones: boolean, instanced: boolean): string {
     if (!instanced) {
         // Non-instanced: shared settings UBO, single clip (Stage 1).
-        return `let vatRow = vatFrameRow(vat.params, vat.clock.x);
-${vatSkinSum("influence", "vatRow", has8Bones)}
+        return `${vatRegularInfluence(has8Bones)}
 finalWorld = mesh.world * influence;`;
     }
     // Per-instance: ALWAYS the dual-clip path — two texels per instance: A=(fromRow,toRow,offset,fps),
@@ -73,16 +93,29 @@ finalWorld = mesh.world * influence;`;
     // reproducing a weighted gait cross-fade. A single-clip instance just sets B==A with blend=0, so this
     // ONE variant covers both — no extra mesh-feature bit, so mesh-features.ts (a shared chunk) stays
     // byte-identical for non-VAT scenes. The 2x bone reads are negligible vs the one-draw-call win.
-    return `let vatIdx = i32(vatInstanceIndex) * 2;
-let vatA = textureLoad(vatInstanceTex, vec2<i32>(vatIdx, 0), 0);
-let vatB = textureLoad(vatInstanceTex, vec2<i32>(vatIdx + 1, 0), 0);
-let vatRowA = vatFrameRow(vatA, vat.clock.x);
-let vatRowB = vatFrameRow(vec4<f32>(vatB.x, vatB.y, vatA.z, vatB.w), vat.clock.x);
-${vatSkinSum("vatInfA", "vatRowA", has8Bones)}
-${vatSkinSum("vatInfB", "vatRowB", has8Bones)}
-let vatBlend = vatB.z;
-var influence: mat4x4<f32> = vatInfA * (1.0 - vatBlend) + vatInfB * vatBlend;
+    return `${vatInstancedInfluence(has8Bones, "vatInstanceIndex")}
 ${VAT_INSTANCE_PLACEMENT}`;
+}
+
+/** @internal VAT-owned shader projection reused by the GPU picker so its mesh pass deforms the
+ *  exact same vertices, with the exact same transform order, as the visible material. */
+export function createVatPickProjectionWgsl(
+    has8Bones: boolean,
+    instanceStorage = false
+): {
+    readonly helpers: string;
+    readonly regularBody: string;
+    readonly thinBody: string;
+} {
+    return {
+        helpers: VAT_HELPERS,
+        regularBody: `${vatRegularInfluence(has8Bones)}
+let projectedTransform = mesh.world * influence;
+let projectedWorld = (projectedTransform * vec4f(position, 1.0)).xyz;`,
+        thinBody: `${vatInstancedInfluence(has8Bones, "instanceIndex", instanceStorage)}
+let projectedTransform = instanceWorld * tiMesh.world * influence;
+let projectedWorld = (projectedTransform * vec4f(position, 1.0)).xyz;`,
+    };
 }
 
 /**

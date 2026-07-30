@@ -438,6 +438,15 @@ describe("lite-gl: disposal", () => {
 });
 
 describe("lite-gl: context loss / restore", () => {
+    it("context restored → extension-backed caps are reacquired", () => {
+        const { canvas, engine } = makeReadyEffect();
+        const before = engine.caps.parallelShaderCompile;
+        fireLost(canvas);
+        fireRestored(canvas);
+        expect(engine.caps.parallelShaderCompile).not.toBe(before);
+        expect(engine.caps.parallelShaderCompile?.COMPLETION_STATUS_KHR).toBe(before?.COMPLETION_STATUS_KHR);
+    });
+
     it("context lost → setters become no-ops and do not poison the cache", () => {
         const { mock, canvas, engine, effect } = makeReadyEffect();
         // First, prove the value cache is poppulated.

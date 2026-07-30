@@ -1,6 +1,7 @@
 import { F32, U8 } from "../../engine/typed-arrays.js";
 import type { GaussianSplattingMesh } from "./gaussian-splatting-mesh.js";
 import type { Mat4 } from "../../math/types.js";
+import { mat4Decompose } from "../../math/mat4-decompose.js";
 
 const ROW_LENGTH = 32;
 
@@ -10,48 +11,11 @@ function mat4TransformCoord(m: Float32Array, x: number, y: number, z: number): [
 }
 
 function mat4ToRotationQuat(m: Float32Array): [number, number, number, number] {
-    const sx = Math.sqrt(m[0]! * m[0]! + m[1]! * m[1]! + m[2]! * m[2]!);
-    const sy = Math.sqrt(m[4]! * m[4]! + m[5]! * m[5]! + m[6]! * m[6]!);
-    const sz = Math.sqrt(m[8]! * m[8]! + m[9]! * m[9]! + m[10]! * m[10]!);
-    const r00 = m[0]! / sx,
-        r01 = m[1]! / sx,
-        r02 = m[2]! / sx;
-    const r10 = m[4]! / sy,
-        r11 = m[5]! / sy,
-        r12 = m[6]! / sy;
-    const r20 = m[8]! / sz,
-        r21 = m[9]! / sz,
-        r22 = m[10]! / sz;
-
-    const trace = r00 + r11 + r22;
-    let qw: number, qx: number, qy: number, qz: number;
-    if (trace > 0) {
-        const s = 0.5 / Math.sqrt(trace + 1.0);
-        qw = 0.25 / s;
-        qx = (r12 - r21) * s;
-        qy = (r20 - r02) * s;
-        qz = (r01 - r10) * s;
-    } else if (r00 > r11 && r00 > r22) {
-        const s = 2.0 * Math.sqrt(1.0 + r00 - r11 - r22);
-        qw = (r12 - r21) / s;
-        qx = 0.25 * s;
-        qy = (r01 + r10) / s;
-        qz = (r02 + r20) / s;
-    } else if (r11 > r22) {
-        const s = 2.0 * Math.sqrt(1.0 + r11 - r00 - r22);
-        qw = (r20 - r02) / s;
-        qx = (r01 + r10) / s;
-        qy = 0.25 * s;
-        qz = (r12 + r21) / s;
-    } else {
-        const s = 2.0 * Math.sqrt(1.0 + r22 - r00 - r11);
-        qw = (r01 - r10) / s;
-        qx = (r02 + r20) / s;
-        qy = (r12 + r21) / s;
-        qz = 0.25 * s;
-    }
-    const len = Math.hypot(qx, qy, qz, qw) || 1;
-    return [qx / len, qy / len, qz / len, qw / len];
+    // Delegates to mat4Decompose: it strips per-axis scale AND folds a mirrored basis (negative
+    // determinant) onto a signed axis. Normalising the columns independently would hand an improper
+    // basis to the quaternion conversion, producing a garbage orientation for every splat.
+    const q = mat4Decompose(m as unknown as Mat4).rotation;
+    return [q.x, q.y, q.z, q.w];
 }
 
 function quatMultiply(ax: number, ay: number, az: number, aw: number, bx: number, by: number, bz: number, bw: number): [number, number, number, number] {

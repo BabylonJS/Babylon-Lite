@@ -2,6 +2,7 @@
 // Designed for zero-allocation per-frame evaluation.
 
 import type { Mat4 } from "../math/types.js";
+import type { StorageBuffer } from "../resource/storage-buffer.js";
 
 // Interpolation modes (numeric for fast comparison in hot path)
 export const INTERP_LINEAR = 0;
@@ -159,6 +160,12 @@ export interface SkeletonData {
     _refCount?: number;
     /** @internal Shared ownership for skin vertex buffers reused by VAT data. */
     readonly _skinBuffers: SkinBufferData;
+    /** @internal Shared node-index → bone override map, stamped by `enableBoneControl`'s
+     *  skeleton builder when bone control is active. Bridges user bone overrides to the
+     *  optional weighted-blend mixer (which reuses this shared runtime skeleton), so a
+     *  blended clip honours overrides without any always-loaded plumbing. Undefined on the
+     *  default path. Typed `unknown` value to keep the internal `BoneOverride` shape private. */
+    _overrides?: ReadonlyMap<number, unknown>;
 }
 
 /** @internal Ref-counted skin vertex buffers shared by live skeletons and VAT data. */
@@ -200,6 +207,9 @@ export interface VatData {
      *  thin-instanced ⇒ the VAT vertex path reads its frame rows from this texture indexed by
      *  `@builtin(instance_index)` instead of the shared settings UBO. Set via the VatHandle. */
     instanceTexture?: GPUTexture | null;
+    /** @internal Authoritative dual-clip params used by a custom VAT material and every derived
+     *  mesh pass (including picking). Set through setVatInstanceStorage(). */
+    _instanceStorage?: StorageBuffer | null;
 }
 
 /** Morph target GPU data — delta storage buffer + weights storage buffer.

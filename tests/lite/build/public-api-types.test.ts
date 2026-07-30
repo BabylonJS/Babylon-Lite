@@ -1,5 +1,5 @@
 import { spawnSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "fs";
 import { resolve } from "path";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -7,6 +7,7 @@ const ROOT = resolve(__dirname, "../../..");
 const PACKAGE_DIR = resolve(ROOT, "packages/babylon-lite");
 const BUILD_DIR = resolve(PACKAGE_DIR, "build");
 const DTS_PATH = resolve(BUILD_DIR, "index.d.ts");
+const SOURCE_PACKAGE_JSON_PATH = resolve(PACKAGE_DIR, "package.json");
 const PACKAGE_JSON_PATH = resolve(BUILD_DIR, "package.json");
 
 // Invoke binaries directly via their JS entry points and the current node
@@ -21,6 +22,7 @@ const TSC_JS = resolve(ROOT, "node_modules/typescript/bin/tsc");
 // shared rolled-up `index.d.ts`; `--mode lib` emits the module-granular tree and the
 // publish-ready `package.json`. Both are required for the assertions below.
 beforeAll(() => {
+    rmSync(BUILD_DIR, { recursive: true, force: true });
     for (const mode of ["dist", "lib"]) {
         const build = spawnSync(NODE, [VITE_JS, "build", "--mode", mode], {
             cwd: PACKAGE_DIR,
@@ -112,9 +114,41 @@ describe("build/index.d.ts", () => {
         const external = [...specifiers].filter((s) => !s.startsWith("./") && !s.startsWith("../"));
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
     });
+
+    it("is the only declaration file in the published package", () => {
+        const declarationFiles = readdirSync(BUILD_DIR, { recursive: true, encoding: "utf-8" })
+            .filter((file) => file.endsWith(".d.ts"))
+            .sort();
+        expect(declarationFiles).toEqual(["index.d.ts"]);
+    });
 });
 
 describe("build/package.json", () => {
+    it("exposes only the root entry in source and published package manifests", () => {
+        expect(existsSync(SOURCE_PACKAGE_JSON_PATH)).toBe(true);
+        expect(existsSync(PACKAGE_JSON_PATH)).toBe(true);
+
+        const sourcePkg = JSON.parse(readFileSync(SOURCE_PACKAGE_JSON_PATH, "utf-8")) as {
+            exports?: Record<string, { import?: string; types?: string }>;
+        };
+        const publishedPkg = JSON.parse(readFileSync(PACKAGE_JSON_PATH, "utf-8")) as {
+            exports?: Record<string, { import?: string; types?: string }>;
+        };
+
+        expect(sourcePkg.exports).toEqual({
+            ".": {
+                import: "./src/index.ts",
+                types: "./src/index.ts",
+            },
+        });
+        expect(publishedPkg.exports).toEqual({
+            ".": {
+                types: "./index.d.ts",
+                import: "./lib/index.js",
+            },
+        });
+    });
+
     it("declares no runtime dependencies and only strictly-optional allowlisted peers", () => {
         expect(existsSync(PACKAGE_JSON_PATH)).toBe(true);
 

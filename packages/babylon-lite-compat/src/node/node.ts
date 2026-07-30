@@ -33,6 +33,8 @@ export abstract class Node {
     protected readonly _children: Node[] = [];
     /** @internal */
     protected _enabled = true;
+    /** @internal Effective enabled state inherited from the parent chain. */
+    protected _parentEnabled = true;
     /** @internal */
     protected _disposed = false;
 
@@ -85,6 +87,7 @@ export abstract class Node {
         if (value && !value._children.includes(this)) {
             value._children.push(this);
         }
+        this._syncParentEnabledState();
     }
 
     /** @internal Whether this node is an `AbstractMesh` (overridden there) — drives `getChildMeshes`. */
@@ -128,12 +131,30 @@ export abstract class Node {
         return this.getDescendants(directDescendantsOnly, (node) => node._isMeshNode() && (!predicate || predicate(node)));
     }
 
-    public isEnabled(): boolean {
-        return this._enabled;
+    public isEnabled(checkAncestors = true): boolean {
+        return this._enabled && (!checkAncestors || this._parentEnabled);
     }
 
     public setEnabled(value: boolean): void {
+        if (this._enabled === value) {
+            return;
+        }
         this._enabled = value;
+        this._syncParentEnabledState();
+    }
+
+    /** @internal Refresh this subtree after a local enabled or parent change. */
+    protected _syncParentEnabledState(): void {
+        this._parentEnabled = this._parent?.isEnabled() ?? true;
+        this._onEffectiveEnabledStateChanged(this.isEnabled());
+        for (const child of this._children) {
+            child._syncParentEnabledState();
+        }
+    }
+
+    /** @internal Hook for wrappers that must materialize effective enabled state in Lite. */
+    protected _onEffectiveEnabledStateChanged(_enabled: boolean): void {
+        // Base nodes carry no Lite-side enabled state.
     }
 
     public isDisposed(): boolean {

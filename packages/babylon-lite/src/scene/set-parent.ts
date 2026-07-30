@@ -28,6 +28,20 @@ function childrenOf(node: IWorldMatrixProvider | null): SceneNode[] | null {
  * Babylon.js `TransformNode.setParent()`. Also keeps the scene-graph `children`
  * arrays consistent: the child is removed from its previous parent's `children`
  * and appended to the new parent's, so traversal helpers see the new hierarchy.
+ *
+ * The world transform is preserved exactly, mirrors included: `mat4Decompose` keeps a negative
+ * determinant (as a negative Y scale), and a node created from a raw matrix
+ * (`createSceneNodeFromMatrix`, used for glTF `matrix` nodes) is switched to TRS so the new local
+ * transform actually takes effect.
+ *
+ * Preservation is impossible when `parent`'s world matrix is singular — a collapsed axis has no
+ * inverse, so no local transform can reproduce the child's world. In that case the child keeps the
+ * parent link and its world *position* is copied into its local position, but its rotation and
+ * scale are not compensated.
+ *
+ * `child.parent` links are only established by `addToScene`, so when reparenting a node from inside
+ * a freshly loaded asset, add the container first — otherwise the child's "world" matrix is just
+ * its local one and the reparent is computed against the wrong space.
  * @param child - The node to reparent (mesh, transform node, or any scene node).
  * @param parent - The new parent (any world-matrix provider), or `null` to detach to world space.
  */
@@ -64,7 +78,13 @@ export function setParent(child: SceneNode, parent: IWorldMatrixProvider | null)
     const parentWorld = parent.worldMatrix;
     const invParent = mat4Invert(parentWorld);
     if (!invParent) {
-        // Singular parent matrix — just set position from world
+        // Singular parent matrix: no local transform can reproduce the child's world, so this is a
+        // best-effort fallback (documented above) rather than true preservation — copy the world
+        // position and leave rotation/scale uncompensated. A matrix-backed node ignores TRS writes,
+        // so seed its TRS from the matrix first or the position write is silently dropped.
+        if (child._localMatrix) {
+            applyLocal(child._localMatrix, child);
+        }
         child.position.set(childWorld[12]!, childWorld[13]!, childWorld[14]!);
         return;
     }
@@ -78,6 +98,11 @@ export function setParent(child: SceneNode, parent: IWorldMatrixProvider | null)
  *  Euler round-trip near gimbal lock. */
 function applyLocal(m: Mat4, node: SceneNode): void {
     const { translation, rotation, scale } = mat4Decompose(m);
+    // A glTF `matrix` node reports `_localMatrix` as its local transform and ignores TRS, so the
+    // writes below would be dropped. Hand control back to the TRS triple before writing — the
+    // decomposition we just computed is exactly the matrix it replaces (glTF requires `matrix` to
+    // be TRS-decomposable), so the node's transform is unchanged apart from the reparent itself.
+    node._localMatrix = undefined;
     node.position.set(translation.x, translation.y, translation.z);
     node.rotationQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
     node.scaling.set(scale.x, scale.y, scale.z);

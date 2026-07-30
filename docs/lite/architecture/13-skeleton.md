@@ -13,7 +13,7 @@ Provides GPU-accelerated skeletal animation infrastructure. Creates bone texture
 ```typescript
 // create-skeleton.ts
 export function createSkeleton(
-    device: GPUDevice,
+    engine: EngineContext,
     joints: Uint16Array | Uint8Array, // 4 joint indices per vertex (JOINTS_0)
     weights: Float32Array, // 4 blend weights per vertex (WEIGHTS_0)
     boneCount: number, // number of bones (joints)
@@ -22,6 +22,13 @@ export function createSkeleton(
     weights1?: Float32Array | null // WEIGHTS_1 for 8-bone skinning
 ): SkeletonData;
 ```
+
+```typescript
+// update-skeleton-bone-matrices.ts
+export function updateSkeletonBoneMatrices(engine: EngineContext, skeleton: SkeletonData, boneMatrices: Float32Array): void;
+```
+
+`updateSkeletonBoneMatrices()` validates the matrix count, updates the skeleton's CPU mirror, and uploads the complete matrix set without exposing the underlying `GPUTexture` to scene code.
 
 ```typescript
 // skeleton-updater.ts
@@ -230,7 +237,7 @@ export function getBoneByName(skeleton: Skeleton, name: string): Bone | undefine
 export function setBonePosition(skeleton: Skeleton, bone: Bone, x, y, z): void;
 export function setBoneRotationQuaternion(skeleton: Skeleton, bone: Bone, x, y, z, w): void;
 export function setBoneScaling(skeleton: Skeleton, bone: Bone, x, y, z): void;
-export function setBoneVisible(skeleton: Skeleton, bone: Bone, visible: boolean): void; // scale→0 hide
+export function setBoneVisible(skeleton: Skeleton, bone: Bone, visible: boolean): void; // scale→0 hide, beats animation
 export function clearBoneOverride(skeleton: Skeleton, bone: Bone): void;
 export interface Skeleton {
     readonly bones: readonly Bone[]; /* +@internal */
@@ -254,9 +261,19 @@ if (head) setBoneVisible(skel, head, false); // hide the head + everything under
 - **Eager bake.** Each `setBone*` immediately recomputes the asset's bone matrices from
   the rest pose + overrides and uploads the bone textures, so overrides apply even with
   **no** animation playing (static models).
-- **Animation wins per-component.** When a clip plays, the per-frame tick re-applies
+- **Animation wins per-component — except visibility.** When a clip plays, the per-frame
+  tick re-applies the `setBonePosition` / `setBoneRotationQuaternion` / `setBoneScaling`
   overrides right after the rest reset and **before** channel evaluation, so any component
   a clip animates overwrites the override; components the clip does not touch keep it.
+  `setBoneVisible(…, false)` is different: it is a visibility control, so it is re-applied
+  **after** channel evaluation (zeroing the bone's scale) in every pose path — the
+  single-clip controller (`skeleton-updater.ts`), the weighted manager blend
+  (`weighted-gltf-mixer.ts` → `uploadTarget`), and the eager bake. Without this a hidden
+  bone would pop back the moment a clip with a scale track on it played, and virtually
+  every rig in the wild bakes a constant scale track onto **every** bone (all Mixamo
+  exports, e.g. Xbot.glb, carry translation + rotation + scale on all 67 joints).
+  Visibility is tracked by its own `BoneOverride.mask` bit (8), so showing a bone again
+  leaves any explicit `setBoneScaling` override intact.
 - **One handle per skin, re-bakes every mesh.** A glTF skin split across multiple meshes
   (e.g. Xbot's `Beta_Joints` + `Beta_Surface`) produces one bone texture _per mesh_ in
   Lite, hence one `Skeleton` handle per skinned mesh on `container.skeletons`. The override
@@ -306,6 +323,7 @@ The internal `BoneOverride` map type is kept off the public API surface: public 
 | File                    | Purpose                                                                                                                         |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `create-skeleton.ts`    | GPU resource factory: creates bone texture + joint/weight vertex buffers from parsed glTF skin data                             |
+| `update-skeleton-bone-matrices.ts` | High-level programmatic bone-matrix update that keeps the CPU mirror and GPU texture synchronized                |
 | `skeleton-updater.ts`   | Per-frame animation evaluation: keyframe interpolation → hierarchy traversal → bone matrix computation → GPU upload             |
 | `skeleton-pose.ts`      | Shared bake primitives (topo order, rest reset, world matrices, bone-texture upload) used by the opt-in eager bone-control bake |
 | `bone-control.ts`       | Opt-in bone-control API: `enableBoneControl`, `getBoneByName`, `setBone*`, eager bake + per-frame override applier              |

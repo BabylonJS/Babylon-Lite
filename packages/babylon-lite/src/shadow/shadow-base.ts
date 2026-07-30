@@ -4,6 +4,7 @@
 
 import { F32 } from "../engine/typed-arrays.js";
 import type { Camera } from "../camera/camera.js";
+import { _cameraChangeKey } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Mat4Storage } from "../math/types.js";
 import type { RenderTarget } from "../engine/render-target.js";
@@ -214,14 +215,26 @@ export function createShadowCamera(sg: Pick<ShadowGenerator, "_light">): Camera 
     } as Camera;
 }
 
-/** Update the camera facade caches shared by all shadow task variants. */
+/** Update the camera facade caches shared by all shadow task variants.
+ *
+ *  This facade does not *compute* its matrices through `camera.ts` — the shadow task already
+ *  built the light's view / view-projection (an orthographic or spot volume that
+ *  `getProjectionMatrix` knows nothing about) and installs them here, pinning the cache
+ *  versions so `getViewMatrix` / `getViewProjectionMatrix` hand them straight back.
+ *
+ *  The pin must therefore use the *same* key each getter compares against, or the getter
+ *  misses and silently rebuilds a perspective projection over the light's volume. The view
+ *  matrix keys on `worldMatrixVersion` (which the facade reports as `cameraVersion`); the
+ *  view-projection keys on `_cameraChangeKey`, which additionally folds in the projection
+ *  revision — and writing `nearPlane` / `farPlane` above moves that revision, so the key is
+ *  read *after* those writes and after `_shadowCameraVersion` is set. */
 export function updateShadowCameraBase(camera: Camera, cameraVersion: number, near: number, far: number, view: Float32Array, viewProj: Float32Array): void {
     camera.nearPlane = near;
     camera.farPlane = far;
+    (camera as Camera & { _shadowCameraVersion?: number })._shadowCameraVersion = cameraVersion;
     camera._viewCache = view;
     camera._viewVer = cameraVersion;
     camera._vpCache = viewProj;
-    camera._vpVer = cameraVersion;
+    camera._vpVer = _cameraChangeKey(camera);
     camera._vpAspect = 1;
-    (camera as Camera & { _shadowCameraVersion?: number })._shadowCameraVersion = cameraVersion;
 }

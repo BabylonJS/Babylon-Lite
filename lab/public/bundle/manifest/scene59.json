@@ -1,11 +1,12 @@
 {
-  "rawKB": 63.1,
-  "gzipKB": 25.3,
+  "rawKB": 62.6,
+  "gzipKB": 25.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene59-billboard-renderable-CWKRAyxb.js",
+    "scene59-billboard-renderable-D1Dt4NOb.js",
     "scene59-scene-uniforms-FTYH6Ct0.js",
-    "scene59-standard-renderable-BqE0cLTR.js",
+    "scene59-standard-renderable-DsIWt3Vn.js",
     "scene59.js"
-  ]
+  ],
+  "rawBytes": 64146
 }

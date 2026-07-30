@@ -258,6 +258,39 @@ describe("Quaternion", () => {
         expect(back.w * sign).toBeCloseTo(src.w, 5);
     });
 
+    it("writes a Babylon.js-convention rotation matrix and resets translation", () => {
+        const q = Quaternion.RotationAxis(new Vector3(0, 0, 1), Math.PI / 2);
+        const result = Matrix.Translation(7, 8, 9);
+        const storage = result.m;
+        const returned = q.toRotationMatrix(result);
+
+        expect(returned).toBe(result);
+        expect(result.m).toBe(storage);
+        expect(result.m[0]).toBeCloseTo(0, 6);
+        expect(result.m[1]).toBeCloseTo(1, 6);
+        expect(result.m[4]).toBeCloseTo(-1, 6);
+        expect(result.m[5]).toBeCloseTo(0, 6);
+        expect(result.m[10]).toBeCloseTo(1, 6);
+        expect(result.m[12]).toBe(0);
+        expect(result.m[13]).toBe(0);
+        expect(result.m[14]).toBe(0);
+        expect(result.m[15]).toBe(1);
+    });
+
+    it("round-trips through toRotationMatrix and fromRotationMatrix", () => {
+        const src = Quaternion.RotationYawPitchRoll(-0.7, 0.2, 1.4).normalize();
+        const rotMat = new Matrix();
+        src.toRotationMatrix(rotMat);
+
+        const back = new Quaternion().fromRotationMatrix(rotMat);
+        const dot = back.x * src.x + back.y * src.y + back.z * src.z + back.w * src.w;
+        const sign = dot < 0 ? -1 : 1;
+        expect(back.x * sign).toBeCloseTo(src.x, 5);
+        expect(back.y * sign).toBeCloseTo(src.y, 5);
+        expect(back.z * sign).toBeCloseTo(src.z, 5);
+        expect(back.w * sign).toBeCloseTo(src.w, 5);
+    });
+
     it("updates in place via fromRotationMatrix and FromRotationMatrixToRef", () => {
         const src = Quaternion.RotationYawPitchRoll(-0.2, 0.9, 0.3).normalize();
         const rotMat = Matrix.Compose(new Vector3(1, 1, 1), src, new Vector3());

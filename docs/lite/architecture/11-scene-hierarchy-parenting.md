@@ -43,6 +43,22 @@ parent's `children` and appended to the new parent's, so traversal helpers (`set
 cascade, cloning, camera bounds) see the new hierarchy. Setting `child.parent` directly drives
 the transform math but does **not** touch `children` — push manually if you need traversal too.
 
+**Mirrored children are preserved.** The glTF loader's synthetic `__root__` carries the RH→LH
+handedness flip as `scaling = (-1, 1, 1)`, so its local transform has a negative determinant.
+`mat4Decompose` keeps that reflection (folded onto a negative Y scale, as Babylon.js does), so
+reparenting a loaded model under a user-created transform node renders identically to before.
+
+**Matrix-backed nodes are reparented too.** A node created with `createSceneNodeFromMatrix` (used
+for glTF nodes that declare a raw `matrix` instead of TRS) reports that matrix as its local
+transform and ignores `position`/`rotationQuaternion`/`scaling`. `setParent` clears `_localMatrix`
+and writes the decomposed TRS instead, handing control back to the TRS triple — the decomposition
+reproduces exactly the matrix it replaces, so the node does not move beyond the reparent itself.
+
+**Parent links come from `addToScene`.** The glTF loader fills `children` arrays but leaves `parent`
+unset; `addToScene` walks the tree and assigns it. `setParent` needs the real parent chain to read a
+node's world transform, so reparent a *nested* loaded node only after its container has been added.
+Reparenting the container's own root beforehand is fine — its parent is null either way.
+
 ### TransformNode (`scene/transform-node.ts`)
 
 ```typescript
@@ -82,7 +98,7 @@ interface Mesh extends IWorldMatrixProvider, IParentable {
 
 Both `ArcRotateCamera` and `FreeCamera` extend `IWorldMatrixProvider, IParentable`.
 Camera `worldMatrix` is the camera-to-world transform (inverse of view matrix).
-`getViewMatrix()` and `getPosition()` derive from `worldMatrix`.
+`getViewMatrix(camera)` and `getCameraPosition(camera)` derive from `worldMatrix`.
 
 ### Lights
 
