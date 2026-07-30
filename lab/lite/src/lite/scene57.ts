@@ -12,6 +12,7 @@ import {
     createStandardMaterial,
     loadSpriteAtlas,
     registerScene,
+    setAlphaToCoverage,
     startEngine,
 } from "babylon-lite";
 import { CUTOUT_SPRITE_ATLAS_INFO, getCutoutSpriteAtlasDataUrl } from "../_shared/sprite-atlas-cutout";
@@ -55,6 +56,7 @@ async function main(): Promise<void> {
         sampling: "nearest",
     });
     const billboards = createFacingBillboardSystem(atlas, { capacity: 5, blendMode: billboardBlendCutout, alphaCutoff: 0.5 });
+    setAlphaToCoverage(billboards, true);
 
     addBillboardSpriteIndex(billboards, {
         position: [0, 0.75, 0.15],

@@ -16,7 +16,7 @@
 >   `_lite-gl-mock.ts`) — run via the `gl-unit` Vitest project
 >   (`pnpm test:unit:gl`). There is no in-package `test/` folder.
 > - **Lab:** `lab/gl/` (WebGL experience), selected by the lab experience toggle.
-> - **Docs:** this file, `docs/gl/architecture/00-lite-gl.md`.
+> - **Docs:** this core design and focused optional-module documents in this directory, including `01-alpha-to-coverage.md`.
 
 ---
 
@@ -63,7 +63,7 @@ Non-goals:
 
 ## 3. Public API Surface
 
-All signatures are final. Exhaustive — these are the only exports.
+The sections below exhaustively describe the core surface. Optional, separately tree-shakable modules add explicit root exports documented in adjacent architecture files; see `01-alpha-to-coverage.md`.
 
 ### 3.0 Naming & API-shape conventions
 

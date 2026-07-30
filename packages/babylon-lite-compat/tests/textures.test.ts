@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { EngineContext } from "babylon-lite";
 
 const liteMocks = vi.hoisted(() => ({
     loadTexture2D: vi.fn(),
