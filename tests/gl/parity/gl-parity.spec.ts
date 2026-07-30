@@ -30,7 +30,7 @@ for (const entry of loadSceneConfigAll()) {
     test.describe(`GL Scene ${entry.id} — ${entry.name}`, () => {
         test.skip(!!sceneConfig.skipParity, `Scene ${entry.id} skipped via skipParity in scene-config-webgl.json`);
 
-        test(`matches Babylon.js ThinEngine reference (MAD ≤ ${sceneConfig.maxMad})`, async ({ page }, testInfo) => {
+        test(`matches Babylon.js ThinEngine reference`, async ({ page }, testInfo) => {
             const browser = page.context().browser()!;
 
             // Capture (or reuse committed) golden from the BJS reference page at the freeze time.
@@ -40,6 +40,13 @@ for (const entry of loadSceneConfigAll()) {
             await page.goto(`/gl/scene${entry.id}.html?seekTime=${SEEK_TIME}`);
             await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
             await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
+            if (entry.id === 17) {
+                // WebGL2 chooses the default framebuffer's sample count, so assert only that MSAA is
+                // actually active — alpha-to-coverage is a no-op at one sample, which would silently
+                // turn this into a non-test. The scene itself already adapts to whatever count it gets.
+                const sampleCount = Number(await page.locator("canvas").getAttribute("data-sample-count")) || 0;
+                expect(sampleCount, "alpha-to-coverage needs a multisampled default framebuffer").toBeGreaterThan(1);
+            }
             await page.waitForTimeout(300);
 
             const screenshotPath = path.join(referenceDir, "test-actual.png");

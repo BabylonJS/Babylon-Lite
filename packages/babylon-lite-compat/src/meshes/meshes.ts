@@ -32,7 +32,6 @@ import {
     setThinInstances,
     setThinInstanceColors,
     createMeshFromData,
-    cloneTransformNode,
     resizeMeshGeometry,
     updateMeshUvs,
     createGroundFromHeightMap,

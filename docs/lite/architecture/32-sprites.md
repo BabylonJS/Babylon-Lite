@@ -83,6 +83,20 @@ The module exposes **two** sprite families:
    from the pure-2D path (no camera). Yaw-locked billboards are axis-locked
    with [0, 1, 0] as the lock axis.
 
+Depth-writing sprites can opt into alpha-to-coverage before scene registration:
+
+- `setAlphaToCoverage(layer, true)` is effective for a scene-hosted
+  `Sprite2DLayer` with `depth: "test-write"` on a multisampled target.
+  The layer keeps its selected blend mode; use `spriteBlendOpaque` for
+  replacement color/depth rendering.
+- `setAlphaToCoverage(system, true)` is effective for a cutout
+  `BillboardSpriteSystem` on a multisampled target. The A2C variant replaces the
+  binary cutoff with continuous texture-alpha sample coverage.
+
+The cutout billboard variant uses replacement color and per-sample depth writes.
+Pure-2D/HUD `SpriteRenderer` layers target a 1x swapchain and retain their normal
+blend descriptors; A2C is neither useful nor enabled on that path.
+
 `SpriteAtlas` and `SpriteFrame` are shared across both families. Clip
 animation, stable handle objects, and parenting are roadmap modules that must
 remain additive and separately importable so index-only scenes pay zero bytes
@@ -805,6 +819,7 @@ export interface SpriteBlendDescriptor {
     readonly _premultipliedOpacity?: boolean;
 }
 
+export const spriteBlendOpaque: SpriteBlendDescriptor; // replacement color; no blend
 export const spriteBlendAlpha: SpriteBlendDescriptor; // straight-alpha "over" (default)
 export const spriteBlendPremultiplied: SpriteBlendDescriptor; // premultiplied "over"
 export const spriteBlendAdditive: SpriteBlendDescriptor; // glows/sparks: src*alpha + dst
