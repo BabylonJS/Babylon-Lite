@@ -119,6 +119,7 @@ describe("Material.clone", () => {
         const register = vi.fn();
         const scene = { _registerNodeMaterial: register } as unknown as Scene;
         const mat = new NodeMaterial("src", scene, { foo: "bar" });
+        mat.backFaceCulling = false;
         const tex = fakeTexture();
         mat.getBlockByName("albedo").texture = tex as never;
 
@@ -127,6 +128,7 @@ describe("Material.clone", () => {
         expect(clone).toBeInstanceOf(NodeMaterial);
         expect(clone).not.toBe(mat);
         expect(clone.name).toBe("clone");
+        expect(clone.backFaceCulling).toBe(false);
         expect(register).toHaveBeenCalledWith(clone);
         // Texture override shared by reference.
         expect(clone.getBlockByName("albedo").texture).toBe(tex);
@@ -147,11 +149,36 @@ describe("Material.clone", () => {
 
         const clone = mat.clone("clone");
         const mesh: { material?: unknown } = {};
-        clone._bindMesh(mesh as never);
+        clone._bindMesh(mesh as never, () => true);
         expect(mesh.material).toBe(sourceLite);
 
         await parsePromise!;
         expect(clone._lite).toBe(cloneLite);
         expect(mesh.material).toBe(cloneLite);
+    });
+
+    it("NodeMaterial parse does not overwrite a mesh reassigned before compilation finishes", async () => {
+        const sourceLite = { id: "source" };
+        const cloneLite = { id: "clone" };
+        const replacementLite = { id: "replacement" };
+        vi.spyOn(lite, "parseNodeMaterialFromSnippet").mockResolvedValueOnce(cloneLite as never);
+        let parsePromise: Promise<void> | undefined;
+        const scene = {
+            _registerNodeMaterial: (material: NodeMaterial) => {
+                parsePromise = material._parse({} as never);
+            },
+        } as unknown as Scene;
+        const source = new NodeMaterial("src", scene, { foo: "bar" });
+        source._lite = sourceLite as never;
+        const clone = source.clone("clone");
+        const mesh: { material?: unknown } = {};
+        let currentMaterial: NodeMaterial | null = clone;
+
+        clone._bindMesh(mesh as never, () => currentMaterial === clone);
+        currentMaterial = null;
+        mesh.material = replacementLite;
+
+        await parsePromise!;
+        expect(mesh.material).toBe(replacementLite);
     });
 });

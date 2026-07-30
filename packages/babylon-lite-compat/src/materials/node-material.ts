@@ -48,7 +48,8 @@ export class NodeMaterial {
     private readonly _json: object | string;
     private readonly _textureOverrides: Record<string, TextureLike> = {};
     private readonly _scene: Scene;
-    private readonly _boundMeshes = new Set<{ material?: LiteNodeMaterial }>();
+    private readonly _pendingBindings = new Map<{ material?: LiteNodeMaterial }, () => boolean>();
+    private _parsed = false;
 
     public constructor(name: string, scene: Scene, json: object | string = {}) {
         this.name = name;
@@ -71,6 +72,7 @@ export class NodeMaterial {
         for (const [block, tex] of Object.entries(this._textureOverrides)) {
             cloned._textureOverrides[block] = tex;
         }
+        cloned.backFaceCulling = this.backFaceCulling;
         // Keep assignments made immediately after clone() functional while the clone's
         // own async renderable is compiled. _parse replaces this temporary handle.
         cloned._lite = this._lite;
@@ -107,9 +109,11 @@ export class NodeMaterial {
         // No-op: `_lite` is set when the tracked parse promise resolves.
     }
 
-    /** @internal Bind a mesh immediately and refresh it when this material finishes parsing. */
-    public _bindMesh(mesh: { material?: LiteNodeMaterial }): void {
-        this._boundMeshes.add(mesh);
+    /** @internal Bind a mesh immediately and refresh it if still assigned when parsing finishes. */
+    public _bindMesh(mesh: { material?: LiteNodeMaterial }, isCurrent: () => boolean): void {
+        if (!this._parsed) {
+            this._pendingBindings.set(mesh, isCurrent);
+        }
         if (this._lite) {
             mesh.material = this._lite;
         }
@@ -132,16 +136,23 @@ export class NodeMaterial {
                 textures[blockName] = tex._lite;
             }
         }
-        this._lite = await parseNodeMaterialFromSnippet(engine, "", {
-            json: this._json,
-            ...(overrides.length ? { textures } : {}),
-            // Babylon.js wires shadows into the scene globally; Babylon Lite takes them
-            // at NME parse time, so NME shadow-receiver blocks sample the scene's
-            // generators (e.g. ground `receiveShadows` in scenes 65/66).
-            ...(shadowGenerators.length ? { shadowGenerators: shadowGenerators as never } : {}),
-        });
-        for (const mesh of this._boundMeshes) {
-            mesh.material = this._lite;
+        try {
+            this._lite = await parseNodeMaterialFromSnippet(engine, "", {
+                json: this._json,
+                ...(overrides.length ? { textures } : {}),
+                // Babylon.js wires shadows into the scene globally; Babylon Lite takes them
+                // at NME parse time, so NME shadow-receiver blocks sample the scene's
+                // generators (e.g. ground `receiveShadows` in scenes 65/66).
+                ...(shadowGenerators.length ? { shadowGenerators: shadowGenerators as never } : {}),
+            });
+            this._parsed = true;
+            for (const [mesh, isCurrent] of this._pendingBindings) {
+                if (isCurrent()) {
+                    mesh.material = this._lite;
+                }
+            }
+        } finally {
+            this._pendingBindings.clear();
         }
     }
 
