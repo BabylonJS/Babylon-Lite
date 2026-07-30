@@ -153,6 +153,11 @@ export class TransformNode extends Node {
         scene._registerMesh(this);
     }
 
+    /** @internal Link an already-parented Lite node without mutating its Lite hierarchy. */
+    public _adoptLoadedParent(parent: TransformNode | null): void {
+        this._linkParent(parent);
+    }
+
     public constructor(name: string, scene?: Scene, liteNode?: SceneNode) {
         super(name, scene);
         if (liteNode) {
@@ -499,10 +504,36 @@ export class Mesh extends AbstractMesh {
     public static _fromLite(lite: LiteMesh, container?: LiteAssetContainer, scene?: Scene): Mesh {
         const mesh = new Mesh(lite.name ?? "", lite);
         mesh._container = container;
+        mesh._visible = lite.visible !== false;
         if (scene) {
             mesh._bindLoadedScene(scene);
         }
         return mesh;
+    }
+
+    /** @internal Wrap and link a complete Lite hierarchy, registering every wrapper. */
+    public static _fromLiteHierarchy(
+        lite: LiteMesh,
+        container?: LiteAssetContainer,
+        scene?: Scene,
+        registry: Map<unknown, TransformNode> = new Map(),
+        parent: TransformNode | null = null
+    ): Mesh {
+        let wrapper = registry.get(lite) as Mesh | undefined;
+        if (!wrapper) {
+            wrapper = Mesh._fromLite(lite, container, scene);
+            registry.set(lite, wrapper);
+        } else if (scene) {
+            wrapper._bindLoadedScene(scene);
+        }
+        wrapper._adoptLoadedParent(parent);
+        const children = (lite as unknown as { children?: LiteMesh[] }).children;
+        if (children) {
+            for (const child of children) {
+                Mesh._fromLiteHierarchy(child, container, scene, registry, wrapper);
+            }
+        }
+        return wrapper;
     }
 
     private _morphTargetManager: MorphTargetManager | null = null;
@@ -593,7 +624,7 @@ export class Mesh extends AbstractMesh {
         if (name !== undefined) {
             liteClone.name = name;
         }
-        const clone = Mesh._fromLite(liteClone, this._container, scene);
+        const clone = Mesh._fromLiteHierarchy(liteClone, this._container, scene);
         addToScene(scene._lite, liteClone);
         // The Lite clone already shares the source material; also carry the compat
         // material wrapper so `clone.material` mirrors the source's.

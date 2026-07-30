@@ -12,7 +12,11 @@ vi.mock("babylon-lite", async (importActual) => {
     return {
         ...actual,
         addToScene: vi.fn(),
-        cloneTransformNode: vi.fn((src: { name: string }) => ({ name: src.name + "_clone", children: [], visible: true })),
+        cloneTransformNode: vi.fn(function clone(src: FakeLite): FakeLite {
+            const result = { ...src, name: src.name + "_clone", children: [], visible: src.visible };
+            result.children = src.children.map((child) => clone(child));
+            return result;
+        }),
     };
 });
 
@@ -49,6 +53,12 @@ function fakeScene(): { scene: Scene; registered: unknown[] } {
     const scene = {
         _lite: {},
         _registerMesh: (mesh: unknown) => registered.push(mesh),
+        _unregisterNode: (mesh: unknown) => {
+            const index = registered.indexOf(mesh);
+            if (index !== -1) {
+                registered.splice(index, 1);
+            }
+        },
     } as unknown as Scene;
     return { scene, registered };
 }
@@ -115,6 +125,29 @@ describe("collectLoadedMeshes", () => {
         mesh.setEnabled(true);
         expect(cube.visible).toBe(true);
     });
+
+    it("reconstructs the loaded hierarchy and unregisters descendants on disposal", () => {
+        const child = liteMesh("Child");
+        const root = liteRoot([child]);
+        const { scene, registered } = fakeScene();
+        const meshes = collectLoadedMeshes(fakeContainer(root), new Map(), scene);
+
+        expect(meshes[1]!.parent).toBe(meshes[0]);
+        expect(meshes[0]!.getChildMeshes()).toEqual([meshes[1]]);
+        meshes[0]!.dispose();
+        expect(registered).toEqual([]);
+    });
+
+    it("preserves loaded visibility across enabled-state changes", () => {
+        const cube = liteMesh("Cube");
+        cube.visible = false;
+        const mesh = collectLoadedMeshes(fakeContainer(liteRoot([cube])), new Map())[1]!;
+
+        expect(mesh.isVisible).toBe(false);
+        mesh.setEnabled(false);
+        mesh.setEnabled(true);
+        expect(cube.visible).toBe(false);
+    });
 });
 
 describe("Mesh.clone", () => {
@@ -131,5 +164,18 @@ describe("Mesh.clone", () => {
         expect(cloneTransformNodeMock).toHaveBeenCalledWith((source as unknown as { _lite: unknown })._lite);
         const cloneLite = cloneTransformNodeMock.mock.results[0]!.value;
         expect(addToSceneMock).toHaveBeenCalledWith((scene as unknown as { _lite: unknown })._lite, cloneLite);
+    });
+
+    it("wraps and registers cloned descendants", () => {
+        const child = liteMesh("Child");
+        const { scene, registered } = fakeScene();
+        const source = collectLoadedMeshes(fakeContainer(liteRoot([liteMesh("Parent"), child])), new Map(), scene)[1] as Mesh;
+        source._lite.children.push(child as never);
+
+        const clone = source.clone("ParentCopy");
+
+        expect(clone.getChildMeshes()).toHaveLength(1);
+        expect(registered).toContain(clone);
+        expect(registered).toContain(clone.getChildMeshes()[0]);
     });
 });

@@ -21,7 +21,6 @@
  * `createDefaultCamera` frames loaded models.
  */
 
-import { getContainerMeshes } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
 import { Mesh } from "../meshes/meshes.js";
@@ -45,30 +44,25 @@ export type LoadedMeshRegistry = Map<unknown, TransformNode>;
  * non-renderable `Mesh`, exactly as Babylon.js's `__root__` is a `Mesh`.
  */
 export function collectLoadedMeshes(container: LiteAssetContainer, registry: LoadedMeshRegistry, scene?: Scene): TransformNode[] {
-    const renderable = getContainerMeshes(container);
     const result: TransformNode[] = [];
-    const wrap = (node: unknown): TransformNode => {
-        let wrapper = registry.get(node);
-        if (!wrapper) {
-            wrapper = Mesh._fromLite(node as LiteMesh, container, scene);
-            registry.set(node, wrapper);
-        } else if (scene) {
-            wrapper._bindLoadedScene(scene);
+    const visited = new Set<unknown>();
+    const visit = (node: unknown, parent: TransformNode | null): void => {
+        if (visited.has(node)) {
+            return;
         }
-        return wrapper;
+        const lite = node as { _gpu?: unknown; children?: unknown[] };
+        if (!lite._gpu && !Array.isArray(lite.children)) {
+            return;
+        }
+        visited.add(node);
+        const wrapper = Mesh._fromLiteHierarchy(node as LiteMesh, container, scene, registry, parent);
+        result.push(wrapper);
+        for (const child of lite.children ?? []) {
+            visit(child, wrapper);
+        }
     };
-    // The glTF loader's root is a transform node (no GPU geometry) that parents the
-    // renderable meshes — include it at index 0 to mirror Babylon.js `__root__`.
-    // Detected as a non-renderable entity that has a `children` array (lights, which
-    // BJS `meshes` excludes, are leaf nodes without one).
     for (const entity of container.entities) {
-        const node = entity as unknown as { _gpu?: unknown; children?: unknown[] };
-        if (!node._gpu && Array.isArray(node.children) && !renderable.includes(entity as unknown as LiteMesh)) {
-            result.push(wrap(entity));
-        }
-    }
-    for (const mesh of renderable) {
-        result.push(wrap(mesh));
+        visit(entity, null);
     }
     return result;
 }
