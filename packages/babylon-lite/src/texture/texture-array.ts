@@ -83,8 +83,6 @@ export interface TextureArrayOptions {
     minFilter?: GPUFilterMode;
     /** Mag filter. Default 'linear'. */
     magFilter?: GPUFilterMode;
-    /** Mipmap filter. Defaults to 'linear' when mipmaps exist, otherwise 'nearest'. */
-    mipmapFilter?: GPUMipmapFilterMode;
 }
 
 /** Per-layer upload options for `uploadImageToArrayLayer()` / `loadImageToArrayLayer()`. */
@@ -135,7 +133,7 @@ export function createTexture2DArray(engine: EngineContext, width: number, heigh
         addressModeV: options.addressModeV ?? "repeat",
         minFilter: options.minFilter ?? "linear",
         magFilter: options.magFilter ?? "linear",
-        mipmapFilter: options.mipmapFilter ?? (mipMaps ? "linear" : "nearest"),
+        mipmapFilter: mipMaps ? "linear" : "nearest",
     });
 
     const tex: Texture2DArray = { texture, view: texture.createView({ dimension: "2d-array" }), sampler, width, height, layers };
