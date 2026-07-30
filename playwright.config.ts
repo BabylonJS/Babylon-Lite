@@ -39,6 +39,9 @@ export default defineConfig({
     timeout: 60_000,
     retries: 2,
     workers: 2,
+    // On CI, bail on the first failing test (after its retries) to save time;
+    // locally we keep running so devs see every failure in one pass.
+    maxFailures: isCI ? 1 : undefined,
     use: {
         channel: "chrome",
         headless,

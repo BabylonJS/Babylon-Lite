@@ -18,6 +18,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import { GPUPicker } from "@babylonjs/core/Collisions/gpuPicker";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
+import "@babylonjs/core/Materials/standardMaterial";
 
 const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_Believe.splat";
 // Screen-centre coordinates pick the GS mesh in both BJS and Lite (the

@@ -58,6 +58,9 @@ export interface ShadowGenerator {
     _onReceiverData?: ((data: Float32Array) => void)[];
     /** @internal Dynamically imports and prepares the shadow-map render task for the given caster meshes. */
     _preloadShadowTask?(casterMeshes: readonly import("../mesh/mesh.js").Mesh[]): Promise<void>;
+    /** @internal Caster set whose lazily-imported material views are still loading. While set, the
+     *  generator is skipped by the shadow task so the pass cannot reach an unassigned no-colour factory. */
+    _preloadPending?: readonly import("../mesh/mesh.js").Mesh[];
     /** @internal Lazily creates (or returns the cached) shadow-task state for rendering the shadow map this frame. */
     _ensureShadowTaskState?(
         engine: import("../engine/engine.js").EngineContext,

@@ -8,6 +8,8 @@
  * application create an array and fill individual layers from any WebGPU
  * external-image source — `ImageBitmap`, `ImageData`, a canvas, or a video —
  * without the "draw to an offscreen canvas and read back raw bytes" dance.
+ * {@link loadKtx2Texture2DArray} covers the other shape: every layer already
+ * packed into one GPU-compressed `.ktx2` container.
  *
  * The whole feature is a set of free functions with zero module-level side
  * effects, so an app that never touches texture arrays strips it entirely, and
@@ -49,6 +51,10 @@
 import { TU } from "../engine/gpu-flags.js";
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import { generateMipmaps, recordMipmaps } from "./generate-mipmaps.js";
+import { decodeKtx2Async, makeSampler, srgbFormat, uncompressedInfo } from "./ktx2-loader.js";
+import type { Ktx2DecodedData, Ktx2DecodedMip } from "./ktx2-loader.js";
+import { getCompressedFormat } from "./compressed-formats.js";
+import type { CompressedFormatInfo } from "./compressed-formats.js";
 import { mipLevelCount } from "./mip-count.js";
 import type { Texture2D } from "./texture-2d.js";
 import type { EngineContext } from "../engine/engine.js";
@@ -322,4 +328,168 @@ export function updateTexture2DArrayFromPixels(engine: EngineContext, tex: Textu
         }
         engine._device.queue.submit([encoder.finish()]);
     }
+}
+
+// ─── KTX2 (Basis Universal) array containers ─────────────────────────
+//
+// A single .ktx2 file can carry all N layers (`layerCount` > 1), which is the
+// compressed, one-request counterpart to `createTexture2DArrayFromUrls()`. The
+// decoder glue lives in ktx2-loader.ts; this module only reshapes its output and
+// drives the GPU uploads — the same split Babylon.js uses between
+// `KhronosTextureContainer2._decodeAsync` and `rawTexture2DArray.functions`.
+
+/** Group the decoder's flat mipmap list into `[level][layer]`. The decoder emits `layerCount` consecutive
+ *  entries per level, ordered by layer, so the grouping is a straight reshape — but `layerIndex` is verified
+ *  rather than assumed so a decoder change cannot silently scramble the layers. */
+function groupArrayMips(decoded: Ktx2DecodedData): { layers: number; levels: Ktx2DecodedMip[][] } {
+    const mips = decoded.mipmaps;
+    const layers = decoded.layerCount;
+    if (layers === undefined) {
+        throw new Error("KTX2: the decoder does not report layerCount; a decoder with 2D array support is required (see setKtx2DecoderUrl)");
+    }
+    if (layers < 1 || mips.length % layers !== 0) {
+        throw new Error(`KTX2: decoder produced ${mips.length} mips, which is not a whole number of ${layers}-layer levels`);
+    }
+
+    const levels: Ktx2DecodedMip[][] = [];
+    for (let i = 0; i < mips.length; i += layers) {
+        const level = mips.slice(i, i + layers);
+        for (let layer = 0; layer < layers; layer++) {
+            const mip = level[layer]!;
+            if (mip.layerIndex !== layer) {
+                throw new Error(`KTX2: expected layer ${layer} at mip index ${i + layer} but the decoder reported layer ${mip.layerIndex}`);
+            }
+            if (mip.width !== level[0]!.width || mip.height !== level[0]!.height) {
+                throw new Error(`KTX2: layers of one mip level must share a size (level ${levels.length}, layer ${layer})`);
+            }
+        }
+        levels.push(level);
+    }
+    return { layers, levels };
+}
+
+function createKtx2ArrayTexture(engine: EngineContext, width: number, height: number, layers: number, levelCount: number, format: GPUTextureFormat, sRGB: boolean): Texture2DArray {
+    const texture = engine._device.createTexture({
+        size: { width, height, depthOrArrayLayers: layers },
+        dimension: "2d",
+        format: sRGB ? srgbFormat(format) : format,
+        mipLevelCount: levelCount,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
+    });
+    // The mip chain comes from the container, so no RENDER_ATTACHMENT / blit pass is needed here (unlike
+    // createTexture2DArray, which regenerates mips after an external-image copy).
+    const tex: Texture2DArray = { texture, view: texture.createView({ dimension: "2d-array" }), sampler: makeSampler(engine, levelCount), width, height, layers, invertY: true };
+    acquireTexture(tex);
+    return tex;
+}
+
+function uploadCompressedKtx2Array(engine: EngineContext, decoded: Ktx2DecodedData, format: CompressedFormatInfo, sRGB: boolean): Texture2DArray {
+    if (!engine._device.features.has(format.feature as GPUFeatureName)) {
+        throw new Error(`KTX2: device does not support ${format.feature}`);
+    }
+    const { layers, levels } = groupArrayMips(decoded);
+    const width = levels[0]![0]!.width;
+    const height = levels[0]![0]!.height;
+    const tex = createKtx2ArrayTexture(engine, width, height, layers, levels.length, format.gpuFormat, sRGB);
+
+    for (let level = 0; level < levels.length; level++) {
+        const blocksPerRow = Math.ceil(levels[level]![0]!.width / format.blockW);
+        const rowBytes = blocksPerRow * format.blockBytes;
+        // Copy extent must be the block-padded (physical) size; tail mips smaller than one block are copied
+        // as a single full block (see ktx-loader.ts).
+        const copyW = blocksPerRow * format.blockW;
+        const copyH = Math.ceil(levels[level]![0]!.height / format.blockH) * format.blockH;
+        for (let layer = 0; layer < layers; layer++) {
+            const mip = levels[level]![layer]!;
+            engine._device.queue.writeTexture(
+                { texture: tex.texture, mipLevel: level, origin: { x: 0, y: 0, z: layer } },
+                mip.data as Uint8Array<ArrayBuffer>,
+                { bytesPerRow: rowBytes },
+                { width: copyW, height: copyH, depthOrArrayLayers: 1 }
+            );
+        }
+    }
+    return tex;
+}
+
+function uploadUncompressedKtx2Array(engine: EngineContext, decoded: Ktx2DecodedData, info: { format: GPUTextureFormat; bytesPerPixel: number }, sRGB: boolean): Texture2DArray {
+    const bytesPerPixel = info.bytesPerPixel;
+    const { layers, levels } = groupArrayMips(decoded);
+    const width = levels[0]![0]!.width;
+    const height = levels[0]![0]!.height;
+    const tex = createKtx2ArrayTexture(engine, width, height, layers, levels.length, info.format, sRGB);
+
+    for (let level = 0; level < levels.length; level++) {
+        const levelWidth = levels[level]![0]!.width;
+        const levelHeight = levels[level]![0]!.height;
+        for (let layer = 0; layer < layers; layer++) {
+            const mip = levels[level]![layer]!;
+            const expected = levelWidth * levelHeight * bytesPerPixel;
+            if (mip.data.length !== expected) {
+                throw new Error(`KTX2: uncompressed mip ${level} layer ${layer} has ${mip.data.length} bytes, expected ${expected}`);
+            }
+            engine._device.queue.writeTexture(
+                { texture: tex.texture, mipLevel: level, origin: { x: 0, y: 0, z: layer } },
+                mip.data as Uint8Array<ArrayBuffer>,
+                { bytesPerRow: levelWidth * bytesPerPixel },
+                { width: levelWidth, height: levelHeight, depthOrArrayLayers: 1 }
+            );
+        }
+    }
+    return tex;
+}
+
+/**
+ * Decode an in-memory multi-layer KTX2 container and upload every layer of its mip chain to a
+ * `Texture2DArray`. The buffer counterpart to {@link loadKtx2Texture2DArray} — use it when the bytes are
+ * already in hand (an ArrayBuffer from a zip, an XHR, or a glTF binary chunk).
+ *
+ * @param engine - Engine context.
+ * @param buffer - Raw `.ktx2` file bytes with `layerCount` \>= 1.
+ * @param sRGB - Select the `*-srgb` GPU format. Default false.
+ */
+export async function uploadKtx2Texture2DArray(engine: EngineContext, buffer: ArrayBuffer, sRGB = false): Promise<Texture2DArray> {
+    // Unlike Babylon.js core (which must transcode arrays to RGBA because its engine cannot upload compressed
+    // array layers), WebGPU's writeTexture takes compressed layers directly via origin.z, so the array is kept
+    // in a GPU-compressed format whenever the device supports one.
+    const decoded = await decodeKtx2Async(engine, buffer);
+
+    const compressed = getCompressedFormat(decoded.transcodedFormat);
+    if (compressed) {
+        return uploadCompressedKtx2Array(engine, decoded, compressed, sRGB);
+    }
+
+    const uncompressed = uncompressedInfo(decoded.transcodedFormat);
+    if (uncompressed) {
+        return uploadUncompressedKtx2Array(engine, decoded, uncompressed, sRGB);
+    }
+
+    throw new Error(`KTX2: unsupported transcoded format 0x${decoded.transcodedFormat.toString(16)}`);
+}
+
+/**
+ * Fetch and decode a KTX2 file holding array layers (`layerCount` \>= 1) into a `Texture2DArray` —
+ * the single-file, single-request counterpart to {@link createTexture2DArrayFromUrls}, which needs one image
+ * per layer. A single-layer container is accepted and yields a one-layer array.
+ *
+ * The array is transcoded to the device's best GPU-compressed format (BC7/ETC2/ASTC) and stays compressed in
+ * VRAM, and the container's authored mip chain is uploaded as-is rather than regenerated.
+ *
+ * Like every codec-decoded texture the data is uploaded unflipped with `invertY = true` (GUIDANCE §8 path 2),
+ * unlike `createTexture2DArrayFromUrls` which flips on upload. No built-in material samples an array, so
+ * honour that flag in your own WGSL (`v = 1 - v`).
+ *
+ * Requires a KTX2 decoder with 2D array support (configure self-hosting via `setKtx2DecoderUrl`).
+ *
+ * @param engine - Engine context.
+ * @param url - URL of a `.ktx2` file whose layers become the array's layers, in order.
+ * @param sRGB - Select the `*-srgb` GPU format. Default false, matching `loadKtx2Texture2D`.
+ * @returns A promise resolving to the populated `Texture2DArray`.
+ */
+export async function loadKtx2Texture2DArray(engine: EngineContext, url: string, sRGB = false): Promise<Texture2DArray> {
+    const resp = await fetch(url);
+    if (!resp.ok) {
+        throw new Error(`KTX2 fetch failed: ${resp.status} for ${url}`);
+    }
+    return uploadKtx2Texture2DArray(engine, await resp.arrayBuffer(), sRGB);
 }
