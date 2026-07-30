@@ -11,7 +11,7 @@ import type { GltfFeature } from "./gltf-feature.js";
 
 const feature: GltfFeature = {
     id: "_primitive",
-    async applyMesh(meshData, mesh) {
+    applyMesh(meshData, mesh) {
         // Install the pipeline's primitive resolvers on first use. This must stay a CALL rather than
         // a bare `import "…/pbr-primitive-resolver.js"`: the package ships `"sideEffects": false`, so
         // a bundler may legally drop an import whose exports are unused — which silently removed the
@@ -20,7 +20,7 @@ const feature: GltfFeature = {
         // Non-triangle topology index from the glTF primitive mode. The unsupported LINE_LOOP(2) /
         // TRIANGLE_FAN(6) modes are left as a triangle list (matching BJS, which can't render them).
         const mode = (meshData as { _primitive?: { mode?: number } })._primitive?.mode;
-        const topo = mode === 0 ? 1 : mode === 1 ? 2 : mode === 3 ? 3 : mode === 5 ? 4 : undefined;
+        const topo = mode === 0 ? 1 : (mode as number) & 1 ? ((mode as number) + 3) >> 1 : undefined;
         if (topo) {
             (mesh as { _topology?: number })._topology = topo;
         }

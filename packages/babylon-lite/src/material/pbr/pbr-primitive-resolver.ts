@@ -1,6 +1,6 @@
 /** Installs the PBR pipeline's primitive-state resolver AND the extra mesh-feature encoder, which
  *  together handle non-triangle glTF topologies (POINTS / LINES / LINE_STRIP / TRIANGLE_STRIP) and
- *  negative-determinant winding reversal. Imported for side effect only by the glTF primitive +
+ *  negative-determinant winding reversal. Installed through a called export by the glTF primitive +
  *  negative-winding features, so triangle-list positive-winding scenes (the overwhelming majority)
  *  never bundle this code and keep their renderer + pipeline chunks byte-identical.
  *
@@ -8,9 +8,7 @@
  *  used only inside this lazy module must not leak into the shared mesh-features chunk, or it would
  *  grow every scene's bundle. */
 import type { Mesh } from "../../mesh/mesh.js";
-import { _installMeshFeatureExtra } from "../mesh-features.js";
-import { _installPbrPrimitiveResolver } from "./pbr-pipeline.js";
-import { _installPbrGeometryWinding } from "./pbr-geometry-renderable.js";
+import { _installPrimitiveStateHooks } from "../primitive-state-hooks.js";
 
 /** Mesh world transform has a positive determinant (mirrored vs the RH→LH root): its triangle
  *  winding is reversed, so back-face culling must flip (cull "front"). */
@@ -47,21 +45,21 @@ export function _resolvePrimitive(meshFeatures: number, hasDoubleSided: boolean)
     // ccw winding, wrongly inverting the shading normal on the visible outer surface → black). BJS
     // handles the same case by flipping sideOrientation (the GL front-face winding); it states the
     // condition as a negative determinant because it measures the sign in its own opposite-handed space.
-    const reverseWinding = (meshFeatures & MSH_REVERSE_WINDING) !== 0;
     // Non-triangle-list primitive topology. Points and lines have no faces to cull; for a strip the
     // material's culling still applies.
     const topoIdx = (meshFeatures >> MSH_TOPOLOGY_SHIFT) & 7;
     const topology: GPUPrimitiveTopology =
         topoIdx === 1 ? "point-list" : topoIdx === 2 ? "line-list" : topoIdx === 3 ? "line-strip" : topoIdx === 4 ? "triangle-strip" : "triangle-list";
-    const noCull = topoIdx >= 1 && topoIdx <= 3;
     // Indexed strip draws need stripIndexFormat to match the index buffer.
-    const stripIndexFormat: GPUIndexFormat | undefined = topoIdx >= 3 ? (meshFeatures & MSH_INDEX_U32 ? "uint32" : "uint16") : undefined;
-    return {
+    const state: GPUPrimitiveState = {
         topology,
-        ...(stripIndexFormat ? { stripIndexFormat } : undefined),
-        cullMode: noCull || hasDoubleSided ? "none" : "back",
-        frontFace: reverseWinding ? "cw" : "ccw",
+        cullMode: (topoIdx && topoIdx < 4) || hasDoubleSided ? "none" : "back",
+        frontFace: _windingFrontFace(meshFeatures),
     };
+    if (topoIdx > 2) {
+        state.stripIndexFormat = meshFeatures & MSH_INDEX_U32 ? "uint32" : "uint16";
+    }
+    return state;
 }
 
 /** @internal Front face for a mesh in a geometry (depth/normal/velocity) pass. Shared with the
@@ -93,24 +91,18 @@ export function _installPrimitiveState(): void {
     }
     _installed = true;
     // Encode the topology + negative-winding bits from the per-mesh flags set by the loader/feature.
-    _installMeshFeatureExtra((mesh: Mesh): number => {
-        let f = 0;
-        if (_windingRule ? _windingRule(mesh) : (mesh as { _reverseWinding?: boolean })._reverseWinding) {
-            f |= MSH_REVERSE_WINDING;
-        }
-        const topo = (mesh as { _topology?: number })._topology;
-        if (topo) {
-            f |= topo << MSH_TOPOLOGY_SHIFT;
-            // Strips need the pipeline stripIndexFormat to match the index buffer; flag uint32 so the
-            // pipeline picks the right format. Lite always draws indexed.
-            if (topo >= 3 && mesh._gpu.indexFormat === "uint32") {
-                f |= MSH_INDEX_U32;
+    _installPrimitiveStateHooks(
+        (mesh: Mesh): number => {
+            let f = _windingRule ? (_windingRule(mesh) ? MSH_REVERSE_WINDING : 0) : (mesh as { _reverseWinding?: boolean })._reverseWinding ? MSH_REVERSE_WINDING : 0;
+            const topo = (mesh as { _topology?: number })._topology;
+            if (topo) {
+                // Strips need the pipeline stripIndexFormat to match the index buffer; flag uint32 so the
+                // pipeline picks the right format. Lite always draws indexed.
+                f |= (topo << MSH_TOPOLOGY_SHIFT) | (topo > 2 && mesh._gpu.indexFormat === "uint32" ? MSH_INDEX_U32 : 0);
             }
-        }
-        return f;
-    });
-    _installPbrPrimitiveResolver(_resolvePrimitive);
-    // A mirrored mesh is mirrored in every pass: without this its depth/normal/velocity output would be
-    // culled away in the geometry pass just as it would in the forward one.
-    _installPbrGeometryWinding(_windingFrontFace);
+            return f;
+        },
+        _resolvePrimitive,
+        _windingFrontFace
+    );
 }

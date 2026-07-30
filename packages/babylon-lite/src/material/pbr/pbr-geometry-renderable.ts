@@ -30,6 +30,7 @@ import type { ComposedShader } from "../../shader/fragment-types.js";
 import { targetSignatureKey, REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
+import { _primitiveState } from "../primitive-state-hooks.js";
 import type { Material } from "../material.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 
@@ -50,19 +51,6 @@ import { _setActivePbrGeometryAttachments } from "./pbr-geometry-view.js";
  *  keeps the module free of top-level side effects so an unused geometry path
  *  tree-shakes away. */
 let _pbrGeometryGroupBuilder: MeshGroupBuilder | null = null;
-
-/** Mirrored-mesh front-face resolution for the geometry pass. Installed by the lazy
- *  `pbr-primitive-resolver` module — which the glTF primitive feature loads for assets containing a
- *  negative-scale node, and which the `enableMirroredMeshes()` opt-in also pulls in. Module-local
- *  with a single exported setter: when neither path is present the setter tree-shakes, the bundler
- *  proves this is always null, and the `frontFace` ternary below folds to the plain `"ccw"` literal
- *  — unmirrored geometry scenes stay byte-identical.
- *  @internal */
-let _geometryWinding: ((meshFeatures: number) => GPUFrontFace) | null = null;
-/** @internal Install geometry-pass winding resolution. */
-export function _installPbrGeometryWinding(resolve: (meshFeatures: number) => GPUFrontFace): void {
-    _geometryWinding = resolve;
-}
 
 export function getPbrGeometryGroupBuilder(): MeshGroupBuilder {
     if (_pbrGeometryGroupBuilder) {
@@ -476,7 +464,12 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
     const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState ? { format: fmt, blend: blendState } : { format: fmt }));
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;
-    const cullMode = hasDoubleSided ? "none" : view._reverseCulling ? "front" : "back";
+    const primitive = _primitiveState
+        ? _primitiveState[1](res._meshFeatures, hasDoubleSided)
+        : { topology: "triangle-list" as GPUPrimitiveTopology, cullMode: hasDoubleSided ? ("none" as GPUCullMode) : ("back" as GPUCullMode), frontFace: "ccw" as GPUFrontFace };
+    if (view._reverseCulling && primitive.cullMode !== "none") {
+        primitive.cullMode = primitive.cullMode === "front" ? "back" : "front";
+    }
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,
         vertex: { module: res._vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
@@ -492,11 +485,9 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
               }
             : undefined,
         multisample: { count: sig._sampleCount },
-        // A mirrored mesh has reversed triangle winding, exactly as in the forward pass — without
-        // this its depth/normal/velocity output would be culled away. Resolution goes through the
-        // opt-in hook so unmirrored bundles fold the whole thing to the plain "ccw" literal. The
-        // variant key already includes meshFeatures, so a winding change gets its own pipeline.
-        primitive: { topology: "triangle-list", cullMode, frontFace: _geometryWinding ? _geometryWinding(res._meshFeatures) : "ccw" },
+        // Match the forward pass's topology, strip index format, culling, and mirrored winding.
+        // The variant key includes meshFeatures, so every primitive-state combination gets its own pipeline.
+        primitive,
     });
     res._pipelines.set(key, pipeline);
     return pipeline;

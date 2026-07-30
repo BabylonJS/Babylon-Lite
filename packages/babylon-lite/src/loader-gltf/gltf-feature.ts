@@ -102,7 +102,7 @@ export interface GltfFeature {
     /** Per-mesh hook: mutates a freshly-uploaded `Mesh`
      *  (e.g. attaches `mesh.skeleton`, `mesh.morphTargets`). Runs in parallel
      *  for each mesh inside the loader's mesh-upload Promise.all. */
-    applyMesh?(meshData: GltfMeshData, mesh: Mesh, ctx: GltfLoadCtx): Promise<void>;
+    applyMesh?(meshData: GltfMeshData, mesh: Mesh, ctx: GltfLoadCtx): Promise<void> | void;
     /** Per-asset hook: contributes a fragment merged into the final `AssetContainer`
      *  (e.g. `animationGroups`, `materialVariants`). Runs once after the mesh
      *  hierarchy is built. */
