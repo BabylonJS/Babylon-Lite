@@ -23,6 +23,7 @@ import {
 import type { Texture2DArray } from "babylon-lite";
 
 import { Constants } from "../misc/engine-constants.js";
+import { unsupported } from "../error.js";
 import type { Scene } from "../scene/scene.js";
 import { BaseTexture, toRgbaBytes } from "./textures.js";
 
@@ -221,6 +222,7 @@ export async function CreateTexture2DArrayFromKTX2Async(scene: Scene, data: stri
     });
     return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
 }
+/** @internal Resolve the live Lite array handle a compat texture wraps. */
 function liteArrayOf(texture: RawTexture2DArray): Texture2DArray {
     const array = texture.getInternalTexture();
     if (!array) {

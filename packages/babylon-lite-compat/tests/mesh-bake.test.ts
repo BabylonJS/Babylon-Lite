@@ -92,6 +92,18 @@ describe("Mesh transform bake (issue #475)", () => {
         expect(call[8]).toBe(colors);
     });
 
+    it("reads auxiliary attributes retained directly by the Lite mesh", () => {
+        const uv2 = new Float32Array([0.3, 0.4]);
+        const tangents = new Float32Array([1, 0, 0, 1]);
+        const colors = new Float32Array([1, 1, 1, 1]);
+        const mesh = makeMesh({ uv2, tangents, colors });
+        Object.assign(mesh as unknown as Record<string, unknown>, { _lastUv2: undefined, _lastTangents: undefined, _lastColors: undefined });
+
+        expect(mesh.getVerticesData("uv2")).toBe(uv2);
+        expect(mesh.getVerticesData("tangent")).toBe(tangents);
+        expect(mesh.getVerticesData("color")).toBe(colors);
+    });
+
     it("transforms tangent directions while preserving handedness", () => {
         const mesh = makeMesh({ normals: new Float32Array([0, 0, 1]), tangents: new Float32Array([1, 1, 0, -1]) });
 

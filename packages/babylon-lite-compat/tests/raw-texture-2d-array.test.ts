@@ -218,6 +218,13 @@ describe("CreateTexture2DArrayFromImageUrlsAsync", () => {
         await CreateTexture2DArrayFromImageUrlsAsync(fakeScene() as never, ["a.png"], { invertY: true, premultiplyAlpha: true });
         expect(fromUrlsMock.mock.calls[0]![2]).toEqual({ mipMaps: true, invertY: true, premultiplyAlpha: true });
     });
+
+    // 🔧 Needs Lite core: Lite's public KTX2 surface decodes only single 2D textures,
+    // so per-layer RGBA array decode has no backing yet (structural blocker documented
+    // on the stub). Assert the throwing stub until Lite exposes the array decode.
+    it("CreateTexture2DArrayFromKTX2Async throws a LiteCompatError pending a Lite decoder addition", async () => {
+        await expect(CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "cubes.ktx2")).rejects.toThrow(/KTX2/);
+    });
 });
 
 describe("CreateTexture2DArrayFromKTX2Async", () => {

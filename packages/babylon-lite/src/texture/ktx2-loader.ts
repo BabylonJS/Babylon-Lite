@@ -13,6 +13,7 @@ import type { Texture2D } from "./texture-2d.js";
 import { getCompressedFormat } from "./compressed-formats.js";
 import type { CompressedFormatInfo } from "./compressed-formats.js";
 
+/** @internal */
 export interface Ktx2DecoderCaps {
     astc: boolean;
     bptc: boolean;
