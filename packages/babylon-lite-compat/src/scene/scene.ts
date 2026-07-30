@@ -249,6 +249,17 @@ export class Scene extends AbstractScene {
     }
 
     /**
+     * @internal Whether the engine has started, i.e. deferred mesh adds have been
+     * flushed and meshes are live in the Lite scene. Used by the mesh `material`
+     * setter and texture-readiness path to decide whether a material change must be
+     * reconciled into the running scene (ensure renderable + rebuild) or is still
+     * safely handled by the boot-time build.
+     */
+    public get _hasStarted(): boolean {
+        return this._started;
+    }
+
+    /**
      * @internal Add a mesh to the Lite scene, deferring until engine start if the
      * engine has not started yet (so a later `mesh.material = …` is captured in the
      * correct render group). After start, adds happen immediately and Lite's
