@@ -30,7 +30,6 @@ import type { ComposedShader } from "../../shader/fragment-types.js";
 import { targetSignatureKey, REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
-import { _primitiveState } from "../primitive-state-hooks.js";
 import type { Material } from "../material.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 
@@ -38,7 +37,7 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./pbr-material.js";
 import { _computePbrMaterialFeatures } from "./pbr-material.js";
 import { PBR_HAS_ALPHA_BLEND, PBR_HAS_DOUBLE_SIDED, PBR_HAS_NORMAL_MAP, PBR2_HAS_UV2 } from "./pbr-flags.js";
-import { createPbrMeshBindGroup } from "./pbr-pipeline.js";
+import { _resolvePrimitive, createPbrMeshBindGroup } from "./pbr-pipeline.js";
 import type { _PbrGeometryContext } from "./pbr-renderable.js";
 import { _writeMaterialData } from "./pbr-renderable.js";
 import type { PbrGeometryMaterialView } from "./pbr-geometry-view.js";
@@ -464,9 +463,7 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
     const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState ? { format: fmt, blend: blendState } : { format: fmt }));
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;
-    const primitive = _primitiveState
-        ? _primitiveState[1](res._meshFeatures, hasDoubleSided)
-        : { topology: "triangle-list" as GPUPrimitiveTopology, cullMode: hasDoubleSided ? ("none" as GPUCullMode) : ("back" as GPUCullMode), frontFace: "ccw" as GPUFrontFace };
+    const primitive = _resolvePrimitive(res._meshFeatures, hasDoubleSided);
     if (view._reverseCulling && primitive.cullMode !== "none") {
         primitive.cullMode = primitive.cullMode === "front" ? "back" : "front";
     }

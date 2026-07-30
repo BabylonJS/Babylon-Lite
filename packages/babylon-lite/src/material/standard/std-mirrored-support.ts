@@ -11,7 +11,8 @@
 import type { Mesh } from "../../mesh/mesh.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { Mat4 } from "../../math/types.js";
-import { _installPrimitiveState, _installWindingRule, _resolvePrimitive, _windingFrontFace } from "../pbr/pbr-primitive-resolver.js";
+import { _installMeshFeatureExtra } from "../mesh-features.js";
+import { _resolvePrimitive, _windingFrontFace } from "../pbr/pbr-pipeline.js";
 import { _installStdPrimitiveResolver } from "./standard-pipeline.js";
 import { _installStdGeometryWinding } from "./standard-geometry-renderable.js";
 import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
@@ -55,10 +56,7 @@ let _watchers: WeakMap<SceneContext, (deltaMs: number) => void> | null = null;
 export function installMirroredMeshSupport(scene: SceneContext): void {
     if (!_installed) {
         _installed = true;
-        // The PBR-side encoder + resolvers are no longer installed at import time, so a
-        // Standard-only scene (which never loads the glTF primitive feature) must install them here.
-        _installPrimitiveState();
-        _installWindingRule(isMirrored);
+        _installMeshFeatureExtra((mesh) => (isMirrored(mesh) ? 1 << 11 : 0));
         // A procedural Standard mesh given a negative scale is mirrored just like a glTF one;
         // without this its back faces would be culled and it would render inside-out.
         _installStdPrimitiveResolver(_resolvePrimitive);

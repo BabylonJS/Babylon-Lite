@@ -1,5 +1,4 @@
 import type { Mesh } from "../mesh/mesh.js";
-import { _primitiveState } from "./primitive-state-hooks.js";
 
 export const MSH_HAS_TANGENTS = 1 << 0;
 export const MSH_HAS_SKELETON = 1 << 1;
@@ -14,8 +13,15 @@ export const MSH_VAT = 1 << 9;
 /** Mesh has no NORMAL attribute → must be flat-shaded (glTF spec). */
 export const MSH_FLAT_NORMAL = 1 << 10;
 // Bits 11-15 (negative-winding + 3-bit topology index + uint32-strip flag) are owned by the lazy
-// glTF primitive feature: their constants live in pbr-primitive-resolver.ts and are encoded via the
-// `_meshFeatureExtra` hook below, so triangle-list positive-winding scenes never bundle that code.
+// glTF primitive feature. It pre-encodes those bits on affected meshes, so the loader's resolver
+// machinery stays out of the shared mesh-feature path.
+
+/** Extra mesh-feature encoder installed only by runtime opt-ins such as mirrored procedural meshes. */
+let _meshFeatureExtra: ((mesh: Mesh) => number) | null = null;
+/** @internal Install an extra mesh-feature encoder. */
+export function _installMeshFeatureExtra(encode: (mesh: Mesh) => number): void {
+    _meshFeatureExtra = encode;
+}
 
 /** @internal Compute mesh/pass feature bits shared by material renderers. */
 export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number {
@@ -58,8 +64,9 @@ export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number
     if (receiveShadows) {
         features |= MSH_RECEIVE_SHADOWS;
     }
-    if (_primitiveState) {
-        features |= _primitiveState[0](mesh);
+    features |= (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0;
+    if (_meshFeatureExtra) {
+        features |= _meshFeatureExtra(mesh);
     }
     return features;
 }

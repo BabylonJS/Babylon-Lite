@@ -20,9 +20,31 @@ import type { _PbrBindCtx, PbrExt } from "./pbr-flags.js";
 import { _getPbrExtsSorted, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT, PBR2_HAS_UV2 } from "./pbr-flags.js";
 import { PBR_HAS_NORMAL_MAP, PBR_HAS_EMISSIVE, PBR_HAS_SPEC_GLOSS, PBR_HAS_DOUBLE_SIDED, PBR_HAS_ALPHA_BLEND } from "./pbr-flags.js";
 import { MSH_HAS_TANGENTS, MSH_HAS_UV2 } from "../mesh-features.js";
-import { _primitiveState } from "../primitive-state-hooks.js";
 import { REVERSE_DEPTH_COMPARE, targetSignatureKey } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
+
+const MSH_REVERSE_WINDING = 1 << 11;
+const MSH_TOPOLOGY_SHIFT = 12;
+const MSH_INDEX_U32 = 1 << 15;
+
+/** @internal Resolve topology, culling, strip format, and winding from mesh feature bits. */
+export function _resolvePrimitive(meshFeatures: number, hasDoubleSided: boolean): GPUPrimitiveState {
+    const topo = (meshFeatures >> MSH_TOPOLOGY_SHIFT) & 7;
+    const state: GPUPrimitiveState = {
+        topology: topo === 1 ? "point-list" : topo === 2 ? "line-list" : topo === 3 ? "line-strip" : topo === 4 ? "triangle-strip" : "triangle-list",
+        cullMode: (topo && topo < 4) || hasDoubleSided ? "none" : "back",
+        frontFace: _windingFrontFace(meshFeatures),
+    };
+    if (topo > 2) {
+        state.stripIndexFormat = meshFeatures & MSH_INDEX_U32 ? "uint32" : "uint16";
+    }
+    return state;
+}
+
+/** @internal Resolve front-face winding from mesh feature bits. */
+export function _windingFrontFace(meshFeatures: number): GPUFrontFace {
+    return meshFeatures & MSH_REVERSE_WINDING ? "cw" : "ccw";
+}
 
 // ─── Shader Bindings (sig-independent) ──────────────────────────────
 
@@ -175,9 +197,7 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
               }
             : {}),
         multisample: { count: sig._sampleCount },
-        primitive: _primitiveState
-            ? _primitiveState[1](meshFeatures, hasDoubleSided)
-            : { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },
+        primitive: _resolvePrimitive(meshFeatures, hasDoubleSided),
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;
