@@ -30,6 +30,7 @@ describe("StandardMaterial texture proxies", () => {
             const mat = new PBRMaterial("dog");
             mat.albedoColor = new Color3(0.2, 0.4, 0.6);
             mat._lite.baseColorTexture = { id: "fallback" } as never;
+            mat._lite.ormTexture = { id: "orm" } as never;
             mat._lite.baseColorFactor = [1, 1, 1, 1];
             const tex = fakeTexture();
 
