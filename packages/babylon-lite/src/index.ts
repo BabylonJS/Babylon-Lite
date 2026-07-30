@@ -278,6 +278,8 @@ export { NeutralToneMapping } from "./material/pbr/pbr-neutral-wgsl.js";
 export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
 export { enableMaterialStencil } from "./material/enable-material-stencil.js";
+export { getAlphaToCoverage, setAlphaToCoverage } from "./render/alpha-to-coverage.js";
+export type { AlphaToCoverageTarget } from "./render/alpha-to-coverage.js";
 export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────
@@ -570,7 +572,7 @@ export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/sh
 export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
 export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
-export { spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
+export { spriteBlendOpaque, spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
 export {
     createSprite2DLayer,
     addSprite2DIndex,

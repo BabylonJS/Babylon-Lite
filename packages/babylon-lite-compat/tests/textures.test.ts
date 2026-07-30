@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { EngineContext } from "babylon-lite";
 
 const liteMocks = vi.hoisted(() => ({
     loadTexture2D: vi.fn(),
@@ -13,10 +14,7 @@ const liteMocks = vi.hoisted(() => ({
 
 vi.mock("babylon-lite", () => liteMocks);
 
-import type { EngineContext } from "babylon-lite";
-
 import { resolveKtxUrl, CubeTexture, HDRCubeTexture, Texture } from "../src/textures/textures";
-import type { EngineContext } from "babylon-lite";
 
 type Deferred<T> = {
     promise: Promise<T>;

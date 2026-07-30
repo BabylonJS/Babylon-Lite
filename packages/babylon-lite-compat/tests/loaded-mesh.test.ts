@@ -13,7 +13,7 @@ vi.mock("babylon-lite", async (importActual) => {
         ...actual,
         addToScene: vi.fn(),
         cloneTransformNode: vi.fn(function clone(src: FakeLite): FakeLite {
-            const result = { ...src, name: src.name + "_clone", children: [], visible: src.visible };
+            const result: FakeLite = { ...src, name: src.name + "_clone", children: [], visible: src.visible };
             result.children = src.children.map((child) => clone(child));
             return result;
         }),
@@ -52,6 +52,7 @@ function fakeScene(): { scene: Scene; registered: unknown[] } {
     const registered: unknown[] = [];
     const scene = {
         _lite: {},
+        _deferAdd: (add: () => void) => add(),
         _registerMesh: (mesh: unknown) => registered.push(mesh),
         _unregisterNode: (mesh: unknown) => {
             const index = registered.indexOf(mesh);
