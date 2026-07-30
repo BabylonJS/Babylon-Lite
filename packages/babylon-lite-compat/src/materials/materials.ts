@@ -352,8 +352,10 @@ export class PBRSheenConfiguration {
         this._texture = value;
         if (value?._lite) {
             this._props.texture = value._lite;
-            this._markDirty();
+        } else {
+            delete this._props.texture;
         }
+        this._markDirty();
     }
 
     private _texture: BaseTexture | null = null;
@@ -495,8 +497,9 @@ export class PBRMaterial extends PushMaterial {
         if (this._albedoTexture) {
             textures.push(this._albedoTexture);
         }
-        if (this._environmentTexture) {
-            textures.push(this._environmentTexture);
+        const environmentTexture = this.environmentTexture;
+        if (environmentTexture) {
+            textures.push(environmentTexture);
         }
         if (this._sheen) {
             textures.push(...this._sheen.getActiveTextures());
