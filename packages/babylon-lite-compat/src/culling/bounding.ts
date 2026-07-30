@@ -46,7 +46,9 @@ export class BoundingSphere {
     /** @internal */
     public _update(worldMatrix: Matrix): void {
         Vector3.TransformCoordinatesToRef(this.center, worldMatrix, this.centerWorld);
-        // Scale the local radius by the largest axis scale of the world matrix.
+        // Match Babylon.js `BoundingSphere._update` exactly: transform (1,1,1)
+        // as a normal, then use its largest absolute component. Basis-vector
+        // lengths would be more conventional geometry, but would break compat.
         const scaled = Vector3.TransformNormal(new Vector3(1, 1, 1), worldMatrix);
         this.radiusWorld = Math.max(Math.abs(scaled.x), Math.abs(scaled.y), Math.abs(scaled.z)) * this.radius;
         this._worldMatrix = worldMatrix;
@@ -134,8 +136,14 @@ export class BoundingBox {
             this.maximumWorld.maximizeInPlace(v);
         }
 
-        this.extendSizeWorld.copyFrom(this.maximumWorld.subtract(this.minimumWorld).scale(0.5));
-        this.centerWorld.copyFrom(Vector3.Lerp(this.minimumWorld, this.maximumWorld, 0.5));
+        const minX = this.minimumWorld.x,
+            minY = this.minimumWorld.y,
+            minZ = this.minimumWorld.z,
+            maxX = this.maximumWorld.x,
+            maxY = this.maximumWorld.y,
+            maxZ = this.maximumWorld.z;
+        this.extendSizeWorld.copyFromFloats((maxX - minX) * 0.5, (maxY - minY) * 0.5, (maxZ - minZ) * 0.5);
+        this.centerWorld.copyFromFloats((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5);
 
         const m = world.m;
         this.directions[0]!.copyFromFloats(m[0]!, m[1]!, m[2]!);

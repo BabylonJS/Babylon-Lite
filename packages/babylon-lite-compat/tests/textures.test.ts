@@ -37,7 +37,7 @@ function engineWrapper(): { _lite: import("babylon-lite").EngineContext } {
 
 /** The `Texture` constructor's scene param is typed `Scene | { _lite: EngineContext }`;
  *  the GPU-free tests only need the `_lite` handle, so the minimal fake is cast in. */
-const asTextureScene = (w: { _lite: object }): never => w as never;
+const asTextureScene = (w: { _lite: object }): ConstructorParameters<typeof Texture>[1] => w as unknown as ConstructorParameters<typeof Texture>[1];
 
 function textureHandle(): unknown {
     return { id: "texture" };

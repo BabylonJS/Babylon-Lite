@@ -88,6 +88,13 @@ describe("BoundingSphere", () => {
         expect(sphere.centerWorld.asArray()).toEqual([5, 0, 0]);
         expect(sphere.radiusWorld).toBeCloseTo(2, 6);
     });
+
+    it("matches Babylon.js radius scaling under rotation", () => {
+        const sphere = new BoundingSphere(new Vector3(-1, 0, 0), new Vector3(1, 0, 0), Matrix.RotationZ(Math.PI / 4));
+        // BJS transforms the (1,1,1) normal and takes its largest absolute
+        // component, which is √2 for this rotation (rather than using basis lengths).
+        expect(sphere.radiusWorld).toBeCloseTo(Math.SQRT2, 6);
+    });
 });
 
 describe("BoundingInfo", () => {
