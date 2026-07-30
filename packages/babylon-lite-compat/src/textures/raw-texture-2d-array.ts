@@ -2,7 +2,8 @@
  * Babylon.js-compatible 2D **texture array** wrappers over Babylon Lite's
  * `createTexture2DArray` / `createTexture2DArrayFromPixels` /
  * `updateTexture2DArrayFromPixels` / `uploadImageToArrayLayer` /
- * `loadImageToArrayLayer` / `createTexture2DArrayFromUrls`.
+ * `loadImageToArrayLayer` / `createTexture2DArrayFromUrls` /
+ * `loadKtx2Texture2DArray` / `uploadKtx2Texture2DArray`.
  *
  * A texture array is a single GPU texture holding N same-size, same-format layers
  * (sampled in a shader as `texture_2d_array<f32>` with an explicit layer index).
@@ -12,13 +13,21 @@
  * decoded image sources through Lite's external-image copy.
  */
 
-import { createTexture2DArray, createTexture2DArrayFromPixels, updateTexture2DArrayFromPixels, loadImageToArrayLayer, createTexture2DArrayFromUrls } from "babylon-lite";
-import type { Texture2DArray } from "babylon-lite";
+import {
+    createTexture2DArray,
+    createTexture2DArrayFromPixels,
+    updateTexture2DArrayFromPixels,
+    loadImageToArrayLayer,
+    createTexture2DArrayFromUrls,
+    loadKtx2Texture2DArray,
+    uploadKtx2Texture2DArray,
+    getOrCreateSampler,
+} from "babylon-lite";
+import type { EngineContext, Texture2DArray } from "babylon-lite";
 
 import { Constants } from "../misc/engine-constants.js";
 import type { Scene } from "../scene/scene.js";
 import { BaseTexture, toRgbaBytes } from "./textures.js";
-import { unsupported } from "../error.js";
 
 /** The decoded image sources WebGPU (and therefore Lite) can upload into a layer. */
 type ImageSource = ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | HTMLVideoElement | ImageData | VideoFrame;
@@ -247,23 +256,46 @@ export interface ICreateTexture2DArrayFromKTX2Options {
     invertY?: boolean;
 }
 
+/** @internal Copy exactly one `ArrayBufferView` window into an owned `ArrayBuffer`. */
+function copyViewToArrayBuffer(data: ArrayBufferView): ArrayBuffer {
+    const copy = new Uint8Array(data.byteLength);
+    copy.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+    return copy.buffer;
+}
+
+/** @internal Apply the BJS-facing orientation and basic sampling options to a decoded Lite array. */
+function applyKtx2Options(engine: EngineContext, texture: Texture2DArray, options?: ICreateTexture2DArrayFromKTX2Options): void {
+    // Lite marks unflipped codec data as `invertY = true`; expose the BJS helper's
+    // requested convention instead (false by default).
+    texture.invertY = options?.invertY ?? false;
+
+    const samplingMode = options?.samplingMode ?? Constants.TEXTURE_TRILINEAR_SAMPLINGMODE;
+    if (samplingMode === Constants.TEXTURE_TRILINEAR_SAMPLINGMODE) {
+        return;
+    }
+
+    const nearest = samplingMode === Constants.TEXTURE_NEAREST_SAMPLINGMODE;
+    texture.sampler = getOrCreateSampler(engine, {
+        addressModeU: "repeat",
+        addressModeV: "repeat",
+        minFilter: nearest ? "nearest" : "linear",
+        magFilter: nearest ? "nearest" : "linear",
+        mipmapFilter: "nearest",
+    });
+}
+
 /**
  * Babylon.js `CreateTexture2DArrayFromKTX2Async` — decode a single multi-layer KTX2
  * container (multiple array layers) into a 2D array texture.
  *
- * 🔧 Needs Lite core. Faithfully backing this requires the KTX2 file decoded into
- * per-layer RGBA pixel data, but Babylon Lite's KTX2 decoder glue (`loadKtx2Decoder`
- * and its `Ktx2DecodedData` model) is private to `texture/ktx2-loader.ts` and models
- * only a single-layer mip chain — it exposes no `layerCount`/`layerIndex`, so there is
- * no way to slice the container into array layers. `loadKtx2Texture2D` likewise yields
- * one `Texture2D`, not an array. Adding layer-aware decode means editing
- * `ktx2-loader.ts`, which the glTF `KHR_texture_basisu` extension already pulls into
- * scene bundles, so the capability cannot be added tree-shakeably from a new file.
- * Throws until Lite exposes a layer-aware KTX2 decode.
+ * Routes URLs through Lite's `loadKtx2Texture2DArray` and in-memory views through
+ * `uploadKtx2Texture2DArray`, then wraps the resulting `Texture2DArray`. Lite keeps
+ * the container's authored mip chain (and GPU compression where available), so the
+ * `generateMipMaps` option is accepted for API shape but does not replace that chain.
  */
-export function CreateTexture2DArrayFromKTX2Async(_scene: Scene, _data: string | ArrayBufferView, _options?: ICreateTexture2DArrayFromKTX2Options): Promise<RawTexture2DArray> {
-    return unsupported(
-        "CreateTexture2DArrayFromKTX2Async",
-        "Lite's KTX2 decoder is single-layer and private to the bundled ktx2-loader module; decoding a multi-layer KTX2 into a 2D array texture needs a layer-aware Lite core decode."
-    );
+export async function CreateTexture2DArrayFromKTX2Async(scene: Scene, data: string | ArrayBufferView, options?: ICreateTexture2DArrayFromKTX2Options): Promise<RawTexture2DArray> {
+    const engine = scene.getEngine()._lite;
+    const liteArray = typeof data === "string" ? await loadKtx2Texture2DArray(engine, data) : await uploadKtx2Texture2DArray(engine, copyViewToArrayBuffer(data));
+    applyKtx2Options(engine, liteArray, options);
+    return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
 }

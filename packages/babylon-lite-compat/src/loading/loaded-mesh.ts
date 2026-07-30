@@ -8,23 +8,21 @@
  * `getContainerMeshes` helper flattens it to its renderable `Mesh` nodes, which we
  * wrap here.
  *
- * Bounds are reported in the node's **local** geometry space (`mesh.boundMin` /
- * `mesh.boundMax`), matching how Babylon Lite's own `createDefaultCamera` frames
- * loaded models — it reads the same local bounds without applying the node world
- * matrix, and the renderer (notably for skinned meshes) draws at that same local
- * scale. Returning world-transformed bounds here would make the camera-framing
- * math in model-viewer scenes disagree with the Lite render.
+ * Bounds retain the node's local geometry in `minimum` / `maximum` and derive
+ * `minimumWorld` / `maximumWorld` (plus the other world members) from the Lite
+ * node's lazy world matrix, matching Babylon.js loader-returned meshes.
  */
 
 import { getContainerMeshes } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
 import { Vector3 } from "../math/vector.js";
+import { Matrix } from "../math/matrix.js";
 import { BoundingInfo } from "../culling/bounding.js";
 
 /**
  * A Babylon.js-shaped handle over a single loaded Babylon Lite mesh. Exposes the
- * subset used by model-framing scenes: local bounding info, vertex data, and name.
+ * subset used by model-framing scenes: bounding info, vertex data, and name.
  */
 export class LoadedMesh {
     public readonly name: string;
@@ -48,14 +46,15 @@ export class LoadedMesh {
         return this;
     }
 
-    /** Babylon.js `getBoundingInfo()` — local-space AABB of this mesh (see module note). */
+    /** Babylon.js `getBoundingInfo()` — local geometry plus world-space derived bounds. */
     public getBoundingInfo(): BoundingInfo {
         const lo = this._mesh.boundMin;
         const hi = this._mesh.boundMax;
+        const world = Matrix.FromArray(this._mesh.worldMatrix);
         if (lo && hi) {
-            return new BoundingInfo(new Vector3(lo[0], lo[1], lo[2]), new Vector3(hi[0], hi[1], hi[2]));
+            return new BoundingInfo(new Vector3(lo[0], lo[1], lo[2]), new Vector3(hi[0], hi[1], hi[2]), world);
         }
-        return new BoundingInfo(new Vector3(0, 0, 0), new Vector3(0, 0, 0));
+        return new BoundingInfo(new Vector3(0, 0, 0), new Vector3(0, 0, 0), world);
     }
 
     /** Babylon.js `getVerticesData(kind)` — CPU position buffer (positions only). */
