@@ -351,9 +351,11 @@ export class AbstractMesh extends TransformNode {
     }
 
     /**
-     * Babylon.js `mesh.getVerticesData(kind)` — read back the CPU geometry buffer
-     * for `position` / `normal` / `uv`. Babylon Lite retains these on the mesh
-     * (for picking + device-loss recovery); other kinds are not stored.
+     * Babylon.js `mesh.getVerticesData(kind)` — read back the CPU geometry buffer.
+     * `position` / `normal` / `uv` come from the buffers Babylon Lite retains on the
+     * mesh (for picking + device-loss recovery). Prefer the last compat-side value
+     * for `uv2` / `tangent` / `color`, falling back to attributes retained by Lite
+     * for loader- and factory-created meshes.
      */
     public getVerticesData(kind: string): Float32Array | null {
         switch (kind) {
@@ -363,6 +365,12 @@ export class AbstractMesh extends TransformNode {
                 return this._lite._cpuNormals ?? null;
             case "uv":
                 return this._lite._cpuUvs ?? null;
+            case "uv2":
+                return this._lastUv2 ?? this._lite._cpuUv2s ?? null;
+            case "tangent":
+                return this._lastTangents ?? this._lite._cpuTangents ?? null;
+            case "color":
+                return this._lastColors ?? this._lite._cpuColors ?? null;
             default:
                 return null;
         }
@@ -382,10 +390,13 @@ export class AbstractMesh extends TransformNode {
         if (!engine || !lite._cpuPositions || !lite._cpuIndices) {
             return;
         }
-        if (kind !== "position" && kind !== "normal" && kind !== "uv" && kind !== "color" && kind !== "tangent") {
+        if (kind !== "position" && kind !== "normal" && kind !== "uv" && kind !== "uv2" && kind !== "color" && kind !== "tangent") {
             return;
         }
         const f32 = data instanceof Float32Array ? data : Float32Array.from(data);
+        if (kind === "uv2") {
+            this._lastUv2 = f32;
+        }
         if (kind === "color") {
             this._lastColors = f32;
         }
@@ -395,10 +406,21 @@ export class AbstractMesh extends TransformNode {
         const positions = kind === "position" ? f32 : lite._cpuPositions;
         const normals = kind === "normal" ? f32 : (lite._cpuNormals ?? computeFlatNormals(positions, lite._cpuIndices));
         const uvs = kind === "uv" ? f32 : lite._cpuUvs;
-        resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, undefined, this._lastTangents, this._lastColors);
+        resizeMeshGeometry(
+            engine,
+            this._lite,
+            positions,
+            normals,
+            lite._cpuIndices,
+            uvs,
+            this._lastUv2 ?? lite._cpuUv2s ?? undefined,
+            this._lastTangents ?? lite._cpuTangents ?? undefined,
+            this._lastColors ?? lite._cpuColors ?? undefined
+        );
     }
 
-    /** @internal Retained tangent/color buffers so successive `setVerticesData` calls keep both. */
+    /** @internal Retained uv2/tangent/color buffers so successive `setVerticesData` (and a bake) keep them all. */
+    private _lastUv2: Float32Array | undefined;
     private _lastTangents: Float32Array | undefined;
     private _lastColors: Float32Array | undefined;
 
@@ -419,25 +441,30 @@ export class AbstractMesh extends TransformNode {
     }
 
     /**
-     * Babylon.js `mesh.bakeCurrentTransformIntoVertices()` — fold the node's local
-     * transform (position / rotation / scaling) into the CPU geometry and reset the
-     * transform to identity. Babylon Lite has no built-in mesh-transform bake, so we
-     * transform the retained CPU positions (full matrix) and normals (rotation only,
-     * renormalized), re-upload via `resizeMeshGeometry`, then clear the transform.
+     * @internal Shared bake: fold `matrix` into the retained CPU geometry and
+     * re-upload it. Positions transform by the full matrix; **normals by the
+     * inverse-transpose of the upper 3×3** (so they stay perpendicular to the baked
+     * surface under non-uniform / sheared transforms, unlike a raw 3×3 multiply) and
+     * are renormalized. The retained `uv` / `uv2` / `tangent` / `color` attributes are
+     * forwarded unchanged so they survive the geometry reupload rather than being
+     * dropped. Returns `false` when there is no geometry to bake.
      */
-    public bakeCurrentTransformIntoVertices(): this {
+    private _bakeMatrix(matrix: Matrix): boolean {
         const engine = this._scene?.getEngine()._lite;
-        const lite = this._lite as { _cpuPositions?: Float32Array; _cpuNormals?: Float32Array; _cpuIndices?: Uint32Array; _cpuUvs?: Float32Array };
+        const lite = this._lite as {
+            _cpuPositions?: Float32Array;
+            _cpuNormals?: Float32Array;
+            _cpuIndices?: Uint32Array;
+            _cpuUvs?: Float32Array;
+            _cpuUv2s?: Float32Array | null;
+            _cpuTangents?: Float32Array | null;
+            _cpuColors?: Float32Array | null;
+        };
         const positions = lite._cpuPositions;
         const indices = lite._cpuIndices;
         if (!engine || !positions || !indices) {
-            return this;
+            return false;
         }
-        const node = this._node;
-        const s = node.scaling;
-        const q = node.rotationQuaternion;
-        const t = node.position;
-        const matrix = Matrix.Compose(liteBackedVector3(s), { x: q.x, y: q.y, z: q.z, w: q.w }, liteBackedVector3(t));
         const m = matrix.m;
 
         const newPositions = new Float32Array(positions.length);
@@ -450,17 +477,30 @@ export class AbstractMesh extends TransformNode {
             newPositions[i + 2] = x * m[2]! + y * m[6]! + z * m[10]! + m[14]!;
         }
 
-        let newNormals: Float32Array | undefined;
+        let bakedIndices = indices;
+        if (matrix.determinant() < 0) {
+            bakedIndices = new Uint32Array(indices);
+            for (let i = 0; i + 2 < bakedIndices.length; i += 3) {
+                const second = bakedIndices[i + 1]!;
+                bakedIndices[i + 1] = bakedIndices[i + 2]!;
+                bakedIndices[i + 2] = second;
+            }
+        }
+
+        let newNormals: Float32Array;
         const normals = lite._cpuNormals;
         if (normals) {
+            // Transform normals by the inverse-transpose upper 3×3 so they stay
+            // correct under non-uniform scale/shear, then renormalize.
+            const nm = matrix.invert().transpose().m;
             newNormals = new Float32Array(normals.length);
             for (let i = 0; i < normals.length; i += 3) {
                 const x = normals[i]!,
                     y = normals[i + 1]!,
                     z = normals[i + 2]!;
-                let nx = x * m[0]! + y * m[4]! + z * m[8]!;
-                let ny = x * m[1]! + y * m[5]! + z * m[9]!;
-                let nz = x * m[2]! + y * m[6]! + z * m[10]!;
+                let nx = x * nm[0]! + y * nm[4]! + z * nm[8]!;
+                let ny = x * nm[1]! + y * nm[5]! + z * nm[9]!;
+                let nz = x * nm[2]! + y * nm[6]! + z * nm[10]!;
                 const len = Math.hypot(nx, ny, nz) || 1;
                 nx /= len;
                 ny /= len;
@@ -470,15 +510,73 @@ export class AbstractMesh extends TransformNode {
                 newNormals[i + 2] = nz;
             }
         } else {
-            newNormals = computeFlatNormals(newPositions, indices);
+            newNormals = computeFlatNormals(newPositions, bakedIndices);
         }
 
-        resizeMeshGeometry(engine, this._lite, newPositions, newNormals, indices, lite._cpuUvs);
+        const tangents = this._lastTangents ?? lite._cpuTangents ?? undefined;
+        let newTangents: Float32Array | undefined;
+        if (tangents) {
+            newTangents = new Float32Array(tangents.length);
+            for (let i = 0; i < tangents.length; i += 4) {
+                const x = tangents[i]!,
+                    y = tangents[i + 1]!,
+                    z = tangents[i + 2]!;
+                let tx = x * m[0]! + y * m[4]! + z * m[8]!;
+                let ty = x * m[1]! + y * m[5]! + z * m[9]!;
+                let tz = x * m[2]! + y * m[6]! + z * m[10]!;
+                const len = Math.hypot(tx, ty, tz) || 1;
+                tx /= len;
+                ty /= len;
+                tz /= len;
+                newTangents[i] = tx;
+                newTangents[i + 1] = ty;
+                newTangents[i + 2] = tz;
+                newTangents[i + 3] = tangents[i + 3]!;
+            }
+        }
 
+        resizeMeshGeometry(
+            engine,
+            this._lite,
+            newPositions,
+            newNormals,
+            bakedIndices,
+            lite._cpuUvs,
+            this._lastUv2 ?? lite._cpuUv2s ?? undefined,
+            newTangents,
+            this._lastColors ?? lite._cpuColors ?? undefined
+        );
+        return true;
+    }
+
+    /**
+     * Babylon.js `mesh.bakeCurrentTransformIntoVertices()` — fold the node's local
+     * transform (position / rotation / scaling) into the CPU geometry via the shared
+     * {@link _bakeMatrix} helper, then reset the node transform to identity (the
+     * geometry now carries it).
+     */
+    public bakeCurrentTransformIntoVertices(): this {
+        const node = this._node;
+        const q = node.rotationQuaternion;
+        const matrix = Matrix.Compose(liteBackedVector3(node.scaling), { x: q.x, y: q.y, z: q.z, w: q.w }, liteBackedVector3(node.position));
+        if (!this._bakeMatrix(matrix)) {
+            return this;
+        }
         // Reset the node transform to identity (the geometry now carries it).
         node.position.set(0, 0, 0);
         node.rotation.set(0, 0, 0);
         node.scaling.set(1, 1, 1);
+        return this;
+    }
+
+    /**
+     * Babylon.js `mesh.bakeTransformIntoVertices(transform)` — fold an **arbitrary**
+     * matrix into the CPU geometry via the shared {@link _bakeMatrix} helper. Unlike
+     * {@link bakeCurrentTransformIntoVertices}, the node's own transform is **not**
+     * reset: the supplied matrix is independent of the node transform.
+     */
+    public bakeTransformIntoVertices(transform: Matrix): this {
+        this._bakeMatrix(transform);
         return this;
     }
 
