@@ -16,7 +16,12 @@ struct VertexOutput {
 @vertex
 fn main(@location(0) position: vec3<f32>) -> VertexOutput {
   var output: VertexOutput;
-  output.positionUVW = position;
+  // Yaw the sampling direction by the scene's environment rotation, matching what the PBR IBL
+  // does to its reflection/normal vectors — so turning the environment turns the visible sky
+  // and the lighting together instead of sliding them out of register.
+  let c = cos(scene.envRotationY);
+  let s = sin(scene.envRotationY);
+  output.positionUVW = vec3<f32>(position.x * c + position.z * s, position.y, -position.x * s + position.z * c);
   // Infinite distance: strip translation (w=0), center at camera.
   // Matches BJS skybox.infiniteDistance = true.
   let worldPos = (mesh.world * vec4<f32>(position, 0.0)).xyz + scene.vEyePosition.xyz;
