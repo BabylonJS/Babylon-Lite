@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 /**
  * GPU-free coverage for the canonical loaded-mesh wrappers (`collectLoadedMeshes`
  * + `Mesh._fromLite` + `Mesh.clone`). Constructing a `Mesh` over an already-loaded
- * Lite node touches no GPU, so we drive the real `getContainerMeshes` flattening
- * against a fake Lite container and only mock the two Lite calls that would need a
- * device: `cloneTransformNode` (clone) and `addToScene` (scene insertion).
+ * Lite node touches no GPU, so we drive the real hierarchy reconstruction against
+ * a fake Lite container and only mock the two Lite calls that would need a device:
+ * `cloneTransformNode` (clone) and `addToScene` (scene insertion).
  */
 vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
@@ -91,6 +91,16 @@ describe("collectLoadedMeshes", () => {
         expect(second[1]).toBe(first[1]);
     });
 
+    it("constructs each hierarchy node only once per collection", () => {
+        const container = fakeContainer(liteRoot([liteMesh("Parent"), liteMesh("Child")]));
+        const fromHierarchy = vi.spyOn(Mesh, "_fromLiteHierarchy");
+
+        collectLoadedMeshes(container, new Map());
+
+        expect(fromHierarchy).toHaveBeenCalledTimes(3);
+        fromHierarchy.mockRestore();
+    });
+
     it("carries the source Lite container on each wrapper for KHR_materials_variants", () => {
         const container = fakeContainer(liteRoot([liteMesh("Cube")]));
         const registry: LoadedMeshRegistry = new Map();
@@ -147,6 +157,18 @@ describe("collectLoadedMeshes", () => {
         mesh.setEnabled(false);
         mesh.setEnabled(true);
         expect(cube.visible).toBe(false);
+    });
+
+    it("does not reveal hidden descendants when the loader root has implicit visibility", () => {
+        const cube = liteMesh("Cube");
+        cube.visible = false;
+        const root = liteRoot([cube]);
+        root.visible = undefined;
+
+        const meshes = collectLoadedMeshes(fakeContainer(root), new Map());
+
+        expect(cube.visible).toBe(false);
+        expect(meshes[1]!.isVisible).toBe(false);
     });
 });
 

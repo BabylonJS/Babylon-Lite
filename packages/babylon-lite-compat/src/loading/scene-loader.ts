@@ -15,7 +15,7 @@ import type { AssetContainer as LiteAssetContainer, AnimationGroup } from "babyl
 import { unsupported } from "../error.js";
 import { collectLoadedMeshes, type LoadedMeshRegistry } from "./loaded-mesh.js";
 import { GaussianSplattingMesh } from "../meshes/gaussian-splatting.js";
-import type { TransformNode } from "../meshes/meshes.js";
+import type { Mesh, TransformNode } from "../meshes/meshes.js";
 import type { Scene } from "../scene/scene.js";
 
 /** Path portion of a URL, without any query string (`?…`) or hash fragment (`#…`). */
@@ -63,7 +63,7 @@ export class AssetContainer {
      * the same wrapper objects, and — once the container is added to a scene — the
      * same handles `scene.meshes` exposes.
      */
-    public get meshes(): TransformNode[] {
+    public get meshes(): Mesh[] {
         return collectLoadedMeshes(this._lite, this._meshRegistry, this._scene);
     }
 

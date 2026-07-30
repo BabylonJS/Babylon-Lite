@@ -249,7 +249,7 @@ export class AbstractMesh extends TransformNode {
     public readonly _lite: LiteMesh;
 
     private _material: CompatMaterial | null = null;
-    private _visible = true;
+    protected _visible = true;
 
     public constructor(name: string, lite: LiteMesh, scene?: Scene) {
         super(name, scene, lite);
@@ -516,7 +516,7 @@ export class Mesh extends AbstractMesh {
         lite: LiteMesh,
         container?: LiteAssetContainer,
         scene?: Scene,
-        registry: Map<unknown, TransformNode> = new Map(),
+        registry: Map<unknown, Mesh> = new Map(),
         parent: TransformNode | null = null
     ): Mesh {
         let wrapper = registry.get(lite) as Mesh | undefined;

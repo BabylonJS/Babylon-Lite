@@ -4,10 +4,10 @@
  * Babylon.js loaders return a flat `meshes` array of real `AbstractMesh` objects
  * (with the synthetic `__root__` at index 0) that apps routinely post-process —
  * reparent, clone, toggle `isVisible`/`setEnabled`, dispose. Babylon Lite returns
- * a root-node hierarchy; the tree-shakeable `getContainerMeshes` helper flattens
- * it to its renderable `Mesh` nodes. We wrap each loaded node as a real compat
- * `Mesh` (see `meshes.ts`) so that whole transform / visibility / clone / dispose
- * surface is available, rather than a stripped read-only handle.
+ * a root-node hierarchy. We reconstruct that hierarchy as canonical compat
+ * `Mesh` wrappers, then flatten the wrappers in hierarchy order so the full
+ * transform / visibility / clone / dispose surface is available rather than a
+ * stripped read-only handle.
  *
  * **Stable identity.** The wrappers are memoized per Lite node in a registry the
  * `AssetContainer` owns, so `container.meshes[0] === container.meshes[0]` and the
@@ -24,11 +24,10 @@
 import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
 import { Mesh } from "../meshes/meshes.js";
-import type { TransformNode } from "../meshes/meshes.js";
 import type { Scene } from "../scene/scene.js";
 
 /** @internal Per-node wrapper cache giving loaded meshes stable identity across `.meshes` reads. */
-export type LoadedMeshRegistry = Map<unknown, TransformNode>;
+export type LoadedMeshRegistry = Map<unknown, Mesh>;
 
 /**
  * Wrap every node a loaded Babylon Lite asset container exposes as a canonical
@@ -43,10 +42,10 @@ export type LoadedMeshRegistry = Map<unknown, TransformNode>;
  * meshes, so we prepend that root at index 0 to mirror Babylon.js — as a real,
  * non-renderable `Mesh`, exactly as Babylon.js's `__root__` is a `Mesh`.
  */
-export function collectLoadedMeshes(container: LiteAssetContainer, registry: LoadedMeshRegistry, scene?: Scene): TransformNode[] {
-    const result: TransformNode[] = [];
+export function collectLoadedMeshes(container: LiteAssetContainer, registry: LoadedMeshRegistry, scene?: Scene): Mesh[] {
+    const result: Mesh[] = [];
     const visited = new Set<unknown>();
-    const visit = (node: unknown, parent: TransformNode | null): void => {
+    const visit = (node: unknown, parent: Mesh | null): void => {
         if (visited.has(node)) {
             return;
         }
@@ -55,7 +54,10 @@ export function collectLoadedMeshes(container: LiteAssetContainer, registry: Loa
             return;
         }
         visited.add(node);
-        const wrapper = Mesh._fromLiteHierarchy(node as LiteMesh, container, scene, registry, parent);
+        let wrapper = registry.get(node);
+        if (!wrapper || (scene && wrapper.getScene() !== scene)) {
+            wrapper = Mesh._fromLiteHierarchy(node as LiteMesh, container, scene, registry, parent);
+        }
         result.push(wrapper);
         for (const child of lite.children ?? []) {
             visit(child, wrapper);
