@@ -370,17 +370,7 @@ export class AbstractMesh extends TransformNode {
         const uvs2 = matchingVertexAttribute(lite._cpuUv2s, vertexCount, 2);
         const tangents = matchingVertexAttribute(this._lastTangents ?? lite._cpuTangents, vertexCount, 4);
         const colors = matchingVertexAttribute(this._lastColors ?? lite._cpuColors, vertexCount, 4);
-        resizeMeshGeometry(
-            engine,
-            this._lite,
-            positions,
-            normals,
-            lite._cpuIndices,
-            uvs,
-            uvs2,
-            tangents,
-            colors
-        );
+        resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, uvs2, tangents, colors);
     }
 
     /**
@@ -409,7 +399,9 @@ export class AbstractMesh extends TransformNode {
         const u32 = indices instanceof Uint32Array ? indices : Uint32Array.from(indices);
         const positions = lite._cpuPositions;
         const vertexCount = positions.length / 3;
-        const normals = this._normalsFollowIndices ? computeFlatNormals(positions, u32) : (matchingVertexAttribute(lite._cpuNormals, vertexCount, 3) ?? computeFlatNormals(positions, u32));
+        const normals = this._normalsFollowIndices
+            ? computeFlatNormals(positions, u32)
+            : (matchingVertexAttribute(lite._cpuNormals, vertexCount, 3) ?? computeFlatNormals(positions, u32));
         resizeMeshGeometry(
             engine,
             this._lite,

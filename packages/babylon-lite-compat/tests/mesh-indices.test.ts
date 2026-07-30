@@ -106,19 +106,17 @@ describe("AbstractMesh.setIndices", () => {
     });
 
     it("regenerates placeholder attributes for a positions-then-indices vertex-count change", () => {
-        resizeMeshGeometryMock.mockImplementation(
-            (_engine, lite, positions, normals, indices, uvs, uvs2, tangents, colors) => {
-                Object.assign(lite, {
-                    _cpuPositions: positions,
-                    _cpuNormals: normals,
-                    _cpuIndices: indices,
-                    _cpuUvs: uvs,
-                    _cpuUv2s: uvs2 ?? null,
-                    _cpuTangents: tangents ?? null,
-                    _cpuColors: colors ?? null,
-                });
-            }
-        );
+        resizeMeshGeometryMock.mockImplementation((_engine, lite, positions, normals, indices, uvs, uvs2, tangents, colors) => {
+            Object.assign(lite, {
+                _cpuPositions: positions,
+                _cpuNormals: normals,
+                _cpuIndices: indices,
+                _cpuUvs: uvs,
+                _cpuUv2s: uvs2 ?? null,
+                _cpuTangents: tangents ?? null,
+                _cpuColors: colors ?? null,
+            });
+        });
         const lite = {
             name: "shape",
             children: [],
