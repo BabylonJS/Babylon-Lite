@@ -183,7 +183,7 @@ export interface ICreateTexture2DArrayFromImageUrlsOptions extends IUploadImageT
 export interface ICreateTexture2DArrayFromKTX2Options {
     /** Generate a full mip chain (true by default). */
     generateMipMaps?: boolean;
-    /** Sampling mode (recorded for parity; Lite uploads the container's own mip chain). */
+    /** Sampling mode (accepted for API compatibility; Lite uploads the container's own mip chain). */
     samplingMode?: number;
     /** Store the texture with the Y axis inverted (false by default). */
     invertY?: boolean;
@@ -264,17 +264,21 @@ export async function CreateTexture2DArrayFromImageUrlsAsync(
  * Babylon.js transcodes the container to uncompressed RGBA because its raw-array path
  * cannot upload compressed layers; Lite keeps the array GPU-compressed (WebGPU's
  * `writeTexture` uploads compressed layers directly). The result samples identically, so
- * `format` is reported as `TEXTUREFORMAT_RGBA` for parity. `generateMipMaps` /
- * `samplingMode` / `invertY` are recorded for parity but Lite uploads the container's
+ * `format` is reported as `TEXTUREFORMAT_RGBA` for parity. The options are accepted
+ * for API compatibility but do not alter the upload: Lite uses the container's
  * authored mip chain as-is (per the codec-decoded convention it stores the data unflipped
  * with `invertY = true`; sample arrays with your own `v = 1 - v` WGSL, GUIDANCE §8 path 2).
  */
 export async function CreateTexture2DArrayFromKTX2Async(scene: Scene, data: string | ArrayBufferView, options?: ICreateTexture2DArrayFromKTX2Options): Promise<RawTexture2DArray> {
     void options;
     const engine = scene.getEngine()._lite;
-    const liteArray =
-        typeof data === "string"
-            ? await loadKtx2Texture2DArray(engine, data)
-            : await uploadKtx2Texture2DArray(engine, data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer);
+    let liteArray: Texture2DArray;
+    if (typeof data === "string") {
+        liteArray = await loadKtx2Texture2DArray(engine, data);
+    } else {
+        const bytes = new Uint8Array(data.byteLength);
+        bytes.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+        liteArray = await uploadKtx2Texture2DArray(engine, bytes.buffer);
+    }
     return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
 }

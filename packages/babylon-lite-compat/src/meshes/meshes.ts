@@ -931,14 +931,14 @@ export const MeshBuilder = {
         return unsupported("MeshBuilder.CreateText", "Extruded font meshes are not implemented in Babylon Lite. For 2D/SDF text use the native `createTextRenderable` API.");
     },
 
-    CreateTiledBox(): never {
+    CreateTiledBox(_name?: string, _options?: object, _scene?: Scene): never {
         return unsupported(
             "MeshBuilder.CreateTiledBox",
             "Tiled box geometry is not implemented in Babylon Lite. Its per-face tile-pattern UV layout (tile size, alignment, per-tile flip/rotate patterns) is a non-trivial vertex-data generator with pattern design choices — not a mechanical addition — so it needs a Lite core mesh-builder decision."
         );
     },
 
-    CreateTiledPlane(): never {
+    CreateTiledPlane(_name?: string, _options?: object, _scene?: Scene): never {
         return unsupported(
             "MeshBuilder.CreateTiledPlane",
             "Tiled plane geometry is not implemented in Babylon Lite. Its per-tile UV layout (tile size, alignment, per-tile flip/rotate patterns) is a non-trivial vertex-data generator with pattern design choices — not a mechanical addition — so it needs a Lite core mesh-builder decision."
@@ -987,11 +987,11 @@ export function CreateDisc(name: string, options: object, scene: Scene): Mesh {
 }
 
 /** Babylon.js `CreateTiledBox(name, options, scene)` (tiledBoxBuilder) — throwing stub (see `MeshBuilder.CreateTiledBox`). */
-export function CreateTiledBox(): never {
-    return MeshBuilder.CreateTiledBox();
+export function CreateTiledBox(name?: string, options?: object, scene?: Scene): never {
+    return MeshBuilder.CreateTiledBox(name, options, scene);
 }
 
 /** Babylon.js `CreateTiledPlane(name, options, scene)` (tiledPlaneBuilder) — throwing stub (see `MeshBuilder.CreateTiledPlane`). */
-export function CreateTiledPlane(): never {
-    return MeshBuilder.CreateTiledPlane();
+export function CreateTiledPlane(name?: string, options?: object, scene?: Scene): never {
+    return MeshBuilder.CreateTiledPlane(name, options, scene);
 }

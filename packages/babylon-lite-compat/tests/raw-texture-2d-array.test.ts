@@ -256,4 +256,14 @@ describe("CreateTexture2DArrayFromKTX2Async", () => {
         const passed = new Uint8Array(uploadKtx2Mock.mock.calls[0]![1] as ArrayBuffer);
         expect(Array.from(passed)).toEqual([1, 2, 3, 4]);
     });
+
+    it("copies a SharedArrayBuffer-backed view into an ArrayBuffer", async () => {
+        uploadKtx2Mock.mockClear();
+        const backing = new Uint8Array(new SharedArrayBuffer(7));
+        backing.set([9, 9, 1, 2, 3, 4, 9]);
+        await CreateTexture2DArrayFromKTX2Async(fakeScene() as never, new Uint8Array(backing.buffer, 2, 4));
+        const passed = uploadKtx2Mock.mock.calls[0]![1] as ArrayBuffer;
+        expect(passed).toBeInstanceOf(ArrayBuffer);
+        expect(Array.from(new Uint8Array(passed))).toEqual([1, 2, 3, 4]);
+    });
 });
