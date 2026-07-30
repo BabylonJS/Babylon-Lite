@@ -15,7 +15,7 @@
  */
 
 import { parseNodeMaterialFromSnippet } from "babylon-lite";
-import type { EngineContext, NodeMaterial as LiteNodeMaterial, Texture2D } from "babylon-lite";
+import type { EngineContext, Material as LiteMaterial, NodeMaterial as LiteNodeMaterial, Texture2D } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
 
@@ -48,7 +48,7 @@ export class NodeMaterial {
     private readonly _json: object | string;
     private readonly _textureOverrides: Record<string, TextureLike> = {};
     private readonly _scene: Scene;
-    private readonly _pendingBindings = new Map<{ material?: LiteNodeMaterial }, () => boolean>();
+    private readonly _pendingBindings = new Map<{ material: LiteMaterial }, () => boolean>();
     private _parsed = false;
 
     public constructor(name: string, scene: Scene, json: object | string = {}) {
@@ -110,7 +110,7 @@ export class NodeMaterial {
     }
 
     /** @internal Bind a mesh immediately and refresh it if still assigned when parsing finishes. */
-    public _bindMesh(mesh: { material?: LiteNodeMaterial }, isCurrent: () => boolean): void {
+    public _bindMesh(mesh: { material: LiteMaterial }, isCurrent: () => boolean): void {
         if (!this._parsed) {
             this._pendingBindings.set(mesh, isCurrent);
         }

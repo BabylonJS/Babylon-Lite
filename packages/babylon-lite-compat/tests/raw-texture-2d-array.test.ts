@@ -20,6 +20,8 @@ vi.mock("babylon-lite", async (importActual) => {
         uploadImageToArrayLayer: vi.fn(),
         loadImageToArrayLayer: vi.fn(async () => undefined),
         createTexture2DArrayFromUrls: vi.fn(async (_engine: unknown, urls: readonly string[]) => makeArray(4, 4, urls.length)),
+        loadKtx2Texture2DArray: vi.fn(async () => makeArray(8, 8, 3)),
+        uploadKtx2Texture2DArray: vi.fn(async () => makeArray(8, 8, 2)),
     };
 });
 
@@ -30,6 +32,8 @@ import {
     uploadImageToArrayLayer,
     loadImageToArrayLayer,
     createTexture2DArrayFromUrls,
+    loadKtx2Texture2DArray,
+    uploadKtx2Texture2DArray,
 } from "babylon-lite";
 import {
     RawTexture2DArray,
@@ -40,7 +44,6 @@ import {
 } from "../src/textures/raw-texture-2d-array";
 import { BaseTexture } from "../src/textures/textures";
 import { AbstractEngine } from "../src/engine/engine";
-import { LiteCompatError } from "../src/error";
 
 const createArrayMock = vi.mocked(createTexture2DArray);
 const createFromPixelsMock = vi.mocked(createTexture2DArrayFromPixels);
@@ -48,6 +51,8 @@ const updateFromPixelsMock = vi.mocked(updateTexture2DArrayFromPixels);
 const uploadMock = vi.mocked(uploadImageToArrayLayer);
 const loadMock = vi.mocked(loadImageToArrayLayer);
 const fromUrlsMock = vi.mocked(createTexture2DArrayFromUrls);
+const loadKtx2ArrayMock = vi.mocked(loadKtx2Texture2DArray);
+const uploadKtx2ArrayMock = vi.mocked(uploadKtx2Texture2DArray);
 
 const liteEngine = {};
 
@@ -216,19 +221,24 @@ describe("CreateTexture2DArrayFromImageUrlsAsync", () => {
         expect(fromUrlsMock.mock.calls[0]![2]).toEqual({ mipMaps: true, invertY: true, premultiplyAlpha: true });
     });
 
-    // 🔧 Needs Lite core: Lite's public KTX2 surface decodes only single 2D textures,
-    // so per-layer RGBA array decode has no backing yet (structural blocker documented
-    // on the stub). Assert the throwing stub until Lite exposes the array decode.
-    it("CreateTexture2DArrayFromKTX2Async throws a LiteCompatError pending a Lite decoder addition", async () => {
-        await expect(CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "cubes.ktx2")).rejects.toThrow(/KTX2/);
-    });
 });
 
 describe("CreateTexture2DArrayFromKTX2Async", () => {
-    // Justified throwing stub: Lite's KTX2 decoder only models a single-layer texture
-    // (no layerCount / 2D-array upload path), so the multi-layer container is not backable
-    // without new Lite core work — a named structural blocker, not a defect.
-    it("throws LiteCompatError until Lite exposes a KTX2 array decode path", async () => {
-        await expect(CreateTexture2DArrayFromKTX2Async({} as never, "foo.ktx2")).rejects.toBeInstanceOf(LiteCompatError);
+    it("loads a URL through Lite's KTX2 array path", async () => {
+        loadKtx2ArrayMock.mockClear();
+        const texture = await CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "cubes.ktx2");
+        expect(loadKtx2ArrayMock).toHaveBeenCalledWith(liteEngine, "cubes.ktx2");
+        expect(texture).toBeInstanceOf(RawTexture2DArray);
+        expect(texture.depth).toBe(3);
+        expect(texture.format).toBe(5);
+    });
+
+    it("uploads exactly the supplied ArrayBufferView bytes", async () => {
+        uploadKtx2ArrayMock.mockClear();
+        const backing = new Uint8Array([9, 1, 2, 3, 8]);
+        const texture = await CreateTexture2DArrayFromKTX2Async(fakeScene() as never, backing.subarray(1, 4));
+        const uploaded = new Uint8Array(uploadKtx2ArrayMock.mock.calls[0]![1]);
+        expect(Array.from(uploaded)).toEqual([1, 2, 3]);
+        expect(texture.depth).toBe(2);
     });
 });
