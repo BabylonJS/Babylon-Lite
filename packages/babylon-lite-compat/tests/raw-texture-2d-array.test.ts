@@ -42,6 +42,7 @@ import {
 } from "../src/textures/raw-texture-2d-array";
 import { BaseTexture } from "../src/textures/textures";
 import { AbstractEngine } from "../src/engine/engine";
+import { Constants } from "../src/misc/engine-constants";
 
 const createArrayMock = vi.mocked(createTexture2DArray);
 const createFromPixelsMock = vi.mocked(createTexture2DArrayFromPixels);
@@ -228,7 +229,13 @@ describe("CreateTexture2DArrayFromKTX2Async", () => {
         const call = fromKtx2Mock.mock.calls[0]!;
         expect(call[0]).toBe(liteEngine);
         expect(call[1]).toBe(buffer);
-        expect(call[2]).toEqual({ generateMipMaps: true });
+        expect(call[2]).toEqual({
+            generateMipMaps: true,
+            invertY: false,
+            minFilter: "linear",
+            magFilter: "linear",
+            mipmapFilter: "linear",
+        });
         expect(tex).toBeInstanceOf(RawTexture2DArray);
         expect(tex.depth).toBe(4);
         expect(tex.format).toBe(5);
@@ -236,8 +243,18 @@ describe("CreateTexture2DArrayFromKTX2Async", () => {
 
     it("threads an explicit generateMipMaps = false through", async () => {
         fromKtx2Mock.mockClear();
-        await CreateTexture2DArrayFromKTX2Async(fakeScene() as never, new Uint8Array(4), { generateMipMaps: false });
-        expect(fromKtx2Mock.mock.calls[0]![2]).toEqual({ generateMipMaps: false });
+        await CreateTexture2DArrayFromKTX2Async(fakeScene() as never, new Uint8Array(4), {
+            generateMipMaps: false,
+            invertY: true,
+            samplingMode: Constants.TEXTURE_NEAREST_SAMPLINGMODE,
+        });
+        expect(fromKtx2Mock.mock.calls[0]![2]).toEqual({
+            generateMipMaps: false,
+            invertY: true,
+            minFilter: "nearest",
+            magFilter: "nearest",
+            mipmapFilter: "nearest",
+        });
     });
 
     it("fetches a URL string, then forwards the decoded bytes", async () => {

@@ -396,7 +396,15 @@ export class AbstractMesh extends TransformNode {
      */
     private _bakeMatrix(matrix: Matrix): boolean {
         const engine = this._scene?.getEngine()._lite;
-        const lite = this._lite as { _cpuPositions?: Float32Array; _cpuNormals?: Float32Array; _cpuIndices?: Uint32Array; _cpuUvs?: Float32Array };
+        const lite = this._lite as {
+            _cpuPositions?: Float32Array;
+            _cpuNormals?: Float32Array;
+            _cpuIndices?: Uint32Array;
+            _cpuUvs?: Float32Array;
+            _cpuUv2s?: Float32Array | null;
+            _cpuTangents?: Float32Array | null;
+            _cpuColors?: Float32Array | null;
+        };
         const positions = lite._cpuPositions;
         const indices = lite._cpuIndices;
         if (!engine || !positions || !indices) {
@@ -412,6 +420,16 @@ export class AbstractMesh extends TransformNode {
             newPositions[i] = x * m[0]! + y * m[4]! + z * m[8]! + m[12]!;
             newPositions[i + 1] = x * m[1]! + y * m[5]! + z * m[9]! + m[13]!;
             newPositions[i + 2] = x * m[2]! + y * m[6]! + z * m[10]! + m[14]!;
+        }
+
+        let bakedIndices = indices;
+        if (matrix.determinant() < 0) {
+            bakedIndices = new Uint32Array(indices);
+            for (let i = 0; i + 2 < bakedIndices.length; i += 3) {
+                const second = bakedIndices[i + 1]!;
+                bakedIndices[i + 1] = bakedIndices[i + 2]!;
+                bakedIndices[i + 2] = second;
+            }
         }
 
         let newNormals: Float32Array;
@@ -437,10 +455,42 @@ export class AbstractMesh extends TransformNode {
                 newNormals[i + 2] = nz;
             }
         } else {
-            newNormals = computeFlatNormals(newPositions, indices);
+            newNormals = computeFlatNormals(newPositions, bakedIndices);
         }
 
-        resizeMeshGeometry(engine, this._lite, newPositions, newNormals, indices, lite._cpuUvs, this._lastUv2, this._lastTangents, this._lastColors);
+        const tangents = this._lastTangents ?? lite._cpuTangents ?? undefined;
+        let newTangents: Float32Array | undefined;
+        if (tangents) {
+            newTangents = new Float32Array(tangents.length);
+            for (let i = 0; i < tangents.length; i += 4) {
+                const x = tangents[i]!,
+                    y = tangents[i + 1]!,
+                    z = tangents[i + 2]!;
+                let tx = x * m[0]! + y * m[4]! + z * m[8]!;
+                let ty = x * m[1]! + y * m[5]! + z * m[9]!;
+                let tz = x * m[2]! + y * m[6]! + z * m[10]!;
+                const len = Math.hypot(tx, ty, tz) || 1;
+                tx /= len;
+                ty /= len;
+                tz /= len;
+                newTangents[i] = tx;
+                newTangents[i + 1] = ty;
+                newTangents[i + 2] = tz;
+                newTangents[i + 3] = tangents[i + 3]!;
+            }
+        }
+
+        resizeMeshGeometry(
+            engine,
+            this._lite,
+            newPositions,
+            newNormals,
+            bakedIndices,
+            lite._cpuUvs,
+            this._lastUv2 ?? lite._cpuUv2s ?? undefined,
+            newTangents,
+            this._lastColors ?? lite._cpuColors ?? undefined
+        );
         return true;
     }
 

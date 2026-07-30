@@ -182,9 +182,9 @@ export interface ICreateTexture2DArrayFromImageUrlsOptions extends IUploadImageT
 export interface ICreateTexture2DArrayFromKTX2Options {
     /** Generate a full mip chain (true by default). */
     generateMipMaps?: boolean;
-    /** Sampling mode (recorded for parity; Lite uses trilinear). */
+    /** Sampling mode (trilinear by default). */
     samplingMode?: number;
-    /** Store the texture with the Y axis inverted (recorded for parity; Lite uploads the decoded layers as-is). */
+    /** Store the texture with the Y axis inverted (false by default). */
     invertY?: boolean;
 }
 
@@ -195,9 +195,8 @@ export interface ICreateTexture2DArrayFromKTX2Options {
  * result in a `RawTexture2DArray`.
  *
  * Babylon.js defaults `generateMipMaps` to `true`; that value is always passed
- * explicitly rather than left to any Lite default. `samplingMode` / `invertY` are
- * recorded for parity (Lite is RGBA8 and uploads the decoded layers unflipped, matching
- * the other compat 2D-array paths).
+ * explicitly rather than left to any Lite default. Sampling and Y inversion are
+ * forwarded to the Lite array handle.
  */
 export async function CreateTexture2DArrayFromKTX2Async(scene: Scene, data: string | ArrayBufferView, options?: ICreateTexture2DArrayFromKTX2Options): Promise<RawTexture2DArray> {
     let buffer: ArrayBufferView;
@@ -210,8 +209,15 @@ export async function CreateTexture2DArrayFromKTX2Async(scene: Scene, data: stri
     } else {
         buffer = data;
     }
+    const samplingMode = options?.samplingMode ?? Constants.TEXTURE_TRILINEAR_SAMPLINGMODE;
+    const nearest = samplingMode === Constants.TEXTURE_NEAREST_SAMPLINGMODE;
+    const bilinear = samplingMode === Constants.TEXTURE_BILINEAR_SAMPLINGMODE;
     const liteArray = await createTexture2DArrayFromKtx2(scene.getEngine()._lite, buffer, {
         generateMipMaps: options?.generateMipMaps ?? true,
+        invertY: options?.invertY ?? false,
+        minFilter: nearest ? "nearest" : "linear",
+        magFilter: nearest ? "nearest" : "linear",
+        mipmapFilter: nearest || bilinear ? "nearest" : "linear",
     });
     return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
 }

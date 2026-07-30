@@ -20,6 +20,14 @@ export interface Ktx2TextureArrayOptions {
     generateMipMaps?: boolean;
     /** Use sRGB sampling (rgba8unorm-srgb) for color/albedo layers. Default false. */
     srgb?: boolean;
+    /** Mark the unflipped upload for V inversion at sampling time. Default false. */
+    invertY?: boolean;
+    /** Minification filter. Default linear. */
+    minFilter?: GPUFilterMode;
+    /** Magnification filter. Default linear. */
+    magFilter?: GPUFilterMode;
+    /** Mipmap filter. Defaults to linear when mipmaps are generated. */
+    mipmapFilter?: GPUMipmapFilterMode;
 }
 
 /**
@@ -64,8 +72,13 @@ export async function createTexture2DArrayFromKtx2(engine: EngineContext, buffer
         flat.set(mip.data, i * layerBytes);
     }
 
-    return createTexture2DArrayFromPixels(engine, flat, width, height, layerCount, {
+    const texture = createTexture2DArrayFromPixels(engine, flat, width, height, layerCount, {
         mipMaps: options.generateMipMaps ?? true,
         srgb: options.srgb ?? false,
+        minFilter: options.minFilter ?? "linear",
+        magFilter: options.magFilter ?? "linear",
+        mipmapFilter: options.mipmapFilter ?? ((options.generateMipMaps ?? true) ? "linear" : "nearest"),
     });
+    texture.invertY = options.invertY ?? false;
+    return texture;
 }

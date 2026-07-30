@@ -136,8 +136,13 @@ export function createMeshFromData(
     mesh._cpuPositions = positions;
     mesh._cpuNormals = normals;
     mesh._cpuUvs = uvs;
+    mesh._cpuUv2s = uvs2?.length ? uvs2 : null;
+    mesh._cpuTangents = tangents?.length ? tangents : null;
+    mesh._cpuColors = colors?.length ? colors : null;
     mesh._cpuIndices = indices;
-    engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
+    mesh._cpuGpuIndices = indices;
+    mesh._cpuIndexFormat = "uint32";
+    engine._dlr?.m(mesh, mesh._cpuUv2s, mesh._cpuTangents, mesh._cpuColors, indices, "uint32");
 
     return mesh;
 }

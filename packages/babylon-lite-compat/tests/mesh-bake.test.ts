@@ -27,6 +27,9 @@ function makeMesh(overrides?: { normals?: Float32Array; uvs?: Float32Array; uv2?
         _cpuNormals: overrides?.normals,
         _cpuIndices: new Uint32Array([0, 1, 2]),
         _cpuUvs: overrides?.uvs,
+        _cpuUv2s: overrides?.uv2,
+        _cpuTangents: overrides?.tangents,
+        _cpuColors: overrides?.colors,
     };
     (mesh as unknown as { _lite: unknown })._lite = lite;
     (mesh as unknown as { _scene: unknown })._scene = { getEngine: () => ({ _lite: {} }) };
@@ -70,8 +73,43 @@ describe("Mesh transform bake (issue #475)", () => {
         const call = mockedResize.mock.calls[0]!;
         expect(call[5]).toBe(uvs);
         expect(call[6]).toBe(uv2);
-        expect(call[7]).toBe(tangents);
+        expect(call[7]).toEqual(tangents);
         expect(call[8]).toBe(colors);
+    });
+
+    it("preserves auxiliary attributes retained directly by the Lite mesh", () => {
+        const uv2 = new Float32Array([0.3, 0.4]);
+        const tangents = new Float32Array([1, 0, 0, 1]);
+        const colors = new Float32Array([1, 1, 1, 1]);
+        const mesh = makeMesh({ normals: new Float32Array([0, 0, 1]), uv2, tangents, colors });
+        Object.assign(mesh as unknown as Record<string, unknown>, { _lastUv2: undefined, _lastTangents: undefined, _lastColors: undefined });
+
+        (mesh as unknown as { _bakeMatrix(m: Matrix): boolean })._bakeMatrix(Matrix.Identity());
+
+        const call = mockedResize.mock.calls[0]!;
+        expect(call[6]).toBe(uv2);
+        expect(call[7]).toEqual(tangents);
+        expect(call[8]).toBe(colors);
+    });
+
+    it("transforms tangent directions while preserving handedness", () => {
+        const mesh = makeMesh({ normals: new Float32Array([0, 0, 1]), tangents: new Float32Array([1, 1, 0, -1]) });
+
+        (mesh as unknown as { _bakeMatrix(m: Matrix): boolean })._bakeMatrix(Matrix.Scaling(2, 1, 1));
+
+        const tangent = mockedResize.mock.calls[0]![7]!;
+        expect(tangent[0]).toBeCloseTo(2 / Math.sqrt(5), 6);
+        expect(tangent[1]).toBeCloseTo(1 / Math.sqrt(5), 6);
+        expect(tangent[2]).toBeCloseTo(0, 6);
+        expect(tangent[3]).toBe(-1);
+    });
+
+    it("reverses triangle winding for a negative-determinant bake", () => {
+        const mesh = makeMesh({ normals: new Float32Array([0, 0, 1]) });
+
+        (mesh as unknown as { _bakeMatrix(m: Matrix): boolean })._bakeMatrix(Matrix.Scaling(-1, 1, 1));
+
+        expect(Array.from(mockedResize.mock.calls[0]![4])).toEqual([0, 2, 1]);
     });
 
     it("is a no-op when there is no CPU geometry", () => {
