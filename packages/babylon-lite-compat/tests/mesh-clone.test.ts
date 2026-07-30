@@ -31,7 +31,14 @@ const addToSceneMock = vi.mocked(addToScene);
 const removeFromSceneMock = vi.mocked(removeFromScene);
 
 /** Minimal compat `Scene` stand-in exposing only what `Mesh.clone` touches. */
-function fakeScene(): { _lite: object; registered: unknown[]; getEngine(): { _lite: object }; defaultMaterial: null; _deferAdd(add: () => void): void; _registerMesh(mesh: unknown): void } {
+function fakeScene(): {
+    _lite: object;
+    registered: unknown[];
+    getEngine(): { _lite: object };
+    defaultMaterial: null;
+    _deferAdd(add: () => void): void;
+    _registerMesh(mesh: unknown): void;
+} {
     const engine = { _lite: {} };
     const registered: unknown[] = [];
     return {
@@ -128,7 +135,7 @@ describe("Mesh.clone", () => {
         const clone = src.clone("copy", null, true);
 
         expect(removeFromSceneMock).toHaveBeenCalledTimes(2);
-        expect(removeFromSceneMock.mock.calls.map((c) => c[1])).toEqual([childA, childB]);
+        expect(removeFromSceneMock.mock.calls.map((c) => (c[1] as { name: string }).name)).toEqual(["childA", "childB"]);
         // The clone is left a lone node.
         expect((clone as unknown as { _lite: { children: unknown[] } })._lite.children.length).toBe(0);
     });
@@ -146,7 +153,8 @@ describe("Mesh.clone", () => {
         const scene = fakeScene();
         const src = sourceMesh(scene, fakeMaterial());
         const parent = new TransformNode("parent");
-        src.parent = parent;
+        Object.assign(src as unknown as Record<string, unknown>, { _parent: parent });
+        (parent as unknown as { _children: Mesh[] })._children.push(src);
         src.id = "custom-id";
         src.metadata = { tag: "metadata" };
         Object.assign(src as unknown as Record<string, unknown>, { _enabled: false, _visible: false });
