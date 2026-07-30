@@ -495,6 +495,9 @@ export class PBRMaterial extends PushMaterial {
         if (this._albedoTexture) {
             textures.push(this._albedoTexture);
         }
+        if (this._environmentTexture) {
+            textures.push(this._environmentTexture);
+        }
         if (this._sheen) {
             textures.push(...this._sheen.getActiveTextures());
         }
@@ -619,13 +622,16 @@ export class PBRMaterial extends PushMaterial {
      * environment (the dominant single-IBL case Babylon.js scenes use).
      */
     public get environmentTexture(): CubeTexture | HDRCubeTexture | null {
-        return this._scene?.environmentTexture ?? null;
+        return this._environmentTexture ?? this._scene?.environmentTexture ?? null;
     }
     public set environmentTexture(value: CubeTexture | HDRCubeTexture | null) {
+        this._environmentTexture = value;
         if (this._scene) {
             this._scene.environmentTexture = value;
         }
     }
+
+    private _environmentTexture: CubeTexture | HDRCubeTexture | null = null;
 
     public get reflectionTexture(): CubeTexture | HDRCubeTexture | null {
         return this.environmentTexture;

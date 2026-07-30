@@ -83,4 +83,12 @@ describe("Material.getActiveTextures", () => {
         expect(mat.sheen.texture).toBe(sheenTex);
         expect(mat.getActiveTextures()).toEqual([albedo, sheenTex]);
     });
+
+    it("enumerates the PBR reflection texture", () => {
+        const scene = fakeScene();
+        const mat = new PBRMaterial("cat", scene);
+        const reflection = fakeTexture();
+        mat.reflectionTexture = reflection as never;
+        expect(mat.getActiveTextures()).toEqual([reflection]);
+    });
 });

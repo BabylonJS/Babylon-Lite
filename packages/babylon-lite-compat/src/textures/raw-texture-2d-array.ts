@@ -267,7 +267,11 @@ export interface ICreateTexture2DArrayFromKTX2Options {
  * maintainers, not a mechanical unattended addition. Compat must not decode the
  * container itself (that is feature logic, which lives in Lite).
  */
-export function CreateTexture2DArrayFromKTX2Async(_scene: Scene, _data: string | ArrayBufferView, _options?: ICreateTexture2DArrayFromKTX2Options): Promise<RawTexture2DArray> {
+export async function CreateTexture2DArrayFromKTX2Async(
+    _scene: Scene,
+    _data: string | ArrayBufferView,
+    _options?: ICreateTexture2DArrayFromKTX2Options
+): Promise<RawTexture2DArray> {
     return unsupported(
         "CreateTexture2DArrayFromKTX2Async",
         "Babylon Lite's KTX2 decoder models single-image 2D textures only and exposes no per-array-layer RGBA output; a multi-layer KTX2 decode path is a Lite-core addition (see 🔧 Needs Lite core)."
