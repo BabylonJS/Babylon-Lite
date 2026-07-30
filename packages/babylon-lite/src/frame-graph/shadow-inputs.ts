@@ -12,9 +12,24 @@ function getShadowTaskInputs(): WeakMap<ShadowGenerator, readonly Mesh[]> {
 /** Register scene-owned shadow caster inputs for a generator. */
 export function setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): void {
     getShadowTaskInputs().set(shadowGenerator, casterMeshes);
-    if (shadowTaskInputPreloader) {
-        void shadowTaskInputPreloader(shadowGenerator, casterMeshes);
+    if (!shadowTaskInputPreloader) {
+        return;
     }
+    // The preload dynamically imports the no-colour material views for the caster families present in
+    // THIS set. Rendering before it resolves would call a factory that is still undefined, so the set is
+    // parked on the generator and skipped until the import lands. Initial registration is already awaited
+    // through the task's `_preload`; this covers the runtime updates, which cannot await.
+    shadowGenerator._preloadPending = casterMeshes;
+    void shadowTaskInputPreloader(shadowGenerator, casterMeshes).then(
+        () => {
+            if (shadowGenerator._preloadPending === casterMeshes) {
+                shadowGenerator._preloadPending = undefined;
+            }
+        },
+        // Leave the set parked — hence the generator skipped: a failed import means the factory is still
+        // missing, and rendering anyway would throw inside the frame with a far less actionable stack.
+        (error: unknown) => console.error(error)
+    );
 }
 
 /** @internal */
