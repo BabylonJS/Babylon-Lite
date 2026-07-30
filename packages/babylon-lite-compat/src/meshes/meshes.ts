@@ -667,7 +667,7 @@ export class Mesh extends AbstractMesh {
         if (cloneName !== undefined) {
             lite.name = cloneName;
         }
-        const isMesh = "_gpu" in lite && "material" in lite;
+        const isMesh = source instanceof Mesh || ("_gpu" in lite && "material" in lite);
         const wrapper = isMesh ? new Mesh(lite.name ?? "", lite as LiteMesh) : new TransformNode(lite.name ?? "", scene, lite);
         wrapper._container = (source as TransformNode | undefined)?._container;
         if (wrapper instanceof Mesh) {
