@@ -31,12 +31,13 @@ import {
     setThinInstances,
     setThinInstanceColors,
     createMeshFromData,
+    cloneTransformNode,
     resizeMeshGeometry,
     updateMeshUvs,
     createGroundFromHeightMap,
     computeAabb,
 } from "babylon-lite";
-import type { Mesh as LiteMesh, SceneNode, EngineContext } from "babylon-lite";
+import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer } from "babylon-lite";
 
 import { Vector3, liteBackedVector3 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
@@ -131,6 +132,32 @@ export class TransformNode extends Node {
     /** @internal The Lite scene node that carries this transform. */
     public readonly _node: SceneNode;
 
+    /**
+     * @internal The Lite asset container this node was loaded from, when produced
+     * by a loader. Used by the `KHR_materials_variants` helpers (which key off the
+     * loaded root node) and to keep loaded meshes tied to their source asset.
+     */
+    public _container?: LiteAssetContainer;
+
+    /**
+     * @internal Bind a loader-produced wrapper to the scene the container was added
+     * to. The loader already inserted the underlying Lite node (via
+     * `addToScene(container)`), so this only wires the compat-side scene reference
+     * and lists the wrapper in `scene.meshes` — it never re-inserts into Lite.
+     */
+    public _bindLoadedScene(scene: Scene): void {
+        if (this._scene === scene) {
+            return;
+        }
+        this._scene = scene;
+        scene._registerMesh(this, this._node);
+    }
+
+    /** @internal Link an already-parented Lite node without mutating its Lite hierarchy. */
+    public _adoptLoadedParent(parent: TransformNode | null): void {
+        this._linkParent(parent);
+    }
+
     public constructor(name: string, scene?: Scene, liteNode?: SceneNode) {
         super(name, scene);
         if (liteNode) {
@@ -222,7 +249,7 @@ export class AbstractMesh extends TransformNode {
     public readonly _lite: LiteMesh;
 
     private _material: CompatMaterial | null = null;
-    private _visible = true;
+    protected _visible = true;
 
     public constructor(name: string, lite: LiteMesh, scene?: Scene) {
         super(name, scene, lite);
@@ -483,6 +510,49 @@ export class Mesh extends AbstractMesh {
         return "Mesh";
     }
 
+    /**
+     * @internal Wrap an already-loaded Lite mesh (or the loader's synthetic root
+     * node) as a canonical compat `Mesh`. Unlike the public constructor it does
+     * **not** re-insert the node into the scene (the loader already added the whole
+     * container) and does **not** override the natively-loaded material — it only
+     * adopts the existing Lite node. Used by the loader to give
+     * `AssetContainer.meshes` real, stable-identity mesh handles.
+     */
+    public static _fromLite(lite: LiteMesh, container?: LiteAssetContainer, scene?: Scene): Mesh {
+        const mesh = new Mesh(lite.name ?? "", lite);
+        mesh._container = container;
+        mesh._visible = lite.visible !== false;
+        if (scene) {
+            mesh._bindLoadedScene(scene);
+        }
+        return mesh;
+    }
+
+    /** @internal Wrap and link a complete Lite hierarchy, registering every wrapper. */
+    public static _fromLiteHierarchy(
+        lite: LiteMesh,
+        container?: LiteAssetContainer,
+        scene?: Scene,
+        registry: Map<unknown, Mesh> = new Map(),
+        parent: TransformNode | null = null
+    ): Mesh {
+        let wrapper = registry.get(lite) as Mesh | undefined;
+        if (!wrapper) {
+            wrapper = Mesh._fromLite(lite, container, scene);
+            registry.set(lite, wrapper);
+        } else if (scene) {
+            wrapper._bindLoadedScene(scene);
+        }
+        wrapper._adoptLoadedParent(parent);
+        const children = (lite as unknown as { children?: LiteMesh[] }).children;
+        if (children) {
+            for (const child of children) {
+                Mesh._fromLiteHierarchy(child, container, scene, registry, wrapper);
+            }
+        }
+        return wrapper;
+    }
+
     private _morphTargetManager: MorphTargetManager | null = null;
 
     /**
@@ -555,9 +625,30 @@ export class Mesh extends AbstractMesh {
         }
     }
 
-    /** Deep mesh clone — not yet wrapped. */
-    public clone(): never {
-        return unsupported("Mesh.clone", "Mesh cloning is not yet wrapped in the compat layer.");
+    /**
+     * Babylon.js `mesh.clone(name?)` — deep-clone this mesh (and its child
+     * hierarchy) and add the copy to the same scene. Backed by Babylon Lite's
+     * `cloneTransformNode`, which shares the source's GPU geometry via ref-counting
+     * (the clone keeps the natively-loaded material). The cloned wrapper is a real
+     * compat `Mesh`, so it carries the full transform / visibility / dispose surface.
+     */
+    public clone(name?: string): Mesh {
+        const scene = this._scene;
+        if (!scene) {
+            return unsupported("Mesh.clone", "Cloning requires the source mesh to belong to a scene.");
+        }
+        const liteClone = cloneTransformNode(this._lite) as unknown as LiteMesh;
+        if (name !== undefined) {
+            liteClone.name = name;
+        }
+        const clone = Mesh._fromLiteHierarchy(liteClone, this._container, scene);
+        addToScene(scene._lite, liteClone);
+        // The Lite clone already shares the source material; also carry the compat
+        // material wrapper so `clone.material` mirrors the source's.
+        if (this.material) {
+            clone.material = this.material;
+        }
+        return clone;
     }
 
     /** Level-of-detail — unsupported (no LOD system in Babylon Lite). */

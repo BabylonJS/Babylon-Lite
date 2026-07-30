@@ -13,6 +13,8 @@ const liteMocks = vi.hoisted(() => ({
 
 vi.mock("babylon-lite", () => liteMocks);
 
+import type { EngineContext } from "babylon-lite";
+
 import { resolveKtxUrl, CubeTexture, HDRCubeTexture, Texture } from "../src/textures/textures";
 
 type Deferred<T> = {
@@ -31,8 +33,8 @@ function deferred<T>(): Deferred<T> {
     return { promise, resolve, reject };
 }
 
-function engineWrapper(): { _lite: import("babylon-lite").EngineContext } {
-    return { _lite: {} as import("babylon-lite").EngineContext };
+function engineWrapper(): { _lite: EngineContext } {
+    return { _lite: {} as EngineContext };
 }
 
 function textureHandle(): unknown {
