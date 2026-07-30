@@ -1108,8 +1108,6 @@
     {
         "id": 104,
         "slug": "scene104-character-controller",
-        "skipParity": true,
-        "skipParityReason": "Quarantined for dep-bump PR: reference bjs Havok character-controller scene hangs/times out at @babylonjs 9.16.1 (.pure.js side-effect split); Lite renders. Fix tracked in follow-up.",
         "name": "Scene 104 — Physics Character Controller",
         "maxMad": 0.05,
         "maxRawKB": 105,
@@ -1121,8 +1119,6 @@
     {
         "id": 105,
         "slug": "scene105-moving-platform",
-        "skipParity": true,
-        "skipParityReason": "Quarantined for dep-bump PR: reference bjs moving-platform scene hangs/times out at @babylonjs 9.16.1 (.pure.js side-effect split); Lite renders. Fix tracked in follow-up.",
         "name": "Scene 105 — Character Controller + Moving Platform",
         "maxMad": 0.05,
         "maxRawKB": 105,
