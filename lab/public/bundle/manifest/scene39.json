@@ -1,28 +1,27 @@
 {
-  "rawKB": 110.5,
-  "gzipKB": 47.4,
+  "rawKB": 110,
+  "gzipKB": 47,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene39-alpha-test-fragment-DDFTge21.js",
     "scene39-animation-pointer-lights-C-0a-TAP.js",
-    "scene39-emissive-fragment-QE1fr1MM.js",
-    "scene39-generate-mipmaps-DSGxrLJ1.js",
+    "scene39-emissive-fragment-BWvvTQaI.js",
+    "scene39-generate-mipmaps-VJkthlsH.js",
     "scene39-gltf-animation-BgzSSrKH.js",
     "scene39-gltf-ext-uv-transform-DhfZ3GtK.js",
     "scene39-gltf-feature-animation-pointer-DLP6qwQK.js",
     "scene39-gltf-feature-animations-CxATJO7n.js",
     "scene39-gltf-feature-lights-punctual-qLLf1x1o.js",
-    "scene39-gltf-feature-registry-D0tvl8Tz.js",
+    "scene39-gltf-feature-registry-BVRSbBPT.js",
     "scene39-gltf-json-asset-PF5DAnha.js",
     "scene39-gltf-light-pointer-state-B7kFTRxK.js",
-    "scene39-gltf-pbr-builder-ext-DBMVZLWN.js",
+    "scene39-gltf-pbr-builder-ext-DyaMnJed.js",
     "scene39-gltf-sampler-desc-DY59huRr.js",
     "scene39-gltf-share-CdeJsh_e.js",
     "scene39-ibl-fragment-CeRrvT96.js",
     "scene39-light-base-DJIAgtv-.js",
     "scene39-light-matrix-CBTBdGsb.js",
-    "scene39-pbr-pipeline-gFWmJcF4.js",
-    "scene39-pbr-renderable-CaDGcC0_.js",
+    "scene39-pbr-renderable-Dihxogc9.js",
     "scene39-pbr-template-ext-CiHpOV5G.js",
     "scene39-rgbd-decode-DqA5PDQg.js",
     "scene39-scene-uniforms-FTYH6Ct0.js",
@@ -32,5 +31,5 @@
     "scene39-visibility-D_WcxQMp.js",
     "scene39.js"
   ],
-  "rawBytes": 113157
+  "rawBytes": 112673
 }
