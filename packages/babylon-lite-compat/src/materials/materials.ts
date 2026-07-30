@@ -450,6 +450,7 @@ export class PBRIridescenceConfiguration {
 export class PBRMaterial extends PushMaterial {
     /** @internal Underlying Babylon Lite PBR-material props. */
     public readonly _lite: PbrMaterialProps;
+    private _albedoFactor: Tuple4 = [1, 1, 1, 1];
 
     public constructor(name: string, scene?: Scene) {
         super(name, scene);
@@ -464,12 +465,11 @@ export class PBRMaterial extends PushMaterial {
     }
 
     public get albedoColor(): Color3 {
-        const f = this._lite.baseColorFactor;
-        return f ? new Color3(f[0], f[1], f[2]) : new Color3(1, 1, 1);
+        return new Color3(this._albedoFactor[0], this._albedoFactor[1], this._albedoFactor[2]);
     }
     public set albedoColor(value: Color3) {
-        const f: Tuple4 = this._lite.baseColorFactor ?? [1, 1, 1, 1];
-        this._lite.baseColorFactor = [value.r, value.g, value.b, f[3]];
+        this._albedoFactor = [value.r, value.g, value.b, this._albedoFactor[3]];
+        this._lite.baseColorFactor = [...this._albedoFactor];
         this._markDirty();
     }
 
@@ -631,6 +631,7 @@ export class PBRMaterial extends PushMaterial {
         const albedo = this._albedoTexture as { _lite?: Texture2D; gammaSpace?: boolean } | null;
         if (albedo?._lite) {
             lite.baseColorTexture = albedo._lite;
+            lite.baseColorFactor = [...this._albedoFactor];
             lite.gammaAlbedo = albedo.gammaSpace ?? true;
         }
         // Babylon Lite's PBR pipeline samples baseColorTexture/ormTexture unconditionally,
@@ -638,7 +639,7 @@ export class PBRMaterial extends PushMaterial {
         // 1×1 solid textures. Bake the factors into the textures and neutralize the factors
         // so each contribution is applied exactly once.
         if (!lite.baseColorTexture) {
-            const f = lite.baseColorFactor ?? [1, 1, 1, 1];
+            const f = this._albedoFactor;
             lite.baseColorTexture = createSolidTexture2D(engine, f[0], f[1], f[2], f[3]);
             lite.baseColorFactor = [1, 1, 1, 1];
         }

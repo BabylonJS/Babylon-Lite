@@ -155,6 +155,23 @@ describe("Texture onLoadObservable", () => {
 
         expect(observerCalls).toBe(1);
     });
+
+    it("notifies attached materials after constructor onLoad configuration", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+        const state: { tex?: Texture } = {};
+        const observedScales: number[] = [];
+        const tex = new Texture("https://h/albedo.png", engineWrapper(), undefined, undefined, undefined, () => {
+            state.tex!.uScale = 2;
+        });
+        state.tex = tex;
+        tex._onReady(() => observedScales.push(tex.uScale));
+
+        load.resolve(textureHandle());
+        await tex.whenReadyAsync();
+
+        expect(observedScales).toEqual([2]);
+    });
 });
 
 /**

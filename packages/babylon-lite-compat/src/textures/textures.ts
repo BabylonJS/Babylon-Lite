@@ -199,11 +199,13 @@ export class Texture extends BaseTexture {
         this._ready = loadCompatTexture(engine, url, loadOpts).then((tex) => {
             this._lite = tex;
             this._notifyLoadObservable();
-            // Rebind + rebuild any material this texture was assigned to before the
-            // load resolved (see BaseTexture._onReady / Material._watchTexture).
-            this._notifyReady();
-            if (onLoad) {
-                onLoad();
+            try {
+                if (onLoad) {
+                    onLoad();
+                }
+            } finally {
+                // Rebuild after onLoad has configured UV scale and related fields.
+                this._notifyReady();
             }
         });
         // Let the scene await this load before it builds renderables, so the GPU
