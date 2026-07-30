@@ -143,6 +143,14 @@ by default (text always uses src-over blending) and consumes its `TextData`
 read-only — the data and its underlying `GlyphStorage` may be shared across
 many `TextRenderable`s.
 
+Scene-attached text can opt into alpha-to-coverage with
+`setAlphaToCoverage(renderable, true)` before it is added/registered. The option
+is effective only when `ignoreDepth === false` and the scene target is
+multisampled. That variant uses straight RGB, analytic glyph coverage as alpha,
+replacement color (no blend), and per-sample depth writes. Standalone
+`TextRenderer` layers draw to a 1x swapchain and retain ordinary straight-alpha
+blending.
+
 ### Tier 3b — `TextRenderer` + `TextLayer` (standalone 2D)
 
 ```typescript

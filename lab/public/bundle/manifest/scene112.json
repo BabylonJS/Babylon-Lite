@@ -7,14 +7,14 @@
     "scene112-background-ground-BtpYxbIK.js",
     "scene112-cubemap-skybox-material-_JaJxh4q.js",
     "scene112-generate-mipmaps-pWw2s9cL.js",
-    "scene112-gltf-ext-basisu-BDn8iWQK.js",
+    "scene112-gltf-ext-basisu-CXL3UK0h.js",
     "scene112-gltf-ext-dielectric-C6hvXXiF.js",
-    "scene112-gltf-feature-registry-BUmHHvej.js",
+    "scene112-gltf-feature-registry-ByA1WsZ2.js",
     "scene112-gltf-json-asset-jIhMyCt9.js",
     "scene112-gltf-uri-6vf9MtoR.js",
     "scene112-ibl-fragment-CeRrvT96.js",
     "scene112-pbr-refraction-BMdiGdWC.js",
-    "scene112-pbr-renderable-DJG1x1oF.js",
+    "scene112-pbr-renderable-BUMzPgnr.js",
     "scene112-pbr-transmission-ext-DW1b_IKQ.js",
     "scene112-rgbd-decode-CFyrlDIY.js",
     "scene112-scene-uniforms-FTYH6Ct0.js",
@@ -22,5 +22,5 @@
     "scene112-wgsl-helpers-BgB2AJrF.js",
     "scene112.js"
   ],
-  "rawBytes": 122914
+  "rawBytes": 122916
 }
