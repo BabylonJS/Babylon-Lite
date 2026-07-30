@@ -26,16 +26,16 @@
     },
     "devDependencies": {
         "@ampproject/remapping": "^2.3.0",
-        "@webgpu/types": "^0.1.52",
+        "@webgpu/types": "^0.1.71",
         "typescript": "^6.0.3",
         "vite": "^6.4.3",
         "vite-plugin-dts": "^4.5.4"
     },
     "dependencies": {
-        "@recast-navigation/core": "0.43.0",
-        "@recast-navigation/generators": "0.43.0",
-        "@recast-navigation/wasm": "0.43.0",
+        "@recast-navigation/core": "0.43.1",
+        "@recast-navigation/generators": "0.43.1",
+        "@recast-navigation/wasm": "0.43.1",
         "manifold-3d": "3.5.1",
-        "text-shaper": "^0.1.18"
+        "text-shaper": "^0.1.28"
     }
 }
