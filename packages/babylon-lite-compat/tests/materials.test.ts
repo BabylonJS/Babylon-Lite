@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import * as lite from "babylon-lite";
 
 import { StandardMaterial, PBRMaterial, PBRMetallicRoughnessMaterial, PBRSpecularGlossinessMaterial } from "../src/materials/materials";
 import { NodeMaterial } from "../src/materials/node-material";
@@ -129,5 +130,28 @@ describe("Material.clone", () => {
         expect(register).toHaveBeenCalledWith(clone);
         // Texture override shared by reference.
         expect(clone.getBlockByName("albedo").texture).toBe(tex);
+    });
+
+    it("NodeMaterial.clone remains assignable after startup and rebinds its own parsed material", async () => {
+        const sourceLite = { id: "source" };
+        const cloneLite = { id: "clone" };
+        vi.spyOn(lite, "parseNodeMaterialFromSnippet").mockResolvedValueOnce(cloneLite as never);
+        let parsePromise: Promise<void> | undefined;
+        const scene = {
+            _registerNodeMaterial: (material: NodeMaterial) => {
+                parsePromise = material._parse({} as never);
+            },
+        } as unknown as Scene;
+        const mat = new NodeMaterial("src", scene, { foo: "bar" });
+        mat._lite = sourceLite as never;
+
+        const clone = mat.clone("clone");
+        const mesh: { material?: unknown } = {};
+        clone._bindMesh(mesh as never);
+        expect(mesh.material).toBe(sourceLite);
+
+        await parsePromise!;
+        expect(clone._lite).toBe(cloneLite);
+        expect(mesh.material).toBe(cloneLite);
     });
 });

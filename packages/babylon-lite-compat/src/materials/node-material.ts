@@ -48,6 +48,7 @@ export class NodeMaterial {
     private readonly _json: object | string;
     private readonly _textureOverrides: Record<string, TextureLike> = {};
     private readonly _scene: Scene;
+    private readonly _boundMeshes = new Set<{ material?: LiteNodeMaterial }>();
 
     public constructor(name: string, scene: Scene, json: object | string = {}) {
         this.name = name;
@@ -70,6 +71,9 @@ export class NodeMaterial {
         for (const [block, tex] of Object.entries(this._textureOverrides)) {
             cloned._textureOverrides[block] = tex;
         }
+        // Keep assignments made immediately after clone() functional while the clone's
+        // own async renderable is compiled. _parse replaces this temporary handle.
+        cloned._lite = this._lite;
         this._scene._registerNodeMaterial(cloned);
         return cloned;
     }
@@ -103,6 +107,14 @@ export class NodeMaterial {
         // No-op: `_lite` is set when the tracked parse promise resolves.
     }
 
+    /** @internal Bind a mesh immediately and refresh it when this material finishes parsing. */
+    public _bindMesh(mesh: { material?: LiteNodeMaterial }): void {
+        this._boundMeshes.add(mesh);
+        if (this._lite) {
+            mesh.material = this._lite;
+        }
+    }
+
     public dispose(): void {
         // GPU resources owned by the scene; disposed with it.
     }
@@ -128,6 +140,9 @@ export class NodeMaterial {
             // generators (e.g. ground `receiveShadows` in scenes 65/66).
             ...(shadowGenerators.length ? { shadowGenerators: shadowGenerators as never } : {}),
         });
+        for (const mesh of this._boundMeshes) {
+            mesh.material = this._lite;
+        }
     }
 
     /**

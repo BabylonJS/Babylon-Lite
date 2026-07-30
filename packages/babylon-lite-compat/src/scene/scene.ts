@@ -331,7 +331,15 @@ export class Scene extends AbstractScene {
 
     /** @internal Register a `NodeMaterial` whose parse the engine drives after shadow build. */
     public _registerNodeMaterial(material: { _parse(engine: import("babylon-lite").EngineContext, shadowGenerators: readonly unknown[]): Promise<void> }): void {
+        if (this._started) {
+            this._engine._registerLateWork(() => material._parse(this._engine._lite, this._liteShadowGenerators()));
+            return;
+        }
         this._nodeMaterials.push(material);
+    }
+
+    private _liteShadowGenerators(): unknown[] {
+        return this._shadowGenerators.map((g) => g._liteGen).filter((g): g is unknown => g !== undefined);
     }
 
     /**
@@ -345,7 +353,7 @@ export class Scene extends AbstractScene {
             return;
         }
         const engine = this._engine._lite;
-        const liteGens = this._shadowGenerators.map((g) => g._liteGen).filter((g): g is unknown => g !== undefined);
+        const liteGens = this._liteShadowGenerators();
         await Promise.all(this._nodeMaterials.map((m) => m._parse(engine, liteGens)));
         this._nodeMaterials.length = 0;
     }
