@@ -31,8 +31,8 @@ function deferred<T>(): Deferred<T> {
     return { promise, resolve, reject };
 }
 
-function engineWrapper(): { _lite: object } {
-    return { _lite: {} };
+function engineWrapper(): { _lite: import("babylon-lite").EngineContext } {
+    return { _lite: {} as import("babylon-lite").EngineContext };
 }
 
 function textureHandle(): unknown {

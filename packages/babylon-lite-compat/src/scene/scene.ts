@@ -224,6 +224,16 @@ export class Scene extends AbstractScene {
         this.onBeforeRenderObservable.notifyObservers(this);
     }
 
+    /**
+     * @internal The Lite-core-owned mesh list backing `scene.meshes`. Babylon Lite's
+     * `SceneContext` owns the authoritative array of scene meshes; the base
+     * `AbstractScene.meshes` maps it back onto the canonical compat wrappers. Guarded
+     * for prototype-only instances that have no `_lite` (GPU-free unit tests).
+     */
+    protected override _coreMeshList(): readonly object[] {
+        return (this._lite?.meshes as readonly object[] | undefined) ?? [];
+    }
+
     public getEngine(): WebGPUEngine {
         return this._engine;
     }
