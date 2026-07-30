@@ -31,7 +31,6 @@ import {
     setThinInstances,
     setThinInstanceColors,
     createMeshFromData,
-    mergeMeshGeometry,
     resizeMeshGeometry,
     updateMeshUvs,
     createGroundFromHeightMap,
@@ -48,6 +47,7 @@ import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { NodeMaterial } from "../materials/node-material.js";
+import { mergeMeshGeometry } from "./merge-mesh-geometry.js";
 import type { GridMaterial } from "../materials/grid-material.js";
 import type { MorphTargetManager } from "../morph/morph.js";
 
@@ -553,7 +553,7 @@ export class Mesh extends AbstractMesh {
      * Babylon.js `Mesh.MergeMeshes` — bake several meshes into one, transforming
      * each source's geometry by its world matrix. Signature:
      * `MergeMeshes(meshes, disposeSource?, allow32BitsIndices?, meshSubclass?, subdivideWithSubMeshes?, multiMultiMaterials?)`.
-     * Forwards to Lite's tree-shakeable `mergeMeshGeometry`; the merged mesh lives at
+     * Uses the compat-local `mergeMeshGeometry`; the merged mesh lives at
      * identity (world transforms are baked in) and takes the first mesh's material.
      *
      * **Supported semantics** (everything else is rejected, never silently dropped):

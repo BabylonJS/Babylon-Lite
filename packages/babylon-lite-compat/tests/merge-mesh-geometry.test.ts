@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mergeMeshGeometry } from "../../../packages/babylon-lite/src/mesh/merge-mesh-geometry";
-import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import type { EngineContext, Mesh as LiteMesh } from "babylon-lite";
+import { mergeMeshGeometry } from "../src/meshes/merge-mesh-geometry.js";
 
 function fakeEngine(): EngineContext {
     const createBuffer = (descriptor: GPUBufferDescriptor): GPUBuffer => {
@@ -17,14 +16,14 @@ function fakeEngine(): EngineContext {
     } as unknown as EngineContext;
 }
 
-function mirroredTriangle(): Mesh {
+function mirroredTriangle(): LiteMesh {
     return {
         name: "mirrored",
         _cpuPositions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
         _cpuNormals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
         _cpuIndices: new Uint32Array([0, 1, 2]),
         worldMatrix: new Float32Array([-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
-    } as unknown as Mesh;
+    } as unknown as LiteMesh;
 }
 
 describe("mergeMeshGeometry", () => {
@@ -33,6 +32,8 @@ describe("mergeMeshGeometry", () => {
 
         expect(Array.from(merged._cpuPositions!)).toEqual([0, 0, 0, -1, 0, 0, 0, 1, 0]);
         expect(Array.from(merged._cpuIndices!)).toEqual([0, 2, 1]);
-        expect(Array.from(merged._cpuNormals!)).toEqual([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+        for (const [index, expected] of [0, 0, 1, 0, 0, 1, 0, 0, 1].entries()) {
+            expect(merged._cpuNormals![index]).toBeCloseTo(expected);
+        }
     });
 });

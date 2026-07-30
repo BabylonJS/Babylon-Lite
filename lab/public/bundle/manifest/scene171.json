@@ -1,13 +1,13 @@
 {
   "rawKB": 95.6,
   "gzipKB": 39.3,
-  "ignoredRawKB": 1485.2,
+  "ignoredRawKB": 1483.8,
   "runtimeChunks": [
     "scene171-generate-mipmaps-DE46RmYB.js",
     "scene171-gltf-glb-parser-DnHYtVMv.js",
     "scene171-mesh-features-Dda6QcW-.js",
-    "scene171-pbr-renderable-c-M65Y4i.js",
-    "scene171-recast-navigation-CYBQI-zY-Dry_z7x_.js",
+    "scene171-pbr-renderable-Bg4d5V-i.js",
+    "scene171-recast-navigation-Ddkygka3-B-kBz3cE.js",
     "scene171-singlelight-hemispheric-wgsl-BrjBFvL6.js",
     "scene171-standard-renderable-Bw0PRSHT.js",
     "scene171.js"

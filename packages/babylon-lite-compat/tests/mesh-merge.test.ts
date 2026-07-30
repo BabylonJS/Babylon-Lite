@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * `Mesh.MergeMeshes` forwards to Babylon Lite's tree-shakeable `mergeMeshGeometry`
+ * `Mesh.MergeMeshes` forwards to the compat-local `mergeMeshGeometry`
  * (which bakes each source's world-transformed CPU geometry into one new mesh). The
  * real merge uploads to the GPU, so these tests mock the Lite factory to a plain
  * handle and verify the compat surface GPU-free: argument forwarding, the
@@ -12,7 +12,6 @@ vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
     return {
         ...actual,
-        mergeMeshGeometry: vi.fn((_engine: unknown, name: string) => ({ name, _tag: "merged" })),
         createMeshFromData: vi.fn((_engine: unknown, name: string) => ({
             name,
             _cpuPositions: new Float32Array(9),
@@ -25,10 +24,15 @@ vi.mock("babylon-lite", async (importActual) => {
     };
 });
 
-import { addToScene, mergeMeshGeometry } from "babylon-lite";
-import { LiteCompatError } from "../src/error";
+vi.mock("../src/meshes/merge-mesh-geometry.js", () => ({
+    mergeMeshGeometry: vi.fn((_engine: unknown, name: string) => ({ name, _tag: "merged" })),
+}));
 
-// Imported after the mock so `Mesh` picks up the stubbed `mergeMeshGeometry`.
+import { addToScene } from "babylon-lite";
+import { LiteCompatError } from "../src/error";
+import { mergeMeshGeometry } from "../src/meshes/merge-mesh-geometry.js";
+
+// Imported after the mocks so `Mesh` picks up the stubbed geometry merge.
 const { Mesh } = await import("../src/meshes/meshes");
 
 const mergeMock = vi.mocked(mergeMeshGeometry);
