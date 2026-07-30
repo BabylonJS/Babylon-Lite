@@ -350,7 +350,17 @@ export class AbstractMesh extends TransformNode {
         const positions = kind === "position" ? f32 : lite._cpuPositions;
         const normals = kind === "normal" ? f32 : (lite._cpuNormals ?? computeFlatNormals(positions, lite._cpuIndices));
         const uvs = kind === "uv" ? f32 : lite._cpuUvs;
-        resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, undefined, this._lastTangents, this._lastColors);
+        resizeMeshGeometry(
+            engine,
+            this._lite,
+            positions,
+            normals,
+            lite._cpuIndices,
+            uvs,
+            lite._cpuUv2s ?? undefined,
+            this._lastTangents ?? lite._cpuTangents ?? undefined,
+            this._lastColors ?? lite._cpuColors ?? undefined
+        );
     }
 
     /**
@@ -359,8 +369,9 @@ export class AbstractMesh extends TransformNode {
      * device-loss recovery), so we return that directly; a mesh with no geometry
      * returns `null`.
      */
-    public getIndices(_copyWhenShared?: boolean, _forceCopy?: boolean): Uint32Array | null {
-        return this._lite._cpuIndices ?? null;
+    public getIndices(_copyWhenShared?: boolean, forceCopy?: boolean): Uint32Array | null {
+        const indices = this._lite._cpuIndices;
+        return indices ? (forceCopy ? indices.slice() : indices) : null;
     }
 
     /**
@@ -378,7 +389,17 @@ export class AbstractMesh extends TransformNode {
         const u32 = indices instanceof Uint32Array ? indices : Uint32Array.from(indices);
         const positions = lite._cpuPositions;
         const normals = lite._cpuNormals ?? computeFlatNormals(positions, u32);
-        resizeMeshGeometry(engine, this._lite, positions, normals, u32, lite._cpuUvs, undefined, this._lastTangents, this._lastColors);
+        resizeMeshGeometry(
+            engine,
+            this._lite,
+            positions,
+            normals,
+            u32,
+            lite._cpuUvs,
+            lite._cpuUv2s ?? undefined,
+            this._lastTangents ?? lite._cpuTangents ?? undefined,
+            this._lastColors ?? lite._cpuColors ?? undefined
+        );
         return this;
     }
 

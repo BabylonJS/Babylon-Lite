@@ -38,6 +38,13 @@ describe("AbstractMesh.getIndices", () => {
     it("returns null when the mesh has no geometry", () => {
         expect(fakeMesh({}).getIndices()).toBeNull();
     });
+
+    it("returns an independent array when forceCopy is true", () => {
+        const indices = new Uint32Array([0, 1, 2]);
+        const copy = fakeMesh({ _cpuIndices: indices }).getIndices(false, true)!;
+        expect(copy).not.toBe(indices);
+        expect(copy).toEqual(indices);
+    });
 });
 
 describe("AbstractMesh.setIndices", () => {
@@ -46,7 +53,18 @@ describe("AbstractMesh.setIndices", () => {
         const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]);
         const normals = new Float32Array(positions.length);
         const uvs = new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]);
-        const mesh = fakeMesh({ _cpuPositions: positions, _cpuNormals: normals, _cpuUvs: uvs, _cpuIndices: new Uint32Array([0, 1, 2]) });
+        const uvs2 = new Float32Array(uvs);
+        const tangents = new Float32Array(16);
+        const colors = new Float32Array(16);
+        const mesh = fakeMesh({
+            _cpuPositions: positions,
+            _cpuNormals: normals,
+            _cpuUvs: uvs,
+            _cpuUv2s: uvs2,
+            _cpuTangents: tangents,
+            _cpuColors: colors,
+            _cpuIndices: new Uint32Array([0, 1, 2]),
+        });
 
         const result = mesh.setIndices([0, 1, 2, 2, 1, 3]);
 
@@ -59,6 +77,9 @@ describe("AbstractMesh.setIndices", () => {
         expect(forwarded).toBeInstanceOf(Uint32Array);
         expect(Array.from(forwarded)).toEqual([0, 1, 2, 2, 1, 3]);
         expect(call[5]).toBe(uvs);
+        expect(call[6]).toBe(uvs2);
+        expect(call[7]).toBe(tangents);
+        expect(call[8]).toBe(colors);
     });
 
     it("forwards a Uint32Array argument without copying", () => {
