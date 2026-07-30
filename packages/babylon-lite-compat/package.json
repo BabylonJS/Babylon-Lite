@@ -45,15 +45,15 @@
     },
     "sideEffects": false,
     "dependencies": {
-        "babylon-lite": "workspace:*",
-        "@recast-navigation/core": "0.43.0",
-        "@recast-navigation/generators": "0.43.0",
-        "@recast-navigation/wasm": "0.43.0"
+        "@recast-navigation/core": "0.43.1",
+        "@recast-navigation/generators": "0.43.1",
+        "@recast-navigation/wasm": "0.43.1",
+        "babylon-lite": "workspace:*"
     },
     "devDependencies": {
-        "@webgpu/types": "^0.1.52",
+        "@webgpu/types": "^0.1.71",
         "typescript": "^6.0.3",
-        "vite": "^6.0.0",
+        "vite": "^6.4.3",
         "vite-plugin-dts": "^4.5.4"
     }
 }
