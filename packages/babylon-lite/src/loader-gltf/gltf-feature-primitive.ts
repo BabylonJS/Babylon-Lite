@@ -11,7 +11,7 @@ import type { GltfFeature } from "./gltf-feature.js";
 
 const feature: GltfFeature = {
     id: "_primitive",
-    applyMesh(meshData, mesh) {
+    async applyMesh(meshData, mesh) {
         // Install the pipeline's primitive resolvers on first use. This must stay a CALL rather than
         // a bare `import "…/pbr-primitive-resolver.js"`: the package ships `"sideEffects": false`, so
         // a bundler may legally drop an import whose exports are unused — which silently removed the
