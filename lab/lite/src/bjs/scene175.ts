@@ -12,7 +12,6 @@ import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import { CreateNavigationPluginAsync } from "@babylonjs/addons/navigation/factory/factory.single-thread";
 import * as RecastCore from "@recast-navigation/core";
 import * as RecastGenerators from "@recast-navigation/generators";
-// glTF 2.0 loader only: as of BJS 9.17.1, importing "/glTF/2.0" registers the SceneLoader plugin and wires the v2 factory without pulling the glTF 1.0 loader from the barrel.
 import "@babylonjs/loaders/glTF/2.0";
 
 const NAV_MESH_URL = "/models/nav_test.glb";

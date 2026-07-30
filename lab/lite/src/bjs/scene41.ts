@@ -26,7 +26,6 @@ import {
     PhysicsShapeSphere,
 } from "@babylonjs/core/Physics/v2/physicsShape";
 import "@babylonjs/core/Physics/joinedPhysicsEngineComponent";
-// glTF 2.0 loader only: as of BJS 9.17.1, importing "/glTF/2.0" registers the SceneLoader plugin and wires the v2 factory without pulling the glTF 1.0 loader from the barrel.
 import "@babylonjs/loaders/glTF/2.0";
 
 const PHYSICS_FPS = 60;
