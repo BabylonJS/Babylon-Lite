@@ -122,6 +122,11 @@ function computeFlatNormals(positions: Float32Array, indices: Uint32Array): Floa
     return normals;
 }
 
+/** @internal Return an attribute only when it has exactly one value tuple per vertex. */
+function matchingVertexAttribute(data: Float32Array | null | undefined, vertexCount: number, components: number): Float32Array | undefined {
+    return data?.length === vertexCount * components ? data : undefined;
+}
+
 /**
  * Babylon.js `TransformNode` — a positioned, rotated, scaled scene-graph node.
  * Wraps a Lite scene node (`_node`): either a standalone Lite transform node, or
@@ -233,6 +238,10 @@ export class AbstractMesh extends TransformNode {
         // assigning that default now; an explicit `mesh.material = …` overrides it.
         if (scene) {
             this.material = scene.defaultMaterial;
+            // Canonical-registry entry keyed by the Lite mesh so `scene.meshes` (and the
+            // scene by-name/-id lookups) enumerate this primitive — reconciled against the
+            // Lite-core-owned list, which holds the same `_lite` object once it is added.
+            scene._registerMesh(this, this._lite);
         }
     }
 
@@ -348,8 +357,19 @@ export class AbstractMesh extends TransformNode {
             this._lastTangents = f32;
         }
         const positions = kind === "position" ? f32 : lite._cpuPositions;
-        const normals = kind === "normal" ? f32 : (lite._cpuNormals ?? computeFlatNormals(positions, lite._cpuIndices));
-        const uvs = kind === "uv" ? f32 : lite._cpuUvs;
+        const vertexCount = positions.length / 3;
+        const existingNormals = matchingVertexAttribute(lite._cpuNormals, vertexCount, 3);
+        const normals = kind === "normal" ? f32 : (existingNormals ?? computeFlatNormals(positions, lite._cpuIndices));
+        if (kind === "position") {
+            this._normalsFollowIndices = !existingNormals;
+        } else if (kind === "normal") {
+            this._normalsFollowIndices = false;
+        }
+        const existingUvs = matchingVertexAttribute(lite._cpuUvs, vertexCount, 2);
+        const uvs = kind === "uv" ? f32 : (existingUvs ?? (kind === "position" ? new Float32Array(vertexCount * 2) : undefined));
+        const uvs2 = matchingVertexAttribute(lite._cpuUv2s, vertexCount, 2);
+        const tangents = matchingVertexAttribute(this._lastTangents ?? lite._cpuTangents, vertexCount, 4);
+        const colors = matchingVertexAttribute(this._lastColors ?? lite._cpuColors, vertexCount, 4);
         resizeMeshGeometry(
             engine,
             this._lite,
@@ -357,9 +377,9 @@ export class AbstractMesh extends TransformNode {
             normals,
             lite._cpuIndices,
             uvs,
-            lite._cpuUv2s ?? undefined,
-            this._lastTangents ?? lite._cpuTangents ?? undefined,
-            this._lastColors ?? lite._cpuColors ?? undefined
+            uvs2,
+            tangents,
+            colors
         );
     }
 
@@ -388,17 +408,18 @@ export class AbstractMesh extends TransformNode {
         }
         const u32 = indices instanceof Uint32Array ? indices : Uint32Array.from(indices);
         const positions = lite._cpuPositions;
-        const normals = lite._cpuNormals ?? computeFlatNormals(positions, u32);
+        const vertexCount = positions.length / 3;
+        const normals = this._normalsFollowIndices ? computeFlatNormals(positions, u32) : (matchingVertexAttribute(lite._cpuNormals, vertexCount, 3) ?? computeFlatNormals(positions, u32));
         resizeMeshGeometry(
             engine,
             this._lite,
             positions,
             normals,
             u32,
-            lite._cpuUvs,
-            lite._cpuUv2s ?? undefined,
-            this._lastTangents ?? lite._cpuTangents ?? undefined,
-            this._lastColors ?? lite._cpuColors ?? undefined
+            matchingVertexAttribute(lite._cpuUvs, vertexCount, 2),
+            matchingVertexAttribute(lite._cpuUv2s, vertexCount, 2),
+            matchingVertexAttribute(this._lastTangents ?? lite._cpuTangents, vertexCount, 4),
+            matchingVertexAttribute(this._lastColors ?? lite._cpuColors, vertexCount, 4)
         );
         return this;
     }
@@ -406,6 +427,8 @@ export class AbstractMesh extends TransformNode {
     /** @internal Retained tangent/color buffers so successive `setVerticesData` calls keep both. */
     private _lastTangents: Float32Array | undefined;
     private _lastColors: Float32Array | undefined;
+    /** @internal Position resizing generated normals from the old topology; regenerate after the next index update. */
+    private _normalsFollowIndices = false;
 
     /** Babylon.js `mesh.getTotalVertices()` — vertex count from the position buffer. */
     public getTotalVertices(): number {

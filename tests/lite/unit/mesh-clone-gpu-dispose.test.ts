@@ -100,9 +100,25 @@ describe("mesh clone GPU buffer ownership", () => {
             _retirements: [],
         } as unknown as EngineContext;
 
-        resizeMeshGeometry(engine, src, new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 1, 2]));
+        const uvs2 = new Float32Array([0, 0, 1, 0, 0, 1]);
+        const tangents = new Float32Array([1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1]);
+        const colors = new Float32Array([1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1]);
+        resizeMeshGeometry(
+            engine,
+            src,
+            new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+            new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+            new Uint32Array([0, 1, 2]),
+            undefined,
+            uvs2,
+            tangents,
+            colors
+        );
 
         expect(src._gpu).not.toBe(gpu);
+        expect(src._cpuUv2s).toBe(uvs2);
+        expect(src._cpuTangents).toBe(tangents);
+        expect(src._cpuColors).toBe(colors);
         expect(clone._gpu).toBe(gpu);
         expect(gpu._refCount).toBe(1);
         expect(engine._retirements).toHaveLength(0);

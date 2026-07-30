@@ -16,7 +16,7 @@ vi.mock("babylon-lite", async (importActual) => {
 });
 
 import { resizeMeshGeometry } from "babylon-lite";
-import { AbstractMesh } from "../src/meshes/meshes";
+import { AbstractMesh, Mesh, VertexBuffer } from "../src/meshes/meshes";
 
 const resizeMeshGeometryMock = vi.mocked(resizeMeshGeometry);
 
@@ -103,5 +103,45 @@ describe("AbstractMesh.setIndices", () => {
         const mesh = fakeMesh({});
         expect(mesh.setIndices([0, 1, 2])).toBe(mesh);
         expect(resizeMeshGeometryMock).not.toHaveBeenCalled();
+    });
+
+    it("regenerates placeholder attributes for a positions-then-indices vertex-count change", () => {
+        resizeMeshGeometryMock.mockImplementation(
+            (_engine, lite, positions, normals, indices, uvs, uvs2, tangents, colors) => {
+                Object.assign(lite, {
+                    _cpuPositions: positions,
+                    _cpuNormals: normals,
+                    _cpuIndices: indices,
+                    _cpuUvs: uvs,
+                    _cpuUv2s: uvs2 ?? null,
+                    _cpuTangents: tangents ?? null,
+                    _cpuColors: colors ?? null,
+                });
+            }
+        );
+        const lite = {
+            name: "shape",
+            children: [],
+            receiveShadows: false,
+            _cpuPositions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+            _cpuNormals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+            _cpuUvs: new Float32Array([0, 0, 1, 0, 0, 1]),
+            _cpuIndices: new Uint32Array([0, 1, 2]),
+        };
+        const scene = {
+            defaultMaterial: null,
+            getEngine: () => ({ _lite: { id: "engine" } }),
+            _registerMesh: vi.fn(),
+        };
+        const mesh = new Mesh("shape", lite as never, scene as never);
+
+        mesh.setVerticesData(VertexBuffer.PositionKind, [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]);
+        mesh.setIndices([0, 1, 2, 2, 1, 3]);
+
+        const lastCall = resizeMeshGeometryMock.mock.calls.at(-1)!;
+        expect(lastCall[2]).toHaveLength(12);
+        expect(lastCall[3]).toHaveLength(12);
+        expect(lastCall[5]).toHaveLength(8);
+        expect(Array.from(lastCall[3] as Float32Array).slice(9, 12)).not.toEqual([0, 0, 0]);
     });
 });

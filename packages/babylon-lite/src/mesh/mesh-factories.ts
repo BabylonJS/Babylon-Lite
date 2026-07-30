@@ -375,16 +375,7 @@ export function resizeMeshGeometry(
     // resize happens during async scene construction before the first submit. Retire them through the engine's
     // frame-gated queue so destruction cannot run before that command buffer has submitted and drained.
     mesh._gpu = uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors);
-    const [min, max] = computeAabb(positions);
-    mesh.boundMin = isFinite(min[0]) ? min : undefined;
-    mesh.boundMax = isFinite(max[0]) ? max : undefined;
-
-    // Retain CPU geometry for detailed picking + device-loss recovery (mirror createMeshFromData).
-    mesh._cpuPositions = positions;
-    mesh._cpuNormals = normals;
-    mesh._cpuUvs = uvs;
-    mesh._cpuIndices = indices;
-    engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
+    retainMeshGeometry(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
     _markWorldMatrixDirty(mesh);
     // `cloneTransformNode` shares the exact MeshGPU object between siblings. Replacing this mesh's
     // `_gpu` drops one ownership claim; only retire the old buffers when no sibling still references
