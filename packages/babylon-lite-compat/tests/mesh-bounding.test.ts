@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createTransformNode } from "babylon-lite";
 
-import { AbstractMesh } from "../src/meshes/meshes";
+import { AbstractMesh, Mesh } from "../src/meshes/meshes";
 import { BoundingInfo } from "../src/culling/bounding";
-import { LoadedMesh } from "../src/loading/loaded-mesh";
 
 /**
  * `AbstractMesh.getBoundingInfo()` reads only the backing Lite mesh's
@@ -62,7 +61,7 @@ describe("AbstractMesh.getBoundingInfo", () => {
     });
 });
 
-describe("LoadedMesh.getBoundingInfo", () => {
+describe("loaded Mesh.getBoundingInfo", () => {
     it("reports loader mesh bounds in both local and current world space", () => {
         const parent = createTransformNode("parent");
         const node = createTransformNode("loaded") as ReturnType<typeof createTransformNode> & { boundMin: [number, number, number]; boundMax: [number, number, number] };
@@ -72,7 +71,7 @@ describe("LoadedMesh.getBoundingInfo", () => {
         parent.position.set(4, 0, 0);
         node.position.set(0, 5, 0);
 
-        const info = new LoadedMesh(node as never).getBoundingInfo();
+        const info = Mesh._fromLite(node as never).getBoundingInfo();
         expect(info.minimum.asArray()).toEqual([-1, -2, -3]);
         expect(info.maximum.asArray()).toEqual([1, 2, 3]);
         expect(info.boundingBox.minimumWorld.asArray()).toEqual([3, 3, -3]);
