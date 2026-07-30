@@ -198,8 +198,8 @@ export class Texture extends BaseTexture {
 
         this._ready = loadCompatTexture(engine, url, loadOpts).then((tex) => {
             this._lite = tex;
-            this._notifyLoadObservable();
             try {
+                this._notifyLoadObservable();
                 if (onLoad) {
                     onLoad();
                 }

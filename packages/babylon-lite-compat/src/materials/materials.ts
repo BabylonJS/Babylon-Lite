@@ -114,6 +114,7 @@ export abstract class Material {
         // disposed through their own handles. Drop the material from its scene's
         // `scene.materials` registry.
         this._scene?._unregisterMaterial(this);
+        this._scene = undefined;
     }
 }
 

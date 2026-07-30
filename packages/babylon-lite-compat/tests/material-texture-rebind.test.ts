@@ -49,16 +49,23 @@ function engineWrapper(): { _lite: import("babylon-lite").EngineContext } {
 }
 
 /** Minimal compat-`Scene` stand-in exposing only what the reconcile path reads. */
-function fakeScene(started: boolean): { scene: Scene; engineLite: object; registerMaterial: ReturnType<typeof vi.fn> } {
+function fakeScene(started: boolean): {
+    scene: Scene;
+    engineLite: object;
+    registerMaterial: ReturnType<typeof vi.fn>;
+    unregisterMaterial: ReturnType<typeof vi.fn>;
+} {
     const engineLite = { id: "engine-lite" };
     const registerMaterial = vi.fn();
+    const unregisterMaterial = vi.fn();
     const scene = {
         _hasStarted: started,
         _lite: { id: "scene-lite" },
         getEngine: () => ({ _lite: engineLite }),
         _registerMaterial: registerMaterial,
+        _unregisterMaterial: unregisterMaterial,
     } as unknown as Scene;
-    return { scene, engineLite, registerMaterial };
+    return { scene, engineLite, registerMaterial, unregisterMaterial };
 }
 
 /** A `Texture` whose backing load is controlled by the returned deferred. */
@@ -132,6 +139,20 @@ describe("StandardMaterial texture-readiness rebuild (issue #476b)", () => {
 
         expect(liteMocks.rebuildMaterial).not.toHaveBeenCalled();
     });
+
+    it("does not rebuild after the material is disposed", async () => {
+        const { scene, unregisterMaterial } = fakeScene(true);
+        const mat = new StandardMaterial("m", scene);
+        const { texture, resolve } = pendingTexture();
+
+        mat.diffuseTexture = texture;
+        mat.dispose();
+        resolve({ id: "handle" });
+        await texture.whenReadyAsync();
+
+        expect(unregisterMaterial).toHaveBeenCalledWith(mat);
+        expect(liteMocks.rebuildMaterial).not.toHaveBeenCalled();
+    });
 });
 
 describe("PBRMaterial texture-readiness rebuild (issue #476b)", () => {
@@ -193,5 +214,21 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
         expect(mat._adoptScene).not.toHaveBeenCalled();
         expect(mat._ensureRenderable).not.toHaveBeenCalled();
         expect(liteMesh.material).toBe(mat._lite);
+    });
+
+    it("rebinds the scene default material when material is cleared", () => {
+        const { scene } = fakeScene(true);
+        const defaultMaterial = fakeMaterial();
+        Object.defineProperty(scene, "defaultMaterial", { value: defaultMaterial });
+        const previousMaterial = fakeMaterial();
+        const liteMesh: { material: unknown } = { material: previousMaterial._lite };
+        const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
+        mesh._lite = liteMesh;
+        mesh._scene = scene;
+
+        materialSetter.call(mesh, null);
+
+        expect(defaultMaterial._adoptScene).toHaveBeenCalledWith(scene);
+        expect(liteMesh.material).toBe(defaultMaterial._lite);
     });
 });

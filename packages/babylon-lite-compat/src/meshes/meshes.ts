@@ -251,7 +251,8 @@ export class AbstractMesh extends TransformNode {
     public set material(value: CompatMaterial | null) {
         this._material = value;
         const scene = this._scene;
-        if (value && scene?._hasStarted) {
+        const renderMaterial = value ?? scene?.defaultMaterial;
+        if (renderMaterial && scene?._hasStarted) {
             // The mesh already entered the scene, so the boot-time build (which
             // normally calls `_ensureRenderable` via `addPrimitive`) has run. Finalize
             // the material's GPU-facing resources now — PBR solid textures and any
@@ -259,11 +260,11 @@ export class AbstractMesh extends TransformNode {
             // rebuild (enqueued by the `_lite.material` reassignment below) sees
             // complete props. Adopt the scene so a still-loading texture assigned to
             // this material can reconcile itself on readiness.
-            (value as { _adoptScene?: (s: Scene) => void })._adoptScene?.(scene);
-            value._ensureRenderable(engineOf(scene));
+            (renderMaterial as { _adoptScene?: (s: Scene) => void })._adoptScene?.(scene);
+            renderMaterial._ensureRenderable(engineOf(scene));
         }
-        if (value?._lite) {
-            this._lite.material = value._lite as never;
+        if (renderMaterial?._lite) {
+            this._lite.material = renderMaterial._lite as never;
         }
     }
 
