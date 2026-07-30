@@ -43,6 +43,9 @@ interface FakeMeshOptions {
     colors?: boolean;
     tangents?: boolean;
     uv2?: boolean;
+    skeleton?: boolean;
+    morphTargets?: boolean;
+    vat?: boolean;
 }
 
 function fakeScene(): {
@@ -83,6 +86,15 @@ function fakeMesh(opts: FakeMeshOptions = {}): InstanceType<typeof Mesh> {
     }
     if (opts.uv2) {
         lite._cpuUv2s = new Float32Array(2);
+    }
+    if (opts.skeleton) {
+        lite.skeleton = {};
+    }
+    if (opts.morphTargets) {
+        lite.morphTargets = {};
+    }
+    if (opts.vat) {
+        lite.vat = {};
     }
     return {
         name: opts.name ?? "m",
@@ -172,5 +184,11 @@ describe("Mesh.MergeMeshes", () => {
         expect(() => Mesh.MergeMeshes([fakeMesh({ colors: true })])).toThrow(LiteCompatError);
         expect(() => Mesh.MergeMeshes([fakeMesh({ tangents: true })])).toThrow(LiteCompatError);
         expect(() => Mesh.MergeMeshes([fakeMesh({ uv2: true })])).toThrow(LiteCompatError);
+    });
+
+    it("rejects skinned, morphed, and vertex-animated sources", () => {
+        expect(() => Mesh.MergeMeshes([fakeMesh({ skeleton: true })])).toThrow(LiteCompatError);
+        expect(() => Mesh.MergeMeshes([fakeMesh({ morphTargets: true })])).toThrow(LiteCompatError);
+        expect(() => Mesh.MergeMeshes([fakeMesh({ vat: true })])).toThrow(LiteCompatError);
     });
 });
