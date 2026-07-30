@@ -20,11 +20,17 @@ function fakeScene(): Scene {
         _lights: unknown[];
         _materials: unknown[];
         _meshWrappers: Map<object, unknown>;
+        _meshes: unknown[];
+        _orderedCoreMeshes: unknown[];
+        _orderedCoreMeshSet: Set<unknown>;
     };
     scene._cameras = [];
     scene._lights = [];
     scene._materials = [];
     scene._meshWrappers = new Map();
+    scene._meshes = [];
+    scene._orderedCoreMeshes = [];
+    scene._orderedCoreMeshSet = new Set();
     return scene;
 }
 
@@ -162,16 +168,37 @@ describe("Scene entity registries", () => {
         expect(scene.meshes).toEqual([sphere, box, splat]);
     });
 
+    it("returns a stable scene.meshes array and preserves non-core wrapper positions", () => {
+        const scene = fakeScene();
+        const rootLite = { id: "rootLite" };
+        const boxLite = { id: "boxLite" };
+        const sphereLite = { id: "sphereLite" };
+        const root = { name: "__root__", _lite: rootLite } as never;
+        const box = { name: "box", _lite: boxLite } as never;
+        const sphere = { name: "sphere", _lite: sphereLite } as never;
+        scene._registerMesh(root, rootLite);
+        scene._registerMesh(box, boxLite);
+        scene._registerMesh(sphere, sphereLite);
+        (scene as unknown as { _lite: { meshes: object[] } })._lite = { meshes: [sphereLite, boxLite] };
+
+        const meshes = scene.meshes;
+        expect(meshes).toBe(scene.meshes);
+        expect(meshes).toEqual([root, sphere, box]);
+    });
+
     it("drops a mesh from scene.meshes and the lookups on unregister", () => {
         const scene = fakeScene();
         const boxLite = { id: "boxLite" };
+        const alternateKey = { id: "alternate" };
         const box = { name: "box", _lite: boxLite } as never;
         scene._registerMesh(box, boxLite);
+        scene._registerMesh(box, alternateKey);
         expect(scene.meshes).toEqual([box]);
         expect(scene.getMeshByName("box")).toBe(box);
         scene._unregisterNode(box);
         expect(scene.meshes).toEqual([]);
         expect(scene.getMeshByName("box")).toBeNull();
+        expect((scene as unknown as { _meshWrappers: Map<object, unknown> })._meshWrappers.size).toBe(0);
     });
 
     it("finds cameras / lights / materials / nodes by id", () => {

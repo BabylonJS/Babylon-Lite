@@ -26,6 +26,12 @@ export abstract class AbstractScene {
      * Gaussian-Splatting meshes, which the old array only ever held.
      */
     protected readonly _meshWrappers = new Map<object, TransformNode>();
+    /** @internal Stable Babylon.js-compatible array returned by `scene.meshes`. */
+    protected readonly _meshes: TransformNode[] = [];
+    /** @internal Reused scratch array for reconciling Lite-core mesh order. */
+    protected readonly _orderedCoreMeshes: TransformNode[] = [];
+    /** @internal Reused membership set for linear-time mesh-order reconciliation. */
+    protected readonly _orderedCoreMeshSet = new Set<TransformNode>();
     /** @internal Cameras constructed against this scene (`scene.cameras`). */
     protected readonly _cameras: Camera[] = [];
     /** @internal Lights constructed against this scene (`scene.lights`). */
@@ -51,27 +57,30 @@ export abstract class AbstractScene {
      * list: the core list ({@link _coreMeshList}) supplies authoritative membership and
      * ordering, mapped back to each mesh's canonical wrapper so the returned handles are
      * the right type and keep wrapper identity. Wrappers not yet mirrored into the core
-     * list (primitives whose scene-add is deferred to engine start, and Gaussian-Splatting
-     * meshes that register their renderables outside `scene.meshes`) are appended.
+     * list (transform-only loader roots, primitives whose scene-add is deferred to engine
+     * start, and Gaussian-Splatting meshes that register their renderables outside
+     * `scene.meshes`) retain their registration positions.
      */
     public get meshes(): TransformNode[] {
-        const wrappers = this._meshWrappers;
-        const result: TransformNode[] = [];
-        const emitted = new Set<TransformNode>();
+        const orderedCore = this._orderedCoreMeshes;
+        const orderedCoreSet = this._orderedCoreMeshSet;
+        orderedCore.length = 0;
+        orderedCoreSet.clear();
         for (const core of this._coreMeshList()) {
-            const w = wrappers.get(core);
-            if (w && !emitted.has(w)) {
-                result.push(w);
-                emitted.add(w);
+            const wrapper = this._meshWrappers.get(core);
+            if (wrapper && !orderedCoreSet.has(wrapper)) {
+                orderedCore.push(wrapper);
+                orderedCoreSet.add(wrapper);
             }
         }
-        for (const w of wrappers.values()) {
-            if (!emitted.has(w)) {
-                result.push(w);
-                emitted.add(w);
+
+        let orderedIndex = 0;
+        for (let i = 0; i < this._meshes.length; i++) {
+            if (orderedCoreSet.has(this._meshes[i]!)) {
+                this._meshes[i] = orderedCore[orderedIndex++]!;
             }
         }
-        return result;
+        return this._meshes;
     }
 
     /** Babylon.js `scene.cameras` — every camera constructed against this scene. */
@@ -96,8 +105,15 @@ export abstract class AbstractScene {
      * Lite node is not a core scene mesh (Gaussian Splatting) key by the wrapper itself.
      */
     public _registerMesh(mesh: TransformNode, liteKey: object = mesh): void {
-        if (!this._meshWrappers.has(liteKey)) {
+        const registered = this._meshWrappers.get(liteKey);
+        if (registered && registered !== mesh) {
+            return;
+        }
+        if (!registered) {
             this._meshWrappers.set(liteKey, mesh);
+        }
+        if (!this._meshes.includes(mesh)) {
+            this._meshes.push(mesh);
         }
     }
 
@@ -135,8 +151,11 @@ export abstract class AbstractScene {
         for (const [key, wrapper] of this._meshWrappers) {
             if (wrapper === (node as unknown as TransformNode)) {
                 this._meshWrappers.delete(key);
-                break;
             }
+        }
+        const mi = this._meshes.indexOf(node as unknown as TransformNode);
+        if (mi !== -1) {
+            this._meshes.splice(mi, 1);
         }
     }
 
