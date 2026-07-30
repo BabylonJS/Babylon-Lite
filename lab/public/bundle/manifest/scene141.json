@@ -15,16 +15,16 @@
     "scene141-node-registry-BDSK2ra4.js",
     "scene141-node-renderable-HdoKdPDy.js",
     "scene141-node-shadow-xbpSTfVl.js",
-    "scene141-pbr-renderable-CJUXN3rE.js",
+    "scene141-pbr-renderable-BZjAm5Gp.js",
     "scene141-pbr-shadow-fragment-DHDAZ1HL.js",
     "scene141-shader-composer-nU4_w_gR.js",
     "scene141-shadow-fragment-core-Dbe1xNkt.js",
     "scene141-shadow-task-BzyINW2Q.js",
     "scene141-singlelight-directional-wgsl-BwMbwENc.js",
-    "scene141-standard-renderable-C0Tnqg_V.js",
+    "scene141-standard-renderable-DpW4Jc8Y.js",
     "scene141-transform-block-Bm9H4Yvp.js",
     "scene141-vertex-output-C7G5u6Y0.js",
     "scene141.js"
   ],
-  "rawBytes": 125179
+  "rawBytes": 125182
 }

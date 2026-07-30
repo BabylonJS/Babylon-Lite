@@ -30,6 +30,9 @@ export {
 } from "./context.js";
 export type { GLEngineOptions, GLEngineCaps, GLEngineContext } from "./context.js";
 
+// ─── Alpha-to-coverage (optional) ───────────────────────────────────
+export { getAlphaToCoverage, getCurrentSampleCount, setAlphaToCoverage } from "./alpha-to-coverage.js";
+
 // ─── Render loop ─────────────────────────────────────────────────────
 export { runRenderLoop, stopRenderLoop } from "./render-loop.js";
 
