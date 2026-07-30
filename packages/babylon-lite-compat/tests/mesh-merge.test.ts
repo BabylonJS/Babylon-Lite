@@ -54,6 +54,7 @@ function fakeScene(): {
     pendingAdds: Array<() => void>;
     _deferAdd(fn: () => void): void;
     flushPendingAdds(): void;
+    _registerMesh(mesh: unknown, lite: unknown): void;
     _unregisterNode(node: unknown): void;
     _lite: object;
 } {
@@ -68,6 +69,7 @@ function fakeScene(): {
                 add();
             }
         },
+        _registerMesh: vi.fn(),
         _unregisterNode: vi.fn(),
         _lite: { _tag: "scene" },
     };
