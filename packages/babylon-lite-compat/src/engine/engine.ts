@@ -29,12 +29,14 @@ import {
     disposeEngine,
     registerScene,
     registerSceneWithShadowSupport,
+    enableMirroredMeshes,
     onBeforeRender,
     createNullEngine,
     stepScene,
+    uploadImageToArrayLayer,
     VERSION,
 } from "babylon-lite";
-import type { EngineContext, EngineOptions, RenderCanvas } from "babylon-lite";
+import type { EngineContext, EngineOptions, RenderCanvas, Texture2DArray } from "babylon-lite";
 
 import { LiteCompatError, unsupported } from "../error.js";
 import { Logger } from "../misc/misc-utils.js";
@@ -393,6 +395,20 @@ export abstract class AbstractEngine {
         return unsupported("AbstractEngine.setAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
     }
 
+    /**
+     * Babylon.js `engine.updateTextureArrayLayerFromImageSource(texture, source, layer, invertY, premultiplyAlpha)`
+     * — the engine extension that uploads a decoded image source into one layer of a 2D array
+     * texture. Forwards to Babylon Lite's `uploadImageToArrayLayer`.
+     *
+     * Babylon.js passes an `InternalTexture`; the compat layer's equivalent handle is the Lite
+     * `Texture2DArray` returned by `RawTexture2DArray.getInternalTexture()`, so ported code that
+     * goes through `UploadImageToTexture2DArrayLayer` (which is exactly what Babylon.js's helper
+     * does) works unchanged.
+     */
+    public updateTextureArrayLayerFromImageSource(texture: Texture2DArray, source: GPUCopyExternalImageSource, layer: number, invertY = false, premultiplyAlpha = false): void {
+        uploadImageToArrayLayer(this._lite, texture, layer, source, { invertY, premultiplyAlpha });
+    }
+
     private _start(): Promise<void> {
         this._startPromise ??= this._startCore();
         return this._startPromise;
@@ -415,6 +431,12 @@ export abstract class AbstractEngine {
             scene._flushPendingAdds();
             scene._buildMorphTargets();
             await scene._loadPendingEnvironment();
+            // Babylon.js reverses triangle winding for negative-determinant (mirrored) world
+            // transforms so a `scaling.x = -1` mesh renders upright rather than inside-out. Enable
+            // Lite's equivalent opt-in per scene (after all assets are added, before registerScene)
+            // to match that behaviour for Standard/procedural meshes; non-mirrored meshes are
+            // unaffected, and the glTF loader's own load-time winding handling is not double-flipped.
+            await enableMirroredMeshes(scene._lite);
             if (scene._hasShadows()) {
                 await registerSceneWithShadowSupport(scene._lite);
             } else {

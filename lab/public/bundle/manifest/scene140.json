@@ -32,7 +32,7 @@
     "scene140-oneminus-block-CY3UZpaw.js",
     "scene140-perturb-normal-Bqx-TYaB.js",
     "scene140-reflection-texture-block-C3h0p5JS.js",
-    "scene140-shadow-task-BxFSOthb.js",
+    "scene140-shadow-task-BaacEMnT.js",
     "scene140-subtract-block-TKeYC6dv.js",
     "scene140-texture-block-BqMd_NnH.js",
     "scene140-transform-block--tVXBc0G.js",
@@ -41,5 +41,5 @@
     "scene140-vertex-output-C7G5u6Y0.js",
     "scene140.js"
   ],
-  "rawBytes": 92725
+  "rawBytes": 92787
 }

@@ -1,5 +1,5 @@
 {
-  "rawKB": 73.7,
+  "rawKB": 73.8,
   "gzipKB": 30.6,
   "ignoredRawKB": 6.4,
   "runtimeChunks": [
@@ -13,10 +13,10 @@
     "scene65-node-registry-al7fDAWk.js",
     "scene65-node-renderable-Crwv6Jnr.js",
     "scene65-node-shadow-BY0HoKUN.js",
-    "scene65-shadow-task-B3wR-C0s.js",
+    "scene65-shadow-task-poqWprho.js",
     "scene65-transform-block-BaCdcvKO.js",
     "scene65-vertex-output-C7G5u6Y0.js",
     "scene65.js"
   ],
-  "rawBytes": 75503
+  "rawBytes": 75531
 }

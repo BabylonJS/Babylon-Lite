@@ -15,6 +15,7 @@ export interface RebuildMaterialOptions {
  *  UBO-only scalar/vector changes should use markMaterialUboDirty instead. */
 export function rebuildMaterial(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions): void {
     const source = getMaterialSource(materialOrView);
+    (source as { _renderFeatures?: unknown })._renderFeatures = undefined;
     const rebuildViews = options?.rebuildViews !== false;
     let changed = false;
     const pending: Promise<void>[] = [];
@@ -74,9 +75,7 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
         if (!ctx._built && !group?.r) {
             return false;
         }
-        return import("../scene/scene-runtime-mesh-build.js")
-            .then(({ startRuntimeMeshBuild }) => startRuntimeMeshBuild(ctx, builder, mesh))
-            .then(() => ctx._runtimeBuilds?._e(false));
+        return import("../scene/scene-runtime-mesh-build.js").then(({ B }) => B(ctx, builder, mesh)).then(() => ctx._runtimeBuilds?._e(false));
     }
     const resolved = group ? group.r : builder._rebuildSingle;
     if (!resolved) {

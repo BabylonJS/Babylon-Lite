@@ -147,6 +147,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
         hasGammaAlbedo ||= !!mat.gammaAlbedo;
     }
+    const group = scene._groups.get(meshes[0]!.material!._buildGroup)!;
+    if (!hasGammaAlbedo || !group.r) {
+        group._w = hasGammaAlbedo ? null : (mesh) => (mesh.material as PbrMaterialProps | null)?.gammaAlbedo;
+    }
 
     // ── Dynamically import fragment creators based on scene capabilities ──
 
@@ -577,7 +581,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         })
     );
 
-    return { renderables, rebuildSingle };
+    return { renderables, rebuildSingle, _G: hasGammaAlbedo };
 }
 
 /** @internal Per-scene PBR context stashed on the singleton `pbrGroupBuilder`

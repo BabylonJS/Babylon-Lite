@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `7ddc62e2ee59b2f034db81c73e04f3804cbc7222`
-- **Last sync date:** 2026-07-17
+- **Last synced BJS commit:** `fd3ddbdb86cf7b584c522814cf2c8e55373b0e91`
+- **Last sync date:** 2026-07-28
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -91,7 +91,8 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `engine.getCaps()` (compressed-format flags `astc` / `s3tc` / `etc2`)                                                                                                                 | ✅ Full          | engine (derived from the Lite WebGPU device's enabled features)                                                                                                               |
 | `AbstractEngine.Version` / `AbstractEngine.NpmPackage` (static)                                                                                                                        | ✅ Full          | engine (reports the underlying Babylon Lite runtime `VERSION`, wrapped as `@babylonjs/lite-compat@<version>` for `NpmPackage`)                                                 |
 | `engine.beginFrame` / `endFrame`                                                                                                                                                      | ❌ Not supported | —                                                                                                                                                                             |
-| `engine.currentSampleCount` / `getAlphaToCoverage` / `setAlphaToCoverage`                                                                                                             | 🔧 Needs Lite core | engine (new BJS `9.17` MSAA/alpha-to-coverage engine surface; Lite manages MSAA internally and exposes no public sample-count accessor or engine-level A2C toggle — throwing stubs) |
+| `engine.currentSampleCount` / `getAlphaToCoverage` / `setAlphaToCoverage`                                                                    | 🔧 Needs Lite core | engine (BJS `9.17` MSAA/alpha-to-coverage engine surface; Lite manages MSAA internally and exposes no public sample-count accessor or engine-level A2C toggle — throwing stubs) |
+| `engine.updateTextureArrayLayerFromImageSource`                                                                                             | ✅ Full          | [engine/engine.ts](src/engine/engine.ts) (new BJS `9.17` engine extension; forwards to Lite `uploadImageToArrayLayer`. Takes the Lite `Texture2DArray` returned by `BaseTexture.getInternalTexture()` where BJS takes an `InternalTexture`, so `UploadImageToTexture2DArrayLayer` routes through it exactly as BJS does) |
 | `NullEngine`                                                                                                                                                                          | ✅ Full          | [engine/engine.ts](src/engine/engine.ts) (backed by Lite's real device-less `createNullEngine`; scene built with `defaultRenderTask: false` — no swapchain/GPU resource — and advanced via Lite `stepScene`, which fires the same before-render hook as the GPU path) |
 | `AbstractScene` / `Scene`                                                                                                                                                             | ⚡ Partial       | [scene/scene.ts](src/scene/scene.ts) over [scene/abstract-scene.ts](src/scene/abstract-scene.ts) (entity collections on `AbstractScene`, as in BJS)                           |
 | `scene.clearColor` / `activeCamera` / `imageProcessingConfiguration`                                                                                                                  | ✅ Full          | scene                                                                                                                                                                         |
@@ -104,7 +105,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `scene.whenReadyAsync` / `isReady`                                                                                                                                                    | ✅ Full          | resolve-immediately (Lite builds synchronously)                                                                                                                               |
 | `scene.createDefaultCamera`                                                                                                                                                           | ✅ Full          | scene                                                                                                                                                                         |
 | `scene.animationGroups` / `scene.animatables`                                                                                                                                         | ⚡ Partial       | scene (returns `AnimationGroup[]` over Lite loaded groups — `goToFrame`/`play`/`pause`/`stop` to seek/freeze)                                                                 |
-| `ScenePerformancePriority` / `ImageProcessingConfiguration` / `Constants`                                                                                                             | ✅ Full          | [misc/engine-constants.ts](src/misc/engine-constants.ts) (numeric values)                                                                                                     |
+| `ScenePerformancePriority` / `ImageProcessingConfiguration` / `Constants`                                                                                                             | ✅ Full          | [misc/engine-constants.ts](src/misc/engine-constants.ts) (numeric values; incl. the new BJS `9.17` `Constants.ALPHA_REPLACE_COLOR = 21`)                                     |
 | `scene.render()` (manual single frame)                                                                                                                                                | ❌ Not supported | no-op under Lite loop                                                                                                                                                         |
 | `scene.getMeshByName` / `getMeshById` / `getMeshByID` / `getCameraBy{Name,Id}` / `getLightBy{Name,Id}` / `getMaterialBy{Name,Id}` / `getNodeBy{Name,Id}` / `scene.meshes` enumeration | ⚡ Partial       | scene query over the compat-tracked entity lists (loader-surfaced + wrapper-created); full scene-mesh enumeration still needs Lite core                                       |
 | `scene.pick` (sync)                                                                                                                                                                   | ❌ Not supported | sync CPU picking; use `GPUPicker` (async) instead                                                                                                                             |
@@ -143,7 +144,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `PointLight`                                          | ✅ Full            | lights                                   |
 | `SpotLight`                                           | ✅ Full            | lights                                   |
 | `light.diffuse/specular/intensity/position/direction` | ✅ Full            | lights                                   |
-| `light.setEnabled(false)`                             | ✅ Full            | lights (no per-light flag in Lite; a disabled light zeroes its intensity in the shared lights UBO and restores the logical value on re-enable) |
+| `light.setEnabled(false)`                             | ✅ Full            | lights (direct or ancestor disablement zeroes the Lite intensity and restores the logical value when effectively re-enabled) |
 | `RectAreaLight`                                       | ❌ Not supported   | not in Lite                              |
 | `ClusteredLightContainer`                             | ❌ Not supported   | throwing stub; not in Lite's public API  |
 
@@ -160,7 +161,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 
 | BJS API                                                                                                         | Status             | Module                                                                                                                                                                                                                                     |
 | --------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Node` (base) + `getScene`/`getClassName`/`parent`/`metadata` + `getDescendants`/`getChildren`/`getChildMeshes` | ⚡ Partial         | [node/node.ts](src/node/node.ts) (scene-graph traversal over a child registry maintained by the `parent` setter / `setParent`)                                                                                                             |
+| `Node` (base) + `getScene`/`getClassName`/`parent`/`metadata` + `getDescendants`/`getChildren`/`getChildMeshes` | ⚡ Partial         | [node/node.ts](src/node/node.ts) (child registry maintained by `parent` / `setParent`; `isEnabled()` combines local and ancestor state while `isEnabled(false)` returns local state)                                                                                                             |
 | Class chain `Mesh → AbstractMesh → TransformNode → Node`                                                        | ✅ Full            | node + meshes (real inheritance)                                                                                                                                                                                                           |
 | `MeshBuilder.CreateBox/Sphere/Ground/Plane/Cylinder`                                                            | ⚡ Partial         | [meshes/meshes.ts](src/meshes/meshes.ts)                                                                                                                                                                                                   |
 | `MeshBuilder.CreateTorus/TorusKnot/Disc/Polyhedron`                                                             | ⚡ Partial         | meshes (Lite-backed)                                                                                                                                                                                                                       |
@@ -256,6 +257,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `Texture` (2D, URL)                                                        | ✅ Full          | [textures/textures.ts](src/textures/textures.ts) (async load awaited at build; honours `invertY` / `noMipmap` / `samplingMode` on the material path; `.basis` URLs route through Lite `loadBasisTexture2D`, compressed `.ktx` URLs through `loadKtxTexture2D`) |
 | `RawTexture`                                                               | ✅ Full          | textures (Lite pixel texture)                                                                                                                                                                                                                                  |
 | `RawTexture3D`                                                             | ✅ Full          | textures (Lite `createTexture3DFromPixels` — RGBA8 volumetric texture / colour-grading LUT; `width`/`height`/`depth` getters, `update` re-upload; `format` recorded for parity)                                                                                 |
+| `RawTexture2DArray` (+ `UploadImageToTexture2DArrayLayer` / `LoadImageToTexture2DArrayLayerAsync` / `CreateTexture2DArrayFromImageUrlsAsync` from BJS `9.17` `rawTexture2DArray.functions`) | ✅ Full          | [textures/raw-texture-2d-array.ts](src/textures/raw-texture-2d-array.ts) — raw-bytes path over Lite `createTexture2DArrayFromPixels` / `updateTexture2DArrayFromPixels` (constructor `data !== null`, `update`, `updateMipLevel`, `CreateRGBATexture`), image-source path over Lite `createTexture2DArray` / `uploadImageToArrayLayer` / `loadImageToArrayLayer` / `createTexture2DArrayFromUrls`. RGBA8-only, so `format` / `textureType` / `samplingMode` are recorded for parity; raw-byte uploads are not Y-flipped (same as `RawTexture` / `RawTexture3D`) |
 | `DynamicTexture` (canvas-backed)                                           | ✅ Full          | textures (Lite `createDynamicTexture` / `updateDynamicTexture` — canvas blitted straight to the GPU via `copyExternalImageToTexture`, no `getImageData` readback)                                                                                              |
 | `CubeTexture` (`CreateFromPrefilteredData`, `isReady`, `onLoadObservable`) | ⚡ Partial       | textures (URL handle → Lite `loadEnvironment` at engine start)                                                                                                                                                                                                 |
 | `HDRCubeTexture`                                                           | ⚡ Partial       | textures (`.hdr` equirect environment handle → Lite `loadHdrEnvironment` at engine start, mirroring `CubeTexture`; standalone GPU HDR-cube object not exposed)                                                                                                 |
@@ -477,43 +479,10 @@ blending (157, 158) now work; the remaining tractable work is the assorted
 single-API gaps. The glTF model-framing cluster and the procedural
 large-world-rendering scenes are now resolved.
 
-> **Task 2 re-check (2026-06-24):** the new Lite capabilities landed since the last
-> sync — opt-in bone control (#268), `AnimationGroupMask` (#269), the AudioV2 port
-> (#273), physics collision/trigger events + raycast + character controller, the
-> standalone `loadKtx2Texture2D` (#263), per-material stencil (#257), and the
-> `mat4Decompose` / `quatFromRotationMatrix` / vec3-ref math helpers — were
-> cross-referenced against the blocker table above. **None clears a
-> previously-skipped scene's blocker:** scene 114 still needs _manual_
-> `Skeleton`/`Bone` construction plus sync skinned `scene.pick` (the new bone-control
-> API only poses loader-built skeletons); scene 40 is a compat-wrapper gap
-> (`PhysicsAggregate` not yet wrapped), not a Lite-core unblock; and audio scenes
-> have no pixel oracle. So no scene moved into the working list this run — Task 2 is
-> dormant, as expected when no Lite change unblocks a scene.
->
-> **Task 2 re-check (2026-06-26):** the only commit to land since the last sync
-> (#313, "Move Lite gl ping pong out of the package") touches `packages/babylon-lite-gl/`
-> and the `lab/gl` WebGL track only — **nothing under `packages/babylon-lite/src/**`**,
-> so no new Lite capability came online. No previously-skipped scene is newly
-> unblocked; Task 2 stays dormant this run.
->
-> **Task 2 re-check (2026-06-29):** no commit has touched `packages/babylon-lite/src/**`
-> since the last status commit (`10fab1290`), so no new Lite capability came online
-> this run. This run was triggered by issue #332 ([compat] `createHavokWorld` physics
-> speed depends on the display refresh rate), which is a compat-wrapper gap, not a Lite
-> unblock — addressed under Task 3 by wrapping `HavokPlugin` (with BJS-matching
-> `useDeltaForWorldStep` delta stepping) over the existing public Lite physics API. No
-> previously-skipped scene is newly unblocked; Task 2 stays dormant.
->
-> **Task 2 re-check (2026-07-09):** the two commits touching
-> `packages/babylon-lite/src/**` since the last status commit are #389
-> (animation fix — decouples `crossFadeAnimationGroups`/`fadeAnimationWeight` into a
-> mixer-neutral `animation-weight-fade.ts` and stops double-driving manager-owned
-> glTF groups; public export paths unchanged) and #388 (audio — per-instance
-> `pitch`/`playbackRate` on Lite's `playSound`, a Lite-only extra not present in the
-> BJS `IStaticSoundPlayOptions` surface). **Neither adds a new Lite public export**
-> (`git diff` of `index.ts` shows only a module-path change for the moved fade
-> functions), so no previously-skipped scene is newly unblocked. The compat blend
-> path already enables blending explicitly (`enableAnimationBlending` on a
-> scene-owned `AnimationManager`) and detaches each group's `_ctrl`, so #389's
-> behaviour change (fades no longer implicitly enable a mixer) requires no compat
-> change. Task 2 stays dormant.
+**Task 2 status — dormant.** No Lite change to date has cleared a blocker in the table
+above, so no previously-skipped scene has been unblocked by a Lite capability. Each run
+re-checks the newest Lite exports against this table and edits the rows in place.
+
+> **This file records current state, not history.** Do not append dated run notes,
+> changelogs, or "re-check" entries — revise the affected rows and prose instead. Git
+> history and the PR description carry the per-run narrative.

@@ -1,5 +1,5 @@
 {
-  "rawKB": 90.2,
+  "rawKB": 90.1,
   "gzipKB": 37,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,11 +8,11 @@
     "scene26-gltf-glb-parser-Di7OzzyU.js",
     "scene26-ibl-fragment-CeRrvT96.js",
     "scene26-ibl-skybox-wgsl-CFIBOHHx.js",
-    "scene26-pbr-renderable-CZj0ZA3A.js",
+    "scene26-pbr-renderable-CwPMYHia.js",
     "scene26-rgbd-decode-DuD8fsG3.js",
     "scene26-singlelight-point-wgsl-CfgbevHh.js",
     "scene26-subsurface-fragment-PWl6-_mP.js",
     "scene26.js"
   ],
-  "rawBytes": 92334
+  "rawBytes": 92262
 }

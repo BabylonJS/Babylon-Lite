@@ -6,10 +6,10 @@ import { rebuildMaterial } from "../../../packages/babylon-lite/src/material/mat
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
-import { addToScene, buildScene, type RuntimeSceneBuildHooks, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { addToScene, buildScene, type RuntimeSceneBuildHooks, type SceneContext, type SceneMeshGroup } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
 import { rebuildScenePbrPipelines } from "../../../packages/babylon-lite/src/scene/scene-rebuild";
-import { startRuntimeMeshBuild } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build";
+import { B as startRuntimeMeshBuild } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build";
 import { _t } from "../../../packages/babylon-lite/src/frame-graph/transmission";
 
 function createScene(engine: EngineContext): SceneContext {
@@ -253,6 +253,106 @@ describe("runtime material rebuild ownership", () => {
         log.mockRestore();
     });
 
+    it("invalidates cached material render features before rebuilding", () => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        const builder = (async () => ({ renderables: [], rebuildSingle: (_target: SceneContext, target: Mesh) => renderable(target) })) as MeshGroupBuilder;
+        const material = { _buildGroup: builder, _renderFeatures: { features: 0, features2: 0 } } as Material & { _renderFeatures?: unknown };
+
+        rebuildMaterial(scene, material);
+
+        expect(material._renderFeatures).toBeUndefined();
+    });
+
+    it("routes a PBR material swap that gains gamma albedo through the asynchronous scene rebuild", async () => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        scene._built = true;
+        const staleGammaRebuild = vi.fn((_target: SceneContext, target: Mesh): Renderable => {
+            if ((target.material as Material & { gammaAlbedo?: boolean }).gammaAlbedo) {
+                throw new Error("stale PBR gamma template");
+            }
+            return renderable(target);
+        });
+        const rebuiltMeshes: Mesh[] = [];
+        const builder = (async (ctx: SceneContext, meshes: Mesh[]) => {
+            const rebuild = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
+            for (const mesh of meshes) {
+                rebuiltMeshes.push(mesh);
+                ctx._meshDisposables.set(mesh, [vi.fn()]);
+            }
+            return { renderables: meshes.map(renderable), rebuildSingle: rebuild };
+        }) as MeshGroupBuilder;
+        builder._materialFamily = "standard";
+        const initialMaterial = { _buildGroup: builder, gammaAlbedo: false } as Material & { gammaAlbedo: boolean };
+        const gammaMaterial = { _buildGroup: builder, gammaAlbedo: true } as Material & { gammaAlbedo: boolean };
+        const mesh = { _gpu: {}, material: initialMaterial, children: [] } as unknown as Mesh;
+        const group = [mesh] as SceneMeshGroup;
+        group.r = staleGammaRebuild;
+        group._w = (target) => !!(target.material as (Material & { gammaAlbedo?: boolean }) | null)?.gammaAlbedo;
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, group);
+        scene._renderables.push(renderable(mesh));
+        mesh.material = gammaMaterial;
+        scene._materialSwapQueue.push(mesh);
+
+        const pending = processMaterialSwaps(scene) as Promise<void>;
+
+        expect(staleGammaRebuild).not.toHaveBeenCalled();
+        await pending;
+        // Assert the runtime build system actually engaged. Without these the test would still pass if
+        // `processMaterialSwaps` simply skipped the mesh: the stale closure would be uncalled and the
+        // original renderable would still be in place.
+        expect(scene._runtimeBuilds).toBeDefined();
+        expect(scene._groups.get(builder)!.r).not.toBe(staleGammaRebuild);
+        expect(rebuiltMeshes).toEqual([mesh]);
+        expect(scene._renderables).toHaveLength(1);
+        expect(scene._renderables[0]!.mesh).toBe(mesh);
+    });
+
+    it("chains gamma widening behind prior async work and skips stale material changes", async () => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        scene._built = true;
+        let finishPrior!: () => void;
+        let priorDone = false;
+        const prior = new Promise<void>((resolve) => {
+            finishPrior = () => {
+                priorDone = true;
+                resolve();
+            };
+        });
+        const rebuiltMeshes: Mesh[] = [];
+        const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
+            rebuiltMeshes.push(...meshes);
+            return { renderables: meshes.map(renderable), rebuildSingle: (_target: SceneContext, mesh: Mesh) => renderable(mesh) };
+        }) as MeshGroupBuilder;
+        builder._materialFamily = "standard";
+        const gammaMaterial = { _buildGroup: builder, gammaAlbedo: true } as Material & { gammaAlbedo: boolean };
+        const replacementMaterial = { _buildGroup: builder, gammaAlbedo: false } as Material & { gammaAlbedo: boolean };
+        const thinMesh = { _gpu: {}, material: replacementMaterial, children: [], _runtimeThinBuild: () => prior } as unknown as Mesh;
+        const mesh = { _gpu: {}, material: gammaMaterial, children: [] } as unknown as Mesh;
+        const group = [mesh] as SceneMeshGroup;
+        group.r = (_target, target) => renderable(target);
+        group._w = (target) => !!(target.material as (Material & { gammaAlbedo?: boolean }) | null)?.gammaAlbedo;
+        scene.meshes.push(thinMesh, mesh);
+        scene._groups.set(builder, group);
+        scene._materialSwapQueue.push(thinMesh, mesh);
+
+        const pending = processMaterialSwaps(scene) as Promise<void>;
+        let settled = false;
+        void pending.then(() => (settled = true));
+        mesh.material = replacementMaterial;
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+        expect(settled).toBe(false);
+        expect(priorDone).toBe(false);
+        expect(rebuiltMeshes).toEqual([]);
+        finishPrior();
+        await pending;
+
+        expect(priorDone).toBe(true);
+        expect(settled).toBe(true);
+        expect(rebuiltMeshes).toEqual([]);
+    });
+
     it("disposes old PBR resources directly when a rebuild finishes after scene disposal", async () => {
         const engine = { _retirements: [] } as unknown as EngineContext;
         const scene = createScene(engine);
@@ -323,6 +423,66 @@ describe("runtime material rebuild ownership", () => {
         } else {
             await expect(rebuild).resolves.toBeUndefined();
         }
+    });
+
+    it.each(["resolve", "reject"] as const)("updates a PBR gamma widening hook only when a rebuild will %s", async (outcome) => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        scene._built = true;
+        const failure = new Error("PBR rebuild failed");
+        const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
+            if (outcome === "reject") {
+                throw failure;
+            }
+            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _G: true };
+        }) as MeshGroupBuilder;
+        builder._materialFamily = "pbr";
+        const material = { _buildGroup: builder, gammaAlbedo: true } as Material & { gammaAlbedo: boolean };
+        const mesh = { material, children: [] } as unknown as Mesh;
+        const group = [mesh] as SceneMeshGroup;
+        const widen = (target: Mesh): boolean => !!(target.material as typeof material | null)?.gammaAlbedo;
+        group.r = (_scene, target) => renderable(target);
+        group._w = widen;
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, group);
+
+        const rebuild = rebuildScenePbrPipelines(scene);
+
+        if (outcome === "reject") {
+            await expect(rebuild).rejects.toBe(failure);
+            expect(group._w).toBe(widen);
+        } else {
+            await expect(rebuild).resolves.toBeUndefined();
+            expect(group._w).toBeNull();
+        }
+    });
+
+    it("keeps PBR gamma widening armed when a non-gamma rebuild races a gamma material change", async () => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        scene._built = true;
+        let finish!: () => void;
+        const gate = new Promise<void>((resolve) => (finish = resolve));
+        const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
+            const capturedGamma = meshes.some((mesh) => (mesh.material as { gammaAlbedo?: boolean } | null)?.gammaAlbedo);
+            await gate;
+            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _G: capturedGamma };
+        }) as MeshGroupBuilder;
+        builder._materialFamily = "pbr";
+        const material = { _buildGroup: builder, gammaAlbedo: false } as Material & { gammaAlbedo: boolean };
+        const mesh = { material, children: [] } as unknown as Mesh;
+        const group = [mesh] as SceneMeshGroup;
+        const widen = (target: Mesh): boolean => !!(target.material as typeof material | null)?.gammaAlbedo;
+        group.r = (_scene, target) => renderable(target);
+        group._w = widen;
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, group);
+
+        const rebuild = rebuildScenePbrPipelines(scene);
+        await vi.waitFor(() => expect(scene._runtimeBuilds?.w).toBe(true));
+        material.gammaAlbedo = true;
+        finish();
+        await rebuild;
+
+        expect(group._w).toBe(widen);
     });
 
     it("detaches a merged packet before deferring its GPU disposer", async () => {
