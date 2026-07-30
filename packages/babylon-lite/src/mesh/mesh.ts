@@ -11,7 +11,8 @@ import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "../scene/world-matrix-state.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { eulerToQuat, createEulerProxy } from "../scene/scene-node.js";
+import { createEulerProxy } from "../scene/scene-node.js";
+import { eulerToQuat } from "../math/quat-euler.js";
 
 // ─── Mesh GPU Geometry ───────────────────────────────────────────────
 

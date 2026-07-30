@@ -17,7 +17,8 @@ import type { Mat4 } from "../../math/types.js";
 import { ObservableVec3 } from "../../math/observable-vec3.js";
 import { ObservableQuat } from "../../math/observable-quat.js";
 import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "../../scene/world-matrix-state.js";
-import { eulerToQuat, createEulerProxy } from "../../scene/scene-node.js";
+import { createEulerProxy } from "../../scene/scene-node.js";
+import { eulerToQuat } from "../../math/quat-euler.js";
 import { buildSplatGeometry, type SplatGeometry, type ParsedSplat } from "../../loader-splat/splat-data.js";
 
 /** Names of the four WGSL slots a `GsShaderFragment` may inject into the

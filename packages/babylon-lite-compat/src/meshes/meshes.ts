@@ -150,7 +150,7 @@ export class TransformNode extends Node {
             return;
         }
         this._scene = scene;
-        scene._registerMesh(this);
+        scene._registerMesh(this, this._node);
     }
 
     /** @internal Link an already-parented Lite node without mutating its Lite hierarchy. */
@@ -260,6 +260,10 @@ export class AbstractMesh extends TransformNode {
         // assigning that default now; an explicit `mesh.material = …` overrides it.
         if (scene) {
             this.material = scene.defaultMaterial;
+            // Canonical-registry entry keyed by the Lite mesh so `scene.meshes` (and the
+            // scene by-name/-id lookups) enumerate this primitive — reconciled against the
+            // Lite-core-owned list, which holds the same `_lite` object once it is added.
+            scene._registerMesh(this, this._lite);
         }
     }
 
