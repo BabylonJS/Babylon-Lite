@@ -21,6 +21,7 @@ import { PhysicsAggregate } from "@babylonjs/core/Physics/v2/physicsAggregate";
 import { HingeConstraint } from "@babylonjs/core/Physics/v2/physicsConstraint";
 import { PhysicsCharacterController } from "@babylonjs/core/Physics/v2/characterController";
 import "@babylonjs/core/Physics/v2/physicsEngineComponent";
+import "@babylonjs/core/Physics/joinedPhysicsEngineComponent";
 import "@babylonjs/core/Animations/animatable";
 
 const PHYSICS_FPS = 60;
