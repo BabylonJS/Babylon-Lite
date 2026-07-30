@@ -33,24 +33,6 @@ export function _installWindingRule(rule: (mesh: Mesh) => boolean): void {
     _windingRule = rule;
 }
 
-// Encode the topology + negative-winding bits from the per-mesh flags set by the loader/feature.
-_installMeshFeatureExtra((mesh: Mesh): number => {
-    let f = 0;
-    if (_windingRule ? _windingRule(mesh) : (mesh as { _reverseWinding?: boolean })._reverseWinding) {
-        f |= MSH_REVERSE_WINDING;
-    }
-    const topo = (mesh as { _topology?: number })._topology;
-    if (topo) {
-        f |= topo << MSH_TOPOLOGY_SHIFT;
-        // Strips need the pipeline stripIndexFormat to match the index buffer; flag uint32 so the
-        // pipeline picks the right format. Lite always draws indexed.
-        if (topo >= 3 && mesh._gpu.indexFormat === "uint32") {
-            f |= MSH_INDEX_U32;
-        }
-    }
-    return f;
-});
-
 /** Shared primitive-state resolution. Also used by the Standard pipeline through the
  *  `enableMirroredMeshes()` opt-in.
  *  @internal */
@@ -88,7 +70,47 @@ export function _windingFrontFace(meshFeatures: number): GPUFrontFace {
     return meshFeatures & MSH_REVERSE_WINDING ? "cw" : "ccw";
 }
 
-_installPbrPrimitiveResolver(_resolvePrimitive);
-// A mirrored mesh is mirrored in every pass: without this its depth/normal/velocity output would be
-// culled away in the geometry pass just as it would in the forward one.
-_installPbrGeometryWinding(_windingFrontFace);
+let _installed = false;
+
+/**
+ * Install the mesh-feature encoder and the forward + geometry primitive resolvers (idempotent).
+ *
+ * Callers must invoke this — it must NOT be done by a bare
+ * `import "…/pbr-primitive-resolver.js"`. The package is published with `"sideEffects": false`,
+ * which lets a bundler drop an import of a module whose exports go unused; the glTF primitive
+ * feature did exactly that, so the emitted chunk shrank from 755 to 252 bytes and the installs
+ * never ran. `frontFace` then stayed "ccw" on mirrored meshes, `@builtin(front_facing)` was
+ * evaluated against the un-mirrored winding, and the double-sided shader flipped the shading
+ * normal on the visible outer surface — rendering them black in every bundled build.
+ *
+ * Keeping the work behind a called export also leaves this module free of import-time side
+ * effects, per the engine's zero-side-effect rule.
+ * @internal
+ */
+export function _installPrimitiveState(): void {
+    if (_installed) {
+        return;
+    }
+    _installed = true;
+    // Encode the topology + negative-winding bits from the per-mesh flags set by the loader/feature.
+    _installMeshFeatureExtra((mesh: Mesh): number => {
+        let f = 0;
+        if (_windingRule ? _windingRule(mesh) : (mesh as { _reverseWinding?: boolean })._reverseWinding) {
+            f |= MSH_REVERSE_WINDING;
+        }
+        const topo = (mesh as { _topology?: number })._topology;
+        if (topo) {
+            f |= topo << MSH_TOPOLOGY_SHIFT;
+            // Strips need the pipeline stripIndexFormat to match the index buffer; flag uint32 so the
+            // pipeline picks the right format. Lite always draws indexed.
+            if (topo >= 3 && mesh._gpu.indexFormat === "uint32") {
+                f |= MSH_INDEX_U32;
+            }
+        }
+        return f;
+    });
+    _installPbrPrimitiveResolver(_resolvePrimitive);
+    // A mirrored mesh is mirrored in every pass: without this its depth/normal/velocity output would be
+    // culled away in the geometry pass just as it would in the forward one.
+    _installPbrGeometryWinding(_windingFrontFace);
+}

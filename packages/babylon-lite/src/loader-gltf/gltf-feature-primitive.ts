@@ -5,13 +5,18 @@
  *  affected mesh and installs the PBR pipeline's primitive resolver (topology + stripIndexFormat +
  *  culling). The common triangle-list positive-winding case never loads this module, so the core
  *  loader + pipeline chunks stay byte-identical. */
-import "../material/pbr/pbr-primitive-resolver.js";
+import { _installPrimitiveState } from "../material/pbr/pbr-primitive-resolver.js";
 import { mat4Determinant3 } from "../math/mat4-determinant3.js";
 import type { GltfFeature } from "./gltf-feature.js";
 
 const feature: GltfFeature = {
     id: "_primitive",
     async applyMesh(meshData, mesh) {
+        // Install the pipeline's primitive resolvers on first use. This must stay a CALL rather than
+        // a bare `import "…/pbr-primitive-resolver.js"`: the package ships `"sideEffects": false`, so
+        // a bundler may legally drop an import whose exports are unused — which silently removed the
+        // resolver from every bundle and left mirrored meshes rendering black.
+        _installPrimitiveState();
         // Non-triangle topology index from the glTF primitive mode. The unsupported LINE_LOOP(2) /
         // TRIANGLE_FAN(6) modes are left as a triangle list (matching BJS, which can't render them).
         const mode = (meshData as { _primitive?: { mode?: number } })._primitive?.mode;
