@@ -544,19 +544,17 @@ export class Mesh extends AbstractMesh {
      * that shares this mesh's geometry. Forwards to Lite's `cloneTransformNode`,
      * which shares the `_gpu`/skeleton/morph/thin-instance resources with the clone
      * under ref-counting (so both meshes own the buffers and they survive until the
-     * last is disposed). Lite hardcodes a `_clone` name suffix, so a non-empty
-     * `name` replaces it; the source material is kept (BJS shares it by reference),
-     * and the clone is registered with the same compat scene through its own wrapper.
-     * An omitted `newParent` keeps the source parent, while explicit `null` detaches.
+     * last is disposed). Babylon.js uses the requested name verbatim, derives clone
+     * IDs from that name plus the source ID, and prefixes descendant names with the
+     * root clone name. The source material is kept (BJS shares it by reference), and
+     * the clone is registered with the same compat scene through its own wrapper.
+     * An omitted or `null` `newParent` keeps the source parent.
      * `doNotCloneChildren` drops the descendants Lite always clones.
      */
-    public clone(name?: string, newParent?: Node | null, doNotCloneChildren?: boolean): Mesh {
+    public clone(name = "", newParent: Node | null = null, doNotCloneChildren?: boolean): Mesh {
         const scene = this._scene;
         const liteClone = cloneTransformNode(this._lite) as LiteMesh;
-        if (name) {
-            liteClone.name = name;
-        }
-        const wrappedClone = Mesh._wrapCloneHierarchy(this, liteClone, scene, null, doNotCloneChildren === true);
+        const wrappedClone = Mesh._wrapCloneHierarchy(this, liteClone, scene, null, doNotCloneChildren === true, name);
         if (!(wrappedClone instanceof Mesh)) {
             throw new Error("Mesh.clone produced a non-mesh root.");
         }
@@ -564,14 +562,24 @@ export class Mesh extends AbstractMesh {
         if (scene) {
             addPrimitive(clone, scene, doNotCloneChildren ? () => pruneClonedDescendants(scene, liteClone) : undefined);
         }
-        const parent = newParent === undefined ? this.parent : newParent;
+        const parent = newParent ?? this.parent;
         if (parent) {
             clone.parent = parent;
         }
         return clone;
     }
 
-    private static _wrapCloneHierarchy(source: Node | undefined, lite: SceneNode, scene: Scene | undefined, parent: TransformNode | null, skipChildren: boolean): TransformNode {
+    private static _wrapCloneHierarchy(
+        source: Node | undefined,
+        lite: SceneNode,
+        scene: Scene | undefined,
+        parent: TransformNode | null,
+        skipChildren: boolean,
+        cloneName?: string
+    ): TransformNode {
+        if (cloneName !== undefined) {
+            lite.name = cloneName;
+        }
         const isMesh = "_gpu" in lite && "material" in lite;
         const wrapper = isMesh ? new Mesh(lite.name ?? "", lite as LiteMesh) : new TransformNode(lite.name ?? "", scene, lite);
         if (wrapper instanceof Mesh) {
@@ -582,6 +590,7 @@ export class Mesh extends AbstractMesh {
         }
         wrapper.parent = parent;
         if (source) {
+            wrapper.id = wrapper instanceof Mesh ? `${wrapper.name}.${source.id}` : wrapper.name;
             wrapper.metadata = source.metadata;
             wrapper.setEnabled(source.isEnabled(false));
             if (wrapper instanceof Mesh && source instanceof Mesh) {
@@ -595,7 +604,8 @@ export class Mesh extends AbstractMesh {
             for (let i = 0; i < lite.children.length; i++) {
                 const sourceLiteChild = sourceLiteChildren[i];
                 const sourceChild = sourceChildren.find((child) => liteNodeOf(child) === sourceLiteChild);
-                Mesh._wrapCloneHierarchy(sourceChild, lite.children[i]!, scene, wrapper, false);
+                const childName = sourceChild ? `${wrapper.name}.${sourceChild.name}` : undefined;
+                Mesh._wrapCloneHierarchy(sourceChild, lite.children[i]!, scene, wrapper, false, childName);
             }
         }
         return wrapper;

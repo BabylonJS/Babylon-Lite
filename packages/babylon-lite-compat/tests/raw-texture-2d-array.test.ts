@@ -224,7 +224,7 @@ describe("CreateTexture2DArrayFromImageUrlsAsync", () => {
  * (a decoder-format-aware Lite path) rather than a mechanical wrapper.
  */
 describe("CreateTexture2DArrayFromKTX2Async", () => {
-    it("throws a LiteCompatError until Lite exposes an array-KTX2 decode path", () => {
-        expect(() => CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "cubes.ktx2")).toThrow(LiteCompatError);
+    it("returns a rejected promise until Lite exposes an array-KTX2 decode path", async () => {
+        await expect(CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "cubes.ktx2")).rejects.toThrow(LiteCompatError);
     });
 });

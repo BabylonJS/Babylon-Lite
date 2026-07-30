@@ -262,7 +262,11 @@ export interface ICreateTexture2DArrayFromKTX2Options {
  * bundled KTX2 decoder module, not a mechanical wrapper. Throws until Lite exposes
  * that path.
  */
-export function CreateTexture2DArrayFromKTX2Async(_scene: Scene, _data: string | ArrayBufferView, _options?: ICreateTexture2DArrayFromKTX2Options): never {
+export async function CreateTexture2DArrayFromKTX2Async(
+    _scene: Scene,
+    _data: string | ArrayBufferView,
+    _options?: ICreateTexture2DArrayFromKTX2Options
+): Promise<RawTexture2DArray> {
     return unsupported(
         "CreateTexture2DArrayFromKTX2Async",
         "Lite's KTX2 decode path (`loadKtx2Texture2D`) yields a single 2D texture and exposes no per-layer array output; array-KTX2 decode needs a new decoder-format-aware Lite path (design-subjective layer/mip slicing)."

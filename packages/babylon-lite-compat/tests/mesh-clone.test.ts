@@ -181,8 +181,12 @@ describe("Mesh.clone", () => {
         const children = clone.getChildren();
         expect(children[0]).toBeInstanceOf(TransformNode);
         expect(children[0]).not.toBeInstanceOf(Mesh);
+        expect(children[0]!.name).toBe("copy.pivot");
+        expect(children[0]!.id).toBe("copy.pivot");
         expect(children[0]!.metadata).toEqual({ kind: "pivot" });
         expect(children[1]).toBeInstanceOf(Mesh);
+        expect(children[1]!.name).toBe("copy.childMesh");
+        expect(children[1]!.id).toBe("copy.childMesh.childMesh");
         expect((children[1] as Mesh).material).toBe(sourceMaterial);
         expect(clone.getChildMeshes()).toEqual([children[1]]);
         expect(scene.registered).not.toContain(children[0]);
@@ -225,21 +229,22 @@ describe("Mesh.clone", () => {
         const clone = src.clone("copy");
 
         expect(clone.parent).toBe(parent);
-        expect(clone.id).toBe("copy");
+        expect(clone.id).toBe("copy.custom-id");
         expect(clone.metadata).toBe(src.metadata);
         expect(clone.isEnabled(false)).toBe(false);
         expect(clone.isVisible).toBe(false);
     });
 
-    it("keeps the Lite default clone name when name is omitted or empty", () => {
+    it("uses the Babylon.js empty default name and derives the clone ID", () => {
         const scene = fakeScene();
         const src = sourceMesh(scene, fakeMaterial());
 
-        expect(src.clone().name).toBe("source_clone");
-        expect(src.clone("").name).toBe("source_clone");
+        const clone = src.clone();
+        expect(clone.name).toBe("");
+        expect(clone.id).toBe(".source-id");
     });
 
-    it("detaches from the source parent when newParent is explicitly null", () => {
+    it("retains the source parent when newParent is explicitly null", () => {
         const scene = fakeScene();
         const src = sourceMesh(scene, fakeMaterial());
         const parent = new TransformNode("parent");
@@ -248,7 +253,7 @@ describe("Mesh.clone", () => {
 
         const clone = src.clone("copy", null);
 
-        expect(clone.parent).toBeNull();
-        expect((clone as unknown as { _lite: { parent: unknown } })._lite.parent).toBeNull();
+        expect(clone.parent).toBe(parent);
+        expect((clone as unknown as { _lite: { parent: unknown } })._lite.parent).toBe((parent as unknown as { _node: unknown })._node);
     });
 });
