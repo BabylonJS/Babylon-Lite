@@ -48,6 +48,9 @@ export default defineConfig({
     timeout: 120_000,
     retries: 1,
     workers: ciWorkers ?? (useBrowserStack ? 1 : 2),
+    // On CI, bail on the first failing test (after its retries) to save time;
+    // locally we keep running so devs see every failure in one pass.
+    maxFailures: isCI ? 1 : undefined,
     fullyParallel: true,
     outputDir: "../test-results/parity-artifacts",
     reporter: [["html", { outputFolder: "../test-results/parity-report", open: "never" }], ["junit", { outputFile: "../test-results/parity-junit.xml" }], ["list"]],
