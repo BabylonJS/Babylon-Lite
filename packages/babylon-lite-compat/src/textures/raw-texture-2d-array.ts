@@ -201,11 +201,7 @@ export interface ICreateTexture2DArrayFromKTX2Options {
  * chain and GPU compression rather than expanding the base level to RGBA and
  * regenerating mips as Babylon.js core does.
  */
-export async function CreateTexture2DArrayFromKTX2Async(
-    scene: Scene,
-    data: string | ArrayBufferView,
-    _options?: ICreateTexture2DArrayFromKTX2Options
-): Promise<RawTexture2DArray> {
+export async function CreateTexture2DArrayFromKTX2Async(scene: Scene, data: string | ArrayBufferView, _options?: ICreateTexture2DArrayFromKTX2Options): Promise<RawTexture2DArray> {
     const engine = scene.getEngine()._lite;
     const liteArray =
         typeof data === "string"
