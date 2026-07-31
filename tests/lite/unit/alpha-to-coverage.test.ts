@@ -205,10 +205,15 @@ describe("WebGPU alpha-to-coverage", () => {
         clearSceneBGLCache();
         const { engine } = makeEngine();
 
-        const shader = makeShaderMaterial({ needAlphaBlending: true, depthWrite: true });
-        setAlphaToCoverage(shader, true);
-        const shaderBindings = getOrCreateShaderPipelineBindings(engine, shader);
-        const shaderPipeline = getOrCreateShaderPipeline(engine, multisampledSignature, shader, shaderBindings);
+        const depthWritingShader = makeShaderMaterial({ needAlphaBlending: true, depthWrite: true });
+        setAlphaToCoverage(depthWritingShader, true);
+        const depthWritingShaderBindings = getOrCreateShaderPipelineBindings(engine, depthWritingShader);
+        const depthWritingShaderPipeline = getOrCreateShaderPipeline(engine, multisampledSignature, depthWritingShader, depthWritingShaderBindings);
+
+        const readOnlyDepthShader = makeShaderMaterial({ needAlphaBlending: true });
+        setAlphaToCoverage(readOnlyDepthShader, true);
+        const readOnlyDepthShaderBindings = getOrCreateShaderPipelineBindings(engine, readOnlyDepthShader);
+        const readOnlyDepthShaderPipeline = getOrCreateShaderPipeline(engine, multisampledSignature, readOnlyDepthShader, readOnlyDepthShaderBindings);
 
         const standard = createStandardMaterial();
         standard.alpha = 0.5;
@@ -226,7 +231,8 @@ describe("WebGPU alpha-to-coverage", () => {
         pbrScene._groups.set(pbr._buildGroup, pbrMeshes);
         const pbrPipeline = (await buildPbrRenderables(pbrScene, pbrMeshes, undefined)).renderables[0]!.bind(engine, multisampledSignature).pipeline;
 
-        for (const pipeline of [shaderPipeline, standardPipeline, pbrPipeline]) {
+        expect(depthWriteEnabled(depthWritingShaderPipeline)).toBe(true);
+        for (const pipeline of [readOnlyDepthShaderPipeline, standardPipeline, pbrPipeline]) {
             expect(alphaToCoverageEnabled(pipeline)).toBe(true);
             expect(colorTarget(pipeline).blend).toBeDefined();
             expect(depthWriteEnabled(pipeline)).toBe(false);

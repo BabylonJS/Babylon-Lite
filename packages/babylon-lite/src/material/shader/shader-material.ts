@@ -56,6 +56,10 @@ export interface ShaderMaterialOptions {
     readonly transmissive?: boolean;
     readonly needAlphaTesting?: boolean;
     readonly backFaceCulling?: boolean;
+    /** Depth-buffer writes for this material's draws. Defaults to `true` for opaque materials and
+     *  `false` for alpha-blended ones (`needAlphaBlending`). An EXPLICIT value always wins: a blended
+     *  volume/veil may set `depthWrite: true` to publish its fragment depth so later draws depth-test
+     *  against it instead of compositing over it. */
     readonly depthWrite?: boolean;
     readonly depthCompare?: GPUCompareFunction;
     /** Compile/run the fragment stage even for depth-only render targets (no colour attachments).
@@ -308,7 +312,9 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         transmissive: options.transmissive ?? false,
         needAlphaTesting: options.needAlphaTesting ?? false,
         backFaceCulling: options.backFaceCulling ?? true,
-        depthWrite: options.depthWrite ?? true,
+        // Blended materials default to depth-read-only; an explicit option always wins (see the
+        // ShaderMaterialOptions doc). Opaque materials keep the depth-writing default.
+        depthWrite: options.depthWrite ?? !(options.needAlphaBlending ?? false),
         depthCompare: options.depthCompare ?? "greater-equal",
         depthOnlyFragment: options.depthOnlyFragment ?? false,
         depthBias: options.depthBias ?? 0,

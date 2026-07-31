@@ -176,7 +176,10 @@ export function getOrCreateShaderPipeline(
                       // correctly when drawn into a reverse-Z camera depth prepass that declares
                       // "greater-equal" — otherwise every fragment fails against the 0-cleared buffer.
                       depthCompare: sig._depthCompare ?? material.depthCompare,
-                      depthWriteEnabled: material.needAlphaBlending ? false : material.depthWrite,
+                      // material.depthWrite is authoritative: the material factory already defaults
+                      // blended materials to false, and an explicit depthWrite on a blended material
+                      // (a volume/veil publishing its fragment depth) must be honoured here.
+                      depthWriteEnabled: material.depthWrite,
                       ...(material.depthBias ? { depthBias: material.depthBias } : {}),
                       ...(material.depthBiasSlopeScale ? { depthBiasSlopeScale: material.depthBiasSlopeScale } : {}),
                       // Pre-baked stencil sub-fields, resolved through the opt-in `_stencilResolver` hook above;
