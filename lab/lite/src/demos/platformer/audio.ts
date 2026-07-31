@@ -149,11 +149,13 @@ export function createSfx(): Sfx {
                 musicGain = mg;
                 await unlockAudioEngineAsync(e);
             } catch {
-                // Audio unavailable — stay silent.
+                // Audio unavailable — stay silent. Reset state so a later
+                // gesture can retry a transient failure.
                 engine = null;
                 ctx = null;
                 master = null;
                 musicGain = null;
+                starting = false;
             }
         })();
     };

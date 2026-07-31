@@ -80,9 +80,11 @@ export function createTetrisAudio(): TetrisAudio {
                 await unlockAudioEngineAsync(e);
             } catch {
                 // Audio unavailable (e.g. no output device) — disable silently.
+                // Reset state so a later gesture can retry a transient failure.
                 engine = null;
                 ctx = null;
                 master = null;
+                starting = false;
             }
         })();
     }

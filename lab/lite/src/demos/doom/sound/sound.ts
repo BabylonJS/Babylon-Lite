@@ -50,7 +50,13 @@ export class DoomSound {
             this.master = master;
             await unlockAudioEngineAsync(engine);
         } catch {
-            // Audio unavailable (e.g. headless E2E) — stay silent.
+            // Audio unavailable (e.g. headless E2E) — stay silent. Clear any
+            // partially-assigned state (e.g. a throw during unlock) and the guard
+            // so a later gesture can retry a transient failure.
+            this.engine = null;
+            this.ctx = null;
+            this.master = null;
+            this.starting = false;
         }
     }
 

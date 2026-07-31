@@ -64,9 +64,11 @@ export function createSounds(): Sounds {
                     master = m;
                     await unlockAudioEngineAsync(e);
                 } catch {
+                    // Reset state so a later gesture can retry a transient failure.
                     engine = null;
                     ctx = null;
                     master = null;
+                    starting = false;
                 }
             })();
         }

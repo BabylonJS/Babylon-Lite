@@ -31,7 +31,12 @@ export function initAudio(): void {
             await unlockAudioEngineAsync(e);
             startAmbience();
         } catch {
-            // Audio unavailable (e.g. headless E2E) — stay silent.
+            // Audio unavailable (e.g. headless E2E) — stay silent. Clear any
+            // partially-assigned state and the guard so a later gesture can retry.
+            engine = null;
+            ctx = null;
+            master = null;
+            starting = false;
         }
     })();
 }

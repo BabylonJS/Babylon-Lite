@@ -59,7 +59,13 @@ export class QuakeSound {
                 this.ctx = engine.audioContext;
                 this.master = master;
             })().catch(() => {
-                // Audio unavailable (e.g. headless E2E) — stay silent.
+                // Audio unavailable (e.g. headless E2E) — stay silent. Clear the
+                // memoized promise (and any partial state) so a later gesture can
+                // retry a transient failure instead of staying muted forever.
+                this.engine = null;
+                this.ctx = null;
+                this.master = null;
+                this.ready = null;
             });
         }
         return this.ready;
