@@ -5,15 +5,18 @@
  * (chiptune-style blips, sweeps and arpeggios).
  *
  * Browser autoplay policy: an AudioContext may only start from a user gesture,
- * so the context is created lazily inside `resume()`, which the wiring layer
- * calls from the first key press / pointer down. `play()` is a no-op until a
- * context exists, so events fired before the first gesture are silently
+ * so the Lite audio engine is created lazily inside `resume()`, which the wiring
+ * layer calls from the first key press / pointer down. `play()` is a no-op until
+ * the engine exists, so events fired before the first gesture are silently
  * dropped rather than throwing or warning.
  *
  * Per repo convention this module has zero import-time side effects: all state
- * lives inside the closure returned by `createTetrisAudio()`.
+ * lives inside the closure returned by `createTetrisAudio()`. Effects are
+ * synthesised on oscillator nodes built in the engine's own context and mixed
+ * through a master `GainNode` routed into the engine via `createSoundSourceAsync`.
  */
 
+import { createAudioEngineAsync, createSoundSourceAsync, unlockAudioEngineAsync, type AudioEngine } from "babylon-lite";
 import type { GameSound } from "./game.js";
 
 /** Every effect the audio layer can play: rules-layer outcomes (`GameSound`)
@@ -52,29 +55,36 @@ interface Note {
 const MASTER_GAIN = 0.32;
 
 export function createTetrisAudio(): TetrisAudio {
-    let ctx: AudioContext | null = null;
+    let engine: AudioEngine | null = null;
+    let ctx: BaseAudioContext | null = null;
     let master: GainNode | null = null;
+    let starting = false;
     let muted = false;
 
     function resume(): void {
-        try {
-            if (typeof AudioContext === "undefined") {
-                return;
-            }
-            if (!ctx) {
-                ctx = new AudioContext();
-                master = ctx.createGain();
-                master.gain.value = muted ? 0 : MASTER_GAIN;
-                master.connect(ctx.destination);
-            }
-            if (ctx.state === "suspended") {
-                void ctx.resume();
-            }
-        } catch {
-            // Audio unavailable (e.g. no output device) — disable silently.
-            ctx = null;
-            master = null;
+        if (engine) {
+            void unlockAudioEngineAsync(engine);
+            return;
         }
+        if (starting) return;
+        starting = true;
+        void (async (): Promise<void> => {
+            try {
+                const e = await createAudioEngineAsync();
+                const m = e.audioContext.createGain();
+                m.gain.value = muted ? 0 : MASTER_GAIN;
+                await createSoundSourceAsync(e, m);
+                engine = e;
+                ctx = e.audioContext;
+                master = m;
+                await unlockAudioEngineAsync(e);
+            } catch {
+                // Audio unavailable (e.g. no output device) — disable silently.
+                engine = null;
+                ctx = null;
+                master = null;
+            }
+        })();
     }
 
     function note(n: Note): void {

@@ -17,10 +17,14 @@
  *   1-3-3-2-3-2 (quiet/LOUD/LOUD/mid/LOUD/mid) with humanizing jitter
  *   (reference steps vary 0.14–0.95 amp, 880–1825 Hz centroid).
  *
- * The AudioContext is created lazily on first play (autoplay policy: the
- * first call always follows a user gesture — a click or keypress). Everything
- * no-ops silently if WebAudio is unavailable (headless E2E).
+ * The Lite audio engine is created lazily on first play (autoplay policy: the
+ * first call always follows a user gesture — a click or keypress). Effects are
+ * built on the engine's own AudioContext and mixed through a master GainNode
+ * routed into the engine via `createSoundSourceAsync`. Everything no-ops
+ * silently if WebAudio is unavailable (headless E2E).
  */
+
+import { createAudioEngineAsync, createSoundSourceAsync, unlockAudioEngineAsync, type AudioEngine } from "babylon-lite";
 
 export interface Sounds {
     playClonePing(): void;
@@ -34,24 +38,42 @@ export interface Sounds {
 const STEP_PATTERN = [1, 3, 3, 2, 3, 2] as const;
 
 export function createSounds(): Sounds {
-    let ctx: AudioContext | null = null;
+    let engine: AudioEngine | null = null;
+    let ctx: BaseAudioContext | null = null;
+    let master: GainNode | null = null;
     let noiseBuffer: AudioBuffer | null = null;
     let boomBuffer: AudioBuffer | null = null;
     let stepIndex = 0;
+    let starting = false;
 
-    const ac = (): AudioContext | null => {
-        if (ctx) {
-            return ctx.state === "suspended" ? (void ctx.resume(), ctx) : ctx;
+    /** Trigger lazy engine creation and return the context if ready yet (else null). */
+    const ac = (): BaseAudioContext | null => {
+        if (engine) {
+            void unlockAudioEngineAsync(engine);
+            return ctx;
         }
-        try {
-            ctx = new AudioContext();
-        } catch {
-            ctx = null;
+        if (!starting) {
+            starting = true;
+            void (async (): Promise<void> => {
+                try {
+                    const e = await createAudioEngineAsync();
+                    const m = e.audioContext.createGain();
+                    await createSoundSourceAsync(e, m);
+                    engine = e;
+                    ctx = e.audioContext;
+                    master = m;
+                    await unlockAudioEngineAsync(e);
+                } catch {
+                    engine = null;
+                    ctx = null;
+                    master = null;
+                }
+            })();
         }
         return ctx;
     };
 
-    const noise = (c: AudioContext): AudioBuffer => {
+    const noise = (c: BaseAudioContext): AudioBuffer => {
         if (!noiseBuffer) {
             noiseBuffer = c.createBuffer(1, c.sampleRate, c.sampleRate);
             const data = noiseBuffer.getChannelData(0);
@@ -67,7 +89,7 @@ export function createSounds(): Sounds {
      * amplitude walk baked in — the crackle/roll the reference sustains for
      * over a second. Precomputed once.
      */
-    const boom = (c: AudioContext): AudioBuffer => {
+    const boom = (c: BaseAudioContext): AudioBuffer => {
         if (!boomBuffer) {
             const dur = 1.35;
             boomBuffer = c.createBuffer(1, Math.floor(c.sampleRate * dur), c.sampleRate);
@@ -92,7 +114,9 @@ export function createSounds(): Sounds {
     };
 
     /** Oscillator helper: type/freq sweep/gain envelope, auto-cleanup. */
-    const blip = (c: AudioContext, type: OscillatorType, f0: number, f1: number, t1: number, g0: number, decay: number): void => {
+    const blip = (c: BaseAudioContext, type: OscillatorType, f0: number, f1: number, t1: number, g0: number, decay: number): void => {
+        const dest = master;
+        if (!dest) return;
         const t = c.currentTime;
         const osc = c.createOscillator();
         const gain = c.createGain();
@@ -103,13 +127,15 @@ export function createSounds(): Sounds {
         }
         gain.gain.setValueAtTime(g0, t);
         gain.gain.exponentialRampToValueAtTime(0.001, t + decay);
-        osc.connect(gain).connect(c.destination);
+        osc.connect(gain).connect(dest);
         osc.start(t);
         osc.stop(t + decay + 0.02);
     };
 
     /** Noise burst through a filter with optional frequency sweep. */
-    const burst = (c: AudioContext, filterType: BiquadFilterType, fStart: number, fEnd: number, dur: number, gainStart: number, q = 1): void => {
+    const burst = (c: BaseAudioContext, filterType: BiquadFilterType, fStart: number, fEnd: number, dur: number, gainStart: number, q = 1): void => {
+        const dest = master;
+        if (!dest) return;
         const t = c.currentTime;
         const src = c.createBufferSource();
         src.buffer = noise(c);
@@ -124,7 +150,7 @@ export function createSounds(): Sounds {
         const gain = c.createGain();
         gain.gain.setValueAtTime(gainStart, t);
         gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
-        src.connect(filter).connect(gain).connect(c.destination);
+        src.connect(filter).connect(gain).connect(dest);
         src.start(t, Math.random() * 0.5); // random read offset — varied grains
         src.stop(t + dur + 0.02);
     };
@@ -133,7 +159,8 @@ export function createSounds(): Sounds {
         /** Classic copy ding: sustained ~920 Hz bell + quiet echo tail. */
         playClonePing(): void {
             const c = ac();
-            if (!c) {
+            const dest = master;
+            if (!c || !dest) {
                 return;
             }
             const t = c.currentTime;
@@ -145,7 +172,7 @@ export function createSounds(): Sounds {
             gain.gain.setValueAtTime(0.22, t + 0.25);
             gain.gain.linearRampToValueAtTime(0.09, t + 0.27);
             gain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
-            gain.connect(c.destination);
+            gain.connect(dest);
             for (const f of [915, 935]) {
                 // close detune pair — the reference's gentle beating
                 const osc = c.createOscillator();
@@ -162,7 +189,8 @@ export function createSounds(): Sounds {
         /** Long rolling boom — the classic explosion, not a metallic pop. */
         playDeleteExplosion(): void {
             const c = ac();
-            if (!c) {
+            const dest = master;
+            if (!c || !dest) {
                 return;
             }
             const t = c.currentTime;
@@ -181,7 +209,7 @@ export function createSounds(): Sounds {
             gain.gain.linearRampToValueAtTime(0.85, t + 0.02); // crack on
             gain.gain.setValueAtTime(0.85, t + 1.0); // ride the roll
             gain.gain.exponentialRampToValueAtTime(0.001, t + 1.35);
-            src.connect(lp).connect(body).connect(gain).connect(c.destination);
+            src.connect(lp).connect(body).connect(gain).connect(dest);
             src.start(t);
             // Initial sharper crack on top (reference slice0 has 350–430 Hz)
             burst(c, "bandpass", 420, 150, 0.18, 0.5, 1.5);
@@ -221,7 +249,8 @@ export function createSounds(): Sounds {
         /** Jump: airy rising SWISH — filtered noise, no tonal boing. */
         playJump(): void {
             const c = ac();
-            if (!c) {
+            const dest = master;
+            if (!c || !dest) {
                 return;
             }
             const t = c.currentTime;
@@ -239,7 +268,7 @@ export function createSounds(): Sounds {
             gain.gain.linearRampToValueAtTime(0.62, t + 0.03); // soft air-on
             gain.gain.setValueAtTime(0.62, t + 0.08);
             gain.gain.exponentialRampToValueAtTime(0.001, t + 0.19);
-            src.connect(bp).connect(gain).connect(c.destination);
+            src.connect(bp).connect(gain).connect(dest);
             src.start(t, Math.random());
             src.stop(t + 0.22);
         },

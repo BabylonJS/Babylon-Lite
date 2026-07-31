@@ -1,4 +1,4 @@
-// Clean-room Quake sound-effect playback via the Web Audio API.
+// Clean-room Quake sound-effect playback through the Lite audio engine.
 //
 // The LibreQuake assets ship sounds as standard RIFF/WAVE PCM lumps (mono,
 // 11025/22050 Hz, 8- or 16-bit), so we let the browser decode them with
@@ -6,7 +6,13 @@
 // lazily and cached. Positional sounds (monsters, doors) are attenuated by
 // distance and panned left/right relative to the listener's facing, mirroring
 // Quake's ATTN_NORM falloff without copying any game code.
+//
+// All mixing happens on nodes built in the Lite audio engine's own context and
+// routed into the engine via `createSoundSourceAsync`, so playback shares the
+// engine's master bus, unlock handling, and master volume instead of a private
+// AudioContext.
 
+import { createAudioEngineAsync, createSoundSourceAsync, unlockAudioEngineAsync, type AudioEngine } from "babylon-lite";
 import { demoAssetUrl } from "../../demo-asset-url.js";
 
 type V3 = [number, number, number];
@@ -25,8 +31,10 @@ interface PlayOptions {
 }
 
 export class QuakeSound {
-    private ctx: AudioContext | null = null;
+    private engine: AudioEngine | null = null;
+    private ctx: BaseAudioContext | null = null;
     private master: GainNode | null = null;
+    private ready: Promise<void> | null = null;
     private readonly buffers = new Map<string, AudioBuffer | null>();
     private readonly loading = new Map<string, Promise<AudioBuffer | null>>();
     private readonly lastPlay = new Map<string, number>();
@@ -34,17 +42,34 @@ export class QuakeSound {
     private listenYaw = 0;
 
     constructor() {
-        const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (!Ctor) return;
-        this.ctx = new Ctor();
-        this.master = this.ctx.createGain();
-        this.master.gain.value = 0.8;
-        this.master.connect(this.ctx.destination);
+        // Warm the engine early (its context starts suspended until a gesture),
+        // so preloaded clips can decode before the first `resume()`.
+        void this.ensure();
     }
 
-    /** Resume the context after a user gesture (browsers start it suspended). */
+    /** Lazily create the Lite audio engine + master node (memoized). */
+    private ensure(): Promise<void> {
+        if (!this.ready) {
+            this.ready = (async (): Promise<void> => {
+                const engine = await createAudioEngineAsync();
+                const master = engine.audioContext.createGain();
+                master.gain.value = 0.8;
+                await createSoundSourceAsync(engine, master);
+                this.engine = engine;
+                this.ctx = engine.audioContext;
+                this.master = master;
+            })().catch(() => {
+                // Audio unavailable (e.g. headless E2E) — stay silent.
+            });
+        }
+        return this.ready;
+    }
+
+    /** Resume the engine after a user gesture (context starts suspended). */
     resume(): void {
-        if (this.ctx && this.ctx.state === "suspended") void this.ctx.resume();
+        void this.ensure().then(() => {
+            if (this.engine) void unlockAudioEngineAsync(this.engine);
+        });
     }
 
     /** Update the listener pose (Quake space) so positional sounds pan/attenuate. */
@@ -77,7 +102,7 @@ export class QuakeSound {
     private start(buf: AudioBuffer | null, opts?: PlayOptions): void {
         const ctx = this.ctx;
         const master = this.master;
-        if (!buf || !ctx || !master || ctx.state !== "running") return;
+        if (!buf || !ctx || !master || this.engine?.state !== "running") return;
 
         let gain = opts?.volume ?? 1;
         let pan = 0;
@@ -118,6 +143,7 @@ export class QuakeSound {
         const inFlight = this.loading.get(path);
         if (inFlight) return inFlight;
         const p = (async (): Promise<AudioBuffer | null> => {
+            await this.ensure();
             if (!this.ctx) return null;
             try {
                 const res = await fetch(SND_BASE + path);

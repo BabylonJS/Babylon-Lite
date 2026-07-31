@@ -1,4 +1,4 @@
-// Clean-room DMX (DS*) sound effect playback via the Web Audio API.
+// Clean-room DMX (DS*) sound effect playback through the Lite audio engine.
 //
 // The DMX digital sound lump format (publicly documented):
 //   u16 format (always 3)
@@ -7,42 +7,69 @@
 //   then `sample count` bytes of unsigned 8-bit PCM.
 // Many lumps include 16 padding samples at the start and end (duplicates of the
 // first/last real sample); we trim them when present.
+//
+// Decoded lumps become `AudioBuffer`s played through the Lite audio engine: a
+// persistent master `GainNode` (built in the engine's own context) is routed into
+// the engine via `createSoundSourceAsync`, so all playback shares the engine's
+// master bus, unlock handling, and master volume rather than a private context.
 
+import { createAudioEngineAsync, createSoundSourceAsync, unlockAudioEngineAsync, type AudioEngine } from "babylon-lite";
 import type { Wad } from "../wad/wad-file.js";
 import { tryGetLump } from "../wad/wad-file.js";
 
 export class DoomSound {
-    private ctx: AudioContext | null = null;
+    private engine: AudioEngine | null = null;
+    private ctx: BaseAudioContext | null = null;
+    private master: GainNode | null = null;
+    private starting = false;
     private readonly cache = new Map<string, AudioBuffer | null>();
     private lastPlay = new Map<string, number>();
 
     constructor(private readonly wad: Wad) {}
 
-    /** Resume the audio context after a user gesture (browsers require this). */
+    /** Create + unlock the Lite audio engine after a user gesture (browsers
+     *  require a gesture before a context can produce sound). Idempotent. */
     resume(): void {
-        if (!this.ctx) {
-            const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-            if (Ctor) this.ctx = new Ctor();
+        if (this.engine) {
+            void unlockAudioEngineAsync(this.engine);
+            return;
         }
-        if (this.ctx && this.ctx.state === "suspended") void this.ctx.resume();
+        if (this.starting) return;
+        this.starting = true;
+        void this.start();
+    }
+
+    private async start(): Promise<void> {
+        try {
+            const engine = await createAudioEngineAsync();
+            const master = engine.audioContext.createGain();
+            master.gain.value = 0.6;
+            await createSoundSourceAsync(engine, master);
+            this.engine = engine;
+            this.ctx = engine.audioContext;
+            this.master = master;
+            await unlockAudioEngineAsync(engine);
+        } catch {
+            // Audio unavailable (e.g. headless E2E) — stay silent.
+        }
     }
 
     /** Plays a sound by its base name (e.g. "PISTOL" -> lump "DSPISTOL"). */
     play(name: string): void {
-        if (!this.ctx || this.ctx.state !== "running") return;
+        const ctx = this.ctx;
+        const master = this.master;
+        if (!ctx || !master || this.engine?.state !== "running") return;
         // Rate-limit identical sounds within the same render frame.
-        const now = this.ctx.currentTime;
+        const now = ctx.currentTime;
         const last = this.lastPlay.get(name) ?? -1;
         if (now - last < 1 / 35) return;
         this.lastPlay.set(name, now);
 
         const buffer = this.getBuffer(name);
         if (!buffer) return;
-        const src = this.ctx.createBufferSource();
+        const src = ctx.createBufferSource();
         src.buffer = buffer;
-        const gain = this.ctx.createGain();
-        gain.gain.value = 0.6;
-        src.connect(gain).connect(this.ctx.destination);
+        src.connect(master);
         src.start();
     }
 
