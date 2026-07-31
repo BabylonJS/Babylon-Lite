@@ -48,6 +48,7 @@ import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { NodeMaterial } from "../materials/node-material.js";
+import { mergeMeshGeometry } from "./merge-mesh-geometry.js";
 import type { GridMaterial } from "../materials/grid-material.js";
 import type { MorphTargetManager } from "../morph/morph.js";
 
@@ -804,6 +805,108 @@ export class Mesh extends AbstractMesh {
     public addLODLevel(): never {
         return unsupported("Mesh.addLODLevel", "Level-of-detail is not implemented in Babylon Lite.");
     }
+
+    /**
+     * Babylon.js `Mesh.MergeMeshes` — bake several meshes into one, transforming
+     * each source's geometry by its world matrix. Signature:
+     * `MergeMeshes(meshes, disposeSource?, allow32BitsIndices?, meshSubclass?, subdivideWithSubMeshes?, multiMultiMaterials?)`.
+     * Uses the compat-local `mergeMeshGeometry`; the merged mesh lives at
+     * identity (world transforms are baked in) and takes the first mesh's material.
+     *
+     * **Supported semantics** (everything else is rejected, never silently dropped):
+     * - `disposeSource` (default `true`) — source meshes are disposed after merge.
+     * - `allow32BitsIndices` — Lite indices are always uint32, so 32-bit is always
+     *   available. When `allow32BitsIndices` is falsy and the merged vertex count
+     *   reaches 65536, this returns `null`, exactly like Babylon.js.
+     * - Positions, normals (world-transformed) and one UV set are carried.
+     *
+     * **Rejected** (throws `LiteCompatError`): `multiMultiMaterials` /
+     * `subdivideWithSubMeshes` (Lite has no submesh / multi-material partitioning),
+     * a supplied `meshSubclass` target, and sources carrying vertex colours,
+     * tangents or a second UV set, or sources carrying skeleton, morph-target, or
+     * vertex-animation data (Lite would have to drop them).
+     */
+    public static MergeMeshes(
+        meshes: (Mesh | null | undefined)[],
+        disposeSource = true,
+        allow32BitsIndices?: boolean,
+        meshSubclass?: Mesh,
+        subdivideWithSubMeshes?: boolean,
+        multiMultiMaterials?: boolean
+    ): Mesh | null {
+        const sources = meshes.filter((m): m is Mesh => !!m);
+        if (sources.length === 0) {
+            return null;
+        }
+
+        if (multiMultiMaterials || subdivideWithSubMeshes) {
+            return unsupported(
+                "Mesh.MergeMeshes(multiMultiMaterials/subdivideWithSubMeshes)",
+                "Babylon Lite renders one material per mesh with no submesh partitioning, so multi-material / subdivided merges cannot be produced. Merge per-material groups into separate meshes instead."
+            );
+        }
+        if (meshSubclass) {
+            return unsupported(
+                "Mesh.MergeMeshes(meshSubclass)",
+                "Merging into an existing target mesh is not wrapped; the merge always returns a fresh mesh. Merge without a meshSubclass and use the result."
+            );
+        }
+
+        // Babylon.js: with 16-bit indices requested, a >= 65536-vertex result cannot
+        // be represented, so it returns null. Mirror that (Lite otherwise emits uint32).
+        if (!allow32BitsIndices) {
+            let totalVertices = 0;
+            for (const mesh of sources) {
+                totalVertices += mesh.getTotalVertices();
+                if (totalVertices >= 65536) {
+                    return null;
+                }
+            }
+        }
+
+        for (const mesh of sources) {
+            const lite = mesh._lite as {
+                _cpuColors?: unknown;
+                _cpuTangents?: unknown;
+                _cpuUv2s?: unknown;
+                skeleton?: unknown;
+                morphTargets?: unknown;
+                vat?: unknown;
+            };
+            if (lite._cpuColors || lite._cpuTangents || lite._cpuUv2s) {
+                return unsupported(
+                    "Mesh.MergeMeshes(colors/tangents/uv2)",
+                    `Mesh "${mesh.name}" carries vertex colours, tangents or a second UV set, which the merge does not carry. Strip those attributes before merging, or keep the meshes separate.`
+                );
+            }
+            if (lite.skeleton || lite.morphTargets || lite.vat) {
+                return unsupported(
+                    "Mesh.MergeMeshes(animation)",
+                    `Mesh "${mesh.name}" carries skeleton, morph-target, or vertex-animation data, which the merge does not carry. Bake the deformation before merging, or keep the meshes separate.`
+                );
+            }
+        }
+
+        const scene = sources[0]!.getScene();
+        if (!scene) {
+            return null;
+        }
+        const lite = mergeMeshGeometry(
+            scene.getEngine()._lite,
+            sources[0]!.name,
+            sources.map((m) => m._lite)
+        );
+        const merged = new Mesh(sources[0]!.name, lite, scene);
+        merged.material = sources[0]!.material;
+        addPrimitive(merged, scene);
+
+        if (disposeSource) {
+            for (const mesh of sources) {
+                mesh.dispose();
+            }
+        }
+        return merged;
+    }
 }
 
 /** Babylon.js `GroundMesh` — a ground plane mesh. CPU height queries are not modelled. */
@@ -936,6 +1039,9 @@ function engineOf(scene: Scene): EngineContext {
  */
 function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
     scene._deferAdd(() => {
+        if (mesh.isDisposed()) {
+            return;
+        }
         const mat = mesh.material;
         mat?._ensureRenderable(engineOf(scene));
         // Re-bind in case the material's Lite handle resolved late (async-parsed

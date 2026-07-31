@@ -31,7 +31,7 @@ function fakeScene(): Scene {
     scene._meshWrappers = new Map();
     scene._meshes = [];
     scene._orderedCoreMeshes = [];
-    scene._orderedCoreMeshSet = new Set();
+    scene._orderedCoreMeshSet = new Set<TransformNode>();
     return scene;
 }
 
