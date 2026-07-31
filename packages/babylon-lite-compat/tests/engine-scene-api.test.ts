@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { VERSION } from "babylon-lite";
 import { AbstractEngine, Engine, ThinEngine, WebGPUEngine } from "../src/engine/engine";
+import type { TransformNode } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
 
 /**
@@ -22,7 +23,7 @@ function fakeScene(): Scene {
         _meshWrappers: Map<object, unknown>;
         _meshes: unknown[];
         _orderedCoreMeshes: unknown[];
-        _orderedCoreMeshSet: Set<import("../src/meshes/meshes").TransformNode>;
+        _orderedCoreMeshSet: Set<TransformNode>;
     };
     scene._cameras = [];
     scene._lights = [];
@@ -30,7 +31,7 @@ function fakeScene(): Scene {
     scene._meshWrappers = new Map();
     scene._meshes = [];
     scene._orderedCoreMeshes = [];
-    scene._orderedCoreMeshSet = new Set<import("../src/meshes/meshes").TransformNode>();
+    scene._orderedCoreMeshSet = new Set<TransformNode>();
     return scene;
 }
 
