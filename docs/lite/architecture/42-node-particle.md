@@ -595,7 +595,7 @@ Contextual source has precedence over system source, and system source has prece
 
 ## 9. Supported blocks
 
-Exactly 26 block class names are supported:
+Exactly 27 block class names are supported:
 
 ```text
 SystemBlock                         CreateParticleBlock
@@ -611,6 +611,7 @@ ParticleTextureSourceBlock          SetupSpriteSheetBlock
 BasicSpriteUpdateBlock              UpdatePositionBlock
 UpdateColorBlock                    UpdateDirectionBlock
 UpdateAngleBlock                    UpdateSizeBlock
+UpdateAttractorBlock
 ```
 
 Local shape modules and serialized variants retain their class name from this list.
@@ -911,23 +912,42 @@ Both variants set `_spriteSheet` with cell dimensions, the cell array, and the u
 
 The block requires `_spriteSheet` during build or throws `NodeParticle: BasicSpriteUpdateBlock requires SetupSpriteSheetBlock`. It appends one `updateSteps` function that calls the captured sheet update. It installs no output getter.
 
-### 9.23 UpdatePositionBlock
+### 9.23 UpdateAttractorBlock
+
+Inputs are `particle`, `attractor`, and `strength`. `attractor` defaults to `(0,0,0)` and `strength` defaults to `1`. The block allocates no columns and appends one direction-only update step.
+
+For attractor position $a$, particle position $p$, direction $d$, strength $s$, and the particle's lifetime-clamped `system._scaledStep` $\Delta t$:
+
+```text
+offset = attractor - position
+lengthSquared = dot(offset, offset)
+
+if lengthSquared != 0:
+    scale = strength * scaledStep / ((lengthSquared + 1) * sqrt(lengthSquared))
+    direction += offset * scale
+```
+
+This is equivalent to adding `normalize(offset) * strength / (lengthSquared + 1) * scaledStep`. Coincident position and attractor produce no force. Negative strength repels. The attractor components are copied before evaluating strength because both inputs may ultimately depend on shared scratch-backed getters.
+
+The block observes position and direction as left by earlier `updateSteps`, and later steps observe its direction change. It does not update position itself. Serialized local systems use the same evaluator; there is no local/world attractor variant.
+
+### 9.24 UpdatePositionBlock
 
 When `position` is connected, append an update step that evaluates a Vec3 and writes base position xyz. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.24 UpdateColorBlock
+### 9.25 UpdateColorBlock
 
 When `color` is connected, request the standard RGBA columns and append an update step that evaluates Color4 and writes all components. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.25 UpdateDirectionBlock
+### 9.26 UpdateDirectionBlock
 
 When `direction` is connected, append an update step that evaluates Vec3 and writes base direction xyz. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.26 UpdateAngleBlock
+### 9.27 UpdateAngleBlock
 
 When `angle` is connected, request the standard angle column and append an update step that writes the scalar result. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.27 UpdateSizeBlock
+### 9.28 UpdateSizeBlock
 
 When `size` is connected, request the standard size column and append an update step that writes the scalar result. With an unconnected input, append nothing. No output getter is installed.
 
@@ -1040,12 +1060,12 @@ Additional behavior is observable:
 
 ## 12. Current limitations
 
-- Only the 26 classes in section 9 are accepted. Other NPE classes follow the registry errors in section 11.
+- Only the 27 classes in section 9 are accepted. Other NPE classes follow the registry errors in section 11.
 - Simulation is CPU-only.
 - Rendering is always camera-facing. Serialized `billBoardMode` and `isBillboardBased` do not affect runtime state.
 - Blend modes 3 and 4, plus unknown values, render with the additive descriptor used by mode 2.
 - System source 4 and every system source outside 1, 2, and 3 are unsupported.
-- Custom emitter functions, sub-emitter triggers, inherited emitter velocity, attractor updates, flow-map updates, and noise updates have no supported block evaluator.
+- Custom emitter functions, sub-emitter triggers, inherited emitter velocity, flow-map updates, and noise updates have no supported block evaluator.
 - Emit power scales the created direction; exactly zero clears it. No inherited velocity term is added.
 - Mesh emission reads only `cachedVertexData`; mesh `worldSpace` is ignored, and mesh data is not structurally validated.
 - A renderable particle system needs a successfully loaded or manually assigned texture. There is no untextured billboard fallback.
@@ -1077,6 +1097,7 @@ The current unit categories are:
 - Change graphs: Size, Color, Speed, Angular Speed, multi-stop Angular Speed, Drag, Emit Rate, Lifetime, Start Size, and Speed Limit.
 - Emitters: Point, Box, Sphere, directed Sphere, Hemisphere, Cone, directed Cone, Cylinder, directed Cylinder, Mesh, rotated Cylinder, all six transformed local shapes, mesh vertex color, mesh InitialDirection, shared volatile bounds, and local source build/read guards.
 - Value correctness: shared-scratch Math, Lerp/Gradient endpoints, Random min/max aliasing, lock modes, Uint32 id edge cases, and capacity-bounded OncePerParticle caches.
+- Attractors: softened inverse-square attraction, negative-strength repulsion, defaults, coincident-point handling, lifetime-clamped step scaling, and lazy evaluator isolation.
 - Feature isolation: runtime chunk manifests and, when bundle-info exists, fetched module contents.
 - Path ownership: the `particle/soa` source directory and `particle-soa*.test.ts` unit-test names must not exist. TypeScript compilation validates all source and test imports.
 
@@ -1096,18 +1117,19 @@ Use conversion for graph extraction. The oracle's direct parse path does not pre
 
 ### 13.3 Visual scenes
 
-All four Lite scenes seed after build, run 200 ratio-1 steps, synchronize one billboard, register the frozen scene, and use a black clear color.
+All five Lite scenes seed after build, run 200 ratio-1 steps, synchronize one billboard, register the frozen scene, and use a black clear color.
 
-| Scene                          | Coverage                                                                | Camera                                                     | MAD ceiling | Raw ceiling |
-| ------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------- | ----------- | ----------- |
-| 262 `scene262-npe-size`        | Basic Properties - Size, Box                                            | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)`  | `0.01`      | `44.1 KB`   |
-| 263 `scene263-npe-sphere`      | Sphere emitter                                                          | alpha `-pi/2`, beta `1.2`, radius `14`, target origin      | `0.01`      | `44.1 KB`   |
-| 264 `scene264-npe-change-size` | Gradient, GradientValue, UpdateSize                                     | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01`      | `44.1 KB`   |
-| 276 `scene276-npe-animations`  | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30 | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
+| Scene                          | Coverage                                                                      | Camera                                                     | MAD ceiling | Raw ceiling |
+| ------------------------------ | ----------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------- | ----------- |
+| 262 `scene262-npe-size`        | Basic Properties - Size, Box                                                  | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)`  | `0.01`      | `44.1 KB`   |
+| 263 `scene263-npe-sphere`      | Sphere emitter                                                                | alpha `-pi/2`, beta `1.2`, radius `14`, target origin      | `0.01`      | `44.1 KB`   |
+| 264 `scene264-npe-change-size` | Gradient, GradientValue, UpdateSize                                           | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01`      | `44.1 KB`   |
+| 276 `scene276-npe-animations`  | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30       | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
+| 277 `scene277-npe-attractor`   | UpdateAttractor after position integration, attractor `(0,2,0)`, strength `8` | alpha `-pi/2`, beta `1.2`, radius `5`, target `(0,0.8,0)`  | `0.01`      | `45.0 KB`   |
 
 Each camera uses near plane `0.1` and far plane `100`. Each scene sets both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start.
 
-Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, and 264 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all four scenes.
+Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, and 277 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all five scenes.
 
 ### 13.4 Bundle manifests and conditional content
 
@@ -1118,11 +1140,12 @@ Current tracked measurements are:
 | 262   |   `39.7 KB` |    `24.1 KB` |                 `28.5 KB` | `44.1 KB` |
 | 263   |   `41.8 KB` |    `24.7 KB` |                 `27.5 KB` | `44.1 KB` |
 | 264   |   `40.0 KB` |    `25.9 KB` |                 `34.4 KB` | `44.1 KB` |
-| 276   |   `41.5 KB` |    `25.2 KB` |                 `29.6 KB` | `45.0 KB` |
+| 276   |   `44.0 KB` |    `25.2 KB` |                 `27.1 KB` | `45.0 KB` |
+| 277   |   `41.6 KB` |    `25.3 KB` |                 `29.8 KB` | `45.0 KB` |
 
-Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, and 276 as sprite users because particles render through billboard sprite modules.
+Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, and 277 as sprite users because particles render through billboard sprite modules.
 
-The particle bundle-content test always requires a nonempty runtime chunk list for each of the four scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, direction/angle update, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 alone may fetch `npe-registry-extra-emitters` because it uses Sphere.
+The particle bundle-content test always requires a nonempty runtime chunk list for each of the five scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/direction/angle update, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, and scene 277 must fetch `update-attractor-block`.
 
 When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, and `math/mat4-invert.ts`. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
 
@@ -1161,7 +1184,7 @@ packages/babylon-lite/src/particle/node/npe-types.ts
 packages/babylon-lite/src/particle/node/npe-value.ts
 ```
 
-### 14.3 Block evaluators and helpers: 41 files
+### 14.3 Block evaluators and helpers: 42 files
 
 ```text
 packages/babylon-lite/src/particle/node/blocks/basic-sprite-update-block.ts
@@ -1201,6 +1224,7 @@ packages/babylon-lite/src/particle/node/blocks/system-block.ts
 packages/babylon-lite/src/particle/node/blocks/system-dynamic-emit-rate-block.ts
 packages/babylon-lite/src/particle/node/blocks/texture-source-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-angle-block.ts
+packages/babylon-lite/src/particle/node/blocks/update-attractor-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-color-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-direction-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-position-block.ts
@@ -1239,17 +1263,21 @@ lab/lite/src/lite/scene262.ts
 lab/lite/src/lite/scene263.ts
 lab/lite/src/lite/scene264.ts
 lab/lite/src/lite/scene276.ts
+lab/lite/src/lite/scene277.ts
 lab/lite/src/shared/scene262-npe.ts
 lab/lite/src/shared/scene263-npe.ts
 lab/lite/src/shared/scene264-npe.ts
 lab/lite/src/shared/scene276-npe.ts
+lab/lite/src/shared/scene277-npe.ts
 lab/public/bundle/manifest/scene262.json
 lab/public/bundle/manifest/scene263.json
 lab/public/bundle/manifest/scene264.json
 lab/public/bundle/manifest/scene276.json
+lab/public/bundle/manifest/scene277.json
 tests/lite/parity/scenes/scene262-npe-size.spec.ts
 tests/lite/parity/scenes/scene263-npe-sphere.spec.ts
 tests/lite/parity/scenes/scene264-npe-change-size.spec.ts
 tests/lite/parity/scenes/scene276-npe-animations.spec.ts
+tests/lite/parity/scenes/scene277-npe-attractor.spec.ts
 tests/lite/unit/npe-particle-bundle-content.test.ts
 ```
