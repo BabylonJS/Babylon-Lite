@@ -24,6 +24,15 @@ export interface SpriteBlendDescriptor {
 }
 
 /**
+ * Opaque replacement color. No color blending is configured; every covered sample replaces
+ * the framebuffer value. Use this for depth-writing alpha-to-coverage layers where fragment
+ * alpha controls sample coverage rather than color compositing.
+ */
+export const spriteBlendOpaque: SpriteBlendDescriptor = {
+    _key: "opaque",
+};
+
+/**
  * Straight-alpha "over" blending (the default). RGB is composited by source alpha; this is
  * the standard transparency mode for HUDs, UI, and soft-edged sprites.
  */

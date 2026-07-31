@@ -536,7 +536,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             _transmissive: needsTaskRefraction,
             mesh,
             bind(eng, sig) {
-                const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings);
+                const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings, mat);
                 const materialBindGroup = needsTaskRefraction
                     ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
                     : materialBindGroupStatic!;

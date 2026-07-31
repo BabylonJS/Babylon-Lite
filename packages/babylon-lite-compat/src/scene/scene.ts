@@ -224,6 +224,16 @@ export class Scene extends AbstractScene {
         this.onBeforeRenderObservable.notifyObservers(this);
     }
 
+    /**
+     * @internal The Lite-core-owned mesh list backing `scene.meshes`. Babylon Lite's
+     * `SceneContext` owns the authoritative array of scene meshes; the base
+     * `AbstractScene.meshes` maps it back onto the canonical compat wrappers. Guarded
+     * for prototype-only instances that have no `_lite` (GPU-free unit tests).
+     */
+    protected override _coreMeshList(): readonly object[] {
+        return (this._lite?.meshes as readonly object[] | undefined) ?? [];
+    }
+
     public getEngine(): WebGPUEngine {
         return this._engine;
     }
@@ -236,6 +246,17 @@ export class Scene extends AbstractScene {
     /** Babylon.js `scene.getUniqueId()` — the process-unique scene id. */
     public getUniqueId(): number {
         return this.uniqueId;
+    }
+
+    /**
+     * @internal Whether the engine has started, i.e. deferred mesh adds have been
+     * flushed and meshes are live in the Lite scene. Used by the mesh `material`
+     * setter and texture-readiness path to decide whether a material change must be
+     * reconciled into the running scene (ensure renderable + rebuild) or is still
+     * safely handled by the boot-time build.
+     */
+    public get _hasStarted(): boolean {
+        return this._started;
     }
 
     /**
@@ -331,7 +352,15 @@ export class Scene extends AbstractScene {
 
     /** @internal Register a `NodeMaterial` whose parse the engine drives after shadow build. */
     public _registerNodeMaterial(material: { _parse(engine: import("babylon-lite").EngineContext, shadowGenerators: readonly unknown[]): Promise<void> }): void {
+        if (this._started) {
+            this._engine._registerLateWork(() => material._parse(this._engine._lite, this._liteShadowGenerators()));
+            return;
+        }
         this._nodeMaterials.push(material);
+    }
+
+    private _liteShadowGenerators(): unknown[] {
+        return this._shadowGenerators.map((g) => g._liteGen).filter((g): g is unknown => g !== undefined);
     }
 
     /**
@@ -345,7 +374,7 @@ export class Scene extends AbstractScene {
             return;
         }
         const engine = this._engine._lite;
-        const liteGens = this._shadowGenerators.map((g) => g._liteGen).filter((g): g is unknown => g !== undefined);
+        const liteGens = this._liteShadowGenerators();
         await Promise.all(this._nodeMaterials.map((m) => m._parse(engine, liteGens)));
         this._nodeMaterials.length = 0;
     }

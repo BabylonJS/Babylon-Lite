@@ -27,6 +27,7 @@ import {
     createTube,
     createExtrudeShape,
     createTransformNode,
+    cloneTransformNode,
     setParent,
     setThinInstances,
     setThinInstanceColors,
@@ -36,7 +37,7 @@ import {
     createGroundFromHeightMap,
     computeAabb,
 } from "babylon-lite";
-import type { Mesh as LiteMesh, SceneNode, EngineContext } from "babylon-lite";
+import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer } from "babylon-lite";
 
 import { Vector3, liteBackedVector3 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
@@ -47,6 +48,7 @@ import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { NodeMaterial } from "../materials/node-material.js";
+import { mergeMeshGeometry } from "./merge-mesh-geometry.js";
 import type { GridMaterial } from "../materials/grid-material.js";
 import type { MorphTargetManager } from "../morph/morph.js";
 
@@ -122,6 +124,11 @@ function computeFlatNormals(positions: Float32Array, indices: Uint32Array): Floa
     return normals;
 }
 
+/** @internal Return an attribute only when it has exactly one value tuple per vertex. */
+function matchingVertexAttribute(data: Float32Array | null | undefined, vertexCount: number, components: number): Float32Array | undefined {
+    return data?.length === vertexCount * components ? data : undefined;
+}
+
 /**
  * Babylon.js `TransformNode` — a positioned, rotated, scaled scene-graph node.
  * Wraps a Lite scene node (`_node`): either a standalone Lite transform node, or
@@ -130,6 +137,32 @@ function computeFlatNormals(positions: Float32Array, indices: Uint32Array): Floa
 export class TransformNode extends Node {
     /** @internal The Lite scene node that carries this transform. */
     public readonly _node: SceneNode;
+
+    /**
+     * @internal The Lite asset container this node was loaded from, when produced
+     * by a loader. Used by the `KHR_materials_variants` helpers (which key off the
+     * loaded root node) and to keep loaded meshes tied to their source asset.
+     */
+    public _container?: LiteAssetContainer;
+
+    /**
+     * @internal Bind a loader-produced wrapper to the scene the container was added
+     * to. The loader already inserted the underlying Lite node (via
+     * `addToScene(container)`), so this only wires the compat-side scene reference
+     * and lists the wrapper in `scene.meshes` — it never re-inserts into Lite.
+     */
+    public _bindLoadedScene(scene: Scene): void {
+        if (this._scene === scene) {
+            return;
+        }
+        this._scene = scene;
+        scene._registerMesh(this, this._node);
+    }
+
+    /** @internal Link an already-parented Lite node without mutating its Lite hierarchy. */
+    public _adoptLoadedParent(parent: TransformNode | null): void {
+        this._linkParent(parent);
+    }
 
     public constructor(name: string, scene?: Scene, liteNode?: SceneNode) {
         super(name, scene);
@@ -222,7 +255,7 @@ export class AbstractMesh extends TransformNode {
     public readonly _lite: LiteMesh;
 
     private _material: CompatMaterial | null = null;
-    private _visible = true;
+    protected _visible = true;
 
     public constructor(name: string, lite: LiteMesh, scene?: Scene) {
         super(name, scene, lite);
@@ -233,6 +266,10 @@ export class AbstractMesh extends TransformNode {
         // assigning that default now; an explicit `mesh.material = …` overrides it.
         if (scene) {
             this.material = scene.defaultMaterial;
+            // Canonical-registry entry keyed by the Lite mesh so `scene.meshes` (and the
+            // scene by-name/-id lookups) enumerate this primitive — reconciled against the
+            // Lite-core-owned list, which holds the same `_lite` object once it is added.
+            scene._registerMesh(this, this._lite);
         }
     }
 
@@ -250,8 +287,24 @@ export class AbstractMesh extends TransformNode {
     }
     public set material(value: CompatMaterial | null) {
         this._material = value;
-        if (value?._lite) {
-            this._lite.material = value._lite as never;
+        const scene = this._scene;
+        const renderMaterial = value ?? scene?.defaultMaterial;
+        if (renderMaterial && scene?._hasStarted) {
+            // The mesh already entered the scene, so the boot-time build (which
+            // normally calls `_ensureRenderable` via `addPrimitive`) has run. Finalize
+            // the material's GPU-facing resources now — PBR solid textures and any
+            // resolved texture handles — before rebinding, so Lite's material-swap
+            // rebuild (enqueued by the `_lite.material` reassignment below) sees
+            // complete props. Adopt the scene so a still-loading texture assigned to
+            // this material can reconcile itself on readiness.
+            (renderMaterial as { _adoptScene?: (s: Scene) => void })._adoptScene?.(scene);
+            renderMaterial._ensureRenderable(engineOf(scene));
+        }
+        if (renderMaterial?._lite) {
+            this._lite.material = renderMaterial._lite as never;
+        }
+        if (value && "_bindMesh" in value) {
+            value._bindMesh(this._lite, () => this._material === value);
         }
     }
 
@@ -283,32 +336,47 @@ export class AbstractMesh extends TransformNode {
     }
 
     /**
-     * Babylon.js `mesh.getBoundingInfo()` — local-space AABB of this mesh. Babylon
-     * Lite stores `boundMin`/`boundMax` (local space) on factory- and loader-built
-     * meshes; when absent (e.g. a placeholder mesh whose bounds were never computed)
-     * we fold the retained CPU positions through Lite's `computeAabb`. A mesh with
-     * no geometry returns a degenerate zero-size box.
+     * Babylon.js `mesh.getBoundingInfo()` — the mesh's AABB. `minimum`/`maximum`
+     * are the local-space bounds; the returned `BoundingInfo`'s world members
+     * (`minimumWorld`/`maximumWorld`/`centerWorld`/…) are derived by transforming
+     * the eight local corners by the mesh's world matrix, so a mesh at (1,2,3)
+     * reports correctly-offset world bounds. Babylon Lite stores `boundMin`/
+     * `boundMax` (local space) on factory- and loader-built meshes; when absent
+     * (e.g. a placeholder mesh whose bounds were never computed) we fold the
+     * retained CPU positions through Lite's `computeAabb`. A mesh with no geometry
+     * returns a degenerate zero-size box.
      */
     public getBoundingInfo(): BoundingInfo {
+        const world = this._worldMatrixForBounds();
         const lo = this._lite.boundMin;
         const hi = this._lite.boundMax;
         if (lo && hi) {
-            return new BoundingInfo(new Vector3(lo[0], lo[1], lo[2]), new Vector3(hi[0], hi[1], hi[2]));
+            return new BoundingInfo(new Vector3(lo[0], lo[1], lo[2]), new Vector3(hi[0], hi[1], hi[2]), world);
         }
         const positions = this._lite._cpuPositions;
         if (positions && positions.length >= 3 && positions.length % 3 === 0) {
             const [min, max] = computeAabb(positions);
             if (Number.isFinite(min[0]) && Number.isFinite(min[1]) && Number.isFinite(min[2]) && Number.isFinite(max[0]) && Number.isFinite(max[1]) && Number.isFinite(max[2])) {
-                return new BoundingInfo(new Vector3(min[0], min[1], min[2]), new Vector3(max[0], max[1], max[2]));
+                return new BoundingInfo(new Vector3(min[0], min[1], min[2]), new Vector3(max[0], max[1], max[2]), world);
             }
         }
-        return new BoundingInfo(new Vector3(0, 0, 0), new Vector3(0, 0, 0));
+        return new BoundingInfo(new Vector3(0, 0, 0), new Vector3(0, 0, 0), world);
+    }
+
+    /** Compat handle over Babylon Lite's world matrix for bounds derivation. Returns
+     *  `undefined` when the Lite node hasn't computed one (world bounds fall back to
+     *  local). */
+    private _worldMatrixForBounds(): Matrix | undefined {
+        const wm = this._lite.worldMatrix;
+        return wm ? Matrix.FromArray(wm) : undefined;
     }
 
     /**
-     * Babylon.js `mesh.getVerticesData(kind)` — read back the CPU geometry buffer
-     * for `position` / `normal` / `uv`. Babylon Lite retains these on the mesh
-     * (for picking + device-loss recovery); other kinds are not stored.
+     * Babylon.js `mesh.getVerticesData(kind)` — read back the CPU geometry buffer.
+     * `position` / `normal` / `uv` come from the buffers Babylon Lite retains on the
+     * mesh (for picking + device-loss recovery). Prefer the last compat-side value
+     * for `uv2` / `tangent` / `color`, falling back to attributes retained by Lite
+     * for loader- and factory-created meshes.
      */
     public getVerticesData(kind: string): Float32Array | null {
         switch (kind) {
@@ -318,6 +386,12 @@ export class AbstractMesh extends TransformNode {
                 return this._lite._cpuNormals ?? null;
             case "uv":
                 return this._lite._cpuUvs ?? null;
+            case "uv2":
+                return this._lastUv2 ?? this._lite._cpuUv2s ?? null;
+            case "tangent":
+                return this._lastTangents ?? this._lite._cpuTangents ?? null;
+            case "color":
+                return this._lastColors ?? this._lite._cpuColors ?? null;
             default:
                 return null;
         }
@@ -337,10 +411,13 @@ export class AbstractMesh extends TransformNode {
         if (!engine || !lite._cpuPositions || !lite._cpuIndices) {
             return;
         }
-        if (kind !== "position" && kind !== "normal" && kind !== "uv" && kind !== "color" && kind !== "tangent") {
+        if (kind !== "position" && kind !== "normal" && kind !== "uv" && kind !== "uv2" && kind !== "color" && kind !== "tangent") {
             return;
         }
         const f32 = data instanceof Float32Array ? data : Float32Array.from(data);
+        if (kind === "uv2") {
+            this._lastUv2 = f32;
+        }
         if (kind === "color") {
             this._lastColors = f32;
         }
@@ -348,14 +425,71 @@ export class AbstractMesh extends TransformNode {
             this._lastTangents = f32;
         }
         const positions = kind === "position" ? f32 : lite._cpuPositions;
-        const normals = kind === "normal" ? f32 : (lite._cpuNormals ?? computeFlatNormals(positions, lite._cpuIndices));
-        const uvs = kind === "uv" ? f32 : lite._cpuUvs;
-        resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, undefined, this._lastTangents, this._lastColors);
+        const vertexCount = positions.length / 3;
+        const existingNormals = matchingVertexAttribute(lite._cpuNormals, vertexCount, 3);
+        const normals = kind === "normal" ? f32 : (existingNormals ?? computeFlatNormals(positions, lite._cpuIndices));
+        if (kind === "position") {
+            this._normalsFollowIndices = !existingNormals;
+        } else if (kind === "normal") {
+            this._normalsFollowIndices = false;
+        }
+        const existingUvs = matchingVertexAttribute(lite._cpuUvs, vertexCount, 2);
+        const uvs = kind === "uv" ? f32 : (existingUvs ?? (kind === "position" ? new Float32Array(vertexCount * 2) : undefined));
+        const uvs2 = kind === "uv2" ? f32 : matchingVertexAttribute(this._lastUv2 ?? lite._cpuUv2s, vertexCount, 2);
+        const tangents = matchingVertexAttribute(this._lastTangents ?? lite._cpuTangents, vertexCount, 4);
+        const colors = matchingVertexAttribute(this._lastColors ?? lite._cpuColors, vertexCount, 4);
+        resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, uvs2, tangents, colors);
     }
 
-    /** @internal Retained tangent/color buffers so successive `setVerticesData` calls keep both. */
+    /**
+     * Babylon.js `mesh.getIndices()` — read back the mesh's index (topology) buffer.
+     * Babylon Lite retains the indices on the mesh as a `Uint32Array` (for picking +
+     * device-loss recovery), so we return that directly; a mesh with no geometry
+     * returns `null`.
+     */
+    public getIndices(_copyWhenShared?: boolean, forceCopy?: boolean): Uint32Array | null {
+        const indices = this._lite._cpuIndices;
+        return indices ? (forceCopy ? indices.slice() : indices) : null;
+    }
+
+    /**
+     * Babylon.js `mesh.setIndices(indices)` — replace the mesh's index (topology)
+     * buffer. Babylon Lite re-uploads the geometry in place via `resizeMeshGeometry`,
+     * keeping the existing position/normal/uv/tangent/color attributes and swapping
+     * only the indices. Returns the mesh for chaining.
+     */
+    public setIndices(indices: number[] | Uint16Array | Uint32Array | Int32Array, _totalVertices?: number | null, _updatable?: boolean): this {
+        const engine = this._scene?.getEngine()._lite;
+        const lite = this._lite;
+        if (!engine || !lite._cpuPositions) {
+            return this;
+        }
+        const u32 = indices instanceof Uint32Array ? indices : Uint32Array.from(indices);
+        const positions = lite._cpuPositions;
+        const vertexCount = positions.length / 3;
+        const normals = this._normalsFollowIndices
+            ? computeFlatNormals(positions, u32)
+            : (matchingVertexAttribute(lite._cpuNormals, vertexCount, 3) ?? computeFlatNormals(positions, u32));
+        resizeMeshGeometry(
+            engine,
+            this._lite,
+            positions,
+            normals,
+            u32,
+            matchingVertexAttribute(lite._cpuUvs, vertexCount, 2),
+            matchingVertexAttribute(this._lastUv2 ?? lite._cpuUv2s, vertexCount, 2),
+            matchingVertexAttribute(this._lastTangents ?? lite._cpuTangents, vertexCount, 4),
+            matchingVertexAttribute(this._lastColors ?? lite._cpuColors, vertexCount, 4)
+        );
+        return this;
+    }
+
+    /** @internal Retained uv2/tangent/color buffers so successive `setVerticesData` (and a bake) keep them all. */
+    private _lastUv2: Float32Array | undefined;
     private _lastTangents: Float32Array | undefined;
     private _lastColors: Float32Array | undefined;
+    /** @internal Position resizing generated normals from the old topology; regenerate after the next index update. */
+    private _normalsFollowIndices = false;
 
     /** Babylon.js `mesh.getTotalVertices()` — vertex count from the position buffer. */
     public getTotalVertices(): number {
@@ -374,25 +508,30 @@ export class AbstractMesh extends TransformNode {
     }
 
     /**
-     * Babylon.js `mesh.bakeCurrentTransformIntoVertices()` — fold the node's local
-     * transform (position / rotation / scaling) into the CPU geometry and reset the
-     * transform to identity. Babylon Lite has no built-in mesh-transform bake, so we
-     * transform the retained CPU positions (full matrix) and normals (rotation only,
-     * renormalized), re-upload via `resizeMeshGeometry`, then clear the transform.
+     * @internal Shared bake: fold `matrix` into the retained CPU geometry and
+     * re-upload it. Positions transform by the full matrix; **normals by the
+     * inverse-transpose of the upper 3×3** (so they stay perpendicular to the baked
+     * surface under non-uniform / sheared transforms, unlike a raw 3×3 multiply) and
+     * are renormalized. The retained `uv` / `uv2` / `tangent` / `color` attributes are
+     * forwarded unchanged so they survive the geometry reupload rather than being
+     * dropped. Returns `false` when there is no geometry to bake.
      */
-    public bakeCurrentTransformIntoVertices(): this {
+    private _bakeMatrix(matrix: Matrix): boolean {
         const engine = this._scene?.getEngine()._lite;
-        const lite = this._lite as { _cpuPositions?: Float32Array; _cpuNormals?: Float32Array; _cpuIndices?: Uint32Array; _cpuUvs?: Float32Array };
+        const lite = this._lite as {
+            _cpuPositions?: Float32Array;
+            _cpuNormals?: Float32Array;
+            _cpuIndices?: Uint32Array;
+            _cpuUvs?: Float32Array;
+            _cpuUv2s?: Float32Array | null;
+            _cpuTangents?: Float32Array | null;
+            _cpuColors?: Float32Array | null;
+        };
         const positions = lite._cpuPositions;
         const indices = lite._cpuIndices;
         if (!engine || !positions || !indices) {
-            return this;
+            return false;
         }
-        const node = this._node;
-        const s = node.scaling;
-        const q = node.rotationQuaternion;
-        const t = node.position;
-        const matrix = Matrix.Compose(liteBackedVector3(s), { x: q.x, y: q.y, z: q.z, w: q.w }, liteBackedVector3(t));
         const m = matrix.m;
 
         const newPositions = new Float32Array(positions.length);
@@ -405,17 +544,30 @@ export class AbstractMesh extends TransformNode {
             newPositions[i + 2] = x * m[2]! + y * m[6]! + z * m[10]! + m[14]!;
         }
 
-        let newNormals: Float32Array | undefined;
+        let bakedIndices = indices;
+        if (matrix.determinant() < 0) {
+            bakedIndices = new Uint32Array(indices);
+            for (let i = 0; i + 2 < bakedIndices.length; i += 3) {
+                const second = bakedIndices[i + 1]!;
+                bakedIndices[i + 1] = bakedIndices[i + 2]!;
+                bakedIndices[i + 2] = second;
+            }
+        }
+
+        let newNormals: Float32Array;
         const normals = lite._cpuNormals;
         if (normals) {
+            // Transform normals by the inverse-transpose upper 3×3 so they stay
+            // correct under non-uniform scale/shear, then renormalize.
+            const nm = matrix.invert().transpose().m;
             newNormals = new Float32Array(normals.length);
             for (let i = 0; i < normals.length; i += 3) {
                 const x = normals[i]!,
                     y = normals[i + 1]!,
                     z = normals[i + 2]!;
-                let nx = x * m[0]! + y * m[4]! + z * m[8]!;
-                let ny = x * m[1]! + y * m[5]! + z * m[9]!;
-                let nz = x * m[2]! + y * m[6]! + z * m[10]!;
+                let nx = x * nm[0]! + y * nm[4]! + z * nm[8]!;
+                let ny = x * nm[1]! + y * nm[5]! + z * nm[9]!;
+                let nz = x * nm[2]! + y * nm[6]! + z * nm[10]!;
                 const len = Math.hypot(nx, ny, nz) || 1;
                 nx /= len;
                 ny /= len;
@@ -425,15 +577,73 @@ export class AbstractMesh extends TransformNode {
                 newNormals[i + 2] = nz;
             }
         } else {
-            newNormals = computeFlatNormals(newPositions, indices);
+            newNormals = computeFlatNormals(newPositions, bakedIndices);
         }
 
-        resizeMeshGeometry(engine, this._lite, newPositions, newNormals, indices, lite._cpuUvs);
+        const tangents = this._lastTangents ?? lite._cpuTangents ?? undefined;
+        let newTangents: Float32Array | undefined;
+        if (tangents) {
+            newTangents = new Float32Array(tangents.length);
+            for (let i = 0; i < tangents.length; i += 4) {
+                const x = tangents[i]!,
+                    y = tangents[i + 1]!,
+                    z = tangents[i + 2]!;
+                let tx = x * m[0]! + y * m[4]! + z * m[8]!;
+                let ty = x * m[1]! + y * m[5]! + z * m[9]!;
+                let tz = x * m[2]! + y * m[6]! + z * m[10]!;
+                const len = Math.hypot(tx, ty, tz) || 1;
+                tx /= len;
+                ty /= len;
+                tz /= len;
+                newTangents[i] = tx;
+                newTangents[i + 1] = ty;
+                newTangents[i + 2] = tz;
+                newTangents[i + 3] = tangents[i + 3]!;
+            }
+        }
 
+        resizeMeshGeometry(
+            engine,
+            this._lite,
+            newPositions,
+            newNormals,
+            bakedIndices,
+            lite._cpuUvs,
+            this._lastUv2 ?? lite._cpuUv2s ?? undefined,
+            newTangents,
+            this._lastColors ?? lite._cpuColors ?? undefined
+        );
+        return true;
+    }
+
+    /**
+     * Babylon.js `mesh.bakeCurrentTransformIntoVertices()` — fold the node's local
+     * transform (position / rotation / scaling) into the CPU geometry via the shared
+     * {@link _bakeMatrix} helper, then reset the node transform to identity (the
+     * geometry now carries it).
+     */
+    public bakeCurrentTransformIntoVertices(): this {
+        const node = this._node;
+        const q = node.rotationQuaternion;
+        const matrix = Matrix.Compose(liteBackedVector3(node.scaling), { x: q.x, y: q.y, z: q.z, w: q.w }, liteBackedVector3(node.position));
+        if (!this._bakeMatrix(matrix)) {
+            return this;
+        }
         // Reset the node transform to identity (the geometry now carries it).
         node.position.set(0, 0, 0);
         node.rotation.set(0, 0, 0);
         node.scaling.set(1, 1, 1);
+        return this;
+    }
+
+    /**
+     * Babylon.js `mesh.bakeTransformIntoVertices(transform)` — fold an **arbitrary**
+     * matrix into the CPU geometry via the shared {@link _bakeMatrix} helper. Unlike
+     * {@link bakeCurrentTransformIntoVertices}, the node's own transform is **not**
+     * reset: the supplied matrix is independent of the node transform.
+     */
+    public bakeTransformIntoVertices(transform: Matrix): this {
+        this._bakeMatrix(transform);
         return this;
     }
 
@@ -464,6 +674,49 @@ export class Mesh extends AbstractMesh {
 
     public override getClassName(): string {
         return "Mesh";
+    }
+
+    /**
+     * @internal Wrap an already-loaded Lite mesh (or the loader's synthetic root
+     * node) as a canonical compat `Mesh`. Unlike the public constructor it does
+     * **not** re-insert the node into the scene (the loader already added the whole
+     * container) and does **not** override the natively-loaded material — it only
+     * adopts the existing Lite node. Used by the loader to give
+     * `AssetContainer.meshes` real, stable-identity mesh handles.
+     */
+    public static _fromLite(lite: LiteMesh, container?: LiteAssetContainer, scene?: Scene): Mesh {
+        const mesh = new Mesh(lite.name ?? "", lite);
+        mesh._container = container;
+        mesh._visible = lite.visible !== false;
+        if (scene) {
+            mesh._bindLoadedScene(scene);
+        }
+        return mesh;
+    }
+
+    /** @internal Wrap and link a complete Lite hierarchy, registering every wrapper. */
+    public static _fromLiteHierarchy(
+        lite: LiteMesh,
+        container?: LiteAssetContainer,
+        scene?: Scene,
+        registry: Map<unknown, Mesh> = new Map(),
+        parent: TransformNode | null = null
+    ): Mesh {
+        let wrapper = registry.get(lite) as Mesh | undefined;
+        if (!wrapper) {
+            wrapper = Mesh._fromLite(lite, container, scene);
+            registry.set(lite, wrapper);
+        } else if (scene) {
+            wrapper._bindLoadedScene(scene);
+        }
+        wrapper._adoptLoadedParent(parent);
+        const children = (lite as unknown as { children?: LiteMesh[] }).children;
+        if (children) {
+            for (const child of children) {
+                Mesh._fromLiteHierarchy(child, container, scene, registry, wrapper);
+            }
+        }
+        return wrapper;
     }
 
     private _morphTargetManager: MorphTargetManager | null = null;
@@ -538,14 +791,184 @@ export class Mesh extends AbstractMesh {
         }
     }
 
-    /** Deep mesh clone — not yet wrapped. */
-    public clone(): never {
-        return unsupported("Mesh.clone", "Mesh cloning is not yet wrapped in the compat layer.");
+    /**
+     * Babylon.js `mesh.clone(name, newParent?, doNotCloneChildren?)` — a new mesh
+     * that shares this mesh's geometry. Forwards to Lite's `cloneTransformNode`,
+     * which shares the `_gpu`/skeleton/morph/thin-instance resources with the clone
+     * under ref-counting (so both meshes own the buffers and they survive until the
+     * last is disposed). Babylon.js uses the requested name verbatim, derives clone
+     * IDs from that name plus the source ID, and prefixes descendant names with the
+     * root clone name. The source material is kept (BJS shares it by reference), and
+     * the clone is registered with the same compat scene through its own wrapper.
+     * An omitted or `null` `newParent` keeps the source parent.
+     * `doNotCloneChildren` drops the descendants Lite always clones.
+     */
+    public clone(name = "", newParent: Node | null = null, doNotCloneChildren?: boolean): Mesh {
+        const scene = this._scene;
+        const liteClone = cloneTransformNode(this._lite) as LiteMesh;
+        const wrappedClone = Mesh._wrapCloneHierarchy(this, liteClone, scene, null, doNotCloneChildren === true, name);
+        if (!(wrappedClone instanceof Mesh)) {
+            throw new Error("Mesh.clone produced a non-mesh root.");
+        }
+        const clone = wrappedClone;
+        if (scene) {
+            addPrimitive(clone, scene, doNotCloneChildren ? () => pruneClonedDescendants(scene, liteClone) : undefined);
+        }
+        const parent = newParent ?? this.parent;
+        if (parent) {
+            clone.parent = parent;
+        }
+        return clone;
+    }
+
+    private static _wrapCloneHierarchy(
+        source: Node | undefined,
+        lite: SceneNode,
+        scene: Scene | undefined,
+        parent: TransformNode | null,
+        skipChildren: boolean,
+        cloneName?: string
+    ): TransformNode {
+        if (cloneName !== undefined) {
+            lite.name = cloneName;
+        }
+        const isMesh = source instanceof Mesh || ("_gpu" in lite && "material" in lite);
+        const wrapper = isMesh ? new Mesh(lite.name ?? "", lite as LiteMesh) : new TransformNode(lite.name ?? "", scene, lite);
+        wrapper._container = (source as TransformNode | undefined)?._container;
+        if (wrapper instanceof Mesh) {
+            wrapper._scene = scene;
+            if (scene) {
+                scene._registerMesh(wrapper, lite);
+            }
+        }
+        wrapper.parent = parent;
+        if (source) {
+            wrapper.id = wrapper instanceof Mesh ? `${wrapper.name}.${source.id}` : wrapper.name;
+            wrapper.metadata = source.metadata;
+            wrapper.setEnabled(source.isEnabled(false));
+            if (wrapper instanceof Mesh && source instanceof Mesh) {
+                wrapper.material = source.material;
+                wrapper.isVisible = source.isVisible;
+            }
+        }
+        if (!skipChildren) {
+            const sourceLiteChildren = liteNodeOf(source ?? null)?.children ?? [];
+            const sourceChildren = source?.getChildren(undefined, true) ?? [];
+            for (let i = 0; i < lite.children.length; i++) {
+                const sourceLiteChild = sourceLiteChildren[i];
+                const sourceChild = sourceChildren.find((child) => liteNodeOf(child) === sourceLiteChild);
+                const childName = sourceChild ? `${wrapper.name}.${sourceChild.name}` : undefined;
+                Mesh._wrapCloneHierarchy(sourceChild, lite.children[i]!, scene, wrapper, false, childName);
+            }
+        }
+        return wrapper;
     }
 
     /** Level-of-detail — unsupported (no LOD system in Babylon Lite). */
     public addLODLevel(): never {
         return unsupported("Mesh.addLODLevel", "Level-of-detail is not implemented in Babylon Lite.");
+    }
+
+    /**
+     * Babylon.js `Mesh.MergeMeshes` — bake several meshes into one, transforming
+     * each source's geometry by its world matrix. Signature:
+     * `MergeMeshes(meshes, disposeSource?, allow32BitsIndices?, meshSubclass?, subdivideWithSubMeshes?, multiMultiMaterials?)`.
+     * Uses the compat-local `mergeMeshGeometry`; the merged mesh lives at
+     * identity (world transforms are baked in) and takes the first mesh's material.
+     *
+     * **Supported semantics** (everything else is rejected, never silently dropped):
+     * - `disposeSource` (default `true`) — source meshes are disposed after merge.
+     * - `allow32BitsIndices` — Lite indices are always uint32, so 32-bit is always
+     *   available. When `allow32BitsIndices` is falsy and the merged vertex count
+     *   reaches 65536, this returns `null`, exactly like Babylon.js.
+     * - Positions, normals (world-transformed) and one UV set are carried.
+     *
+     * **Rejected** (throws `LiteCompatError`): `multiMultiMaterials` /
+     * `subdivideWithSubMeshes` (Lite has no submesh / multi-material partitioning),
+     * a supplied `meshSubclass` target, and sources carrying vertex colours,
+     * tangents or a second UV set, or sources carrying skeleton, morph-target, or
+     * vertex-animation data (Lite would have to drop them).
+     */
+    public static MergeMeshes(
+        meshes: (Mesh | null | undefined)[],
+        disposeSource = true,
+        allow32BitsIndices?: boolean,
+        meshSubclass?: Mesh,
+        subdivideWithSubMeshes?: boolean,
+        multiMultiMaterials?: boolean
+    ): Mesh | null {
+        const sources = meshes.filter((m): m is Mesh => !!m);
+        if (sources.length === 0) {
+            return null;
+        }
+
+        if (multiMultiMaterials || subdivideWithSubMeshes) {
+            return unsupported(
+                "Mesh.MergeMeshes(multiMultiMaterials/subdivideWithSubMeshes)",
+                "Babylon Lite renders one material per mesh with no submesh partitioning, so multi-material / subdivided merges cannot be produced. Merge per-material groups into separate meshes instead."
+            );
+        }
+        if (meshSubclass) {
+            return unsupported(
+                "Mesh.MergeMeshes(meshSubclass)",
+                "Merging into an existing target mesh is not wrapped; the merge always returns a fresh mesh. Merge without a meshSubclass and use the result."
+            );
+        }
+
+        // Babylon.js: with 16-bit indices requested, a >= 65536-vertex result cannot
+        // be represented, so it returns null. Mirror that (Lite otherwise emits uint32).
+        if (!allow32BitsIndices) {
+            let totalVertices = 0;
+            for (const mesh of sources) {
+                totalVertices += mesh.getTotalVertices();
+                if (totalVertices >= 65536) {
+                    return null;
+                }
+            }
+        }
+
+        for (const mesh of sources) {
+            const lite = mesh._lite as {
+                _cpuColors?: unknown;
+                _cpuTangents?: unknown;
+                _cpuUv2s?: unknown;
+                skeleton?: unknown;
+                morphTargets?: unknown;
+                vat?: unknown;
+            };
+            if (lite._cpuColors || lite._cpuTangents || lite._cpuUv2s) {
+                return unsupported(
+                    "Mesh.MergeMeshes(colors/tangents/uv2)",
+                    `Mesh "${mesh.name}" carries vertex colours, tangents or a second UV set, which the merge does not carry. Strip those attributes before merging, or keep the meshes separate.`
+                );
+            }
+            if (lite.skeleton || lite.morphTargets || lite.vat) {
+                return unsupported(
+                    "Mesh.MergeMeshes(animation)",
+                    `Mesh "${mesh.name}" carries skeleton, morph-target, or vertex-animation data, which the merge does not carry. Bake the deformation before merging, or keep the meshes separate.`
+                );
+            }
+        }
+
+        const scene = sources[0]!.getScene();
+        if (!scene) {
+            return null;
+        }
+        const lite = mergeMeshGeometry(
+            scene.getEngine()._lite,
+            sources[0]!.name,
+            sources.map((m) => m._lite)
+        );
+        const merged = new Mesh(sources[0]!.name, lite, scene);
+        merged.material = sources[0]!.material;
+        addPrimitive(merged, scene);
+
+        if (disposeSource) {
+            for (const mesh of sources) {
+                mesh.dispose();
+            }
+        }
+        return merged;
     }
 }
 
@@ -677,8 +1100,11 @@ function engineOf(scene: Scene): EngineContext {
  * a mesh into a render group at add time, so we defer the add until engine start
  * (via `scene._deferAdd`) to let those assignments settle.
  */
-function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
+function addPrimitive(mesh: Mesh, scene: Scene, afterAdd?: () => void): Mesh {
     scene._deferAdd(() => {
+        if (mesh.isDisposed()) {
+            return;
+        }
         const mat = mesh.material;
         mat?._ensureRenderable(engineOf(scene));
         // Re-bind in case the material's Lite handle resolved late (async-parsed
@@ -687,8 +1113,23 @@ function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
             mesh._lite.material = mat._lite as never;
         }
         addToScene(scene._lite, mesh._lite);
+        afterAdd?.();
     });
     return mesh;
+}
+
+/**
+ * Drop the descendants Lite's `cloneTransformNode` always clones, for
+ * `mesh.clone(..., doNotCloneChildren = true)`. `addToScene` already registered
+ * them (it recurses into `children`), so `removeFromScene` here releases their
+ * shared, ref-counted GPU claims — the source keeps its buffers — and detaches
+ * them, leaving the clone a lone node with no leak.
+ */
+function pruneClonedDescendants(scene: Scene, liteClone: LiteMesh): void {
+    for (const child of [...liteClone.children]) {
+        removeFromScene(scene._lite, child as never);
+    }
+    liteClone.children.length = 0;
 }
 
 /** Babylon.js `MeshBuilder` — factory namespace for primitive meshes. */
@@ -822,6 +1263,20 @@ export const MeshBuilder = {
     CreateText(): never {
         return unsupported("MeshBuilder.CreateText", "Extruded font meshes are not implemented in Babylon Lite. For 2D/SDF text use the native `createTextRenderable` API.");
     },
+
+    CreateTiledBox(_name?: string, _options?: object, _scene?: Scene): never {
+        return unsupported(
+            "MeshBuilder.CreateTiledBox",
+            "Tiled box geometry is not implemented in Babylon Lite. Its per-face tile-pattern UV layout (tile size, alignment, per-tile flip/rotate patterns) is a non-trivial vertex-data generator with pattern design choices — not a mechanical addition — so it needs a Lite core mesh-builder decision."
+        );
+    },
+
+    CreateTiledPlane(_name?: string, _options?: object, _scene?: Scene): never {
+        return unsupported(
+            "MeshBuilder.CreateTiledPlane",
+            "Tiled plane geometry is not implemented in Babylon Lite. Its per-tile UV layout (tile size, alignment, per-tile flip/rotate patterns) is a non-trivial vertex-data generator with pattern design choices — not a mechanical addition — so it needs a Lite core mesh-builder decision."
+        );
+    },
 };
 
 // ── Standalone builder functions (Babylon.js `@babylonjs/core/Meshes/Builders/*`) ──
@@ -862,4 +1317,14 @@ export function CreateTorus(name: string, options: object, scene: Scene): Mesh {
 /** Babylon.js `CreateDisc(name, options, scene)` (discBuilder). */
 export function CreateDisc(name: string, options: object, scene: Scene): Mesh {
     return MeshBuilder.CreateDisc(name, options, scene);
+}
+
+/** Babylon.js `CreateTiledBox(name, options, scene)` (tiledBoxBuilder) — throwing stub (see `MeshBuilder.CreateTiledBox`). */
+export function CreateTiledBox(name?: string, options?: object, scene?: Scene): never {
+    return MeshBuilder.CreateTiledBox(name, options, scene);
+}
+
+/** Babylon.js `CreateTiledPlane(name, options, scene)` (tiledPlaneBuilder) — throwing stub (see `MeshBuilder.CreateTiledPlane`). */
+export function CreateTiledPlane(name?: string, options?: object, scene?: Scene): never {
+    return MeshBuilder.CreateTiledPlane(name, options, scene);
 }

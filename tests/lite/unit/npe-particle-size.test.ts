@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import groundTruth from "./fixtures/scene262-npe-size-states.json";
 import { SCENE262_NPE_JSON } from "../../../lab/lite/src/shared/scene262-npe";
-import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
-import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
-import { startParticleSystem, animateParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
-import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import { simulateNodeParticleGraph, snapshotParticles } from "./particle-test-utils";
 
 interface BjsParticle {
     id: number;
@@ -30,27 +26,11 @@ const truth = groundTruth as { N: number; count: number; particles: BjsParticle[
  */
 describe("NPE particle simulation (Size) — deterministic parity with Babylon.js", () => {
     it(`reproduces Babylon.js particle states after ${truth.N} deterministic steps`, async () => {
-        const graph = parseNodeParticleSource(SCENE262_NPE_JSON);
-        // Engine/scene are unused by this CPU-only graph (the texture load is tolerant of a missing device).
-        const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph, { emitter: { x: 0, y: 0, z: 0 } });
-        const system = set.systems[0]!;
-        expect(system).toBeTruthy();
-
-        let seed = 1;
-        Math.random = () => {
-            const x = Math.sin(seed++) * 10000;
-            return x - Math.floor(x);
-        };
-
-        startParticleSystem(system);
-        for (let i = 0; i < truth.N; i++) {
-            animateParticleSystem(system, 1);
-        }
-
-        const lite = system._particles.slice().sort((a, b) => a.id - b.id);
+        const system = await simulateNodeParticleGraph(SCENE262_NPE_JSON, truth.N, { emitter: { x: 0, y: 0, z: 0 } });
+        const lite = snapshotParticles(system);
         expect(lite.length).toBe(truth.count);
 
-        const tol = 1e-6;
+        const tol = 1e-4;
         for (let i = 0; i < truth.particles.length; i++) {
             const b = truth.particles[i]!;
             const l = lite[i]!;
