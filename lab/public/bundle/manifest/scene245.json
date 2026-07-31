@@ -1,6 +1,6 @@
 {
   "rawKB": 102.2,
-  "gzipKB": 43.7,
+  "gzipKB": 43.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene245-create-skeleton-B1d1Zvek.js",
@@ -8,7 +8,7 @@
     "scene245-generate-mipmaps-BiirLBBd.js",
     "scene245-gltf-animation-B2ts7voU.js",
     "scene245-gltf-feature-animations-DnWT-O_8.js",
-    "scene245-gltf-feature-registry-DkguMoOM.js",
+    "scene245-gltf-feature-registry-DbxNNkFg.js",
     "scene245-gltf-feature-skeleton-DWhCgmVK.js",
     "scene245-gltf-interleave-KM-jw4Ig.js",
     "scene245-gltf-json-asset-9bYm1ZAX.js",
@@ -16,12 +16,12 @@
     "scene245-gltf-share-CeStaSTa.js",
     "scene245-gltf-strided-attribute-CGKc0Sx6.js",
     "scene245-ibl-fragment-CeRrvT96.js",
-    "scene245-pbr-renderable-SF0TFbBn.js",
+    "scene245-pbr-renderable-BrZFTVJ4.js",
     "scene245-pbr-template-ext-CiHpOV5G.js",
     "scene245-rgbd-decode-EC97mNh4.js",
     "scene245-scene-uniforms-FTYH6Ct0.js",
-    "scene245-skeleton-fragment-CzW_7HrL.js",
+    "scene245-skeleton-fragment-z5wK1LIV.js",
     "scene245.js"
   ],
-  "rawBytes": 104648
+  "rawBytes": 104654
 }

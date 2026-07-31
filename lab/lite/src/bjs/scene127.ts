@@ -17,6 +17,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import "@babylonjs/core/Rendering/depthRendererSceneComponent";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
+import "@babylonjs/core/Materials/standardMaterial";
 
 const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_Believe.splat";
 

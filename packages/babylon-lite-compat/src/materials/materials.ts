@@ -9,7 +9,7 @@
  * material properties are intentionally omitted.
  */
 
-import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty, createSolidTexture2D } from "babylon-lite";
+import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty, createSolidTexture2D, rebuildMaterial } from "babylon-lite";
 import type { StandardMaterialProps, PbrMaterialProps, ClearCoatProps, SheenProps, AnisotropyProps, IridescenceProps, Texture2D, EngineContext } from "babylon-lite";
 
 import { Color3 } from "../math/color.js";
@@ -56,6 +56,21 @@ export abstract class Material {
         return "Material";
     }
 
+    /** The scene this material was constructed against (Babylon.js `Material.getScene`). */
+    public getScene(): Scene | undefined {
+        return this._scene;
+    }
+
+    /**
+     * The textures currently bound to this material (Babylon.js
+     * `Material.getActiveTextures`). The base material owns no texture slots, so
+     * this returns an empty array; each subclass overrides it to enumerate its own
+     * slots and those of its extensions.
+     */
+    public getActiveTextures(): BaseTexture[] {
+        return [];
+    }
+
     protected _markDirty(): void {
         markMaterialUboDirty(this._lite);
     }
@@ -69,11 +84,52 @@ export abstract class Material {
         // No-op for the base/standard material.
     }
 
+    /**
+     * @internal Adopt an owning scene discovered when the material is first assigned
+     * to a mesh (Babylon.js allows `new StandardMaterial(name)` with no scene, then
+     * `mesh.material = mat`). Needed so the texture-readiness path can reconcile the
+     * material into the running scene. Registers with the scene the first time.
+     */
+    public _adoptScene(scene: Scene): void {
+        if (!this._scene) {
+            this._scene = scene;
+            scene._registerMaterial(this);
+        }
+    }
+
+    /**
+     * @internal Reconcile this material into its scene when the scene is already
+     * live: finalize GPU-facing resources ({@link _ensureRenderable}) and rebuild
+     * the renderables of every mesh using it. A no-op before engine start (the
+     * boot-time build handles those meshes) or when the material has no scene.
+     * Shared by the mesh `material` setter and the texture-readiness callback.
+     */
+    public _refreshInScene(): void {
+        const scene = this._scene;
+        if (!scene?._hasStarted) {
+            return;
+        }
+        this._ensureRenderable(scene.getEngine()._lite);
+        rebuildMaterial(scene._lite, this._lite);
+    }
+
+    /**
+     * @internal Rebind + rebuild this material once an asynchronously loaded texture
+     * assigned to it becomes GPU-ready. Babylon.js `Texture`s load in the background,
+     * so a texture assigned to a material (or a material assigned to a mesh) before
+     * the load resolves must go back through the rebuild path once the handle exists.
+     * Fires immediately when the texture is already ready (then gated by scene state).
+     */
+    protected _watchTexture(texture: { _onReady?: (listener: () => void) => void } | null): void {
+        texture?._onReady?.(() => this._refreshInScene());
+    }
+
     public dispose(): void {
         // No GPU resources are owned by the props object directly; textures are
         // disposed through their own handles. Drop the material from its scene's
         // `scene.materials` registry.
         this._scene?._unregisterMaterial(this);
+        this._scene = undefined;
     }
 }
 
@@ -159,6 +215,7 @@ export class StandardMaterial extends PushMaterial {
     public set diffuseTexture(texture: BaseTexture | null) {
         this._diffuseTexture = texture;
         this._lite.diffuseTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        this._watchTexture(texture);
         this._markDirty();
     }
 
@@ -189,6 +246,7 @@ export class StandardMaterial extends PushMaterial {
     public set bumpTexture(texture: BaseTexture | null) {
         this._bumpTexture = texture;
         this._lite.bumpTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        this._watchTexture(texture);
         this._markDirty();
     }
 
@@ -198,12 +256,28 @@ export class StandardMaterial extends PushMaterial {
     public set emissiveTexture(texture: BaseTexture | null) {
         this._emissiveTexture = texture;
         this._lite.emissiveTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        this._watchTexture(texture);
         this._markDirty();
     }
 
     private _diffuseTexture: BaseTexture | null = null;
     private _bumpTexture: BaseTexture | null = null;
     private _emissiveTexture: BaseTexture | null = null;
+
+    /** Enumerate the standard-material texture slots that are bound (Babylon.js `getActiveTextures`). */
+    public override getActiveTextures(): BaseTexture[] {
+        const textures: BaseTexture[] = [];
+        if (this._diffuseTexture) {
+            textures.push(this._diffuseTexture);
+        }
+        if (this._bumpTexture) {
+            textures.push(this._bumpTexture);
+        }
+        if (this._emissiveTexture) {
+            textures.push(this._emissiveTexture);
+        }
+        return textures;
+    }
 
     /**
      * @internal Re-bind texture maps to the Lite material. Babylon.js `Texture`s
@@ -314,12 +388,25 @@ export class PBRSheenConfiguration {
         this._markDirty();
     }
 
-    /** Babylon.js `sheen.texture`. Binds the Lite handle if the texture has resolved. */
-    public set texture(value: { _lite?: Texture2D } | null) {
+    /** Babylon.js `sheen.texture`. Retains the wrapper and binds the Lite handle if the texture has resolved. */
+    public get texture(): BaseTexture | null {
+        return this._texture;
+    }
+    public set texture(value: BaseTexture | null) {
+        this._texture = value;
         if (value?._lite) {
             this._props.texture = value._lite;
-            this._markDirty();
+        } else {
+            delete this._props.texture;
         }
+        this._markDirty();
+    }
+
+    private _texture: BaseTexture | null = null;
+
+    /** Enumerate the sheen texture slot for `Material.getActiveTextures`. */
+    public getActiveTextures(): BaseTexture[] {
+        return this._texture ? [this._texture] : [];
     }
 }
 
@@ -407,6 +494,7 @@ export class PBRIridescenceConfiguration {
 export class PBRMaterial extends PushMaterial {
     /** @internal Underlying Babylon Lite PBR-material props. */
     public readonly _lite: PbrMaterialProps;
+    private _albedoFactor: Tuple4 = [1, 1, 1, 1];
 
     public constructor(name: string, scene?: Scene) {
         super(name, scene);
@@ -421,12 +509,11 @@ export class PBRMaterial extends PushMaterial {
     }
 
     public get albedoColor(): Color3 {
-        const f = this._lite.baseColorFactor;
-        return f ? new Color3(f[0], f[1], f[2]) : new Color3(1, 1, 1);
+        return new Color3(this._albedoFactor[0], this._albedoFactor[1], this._albedoFactor[2]);
     }
     public set albedoColor(value: Color3) {
-        const f: Tuple4 = this._lite.baseColorFactor ?? [1, 1, 1, 1];
-        this._lite.baseColorFactor = [value.r, value.g, value.b, f[3]];
+        this._albedoFactor = [value.r, value.g, value.b, this._albedoFactor[3]];
+        this._lite.baseColorFactor = [...this._albedoFactor];
         this._markDirty();
     }
 
@@ -440,10 +527,30 @@ export class PBRMaterial extends PushMaterial {
     }
     public set albedoTexture(texture: BaseTexture | null) {
         this._albedoTexture = texture;
+        this._watchTexture(texture);
         this._markDirty();
     }
 
     private _albedoTexture: BaseTexture | null = null;
+
+    /**
+     * Enumerate every bound PBR texture slot, including extension sub-configurations
+     * (Babylon.js `PBRMaterial.getActiveTextures`).
+     */
+    public override getActiveTextures(): BaseTexture[] {
+        const textures: BaseTexture[] = [];
+        if (this._albedoTexture) {
+            textures.push(this._albedoTexture);
+        }
+        const environmentTexture = this.environmentTexture;
+        if (environmentTexture) {
+            textures.push(environmentTexture);
+        }
+        if (this._sheen) {
+            textures.push(...this._sheen.getActiveTextures());
+        }
+        return textures;
+    }
 
     public get metallic(): number {
         return this._lite.metallicFactor ?? 1;
@@ -563,13 +670,16 @@ export class PBRMaterial extends PushMaterial {
      * environment (the dominant single-IBL case Babylon.js scenes use).
      */
     public get environmentTexture(): CubeTexture | HDRCubeTexture | null {
-        return this._scene?.environmentTexture ?? null;
+        return this._environmentTexture ?? this._scene?.environmentTexture ?? null;
     }
     public set environmentTexture(value: CubeTexture | HDRCubeTexture | null) {
+        this._environmentTexture = value;
         if (this._scene) {
             this._scene.environmentTexture = value;
         }
     }
+
+    private _environmentTexture: CubeTexture | HDRCubeTexture | null = null;
 
     public get reflectionTexture(): CubeTexture | HDRCubeTexture | null {
         return this.environmentTexture;
@@ -587,6 +697,7 @@ export class PBRMaterial extends PushMaterial {
         const albedo = this._albedoTexture as { _lite?: Texture2D; gammaSpace?: boolean } | null;
         if (albedo?._lite) {
             lite.baseColorTexture = albedo._lite;
+            lite.baseColorFactor = [...this._albedoFactor];
             lite.gammaAlbedo = albedo.gammaSpace ?? true;
         }
         // Babylon Lite's PBR pipeline samples baseColorTexture/ormTexture unconditionally,
@@ -594,7 +705,7 @@ export class PBRMaterial extends PushMaterial {
         // 1×1 solid textures. Bake the factors into the textures and neutralize the factors
         // so each contribution is applied exactly once.
         if (!lite.baseColorTexture) {
-            const f = lite.baseColorFactor ?? [1, 1, 1, 1];
+            const f = this._albedoFactor;
             lite.baseColorTexture = createSolidTexture2D(engine, f[0], f[1], f[2], f[3]);
             lite.baseColorFactor = [1, 1, 1, 1];
         }

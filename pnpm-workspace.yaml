@@ -8,6 +8,19 @@ packages:
 # Enforced natively by pnpm >= 10.16 during resolution.
 minimumReleaseAge: 10080
 
+# Narrow, temporary exception: @babylonjs 9.19.0 ships the upstream .pure-split
+# back-compat fixes (MeshBuilder legacy statics, glTF InstancedMesh side-effect,
+# WGSL UBO include chunks) that let us drop the per-scene reference workarounds.
+# These are first-party BabylonJS packages we track closely, so we opt them out
+# of the release-age gate to adopt the fix promptly. Remove this once the pinned
+# versions are older than the age window.
+minimumReleaseAgeExclude:
+  - '@babylonjs/core'
+  - '@babylonjs/loaders'
+  - '@babylonjs/materials'
+  - '@babylonjs/addons'
+  - babylonjs-gltf2interface
+
 # pnpm >= 10 does not run dependency build scripts unless they are explicitly
 # approved here. Only these packages ship native binaries that must build.
 allowBuilds:
@@ -15,16 +28,21 @@ allowBuilds:
   sharp: true
 
 overrides:
-  protobufjs: '>=7.6.3'
-  fast-uri: '>=3.1.2'
+  protobufjs: '>=8.6.6'
+  fast-uri: '>=4.1.1'
   basic-ftp: '>=5.3.1'
   tmp: '>=0.2.7'
   form-data: '>=4.0.6'
   ip-address: '>=10.1.1'
   uuid@<11.1.1: '>=11.1.1'
   qs: '>=6.15.2'
-  js-yaml: '>=4.2.0 <5.0.0'
-  brace-expansion: '>=5.0.6'
+  js-yaml: '>=4.3.0 <5.0.0'
+  brace-expansion: '>=5.0.8'
   picomatch: '>=4.0.4'
   '@protobufjs/utf8': '>=1.1.1'
-  dompurify: '>=3.4.11'
+  dompurify: '>=3.4.12'
+  linkify-it: '>=5.0.2'
+  postcss: '>=8.5.18'
+  sharp: '>=0.35.0'
+  '@typescript-eslint/utils': '>=8.65.0'
+  esbuild-wasm: '>=0.27.3 <0.28.0'

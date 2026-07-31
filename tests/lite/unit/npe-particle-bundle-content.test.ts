@@ -12,7 +12,7 @@ interface BundleInfo {
 
 const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
-const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 274];
+const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276];
 const UNUSED_FEATURE_CHUNK =
     /registry-(variants|extra-basic|extra-emitters|extra-values|local-shapes)|update-(direction|angle)-block|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 

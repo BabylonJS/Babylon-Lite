@@ -27,19 +27,9 @@ The design requirements are:
 ```ts
 function parseNodeParticleSource(source: unknown): ParticleGraph;
 
-function buildNodeParticleSet(
-    engine: EngineContext,
-    scene: SceneContext,
-    graph: ParticleGraph,
-    options?: BuildNodeParticleOptions
-): Promise<NodeParticleSet>;
+function buildNodeParticleSet(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
 
-function parseNodeParticleSetFromSnippet(
-    engine: EngineContext,
-    scene: SceneContext,
-    snippetId: string,
-    options?: ParseNodeParticleOptions
-): Promise<NodeParticleSet>;
+function parseNodeParticleSetFromSnippet(engine: EngineContext, scene: SceneContext, snippetId: string, options?: ParseNodeParticleOptions): Promise<NodeParticleSet>;
 
 function startParticleSystem(system: ParticleSystem): void;
 function stopParticleSystem(system: ParticleSystem): void;
@@ -149,17 +139,17 @@ The particle package owns no shader, material, render pipeline, bind group, or G
 
 `createParticleBuffer(capacity)` creates 21 columns, each with exactly `capacity` elements:
 
-| Field | Typed array | Meaning |
-| --- | --- | --- |
-| `posX`, `posY`, `posZ` | `Float32Array` | world render position |
-| `dirX`, `dirY`, `dirZ` | `Float32Array` | movement direction or velocity |
-| `age` | `Float64Array` | elapsed particle lifetime |
-| `lifeTime` | `Float64Array` | death threshold |
-| `id` | `Uint32Array` | spawn identity |
-| `size` | `Float32Array` | uniform particle size |
-| `angle` | `Float32Array` | billboard rotation |
-| `scaleX`, `scaleY` | `Float32Array` | per-axis size multipliers |
-| `colorR`, `colorG`, `colorB`, `colorA` | `Float32Array` | current render color |
+| Field                                                  | Typed array    | Meaning                        |
+| ------------------------------------------------------ | -------------- | ------------------------------ |
+| `posX`, `posY`, `posZ`                                 | `Float32Array` | world render position          |
+| `dirX`, `dirY`, `dirZ`                                 | `Float32Array` | movement direction or velocity |
+| `age`                                                  | `Float64Array` | elapsed particle lifetime      |
+| `lifeTime`                                             | `Float64Array` | death threshold                |
+| `id`                                                   | `Uint32Array`  | spawn identity                 |
+| `size`                                                 | `Float32Array` | uniform particle size          |
+| `angle`                                                | `Float32Array` | billboard rotation             |
+| `scaleX`, `scaleY`                                     | `Float32Array` | per-axis size multipliers      |
+| `colorR`, `colorG`, `colorB`, `colorA`                 | `Float32Array` | current render color           |
 | `colorStepR`, `colorStepG`, `colorStepB`, `colorStepA` | `Float32Array` | color change per lifetime unit |
 
 `ParticleColumn` is the union `Float64Array | Float32Array | Uint32Array | Uint16Array | Uint8Array | Int32Array`.
@@ -209,12 +199,12 @@ Live particles occupy the dense interval `[0, buffer.alive)`. `_all` starts with
 
 Twelve of the built-in `Float32Array` fields provide the standard NPE creation and rendering state:
 
-| State | Direct fields |
-| --- | --- |
-| Size | `size` |
-| Angle | `angle` |
-| Scale | `scaleX`, `scaleY` |
-| Color | `colorR`, `colorG`, `colorB`, `colorA` |
+| State      | Direct fields                                          |
+| ---------- | ------------------------------------------------------ |
+| Size       | `size`                                                 |
+| Angle      | `angle`                                                |
+| Scale      | `scaleX`, `scaleY`                                     |
+| Color      | `colorR`, `colorG`, `colorB`, `colorA`                 |
 | Color step | `colorStepR`, `colorStepG`, `colorStepB`, `colorStepA` |
 
 `CreateParticleBlock` initializes these fields for each birth, contextual and update blocks read or modify them, and `syncParticleBillboard` reads the render subset directly. They are part of every buffer because the primary runtime contract is a renderable NPE particle system.
@@ -279,21 +269,21 @@ interface ParticleSystem {
 
 `createParticleSystem(capacity)` is internal. It creates a fresh buffer and sets:
 
-| Field | Default |
-| --- | --- |
-| `emitRate` | `10` |
-| `updateSpeed` | `0.0167` |
-| `targetStopDuration` | `0` |
-| `blendMode` | `2` |
-| `texture` | `null` |
-| all eight `create*` slots | `null` |
-| `updateSteps` | `[]` |
-| `_scaledStep` | `0` |
-| `_emitPower` | `1` |
-| `_scaledUpdateSpeed` | `0` |
-| `_newPartsExcess` | `0` |
-| `_started`, `_stopped` | `false`, `false` |
-| `_actualFrame` | `0` |
+| Field                     | Default          |
+| ------------------------- | ---------------- |
+| `emitRate`                | `10`             |
+| `updateSpeed`             | `0.0167`         |
+| `targetStopDuration`      | `0`              |
+| `blendMode`               | `2`              |
+| `texture`                 | `null`           |
+| all eight `create*` slots | `null`           |
+| `updateSteps`             | `[]`             |
+| `_scaledStep`             | `0`              |
+| `_emitPower`              | `1`              |
+| `_scaledUpdateSpeed`      | `0`              |
+| `_newPartsExcess`         | `0`              |
+| `_started`, `_stopped`    | `false`, `false` |
+| `_actualFrame`            | `0`              |
 
 Optional internal fields are absent until a feature installs them.
 
@@ -328,12 +318,12 @@ For each dense slot, in ascending slot order:
 2. Write `age[i] = ageBefore + stepSpeed`.
 3. If the new age is greater than `lifeTime[i]`, compute:
 
-   ```ts
-   const diff = age[i] - ageBefore;
-   const remaining = lifeTime[i] - ageBefore;
-   stepSpeed = (remaining * stepSpeed) / diff;
-   age[i] = lifeTime[i];
-   ```
+    ```ts
+    const diff = age[i] - ageBefore;
+    const remaining = lifeTime[i] - ageBefore;
+    stepSpeed = (remaining * stepSpeed) / diff;
+    age[i] = lifeTime[i];
+    ```
 
 4. Assign the possibly shortened value to `_scaledStep`.
 5. Run every function in `updateSteps` in array order.
@@ -534,25 +524,25 @@ Scalar getters return a number. Vector and color getters generally fill one valu
 
 ### 8.2 Contextual particle sources
 
-| Id | Name | Return and behavior |
-| --- | --- | --- |
-| `0x0001` | Position | scratch `Vec3` from base position columns |
-| `0x0002` | Direction | scratch `Vec3` from base direction columns |
-| `0x0003` | Age | `number` from `age[i]` |
-| `0x0004` | Lifetime | `number` from `lifeTime[i]` |
-| `0x0005` | Color | scratch `Color4` from standard color columns |
-| `0x0006` | ScaledDirection | scratch `Vec3 = direction * system._scaledStep` |
-| `0x0007` | Scale | scratch `Vec2` from standard scale columns |
-| `0x0008` | AgeGradient | `age[i] / lifeTime[i]`, without a zero guard |
-| `0x0009` | Angle | `number` from the standard angle column |
-| `0x0013` | InitialColor | scratch `Color4`; requests four initial-color columns and wraps `createColorDead` to copy current color before invoking the captured step |
-| `0x0014` | ColorDead | scratch `Color4`; requests four dead-color columns and installs `_writeColorDead` |
-| `0x0015` | InitialDirection | scratch `Vec3`; normally requests three columns and wraps `createEmitPower` to copy direction before invoking the captured step |
-| `0x0016` | ColorStep | scratch `Color4` from standard color-step columns |
-| `0x0017` | ScaledColorStep | scratch `Color4 = colorStep * system._scaledUpdateSpeed` |
-| `0x0018` | LocalPositionUpdated | scratch world `Vec3` and a write to base position, as specified below |
-| `0x0019` | Size | `number` from the standard size column |
-| `0x0020` | DirectionScale | `number` equal to `system._scaledStep` |
+| Id       | Name                 | Return and behavior                                                                                                                       |
+| -------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `0x0001` | Position             | scratch `Vec3` from base position columns                                                                                                 |
+| `0x0002` | Direction            | scratch `Vec3` from base direction columns                                                                                                |
+| `0x0003` | Age                  | `number` from `age[i]`                                                                                                                    |
+| `0x0004` | Lifetime             | `number` from `lifeTime[i]`                                                                                                               |
+| `0x0005` | Color                | scratch `Color4` from standard color columns                                                                                              |
+| `0x0006` | ScaledDirection      | scratch `Vec3 = direction * system._scaledStep`                                                                                           |
+| `0x0007` | Scale                | scratch `Vec2` from standard scale columns                                                                                                |
+| `0x0008` | AgeGradient          | `age[i] / lifeTime[i]`, without a zero guard                                                                                              |
+| `0x0009` | Angle                | `number` from the standard angle column                                                                                                   |
+| `0x0013` | InitialColor         | scratch `Color4`; requests four initial-color columns and wraps `createColorDead` to copy current color before invoking the captured step |
+| `0x0014` | ColorDead            | scratch `Color4`; requests four dead-color columns and installs `_writeColorDead`                                                         |
+| `0x0015` | InitialDirection     | scratch `Vec3`; normally requests three columns and wraps `createEmitPower` to copy direction before invoking the captured step           |
+| `0x0016` | ColorStep            | scratch `Color4` from standard color-step columns                                                                                         |
+| `0x0017` | ScaledColorStep      | scratch `Color4 = colorStep * system._scaledUpdateSpeed`                                                                                  |
+| `0x0018` | LocalPositionUpdated | scratch world `Vec3` and a write to base position, as specified below                                                                     |
+| `0x0019` | Size                 | `number` from the standard size column                                                                                                    |
+| `0x0020` | DirectionScale       | `number` equal to `system._scaledStep`                                                                                                    |
 
 InitialColor captures the current `createColorDead` function when its getter is built. Its installed function copies standard RGBA into `initialColor.*` and then calls the captured function when non-null. ColorDead installs a writer that copies the supplied RGBA to `colorDead.*`; `CreateParticleBlock.createColorDead` invokes it before deriving standard color steps.
 
@@ -576,10 +566,10 @@ For a valid read, `step = 0` when `age[i] === 0`; otherwise `step = system._scal
 
 ### 8.4 System sources and timing
 
-| Id | Name | Return |
-| --- | --- | --- |
-| `1` | Time | `system._actualFrame` |
-| `2` | Delta | `system._scaledUpdateSpeed` |
+| Id  | Name    | Return                         |
+| --- | ------- | ------------------------------ |
+| `1` | Time    | `system._actualFrame`          |
+| `2` | Delta   | `system._scaledUpdateSpeed`    |
 | `3` | Emitter | the build-state emitter `Vec3` |
 
 Other ids throw `NodeParticle: unsupported system source <decimal id>` during build.
@@ -592,14 +582,14 @@ Delta is assigned before emit-rate evaluation and remains the full `updateSpeed 
 
 When both contextual and system source ids are zero, the block reads `serialized.type`, defaulting to Float `0x0002`:
 
-| Type id | Result |
-| --- | --- |
-| `0x0001` Int | numeric serialized value or `0` |
-| `0x0002` Float | numeric serialized value or `0` |
-| `0x0004` Vector2 | array components with missing entries `0` |
-| `0x0008` Vector3 | array components with missing entries `0` |
-| `0x0080` Color4 | array RGB with missing entries `0`, alpha with missing entry `1` |
-| any other id | numeric serialized value or `0` |
+| Type id          | Result                                                           |
+| ---------------- | ---------------------------------------------------------------- |
+| `0x0001` Int     | numeric serialized value or `0`                                  |
+| `0x0002` Float   | numeric serialized value or `0`                                  |
+| `0x0004` Vector2 | array components with missing entries `0`                        |
+| `0x0008` Vector3 | array components with missing entries `0`                        |
+| `0x0080` Color4  | array RGB with missing entries `0`, alpha with missing entry `1` |
+| any other id     | numeric serialized value or `0`                                  |
 
 Contextual source has precedence over system source, and system source has precedence over a constant. The block installs `output`.
 
@@ -643,15 +633,15 @@ This block captures the twelve standard buffer fields and installs six creation 
 
 Input defaults are:
 
-| Input | Default |
-| --- | --- |
-| `lifeTime` | `1` |
-| `emitPower` | `1` |
-| `color` | `{ r: 1, g: 1, b: 1, a: 1 }` |
+| Input       | Default                      |
+| ----------- | ---------------------------- |
+| `lifeTime`  | `1`                          |
+| `emitPower` | `1`                          |
+| `color`     | `{ r: 1, g: 1, b: 1, a: 1 }` |
 | `colorDead` | `{ r: 0, g: 0, b: 0, a: 0 }` |
-| `scale` | `{ x: 1, y: 1 }` |
-| `angle` | `0` |
-| `size` | `1` |
+| `scale`     | `{ x: 1, y: 1 }`             |
+| `angle`     | `0`                          |
+| `size`      | `1`                          |
 
 The slots are:
 
@@ -801,12 +791,12 @@ Defaults are `min = 0`, `max = 1`, and `lockMode = 1`. The draw function selects
 
 Lock modes are:
 
-| Mode | Behavior |
-| --- | --- |
-| `0` None | draw on every getter call |
-| `1` PerParticle | hold one `stored` value and one `currentLockId`; draw when `buffer.id[i]` differs from the id used by the immediately cached value. Consecutive reads for the same id share the value, but an A-B-A access order draws A twice |
-| `2` PerSystem | use lock id `0`; the first getter call draws and all calls share that value |
-| `3` OncePerParticle | use per-block typed-array id, valid, and Float64 component caches at particle slots; draw once for each particle id, including id zero and slot reuse |
+| Mode                | Behavior                                                                                                                                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `0` None            | draw on every getter call                                                                                                                                                                                                      |
+| `1` PerParticle     | hold one `stored` value and one `currentLockId`; draw when `buffer.id[i]` differs from the id used by the immediately cached value. Consecutive reads for the same id share the value, but an A-B-A access order draws A twice |
+| `2` PerSystem       | use lock id `0`; the first getter call draws and all calls share that value                                                                                                                                                    |
+| `3` OncePerParticle | use per-block typed-array id, valid, and Float64 component caches at particle slots; draw once for each particle id, including id zero and slot reuse                                                                          |
 
 Mode 3 scalar results use `value0`. Typed mode uses two, three, or four value columns according to the serialized value type and returns a reused Vector2, Vector3, or Color4 scratch value. Numeric modes outside 0 through 3 reach the ordinary evaluator but never satisfy its draw condition, so the initialized stored scalar `0` is returned. The block installs `output`.
 
@@ -857,17 +847,17 @@ Scalar values return scalars; vector and color values are copied into reused scr
 
 Defaults are `test = 0`, `epsilon = 0`, `left = 0`, `right = 0`, `ifTrue = 1`, and `ifFalse = 0`. It evaluates scalar left and right and lazily evaluates only the selected result getter.
 
-| Test | Id | Predicate |
-| --- | --- | --- |
-| Equal | `0` | `abs(left-right) <= epsilon` |
-| NotEqual | `1` | `abs(left-right) > epsilon` |
-| LessThan | `2` | `left < right + epsilon` |
-| GreaterThan | `3` | `left > right - epsilon` |
-| LessOrEqual | `4` | `left <= right + epsilon` |
-| GreaterOrEqual | `5` | `left >= right - epsilon` |
-| Xor | `6` | one operand truthy and the other falsy |
-| Or | `7` | either operand truthy |
-| And | `8` | both operands truthy |
+| Test           | Id  | Predicate                              |
+| -------------- | --- | -------------------------------------- |
+| Equal          | `0` | `abs(left-right) <= epsilon`           |
+| NotEqual       | `1` | `abs(left-right) > epsilon`            |
+| LessThan       | `2` | `left < right + epsilon`               |
+| GreaterThan    | `3` | `left > right - epsilon`               |
+| LessOrEqual    | `4` | `left <= right + epsilon`              |
+| GreaterOrEqual | `5` | `left >= right - epsilon`              |
+| Xor            | `6` | one operand truthy and the other falsy |
+| Or             | `7` | either operand truthy                  |
+| And            | `8` | both operands truthy                   |
 
 Unknown test ids select false. The block installs `output`.
 
@@ -891,14 +881,14 @@ The asynchronous load stores the resulting `Texture2D` on `system.texture`. Any 
 
 Configuration defaults are:
 
-| Serialized field | Default |
-| --- | --- |
-| `start` | `0` |
-| `end` | `0` |
-| `loop` | `true` |
-| `spriteCellChangeSpeed` | `1` |
-| `width`, `height` | `0` |
-| `randomStartCell` | non-random unless exactly `true` |
+| Serialized field        | Default                          |
+| ----------------------- | -------------------------------- |
+| `start`                 | `0`                              |
+| `end`                   | `0`                              |
+| `loop`                  | `true`                           |
+| `spriteCellChangeSpeed` | `1`                              |
+| `width`, `height`       | `0`                              |
+| `randomStartCell`       | non-random unless exactly `true` |
 
 The ordinary variant allocates `sprite.cellIndex`. Birth writes `startCellID`. Update computes:
 
@@ -960,14 +950,14 @@ It then creates a camera-facing billboard system with initial capacity `system.b
 
 Blend mapping is:
 
-| Particle `blendMode` | Billboard descriptor | Color factors | Alpha factors |
-| --- | --- | --- | --- |
-| `0` | `billboardBlendOneOne` | source `one`, destination `one` | source `one`, destination `one` |
-| `1` | `billboardBlendAlpha` | source `src-alpha`, destination `one-minus-src-alpha` | source `one`, destination `one-minus-src-alpha` |
-| `2` | `billboardBlendAdditive` | source `src-alpha`, destination `one` | source `one`, destination `one` |
-| `3` | `billboardBlendAdditive` | source `src-alpha`, destination `one` | source `one`, destination `one` |
-| `4` | `billboardBlendAdditive` | source `src-alpha`, destination `one` | source `one`, destination `one` |
-| any other number | `billboardBlendAdditive` | source `src-alpha`, destination `one` | source `one`, destination `one` |
+| Particle `blendMode` | Billboard descriptor     | Color factors                                         | Alpha factors                                   |
+| -------------------- | ------------------------ | ----------------------------------------------------- | ----------------------------------------------- |
+| `0`                  | `billboardBlendOneOne`   | source `one`, destination `one`                       | source `one`, destination `one`                 |
+| `1`                  | `billboardBlendAlpha`    | source `src-alpha`, destination `one-minus-src-alpha` | source `one`, destination `one-minus-src-alpha` |
+| `2`                  | `billboardBlendAdditive` | source `src-alpha`, destination `one`                 | source `one`, destination `one`                 |
+| `3`                  | `billboardBlendAdditive` | source `src-alpha`, destination `one`                 | source `one`, destination `one`                 |
+| `4`                  | `billboardBlendAdditive` | source `src-alpha`, destination `one`                 | source `one`, destination `one`                 |
+| any other number     | `billboardBlendAdditive` | source `src-alpha`, destination `one`                 | source `one`, destination `one`                 |
 
 Every blend operation is `add`. All mappings use the transparent billboard path.
 
@@ -1083,7 +1073,7 @@ The current unit categories are:
 
 - Buffer and lifecycle: base-only allocation, string-key column sharing, dense spawn/swap-remove, capacity, emission, integration, death clamp, and sprite-column math.
 - Build behavior: inline JSON, root reachability, detached-block isolation, two-field connection criteria, dynamic emit-rate laziness, and system-time reevaluation.
-- Canonical graph state: scenes 262, 263, 264, and 274; full Basic Properties; Size; Sphere; and deterministic/random-start sprite variants.
+- Canonical graph state: scenes 262, 263, 264, and 276; full Basic Properties; Size; Sphere; and deterministic/random-start sprite variants.
 - Change graphs: Size, Color, Speed, Angular Speed, multi-stop Angular Speed, Drag, Emit Rate, Lifetime, Start Size, and Speed Limit.
 - Emitters: Point, Box, Sphere, directed Sphere, Hemisphere, Cone, directed Cone, Cylinder, directed Cylinder, Mesh, rotated Cylinder, all six transformed local shapes, mesh vertex color, mesh InitialDirection, shared volatile bounds, and local source build/read guards.
 - Value correctness: shared-scratch Math, Lerp/Gradient endpoints, Random min/max aliasing, lock modes, Uint32 id edge cases, and capacity-bounded OncePerParticle caches.
@@ -1108,29 +1098,29 @@ Use conversion for graph extraction. The oracle's direct parse path does not pre
 
 All four Lite scenes seed after build, run 200 ratio-1 steps, synchronize one billboard, register the frozen scene, and use a black clear color.
 
-| Scene | Coverage | Camera | MAD ceiling | Raw ceiling |
-| --- | --- | --- | --- | --- |
-| 262 `scene262-npe-size` | Basic Properties - Size, Box | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)` | `0.01` | `44.1 KB` |
-| 263 `scene263-npe-sphere` | Sphere emitter | alpha `-pi/2`, beta `1.2`, radius `14`, target origin | `0.01` | `44.1 KB` |
-| 264 `scene264-npe-change-size` | Gradient, GradientValue, UpdateSize | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01` | `44.1 KB` |
-| 274 `scene274-npe-animations` | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30 | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)` | `0.01` | `45.0 KB` |
+| Scene                          | Coverage                                                                | Camera                                                     | MAD ceiling | Raw ceiling |
+| ------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------- | ----------- | ----------- |
+| 262 `scene262-npe-size`        | Basic Properties - Size, Box                                            | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)`  | `0.01`      | `44.1 KB`   |
+| 263 `scene263-npe-sphere`      | Sphere emitter                                                          | alpha `-pi/2`, beta `1.2`, radius `14`, target origin      | `0.01`      | `44.1 KB`   |
+| 264 `scene264-npe-change-size` | Gradient, GradientValue, UpdateSize                                     | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01`      | `44.1 KB`   |
+| 276 `scene276-npe-animations`  | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30 | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
 
 Each camera uses near plane `0.1` and far plane `100`. Each scene sets both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start.
 
-Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, and 264 invoke the shared golden-capture helper before opening the Lite page; specification 274 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all four scenes.
+Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, and 264 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all four scenes.
 
 ### 13.4 Bundle manifests and conditional content
 
 Current tracked measurements are:
 
-| Scene | Runtime raw | Runtime gzip | Ignored graph payload raw | Ceiling |
-| --- | ---: | ---: | ---: | ---: |
-| 262 | `39.7 KB` | `24.1 KB` | `28.5 KB` | `44.1 KB` |
-| 263 | `41.8 KB` | `24.7 KB` | `27.5 KB` | `44.1 KB` |
-| 264 | `40.0 KB` | `25.8 KB` | `34.4 KB` | `44.1 KB` |
-| 274 | `41.5 KB` | `25.2 KB` | `29.6 KB` | `45.0 KB` |
+| Scene | Runtime raw | Runtime gzip | Ignored graph payload raw |   Ceiling |
+| ----- | ----------: | -----------: | ------------------------: | --------: |
+| 262   |   `39.7 KB` |    `24.1 KB` |                 `28.5 KB` | `44.1 KB` |
+| 263   |   `41.8 KB` |    `24.7 KB` |                 `27.5 KB` | `44.1 KB` |
+| 264   |   `40.0 KB` |    `25.9 KB` |                 `34.4 KB` | `44.1 KB` |
+| 276   |   `41.5 KB` |    `25.2 KB` |                 `29.6 KB` | `45.0 KB` |
 
-Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, and 274 as sprite users because particles render through billboard sprite modules.
+Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, and 276 as sprite users because particles render through billboard sprite modules.
 
 The particle bundle-content test always requires a nonempty runtime chunk list for each of the four scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, direction/angle update, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 alone may fetch `npe-registry-extra-emitters` because it uses Sphere.
 
@@ -1248,18 +1238,18 @@ scene-config.json
 lab/lite/src/lite/scene262.ts
 lab/lite/src/lite/scene263.ts
 lab/lite/src/lite/scene264.ts
-lab/lite/src/lite/scene274.ts
+lab/lite/src/lite/scene276.ts
 lab/lite/src/shared/scene262-npe.ts
 lab/lite/src/shared/scene263-npe.ts
 lab/lite/src/shared/scene264-npe.ts
-lab/lite/src/shared/scene274-npe.ts
+lab/lite/src/shared/scene276-npe.ts
 lab/public/bundle/manifest/scene262.json
 lab/public/bundle/manifest/scene263.json
 lab/public/bundle/manifest/scene264.json
-lab/public/bundle/manifest/scene268.json
+lab/public/bundle/manifest/scene276.json
 tests/lite/parity/scenes/scene262-npe-size.spec.ts
 tests/lite/parity/scenes/scene263-npe-sphere.spec.ts
 tests/lite/parity/scenes/scene264-npe-change-size.spec.ts
-tests/lite/parity/scenes/scene274-npe-animations.spec.ts
+tests/lite/parity/scenes/scene276-npe-animations.spec.ts
 tests/lite/unit/npe-particle-bundle-content.test.ts
 ```

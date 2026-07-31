@@ -4,12 +4,12 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene205-_mat4-storage-f64-BubVEbOW.js",
-    "scene205-billboard-renderable-BPAUO8NI.js",
+    "scene205-billboard-renderable-BrVl82Ri.js",
     "scene205-floating-origin-BpHUAtCM.js",
     "scene205-pack-mat4-with-offset-BS-Lz8k7.js",
     "scene205-scene-uniforms-FTYH6Ct0.js",
-    "scene205-standard-renderable-CDCdgq3R.js",
+    "scene205-standard-renderable-BmvrsxXJ.js",
     "scene205.js"
   ],
-  "rawBytes": 63585
+  "rawBytes": 63588
 }
