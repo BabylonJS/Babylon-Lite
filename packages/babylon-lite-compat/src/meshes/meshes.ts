@@ -124,6 +124,11 @@ function computeFlatNormals(positions: Float32Array, indices: Uint32Array): Floa
     return normals;
 }
 
+/** @internal Return an attribute only when it has exactly one value tuple per vertex. */
+function matchingVertexAttribute(data: Float32Array | null | undefined, vertexCount: number, components: number): Float32Array | undefined {
+    return data?.length === vertexCount * components ? data : undefined;
+}
+
 /**
  * Babylon.js `TransformNode` — a positioned, rotated, scaled scene-graph node.
  * Wraps a Lite scene node (`_node`): either a standalone Lite transform node, or
@@ -420,25 +425,71 @@ export class AbstractMesh extends TransformNode {
             this._lastTangents = f32;
         }
         const positions = kind === "position" ? f32 : lite._cpuPositions;
-        const normals = kind === "normal" ? f32 : (lite._cpuNormals ?? computeFlatNormals(positions, lite._cpuIndices));
-        const uvs = kind === "uv" ? f32 : lite._cpuUvs;
+        const vertexCount = positions.length / 3;
+        const existingNormals = matchingVertexAttribute(lite._cpuNormals, vertexCount, 3);
+        const normals = kind === "normal" ? f32 : (existingNormals ?? computeFlatNormals(positions, lite._cpuIndices));
+        if (kind === "position") {
+            this._normalsFollowIndices = !existingNormals;
+        } else if (kind === "normal") {
+            this._normalsFollowIndices = false;
+        }
+        const existingUvs = matchingVertexAttribute(lite._cpuUvs, vertexCount, 2);
+        const uvs = kind === "uv" ? f32 : (existingUvs ?? (kind === "position" ? new Float32Array(vertexCount * 2) : undefined));
+        const uvs2 = kind === "uv2" ? f32 : matchingVertexAttribute(this._lastUv2 ?? lite._cpuUv2s, vertexCount, 2);
+        const tangents = matchingVertexAttribute(this._lastTangents ?? lite._cpuTangents, vertexCount, 4);
+        const colors = matchingVertexAttribute(this._lastColors ?? lite._cpuColors, vertexCount, 4);
+        resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, uvs2, tangents, colors);
+    }
+
+    /**
+     * Babylon.js `mesh.getIndices()` — read back the mesh's index (topology) buffer.
+     * Babylon Lite retains the indices on the mesh as a `Uint32Array` (for picking +
+     * device-loss recovery), so we return that directly; a mesh with no geometry
+     * returns `null`.
+     */
+    public getIndices(_copyWhenShared?: boolean, forceCopy?: boolean): Uint32Array | null {
+        const indices = this._lite._cpuIndices;
+        return indices ? (forceCopy ? indices.slice() : indices) : null;
+    }
+
+    /**
+     * Babylon.js `mesh.setIndices(indices)` — replace the mesh's index (topology)
+     * buffer. Babylon Lite re-uploads the geometry in place via `resizeMeshGeometry`,
+     * keeping the existing position/normal/uv/tangent/color attributes and swapping
+     * only the indices. Returns the mesh for chaining.
+     */
+    public setIndices(indices: number[] | Uint16Array | Uint32Array | Int32Array, _totalVertices?: number | null, _updatable?: boolean): this {
+        const engine = this._scene?.getEngine()._lite;
+        const lite = this._lite;
+        if (!engine || !lite._cpuPositions) {
+            return this;
+        }
+        const u32 = indices instanceof Uint32Array ? indices : Uint32Array.from(indices);
+        const positions = lite._cpuPositions;
+        const vertexCount = positions.length / 3;
+        const normals = this._normalsFollowIndices
+            ? computeFlatNormals(positions, u32)
+            : (matchingVertexAttribute(lite._cpuNormals, vertexCount, 3) ?? computeFlatNormals(positions, u32));
         resizeMeshGeometry(
             engine,
             this._lite,
             positions,
             normals,
-            lite._cpuIndices,
-            uvs,
-            this._lastUv2 ?? lite._cpuUv2s ?? undefined,
-            this._lastTangents ?? lite._cpuTangents ?? undefined,
-            this._lastColors ?? lite._cpuColors ?? undefined
+            u32,
+            matchingVertexAttribute(lite._cpuUvs, vertexCount, 2),
+            matchingVertexAttribute(this._lastUv2 ?? lite._cpuUv2s, vertexCount, 2),
+            matchingVertexAttribute(this._lastTangents ?? lite._cpuTangents, vertexCount, 4),
+            matchingVertexAttribute(this._lastColors ?? lite._cpuColors, vertexCount, 4)
         );
+        return this;
     }
 
     /** @internal Retained uv2/tangent/color buffers so successive `setVerticesData` (and a bake) keep them all. */
     private _lastUv2: Float32Array | undefined;
     private _lastTangents: Float32Array | undefined;
     private _lastColors: Float32Array | undefined;
+    /** @internal Position resizing generated normals from the old topology; regenerate after the next index update. */
+    private _normalsFollowIndices = false;
 
     /** Babylon.js `mesh.getTotalVertices()` — vertex count from the position buffer. */
     public getTotalVertices(): number {
