@@ -298,6 +298,9 @@ export class AbstractMesh extends TransformNode {
         if (renderMaterial?._lite) {
             this._lite.material = renderMaterial._lite as never;
         }
+        if (value && "_bindMesh" in value) {
+            value._bindMesh(this._lite, () => this._material === value);
+        }
     }
 
     public get isVisible(): boolean {

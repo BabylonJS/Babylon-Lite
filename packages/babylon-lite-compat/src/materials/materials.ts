@@ -56,6 +56,28 @@ export abstract class Material {
         return "Material";
     }
 
+    /**
+     * Babylon.js `Material.clone(name)` — return a deep copy of this material under
+     * a new name. Textures are **shared** by reference (matching Babylon.js), but the
+     * clone gets its **own** Babylon Lite renderable (a fresh `_buildGroup` / UBO from
+     * its factory) rather than aliasing the source's, so the two materials render and
+     * dirty-track independently. Each concrete subclass copies its own property set.
+     */
+    public abstract clone(name: string): Material;
+
+    /**
+     * @internal Copy the shared base + Lite data-property state onto a freshly
+     * constructed clone. The clone keeps the `_buildGroup`/UBO its own factory
+     * created (internal `_`-prefixed fields are never copied), so only the observable
+     * data properties — colours, scalars, and shared texture references — carry over.
+     */
+    protected _cloneBaseInto(target: Material): void {
+        copyLiteMaterialData(this._lite, target._lite);
+        target.transparencyMode = this.transparencyMode;
+        target.wireframe = this.wireframe;
+        target.backFaceCulling = this._backFaceCulling;
+    }
+
     /** The scene this material was constructed against (Babylon.js `Material.getScene`). */
     public getScene(): Scene | undefined {
         return this._scene;
@@ -142,6 +164,26 @@ export abstract class PushMaterial extends Material {
 
 function readColor3(tuple: Tuple3 | undefined): Color3 {
     return tuple ? new Color3(tuple[0], tuple[1], tuple[2]) : new Color3(0, 0, 0);
+}
+
+/**
+ * Copy the observable Babylon Lite material data-properties from `src` onto `dst`.
+ * `_`-prefixed internal fields (`_buildGroup`, `_uboVersion`, render-feature caches)
+ * are skipped so the clone keeps its own renderable state. Arrays (colour/UV tuples)
+ * are copied so mutating one material's colour does not alias the other; object
+ * values (texture handles) are shared by reference, matching Babylon.js clone
+ * semantics. Nested config objects (PBR clearcoat/sheen/…) are re-copied per-subclass.
+ */
+function copyLiteMaterialData(src: object, dst: object): void {
+    const s = src as Record<string, unknown>;
+    const d = dst as Record<string, unknown>;
+    for (const key of Object.keys(s)) {
+        if (key.startsWith("_")) {
+            continue;
+        }
+        const value = s[key];
+        d[key] = Array.isArray(value) ? value.slice() : value;
+    }
 }
 
 export class StandardMaterial extends PushMaterial {
@@ -302,6 +344,21 @@ export class StandardMaterial extends PushMaterial {
             this._lite.emissiveTexture = emissive._lite;
         }
         this._markDirty();
+    }
+
+    /**
+     * Babylon.js `StandardMaterial.clone(name)`. Copies the diffuse/specular/emissive/
+     * ambient colours and scalars, shares the diffuse/bump/emissive texture references,
+     * and gives the clone its own Lite standard-material renderable.
+     */
+    public override clone(name: string): StandardMaterial {
+        const cloned = new StandardMaterial(name, this._scene);
+        this._cloneBaseInto(cloned);
+        cloned.useAlphaFromDiffuseTexture = this.useAlphaFromDiffuseTexture;
+        cloned._diffuseTexture = this._diffuseTexture;
+        cloned._bumpTexture = this._bumpTexture;
+        cloned._emissiveTexture = this._emissiveTexture;
+        return cloned;
     }
 }
 
@@ -717,6 +774,46 @@ export class PBRMaterial extends PushMaterial {
             lite.metallicFactor = 1;
         }
     }
+
+    /**
+     * Babylon.js `PBRMaterial.clone(name)`. Copies the albedo/metallic/roughness/
+     * emissive state, shares the albedo texture reference, gives the clone independent
+     * clearcoat/sheen/anisotropy/iridescence sub-configurations (sharing any nested
+     * texture), and a fresh Lite PBR renderable.
+     */
+    public override clone(name: string): PBRMaterial {
+        const cloned = new PBRMaterial(name, this._scene);
+        this._clonePbrInto(cloned);
+        return cloned;
+    }
+
+    /**
+     * @internal Copy PBR-specific compat + Lite state onto a freshly constructed PBR
+     * clone (used by every `PBRMaterial` subclass so each returns its own concrete
+     * type). The base `_cloneBaseInto` shares the sub-config objects by reference; this
+     * re-copies them so the clone's `clearCoat`/`sheen`/… mutate independently while
+     * still sharing any nested texture handle.
+     */
+    protected _clonePbrInto(target: PBRMaterial): void {
+        this._cloneBaseInto(target);
+        target.forceIrradianceInFragment = this.forceIrradianceInFragment;
+        target._albedoFactor = [...this._albedoFactor];
+        target._albedoTexture = this._albedoTexture;
+        const src = this._lite;
+        const dst = target._lite;
+        if (src.clearCoat) {
+            dst.clearCoat = { ...src.clearCoat };
+        }
+        if (src.sheen) {
+            dst.sheen = { ...src.sheen };
+        }
+        if (src.anisotropy) {
+            dst.anisotropy = { ...src.anisotropy };
+        }
+        if (src.iridescence) {
+            dst.iridescence = { ...src.iridescence };
+        }
+    }
 }
 
 /**
@@ -734,6 +831,12 @@ export class PBRMetallicRoughnessMaterial extends PBRMaterial {
     }
     public set baseColor(value: Color3) {
         this.albedoColor = value;
+    }
+
+    public override clone(name: string): PBRMetallicRoughnessMaterial {
+        const cloned = new PBRMetallicRoughnessMaterial(name, this._scene);
+        this._clonePbrInto(cloned);
+        return cloned;
     }
 }
 
@@ -762,5 +865,11 @@ export class PBRSpecularGlossinessMaterial extends PBRMaterial {
     }
     public set glossiness(value: number) {
         this.roughness = 1 - value;
+    }
+
+    public override clone(name: string): PBRSpecularGlossinessMaterial {
+        const cloned = new PBRSpecularGlossinessMaterial(name, this._scene);
+        this._clonePbrInto(cloned);
+        return cloned;
     }
 }
