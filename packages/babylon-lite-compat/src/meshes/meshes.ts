@@ -27,11 +27,11 @@ import {
     createTube,
     createExtrudeShape,
     createTransformNode,
+    cloneTransformNode,
     setParent,
     setThinInstances,
     setThinInstanceColors,
     createMeshFromData,
-    cloneTransformNode,
     resizeMeshGeometry,
     updateMeshUvs,
     createGroundFromHeightMap,
@@ -792,29 +792,76 @@ export class Mesh extends AbstractMesh {
     }
 
     /**
-     * Babylon.js `mesh.clone(name?)` — deep-clone this mesh (and its child
-     * hierarchy) and add the copy to the same scene. Backed by Babylon Lite's
-     * `cloneTransformNode`, which shares the source's GPU geometry via ref-counting
-     * (the clone keeps the natively-loaded material). The cloned wrapper is a real
-     * compat `Mesh`, so it carries the full transform / visibility / dispose surface.
+     * Babylon.js `mesh.clone(name, newParent?, doNotCloneChildren?)` — a new mesh
+     * that shares this mesh's geometry. Forwards to Lite's `cloneTransformNode`,
+     * which shares the `_gpu`/skeleton/morph/thin-instance resources with the clone
+     * under ref-counting (so both meshes own the buffers and they survive until the
+     * last is disposed). Babylon.js uses the requested name verbatim, derives clone
+     * IDs from that name plus the source ID, and prefixes descendant names with the
+     * root clone name. The source material is kept (BJS shares it by reference), and
+     * the clone is registered with the same compat scene through its own wrapper.
+     * An omitted or `null` `newParent` keeps the source parent.
+     * `doNotCloneChildren` drops the descendants Lite always clones.
      */
-    public clone(name?: string): Mesh {
+    public clone(name = "", newParent: Node | null = null, doNotCloneChildren?: boolean): Mesh {
         const scene = this._scene;
-        if (!scene) {
-            return unsupported("Mesh.clone", "Cloning requires the source mesh to belong to a scene.");
+        const liteClone = cloneTransformNode(this._lite) as LiteMesh;
+        const wrappedClone = Mesh._wrapCloneHierarchy(this, liteClone, scene, null, doNotCloneChildren === true, name);
+        if (!(wrappedClone instanceof Mesh)) {
+            throw new Error("Mesh.clone produced a non-mesh root.");
         }
-        const liteClone = cloneTransformNode(this._lite) as unknown as LiteMesh;
-        if (name !== undefined) {
-            liteClone.name = name;
+        const clone = wrappedClone;
+        if (scene) {
+            addPrimitive(clone, scene, doNotCloneChildren ? () => pruneClonedDescendants(scene, liteClone) : undefined);
         }
-        const clone = Mesh._fromLiteHierarchy(liteClone, this._container, scene);
-        addToScene(scene._lite, liteClone);
-        // The Lite clone already shares the source material; also carry the compat
-        // material wrapper so `clone.material` mirrors the source's.
-        if (this.material) {
-            clone.material = this.material;
+        const parent = newParent ?? this.parent;
+        if (parent) {
+            clone.parent = parent;
         }
         return clone;
+    }
+
+    private static _wrapCloneHierarchy(
+        source: Node | undefined,
+        lite: SceneNode,
+        scene: Scene | undefined,
+        parent: TransformNode | null,
+        skipChildren: boolean,
+        cloneName?: string
+    ): TransformNode {
+        if (cloneName !== undefined) {
+            lite.name = cloneName;
+        }
+        const isMesh = source instanceof Mesh || ("_gpu" in lite && "material" in lite);
+        const wrapper = isMesh ? new Mesh(lite.name ?? "", lite as LiteMesh) : new TransformNode(lite.name ?? "", scene, lite);
+        wrapper._container = (source as TransformNode | undefined)?._container;
+        if (wrapper instanceof Mesh) {
+            wrapper._scene = scene;
+            if (scene) {
+                scene._registerMesh(wrapper, lite);
+            }
+        }
+        wrapper.parent = parent;
+        if (source) {
+            wrapper.id = wrapper instanceof Mesh ? `${wrapper.name}.${source.id}` : wrapper.name;
+            wrapper.metadata = source.metadata;
+            wrapper.setEnabled(source.isEnabled(false));
+            if (wrapper instanceof Mesh && source instanceof Mesh) {
+                wrapper.material = source.material;
+                wrapper.isVisible = source.isVisible;
+            }
+        }
+        if (!skipChildren) {
+            const sourceLiteChildren = liteNodeOf(source ?? null)?.children ?? [];
+            const sourceChildren = source?.getChildren(undefined, true) ?? [];
+            for (let i = 0; i < lite.children.length; i++) {
+                const sourceLiteChild = sourceLiteChildren[i];
+                const sourceChild = sourceChildren.find((child) => liteNodeOf(child) === sourceLiteChild);
+                const childName = sourceChild ? `${wrapper.name}.${sourceChild.name}` : undefined;
+                Mesh._wrapCloneHierarchy(sourceChild, lite.children[i]!, scene, wrapper, false, childName);
+            }
+        }
+        return wrapper;
     }
 
     /** Level-of-detail — unsupported (no LOD system in Babylon Lite). */
@@ -1053,7 +1100,7 @@ function engineOf(scene: Scene): EngineContext {
  * a mesh into a render group at add time, so we defer the add until engine start
  * (via `scene._deferAdd`) to let those assignments settle.
  */
-function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
+function addPrimitive(mesh: Mesh, scene: Scene, afterAdd?: () => void): Mesh {
     scene._deferAdd(() => {
         if (mesh.isDisposed()) {
             return;
@@ -1066,8 +1113,23 @@ function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
             mesh._lite.material = mat._lite as never;
         }
         addToScene(scene._lite, mesh._lite);
+        afterAdd?.();
     });
     return mesh;
+}
+
+/**
+ * Drop the descendants Lite's `cloneTransformNode` always clones, for
+ * `mesh.clone(..., doNotCloneChildren = true)`. `addToScene` already registered
+ * them (it recurses into `children`), so `removeFromScene` here releases their
+ * shared, ref-counted GPU claims — the source keeps its buffers — and detaches
+ * them, leaving the clone a lone node with no leak.
+ */
+function pruneClonedDescendants(scene: Scene, liteClone: LiteMesh): void {
+    for (const child of [...liteClone.children]) {
+        removeFromScene(scene._lite, child as never);
+    }
+    liteClone.children.length = 0;
 }
 
 /** Babylon.js `MeshBuilder` — factory namespace for primitive meshes. */

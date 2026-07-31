@@ -35,11 +35,12 @@ interface FakeLite {
     children: FakeLite[];
     visible?: boolean;
     _gpu?: object;
+    material?: object;
 }
 
 /** A renderable Lite mesh node (carries `_gpu`). */
 function liteMesh(name: string): FakeLite {
-    return { name, children: [], visible: true, _gpu: {} };
+    return { name, children: [], visible: true, _gpu: {}, material: {} };
 }
 
 /** The loader's synthetic `__root__` transform node (no `_gpu`, parents the meshes). */
@@ -51,7 +52,17 @@ function liteRoot(children: FakeLite[]): FakeLite {
 function fakeScene(): { scene: Scene; registered: unknown[] } {
     const registered: unknown[] = [];
     const scene = {
-        _lite: {},
+        _lite: {
+            _frameGraph: { _tasks: [] },
+            _meshDisposables: new Map(),
+            _meshAuxDisposables: new Map(),
+            meshes: [],
+            _renderables: [],
+            _renderableVersion: 0,
+            _groups: new Map(),
+            _materialSwapQueue: [],
+            surface: { engine: {} },
+        },
         _deferAdd: (add: () => void) => add(),
         _registerMesh: (mesh: unknown) => registered.push(mesh),
         _unregisterNode: (mesh: unknown) => {
