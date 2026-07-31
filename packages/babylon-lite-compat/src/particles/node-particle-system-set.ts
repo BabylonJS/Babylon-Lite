@@ -117,6 +117,7 @@ export class NodeParticleSystemSet {
      * the recorded snippet id or inline JSON).
      */
     public async buildAsync(scene: Scene, _verbose = false): Promise<ParticleSystemSet> {
+        void _verbose;
         const engine = scene.getEngine()._lite;
         const liteSet =
             this._snippetId !== null
@@ -163,6 +164,7 @@ export class NodeParticleSystemSet {
 
     /** Babylon.js `NodeParticleSystemSet.CreateDefault(name)`. Requires programmatic block authoring — not backed. */
     public static CreateDefault(_name: string): NodeParticleSystemSet {
+        void _name;
         return unsupported(
             "NodeParticleSystemSet.CreateDefault",
             "Babylon Lite consumes a serialized node-particle graph (snippet id or JSON); it has no programmatic block-authoring API to assemble a default graph. Load a graph via `Parse` / `ParseFromSnippetAsync` instead."
@@ -177,6 +179,7 @@ export class NodeParticleSystemSet {
     }
 
     public getBlockByName(_name: string): never {
+        void _name;
         return unsupported("NodeParticleSystemSet.getBlockByName", "Babylon Lite exposes no programmatic node-particle block graph to query.");
     }
 
