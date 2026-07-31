@@ -35,11 +35,12 @@ interface FakeLite {
     children: FakeLite[];
     visible?: boolean;
     _gpu?: object;
+    material?: object;
 }
 
 /** A renderable Lite mesh node (carries `_gpu`). */
 function liteMesh(name: string): FakeLite {
-    return { name, children: [], visible: true, _gpu: {} };
+    return { name, children: [], visible: true, _gpu: {}, material: {} };
 }
 
 /** The loader's synthetic `__root__` transform node (no `_gpu`, parents the meshes). */
