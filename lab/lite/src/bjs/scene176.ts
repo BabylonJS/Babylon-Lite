@@ -19,7 +19,6 @@ import { CubeTexture } from "@babylonjs/core/Materials/Textures/cubeTexture";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/loaders/glTF";
-import "@babylonjs/core/Materials/Textures/baseTexture.polynomial";
 
 const MODEL_ROOT = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Models@master/2.0/MosquitoInAmber/glTF/";
 const MODEL_FILE = "MosquitoInAmber.gltf";

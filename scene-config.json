@@ -1685,7 +1685,7 @@
         "id": 176,
         "slug": "scene176-mosquito-amber",
         "skipParity": true,
-        "skipParityReason": "Diffuse-IBL brightness fixed (BJS reference now imports baseTexture.polynomial to register cubemap->SH). Remaining parity gap is unrelated: HDR skybox gradient banding/moiré + KHR_materials_transmission amber tint. Needs a separate skybox/transmission parity fix.",
+        "skipParityReason": "Not a diffuse-IBL brightness issue (studio.env carries embedded SH, so the scene17/19 baseTexture.polynomial fix does not apply here). Residual parity gap is a genuine Lite-vs-BJS difference: HDR skybox gradient banding/moiré + KHR_materials_transmission amber tint. Needs a separate skybox/transmission parity fix.",
         "name": "Scene 176 - MosquitoInAmber",
         "maxMad": 0.5,
         "maxRawKB": 104.57,
