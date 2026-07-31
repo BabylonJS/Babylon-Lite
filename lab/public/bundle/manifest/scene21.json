@@ -1,6 +1,6 @@
 {
-  "rawKB": 86.1,
-  "gzipKB": 35.4,
+  "rawKB": 86.3,
+  "gzipKB": 35.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene21-background-hdr-skybox-CfN-gxQH.js",
@@ -8,11 +8,11 @@
     "scene21-generate-mipmaps-CfM7UHZZ.js",
     "scene21-gltf-glb-parser-DF3kRg-R.js",
     "scene21-ibl-fragment-CeRrvT96.js",
-    "scene21-pbr-renderable-DynbkTrY.js",
+    "scene21-pbr-renderable-DZq16tAu.js",
     "scene21-rgbd-decode-Btjg7lXq.js",
     "scene21-scene-uniforms-FTYH6Ct0.js",
     "scene21-sheen-fragment-_mQhtdZq.js",
     "scene21.js"
   ],
-  "rawBytes": 88155
+  "rawBytes": 88375
 }

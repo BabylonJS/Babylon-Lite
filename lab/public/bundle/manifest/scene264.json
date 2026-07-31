@@ -1,6 +1,5 @@
 {
   "rawKB": 40,
-  "rawBytes": 40943,
   "gzipKB": 25.9,
   "ignoredRawKB": 34.4,
   "runtimeChunks": [
@@ -25,5 +24,6 @@
     "scene264-update-position-block-DQ-fau8B.js",
     "scene264-update-size-block-BNfghVaW.js",
     "scene264.js"
-  ]
+  ],
+  "rawBytes": 40943
 }

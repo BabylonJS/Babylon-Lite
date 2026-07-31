@@ -1,6 +1,5 @@
 {
   "rawKB": 43.4,
-  "rawBytes": 44464,
   "gzipKB": 17.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,5 +7,6 @@
     "scene274-shader-renderable-iT2TqeKr.js",
     "scene274-uniform-copy-batch-BHris-Ik.js",
     "scene274.js"
-  ]
+  ],
+  "rawBytes": 44464
 }

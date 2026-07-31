@@ -1,6 +1,5 @@
 {
   "rawKB": 80.9,
-  "rawBytes": 82847,
   "gzipKB": 33.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -11,5 +10,6 @@
     "scene273-singlelight-hemispheric-wgsl-urd_wPyK.js",
     "scene273-standard-renderable-CE94kyFw.js",
     "scene273.js"
-  ]
+  ],
+  "rawBytes": 82847
 }

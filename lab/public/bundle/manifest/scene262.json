@@ -1,6 +1,5 @@
 {
   "rawKB": 39.7,
-  "rawBytes": 40690,
   "gzipKB": 24.1,
   "ignoredRawKB": 28.5,
   "runtimeChunks": [
@@ -20,5 +19,6 @@
     "scene262-update-color-block-D3_45s5M.js",
     "scene262-update-position-block-DQ-fau8B.js",
     "scene262.js"
-  ]
+  ],
+  "rawBytes": 40690
 }
