@@ -41,7 +41,6 @@ import {
     CreateTexture2DArrayFromKTX2Async,
 } from "../src/textures/raw-texture-2d-array";
 import { BaseTexture } from "../src/textures/textures";
-import { LiteCompatError } from "../src/error";
 import { AbstractEngine } from "../src/engine/engine";
 import { Constants } from "../src/misc/engine-constants";
 
@@ -278,15 +277,5 @@ describe("CreateTexture2DArrayFromKTX2Async", () => {
         } finally {
             fetchSpy.mockRestore();
         }
-    });
-});
-
-describe("CreateTexture2DArrayFromKTX2Async", () => {
-    // Justified throwing stub: Lite's KTX2 decoder models single-image 2D textures
-    // only (no per-array-layer RGBA output), and adding a multi-layer decode path
-    // means changing the bundled `ktx2-loader.ts` — a Lite-core design task, not a
-    // mechanical compat addition. See the 🔧 Needs Lite core row in COMPAT-STATUS.
-    it("rejects with a LiteCompatError until Lite exposes a multi-layer KTX2 decode", async () => {
-        await expect(CreateTexture2DArrayFromKTX2Async(fakeScene() as never, "atlas.ktx2")).rejects.toBeInstanceOf(LiteCompatError);
     });
 });
