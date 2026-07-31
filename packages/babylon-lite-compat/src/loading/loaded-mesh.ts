@@ -1,101 +1,70 @@
 /**
- * Lightweight handles for meshes produced by the loaders (`ImportMeshAsync` etc.).
+ * Canonical, stable-identity compat wrappers for the meshes a loader produces.
  *
- * Babylon.js loaders return a flat `meshes` array whose entries expose
- * `getBoundingInfo()` (with min/max), `refreshBoundingInfo()`, and
- * `getVerticesData()` — used by scenes to frame a camera around a loaded model.
- * Babylon Lite returns a root-node hierarchy; the tree-shakeable
- * `getContainerMeshes` helper flattens it to its renderable `Mesh` nodes, which we
- * wrap here.
+ * Babylon.js loaders return a flat `meshes` array of real `AbstractMesh` objects
+ * (with the synthetic `__root__` at index 0) that apps routinely post-process —
+ * reparent, clone, toggle `isVisible`/`setEnabled`, dispose. Babylon Lite returns
+ * a root-node hierarchy. We reconstruct that hierarchy as canonical compat
+ * `Mesh` wrappers, then flatten the wrappers in hierarchy order so the full
+ * transform / visibility / clone / dispose surface is available rather than a
+ * stripped read-only handle.
  *
- * Bounds are reported in the node's **local** geometry space (`mesh.boundMin` /
- * `mesh.boundMax`), matching how Babylon Lite's own `createDefaultCamera` frames
- * loaded models — it reads the same local bounds without applying the node world
- * matrix, and the renderer (notably for skinned meshes) draws at that same local
- * scale. Returning world-transformed bounds here would make the camera-framing
- * math in model-viewer scenes disagree with the Lite render.
+ * **Stable identity.** The wrappers are memoized per Lite node in a registry the
+ * `AssetContainer` owns, so `container.meshes[0] === container.meshes[0]` and the
+ * same handle is shared with `scene.meshes` — matching Babylon.js, where a loaded
+ * mesh is a single canonical object.
+ *
+ * The wrappers never re-insert into the scene (the loader already added the whole
+ * container) and never override the natively-loaded material (`Mesh._fromLite`
+ * adopts the Lite node as-is). Bounds are reported in the node's **local**
+ * geometry space (`AbstractMesh.getBoundingInfo`), matching how Babylon Lite's own
+ * `createDefaultCamera` frames loaded models.
  */
 
-import { getContainerMeshes } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
-import { Vector3 } from "../math/vector.js";
-import { BoundingInfo } from "../culling/bounding.js";
+import { Mesh } from "../meshes/meshes.js";
+import type { Scene } from "../scene/scene.js";
+
+/** @internal Per-node wrapper cache giving loaded meshes stable identity across `.meshes` reads. */
+export type LoadedMeshRegistry = Map<unknown, Mesh>;
 
 /**
- * A Babylon.js-shaped handle over a single loaded Babylon Lite mesh. Exposes the
- * subset used by model-framing scenes: local bounding info, vertex data, and name.
- */
-export class LoadedMesh {
-    public readonly name: string;
-    private readonly _mesh: LiteMesh;
-    /** @internal The asset container this mesh was loaded from (for `KHR_materials_variants`). */
-    public readonly _container: LiteAssetContainer | undefined;
-
-    public constructor(mesh: LiteMesh, container?: LiteAssetContainer) {
-        this._mesh = mesh;
-        this.name = mesh.name ?? "";
-        this._container = container;
-    }
-
-    /** @internal The underlying Babylon Lite mesh (e.g. for the navmesh wrapper's geometry merge). */
-    public get _lite(): LiteMesh {
-        return this._mesh;
-    }
-
-    /** Babylon.js `refreshBoundingInfo()` — bounds are read on demand, so this is a no-op. */
-    public refreshBoundingInfo(_options?: unknown): LoadedMesh {
-        return this;
-    }
-
-    /** Babylon.js `getBoundingInfo()` — local-space AABB of this mesh (see module note). */
-    public getBoundingInfo(): BoundingInfo {
-        const lo = this._mesh.boundMin;
-        const hi = this._mesh.boundMax;
-        if (lo && hi) {
-            return new BoundingInfo(new Vector3(lo[0], lo[1], lo[2]), new Vector3(hi[0], hi[1], hi[2]));
-        }
-        return new BoundingInfo(new Vector3(0, 0, 0), new Vector3(0, 0, 0));
-    }
-
-    /** Babylon.js `getVerticesData(kind)` — CPU position buffer (positions only). */
-    public getVerticesData(kind: string): Float32Array | null {
-        const positions = this._mesh._cpuPositions;
-        return kind === "position" ? (positions ?? null) : null;
-    }
-
-    /** Babylon.js `getTotalVertices()`. */
-    public getTotalVertices(): number {
-        const positions = this._mesh._cpuPositions;
-        return positions ? positions.length / 3 : 0;
-    }
-}
-
-/**
- * Wrap every renderable mesh in a loaded Babylon Lite asset container as a
- * `LoadedMesh`, matching the flat `meshes` array Babylon.js loaders return.
+ * Wrap every node a loaded Babylon Lite asset container exposes as a canonical
+ * compat `Mesh`, reusing the cached wrapper for a node when one already exists (so
+ * repeated reads return identical handles). When a `scene` is supplied, each
+ * wrapper is bound to it (surfaced through `scene.meshes` and given scene-aware
+ * disposal).
  *
- * Babylon.js loaders place a synthetic `__root__` transform node at
- * `result.meshes[0]` (the renderable meshes follow it). Babylon Lite builds the
- * same `__root__` (`entities[0]` for glTF) but `getContainerMeshes` returns only
- * renderable meshes. Prepend that root so index-based access (`result.meshes[1]`,
- * used by the navigation scenes) lines up with Babylon.js.
+ * Babylon.js places a synthetic `__root__` transform node at `result.meshes[0]`
+ * (the renderable meshes follow it). Babylon Lite builds the same root
+ * (`entities[0]` for glTF) but `getContainerMeshes` returns only renderable
+ * meshes, so we prepend that root at index 0 to mirror Babylon.js — as a real,
+ * non-renderable `Mesh`, exactly as Babylon.js's `__root__` is a `Mesh`.
  */
-export function collectLoadedMeshes(container: LiteAssetContainer): LoadedMesh[] {
-    const renderable = getContainerMeshes(container);
-    const result: LoadedMesh[] = [];
-    // The glTF loader's root is a transform node (no GPU geometry) that parents the
-    // renderable meshes — include it at index 0 to mirror Babylon.js `__root__`.
-    // Detected as a non-renderable entity that has a `children` array (lights, which
-    // BJS `meshes` excludes, are leaf nodes without one).
-    for (const entity of container.entities) {
-        const node = entity as unknown as { _gpu?: unknown; children?: unknown[] };
-        if (!node._gpu && Array.isArray(node.children) && !renderable.includes(entity as unknown as LiteMesh)) {
-            result.push(new LoadedMesh(entity as unknown as LiteMesh, container));
+export function collectLoadedMeshes(container: LiteAssetContainer, registry: LoadedMeshRegistry, scene?: Scene): Mesh[] {
+    const result: Mesh[] = [];
+    const visited = new Set<unknown>();
+    const visit = (node: unknown, parent: Mesh | null): void => {
+        if (visited.has(node)) {
+            return;
         }
-    }
-    for (const mesh of renderable) {
-        result.push(new LoadedMesh(mesh, container));
+        const lite = node as { _gpu?: unknown; children?: unknown[] };
+        if (!lite._gpu && !Array.isArray(lite.children)) {
+            return;
+        }
+        visited.add(node);
+        let wrapper = registry.get(node);
+        if (!wrapper || (scene && wrapper.getScene() !== scene)) {
+            wrapper = Mesh._fromLiteHierarchy(node as LiteMesh, container, scene, registry, parent);
+        }
+        result.push(wrapper);
+        for (const child of lite.children ?? []) {
+            visit(child, wrapper);
+        }
+    };
+    for (const entity of container.entities) {
+        visit(entity, null);
     }
     return result;
 }

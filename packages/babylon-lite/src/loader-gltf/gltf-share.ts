@@ -28,6 +28,9 @@ export async function share(
         const active = activeNodes.has(m._nodeIndex);
         const source = active ? geometryCache.get(m._primitive) : undefined;
         const mesh = m._vb ? interleave!.buildInterleavedMesh(engine, m, i, material, meshName, source) : buildTightMesh(engine, m, material, meshName, source);
+        // Same authored-winding marker the non-shared path sets in load-gltf.ts: glTF geometry is
+        // authored for the negative-determinant space created by the RH→LH `__root__` flip.
+        mesh._authoredSign = -1;
 
         if (source) {
             _installSharedRecovery(source._gpu);

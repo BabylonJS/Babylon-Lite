@@ -11,7 +11,8 @@ import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "../scene/world-matrix-state.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { eulerToQuat, createEulerProxy } from "../scene/scene-node.js";
+import { createEulerProxy } from "../scene/scene-node.js";
+import { eulerToQuat } from "../math/quat-euler.js";
 
 // ─── Mesh GPU Geometry ───────────────────────────────────────────────
 
@@ -102,6 +103,8 @@ export interface Mesh extends SceneNode {
     vat?: VatData | null;
     /** Morph target GPU data. Type-only — no module dependency. */
     morphTargets?: MorphTargetData | null;
+    /** @internal Route this thin-instanced mesh through scene-local runtime materialization. */
+    _runtimeThinBuild?: (scene: import("../scene/scene-core.js").SceneContext, mesh: Mesh, pending?: Promise<void>) => Promise<void>;
     /** User-controlled render order. Lower = drawn first within phase.
      *  Only affects ordering within the opaque or transparent phase. */
     renderOrder?: number;
@@ -129,6 +132,20 @@ export interface Mesh extends SceneNode {
 
     /** @internal */
     _gpu: MeshGPU;
+    /** @internal Set by `disposeMeshGpu`: this mesh released its claim on every GPU resource it
+     *  owned and is retired for good. Buffers whose last claim went away are already destroyed;
+     *  surviving ones now belong to their remaining owners only. Either way the mesh must never
+     *  re-enter a scene — it would draw with dead handles, or release a second claim it no longer
+     *  holds and free buffers a sibling still renders with. `addToScene` rejects it, repeat
+     *  `disposeMeshGpu` calls are no-ops (so the idempotent `removeFromScene` stays idempotent),
+     *  and `cloneTransformNode` refuses it — cloning retired geometry is the same bug wearing a
+     *  new name, and the clone's claims could never be released. */
+    _disposed?: boolean;
+    /** @internal Sign of the world-matrix 3x3 determinant the geometry's triangle winding was
+     *  authored for. Procedural meshes default to `+1`; the glTF loader marks its meshes `-1`
+     *  because they live under the RH→LH `__root__` flip. `enableMirroredMeshes()` reverses winding
+     *  whenever a mesh's current world determinant sign disagrees with this. */
+    _authoredSign?: number;
     /** @internal Reason cloning this mesh is currently forbidden. */
     _clone?: string;
     /** @internal Highest CSM cascade this mesh casts into; undefined means all cascades. */

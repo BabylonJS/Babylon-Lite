@@ -23,6 +23,8 @@ export interface Material {
     _renderFeatures?: MaterialRenderFeatures;
     /** @internal Monotonic material UBO version. Renderables track their last seen value independently. */
     _uboVersion: number;
+    /** @internal Monotonic CSM material-view generation. */
+    _csmGen?: number;
     /** @internal Optional ALTERNATE material the shadow caster pass renders this material's mesh with, instead of
      *  deriving a no-colour view from this (receive) material. Use when this material samples the shadow map it would
      *  cast into (a CSM-receiving custom ShaderMaterial): its own no-colour view would bind that depth texture WHILE it

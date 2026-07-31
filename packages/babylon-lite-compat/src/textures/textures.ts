@@ -75,8 +75,45 @@ export abstract class BaseTexture {
     /** @internal The underlying Lite texture handle. Undefined until the async load resolves. */
     public _lite: Texture2D | undefined;
 
+    /** @internal One-shot listeners fired when the GPU handle first resolves (see {@link _onReady}). */
+    private _readyListeners: Array<() => void> | undefined;
+
     public getClassName(): string {
         return "BaseTexture";
+    }
+
+    /**
+     * @internal Register a callback fired once this texture's GPU handle resolves.
+     * Owning compat materials use it to rebind and rebuild once an asynchronously
+     * loaded texture becomes available. Fires immediately if the handle already
+     * exists; otherwise queues until {@link _notifyReady}. One-shot per listener.
+     */
+    public _onReady(listener: () => void): void {
+        if (this._lite) {
+            listener();
+            return;
+        }
+        (this._readyListeners ??= []).push(listener);
+    }
+
+    /** @internal Fire and clear the readiness listeners (called by subclasses once `_lite` resolves). */
+    protected _notifyReady(): void {
+        const listeners = this._readyListeners;
+        if (listeners) {
+            this._readyListeners = undefined;
+            for (const listener of listeners) {
+                listener();
+            }
+        }
+    }
+
+    /**
+     * Babylon.js `BaseTexture.getInternalTexture()` — the backend texture handle. Babylon.js
+     * returns an `InternalTexture`; the compat layer's equivalent is the Lite texture handle,
+     * which is what the compat engine's texture methods accept.
+     */
+    public getInternalTexture(): Texture2D | null {
+        return this._lite ?? null;
     }
 
     public abstract whenReadyAsync(): Promise<void>;
@@ -89,6 +126,7 @@ export abstract class BaseTexture {
 
 export class Texture extends BaseTexture {
     private readonly _ready: Promise<void>;
+    private _onLoadObservable: Observable<Texture> | undefined;
     /** Babylon.js sampling-mode constants (numeric parity). */
     public static readonly NEAREST_SAMPLINGMODE = 1;
     public static readonly BILINEAR_SAMPLINGMODE = 2;
@@ -160,8 +198,14 @@ export class Texture extends BaseTexture {
 
         this._ready = loadCompatTexture(engine, url, loadOpts).then((tex) => {
             this._lite = tex;
-            if (onLoad) {
-                onLoad();
+            try {
+                this._notifyLoadObservable();
+                if (onLoad) {
+                    onLoad();
+                }
+            } finally {
+                // Rebuild after onLoad has configured UV scale and related fields.
+                this._notifyReady();
             }
         });
         // Let the scene await this load before it builds renderables, so the GPU
@@ -199,6 +243,25 @@ export class Texture extends BaseTexture {
 
     public override whenReadyAsync(): Promise<void> {
         return this._ready;
+    }
+
+    /** Babylon.js `Texture.onLoadObservable`, allocated only when code subscribes. */
+    public get onLoadObservable(): Observable<Texture> {
+        let observable = this._onLoadObservable;
+        if (!observable) {
+            observable = new Observable<Texture>(undefined, true);
+            this._onLoadObservable = observable;
+            if (this.isReady()) {
+                observable.notifyObservers(this);
+            }
+        }
+        return observable;
+    }
+
+    private _notifyLoadObservable(): void {
+        if (this._onLoadObservable) {
+            this._onLoadObservable.notifyObservers(this);
+        }
     }
 
     /** Babylon.js `BaseTexture.isReady()` — true once the GPU handle has resolved. */
@@ -318,11 +381,13 @@ export class RawTexture3D extends BaseTexture {
 
 /**
  * @internal Coerce a raw `ArrayBufferView` (or a bare `Uint8Array`) into the tightly
- * packed `width * height * depth * 4` RGBA8 `Uint8Array` Babylon Lite's
- * `createTexture3DFromPixels` expects. Babylon.js allows a `null` data argument
+ * packed `width * height * depth * 4` RGBA8 `Uint8Array` Babylon Lite's raw-pixel
+ * texture factories expect (`createTexture3DFromPixels`,
+ * `createTexture2DArrayFromPixels`). Babylon.js allows a `null` data argument
  * (an empty texture); Lite requires bytes, so `null` becomes a zero-filled volume.
+ * For a 2D array, `depth` is the layer count.
  */
-function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number, depth: number): Uint8Array {
+export function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number, depth: number): Uint8Array {
     const expected = width * height * depth * 4;
     if (data === null) {
         return new Uint8Array(expected);

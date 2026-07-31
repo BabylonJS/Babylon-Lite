@@ -339,7 +339,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             isTransparent,
             mesh,
             bind(eng, sig) {
-                const pipeline = getOrCreateStandardPipeline(eng as EngineContext, sig, bindings);
+                const pipeline = getOrCreateStandardPipeline(eng as EngineContext, sig, bindings, mat);
                 // Opaque-only GPU culling (opt-in): tryBind gates on opt-in + transparency, returns the per-binding cull lifecycle.
                 const cb = cull?.tryBind(r, s, mesh, engine, hasInstanceColor, isTransparent, update, sig);
                 return {
@@ -364,8 +364,10 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
     };
 
     scene._disposables.push(
-        () => clearStandardPipelineCache(),
-        () => clearSamplerCache(engine)
+        (engine._standardCleanup ??= () => {
+            clearStandardPipelineCache();
+            clearSamplerCache(engine);
+        })
     );
 
     return { renderables, rebuildSingle };

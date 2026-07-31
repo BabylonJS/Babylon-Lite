@@ -203,11 +203,24 @@ export const LITE_BUNDLE_TARGET = "esnext";
 interface SceneConfigEntry {
     id: number;
     tags?: string[];
+    /** Raw bundle-size ceiling in KB. Absent for scenes that opt out of the check. */
+    maxRawKB?: number;
+    /** Scene opts out of bundle-size ceiling enforcement (mirrors bundle-size.spec.ts). */
+    skipBundleSize?: boolean;
+    /** This scene's runtime dynamic-imports branch on device capability, so its measured
+     *  chunk set differs between a developer's GPU and CI's software renderer. A local
+     *  build measures it but does not overwrite its committed manifest entry; only CI's
+     *  measurement is authoritative. See `DEVICE_DEPENDENT_NOTE`. */
+    deviceDependentChunks?: boolean;
 }
 
 interface BundleManifestEntry {
     rawKB: number;
     gzipKB: number;
+    /** Exact runtime-fetched byte count. `rawKB` is this rounded to 0.1 KB for display, which
+     *  hides sub-50-byte drift — including a ceiling overflow on a zero-headroom scene. Tools
+     *  comparing sizes (`validate:bundle-manifest`, the build's ceiling check) use this. */
+    rawBytes?: number;
     ignoredRawKB?: number;
     bjsRawKB?: number;
     bjsGzipKB?: number;
@@ -965,12 +978,56 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
     rmSync(sceneOutDir, { recursive: true, force: true });
 }
 
+/** Chromium flags for the measurement browser. SwiftShader under CI, or locally when the
+ *  `--software` flag is passed; otherwise the real GPU (SwiftShader is far slower, and
+ *  several heavy scenes never reach `dataset.ready` under it on Windows).
+ *  See `DEVICE_DEPENDENT_NOTE`. */
 export function measurementBrowserArgs(): string[] {
-    const swiftShaderArgs = process.env.CI
-        ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
-        : [];
+    const swiftShaderArgs =
+        process.env.CI || softwareRenderRequested()
+            ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
+            : [];
     return ["--force-color-profile=srgb", "--enable-unsafe-webgpu", ...swiftShaderArgs];
 }
+
+/** `--software` on the command line, or `BUNDLE_SOFTWARE_RENDER=1`. Only an explicit
+ *  truthy value counts, so `BUNDLE_SOFTWARE_RENDER=0` disables it as one would expect. */
+function softwareRenderRequested(): boolean {
+    const env = process.env.BUNDLE_SOFTWARE_RENDER;
+    return process.argv.includes("--software") || env === "1" || env === "true";
+}
+
+/** Why some scenes' committed manifest is authored under the software renderer only.
+ *
+ *  CI measures under SwiftShader; a developer machine measures on its real GPU. A few
+ *  runtime paths branch on device capability and dynamic-import different chunks as a
+ *  result — scenes 113/114/115 resolve detailed picking to `picking-detailed-pipeline` on
+ *  a real GPU and to `picking-pipeline` under SwiftShader. Their measured chunk set (and
+ *  size) therefore depends on the machine, so a locally regenerated manifest could never
+ *  match what CI rebuilds, and `validate:bundle-manifest` failed on PRs that had not
+ *  touched those scenes at all — three times before this was diagnosed.
+ *
+ *  Forcing SwiftShader for the whole build was tried and rejected: on Windows the heavy
+ *  IBL scenes never reach `dataset.ready` under it. Restricting the run to the flagged
+ *  scenes is the canonical way to regenerate them:
+ *
+ *      pnpm build:bundle-manifest:device
+ *
+ *  That command needs a working SwiftShader WebGPU stack — reliable on the Linux CI image,
+ *  flaky-to-unusable on Windows, where these scenes also time out. So on Windows those
+ *  three entries are effectively CI-authored: leave them as committed.
+ *
+ *  Outside such a run, a local build measures these scenes (so the ceiling check and the
+ *  generated aggregate manifest see real local numbers) but leaves their TRACKED per-scene
+ *  file untouched, because only a software-renderer measurement is comparable to CI's. */
+const DEVICE_DEPENDENT_NOTE = "device-dependent chunk set — tracked manifest left untouched (regenerate with: pnpm build:bundle-manifest:device)";
+
+/** A scene with less than this much room under its ceiling is reported after a build: at
+ *  that margin the next shared-path change lands on it, and finding that out from CI costs
+ *  ~35 minutes. */
+const TIGHT_HEADROOM_BYTES = 256;
+/** Cap the tight-headroom list so a build's output stays readable; the rest are counted. */
+const TIGHT_HEADROOM_LIST_LIMIT = 10;
 
 export async function buildBundleScenes(): Promise<void> {
     const t0 = performance.now();
@@ -1050,9 +1107,10 @@ export async function buildBundleScenes(): Promise<void> {
             resolve: {
                 // Resolve `babylon-lite` to the built `build/lib` tree (NOT the TS source)
                 // so the measured bundle reflects exactly what a consumer of the published
-                // package gets. Using the directory (not index.js) so sub-path imports like
-                // 'babylon-lite/loader-env/load-dds-env' resolve correctly. `build:lib` must
-                // run first unless explicit source fallback is enabled for legacy baselines.
+                // package gets. Using the directory (not index.js) also preserves internal,
+                // lab-only deep imports that are intentionally absent from the public package
+                // export map. `build:lib` must run first unless explicit source fallback is
+                // enabled for legacy baselines.
                 alias: {
                     "babylon-lite": liteAliasDir,
                 },
@@ -1185,7 +1243,59 @@ export async function buildBundleScenes(): Promise<void> {
             console.log(line);
         }
     }
+    reportCeilingHeadroom(scenesToBuild, manifest);
+    if (process.exitCode) {
+        console.error(`✘ Bundle scenes built to ${outDir}, but a ceiling was exceeded (total ${elapsed(t0)})`);
+        return;
+    }
     console.log(`✓ Bundle scenes + manifest built to ${outDir} (total ${elapsed(t0)})`);
+}
+
+/**
+ * Report each measured scene against its `scene-config.json` ceiling, in BYTES.
+ *
+ * `rawKB` is rounded to 0.1 KB, so a scene sitting exactly at its ceiling can overflow by
+ * a few bytes while both the printed size and the committed manifest still read the same
+ * value — the overflow then only surfaces in CI's bundle-size job, ~35 minutes later.
+ * Comparing exact bytes here surfaces it immediately, and listing the tightest scenes makes
+ * a zero-margin scene visible *before* it is the thing that breaks someone else's PR.
+ */
+function reportCeilingHeadroom(scenes: readonly string[], manifest: Record<string, BundleManifestEntry>): void {
+    const over: string[] = [];
+    const tight: { scene: string; headroom: number; ceilingKB: number }[] = [];
+
+    for (const scene of scenes) {
+        const measured = manifest[scene]?.rawBytes;
+        const config = sceneConfigByName.get(scene);
+        const ceilingKB = config?.maxRawKB;
+        // Honour the same opt-out as the ceiling test in bundle-size.spec.ts.
+        if (measured == null || ceilingKB == null || config?.skipBundleSize) {
+            continue;
+        }
+        const ceilingBytes = ceilingKB * 1024;
+        // Compare before rounding: a ceiling like 92.2 KB is 94412.8 bytes, so 94413 bytes is
+        // over by 0.2 — which `Math.round` would turn into `-0` and wave through.
+        if (measured > ceilingBytes) {
+            over.push(`  ${scene}: ${(measured / 1024).toFixed(3)} KB exceeds ceiling ${ceilingKB} KB by ${Math.ceil(measured - ceilingBytes)} bytes`);
+        } else {
+            const headroom = Math.floor(ceilingBytes - measured);
+            if (headroom < TIGHT_HEADROOM_BYTES) {
+                tight.push({ scene, headroom, ceilingKB });
+            }
+        }
+    }
+
+    if (tight.length > 0) {
+        tight.sort((a, b) => a.headroom - b.headroom);
+        const shown = tight.slice(0, TIGHT_HEADROOM_LIST_LIMIT).map((t) => `  ${t.scene}: ${t.headroom} B below its ${t.ceilingKB} KB ceiling`);
+        const more = tight.length > shown.length ? `\n  … and ${tight.length - shown.length} more under ${TIGHT_HEADROOM_BYTES} B` : "";
+        console.log(`\n⚠ ${tight.length} scene(s) with little headroom — a shared-path change may push them over:\n${shown.join("\n")}${more}`);
+    }
+    if (over.length > 0) {
+        console.error(`\n✘ Bundle-size ceiling exceeded (exact bytes; scene-config.json maxRawKB):\n${over.join("\n")}`);
+        console.error(`\nRaising a ceiling requires explicit user approval — see GUIDANCE.md.`);
+        process.exitCode = 1;
+    }
 }
 
 /**
@@ -1238,7 +1348,7 @@ async function measureLiteSceneWithRetry(
     browser: any,
     port: number,
     scene: string
-): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
+): Promise<{ rawKB: number; rawBytes: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= LITE_MEASURE_ATTEMPTS; attempt++) {
         try {
@@ -1276,14 +1386,27 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
         const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
         console.log(`Browser launched in ${elapsed(tBrowser)}`);
 
+        // A scene whose chunk set depends on the GPU keeps its TRACKED file when measured on a
+        // real GPU: only a software-renderer measurement is comparable to CI's. The measurement
+        // is still recorded in memory, so the ceiling check and the generated aggregate manifest
+        // reflect what this machine actually loads.
+        const trackedWriteSuppressed = (scene: string): boolean =>
+            !!sceneConfigByName.get(scene)?.deviceDependentChunks && !process.env.CI && !softwareRenderRequested();
+
         // Measure Lite scenes (write after each), retrying transient failures.
         for (const scene of liteScenes) {
             const tPage = performance.now();
-            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measureLiteSceneWithRetry(browser, port, scene);
-            manifest[scene] = { ...manifest[scene], rawKB, gzipKB, ignoredRawKB, runtimeChunks: chunks };
-            flushScene(scene);
+            const { rawKB, rawBytes, gzipKB, ignoredRawKB, chunks } = await measureLiteSceneWithRetry(browser, port, scene);
+            manifest[scene] = { ...manifest[scene], rawKB, rawBytes, gzipKB, ignoredRawKB, runtimeChunks: chunks };
+            const suppressed = trackedWriteSuppressed(scene);
+            if (suppressed) {
+                writeAggregateBundleManifest(manifest);
+            } else {
+                flushScene(scene);
+            }
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
-            console.log(`  measured ${scene}: ${rawKB} KB raw, ${gzipKB} KB gzip${ignored} (${elapsed(tPage)})`);
+            const note = suppressed ? ` — ${DEVICE_DEPENDENT_NOTE}` : "";
+            console.log(`  measured ${scene}: ${rawKB} KB raw, ${gzipKB} KB gzip${ignored} (${elapsed(tPage)})${note}`);
         }
 
         // Measure BJS scenes — skip if sizes already cached in manifest
@@ -1460,7 +1583,7 @@ export async function measurePage(
     bundlePath: string,
     requireReady = false,
     readyTimeoutMs = READY_TIMEOUT_MS_DEFAULT
-): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
+): Promise<{ rawKB: number; rawBytes: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
     const page = await browser.newPage();
     const jsPayloads: RuntimeJsPayload[] = [];
     const chunkFiles: string[] = [];
@@ -1537,6 +1660,7 @@ export async function measurePage(
     await page.close();
     return {
         rawKB: bytesToRoundedKB(rawBytes),
+        rawBytes,
         gzipKB: bytesToRoundedKB(summary.gzipBytes),
         ignoredRawKB,
         chunks: Array.from(new Set(chunkFiles)).sort(),

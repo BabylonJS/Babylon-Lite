@@ -100,9 +100,25 @@ describe("mesh clone GPU buffer ownership", () => {
             _retirements: [],
         } as unknown as EngineContext;
 
-        resizeMeshGeometry(engine, src, new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 1, 2]));
+        const uvs2 = new Float32Array([0, 0, 1, 0, 0, 1]);
+        const tangents = new Float32Array([1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1]);
+        const colors = new Float32Array([1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1]);
+        resizeMeshGeometry(
+            engine,
+            src,
+            new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+            new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+            new Uint32Array([0, 1, 2]),
+            undefined,
+            uvs2,
+            tangents,
+            colors
+        );
 
         expect(src._gpu).not.toBe(gpu);
+        expect(src._cpuUv2s).toBe(uvs2);
+        expect(src._cpuTangents).toBe(tangents);
+        expect(src._cpuColors).toBe(colors);
         expect(clone._gpu).toBe(gpu);
         expect(gpu._refCount).toBe(1);
         expect(engine._retirements).toHaveLength(0);
@@ -271,5 +287,30 @@ describe("mesh clone GPU buffer ownership", () => {
         // when attachVat ran) — must not throw or double-free anything.
         expect(() => disposeMeshGpu(clone)).not.toThrow();
         expect(skel.boneTexture.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses to clone a disposed mesh instead of pinning its buffers with an unreleasable claim", () => {
+        const gpu: MeshGPU = {
+            positionBuffer: fakeBuffer(),
+            normalBuffer: fakeBuffer(),
+            uvBuffer: fakeBuffer(),
+            indexBuffer: fakeBuffer(),
+            indexCount: 3,
+            indexFormat: "uint16",
+        };
+        const src = makeMesh(gpu);
+        const clone = cloneTransformNode(src) as Mesh;
+
+        // `src` leaves its last scene: its claim is released, the clone keeps the geometry alive.
+        disposeMeshGpu(src);
+        expect(gpu.positionBuffer.destroy).not.toHaveBeenCalled();
+
+        // A clone of `src` could never be added to a scene, so its retained claim would never be
+        // released — the geometry would outlive its last real owner.
+        expect(() => cloneTransformNode(src)).toThrow("was disposed");
+        expect(gpu._refCount).toBe(1);
+
+        disposeMeshGpu(clone);
+        expect(gpu.positionBuffer.destroy).toHaveBeenCalledTimes(1);
     });
 });

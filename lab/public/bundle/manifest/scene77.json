@@ -1,24 +1,25 @@
 {
-  "rawKB": 57.8,
-  "gzipKB": 25,
+  "rawKB": 58.3,
+  "gzipKB": 25.2,
   "ignoredRawKB": 7,
   "runtimeChunks": [
-    "scene77-_math-factory-BTZFssmR.js",
+    "scene77-_math-factory-BvVaj8-f.js",
     "scene77-debug-block-BQoPvcej.js",
     "scene77-elbow-block-CSQUp118.js",
     "scene77-fragment-output-CfRmfbPv.js",
-    "scene77-input-block-okH30SnA.js",
-    "scene77-node-registry-_twcmcp6.js",
-    "scene77-node-registry-extra-compat-DBXwv9Po.js",
-    "scene77-node-registry-extra-math-Cycq-Afu.js",
-    "scene77-node-renderable-C8tsFeeS.js",
-    "scene77-opposite-block-CjYtnskz.js",
+    "scene77-input-block-qfoArSTE.js",
+    "scene77-node-registry-CFcvLZBP.js",
+    "scene77-node-registry-extra-compat-BBnIoChy.js",
+    "scene77-node-registry-extra-math-CQZgWtZS.js",
+    "scene77-node-renderable-DaEpTHLD.js",
+    "scene77-opposite-block-DCZPr-WU.js",
     "scene77-teleport-in-block-DJKPTgKE.js",
-    "scene77-teleport-out-block-BhwpdExI.js",
-    "scene77-transform-block-CE7Ko5Dj.js",
+    "scene77-teleport-out-block-BosywCBX.js",
+    "scene77-transform-block-6dxWCMqf.js",
     "scene77-vector-merger-YcC3xFyg.js",
-    "scene77-vector-splitter-Di1NeRXG.js",
+    "scene77-vector-splitter-BsUvwv5L.js",
     "scene77-vertex-output-C7G5u6Y0.js",
     "scene77.js"
-  ]
+  ],
+  "rawBytes": 59735
 }

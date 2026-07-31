@@ -1,114 +1,94 @@
 import { randomRange } from "../../../math/random-range.js";
 import { transformCoordinatesToRef, transformNormalToRef } from "../../../math/mat4-transform.js";
 import type { Vec3 } from "../../../math/types.js";
-import type { ParticleSystem } from "../../particle-system.js";
-import type { ParticleBlockEvaluator } from "../npe-types.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
 
-/**
- * `ConeShapeBlock` — emits particles from a cone. The position slot draws a point on/in the cone from a
- * height factor, a thinned radius, and a random azimuth; the direction slot points the particle radially
- * outward from the emitter (with optional `directionRandomizer` jitter) unless both `direction1` and
- * `direction2` are connected. The random-draw order and the `randomRange` short-circuit match BJS
- * `ConeShapeBlock` exactly. The emitter's world matrix is baked into birth position and direction.
- */
-export const coneShapeBlock: ParticleBlockEvaluator = {
+/** `ConeShapeBlock` — cone sampling with directed or radial emission. */
+export const coneShapeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const state = ctx.state;
-        const system = ctx.input(block, "particle")(state) as ParticleSystem;
-
+        const system = state.system!;
+        const buffer = state.buffer!;
+        const emitterWorldMatrix = state.emitterWorldMatrix;
+        const emitterX = state.emitter.x;
+        const emitterY = state.emitter.y;
+        const emitterZ = state.emitter.z;
         const emitFromSpawnPointOnly = block.serialized.emitFromSpawnPointOnly === true;
         const radiusGetter = ctx.input(block, "radius", () => 1);
-        const coneAngleGetter = ctx.input(block, "angle", () => Math.PI);
+        const angleGetter = ctx.input(block, "angle", () => Math.PI);
         const radiusRangeGetter = ctx.input(block, "radiusRange", () => 1);
         const heightRangeGetter = ctx.input(block, "heightRange", () => 1);
-        const directionRandomizerGetter = ctx.input(block, "directionRandomizer", () => 0);
-        const dir1Getter = ctx.input(block, "direction1", () => ({ x: 0, y: 1, z: 0 }));
-        const dir2Getter = ctx.input(block, "direction2", () => ({ x: 0, y: 1, z: 0 }));
-        const useExplicitDirections = ctx.isConnected(block, "direction1") && ctx.isConnected(block, "direction2");
-
-        system._createPosition = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            const radius = radiusGetter(state) as number;
-            const coneAngle = coneAngleGetter(state) as number;
-            const radiusRange = radiusRangeGetter(state) as number;
-            const heightRange = heightRangeGetter(state) as number;
-
-            let h: number;
-            if (!emitFromSpawnPointOnly) {
-                h = randomRange(0, heightRange);
-                h = 1 - h * h;
+        const randomizerGetter = ctx.input(block, "directionRandomizer", () => 0);
+        const direction1Getter = ctx.input(block, "direction1", () => ({ x: 0, y: 1, z: 0 }));
+        const direction2Getter = ctx.input(block, "direction2", () => ({ x: 0, y: 1, z: 0 }));
+        const explicit = ctx.isConnected(block, "direction1") && ctx.isConnected(block, "direction2");
+        const scratch: Vec3 = { x: 0, y: 0, z: 0 };
+        let birthX = 0;
+        let birthY = 0;
+        let birthZ = 0;
+        system.createPosition = (i) => {
+            const radius = radiusGetter(i) as number;
+            const coneAngle = angleGetter(i) as number;
+            const radiusRange = radiusRangeGetter(i) as number;
+            const heightRange = heightRangeGetter(i) as number;
+            let heightFactor: number;
+            if (emitFromSpawnPointOnly) {
+                heightFactor = 0.0001;
             } else {
-                h = 0.0001;
+                heightFactor = randomRange(0, heightRange);
+                heightFactor = 1 - heightFactor * heightFactor;
             }
-            let newRadius = radius - randomRange(0, radius * radiusRange);
-            newRadius = newRadius * h;
-            const s = randomRange(0, Math.PI * 2);
-            const rx = newRadius * Math.sin(s);
-            const rz = newRadius * Math.cos(s);
-            const ry = h * (coneAngle !== 0 ? radius / Math.tan(coneAngle / 2) : 1);
-
-            if (sys.isLocal) {
-                particle.position.x = rx;
-                particle.position.y = ry;
-                particle.position.z = rz;
-            } else {
-                transformCoordinatesToRef(rx, ry, rz, state.emitterWorldMatrix, particle.position);
-            }
+            const sampleRadius = (radius - randomRange(0, radius * radiusRange)) * heightFactor;
+            const azimuth = randomRange(0, Math.PI * 2);
+            const localX = sampleRadius * Math.sin(azimuth);
+            const localZ = sampleRadius * Math.cos(azimuth);
+            const localY = heightFactor * (coneAngle !== 0 ? radius / Math.tan(coneAngle / 2) : 1);
+            transformCoordinatesToRef(localX, localY, localZ, emitterWorldMatrix, scratch);
+            birthX = scratch.x;
+            birthY = scratch.y;
+            birthZ = scratch.z;
+            buffer.posX[i] = birthX;
+            buffer.posY[i] = birthY;
+            buffer.posZ[i] = birthZ;
         };
-
-        system._createDirection = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            if (useExplicitDirections) {
-                const dir1 = dir1Getter(state) as Vec3;
-                const dir2 = dir2Getter(state) as Vec3;
-                const rx = randomRange(dir1.x, dir2.x);
-                const ry = randomRange(dir1.y, dir2.y);
-                const rz = randomRange(dir1.z, dir2.z);
-                if (sys.isLocal) {
-                    particle.direction.x = rx;
-                    particle.direction.y = ry;
-                    particle.direction.z = rz;
-                } else {
-                    transformNormalToRef(rx, ry, rz, state.emitterWorldMatrix, particle.direction);
+        system.createDirection = (i) => {
+            let x: number;
+            let y: number;
+            let z: number;
+            if (explicit) {
+                const direction1 = direction1Getter(i) as Vec3;
+                const minX = direction1.x;
+                const minY = direction1.y;
+                const minZ = direction1.z;
+                const direction2 = direction2Getter(i) as Vec3;
+                x = randomRange(minX, direction2.x);
+                y = randomRange(minY, direction2.y);
+                z = randomRange(minZ, direction2.z);
+            } else {
+                x = birthX - emitterX;
+                y = birthY - emitterY;
+                z = birthZ - emitterZ;
+                let length = Math.sqrt(x * x + y * y + z * z);
+                if (length !== 0 && length !== 1) {
+                    x /= length;
+                    y /= length;
+                    z /= length;
                 }
-                particle._initialDirection.x = particle.direction.x;
-                particle._initialDirection.y = particle.direction.y;
-                particle._initialDirection.z = particle.direction.z;
-                return;
+                const randomizer = randomizerGetter(i) as number;
+                x += randomRange(0, randomizer);
+                y += randomRange(0, randomizer);
+                z += randomRange(0, randomizer);
+                length = Math.sqrt(x * x + y * y + z * z);
+                if (length !== 0 && length !== 1) {
+                    x /= length;
+                    y /= length;
+                    z /= length;
+                }
             }
-            const directionRandomizer = directionRandomizerGetter(state) as number;
-            let dx = particle.position.x - state.emitter.x;
-            let dy = particle.position.y - state.emitter.y;
-            let dz = particle.position.z - state.emitter.z;
-            let length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            if (length !== 0 && length !== 1) {
-                dx /= length;
-                dy /= length;
-                dz /= length;
-            }
-            dx += randomRange(0, directionRandomizer);
-            dy += randomRange(0, directionRandomizer);
-            dz += randomRange(0, directionRandomizer);
-            length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            if (length !== 0 && length !== 1) {
-                dx /= length;
-                dy /= length;
-                dz /= length;
-            }
-            if (sys.isLocal) {
-                particle.direction.x = dx;
-                particle.direction.y = dy;
-                particle.direction.z = dz;
-            } else {
-                transformNormalToRef(dx, dy, dz, state.emitterWorldMatrix, particle.direction);
-            }
-            particle._initialDirection.x = particle.direction.x;
-            particle._initialDirection.y = particle.direction.y;
-            particle._initialDirection.z = particle.direction.z;
+            transformNormalToRef(x, y, z, emitterWorldMatrix, scratch);
+            buffer.dirX[i] = scratch.x;
+            buffer.dirY[i] = scratch.y;
+            buffer.dirZ[i] = scratch.z;
         };
-
-        ctx.setOutput(block.id, "output", () => system);
     },
 };

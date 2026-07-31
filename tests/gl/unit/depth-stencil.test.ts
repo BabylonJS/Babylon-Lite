@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { createGLEngine } from "../../../packages/babylon-lite-gl/src/context";
-import { setDepthState, setCullState, setStencilState, setColorMask, clearEngine, generateRenderTargetStencil } from "../../../packages/babylon-lite-gl/src/depth-stencil";
+import { createGLEngine, wipeGLStateCache } from "../../../packages/babylon-lite-gl/src/context";
+import {
+    setDepthState,
+    setCullState,
+    setStencilState,
+    setStencilOpSeparate,
+    setColorMask,
+    clearEngine,
+    generateRenderTargetStencil,
+} from "../../../packages/babylon-lite-gl/src/depth-stencil";
 import { applyGLStates } from "../../../packages/babylon-lite-gl/src/apply-states";
 import { createRenderTarget, disposeRenderTarget, resizeRenderTarget, bindRenderTarget } from "../../../packages/babylon-lite-gl/src/render-target";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
@@ -91,6 +99,17 @@ describe("lite-gl cull state", () => {
 });
 
 describe("lite-gl stencil state", () => {
+    it("allocates back-face slots only for a non-empty separate update", () => {
+        const { engine } = makeEngine();
+        expect(engine._state.rs).toHaveLength(46);
+        setStencilState(engine, { opZPass: engine.gl.KEEP });
+        expect(engine._state.rs).toHaveLength(46);
+        setStencilOpSeparate(engine, engine.gl.BACK, {});
+        expect(engine._state.rs).toHaveLength(46);
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        expect(engine._state.rs).toHaveLength(52);
+    });
+
     it("applies the func triple as a unit and caches it", () => {
         const { mock, engine } = makeEngine();
         setStencilState(engine, { test: true, mask: 0xff, func: engine.gl.ALWAYS, ref: 1, funcMask: 0xff });
@@ -112,6 +131,65 @@ describe("lite-gl stencil state", () => {
         expect(callsNamed(mock, "stencilFunc")).toHaveLength(0);
     });
 
+    it("does not elide an explicit ZERO op triple on first use", () => {
+        const { mock, engine } = makeEngine();
+        setStencilState(engine, { opFail: engine.gl.ZERO, opZFail: engine.gl.ZERO, opZPass: engine.gl.ZERO });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.ZERO, engine.gl.ZERO, engine.gl.ZERO]]);
+    });
+
+    it("initializes both faces to KEEP before a first partial shared update", () => {
+        const { mock, engine } = makeEngine();
+        setStencilState(engine, { opZPass: engine.gl.ZERO });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.KEEP, engine.gl.KEEP, engine.gl.ZERO]]);
+    });
+
+    it("initializes both faces to KEEP before a first partial separate update", () => {
+        const { mock, engine } = makeEngine();
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.ZERO });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.KEEP, engine.gl.KEEP, engine.gl.ZERO],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP],
+        ]);
+    });
+
+    it("applies all supplied operations to only the selected face", () => {
+        const { mock, engine } = makeEngine();
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opFail: engine.gl.ZERO, opZFail: engine.gl.INCR_WRAP, opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.ZERO, engine.gl.INCR_WRAP, engine.gl.DECR_WRAP],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP],
+        ]);
+    });
+
+    it("does not issue an operation call for an empty update", () => {
+        const { mock, engine } = makeEngine();
+        setStencilOpSeparate(engine, engine.gl.FRONT, {});
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+    });
+
+    it("reinitializes both faces after the GL state cache is wiped", () => {
+        const { mock, engine } = makeEngine();
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        wipeGLStateCache(engine);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.ZERO });
+        applyGLStates(engine);
+
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.KEEP, engine.gl.KEEP, engine.gl.ZERO],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP],
+        ]);
+    });
+
     it("partial func update merges unspecified members from cache", () => {
         const { mock, engine } = makeEngine();
         setStencilState(engine, { func: engine.gl.ALWAYS, ref: 0, funcMask: 0x3 });
@@ -120,6 +198,111 @@ describe("lite-gl stencil state", () => {
         setStencilState(engine, { func: engine.gl.NOTEQUAL });
         applyGLStates(engine);
         expect(callsNamed(mock, "stencilFunc")[0]?.args).toEqual([engine.gl.NOTEQUAL, 0, 0x3]);
+    });
+
+    it("applies and caches separate front/back op triples, then returns to shared state", () => {
+        const { mock, engine } = makeEngine();
+        const keep = { opFail: engine.gl.KEEP, opZFail: engine.gl.KEEP, opZPass: engine.gl.KEEP };
+        setStencilState(engine, keep);
+        applyGLStates(engine);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.KEEP, engine.gl.KEEP, engine.gl.INCR_WRAP],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.KEEP, engine.gl.DECR_WRAP],
+        ]);
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
+
+        mock.clear();
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+
+        setStencilState(engine, keep);
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP]]);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+    });
+
+    it("flushes one changed face separately and coalesces when it converges", () => {
+        const { mock, engine } = makeEngine();
+        setStencilState(engine, { opFail: engine.gl.KEEP, opZFail: engine.gl.KEEP, opZPass: engine.gl.KEEP });
+        applyGLStates(engine);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([[engine.gl.FRONT, engine.gl.KEEP, engine.gl.KEEP, engine.gl.INCR_WRAP]]);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.KEEP });
+        applyGLStates(engine);
+        expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP]]);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+    });
+
+    it("updates only the supplied shared operation on divergent faces", () => {
+        const { mock, engine } = makeEngine();
+        setStencilState(engine, { opFail: engine.gl.KEEP, opZFail: engine.gl.KEEP, opZPass: engine.gl.KEEP });
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        mock.clear();
+
+        setStencilState(engine, { opFail: engine.gl.ZERO });
+        applyGLStates(engine);
+
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.ZERO, engine.gl.KEEP, engine.gl.INCR_WRAP],
+            [engine.gl.BACK, engine.gl.ZERO, engine.gl.KEEP, engine.gl.DECR_WRAP],
+        ]);
+    });
+
+    it("coalesces a FRONT_AND_BACK update when the resulting face states match", () => {
+        const { mock, engine } = makeEngine();
+        setStencilState(engine, { opFail: engine.gl.KEEP, opZFail: engine.gl.KEEP, opZPass: engine.gl.KEEP });
+        applyGLStates(engine);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT_AND_BACK, { opZPass: engine.gl.INCR_WRAP });
+        applyGLStates(engine);
+
+        expect(callsNamed(mock, "stencilOp").map((call) => call.args)).toEqual([[engine.gl.KEEP, engine.gl.KEEP, engine.gl.INCR_WRAP]]);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
+    });
+
+    it("updates only the supplied FRONT_AND_BACK operation on divergent faces", () => {
+        const { mock, engine } = makeEngine();
+        setStencilState(engine, { opFail: engine.gl.KEEP, opZFail: engine.gl.KEEP, opZPass: engine.gl.KEEP });
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.FRONT_AND_BACK, { opZFail: engine.gl.ZERO });
+        applyGLStates(engine);
+
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.KEEP, engine.gl.ZERO, engine.gl.INCR_WRAP],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.ZERO, engine.gl.DECR_WRAP],
+        ]);
+    });
+
+    it("rejects an invalid separate-op face without dirtying state", () => {
+        const { mock, engine } = makeEngine();
+
+        expect(() => setStencilOpSeparate(engine, engine.gl.ALWAYS, { opZPass: engine.gl.INCR_WRAP })).toThrow(/invalid face/);
+        applyGLStates(engine);
+
+        expect(callsNamed(mock, "stencilOp")).toHaveLength(0);
+        expect(callsNamed(mock, "stencilOpSeparate")).toHaveLength(0);
     });
 });
 
@@ -182,10 +365,29 @@ describe("lite-gl depth/stencil: lost-context safety", () => {
         expect(() => {
             setDepthState(engine, { test: true });
             setStencilState(engine, { test: true });
+            setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
             setColorMask(engine, true, false, true, false);
             clearEngine(engine, { color: { r: 0, g: 0, b: 0 } });
         }).not.toThrow();
         expect(mock.log).toHaveLength(0);
+    });
+
+    it("reinitializes both faces after context restoration", () => {
+        const { mock, canvas, engine } = makeEngine();
+        setStencilOpSeparate(engine, engine.gl.FRONT, { opZPass: engine.gl.INCR_WRAP });
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.DECR_WRAP });
+        applyGLStates(engine);
+        fireLost(canvas);
+        fireRestored(canvas);
+        mock.clear();
+
+        setStencilOpSeparate(engine, engine.gl.BACK, { opZPass: engine.gl.ZERO });
+        applyGLStates(engine);
+
+        expect(callsNamed(mock, "stencilOpSeparate").map((call) => call.args)).toEqual([
+            [engine.gl.FRONT, engine.gl.KEEP, engine.gl.KEEP, engine.gl.KEEP],
+            [engine.gl.BACK, engine.gl.KEEP, engine.gl.KEEP, engine.gl.ZERO],
+        ]);
     });
 });
 

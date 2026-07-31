@@ -29,7 +29,11 @@ const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-in
 const BUNDLE_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/manifest.json");
 const MASTER_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/master-manifest.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-const SCENES = allScenes.filter((s) => s.maxRawKB != null);
+const SCENES = allScenes.filter((s) => {
+    // Scene 114 opts out because WebGPU's optional "primitive-index" feature
+    // changes which picking chunks the browser fetches across machines.
+    return !s.skipBundleSize && s.maxRawKB != null;
+});
 
 interface BundleInfoModule {
     id: string;
@@ -200,11 +204,25 @@ for (const scene of SCENES) {
             ).toBe(true);
         }
 
+        // Orthographic projection is an opt-in seam: `camera.ts` holds a module-local projector that
+        // only `enableOrthographicCamera` installs, so the branch folds away for every perspective-only
+        // scene. Guard both directions — no other scene may pull the module in, and scene 268 must.
+        const ORTHO_SCENE_IDS = new Set([268]);
+        if (ORTHO_SCENE_IDS.has(scene.id)) {
+            expect(
+                runtimeModules.some((id) => /\/camera\/orthographic\.[jt]s$/.test(id)),
+                `${scene.slug} MUST include the orthographic camera module; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
+        } else {
+            const offenders = runtimeModules.filter((id) => /\/(camera\/orthographic|math\/mat4-ortho-lh-to-ref)\.[jt]s$/.test(id));
+            expect(offenders, `perspective-only ${scene.slug} must not load orthographic camera modules; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
         // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
         // List excludes the sprite-using scenes (50-59, the 92-98 custom-shader scenes, and the
         // 117/118 sprite-picking scenes). 60-series are NME demos with no sprites; 1-40 are core 3D.
-        // 262/263/264 are NPE particle scenes (particles render as billboards).
-        const SPRITE_USING_IDS = new Set([50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264]);
+        // 262/263/264/274 are NPE particle scenes (particles render as billboards).
+        const SPRITE_USING_IDS = new Set([50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));
             expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);

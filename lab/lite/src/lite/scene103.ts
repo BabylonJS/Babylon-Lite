@@ -84,7 +84,7 @@ interface RayHit {
 }
 
 function readCaptureFrame(): number | null {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
     const frameValue = params.get("captureFrame");
     if (frameValue !== null) {
         const frame = Number(frameValue);
@@ -96,7 +96,7 @@ function readCaptureFrame(): number | null {
 /** Small LCG so per-instance colors match Lite ↔ BJS exactly. */
 function rand(seed: { value: number }): number {
     seed.value = (seed.value * 1664525 + 1013904223) >>> 0;
-    return seed.value / 0x100000000;
+    return seed.value / 4294967296;
 }
 
 /** Instance (i,j,k) world position — identical layout to the playground. */

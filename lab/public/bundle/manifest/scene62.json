@@ -1,17 +1,18 @@
 {
-  "rawKB": 58.6,
-  "gzipKB": 24.8,
+  "rawKB": 59.1,
+  "gzipKB": 25,
   "ignoredRawKB": 5.3,
   "runtimeChunks": [
-    "scene62-_math-factory-BySEy5d9.js",
+    "scene62-_math-factory-CfLepYl6.js",
     "scene62-fragment-output-CfRmfbPv.js",
     "scene62-generate-mipmaps-BPTGASCY.js",
-    "scene62-input-block-DjRzoi3r.js",
-    "scene62-node-registry-Bk63Hwc9.js",
-    "scene62-node-renderable-B59oylW8.js",
+    "scene62-input-block-Ir5zBLQp.js",
+    "scene62-node-registry-kdUp6x3O.js",
+    "scene62-node-renderable-C-33LFx4.js",
     "scene62-texture-block-BqMd_NnH.js",
-    "scene62-transform-block-BR1QBWil.js",
+    "scene62-transform-block-joLLcrsq.js",
     "scene62-vertex-output-C7G5u6Y0.js",
     "scene62.js"
-  ]
+  ],
+  "rawBytes": 60552
 }

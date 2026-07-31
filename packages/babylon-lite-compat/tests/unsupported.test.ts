@@ -40,7 +40,7 @@ import {
     GeospatialClippingBehavior,
     SceneSerializer,
 } from "../src/unsupported/unsupported-apis";
-import { MeshBuilder } from "../src/meshes/meshes";
+import { MeshBuilder, CreateTiledBox, CreateTiledPlane } from "../src/meshes/meshes";
 import { SceneLoader } from "../src/loading/scene-loader";
 
 describe("LiteCompatError", () => {
@@ -125,10 +125,18 @@ describe("SceneSerializer", () => {
 });
 
 describe("MeshBuilder unsupported primitives", () => {
-    it.each(["CreateLines", "CreateLineSystem", "CreateDashedLines", "CreateDecal", "CreateText"] as const)("%s throws LiteCompatError", (method) => {
-        const fn = MeshBuilder[method] as () => never;
-        expect(fn).toThrow(LiteCompatError);
-        expect(fn).toThrow(new RegExp(method));
+    it.each(["CreateLines", "CreateLineSystem", "CreateDashedLines", "CreateDecal", "CreateText", "CreateTiledBox", "CreateTiledPlane"] as const)(
+        "%s throws LiteCompatError",
+        (method) => {
+            const fn = MeshBuilder[method] as () => never;
+            expect(fn).toThrow(LiteCompatError);
+            expect(fn).toThrow(new RegExp(method));
+        }
+    );
+
+    it("standalone CreateTiledBox / CreateTiledPlane exports throw LiteCompatError", () => {
+        expect(() => CreateTiledBox()).toThrow(LiteCompatError);
+        expect(() => CreateTiledPlane()).toThrow(LiteCompatError);
     });
 });
 

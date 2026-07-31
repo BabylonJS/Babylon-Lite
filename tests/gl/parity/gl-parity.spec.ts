@@ -30,7 +30,7 @@ for (const entry of loadSceneConfigAll()) {
     test.describe(`GL Scene ${entry.id} — ${entry.name}`, () => {
         test.skip(!!sceneConfig.skipParity, `Scene ${entry.id} skipped via skipParity in scene-config-webgl.json`);
 
-        test(`matches Babylon.js ThinEngine reference (MAD ≤ ${sceneConfig.maxMad})`, async ({ page }, testInfo) => {
+        test(`matches Babylon.js ThinEngine reference`, async ({ page }, testInfo) => {
             const browser = page.context().browser()!;
 
             // Capture (or reuse committed) golden from the BJS reference page at the freeze time.
@@ -40,6 +40,13 @@ for (const entry of loadSceneConfigAll()) {
             await page.goto(`/gl/scene${entry.id}.html?seekTime=${SEEK_TIME}`);
             await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
             await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
+            if (entry.id === 17) {
+                // WebGL2 chooses the default framebuffer's sample count, so assert only that MSAA is
+                // actually active — alpha-to-coverage is a no-op at one sample, which would silently
+                // turn this into a non-test. The scene itself already adapts to whatever count it gets.
+                const sampleCount = Number(await page.locator("canvas").getAttribute("data-sample-count")) || 0;
+                expect(sampleCount, "alpha-to-coverage needs a multisampled default framebuffer").toBeGreaterThan(1);
+            }
             await page.waitForTimeout(300);
 
             const screenshotPath = path.join(referenceDir, "test-actual.png");
@@ -56,3 +63,35 @@ for (const entry of loadSceneConfigAll()) {
         });
     });
 }
+
+test("GL Scene 16 restores its attribute binding after context loss", async ({ page }) => {
+    const sceneConfig = getSceneConfig(16);
+    const goldenRef = path.resolve(__dirname, `../../../reference/gl/${sceneConfig.slug}/babylon-ref-golden.png`);
+
+    await page.goto("/gl/scene16.html");
+    await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
+    await page.waitForTimeout(300);
+
+    const extensionAvailable = await page.evaluate(async () => {
+        const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+        const gl = canvas.getContext("webgl2")!;
+        const ext = gl.getExtension("WEBGL_lose_context");
+        if (!ext) {
+            return false;
+        }
+        await new Promise<void>((resolve) => {
+            canvas.addEventListener("webglcontextrestored", () => resolve(), { once: true });
+            ext.loseContext();
+            setTimeout(() => ext.restoreContext(), 0);
+        });
+        return true;
+    });
+    test.skip(!extensionAvailable, "WEBGL_lose_context is unavailable");
+    await page.waitForFunction(() => document.querySelector("canvas")?.dataset.contextRestored === "true", { timeout: 30_000 });
+    await page.waitForTimeout(300);
+
+    const screenshotPath = path.resolve(__dirname, `../../../reference/gl/${sceneConfig.slug}/test-actual.png`);
+    await page.locator("canvas").screenshot({ path: screenshotPath });
+    const full = compareImages(screenshotPath, goldenRef);
+    expect(full.mad, "Scene 16 should match its golden after context restoration").toBeLessThanOrEqual(sceneConfig.maxMad);
+});

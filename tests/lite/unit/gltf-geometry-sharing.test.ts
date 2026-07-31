@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
+import { resolveExternalImage } from "../../../packages/babylon-lite/src/loader-gltf/gltf-json-asset.js";
 import { loadGltf } from "../../../packages/babylon-lite/src/loader-gltf/load-gltf.js";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose.js";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
@@ -8,6 +9,10 @@ import type { TransformNode } from "../../../packages/babylon-lite/src/scene/tra
 
 const FLOAT = 5126;
 const UNSIGNED_SHORT = 5123;
+
+afterEach(() => {
+    vi.unstubAllGlobals();
+});
 
 function align4(value: number): number {
     return (value + 3) & ~3;
@@ -154,5 +159,86 @@ describe("loadGltf geometry sharing", () => {
 
         expect(first._topology).toBe(2);
         expect(second._topology).toBe(2);
+    });
+});
+
+describe("loadGltf URL sources", () => {
+    it("loads GLB data from blob: and data: URLs without deriving a directory base", async () => {
+        vi.stubGlobal("location", { href: "https://example.test/viewer/index.html" });
+        const fetchMock = vi.fn(async () => ({ arrayBuffer: async () => makeSharedMeshGlb() })) as unknown as typeof fetch;
+        vi.stubGlobal("fetch", fetchMock);
+
+        for (const source of [
+            "blob:https://example.test/asset-id",
+            "BLOB:https://example.test/asset-id",
+            "data:model/gltf-binary;base64,AA==",
+            "Data:model/gltf-binary;base64,AA==",
+            "DATA:model/gltf-binary;base64,AA==",
+        ]) {
+            const { engine } = makeMockEngine();
+            const container = await loadGltf(engine, source);
+
+            expect(container.entities).toHaveLength(1);
+            expect(fetchMock).toHaveBeenCalledWith(source);
+        }
+    });
+
+    it("loads mixed-case blob URLs without deriving a base in non-DOM contexts", async () => {
+        const fetchMock = vi.fn(async () => ({ arrayBuffer: async () => makeSharedMeshGlb() })) as unknown as typeof fetch;
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { engine } = makeMockEngine();
+        const source = "bLoB:https://example.test/asset-id";
+        const container = await loadGltf(engine, source);
+
+        expect(container.entities).toHaveLength(1);
+        expect(fetchMock).toHaveBeenCalledWith(source);
+    });
+
+    it("resolves relative buffers for absolute URL sources in non-DOM contexts", async () => {
+        const source = "https://example.test/models/asset.gltf";
+        const json = JSON.stringify({ asset: { version: "2.0" }, buffers: [{ uri: "mesh.bin", byteLength: 4 }], nodes: [], meshes: [] });
+        const fetchMock = vi.fn(async (url: string) => ({
+            arrayBuffer: async () => (url === source ? new TextEncoder().encode(json).buffer : new ArrayBuffer(4)),
+        })) as unknown as typeof fetch;
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { engine } = makeMockEngine();
+        await loadGltf(engine, source);
+
+        expect(fetchMock).toHaveBeenNthCalledWith(2, "https://example.test/models/mesh.bin");
+    });
+
+    it("loads self-contained JSON glTF from a data: URL source", async () => {
+        const source = "data:model/gltf+json;base64,ignored";
+        const binUri = "data:application/octet-stream;base64,AAAAAA==";
+        const json = JSON.stringify({ asset: { version: "2.0" }, buffers: [{ uri: binUri, byteLength: 4 }], nodes: [], meshes: [] });
+        const fetchMock = vi.fn(async (url: string) => ({
+            arrayBuffer: async () => (url === source ? new TextEncoder().encode(json).buffer : new ArrayBuffer(4)),
+        })) as unknown as typeof fetch;
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { engine } = makeMockEngine();
+        const container = await loadGltf(engine, source);
+
+        expect(container.entities).toHaveLength(1);
+        expect(fetchMock).toHaveBeenNthCalledWith(2, binUri);
+    });
+
+    it("reports a clear error when a base-less glTF source references a relative buffer", async () => {
+        vi.stubGlobal("location", { href: "https://example.test/viewer/index.html" });
+        const json = JSON.stringify({ asset: { version: "2.0" }, buffers: [{ uri: "mesh.bin?sig=urn:foo", byteLength: 4 }] });
+        vi.stubGlobal("fetch", vi.fn(async () => ({ arrayBuffer: async () => new TextEncoder().encode(json).buffer })) as unknown as typeof fetch);
+
+        const { engine } = makeMockEngine();
+        await expect(loadGltf(engine, "data:model/gltf+json;base64,ignored")).rejects.toThrow(
+            "loadGltf: baseless input can't resolve relative URI; use self-contained GLB or URL with base."
+        );
+    });
+
+    it("reports a clear error when a base-less glTF source references a relative image", async () => {
+        await expect(resolveExternalImage("albedo.png?sig=urn:foo", "")).rejects.toThrow(
+            "loadGltf: baseless input can't resolve relative URI; use self-contained GLB or URL with base."
+        );
     });
 });

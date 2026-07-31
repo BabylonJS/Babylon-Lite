@@ -95,7 +95,8 @@ use.
 - **Meshes / buffers** — `createVertexBuffer`, `updateVertexBuffer`,
   `createIndexBuffer`, `bindAttributes`, `drawIndexed` (instanced), `disposeBuffer`.
 - **Depth / stencil / scissor** — `setDepthState`, `setStencilState`,
-  `setCullState`, `setColorMask`, `clearEngine`; `setScissor`, `disableScissor`.
+  `setStencilOpSeparate` (independent front/back operations), `setCullState`,
+  `setColorMask`, `clearEngine`; `setScissor`, `disableScissor`.
 - **Blend** — `setBlendMode` + `GLBlendMode` (`DISABLE` / `ADD` / `ALPHA` /
   `PREMULTIPLIED`), matching Babylon's `setAlphaMode` parameters.
 

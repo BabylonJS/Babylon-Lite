@@ -4,7 +4,7 @@ import { isRenderingContextRegistered } from "./engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
-import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
+import { clearSceneBGLCache, getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { ensureSceneLightState } from "../render/lights-ubo.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import type { Texture2D } from "../texture/texture-2d.js";
@@ -40,16 +40,20 @@ interface RecoverableRenderTask {
  * Rebuilds the GPU resources of every registered scene after a WebGPU device
  * loss. This whole subtree (mesh geometry, frame-graph tasks, textures,
  * skeletons, morph targets) runs only on the recovery path, so it lives here
- * behind a single lazy `await import()` from device-lost-recovery's
- * `recoverDevice`. The always-bundled recovery orchestrator therefore carries
+ * behind a single lazy `await import()` from the scene recovery adapter.
+ * The always-bundled recovery orchestrator therefore carries
  * none of it statically, and a recovery-enabled scene only fetches this chunk
  * if an actual device loss occurs.
  */
 export async function rebuildRegisteredScenes(engine: EngineContext): Promise<void> {
+    clearSceneBGLCache();
     for (const surface of engine.surfaces) {
         for (const ctx of surface._renderingContexts) {
+            if (ctx._kind !== "scene") {
+                continue;
+            }
             const scene = ctx as SceneContext;
-            if (!isRenderingContextRegistered(surface, scene)) {
+            if (!isRenderingContextRegistered(surface, scene) || scene._z) {
                 continue;
             }
             await rebuildSceneGpu(engine, scene);
@@ -60,9 +64,11 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
 async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Promise<void> {
     await rebuildSceneTextures(engine, scene);
     await _rebuildMeshes(engine, scene);
+    if (scene._z) {
+        return;
+    }
 
-    scene._renderables.length = 0;
-    scene._uniformUpdaters.length = 0;
+    scene._renderables.length = scene._uniformUpdaters.length = 0;
     scene._meshDisposables.clear();
     scene._meshAuxDisposables.clear();
     if (scene._lightGpuState) {
@@ -71,6 +77,11 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
 
     for (const [build, meshes] of scene._groups) {
         const result = await build(scene, meshes);
+        if (scene._z) {
+            return;
+        }
+        meshes.r = scene._runtimeBuilds?.base(build, result.rebuildSingle) ?? result.rebuildSingle;
+        meshes.o = result.renderables;
         scene._renderables.push(...result.renderables);
         if (result.updater) {
             scene._uniformUpdaters.push(result.updater);

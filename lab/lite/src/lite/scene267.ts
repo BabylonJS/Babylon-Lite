@@ -1,7 +1,6 @@
 // Scene 267 — StandardMaterial Vertex Colors
 
-import { addToScene, createArcRotateCamera, createEngine, createMeshFromData, createSceneContext, createStandardMaterial, registerScene, startEngine } from "babylon-lite";
-import { enableStandardVertexColors } from "babylon-lite/material/standard/enable-standard-vertex-colors";
+import { addToScene, createArcRotateCamera, createEngine, createMeshFromData, createSceneContext, createStandardMaterial, enableStandardVertexColors, registerScene, startEngine } from "babylon-lite";
 
 const POSITIONS = new Float32Array([-3, -2, 0, 3, -2, 0, -3, 2, 0, 3, 2, 0]);
 const NORMALS = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]);

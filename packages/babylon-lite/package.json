@@ -9,35 +9,6 @@
         ".": {
             "import": "./src/index.ts",
             "types": "./src/index.ts"
-        },
-        "./material/pbr/background-dds-skybox": {
-            "import": "./src/material/pbr/background-dds-skybox.ts"
-        },
-        "./material/pbr/pbr-thin-instance-ext": {
-            "import": "./src/material/pbr/pbr-thin-instance-ext.ts"
-        },
-        "./material/standard/enable-standard-vertex-colors": {
-            "import": "./src/material/standard/enable-standard-vertex-colors.ts",
-            "types": "./src/material/standard/enable-standard-vertex-colors.ts"
-        },
-        "./loader-env/load-dds-env": {
-            "import": "./src/loader-env/load-dds-env.ts"
-        },
-        "./light/clustered": {
-            "import": "./src/light/clustered.ts",
-            "types": "./src/light/clustered.ts"
-        },
-        "./engine/device-lost-recovery": {
-            "import": "./src/engine/device-lost-recovery.ts",
-            "types": "./src/engine/device-lost-recovery.ts"
-        },
-        "./engine/device-lost-recovery-testing": {
-            "import": "./src/engine/device-lost-recovery-testing.ts",
-            "types": "./src/engine/device-lost-recovery-testing.ts"
-        },
-        "./material/standard/enable-standard-mesh-features": {
-            "import": "./src/material/standard/enable-standard-mesh-features.ts",
-            "types": "./src/material/standard/enable-standard-mesh-features.ts"
         }
     },
     "files": [
@@ -55,16 +26,16 @@
     },
     "devDependencies": {
         "@ampproject/remapping": "^2.3.0",
-        "@webgpu/types": "^0.1.52",
+        "@webgpu/types": "^0.1.71",
         "typescript": "^6.0.3",
         "vite": "^6.4.3",
         "vite-plugin-dts": "^4.5.4"
     },
     "dependencies": {
-        "@recast-navigation/core": "0.43.0",
-        "@recast-navigation/generators": "0.43.0",
-        "@recast-navigation/wasm": "0.43.0",
-        "manifold-3d": "3.4.0",
-        "text-shaper": "^0.1.18"
+        "@recast-navigation/core": "0.43.1",
+        "@recast-navigation/generators": "0.43.1",
+        "@recast-navigation/wasm": "0.43.1",
+        "manifold-3d": "3.5.1",
+        "text-shaper": "^0.1.28"
     }
 }

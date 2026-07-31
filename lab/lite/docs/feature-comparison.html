@@ -384,6 +384,12 @@
                             <td>Globe-orbit camera (center/yaw/pitch/radius) with fly-to + controls (Scene 225)</td>
                         </tr>
                         <tr>
+                            <td>Orthographic Projection</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Any camera via enableOrthographicCamera() opt-in; live/animatable bounds, aspect-derived or off-center (Scene 268)</td>
+                        </tr>
+                        <tr>
                             <td>Follow Camera</td>
                             <td>—</td>
                             <td>✅</td>
@@ -1337,7 +1343,7 @@
                             <td>Device Lost Recovery</td>
                             <td>✅</td>
                             <td>✅</td>
-                            <td>Opt-in automatic WebGPU device-loss recovery (Scene 164)</td>
+                            <td>Opt-in per-kind WebGPU device-loss recovery via <code>enableDeviceLost*Recovery</code> APIs (Scene 164: Scene)</td>
                         </tr>
                         <tr>
                             <td>OffscreenCanvas / Worker Rendering</td>

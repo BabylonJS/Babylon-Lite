@@ -1,19 +1,16 @@
-import { createParticleSystem } from "../../particle-system.js";
-import { copyColor4 } from "../../../math/color4-ref.js";
-import type { Color4, Vec2 } from "../../../math/types.js";
-import type { ParticleBlockEvaluator } from "../npe-types.js";
+import type { Vec2, Color4 } from "../../../math/types.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /**
- * `CreateParticleBlock` — creates the {@link ParticleSystem} and fills the creation slots that set a new
- * particle's lifetime/emit-power, size/scale, angle, colour, and dead colour (which also derives the
- * per-step colour ramp). Mirrors BJS `CreateParticleBlock._build`. The shape block fills the
- * position/direction slots; the fixed slot order is enforced by the runtime, not by build order.
+ * `CreateParticleBlock` — creates the {@link ParticleSystem} and fills the fixed creation slots
+ * (lifetime/emit-power, size/scale, angle, colour, dead colour + the derived per-step colour ramp) as
+ * column writes. The shape block fills position/direction.
  */
-export const createParticleBlock: ParticleBlockEvaluator = {
+export const createParticleBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const state = ctx.state;
-        const system = createParticleSystem(block.name, state.capacity);
-        state.system = system;
+        const system = state.system!;
+        const buffer = system.buffer;
 
         const lifeTimeGetter = ctx.input(block, "lifeTime", () => 1);
         const emitPowerGetter = ctx.input(block, "emitPower", () => 1);
@@ -23,77 +20,77 @@ export const createParticleBlock: ParticleBlockEvaluator = {
         const angleGetter = ctx.input(block, "angle", () => 0);
         const sizeGetter = ctx.input(block, "size", () => 1);
 
-        system._createLifeTime = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            particle.lifeTime = lifeTimeGetter(state) as number;
-            sys._emitPower = emitPowerGetter(state) as number;
+        const lifeTime = buffer.lifeTime;
+        const dirX = buffer.dirX;
+        const dirY = buffer.dirY;
+        const dirZ = buffer.dirZ;
+        const size = buffer.size;
+        const scaleX = buffer.scaleX;
+        const scaleY = buffer.scaleY;
+        const angle = buffer.angle;
+        const colR = buffer.colorR;
+        const colG = buffer.colorG;
+        const colB = buffer.colorB;
+        const colA = buffer.colorA;
+        const stepR = buffer.colorStepR;
+        const stepG = buffer.colorStepG;
+        const stepB = buffer.colorStepB;
+        const stepA = buffer.colorStepA;
+
+        system.createLifeTime = (i) => {
+            lifeTime[i] = lifeTimeGetter(i) as number;
+            system._emitPower = emitPowerGetter(i) as number;
         };
 
-        system._createEmitPower = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            // Mirrors BJS `_CreateEmitPowerData`: scale the (unit) emission direction by the emit power so a
-            // particle's velocity magnitude equals its emit power. A zero emit power parks the particle and
-            // stashes its facing in `_initialDirection`. (Lite has no inherited-velocity offset to add.)
-            const emitPower = sys._emitPower;
-            if (emitPower === 0) {
-                particle._initialDirection.x = particle.direction.x;
-                particle._initialDirection.y = particle.direction.y;
-                particle._initialDirection.z = particle.direction.z;
-                particle.direction.x = 0;
-                particle.direction.y = 0;
-                particle.direction.z = 0;
+        system.createEmitPower = (i) => {
+            const p = system._emitPower;
+            if (p === 0) {
+                dirX[i] = 0;
+                dirY[i] = 0;
+                dirZ[i] = 0;
             } else {
-                particle.direction.x *= emitPower;
-                particle.direction.y *= emitPower;
-                particle.direction.z *= emitPower;
+                dirX[i] = dirX[i]! * p;
+                dirY[i] = dirY[i]! * p;
+                dirZ[i] = dirZ[i]! * p;
             }
         };
 
-        system._createSize = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            const size = sizeGetter(state);
-            particle.size = typeof size === "number" ? size : 1;
-            const scale = scaleGetter(state);
-            if (scale && typeof scale === "object") {
-                const vec = scale as Vec2;
-                particle.scale.x = vec.x;
-                particle.scale.y = vec.y;
+        system.createSize = (i) => {
+            const s = sizeGetter(i);
+            size[i] = typeof s === "number" ? s : 1;
+            const sc = scaleGetter(i);
+            if (sc && typeof sc === "object") {
+                const v = sc as Vec2;
+                scaleX[i] = v.x;
+                scaleY[i] = v.y;
             } else {
-                particle.scale.x = scale as number;
-                particle.scale.y = scale as number;
+                scaleX[i] = sc as number;
+                scaleY[i] = sc as number;
             }
         };
 
-        system._createAngle = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            particle.angle = angleGetter(state) as number;
+        system.createAngle = (i) => {
+            angle[i] = angleGetter(i) as number;
         };
 
-        system._createColor = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            const color = colorGetter(state) as Color4 | null;
-            if (color) {
-                copyColor4(particle.color, color);
+        system.createColor = (i) => {
+            const c = colorGetter(i) as Color4 | null;
+            if (c) {
+                colR[i] = c.r;
+                colG[i] = c.g;
+                colB[i] = c.b;
+                colA[i] = c.a;
             }
         };
 
-        system._createColorDead = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            copyColor4(particle.colorDead, colorDeadGetter(state) as Color4);
-            copyColor4(particle.initialColor, particle.color);
-            const invLife = 1 / particle.lifeTime;
-            particle.colorStep.r = (particle.colorDead.r - particle.initialColor.r) * invLife;
-            particle.colorStep.g = (particle.colorDead.g - particle.initialColor.g) * invLife;
-            particle.colorStep.b = (particle.colorDead.b - particle.initialColor.b) * invLife;
-            particle.colorStep.a = (particle.colorDead.a - particle.initialColor.a) * invLife;
+        system.createColorDead = (i) => {
+            const cd = colorDeadGetter(i) as Color4;
+            system._writeColorDead?.(i, cd);
+            const invLife = 1 / lifeTime[i]!;
+            stepR[i] = (cd.r - colR[i]!) * invLife;
+            stepG[i] = (cd.g - colG[i]!) * invLife;
+            stepB[i] = (cd.b - colB[i]!) * invLife;
+            stepA[i] = (cd.a - colA[i]!) * invLife;
         };
-
-        ctx.setOutput(block.id, "particle", () => system);
     },
 };
