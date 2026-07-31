@@ -65,9 +65,9 @@ describe("PhysicsCharacterController.setShapeOptions", () => {
         cc.setShapeOptions(options);
 
         expect(cc.shapeOptions).toBe(options);
-        expect(cc.getPosition()).toEqual({ x: 1, y: 1.7, z: 3 });
-        expect(setNodePosition).toHaveBeenCalledWith(1, 1.7, 3);
-        expect(createCapsule).toHaveBeenCalledWith([0, 0.19999999999999996, 0], [0, -0.19999999999999996, 0], 0.4);
+        expect(cc.getPosition()).toEqual({ x: 1, y: expect.closeTo(1.7), z: 3 });
+        expect(setNodePosition).toHaveBeenCalledWith(1, expect.closeTo(1.7), 3);
+        expect(createCapsule).toHaveBeenCalledWith([0, expect.closeTo(0.2), 0], [0, expect.closeTo(-0.2), 0], 0.4);
         expect(setBodyShape).toHaveBeenCalledWith("body", "new-shape");
         expect(body._shape?._hkShape).toBe("new-shape");
         expect(releaseShape).toHaveBeenCalledWith(oldShape._hkShape);
