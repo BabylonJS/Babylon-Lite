@@ -112,13 +112,10 @@ export class SSAO2RenderingPipeline {
 // ─── Particles ───────────────────────────────────────────────────────
 export class ParticleHelper {
     public constructor() {
-        unsupported("ParticleHelper", "Particle systems are not implemented in Babylon Lite.");
-    }
-}
-
-export class ParticleSystemSet {
-    public constructor() {
-        unsupported("ParticleSystemSet", "Particle systems are not implemented in Babylon Lite.");
+        unsupported(
+            "ParticleHelper",
+            "The imperative particle-preset helper is not backed. Babylon Lite renders serialized Node Particle Editor graphs (`NodeParticleSystemSet.ParseFromSnippetAsync` → `buildAsync`), not preset-driven imperative `ParticleSystem`s."
+        );
     }
 }
 

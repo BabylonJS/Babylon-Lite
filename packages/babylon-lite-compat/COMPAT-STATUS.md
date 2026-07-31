@@ -8,7 +8,7 @@ updated by the `update-compat-layer` skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
 - **Last synced BJS commit:** `227f5a188c8f362ee636ddf9553612d9742c4200`
-- **Last sync date:** 2026-07-30
+- **Last sync date:** 2026-07-31
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -311,8 +311,10 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 
 | BJS API                                                        | Status           | Notes                      |
 | -------------------------------------------------------------- | ---------------- | -------------------------- |
-| `ParticleSystem` / `GPUParticleSystem` / `SolidParticleSystem` | ❌ Not supported | throwing stub; not in Lite |
-| `ParticleHelper` / `ParticleSystemSet` / `PointsCloudSystem`   | ❌ Not supported | throwing stub              |
+| `NodeParticleSystemSet` / `ParticleSystemSet` (NPE)            | ⚡ Partial       | [particles/node-particle-system-set.ts](src/particles/node-particle-system-set.ts) — the Node Particle Editor load→build→run path. `Parse` / `ParseFromSnippetAsync` / `ParseFromFileAsync` record the graph source; `buildAsync(scene)` forwards to Lite `parseNodeParticleSetFromSnippet` (fused parse+build) and returns a real `ParticleSystemSet` whose `start()` calls Lite `registerNodeParticleSet` (billboard render + per-frame advance) and `dispose()` calls `stopParticleSystem`. Programmatic graph-authoring (`attachedBlocks` / `getBlockByName` / `serialize` / `editAsync` / `CreateDefault`) and the per-system imperative `ParticleSystem` handle (`ParticleSystemSet.systems`) throw — Lite consumes a serialized graph and runs a fused struct-of-arrays simulation with no BJS-shaped per-system object |
+| `NodeParticleBlock` + NPE blocks / connection points / build state / source enums | ❌ Not supported | throwing (via the NPE set); programmatic node-graph authoring API — Lite consumes a serialized graph (snippet id / JSON) and exposes no block-construction surface to mirror |
+| `ParticleSystem` / `GPUParticleSystem` / `SolidParticleSystem` | ❌ Not supported | throwing stub. Lite backs serialized NPE graphs (see `NodeParticleSystemSet`), not the imperative classic `ParticleSystem` API (emitters, over-lifetime gradients, `minEmitBox`), a GPU-compute path, or per-particle solid-mesh copies |
+| `ParticleHelper` / `PointsCloudSystem`                         | ❌ Not supported | throwing stub — imperative preset helper / points cloud have no Lite backing |
 
 ## Post-processes
 
@@ -388,7 +390,7 @@ candidate rows for the next audit passes — until wrapped they either carry a
 | `BABYLON.*` global namespace                   | ⛔ Out of scope (no `globalThis` mutation) |
 | `SceneLoader.RegisterPlugin` / `RegisterClass` | ⛔ Out of scope (side-effectful)           |
 | `Inspector` / `NodeMaterialEditor`             | ⛔ Out of scope                            |
-| `ParticleSystem` / `GPUParticleSystem`         | ❌ Not supported (not in Lite)             |
+| `ParticleSystem` / `GPUParticleSystem`         | ❌ Not supported (imperative API; NPE graphs work — see Particles) |
 | `@babylonjs/gui`                               | ❌ Not supported (not in Lite)             |
 | `Sound` / `AudioEngine` (legacy v1)            | ❌ Not supported (use AudioV2 — see Audio) |
 | WebXR                                          | ❌ Not supported (no XR in Lite)           |
