@@ -55,6 +55,6 @@ export function createScene277NpeJson(): unknown {
     });
     particle.targetBlockId = attractorId;
     particle.targetConnectionName = "output";
-    emitRate.value = 100;
+    emitRate.value = 50;
     return graph;
 }
