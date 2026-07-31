@@ -23,8 +23,8 @@ import { createSplatSortScratch, sortSplatsBackToFront, type SplatSortScratch } 
  *  `splat-sort-core.ts` (O(n)). `t` is the affine depth transform for
  *  `cameraForward · (world · localPos - cameraPos)`. */
 
-let positions: Float32Array | null = null;
-let scratch: SplatSortScratch | null = null;
+let positions: Float32Array;
+let scratch: SplatSortScratch;
 
 self.onmessage = (e: MessageEvent) => {
     const data = e.data as {
@@ -39,12 +39,8 @@ self.onmessage = (e: MessageEvent) => {
         return;
     }
 
-    if (!positions || !scratch || !data.t || !data.o) {
-        return;
-    }
-
-    const order = data.o;
-    sortSplatsBackToFront(positions, order.length, data.t, order, scratch);
+    const order = data.o!;
+    sortSplatsBackToFront(positions, order.length, data.t!, order, scratch);
 
     (self as unknown as { postMessage: (m: unknown, t?: Transferable[]) => void }).postMessage({ o: order }, [order.buffer]);
 };
