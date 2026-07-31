@@ -433,7 +433,7 @@ export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: Ga
         cpu[59] = 0;
         device.queue.writeBuffer(ubo, 0, cpu.buffer, 0, UBO_BYTES);
 
-        postSplatSortIfDirty(mesh, world, view[2]!, view[6]!, view[10]!, camPos.x, camPos.y, camPos.z);
+        postSplatSortIfDirty(mesh, world, view);
     };
 
     const r: Renderable = {

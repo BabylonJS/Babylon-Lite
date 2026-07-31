@@ -24,7 +24,7 @@ import type { SceneContext } from "../../scene/scene-core.js";
 import type { Renderable, DrawBinding } from "../../render/renderable.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { targetSignatureKey } from "../../engine/render-target.js";
-import { getViewMatrix, getProjectionMatrix, getCameraPosition } from "../../camera/camera.js";
+import { getViewMatrix, getProjectionMatrix } from "../../camera/camera.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { getRenderTargetSize } from "../../engine/engine.js";
 import { disposeGaussianSplattingMesh, uploadPendingSplatOrder, postSplatSortIfDirty, type GaussianSplattingMesh, type GsShaderFragment } from "./gaussian-splatting-mesh.js";
@@ -256,8 +256,7 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
         // dataSize / alpha pre-written at construction.
         device.queue.writeBuffer(ubo, 0, cpu.buffer, 0, UBO_BYTES);
 
-        const camPos = getCameraPosition(cam);
-        postSplatSortIfDirty(mesh, world, view[2]!, view[6]!, view[10]!, camPos.x, camPos.y, camPos.z);
+        postSplatSortIfDirty(mesh, world, view);
     };
 
     const r: Renderable = {

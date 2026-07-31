@@ -11,7 +11,7 @@ import { createSplatSortScratch, sortSplatsBackToFront, type SplatSortScratch } 
  *  Init (once):  `{ p: Float32Array, n: number }`
  *                — buffer is transferred and retained on the worker side.
  *                — positions are in mesh-LOCAL space (stride 3, xyz per splat).
- *  Sort  (N×):   `{ m: Float32Array(16), f: Float32Array(3), c: Float32Array(3), o: Uint32Array }`
+ *  Sort  (N×):   `{ t: Float32Array(4), o: Uint32Array }`
  *                — `o` is a transferable order buffer owned by the main thread's
  *                  pool (`mesh._orderPool`); the worker fills it with splat
  *                  indices in back-to-front order and transfers it back as
@@ -20,8 +20,8 @@ import { createSplatSortScratch, sortSplatsBackToFront, type SplatSortScratch } 
  *                  the worker never idles on the round-trip during camera motion.
  *
  *  The sort itself is the uniform-key counting (radix) sort in
- *  `splat-sort-core.ts` (O(n)) — see that module for the algorithm and the
- *  depth recipe `cameraForward · (world · localPos - cameraPos)`. */
+ *  `splat-sort-core.ts` (O(n)). `t` is the affine depth transform for
+ *  `cameraForward · (world · localPos - cameraPos)`. */
 
 let positions: Float32Array | null = null;
 let vertexCount = 0;
@@ -31,9 +31,7 @@ self.onmessage = (e: MessageEvent) => {
     const data = e.data as {
         p?: Float32Array;
         n?: number;
-        m?: Float32Array;
-        f?: Float32Array;
-        c?: Float32Array;
+        t?: Float32Array;
         o?: Uint32Array;
     };
 
@@ -44,12 +42,12 @@ self.onmessage = (e: MessageEvent) => {
         return;
     }
 
-    if (!positions || !scratch || !data.m || !data.f || !data.c || !data.o) {
+    if (!positions || !scratch || !data.t || !data.o) {
         return;
     }
 
     const order = data.o;
-    sortSplatsBackToFront(positions, vertexCount, data.m, data.f, data.c, order, scratch);
+    sortSplatsBackToFront(positions, vertexCount, data.t, order, scratch);
 
     (self as unknown as { postMessage: (m: unknown, t?: Transferable[]) => void }).postMessage({ o: order }, [order.buffer]);
 };

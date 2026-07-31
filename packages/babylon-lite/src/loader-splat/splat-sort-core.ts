@@ -28,29 +28,20 @@ import { F32, U32 } from "../engine/typed-arrays.js";
  *  coarse bin only one key — spanning 1/32 ≈ 3.1 % of the depth range — so a
  *  splat crossing an empty gap in a clustered (i.e. real captured) scene can
  *  pop by up to ~3 %. The uniform mapping is marginally faster (one fewer pass)
- *  and keeps the worst-case error at one bucket (< 0.01 %) on every scene, so
+ *  and keeps the worst-case error below 0.01 % on every scene, so
  *  it is the ordering the runtime uses. See PR #446 for the full comparison.
  *
  *  Splats whose quantized keys collide keep their original relative order (the
  *  scatter is stable). Non-finite depths (NaN/Inf centres) map to the far end of
  *  the range, so corrupt splats draw first, behind everything. */
 
-/** Per-cloud scratch reused across sorts. Sized once per `positions` upload. */
-export interface SplatSortScratch {
-    /** Per-splat view depth (pass 1), then reused to hold each splat's integer
-     *  sort key (pass 2) — keys are < 2^20 so f32 stores them exactly. */
-    depths: Float32Array;
-    /** Counting-sort table, `2^bits` entries. Lazily (re)allocated because the
-     *  bit count depends on the vertex count. */
-    counts: Uint32Array | null;
-}
+/** Per-cloud scratch reused across sorts: per-splat depth/key storage followed
+ *  by the counting table. Both are sized once per `positions` upload. */
+export type SplatSortScratch = [depths: Float32Array, counts: Uint32Array];
 
 /** Allocate the scratch for a cloud of `vertexCount` splats. */
 export function createSplatSortScratch(vertexCount: number): SplatSortScratch {
-    return {
-        depths: new F32(vertexCount),
-        counts: null,
-    };
+    return [new F32(vertexCount), new U32(1 << splatSortBucketBits(vertexCount))];
 }
 
 /** Sort-key bit width for a cloud: `clamp(round(log2(n / 4)), 10, 20)`. */
@@ -60,27 +51,13 @@ export function splatSortBucketBits(vertexCount: number): number {
 
 /** Write the back-to-front splat order into `order[0..vertexCount)`.
  *
- *  `m` is the mesh's world matrix (column-major, affine), `cf` the camera's
- *  world-space forward vector, `cp` the camera's world-space position —
- *  the same three inputs the previous BigInt64 sort consumed, producing the
- *  same ordering up to key-quantization ties. */
-export function sortSplatsBackToFront(
-    positions: Float32Array,
-    vertexCount: number,
-    m: Float32Array,
-    cf: Float32Array,
-    cp: Float32Array,
-    order: Uint32Array,
-    scratch: SplatSortScratch
-): void {
-    // Collapse cameraForward · (world · localPos - cameraPos) into (a*x + b*y + c*z + d).
-    // Lite column-major: world's column k lives at indices [4k, 4k+1, 4k+2, 4k+3]
-    // (the 4th row is always [0,0,0,1] for an affine matrix, so we skip m[3,7,11,15]).
-    const camDot = cf[0]! * cp[0]! + cf[1]! * cp[1]! + cf[2]! * cp[2]!;
-    const a = cf[0]! * m[0]! + cf[1]! * m[1]! + cf[2]! * m[2]!;
-    const b = cf[0]! * m[4]! + cf[1]! * m[5]! + cf[2]! * m[6]!;
-    const c = cf[0]! * m[8]! + cf[1]! * m[9]! + cf[2]! * m[10]!;
-    const d = cf[0]! * m[12]! + cf[1]! * m[13]! + cf[2]! * m[14]! - camDot;
+ *  `depthTransform` is the four-coefficient affine kernel `(a,b,c,d)` for
+ *  `cameraForward · (world · localPos − cameraPos)`. */
+export function sortSplatsBackToFront(positions: Float32Array, vertexCount: number, depthTransform: Float32Array, order: Uint32Array, scratch: SplatSortScratch): void {
+    const a = depthTransform[0]!;
+    const b = depthTransform[1]!;
+    const c = depthTransform[2]!;
+    const d = depthTransform[3]!;
 
     // ── Pass 1: depths + finite min/max (NaN fails both compares, Inf is kept
     // out by the isFinite guard so a single corrupt splat can't destroy the
@@ -90,13 +67,13 @@ export function sortSplatsBackToFront(
     // nearest splat's f32-truncated depth can land just below an f64 `min`,
     // making `t < 0` and mis-routing it to the far end (drawn behind
     // everything instead of in front). ──────────────────────────────────────
-    const depths = scratch.depths;
+    const depths = scratch[0];
     let min = Infinity;
     let max = -Infinity;
     for (let j = 0; j < vertexCount; j++) {
         depths[j] = a * positions[3 * j]! + b * positions[3 * j + 1]! + c * positions[3 * j + 2]! + d;
         const sj = depths[j]!;
-        if (Number.isFinite(sj)) {
+        if (sj - sj === 0) {
             if (sj < min) {
                 min = sj;
             }
@@ -117,20 +94,14 @@ export function sortSplatsBackToFront(
     }
 
     // Key space: 2^bits uniform buckets across the depth range.
-    const bits = splatSortBucketBits(vertexCount);
-    const bucketCount = 1 << bits;
-    let counts = scratch.counts;
-    if (!counts || counts.length !== bucketCount) {
-        counts = scratch.counts = new U32(bucketCount);
-    } else {
-        counts.fill(0);
-    }
+    const counts = scratch[1];
+    counts.fill(0);
 
     // ── Pass 2: per-splat uniform key (ascending with depth) + counts. Keys
     // overwrite `depths` in place — they are < 2^20, exact in f32. The nearest
     // splat maps to key 0 and the farthest to the top key, so the descending
     // scatter below yields back-to-front order. ─────────────────────────────
-    const maxKey = bucketCount - 1;
+    const maxKey = counts.length - 1;
     const scale = maxKey / range;
     for (let j = 0; j < vertexCount; j++) {
         const sj = depths[j]!;
@@ -138,7 +109,7 @@ export function sortSplatsBackToFront(
         // everything). Finite depths quantize uniformly; clamp guards against a
         // depth == max (or float rounding) producing key > maxKey.
         let key: number;
-        if (Number.isFinite(sj)) {
+        if (sj - sj === 0) {
             key = ((sj - min) * scale) | 0;
             if (key > maxKey) {
                 key = maxKey;

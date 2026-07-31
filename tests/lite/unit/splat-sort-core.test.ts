@@ -22,9 +22,18 @@ function refOrder(positions: Float32Array, n: number, m: Float32Array, cf: Float
     return idx.sort((p, q) => depths[q]! - depths[p]! || p - q);
 }
 
+function depthTransform(m: Float32Array, cf: Float32Array, cp: Float32Array): Float32Array {
+    return new Float32Array([
+        cf[0]! * m[0]! + cf[1]! * m[1]! + cf[2]! * m[2]!,
+        cf[0]! * m[4]! + cf[1]! * m[5]! + cf[2]! * m[6]!,
+        cf[0]! * m[8]! + cf[1]! * m[9]! + cf[2]! * m[10]!,
+        cf[0]! * (m[12]! - cp[0]!) + cf[1]! * (m[13]! - cp[1]!) + cf[2]! * (m[14]! - cp[2]!),
+    ]);
+}
+
 function sort(positions: Float32Array, n: number, m: Float32Array, cf: Float32Array, cp: Float32Array): Uint32Array {
     const order = new Uint32Array(n);
-    sortSplatsBackToFront(positions, n, m, cf, cp, order, createSplatSortScratch(n));
+    sortSplatsBackToFront(positions, n, depthTransform(m, cf, cp), order, createSplatSortScratch(n));
     return order;
 }
 
@@ -141,10 +150,18 @@ describe("sortSplatsBackToFront", () => {
 
     it("sorts NaN centers to the back and keeps the rest ordered", () => {
         const positions = new Float32Array([
-            0, 0, 1, // near
-            NaN, 0, 2, // corrupt
-            0, 0, 9, // far
-            0, 0, 5, // mid
+            0,
+            0,
+            1, // near
+            NaN,
+            0,
+            2, // corrupt
+            0,
+            0,
+            9, // far
+            0,
+            0,
+            5, // mid
         ]);
         const order = sort(positions, 4, IDENTITY, CF, CP);
         expectPermutation(order, 4);
@@ -163,9 +180,7 @@ describe("sortSplatsBackToFront", () => {
 
 describe("postSplatSortIfDirty / uploadPendingSplatOrder", () => {
     interface PostedJob {
-        m: Float32Array;
-        f: Float32Array;
-        c: Float32Array;
+        t: Float32Array;
         o: Uint32Array;
     }
 
@@ -175,9 +190,7 @@ describe("postSplatSortIfDirty / uploadPendingSplatOrder", () => {
             vertexCount,
             _orderPool: [new Uint32Array(vertexCount), new Uint32Array(vertexCount)],
             _pendingOrder: null,
-            _sortWorldMatrix: new Float32Array(16),
-            _sortCameraForward: new Float32Array(3),
-            _sortCameraPosition: new Float32Array(3),
+            _sortDepthTransform: new Float32Array(4),
             _worker: {
                 postMessage(data: PostedJob) {
                     posted.push(data);
@@ -198,47 +211,51 @@ describe("postSplatSortIfDirty / uploadPendingSplatOrder", () => {
             },
         }) as unknown as GPUQueue;
 
-    it("posts when the camera moved past the epsilon and snapshots the state", () => {
+    it("posts when the depth transform moved past the epsilon and snapshots it", () => {
         const { mesh, posted } = makeMesh(4);
-        postSplatSortIfDirty(mesh, IDENTITY, 0, 0, 1, 0, 0, 0);
+        postSplatSortIfDirty(mesh, IDENTITY, IDENTITY);
         expect(posted.length).toBe(1);
         expect(mesh._orderPool.length).toBe(1);
-        expect(Array.from(mesh._sortCameraForward)).toEqual([0, 0, 1]);
+        expect(Array.from(mesh._sortDepthTransform)).toEqual([0, 0, 1, 0]);
     });
 
     it("skips a re-sort for sub-epsilon drift", () => {
         const { mesh, posted } = makeMesh(4);
-        postSplatSortIfDirty(mesh, IDENTITY, 0, 0, 1, 0, 0, 0);
-        // 5e-5 < SORT_EPS (1e-4) on every component: no new job.
-        postSplatSortIfDirty(mesh, IDENTITY, 0, 0, 1 + 5e-5, 5e-5, 0, 0);
+        postSplatSortIfDirty(mesh, IDENTITY, IDENTITY);
+        const view = new Float32Array(IDENTITY);
+        view[14] = 5e-5;
+        postSplatSortIfDirty(mesh, IDENTITY, view);
         expect(posted.length).toBe(1);
-        // Past the epsilon: re-sort.
-        postSplatSortIfDirty(mesh, IDENTITY, 0, 0, 1, 0.001, 0, 0);
+        view[14] = 0.001;
+        postSplatSortIfDirty(mesh, IDENTITY, view);
         expect(posted.length).toBe(2);
     });
 
-    it("re-sorts when only the world matrix changes", () => {
+    it("re-sorts when the world matrix changes view depth", () => {
         const { mesh, posted } = makeMesh(4);
-        postSplatSortIfDirty(mesh, IDENTITY, 0, 0, 1, 0, 0, 0);
+        postSplatSortIfDirty(mesh, IDENTITY, IDENTITY);
         const moved = new Float32Array(IDENTITY);
-        moved[12] = 2;
-        postSplatSortIfDirty(mesh, moved, 0, 0, 1, 0, 0, 0);
+        moved[14] = 2;
+        postSplatSortIfDirty(mesh, moved, IDENTITY);
         expect(posted.length).toBe(2);
     });
 
     it("caps in-flight jobs at the pool size", () => {
         const { mesh, posted } = makeMesh(4);
-        postSplatSortIfDirty(mesh, IDENTITY, 0, 0, 1, 0, 0, 0);
-        postSplatSortIfDirty(mesh, IDENTITY, 0, 0, 1, 1, 0, 0);
+        postSplatSortIfDirty(mesh, IDENTITY, IDENTITY);
+        const view = new Float32Array(IDENTITY);
+        view[14] = 1;
+        postSplatSortIfDirty(mesh, IDENTITY, view);
         expect(posted.length).toBe(2);
         expect(mesh._orderPool.length).toBe(0);
         // Pool exhausted: a further move must not post (and must not consume
         // the snapshot, so the job isn't lost — it stays dirty).
-        postSplatSortIfDirty(mesh, IDENTITY, 0, 0, 1, 2, 0, 0);
+        view[14] = 2;
+        postSplatSortIfDirty(mesh, IDENTITY, view);
         expect(posted.length).toBe(2);
         // A buffer returns: the still-dirty state posts on the next call.
         mesh._orderPool.push(new Uint32Array(4));
-        postSplatSortIfDirty(mesh, IDENTITY, 0, 0, 1, 2, 0, 0);
+        postSplatSortIfDirty(mesh, IDENTITY, view);
         expect(posted.length).toBe(3);
     });
 
