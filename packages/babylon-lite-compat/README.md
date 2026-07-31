@@ -97,8 +97,9 @@ mismapping. Once migration is complete you can drop the plugin and import from
   module-level side effects, so it never bloats consumers that don't use it.
 - **Honest:** unsupported Babylon.js APIs throw `LiteCompatError` rather than
   rendering something subtly wrong.
-- **Not** a full Babylon.js reimplementation. Particles, GUI, WebXR, decals,
-  and other features absent from Babylon Lite are out of scope.
+- **Not** a full Babylon.js reimplementation. Classic imperative particle systems,
+  GUI, WebXR, decals, and other features absent from Babylon Lite are out of scope
+  (Node Particle Editor graphs are partially supported).
 
 ## Supported APIs at a glance
 
@@ -134,7 +135,8 @@ overloads within a supported area may still be absent.
 | Misc (`Observable`, `Tools`, `SmartArray`, `Tags`, gradients, `PerformanceMonitor`)                       |   ✅   |                                                                                                                                                                           |
 | Audio V2 (`AudioEngineV2`, `StaticSound`, `StreamingSound`, `AudioBus`, buses/sources/analyzer)           |   ⚡   | over Lite's AudioV2 port; `MainAudioBus` spatial/analyzer and a second main bus unsupported                                                                               |
 | Physics (`HavokPlugin`, `scene.enablePhysics`/`getPhysicsEngine`, `PhysicsShapeType`/`PhysicsMotionType`) |   ⚡   | Havok V2 over Lite `createHavokWorld`; refresh-rate-independent `useDeltaForWorldStep`. Bodies via native `createPhysicsAggregate` (`PhysicsAggregate` class not wrapped) |
-| Particles, post-processes, layers (glow/highlight), probes, WebXR                                         |   ❌   | not in Babylon Lite — use native Lite `create*Task` functions                                                                                                             |
+| Particles (`NodeParticleSystemSet` / `ParticleSystemSet` — Node Particle Editor)                          |   ⚡   | NPE snippet/JSON graphs: `Parse`/`ParseFromSnippetAsync` → `buildAsync` → `start`. Imperative classic/GPU/solid `ParticleSystem` + programmatic block authoring unsupported                                                    |
+| Post-processes, layers (glow/highlight), probes, WebXR                                                    |   ❌   | not in Babylon Lite — use native Lite `create*Task` functions                                                                                                             |
 
 ### `@babylonjs/loaders`
 

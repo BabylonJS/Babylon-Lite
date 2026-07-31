@@ -49,19 +49,28 @@ export class ClusteredLightContainer {
 // ─── Particles ───────────────────────────────────────────────────────
 export class ParticleSystem {
     public constructor() {
-        unsupported("ParticleSystem", "Particle systems are not implemented in Babylon Lite.");
+        unsupported(
+            "ParticleSystem",
+            "Babylon Lite backs serialized Node Particle Editor graphs via `NodeParticleSystemSet` (`Parse`/`ParseFromSnippetAsync` → `buildAsync` → `start`), not the imperative classic `ParticleSystem` construction API (emitters, over-lifetime gradients, `minEmitBox`)."
+        );
     }
 }
 
 export class GPUParticleSystem {
     public constructor() {
-        unsupported("GPUParticleSystem", "Particle systems are not implemented in Babylon Lite.");
+        unsupported(
+            "GPUParticleSystem",
+            "Babylon Lite has no GPU-compute particle path. Its node-particle runtime (`NodeParticleSystemSet`) is a CPU struct-of-arrays simulation; use `NodeParticleSystemSet.ParseFromSnippetAsync` → `buildAsync` instead."
+        );
     }
 }
 
 export class SolidParticleSystem {
     public constructor() {
-        unsupported("SolidParticleSystem", "Solid particle systems are not implemented in Babylon Lite. Consider native thin instances for many-copies use cases.");
+        unsupported(
+            "SolidParticleSystem",
+            "Solid particle systems (per-particle mesh copies) are not backed by Babylon Lite. Consider native thin instances for many-copies use cases; node-particle billboards are available via `NodeParticleSystemSet`."
+        );
     }
 }
 

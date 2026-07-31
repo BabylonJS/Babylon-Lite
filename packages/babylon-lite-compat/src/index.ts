@@ -292,7 +292,6 @@ export {
     FxaaPostProcess,
     SSAO2RenderingPipeline,
     ParticleHelper,
-    ParticleSystemSet,
     PointsCloudSystem,
     PhysicsAggregate,
     PhysicsBody,
@@ -313,3 +312,6 @@ export {
 } from "./unsupported/unsupported-extended.js";
 
 export { HavokPlugin, PhysicsEngine, PhysicsShapeType, PhysicsMotionType, PhysicsPrestepType, PhysicsConstraintType } from "./physics/physics.js";
+
+// ─── Node Particle Editor (NPE) ──────────────────────────────────────
+export { NodeParticleSystemSet, ParticleSystemSet } from "./particles/node-particle-system-set.js";
