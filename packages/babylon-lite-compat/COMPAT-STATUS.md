@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `d690fa8ffdf6d4b029409696d59992ac412d6c1d`
-- **Last sync date:** 2026-07-29
+- **Last synced BJS commit:** `227f5a188c8f362ee636ddf9553612d9742c4200`
+- **Last sync date:** 2026-07-30
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -168,6 +168,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `Mesh.CreateSphere/Box/Ground/Plane/Cylinder/Torus` (legacy statics)                                            | ✅ Full            | meshes (delegate to `MeshBuilder`)                                                                                                                                                                                                         |
 | `MeshBuilder.CreateRibbon/Tube/ExtrudeShape`                                                                    | ⚡ Partial         | meshes (Lite-backed)                                                                                                                                                                                                                       |
 | `MeshBuilder.CreateLines` / `CreateDecal` / `CreateText`                                                        | ❌ Not supported   | throwing stub; not in Lite                                                                                                                                                                                                                 |
+| `MeshBuilder.CreateTiledBox` / `CreateTiledPlane` (+ standalone `CreateTiledBox` / `CreateTiledPlane`)          | 🔧 Needs Lite core | throwing stubs; Lite's box/plane builders have no per-tile UV tiling. The tile-pattern layout (tile size, alignment, per-tile flip/rotate patterns) is a non-trivial vertex-data generator with pattern design choices — not a mechanical addition |
 | `Mesh` / `AbstractMesh` (transform, material, visibility)                                                       | ⚡ Partial         | meshes — incl. `getVerticesData`/`setVerticesData` (position/normal/uv/uv2/tangent/color, retained), and both transform-bake entry points over one shared helper: `bakeCurrentTransformIntoVertices()` (folds the node transform, then resets it) and `bakeTransformIntoVertices(matrix)` (arbitrary matrix, no reset). Normals bake by the inverse-transpose (correct under non-uniform scale); uv/uv2/tangent/color are preserved across the reupload (issue #475) |
 | `Mesh.MergeMeshes` (static)                                                                                     | ⚡ Partial         | [meshes/meshes.ts](src/meshes/meshes.ts) over Lite's tree-shakeable `mergeMeshGeometry` ([mesh/merge-mesh-geometry.ts](../babylon-lite/src/mesh/merge-mesh-geometry.ts)) — world-bakes positions/normals(cofactor)/one UV set into a fresh mesh; supports `disposeSource` + the 16-bit-index 65536-vertex null return; rejects (throws) `multiMultiMaterials`/`subdivideWithSubMeshes`, a `meshSubclass` target, and sources with vertex colours/tangents/UV2. Skinning is not carried (issue #474) |
 | `GroundMesh`                                                                                                    | ⚡ Partial         | meshes (no CPU height query)                                                                                                                                                                                                               |
