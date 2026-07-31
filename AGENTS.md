@@ -43,9 +43,10 @@ release.
 
 ### Guardrails (Non-Negotiable)
 
-- **Run ALL agent-allowed tests before validating** — actually execute `pnpm test` (build + parity) and review the output. Never skip tests or declare success based on code review alone.
-- **No MAD regression** — visual parity tests must all pass.
-- **All agent-allowed tests green** — bundle-size and parity tests must all pass. Perf tests are user/CI-only.
+- **Never run the all-scene suite unless the user explicitly requests it** — do not execute `pnpm test`, full `pnpm test:parity`, or an unfiltered `pnpm build:bundle-scenes`. CI owns repository-wide scene coverage.
+- **Run focused validation before declaring success** — use the narrowest relevant unit tests, filtered scene bundles, individual parity specs, lint, and typecheck for the changed subsystem.
+- **No MAD regression in affected scenes** — every parity spec relevant to the change must pass.
+- **All focused agent-allowed tests green** — scoped bundle-size and parity checks must pass. Perf tests are user/CI-only.
 - **No bundle-size regression** — bundle size must stay within ceilings.
 - **No ceiling updates** — bundle-size test thresholds cannot be changed without explicit user approval.
 - **No golden reference changes** — reference screenshots are immutable unless user explicitly requests update.

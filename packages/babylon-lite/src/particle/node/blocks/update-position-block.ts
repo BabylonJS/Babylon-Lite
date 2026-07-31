@@ -1,27 +1,27 @@
-import { copyVec3 } from "../../../math/vec3-ref.js";
 import type { Vec3 } from "../../../math/types.js";
-import type { ParticleSystem } from "../../particle-system.js";
-import type { ParticleBlockEvaluator } from "../npe-types.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /**
- * `UpdatePositionBlock` — each step, sets the particle position to the value of its `position` input
- * (typically `currentPosition + scaledDirection`). Mirrors BJS `UpdatePositionBlock`.
+ * `UpdatePositionBlock` — each step, writes the particle position columns from the `position` input
+ * (typically `currentPosition + scaledDirection`).
  */
-export const updatePositionBlock: ParticleBlockEvaluator = {
+export const updatePositionBlock: NpeBlockEvaluator = {
     build(block, ctx) {
-        const state = ctx.state;
-        const system = ctx.input(block, "particle")(state) as ParticleSystem;
-        ctx.setOutput(block.id, "output", () => system);
-
+        const system = ctx.state.system!;
+        const buffer = ctx.state.buffer!;
         if (!ctx.isConnected(block, "position")) {
             return;
         }
         const positionGetter = ctx.input(block, "position");
+        const posX = buffer.posX;
+        const posY = buffer.posY;
+        const posZ = buffer.posZ;
 
-        system._updateQueue.push((particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            copyVec3(particle.position, positionGetter(state) as Vec3);
+        system.updateSteps.push((i) => {
+            const v = positionGetter(i) as Vec3;
+            posX[i] = v.x;
+            posY[i] = v.y;
+            posZ[i] = v.z;
         });
     },
 };

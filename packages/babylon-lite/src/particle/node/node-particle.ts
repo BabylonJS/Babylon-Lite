@@ -5,6 +5,10 @@ import { parseNodeParticleSource } from "./npe-parser.js";
 import { buildNodeParticleSet } from "./npe-build.js";
 import type { NodeParticleSet } from "./npe-build.js";
 
+export { buildNodeParticleSet };
+export type { NodeParticleSet };
+export type { BuildNodeParticleOptions } from "./npe-build.js";
+
 /** Options for {@link parseNodeParticleSetFromSnippet}. */
 export interface ParseNodeParticleOptions {
     /** Inline graph JSON (string or parsed object); bypasses the network. */

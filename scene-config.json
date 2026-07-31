@@ -2412,5 +2412,16 @@
         "description": "Two overlapping MSDF text renderers write per-sample depth into a 4x MSAA target. Fractional front-glyph edge coverage leaves samples for the rear glyph, producing a visible red/green edge mix and exercising the dedicated Slug A2C fragment pipeline on GPU.",
         "tags": ["text", "msdf", "depth", "msaa", "alpha-to-coverage"],
         "skipPerf": true
+    },
+    {
+        "id": 276,
+        "slug": "scene276-npe-animations",
+        "name": "Scene 276 — NPE Particles: Animations 2 (sprite sheet)",
+        "maxMad": 0.01,
+        "maxRawKB": 45,
+        "description": "Node Particle Editor graph (a classic sprite-sheet ParticleSystem — isAnimationSheetEnabled with spriteCellChangeSpeed 30 over cells 0..9 of a 64×64 grid, looped — converted to NPE via ConvertToNodeParticleSystemSetAsync, mirroring Babylon.js visual test 'Particles - Animations 2', playground #CBXIIX#0) rendered as camera-facing additive billboards through the pay-for-use particle runtime, with a deterministic seeded RNG and a frozen frame.",
+        "tags": ["npe", "particles", "billboards", "sprite-sheet"],
+        "skipPerf": true,
+        "compatParity": true
     }
 ]
