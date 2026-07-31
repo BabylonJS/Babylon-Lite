@@ -1141,7 +1141,7 @@ Current tracked measurements are:
 | 263   |   `41.8 KB` |    `24.7 KB` |                 `27.5 KB` | `44.1 KB` |
 | 264   |   `40.0 KB` |    `25.9 KB` |                 `34.4 KB` | `44.1 KB` |
 | 276   |   `44.0 KB` |    `25.2 KB` |                 `27.1 KB` | `45.0 KB` |
-| 277   |   `41.6 KB` |    `25.3 KB` |                 `29.8 KB` | `45.0 KB` |
+| 277   |   `41.6 KB` |    `25.2 KB` |                 `29.8 KB` | `45.0 KB` |
 
 Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, and 277 as sprite users because particles render through billboard sprite modules.
 

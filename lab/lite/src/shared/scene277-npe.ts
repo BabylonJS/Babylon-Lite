@@ -19,7 +19,7 @@ interface MutableBlock {
 }
 
 /** Scene 277 - NPE UpdateAttractorBlock graph derived from the canonical scene 262 particle graph. */
-export const SCENE277_NPE_JSON = (() => {
+export function createScene277NpeJson(): unknown {
     const graph = structuredClone(SCENE262_NPE_JSON) as unknown as { blocks: MutableBlock[] };
     const system = graph.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;
     const particle = system.inputs.find((input) => input.name === "particle")!;
@@ -57,4 +57,4 @@ export const SCENE277_NPE_JSON = (() => {
     particle.targetConnectionName = "output";
     emitRate.value = 100;
     return graph;
-})();
+}

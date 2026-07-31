@@ -11,7 +11,7 @@ import { NodeParticleSystemSet } from "@babylonjs/core/Particles/Node/nodePartic
 import "@babylonjs/core/Particles/Node/Blocks";
 import "@babylonjs/core/Shaders/particles.vertex";
 import "@babylonjs/core/Shaders/particles.fragment";
-import { SCENE277_NPE_JSON } from "../shared/scene277-npe.js";
+import { createScene277NpeJson } from "../shared/scene277-npe.js";
 
 const STEPS = 200;
 
@@ -28,7 +28,7 @@ const STEPS = 200;
     camera.minZ = 0.1;
     camera.maxZ = 100;
 
-    const set = NodeParticleSystemSet.Parse(SCENE277_NPE_JSON);
+    const set = NodeParticleSystemSet.Parse(createScene277NpeJson());
     const built = await set.buildAsync(scene);
     const system = built.systems[0] as ParticleSystem;
     system.particleTexture = new Texture("https://playground.babylonjs.com/textures/flare.png", scene);

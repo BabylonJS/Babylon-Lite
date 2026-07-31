@@ -15,7 +15,7 @@ import {
     startParticleSystem,
     syncParticleBillboard,
 } from "babylon-lite";
-import { SCENE277_NPE_JSON } from "../shared/scene277-npe.js";
+import { createScene277NpeJson } from "../shared/scene277-npe.js";
 
 const STEPS = 200;
 
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
     scene.camera = camera;
     attachControl(camera, canvas, scene);
 
-    const graph = parseNodeParticleSource(SCENE277_NPE_JSON);
+    const graph = parseNodeParticleSource(createScene277NpeJson());
     const set = await buildNodeParticleSet(engine, scene, graph, {
         emitter: { x: 0, y: 0, z: 0 },
         textureBaseUrl: "https://playground.babylonjs.com/",

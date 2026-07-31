@@ -1,7 +1,7 @@
 {
   "rawKB": 41.6,
-  "rawBytes": 42577,
-  "gzipKB": 25.3,
+  "rawBytes": 42575,
+  "gzipKB": 25.2,
   "ignoredRawKB": 29.8,
   "runtimeChunks": [
     "scene277-billboard-renderable-B50v6vkT.js",

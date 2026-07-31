@@ -14,7 +14,7 @@ const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
 const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277];
 const UNUSED_FEATURE_CHUNK =
-    /registry-(variants|extra-basic|extra-emitters|extra-values|local-shapes)|update-(attractor|direction|angle)-block|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
+    /registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|direction|angle)-block|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 
 describe("Particle bundle feature isolation", () => {
     it("canonical particle scenes do not fetch unused optional features", () => {
@@ -26,13 +26,17 @@ describe("Particle bundle feature isolation", () => {
                 (chunk) =>
                     UNUSED_FEATURE_CHUNK.test(chunk) &&
                     !(sceneId === 263 && chunk.includes("registry-extra-emitters")) &&
-                    !(sceneId === 277 && chunk.includes("update-attractor-block"))
+                    !(sceneId === 277 && (chunk.includes("registry-extra-remaining") || chunk.includes("update-attractor-block")))
             );
             expect(offenders, `scene${sceneId} fetches unused particle feature chunks`).toEqual([]);
             if (sceneId === 277) {
                 expect(
                     chunks.some((chunk) => chunk.includes("update-attractor-block")),
                     "scene277 must fetch the attractor evaluator"
+                ).toBe(true);
+                expect(
+                    chunks.some((chunk) => chunk.includes("registry-extra-remaining")),
+                    "scene277 must fetch the remaining optional registry"
                 ).toBe(true);
             }
 
@@ -49,9 +53,9 @@ describe("Particle bundle feature isolation", () => {
                 .map((module) => module.id ?? "")
                 .filter(
                     (id) =>
-                        /particle\/node\/(npe-registry-(extra-values|local-shapes)|npe-local-position|blocks\/(system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|update-attractor-block|(box|point|sphere|cone|cylinder|mesh)-shape-local))|math\/mat4-invert/.test(
+                        /particle\/node\/(npe-registry-(extra-remaining|extra-values|local-shapes)|npe-local-position|blocks\/(system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|update-attractor-block|(box|point|sphere|cone|cylinder|mesh)-shape-local))|math\/mat4-invert/.test(
                             id
-                        ) && !(sceneId === 277 && id.includes("update-attractor-block"))
+                        ) && !(sceneId === 277 && (id.includes("npe-registry-extra-remaining") || id.includes("update-attractor-block")))
                 );
             expect(moduleOffenders, `scene${sceneId} folds unused optional particle features into runtime chunks`).toEqual([]);
         }
