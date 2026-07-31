@@ -36,6 +36,10 @@ function engineWrapper(): { _lite: EngineContext } {
     return { _lite: {} as EngineContext };
 }
 
+/** The `Texture` constructor's scene param is typed `Scene | { _lite: EngineContext }`;
+ *  the GPU-free tests only need the `_lite` handle, so the minimal fake is cast in. */
+const asTextureScene = (w: { _lite: object }): ConstructorParameters<typeof Texture>[1] => w as unknown as ConstructorParameters<typeof Texture>[1];
+
 function textureHandle(): unknown {
     return { id: "texture" };
 }
@@ -78,7 +82,7 @@ describe("Texture onLoadObservable", () => {
         const load = deferred<unknown>();
         liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
 
-        const tex = new Texture("https://h/albedo.png", engineWrapper());
+        const tex = new Texture("https://h/albedo.png", asTextureScene(engineWrapper()));
         expect((tex as unknown as { _onLoadObservable?: unknown })._onLoadObservable).toBeUndefined();
 
         load.resolve(textureHandle());
@@ -95,7 +99,7 @@ describe("Texture onLoadObservable", () => {
         let observerCalls = 0;
         const events: string[] = [];
 
-        const tex = new Texture("https://h/albedo.png", engineWrapper(), undefined, undefined, undefined, () => {
+        const tex = new Texture("https://h/albedo.png", asTextureScene(engineWrapper()), undefined, undefined, undefined, () => {
             events.push("onLoad");
             onLoadCalls++;
         });
@@ -117,7 +121,7 @@ describe("Texture onLoadObservable", () => {
     it("fires immediately for subscribers attached after the texture is ready", async () => {
         const load = deferred<unknown>();
         liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
-        const tex = new Texture("https://h/albedo.png", engineWrapper());
+        const tex = new Texture("https://h/albedo.png", asTextureScene(engineWrapper()));
 
         load.resolve(textureHandle());
         await tex.whenReadyAsync();
@@ -143,7 +147,7 @@ describe("Texture onLoadObservable", () => {
         let observerCalls = 0;
         const state: { tex?: Texture } = {};
 
-        const tex = new Texture("https://h/albedo.png", engineWrapper(), undefined, undefined, undefined, () => {
+        const tex = new Texture("https://h/albedo.png", asTextureScene(engineWrapper()), undefined, undefined, undefined, () => {
             state.tex!.onLoadObservable.add((observed) => {
                 observerCalls++;
                 expect(observed).toBe(state.tex);
