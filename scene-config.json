@@ -1685,7 +1685,7 @@
         "id": 176,
         "slug": "scene176-mosquito-amber",
         "skipParity": true,
-        "skipParityReason": "Not a diffuse-IBL brightness issue (studio.env carries embedded SH, so the scene17/19 baseTexture.polynomial fix does not apply here). Residual parity gap is a genuine Lite-vs-BJS difference: HDR skybox gradient banding/moiré + KHR_materials_transmission amber tint. Needs a separate skybox/transmission parity fix.",
+        "skipParityReason": "Not a diffuse-IBL brightness issue and NOT a missing tree-shaking side-effect import: a full-bundle CDN Babylon.js repro of this exact scene renders identically to the tree-shaken BJS reference page (global MAD <0.1; background <0.7; so no import is missing). studio.env also carries embedded SH, so the scene17/19 baseTexture.polynomial fix does not apply. The residual parity gap (~3.4 MAD) is concentrated entirely in the transmissive amber body (body MAD ~8.7 vs background ~0.7) — a genuine Lite-vs-BJS difference in KHR_materials_transmission + KHR_materials_volume (subsurface tint / Beer-Lambert absorption) evaluation, independent of transmission copyCount. Needs a separate transmission/subsurface parity fix.",
         "name": "Scene 176 - MosquitoInAmber",
         "maxMad": 0.5,
         "maxRawKB": 104.57,
