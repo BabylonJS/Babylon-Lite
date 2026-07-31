@@ -1,4 +1,4 @@
-import { createSplatSortScratch, sortSplatsBackToFront, type SplatSortScratch } from "./splat-sort-core.js";
+import { sortSplatsBackToFront, type SplatSortScratch } from "./splat-sort-core.js";
 /** Splat sort worker.
  *
  *  Vite import: `import SortWorker from './splat-sort-worker.ts?worker&inline'`.
@@ -35,7 +35,8 @@ self.onmessage = (e: MessageEvent) => {
 
     if (data.p) {
         positions = data.p;
-        scratch = createSplatSortScratch(positions.length / 3);
+        const n = positions.length / 3;
+        scratch = [new Float32Array(n), new Uint32Array(1 << Math.max(10, Math.min(20, Math.round(Math.log2(n / 4)))))];
         return;
     }
 
