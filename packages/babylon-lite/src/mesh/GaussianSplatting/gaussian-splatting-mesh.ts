@@ -102,6 +102,8 @@ export interface GaussianSplattingMesh extends SceneNode {
      *  on the last sort. A re-sort is needed only when these coefficients
      *  change, regardless of which camera/world component caused the change. */
     _sortDepthTransform: Float32Array;
+    /** @internal Scratch for the current affine view-depth transform. */
+    _nextSortDepthTransform: Float32Array;
     /** Resolves on the first sort completion. The lab scene awaits this
      *  before flagging `dataset.ready`. */
     readonly firstSortReady: Promise<void>;
@@ -199,6 +201,7 @@ export function createGaussianSplattingMesh(engine: EngineContext, name: string,
         _orderPool: [new U32(vertexCount), new U32(vertexCount)],
         _pendingOrder: null,
         _sortDepthTransform: new F32(4),
+        _nextSortDepthTransform: new F32(4),
         firstSortReady,
         _firstSortResolve: firstResolve,
         _gs: {
@@ -248,7 +251,7 @@ export function createGaussianSplattingMesh(engine: EngineContext, name: string,
         // hand the worker a fresh transferable. If a sort is currently in
         // flight, the message queues behind it and the worker swaps to the
         // new positions when it lands.
-        mesh._worker.postMessage({ p: newGeom.positions, n: newGeom.vertexCount }, [newGeom.positions.buffer]);
+        mesh._worker.postMessage({ p: newGeom.positions }, [newGeom.positions.buffer]);
         // Force a re-sort on the next eligible frame by zeroing the snapshot
         // state — any real camera/world state will differ by more than the
         // gating threshold. (`_orderPool` is left untouched — in-flight sort
@@ -264,7 +267,7 @@ export function createGaussianSplattingMesh(engine: EngineContext, name: string,
 
     // Ship the positions buffer to the worker once. After this `geom.positions`
     // is detached on this side — that's fine, we never need it again.
-    worker.postMessage({ p: geom.positions, n: vertexCount }, [geom.positions.buffer]);
+    worker.postMessage({ p: geom.positions }, [geom.positions.buffer]);
 
     worker.onmessage = (e: MessageEvent) => {
         const data = e.data as { o: Uint32Array };
@@ -315,19 +318,20 @@ export function postSplatSortIfDirty(mesh: GaussianSplattingMesh, world: Float32
     const v0 = view[2]!;
     const v1 = view[6]!;
     const v2 = view[10]!;
-    const d0 = v0 * world[0]! + v1 * world[1]! + v2 * world[2]!;
-    const d1 = v0 * world[4]! + v1 * world[5]! + v2 * world[6]!;
-    const d2 = v0 * world[8]! + v1 * world[9]! + v2 * world[10]!;
-    const d3 = v0 * world[12]! + v1 * world[13]! + v2 * world[14]! + view[14]!;
     const last = mesh._sortDepthTransform;
-    if (Math.abs(last[0]! - d0) <= SORT_EPS && Math.abs(last[1]! - d1) <= SORT_EPS && Math.abs(last[2]! - d2) <= SORT_EPS && Math.abs(last[3]! - d3) <= SORT_EPS) {
+    const next = mesh._nextSortDepthTransform;
+    let dirty = false;
+    for (let i = 0; i < 4; i++) {
+        next[i] = v0 * world[4 * i]! + v1 * world[4 * i + 1]! + v2 * world[4 * i + 2]! + (i === 3 ? view[14]! : 0);
+        if (Math.abs(last[i]! - next[i]!) > SORT_EPS) {
+            dirty = true;
+        }
+    }
+    if (!dirty) {
         return;
     }
 
-    last[0] = d0;
-    last[1] = d1;
-    last[2] = d2;
-    last[3] = d3;
+    last.set(next);
     const order = mesh._orderPool.pop()!;
     mesh._worker.postMessage({ t: last, o: order }, [order.buffer]);
 }

@@ -8,7 +8,7 @@ import { createSplatSortScratch, sortSplatsBackToFront, type SplatSortScratch } 
  *
  *  Protocol
  *  --------
- *  Init (once):  `{ p: Float32Array, n: number }`
+ *  Init (once):  `{ p: Float32Array }`
  *                — buffer is transferred and retained on the worker side.
  *                — positions are in mesh-LOCAL space (stride 3, xyz per splat).
  *  Sort  (N×):   `{ t: Float32Array(4), o: Uint32Array }`
@@ -24,21 +24,18 @@ import { createSplatSortScratch, sortSplatsBackToFront, type SplatSortScratch } 
  *  `cameraForward · (world · localPos - cameraPos)`. */
 
 let positions: Float32Array | null = null;
-let vertexCount = 0;
 let scratch: SplatSortScratch | null = null;
 
 self.onmessage = (e: MessageEvent) => {
     const data = e.data as {
         p?: Float32Array;
-        n?: number;
         t?: Float32Array;
         o?: Uint32Array;
     };
 
     if (data.p) {
         positions = data.p;
-        vertexCount = data.n ?? 0;
-        scratch = createSplatSortScratch(vertexCount);
+        scratch = createSplatSortScratch(positions.length / 3);
         return;
     }
 
@@ -47,7 +44,7 @@ self.onmessage = (e: MessageEvent) => {
     }
 
     const order = data.o;
-    sortSplatsBackToFront(positions, vertexCount, data.t, order, scratch);
+    sortSplatsBackToFront(positions, order.length, data.t, order, scratch);
 
     (self as unknown as { postMessage: (m: unknown, t?: Transferable[]) => void }).postMessage({ o: order }, [order.buffer]);
 };

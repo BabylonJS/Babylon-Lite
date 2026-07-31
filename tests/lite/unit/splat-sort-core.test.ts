@@ -191,6 +191,7 @@ describe("postSplatSortIfDirty / uploadPendingSplatOrder", () => {
             _orderPool: [new Uint32Array(vertexCount), new Uint32Array(vertexCount)],
             _pendingOrder: null,
             _sortDepthTransform: new Float32Array(4),
+            _nextSortDepthTransform: new Float32Array(4),
             _worker: {
                 postMessage(data: PostedJob) {
                     posted.push(data);

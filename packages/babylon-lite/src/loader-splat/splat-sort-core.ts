@@ -41,7 +41,8 @@ export type SplatSortScratch = [depths: Float32Array, counts: Uint32Array];
 
 /** Allocate the scratch for a cloud of `vertexCount` splats. */
 export function createSplatSortScratch(vertexCount: number): SplatSortScratch {
-    return [new F32(vertexCount), new U32(1 << splatSortBucketBits(vertexCount))];
+    const bits = Math.max(10, Math.min(20, Math.round(Math.log2(vertexCount / 4))));
+    return [new F32(vertexCount), new U32(1 << bits)];
 }
 
 /** Sort-key bit width for a cloud: `clamp(round(log2(n / 4)), 10, 20)`. */
@@ -118,7 +119,7 @@ export function sortSplatsBackToFront(positions: Float32Array, vertexCount: numb
             key = maxKey;
         }
         depths[j] = key;
-        counts[key] = counts[key]! + 1;
+        counts[key]!++;
     }
 
     // ── Pass 3: suffix scan (highest key writes first ⇒ back-to-front) and
