@@ -13,7 +13,8 @@
 import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
-import type { StandardMaterialProps } from "./standard-material.js";
+import type { StandardMaterialProps, StandardSceneShaderContext } from "./standard-material.js";
+import type { Mesh } from "../../mesh/mesh.js";
 import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
 import { _standardFeatureKey } from "./standard-material.js";
@@ -27,6 +28,7 @@ import {
     DIFFUSE_USES_UV2,
     DISABLE_LIGHTING,
     DOUBLE_SIDED,
+    HAS_BUMP_TEXTURE,
     HAS_DIFFUSE_TEXTURE,
     HAS_OPACITY_TEXTURE,
     MATERIAL_ALPHA_BLEND,
@@ -37,14 +39,46 @@ import {
     _getStdExtsSorted,
 } from "./standard-flags.js";
 import { MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
+import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
  *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
  *  always null, and every stencil branch below folds away — stencil-free Standard scenes stay byte-identical. */
 let _stencilResolver: ((stencil: StencilState) => ResolvedStencil) | null = null;
+let _uvOffsetResolver: ((material: StandardMaterialProps) => readonly [number, number] | null) | null = null;
 /** @internal Install the stencil resolver into the Standard pipeline (called by `enableMaterialStencil`). */
 export function _installStandardStencilResolver(resolve: (stencil: StencilState) => ResolvedStencil): void {
     _stencilResolver = resolve;
+}
+
+/** Vertex-color fragment factory installed only by `enableStandardVertexColors`. RGB is always
+ *  applied; the `hasVertexAlpha` argument (Babylon `VERTEXALPHA`, from `mesh.hasVertexAlpha`) gates
+ *  the fragment's `alpha *= vColor.a` + vertex-alpha alpha-test. `hasDiffuse` selects the alpha-test
+ *  source. Installed by the canonical `enableStandardVertexColors()` (master #430) opt-in. */
+export let _stdVertexColorFragment: ((hasDiffuse: boolean, hasVertexAlpha: boolean) => ShaderFragment) | null = null;
+
+/** @internal Install Standard mesh vertex-color shader support (called by `enableStandardVertexColors`). */
+export function _installStdVertexColorFragment(factory: (hasDiffuse: boolean, hasVertexAlpha: boolean) => ShaderFragment): void {
+    _stdVertexColorFragment = factory;
+}
+
+/** @internal Install optional Standard UV-offset reads. */
+export function _installStandardUvOffsetResolver(resolve: (material: StandardMaterialProps) => readonly [number, number] | null): void {
+    _uvOffsetResolver = resolve;
+}
+
+/** Primitive-state resolver, installed only by `std-mirrored-support` — i.e. the
+ *  `enableMirroredMeshes()` opt-in — so that a mirrored Standard mesh gets its triangle winding
+ *  reversed. (The shared resolver it installs also threads non-triangle topology, but that only
+ *  ever comes from glTF primitives, which are PBR; a Standard mesh always resolves to a
+ *  triangle list.) Module-local with a single exported setter: when the opt-in is absent the setter
+ *  tree-shakes, the bundler proves this is always null, and the ternary in
+ *  `getOrCreateStandardPipeline` folds to the plain triangle-list default — every ordinary Standard
+ *  scene stays byte-identical. */
+let _stdPrimitiveResolver: ((meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState) | null = null;
+/** @internal Install the Standard primitive-state resolver. */
+export function _installStdPrimitiveResolver(resolve: (meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState): void {
+    _stdPrimitiveResolver = resolve;
 }
 
 // ─── Composer Path (Phase 1) ────────────────────────────────────────
@@ -54,7 +88,13 @@ export function _installStandardStencilResolver(resolve: (stencil: StencilState)
 
 /** Compose Standard shader via the generic ShaderComposer.
  *  @param fragments - Optional extra fragments (e.g. thin-instance). */
-export function composeStandardShader(features: number, _meshFeatures = 0, fragments: ShaderFragment[] = [], esmShadowDepthCode = ""): ComposedShader {
+export function composeStandardShader(
+    features: number,
+    _meshFeatures = 0,
+    fragments: ShaderFragment[] = [],
+    esmShadowDepthCode = "",
+    sceneShader: StandardSceneShaderContext | null = null
+): ComposedShader {
     const has = (bit: number) => (features & bit) !== 0;
     const pc = fragments[0]?._pc;
     const template = createStandardTemplate(
@@ -70,7 +110,7 @@ export function composeStandardShader(features: number, _meshFeatures = 0, fragm
         },
         esmShadowDepthCode
     );
-    let composed = composeShader(template, fragments);
+    let composed = composeShader(template, sceneShader ? [...fragments, ...sceneShader._fragments] : fragments);
     pc && (composed = pc(composed));
     return composed;
 }
@@ -86,11 +126,17 @@ export interface StandardShaderBindings {
     /** @internal */
     _meshFeatures: number;
     /** @internal */
+    _sceneFeatures: number;
+    /** @internal */
     _meshBGL: GPUBindGroupLayout;
     /** @internal */
     _shadowBGL: GPUBindGroupLayout | null;
     /** @internal */
     _composed: ComposedShader;
+    /** @internal Shared across normal/A2C pipeline variants only when the A2C resolver is installed. */
+    _a2cVertModule?: GPUShaderModule;
+    /** @internal */
+    _a2cFragModule?: GPUShaderModule;
     /** @internal Pre-baked partial depth-stencil descriptor for this material's stencil state. Present (and
      *  the cache key carries the resolved `_key`) only when `enableMaterialStencil` was called — otherwise the
      *  field is never assigned and the whole stencil path folds out of stencil-free bundles. */
@@ -140,14 +186,16 @@ export function getOrCreateStandardBindings(
     fragments: ShaderFragment[] = [],
     shaderKey = "",
     esmShadowDepthCode = "",
-    stencil: StencilState | null = null
+    stencil: StencilState | null = null,
+    sceneShader: StandardSceneShaderContext | null = null
 ): StandardShaderBindings {
     ensureDevice(engine);
     // Stencil state is baked into the GPU pipeline (no dynamic stencil ref), so two materials that differ only in
     // stencil must NOT share bindings/pipelines — fold the resolved stencil token into the cache key. Resolution
     // goes through the opt-in `_stencilResolver` hook, so non-stencil scenes fold this whole block away.
     const resolvedStencil = stencil && _stencilResolver ? _stencilResolver(stencil) : null;
-    const key = _standardFeatureKey(features, meshFeatures, shaderKey) + (resolvedStencil ? resolvedStencil._key : "");
+    const sceneFeatures = sceneShader?._features ?? 0;
+    const key = _standardFeatureKey(features, meshFeatures, sceneFeatures, shaderKey) + (resolvedStencil ? resolvedStencil._key : "");
     const cached = _bindingsCache.get(key);
     if (cached) {
         return cached;
@@ -156,7 +204,7 @@ export function getOrCreateStandardBindings(
     const cc = getComposedCache();
     let composed = cc.get(key);
     if (!composed) {
-        composed = composeStandardShader(features, meshFeatures, fragments, esmShadowDepthCode);
+        composed = composeStandardShader(features, meshFeatures, fragments, esmShadowDepthCode, sceneShader);
         cc.set(key, composed);
     }
 
@@ -171,6 +219,7 @@ export function getOrCreateStandardBindings(
     const bindings: StandardShaderBindings = {
         _features: features,
         _meshFeatures: meshFeatures,
+        _sceneFeatures: sceneFeatures,
         _meshBGL: meshBGL,
         _shadowBGL: shadowBGL,
         _composed: composed,
@@ -185,9 +234,16 @@ export function getOrCreateStandardBindings(
 }
 
 /** Get-or-build a sig-specific pipeline on top of a shader bindings. Called at bind() time. */
-export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTargetSignature, bindings: StandardShaderBindings): GPURenderPipeline {
+export function getOrCreateStandardPipeline(
+    engine: EngineContext,
+    sig: RenderTargetSignature,
+    bindings: StandardShaderBindings,
+    material: StandardMaterialProps
+): GPURenderPipeline {
     ensureDevice(engine);
-    const key = targetSignatureKey(sig);
+    const alphaToCoverageResolver = _getAlphaToCoverageResolver();
+    const useAlphaToCoverage = sig._sampleCount > 1 && !!alphaToCoverageResolver?.(material);
+    const key = `${targetSignatureKey(sig)}${useAlphaToCoverage ? ":a2c" : ""}`;
     const cached = bindings._pipelines.get(key);
     if (cached) {
         return cached;
@@ -199,10 +255,17 @@ export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTa
     const sceneBGL = getSceneBindGroupLayout(engine);
     const bgls: GPUBindGroupLayout[] = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
 
-    const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
+    const vertModule = alphaToCoverageResolver
+        ? (bindings._a2cVertModule ??= device.createShaderModule({ code: composed._vertexWGSL }))
+        : device.createShaderModule({ code: composed._vertexWGSL });
     const noColorOutput = (features & NO_COLOR_OUTPUT) !== 0;
     const esmShadowOutput = (features & ESM_SHADOW_OUTPUT) !== 0;
-    const fragModule = !sig._colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
+    const fragModule =
+        !sig._colorFormat && !noColorOutput
+            ? null
+            : alphaToCoverageResolver
+              ? (bindings._a2cFragModule ??= device.createShaderModule({ code: composed._fragmentWGSL }))
+              : device.createShaderModule({ code: composed._fragmentWGSL });
 
     const needsBlend = !esmShadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || (features & MATERIAL_ALPHA_BLEND) !== 0);
     const colorTarget: GPUColorTargetState | null = noColorOutput
@@ -235,8 +298,10 @@ export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTa
                   },
               }
             : {}),
-        multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
+        multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
+        primitive: _stdPrimitiveResolver
+            ? _stdPrimitiveResolver(bindings._meshFeatures, (features & DOUBLE_SIDED) !== 0)
+            : { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
     });
 
     bindings._pipelines.set(key, pipeline);
@@ -257,7 +322,8 @@ export function createStandardMeshBindGroup(
     meshUBO: GPUBuffer,
     materialUBO: GPUBuffer,
     material: StandardMaterialProps,
-    morphTargets: { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer } | null = null
+    morphTargets: { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer } | null = null,
+    mesh?: Mesh
 ): GPUBindGroup {
     const device = engine._device;
     const features = bindings._features;
@@ -270,8 +336,8 @@ export function createStandardMeshBindGroup(
     let nextBinding = 0;
     const entries: GPUBindGroupEntry[] = [{ binding: nextBinding++, resource: { buffer: meshUBO } }];
 
-    // Morph bindings are fragment vertex bindings, so the composer places them
-    // immediately after the mesh UBO and before the material UBO.
+    // Morph bindings are vertex bindings, so the composer places them before
+    // the Standard template's base material binding.
     if (morphTargets) {
         entries.push({ binding: nextBinding++, resource: { buffer: morphTargets.deltasBuffer } }, { binding: nextBinding++, resource: { buffer: morphTargets.weightsBuffer } });
     }
@@ -286,19 +352,7 @@ export function createStandardMeshBindGroup(
     // UV params UBO (only when UVs are actually emitted).
     if (needsUV) {
         const uvData = new F32(4);
-        const scaleX = material.uvScale[0];
-        let scaleY = material.uvScale[1];
-        let offsetY = 0;
-        // Flip V for y-down source data (e.g. basis/compressed textures).
-        // uv * (sx, sy) + (ox, oy) with vFlip becomes uv.xy * (sx, -sy) + (ox, sy+oy).
-        if (material.diffuseTexture?.invertY) {
-            offsetY = scaleY;
-            scaleY = -scaleY;
-        }
-        uvData[0] = scaleX;
-        uvData[1] = scaleY;
-        uvData[2] = 0;
-        uvData[3] = offsetY;
+        writeStandardUvTransformData(uvData, material, isStandardUvInverted(features, material));
         entries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
     }
 
@@ -314,7 +368,7 @@ export function createStandardMeshBindGroup(
     const sortedExts = _getStdExtsSorted();
     for (const ext of sortedExts) {
         if (features & ext._feature && ext._bind) {
-            nextBinding = ext._bind(material, entries, nextBinding);
+            nextBinding = ext._bind(material, entries, nextBinding, mesh);
         }
     }
 
@@ -322,6 +376,34 @@ export function createStandardMeshBindGroup(
 }
 
 // ─── Internal Helpers ───────────────────────────────────────────────
+
+/** @internal Write `(scaleX, scaleY, offsetX, offsetY)` with safe optional offsets. */
+export function writeStandardUvTransformData(data: Float32Array, material: StandardMaterialProps, invertY: boolean): void {
+    const offset = _uvOffsetResolver?.(material) ?? null;
+    const scaleX = material.uvScale[0];
+    let scaleY = material.uvScale[1];
+    const offsetX = offset?.[0] ?? 0;
+    let offsetY = offset?.[1] ?? 0;
+    if (invertY) {
+        offsetY += scaleY;
+        scaleY = -scaleY;
+    }
+    data[0] = scaleX;
+    data[1] = scaleY;
+    data[2] = offsetX;
+    data[3] = offsetY;
+}
+
+/** @internal Resolve the shared UV transform's source-texture orientation. */
+export function isStandardUvInverted(features: number, material: StandardMaterialProps): boolean {
+    if ((features & HAS_DIFFUSE_TEXTURE) !== 0 && material.diffuseTexture) {
+        return material.diffuseTexture.invertY === true;
+    }
+    if ((features & HAS_OPACITY_TEXTURE) !== 0 && material.opacityTexture) {
+        return material.opacityTexture.invertY === true;
+    }
+    return (features & HAS_BUMP_TEXTURE) !== 0 && material.bumpTexture?.invertY === true;
+}
 
 /** Write standard material properties into a pre-allocated Float32Array (24 floats). */
 export function writeStdMaterialData(data: Float32Array, mat: StandardMaterialProps, textureLevel: number): void {

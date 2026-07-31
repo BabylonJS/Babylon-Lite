@@ -1,11 +1,8 @@
 import { randomRange } from "../../../math/random-range.js";
 import { transformCoordinatesToRef, transformNormalToRef } from "../../../math/mat4-transform.js";
 import type { Vec3 } from "../../../math/types.js";
-import type { Color4 } from "../../../math/types.js";
-import type { ParticleSystem } from "../../particle-system.js";
-import type { ParticleBlockEvaluator } from "../npe-types.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
 
-/** Serialized `VertexData` carried by a MeshShapeBlock when `serializedCachedData` is set in the editor. */
 interface CachedVertexData {
     positions?: number[];
     indices?: number[];
@@ -13,126 +10,99 @@ interface CachedVertexData {
     colors?: number[];
 }
 
-/**
- * `MeshShapeBlock` — emits particles from a mesh's surface. The mesh geometry travels in the graph as the
- * block's `cachedVertexData` (positions/indices/normals), which the Node Particle Editor bakes when
- * "serialize cached data" is enabled. Each particle picks a random triangle and a random barycentric point;
- * the direction is the interpolated face normal (`useMeshNormalsForDirection`, the default) or a uniform
- * random between `direction1`/`direction2`. The three raw `Math.random()` draws (face index, then the two
- * barycentric coordinates) mirror BJS `MeshShapeBlock` exactly. A graph with no baked geometry emits nothing,
- * as in BJS. The emitter's world matrix is baked into birth position and direction; the mesh's own
- * world-space transform (BJS `worldSpace`) is not applied — geometry is sampled in mesh-local space.
- */
-export const meshShapeBlock: ParticleBlockEvaluator = {
+/** `MeshShapeBlock` — sample cached triangle geometry and interpolate its vertex data. */
+export const meshShapeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
-        const state = ctx.state;
-        const system = ctx.input(block, "particle")(state) as ParticleSystem;
-        ctx.setOutput(block.id, "output", () => system);
-
         const cached = block.serialized.cachedVertexData as CachedVertexData | undefined;
         const positions = cached?.positions;
         const indices = cached?.indices;
-        const normals = cached?.normals;
-        const colors = cached?.colors;
-        // Without baked geometry there is nothing to sample; BJS early-outs the same way (particles stay put).
         if (!positions || !indices) {
             return;
         }
 
-        const useMeshNormalsForDirection = block.serialized.useMeshNormalsForDirection !== false;
-        const useMeshColorForColor = block.serialized.useMeshColorForColor === true;
-        const dir1Getter = ctx.input(block, "direction1", () => ({ x: 0, y: 1, z: 0 }));
-        const dir2Getter = ctx.input(block, "direction2", () => ({ x: 0, y: 1, z: 0 }));
-
-        // When the mesh drives colour, the CreateParticle colour slot is suppressed (mirrors BJS clearing
-        // `_colorCreation`); the colour is written here from the sampled triangle instead.
-        if (useMeshColorForColor && colors) {
-            system._createColor = null;
+        const state = ctx.state;
+        const system = state.system!;
+        const buffer = state.buffer!;
+        const emitterWorldMatrix = state.emitterWorldMatrix;
+        const normals = cached.normals;
+        const colors = cached.colors;
+        const useNormals = block.serialized.useMeshNormalsForDirection !== false && !!normals;
+        const useColors = block.serialized.useMeshColorForColor === true && !!colors;
+        if (useNormals) {
+            system._suppressInitialDirectionCapture = true;
         }
-
-        // Face normal at the sampled point, computed in the position slot and consumed by the direction slot.
+        const direction1Getter = ctx.input(block, "direction1", () => ({ x: 0, y: 1, z: 0 }));
+        const direction2Getter = ctx.input(block, "direction2", () => ({ x: 0, y: 1, z: 0 }));
+        const scratch: Vec3 = { x: 0, y: 0, z: 0 };
         let normalX = 0;
         let normalY = 0;
         let normalZ = 0;
 
-        system._createPosition = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
+        let colorR: Float32Array | null = null;
+        let colorG: Float32Array | null = null;
+        let colorB: Float32Array | null = null;
+        let colorA: Float32Array | null = null;
+        if (useColors) {
+            colorR = buffer.colorR;
+            colorG = buffer.colorG;
+            colorB = buffer.colorB;
+            colorA = buffer.colorA;
+            system.createColor = null;
+        }
 
-            const randomFaceIndex = 3 * ((Math.random() * (indices.length / 3)) | 0);
+        system.createPosition = (i) => {
+            const face = 3 * ((Math.random() * (indices.length / 3)) | 0);
             const bu = Math.random();
-            const bv = Math.random() * (1.0 - bu);
-            const bw = 1.0 - bu - bv;
+            const bv = Math.random() * (1 - bu);
+            const bw = 1 - bu - bv;
+            const ia = indices[face]!;
+            const ib = indices[face + 1]!;
+            const ic = indices[face + 2]!;
+            const x = bu * positions[ia * 3]! + bv * positions[ib * 3]! + bw * positions[ic * 3]!;
+            const y = bu * positions[ia * 3 + 1]! + bv * positions[ib * 3 + 1]! + bw * positions[ic * 3 + 1]!;
+            const z = bu * positions[ia * 3 + 2]! + bv * positions[ib * 3 + 2]! + bw * positions[ic * 3 + 2]!;
 
-            const ia = indices[randomFaceIndex]!;
-            const ib = indices[randomFaceIndex + 1]!;
-            const ic = indices[randomFaceIndex + 2]!;
+            transformCoordinatesToRef(x, y, z, emitterWorldMatrix, scratch);
+            buffer.posX[i] = scratch.x;
+            buffer.posY[i] = scratch.y;
+            buffer.posZ[i] = scratch.z;
 
-            const ax = positions[ia * 3]!;
-            const ay = positions[ia * 3 + 1]!;
-            const az = positions[ia * 3 + 2]!;
-            const bx = positions[ib * 3]!;
-            const by = positions[ib * 3 + 1]!;
-            const bz = positions[ib * 3 + 2]!;
-            const cx = positions[ic * 3]!;
-            const cy = positions[ic * 3 + 1]!;
-            const cz = positions[ic * 3 + 2]!;
-
-            const rx = bu * ax + bv * bx + bw * cx;
-            const ry = bu * ay + bv * by + bw * cy;
-            const rz = bu * az + bv * bz + bw * cz;
-
-            if (sys.isLocal) {
-                particle.position.x = rx;
-                particle.position.y = ry;
-                particle.position.z = rz;
-            } else {
-                transformCoordinatesToRef(rx, ry, rz, state.emitterWorldMatrix, particle.position);
+            if (useNormals) {
+                normalX = bu * normals![ia * 3]! + bv * normals![ib * 3]! + bw * normals![ic * 3]!;
+                normalY = bu * normals![ia * 3 + 1]! + bv * normals![ib * 3 + 1]! + bw * normals![ic * 3 + 1]!;
+                normalZ = bu * normals![ia * 3 + 2]! + bv * normals![ib * 3 + 2]! + bw * normals![ic * 3 + 2]!;
             }
 
-            if (useMeshNormalsForDirection && normals) {
-                normalX = bu * normals[ia * 3]! + bv * normals[ib * 3]! + bw * normals[ic * 3]!;
-                normalY = bu * normals[ia * 3 + 1]! + bv * normals[ib * 3 + 1]! + bw * normals[ic * 3 + 1]!;
-                normalZ = bu * normals[ia * 3 + 2]! + bv * normals[ib * 3 + 2]! + bw * normals[ic * 3 + 2]!;
-            }
-
-            if (useMeshColorForColor && colors) {
-                const color = particle.color as Color4;
-                color.r = bu * colors[ia * 4]! + bv * colors[ib * 4]! + bw * colors[ic * 4]!;
-                color.g = bu * colors[ia * 4 + 1]! + bv * colors[ib * 4 + 1]! + bw * colors[ic * 4 + 1]!;
-                color.b = bu * colors[ia * 4 + 2]! + bv * colors[ib * 4 + 2]! + bw * colors[ic * 4 + 2]!;
-                color.a = bu * colors[ia * 4 + 3]! + bv * colors[ib * 4 + 3]! + bw * colors[ic * 4 + 3]!;
+            if (useColors) {
+                colorR![i] = bu * colors![ia * 4]! + bv * colors![ib * 4]! + bw * colors![ic * 4]!;
+                colorG![i] = bu * colors![ia * 4 + 1]! + bv * colors![ib * 4 + 1]! + bw * colors![ic * 4 + 1]!;
+                colorB![i] = bu * colors![ia * 4 + 2]! + bv * colors![ib * 4 + 2]! + bw * colors![ic * 4 + 2]!;
+                colorA![i] = bu * colors![ia * 4 + 3]! + bv * colors![ib * 4 + 3]! + bw * colors![ic * 4 + 3]!;
             }
         };
 
-        system._createDirection = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            if (useMeshNormalsForDirection && normals) {
-                if (sys.isLocal) {
-                    particle.direction.x = normalX;
-                    particle.direction.y = normalY;
-                    particle.direction.z = normalZ;
-                } else {
-                    transformNormalToRef(normalX, normalY, normalZ, state.emitterWorldMatrix, particle.direction);
-                }
-                return;
-            }
-            const dir1 = dir1Getter(state) as Vec3;
-            const dir2 = dir2Getter(state) as Vec3;
-            const rx = randomRange(dir1.x, dir2.x);
-            const ry = randomRange(dir1.y, dir2.y);
-            const rz = randomRange(dir1.z, dir2.z);
-            if (sys.isLocal) {
-                particle.direction.x = rx;
-                particle.direction.y = ry;
-                particle.direction.z = rz;
+        system.createDirection = (i) => {
+            let x: number;
+            let y: number;
+            let z: number;
+            if (useNormals) {
+                x = normalX;
+                y = normalY;
+                z = normalZ;
             } else {
-                transformNormalToRef(rx, ry, rz, state.emitterWorldMatrix, particle.direction);
+                const direction1 = direction1Getter(i) as Vec3;
+                const minX = direction1.x;
+                const minY = direction1.y;
+                const minZ = direction1.z;
+                const direction2 = direction2Getter(i) as Vec3;
+                x = randomRange(minX, direction2.x);
+                y = randomRange(minY, direction2.y);
+                z = randomRange(minZ, direction2.z);
             }
-            particle._initialDirection.x = particle.direction.x;
-            particle._initialDirection.y = particle.direction.y;
-            particle._initialDirection.z = particle.direction.z;
+            transformNormalToRef(x, y, z, emitterWorldMatrix, scratch);
+            buffer.dirX[i] = scratch.x;
+            buffer.dirY[i] = scratch.y;
+            buffer.dirZ[i] = scratch.z;
         };
     },
 };

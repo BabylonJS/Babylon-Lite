@@ -32,6 +32,8 @@ export interface MockGL {
      *  flipped via `setParallelComplete(true)`. */
     setParallelComplete(ok: boolean): void;
     setParallelAvailable(ok: boolean): void;
+    /** Set the value returned for `gl.SAMPLES`. */
+    setSampleCount(samples: number): void;
     /** Toggle availability of a `getExtension(name)` result (e.g. the
      *  color-buffer-float extensions that drive render-target caps). */
     setExtensionAvailable(name: string, ok: boolean): void;
@@ -42,6 +44,7 @@ interface Internal {
     parallelComplete: boolean;
     compileSuccess: boolean;
     linkSuccess: boolean;
+    sampleCount: number;
     extensions: Record<string, boolean>;
 }
 
@@ -53,6 +56,7 @@ export function createMockGL(): MockGL {
         parallelComplete: true,
         compileSuccess: true,
         linkSuccess: true,
+        sampleCount: 0,
         // Default: all color-buffer-float extensions present so render-target
         // float caps report true. Toggle with `setExtensionAvailable`.
         extensions: {
@@ -111,6 +115,8 @@ export function createMockGL(): MockGL {
         LINK_STATUS: 0x8b82,
         MAX_TEXTURE_SIZE: 0x0d33,
         MAX_COMBINED_TEXTURE_IMAGE_UNITS: 0x8b4d,
+        SAMPLES: 0x80a9,
+        SAMPLE_ALPHA_TO_COVERAGE: 0x809e,
         // ──── blend state + dynamic draw (sprites + setBlendMode) ────────
         BLEND: 0x0be2,
         FUNC_ADD: 0x8006,
@@ -144,7 +150,10 @@ export function createMockGL(): MockGL {
         NOTEQUAL: 0x0205,
         KEEP: 0x1e00,
         INCR_WRAP: 0x8507,
+        DECR_WRAP: 0x8508,
+        FRONT: 0x0404,
         BACK: 0x0405,
+        FRONT_AND_BACK: 0x0408,
         // ──── pixel store + blend equations ──────────────────────────────
         UNPACK_ALIGNMENT: 0x0cf5,
         UNPACK_PREMULTIPLY_ALPHA_WEBGL: 0x9241,
@@ -166,11 +175,14 @@ export function createMockGL(): MockGL {
             if (p === ENUMS.MAX_COMBINED_TEXTURE_IMAGE_UNITS) {
                 return 16;
             }
+            if (p === ENUMS.SAMPLES) {
+                return state.sampleCount;
+            }
             return 0;
         },
         getExtension: (name: string): unknown => {
             if (name === "KHR_parallel_shader_compile" && state.parallelAvailable) {
-                return PARALLEL_EXT;
+                return { ...PARALLEL_EXT };
             }
             if (state.extensions[name] === true) {
                 return { __ext: name };
@@ -411,6 +423,9 @@ export function createMockGL(): MockGL {
         stencilOp: (fail: number, zfail: number, zpass: number): void => {
             rec("stencilOp", fail, zfail, zpass);
         },
+        stencilOpSeparate: (face: number, fail: number, zfail: number, zpass: number): void => {
+            rec("stencilOpSeparate", face, fail, zfail, zpass);
+        },
         stencilMask: (m: number): void => {
             rec("stencilMask", m);
         },
@@ -447,6 +462,9 @@ export function createMockGL(): MockGL {
         },
         setParallelAvailable: (ok) => {
             state.parallelAvailable = ok;
+        },
+        setSampleCount: (samples) => {
+            state.sampleCount = samples;
         },
         setExtensionAvailable: (name, ok) => {
             state.extensions[name] = ok;

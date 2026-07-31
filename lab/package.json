@@ -1,28 +1,28 @@
 {
-  "name": "@babylon-lite/lab",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build"
-  },
-  "dependencies": {
-    "babylon-lite": "workspace:*"
-  },
-  "devDependencies": {
-    "@babylonjs/addons": "9.16.0",
-    "@babylonjs/core": "9.16.0",
-    "@babylonjs/havok": "^1.3.12",
-    "@babylonjs/loaders": "9.16.0",
-    "@babylonjs/materials": "9.16.0",
-    "@recast-navigation/core": "0.43.0",
-    "@recast-navigation/generators": "0.43.0",
-    "@recast-navigation/wasm": "0.43.0",
-    "@webgpu/types": "^0.1.52",
-    "babylonjs-gltf2interface": "9.16.0",
-    "manifold-3d": "3.4.0",
-    "typescript": "^6.0.3",
-    "vite": "^6.4.3"
-  }
+    "name": "@babylon-lite/lab",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build"
+    },
+    "dependencies": {
+        "babylon-lite": "workspace:*"
+    },
+    "devDependencies": {
+        "@babylonjs/addons": "^9.19.0",
+        "@babylonjs/core": "^9.19.0",
+        "@babylonjs/havok": "^1.3.13",
+        "@babylonjs/loaders": "^9.19.0",
+        "@babylonjs/materials": "^9.19.0",
+        "@recast-navigation/core": "0.43.1",
+        "@recast-navigation/generators": "0.43.1",
+        "@recast-navigation/wasm": "0.43.1",
+        "@webgpu/types": "^0.1.71",
+        "babylonjs-gltf2interface": "^9.19.0",
+        "manifold-3d": "3.5.1",
+        "typescript": "^6.0.3",
+        "vite": "^6.4.3"
+    }
 }

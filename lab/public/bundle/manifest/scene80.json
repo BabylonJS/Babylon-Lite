@@ -1,23 +1,24 @@
 {
-  "rawKB": 60.8,
-  "gzipKB": 26.6,
+  "rawKB": 59.5,
+  "gzipKB": 26.4,
   "ignoredRawKB": 6,
   "runtimeChunks": [
-    "scene80-_math-factory-DFVyS8gB.js",
+    "scene80-_math-factory-DXsaSWQC.js",
     "scene80-color-converter-block-DtG9umpu.js",
     "scene80-color-merger-0HZ9FICW.js",
     "scene80-desaturate-block-fwjhrbl5.js",
     "scene80-fragment-output-CfRmfbPv.js",
-    "scene80-gradient-block-DY_wOadG.js",
-    "scene80-input-block-DkwEQhbC.js",
-    "scene80-node-registry-KVaU9iJg.js",
-    "scene80-node-registry-extra-procedural-BLc7IE-c.js",
-    "scene80-node-renderable-CpLAYRD9.js",
+    "scene80-gradient-block-BjhfNz9A.js",
+    "scene80-input-block-Bc0hDzkj.js",
+    "scene80-node-registry-dEtvQkaI.js",
+    "scene80-node-registry-extra-procedural-Cr-0qcvV.js",
+    "scene80-node-renderable-Clk5Sd5j.js",
     "scene80-posterize-block-PW8UWjyJ.js",
-    "scene80-replace-color-block-jNV1Iu7G.js",
-    "scene80-transform-block-DM6P_1Fx.js",
-    "scene80-vector-splitter-BMf4DQi8.js",
+    "scene80-replace-color-block-_zVb6UVo.js",
+    "scene80-transform-block-nM6JstTs.js",
+    "scene80-vector-splitter-BK_eLmNK.js",
     "scene80-vertex-output-C7G5u6Y0.js",
     "scene80.js"
-  ]
+  ],
+  "rawBytes": 60950
 }

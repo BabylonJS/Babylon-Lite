@@ -14,6 +14,7 @@ import { computeAabb } from "../math/compute-aabb.js";
 import { createSphereData } from "./create-sphere.js";
 import type { SphereOptions } from "./create-sphere.js";
 import { createBoxData } from "./create-box.js";
+import type { BoxOptions } from "./create-box.js";
 import { createTorusData } from "./create-torus.js";
 import type { TorusOptions } from "./create-torus.js";
 import { createTorusKnotData } from "./create-torus-knot.js";
@@ -374,16 +375,7 @@ export function resizeMeshGeometry(
     // resize happens during async scene construction before the first submit. Retire them through the engine's
     // frame-gated queue so destruction cannot run before that command buffer has submitted and drained.
     mesh._gpu = uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors);
-    const [min, max] = computeAabb(positions);
-    mesh.boundMin = isFinite(min[0]) ? min : undefined;
-    mesh.boundMax = isFinite(max[0]) ? max : undefined;
-
-    // Retain CPU geometry for detailed picking + device-loss recovery (mirror createMeshFromData).
-    mesh._cpuPositions = positions;
-    mesh._cpuNormals = normals;
-    mesh._cpuUvs = uvs;
-    mesh._cpuIndices = indices;
-    engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
+    retainMeshGeometry(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
     _markWorldMatrixDirty(mesh);
     // `cloneTransformNode` shares the exact MeshGPU object between siblings. Replacing this mesh's
     // `_gpu` drops one ownership claim; only retire the old buffers when no sibling still references
@@ -468,8 +460,8 @@ export function createSphere(engine: EngineContext, options?: SphereOptions): Me
 }
 
 /** Create a box mesh. Caller must assign material. */
-export function createBox(engine: EngineContext, size = 1): Mesh {
-    const data = createBoxData(size);
+export function createBox(engine: EngineContext, options: number | BoxOptions = 1): Mesh {
+    const data = createBoxData(options);
     return createMeshFromData(engine as EngineContext, "box", data.positions, data.normals, data.indices, data.uvs);
 }
 

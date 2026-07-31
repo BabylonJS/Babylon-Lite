@@ -15,7 +15,7 @@
  */
 
 import { parseNodeMaterialFromSnippet } from "babylon-lite";
-import type { EngineContext, NodeMaterial as LiteNodeMaterial, Texture2D } from "babylon-lite";
+import type { EngineContext, Material as LiteMaterial, NodeMaterial as LiteNodeMaterial, Texture2D } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
 
@@ -47,14 +47,37 @@ export class NodeMaterial {
 
     private readonly _json: object | string;
     private readonly _textureOverrides: Record<string, TextureLike> = {};
+    private readonly _scene: Scene;
+    private readonly _pendingBindings = new Map<{ material: LiteMaterial }, () => boolean>();
+    private _parsed = false;
 
-    public constructor(name: string, _scene: Scene, json: object | string = {}) {
+    public constructor(name: string, scene: Scene, json: object | string = {}) {
         this.name = name;
+        this._scene = scene;
         this._json = json;
     }
 
     public getClassName(): string {
         return "NodeMaterial";
+    }
+
+    /**
+     * Babylon.js `NodeMaterial.clone(name)`. Reuses the same NME source graph and the
+     * captured per-block texture overrides (textures shared by reference, as
+     * Babylon.js does), registering the clone with the scene so it parses/compiles its
+     * own Lite node material (own renderable) at engine start.
+     */
+    public clone(name: string): NodeMaterial {
+        const cloned = new NodeMaterial(name, this._scene, this._json);
+        for (const [block, tex] of Object.entries(this._textureOverrides)) {
+            cloned._textureOverrides[block] = tex;
+        }
+        cloned.backFaceCulling = this.backFaceCulling;
+        // Keep assignments made immediately after clone() functional while the clone's
+        // own async renderable is compiled. _parse replaces this temporary handle.
+        cloned._lite = this._lite;
+        this._scene._registerNodeMaterial(cloned);
+        return cloned;
     }
 
     /** Babylon.js `getBlockByName(name)` — returns a proxy that captures texture overrides. */
@@ -86,6 +109,16 @@ export class NodeMaterial {
         // No-op: `_lite` is set when the tracked parse promise resolves.
     }
 
+    /** @internal Bind a mesh immediately and refresh it if still assigned when parsing finishes. */
+    public _bindMesh(mesh: { material: LiteMaterial }, isCurrent: () => boolean): void {
+        if (!this._parsed) {
+            this._pendingBindings.set(mesh, isCurrent);
+        }
+        if (this._lite) {
+            mesh.material = this._lite;
+        }
+    }
+
     public dispose(): void {
         // GPU resources owned by the scene; disposed with it.
     }
@@ -103,14 +136,24 @@ export class NodeMaterial {
                 textures[blockName] = tex._lite;
             }
         }
-        this._lite = await parseNodeMaterialFromSnippet(engine, "", {
-            json: this._json,
-            ...(overrides.length ? { textures } : {}),
-            // Babylon.js wires shadows into the scene globally; Babylon Lite takes them
-            // at NME parse time, so NME shadow-receiver blocks sample the scene's
-            // generators (e.g. ground `receiveShadows` in scenes 65/66).
-            ...(shadowGenerators.length ? { shadowGenerators: shadowGenerators as never } : {}),
-        });
+        try {
+            this._lite = await parseNodeMaterialFromSnippet(engine, "", {
+                json: this._json,
+                ...(overrides.length ? { textures } : {}),
+                // Babylon.js wires shadows into the scene globally; Babylon Lite takes them
+                // at NME parse time, so NME shadow-receiver blocks sample the scene's
+                // generators (e.g. ground `receiveShadows` in scenes 65/66).
+                ...(shadowGenerators.length ? { shadowGenerators: shadowGenerators as never } : {}),
+            });
+            this._parsed = true;
+            for (const [mesh, isCurrent] of this._pendingBindings) {
+                if (isCurrent()) {
+                    mesh.material = this._lite;
+                }
+            }
+        } finally {
+            this._pendingBindings.clear();
+        }
     }
 
     /**

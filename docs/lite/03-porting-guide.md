@@ -34,6 +34,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 | `new FreeCamera("cam", position, scene)`                            | `createFreeCamera(position, target)`                                                                        |
 | `scene.createDefaultCamera(true, true, true)`                       | `createDefaultCamera(scene)`                                                                                |
 | `camera.attachControl(canvas, true)`                                | `attachControl(camera, canvas, scene)` _(arc-rotate)_ / `attachFreeControl(camera, canvas, scene)` _(free)_ |
+| `camera.mode = Camera.ORTHOGRAPHIC_CAMERA`                          | `enableOrthographicCamera(camera, { halfHeight })`                                                          |
 | `new HemisphericLight("h", new Vector3(0,1,0), scene)`              | `createHemisphericLight([0,1,0], 1.0)`                                                                      |
 | `new DirectionalLight("d", new Vector3(0,-1,0), scene)`             | `createDirectionalLight([0,-1,0])`                                                                          |
 | `new SpotLight("s", pos, dir, angle, exp, scene)`                   | `createSpotLight(pos, dir, angle, exp)`                                                                     |
@@ -216,7 +217,59 @@ sphere.material = createStandardMaterial();
 addToScene(scene, sphere);
 ```
 
-### 9. Removing & Disposing Entities
+### 9. StandardMaterial Vertex Colors Are Opt-In
+
+PBR materials consume mesh vertex colors automatically. Standard materials use an explicit opt-in so scenes without vertex colors retain no feature code. Supply a tightly packed RGBA buffer (four floats per vertex), call `enableStandardVertexColors()` once, then register the scene.
+
+```typescript
+import { enableStandardVertexColors } from "babylon-lite";
+
+const vertexCount = positions.length / 3;
+const colors = new Float32Array(vertexCount * 4);
+for (let i = 0; i < vertexCount; i++) {
+    const offset = i * 4;
+    colors[offset] = 1;
+    colors[offset + 3] = 1;
+}
+
+const mesh = createMeshFromData(engine, "colored", positions, normals, indices, undefined, undefined, undefined, colors);
+mesh.material = createStandardMaterial();
+addToScene(scene, mesh);
+
+enableStandardVertexColors();
+await registerScene(scene);
+```
+
+### 10. Mirrored (Negatively Scaled) Meshes Are Opt-In
+
+Babylon flips `sideOrientation` automatically whenever a mesh's world-matrix determinant turns
+negative. Lite's glTF loader already reverses winding for negative-scale nodes it finds at load
+time, but the remaining cases go through an explicit opt-in so scenes that never mirror anything
+carry no winding code. Call `await enableMirroredMeshes(scene)` once — after your assets are added
+and before `registerScene()` — when you mirror a Standard-material mesh, a procedural mesh, or
+change a mesh's mirroring after load.
+
+```typescript
+import { enableMirroredMeshes } from "babylon-lite";
+
+const box = createBox(engine, 2);
+box.scaling.set(-1, 1, 1); // mirrored — winding is reversed for you
+addToScene(scene, box);
+
+await enableMirroredMeshes(scene);
+await registerScene(scene);
+```
+
+It also keeps working when the mirroring changes at runtime: each frame the watcher only looks at
+meshes whose world matrix actually changed (an integer version compare), computes a determinant for
+those alone, and rebuilds a pipeline only when the sign really flipped.
+
+Only that runtime watcher is scoped to the scene you pass — the pipeline-side winding resolution is
+installed process-wide on the first call, so in a multi-scene app the other scenes also stop
+rendering mirrored meshes inside-out, but they will not track a mirroring that changes after their
+renderables are built unless you call it for them too.
+
+### 11. Removing & Disposing Entities
 
 BJS uses `mesh.dispose()` on individual objects. Lite uses `removeFromScene()` which removes the mesh from the scene and destroys all its GPU resources (buffers, textures, skeleton data).
 
@@ -291,6 +344,8 @@ await startEngine(engine);
 | **No `new` keyword**            | Everything is created via factory functions, not constructors.                                                                                                                                |
 | **Assign camera explicitly**    | Either use `createDefaultCamera(scene)` (auto-assigns) or set `scene.camera = myCamera` manually.                                                                                             |
 | **Materials are optional**      | `createStandardMaterial()` / `createPbrMaterial()` return props objects. Assign to `mesh.material`.                                                                                           |
+| **Standard vertex colors**      | Supply four floats (RGBA) per vertex and call `enableStandardVertexColors()` before `registerScene()`. PBR vertex colors remain automatic.                                                   |
+| **Mirrored meshes**             | Call `await enableMirroredMeshes(scene)` before `registerScene()` when you give a mesh (or an ancestor) a negative scale, so its triangle winding is reversed. glTF negative-scale nodes are already handled at load time. |
 | **WebGPU only**                 | No WebGL fallback. `createEngine()` throws if WebGPU is unavailable.                                                                                                                          |
 | **No `dispose()` on meshes**    | Use `removeFromScene(scene, mesh)` to remove a single mesh and destroy its GPU resources. Use `disposeScene(scene)` + `disposeEngine(engine)` to tear down everything.                        |
 | **Tree-shakable imports**       | Import only what you use. Unused features are stripped from the bundle.                                                                                                                       |
@@ -421,7 +476,7 @@ feature is tree-shakable: scenes that don't use it pay no bundle cost.
 | CSG / CSG2                                    | ✅      | Mesh boolean subtract/intersect/union/add APIs (Scenes 90-91)                                                                                                                                                          |
 | Physics                                       | ⚡      | Havok Physics V2 subset (Scene 40)                                                                                                                                                                                     |
 | Navigation / Recast                           | ⚡      | Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, raycast (Scenes 170-175)                                                                                                                       |
-| Device-lost recovery                          | ✅      | Opt-in WebGPU device-loss recovery (Scene 164)                                                                                                                                                                         |
+| Device-lost recovery                          | ✅      | Opt-in SceneContext, SpriteRenderer, and TextRenderer recovery via the corresponding `enableDeviceLost*Recovery` API (Scene 164 covers SceneContext)                                                                   |
 | Screen-space SSS (PrePass)                    | ❌      | Not implemented — only BRDF-layer translucency                                                                                                                                                                         |
 
 See `lab/lite/src/lite/scene*.ts` for end-to-end examples of each extension in action.

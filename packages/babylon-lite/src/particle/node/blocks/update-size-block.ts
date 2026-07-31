@@ -1,26 +1,17 @@
-import type { ParticleSystem } from "../../particle-system.js";
-import type { ParticleBlockEvaluator } from "../npe-types.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
 
-/**
- * `UpdateSizeBlock` — each step, sets the particle size to the value of its `size` input (typically a size
- * gradient evaluated at the age/lifetime ratio, so the particle grows or shrinks over its life). Mirrors
- * BJS `UpdateSizeBlock`.
- */
-export const updateSizeBlock: ParticleBlockEvaluator = {
+/** `UpdateSizeBlock` — write the evaluated size input into the size column each step. */
+export const updateSizeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
-        const state = ctx.state;
-        const system = ctx.input(block, "particle")(state) as ParticleSystem;
-        ctx.setOutput(block.id, "output", () => system);
-
+        const system = ctx.state.system!;
+        const buffer = ctx.state.buffer!;
         if (!ctx.isConnected(block, "size")) {
             return;
         }
         const sizeGetter = ctx.input(block, "size");
-
-        system._updateQueue.push((particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            particle.size = sizeGetter(state) as number;
+        const size = buffer.size;
+        system.updateSteps.push((i) => {
+            size[i] = sizeGetter(i) as number;
         });
     },
 };

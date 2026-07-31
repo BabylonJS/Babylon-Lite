@@ -50,6 +50,7 @@ const LITTLEST_TOKYO_SRC = resolve(labDir, "public/littlest-tokyo");
 const TETRIS_SRC = resolve(labDir, "public/tetris");
 const PLATFORMER_SRC = resolve(labDir, "public/platformer");
 const SANDBLOX_SRC = resolve(labDir, "public/sandblox");
+const RACER_SRC = resolve(labDir, "public/racer");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
 const _demoRequire = createRequire(import.meta.url);
@@ -241,6 +242,12 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
         copyRequiredDir(SANDBLOX_SRC, resolve(demosDir, "sandblox"), "Sandblox");
     }
 
+    if (demos.some((demo) => demo.slug === "racer")) {
+        // CC0 Kenney car / track / prop GLBs + smoke sprite + audio, fetched by
+        // fetch-racer.ts and resolved at runtime via demoAssetUrl("./racer/...").
+        copyRequiredDir(RACER_SRC, resolve(demosDir, "racer"), "Racer");
+    }
+
     if (demos.some((demo) => demo.slug === "bath-day")) {
         const glb = resolve(labDir, "public", "bath_day.glb");
         if (existsSync(glb)) {
@@ -278,8 +285,11 @@ function writeDemoHtml(demos: DemoConfigEntry[], manifest: Record<string, DemoMa
         writeFileSync(resolve(demosDir, `demo-${demo.slug}.html`), rawKB != null ? injectDemoEngineSize(html, rawKB) : html);
     }
     copyDemoIndexAssets(demos);
-    copyDemoRuntimeAssets(demos);
     writeFileSync(resolve(demosDir, "index.html"), renderDemoIndex(demos, manifest));
+}
+
+function demoRequiresReady(slug: string): boolean {
+    return slug === "racer";
 }
 
 export async function buildDemo(slug: string): Promise<void> {
@@ -405,7 +415,7 @@ export async function buildSingleDemo(slug: string, options: { measure?: boolean
         try {
             const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
             try {
-                const { rawKB, gzipKB } = await measurePage(browser, port, `demo-${slug}`, `lite/demo-${slug}.html`, "/bundle/demos/");
+                const { rawKB, gzipKB } = await measurePage(browser, port, `demo-${slug}`, `lite/demo-${slug}.html`, "/bundle/demos/", demoRequiresReady(slug));
                 const manifest: Record<string, DemoManifestEntry> = existsSync(DEMOS_MANIFEST_FILE)
                     ? (JSON.parse(readFileSync(DEMOS_MANIFEST_FILE, "utf-8")) as Record<string, DemoManifestEntry>)
                     : {};
@@ -452,6 +462,10 @@ export async function buildDemoBundles(): Promise<void> {
     }
 
     await buildDemoSupportBundles();
+    // Measurement loads demos through their source HTML, so runtime assets must
+    // already exist in the bundled output. Racer's readiness requirement below
+    // turns a missing WASM/model into a loud build failure.
+    copyDemoRuntimeAssets(demos);
 
     // Measure runtime-fetched JS size for each demo.
     const { chromium } = await import("@playwright/test");
@@ -463,7 +477,7 @@ export async function buildDemoBundles(): Promise<void> {
         const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
         try {
             for (const demo of demos) {
-                const { rawKB, gzipKB } = await measurePage(browser, port, `demo-${demo.slug}`, `lite/demo-${demo.slug}.html`, "/bundle/demos/");
+                const { rawKB, gzipKB } = await measurePage(browser, port, `demo-${demo.slug}`, `lite/demo-${demo.slug}.html`, "/bundle/demos/", demoRequiresReady(demo.slug));
                 manifest[demo.slug] = { rawKB, gzipKB };
                 writeFileSync(DEMOS_MANIFEST_FILE, JSON.stringify(manifest, null, 2));
                 console.log(`  measured ${demo.slug}: ${rawKB} KB raw, ${gzipKB} KB gzip`);
@@ -519,6 +533,7 @@ export async function buildFlatDemoSite(): Promise<string> {
         await buildDemo(demo.slug);
     }
     await buildDemoSupportBundles();
+    copyDemoRuntimeAssets(demos);
 
     const manifest: Record<string, DemoManifestEntry> = existsSync(DEMOS_MANIFEST_FILE)
         ? (JSON.parse(readFileSync(DEMOS_MANIFEST_FILE, "utf-8")) as Record<string, DemoManifestEntry>)

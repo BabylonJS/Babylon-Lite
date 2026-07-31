@@ -1,11 +1,11 @@
 /** Generic ref-counting for plain objects that carry an optional `_refCount` field.
  *
- *  Its one current use is GPU resource objects (`MeshGPU`, `SkeletonData`,
+ *  Its current use is GPU resource objects (`MeshGPU`, `SkeletonData`,
  *  skin buffers, `VatData`, `MorphTargetData`, `ThinInstanceData`) shared across mesh clones or
- *  between a live skeleton and baked VAT data:
- *  `cloneTransformNode`/`cloneMeshNode` intentionally SHARE geometry (mesh._gpu),
- *  skeleton, morph-target, and thin-instance GPU buffers between a source mesh and
- *  its clone (mirrors BJS `Mesh.clone()` — cheap instancing, no duplicate GPU memory),
+ *  glTF nodes, or between a live skeleton and baked VAT data:
+ *  `loadGltf` shares immutable geometry between nodes referencing the same primitive,
+ *  while `cloneTransformNode`/`cloneMeshNode` intentionally share geometry (mesh._gpu),
+ *  skeleton, morph-target, and thin-instance GPU buffers with a clone,
  *  so each of those resource objects may be referenced by more than one `Mesh`, and
  *  each declares its own optional `_refCount` field for this purpose (see each
  *  interface). Nothing here is mesh- or GPU-specific — any object type may add an
@@ -17,8 +17,8 @@
  *  the sibling afterwards double-frees the same GPUBuffer.
  *
  *  A resource with `_refCount` left `undefined` is implicitly owned by exactly one
- *  owner (the common case — no clone was ever made), so creation sites don't need to
- *  initialize it. `retain` is called once per EXTRA owner (i.e. once per clone);
+ *  owner, so creation sites don't need to initialize it. `retain` is called once per
+ *  EXTRA owner (e.g. another glTF node or a clone);
  *  `release` is called once per owner that goes away and reports whether it was the
  *  last one.
  *
@@ -42,8 +42,7 @@ interface RefCounted {
     _refCount?: number;
 }
 
-/** @internal Register an additional owner of a shared resource (called when a mesh
- *  clone starts sharing `_gpu`/`skeleton`/`morphTargets`/`thinInstances` with its source). */
+/** @internal Register an additional owner of a shared resource. */
 export function retain(resource: RefCounted): void {
     resource._refCount = (resource._refCount ?? 1) + 1;
 }

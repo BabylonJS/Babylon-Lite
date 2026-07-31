@@ -9,6 +9,7 @@ import type { IWorldMatrixProvider } from "./parentable.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "./world-matrix-state.js";
+import { eulerToQuat, quatToEulerXYZ } from "../math/quat-euler.js";
 
 // ─── EulerProxy ──────────────────────────────────────────────────────
 
@@ -36,35 +37,15 @@ export interface SceneNode {
     parent: IWorldMatrixProvider | null;
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
-    /** @internal Raw local matrix for glTF matrix nodes. */
+    /** @internal Raw local matrix for glTF matrix nodes. While set, it IS the local transform and
+     *  `position`/`rotationQuaternion`/`scaling` are ignored. Clearing it hands control back to the
+     *  TRS triple (what `setParent` does so it can move a `matrix`-declared glTF node). */
     _localMatrix?: Mat4;
     /** Self-visibility. Undefined/true = visible; `false` skips render + camera AABB.
      *  Cascade is materialized at write-time by `setSubtreeVisible`. */
     visible?: boolean;
     /** User metadata. glTF loads populate `metadata.gltf.extras` when source extras exist. */
     metadata?: LiteMetadata;
-}
-
-// ─── Math helpers ─────────────────────────────────────────────────────
-
-/** Euler XYZ → quaternion (intrinsic XYZ order). */
-export function eulerToQuat(rx: number, ry: number, rz: number): [number, number, number, number] {
-    const cx = Math.cos(rx * 0.5),
-        sx_ = Math.sin(rx * 0.5);
-    const cy = Math.cos(ry * 0.5),
-        sy_ = Math.sin(ry * 0.5);
-    const cz = Math.cos(rz * 0.5),
-        sz_ = Math.sin(rz * 0.5);
-    return [sx_ * cy * cz + cx * sy_ * sz_, cx * sy_ * cz - sx_ * cy * sz_, cx * cy * sz_ + sx_ * sy_ * cz, cx * cy * cz - sx_ * sy_ * sz_];
-}
-
-/** Quaternion → Euler XYZ (inverse of eulerToQuat). */
-export function quatToEulerXYZ(qx: number, qy: number, qz: number, qw: number): [number, number, number] {
-    const sinY = 2 * (qx * qz + qw * qy);
-    const ry = Math.asin(Math.max(-1, Math.min(1, sinY)));
-    const rx = Math.atan2(-(2 * (qy * qz - qw * qx)), 1 - 2 * (qx * qx + qy * qy));
-    const rz = Math.atan2(-(2 * (qx * qy - qw * qz)), 1 - 2 * (qy * qy + qz * qz));
-    return [rx, ry, rz];
 }
 
 /** Create a live bidirectional EulerProxy backed by the given ObservableQuat.
@@ -144,14 +125,13 @@ export function createSceneNodeFromMatrix(name: string, matrix: Mat4): SceneNode
 }
 
 function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): SceneNode {
+    // Read the raw matrix off the node, not off a captured local: clearing `_localMatrix`
+    // (setParent on a glTF `matrix` node) must switch the node back to TRS-driven.
     const wm = createWorldMatrixState(() => {
-        if (matrix) {
-            return matrix;
-        }
-        return composeTrsLocalMatrix(node.position, node.rotationQuaternion, node.scaling);
+        return node._localMatrix ?? composeTrsLocalMatrix(node.position, node.rotationQuaternion, node.scaling);
     });
     const onWmDirty = () => {
-        if (!matrix) {
+        if (!node._localMatrix) {
             wm.markLocalDirty();
         }
     };

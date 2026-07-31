@@ -11,9 +11,8 @@
 //   Author:  https://artstation.com/glenatron
 //   License: https://creativecommons.org/licenses/by/4.0/
 
-import { addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial, createSceneContext, createSolidTexture2D, loadGltf, onBeforeRender, playAnimation, rebuildMaterial, registerScene, setCameraLimits, startEngine } from "babylon-lite";
+import { addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial, createSceneContext, createSolidTexture2D, loadDdsEnvironment, loadGltf, onBeforeRender, playAnimation, rebuildMaterial, registerScene, setCameraLimits, startEngine } from "babylon-lite";
 import type { PbrMaterialProps } from "babylon-lite";
-import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
 import { demoAssetUrl, configureDemoDecoderBases } from "./demo-asset-url.js";
 import { installFetchProgress } from "./loading-progress.js";
 

@@ -62,6 +62,12 @@ function cloneMeshNode(mesh: Mesh): Mesh {
     if (mesh._clone) {
         throw Error(mesh._clone);
     }
+    // A disposed mesh already released its claims and may hold destroyed handles. Cloning it
+    // would retain claims the clone can never release (it cannot enter a scene, so nothing
+    // ever disposes it), pinning the buffers forever — reject it here instead.
+    if (mesh._disposed) {
+        throw Error(`Mesh "${mesh.name}" cannot be cloned: it was disposed when it left its last scene.`);
+    }
     const meshClone = {
         ...mesh,
         name: mesh.name + "_clone",

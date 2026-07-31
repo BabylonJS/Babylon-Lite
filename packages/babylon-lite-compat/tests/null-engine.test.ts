@@ -4,6 +4,8 @@ import { NullEngine, WebGPUEngine, AbstractEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
 import { Animation } from "../src/animations/animation";
 import { Color3, Color4 } from "../src/math/color";
+import { LiteCompatError } from "../src/error";
+import { MeshBuilder } from "../src/meshes/meshes";
 import { stepScene } from "babylon-lite";
 
 /**
@@ -19,6 +21,16 @@ describe("NullEngine (headless)", () => {
         expect(engine).toBeInstanceOf(AbstractEngine);
         expect(engine._headless).toBe(true);
         expect(engine.isWebGPU).toBe(true);
+    });
+
+    it("throws LiteCompatError for the MSAA / alpha-to-coverage engine APIs (no Lite backing)", () => {
+        const engine = new NullEngine();
+        expect(() => engine.currentSampleCount).toThrow(LiteCompatError);
+        expect(() => engine.currentSampleCount).toThrow(/currentSampleCount/);
+        expect(() => engine.getAlphaToCoverage()).toThrow(LiteCompatError);
+        expect(() => engine.getAlphaToCoverage()).toThrow(/getAlphaToCoverage/);
+        expect(() => engine.setAlphaToCoverage(true)).toThrow(LiteCompatError);
+        expect(() => engine.setAlphaToCoverage(true)).toThrow(/setAlphaToCoverage/);
     });
 
     it("constructs a Scene with no GPU context", () => {
@@ -41,6 +53,27 @@ describe("NullEngine (headless)", () => {
         expect(scene._lite._beforeRender.length).toBeGreaterThan(0);
         // `defaultRenderTask: false` → no render task was appended to the frame graph.
         expect(scene._lite._frameGraph._tasks.length).toBe(0);
+        scene.dispose();
+    });
+
+    it("forwards independent box dimensions to Babylon Lite", () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        (engine._lite as unknown as { _device: GPUDevice })._device = {
+            createBuffer: ({ size }: GPUBufferDescriptor) => {
+                const mapped = new ArrayBuffer(Number(size));
+                return {
+                    getMappedRange: () => mapped,
+                    unmap: () => undefined,
+                    destroy: () => undefined,
+                } as unknown as GPUBuffer;
+            },
+        } as unknown as GPUDevice;
+        const box = MeshBuilder.CreateBox("panel", { width: 598, height: 18, depth: 530 }, scene);
+        const bounds = box.getBoundingInfo();
+
+        expect(bounds.minimum.asArray()).toEqual([-299, -9, -265]);
+        expect(bounds.maximum.asArray()).toEqual([299, 9, 265]);
         scene.dispose();
     });
 

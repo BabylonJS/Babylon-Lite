@@ -664,6 +664,28 @@ export function raycast(plugin: NavigationPlugin, start: Vec3, end: Vec3): { hit
     };
 }
 
+/**
+ * Strict walkability ray: `true` when the straight segment from `start` to `end` is NOT provably
+ * clear on the navmesh. Unlike {@link raycast} (BJS Addons parity: `hit` only for `0 < t < 1`),
+ * an unresolvable start polygon and a wall at the very origin (Detour reports `t = 0`, which
+ * happens whenever the probe origin lies on a boundary edge - e.g. a funnel corner) are BLOCKED:
+ * "cannot prove clear" is blocked. Recast's raycast ignores the y component (2D check).
+ */
+export function navRayBlocked(plugin: NavigationPlugin, start: Vec3, end: Vec3): boolean {
+    _assertReady(plugin);
+    const q = plugin._navMeshQuery;
+    const nearest = q.findNearestPoly(start, { halfExtents: _tmpHalfExtents });
+    if (!nearest.success || nearest.nearestRef === 0) {
+        return true;
+    }
+    const r = q.raycast(nearest.nearestRef, start, end);
+    // Detour t semantics: t in [0,1] = wall at parameter t (0 = blocked at the origin);
+    // Finite FLT_MAX = the end was reached unobstructed. Fail closed: only a
+    // successful query with that "reached the end" value proves clear.
+    const t = r?.t;
+    return !(r?.success === true && typeof t === "number" && Number.isFinite(t) && t > 1);
+}
+
 // ─── Obstacles (tile-cache navmeshes only) ───────────────────────────
 
 /**

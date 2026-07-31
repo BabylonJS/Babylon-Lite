@@ -9,6 +9,7 @@
 > - `packages/babylon-lite/src/loader-gltf/gltf-feature-xmp.ts` — `KHR_xmp_json_ld` metadata feature module
 > - `packages/babylon-lite/src/loader-gltf/gltf-feature-extras.ts` — `ExtrasAsMetadata` feature module
 > - `packages/babylon-lite/src/loader-gltf/gltf-interleave.ts` — dynamic native interleaved-vertex-buffer support (de-strided CPU copies built lazily on demand)
+> - `packages/babylon-lite/src/loader-gltf/gltf-share.ts` — duplicate-primitive CPU/GPU geometry sharing
 > - `packages/babylon-lite/src/loader-env/load-env.ts` — Babylon .env environment loader
 > - `packages/babylon-lite/src/loader-env/load-dds-env.ts` — DDS cubemap environment loader
 > - `packages/babylon-lite/src/loader-env/env-helpers.ts` — Shared environment assembly helpers
@@ -120,7 +121,7 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
 
 > **Note**: `loadGltf` takes an `Engine` (not `SceneContext`) and returns an `AssetContainer`. The result's `entities` array contains root scene entities; glTF meshes usually hang off a root `TransformNode` hierarchy. Pass the result to `addToScene(scene, result)` — it will traverse the hierarchy, register animation ticks, and integrate everything into the scene. Meshes are the standard `Mesh` type with GPU data in the `_gpu` field and bounding box on `Mesh.boundMin`/`Mesh.boundMax`. Renderable mesh names preserve source glTF `mesh.name` when present; parent transform names still preserve glTF `node.name`.
 >
-> **Local data**: `source` may be a URL `string`, or an `ArrayBuffer`/`Blob` of an already-loaded asset (drag-and-drop, OPFS, a `fetch` body, etc.). GLB-vs-glTF is detected from the data's magic bytes, **not** the URL extension, so object URLs (`blob:…`) and extensionless sources load correctly. `ArrayBuffer`/`Blob` inputs have no base URL, so they must be self-contained (a GLB, or a glTF whose buffers/images use `data:` URIs); a glTF referencing external `.bin`/image files by relative path must be loaded from a URL.
+> **Local data**: `source` may be a URL `string`, or an `ArrayBuffer`/`Blob` of an already-loaded asset (drag-and-drop, OPFS, a `fetch` body, etc.). GLB-vs-glTF is detected from the data's magic bytes, **not** the URL extension, so object URLs (`blob:…`) and extensionless sources load correctly. `ArrayBuffer`/`Blob` inputs and opaque `blob:`/`data:` URL strings have no directory base, so they must be self-contained (a GLB, or a glTF whose buffers/images use `data:` URIs); a glTF referencing external `.bin`/image files by relative path must be loaded from a URL with a resolvable base.
 
 ### `load-env.ts`
 
@@ -178,7 +179,7 @@ loadFeatureModules(json)              // dynamic imports, e.g. KHR_texture_basis
   └── material hooks                  // feature-owned texture/material/metadata overrides
   ↓
 extractAllMeshes(json, binChunk)       // for each node with mesh
-  ├── resolveAccessor() × N            // positions, normals, tangents, UVs, indices
+  ├── resolveAccessor() × N             // positions, normals, tangents, UVs, indices
   ├── extractMaterial()                 // PBR factors + textures
   │     └── resolveImage() × 5         // parallel image decode
   └── computeNodeWorldMatrix()         // recursive parent chain + RH→LH root
@@ -186,6 +187,10 @@ extractAllMeshes(json, binChunk)       // for each node with mesh
 GltfMeshData[]
   ↓
 uploadMeshes(device, meshDatas)
+  ├── repeated-primitive gate           // dynamically imports gltf-share only when needed
+  │     ├── canonicalize CPU geometry   // repeated active nodes retain the same arrays
+  │     └── primitive GPU cache         // one MeshGPU upload retained by every active owner
+  ├── shared mesh builders              // identical instance assembly on normal/shared paths
   ├── uploadTexture() × 4              // → Texture2D objects (cached per bitmap + sRGB)
   ├── runMatExts()                     // feature-owned material overrides, e.g. KTX2 textures
   ├── createBufferFromData() × 5       // pos, norm, tan, uv, idx
@@ -201,6 +206,8 @@ AssetContainer { entities: [root], animationGroups }
 ```
 
 **Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. The hot-path cache uses a numeric key (`bitmapId * 2 + +srgb`) so plain-image glTF assets do not pay string-key overhead. Feature modules can maintain their own caches for extension-owned image sources.
+
+**Geometry sharing**: A glTF mesh may be instantiated by multiple nodes. The loader creates a distinct Lite `Mesh` for every node/primitive pair so transforms, bounds, metadata, winding, skins, and morph state remain independent. Normal and repeated-primitive paths use the same internal mesh builders; the lazy `gltf-share` module only canonicalizes immutable geometry, manages ownership, and installs shared recovery. Instances reachable from the selected/default glTF scene share one `MeshGPU` and the same retained CPU attribute arrays when they reference the same immutable primitive. Nodes reachable only from inactive scenes are excluded from that shared ownership group, so they do not increment the active geometry's `_refCount` or pin its buffers. `MeshGPU` ownership is reference-counted so removing one active instance cannot dispose buffers still used by another; device-lost recovery rebuilds each shared geometry only once and preserves the ownership count.
 
 **Animation support**: `loadGltf` extracts glTF animations, creates `AnimationGroup[]` via `createAnimationGroups()`, and returns them in `AssetContainer.animationGroups`. `addToScene()` registers playback with the scene-owned animation manager. Each group exposes `currentTime` (seconds), `goToFrame()` for frame-based seeking, and lightweight `targetedAnimations` metadata for inspecting affected node/path pairs.
 

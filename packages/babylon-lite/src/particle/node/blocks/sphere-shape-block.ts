@@ -1,23 +1,19 @@
 import { randomRange } from "../../../math/random-range.js";
 import { transformCoordinatesToRef, transformNormalToRef } from "../../../math/mat4-transform.js";
 import type { Vec3 } from "../../../math/types.js";
-import type { ParticleSystem } from "../../particle-system.js";
-import type { ParticleBlockEvaluator } from "../npe-types.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /**
- * `SphereShapeBlock` — emits particles from a sphere. The position slot draws a point inside a sphere of
- * `radius` (thinned toward the surface by `radiusRange`) using uniform spherical coordinates. The direction
- * slot points each particle radially outward from the emitter — with optional `directionRandomizer` jitter —
- * unless both `direction1` and `direction2` are connected, in which case it draws a uniform random direction
- * between them (the `BoxShapeBlock` behaviour). The random-draw order and the `randomRange` short-circuit
- * (which skips the RNG when min === max, so a zero-width range or zero randomizer consumes nothing) match BJS
- * `SphereShapeBlock` exactly, keeping creation-time draws aligned. The emitter's world matrix is baked into
- * birth position and direction.
+ * `SphereShapeBlock` — emits inside a sphere (or hemisphere) and points particles radially outward,
+ * with optional direction jitter. When both direction inputs are connected it uses their explicit random
+ * range instead. Random draws and transforms match Babylon.js; state is written directly into
+ * columns and the per-spawn scratch is reused.
  */
-export const sphereShapeBlock: ParticleBlockEvaluator = {
+export const sphereShapeBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const state = ctx.state;
-        const system = ctx.input(block, "particle")(state) as ParticleSystem;
+        const system = state.system!;
+        const buffer = state.buffer!;
 
         const isHemispheric = block.serialized.isHemispheric === true;
         const radiusGetter = ctx.input(block, "radius", () => 1);
@@ -25,86 +21,84 @@ export const sphereShapeBlock: ParticleBlockEvaluator = {
         const directionRandomizerGetter = ctx.input(block, "directionRandomizer", () => 0);
         const dir1Getter = ctx.input(block, "direction1", () => ({ x: 0, y: 1, z: 0 }));
         const dir2Getter = ctx.input(block, "direction2", () => ({ x: 0, y: 1, z: 0 }));
-        // BJS uses the radial (directionRandomizer) path unless BOTH directions are explicitly connected.
         const useExplicitDirections = ctx.isConnected(block, "direction1") && ctx.isConnected(block, "direction2");
+        const emitterWorldMatrix = state.emitterWorldMatrix;
+        const emitter = state.emitter;
 
-        system._createPosition = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            const radius = radiusGetter(state) as number;
-            const radiusRange = radiusRangeGetter(state) as number;
-            const randRadius = radius - randomRange(0, radius * radiusRange);
+        const posX = buffer.posX;
+        const posY = buffer.posY;
+        const posZ = buffer.posZ;
+        const dirX = buffer.dirX;
+        const dirY = buffer.dirY;
+        const dirZ = buffer.dirZ;
+        const scratch: Vec3 = { x: 0, y: 0, z: 0 };
+
+        // Creation slots run position immediately before direction, so preserve the unquantized transformed
+        // position for radial-direction math instead of reading it back through the float32 columns.
+        let birthX = 0;
+        let birthY = 0;
+        let birthZ = 0;
+
+        system.createPosition = (i) => {
+            const radius = radiusGetter(i) as number;
+            const radiusRange = radiusRangeGetter(i) as number;
+            const randomRadius = radius - randomRange(0, radius * radiusRange);
             const v = randomRange(0, 1);
             const phi = randomRange(0, 2 * Math.PI);
             const theta = Math.acos(2 * v - 1);
-            const rx = randRadius * Math.cos(phi) * Math.sin(theta);
-            let ry = randRadius * Math.cos(theta);
-            const rz = randRadius * Math.sin(phi) * Math.sin(theta);
+            const rx = randomRadius * Math.cos(phi) * Math.sin(theta);
+            let ry = randomRadius * Math.cos(theta);
+            const rz = randomRadius * Math.sin(phi) * Math.sin(theta);
             if (isHemispheric) {
                 ry = Math.abs(ry);
             }
-            if (sys.isLocal) {
-                particle.position.x = rx;
-                particle.position.y = ry;
-                particle.position.z = rz;
-            } else {
-                transformCoordinatesToRef(rx, ry, rz, state.emitterWorldMatrix, particle.position);
-            }
+            transformCoordinatesToRef(rx, ry, rz, emitterWorldMatrix, scratch);
+            birthX = scratch.x;
+            birthY = scratch.y;
+            birthZ = scratch.z;
+            posX[i] = birthX;
+            posY[i] = birthY;
+            posZ[i] = birthZ;
         };
 
-        system._createDirection = (particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
+        system.createDirection = (i) => {
+            let dx: number;
+            let dy: number;
+            let dz: number;
             if (useExplicitDirections) {
-                const dir1 = dir1Getter(state) as Vec3;
-                const dir2 = dir2Getter(state) as Vec3;
-                const rx = randomRange(dir1.x, dir2.x);
-                const ry = randomRange(dir1.y, dir2.y);
-                const rz = randomRange(dir1.z, dir2.z);
-                if (sys.isLocal) {
-                    particle.direction.x = rx;
-                    particle.direction.y = ry;
-                    particle.direction.z = rz;
-                } else {
-                    transformNormalToRef(rx, ry, rz, state.emitterWorldMatrix, particle.direction);
-                }
-                particle._initialDirection.x = particle.direction.x;
-                particle._initialDirection.y = particle.direction.y;
-                particle._initialDirection.z = particle.direction.z;
-                return;
-            }
-            const directionRandomizer = directionRandomizerGetter(state) as number;
-            // Radial direction: outward from the emitter through the particle, then jittered + renormalized.
-            let dx = particle.position.x - state.emitter.x;
-            let dy = particle.position.y - state.emitter.y;
-            let dz = particle.position.z - state.emitter.z;
-            let length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            if (length !== 0 && length !== 1) {
-                dx /= length;
-                dy /= length;
-                dz /= length;
-            }
-            dx += randomRange(0, directionRandomizer);
-            dy += randomRange(0, directionRandomizer);
-            dz += randomRange(0, directionRandomizer);
-            length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            if (length !== 0 && length !== 1) {
-                dx /= length;
-                dy /= length;
-                dz /= length;
-            }
-            if (sys.isLocal) {
-                particle.direction.x = dx;
-                particle.direction.y = dy;
-                particle.direction.z = dz;
+                const direction1 = dir1Getter(i) as Vec3;
+                const minX = direction1.x;
+                const minY = direction1.y;
+                const minZ = direction1.z;
+                const direction2 = dir2Getter(i) as Vec3;
+                dx = randomRange(minX, direction2.x);
+                dy = randomRange(minY, direction2.y);
+                dz = randomRange(minZ, direction2.z);
             } else {
-                transformNormalToRef(dx, dy, dz, state.emitterWorldMatrix, particle.direction);
+                const directionRandomizer = directionRandomizerGetter(i) as number;
+                dx = birthX - emitter.x;
+                dy = birthY - emitter.y;
+                dz = birthZ - emitter.z;
+                let length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                if (length !== 0 && length !== 1) {
+                    dx /= length;
+                    dy /= length;
+                    dz /= length;
+                }
+                dx += randomRange(0, directionRandomizer);
+                dy += randomRange(0, directionRandomizer);
+                dz += randomRange(0, directionRandomizer);
+                length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                if (length !== 0 && length !== 1) {
+                    dx /= length;
+                    dy /= length;
+                    dz /= length;
+                }
             }
-            particle._initialDirection.x = particle.direction.x;
-            particle._initialDirection.y = particle.direction.y;
-            particle._initialDirection.z = particle.direction.z;
+            transformNormalToRef(dx, dy, dz, emitterWorldMatrix, scratch);
+            dirX[i] = scratch.x;
+            dirY[i] = scratch.y;
+            dirZ[i] = scratch.z;
         };
-
-        ctx.setOutput(block.id, "output", () => system);
     },
 };

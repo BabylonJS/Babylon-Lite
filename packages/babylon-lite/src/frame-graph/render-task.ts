@@ -39,7 +39,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { Material } from "../material/material.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
-import { getViewMatrix } from "../camera/camera.js";
+import { getViewMatrix, _cameraChangeKey } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { _packSceneUniforms } from "./scene-uniforms-pack.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
@@ -258,7 +258,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
                 task._renderables.length = 0;
             }
             resolvePendingMeshes(task, sc);
-            task._autoFromScene = task._renderables.length === 0;
+            task._autoFromScene = !task._renderables.length;
             if (task._autoFromScene) {
                 task._renderables.push(...sc._renderables);
             }
@@ -346,13 +346,15 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolvePendingMeshes(task: RenderTask, sc: SceneContext): void {
-    if (task._pendingMeshes.length === 0) {
+    if (!task._pendingMeshes.length) {
         return;
     }
     for (const { mesh, material } of task._pendingMeshes) {
-        const rebuild = material._buildGroup?._rebuildSingle;
+        const builder = material._buildGroup;
+        const group = sc._groups.get(builder);
+        const rebuild = group ? group.r : builder._rebuildSingle;
         if (!rebuild) {
-            throw new Error();
+            throw Error();
         }
         const renderable = rebuild(sc, mesh, material);
         if (!task._renderables.includes(renderable)) {
@@ -533,7 +535,7 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
 
     // Opaque: cached render bundle. Invalidated by scene mutation (_renderableVersion) or
     // the global visibility/resource epoch (_vis). The bundle records group(0) at its start.
-    if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || opaqueBundles.length === 0) {
+    if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || !opaqueBundles.length) {
         const desc = rt._descriptor;
         const be = eng._device.createRenderBundleEncoder({
             colorFormats: desc.format ? [desc.format] : [],
@@ -591,7 +593,9 @@ export function _writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: 
     const fog = scene.fog;
     const img = scene.imageProcessing;
     const envRotationY = scene.envRotationY || 0;
-    const wv = camera.worldMatrixVersion;
+    // Change key = camera transform version + projection revision, the latter covering both
+    // `fov` / `nearPlane` / `farPlane` writes and orthographic bounds. See `_cameraChangeKey`.
+    const wv = _cameraChangeKey(camera);
     // `envTextures` identity is tracked so an environment loaded (or swapped) AFTER the scene has reached
     // steady state invalidates this cache. Its spherical-harmonics irradiance and `lodGenerationScale` are
     // written into the scene UBO below (via `_packSceneUniforms` + the env-SH contributor); without tracking

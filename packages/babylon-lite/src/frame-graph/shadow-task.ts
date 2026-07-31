@@ -49,7 +49,7 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
             for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
                 const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
-                if (sg?._ensureShadowTaskState && casterMeshes) {
+                if (sg?._ensureShadowTaskState && casterMeshes && !sg._preloadPending) {
                     shadowGenerators.add(sg);
                     const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
                     state._task.record();
@@ -61,7 +61,10 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
             for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
                 const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
-                if (sg?._ensureShadowTaskState && sg._renderShadowMap && casterMeshes) {
+                // A caster set supplied at runtime may still be importing the no-colour material views for
+                // a family it just introduced. Skip the generator until that lands — the shadow map keeps
+                // its previous contents for a frame instead of the pass throwing on an unassigned factory.
+                if (sg?._ensureShadowTaskState && sg._renderShadowMap && casterMeshes && !sg._preloadPending) {
                     shadowGenerators.add(sg);
                     const existing = sg._shadowTaskState ?? null;
                     const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
