@@ -3,6 +3,7 @@ import type { LightBase } from "./light/types.js";
 import type { AnimationGroup } from "./animation/animation-group.js";
 import type { MaterialVariantData } from "./loader-gltf/material-variants.js";
 import type { Mesh } from "./mesh/mesh.js";
+import type { GaussianSplattingMesh } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import type { Skeleton } from "./skeleton/bone-control.js";
 import type { SceneContext } from "./scene/scene-core.js";
 
@@ -49,7 +50,7 @@ export interface AssetContainer {
      *  {@link GaussianSplattingMesh}. Await `mesh.firstSortReady` to know when the
      *  first depth sort has landed. `undefined` for assets without GS primitives.
      *  @internal */
-    _gaussianSplats?: Promise<import("./mesh/GaussianSplatting/gaussian-splatting-mesh.js").GaussianSplattingMesh>[];
+    _gaussianSplats?: Promise<GaussianSplattingMesh>[];
 }
 
 /**
