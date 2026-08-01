@@ -601,7 +601,10 @@ export class PBRMaterial extends PushMaterial {
         }
         const environmentTexture = this.environmentTexture;
         if (environmentTexture) {
-            textures.push(environmentTexture);
+            // `CubeTexture`/`HDRCubeTexture` are standalone environment handles in the
+            // compat layer (not `BaseTexture` subclasses), but BJS surfaces them in the
+            // `BaseTexture[]` active-texture list, so widen to match that shape.
+            textures.push(environmentTexture as unknown as BaseTexture);
         }
         if (this._sheen) {
             textures.push(...this._sheen.getActiveTextures());

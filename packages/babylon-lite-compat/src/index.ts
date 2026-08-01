@@ -232,7 +232,6 @@ export {
     BackgroundMaterial,
     RectAreaLight,
     ClusteredLightContainer,
-    ParticleSystem,
     GPUParticleSystem,
     SolidParticleSystem,
     HighlightLayer,
@@ -315,3 +314,4 @@ export { HavokPlugin, PhysicsEngine, PhysicsShapeType, PhysicsMotionType, Physic
 
 // ─── Node Particle Editor (NPE) ──────────────────────────────────────
 export { NodeParticleSystemSet, ParticleSystemSet } from "./particles/node-particle-system-set.js";
+export { ParticleSystem } from "./particles/particle-system.js";

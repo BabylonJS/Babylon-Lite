@@ -17,16 +17,16 @@
  * stops emission via `stopParticleSystem`.
  *
  * The graph-authoring surface (programmatic blocks, `serialize`, `editAsync`,
- * `getBlockByName`) and the per-system imperative BJS `ParticleSystem` API
- * (`system.animate` / `updateSpeed` / `particleTexture`) are **not** backed: Lite
- * consumes a serialized graph and exposes a fused struct-of-arrays runtime with no
- * BJS-shaped per-system object, so those members throw `LiteCompatError`.
+ * `getBlockByName`) is **not** backed: Lite consumes a serialized graph and
+ * exposes no block-construction API. The per-system runtime handles
+ * (`ParticleSystemSet.systems[i]`) are backed — see {@link ParticleSystem}.
  */
 
 import { parseNodeParticleSetFromSnippet, registerNodeParticleSet, stopParticleSystem } from "babylon-lite";
 import type { NodeParticleSet as LiteNodeParticleSet } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
+import { ParticleSystem } from "./particle-system.js";
 import { unsupported } from "../error.js";
 
 /**
@@ -42,22 +42,28 @@ export class ParticleSystemSet {
     public _scene: Scene | null = null;
 
     private _started = false;
+    /** @internal Cached per-system wrappers (stable identity across `systems` reads). */
+    private _systems: ParticleSystem[] | null = null;
 
     public getClassName(): string {
         return "ParticleSystemSet";
     }
 
     /**
-     * Babylon.js `ParticleSystemSet.systems` — the array of per-system
-     * `ParticleSystem` handles. Not backed: Lite's node-particle runtime is a fused
-     * struct-of-arrays simulation with no per-system BJS `ParticleSystem` object to
-     * expose. Drive the set as a whole via {@link start} instead.
+     * Babylon.js `ParticleSystemSet.systems` — the per-system {@link ParticleSystem}
+     * handles. Each wraps one Lite `NodeParticleSet.systems[i]`, exposing the
+     * runtime subset Lite backs (`start` / `animate` / `stop` / `updateSpeed` /
+     * `particleTexture`). An empty (directly-constructed) set has no systems.
      */
-    public get systems(): never {
-        return unsupported(
-            "ParticleSystemSet.systems",
-            "Babylon Lite's node-particle runtime is a fused struct-of-arrays simulation and exposes no per-system BJS ParticleSystem handle. Start/stop the whole set via `set.start()` / `set.dispose()`."
-        );
+    public get systems(): ParticleSystem[] {
+        if (!this._lite || !this._scene) {
+            return [];
+        }
+        if (!this._systems) {
+            const scene = this._scene;
+            this._systems = this._lite.systems.map((s) => ParticleSystem._fromLite(s, scene));
+        }
+        return this._systems;
     }
 
     /**
