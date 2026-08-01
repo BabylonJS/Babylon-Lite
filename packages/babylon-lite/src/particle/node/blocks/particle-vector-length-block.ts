@@ -1,37 +1,28 @@
-import type { Vec2, Vec3, Color4 } from "../../../math/types.js";
-import type { ParticleBlockEvaluator, ParticleValue, NpeGetter } from "../npe-types.js";
+import type { Color4, Vec2, Vec3 } from "../../../math/types.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
+import type { ScalarGetter, NpeValue } from "../npe-value.js";
 
-/** Euclidean length of a Vec2/Vec3 input (or the absolute value of a scalar). Mirrors BJS `Vector.length()`. */
-function vectorLength(v: ParticleValue): number {
-    if (typeof v === "number") {
-        return Math.abs(v);
+function vectorLength(value: NpeValue): number {
+    if (typeof value === "number") {
+        return Math.abs(value);
     }
-    if (v && typeof v === "object") {
-        if ("z" in v) {
-            const vec = v as Vec3;
-            return Math.sqrt(vec.x * vec.x + vec.y * vec.y + vec.z * vec.z);
-        }
-        if ("r" in v) {
-            const c = v as Color4;
-            return Math.sqrt(c.r * c.r + c.g * c.g + c.b * c.b + c.a * c.a);
-        }
-        if ("x" in v) {
-            const vec = v as Vec2;
-            return Math.sqrt(vec.x * vec.x + vec.y * vec.y);
-        }
+    if ("z" in value) {
+        const vector = value as Vec3;
+        return Math.sqrt(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z);
     }
-    return 0;
+    if ("r" in value) {
+        const color = value as Color4;
+        return Math.sqrt(color.r * color.r + color.g * color.g + color.b * color.b + color.a * color.a);
+    }
+    const vector = value as Vec2;
+    return Math.sqrt(vector.x * vector.x + vector.y * vector.y);
 }
 
-/**
- * `ParticleVectorLengthBlock` — outputs the Euclidean length (magnitude) of a vector input. Mirrors BJS
- * `ParticleVectorLengthBlock` (`input.length()`); used, e.g., to measure a particle's speed from its
- * velocity vector for the velocity-limit gradient.
- */
-export const particleVectorLengthBlock: ParticleBlockEvaluator = {
+/** `ParticleVectorLengthBlock` — return the magnitude of a scalar, vector, or color. */
+export const particleVectorLengthBlock: NpeBlockEvaluator = {
     build(block, ctx) {
-        const inputGetter = ctx.input(block, "input");
-        const getter: NpeGetter = (state) => vectorLength(inputGetter(state));
+        const input = ctx.input(block, "input");
+        const getter: ScalarGetter = (i) => vectorLength(input(i));
         ctx.setOutput(block.id, "output", getter);
     },
 };

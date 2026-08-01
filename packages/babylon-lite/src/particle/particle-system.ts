@@ -1,135 +1,106 @@
-import type { Vec3, Color4 } from "../math/types.js";
-import type { Texture2D } from "../texture/texture-2d.js";
-import type { Particle } from "./particle.js";
-import { createParticle, resetParticle } from "./particle.js";
-
 /**
- * A unit of per-particle work run during creation or update. The node-graph build populates a
- * system's create/update queues with these closures (one per graph block that touches a particle).
- */
-export type ParticleProcess = (particle: Particle, system: ParticleSystem) => void;
-
-/**
- * A CPU-simulated particle system — pure state.
+ * Data-oriented particle system and simulation loop.
  *
- * The node-graph build configures the public properties and fills {@link ParticleSystem._createQueue}
- * and {@link ParticleSystem._updateQueue}. {@link animateParticleSystem} advances the simulation by a
- * single step. Rendering is handled separately by binding live particles to a billboard system.
+ * Matches Babylon.js emission counting, update, lifetime-clamp, recycle, and creation semantics, including
+ * `Math.random` consumption and creation-step order, while operating on a {@link ParticleBuffer} of columns
+ * via ordered {@link ParticleStep} lists. The creation and update steps
+ * are supplied by the graph build (or, in tests, hand-wired). Feature state lives in feature columns, so a
+ * system pays nothing for features it does not use.
  */
+import { createParticleBuffer, killParticle, spawnParticle, type ParticleBuffer } from "./particle-buffer.js";
+import type { ParticleStep } from "./node/npe-value.js";
+import type { Texture2D } from "../texture/texture-2d.js";
+import type { Color4 } from "../math/types.js";
+
+/**
+ * Minimal sprite-sheet handle carried on a system whose graph uses the sprite feature (null otherwise).
+ * Holds the render cell dimensions, the per-particle cell-index column read by the billboard, and the
+ * per-particle update step. The feature's columns and logic live in `sprite-columns.ts` + the sprite
+ * blocks; a non-sprite system leaves this null and imports none of that.
+ */
+export interface ParticleSpriteHandle {
+    readonly cellWidth: number;
+    readonly cellHeight: number;
+    readonly cellIndex: Uint16Array;
+    readonly update: (i: number) => void;
+}
+
+/** Pure-state data-oriented particle system. Behaviour is provided by the standalone functions below. */
 export interface ParticleSystem {
-    /** System name (from the graph's SystemBlock). */
-    name: string;
-    /** Maximum number of simultaneously alive particles. */
-    capacity: number;
+    readonly buffer: ParticleBuffer;
     /** Particles emitted per simulated time unit. */
     emitRate: number;
-    /** Simulation advance per render frame, before the per-step ratio. */
+    /** Simulation advance per frame, before the per-step ratio. */
     updateSpeed: number;
     /** When non-zero, the system stops once `_actualFrame` reaches this value. */
     targetStopDuration: number;
-    /** Blend mode index (Babylon.js `BLENDMODE_*`); mapped to a billboard blend descriptor at render time. */
+    /** Rendering blend mode (Babylon.js BaseParticleSystem blend constants). */
     blendMode: number;
-    /** Billboard mode index (Babylon.js `PARTICLES_BILLBOARDMODE_*`). */
-    billboardMode: number;
-    /** Whether particles render as camera-facing billboards. */
-    isBillboardBased: boolean;
-    /** Whether particle coordinates are emitter-local rather than world. */
-    isLocal: boolean;
-    /** Emitter world position (pure-translation emitter). */
-    emitter: Vec3;
-    /** Particle texture used by the billboard renderer (resolved after async asset loads complete). */
+    /** Particle texture, bound after the build's async loads settle (null until then / for headless builds). */
     texture: Texture2D | null;
+    /** Creation slots, run in Babylon.js fixed order on every spawned particle (null slots skipped). */
+    createLifeTime: ParticleStep | null;
+    createPosition: ParticleStep | null;
+    createDirection: ParticleStep | null;
+    createEmitPower: ParticleStep | null;
+    createSize: ParticleStep | null;
+    createAngle: ParticleStep | null;
+    createColor: ParticleStep | null;
+    createColorDead: ParticleStep | null;
+    /** Update steps, run in graph order on every live particle each frame. */
+    updateSteps: ParticleStep[];
 
-    /** @internal Deferred texture binder, run by the build once async loads settle. */
-    _resolveTexture: (() => void) | null;
-
-    /** @internal Live particles (compacted; recycling swaps with the last). */
-    _particles: Particle[];
-    /** @internal Recycled-particle pool for zero-allocation steady state. */
-    _stock: Particle[];
+    /** @internal Scaled step for the current particle (= Babylon.js `_directionScale`; clamped on the dying step). */
+    _scaledStep: number;
+    /** @internal Emit power of the most recently created particle (set by the creation slots). */
+    _emitPower: number;
+    /** @internal Update speed scaled by the step ratio for the whole frame (unclamped; used by scaled colour step). */
+    _scaledUpdateSpeed: number;
+    /** @internal Fractional emission carry-over between steps. */
+    _newPartsExcess: number;
     /** @internal Whether the system is started. */
     _started: boolean;
-    /** @internal Whether the system has been stopped (drains remaining particles, emits no more). */
+    /** @internal Whether the system has been stopped (drains remaining particles). */
     _stopped: boolean;
     /** @internal Accumulated simulated time, in update-speed units. */
     _actualFrame: number;
-    /** @internal Fractional emission carry-over between steps. */
-    _newPartsExcess: number;
-    /**
-     * @internal Per-frame emit-rate getter, set by the SystemBlock when the emit rate is a dynamic source
-     * (e.g. an emit-rate gradient over the system's target duration). When null, the constant
-     * {@link ParticleSystem.emitRate} is used instead.
-     */
-    _emitRateGetter: ((system: ParticleSystem) => number) | null;
-    /** @internal Update speed scaled by the current step ratio. */
-    _scaledUpdateSpeed: number;
-    /** @internal Emit power of the most recently created particle (set by the creation queue). */
-    _emitPower: number;
-    /** @internal Monotonic particle-id source. */
-    _nextParticleId: number;
-    /** @internal Scratch: `colorStep * _scaledUpdateSpeed` (contextual ScaledColorStep). */
-    _scaledColorStep: Color4;
-    /**
-     * @internal Creation slots, run in this fixed order on every spawn — matching the
-     * `ThinParticleSystem` creation-queue wiring. The fixed order (not graph build order) is what
-     * makes the per-particle `Math.random()` sequence match Babylon.js. Each slot is filled by the
-     * block that owns it (CreateParticleBlock fills lifetime/size/angle/colour; the shape block fills
-     * position/direction); unfilled slots are skipped.
-     */
-    _createLifeTime: ParticleProcess | null;
-    /** @internal */
-    _createPosition: ParticleProcess | null;
-    /** @internal */
-    _createDirection: ParticleProcess | null;
-    /** @internal */
-    _createEmitPower: ParticleProcess | null;
-    /** @internal */
-    _createSize: ParticleProcess | null;
-    /** @internal */
-    _createAngle: ParticleProcess | null;
-    /** @internal */
-    _createColor: ParticleProcess | null;
-    /** @internal */
-    _createColorDead: ParticleProcess | null;
-    /** @internal Per-particle update steps, in graph-connection order. */
-    _updateQueue: ParticleProcess[];
+    /** @internal Optional system-level emit-rate getter, installed only for a connected emit-rate graph. */
+    _emitRateGetter?: () => number;
+    /** @internal Sprite-sheet feature handle, present only for sprite systems. */
+    _spriteSheet?: ParticleSpriteHandle;
+    /** @internal Optional feature writer installed only when a graph reads ColorDead. */
+    _writeColorDead?: (i: number, color: Color4) => void;
+    /** @internal Mesh-normal emitters leave Babylon.js's initial direction at its zero default. */
+    _suppressInitialDirectionCapture?: boolean;
+    /** @internal Local-position source hook installed only for emitter-local graphs that read source 0x18. */
+    _seedLocalPosition?: ParticleStep;
 }
 
-/** Create an empty particle system with Babylon.js default properties. The graph build overrides these. */
-export function createParticleSystem(name: string, capacity: number): ParticleSystem {
+/** Create a data-oriented particle system with an empty buffer of the given capacity. */
+export function createParticleSystem(capacity: number): ParticleSystem {
     return {
-        name,
-        capacity,
+        buffer: createParticleBuffer(capacity),
         emitRate: 10,
-        updateSpeed: 0.016666666666666666,
+        updateSpeed: 0.0167,
         targetStopDuration: 0,
-        blendMode: 0,
-        billboardMode: 7,
-        isBillboardBased: true,
-        isLocal: false,
-        emitter: { x: 0, y: 0, z: 0 },
+        blendMode: 2,
         texture: null,
-        _resolveTexture: null,
-        _particles: [],
-        _stock: [],
+        createLifeTime: null,
+        createPosition: null,
+        createDirection: null,
+        createEmitPower: null,
+        createSize: null,
+        createAngle: null,
+        createColor: null,
+        createColorDead: null,
+        updateSteps: [],
+        _scaledStep: 0,
+        _emitPower: 1,
+        _scaledUpdateSpeed: 0,
+        _newPartsExcess: 0,
         _started: false,
         _stopped: false,
         _actualFrame: 0,
-        _newPartsExcess: 0,
-        _emitRateGetter: null,
-        _scaledUpdateSpeed: 0,
-        _emitPower: 1,
-        _nextParticleId: 0,
-        _scaledColorStep: { r: 0, g: 0, b: 0, a: 0 },
-        _createLifeTime: null,
-        _createPosition: null,
-        _createDirection: null,
-        _createEmitPower: null,
-        _createSize: null,
-        _createAngle: null,
-        _createColor: null,
-        _createColorDead: null,
-        _updateQueue: [],
     };
 }
 
@@ -146,24 +117,20 @@ export function stopParticleSystem(system: ParticleSystem): void {
 }
 
 /**
- * Advance the simulation by one step.
- *
- * `scaledRatio` is the per-step multiplier on {@link ParticleSystem.updateSpeed}: the scene animation
- * ratio for a live frame, or the pre-warm step offset during pre-warm. Mirrors the emission-count,
- * update, recycle, and creation logic of Babylon.js `ThinParticleSystem.animate`.
+ * Advance the simulation by one step. `scaledRatio` multiplies the system's `updateSpeed`
+ * (scene animation ratio for a live frame, or the pre-warm step offset).
  */
 export function animateParticleSystem(system: ParticleSystem, scaledRatio: number): void {
     if (!system._started) {
         return;
     }
 
-    system._scaledUpdateSpeed = system.updateSpeed * scaledRatio;
+    const scaledUpdateSpeed = system.updateSpeed * scaledRatio;
+    system._scaledUpdateSpeed = scaledUpdateSpeed;
 
-    // Emission count: integer part this step, fractional part carried over. A dynamic emit rate (e.g. an
-    // emit-rate gradient) is re-evaluated each step from the current `_actualFrame`; otherwise the constant.
-    const emitRate = system._emitRateGetter ? system._emitRateGetter(system) : system.emitRate;
-    let newParticles = (emitRate * system._scaledUpdateSpeed) >> 0;
-    system._newPartsExcess += emitRate * system._scaledUpdateSpeed - newParticles;
+    const emitRate = system._emitRateGetter ? system._emitRateGetter() : system.emitRate;
+    let newParticles = (emitRate * scaledUpdateSpeed) >> 0;
+    system._newPartsExcess += emitRate * scaledUpdateSpeed - newParticles;
     if (system._newPartsExcess > 1.0) {
         const extra = system._newPartsExcess >> 0;
         newParticles += extra;
@@ -173,111 +140,80 @@ export function animateParticleSystem(system: ParticleSystem, scaledRatio: numbe
     if (system._stopped) {
         newParticles = 0;
     } else {
-        system._actualFrame += system._scaledUpdateSpeed;
+        system._actualFrame += scaledUpdateSpeed;
         if (system.targetStopDuration && system._actualFrame >= system.targetStopDuration) {
             stopParticleSystem(system);
         }
     }
 
-    updateExistingParticles(system);
-    createNewParticles(system, newParticles);
+    updateExisting(system, scaledUpdateSpeed);
+    createNew(system, newParticles);
 }
 
-function updateExistingParticles(system: ParticleSystem): void {
-    const particles = system._particles;
-    const updateQueue = system._updateQueue;
+function updateExisting(system: ParticleSystem, scaledUpdateSpeed: number): void {
+    const buffer = system.buffer;
+    const age = buffer.age;
+    const lifeTime = buffer.lifeTime;
+    const steps = system.updateSteps;
 
-    for (let i = 0; i < particles.length; i++) {
-        const particle = particles[i]!;
+    for (let i = 0; i < buffer.alive; i++) {
+        let stepSpeed = scaledUpdateSpeed;
+        const previousAge = age[i]!;
+        age[i] = previousAge + stepSpeed;
 
-        let stepSpeed = system._scaledUpdateSpeed;
-        const previousAge = particle.age;
-        particle.age += stepSpeed;
-
-        // Clamp the final partial step so a particle dies exactly at its lifetime.
-        if (particle.age > particle.lifeTime) {
-            const diff = particle.age - previousAge;
-            const oldDiff = particle.lifeTime - previousAge;
+        // Clamp the final partial step so a particle dies exactly at its lifetime (matches Babylon.js).
+        if (age[i]! > lifeTime[i]!) {
+            const diff = age[i]! - previousAge;
+            const oldDiff = lifeTime[i]! - previousAge;
             stepSpeed = (oldDiff * stepSpeed) / diff;
-            particle.age = particle.lifeTime;
+            age[i] = lifeTime[i]!;
         }
 
-        particle._directionScale = stepSpeed;
-
-        for (let q = 0; q < updateQueue.length; q++) {
-            updateQueue[q]!(particle, system);
+        system._scaledStep = stepSpeed;
+        for (let s = 0; s < steps.length; s++) {
+            steps[s]!(i);
         }
 
-        if (particle.age >= particle.lifeTime) {
-            recycleParticle(system, i);
+        if (age[i]! >= lifeTime[i]!) {
+            killParticle(buffer, i);
             i--;
         }
     }
 }
 
-function createNewParticles(system: ParticleSystem, count: number): void {
-    const particles = system._particles;
+function createNew(system: ParticleSystem, count: number): void {
+    const buffer = system.buffer;
 
     for (let n = 0; n < count; n++) {
-        if (particles.length >= system.capacity) {
+        const i = spawnParticle(buffer);
+        if (i < 0) {
             break;
         }
-
-        const id = system._nextParticleId++;
-        const pooled = system._stock.pop();
-        const particle = pooled ?? createParticle(id);
-        if (pooled) {
-            resetParticle(particle, id);
+        // Fixed Babylon.js creation-slot order (not graph order) — this is what keeps the per-particle
+        // `Math.random()` sequence aligned with Babylon.js.
+        if (system.createLifeTime) {
+            system.createLifeTime(i);
         }
-
-        particles.push(particle);
-        runCreationSlots(system, particle);
+        if (system.createPosition) {
+            system.createPosition(i);
+        }
+        if (system.createDirection) {
+            system.createDirection(i);
+        }
+        if (system.createEmitPower) {
+            system.createEmitPower(i);
+        }
+        if (system.createSize) {
+            system.createSize(i);
+        }
+        if (system.createAngle) {
+            system.createAngle(i);
+        }
+        if (system.createColor) {
+            system.createColor(i);
+        }
+        if (system.createColorDead) {
+            system.createColorDead(i);
+        }
     }
-}
-
-/** Run the fixed-order creation slots for a freshly spawned particle (skips unfilled slots). */
-function runCreationSlots(system: ParticleSystem, particle: Particle): void {
-    if (system._createLifeTime) {
-        system._createLifeTime(particle, system);
-    }
-    if (system._createPosition) {
-        system._createPosition(particle, system);
-        // Mirror BJS `_CreateLocalPositionData`: seed the local-space position from the emitted position so an
-        // isLocal system's `LocalPositionUpdated` source integrates from the correct origin.
-        particle._localPosition.x = particle.position.x;
-        particle._localPosition.y = particle.position.y;
-        particle._localPosition.z = particle.position.z;
-    }
-    if (system._createDirection) {
-        system._createDirection(particle, system);
-    }
-    if (system._createEmitPower) {
-        system._createEmitPower(particle, system);
-    }
-    if (system._createSize) {
-        system._createSize(particle, system);
-    }
-    if (system._createAngle) {
-        system._createAngle(particle, system);
-    }
-    if (system._createColor) {
-        system._createColor(particle, system);
-    }
-    if (system._createColorDead) {
-        system._createColorDead(particle, system);
-    }
-}
-
-/** Recycle a dead particle by swapping it with the last live particle and returning it to the pool. */
-function recycleParticle(system: ParticleSystem, index: number): void {
-    const particles = system._particles;
-    const dead = particles[index]!;
-    const lastIndex = particles.length - 1;
-    if (index !== lastIndex) {
-        particles[index] = particles[lastIndex]!;
-    }
-    particles.pop();
-    // Prune this particle's per-life random-lock cache so `OncePerParticle` draws don't accumulate.
-    dead._onceRandomValues?.clear();
-    system._stock.push(dead);
 }

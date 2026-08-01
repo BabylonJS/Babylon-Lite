@@ -12,11 +12,17 @@
  * decoded image sources through Lite's external-image copy.
  */
 
-import { createTexture2DArray, createTexture2DArrayFromPixels, updateTexture2DArrayFromPixels, loadImageToArrayLayer, createTexture2DArrayFromUrls } from "babylon-lite";
+import {
+    createTexture2DArray,
+    createTexture2DArrayFromPixels,
+    updateTexture2DArrayFromPixels,
+    loadImageToArrayLayer,
+    createTexture2DArrayFromUrls,
+    createTexture2DArrayFromKtx2,
+} from "babylon-lite";
 import type { Texture2DArray } from "babylon-lite";
 
 import { Constants } from "../misc/engine-constants.js";
-import { unsupported } from "../error.js";
 import type { Scene } from "../scene/scene.js";
 import { BaseTexture, toRgbaBytes } from "./textures.js";
 
@@ -172,46 +178,49 @@ export interface ICreateTexture2DArrayFromImageUrlsOptions extends IUploadImageT
     imageBitmapOptions?: ImageBitmapOptions;
 }
 
-/**
- * Babylon.js `ICreateTexture2DArrayFromKTX2Options` — creation settings for
- * {@link CreateTexture2DArrayFromKTX2Async}.
- */
+/** Babylon.js `ICreateTexture2DArrayFromKTX2Options`. */
 export interface ICreateTexture2DArrayFromKTX2Options {
     /** Generate a full mip chain (true by default). */
     generateMipMaps?: boolean;
-    /** Sampling mode (recorded for parity; Lite uses trilinear). */
+    /** Sampling mode (trilinear by default). */
     samplingMode?: number;
     /** Store the texture with the Y axis inverted (false by default). */
     invertY?: boolean;
 }
 
 /**
- * Babylon.js `CreateTexture2DArrayFromKTX2Async` — build a 2D array texture from a
- * single multi-layer KTX2 file, transcoded to RGBA.
+ * Babylon.js `CreateTexture2DArrayFromKTX2Async` — decode a single multi-layer KTX2
+ * container into a texture array. Forwards to Lite's `createTexture2DArrayFromKtx2`
+ * (transcodes to RGBA8, uploads the base level, regenerates mips), then wraps the
+ * result in a `RawTexture2DArray`.
  *
- * 🔧 Needs Lite core. Babylon Lite's public KTX2 surface decodes only **single 2D
- * textures** (`loadKtx2Texture2D` / `uploadKtx2Texture2D`, and
- * `decodeKtx2ImageBitmapFromBuffer`, which keeps only mip level 0 as one
- * `ImageBitmap`) — none expose the per-layer RGBA data a `layerCount > 1` array
- * needs. Surfacing it means teaching Lite's decoder wrapper to report `layerCount`
- * and per-layer base-level mips and adding an array-decode entry point, but that
- * plumbing lives inside `texture/ktx2-loader.ts`, a module already pulled into the
- * `KHR_texture_basisu` glTF chunk (via `loader-gltf/gltf-ext-basisu.ts`). A
- * standalone tree-shakeable helper cannot reach those internals without either
- * editing that bundled module or re-implementing the CDN decoder loader, so this is
- * a Lite-core change rather than a mechanical compat wrapper.
+ * Babylon.js defaults `generateMipMaps` to `true`; that value is always passed
+ * explicitly rather than left to any Lite default. Sampling and Y inversion are
+ * forwarded to the Lite array handle.
  */
-export async function CreateTexture2DArrayFromKTX2Async(
-    _scene: Scene,
-    _data: string | ArrayBufferView,
-    _options?: ICreateTexture2DArrayFromKTX2Options
-): Promise<RawTexture2DArray> {
-    return unsupported(
-        "CreateTexture2DArrayFromKTX2Async",
-        "Babylon Lite's public KTX2 API decodes only single 2D textures; per-layer RGBA array decode requires exposing the KTX2 decoder's layerCount/per-layer mips from the bundled ktx2-loader module — a Lite-core addition."
-    );
+export async function CreateTexture2DArrayFromKTX2Async(scene: Scene, data: string | ArrayBufferView, options?: ICreateTexture2DArrayFromKTX2Options): Promise<RawTexture2DArray> {
+    let buffer: ArrayBufferView;
+    if (typeof data === "string") {
+        const response = await fetch(data);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch KTX2 file "${data}": ${response.status} ${response.statusText}`);
+        }
+        buffer = new Uint8Array(await response.arrayBuffer());
+    } else {
+        buffer = data;
+    }
+    const samplingMode = options?.samplingMode ?? Constants.TEXTURE_TRILINEAR_SAMPLINGMODE;
+    const nearest = samplingMode === Constants.TEXTURE_NEAREST_SAMPLINGMODE;
+    const bilinear = samplingMode === Constants.TEXTURE_BILINEAR_SAMPLINGMODE;
+    const liteArray = await createTexture2DArrayFromKtx2(scene.getEngine()._lite, buffer, {
+        generateMipMaps: options?.generateMipMaps ?? true,
+        invertY: options?.invertY ?? false,
+        minFilter: nearest ? "nearest" : "linear",
+        magFilter: nearest ? "nearest" : "linear",
+        mipmapFilter: nearest || bilinear ? "nearest" : "linear",
+    });
+    return RawTexture2DArray._fromLite(liteArray, Constants.TEXTUREFORMAT_RGBA, scene);
 }
-
 /** @internal Resolve the live Lite array handle a compat texture wraps. */
 function liteArrayOf(texture: RawTexture2DArray): Texture2DArray {
     const array = texture.getInternalTexture();

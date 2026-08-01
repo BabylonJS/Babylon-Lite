@@ -3,12 +3,15 @@
 import type { EngineContext } from "../../engine/engine.js";
 import vertSrc from "../shaders/slug.vert.wgsl?raw";
 import fragSrc from "../shaders/slug.frag.wgsl?raw";
+import a2cFragSrc from "../shaders/slug-a2c.frag.wgsl?raw";
 import { TEXT_INSTANCE_BYTES } from "../text-data.js";
+import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
 export interface TextPipelineDeviceCache {
     bindGroupLayout: GPUBindGroupLayout;
     vertModule: GPUShaderModule;
     fragModule: GPUShaderModule;
+    a2cFragModule?: GPUShaderModule;
     quadVertexBuffer: GPUBuffer;
     pipelines: Map<string, GPURenderPipeline>;
 }
@@ -55,8 +58,8 @@ function getOrCreateDeviceCache(engine: EngineContext): TextPipelineDeviceCache 
     return cache;
 }
 
-function pipelineKey(format: GPUTextureFormat, sampleCount: number, depthStencilFormat: GPUTextureFormat | null, depthWrite: boolean): string {
-    return format + ":" + sampleCount + ":" + (depthStencilFormat ?? "-") + ":" + (depthWrite ? "w" : "r");
+function pipelineKey(format: GPUTextureFormat, sampleCount: number, depthStencilFormat: GPUTextureFormat | null, depthWrite: boolean, alphaToCoverage: boolean): string {
+    return format + ":" + sampleCount + ":" + (depthStencilFormat ?? "-") + ":" + (depthWrite ? "w" : "r") + (alphaToCoverage ? ":a" : "");
 }
 
 export function getOrCreateTextPipeline(
@@ -64,15 +67,19 @@ export function getOrCreateTextPipeline(
     format: GPUTextureFormat,
     sampleCount: 1 | 4,
     depthStencilFormat: GPUTextureFormat | null,
-    depthWrite: boolean
+    depthWrite: boolean,
+    owner?: object
 ): { pipeline: GPURenderPipeline; cache: TextPipelineDeviceCache } {
     const cache = getOrCreateDeviceCache(engine);
-    const key = pipelineKey(format, sampleCount, depthStencilFormat, depthWrite);
+    const alphaToCoverageResolver = _getAlphaToCoverageResolver();
+    const alphaToCoverage = depthWrite && sampleCount > 1 && !!owner && !!alphaToCoverageResolver?.(owner);
+    const key = pipelineKey(format, sampleCount, depthStencilFormat, depthWrite, alphaToCoverage);
     let pipeline = cache.pipelines.get(key);
     if (pipeline) {
         return { pipeline, cache };
     }
     const device = engine._device;
+    const fragModule = alphaToCoverage ? (cache.a2cFragModule ??= device.createShaderModule({ label: "text-a2c-frag", code: a2cFragSrc })) : cache.fragModule;
     const descriptor: GPURenderPipelineDescriptor = {
         label: "text-pipeline",
         layout: device.createPipelineLayout({ bindGroupLayouts: [cache.bindGroupLayout] }),
@@ -99,26 +106,26 @@ export function getOrCreateTextPipeline(
             ],
         },
         fragment: {
-            module: cache.fragModule,
+            module: fragModule,
             entryPoint: "main",
             targets: [
                 {
                     format,
-                    blend: {
-                        // Premultiplied-alpha blend. The Slug fragment shader outputs
-                        // `vColor * coverage` — i.e. RGB already premultiplied by coverage
-                        // (and alpha = coverage) — so the color blend must use srcFactor
-                        // `one` (NOT `src-alpha`, which would multiply by coverage a second
-                        // time and render anti-aliased edges as coverage², too dark). The
-                        // alpha channel already uses `one` for the same reason.
-                        color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-                        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-                    },
+                    ...(alphaToCoverage
+                        ? {}
+                        : {
+                              // Premultiplied-alpha blend. The ordinary Slug fragment outputs
+                              // `vColor * coverage`, so RGB is already coverage-weighted.
+                              blend: {
+                                  color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" } as GPUBlendComponent,
+                                  alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" } as GPUBlendComponent,
+                              },
+                          }),
                 },
             ],
         },
         primitive: { topology: "triangle-list", cullMode: "none", frontFace: "ccw" },
-        multisample: { count: sampleCount },
+        multisample: alphaToCoverage ? { count: sampleCount, alphaToCoverageEnabled: true } : { count: sampleCount },
     };
     if (depthStencilFormat) {
         descriptor.depthStencil = {

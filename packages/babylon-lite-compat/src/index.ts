@@ -60,7 +60,7 @@ export { Light, HemisphericLight, DirectionalLight, PointLight, SpotLight } from
 
 // ─── Meshes ──────────────────────────────────────────────────────────
 export { Mesh, AbstractMesh, TransformNode, GroundMesh, InstancedMesh, VertexData, VertexBuffer, MeshBuilder } from "./meshes/meshes.js";
-export { CreateBox, CreateSphere, CreateGround, CreatePlane, CreateCylinder, CreateTorus, CreateDisc } from "./meshes/meshes.js";
+export { CreateBox, CreateSphere, CreateGround, CreatePlane, CreateCylinder, CreateTorus, CreateDisc, CreateTiledBox, CreateTiledPlane } from "./meshes/meshes.js";
 export { CSG, CSG2, InitializeCSG2Async } from "./meshes/csg.js";
 export { MeshoptCompression } from "./meshes/compression.js";
 export { MorphTarget, MorphTargetManager } from "./morph/morph.js";
@@ -292,7 +292,6 @@ export {
     FxaaPostProcess,
     SSAO2RenderingPipeline,
     ParticleHelper,
-    ParticleSystemSet,
     PointsCloudSystem,
     PhysicsAggregate,
     PhysicsBody,
@@ -313,3 +312,6 @@ export {
 } from "./unsupported/unsupported-extended.js";
 
 export { HavokPlugin, PhysicsEngine, PhysicsShapeType, PhysicsMotionType, PhysicsPrestepType, PhysicsConstraintType } from "./physics/physics.js";
+
+// ─── Node Particle Editor (NPE) ──────────────────────────────────────
+export { NodeParticleSystemSet, ParticleSystemSet } from "./particles/node-particle-system-set.js";

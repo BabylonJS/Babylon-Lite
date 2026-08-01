@@ -60,6 +60,14 @@ export interface AudioEngineOptions {
 export interface AudioEngine {
     /** Current context state. Always `"running"` for an offline context. */
     readonly state: AudioEngineState;
+    /**
+     * The underlying Web Audio context. Use it to build custom source nodes
+     * (oscillators, buffers, filters) and route them into the engine via
+     * {@link createSoundSourceAsync}, so they share the engine's master bus,
+     * unlock handling, and master volume. Typed as `BaseAudioContext` because an
+     * `OfflineAudioContext` may back the engine for deterministic rendering.
+     */
+    readonly audioContext: BaseAudioContext;
     /** The audio context's current time, in seconds. */
     readonly currentTime: number;
     /** Fires whenever {@link state} changes. */
@@ -123,6 +131,9 @@ export async function createAudioEngineAsync(options: AudioEngineOptions = {}): 
     const engine: AudioEngine = {
         get state(): AudioEngineState {
             return isOffline ? "running" : ((ctx as AudioContext).state as AudioEngineState);
+        },
+        get audioContext(): BaseAudioContext {
+            return ctx;
         },
         get currentTime(): number {
             return ctx.currentTime ?? 0;

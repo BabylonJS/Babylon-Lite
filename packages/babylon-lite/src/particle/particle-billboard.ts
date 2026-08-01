@@ -4,14 +4,11 @@ import { billboardBlendAdditive, billboardBlendAlpha, billboardBlendOneOne } fro
 import type { BillboardBlendMode, FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 import type { ParticleSystem } from "./particle-system.js";
 
-const BLENDMODE_ONEONE = 0; // Babylon.js BaseParticleSystem.BLENDMODE_ONEONE (pure additive, src·1 + dst)
-const BLENDMODE_STANDARD = 1; // Babylon.js BaseParticleSystem.BLENDMODE_STANDARD (alpha blend)
+const BLENDMODE_ONEONE = 0; // Babylon.js BLENDMODE_ONEONE (pure additive, src·1 + dst)
+const BLENDMODE_STANDARD = 1; // Babylon.js BLENDMODE_STANDARD (alpha blend)
 
-/** Map a particle-system blend mode to a billboard blend descriptor. */
+/** Map a Babylon.js particle-system blend mode to a billboard blend descriptor. */
 function blendForMode(mode: number): BillboardBlendMode {
-    // Babylon.js: ONEONE (0) adds the source RGB at full strength (ALPHA_ONEONE); STANDARD (1) is
-    // alpha-blended (ALPHA_COMBINE); ADD (2) and MULTIPLYADD (4) weight the source by its alpha
-    // (ALPHA_ADD). Only ONEONE and ADD differ, and only where the texture alpha is below 1.
     if (mode === BLENDMODE_STANDARD) {
         return billboardBlendAlpha;
     }
@@ -22,30 +19,47 @@ function blendForMode(mode: number): BillboardBlendMode {
 }
 
 /**
- * Create a camera-facing billboard system that renders `system`'s particles using the system's texture.
- * The texture becomes a single-frame atlas; the blend mode follows the system's blend mode.
+ * Create a camera-facing billboard system that renders a particle system's live columns using its texture.
+ * A graph without an animation sheet uses the texture as a single-frame atlas.
  */
 export function createParticleBillboard(system: ParticleSystem): FacingBillboardSpriteSystem {
     const texture = system.texture;
     if (!texture) {
         throw new Error("createParticleBillboard: the particle system has no texture");
     }
-    const atlas = createGridSpriteAtlas(texture, { cellWidthPx: texture.width, cellHeightPx: texture.height });
-    return createFacingBillboardSystem(atlas, { capacity: system.capacity, blendMode: blendForMode(system.blendMode) });
+    const sheet = system._spriteSheet;
+    const atlas = createGridSpriteAtlas(texture, {
+        // With a sprite sheet the texture is a grid of cells; otherwise it is a single-frame sprite.
+        cellWidthPx: sheet && sheet.cellWidth > 0 ? sheet.cellWidth : texture.width,
+        cellHeightPx: sheet && sheet.cellHeight > 0 ? sheet.cellHeight : texture.height,
+    });
+    return createFacingBillboardSystem(atlas, { capacity: system.buffer.capacity, blendMode: blendForMode(system.blendMode) });
 }
 
 /** Upload the current set of alive particles into the billboard instance buffer (call once per frame). */
 export function syncParticleBillboard(system: ParticleSystem, billboard: FacingBillboardSpriteSystem): void {
     clearBillboardSprites(billboard);
-    const particles = system._particles;
-    for (let i = 0; i < particles.length; i++) {
-        const particle = particles[i]!;
+    const buffer = system.buffer;
+    const posX = buffer.posX;
+    const posY = buffer.posY;
+    const posZ = buffer.posZ;
+    const size = buffer.size;
+    const scaleX = buffer.scaleX;
+    const scaleY = buffer.scaleY;
+    const angle = buffer.angle;
+    const colR = buffer.colorR;
+    const colG = buffer.colorG;
+    const colB = buffer.colorB;
+    const colA = buffer.colorA;
+    const cellIndex = system._spriteSheet ? system._spriteSheet.cellIndex : null;
+
+    for (let i = 0; i < buffer.alive; i++) {
         addBillboardSpriteIndex(billboard, {
-            position: [particle.position.x, particle.position.y, particle.position.z],
-            sizeWorld: [particle.size * particle.scale.x, particle.size * particle.scale.y],
-            color: [particle.color.r, particle.color.g, particle.color.b, particle.color.a],
-            rotation: particle.angle,
-            frame: 0,
+            position: [posX[i]!, posY[i]!, posZ[i]!],
+            sizeWorld: [size[i]! * scaleX[i]!, size[i]! * scaleY[i]!],
+            color: [colR[i]!, colG[i]!, colB[i]!, colA[i]!],
+            rotation: angle[i]!,
+            frame: cellIndex ? cellIndex[i]! : 0,
         });
     }
 }

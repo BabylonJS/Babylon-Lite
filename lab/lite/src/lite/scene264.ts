@@ -9,11 +9,12 @@ import {
     addFacingBillboardSystem,
     animateParticleSystem,
     attachControl,
+    buildNodeParticleSet,
     createArcRotateCamera,
     createEngine,
     createParticleBillboard,
     createSceneContext,
-    parseNodeParticleSetFromSnippet,
+    parseNodeParticleSource,
     registerScene,
     startEngine,
     startParticleSystem,
@@ -37,8 +38,8 @@ async function main(): Promise<void> {
     scene.camera = camera;
     attachControl(camera, canvas, scene);
 
-    const set = await parseNodeParticleSetFromSnippet(engine, scene, "", {
-        json: SCENE264_NPE_JSON,
+    const graph = parseNodeParticleSource(SCENE264_NPE_JSON);
+    const set = await buildNodeParticleSet(engine, scene, graph, {
         emitter: { x: 0, y: 0, z: 0 },
         textureBaseUrl: "https://playground.babylonjs.com/",
     });

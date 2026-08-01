@@ -1,41 +1,56 @@
-import { lerpValue } from "./particle-lerp.js";
-import type { ParticleGradientEntry } from "./particle-gradient-value-block.js";
-import type { ParticleBlockEvaluator, NpeGetter } from "../npe-types.js";
+import type { Vec2, Vec3, Color4 } from "../../../math/types.js";
+import type { NpeGradientEntry } from "./particle-gradient-value-block.js";
+import { lerpGetters } from "./particle-lerp-block.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
+import type { NpeGetter } from "../npe-value.js";
 
-/**
- * `ParticleGradientBlock` — interpolates between gradient stops (each a `ParticleGradientValueBlock` wired
- * to a `valueN` input) by the scalar `gradient` input (typically the age/lifetime ratio). Stops are sorted
- * by reference once at build; on evaluation the value is lerped between the stop at or below `gradient` and
- * the next one above it (component-wise for vectors/colours). A `gradient` below the lowest stop yields 0.
- * Mirrors BJS `ParticleGradientBlock`.
- */
-export const particleGradientBlock: ParticleBlockEvaluator = {
+/** `ParticleGradientBlock` — interpolate sorted static stops into reused scratch. */
+export const particleGradientBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const gradientGetter = ctx.input(block, "gradient", () => 1);
-
-        // The stops are static blocks, so resolve them (reference + value getter) once and sort by reference.
         const entries = block.inputs
             .filter((input) => input.name.startsWith("value") && input.targetBlockId != null)
-            .map((input) => ctx.input(block, input.name)(ctx.state) as unknown as ParticleGradientEntry)
+            .map((input) => ctx.input(block, input.name)(0) as unknown as NpeGradientEntry)
             .sort((a, b) => a.reference - b.reference);
-
-        const getter: NpeGetter = (state) => {
-            const gradient = gradientGetter(state) as number;
-            if (entries.length === 1) {
-                return entries[0]!.value(state);
+        const vector2: Vec2 = { x: 0, y: 0 };
+        const vector3: Vec3 = { x: 0, y: 0, z: 0 };
+        const color4: Color4 = { r: 0, g: 0, b: 0, a: 0 };
+        const copy = (value: ReturnType<NpeGetter>): ReturnType<NpeGetter> => {
+            if (typeof value === "number") {
+                return value;
             }
+            if ("r" in value) {
+                color4.r = value.r;
+                color4.g = value.g;
+                color4.b = value.b;
+                color4.a = value.a;
+                return color4;
+            }
+            if ("z" in value) {
+                vector3.x = value.x;
+                vector3.y = value.y;
+                vector3.z = value.z;
+                return vector3;
+            }
+            vector2.x = value.x;
+            vector2.y = value.y;
+            return vector2;
+        };
 
-            // Walk from the top: interpolate between the stop at/below `gradient` and the next one above it.
-            let next: ParticleGradientEntry | null = null;
-            for (let i = entries.length - 1; i >= 0; i--) {
-                const entry = entries[i]!;
+        const getter: NpeGetter = (i) => {
+            const gradient = gradientGetter(i) as number;
+            if (entries.length === 1) {
+                return copy(entries[0]!.value(i));
+            }
+            let next: NpeGradientEntry | null = null;
+            for (let entryIndex = entries.length - 1; entryIndex >= 0; entryIndex--) {
+                const entry = entries[entryIndex]!;
                 if (entry.reference <= gradient) {
-                    const currentValue = entry.value(state);
                     if (next) {
-                        const scale = Math.max(0, Math.min(1, (gradient - entry.reference) / (next.reference - entry.reference)));
-                        return lerpValue(currentValue, next.value(state), scale);
+                        const amount = Math.max(0, Math.min(1, (gradient - entry.reference) / (next.reference - entry.reference)));
+                        return lerpGetters(entry.value, next.value, i, amount, vector2, vector3, color4);
                     }
-                    return currentValue;
+                    return copy(entry.value(i));
                 }
                 next = entry;
             }

@@ -1,28 +1,19 @@
-import { copyVec3 } from "../../../math/vec3-ref.js";
 import type { Vec3 } from "../../../math/types.js";
-import type { ParticleSystem } from "../../particle-system.js";
-import type { ParticleBlockEvaluator } from "../npe-types.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
 
-/**
- * `UpdateDirectionBlock` — each step, sets the particle direction (velocity) to the value of its
- * `direction` input (typically `currentDirection + gravity * scaledUpdateSpeed`, after drag/limit math).
- * Mirrors BJS `UpdateDirectionBlock`.
- */
-export const updateDirectionBlock: ParticleBlockEvaluator = {
+/** `UpdateDirectionBlock` — copy the evaluated velocity into the base direction columns. */
+export const updateDirectionBlock: NpeBlockEvaluator = {
     build(block, ctx) {
-        const state = ctx.state;
-        const system = ctx.input(block, "particle")(state) as ParticleSystem;
-        ctx.setOutput(block.id, "output", () => system);
-
         if (!ctx.isConnected(block, "direction")) {
             return;
         }
+        const buffer = ctx.state.buffer!;
         const directionGetter = ctx.input(block, "direction");
-
-        system._updateQueue.push((particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            copyVec3(particle.direction, directionGetter(state) as Vec3);
+        ctx.state.system!.updateSteps.push((i) => {
+            const direction = directionGetter(i) as Vec3;
+            buffer.dirX[i] = direction.x;
+            buffer.dirY[i] = direction.y;
+            buffer.dirZ[i] = direction.z;
         });
     },
 };

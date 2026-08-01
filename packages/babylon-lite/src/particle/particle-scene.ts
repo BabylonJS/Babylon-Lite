@@ -3,7 +3,7 @@ import { addFacingBillboardSystem } from "../sprite/billboard-scene.js";
 import { animateParticleSystem, startParticleSystem } from "./particle-system.js";
 import { createParticleBillboard, syncParticleBillboard } from "./particle-billboard.js";
 import type { SceneContext } from "../scene/scene.js";
-import type { NodeParticleSet } from "./node/npe-build.js";
+import type { NodeParticleSet } from "./node/node-particle.js";
 
 /** One simulated frame at 60 fps, used to convert frame delta time to an update-speed ratio. */
 const FRAME_MS = 1000 / 60;

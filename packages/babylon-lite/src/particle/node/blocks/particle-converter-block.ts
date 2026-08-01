@@ -1,12 +1,11 @@
-import type { Color4, Vec3, Vec2 } from "../../../math/types.js";
-import type { ParticleBlockEvaluator, ParticleValue, NpeBuildState } from "../npe-types.js";
+import type { Vec2, Vec3, Color4 } from "../../../math/types.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /**
- * `ParticleConverterBlock` — composes a Color4 from individual or partial component inputs and exposes it
- * as every projection (`color`, `xyz`, `xy`, `zw`, `x`, `y`, `z`, `w`). Component order maps r↔x, g↔y,
- * b↔z, a↔w. Mirrors BJS `ParticleConverterBlock`.
+ * `ParticleConverterBlock` — composes a Color4 from component inputs and exposes every projection
+ * (`color`, `xyz`, `xy`, `zw`, `x`, `y`, `z`, `w`), r↔x g↔y b↔z a↔w. Fills reused scratch values.
  */
-export const particleConverterBlock: ParticleBlockEvaluator = {
+export const particleConverterBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const colorIn = ctx.input(block, "color");
         const xyzIn = ctx.input(block, "xyz");
@@ -26,71 +25,101 @@ export const particleConverterBlock: ParticleBlockEvaluator = {
         const hasZ = ctx.isConnected(block, "z");
         const hasW = ctx.isConnected(block, "w");
 
-        const getData = (state: NpeBuildState): Color4 => {
+        const data: Color4 = { r: 0, g: 0, b: 0, a: 0 };
+        const fill = (i: number): void => {
             if (hasColor) {
-                const color = colorIn(state) as Color4;
-                return { r: color.r, g: color.g, b: color.b, a: color.a };
+                const c = colorIn(i) as Color4;
+                data.r = c.r;
+                data.g = c.g;
+                data.b = c.b;
+                data.a = c.a;
+                return;
             }
-
             let x = 0;
             let y = 0;
             let z = 0;
             let w = 0;
-
             if (hasX) {
-                x = xIn(state) as number;
+                x = xIn(i) as number;
             }
             if (hasY) {
-                y = yIn(state) as number;
+                y = yIn(i) as number;
             }
             if (hasZ) {
-                z = zIn(state) as number;
+                z = zIn(i) as number;
             }
             if (hasW) {
-                w = wIn(state) as number;
+                w = wIn(i) as number;
             }
             if (hasXy) {
-                const temp = xyIn(state) as Vec2 | null;
-                if (temp) {
-                    x = temp.x;
-                    y = temp.y;
+                const t = xyIn(i) as Vec2 | null;
+                if (t) {
+                    x = t.x;
+                    y = t.y;
                 }
             }
             if (hasZw) {
-                const temp = zwIn(state) as Vec2 | null;
-                if (temp) {
-                    z = temp.x;
-                    w = temp.y;
+                const t = zwIn(i) as Vec2 | null;
+                if (t) {
+                    z = t.x;
+                    w = t.y;
                 }
             }
             if (hasXyz) {
-                const temp = xyzIn(state) as Vec3 | null;
-                if (temp) {
-                    x = temp.x;
-                    y = temp.y;
-                    z = temp.z;
+                const t = xyzIn(i) as Vec3 | null;
+                if (t) {
+                    x = t.x;
+                    y = t.y;
+                    z = t.z;
                 }
             }
-
-            return { r: x, g: y, b: z, a: w };
+            data.r = x;
+            data.g = y;
+            data.b = z;
+            data.a = w;
         };
 
-        ctx.setOutput(block.id, "color", (state) => getData(state) as ParticleValue);
-        ctx.setOutput(block.id, "xyz", (state) => {
-            const data = getData(state);
-            return { x: data.r, y: data.g, z: data.b };
+        const v3: Vec3 = { x: 0, y: 0, z: 0 };
+        const v2a: Vec2 = { x: 0, y: 0 };
+        const v2b: Vec2 = { x: 0, y: 0 };
+        ctx.setOutput(block.id, "color", (i) => {
+            fill(i);
+            return data;
         });
-        ctx.setOutput(block.id, "xy", (state) => {
-            const data = getData(state);
-            return { x: data.r, y: data.g };
+        ctx.setOutput(block.id, "xyz", (i) => {
+            fill(i);
+            v3.x = data.r;
+            v3.y = data.g;
+            v3.z = data.b;
+            return v3;
         });
-        ctx.setOutput(block.id, "zw", (state) => {
-            const data = getData(state);
-            return { x: data.b, y: data.a };
+        ctx.setOutput(block.id, "xy", (i) => {
+            fill(i);
+            v2a.x = data.r;
+            v2a.y = data.g;
+            return v2a;
         });
-        ctx.setOutput(block.id, "x", (state) => getData(state).r);
-        ctx.setOutput(block.id, "y", (state) => getData(state).g);
-        ctx.setOutput(block.id, "z", (state) => getData(state).b);
-        ctx.setOutput(block.id, "w", (state) => getData(state).a);
+        ctx.setOutput(block.id, "zw", (i) => {
+            fill(i);
+            v2b.x = data.b;
+            v2b.y = data.a;
+            return v2b;
+        });
+        ctx.setOutput(block.id, "x", (i) => {
+            fill(i);
+            return data.r;
+        });
+        ctx.setOutput(block.id, "y", (i) => {
+            fill(i);
+            return data.g;
+        });
+        ctx.setOutput(block.id, "z", (i) => {
+            fill(i);
+            return data.b;
+        });
+        ctx.setOutput(block.id, "w", (i) => {
+            fill(i);
+            return data.a;
+        });
     },
 };
