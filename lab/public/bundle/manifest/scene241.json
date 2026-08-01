@@ -29,10 +29,10 @@
     "scene241-iridescence-fragment-wl-ip2dN.js",
     "scene241-light-base-BpyK7ED4.js",
     "scene241-light-matrix-CtsX4GmG.js",
-    "scene241-pbr-refraction-D8houi5b.js",
-    "scene241-pbr-renderable-B65TGWeQ.js",
+    "scene241-pbr-refraction-CXyshy9G.js",
+    "scene241-pbr-renderable-DpPGJJOf.js",
     "scene241-pbr-template-ext-CiHpOV5G.js",
-    "scene241-pbr-transmission-ext--zzBNHdn.js",
+    "scene241-pbr-transmission-ext-BWN0b1Bf.js",
     "scene241-reflectance-fragment-B1IUP2So.js",
     "scene241-rgbd-decode-DH-gSQt2.js",
     "scene241-scene-uniforms-FTYH6Ct0.js",
@@ -45,5 +45,5 @@
     "scene241-visibility-CKB7eGDU.js",
     "scene241.js"
   ],
-  "rawBytes": 165963
+  "rawBytes": 165951
 }

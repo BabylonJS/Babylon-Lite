@@ -145,20 +145,24 @@ export function getOrCreateShaderPipeline(
     const colorTarget: GPUColorTargetState | null = sig._colorFormat
         ? {
               format: sig._colorFormat,
-              ...(material.needAlphaBlending
-                  ? {
-                        blend:
-                            material.blendMode === "additive"
-                                ? ({
-                                      color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
-                                      alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
-                                  } satisfies GPUBlendState)
-                                : ({
-                                      color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
-                                      alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-                                  } satisfies GPUBlendState),
-                    }
-                  : {}),
+              // An explicit material.blend REPLACES the needAlphaBlending-derived state entirely
+              // (see ShaderMaterialOptions.blend).
+              ...(material.blend
+                  ? { blend: material.blend }
+                  : material.needAlphaBlending
+                    ? {
+                          blend:
+                              material.blendMode === "additive"
+                                  ? ({
+                                        color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+                                        alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
+                                    } satisfies GPUBlendState)
+                                  : ({
+                                        color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+                                        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+                                    } satisfies GPUBlendState),
+                      }
+                    : {}),
           }
         : null;
 

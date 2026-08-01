@@ -1,5 +1,5 @@
 {
-  "rawKB": 60,
+  "rawKB": 60.0,
   "gzipKB": 24.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,5 +8,5 @@
     "scene54-standard-renderable-vGBAQ-9A.js",
     "scene54.js"
   ],
-  "rawBytes": 61456
+  "rawBytes": 61439
 }
