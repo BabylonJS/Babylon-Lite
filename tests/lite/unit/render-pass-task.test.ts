@@ -713,6 +713,61 @@ describe("RenderPassTask transparent sorting", () => {
         const colorAtt = (descriptor!.colorAttachments as GPURenderPassColorAttachment[])[0]!;
         expect(colorAtt.loadOp).toBe("load");
     });
+
+    it("loads an rt-owned depth attachment when depthClear is false", async () => {
+        const seenDescriptors: GPURenderPassDescriptor[] = [];
+        const engine = makeMockEngine({ msaaSamples: 1, onBeginPass: (d) => seenDescriptors.push(d) });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+
+        const rt = createRenderTarget({
+            lbl: "overlay",
+            format: "bgra8unorm",
+            dFormat: "depth32float",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const task = createRenderTask({ name: "overlay", rt, clr: false, depthClear: false }, engine, scene);
+        scene._frameGraph._tasks.push(task);
+
+        await registerScene(scene);
+        scene._record();
+
+        const descriptor = seenDescriptors.find((d) => d.depthStencilAttachment);
+        const depthAtt = descriptor!.depthStencilAttachment as GPURenderPassDepthStencilAttachment;
+        expect(depthAtt.depthLoadOp).toBe("load");
+        const colorAtt = (descriptor!.colorAttachments as GPURenderPassColorAttachment[])[0]!;
+        expect(colorAtt.loadOp).toBe("load");
+    });
+
+    it("keeps task-managed external depth clearing when depthClear is false", async () => {
+        const seenDescriptors: GPURenderPassDescriptor[] = [];
+        const engine = makeMockEngine({ msaaSamples: 1, onBeginPass: (d) => seenDescriptors.push(d) });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+
+        const colorRt = createRenderTarget({
+            lbl: "overlay-color",
+            format: "bgra8unorm",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const externalDepth = createRenderTarget({
+            lbl: "task-managed-depth",
+            dFormat: "depth32float",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const task = createRenderTask({ name: "overlay", rt: colorRt, depth: externalDepth, depthClear: false }, engine, scene);
+        scene._frameGraph._tasks.push(task);
+
+        await registerScene(scene);
+        scene._record();
+
+        const descriptor = seenDescriptors.find((d) => d.depthStencilAttachment);
+        const depthAtt = descriptor!.depthStencilAttachment as GPURenderPassDepthStencilAttachment;
+        expect(depthAtt.depthLoadOp).toBe("clear");
+    });
 });
 
 describe("RenderTask MSAA resolveTarget", () => {

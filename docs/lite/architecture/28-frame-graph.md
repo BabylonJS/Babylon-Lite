@@ -175,7 +175,7 @@ addTaskAfter(sceneOrGraph, task, afterTask); // insert immediately after afterTa
 Rules:
 
 - Offscreen producer tasks must run before consumers that sample their output.
-- Overlay tasks should use `clr: false` and run after the task they overlay.
+- Overlay tasks should use `clr: false` and run after the task they overlay. Add `depthClear: false` when they must depth-test against rt-owned depth produced by the earlier task.
 - `addTaskBefore()` appends if the `beforeTask` is not found.
 - `addTaskAfter()` inserts immediately after `afterTask`, and appends if it is not found.
 - If tasks are added or inserted outside the startup/resize path, caller code must rebuild the graph before the next frame.
@@ -270,6 +270,7 @@ export interface RenderTaskConfig {
     rt: RenderTarget;
     clrColor?: GPUColorDict;
     clr?: boolean;
+    depthClear?: boolean;
     cam?: Camera | null;
     cs?: boolean;
     transmission?: { copyCount?: number; generateMipmaps?: boolean };
@@ -281,7 +282,8 @@ export interface RenderTaskConfig {
 | `name`         | Used for labels and diagnostics.                                                                                                                                                                                                                          |
 | `rt`           | Concrete render target for this pass.                                                                                                                                                                                                                     |
 | `clrColor`     | Clear color. The object may be mutated between frames.                                                                                                                                                                                                    |
-| `clr`          | Defaults to clear. Set `false` to use color/depth `loadOp: "load"` for overlays or multi-scene composition.                                                                                                                                               |
+| `clr`          | Defaults to clear. Set `false` to use color `loadOp: "load"` for overlays or multi-scene composition.                                                                                                                                                     |
+| `depthClear`   | Controls rt-owned depth independently. Defaults to clear; set `false` to load existing depth. Ignored for external `depth` targets, which retain their eager/task-managed ownership policy.                                                               |
 | `cam`          | Optional per-pass camera. Defaults to `scene.camera`.                                                                                                                                                                                                     |
 | `cs`           | Canvas-sized aspect flag. When true, scene UBO aspect uses canvas dimensions instead of RTT dimensions. This is useful for RTTs that are later sampled as a material texture but should preserve canvas aspect.                                           |
 | `transmission` | Optional scene-texture transmission settings. `copyCount: 0` refreshes before every transmissive draw; otherwise the default is one refresh. `generateMipmaps` defaults to `true`; set `false` to allocate only mip 0 and skip refraction mip generation. |

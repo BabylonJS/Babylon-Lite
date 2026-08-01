@@ -24,8 +24,8 @@
  * The engine `scRT` is just another `RenderTarget` here: a task that
  * targets it (`rt`) or resolves into it (`rst`) re-reads its per-frame color view
  * at execute time (the swap texture is re-acquired each frame). `clr: false`
- * switches color + depth `loadOp` to `"load"` so multiple scenes can share the
- * swapchain in one frame (e.g., a 3D scene + a UI overlay scene).
+ * preserves color content, while `depthClear: false` preserves rt-owned depth,
+ * so multiple tasks can share a target in one frame.
  */
 
 import { F32 } from "../engine/typed-arrays.js";
@@ -78,9 +78,14 @@ export interface RenderTaskConfig {
     /** Background clear color. May be mutated frame-to-frame. */
     clrColor?: GPUColorDict;
     /** When true, color `loadOp` is "clear"; when false, "load" (overlays previous
-     *  color content). Depth is always cleared when rt-owned and always loaded when
-     *  supplied via `depth`. */
+     *  color content). Depth is cleared when rt-owned (unless `depthClear: false`) and
+     *  always loaded when supplied via `depth`. */
     clr?: boolean;
+    /** rt-owned depth `loadOp`. Default true = "clear" (unchanged behaviour). Set false so an
+     *  overlay task drawn into another task's target LOADS that target's existing depth and can
+     *  depth-test against the scene already rendered there. Ignored when `depth` is supplied
+     *  (an external depth is always loaded when eager, task-managed otherwise). */
+    depthClear?: boolean;
     /** Per-pass camera override. Null/undefined uses `scene.camera`. */
     cam?: Camera | null;
     /** Use canvas dimensions, not render-target dimensions, for this pass's scene UBO aspect. */
@@ -422,7 +427,9 @@ function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
     let depthAttachment: GPURenderPassDepthStencilAttachment | undefined;
     if (depthView) {
         const dd = depthSrc._descriptor;
-        const loadOp = task._depthLoadOp ?? "clear";
+        // rt-owned depth honours `depthClear: false` (overlay tasks keep the target's depth);
+        // an external `depth` keeps its established load/clear split via `_depthLoadOp`.
+        const loadOp = task._depthLoadOp ?? (task._config.depthClear === false ? "load" : "clear");
         depthAttachment = {
             view: depthView,
             depthClearValue: dd._depthClearValue ?? 0,

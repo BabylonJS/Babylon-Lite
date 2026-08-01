@@ -86,6 +86,7 @@ export interface RenderTaskConfig {
     rt: RenderTarget;
     clrColor?: GPUColorDict;
     clr?: boolean;
+    depthClear?: boolean;
     cam?: Camera | null;
     cs?: boolean;
 }
@@ -93,12 +94,13 @@ export interface RenderTaskConfig {
 
 Important fields:
 
-| Field | Meaning                                                                                                                             |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `rt`  | Concrete render target. Swapchain tasks use `resolveToSwapchain: true`; RTT tasks allocate color/depth textures.                    |
-| `clr` | `true`/undefined clears color+depth; `false` loads previous content for overlays/multi-scene composition.                           |
-| `cam` | Per-pass camera override; defaults to `scene.camera`.                                                                               |
-| `cs`  | Use canvas dimensions for scene UBO aspect instead of RTT dimensions. Used when an RTT texture must be rendered with canvas aspect. |
+| Field        | Meaning                                                                                                                                                  |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rt`         | Concrete render target. Swapchain tasks use `resolveToSwapchain: true`; RTT tasks allocate color/depth textures.                                         |
+| `clr`        | `true`/undefined clears color; `false` loads previous color content for overlays/multi-scene composition.                                                |
+| `depthClear` | Controls rt-owned depth independently. `true`/undefined clears depth; `false` loads existing depth. External `depth` targets keep their ownership policy. |
+| `cam`        | Per-pass camera override; defaults to `scene.camera`.                                                                                                    |
+| `cs`         | Use canvas dimensions for scene UBO aspect instead of RTT dimensions. Used when an RTT texture must be rendered with canvas aspect.                      |
 
 `RenderTask.addMesh(mesh, { material })` accepts either a source material or a `MaterialView`. The mesh is resolved at `record()` time through the source material family's `_buildGroup._rebuildSingle` closure, so explicit offscreen tasks can render the same mesh with pass-specific material features without mutating `mesh.material`.
 
