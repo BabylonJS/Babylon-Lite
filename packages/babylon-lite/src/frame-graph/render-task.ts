@@ -123,7 +123,7 @@ export interface RenderTask extends Task {
     /** @internal */
     readonly _config: RenderTaskConfig;
     /** @internal */
-    _autoFromScene: boolean;
+    _af: boolean;
 
     /** Source-of-truth renderables. Bucketed binding lists below are derived from
      *  this list at `record()` (or re-sync when auto-filled and `_renderableVersion` changes). */
@@ -228,7 +228,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         engine: engine,
         scene: sc,
         _passes: [],
-        _autoFromScene: false,
+        _af: false,
         _renderables: [],
         _opaqueBindings: [],
         _directBindings: [],
@@ -259,19 +259,19 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
                 // shared scene UBO + every task's render target mid-frame and crashes the in-flight submit).
                 resolvePendingMeshes(task, sc);
                 // A live add makes the render list explicit (mirrors record(), where a pending mesh forces
-                // _autoFromScene = false). Without this, an auto-mirroring task's next scene-version resync in
+                // _af = false). Without this, an auto-mirroring task's next scene-version resync in
                 // prepareRenderTaskPass would clear _renderables and drop the just-added mesh.
-                task._autoFromScene = false;
+                task._af = false;
                 buildBindings(task, engine, targetSignature);
             }
         },
         record(): void {
-            if (task._autoFromScene) {
+            if (task._af) {
                 task._renderables.length = 0;
             }
             resolvePendingMeshes(task, sc);
-            task._autoFromScene = config.autoMirror === false ? false : !task._renderables.length;
-            if (task._autoFromScene) {
+            task._af = config.autoMirror !== false && !task._renderables.length;
+            if (task._af) {
                 task._renderables.push(...sc._renderables);
             }
             // Read config.rt dynamically — transmission retargeting swaps it after
@@ -462,7 +462,7 @@ function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
 function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSignature: RenderTargetSignature, context: DrawUpdateContext): void {
     const sc = task.scene as SceneContext;
     // Auto-resync when the source scene mutates.
-    if (task._autoFromScene && task._lastVersion !== sc._renderableVersion) {
+    if (task._af && task._lastVersion !== sc._renderableVersion) {
         task._renderables.length = 0;
         task._renderables.push(...sc._renderables);
         buildBindings(task, eng, targetSignature);
@@ -517,7 +517,7 @@ function executePass(task: RenderTask, eng: EngineContext, targetSignature: Rend
             att.view = cfg.rt._colorView;
         }
         att.resolveTarget = cfg.rst?._colorView ?? undefined;
-        att.clearValue = task._autoFromScene ? sc.clearColor : cfg.clrColor!;
+        att.clearValue = task._af ? sc.clearColor : cfg.clrColor!;
         att.loadOp = cfg.clr ? "clear" : "load";
     }
     if (task._executeWithTransmission) {

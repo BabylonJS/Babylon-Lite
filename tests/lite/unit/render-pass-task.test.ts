@@ -779,7 +779,7 @@ describe("RenderPassTask transparent sorting", () => {
 
         task.record();
 
-        expect(task._autoFromScene).toBe(false);
+        expect(task._af).toBe(false);
         expect(task._renderables).toHaveLength(0);
     });
 
