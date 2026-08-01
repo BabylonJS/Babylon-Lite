@@ -79,7 +79,7 @@ export interface RenderTaskConfig {
     clrColor?: GPUColorDict;
     /** When true, color `loadOp` is "clear"; when false, "load" (overlays previous
      *  color content). Depth is cleared when rt-owned (unless `depthClear: false`) and
-     *  always loaded when supplied via `depth`. */
+     *  follows the eager/task-managed ownership policy when supplied via `depth`. */
     clr?: boolean;
     /** rt-owned depth `loadOp`. Default true = "clear" (unchanged behaviour). Set false so an
      *  overlay task drawn into another task's target LOADS that target's existing depth and can
@@ -137,11 +137,8 @@ export interface RenderTask extends Task {
     _renderPassDescriptor: GPURenderPassDescriptor;
     /** @internal */
     _colorAttachment: GPURenderPassColorAttachment;
-    /** @internal External depth source from `config.depth`. When unset,
-     *  the pass uses `config.rt._depthView`. */
-    _depthSrc?: RenderTarget;
-    /** @internal External depth/stencil `loadOp` ("load" when `config.depth` is
-     *  set). When unset, defaults to `"clear"`. */
+    /** @internal Resolved depth/stencil `loadOp` override from external-depth ownership
+     *  or `depthClear: false`. When unset, defaults to `"clear"`. */
     _depthLoadOp?: GPULoadOp;
 
     /** Per-task scene UBO + bind group. Created eagerly in createRenderTask
@@ -230,8 +227,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _recorded: false,
         _renderPassDescriptor: { colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
-        _depthSrc: config.depth,
-        _depthLoadOp: config.depth ? (config.depth._eager ? "load" : "clear") : undefined,
+        _depthLoadOp: config.depth ? (config.depth._eager ? "load" : "clear") : config.depthClear === false ? "load" : undefined,
         _sceneUBO: sceneUBO,
         _sceneBG: sceneBG,
         _lightsUBO: lightsUBO,
@@ -422,14 +418,12 @@ function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
     att.resolveTarget = task._config.rst?._colorView ?? undefined;
     task._renderPassDescriptor.colorAttachments = rt._colorView ? [att] : [];
 
-    const depthSrc = task._depthSrc ?? rt;
+    const depthSrc = task._config.depth ?? rt;
     const depthView = depthSrc._depthView;
     let depthAttachment: GPURenderPassDepthStencilAttachment | undefined;
     if (depthView) {
         const dd = depthSrc._descriptor;
-        // rt-owned depth honours `depthClear: false` (overlay tasks keep the target's depth);
-        // an external `depth` keeps its established load/clear split via `_depthLoadOp`.
-        const loadOp = task._depthLoadOp ?? (task._config.depthClear === false ? "load" : "clear");
+        const loadOp = task._depthLoadOp ?? "clear";
         depthAttachment = {
             view: depthView,
             depthClearValue: dd._depthClearValue ?? 0,
