@@ -20,7 +20,7 @@ function makeTask(mesh: Mesh): RenderTask {
         _opaqueBindings: [],
         _directBindings: [],
         _transparentBindings: [],
-        _opaqueBundles: [],
+        _ob: [],
         _lastVersion: 0,
         addMesh: vi.fn((added: Mesh, opts?: { material?: Material }) => {
             task._pendingMeshes.push({ mesh: added, material: opts?.material ?? added.material });

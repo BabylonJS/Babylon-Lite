@@ -783,6 +783,22 @@ describe("RenderPassTask transparent sorting", () => {
         expect(task._renderables).toHaveLength(0);
     });
 
+    it("uses the scene clear color when an explicit task omits clrColor", () => {
+        const seenDescriptors: GPURenderPassDescriptor[] = [];
+        const engine = makeMockEngine({ msaaSamples: 1, onBeginPass: (descriptor) => seenDescriptors.push(descriptor) });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+        const rt = createRenderTarget({ lbl: "explicit-clear", format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
+        const task = createRenderTask({ name: "explicit-clear", rt, autoMirror: false }, engine, scene);
+        task.record();
+
+        task.execute?.();
+
+        const color = (seenDescriptors[0]!.colorAttachments as GPURenderPassColorAttachment[])[0]!;
+        expect(color.loadOp).toBe("clear");
+        expect(color.clearValue).toBe(scene.clearColor);
+    });
+
     it("skips all pass work while disabled", () => {
         const seenDescriptors: GPURenderPassDescriptor[] = [];
         const engine = makeMockEngine({ msaaSamples: 1, onBeginPass: (descriptor) => seenDescriptors.push(descriptor) });

@@ -138,7 +138,7 @@ export interface RenderTask extends Task {
     /** Cached opaque render bundle. Invalidated by renderable list mutations
      *  (`_lastVersion`) and the global visibility/resource epoch (`_lastVis`). */
     /** @internal */
-    _opaqueBundles: GPURenderBundle[];
+    _ob: GPURenderBundle[];
     /** @internal */
     _lastVersion: number;
     /** @internal */
@@ -233,7 +233,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _opaqueBindings: [],
         _directBindings: [],
         _transparentBindings: [],
-        _opaqueBundles: [],
+        _ob: [],
         _lastVersion: -1,
         _lastVis: 0,
         _recorded: false,
@@ -308,7 +308,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
                 task._directBindings.length =
                 task._transparentBindings.length =
                 task._renderables.length =
-                task._opaqueBundles.length =
+                task._ob.length =
                     0;
             // disposeRenderTarget no-ops on the engine scRT and on eager
             // GeometryRendererTask depth outputs (both `_eager`), and on an undefined
@@ -358,7 +358,7 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
         }
     }
     if (removed) {
-        task._opaqueBundles.length = 0;
+        task._ob.length = 0;
         task._lastVersion = -1;
     }
 }
@@ -421,7 +421,7 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
     }
     opaque.sort((a, b) => a.renderable.order - b.renderable.order);
     direct.sort((a, b) => a.renderable.order - b.renderable.order);
-    task._opaqueBundles.length = 0;
+    task._ob.length = 0;
     task._lastVersion = (task.scene as SceneContext)._renderableVersion;
 }
 
@@ -516,8 +516,8 @@ function executePass(task: RenderTask, eng: EngineContext, targetSignature: Rend
             att.view = cfg.rt._colorView;
         }
         att.resolveTarget = cfg.rst?._colorView ?? undefined;
-        att.clearValue = task._af ? sc.clearColor : cfg.clrColor!;
-        att.loadOp = cfg.clr ? "clear" : "load";
+        att.clearValue = cfg.clrColor ?? sc.clearColor;
+        att.loadOp = cfg.clr === false ? "load" : "clear";
     }
     if (task._executeWithTransmission) {
         return task._executeWithTransmission(sampleCount);
@@ -537,7 +537,7 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     const rt = cfg.rt;
     const scene = task.scene as SceneContext;
     const opaqueBindings = task._opaqueBindings;
-    const opaqueBundles = task._opaqueBundles;
+    const opaqueBundles = task._ob;
     const sceneBG = task._sceneBG;
 
     const camera = cfg.cam ?? scene.camera;
@@ -597,7 +597,7 @@ function refreshTaskSceneBindGroup(task: RenderTask, eng: EngineContext): void {
             { binding: 1, resource: { buffer: lightsUBO } },
         ],
     });
-    task._opaqueBundles.length = 0;
+    task._ob.length = 0;
     task._lastVersion = -1;
 }
 
