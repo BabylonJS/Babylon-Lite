@@ -138,7 +138,7 @@ export interface RenderTask extends Task {
     /** Cached opaque render bundle. Invalidated by renderable list mutations
      *  (`_lastVersion`) and the global visibility/resource epoch (`_lastVis`). */
     /** @internal */
-    _ob: GPURenderBundle[];
+    _opaqueBundles: GPURenderBundle[];
     /** @internal */
     _lastVersion: number;
     /** @internal */
@@ -196,7 +196,6 @@ interface MutableDrawUpdateContext {
  *  Swapchain-targeted tasks acquire the swap view per-frame at execute time. */
 export function createRenderTask(config: RenderTaskConfig, engine: EngineContext, scene: SceneContext): RenderTask {
     const sc = scene as SceneContext;
-    config.clrColor ??= { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
     config.clr ??= true;
     const desc = config.rt._descriptor;
     // Render upright: row 0 of the GPU texture is the top of the scene. Every
@@ -233,7 +232,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _opaqueBindings: [],
         _directBindings: [],
         _transparentBindings: [],
-        _ob: [],
+        _opaqueBundles: [],
         _lastVersion: -1,
         _lastVis: 0,
         _recorded: false,
@@ -303,13 +302,8 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             return executePass(task, engine, targetSignature, updateContext);
         },
         dispose(): void {
-            task._passes.length =
-                task._opaqueBindings.length =
-                task._directBindings.length =
-                task._transparentBindings.length =
-                task._renderables.length =
-                task._ob.length =
-                    0;
+            task._passes.length = task._opaqueBindings.length = task._directBindings.length = 0;
+            task._transparentBindings.length = task._renderables.length = task._opaqueBundles.length = 0;
             // disposeRenderTarget no-ops on the engine scRT and on eager
             // GeometryRendererTask depth outputs (both `_eager`), and on an undefined
             // rst/depth — so these can be passed unconditionally. A shared target remains
@@ -358,7 +352,7 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
         }
     }
     if (removed) {
-        task._ob.length = 0;
+        task._opaqueBundles.length = 0;
         task._lastVersion = -1;
     }
 }
@@ -421,7 +415,7 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
     }
     opaque.sort((a, b) => a.renderable.order - b.renderable.order);
     direct.sort((a, b) => a.renderable.order - b.renderable.order);
-    task._ob.length = 0;
+    task._opaqueBundles.length = 0;
     task._lastVersion = (task.scene as SceneContext)._renderableVersion;
 }
 
@@ -517,7 +511,7 @@ function executePass(task: RenderTask, eng: EngineContext, targetSignature: Rend
         }
         att.resolveTarget = cfg.rst?._colorView ?? undefined;
         att.clearValue = cfg.clrColor ?? sc.clearColor;
-        att.loadOp = cfg.clr === false ? "load" : "clear";
+        att.loadOp = cfg.clr ? "clear" : "load";
     }
     if (task._executeWithTransmission) {
         return task._executeWithTransmission(sampleCount);
@@ -537,7 +531,7 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     const rt = cfg.rt;
     const scene = task.scene as SceneContext;
     const opaqueBindings = task._opaqueBindings;
-    const opaqueBundles = task._ob;
+    const opaqueBundles = task._opaqueBundles;
     const sceneBG = task._sceneBG;
 
     const camera = cfg.cam ?? scene.camera;
@@ -597,7 +591,7 @@ function refreshTaskSceneBindGroup(task: RenderTask, eng: EngineContext): void {
             { binding: 1, resource: { buffer: lightsUBO } },
         ],
     });
-    task._ob.length = 0;
+    task._opaqueBundles.length = 0;
     task._lastVersion = -1;
 }
 

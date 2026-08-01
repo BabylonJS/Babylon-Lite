@@ -253,7 +253,7 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTask): void {
     sig._depthStencilFormat = cfg.depth?._descriptor.dFormat ?? newRt._descriptor.dFormat;
     sig._depthCompare = newRt._descriptor._depthCompare;
     sig._sampleCount = sampleCount;
-    task._ob.length = 0;
+    task._opaqueBundles.length = 0;
     task._lastVersion = -1;
 }
 
@@ -575,7 +575,7 @@ function drawBaseTask(task: RenderTask, pass: GPURenderPassEncoder): number {
     const rt = task._config.rt;
     const scene = task.scene;
     const opaqueBindings = task._opaqueBindings;
-    const opaqueBundles = task._ob;
+    const opaqueBundles = task._opaqueBundles;
 
     setPassState(task, pass);
 
