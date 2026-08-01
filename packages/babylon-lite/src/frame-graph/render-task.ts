@@ -137,9 +137,6 @@ export interface RenderTask extends Task {
     _renderPassDescriptor: GPURenderPassDescriptor;
     /** @internal */
     _colorAttachment: GPURenderPassColorAttachment;
-    /** @internal Resolved depth/stencil `loadOp` override from external-depth ownership
-     *  or `depthClear: false`. When unset, defaults to `"clear"`. */
-    _depthLoadOp?: GPULoadOp;
 
     /** Per-task scene UBO + bind group. Created eagerly in createRenderTask
      *  so renderables can reference `_sceneBG` at `bind()` time. Written each
@@ -227,7 +224,6 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _recorded: false,
         _renderPassDescriptor: { colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
-        _depthLoadOp: config.depth ? (config.depth._eager ? "load" : "clear") : config.depthClear === false ? "load" : undefined,
         _sceneUBO: sceneUBO,
         _sceneBG: sceneBG,
         _lightsUBO: lightsUBO,
@@ -409,21 +405,22 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
 }
 
 function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
+    const config = task._config;
     const att = task._colorAttachment;
     att.view = rt._colorView!;
     // End-of-pass MSAA resolve into a caller-supplied single-sample target.
     // record() only builds the target's color view for an MSAA rt, so its
     // presence is the gate. The swapchain case is wired per-frame in
     // executePass (its view changes each frame); this custom view is stable.
-    att.resolveTarget = task._config.rst?._colorView ?? undefined;
+    att.resolveTarget = config.rst?._colorView ?? undefined;
     task._renderPassDescriptor.colorAttachments = rt._colorView ? [att] : [];
 
-    const depthSrc = task._config.depth ?? rt;
+    const depthSrc = config.depth ?? rt;
     const depthView = depthSrc._depthView;
     let depthAttachment: GPURenderPassDepthStencilAttachment | undefined;
     if (depthView) {
         const dd = depthSrc._descriptor;
-        const loadOp = task._depthLoadOp ?? "clear";
+        const loadOp = (config.depth ? depthSrc._eager : config.depthClear === false) ? "load" : "clear";
         depthAttachment = {
             view: depthView,
             depthClearValue: dd._depthClearValue ?? 0,
