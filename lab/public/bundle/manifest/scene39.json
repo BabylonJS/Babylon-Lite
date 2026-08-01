@@ -21,7 +21,7 @@
     "scene39-ibl-fragment-CeRrvT96.js",
     "scene39-light-base-DJIAgtv-.js",
     "scene39-light-matrix-CBTBdGsb.js",
-    "scene39-pbr-renderable-Dihxogc9.js",
+    "scene39-pbr-renderable-C8zF1SFU.js",
     "scene39-pbr-template-ext-CiHpOV5G.js",
     "scene39-rgbd-decode-DqA5PDQg.js",
     "scene39-scene-uniforms-FTYH6Ct0.js",
@@ -31,5 +31,5 @@
     "scene39-visibility-D_WcxQMp.js",
     "scene39.js"
   ],
-  "rawBytes": 112673
+  "rawBytes": 112682
 }

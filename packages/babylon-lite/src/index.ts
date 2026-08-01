@@ -235,6 +235,8 @@ export type { DynamicTexture2D, DynamicTexture2DOptions, DynamicTextureUpdateOpt
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
+export { createTexture2DArrayFromKtx2 } from "./texture/ktx2-texture-array.js";
+export type { Ktx2TextureArrayOptions } from "./texture/ktx2-texture-array.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
@@ -278,6 +280,8 @@ export { NeutralToneMapping } from "./material/pbr/pbr-neutral-wgsl.js";
 export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
 export { enableMaterialStencil } from "./material/enable-material-stencil.js";
+export { getAlphaToCoverage, setAlphaToCoverage } from "./render/alpha-to-coverage.js";
+export type { AlphaToCoverageTarget } from "./render/alpha-to-coverage.js";
 export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────
@@ -570,7 +574,7 @@ export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/sh
 export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
 export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
-export { spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
+export { spriteBlendOpaque, spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
 export {
     createSprite2DLayer,
     addSprite2DIndex,
@@ -665,12 +669,11 @@ export {
 } from "./sprite/sprite-renderer.js";
 
 // ─── Node Particles (NPE) ────────────────────────────────────────────
-export type { Particle } from "./particle/particle.js";
+export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
+export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
+export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
 export type { ParticleSystem } from "./particle/particle-system.js";
 export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
-export type { NodeParticleSet } from "./particle/node/npe-build.js";
-export type { ParseNodeParticleOptions } from "./particle/node/node-particle.js";
-export { parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
 export { registerNodeParticleSet } from "./particle/particle-scene.js";
 export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";

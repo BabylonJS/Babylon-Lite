@@ -10,6 +10,7 @@ import type { ShaderAttributeName, ShaderMaterial, ShaderSamplerDecl, ShaderUnif
 import { _isShaderSystemUniform } from "./shader-material.js";
 import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
+import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
  *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
@@ -113,6 +114,11 @@ export function getOrCreateShaderPipeline(
     // only caller that passes non-default values, so no instancing logic runs
     // for non-instanced scenes.
     const stencil = material.stencil && _stencilResolver ? _stencilResolver(material.stencil) : null;
+    const alphaToCoverageResolver = _getAlphaToCoverageResolver();
+    const alphaToCoverage = sig._sampleCount > 1 && !!alphaToCoverageResolver?.(material);
+    if (alphaToCoverage) {
+        variantKey += ":a2c";
+    }
     const device = engine._device;
     const cache = (material as ShaderMaterialPipelineState)._shaderPipelineCache;
     const wantsFragment = !!sig._colorFormat || material.depthOnlyFragment;
@@ -170,7 +176,10 @@ export function getOrCreateShaderPipeline(
                       // correctly when drawn into a reverse-Z camera depth prepass that declares
                       // "greater-equal" — otherwise every fragment fails against the 0-cleared buffer.
                       depthCompare: sig._depthCompare ?? material.depthCompare,
-                      depthWriteEnabled: material.needAlphaBlending ? false : material.depthWrite,
+                      // material.depthWrite is authoritative: the material factory already defaults
+                      // blended materials to false, and an explicit depthWrite on a blended material
+                      // (a volume/veil publishing its fragment depth) must be honoured here.
+                      depthWriteEnabled: material.depthWrite,
                       ...(material.depthBias ? { depthBias: material.depthBias } : {}),
                       ...(material.depthBiasSlopeScale ? { depthBiasSlopeScale: material.depthBiasSlopeScale } : {}),
                       // Pre-baked stencil sub-fields, resolved through the opt-in `_stencilResolver` hook above;
@@ -181,7 +190,7 @@ export function getOrCreateShaderPipeline(
                   },
               }
             : {}),
-        multisample: { count: sig._sampleCount },
+        multisample: alphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
         primitive: { topology: "triangle-list", cullMode: material.backFaceCulling ? "back" : "none", frontFace: "ccw" },
     });
     bindings.pipelines.set(key, pipeline);

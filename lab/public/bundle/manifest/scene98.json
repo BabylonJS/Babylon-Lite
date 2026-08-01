@@ -3,10 +3,10 @@
   "gzipKB": 24.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene98-billboard-renderable-DsmmAwxr.js",
+    "scene98-billboard-renderable-DsAcOuFk.js",
     "scene98-scene-uniforms-FTYH6Ct0.js",
-    "scene98-standard-renderable-CWwRPX8d.js",
+    "scene98-standard-renderable-aPXwOKJJ.js",
     "scene98.js"
   ],
-  "rawBytes": 61727
+  "rawBytes": 61735
 }

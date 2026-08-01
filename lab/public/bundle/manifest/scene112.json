@@ -14,7 +14,7 @@
     "scene112-gltf-uri-6vf9MtoR.js",
     "scene112-ibl-fragment-CeRrvT96.js",
     "scene112-pbr-refraction-BMdiGdWC.js",
-    "scene112-pbr-renderable-DJG1x1oF.js",
+    "scene112-pbr-renderable-BmxbSfeI.js",
     "scene112-pbr-transmission-ext-DW1b_IKQ.js",
     "scene112-rgbd-decode-CFyrlDIY.js",
     "scene112-scene-uniforms-FTYH6Ct0.js",
@@ -22,5 +22,5 @@
     "scene112-wgsl-helpers-BgB2AJrF.js",
     "scene112.js"
   ],
-  "rawBytes": 122914
+  "rawBytes": 122916
 }
