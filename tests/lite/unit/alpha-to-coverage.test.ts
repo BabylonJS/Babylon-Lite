@@ -231,6 +231,8 @@ describe("WebGPU alpha-to-coverage", () => {
         pbrScene._groups.set(pbr._buildGroup, pbrMeshes);
         const pbrPipeline = (await buildPbrRenderables(pbrScene, pbrMeshes, undefined)).renderables[0]!.bind(engine, multisampledSignature).pipeline;
 
+        expect(alphaToCoverageEnabled(depthWritingShaderPipeline)).toBe(true);
+        expect(colorTarget(depthWritingShaderPipeline).blend).toBeDefined();
         expect(depthWriteEnabled(depthWritingShaderPipeline)).toBe(true);
         for (const pipeline of [readOnlyDepthShaderPipeline, standardPipeline, pbrPipeline]) {
             expect(alphaToCoverageEnabled(pipeline)).toBe(true);
