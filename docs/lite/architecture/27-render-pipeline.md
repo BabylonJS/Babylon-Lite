@@ -87,8 +87,10 @@ export interface RenderTaskConfig {
     clrColor?: GPUColorDict;
     clr?: boolean;
     depthClear?: boolean;
+    sharedRt?: boolean;
     cam?: Camera | null;
     cs?: boolean;
+    autoMirror?: boolean;
 }
 ```
 
@@ -99,10 +101,14 @@ Important fields:
 | `rt`         | Concrete render target. Swapchain tasks use `resolveToSwapchain: true`; RTT tasks allocate color/depth textures.                                         |
 | `clr`        | `true`/undefined clears color; `false` loads previous color content for overlays/multi-scene composition.                                                |
 | `depthClear` | Controls rt-owned depth independently. `true`/undefined clears depth; `false` loads existing depth. External `depth` targets keep their ownership policy. |
+| `sharedRt`   | Uses a target owned and recorded by an earlier task; this task does not build or dispose `rt`/`rst`.                                                      |
 | `cam`        | Per-pass camera override; defaults to `scene.camera`.                                                                                                    |
 | `cs`         | Use canvas dimensions for scene UBO aspect instead of RTT dimensions. Used when an RTT texture must be rendered with canvas aspect.                      |
+| `autoMirror` | Set `false` to keep an empty explicit render list instead of mirroring the scene renderables.                                                             |
 
 `RenderTask.addMesh(mesh, { material })` accepts either a source material or a `MaterialView`. The mesh is resolved at `record()` time through the source material family's `_buildGroup._rebuildSingle` closure, so explicit offscreen tasks can render the same mesh with pass-specific material features without mutating `mesh.material`.
+
+`RenderTask.enabled` defaults to `true`. Setting it to `false` skips the pass before updates, attachment loads, resolves, or draws.
 
 ## Runtime Flow
 

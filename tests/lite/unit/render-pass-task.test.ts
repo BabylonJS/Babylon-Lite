@@ -768,6 +768,54 @@ describe("RenderPassTask transparent sorting", () => {
         const depthAtt = descriptor!.depthStencilAttachment as GPURenderPassDepthStencilAttachment;
         expect(depthAtt.depthLoadOp).toBe("clear");
     });
+
+    it("keeps an explicit empty render list when autoMirror is false", () => {
+        const engine = makeMockEngine({ msaaSamples: 1 });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+        scene._renderables.push(makeDrawOrderRenderable("scene", {}, []));
+        const rt = createRenderTarget({ lbl: "explicit", format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
+        const task = createRenderTask({ name: "explicit", rt, autoMirror: false }, engine, scene);
+
+        task.record();
+
+        expect(task._autoFromScene).toBe(false);
+        expect(task._renderables).toHaveLength(0);
+    });
+
+    it("skips all pass work while disabled", () => {
+        const seenDescriptors: GPURenderPassDescriptor[] = [];
+        const engine = makeMockEngine({ msaaSamples: 1, onBeginPass: (descriptor) => seenDescriptors.push(descriptor) });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+        const rt = createRenderTarget({ lbl: "disabled", format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
+        const task = createRenderTask({ name: "disabled", rt }, engine, scene);
+        task.record();
+        task.enabled = false;
+
+        expect(task.execute?.()).toBe(0);
+        expect(seenDescriptors).toHaveLength(0);
+    });
+
+    it("does not rebuild or dispose a shared render target", () => {
+        const engine = makeMockEngine({ msaaSamples: 1 });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+        const rt = createRenderTarget({ lbl: "shared", format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: { width: 16, height: 16 } });
+        const owner = createRenderTask({ name: "owner", rt }, engine, scene);
+        owner.record();
+        const colorView = rt._colorView;
+        const depthView = rt._depthView;
+        const overlay = createRenderTask({ name: "overlay", rt, sharedRt: true, clr: false, depthClear: false, autoMirror: false }, engine, scene);
+
+        overlay.record();
+        expect(rt._colorView).toBe(colorView);
+        expect(rt._depthView).toBe(depthView);
+
+        overlay.dispose();
+        expect(rt._colorView).toBe(colorView);
+        expect(rt._depthView).toBe(depthView);
+    });
 });
 
 describe("RenderTask MSAA resolveTarget", () => {

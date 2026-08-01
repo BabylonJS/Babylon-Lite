@@ -175,7 +175,7 @@ addTaskAfter(sceneOrGraph, task, afterTask); // insert immediately after afterTa
 Rules:
 
 - Offscreen producer tasks must run before consumers that sample their output.
-- Overlay tasks should use `clr: false` and run after the task they overlay. Add `depthClear: false` when they must depth-test against rt-owned depth produced by the earlier task.
+- Overlay tasks should use `sharedRt: true`, `clr: false`, and run after the owning task. Add `depthClear: false` when they must depth-test against its rt-owned depth.
 - `addTaskBefore()` appends if the `beforeTask` is not found.
 - `addTaskAfter()` inserts immediately after `afterTask`, and appends if it is not found.
 - If tasks are added or inserted outside the startup/resize path, caller code must rebuild the graph before the next frame.
@@ -271,9 +271,11 @@ export interface RenderTaskConfig {
     clrColor?: GPUColorDict;
     clr?: boolean;
     depthClear?: boolean;
+    sharedRt?: boolean;
     cam?: Camera | null;
     cs?: boolean;
     transmission?: { copyCount?: number; generateMipmaps?: boolean };
+    autoMirror?: boolean;
 }
 ```
 
@@ -284,9 +286,11 @@ export interface RenderTaskConfig {
 | `clrColor`     | Clear color. The object may be mutated between frames.                                                                                                                                                                                                    |
 | `clr`          | Defaults to clear. Set `false` to use color `loadOp: "load"` for overlays or multi-scene composition.                                                                                                                                                     |
 | `depthClear`   | Controls rt-owned depth independently. Defaults to clear; set `false` to load existing depth. Ignored for external `depth` targets, which retain their eager/task-managed ownership policy.                                                               |
+| `sharedRt`     | Marks `rt`/`rst` as owned by another, earlier task. This task uses the live views without rebuilding or disposing them.                                                                                                                                  |
 | `cam`          | Optional per-pass camera. Defaults to `scene.camera`.                                                                                                                                                                                                     |
 | `cs`           | Canvas-sized aspect flag. When true, scene UBO aspect uses canvas dimensions instead of RTT dimensions. This is useful for RTTs that are later sampled as a material texture but should preserve canvas aspect.                                           |
 | `transmission` | Optional scene-texture transmission settings. `copyCount: 0` refreshes before every transmissive draw; otherwise the default is one refresh. `generateMipmaps` defaults to `true`; set `false` to allocate only mip 0 and skip refraction mip generation. |
+| `autoMirror`   | Set `false` for an explicit render list that remains empty until populated with `addMesh()`.                                                                                                                                                              |
 
 ### Image Processing Task
 
@@ -342,7 +346,9 @@ const swapRT = createRenderTarget({
 createRenderTask({ name: "scene", rt: swapRT, clrColor: scene.clearColor }, engine, scene);
 ```
 
-This task auto-mirrors `scene._renderables` when its own `_renderables` list is empty. If the scene renderable version changes because of mesh add/remove/material swap, the task re-syncs and rebinds its draw lists.
+This task auto-mirrors `scene._renderables` when its own `_renderables` list is empty unless `autoMirror: false`. If the scene renderable version changes because of mesh add/remove/material swap, an auto-mirroring task re-syncs and rebinds its draw lists.
+
+`RenderTask.enabled` defaults to `true`. A disabled task exits before per-pass updates and does not load attachments, resolve MSAA, or issue draws.
 
 ### Explicit Task Population
 

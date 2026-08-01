@@ -86,6 +86,11 @@ export interface RenderTaskConfig {
      *  depth-test against the scene already rendered there. Ignored when `depth` is supplied
      *  (an external depth is always loaded when eager, task-managed otherwise). */
     depthClear?: boolean;
+    /** This task draws into a target OWNED BY ANOTHER TASK: it neither builds nor disposes `rt`/
+     *  `rst` (the owner does; `record()` here only wires the pass to the owner's live views, so
+     *  the owning task must be recorded first — place this task after it). Pair with `clr: false`
+     *  and `depthClear: false` for a full overlay pass. Default false. */
+    sharedRt?: boolean;
     /** Per-pass camera override. Null/undefined uses `scene.camera`. */
     cam?: Camera | null;
     /** Use canvas dimensions, not render-target dimensions, for this pass's scene UBO aspect. */
@@ -96,6 +101,9 @@ export interface RenderTaskConfig {
      *  `grabDepth: true` also snapshots the task's DEPTH attachment at the same mid-pass grab (see
      *  `TransmissionOptions.grabDepth`). */
     transmission?: { copyCount?: number; generateMipmaps?: boolean; mipLevelCount?: number; grabDepth?: boolean };
+    /** Set false for an explicit render list that never auto-mirrors the scene's renderables,
+     *  even while the task list is empty. Undefined preserves the default auto-mirror behavior. */
+    autoMirror?: boolean;
     /** @internal Skip clustered-light preparation for passes that never run forward lighting. */
     _skipClusteredLights?: boolean;
 }
@@ -103,6 +111,12 @@ export interface RenderTaskConfig {
 /** A frame-graph task that records a single `RenderPass`, binds the scene's `RenderTarget`, and draws renderables into it. */
 export interface RenderTask extends Task {
     readonly name: string;
+    /** App-driven execute gate, default true. When false the pass is skipped entirely — no
+     *  attachment load, no MSAA resolve, no draws. The owner that KNOWS the task's content toggles
+     *  this (e.g. when its last mesh hides); the engine never scans bindings to decide. Disabling a
+     *  task that owns its target leaves the target's previous content stale — meant for overlay
+     *  tasks (`sharedRt`/`clr: false`), where skipping is a semantic no-op. */
+    enabled: boolean;
     /** Render tasks are scene-bound because they consume scene camera, lights, and renderables. */
     readonly scene: SceneContext;
     /** Live task configuration. Mutating `clr` or `clrColor` affects subsequent frames. */
@@ -209,6 +223,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
     const updateContext: MutableDrawUpdateContext = { targetWidth: 0, targetHeight: 0 };
     const task: RenderTask = {
         name: config.name,
+        enabled: true,
         _config: config,
         engine: engine,
         scene: sc,
@@ -255,16 +270,20 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
                 task._renderables.length = 0;
             }
             resolvePendingMeshes(task, sc);
-            task._autoFromScene = !task._renderables.length;
+            task._autoFromScene = config.autoMirror === false ? false : !task._renderables.length;
             if (task._autoFromScene) {
                 task._renderables.push(...sc._renderables);
             }
             // Read config.rt dynamically — transmission retargeting swaps it after
             // the task is created, and the engine scRT must never be rebuilt.
             const rt = config.rt;
-            buildRenderTarget(rt, engine);
-            if (config.rst && (rt._descriptor.samples ?? 1) > 1) {
-                buildRenderTarget(config.rst, engine);
+            // A shared target belongs to another task: (re)building it here would destroy the
+            // textures the owner's recorded pass still references.
+            if (!config.sharedRt) {
+                buildRenderTarget(rt, engine);
+                if (config.rst && (rt._descriptor.samples ?? 1) > 1) {
+                    buildRenderTarget(config.rst, engine);
+                }
             }
             // A non-eager external depth (e.g. the default single-sample scene task's
             // depth, whose colour rt is the depth-less scRT) is task-managed:
@@ -287,9 +306,12 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             task._passes.length = 0;
             // disposeRenderTarget no-ops on the engine scRT and on eager
             // GeometryRendererTask depth outputs (both `_eager`), and on an undefined
-            // rst/depth — so these can be passed unconditionally.
-            disposeRenderTarget(config.rt);
-            disposeRenderTarget(config.rst);
+            // rst/depth — so these can be passed unconditionally. A shared target remains
+            // owned by the task that created it.
+            if (!config.sharedRt) {
+                disposeRenderTarget(config.rt);
+                disposeRenderTarget(config.rst);
+            }
             disposeRenderTarget(config.depth);
             task._opaqueBindings.length = 0;
             task._directBindings.length = 0;
@@ -477,6 +499,9 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
 }
 
 function executePass(task: RenderTask, eng: EngineContext, targetSignature: RenderTargetSignature, context: DrawUpdateContext): number {
+    if (!task.enabled) {
+        return 0;
+    }
     const sc = task.scene;
     const sampleCount = targetSignature._sampleCount;
     prepareRenderTaskPass(task, eng, targetSignature, context);

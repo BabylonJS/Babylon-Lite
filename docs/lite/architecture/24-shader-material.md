@@ -38,6 +38,8 @@ export interface ShaderMaterialOptions {
     /** Bind/inject the mesh's optional thin-instance RGBA stream for this material. Default true. */
     readonly useThinInstanceColors?: boolean;
     readonly needAlphaBlending?: boolean;
+    readonly blendMode?: "alpha" | "additive";
+    readonly blend?: GPUBlendState;
     readonly needAlphaTesting?: boolean;
     readonly backFaceCulling?: boolean;
     readonly depthWrite?: boolean;
@@ -66,6 +68,8 @@ export interface ShaderMaterial extends Material {
     readonly samplerDecls: readonly ShaderSamplerDecl[];
     readonly defines: readonly ShaderDefine[];
     readonly needAlphaBlending: boolean;
+    readonly blendMode: "alpha" | "additive";
+    readonly blend?: GPUBlendState;
     readonly needAlphaTesting: boolean;
     readonly backFaceCulling: boolean;
     readonly depthWrite: boolean;
@@ -78,6 +82,8 @@ export interface ShaderMaterial extends Material {
 ```
 
 `_uboVersion` from the base `Material` mirrors `_uniformVersion` for compatibility with existing dirty tracking. `_resourceVersion` is separate because texture/sampler changes require bind group rebuilds, not just UBO writes.
+
+`blend` is an explicit color-target blend-state override. When present, it replaces the state derived from `needAlphaBlending` and `blendMode`, and participates in the cross-material pipeline-cache key.
 
 ### Attributes
 

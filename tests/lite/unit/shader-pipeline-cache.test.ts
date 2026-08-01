@@ -27,12 +27,13 @@ function makeEngine() {
     };
 }
 
-function makeMaterial(fragment = "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }") {
+function makeMaterial(fragment = "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }", blend?: GPUBlendState) {
     return createShaderMaterial({
         vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
         fragmentSource: fragment,
         attributes: ["position"],
         uniforms: ["world", { name: "tint", type: "vec3<f32>" }],
+        ...(blend ? { blend } : {}),
     });
 }
 
@@ -105,5 +106,33 @@ describe("ShaderMaterial pipeline cache", () => {
 
         expect(after).not.toBe(before);
         expect((second as unknown as { _shaderPipelineCache: object })._shaderPipelineCache).toBe(after);
+    });
+
+    it("uses explicit blend overrides and keeps different states in separate pipelines", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        const { engine, createRenderPipeline } = makeEngine();
+        const colorBlend = {
+            color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+            alpha: { srcFactor: "zero", dstFactor: "zero", operation: "add" },
+        } satisfies GPUBlendState;
+        const additiveBlend = {
+            color: { srcFactor: "one", dstFactor: "one", operation: "add" },
+            alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
+        } satisfies GPUBlendState;
+        const first = makeMaterial(undefined, colorBlend);
+        const second = makeMaterial(undefined, additiveBlend);
+        enableShaderPipelineCache(engine, [{ material: first }, { material: second }]);
+
+        getOrCreateShaderPipeline(engine, signature, first, getOrCreateShaderPipelineBindings(engine, first));
+        getOrCreateShaderPipeline(engine, signature, second, getOrCreateShaderPipelineBindings(engine, second));
+
+        expect(createRenderPipeline).toHaveBeenCalledTimes(2);
+        const firstDescriptor = createRenderPipeline.mock.calls[0]![0];
+        const secondDescriptor = createRenderPipeline.mock.calls[1]![0];
+        const firstTarget = (firstDescriptor.fragment!.targets as GPUColorTargetState[])[0];
+        const secondTarget = (secondDescriptor.fragment!.targets as GPUColorTargetState[])[0];
+        expect(firstTarget?.blend).toEqual(colorBlend);
+        expect(secondTarget?.blend).toEqual(additiveBlend);
     });
 });
