@@ -1,5 +1,5 @@
 {
-  "rawKB": 127,
+  "rawKB": 127.0,
   "gzipKB": 53.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -25,5 +25,5 @@
     "scene115-standard-renderable-BXC04JFy.js",
     "scene115.js"
   ],
-  "rawBytes": 130064
+  "rawBytes": 130050
 }

@@ -1,5 +1,5 @@
 {
-  "rawKB": 110,
+  "rawKB": 110.0,
   "gzipKB": 47,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -31,5 +31,5 @@
     "scene39-visibility-D_WcxQMp.js",
     "scene39.js"
   ],
-  "rawBytes": 112682
+  "rawBytes": 112668
 }

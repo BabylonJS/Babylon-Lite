@@ -1,5 +1,5 @@
 {
-  "rawKB": 98.3,
+  "rawKB": 98.2,
   "gzipKB": 41,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -19,5 +19,5 @@
     "scene34-visibility-CRkrFthj.js",
     "scene34.js"
   ],
-  "rawBytes": 100614
+  "rawBytes": 100600
 }
