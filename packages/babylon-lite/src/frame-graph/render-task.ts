@@ -116,14 +116,14 @@ export interface RenderTask extends Task {
      *  this (e.g. when its last mesh hides); the engine never scans bindings to decide. Disabling a
      *  task that owns its target leaves the target's previous content stale — meant for overlay
      *  tasks (`sharedRt`/`clr: false`), where skipping is a semantic no-op. */
-    enabled: boolean;
+    enabled?: boolean;
     /** Render tasks are scene-bound because they consume scene camera, lights, and renderables. */
     readonly scene: SceneContext;
     /** Live task configuration. Mutating `clr` or `clrColor` affects subsequent frames. */
     /** @internal */
     readonly _config: RenderTaskConfig;
     /** @internal */
-    _af: boolean;
+    _af?: boolean;
 
     /** Source-of-truth renderables. Bucketed binding lists below are derived from
      *  this list at `record()` (or re-sync when auto-filled and `_renderableVersion` changes). */
@@ -221,14 +221,14 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
     });
     const colorAttachment = { loadOp: "clear", storeOp: "store" } as GPURenderPassColorAttachment;
     const updateContext: MutableDrawUpdateContext = { targetWidth: 0, targetHeight: 0 };
+    const autoMirror = config.autoMirror !== false;
+    const ownsRt = !config.sharedRt;
     const task: RenderTask = {
         name: config.name,
-        enabled: true,
         _config: config,
         engine: engine,
         scene: sc,
         _passes: [],
-        _af: false,
         _renderables: [],
         _opaqueBindings: [],
         _directBindings: [],
@@ -270,7 +270,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
                 task._renderables.length = 0;
             }
             resolvePendingMeshes(task, sc);
-            task._af = config.autoMirror !== false && !task._renderables.length;
+            task._af = autoMirror && !task._renderables.length;
             if (task._af) {
                 task._renderables.push(...sc._renderables);
             }
@@ -279,7 +279,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             const rt = config.rt;
             // A shared target belongs to another task: (re)building it here would destroy the
             // textures the owner's recorded pass still references.
-            if (!config.sharedRt) {
+            if (ownsRt) {
                 buildRenderTarget(rt, engine);
                 if (config.rst && (rt._descriptor.samples ?? 1) > 1) {
                     buildRenderTarget(config.rst, engine);
@@ -303,21 +303,22 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             return executePass(task, engine, targetSignature, updateContext);
         },
         dispose(): void {
-            task._passes.length = 0;
+            task._passes.length =
+                task._opaqueBindings.length =
+                task._directBindings.length =
+                task._transparentBindings.length =
+                task._renderables.length =
+                task._opaqueBundles.length =
+                    0;
             // disposeRenderTarget no-ops on the engine scRT and on eager
             // GeometryRendererTask depth outputs (both `_eager`), and on an undefined
             // rst/depth — so these can be passed unconditionally. A shared target remains
             // owned by the task that created it.
-            if (!config.sharedRt) {
+            if (ownsRt) {
                 disposeRenderTarget(config.rt);
                 disposeRenderTarget(config.rst);
             }
             disposeRenderTarget(config.depth);
-            task._opaqueBindings.length = 0;
-            task._directBindings.length = 0;
-            task._transparentBindings.length = 0;
-            task._renderables.length = 0;
-            task._opaqueBundles.length = 0;
             task._sceneUBO.destroy();
             for (const batch of task._updateBatches) {
                 batch.destroy();
@@ -402,9 +403,7 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
     const opaque = task._opaqueBindings;
     const direct = task._directBindings;
     const transparent = task._transparentBindings;
-    opaque.length = 0;
-    direct.length = 0;
-    transparent.length = 0;
+    opaque.length = direct.length = transparent.length = 0;
     for (const r of task._renderables) {
         const binding = r.bind(eng, targetSignature);
         for (const batch of binding._updateBatches ?? []) {
@@ -499,7 +498,7 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
 }
 
 function executePass(task: RenderTask, eng: EngineContext, targetSignature: RenderTargetSignature, context: DrawUpdateContext): number {
-    if (!task.enabled) {
+    if (task.enabled === false) {
         return 0;
     }
     const sc = task.scene;

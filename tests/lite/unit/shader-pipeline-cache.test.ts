@@ -122,6 +122,8 @@ describe("ShaderMaterial pipeline cache", () => {
         } satisfies GPUBlendState;
         const first = makeMaterial(undefined, colorBlend);
         const second = makeMaterial(undefined, additiveBlend);
+        expect(first.needAlphaBlending).toBe(true);
+        expect(first.depthWrite).toBe(false);
         enableShaderPipelineCache(engine, [{ material: first }, { material: second }]);
 
         getOrCreateShaderPipeline(engine, signature, first, getOrCreateShaderPipelineBindings(engine, first));

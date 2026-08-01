@@ -299,7 +299,8 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
     }
     defines.sort((a, b) => a.name.localeCompare(b.name));
 
-    if (options.transmissive && !(options.needAlphaBlending ?? false)) {
+    const needAlphaBlending = options.needAlphaBlending ?? !!options.blend;
+    if (options.transmissive && !needAlphaBlending) {
         throw new Error("ShaderMaterial: `transmissive` requires `needAlphaBlending` (the surface composites over the grabbed opaque scene color).");
     }
 
@@ -313,7 +314,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         storageBufferDecls,
         defines,
         _tic: options.useThinInstanceColors,
-        needAlphaBlending: options.needAlphaBlending ?? false,
+        needAlphaBlending,
         blendMode: options.blendMode ?? "alpha",
         ...(options.blend ? { blend: options.blend } : {}),
         transmissive: options.transmissive ?? false,
@@ -321,7 +322,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         backFaceCulling: options.backFaceCulling ?? true,
         // Blended materials default to depth-read-only; an explicit option always wins (see the
         // ShaderMaterialOptions doc). Opaque materials keep the depth-writing default.
-        depthWrite: options.depthWrite ?? !(options.needAlphaBlending ?? false),
+        depthWrite: options.depthWrite ?? !needAlphaBlending,
         depthCompare: options.depthCompare ?? "greater-equal",
         depthOnlyFragment: options.depthOnlyFragment ?? false,
         depthBias: options.depthBias ?? 0,
