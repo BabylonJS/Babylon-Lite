@@ -1,10 +1,10 @@
 {
-  "rawKB": 57.9,
+  "rawKB": 57.8,
   "gzipKB": 22.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene156-standard-renderable-BEaiaAAk.js",
     "scene156.js"
   ],
-  "rawBytes": 59254
+  "rawBytes": 59236
 }

@@ -1,5 +1,5 @@
 {
-  "rawKB": 49,
+  "rawKB": 49.0,
   "gzipKB": 20.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,5 +9,5 @@
     "scene201-standard-renderable-BNIyIXML.js",
     "scene201.js"
   ],
-  "rawBytes": 50208
+  "rawBytes": 50194
 }
