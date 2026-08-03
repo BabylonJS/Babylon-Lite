@@ -1,5 +1,5 @@
 {
-  "rawKB": 55,
+  "rawKB": 54.9,
   "gzipKB": 22.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,5 +10,5 @@
     "scene209-standard-renderable-D5SRe5mq.js",
     "scene209.js"
   ],
-  "rawBytes": 56286
+  "rawBytes": 56263
 }
