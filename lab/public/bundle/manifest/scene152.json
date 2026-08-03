@@ -1,5 +1,5 @@
 {
-  "rawKB": 93.0,
+  "rawKB": 93,
   "gzipKB": 39.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -13,9 +13,9 @@
     "scene152-gltf-feature-skeleton-BGDYR5rN.js",
     "scene152-gltf-glb-parser-BeX6MjHH.js",
     "scene152-gltf-sampler-desc-55i7wkXO.js",
-    "scene152-pbr-renderable-DbuqwhwA.js",
+    "scene152-pbr-renderable-aFhPJ8Xk.js",
     "scene152-singlelight-hemispheric-wgsl-kWPig5Fa.js",
-    "scene152-skeleton-fragment-CCxBuZto.js",
+    "scene152-skeleton-fragment-CpAHEz2u.js",
     "scene152.js"
   ],
   "rawBytes": 95255

@@ -1,5 +1,5 @@
 {
-  "rawKB": 87.0,
+  "rawKB": 87,
   "gzipKB": 35.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene28-gltf-feature-registry-Bqjc4FAJ.js",
     "scene28-gltf-json-asset-B8WAjZ11.js",
     "scene28-ibl-fragment-CeRrvT96.js",
-    "scene28-pbr-renderable-B8EVZhmv.js",
+    "scene28-pbr-renderable-BGUjb1sn.js",
     "scene28-rgbd-decode-DNHi-djf.js",
     "scene28-scene-uniforms-FTYH6Ct0.js",
     "scene28.js"
