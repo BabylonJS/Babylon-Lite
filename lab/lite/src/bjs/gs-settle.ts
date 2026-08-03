@@ -74,13 +74,31 @@ export async function waitForGsSettled(scene: Scene, gs: AbstractMesh, opts: { s
     const start = performance.now();
     let stable = 0;
     while (stable < stableTarget) {
-        // Advance exactly one rendered frame, then sample. The worker's onmessage
-        // handler runs on the task queue between frames, so real rendered frames
-        // are what let an in-flight sort actually land.
-        await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
-        stable = isSettled(internals) ? stable + 1 : 0;
-        if (performance.now() - start > timeoutMs) {
+        const remaining = timeoutMs - (performance.now() - start);
+        if (remaining <= 0) {
             break;
         }
+        // Advance exactly one rendered frame, then sample. The worker's onmessage
+        // handler runs on the task queue between frames, so real rendered frames
+        // are what let an in-flight sort actually land. Race the frame against a
+        // wall-clock timer for the remaining budget: if the render loop never
+        // starts or stalls, onAfterRenderObservable would never fire, so this
+        // keeps the "bounded by timeoutMs" guarantee real (and prunes the
+        // observer on timeout so nothing leaks).
+        const framed = await new Promise<boolean>((resolve) => {
+            let timer: ReturnType<typeof setTimeout>;
+            const observer = scene.onAfterRenderObservable.addOnce(() => {
+                clearTimeout(timer);
+                resolve(true);
+            });
+            timer = setTimeout(() => {
+                scene.onAfterRenderObservable.remove(observer);
+                resolve(false);
+            }, remaining);
+        });
+        if (!framed) {
+            break;
+        }
+        stable = isSettled(internals) ? stable + 1 : 0;
     }
 }
