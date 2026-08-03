@@ -1,6 +1,6 @@
 {
-  "rawKB": 97.3,
-  "gzipKB": 40.2,
+  "rawKB": 97.7,
+  "gzipKB": 40.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene37-generate-mipmaps-DaBvcePx.js",
@@ -8,19 +8,19 @@
     "scene37-gltf-ext-dielectric-C6hvXXiF.js",
     "scene37-gltf-ext-sheen-Dv23b_3T.js",
     "scene37-gltf-ext-uv-transform-hVTzf5Q9.js",
-    "scene37-gltf-feature-registry-DGZl_rEa.js",
+    "scene37-gltf-feature-registry-eLjYUkbN.js",
     "scene37-gltf-glb-parser-BvLkUAFg.js",
     "scene37-gltf-pbr-builder-ext-DBkuxTnO.js",
     "scene37-ibl-fragment-CeRrvT96.js",
-    "scene37-pbr-renderable-BDh6ZvQ7.js",
+    "scene37-pbr-renderable-eDg65V0X.js",
     "scene37-pbr-template-ext-CiHpOV5G.js",
-    "scene37-reflectance-fragment-CbFq_491.js",
+    "scene37-reflectance-fragment-Djqutjxk.js",
     "scene37-rgbd-decode-Ow3m-YWC.js",
     "scene37-scene-uniforms-FTYH6Ct0.js",
-    "scene37-sheen-fragment-budnzye_.js",
+    "scene37-sheen-fragment-Dvsa7H9w.js",
     "scene37-texture-2d-DQo3n8D6.js",
     "scene37-uv-transform-fragment-B8ijWmAK.js",
     "scene37.js"
   ],
-  "rawBytes": 99670
+  "rawBytes": 100003
 }
