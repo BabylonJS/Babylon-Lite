@@ -180,6 +180,19 @@ describe("updateTextData replaceRun", () => {
         }
     });
 
+    // The free list is shared by every path that allocates, so an added run reuses a removed
+    // run's slots through the same LIFO pop that reverses a resize.
+    it("keeps an added run's glyphs in ascending slot order when it reuses freed slots", () => {
+        const data = createTextData(makeStorage(), [run("f", 0), run("f", 10), run("f", 20)]);
+        // Frees slots 2 and 3 onto the group's free list, in that order.
+        updateTextData(data, { update: "removeRun", run: 1 });
+        const added = run("f", 50);
+
+        updateTextData(data, { update: "addRun", run: added });
+
+        expect(data._runRecords.get(added)!.slots).toEqual([2, 3]);
+    });
+
     it("routes an empty replacement through the remove path so its slots are reclaimed", () => {
         const data = createTextData(makeStorage(), [run("f", 0), run("g", 10, [1])]);
         const empty: GlyphRun = { curveSet: "g", glyphs: [], pixelsPerFontUnit: 1 };

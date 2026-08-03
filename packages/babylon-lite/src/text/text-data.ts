@@ -314,46 +314,56 @@ function growGroup(data: TextData, group: TextDataDrawGroup, extraSlots: number)
 }
 
 /** Allocate `count` slots for `group`. Reuses free slots first, then extends. Returns
- *  the array of absolute slot indices in the order they were allocated. */
+ *  the array of absolute slot indices in ascending order. */
 function allocateSlots(data: TextData, group: TextDataDrawGroup, count: number): number[] {
     // `.fill` is what keeps this PACKED_SMI_ELEMENTS in V8. A bare `new Array(count)` is
     // holey, and `writeRunToSlots` hands this exact array straight to a run record, so the
     // holeyness would leak into `shiftSlotsAtOrAfter`'s hot per-slot loop and halve its
     // throughput.
     const out: number[] = new Array(count).fill(-1);
-    let extendNeeded = 0;
+    // Instances are drawn in slot order, so a run's glyphs have to land on ascending slots or
+    // overlapping ones composite in the wrong order. `popFreeSlot` hands reclaimed slots back
+    // LIFO, so a block that was just freed comes back reversed. Track that while filling instead
+    // of rescanning afterwards, and sort only when it actually happened: `sort` runs a comparator
+    // call per element even on already-ordered input, which is pure overhead on the common path.
+    let sorted = true;
+    let prevSlot = -1;
+    let reused = count;
     for (let i = 0; i < count; i++) {
-        const reused = popFreeSlot(group);
-        if (reused !== -1) {
-            out[i] = reused;
-        } else {
-            out[i] = -1;
-            extendNeeded++;
+        const slot = popFreeSlot(group);
+        // Nothing refills the free list mid-loop, so the rest of `out` comes from the extension.
+        if (slot === -1) {
+            reused = i;
+            break;
+        }
+        out[i] = slot;
+        sorted &&= slot >= prevSlot;
+        prevSlot = slot;
+    }
+    if (reused < count) {
+        const firstNewSlot = growGroup(data, group, count - reused);
+        // Extension slots are appended past the group's tail and ascend from there, so only the
+        // seam against the reused prefix can be out of order.
+        sorted &&= firstNewSlot >= prevSlot;
+        for (let i = reused, n = firstNewSlot; i < count; i++) {
+            out[i] = n++;
         }
     }
-    if (extendNeeded > 0) {
-        const firstNewSlot = growGroup(data, group, extendNeeded);
-        let n = firstNewSlot;
-        for (let i = 0; i < count; i++) {
-            if (out[i] === -1) {
-                out[i] = n++;
-            }
-        }
+    if (!sorted) {
+        out.sort(ascendingSlot);
     }
     return out;
 }
 
-/** Ascending numeric comparator for slot indices. */
 function ascendingSlot(a: number, b: number): number {
     return a - b;
 }
 
-/** Release `slots[from…]` back to `group.freeSlots`, marking each dead in the buffer. */
-function freeSlots(data: TextData, group: TextDataDrawGroup, slots: number[], from = 0): void {
+/** Release `slots` back to `group.freeSlots`, marking each dead in the buffer. */
+function freeSlots(data: TextData, group: TextDataDrawGroup, slots: number[]): void {
     let minSlot = Number.POSITIVE_INFINITY;
     let maxSlot = -1;
-    for (let i = from; i < slots.length; i++) {
-        const s = slots[i]!;
+    for (const s of slots) {
         markSlotDead(data._instances, s);
         group.freeSlots.push(s);
         if (s < minSlot) {
@@ -639,33 +649,13 @@ function applyReplaceRun(data: TextData, prevRef: GlyphRun | number, newRun: Gly
     // the remove path knows how to retire a group.
     if (newRun.curveSet === group.curveSetId && newRun.glyphs.length > 0) {
         const prevSlotCount = rec.slots.length;
-        const slots = rec.slots;
+        let slots = rec.slots;
         if (newRun.glyphs.length !== prevSlotCount) {
-            // Instances draw in slot order, so a run's glyphs have to sit on ascending slots or
-            // overlapping glyphs composite in the wrong order. Resize this run's own slot list in
-            // place: handing the whole block back to the group's free list and re-allocating would
-            // pop it back LIFO and reverse the run.
-            if (newRun.glyphs.length < prevSlotCount) {
-                freeSlots(data, group, slots, newRun.glyphs.length);
-                slots.length = newRun.glyphs.length;
-            } else {
-                const extra = allocateSlots(data, group, newRun.glyphs.length - prevSlotCount);
-                // Slots appended past the group's tail already sort after the ones this run holds;
-                // only slots reclaimed from the free list can land below them.
-                let sorted = true;
-                let prevSlot = prevSlotCount > 0 ? slots[prevSlotCount - 1]! : -1;
-                for (let i = 0; i < extra.length; i++) {
-                    const s = extra[i]!;
-                    if (s < prevSlot) {
-                        sorted = false;
-                    }
-                    prevSlot = s;
-                    slots.push(s);
-                }
-                if (!sorted) {
-                    slots.sort(ascendingSlot);
-                }
-            }
+            // Glyph count changed, so this run hands its slots back to the group's free list and
+            // takes a fresh block. It reclaims most of them immediately — the allocator pops the
+            // slots it just freed — so the write stays within roughly the same buffer range.
+            freeSlots(data, group, slots);
+            slots = allocateSlots(data, group, newRun.glyphs.length);
         }
         const live = writeRunToSlots(data, group, newRun, slots);
         // Absorbs both a changed glyph count and any glyph that missed the atlas.
