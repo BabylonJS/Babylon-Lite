@@ -1,25 +1,26 @@
 {
-  "rawKB": 94.9,
-  "gzipKB": 40.3,
+  "rawKB": 96,
+  "gzipKB": 40.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene164-create-morph-targets-HFpNUWQ3.js",
     "scene164-create-skeleton-DHraayy5.js",
+    "scene164-device-lost-recovery-run-DUd09r05.js",
     "scene164-generate-mipmaps-DjhI_uNn.js",
-    "scene164-gltf-animation-BCL-Vxan.js",
+    "scene164-gltf-animation-CH504R5I.js",
     "scene164-gltf-color-normalize-4-WGzPL2.js",
-    "scene164-gltf-feature-animations-CezTXKjn.js",
+    "scene164-gltf-feature-animations-v14VwhGv.js",
     "scene164-gltf-feature-morph-7lwtFhBO.js",
-    "scene164-gltf-feature-registry-4KG20V18.js",
-    "scene164-gltf-feature-skeleton-Baf9dxYD.js",
+    "scene164-gltf-feature-registry-DdHQPqGd.js",
+    "scene164-gltf-feature-skeleton-TShJElQ7.js",
     "scene164-gltf-json-asset-CJmOxkje.js",
-    "scene164-morph-fragment-CrrjXh5R.js",
-    "scene164-pbr-renderable-CIRvnoZh.js",
+    "scene164-morph-fragment-B4EK8dnx.js",
+    "scene164-pbr-renderable-B5HZ8Fh1.js",
     "scene164-pbr-template-ext-CiHpOV5G.js",
     "scene164-samplers-DuUvRDBP.js",
     "scene164-singlelight-hemispheric-wgsl-B3eEzZwe.js",
-    "scene164-skeleton-fragment-BUK5RiWS.js",
+    "scene164-skeleton-fragment-BY6suSQp.js",
     "scene164.js"
   ],
-  "rawBytes": 97127
+  "rawBytes": 98274
 }
