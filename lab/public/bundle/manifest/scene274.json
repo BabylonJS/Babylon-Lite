@@ -1,7 +1,7 @@
 {
   "rawKB": 43.4,
   "rawBytes": 44487,
-  "gzipKB": 17.5,
+  "gzipKB": 17.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene274-shader-pipeline-cache-DX3HJCz_.js",
