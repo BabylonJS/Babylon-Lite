@@ -1,28 +1,27 @@
 {
-  "rawKB": 106.1,
-  "gzipKB": 45.2,
+  "rawKB": 105.7,
+  "gzipKB": 45,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene7-background-ground-CmUWWylC.js",
-    "scene7-background-solid-skybox-gseoj8nJ.js",
-    "scene7-bgl-helpers-Bob3fM5m.js",
+    "scene7-background-solid-skybox-BiN_DcGd.js",
     "scene7-create-skeleton-BmmRSwUy.js",
     "scene7-generate-mipmaps-DeX_eOlr.js",
-    "scene7-gltf-animation-D7S9-hAz.js",
-    "scene7-gltf-feature-animations-CnMD0fBm.js",
+    "scene7-gltf-animation-CBEXoXjt.js",
+    "scene7-gltf-feature-animations-DBjQPXJn.js",
     "scene7-gltf-feature-extras-VHPteGay.js",
-    "scene7-gltf-feature-registry-BoB6R61y.js",
-    "scene7-gltf-feature-skeleton-Cxjljk2d.js",
+    "scene7-gltf-feature-registry-DscNVoLY.js",
+    "scene7-gltf-feature-skeleton-C4mxkxAa.js",
     "scene7-gltf-json-asset-DboJkkGT.js",
     "scene7-ibl-fragment-CeRrvT96.js",
-    "scene7-pbr-renderable-BjO12_90.js",
+    "scene7-pbr-renderable-DeBNaQgj.js",
     "scene7-rgbd-decode-B_BnEftW.js",
     "scene7-scene-uniforms-FTYH6Ct0.js",
     "scene7-singlelight-hemispheric-wgsl-DoH1sdOa.js",
-    "scene7-skeleton-fragment-BdsN8SsM.js",
+    "scene7-skeleton-fragment-C6VwNiEg.js",
     "scene7-skybox.vertex-Ban7q6IM-D1KSfOUq.js",
     "scene7-wgsl-helpers-BgB2AJrF.js",
     "scene7.js"
   ],
-  "rawBytes": 108624
+  "rawBytes": 108195
 }
