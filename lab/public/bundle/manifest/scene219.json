@@ -1,5 +1,6 @@
 {
   "rawKB": 97.7,
+  "rawBytes": 100023,
   "gzipKB": 40.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -18,6 +19,5 @@
     "scene219-thin-instance-fragment-CBn2miAC.js",
     "scene219-thin-instance-gpu-CCiryIV4.js",
     "scene219.js"
-  ],
-  "rawBytes": 100003
+  ]
 }

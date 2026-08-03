@@ -1,6 +1,6 @@
 {
-  "rawKB": 80.2,
-  "gzipKB": 33.3,
+  "rawKB": 80.3,
+  "gzipKB": 33.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene32-generate-mipmaps-Cr6tLrFA.js",
@@ -14,5 +14,5 @@
     "scene32-unlit-fragment-DWtvt7yQ.js",
     "scene32.js"
   ],
-  "rawBytes": 82153
+  "rawBytes": 82178
 }

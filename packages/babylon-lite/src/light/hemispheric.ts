@@ -10,7 +10,7 @@ import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 export interface HemisphericLight extends LightBase {
     readonly lightType: "hemispheric";
-    direction: ObservableVec3;
+    readonly direction: ObservableVec3;
     intensity: number;
     diffuseColor: [number, number, number];
     specularColor: [number, number, number];

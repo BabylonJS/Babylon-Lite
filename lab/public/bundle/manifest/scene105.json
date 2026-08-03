@@ -1,5 +1,5 @@
 {
-  "rawKB": 102,
+  "rawKB": 101.9,
   "gzipKB": 39.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -11,5 +11,5 @@
     "scene105-std-lightmap-fragment-CAyjqaXg.js",
     "scene105.js"
   ],
-  "rawBytes": 104417
+  "rawBytes": 104354
 }

@@ -1,5 +1,5 @@
 {
-  "rawKB": 101.3,
+  "rawKB": 101.2,
   "gzipKB": 39.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -11,5 +11,5 @@
     "scene104-std-lightmap-fragment-BcOGvaSO.js",
     "scene104.js"
   ],
-  "rawBytes": 103720
+  "rawBytes": 103669
 }

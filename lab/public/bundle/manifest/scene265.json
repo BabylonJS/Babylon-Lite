@@ -1,6 +1,6 @@
 {
   "rawKB": 80.4,
-  "gzipKB": 33.8,
+  "gzipKB": 33.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene265-generate-mipmaps-JrMA50q2.js",
@@ -14,5 +14,5 @@
     "scene265-pbr-renderable-4zo7fs0w.js",
     "scene265.js"
   ],
-  "rawBytes": 82286
+  "rawBytes": 82306
 }

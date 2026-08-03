@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
-import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
+import type { MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { updateMeshGeometry } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 import { setThinInstanceColor, setThinInstanceDrawCount, setThinInstanceMatrix, type ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
@@ -58,7 +58,7 @@ describe("shadow caster dirty tracking", () => {
             hasTangent: false,
             hasColor: false,
         } satisfies MeshGPU;
-        const mesh = {
+        const mesh = initMeshTransform({
             name: "caster",
             children: [],
             _gpu: gpu,
@@ -66,8 +66,7 @@ describe("shadow caster dirty tracking", () => {
             _cpuNormals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
             _cpuIndices: new Uint32Array([0, 1, 2]),
             thinInstances: makeThinInstances(),
-        } as unknown as Mesh;
-        initMeshTransform(mesh);
+        });
         const execute = vi.fn(() => 1);
         const task = { record: vi.fn(), execute, dispose: vi.fn() } as unknown as PcfTaskState["_task"];
         const camera = {
@@ -112,15 +111,14 @@ describe("shadow caster dirty tracking", () => {
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(1);
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(0);
 
-        const unrelated = {
+        const unrelated = initMeshTransform({
             name: "unrelated",
             children: [],
             _gpu: { ...gpu },
             _cpuPositions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
             _cpuNormals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
             _cpuIndices: new Uint32Array([0, 1, 2]),
-        } as unknown as Mesh;
-        initMeshTransform(unrelated);
+        });
         updateMeshGeometry(engine, unrelated, new Float32Array([0, 0, 0, 2, 0, 0, 0, 2, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 2, 1]));
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(0);
 

@@ -1,5 +1,5 @@
 {
-  "rawKB": 111.8,
+  "rawKB": 111.9,
   "gzipKB": 45.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -22,5 +22,5 @@
     "scene144-texture-2d-DQo3n8D6.js",
     "scene144.js"
   ],
-  "rawBytes": 114525
+  "rawBytes": 114545
 }

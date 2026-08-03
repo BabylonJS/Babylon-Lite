@@ -1,6 +1,6 @@
 {
-  "rawKB": 94.8,
-  "gzipKB": 40.2,
+  "rawKB": 94.9,
+  "gzipKB": 40.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene164-create-morph-targets-HFpNUWQ3.js",
@@ -21,5 +21,5 @@
     "scene164-skeleton-fragment-BUK5RiWS.js",
     "scene164.js"
   ],
-  "rawBytes": 97107
+  "rawBytes": 97127
 }
