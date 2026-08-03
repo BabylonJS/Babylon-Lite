@@ -69,6 +69,11 @@ interface HtmlInCanvasHost {
     removeEventListener(type: "paint", listener: (ev: Event) => void): void;
 }
 
+interface HtmlInCanvasHostRef {
+    count: number;
+    previousLayoutSubtree: HtmlInCanvasHost["layoutSubtree"] | undefined;
+}
+
 /** A `paint` event carrying the set of elements that changed since the last paint. @internal */
 interface PaintEventLike extends Event {
     readonly changedElements?: ReadonlyArray<Element>;
@@ -102,6 +107,8 @@ export interface HtmlTexture2D extends DynamicTexture2D {
     _useSvgFallback: boolean;
     /** @internal One-shot: force the next paint to upload regardless of the change filter. */
     _forceNext: boolean;
+    /** @internal True while this texture has hosted its element under the canvas. */
+    _hosted: boolean;
     /** @internal Set once {@link disposeHtmlTexture} has run. */
     _disposed: boolean;
     /** @internal Staging texture for the native V-flip blit, or null until first used. */
@@ -133,10 +140,11 @@ export function isHtmlInCanvasSupported(engine: EngineContext): boolean {
 }
 
 /**
- * Create an HTML texture from a live `element`. The element is re-parented under
- * the rendering canvas (restored on dispose), the texture is allocated blank, and
- * — on the native path — a `paint` listener is attached so the texture tracks the
- * element. Reads as transparent black until the first paint uploads.
+ * Create an HTML texture from a live `element`. When an update path exists, the
+ * element is re-parented under the rendering canvas (restored on dispose), the
+ * texture is allocated blank, and — on the native path — a `paint` listener is
+ * attached so the texture tracks the element. Reads as transparent black until
+ * the first paint uploads.
  *
  * @param engine - Engine context (must render into a DOM canvas, not an `OffscreenCanvas`).
  * @param element - The DOM element to rasterise.
@@ -147,6 +155,7 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
     if (!isDomCanvas(host)) {
         throw new Error("createHtmlTexture: requires a DOM canvas rendering surface (HTML-in-Canvas is unavailable on OffscreenCanvas).");
     }
+    const supportsNativeHtmlTexture = isHtmlInCanvasSupported(engine);
 
     const width = options.width ?? (element.offsetWidth || 256);
     const height = options.height ?? (element.offsetHeight || 256);
@@ -170,17 +179,21 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
     tex._autoUpdate = options.autoUpdate ?? true;
     tex._useSvgFallback = options.useSvgFallback ?? true;
     tex._forceNext = false;
+    tex._hosted = false;
     tex._disposed = false;
     tex._flipSrc = null;
 
-    // Host the element so the browser lays it out for capture. `layoutSubtree`
-    // opts the canvas's DOM descendants into layout + paint; `inert` stops the
-    // subtree from stealing pointer/keyboard input from the camera controls.
-    (host as unknown as HtmlInCanvasHost).layoutSubtree = true;
-    element.inert = true;
-    host.appendChild(element);
+    if (supportsNativeHtmlTexture || tex._useSvgFallback) {
+        // Host the element only when an update path exists. `layoutSubtree` opts
+        // the canvas's DOM descendants into layout + paint; `inert` stops the
+        // subtree from stealing pointer/keyboard input from the camera controls.
+        acquireHtmlInCanvasHost(host as unknown as HtmlInCanvasHost);
+        element.inert = true;
+        host.appendChild(element);
+        tex._hosted = true;
+    }
 
-    if (isHtmlInCanvasSupported(engine)) {
+    if (supportsNativeHtmlTexture) {
         // Orientation is baked into the texture pixels (a GPU V-flip in
         // updateHtmlTexture), not applied as a material-side UV flip — the standard
         // material's single shared UV transform can only invert the diffuse/opacity/
@@ -268,10 +281,11 @@ export function requestHtmlTextureUpdate(engine: EngineContext, tex: HtmlTexture
         return;
     }
     const host = tex._host as unknown as HtmlInCanvasHost;
-    if (typeof host.requestPaint === "function") {
+    const supportsNativeHtmlTexture = isHtmlInCanvasSupported(engine);
+    if (supportsNativeHtmlTexture && typeof host.requestPaint === "function") {
         tex._forceNext = true;
         host.requestPaint();
-    } else if (tex._useSvgFallback) {
+    } else if (!supportsNativeHtmlTexture && tex._useSvgFallback) {
         updateHtmlTexture(engine, tex);
     }
 }
@@ -293,20 +307,56 @@ export function disposeHtmlTexture(tex: HtmlTexture2D): void {
         tex._paint = null;
     }
 
-    const element = tex._element;
-    if (element.parentNode === tex._host) {
-        if (tex._prevParent) {
-            tex._prevParent.insertBefore(element, tex._prevNextSibling);
-        } else {
-            tex._host.removeChild(element);
+    if (tex._hosted) {
+        const element = tex._element;
+        if (element.parentNode === tex._host) {
+            if (tex._prevParent) {
+                tex._prevParent.insertBefore(element, tex._prevNextSibling);
+            } else {
+                tex._host.removeChild(element);
+            }
         }
+        element.inert = tex._prevInert;
+        releaseHtmlInCanvasHost(tex._host as unknown as HtmlInCanvasHost);
+        tex._hosted = false;
     }
-    element.inert = tex._prevInert;
 
     tex._flipSrc?.destroy();
     tex._flipSrc = null;
 
     releaseTexture(tex);
+}
+
+let htmlInCanvasHostRefs: WeakMap<HtmlInCanvasHost, HtmlInCanvasHostRef> | null = null;
+
+function acquireHtmlInCanvasHost(host: HtmlInCanvasHost): void {
+    const refs = (htmlInCanvasHostRefs ??= new WeakMap());
+    let ref = refs.get(host);
+    if (!ref) {
+        ref = { count: 0, previousLayoutSubtree: (host as Partial<HtmlInCanvasHost>).layoutSubtree };
+        refs.set(host, ref);
+    }
+    ref.count++;
+    host.layoutSubtree = true;
+}
+
+function releaseHtmlInCanvasHost(host: HtmlInCanvasHost): void {
+    const ref = htmlInCanvasHostRefs?.get(host);
+    if (!ref) {
+        return;
+    }
+    ref.count--;
+    if (ref.count > 0) {
+        return;
+    }
+
+    // Restore the host's paint-capture mode when the last HTML texture is gone.
+    if (ref.previousLayoutSubtree === undefined) {
+        delete (host as Partial<HtmlInCanvasHost>).layoutSubtree;
+    } else {
+        host.layoutSubtree = ref.previousLayoutSubtree;
+    }
+    htmlInCanvasHostRefs?.delete(host);
 }
 
 /** Rasterise the element via an SVG `<foreignObject>` snapshot and upload it.

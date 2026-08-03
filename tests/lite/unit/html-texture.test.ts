@@ -322,6 +322,22 @@ describe("disposeHtmlTexture", () => {
         disposeHtmlTexture(tex);
         expect(() => disposeHtmlTexture(tex)).not.toThrow();
     });
+
+    it("restores host.layoutSubtree once the last hosted texture on it is disposed", () => {
+        const host = makeHost();
+        const engine = makeEngine(host, newCap());
+        expect(host.layoutSubtree).toBe(false);
+
+        const a = createHtmlTexture(engine, makeElement(), {});
+        const b = createHtmlTexture(engine, makeElement(), {});
+        expect(host.layoutSubtree).toBe(true);
+
+        disposeHtmlTexture(a);
+        expect(host.layoutSubtree).toBe(true); // still one live texture on the host
+
+        disposeHtmlTexture(b);
+        expect(host.layoutSubtree).toBe(false); // restored to the pre-feature value
+    });
 });
 
 describe("createHtmlTexture (no DOM canvas)", () => {
@@ -385,10 +401,15 @@ describe("SVG fallback path", () => {
         const host = makeHost({ withRequestPaint: false });
         const cap = newCap();
         const engine = makeEngine(host, cap, { native: false });
+        const el = makeElement();
 
-        createHtmlTexture(engine, makeElement(), { useSvgFallback: false });
+        createHtmlTexture(engine, el, { useSvgFallback: false });
         await new Promise((r) => setTimeout(r, 0));
 
         expect(cap.copyExternalCalls).toBe(0);
+        // With no update path the element must not be hosted or the DOM mutated.
+        expect(host.children).not.toContain(el);
+        expect(host.layoutSubtree).toBe(false);
+        expect(writable(el).inert).toBe(false);
     });
 });
