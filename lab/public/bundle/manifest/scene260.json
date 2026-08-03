@@ -1,6 +1,6 @@
 {
   "rawKB": 80.3,
-  "gzipKB": 33.4,
+  "gzipKB": 33.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene260-flat-normal-wgsl-Cm9mM4tC.js",
@@ -10,10 +10,10 @@
     "scene260-gltf-json-asset-yi5RiuZK.js",
     "scene260-gltf-normals-DYhLwXNX.js",
     "scene260-ibl-fragment-CeRrvT96.js",
-    "scene260-pbr-renderable-CVs3Z-A-.js",
+    "scene260-pbr-renderable-C3m_Ej0f.js",
     "scene260-rgbd-decode-BHKCP5vu.js",
     "scene260-scene-uniforms-FTYH6Ct0.js",
     "scene260.js"
   ],
-  "rawBytes": 82278
+  "rawBytes": 82260
 }

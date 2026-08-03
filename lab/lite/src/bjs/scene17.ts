@@ -11,6 +11,7 @@ import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import "@babylonjs/core/Meshes/thinInstanceMesh";
 import { Scene } from "@babylonjs/core/scene";
+import "@babylonjs/core/Materials/Textures/baseTexture.polynomial";
 
 (async function () {
     const __initStart = performance.now();

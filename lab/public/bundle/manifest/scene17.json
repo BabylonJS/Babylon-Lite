@@ -5,7 +5,7 @@
   "runtimeChunks": [
     "scene17-generate-mipmaps-DNSbr_z3.js",
     "scene17-ibl-fragment-CeRrvT96.js",
-    "scene17-pbr-renderable-Du6PEQVz.js",
+    "scene17-pbr-renderable-D-g7CZk5.js",
     "scene17-rgbd-decode-aydmE8bD.js",
     "scene17-shader-composer-qxmZVcOJ.js",
     "scene17-singlelight-hemispheric-wgsl-DYVKx4Qw.js",
@@ -14,5 +14,5 @@
     "scene17-thin-instance-gpu-BmCYehED.js",
     "scene17.js"
   ],
-  "rawBytes": 89105
+  "rawBytes": 89087
 }
