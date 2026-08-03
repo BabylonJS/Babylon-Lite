@@ -173,8 +173,6 @@
     {
         "id": 17,
         "slug": "scene17-pbr-std-thin-instances",
-        "skipParity": true,
-        "skipParityReason": "Quarantined for dep-bump PR: Lite diffuse-IBL ~1.4x over-bright vs improved reference (reference changed at core 9.8.0). Group 1 Lite rendering fix in follow-up PR.",
         "name": "Scene 17 — PBR + Std TI",
         "maxMad": 0.021,
         "maxRawKB": 89.8,
@@ -195,8 +193,6 @@
     {
         "id": 19,
         "slug": "scene19-clearcoat",
-        "skipParity": true,
-        "skipParityReason": "Quarantined for dep-bump PR: Lite diffuse-IBL/clearcoat over-bright vs improved reference (reference changed at core 9.8.0). Group 1 Lite rendering fix in follow-up PR.",
         "name": "Scene 19 — PBR Clearcoat",
         "maxMad": 0.031,
         "maxRawKB": 71.06,
@@ -1688,8 +1684,6 @@
     {
         "id": 176,
         "slug": "scene176-mosquito-amber",
-        "skipParity": true,
-        "skipParityReason": "Quarantined for dep-bump PR: Lite diffuse-IBL over-bright vs improved reference (reference changed at core 9.8.0). Group 1 Lite rendering fix in follow-up PR.",
         "name": "Scene 176 - MosquitoInAmber",
         "maxMad": 0.5,
         "maxRawKB": 104.57,
