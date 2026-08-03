@@ -222,6 +222,26 @@ describe("createHtmlTexture (native path)", () => {
         expect(cap.blitPasses).toBe(0);
     });
 
+    it("recreates the flip staging texture when the GPU device changes (device-lost recovery)", () => {
+        const host = makeHost();
+        const cap = newCap();
+        const engine = makeEngine(host, cap);
+        const tex = createHtmlTexture(engine, makeElement(32, 32), { autoUpdate: true });
+        const firstSrc = tex._flipSrc;
+        expect(firstSrc).not.toBeNull();
+        expect(tex._flipDevice).toBe(engine._device);
+
+        // Simulate device-lost recovery: the engine now exposes a brand-new GPUDevice
+        // while the texture's cached staging texture still belongs to the dead device.
+        const engine2 = makeEngine(host, cap);
+        updateHtmlTexture(engine2, tex);
+
+        // Staging texture rebuilt on the new device rather than blitting into a dead one.
+        expect(tex._flipSrc).not.toBe(firstSrc);
+        expect(tex._flipDevice).toBe(engine2._device);
+        expect(cap.copyElementCalls.at(-1)!.texture).toBe(tex._flipSrc);
+    });
+
     it("falls back to 256 when the element reports zero size and no override is given", () => {
         const host = makeHost();
         const engine = makeEngine(host, newCap());

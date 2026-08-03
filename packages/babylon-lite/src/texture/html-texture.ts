@@ -113,6 +113,9 @@ export interface HtmlTexture2D extends DynamicTexture2D {
     _disposed: boolean;
     /** @internal Staging texture for the native V-flip blit, or null until first used. */
     _flipSrc: GPUTexture | null;
+    /** @internal Device that created {@link _flipSrc}; a mismatch (device-lost
+     *  recovery) forces the staging texture to be recreated. */
+    _flipDevice: GPUDevice | null;
 }
 
 /** Options for {@link createHtmlTexture}. */
@@ -182,6 +185,7 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
     tex._hosted = false;
     tex._disposed = false;
     tex._flipSrc = null;
+    tex._flipDevice = null;
 
     if (supportsNativeHtmlTexture || tex._useSvgFallback) {
         // Host the element only when an update path exists. `layoutSubtree` opts
@@ -323,6 +327,7 @@ export function disposeHtmlTexture(tex: HtmlTexture2D): void {
 
     tex._flipSrc?.destroy();
     tex._flipSrc = null;
+    tex._flipDevice = null;
 
     releaseTexture(tex);
 }
@@ -454,15 +459,17 @@ function ensureFlipPipeline(engine: EngineContext, format: GPUTextureFormat): GP
 /** Lazily allocate (and size-match) the staging texture the native capture is copied
  *  into before the V-flip blit. */
 function ensureFlipSource(engine: EngineContext, tex: HtmlTexture2D): GPUTexture {
+    const device = engine._device;
     let src = tex._flipSrc;
-    if (!src || src.width !== tex.width || src.height !== tex.height) {
+    if (!src || tex._flipDevice !== device || src.width !== tex.width || src.height !== tex.height) {
         src?.destroy();
-        src = engine._device.createTexture({
+        src = device.createTexture({
             size: { width: tex.width, height: tex.height },
             format: tex.texture.format,
             usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
         });
         tex._flipSrc = src;
+        tex._flipDevice = device;
     }
     return src;
 }
