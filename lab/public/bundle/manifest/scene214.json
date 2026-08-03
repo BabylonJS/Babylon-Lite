@@ -1,5 +1,5 @@
 {
-  "rawKB": 69.4,
+  "rawKB": 69.3,
   "gzipKB": 27.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,5 +10,5 @@
     "scene214-std-shadow-fragment-DUILnYou.js",
     "scene214.js"
   ],
-  "rawBytes": 71059
+  "rawBytes": 71008
 }

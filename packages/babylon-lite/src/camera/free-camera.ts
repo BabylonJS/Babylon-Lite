@@ -16,8 +16,8 @@ import { allocateMat4 } from "../math/_matrix-allocator.js";
  *  Push-based dirty tracking: position and target use ObservableVec3,
  *  _yaw/_pitch use Object.defineProperty. */
 export interface FreeCamera extends Camera, IWorldMatrixProvider, IParentable {
-    position: ObservableVec3;
-    target: ObservableVec3;
+    readonly position: ObservableVec3;
+    readonly target: ObservableVec3;
     /** Movement speed. Default 2.0 (matches BJS). */
     speed: number;
     /** Mouse rotation sensitivity (higher = less sensitive). Default 2000 (matches BJS). */
