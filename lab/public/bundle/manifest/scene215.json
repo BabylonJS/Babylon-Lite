@@ -1,5 +1,5 @@
 {
-  "rawKB": 81,
+  "rawKB": 80.9,
   "gzipKB": 32.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -12,5 +12,5 @@
     "scene215-singlelight-directional-wgsl-BpRi11tU.js",
     "scene215.js"
   ],
-  "rawBytes": 82902
+  "rawBytes": 82853
 }
