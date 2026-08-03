@@ -5,7 +5,6 @@ import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/e
 import { createShaderMaterial, setShaderFloat, setShaderUniform } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
 import { enableShaderUniformRangeUpdates } from "../../../packages/babylon-lite/src/material/shader/shader-uniform-range";
-import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { UniformCopyBatch } from "../../../packages/babylon-lite/src/render/uniform-copy-batch";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
@@ -57,7 +56,7 @@ function fixture(getUniformBatch?: () => UniformCopyBatch, enabled = true) {
             { name: "tint", type: "vec3<f32>" },
         ],
     });
-    const mesh = {
+    const mesh = initMeshTransform({
         name: "range",
         children: [],
         material,
@@ -70,8 +69,7 @@ function fixture(getUniformBatch?: () => UniformCopyBatch, enabled = true) {
             indexCount: 3,
             indexFormat: "uint32",
         },
-    } as unknown as Mesh;
-    initMeshTransform(mesh);
+    });
     const scene = {
         surface: { engine },
         camera: null,

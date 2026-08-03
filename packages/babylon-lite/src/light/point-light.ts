@@ -11,7 +11,7 @@ import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 export interface PointLight extends LightBase {
     readonly lightType: "point";
-    position: ObservableVec3;
+    readonly position: ObservableVec3;
     diffuse: [number, number, number];
     specular: [number, number, number];
     intensity: number;
