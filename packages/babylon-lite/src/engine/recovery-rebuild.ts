@@ -31,7 +31,7 @@ interface RecoverableRenderTask {
     _opaqueBindings: unknown[];
     _directBindings: unknown[];
     _transparentBindings: unknown[];
-    _opaqueBundles: unknown[];
+    _ob: unknown[];
     _lastVersion: number;
     _su: unknown[];
 }
@@ -111,7 +111,7 @@ function resetFrameGraphTasks(engine: EngineContext, scene: SceneContext): void 
         rt._opaqueBindings.length = 0;
         rt._directBindings.length = 0;
         rt._transparentBindings.length = 0;
-        rt._opaqueBundles.length = 0;
+        rt._ob.length = 0;
         rt._lastVersion = -1;
         rt._su.length = 0;
     }

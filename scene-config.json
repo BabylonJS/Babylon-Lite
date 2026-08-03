@@ -173,8 +173,6 @@
     {
         "id": 17,
         "slug": "scene17-pbr-std-thin-instances",
-        "skipParity": true,
-        "skipParityReason": "Quarantined for dep-bump PR: Lite diffuse-IBL ~1.4x over-bright vs improved reference (reference changed at core 9.8.0). Group 1 Lite rendering fix in follow-up PR.",
         "name": "Scene 17 — PBR + Std TI",
         "maxMad": 0.021,
         "maxRawKB": 89.8,
@@ -195,8 +193,6 @@
     {
         "id": 19,
         "slug": "scene19-clearcoat",
-        "skipParity": true,
-        "skipParityReason": "Quarantined for dep-bump PR: Lite diffuse-IBL/clearcoat over-bright vs improved reference (reference changed at core 9.8.0). Group 1 Lite rendering fix in follow-up PR.",
         "name": "Scene 19 — PBR Clearcoat",
         "maxMad": 0.031,
         "maxRawKB": 71.06,
@@ -1688,8 +1684,6 @@
     {
         "id": 176,
         "slug": "scene176-mosquito-amber",
-        "skipParity": true,
-        "skipParityReason": "Quarantined for dep-bump PR: Lite diffuse-IBL over-bright vs improved reference (reference changed at core 9.8.0). Group 1 Lite rendering fix in follow-up PR.",
         "name": "Scene 176 - MosquitoInAmber",
         "maxMad": 0.5,
         "maxRawKB": 104.73,
@@ -2431,6 +2425,17 @@
         "maxRawKB": 45,
         "description": "Node Particle Editor graph (a classic sprite-sheet ParticleSystem — isAnimationSheetEnabled with spriteCellChangeSpeed 30 over cells 0..9 of a 64×64 grid, looped — converted to NPE via ConvertToNodeParticleSystemSetAsync, mirroring Babylon.js visual test 'Particles - Animations 2', playground #CBXIIX#0) rendered as camera-facing additive billboards through the pay-for-use particle runtime, with a deterministic seeded RNG and a frozen frame.",
         "tags": ["npe", "particles", "billboards", "sprite-sheet"],
+        "skipPerf": true,
+        "compatParity": true
+    },
+    {
+        "id": 277,
+        "slug": "scene277-npe-attractor",
+        "name": "Scene 277 — NPE Particles: Attractor",
+        "maxMad": 0.01,
+        "maxRawKB": 45,
+        "description": "A serialized NPE particle graph with UpdateAttractorBlock applying a softened inverse-square force toward a point above the emitter after position integration. Uses deterministic seeded simulation and a frozen camera-facing billboard frame.",
+        "tags": ["npe", "particles", "billboards", "attractor"],
         "skipPerf": true,
         "compatParity": true
     }

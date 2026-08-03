@@ -1,5 +1,6 @@
 {
-  "rawKB": 57.9,
+  "rawKB": 57.8,
+  "rawBytes": 59232,
   "gzipKB": 23.4,
   "ignoredRawKB": 1451.1,
   "runtimeChunks": [
@@ -7,6 +8,5 @@
     "scene91-manifold-C2NWAcxM-CgxmBSpa.js",
     "scene91-standard-renderable-BGu3jrWf.js",
     "scene91.js"
-  ],
-  "rawBytes": 59250
+  ]
 }

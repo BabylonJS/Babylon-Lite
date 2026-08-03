@@ -63,7 +63,7 @@ let lv=clamp(log2(f32(textureDimensions(refractionTexture).x)*ra)-4.0,0.0,f32(te
 ${sampleLines}
 ${absorptionLine}
 ${refractionLine}
-color=finalIrradiance*ro*ro+finalRadianceScaled+finalSpecularScaled+directDiffuse*ro*ro+fr+emissive;
+color=finalIrradiance*ro+finalRadianceScaled+finalSpecularScaled+directDiffuse*ro+fr+emissive;
 }`;
 }
 

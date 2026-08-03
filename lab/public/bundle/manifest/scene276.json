@@ -1,5 +1,6 @@
 {
   "rawKB": 44,
+  "rawBytes": 45064,
   "gzipKB": 25.2,
   "ignoredRawKB": 27.1,
   "runtimeChunks": [
@@ -9,7 +10,7 @@
     "scene276-create-particle-block-CiseX6ot.js",
     "scene276-generate-mipmaps-DmvWpqXO.js",
     "scene276-npe-contextual-DcCy6blJ.js",
-    "scene276-npe-registry-extra-Bu9JIfUP.js",
+    "scene276-npe-registry-extra-B_R8TAjc.js",
     "scene276-particle-converter-block-CVHvXC1Y.js",
     "scene276-particle-input-block-DfSRd2z3.js",
     "scene276-particle-lerp-block-DmOawfA2.js",
@@ -22,6 +23,5 @@
     "scene276-update-color-block-D3_45s5M.js",
     "scene276-update-position-block-DQ-fau8B.js",
     "scene276.js"
-  ],
-  "rawBytes": 45080
+  ]
 }

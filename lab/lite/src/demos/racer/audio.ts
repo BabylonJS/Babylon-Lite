@@ -1,14 +1,19 @@
 /**
- * Racer audio — engine loop, tyre skid, and impact, via the Web Audio API (the
- * convention used by the other Lite demos). Levels and pitch follow the kit's
- * `effect_engine` / `effect_trails` / `_on_sphere_body_entered` logic in
- * `vehicle.gd`, converting its decibel targets to linear Web Audio gain.
+ * Racer audio — engine loop, tyre skid, and impact, routed through the Lite
+ * audio engine. Levels and pitch follow the kit's `effect_engine` /
+ * `effect_trails` / `_on_sphere_body_entered` logic in `vehicle.gd`, converting
+ * its decibel targets to linear Web Audio gain.
  *
- * The context starts suspended (browser autoplay policy) and is resumed on the
- * first user gesture, at which point the looping engine + skid sources start.
- * Everything is wrapped defensively so a missing/blocked audio device never
- * breaks the demo.
+ * All source/gain nodes are built in the Lite audio engine's own context and
+ * mixed through a master `GainNode` routed into the engine via
+ * `createSoundSourceAsync`, so playback shares the engine's master bus, unlock
+ * handling, and master volume. The engine's context starts suspended (browser
+ * autoplay policy) and is unlocked on the first user gesture, at which point the
+ * looping engine + skid sources start. Everything is wrapped defensively so a
+ * missing/blocked audio device never breaks the demo.
  */
+
+import { createAudioEngineAsync, createSoundSourceAsync, unlockAudioEngineAsync, type AudioEngine } from "babylon-lite";
 
 /** CC0 kit audio clips (engine loop, tyre skid loop, one-shot impact). */
 export interface RacerAudioUrls {
@@ -35,7 +40,7 @@ function lerp(a: number, b: number, t: number): number {
     return a + (b - a) * Math.min(1, Math.max(0, t));
 }
 
-async function decode(ctx: AudioContext, url: string): Promise<AudioBuffer | null> {
+async function decode(ctx: BaseAudioContext, url: string): Promise<AudioBuffer | null> {
     try {
         const res = await fetch(url);
         if (!res.ok) {
@@ -48,7 +53,8 @@ async function decode(ctx: AudioContext, url: string): Promise<AudioBuffer | nul
 }
 
 export class RacerAudio {
-    private readonly _ctx: AudioContext | null;
+    private readonly _engine: AudioEngine | null;
+    private readonly _ctx: BaseAudioContext | null;
     private readonly _master: GainNode | null;
     private readonly _engineBuf: AudioBuffer | null;
     private readonly _engineMotoBuf: AudioBuffer | null;
@@ -67,13 +73,15 @@ export class RacerAudio {
     private _skidDb = -80;
 
     private constructor(
-        ctx: AudioContext | null,
+        engine: AudioEngine | null,
+        ctx: BaseAudioContext | null,
         master: GainNode | null,
         engineBuf: AudioBuffer | null,
         engineMotoBuf: AudioBuffer | null,
         skidBuf: AudioBuffer | null,
         impactBuf: AudioBuffer | null
     ) {
+        this._engine = engine;
         this._ctx = ctx;
         this._master = master;
         this._engineBuf = engineBuf;
@@ -87,36 +95,33 @@ export class RacerAudio {
         }
     }
 
-    /** Create the context and load the clips. Never throws — falls back to silence. */
+    /** Create the Lite audio engine and load the clips. Never throws — falls back to silence. */
     static async create(urls: RacerAudioUrls): Promise<RacerAudio> {
         try {
-            const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-            if (!Ctor) {
-                return new RacerAudio(null, null, null, null, null, null);
-            }
-            const ctx = new Ctor();
+            const engine = await createAudioEngineAsync();
+            const ctx = engine.audioContext;
             const master = ctx.createGain();
             master.gain.value = 0.5;
-            master.connect(ctx.destination);
+            await createSoundSourceAsync(engine, master);
             const [engineBuf, engineMotoBuf, skidBuf, impactBuf] = await Promise.all([
                 decode(ctx, urls.engine),
                 decode(ctx, urls.engineMotorcycle),
                 decode(ctx, urls.skid),
                 decode(ctx, urls.impact),
             ]);
-            return new RacerAudio(ctx, master, engineBuf, engineMotoBuf, skidBuf, impactBuf);
+            return new RacerAudio(engine, ctx, master, engineBuf, engineMotoBuf, skidBuf, impactBuf);
         } catch {
-            return new RacerAudio(null, null, null, null, null, null);
+            return new RacerAudio(null, null, null, null, null, null, null);
         }
     }
 
-    /** Start the looping engine + skid sources (once), resuming the context. */
+    /** Start the looping engine + skid sources (once), unlocking the engine. */
     private _start(): void {
-        if (this._started || !this._ctx || !this._master) {
+        if (this._started || !this._engine || !this._ctx || !this._master) {
             return;
         }
         this._started = true;
-        void this._ctx.resume();
+        void unlockAudioEngineAsync(this._engine);
         const engine = this._startLoop(this._wantMoto && this._engineMotoBuf ? this._engineMotoBuf : this._engineBuf);
         this._engineSrc = engine?.src ?? null;
         this._engineGain = engine?.gain ?? null;

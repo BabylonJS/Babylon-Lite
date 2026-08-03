@@ -1,5 +1,6 @@
 {
-  "rawKB": 70.3,
+  "rawKB": 70.2,
+  "rawBytes": 71923,
   "gzipKB": 27.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,6 +11,5 @@
     "scene271-standard-renderable-YxFH5_4w.js",
     "scene271-std-shadow-fragment-pwyXRo4i.js",
     "scene271.js"
-  ],
-  "rawBytes": 71944
+  ]
 }
