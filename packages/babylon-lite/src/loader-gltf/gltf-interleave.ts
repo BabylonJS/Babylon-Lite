@@ -355,7 +355,7 @@ export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, ind
     // AABB: fold strided positions straight from the slice; tight positions normally.
     const [boundMin, boundMax] = m._vb!._p ? computeAabbStrided(m._vb!._p, m._worldMatrix) : computeAabb(m._positions!, m._worldMatrix);
 
-    const mesh = {
+    const mesh = initMeshTransform({
         name: name || `gltf_mesh_${index}`,
         material,
         receiveShadows: false,
@@ -363,8 +363,7 @@ export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, ind
         boundMax,
         _gpu: gpu,
         _flatNormal: m._flatNormal,
-    } as unknown as Mesh;
-    initMeshTransform(mesh);
+    });
 
     // Lazy CPU geometry: the de-strided tight copy is built only on first read.
     installLazyCpu(mesh, m);

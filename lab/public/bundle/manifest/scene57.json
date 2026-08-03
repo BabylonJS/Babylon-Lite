@@ -1,6 +1,6 @@
 {
   "rawKB": 60.6,
-  "gzipKB": 24.9,
+  "gzipKB": 24.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene57-billboard-renderable-BmngFr2T.js",
@@ -8,5 +8,5 @@
     "scene57-standard-renderable-B61xdak7.js",
     "scene57.js"
   ],
-  "rawBytes": 62048
+  "rawBytes": 62008
 }

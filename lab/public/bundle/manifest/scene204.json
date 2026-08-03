@@ -1,5 +1,5 @@
 {
-  "rawKB": 52.3,
+  "rawKB": 52.2,
   "gzipKB": 21.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -11,5 +11,5 @@
     "scene204-thin-instance-gpu-DMvEkqgI.js",
     "scene204.js"
   ],
-  "rawBytes": 53518
+  "rawBytes": 53473
 }
