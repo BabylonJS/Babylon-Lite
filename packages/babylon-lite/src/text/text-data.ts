@@ -343,11 +343,17 @@ function allocateSlots(data: TextData, group: TextDataDrawGroup, count: number):
     return out;
 }
 
-/** Release `slots` back to `group.freeSlots`, marking each dead in the buffer. */
-function freeSlots(data: TextData, group: TextDataDrawGroup, slots: number[]): void {
+/** Ascending numeric comparator for slot indices. */
+function ascendingSlot(a: number, b: number): number {
+    return a - b;
+}
+
+/** Release `slots[from…]` back to `group.freeSlots`, marking each dead in the buffer. */
+function freeSlots(data: TextData, group: TextDataDrawGroup, slots: number[], from = 0): void {
     let minSlot = Number.POSITIVE_INFINITY;
     let maxSlot = -1;
-    for (const s of slots) {
+    for (let i = from; i < slots.length; i++) {
+        const s = slots[i]!;
         markSlotDead(data._instances, s);
         group.freeSlots.push(s);
         if (s < minSlot) {
@@ -633,13 +639,33 @@ function applyReplaceRun(data: TextData, prevRef: GlyphRun | number, newRun: Gly
     // the remove path knows how to retire a group.
     if (newRun.curveSet === group.curveSetId && newRun.glyphs.length > 0) {
         const prevSlotCount = rec.slots.length;
-        let slots = rec.slots;
+        const slots = rec.slots;
         if (newRun.glyphs.length !== prevSlotCount) {
-            // Glyph count changed, so this run hands its slots back to the group's free list and
-            // takes a fresh block. It reclaims most of them immediately — the allocator pops the
-            // slots it just freed — so the write stays within roughly the same buffer range.
-            freeSlots(data, group, slots);
-            slots = allocateSlots(data, group, newRun.glyphs.length);
+            // Instances draw in slot order, so a run's glyphs have to sit on ascending slots or
+            // overlapping glyphs composite in the wrong order. Resize this run's own slot list in
+            // place: handing the whole block back to the group's free list and re-allocating would
+            // pop it back LIFO and reverse the run.
+            if (newRun.glyphs.length < prevSlotCount) {
+                freeSlots(data, group, slots, newRun.glyphs.length);
+                slots.length = newRun.glyphs.length;
+            } else {
+                const extra = allocateSlots(data, group, newRun.glyphs.length - prevSlotCount);
+                // Slots appended past the group's tail already sort after the ones this run holds;
+                // only slots reclaimed from the free list can land below them.
+                let sorted = true;
+                let prevSlot = prevSlotCount > 0 ? slots[prevSlotCount - 1]! : -1;
+                for (let i = 0; i < extra.length; i++) {
+                    const s = extra[i]!;
+                    if (s < prevSlot) {
+                        sorted = false;
+                    }
+                    prevSlot = s;
+                    slots.push(s);
+                }
+                if (!sorted) {
+                    slots.sort(ascendingSlot);
+                }
+            }
         }
         const live = writeRunToSlots(data, group, newRun, slots);
         // Absorbs both a changed glyph count and any glyph that missed the atlas.

@@ -152,6 +152,34 @@ describe("updateTextData replaceRun", () => {
         }
     });
 
+    // Instances are drawn in slot order, so a run's glyphs have to land on ascending slots or
+    // overlapping glyphs composite in the wrong order. Reclaiming a resized run's slots through
+    // the group free list hands them back LIFO, which is what this guards against.
+    it.each([
+        ["grows", [1, 2, 3]],
+        ["shrinks", [1]],
+    ])("keeps a run's glyphs in ascending slot order when it %s", (_label, glyphIds) => {
+        const data = createTextData(makeStorage(), [run("f", 0), run("f", 10), run("f", 20)]);
+        const next = run("f", 50, glyphIds);
+
+        updateTextData(data, { update: "replaceRun", previous: data.runs[1]!, run: next });
+
+        const slots = data._runRecords.get(next)!.slots;
+        expect(slots).toEqual([...slots].sort((a, b) => a - b));
+    });
+
+    it("keeps every run's glyphs in ascending slot order across repeated resizes", () => {
+        const data = createTextData(makeStorage(), [run("f", 0), run("f", 10), run("f", 20)]);
+        for (let i = 0; i < 40; i++) {
+            const len = 1 + (i % 3);
+            updateTextData(data, { update: "replaceRun", previous: data.runs[i % 3]!, run: run("f", i, [1, 2, 3].slice(0, len)) });
+            for (const r of data.runs) {
+                const slots = data._runRecords.get(r)!.slots;
+                expect(slots).toEqual([...slots].sort((a, b) => a - b));
+            }
+        }
+    });
+
     it("routes an empty replacement through the remove path so its slots are reclaimed", () => {
         const data = createTextData(makeStorage(), [run("f", 0), run("g", 10, [1])]);
         const empty: GlyphRun = { curveSet: "g", glyphs: [], pixelsPerFontUnit: 1 };
