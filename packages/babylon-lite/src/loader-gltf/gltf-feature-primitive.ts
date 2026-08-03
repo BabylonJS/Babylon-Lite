@@ -1,9 +1,16 @@
 /** Primitive-state feature (non-triangle topology + negative-determinant winding) — dynamically
  *  imported, gated on a non-triangle primitive mode OR a negative-determinant node.
  *
- *  Encodes topology, strip index format, and reversed winding into the affected mesh's feature bits.
+ *  Reversed winding rides in the mesh's feature bits (the shared pipeline reads it directly, so it
+ *  is correct whether or not this module ever loads). Non-triangle TOPOLOGY instead becomes a
+ *  ready-made `GPUPrimitiveState` partial on the mesh, built by a further dynamically-imported
+ *  module: the topology names and branches are ~144 bytes that every PBR scene would otherwise
+ *  carry on the shared pipeline path for a case essentially no asset uses, and that even a
+ *  mirrored-but-triangle-list asset (the common reason this feature loads) would carry here.
+ *
  *  The common triangle-list positive-winding case never loads this module. */
 import { mat4Determinant3 } from "../math/mat4-determinant3.js";
+import { buildPrimitiveState } from "../material/pbr/pbr-primitive-topology.js";
 import type { GltfFeature } from "./gltf-feature.js";
 
 const MSH_REVERSE_WINDING = 1 << 11;
@@ -18,6 +25,12 @@ const feature: GltfFeature = {
         const mode = (meshData as { _primitive?: { mode?: number } })._primitive?.mode;
         const topo = mode === 0 ? 1 : (mode as number) & 1 ? ((mode as number) + 3) >> 1 : undefined;
         let features = topo ? (topo << MSH_TOPOLOGY_SHIFT) | (topo > 2 && mesh._gpu.indexFormat === "uint32" ? MSH_INDEX_U32 : 0) : 0;
+        if (topo) {
+            // Statically imported: a further dynamic import would keep the topology names out of
+            // this chunk, but it drags the bundler's preload plumbing INTO it, and this chunk is
+            // fetched by every mirrored-node asset — measured worse for both scenes that load it.
+            (mesh as typeof mesh & { _primitive?: GPUPrimitiveState })._primitive = buildPrimitiveState(topo, mesh._gpu.indexFormat === "uint32");
+        }
         // A mesh whose net world-matrix determinant is positive (mirrored vs the RH→LH root flip) has
         // reversed triangle winding; flag it so the pipeline culls "front" (matching BJS, which flips
         // sideOrientation on negative determinant). Normal meshes have a negative world determinant.

@@ -12,11 +12,22 @@ import type { Mesh } from "../../mesh/mesh.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { Mat4 } from "../../math/types.js";
 import { _installMeshFeatureExtra } from "../mesh-features.js";
-import { _resolvePrimitive, _windingFrontFace } from "../pbr/pbr-pipeline.js";
+import { _resolvePrimitive } from "../pbr/pbr-pipeline.js";
 import { _installStdPrimitiveResolver } from "./standard-pipeline.js";
 import { _installStdGeometryWinding } from "./standard-geometry-renderable.js";
 import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
 import { mat4Determinant3 } from "../../math/mat4-determinant3.js";
+
+/** Front-face winding for a mirrored mesh's geometry-pass pipeline.
+ *
+ *  Deliberately declared HERE rather than exported from `pbr-pipeline.ts`: this opt-in module is
+ *  its only consumer, and an export on the shared PBR pipeline path is retained in every PBR
+ *  scene's chunk (this module is a lazy chunk in the same build, so the import is reachable and
+ *  cannot be tree-shaken). One line duplicated buys back those bytes for every scene that never
+ *  calls `enableMirroredMeshes`. */
+function _windingFrontFace(meshFeatures: number): GPUFrontFace {
+    return meshFeatures & (1 << 11) ? "cw" : "ccw";
+}
 
 /** Sign of the upper-left 3x3 determinant. Negative means the transform mirrors the geometry. */
 function detSign(m: Mat4): number {

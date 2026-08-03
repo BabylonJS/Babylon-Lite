@@ -25,26 +25,28 @@ import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
 const MSH_REVERSE_WINDING = 1 << 11;
-const MSH_TOPOLOGY_SHIFT = 12;
-const MSH_INDEX_U32 = 1 << 15;
 
-/** @internal Resolve topology, culling, strip format, and winding from mesh feature bits. */
-export function _resolvePrimitive(meshFeatures: number, hasDoubleSided: boolean): GPUPrimitiveState {
-    const topo = (meshFeatures >> MSH_TOPOLOGY_SHIFT) & 7;
-    const state: GPUPrimitiveState = {
-        topology: topo === 1 ? "point-list" : topo === 2 ? "line-list" : topo === 3 ? "line-strip" : topo === 4 ? "triangle-strip" : "triangle-list",
-        cullMode: (topo && topo < 4) || hasDoubleSided ? "none" : "back",
-        frontFace: _windingFrontFace(meshFeatures),
+/** @internal Resolve the primitive state for a draw.
+ *
+ *  Only the COMMON case is spelled out here, because this sits on the shared PBR pipeline path and
+ *  every byte lands in every PBR scene: a triangle list, culled per the material, wound per the
+ *  mesh's mirror bit. The winding term is the one that matters for correctness — a mirrored glTF
+ *  mesh must flip `frontFace`, or WebGPU's `@builtin(front_facing)` comes out inverted and the
+ *  double-sided shader flips the shading normal on the VISIBLE side, rendering it black.
+ *
+ *  Everything exotic (point/line/strip topologies and `stripIndexFormat`) arrives as a ready-made
+ *  partial in `exotic`, built by whoever knew the mesh was exotic — for glTF that is the lazy
+ *  primitive feature. Resolving it here instead cost ~144 bytes of topology names and branches in
+ *  every scene, which pushed eleven of them past their bundle ceilings; as data it costs a spread.
+ *  It cannot be a hook: the installer would sit in a chunk that every glTF scene can reach, so the
+ *  bundler could never prove the binding null and the branch would never fold. */
+export function _resolvePrimitive(meshFeatures: number, hasDoubleSided: boolean, exotic?: GPUPrimitiveState): GPUPrimitiveState {
+    return {
+        topology: "triangle-list",
+        cullMode: hasDoubleSided ? "none" : "back",
+        frontFace: meshFeatures & MSH_REVERSE_WINDING ? "cw" : "ccw",
+        ...exotic,
     };
-    if (topo > 2) {
-        state.stripIndexFormat = meshFeatures & MSH_INDEX_U32 ? "uint32" : "uint16";
-    }
-    return state;
-}
-
-/** @internal Resolve front-face winding from mesh feature bits. */
-export function _windingFrontFace(meshFeatures: number): GPUFrontFace {
-    return meshFeatures & MSH_REVERSE_WINDING ? "cw" : "ccw";
 }
 
 // ─── Shader Bindings (sig-independent) ──────────────────────────────
@@ -77,6 +79,11 @@ interface _PbrShaderBindings {
     _meshBGL: GPUBindGroupLayout;
     _shadowBGL: GPUBindGroupLayout | null;
     _composed: ComposedShader;
+    /** Exotic primitive state (non-triangle topology + strip index format) for this mesh, or absent
+     *  for the usual triangle list. Carried on the bindings because the pipeline is built from them
+     *  and never sees the mesh; the cache key already folds in `meshFeatures`, whose topology bits
+     *  this mirrors, so two meshes that differ here can never share bindings. */
+    _prim?: GPUPrimitiveState;
     /** Shared across normal/A2C pipeline variants only when the A2C resolver is installed. */
     _a2cVertModule?: GPUShaderModule;
     /** @internal */
@@ -117,7 +124,8 @@ export function getOrCreatePbrBindings(
     sceneFeatures: number,
     composed: ComposedShader,
     shaderKey = "",
-    stencil: StencilState | null = null
+    stencil: StencilState | null = null,
+    prim?: GPUPrimitiveState
 ): _PbrShaderBindings {
     ensureDevice(engine);
     // Stencil state is baked into the GPU pipeline (no dynamic stencil ref), so two materials that differ only in
@@ -148,6 +156,10 @@ export function getOrCreatePbrBindings(
     // Gated by the opt-in resolver so the field assignment folds out of stencil-free bundles entirely.
     if (resolvedStencil) {
         bindings._stencil = resolvedStencil._desc;
+    }
+    // Likewise absent for every ordinary triangle-list mesh.
+    if (prim) {
+        bindings._prim = prim;
     }
     _bindingsCache.set(key, bindings);
     return bindings;
@@ -211,7 +223,7 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
               }
             : {}),
         multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
-        primitive: _resolvePrimitive(meshFeatures, hasDoubleSided),
+        primitive: _resolvePrimitive(meshFeatures, hasDoubleSided, bindings._prim),
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;

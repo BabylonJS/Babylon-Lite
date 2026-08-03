@@ -363,7 +363,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             sceneFeatures,
             composed,
             `${lightMode}:${singleLightType}${vbKey}:${uv2Mask}`,
-            mat.stencil ?? null
+            mat.stencil ?? null,
+            (mesh as Mesh & { _primitive?: GPUPrimitiveState })._primitive
         );
 
         // Mesh UBO (world matrix at offset 0; spec.totalBytes covers any extra fields).
