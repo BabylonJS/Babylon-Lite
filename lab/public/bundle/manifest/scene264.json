@@ -1,6 +1,6 @@
 {
-  "rawKB": 40,
-  "rawBytes": 40943,
+  "rawKB": 40.0,
+  "rawBytes": 40925,
   "gzipKB": 25.9,
   "ignoredRawKB": 34.4,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene264-create-particle-block-CiseX6ot.js",
     "scene264-generate-mipmaps-BUwhAVC8.js",
     "scene264-npe-contextual-DcCy6blJ.js",
-    "scene264-npe-registry-extra-s2Pbaui-.js",
+    "scene264-npe-registry-extra-BkvKc_Hl.js",
     "scene264-particle-converter-block-CVHvXC1Y.js",
     "scene264-particle-gradient-block-RP12ZwVR.js",
     "scene264-particle-gradient-value-block-DAYsb4x-.js",

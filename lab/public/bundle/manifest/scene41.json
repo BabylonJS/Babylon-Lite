@@ -1,5 +1,5 @@
 {
-  "rawKB": 92.7,
+  "rawKB": 92.6,
   "gzipKB": 37.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -13,5 +13,5 @@
     "scene41-standard-renderable-D52DjuE5.js",
     "scene41.js"
   ],
-  "rawBytes": 94886
+  "rawBytes": 94870
 }

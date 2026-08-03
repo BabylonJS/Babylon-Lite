@@ -1,5 +1,5 @@
 {
-  "rawKB": 77,
+  "rawKB": 77.0,
   "gzipKB": 31.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,5 +10,5 @@
     "scene118-standard-renderable-CiCWOjTT.js",
     "scene118.js"
   ],
-  "rawBytes": 78869
+  "rawBytes": 78853
 }

@@ -2417,5 +2417,16 @@
         "tags": ["npe", "particles", "billboards", "sprite-sheet"],
         "skipPerf": true,
         "compatParity": true
+    },
+    {
+        "id": 277,
+        "slug": "scene277-npe-attractor",
+        "name": "Scene 277 — NPE Particles: Attractor",
+        "maxMad": 0.01,
+        "maxRawKB": 45,
+        "description": "A serialized NPE particle graph with UpdateAttractorBlock applying a softened inverse-square force toward a point above the emitter after position integration. Uses deterministic seeded simulation and a frozen camera-facing billboard frame.",
+        "tags": ["npe", "particles", "billboards", "attractor"],
+        "skipPerf": true,
+        "compatParity": true
     }
 ]

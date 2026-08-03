@@ -10,13 +10,13 @@
     "scene176-gltf-json-asset-CfnpYb9a.js",
     "scene176-ibl-fragment-CeRrvT96.js",
     "scene176-ibl-skybox-wgsl-CFIBOHHx.js",
-    "scene176-pbr-refraction-CxDTyIgr.js",
-    "scene176-pbr-renderable-H743h2yX.js",
-    "scene176-pbr-transmission-ext-DTL0sWzz.js",
+    "scene176-pbr-refraction-CyAxIkQg.js",
+    "scene176-pbr-renderable-N2u-l1UG.js",
+    "scene176-pbr-transmission-ext-DeUOBUhF.js",
     "scene176-reflectance-fragment-DIy2PFIk.js",
     "scene176-rgbd-decode-DNgLCqYz.js",
     "scene176-scene-uniforms-FTYH6Ct0.js",
     "scene176.js"
   ],
-  "rawBytes": 106837
+  "rawBytes": 106826
 }
