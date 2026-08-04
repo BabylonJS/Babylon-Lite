@@ -9,6 +9,7 @@ import type { Texture2D } from "../texture/texture-2d.js";
 import { cloneTexture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
+import { setPbrUvTransform } from "../material/pbr/set-uv-transform.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import type { TextureWrapFn, GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 import { uploadBaseColorFactorTexture, uploadOrmFactorTexture, uploadTex } from "./gltf-pbr-builder.js";
@@ -159,7 +160,7 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         (tc1(tex.emissiveTexture) ? 8 : 0) |
         (tc1((extLayers as { specGlossTexture?: unknown } | undefined)?.specGlossTexture) ? 16 : 0) |
         (mat._occlusionTexCoord === 1 ? 32 : 0);
-    return {
+    const props = {
         baseColorTexture: tex.baseColorTexture,
         normalTexture: tex.normalTexture,
         ormTexture: tex.ormTexture,
@@ -175,13 +176,18 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         enableSpecularAA: true,
         ...(mat._alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat._baseColorFactor[3] } : undefined),
         ...(mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3] } : undefined),
-        ...(hasAnyUvTx ? { _hasUvTx: true } : undefined),
         ...(mat._rawMatDef?.name ? { name: mat._rawMatDef.name as string } : undefined),
         ...extLayers,
         ...(uv2Mask ? { _uv2Mask: uv2Mask } : undefined),
         _buildGroup: getPbrGroupBuilder(),
         _uboVersion: 0,
     } as PbrMaterialProps;
+    // Routed through the setter so the uv-transform ext is registered; it also stamps
+    // `_hasUvTx`, which the ext's own `detect` turns into PBR2_HAS_UV_TRANSFORM.
+    if (hasAnyUvTx) {
+        setPbrUvTransform(props);
+    }
+    return props;
 }
 
 function isDefaultBaseColorFactor(f: readonly number[]): boolean {

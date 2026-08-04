@@ -102,6 +102,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasSomeMorphs = false;
     let hasSomeThinInstances = false;
     let hasCullingTI = false;
+    // Only gates the shared `pbr-template-ext` lazy import below (alongside vertex-color
+    // and uv2); the uv-transform *ext* is registered by `setPbrUvTransform`, not by a scan.
     let hasAnyUvTransform = false;
     let hasAnyUv2 = false;
     let hasAnyVertexColor = false;
@@ -109,7 +111,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasGammaAlbedo = false;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
-        const mat = m.material as PbrMaterialProps & { _hasUvTx?: boolean };
+        const mat = m.material as PbrMaterialProps;
         needsEmissiveColor ||= !!mat.emissiveColor;
         hasSomeSkeletons ||= !!m.skeleton;
         hasSomeMorphs ||= !!m.morphTargets;
@@ -199,7 +201,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         [needsEmissiveColor, () => import("./fragments/emissive-fragment.js")],
         [hasSomeSkeletons, () => import("./fragments/skeleton-fragment.js")],
         [hasSomeMorphs, () => import("./fragments/morph-fragment.js")],
-        [hasAnyUvTransform, () => import("./fragments/uv-transform-fragment.js")],
     ]);
 
     // Lazy-load pbr-template-ext when any advanced features are present.

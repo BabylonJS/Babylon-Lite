@@ -23,6 +23,8 @@ import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS
 import type { PointerMaterial } from "./animation-pointer.js";
 import { resolveAnimationPointer } from "./animation-pointer.js";
 import { _installPointerHandlers } from "./gltf-animation.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import { setPbrUvTransform } from "../material/pbr/set-uv-transform.js";
 
 // Node TRS/weights pointer targets map 1:1 onto the standard glTF channel paths.
 const NODE_TRS_PATH: Record<string, TargetPath> = {
@@ -120,7 +122,7 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
                 // texture transform that is identity at load (so the matrices exist for the
                 // animation to drive — see uvTransformAnimated above).
                 if (uvTransformAnimated.has(matIdx)) {
-                    (pm as { _hasUvTx?: boolean })._hasUvTx = true;
+                    setPbrUvTransform(pm as Partial<PbrMaterialProps>);
                 }
                 map[matIdx] = pm;
             }

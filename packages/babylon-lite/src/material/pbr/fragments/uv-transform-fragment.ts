@@ -1,11 +1,12 @@
-/** UV-transform PbrExt. Registered lazily only when a scene actually has a
- *  material with PBR2_HAS_UV_TRANSFORM set, so non-UV-transform bundles pay
- *  zero bytes. Template-only ext — contributes no fragment or bindings, just
- *  a material-UBO slice. */
+/** UV-transform PbrExt. Pulled in only by `setPbrUvTransform`, so non-UV-transform
+ *  bundles pay zero bytes. Contributes the `PBR2_HAS_UV_TRANSFORM` feature bit from
+ *  its own `detect`. Template-only ext — no fragment or bindings, just a material-UBO
+ *  slice. */
 
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
+import { PBR2_HAS_UV_TRANSFORM } from "../pbr-flag-bits.js";
 
 // Independent-occlusion UV transform (orm-unpack) features2 bit. Defined here,
 // not in the shared flag module, for zero bundle movement on scenes that never
@@ -56,7 +57,10 @@ export const pbrExt: PbrExt = {
         // distinct UV) when an occlusionTexture carrier exists and it is NOT a UV2
         // occlusion (texCoord 1 uses input.uv2 instead).
         const split = !!m.occlusionTexture && !m.occlusionTexCoord;
-        return { f: 0, f2: split ? PBR2_OCCL_UV_SPLIT : 0 };
+        // PBR2_HAS_UV_TRANSFORM is contributed here rather than by the always-loaded
+        // `_computePbrMaterialFeatures`, so the base feature computation carries no
+        // uv-transform check. Per-material: only materials the setter touched opt in.
+        return { f: 0, f2: (m._hasUvTx ? PBR2_HAS_UV_TRANSFORM : 0) | (split ? PBR2_OCCL_UV_SPLIT : 0) };
     },
     writeUbo(data: Float32Array, material: unknown, offsets: ReadonlyMap<string, number>): void {
         const m = material as PbrMaterialProps;

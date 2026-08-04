@@ -13,7 +13,6 @@ import { _installPbrFallbackResolver } from "./pbr-pipeline.js";
 import {
     _getPbrExts,
     PBR2_HAS_BASE_COLOR_FACTOR,
-    PBR2_HAS_UV_TRANSFORM,
     PBR2_HAS_UV2,
     PBR_HAS_ALPHA_BLEND,
     PBR_HAS_DOUBLE_SIDED,
@@ -224,9 +223,6 @@ export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: 
             features |= d.f;
             features2 |= d.f2;
         }
-    }
-    if ((mat as { _hasUvTx?: boolean })._hasUvTx) {
-        features2 |= PBR2_HAS_UV_TRANSFORM;
     }
     // Per-channel UV set selection (glTF texCoord). `_uv2Mask` is precomputed once at glTF build
     // time by the lazy slow-path loader (gltf-pbr-builder-ext) — the only place a texture can carry
