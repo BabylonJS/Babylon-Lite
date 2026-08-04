@@ -7,6 +7,13 @@ trigger:
     branches:
         include:
             - master
+    paths:
+        # The bundle-manifest bot (azure-pipelines-bundle-manifest.yml) pushes a
+        # commit touching only this directory after every merge. Nothing here
+        # affects the demos, so exclude it rather than paying for a full build
+        # and CDN deploy on each one.
+        exclude:
+            - lab/public/bundle/manifest
 
 pr: none
 

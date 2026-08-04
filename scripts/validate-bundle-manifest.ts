@@ -12,11 +12,16 @@
  * for reasons unrelated to that PR. The only cure was a rebase plus a very slow
  * full local rebuild — repeated on every subsequent merge to master.
  *
- * The baseline is therefore CI-owned: `scripts/commit-bundle-manifest.ts` pushes
- * the freshly measured files back to the PR branch, so reviewers still see the
- * size deltas in the diff without any author busywork. This script's job is to
- * describe the drift (for the build log and for that auto-commit step), not to
- * fail the build.
+ * The baseline is therefore owned by **master**, and only by master: a dedicated
+ * master-triggered pipeline re-measures every scene after each merge and commits
+ * the result (`scripts/commit-bundle-manifest.ts`). PR branches never carry the
+ * manifest at all, which also removes what had become the repo's dominant source
+ * of merge conflicts — two branches rewriting the same ~200 generated files.
+ * Reviewers see the size impact in the bundle-size delta PR comment instead.
+ *
+ * On a PR branch this script therefore reports how the branch's inherited
+ * baseline differs from the fresh measurement — i.e. the size impact of the
+ * change. Drift is expected and is not something the author needs to fix.
  *
  * **Bundle-size regressions are still gated** — by the absolute per-scene
  * ceilings in `scene-config.json` (`maxRawKB`), which `pnpm build:bundle-scenes`
@@ -294,8 +299,11 @@ function main(): void {
 
     // Informational only. Per-scene ceilings (enforced byte-exactly by
     // `pnpm build:bundle-scenes`) are what gate a size regression; the manifest
-    // itself is refreshed by scripts/commit-bundle-manifest.ts.
-    console.log(`Bundle manifest drift detected — the CI auto-commit step will refresh it.\n${detail}`);
+    // is committed on master by scripts/commit-bundle-manifest.ts.
+    console.log(
+        `Bundle manifest drift detected — this is the size impact of the change, not a problem to fix.\n` +
+            `The baseline is refreshed on master after merge; leave lab/public/bundle/manifest/ out of the PR.\n${detail}`
+    );
     console.log("##vso[task.setvariable variable=BUNDLE_MANIFEST_STALE]true");
 }
 

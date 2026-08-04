@@ -1,0 +1,113 @@
+# Azure Pipelines — Bundle-Size Manifest Baseline
+#
+# Master is the single writer of the tracked per-scene bundle-size manifest
+# (`lab/public/bundle/manifest/<scene>.json`). This pipeline measures every scene
+# on each push to master and commits the result back.
+#
+# ── Why this exists ───────────────────────────────────────────────────────────
+#
+# The manifest used to be maintained by PR authors, which broke in two ways at
+# once, because nearly every shared-module change moves bytes in most of the ~230
+# scenes:
+#
+#   * Red CI — as soon as any shared-code PR merged, every other open PR's
+#     committed manifest was stale and its Bundle Size job went red for reasons
+#     that had nothing to do with that PR.
+#   * Merge conflicts — two branches that both regenerated the manifest rewrote
+#     the same ~200 tracked files and collided. In one representative PR, 168 of
+#     the 169 conflicting paths were manifest files and none were source.
+#
+# Giving the file exactly one writer removes both. It is safe to do because the
+# manifest gates nothing: the size ceilings live in `scene-config.json`, and the
+# master baseline used for PR delta comments is read straight out of
+# `origin/master` by `readMasterBundleManifestFromRef()`. So the manifest only
+# ever has to be correct on master — on a PR branch it is pure conflict surface.
+#
+# ── Loop safety ───────────────────────────────────────────────────────────────
+#
+# This pipeline's own bot commit touches nothing but the manifest directory,
+# which the path filter below excludes, so it cannot re-trigger this pipeline.
+# `MAX_CONSECUTIVE_AUTOCOMMITS` in the script is a second, independent guard in
+# case that filter is ever relaxed. A commit that changes both source and
+# manifest files still triggers a run, which is correct — the source changed.
+
+trigger:
+    branches:
+        include:
+            - master
+    paths:
+        exclude:
+            - lab/public/bundle/manifest
+
+pr: none
+
+variables:
+    # GITHUB_TOKEN (a PAT with contents:write, used to push the refreshed
+    # manifest) comes from the same variable groups as the PR pipeline. All three
+    # are listed so this pipeline resolves it identically to azure-pipelines.yml;
+    # each needs to be authorized for this pipeline once, in the ADO UI.
+    - group: BabylonJS-BrowserStack
+    - group: BabylonJS-Deployment
+    - group: BabylonJS-CI-Infrastructure
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "11.9.0"
+    - name: CI
+      value: "true"
+    - name: HEADLESS
+      value: "true"
+
+stages:
+    - stage: BundleManifest
+      displayName: "Bundle Manifest Baseline"
+      jobs:
+          - job: RefreshManifest
+            displayName: "Measure scenes and refresh the manifest on master"
+            timeoutInMinutes: 120
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm exec playwright install chromium
+                  displayName: "Install Playwright browsers"
+
+                # Same rolling URL->bytes asset cache as the PR job: the exact key
+                # never hits (so newly fetched assets are always saved at job end)
+                # while restoreKeys restores the most recent prefix match.
+                # Measurement re-fetches on a miss, so a cold cache is only slower.
+                - task: Cache@2
+                  displayName: "Cache remote scene assets"
+                  inputs:
+                      key: 'bundle-assets | v1 | "$(Build.BuildId)"'
+                      restoreKeys: |
+                          bundle-assets | v1
+                      path: $(System.DefaultWorkingDirectory)/.bundle-asset-cache
+
+                # Enforces the per-scene maxRawKB ceilings byte-exactly and fails
+                # the job when one is exceeded, so a breach can never be papered
+                # over by the refresh step below.
+                - script: pnpm build:bundle-scenes
+                  displayName: "Build bundle scenes"
+                  env:
+                      SKIP_BJS: "true"
+
+                - script: pnpm commit:bundle-manifest
+                  displayName: "Commit the refreshed manifest to master"
+                  continueOnError: true
+                  env:
+                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
+                      GITHUB_TOKEN: "$(GITHUB_TOKEN)"

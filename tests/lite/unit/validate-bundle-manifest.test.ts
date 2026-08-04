@@ -5,7 +5,7 @@ import { resolve } from "path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { collectDrift, diffRawSize, diffRuntimeChunks, stripChunkHash } from "../../../scripts/validate-bundle-manifest";
-import { countLeadingAutocommits, sanitizeLogMessage, shortBranchName } from "../../../scripts/commit-bundle-manifest";
+import { countLeadingAutocommits, parseCommitLog, sanitizeLogMessage, shortBranchName } from "../../../scripts/commit-bundle-manifest";
 
 const ROOT = resolve(__dirname, "../../..");
 const SCRIPT = resolve(ROOT, "scripts/validate-bundle-manifest.ts");
@@ -88,11 +88,25 @@ describe("commit-bundle-manifest helpers", () => {
         expect(shortBranchName("my-feature")).toBe("my-feature");
     });
 
-    it("counts only the leading run of bot commits", () => {
+    it("counts only the leading bot commits that measured this same revision", () => {
         const subject = "chore(bundle): refresh per-scene bundle-size manifest";
-        expect(countLeadingAutocommits([subject, subject, "feat: thing"])).toBe(2);
-        expect(countLeadingAutocommits(["feat: thing", subject])).toBe(0);
-        expect(countLeadingAutocommits([])).toBe(0);
+        const shaA = "a".repeat(40);
+        const shaB = "b".repeat(40);
+        const shaC = "c".repeat(40);
+        const bot = (sha: string) => `${subject}\u001fMeasured-from: ${sha}\u001e`;
+        const human = (s: string) => `${s}\u001f\u001e`;
+
+        const parse = (records: string[]) => parseCommitLog(records.join(""));
+
+        expect(countLeadingAutocommits(parse([bot(shaA), bot(shaA), human("feat: thing")]), shaA)).toBe(2);
+        expect(countLeadingAutocommits(parse([human("feat: thing"), bot(shaA)]), shaA)).toBe(0);
+        expect(countLeadingAutocommits(parse([]), shaA)).toBe(0);
+
+        // Concurrent master builds stack bot commits from *other* revisions. Those
+        // say nothing about our own measurement, so they neither count nor break
+        // the run.
+        expect(countLeadingAutocommits(parse([bot(shaB), bot(shaC)]), shaA)).toBe(0);
+        expect(countLeadingAutocommits(parse([bot(shaB), bot(shaA), bot(shaC), bot(shaA)]), shaA)).toBe(2);
     });
 
     it("flattens a multi-line git error into one Azure-safe log line", () => {

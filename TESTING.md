@@ -228,9 +228,16 @@ pnpm build:bundle-scenes
 pnpm test:bundle-size
 ```
 
-The tracked per-scene baseline under `lab/public/bundle/manifest/` is refreshed by
-CI (`pnpm commit:bundle-manifest` pushes it to the PR branch), so you do not need
-to regenerate it by hand. To check locally whether it is in sync:
+The tracked per-scene baseline under `lab/public/bundle/manifest/` is owned by
+**master**: `azure-pipelines-bundle-manifest.yml` re-measures every scene after
+each merge and commits the result. Never commit those files from a branch — if a
+local build dirties them, restore them before committing:
+
+```sh
+git checkout -- lab/public/bundle/manifest
+```
+
+To see how your change moves sizes:
 
 ```sh
 pnpm validate:bundle-manifest          # report drift, always exits 0

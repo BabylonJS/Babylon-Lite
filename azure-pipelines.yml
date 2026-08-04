@@ -252,7 +252,8 @@ stages:
                       SKIP_BJS: "true"
 
                 # Report how the freshly measured per-scene sizes differ from the
-                # manifest committed on the branch, then let the bot refresh it.
+                # manifest committed on the branch. Informational only — always
+                # exits 0.
                 #
                 # This used to hard-fail when the two disagreed, which made the job
                 # structurally unstable: a shared-module change moves bytes in most
@@ -264,17 +265,15 @@ stages:
                 # Size regressions are still gated: "Build bundle scenes" above
                 # enforces the per-scene maxRawKB ceilings byte-exactly and fails the
                 # job when one is exceeded. That check is deterministic and cannot go
-                # stale. The manifest is a generated baseline, so CI owns it — the
-                # deltas still land in the PR diff as a bot commit for reviewers.
+                # stale.
+                #
+                # Nothing here writes the manifest. It is owned exclusively by
+                # master (azure-pipelines-bundle-manifest.yml), which is what keeps
+                # ~200 generated files out of every PR diff and stops branches from
+                # conflicting on them. Reviewers see the size impact in the
+                # bundle-size delta comment posted below.
                 - script: pnpm validate:bundle-manifest
                   displayName: "Report bundle manifest drift"
-
-                - script: pnpm commit:bundle-manifest
-                  displayName: "Refresh bundle manifest on the PR branch"
-                  continueOnError: true
-                  env:
-                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
-                      GITHUB_TOKEN: "$(GITHUB_TOKEN)"
 
                 # Absolute ceiling checks (scene-config.json maxRawKB)
                 - script: npx playwright test tests/lite/parity/bundle-size.spec.ts --reporter=junit
