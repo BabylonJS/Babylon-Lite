@@ -259,6 +259,8 @@ export { setPbrAnisotropy } from "./material/pbr/set-anisotropy.js";
 export { setPbrGammaAlbedo } from "./material/pbr/set-gamma-albedo.js";
 export { setPbrSkybox } from "./material/pbr/set-skybox.js";
 export { setPbrAlphaCutoff } from "./material/pbr/set-alpha-cutoff.js";
+export { setPbrTransmission } from "./material/pbr/set-transmission.js";
+export { setPbrDispersion } from "./material/pbr/set-dispersion.js";
 export type { MetallicReflectanceOptions } from "./material/pbr/set-metallic-reflectance.js";
 export {
     createShaderMaterial,

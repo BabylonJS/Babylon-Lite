@@ -43,7 +43,7 @@ let th=(material.thicknessParams.x+ths*material.thicknessParams.y)*ts;`
 
     // Refracted environment sample. Dispersion splits the refracted ray into
     // per-RGB index-of-refraction offsets (chromatic aberration); that 3-ray WGSL
-    // is injected from a dynamically-imported module (see refraction-dispersion-wgsl.ts)
+    // is supplied by `setPbrDispersion` (see refraction-dispersion-wgsl.ts)
     // so non-dispersion transmission scenes keep the lean single-ray path below.
     const sampleLines =
         hasDispersion && dispersionSampleWgsl

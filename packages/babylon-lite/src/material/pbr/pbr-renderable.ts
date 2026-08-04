@@ -21,6 +21,7 @@ import { getOrCreatePbrBindings, getOrCreatePbrPipeline, createPbrMeshBindGroup,
 import {
     _registerPbrExt,
     _getPbrExts,
+    _getPbrSceneHooks,
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_ALPHA_BLEND,
     PBR2_NO_COLOR_OUTPUT,
@@ -96,7 +97,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // ── Single O(N) scan over meshes for all scene-wide feature flags ──
     // Flags are plain locals (not an object return) so terser can mangle their names.
     // Replaces ~11 sequential meshes.some() loops (was O(11N)).
-    let hasTransmissionRefraction = false;
     let needsEmissiveColor = false;
     let hasSomeSkeletons = false;
     let hasSomeMorphs = false;
@@ -110,8 +110,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps & { _hasUvTx?: boolean };
-        const refractionIntensity = mat._subsurface?.refraction?.intensity ?? 0;
-        hasTransmissionRefraction ||= refractionIntensity > 0 && !!mat.transmissive;
         needsEmissiveColor ||= !!mat.emissiveColor;
         hasSomeSkeletons ||= !!m.skeleton;
         hasSomeMorphs ||= !!m.morphTargets;
@@ -190,9 +188,12 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         }
     };
 
-    if (hasTransmissionRefraction) {
-        const mod = await import("./pbr-refraction.js");
-        await mod.R(scene as SceneContext, engine, _registerPbrExt);
+    // Scene-level PBR features (transmission) opt in via `_registerPbrSceneHook` from
+    // their setter, which has no scene context. Drained here — ahead of `_drainPbrExts`
+    // so hook-contributed exts keep their historical registration order. Each hook
+    // re-gates on `meshes` itself, so the shared chunk carries no feature predicate.
+    for (const hook of _getPbrSceneHooks()) {
+        await hook(scene as SceneContext, engine, meshes);
     }
     await _drainPbrExts([
         [needsEmissiveColor, () => import("./fragments/emissive-fragment.js")],

@@ -32,8 +32,10 @@
  *  PR 1 wires the data only — the PBR refraction shader path lands in PR 2.
  *  Until then, transmissive materials render as opaque. */
 import type { GltfFeature } from "./gltf-feature.js";
-import type { PbrMaterialProps, RefractionProps } from "../material/pbr/pbr-material.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { setPbrMetallicReflectance, type MetallicReflectanceOptions } from "../material/pbr/set-metallic-reflectance.js";
+import { setPbrTransmission } from "../material/pbr/set-transmission.js";
+import { setPbrDispersion } from "../material/pbr/set-dispersion.js";
 
 const ext: GltfFeature = {
     id: "KHR_materials_dielectric",
@@ -146,14 +148,17 @@ const ext: GltfFeature = {
         if (eTx) {
             const intensity: number = typeof eTx.transmissionFactor === "number" ? eTx.transmissionFactor : 0;
             if (intensity > 0 || transTex) {
-                out.transmissive = true;
-                const refraction: RefractionProps = {
+                // Route through the setter so the transmission scene hook (frame-graph
+                // rewiring + refraction ext) gets registered. Publishing `subsurface` onto
+                // `out` first lets the setter mutate it in place — the tail assignment
+                // below is then a no-op.
+                out._subsurface = subsurface;
+                setPbrTransmission(out, {
                     ...(subsurface.refraction ?? {}),
                     intensity,
                     useThicknessAsDepth: !!subsurface.thickness,
                     ...(transTex ? { texture: transTex } : undefined),
-                };
-                subsurface.refraction = refraction;
+                });
             }
         }
 
@@ -163,7 +168,8 @@ const ext: GltfFeature = {
         // number of 20, so the glTF dispersion value maps to strength = 20 / dispersion
         // (larger glTF dispersion ⇒ larger Abbe ⇒ weaker chromatic spread).
         if (eDisp && typeof eDisp.dispersion === "number" && eDisp.dispersion > 0 && subsurface.refraction && subsurface.thickness) {
-            subsurface.refraction = { ...subsurface.refraction, dispersion: 20.0 / eDisp.dispersion };
+            out._subsurface = subsurface;
+            setPbrDispersion(out, 20.0 / eDisp.dispersion);
         }
 
         if (Object.keys(subsurface).length > 0) {

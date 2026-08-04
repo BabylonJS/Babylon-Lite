@@ -97,3 +97,33 @@ export function _getPbrExtsSorted(): readonly PbrExt[] {
     }
     return _pbrExtsSorted;
 }
+
+// ─── Scene-level PBR setup hooks ────────────────────────────────────
+/** @internal A PBR feature that must mutate the *scene* (not just contribute a
+ *  `PbrExt`) before renderables are built — e.g. transmission, which retargets the
+ *  render task's colour buffer and appends a frame-graph task.
+ *
+ *  An opt-in setter runs at material-creation time and has no scene, so it registers
+ *  the hook instead of calling it; `buildPbrRenderables` drains the list with the
+ *  `scene`/`engine`/`meshes` it already holds. This is the same inversion `PbrExt`
+ *  uses for per-material work, and it keeps the feature's trigger predicate and
+ *  `import()` specifier out of the renderable's shared chunk.
+ *
+ *  The registry is per-runtime, so a hook fires for every mesh group once any material
+ *  opts in — each hook MUST re-check `meshes` and return early when its feature is
+ *  absent. */
+export type PbrSceneHook = (
+    scene: import("../../scene/scene.js").SceneContext,
+    engine: import("../../engine/engine.js").EngineContext,
+    meshes: readonly import("../../mesh/mesh.js").Mesh[]
+) => void | Promise<void>;
+
+let _pbrSceneHooks: Set<PbrSceneHook> | null = null;
+/** @internal Register a scene-setup hook. Idempotent (keyed by function identity). */
+export function _registerPbrSceneHook(hook: PbrSceneHook): void {
+    (_pbrSceneHooks ??= new Set()).add(hook);
+}
+/** @internal Iterate the registered scene-setup hooks. */
+export function _getPbrSceneHooks(): Iterable<PbrSceneHook> {
+    return _pbrSceneHooks ?? [];
+}
