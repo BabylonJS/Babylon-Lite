@@ -1,14 +1,14 @@
-# Azure Pipelines — Bundle-Size Manifest Baseline
+# Azure Pipelines — Bundle-Size Baseline
 #
-# Master is the single writer of the tracked per-scene bundle-size manifest
-# (`lab/public/bundle/manifest/<scene>.json`). This pipeline measures every scene
-# on each push to master and commits the result back.
+# Measures every scene on each push to master and publishes the aggregate
+# bundle-size manifest to public storage, where PR builds (and developers) read
+# it as the baseline for the "how did this change move bundle sizes" report.
 #
 # ── Why this exists ───────────────────────────────────────────────────────────
 #
-# The manifest used to be maintained by PR authors, which broke in two ways at
-# once, because nearly every shared-module change moves bytes in most of the ~230
-# scenes:
+# The baseline used to be ~227 JSON files tracked in git and refreshed by PR
+# authors. Because nearly every shared-module change moves bytes in most of the
+# ~230 scenes, that broke in two ways at once:
 #
 #   * Red CI — as soon as any shared-code PR merged, every other open PR's
 #     committed manifest was stale and its Bundle Size job went red for reasons
@@ -17,35 +17,33 @@
 #     the same ~200 tracked files and collided. In one representative PR, 168 of
 #     the 169 conflicting paths were manifest files and none were source.
 #
-# Giving the file exactly one writer removes both. It is safe to do because the
-# manifest gates nothing: the size ceilings live in `scene-config.json`, and the
-# master baseline used for PR delta comments is read straight out of
-# `origin/master` by `readMasterBundleManifestFromRef()`. So the manifest only
-# ever has to be correct on master — on a PR branch it is pure conflict surface.
+# Both failures come from the same root cause: a generated file living in git on
+# branches that have no reason to carry it. Publishing the baseline instead of
+# committing it removes the cause rather than managing the symptoms — there is no
+# tracked file to go stale and nothing for two branches to collide on.
 #
-# ── Loop safety ───────────────────────────────────────────────────────────────
+# Publishing (rather than pushing to master) also keeps CI out of the repo's
+# write path entirely: master is a protected branch, and the CI identity is
+# deliberately not allowed to bypass that protection.
 #
-# This pipeline's own bot commit touches nothing but the manifest directory,
-# which the path filter below excludes, so it cannot re-trigger this pipeline.
-# `MAX_CONSECUTIVE_AUTOCOMMITS` in the script is a second, independent guard in
-# case that filter is ever relaxed. A commit that changes both source and
-# manifest files still triggers a run, which is correct — the source changed.
+# It is safe because the baseline gates nothing. Size regressions are caught by
+# the absolute per-scene ceilings in `scene-config.json` (`maxRawKB`), which
+# `pnpm build:bundle-scenes` enforces byte-exactly. The baseline only powers the
+# advisory delta report, so if it is ever missing or stale the report is skipped
+# and no build fails.
 
 trigger:
     branches:
         include:
             - master
-    paths:
-        exclude:
-            - lab/public/bundle/manifest
 
 pr: none
 
 variables:
-    # GITHUB_TOKEN (a PAT with contents:write, used to push the refreshed
-    # manifest) comes from the same variable groups as the PR pipeline. All three
-    # are listed so this pipeline resolves it identically to azure-pipelines.yml;
-    # each needs to be authorized for this pipeline once, in the ADO UI.
+    # DEPLOYMENT_SERVER / DEPLOY_TOKEN / DEPLOY_ENDPOINT_UPLOAD and
+    # TOOLS_STORAGE_ACCOUNT come from these groups — the same upload path the
+    # playground uses for /v/versions.json. Each group needs to be authorized for
+    # this pipeline once, in the ADO UI.
     - group: BabylonJS-BrowserStack
     - group: BabylonJS-Deployment
     - group: BabylonJS-CI-Infrastructure
@@ -57,13 +55,26 @@ variables:
       value: "true"
     - name: HEADLESS
       value: "true"
+    # Public path the baseline is served from. Must stay in sync with
+    # DEFAULT_MASTER_MANIFEST_URL in scripts/bundle-scenes-core.ts.
+    # litePlayground maps to https://liteplayground.babylonjs.com/, so this is
+    # served at https://liteplayground.babylonjs.com/bundle-baseline/manifest.json
+    # The deploy server overlays at the given path, so the playground itself and
+    # its sibling /v/<ver>/ snapshots are untouched.
+    - name: baselineDeployPath
+      value: litePlayground/bundle-baseline
+    # CDN endpoint + profile — used only for the post-deploy purge.
+    - name: cdnEndpoint
+      value: lite-playground
+    - name: cdnProfile
+      value: $(CDN_PROFILE_TOOLS)
 
 stages:
-    - stage: BundleManifest
-      displayName: "Bundle Manifest Baseline"
+    - stage: BundleBaseline
+      displayName: "Bundle-Size Baseline"
       jobs:
-          - job: RefreshManifest
-            displayName: "Measure scenes and refresh the manifest on master"
+          - job: PublishBaseline
+            displayName: "Measure scenes and publish the baseline"
             timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
@@ -98,16 +109,51 @@ stages:
                       path: $(System.DefaultWorkingDirectory)/.bundle-asset-cache
 
                 # Enforces the per-scene maxRawKB ceilings byte-exactly and fails
-                # the job when one is exceeded, so a breach can never be papered
-                # over by the refresh step below.
+                # the job when one is exceeded, so a breach can never be published
+                # as the new baseline by the step below.
+                #
+                # BUNDLE_MASTER_MANIFEST_URL is blanked so this build does not
+                # fetch the previous baseline just to overwrite it.
                 - script: pnpm build:bundle-scenes
                   displayName: "Build bundle scenes"
                   env:
                       SKIP_BJS: "true"
+                      BUNDLE_MASTER_MANIFEST_URL: ""
 
-                - script: pnpm commit:bundle-manifest
-                  displayName: "Commit the refreshed manifest to master"
-                  continueOnError: true
-                  env:
-                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
-                      GITHUB_TOKEN: "$(GITHUB_TOKEN)"
+                # Publish the aggregate manifest to the same public storage that
+                # serves liteplayground.babylonjs.com, at a stable path. PR builds
+                # and local developers read it over plain HTTPS — no auth, no ADO
+                # artifact retention window, and it works for fork PRs.
+                #
+                # --fail-with-body so an upload rejection fails the step instead of
+                # silently leaving the baseline stale. The .json would otherwise be
+                # cached at the CDN default TTL, so purge it to keep PR deltas
+                # measured against the current master rather than a stale copy.
+                - script: |
+                      set -euo pipefail
+
+                      MANIFEST="$(System.DefaultWorkingDirectory)/lab/public/bundle/manifest.json"
+                      WORK="$(Build.ArtifactStagingDirectory)/bundle-baseline"
+
+                      if ! test -s "$MANIFEST"; then
+                        echo "No aggregate manifest at $MANIFEST — refusing to publish an empty baseline."
+                        exit 1
+                      fi
+
+                      SCENES="$(node -e 'process.stdout.write(String(Object.keys(require(process.argv[1])).length))' "$MANIFEST")"
+                      echo "Publishing bundle-size baseline for $SCENES scene(s)."
+
+                      mkdir -p "$WORK"
+                      cp "$MANIFEST" "$WORK/manifest.json"
+                      (cd "$WORK" && zip -j baseline.zip manifest.json)
+
+                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
+                        -H "Content-Type: multipart/form-data" \
+                        -H "Authorization: ******" \
+                        -F "path=$(baselineDeployPath)" \
+                        -F "storageAccount=$(TOOLS_STORAGE_ACCOUNT)" \
+                        -F "zip=@$WORK/baseline.zip"
+
+                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_PURGE)?endpoint=$(cdnEndpoint)&profileName=$(cdnProfile)" --fail-with-body -i -X POST \
+                        -H "Authorization: ******"
+                  displayName: "Publish bundle-size baseline"

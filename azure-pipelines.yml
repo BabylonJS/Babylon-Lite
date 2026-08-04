@@ -240,40 +240,20 @@ stages:
                           bundle-assets | v1
                       path: $(System.DefaultWorkingDirectory)/.bundle-asset-cache
 
-                - script: |
-                      TARGET_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-refs/heads/master}"
-                      TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
-                      git fetch origin "$TARGET_BRANCH:refs/remotes/origin/$TARGET_BRANCH" --depth=1
-                  displayName: "Fetch master bundle baseline"
-
+                # The master baseline for the delta report is published by
+                # azure-pipelines-bundle-manifest.yml to public storage, so it is
+                # fetched over plain HTTPS rather than read out of git. Nothing is
+                # tracked, so there is nothing for branches to conflict on and
+                # nothing that can go stale and turn this job red.
+                #
+                # build:bundle-scenes fetches it itself (see
+                # writeMasterBundleManifest); a missing baseline is not an error —
+                # the delta report is skipped and the ceiling checks below, which
+                # are what actually gate size, are unaffected.
                 - script: pnpm build:bundle-scenes
                   displayName: "Build bundle scenes"
                   env:
                       SKIP_BJS: "true"
-
-                # Report how the freshly measured per-scene sizes differ from the
-                # manifest committed on the branch. Informational only — always
-                # exits 0.
-                #
-                # This used to hard-fail when the two disagreed, which made the job
-                # structurally unstable: a shared-module change moves bytes in most
-                # of the ~230 scenes, so as soon as any such PR merged, every other
-                # open PR's committed manifest was stale and this job went red for
-                # reasons unrelated to that PR — curable only by a rebase plus a very
-                # slow full local rebuild, then again on the next merge to master.
-                #
-                # Size regressions are still gated: "Build bundle scenes" above
-                # enforces the per-scene maxRawKB ceilings byte-exactly and fails the
-                # job when one is exceeded. That check is deterministic and cannot go
-                # stale.
-                #
-                # Nothing here writes the manifest. It is owned exclusively by
-                # master (azure-pipelines-bundle-manifest.yml), which is what keeps
-                # ~200 generated files out of every PR diff and stops branches from
-                # conflicting on them. Reviewers see the size impact in the
-                # bundle-size delta comment posted below.
-                - script: pnpm validate:bundle-manifest
-                  displayName: "Report bundle manifest drift"
 
                 # Absolute ceiling checks (scene-config.json maxRawKB)
                 - script: npx playwright test tests/lite/parity/bundle-size.spec.ts --reporter=junit
