@@ -1,5 +1,6 @@
 {
   "rawKB": 154.5,
+  "rawBytes": 158181,
   "gzipKB": 65.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -24,7 +25,7 @@
     "scene253-gltf-feature-extras-VHPteGay.js",
     "scene253-gltf-feature-lights-punctual-DbskzDmW.js",
     "scene253-gltf-feature-morph-OgvZWqfo.js",
-    "scene253-gltf-feature-registry-Cl7RQdX3.js",
+    "scene253-gltf-feature-registry-FyqFr4rI.js",
     "scene253-gltf-feature-skeleton-DoxeSk03.js",
     "scene253-gltf-json-asset-CBZJXM3t.js",
     "scene253-gltf-light-pointer-state-B7kFTRxK.js",
@@ -35,22 +36,21 @@
     "scene253-iridescence-fragment-ChMtYpez.js",
     "scene253-light-base-CigsULGV.js",
     "scene253-light-matrix-BpE3lP6k.js",
-    "scene253-morph-fragment-BhgUscZl.js",
+    "scene253-morph-fragment-Dyq48Hqc.js",
     "scene253-multilight-wgsl-DLargEvA.js",
     "scene253-pbr-refraction-BIlbgb4B.js",
-    "scene253-pbr-renderable-G61V1lmY.js",
+    "scene253-pbr-renderable-8reqbvYS.js",
     "scene253-pbr-template-ext-CiHpOV5G.js",
     "scene253-pbr-transmission-ext-1jlaCBES.js",
     "scene253-reflectance-fragment-C5HtKmqP.js",
     "scene253-rgbd-decode-hJNa3Ibl.js",
     "scene253-scene-uniforms-FTYH6Ct0.js",
-    "scene253-skeleton-fragment-CsecEnlD.js",
+    "scene253-skeleton-fragment-BJx-xUEV.js",
     "scene253-spot-light-C1HAYeJi.js",
     "scene253-texture-2d-DQo3n8D6.js",
     "scene253-unlit-fragment-DWtvt7yQ.js",
     "scene253-uv-transform-fragment-B8ijWmAK.js",
     "scene253-visibility-d7IXewqL.js",
     "scene253.js"
-  ],
-  "rawBytes": 158181
+  ]
 }
