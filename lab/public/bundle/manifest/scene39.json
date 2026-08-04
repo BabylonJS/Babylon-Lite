@@ -1,5 +1,6 @@
 {
   "rawKB": 110.4,
+  "rawBytes": 113036,
   "gzipKB": 47.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -21,7 +22,7 @@
     "scene39-ibl-fragment-CeRrvT96.js",
     "scene39-light-base-CmbxR-6G.js",
     "scene39-light-matrix-CBTBdGsb.js",
-    "scene39-pbr-renderable-D08ATk2n.js",
+    "scene39-pbr-renderable-9R2jM7x1.js",
     "scene39-pbr-template-ext-CiHpOV5G.js",
     "scene39-rgbd-decode-DqA5PDQg.js",
     "scene39-scene-uniforms-FTYH6Ct0.js",
@@ -30,6 +31,5 @@
     "scene39-uv-transform-fragment-B8ijWmAK.js",
     "scene39-visibility-CqhPhaFC.js",
     "scene39.js"
-  ],
-  "rawBytes": 113036
+  ]
 }
