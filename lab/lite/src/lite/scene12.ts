@@ -59,7 +59,7 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
             baseColorTexture: baseColorTex,
             ormTexture: ormTex,
             occlusionStrength: 0.0,
-            metallicF0Factor: 0.95,
+            _metallicF0Factor: 0.95,
         });
         setPbrMetallicReflectance(mat, {
             color: [mrcR, mrcG, mrcB],

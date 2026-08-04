@@ -14,6 +14,6 @@ import { _registerPbrExt } from "./pbr-flags.js";
  *  fragment only renders when `subsurface.translucency` is present. Registers the
  *  subsurface extension globally (idempotent). Call before the scene is first built. */
 export function setPbrSubsurface(mat: Partial<PbrMaterialProps>, subsurface: SubSurfaceProps): void {
-    mat.subsurface = subsurface;
+    mat._subsurface = subsurface;
     _registerPbrExt(pbrExt);
 }

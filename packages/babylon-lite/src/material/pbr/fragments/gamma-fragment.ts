@@ -16,7 +16,7 @@ import { gammaBaseColor } from "../pbr-template-gamma.js";
  *  import of the decode module — the function travels with the ext object, which only
  *  exists once gamma-albedo is registered (via {@link setPbrGammaAlbedo}). */
 export interface GammaTemplateHooks {
-    /** Produce the sRGB (pow 2.2) base-color decode block. */
+    /** @internal Produce the sRGB (pow 2.2) base-color decode block. */
     readonly _gammaBaseColor: (baseColorFactorRgb: string, baseColorFactorAlpha: string, vertexColorMod: string) => string;
 }
 
@@ -28,6 +28,6 @@ export const pbrExt: PbrExt & GammaTemplateHooks = {
     phase: "fragment",
     _gammaBaseColor: gammaBaseColor,
     detect(mat) {
-        return { f: (mat as { gammaAlbedo?: boolean }).gammaAlbedo ? PBR_HAS_GAMMA_ALBEDO : 0, f2: 0 };
+        return { f: (mat as { _gammaAlbedo?: boolean })._gammaAlbedo ? PBR_HAS_GAMMA_ALBEDO : 0, f2: 0 };
     },
 };

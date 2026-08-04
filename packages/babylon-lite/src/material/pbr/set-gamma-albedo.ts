@@ -12,6 +12,6 @@ import { _registerPbrExt } from "./pbr-flags.js";
  *  before lighting). Registers the gamma-albedo extension globally (idempotent). Call
  *  before the scene is first built. */
 export function setPbrGammaAlbedo(mat: Partial<PbrMaterialProps>): void {
-    (mat as { gammaAlbedo?: boolean }).gammaAlbedo = true;
+    mat._gammaAlbedo = true;
     _registerPbrExt(pbrExt);
 }

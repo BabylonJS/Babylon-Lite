@@ -129,9 +129,9 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const _hasMorph = hasMesh(MSH_HAS_MORPH_TARGETS);
         const hasShadow = hasMesh(MSH_RECEIVE_SHADOWS);
         const _hasAnisotropy = has(PBR_HAS_ANISOTROPY);
-        const _anisoHooks = _hasAnisotropy ? (_getPbrExts().get("anisotropy") as (AnisoTemplateHooks | undefined)) : undefined;
-        const _gammaHooks = has(PBR_HAS_GAMMA_ALBEDO) ? (_getPbrExts().get("gamma-albedo") as (GammaTemplateHooks | undefined)) : undefined;
-        const _skyboxHooks = has(PBR_HAS_SKYBOX) ? (_getPbrExts().get("skybox") as (SkyboxTemplateHooks | undefined)) : undefined;
+        const _anisoHooks = _hasAnisotropy ? (_getPbrExts().get("anisotropy") as AnisoTemplateHooks | undefined) : undefined;
+        const _gammaHooks = has(PBR_HAS_GAMMA_ALBEDO) ? (_getPbrExts().get("gamma-albedo") as GammaTemplateHooks | undefined) : undefined;
+        const _skyboxHooks = has(PBR_HAS_SKYBOX) ? (_getPbrExts().get("skybox") as SkyboxTemplateHooks | undefined) : undefined;
         const _hasEmissiveColor = has(PBR_HAS_EMISSIVE_COLOR);
         const _hasEmissiveTexture = has(PBR_HAS_EMISSIVE);
         const hasTI = hasMesh(MSH_HAS_THIN_INSTANCES);

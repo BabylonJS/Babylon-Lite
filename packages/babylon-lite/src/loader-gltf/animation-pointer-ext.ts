@@ -61,7 +61,7 @@ const _extHandlers: [RegExp, PointerFactory][] = [
         /^\/materials\/(\d+)\/extensions\/KHR_materials_transmission\/transmissionFactor$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
-            const refr = mat?.subsurface?.refraction;
+            const refr = mat?._subsurface?.refraction;
             if (!mat || !refr) {
                 return null;
             }
@@ -87,11 +87,11 @@ const _extHandlers: [RegExp, PointerFactory][] = [
                 arity: 1,
                 writer: (out, off) => {
                     const ior = out[off]!;
-                    if (mat.subsurface?.refraction) {
-                        mat.subsurface.refraction.indexOfRefraction = ior;
+                    if (mat._subsurface?.refraction) {
+                        mat._subsurface.refraction.indexOfRefraction = ior;
                     }
-                    mat.metallicF0Factor = iorToF0Factor(ior);
-                    mat.specularWeight = 1.0;
+                    mat._metallicF0Factor = iorToF0Factor(ior);
+                    mat._specularWeight = 1.0;
                     mat._hasReflExt = true;
                     bump(mat);
                 },
@@ -103,13 +103,13 @@ const _extHandlers: [RegExp, PointerFactory][] = [
         /^\/materials\/(\d+)\/extensions\/KHR_materials_volume\/(thicknessFactor|attenuationDistance|attenuationColor)$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
-            if (!mat?.subsurface) {
+            if (!mat?._subsurface) {
                 return null;
             }
             return {
                 arity: m[2] === "attenuationColor" ? 3 : 1,
                 writer: (out, off) => {
-                    const ss = mat.subsurface!;
+                    const ss = mat._subsurface!;
                     if (m[2] === "thicknessFactor") {
                         ss.thickness ??= { min: 0, max: 0, useGlTFChannel: true };
                         ss.thickness.max = out[off]!;
@@ -134,7 +134,7 @@ const _extHandlers: [RegExp, PointerFactory][] = [
         /^\/materials\/(\d+)\/extensions\/KHR_materials_iridescence\/(iridescenceFactor|iridescenceIor|iridescenceThicknessMaximum)$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
-            const iri = mat?.iridescence;
+            const iri = mat?._iridescence;
             if (!mat || !iri) {
                 return null;
             }
@@ -232,31 +232,31 @@ export function seedExtMaterials(json: any, map: (PointerMaterial | undefined)[]
         }
         if (transmissionAnimated.has(matIdx)) {
             pm.transmissive = true;
-            pm.subsurface ??= {};
-            pm.subsurface.refraction ??= {
+            pm._subsurface ??= {};
+            pm._subsurface.refraction ??= {
                 intensity: def?.extensions?.KHR_materials_transmission?.transmissionFactor ?? 0,
                 indexOfRefraction: def?.extensions?.KHR_materials_ior?.ior ?? 1.5,
             };
         }
         if (iorAnimated.has(matIdx)) {
-            pm.subsurface ??= {};
-            pm.subsurface.refraction ??= { intensity: 0, indexOfRefraction: def?.extensions?.KHR_materials_ior?.ior ?? 1.5 };
+            pm._subsurface ??= {};
+            pm._subsurface.refraction ??= { intensity: 0, indexOfRefraction: def?.extensions?.KHR_materials_ior?.ior ?? 1.5 };
             const ior = def?.extensions?.KHR_materials_ior?.ior ?? 1.5;
-            pm.metallicF0Factor = iorToF0Factor(ior);
-            pm.specularWeight = 1.0;
+            pm._metallicF0Factor = iorToF0Factor(ior);
+            pm._specularWeight = 1.0;
             pm._hasReflExt = true;
         }
         if (volumeThicknessAnimated.has(matIdx) || volumeTintAnimated.has(matIdx)) {
-            pm.subsurface ??= {};
+            pm._subsurface ??= {};
             const eVol = def?.extensions?.KHR_materials_volume;
             if (volumeThicknessAnimated.has(matIdx)) {
-                pm.subsurface.thickness ??= { min: 0, max: eVol?.thicknessFactor ?? 0, useGlTFChannel: true };
-                if (pm.subsurface.refraction) {
-                    pm.subsurface.refraction.useThicknessAsDepth = true;
+                pm._subsurface.thickness ??= { min: 0, max: eVol?.thicknessFactor ?? 0, useGlTFChannel: true };
+                if (pm._subsurface.refraction) {
+                    pm._subsurface.refraction.useThicknessAsDepth = true;
                 }
             }
             if (volumeTintAnimated.has(matIdx)) {
-                pm.subsurface.tint ??= { color: eVol?.attenuationColor ?? [1, 1, 1], atDistance: eVol?.attenuationDistance ?? 1 };
+                pm._subsurface.tint ??= { color: eVol?.attenuationColor ?? [1, 1, 1], atDistance: eVol?.attenuationDistance ?? 1 };
             }
         }
     }

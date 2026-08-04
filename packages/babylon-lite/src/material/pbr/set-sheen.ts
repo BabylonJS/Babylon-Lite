@@ -12,6 +12,6 @@ import { _registerPbrExt } from "./pbr-flags.js";
 /** Add a soft velvet-like sheen layer (fabric, cloth) to `mat`. Registers the sheen
  *  extension globally (idempotent). Call before the scene is first built. */
 export function setPbrSheen(mat: Partial<PbrMaterialProps>, sheen: SheenProps): void {
-    mat.sheen = sheen;
+    mat._sheen = sheen;
     _registerPbrExt(pbrExt);
 }

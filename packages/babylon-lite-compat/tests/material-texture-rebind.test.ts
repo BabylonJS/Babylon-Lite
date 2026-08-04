@@ -172,7 +172,7 @@ describe("PBRMaterial texture-readiness rebuild (issue #476b)", () => {
         // the PBR solid ORM texture is synthesized against the scene engine, and the
         // renderables rebuild through Lite's rebuildMaterial.
         expect((mat._lite as { baseColorTexture?: unknown }).baseColorTexture).toBe(handle);
-        expect((mat._lite as { gammaAlbedo?: unknown }).gammaAlbedo).toBe(true);
+        expect((mat._lite as { _gammaAlbedo?: unknown })._gammaAlbedo).toBe(true);
         expect(liteMocks.createSolidTexture2D).toHaveBeenCalledWith(engineLite, 1, 1, 1);
         expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, mat._lite);
     });

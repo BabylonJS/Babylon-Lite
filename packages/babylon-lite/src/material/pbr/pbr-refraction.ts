@@ -10,7 +10,7 @@ export async function R(scene: SceneContext, engine: EngineContext, register: (e
     // string is injected into the refraction fragment (no shared module mutation).
     let dispersionSampleWgsl: string | undefined;
     for (const mesh of scene.meshes) {
-        const refr = (mesh.material as PbrMaterialProps | undefined)?.subsurface?.refraction;
+        const refr = (mesh.material as PbrMaterialProps | undefined)?._subsurface?.refraction;
         if (refr?.dispersion) {
             dispersionSampleWgsl = (await import("./fragments/refraction-dispersion-wgsl.js")).DISPERSION_SAMPLE_WGSL;
             break;

@@ -110,7 +110,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps & { _hasUvTx?: boolean };
-        const refractionIntensity = mat.subsurface?.refraction?.intensity ?? 0;
+        const refractionIntensity = mat._subsurface?.refraction?.intensity ?? 0;
         hasTransmissionRefraction ||= refractionIntensity > 0 && !!mat.transmissive;
         needsEmissiveColor ||= !!mat.emissiveColor;
         hasSomeSkeletons ||= !!m.skeleton;
@@ -125,11 +125,11 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasAnyUv2 ||= !!m._gpu.uv2Buffer && !!(mat as { _uv2Mask?: number })._uv2Mask;
         hasAnyVertexColor ||= !!m._gpu.colorBuffer;
         hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
-        hasGammaAlbedo ||= !!mat.gammaAlbedo;
+        hasGammaAlbedo ||= !!mat._gammaAlbedo;
     }
     const group = scene._groups.get(meshes[0]!.material!._buildGroup)!;
     if (!hasGammaAlbedo || !group.r) {
-        group._w = hasGammaAlbedo ? null : (mesh) => (mesh.material as PbrMaterialProps | null)?.gammaAlbedo;
+        group._w = hasGammaAlbedo ? null : (mesh) => (mesh.material as PbrMaterialProps | null)?._gammaAlbedo;
     }
 
     // ── Dynamically import fragment creators based on scene capabilities ──

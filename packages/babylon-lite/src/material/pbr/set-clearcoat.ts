@@ -16,6 +16,6 @@ import { _registerPbrExt } from "./pbr-flags.js";
  *  renders it. Call on the material returned by `createPbrMaterial` (or on the props
  *  before creating it), before the scene is first built. */
 export function setPbrClearCoat(mat: Partial<PbrMaterialProps>, clearCoat: ClearCoatProps): void {
-    mat.clearCoat = clearCoat;
+    mat._clearCoat = clearCoat;
     _registerPbrExt(pbrExt);
 }

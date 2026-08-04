@@ -31,22 +31,22 @@ export interface MetallicReflectanceOptions {
  *  globally (idempotent). Call before the scene is first built. */
 export function setPbrMetallicReflectance(mat: Partial<PbrMaterialProps>, options: MetallicReflectanceOptions): void {
     if (options.color) {
-        mat.metallicReflectanceColor = options.color;
+        mat._metallicReflectanceColor = options.color;
     }
     if (options.texture) {
-        mat.metallicReflectanceTexture = options.texture;
+        mat._metallicReflectanceTexture = options.texture;
     }
     if (options.reflectanceTexture) {
-        mat.reflectanceTexture = options.reflectanceTexture;
+        mat._reflectanceTexture = options.reflectanceTexture;
     }
     if (options.f0Factor !== undefined) {
-        mat.metallicF0Factor = options.f0Factor;
+        mat._metallicF0Factor = options.f0Factor;
     }
     if (options.specularWeight !== undefined) {
-        mat.specularWeight = options.specularWeight;
+        mat._specularWeight = options.specularWeight;
     }
     if (options.useOnlyMetallicFromTexture !== undefined) {
-        mat.useOnlyMetallicFromMetallicReflectanceTexture = options.useOnlyMetallicFromTexture;
+        mat._useOnlyMetallicFromMetallicReflectanceTexture = options.useOnlyMetallicFromTexture;
     }
     _registerPbrExt(pbrExt);
 }

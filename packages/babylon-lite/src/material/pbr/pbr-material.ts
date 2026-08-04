@@ -109,53 +109,53 @@ export interface PbrMaterialProps extends Material {
     occlusionTexture?: Texture2D;
     /** @internal Scales dielectric F0 (default 1.0). Maps to BJS metallicF0Factor.
      *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
-    metallicF0Factor?: number;
+    _metallicF0Factor?: number;
     /** @internal Grazing specular/F90 weight (default follows metallicF0Factor for legacy callers).
      *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
-    specularWeight?: number;
+    _specularWeight?: number;
     /** @internal Tints dielectric reflectance (linear RGB, default [1,1,1]). Maps to BJS metallicReflectanceColor.
      *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
-    metallicReflectanceColor?: [number, number, number];
+    _metallicReflectanceColor?: [number, number, number];
     /** @internal Texture whose RGB tints reflectance and A scales F0. Maps to BJS metallicReflectanceTexture.
      *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
-    metallicReflectanceTexture?: Texture2D;
+    _metallicReflectanceTexture?: Texture2D;
     /** @internal Texture whose RGB tints reflectance only. Maps to BJS reflectanceTexture.
      *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
-    reflectanceTexture?: Texture2D;
+    _reflectanceTexture?: Texture2D;
     /** @internal When true + both reflectance textures set, metallicReflectanceTexture only contributes A (F0 scalar).
      *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
-    useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
+    _useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
     /** Enable specular anti-aliasing on IBL alphaG (matches BJS SPECULARAA). Default false.
      *  Set automatically by the glTF loader for materials loaded from glTF files. */
     enableSpecularAA?: boolean;
     /** @internal Clearcoat layer configuration. Set via {@link setPbrClearCoat}, which
      *  registers the extension so the renderer detects and renders it. Adds a glossy
      *  transparent top layer (car paint, lacquer). Tree-shakable — only bundled when used. */
-    clearCoat?: ClearCoatProps;
+    _clearCoat?: ClearCoatProps;
     /** @internal Sheen layer configuration. Set via {@link setPbrSheen}, which registers
      *  the extension. Adds a soft velvet-like sheen layer (like fabric or cloth).
      *  Tree-shakable — only bundled when used. */
-    sheen?: SheenProps;
+    _sheen?: SheenProps;
     /** @internal Iridescence thin-film configuration. Set via {@link setPbrIridescence},
      *  which registers the extension. Replaces base-layer F0 with a wavelength-dependent
      *  thin-film Fresnel blend. Maps to BJS PBRMaterial.iridescence and
      *  KHR_materials_iridescence. Tree-shakable — only bundled when used. */
-    iridescence?: IridescenceProps;
+    _iridescence?: IridescenceProps;
     /** @internal When true, the albedo texture is in sRGB/gamma space (loaded as rgba8unorm)
      *  and the shader applies pow(baseColor, 2.2) for sRGB→linear conversion. Set via
      *  {@link setPbrGammaAlbedo}, which registers the extension. Tree-shakable — only bundled
      *  when used. Matches BJS PBRMaterial's Texture.gammaSpace=true behavior. When unset
      *  (default), assumes the texture already provides linear values (e.g. rgba8unorm-srgb
      *  format or glTF sRGB textures). */
-    gammaAlbedo?: boolean;
+    _gammaAlbedo?: boolean;
     /** @internal Anisotropy configuration. Set via {@link setPbrAnisotropy}, which
      *  registers the extension. When isEnabled=true, stretches specular highlights along
      *  a preferred direction. Tree-shakable — only bundled when used. */
-    anisotropy?: AnisotropyProps;
+    _anisotropy?: AnisotropyProps;
     /** @internal Subsurface configuration. Translucency is set via {@link setPbrSubsurface},
      *  which registers the extension. Presence of nested sub-features (translucency, scattering)
      *  enables them — no isEnabled booleans needed. Tree-shakable — only bundled when used. */
-    subsurface?: SubSurfaceProps;
+    _subsurface?: SubSurfaceProps;
     /** True transmissive surface: render task provides a scene-color refraction texture
      *  just before this material draws. Set by KHR_materials_transmission. */
     transmissive?: boolean;
@@ -164,34 +164,34 @@ export interface PbrMaterialProps extends Material {
      *  {@link setPbrSkybox}, which registers the extension. Tree-shakable — only bundled when
      *  used. Used for PBR skybox boxes where the mesh surrounds the camera and should display
      *  the environment directly. Also zeroes SH irradiance — skybox is pure cubemap + BRDF only. */
-    skyboxMode?: boolean;
+    _skyboxMode?: boolean;
     /** @internal When true, the material is unlit — the base color is output directly,
      *  bypassing all lighting, IBL, tonemap, and shading calculations. Set via
      *  {@link setPbrUnlit}, which registers the extension. Matches `KHR_materials_unlit`
      *  glTF extension. Alpha handling is preserved. */
-    unlit?: boolean;
+    _unlit?: boolean;
     /** @internal Linear-RGB tint applied to baseColor when `unlit` is true (i.e. glTF
      *  `baseColorFactor`). Set via {@link setPbrUnlit}. When omitted or [1,1,1], no tint
      *  is applied. Only bundled/bound when the unlit extension is active. */
-    unlitColor?: [number, number, number];
+    _unlitColor?: [number, number, number];
     /** @internal Set via {@link setShadowOnly}. When true, the material is a shadow-only
      *  receiver: the surface is invisible except where a shadow is cast on it, where it
      *  appears in `shadowOnlyColor` (or black when omitted). Mirrors BJS
      *  `BackgroundMaterial.shadowOnly`. Requires `receiveShadows` on the mesh and at least
      *  one shadow-casting light. Implies alpha-blended rendering. Setting this field
      *  directly (without `setShadowOnly`) will NOT register the shadow-only extension. */
-    shadowOnly?: boolean;
+    _shadowOnly?: boolean;
     /** @internal Set via {@link setShadowOnly}. Linear-RGB color shown where the shadow
      *  falls. Defaults to black (`[0, 0, 0]`). */
-    shadowOnlyColor?: [number, number, number];
+    _shadowOnlyColor?: [number, number, number];
     /** @internal Set via {@link setShadowOnly}. Maximum opacity at the darkest part of the
      *  shadow. Range [0, 1]. Default 1.0. Mirrors the `shadowLevel` parameter on BJS
      *  `BackgroundMaterial.shadowOnly`. */
-    shadowOnlyOpacity?: number;
+    _shadowOnlyOpacity?: number;
     /** @internal Set via {@link setShadowOnly}. Falloff sharpness for the shadow's soft
      *  edges. Default 1.0. Higher values steepen the falloff (crisper visible edges).
      *  `alpha = saturate((1 - shadowFactor) * falloff) * opacity`. */
-    shadowOnlyFalloff?: number;
+    _shadowOnlyFalloff?: number;
     /** @internal True when any of the material's textures carries `_hasTx=true`
      *  (KHR_texture_transform). Stamped once by the glTF loader's slow path
      *  so the renderer doesn't re-scan 5 textures per mesh. */

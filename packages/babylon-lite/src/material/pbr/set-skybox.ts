@@ -13,6 +13,6 @@ import { _registerPbrExt } from "./pbr-flags.js";
  *  (idempotent). Requires the scene to have an environment (IBL). Call before the scene is
  *  first built. */
 export function setPbrSkybox(mat: Partial<PbrMaterialProps>): void {
-    (mat as { skyboxMode?: boolean }).skyboxMode = true;
+    mat._skyboxMode = true;
     _registerPbrExt(pbrExt);
 }

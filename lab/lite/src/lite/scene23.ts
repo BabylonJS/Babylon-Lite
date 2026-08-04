@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     if (isNaN(seekTimeParam)) {
         onBeforeRender(scene, () => {
             a += 0.01;
-            material.anisotropy!.intensity = Math.cos(a) * 0.5 + 0.5;
+            material._anisotropy!.intensity = Math.cos(a) * 0.5 + 0.5;
         });
     }
 

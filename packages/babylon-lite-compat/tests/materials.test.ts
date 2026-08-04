@@ -114,7 +114,7 @@ describe("Material.clone", () => {
         expect(clone.clearCoat.isEnabled).toBe(true);
         expect(clone.clearCoat.intensity).toBeCloseTo(0.4);
         // Sub-config object is copied, not shared.
-        expect(clone._lite.clearCoat).not.toBe(mat._lite.clearCoat);
+        expect(clone._lite._clearCoat).not.toBe(mat._lite._clearCoat);
         clone.clearCoat.intensity = 0.9;
         expect(mat.clearCoat.intensity).toBeCloseTo(0.4);
     });
@@ -246,11 +246,11 @@ describe("Material.getActiveTextures", () => {
         mat.albedoTexture = albedo;
         mat.sheen.texture = sheenTex;
         expect(mat.sheen.texture).toBe(sheenTex);
-        expect(mat._lite.sheen?.texture).toBe(sheenTex._lite);
+        expect(mat._lite._sheen?.texture).toBe(sheenTex._lite);
         expect(mat.getActiveTextures()).toEqual([albedo, sheenTex]);
 
         mat.sheen.texture = null;
-        expect(mat._lite.sheen?.texture).toBeUndefined();
+        expect(mat._lite._sheen?.texture).toBeUndefined();
         expect(mat.getActiveTextures()).toEqual([albedo]);
     });
 

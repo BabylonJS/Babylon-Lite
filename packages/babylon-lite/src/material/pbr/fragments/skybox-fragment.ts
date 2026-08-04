@@ -16,7 +16,7 @@ import { IBL_SKYBOX_CALCULATION } from "./ibl-skybox-wgsl.js";
  *  import of the skybox module — the string travels with the ext object, which only exists
  *  once skybox-mode is registered (via {@link setPbrSkybox}). */
 export interface SkyboxTemplateHooks {
-    /** Skybox IBL-sampling WGSL injected into the IBL calculation. */
+    /** @internal Skybox IBL-sampling WGSL injected into the IBL calculation. */
     readonly _skyboxCalc: string;
 }
 
@@ -28,6 +28,6 @@ export const pbrExt: PbrExt & SkyboxTemplateHooks = {
     phase: "fragment",
     _skyboxCalc: IBL_SKYBOX_CALCULATION,
     detect(mat) {
-        return { f: (mat as { skyboxMode?: boolean }).skyboxMode ? PBR_HAS_SKYBOX : 0, f2: 0 };
+        return { f: (mat as { _skyboxMode?: boolean })._skyboxMode ? PBR_HAS_SKYBOX : 0, f2: 0 };
     },
 };

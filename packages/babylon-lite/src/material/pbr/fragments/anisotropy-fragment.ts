@@ -115,13 +115,13 @@ let R_raw = reflect(-V, anisoBentNormal);`;
  *  strings travel with the ext object, which only exists once anisotropy is registered
  *  (via {@link setPbrAnisotropy} or the glTF KHR_materials_anisotropy handler). */
 export interface AnisoTemplateHooks {
-    /** Anisotropic BRDF helper functions (top-of-shader). */
+    /** @internal Anisotropic BRDF helper functions (top-of-shader). */
     readonly _anisoBrdf: string;
-    /** Tangent/bitangent computation block for the given normal/texture mode. */
+    /** @internal Tangent/bitangent computation block for the given normal/texture mode. */
     readonly _anisoTB: (hasNormal: boolean, hasTexture: boolean) => string;
-    /** IBL bent-normal computation. */
+    /** @internal IBL bent-normal computation. */
     readonly _anisoBentNormal: string;
-    /** features2 bit set when an anisotropyTexture is present. */
+    /** @internal features2 bit set when an anisotropyTexture is present. */
     readonly _anisoTexBit: number;
 }
 
@@ -138,7 +138,7 @@ export const pbrExt: PbrExt & AnisoTemplateHooks = {
     _anisoBentNormal: ANISO_BENT_NORMAL,
     _anisoTexBit: PBR2_HAS_ANISO_TEX,
     detect(mat) {
-        const aniso = (mat as PbrMaterialProps).anisotropy;
+        const aniso = (mat as PbrMaterialProps)._anisotropy;
         if (!aniso?.isEnabled) {
             return { f: 0, f2: 0 };
         }
@@ -160,7 +160,7 @@ export const pbrExt: PbrExt & AnisoTemplateHooks = {
         return frag;
     },
     writeUbo(data: Float32Array, material: unknown, offsets: ReadonlyMap<string, number>): void {
-        const aniso = (material as PbrMaterialProps).anisotropy;
+        const aniso = (material as PbrMaterialProps)._anisotropy;
         if (!aniso?.isEnabled || !offsets.has("anisotropyParams")) {
             return;
         }
@@ -201,7 +201,7 @@ export const pbrExt: PbrExt & AnisoTemplateHooks = {
         data[ti + 3] = 0;
     },
     bind(ctx, entries, b) {
-        const aniso = (ctx._material as PbrMaterialProps).anisotropy;
+        const aniso = (ctx._material as PbrMaterialProps)._anisotropy;
         if ((ctx._features2 & PBR2_HAS_ANISO_TEX) === 0 || !aniso?.texture) {
             return b;
         }
@@ -210,7 +210,7 @@ export const pbrExt: PbrExt & AnisoTemplateHooks = {
         return b;
     },
     textures(mat, out) {
-        const aniso = (mat as PbrMaterialProps).anisotropy;
+        const aniso = (mat as PbrMaterialProps)._anisotropy;
         if (aniso?.texture) {
             out.push(aniso.texture);
         }

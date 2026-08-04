@@ -64,7 +64,7 @@ const ext: GltfFeature = {
         ]);
 
         const out: Partial<PbrMaterialProps> = {};
-        const subsurface: NonNullable<PbrMaterialProps["subsurface"]> = {};
+        const subsurface: NonNullable<PbrMaterialProps["_subsurface"]> = {};
         // Dielectric-reflectance fields are collected here and applied once at the end via
         // setPbrMetallicReflectance, which writes them onto `out` AND registers the
         // reflectance ext (fragment statically imported by the setter). `hasRefl` mirrors
@@ -167,7 +167,7 @@ const ext: GltfFeature = {
         }
 
         if (Object.keys(subsurface).length > 0) {
-            out.subsurface = subsurface;
+            out._subsurface = subsurface;
         }
         // Apply the reflectance ext when any dielectric-reflectance field was populated.
         // setPbrMetallicReflectance writes the fields onto `out` and registers the ext.

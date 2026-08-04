@@ -13,6 +13,6 @@ import { _registerPbrExt } from "./pbr-flags.js";
 /** Add anisotropy (direction-dependent specular highlight stretching) to `mat`. Registers
  *  the anisotropy extension globally (idempotent). Call before the scene is first built. */
 export function setPbrAnisotropy(mat: Partial<PbrMaterialProps>, anisotropy: AnisotropyProps): void {
-    mat.anisotropy = anisotropy;
+    mat._anisotropy = anisotropy;
     _registerPbrExt(pbrExt);
 }

@@ -13,6 +13,6 @@ import { _registerPbrExt } from "./pbr-flags.js";
  *  Registers the iridescence extension globally (idempotent). Call before the scene is
  *  first built. */
 export function setPbrIridescence(mat: Partial<PbrMaterialProps>, iridescence: IridescenceProps): void {
-    mat.iridescence = iridescence;
+    mat._iridescence = iridescence;
     _registerPbrExt(pbrExt);
 }

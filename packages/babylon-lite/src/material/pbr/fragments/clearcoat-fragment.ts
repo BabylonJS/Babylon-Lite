@@ -2,7 +2,7 @@
  * Clearcoat Fragment
  *
  * Adds a glossy transparent top layer (like car paint or lacquered surfaces).
- * Only bundled when a scene uses PbrMaterialProps.clearCoat.
+ * Only bundled when a scene uses PbrMaterialProps._clearCoat.
  *
  * Math follows BJS PBRClearCoatConfiguration:
  *  - F0 from IOR: ((1-ior)/(1+ior))^2
@@ -256,7 +256,7 @@ export function createClearcoatFragment(features: number, features2: number, has
 
 /** Write the clearcoat material-UBO slice (ccParams + ccParams2). */
 export function writeClearcoatUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
-    const cc = material.clearCoat as ClearCoatProps | undefined;
+    const cc = material._clearCoat as ClearCoatProps | undefined;
     if (!cc?.isEnabled || !offsets.has("ccParams")) {
         return;
     }
@@ -322,7 +322,7 @@ export const pbrExt: PbrExt = {
     id: "clearcoat",
     phase: "base-tex",
     detect(mat) {
-        const cc = (mat as PbrMaterialProps).clearCoat as ClearCoatProps | undefined;
+        const cc = (mat as PbrMaterialProps)._clearCoat as ClearCoatProps | undefined;
         if (!cc?.isEnabled) {
             return { f: 0, f2: 0 };
         }
@@ -348,7 +348,7 @@ export const pbrExt: PbrExt = {
     frag: (ctx) => createClearcoatFragment(ctx._features, ctx._features2, ctx._hasIbl, ctx._hasAnyNormal, ctx._hasSpecularAA),
     writeUbo: writeClearcoatUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {
-        const cc = (ctx._material as PbrMaterialProps).clearCoat as ClearCoatProps | undefined;
+        const cc = (ctx._material as PbrMaterialProps)._clearCoat as ClearCoatProps | undefined;
         if (!cc) {
             return b;
         }
@@ -362,7 +362,7 @@ export const pbrExt: PbrExt = {
         return b;
     },
     textures(mat, t) {
-        const cc = (mat as PbrMaterialProps).clearCoat;
+        const cc = (mat as PbrMaterialProps)._clearCoat;
         if (!cc) {
             return;
         }

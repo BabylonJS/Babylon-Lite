@@ -671,10 +671,10 @@ export class PBRMaterial extends PushMaterial {
      */
     public get clearCoat(): PBRClearCoatConfiguration {
         if (!this._clearCoat) {
-            if (!this._lite.clearCoat) {
-                this._lite.clearCoat = { isEnabled: false };
+            if (!this._lite._clearCoat) {
+                this._lite._clearCoat = { isEnabled: false };
             }
-            this._clearCoat = new PBRClearCoatConfiguration(this._lite.clearCoat, () => this._markDirty());
+            this._clearCoat = new PBRClearCoatConfiguration(this._lite._clearCoat, () => this._markDirty());
         }
         return this._clearCoat;
     }
@@ -684,10 +684,10 @@ export class PBRMaterial extends PushMaterial {
     /** Babylon.js `pbr.sheen` sub-configuration (Lite `SheenProps`). */
     public get sheen(): PBRSheenConfiguration {
         if (!this._sheen) {
-            if (!this._lite.sheen) {
-                this._lite.sheen = { isEnabled: false };
+            if (!this._lite._sheen) {
+                this._lite._sheen = { isEnabled: false };
             }
-            this._sheen = new PBRSheenConfiguration(this._lite.sheen, () => this._markDirty());
+            this._sheen = new PBRSheenConfiguration(this._lite._sheen, () => this._markDirty());
         }
         return this._sheen;
     }
@@ -697,10 +697,10 @@ export class PBRMaterial extends PushMaterial {
     /** Babylon.js `pbr.anisotropy` sub-configuration (Lite `AnisotropyProps`). */
     public get anisotropy(): PBRAnisotropicConfiguration {
         if (!this._anisotropy) {
-            if (!this._lite.anisotropy) {
-                this._lite.anisotropy = { isEnabled: false };
+            if (!this._lite._anisotropy) {
+                this._lite._anisotropy = { isEnabled: false };
             }
-            this._anisotropy = new PBRAnisotropicConfiguration(this._lite.anisotropy, () => this._markDirty());
+            this._anisotropy = new PBRAnisotropicConfiguration(this._lite._anisotropy, () => this._markDirty());
         }
         return this._anisotropy;
     }
@@ -710,10 +710,10 @@ export class PBRMaterial extends PushMaterial {
     /** Babylon.js `pbr.iridescence` sub-configuration (Lite `IridescenceProps`). */
     public get iridescence(): PBRIridescenceConfiguration {
         if (!this._iridescence) {
-            if (!this._lite.iridescence) {
-                this._lite.iridescence = { isEnabled: false };
+            if (!this._lite._iridescence) {
+                this._lite._iridescence = { isEnabled: false };
             }
-            this._iridescence = new PBRIridescenceConfiguration(this._lite.iridescence, () => this._markDirty());
+            this._iridescence = new PBRIridescenceConfiguration(this._lite._iridescence, () => this._markDirty());
         }
         return this._iridescence;
     }
@@ -755,7 +755,7 @@ export class PBRMaterial extends PushMaterial {
         if (albedo?._lite) {
             lite.baseColorTexture = albedo._lite;
             lite.baseColorFactor = [...this._albedoFactor];
-            lite.gammaAlbedo = albedo.gammaSpace ?? true;
+            lite._gammaAlbedo = albedo.gammaSpace ?? true;
         }
         // Babylon Lite's PBR pipeline samples baseColorTexture/ormTexture unconditionally,
         // so a factor-only Babylon.js PBR material (colours but no maps) must be backed by
@@ -801,17 +801,17 @@ export class PBRMaterial extends PushMaterial {
         target._albedoTexture = this._albedoTexture;
         const src = this._lite;
         const dst = target._lite;
-        if (src.clearCoat) {
-            dst.clearCoat = { ...src.clearCoat };
+        if (src._clearCoat) {
+            dst._clearCoat = { ...src._clearCoat };
         }
-        if (src.sheen) {
-            dst.sheen = { ...src.sheen };
+        if (src._sheen) {
+            dst._sheen = { ...src._sheen };
         }
-        if (src.anisotropy) {
-            dst.anisotropy = { ...src.anisotropy };
+        if (src._anisotropy) {
+            dst._anisotropy = { ...src._anisotropy };
         }
-        if (src.iridescence) {
-            dst.iridescence = { ...src.iridescence };
+        if (src._iridescence) {
+            dst._iridescence = { ...src._iridescence };
         }
     }
 }

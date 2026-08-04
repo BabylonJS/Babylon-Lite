@@ -14,9 +14,9 @@ import { _registerPbrExt } from "./pbr-flags.js";
  *  applied to the base color. Registers the unlit extension globally (idempotent). Call
  *  before the scene is first built. */
 export function setPbrUnlit(mat: Partial<PbrMaterialProps>, unlitColor?: [number, number, number]): void {
-    mat.unlit = true;
+    mat._unlit = true;
     if (unlitColor) {
-        mat.unlitColor = unlitColor;
+        mat._unlitColor = unlitColor;
     }
     _registerPbrExt(pbrExt);
 }

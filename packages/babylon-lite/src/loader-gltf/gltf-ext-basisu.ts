@@ -318,10 +318,10 @@ const ext: GltfFeature = {
                 : undefined),
             ...(normalTexture ? { normalTexture, normalTextureScale: data.normalTexture?.scale ?? 1 } : undefined),
             ...(emissiveTexture ? { emissiveTexture } : undefined),
-            ...(specularTexture ? { metallicReflectanceTexture: specularTexture, useOnlyMetallicFromMetallicReflectanceTexture: true } : undefined),
-            ...(specularColorTexture ? { reflectanceTexture: specularColorTexture } : undefined),
+            ...(specularTexture ? { _metallicReflectanceTexture: specularTexture, _useOnlyMetallicFromMetallicReflectanceTexture: true } : undefined),
+            ...(specularColorTexture ? { _reflectanceTexture: specularColorTexture } : undefined),
         };
-        if (!out.baseColorTexture && !out.ormTexture && !out.normalTexture && !out.emissiveTexture && !out.metallicReflectanceTexture && !out.reflectanceTexture) {
+        if (!out.baseColorTexture && !out.ormTexture && !out.normalTexture && !out.emissiveTexture && !out._metallicReflectanceTexture && !out._reflectanceTexture) {
             return null;
         }
         return out;

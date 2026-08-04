@@ -27,21 +27,21 @@ export interface ShadowOnlyOptions {
  *  and at least one shadow-casting light. Call on the material returned by
  *  `createPbrMaterial` (or on the props before creating it). */
 export function setShadowOnly(mat: Partial<PbrMaterialProps>, options?: ShadowOnlyOptions): void {
-    mat.shadowOnly = true;
+    mat._shadowOnly = true;
     if (options?.color) {
-        mat.shadowOnlyColor = options.color;
+        mat._shadowOnlyColor = options.color;
     }
     if (options?.opacity !== undefined) {
-        mat.shadowOnlyOpacity = options.opacity;
+        mat._shadowOnlyOpacity = options.opacity;
     }
     if (options?.falloff !== undefined) {
-        mat.shadowOnlyFalloff = options.falloff;
+        mat._shadowOnlyFalloff = options.falloff;
     }
     // Register globally (idempotent, keyed by id). The PBR registry is a persistent
     // per-runtime Map that the drain in buildPbrRenderables already populates the same
     // way, so registering here is consistent — and it means the renderable's shared
     // chunk carries no shadow-only scan or import specifier. The ext's `detect` hook
-    // gates every hot path on `mat.shadowOnly`, so materials that never opt in are
+    // gates every hot path on `mat._shadowOnly`, so materials that never opt in are
     // untouched.
     _registerPbrExt(pbrExt);
 }
