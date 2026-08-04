@@ -1,11 +1,10 @@
 {
-  "rawKB": 96,
-  "gzipKB": 40.9,
+  "rawKB": 95.2,
+  "gzipKB": 40.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene164-create-morph-targets-HFpNUWQ3.js",
     "scene164-create-skeleton-DHraayy5.js",
-    "scene164-device-lost-recovery-run-DUd09r05.js",
     "scene164-generate-mipmaps-DjhI_uNn.js",
     "scene164-gltf-animation-CH504R5I.js",
     "scene164-gltf-color-normalize-4-WGzPL2.js",
@@ -22,5 +21,5 @@
     "scene164-skeleton-fragment-BY6suSQp.js",
     "scene164.js"
   ],
-  "rawBytes": 98274
+  "rawBytes": 97487
 }
