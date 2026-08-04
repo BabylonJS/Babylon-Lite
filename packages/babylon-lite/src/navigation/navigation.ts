@@ -686,6 +686,102 @@ export function navRayBlocked(plugin: NavigationPlugin, start: Vec3, end: Vec3):
     return !(r?.success === true && typeof t === "number" && Number.isFinite(t) && t > 1);
 }
 
+// ─── Allocation-free hot-path queries ────────────────────────────────
+//
+// The convenience wrappers above (via @recast-navigation/core's NavMeshQuery methods) construct and
+// destroy wasm-side result objects (Vec3/BoolRef/UnsignedIntRef/dtRaycastHit) on EVERY call. A consumer
+// issuing thousands of point-snap and walkability-ray queries per second pays that construct/destroy
+// churn as a dominant CPU cost. These variants call the raw bound query directly with one lazily
+// created, permanently reused scratch set: JS is single-threaded per context and every scratch value
+// is fully consumed before the function returns, so reuse is safe. Results are written into
+// caller-provided storage.
+
+interface FastQueryScratch {
+    pos: [number, number, number];
+    end: [number, number, number];
+    ext: [number, number, number];
+    polyRef: any; // Raw.UnsignedIntRef
+    point: any; // Raw.Vec3
+    boolRef: any; // Raw.BoolRef
+    hit: any; // Raw.Module.dtRaycastHit
+}
+
+let _fastQueryScratch: FastQueryScratch | null = null;
+
+function _fastScratch(plugin: NavigationPlugin): FastQueryScratch {
+    if (!_fastQueryScratch) {
+        // Raw classes exist only after the wasm module initialised; _assertReady in the callers guarantees
+        // that (a navmesh implies a completed init). Never destroyed: one scratch set for the module lifetime.
+        const raw = (plugin._recast as { Raw: any }).Raw;
+        _fastQueryScratch = {
+            pos: [0, 0, 0],
+            end: [0, 0, 0],
+            ext: [0, 0, 0],
+            polyRef: new raw.UnsignedIntRef(),
+            point: new raw.Vec3(),
+            boolRef: new raw.BoolRef(),
+            hit: new raw.Module.dtRaycastHit(),
+        };
+    }
+    return _fastQueryScratch;
+}
+
+function _statusSucceed(plugin: NavigationPlugin, status: number): boolean {
+    return (plugin._recast as { Raw: any }).Raw.Detour.statusSucceed(status);
+}
+
+/**
+ * `findClosestPointWithin` without per-call result-wrapper allocation: writes the snapped point into
+ * `out` and returns whether the query succeeded. Identical semantics otherwise (explicit search box,
+ * failure reported instead of an unspecified point).
+ */
+export function findClosestPointWithinInto(plugin: NavigationPlugin, position: Vec3, halfExtents: Vec3, out: Vec3): boolean {
+    _assertReady(plugin);
+    const s = _fastScratch(plugin);
+    const q = plugin._navMeshQuery;
+    s.pos[0] = position.x;
+    s.pos[1] = position.y;
+    s.pos[2] = position.z;
+    s.ext[0] = halfExtents.x;
+    s.ext[1] = halfExtents.y;
+    s.ext[2] = halfExtents.z;
+    const status = q.raw.findClosestPoint(s.pos, s.ext, q.defaultFilter.raw, s.polyRef, s.point, s.boolRef);
+    if (!_statusSucceed(plugin, status)) {
+        return false;
+    }
+    out.x = s.point.x;
+    out.y = s.point.y;
+    out.z = s.point.z;
+    return true;
+}
+
+/**
+ * `navRayBlocked` without per-call wrapper allocation. Same fail-closed semantics: an unresolvable
+ * start polygon and a wall at the origin (`t = 0`) are BLOCKED; only a successful query whose hit
+ * parameter proves "reached the end" (finite `t > 1`) is clear.
+ */
+export function navRayBlockedFast(plugin: NavigationPlugin, start: Vec3, end: Vec3): boolean {
+    _assertReady(plugin);
+    const s = _fastScratch(plugin);
+    const q = plugin._navMeshQuery;
+    s.pos[0] = start.x;
+    s.pos[1] = start.y;
+    s.pos[2] = start.z;
+    s.ext[0] = _tmpHalfExtents.x;
+    s.ext[1] = _tmpHalfExtents.y;
+    s.ext[2] = _tmpHalfExtents.z;
+    const nearStatus = q.raw.findNearestPoly(s.pos, s.ext, q.defaultFilter.raw, s.polyRef, s.point, s.boolRef);
+    if (!_statusSucceed(plugin, nearStatus) || s.polyRef.value === 0) {
+        return true;
+    }
+    s.end[0] = end.x;
+    s.end[1] = end.y;
+    s.end[2] = end.z;
+    const status = q.raw.raycast(s.polyRef.value, s.pos, s.end, q.defaultFilter.raw, 0, s.hit, 0);
+    const t = s.hit.t;
+    return !(_statusSucceed(plugin, status) && typeof t === "number" && Number.isFinite(t) && t > 1);
+}
+
 // ─── Obstacles (tile-cache navmeshes only) ───────────────────────────
 
 /**
