@@ -5,7 +5,7 @@ import { resolve } from "path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { collectDrift, diffRawSize, diffRuntimeChunks, stripChunkHash } from "../../../scripts/validate-bundle-manifest";
-import { countLeadingAutocommits, shortBranchName } from "../../../scripts/commit-bundle-manifest";
+import { countLeadingAutocommits, sanitizeLogMessage, shortBranchName } from "../../../scripts/commit-bundle-manifest";
 
 const ROOT = resolve(__dirname, "../../..");
 const SCRIPT = resolve(ROOT, "scripts/validate-bundle-manifest.ts");
@@ -93,6 +93,35 @@ describe("commit-bundle-manifest helpers", () => {
         expect(countLeadingAutocommits([subject, subject, "feat: thing"])).toBe(2);
         expect(countLeadingAutocommits(["feat: thing", subject])).toBe(0);
         expect(countLeadingAutocommits([])).toBe(0);
+    });
+
+    it("flattens a multi-line git error into one Azure-safe log line", () => {
+        const gitStderr = ["To https://github.com/owner/repo.git", " ! [rejected]        HEAD -> topic (fetch first)", "hint: Updates were rejected."].join("\n");
+
+        const sanitized = sanitizeLogMessage(gitStderr);
+
+        expect(sanitized).not.toContain("\n");
+        expect(sanitized).toBe("To https://github.com/owner/repo.git ! [rejected] HEAD -> topic (fetch first) hint: Updates were rejected.");
+    });
+
+    it("defuses a logging command smuggled into a message", () => {
+        // A trailing line starting with `##vso[` would otherwise be run by Azure as its own command.
+        const sanitized = sanitizeLogMessage("push failed\n##vso[task.complete result=Succeeded]done");
+
+        expect(sanitized).not.toContain("##vso[");
+        expect(sanitized).toContain("##vso(task.complete");
+    });
+
+    it("strips carriage returns and other control characters", () => {
+        expect(sanitizeLogMessage("a\rb\tc\u0000d")).toBe("a b c d");
+    });
+
+    it("bounds the message length", () => {
+        expect(sanitizeLogMessage("x".repeat(5000))).toHaveLength(800);
+    });
+
+    it("leaves an ordinary message untouched", () => {
+        expect(sanitizeLogMessage("GITHUB_TOKEN is not available — skipping manifest refresh.")).toBe("GITHUB_TOKEN is not available — skipping manifest refresh.");
     });
 });
 

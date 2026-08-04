@@ -79,6 +79,9 @@ const FETCH_DEPTH = MAX_CONSECUTIVE_AUTOCOMMITS + 1;
  */
 const MIN_MIRROR_COVERAGE = 0.5;
 
+/** Azure truncates long warning annotations anyway; keep them readable. */
+const MAX_LOG_MESSAGE_LENGTH = 800;
+
 function git(args: string[], options: { cwd?: string; allowFailure?: boolean } = {}): string {
     try {
         return execFileSync("git", args, { cwd: options.cwd ?? ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -96,9 +99,28 @@ function redact(text: string): string {
     return token && token.length >= 4 ? text.split(token).join("***") : text;
 }
 
+/** Azure treats `##vso[...]` at the start of any output line as a command, so untrusted text must never produce one. */
+function defuseLogCommands(text: string): string {
+    return text.replace(/##vso\[/gi, "##vso(");
+}
+
+/**
+ * Azure parses logging commands line by line, so a message carrying newlines —
+ * git stderr routinely does — would truncate the warning and leave the trailing
+ * lines to be interpreted on their own. Flatten to a single bounded line.
+ */
+export function sanitizeLogMessage(message: string): string {
+    return defuseLogCommands(message)
+        .replace(/[\u0000-\u001f\u007f]+/g, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim()
+        .slice(0, MAX_LOG_MESSAGE_LENGTH);
+}
+
 function warn(message: string): void {
-    console.warn(`⚠ ${message}`);
-    console.log(`##vso[task.logissue type=warning]${message}`);
+    // Keep the multi-line detail on the console stream; it is what makes a failed push debuggable.
+    console.warn(`⚠ ${defuseLogCommands(message)}`);
+    console.log(`##vso[task.logissue type=warning]${sanitizeLogMessage(message)}`);
 }
 
 /** Strip a `refs/heads/` prefix from a branch ref. */
