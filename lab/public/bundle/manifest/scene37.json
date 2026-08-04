@@ -12,7 +12,7 @@
     "scene37-gltf-glb-parser-BvLkUAFg.js",
     "scene37-gltf-pbr-builder-ext-DBkuxTnO.js",
     "scene37-ibl-fragment-CeRrvT96.js",
-    "scene37-pbr-renderable-Ckb38o7g.js",
+    "scene37-pbr-renderable-BfjgGk5V.js",
     "scene37-pbr-template-ext-CiHpOV5G.js",
     "scene37-reflectance-fragment-CuampUJj.js",
     "scene37-rgbd-decode-Ow3m-YWC.js",
@@ -22,5 +22,5 @@
     "scene37-uv-transform-fragment-B8ijWmAK.js",
     "scene37.js"
   ],
-  "rawBytes": 100138
+  "rawBytes": 100112
 }

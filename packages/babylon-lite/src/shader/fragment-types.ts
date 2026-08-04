@@ -219,6 +219,15 @@ export interface UboSpec {
 
 /** The output of composeShader() — everything needed to create a GPU pipeline */
 export interface ComposedShader {
+    /** @internal Exotic primitive state (non-triangle topology + strip index format) for the mesh
+     *  this variant was composed for, or absent for the usual triangle list.
+     *
+     *  It rides here rather than being threaded as its own parameter purely for bundle size: the
+     *  composed shader already reaches both pipeline builders, so a separate channel cost ~54 bytes
+     *  of extra parameters and fields in chunks every PBR scene fetches. The composition key folds
+     *  in `meshFeatures`, whose topology bits this mirrors, so a cached variant can never be shared
+     *  between meshes that disagree about it. */
+    _prim?: GPUPrimitiveState;
     /** @internal Final vertex WGSL source */
     readonly _vertexWGSL: string;
     /** @internal Final fragment WGSL source */

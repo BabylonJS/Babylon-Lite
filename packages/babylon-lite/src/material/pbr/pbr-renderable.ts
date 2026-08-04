@@ -355,6 +355,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const uv2Mask = (mat as { _uv2Mask?: number })._uv2Mask ?? 0;
 
         const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey, uv2Mask);
+        // Non-triangle topology rides on the composed variant (see ComposedShader._prim). The
+        // composition key folds in meshFeatures, whose topology bits this mirrors, so this is only
+        // ever written with the same value for a given variant.
+        (composed as { _prim?: GPUPrimitiveState })._prim = (mesh as Mesh & { _primitive?: GPUPrimitiveState })._primitive;
         const bindings = getOrCreatePbrBindings(
             engine,
             features,
@@ -363,8 +367,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             sceneFeatures,
             composed,
             `${lightMode}:${singleLightType}${vbKey}:${uv2Mask}`,
-            mat.stencil ?? null,
-            (mesh as Mesh & { _primitive?: GPUPrimitiveState })._primitive
+            mat.stencil ?? null
         );
 
         // Mesh UBO (world matrix at offset 0; spec.totalBytes covers any extra fields).

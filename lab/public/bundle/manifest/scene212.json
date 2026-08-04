@@ -10,7 +10,7 @@
     "scene212-ibl-fragment-CeRrvT96.js",
     "scene212-ibl-skybox-wgsl-CFIBOHHx.js",
     "scene212-pbr-refraction-ClxheuNX.js",
-    "scene212-pbr-renderable-sEfQdLzk.js",
+    "scene212-pbr-renderable-DjtFh7W_.js",
     "scene212-pbr-transmission-ext-B6Nyh5Rs.js",
     "scene212-reflectance-fragment-DUx_mf3I.js",
     "scene212-refraction-dispersion-wgsl-BKvBCmZU.js",
@@ -18,5 +18,5 @@
     "scene212-scene-uniforms-FTYH6Ct0.js",
     "scene212.js"
   ],
-  "rawBytes": 107235
+  "rawBytes": 107227
 }

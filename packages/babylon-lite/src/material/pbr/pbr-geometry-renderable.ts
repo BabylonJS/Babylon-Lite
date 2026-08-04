@@ -71,10 +71,6 @@ interface PbrGeometryViewResources {
     _features: number;
     _features2: number;
     _meshFeatures: number;
-    /** Exotic primitive state for this mesh (non-triangle topology / strip format), or absent for
-     *  the usual triangle list. The variant key folds in `meshFeatures`, whose topology bits this
-     *  mirrors, so a cached entry can never be reused across differing primitive states. */
-    _prim?: GPUPrimitiveState;
     _sceneFeatures: number;
     _meshBGL: GPUBindGroupLayout;
     _shadowBGL: GPUBindGroupLayout | null;
@@ -145,7 +141,11 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
 
     const variantKey = _variantKey(meshFeatures, lightMode, singleLightType);
-    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, variantKey, (mesh as Mesh & { _primitive?: GPUPrimitiveState })._primitive);
+    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, variantKey);
+    // The geometry pass composes its OWN variant, so it needs the mesh's exotic primitive state
+    // stamped on separately (see ComposedShader._prim). `variantKey` folds in meshFeatures, whose
+    // topology bits this mirrors, so a cached variant only ever sees one value here.
+    (res._composed as { _prim?: GPUPrimitiveState })._prim = (mesh as Mesh & { _primitive?: GPUPrimitiveState })._primitive;
 
     const features = res._features;
     const features2 = res._features2;
@@ -347,8 +347,7 @@ function _ensureViewResources(
     meshFeatures: number,
     lightMode: 0 | 1 | 2,
     singleLightType: string,
-    variantKey: string,
-    prim?: GPUPrimitiveState
+    variantKey: string
 ): PbrGeometryViewResources {
     let cache = view._geometry as Map<string, PbrGeometryViewResources> | undefined;
     if (!cache) {
@@ -414,7 +413,6 @@ function _ensureViewResources(
         _features: features,
         _features2: features2,
         _meshFeatures: meshFeatures,
-        _prim: prim,
         _sceneFeatures: sceneFeatures,
         _meshBGL: meshBGL,
         _shadowBGL: shadowBGL,
@@ -469,7 +467,7 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
     const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState ? { format: fmt, blend: blendState } : { format: fmt }));
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;
-    const primitive = _resolvePrimitive(res._meshFeatures, hasDoubleSided, res._prim);
+    const primitive = _resolvePrimitive(res._meshFeatures, hasDoubleSided, res._composed._prim);
     if (view._reverseCulling && primitive.cullMode !== "none") {
         primitive.cullMode = primitive.cullMode === "front" ? "back" : "front";
     }

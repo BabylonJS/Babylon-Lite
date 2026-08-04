@@ -79,11 +79,6 @@ interface _PbrShaderBindings {
     _meshBGL: GPUBindGroupLayout;
     _shadowBGL: GPUBindGroupLayout | null;
     _composed: ComposedShader;
-    /** Exotic primitive state (non-triangle topology + strip index format) for this mesh, or absent
-     *  for the usual triangle list. Carried on the bindings because the pipeline is built from them
-     *  and never sees the mesh; the cache key already folds in `meshFeatures`, whose topology bits
-     *  this mirrors, so two meshes that differ here can never share bindings. */
-    _prim?: GPUPrimitiveState;
     /** Shared across normal/A2C pipeline variants only when the A2C resolver is installed. */
     _a2cVertModule?: GPUShaderModule;
     /** @internal */
@@ -124,8 +119,7 @@ export function getOrCreatePbrBindings(
     sceneFeatures: number,
     composed: ComposedShader,
     shaderKey = "",
-    stencil: StencilState | null = null,
-    prim?: GPUPrimitiveState
+    stencil: StencilState | null = null
 ): _PbrShaderBindings {
     ensureDevice(engine);
     // Stencil state is baked into the GPU pipeline (no dynamic stencil ref), so two materials that differ only in
@@ -156,10 +150,6 @@ export function getOrCreatePbrBindings(
     // Gated by the opt-in resolver so the field assignment folds out of stencil-free bundles entirely.
     if (resolvedStencil) {
         bindings._stencil = resolvedStencil._desc;
-    }
-    // Likewise absent for every ordinary triangle-list mesh.
-    if (prim) {
-        bindings._prim = prim;
     }
     _bindingsCache.set(key, bindings);
     return bindings;
@@ -223,7 +213,7 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
               }
             : {}),
         multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
-        primitive: _resolvePrimitive(meshFeatures, hasDoubleSided, bindings._prim),
+        primitive: _resolvePrimitive(meshFeatures, hasDoubleSided, composed._prim),
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;
