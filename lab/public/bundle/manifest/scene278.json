@@ -1,0 +1,7 @@
+{
+    "rawKB": 43.6,
+    "rawBytes": 44635,
+    "gzipKB": 17.5,
+    "ignoredRawKB": 0,
+    "runtimeChunks": ["scene278-shader-pipeline-cache-D8i3wbiy.js", "scene278-shader-renderable-57_INQ3P.js", "scene278-uniform-copy-batch-AuSvd96S.js", "scene278.js"]
+}

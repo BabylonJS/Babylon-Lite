@@ -10,7 +10,17 @@
  */
 
 import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty, createSolidTexture2D, rebuildMaterial } from "babylon-lite";
-import type { StandardMaterialProps, PbrMaterialProps, ClearCoatProps, SheenProps, AnisotropyProps, IridescenceProps, Texture2D, EngineContext } from "babylon-lite";
+import type {
+    StandardMaterialProps,
+    PbrMaterialProps,
+    ClearCoatProps,
+    SheenProps,
+    AnisotropyProps,
+    IridescenceProps,
+    Texture2D,
+    EngineContext,
+    Material as LiteMaterial,
+} from "babylon-lite";
 
 import { Color3 } from "../math/color.js";
 import type { Scene } from "../scene/scene.js";
@@ -41,7 +51,7 @@ export abstract class Material {
     /** Wireframe rendering toggle (not honoured by all Lite materials). */
     public wireframe = false;
     /** @internal Underlying Babylon Lite material props. */
-    public abstract readonly _lite: StandardMaterialProps | PbrMaterialProps;
+    public abstract readonly _lite: LiteMaterial;
 
     /** @internal Owning compat scene, when constructed against one. */
     protected _scene: Scene | undefined;

@@ -77,6 +77,8 @@ export interface ShaderMaterialOptions {
     /** Slope-scaled depth bias — extra bias proportional to the depth gradient, so steeply-angled (grazing)
      *  surfaces get more bias. Pairs with `depthBias` to kill z-fighting at oblique angles. Default 0. */
     readonly depthBiasSlopeScale?: number;
+    /** @internal Primitive topology owned by specialized materials such as LineMaterial. */
+    readonly _topology?: GPUPrimitiveTopology;
 }
 
 /** A custom uniform declaration: WGSL identifier, type, and optional default. */
@@ -152,6 +154,8 @@ export interface ShaderMaterial extends Material {
     readonly depthOnlyFragment: boolean;
     readonly depthBias: number;
     readonly depthBiasSlopeScale: number;
+    /** @internal Primitive topology override. Undefined means triangle-list. */
+    readonly _topology?: GPUPrimitiveTopology;
     /** Optional stencil-test state baked into the main-pass pipeline (mask write / discard). Set after
      *  creation (`mat.stencil = { ... }`) and call `enableMaterialStencil()` before `registerScene`. Default
      *  none. See `StencilState`. */
@@ -327,6 +331,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         depthOnlyFragment: options.depthOnlyFragment ?? false,
         depthBias: options.depthBias ?? 0,
         depthBiasSlopeScale: options.depthBiasSlopeScale ?? 0,
+        _topology: options._topology,
         _buildGroup: getShaderGroupBuilder(),
         _uboVersion: 0,
         _uniformValues: uniformValues,

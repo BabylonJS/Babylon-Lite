@@ -39,7 +39,7 @@ _installMeshFeatureExtra((mesh: Mesh): number => {
     if (_windingRule ? _windingRule(mesh) : (mesh as { _reverseWinding?: boolean })._reverseWinding) {
         f |= MSH_REVERSE_WINDING;
     }
-    const topo = (mesh as { _topology?: number })._topology;
+    const topo = mesh._topology;
     if (topo) {
         f |= topo << MSH_TOPOLOGY_SHIFT;
         // Strips need the pipeline stripIndexFormat to match the index buffer; flag uint32 so the
