@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { NullEngine } from "../src/engine/engine";
 import { Color3, Color4 } from "../src/math/color";
+import { Vector3 } from "../src/math/vector";
 import { CreateLineSystem, LinesMesh, MeshBuilder } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
 
@@ -30,15 +31,8 @@ describe("LinesMesh compatibility", () => {
             "lines",
             {
                 lines: [
-                    [
-                        { x: 0, y: 0, z: 0 },
-                        { x: 1, y: 0, z: 0 },
-                        { x: 1, y: 1, z: 0 },
-                    ],
-                    [
-                        { x: 3, y: 0, z: 0 },
-                        { x: 3, y: 1, z: 0 },
-                    ],
+                    [new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(1, 1, 0)],
+                    [new Vector3(3, 0, 0), new Vector3(3, 1, 0)],
                 ],
                 useVertexAlpha: false,
             },
@@ -62,12 +56,7 @@ describe("LinesMesh compatibility", () => {
         const mesh = CreateLineSystem(
             "lines",
             {
-                lines: [
-                    [
-                        { x: 0, y: 0, z: 0 },
-                        { x: 1, y: 0, z: 0 },
-                    ],
-                ],
+                lines: [[new Vector3(0, 0, 0), new Vector3(1, 0, 0)]],
                 colors,
                 updatable: true,
             },
@@ -77,12 +66,7 @@ describe("LinesMesh compatibility", () => {
         const updated = CreateLineSystem(
             "lines",
             {
-                lines: [
-                    [
-                        { x: -1, y: 0, z: 0 },
-                        { x: 2, y: 1, z: 0 },
-                    ],
-                ],
+                lines: [[new Vector3(-1, 0, 0), new Vector3(2, 1, 0)]],
                 colors,
                 instance: mesh,
             },

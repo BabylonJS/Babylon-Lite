@@ -151,7 +151,7 @@ describe("ShaderMaterial pipeline cache", () => {
         getOrCreateShaderPipeline(engine, signature, lines, getOrCreateShaderPipelineBindings(engine, lines));
 
         expect(createRenderPipeline).toHaveBeenCalledTimes(2);
-        expect(createRenderPipeline.mock.calls[0]![0].primitive.topology).toBe("triangle-list");
-        expect(createRenderPipeline.mock.calls[1]![0].primitive.topology).toBe("line-list");
+        expect(createRenderPipeline.mock.calls[0]![0]!.primitive!.topology).toBe("triangle-list");
+        expect(createRenderPipeline.mock.calls[1]![0]!.primitive!.topology).toBe("line-list");
     });
 });

@@ -205,7 +205,7 @@ export class GaussianSplattingMesh extends TransformNode {
 
     /** @internal Babylon.js's worker-throttle flag; ported scenes poll it to detect the first sort. */
     public get _canPostToWorker(): boolean {
-        return this._gs ? this._gs._canPostToWorker : false;
+        return this._gs ? this._gs._orderPool.length > 0 : false;
     }
 
     /** @internal The loaded Lite splat node, for the GPU picker's result mapping (undefined until loaded). */
