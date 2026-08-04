@@ -745,8 +745,9 @@ export function findClosestPointWithinInto(plugin: NavigationPlugin, position: V
     s.ext[0] = halfExtents.x;
     s.ext[1] = halfExtents.y;
     s.ext[2] = halfExtents.z;
+    s.polyRef.value = 0;
     const status = q.raw.findClosestPoint(s.pos, s.ext, q.defaultFilter.raw, s.polyRef, s.point, s.boolRef);
-    if (!_statusSucceed(plugin, status)) {
+    if (!_statusSucceed(plugin, status) || s.polyRef.value === 0) {
         return false;
     }
     out.x = s.point.x;
@@ -770,6 +771,7 @@ export function navRayBlockedFast(plugin: NavigationPlugin, start: Vec3, end: Ve
     s.ext[0] = _tmpHalfExtents.x;
     s.ext[1] = _tmpHalfExtents.y;
     s.ext[2] = _tmpHalfExtents.z;
+    s.polyRef.value = 0;
     const nearStatus = q.raw.findNearestPoly(s.pos, s.ext, q.defaultFilter.raw, s.polyRef, s.point, s.boolRef);
     if (!_statusSucceed(plugin, nearStatus) || s.polyRef.value === 0) {
         return true;
