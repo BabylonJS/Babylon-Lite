@@ -1,29 +1,53 @@
 /**
- * Validate that the committed per-scene bundle-size manifest is up to date.
+ * Report (and optionally enforce) whether the committed per-scene bundle-size
+ * manifest matches a fresh measurement.
  *
- * A PR that changes runtime code (or scenes) such that per-scene bundle sizes
- * move MUST also commit the regenerated per-scene manifest files under
- * `lab/public/bundle/manifest/<scene>.json`. GUIDANCE.md makes this mandatory so
- * reviewers can see size deltas in the diff and the tracked baseline stays in
- * sync with the code. The manifest is distributed (one file per scene) so PRs
- * touching different scenes do not collide on a single shared manifest file.
+ * ## Why this is a report, not a gate
  *
- * This script is meant to run in CI AFTER `pnpm build:bundle-scenes`, which
- * overwrites the working-tree per-scene files with freshly measured sizes. It
- * compares those freshly built files against the versions committed at `git
- * HEAD`. Raw size is compared exactly, in bytes (`rawBytes`), because `rawKB` is
- * rounded to 0.1 KB and hides sub-50-byte drift. gzip stays rounded to whole KB:
- * its output varies with the zlib build, so an exact check would fail spuriously
- * across environments.
+ * The manifest under `lab/public/bundle/manifest/<scene>.json` records each
+ * scene's runtime-fetched bundle size. Almost every change to a shared module
+ * moves bytes in *most* of the ~230 scenes, so an exact-equality gate against
+ * `git HEAD` had a fatal property: whenever any shared-code PR merged first,
+ * every other open PR's committed manifest became stale and its CI turned red
+ * for reasons unrelated to that PR. The only cure was a rebase plus a very slow
+ * full local rebuild — repeated on every subsequent merge to master.
  *
- * It also compares each scene's `runtimeChunks` set. Chunk filenames carry a
- * content hash, so they change whenever a PR alters code that actually lands in
- * that scene's bundle (its own scene code or a shared module it imports). This
- * catches content-only changes that leave the rounded KB sizes unchanged.
+ * The baseline is therefore CI-owned: `scripts/commit-bundle-manifest.ts` pushes
+ * the freshly measured files back to the PR branch, so reviewers still see the
+ * size deltas in the diff without any author busywork. This script's job is to
+ * describe the drift (for the build log and for that auto-commit step), not to
+ * fail the build.
  *
- * Exit code 1 (with a helpful message) when the committed manifest is stale.
+ * **Bundle-size regressions are still gated** — by the absolute per-scene
+ * ceilings in `scene-config.json` (`maxRawKB`), which `pnpm build:bundle-scenes`
+ * enforces byte-exactly and which no automation may raise. That check is
+ * deterministic and independent of what any other PR merged, so it never goes
+ * stale.
  *
- * Usage: npx tsx scripts/validate-bundle-manifest.ts
+ * ## What is compared
+ *
+ * - `rawBytes` exactly when both sides carry it (`rawKB` is rounded to 0.1 KB and
+ *   hides sub-50-byte drift); otherwise the legacy whole-KB `rawKB` comparison.
+ * - `gzipKB` rounded to whole KB — zlib output varies with the build, so an exact
+ *   check would differ across environments.
+ * - `runtimeChunks` as a set **with content hashes stripped**. Chunk filenames are
+ *   `<scene>-<name>-<hash>.js`, and the hash changes whenever any module in the
+ *   chunk changes — including edits made by an unrelated PR that merged first, or
+ *   a Rollup/Vite upgrade. Comparing hashes therefore reported "chunk churn" that
+ *   carried no size information. Comparing the hash-stripped names still catches
+ *   the signal that matters: a scene starting or stopping to pull in a module.
+ *
+ * ## Usage
+ *
+ *   npx tsx scripts/validate-bundle-manifest.ts            # report, always exits 0
+ *   npx tsx scripts/validate-bundle-manifest.ts --strict   # exit 1 on any drift
+ *
+ * `--strict` (or `BUNDLE_MANIFEST_STRICT=true`) restores the old hard-failing
+ * behaviour; it is useful locally to confirm a manifest is fully up to date.
+ * `BUNDLE_MANIFEST_ROOT` overrides the repo root (used by the unit tests).
+ *
+ * Meant to run AFTER `pnpm build:bundle-scenes`, which overwrites the working-tree
+ * per-scene files with freshly measured sizes.
  */
 import { execFileSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
@@ -46,17 +70,28 @@ function roundToWholeKB(kb: number | undefined): number {
     return Math.round(kb ?? 0);
 }
 
+/**
+ * Strip the Rollup content hash from a chunk filename.
+ *
+ * Non-entry chunks are emitted as `<scene>-<name>-<hash>.js` (see `chunkFileNames`
+ * in `scripts/bundle-scenes-core.ts`) with Rollup's default 8-character
+ * base64url-ish hash. Entry chunks are plain `<scene>.js` and are returned
+ * unchanged, as is anything that does not end in a hash-shaped segment.
+ */
+export function stripChunkHash(file: string): string {
+    return file.replace(/-[A-Za-z0-9_-]{8}\.js$/, ".js");
+}
+
 /** Compare raw size as exactly as both sides allow.
  *
  *  `rawBytes` is exact and deterministic (a sum of fetched file lengths), so when both
  *  sides carry it they are compared byte-for-byte: `rawKB` alone is rounded to 0.1 KB and
- *  hides sub-50-byte drift, which is precisely how a stale manifest slipped through on a
- *  zero-headroom scene. Entries committed before `rawBytes` existed fall back to the old
- *  whole-KB comparison rather than failing spuriously.
+ *  hides sub-50-byte drift. Entries recorded before `rawBytes` existed fall back to the
+ *  old whole-KB comparison rather than reporting spurious drift.
  *
  *  gzip is deliberately NOT compared exactly: its output varies with the zlib build, so an
- *  exact check would fail across environments. It stays rounded to whole KB. */
-function diffRawSize(committed: ManifestEntry, built: ManifestEntry): string | null {
+ *  exact check would differ across environments. It stays rounded to whole KB. */
+export function diffRawSize(committed: ManifestEntry, built: ManifestEntry): string | null {
     if (committed.rawBytes != null && built.rawBytes != null) {
         if (committed.rawBytes !== built.rawBytes) {
             const delta = built.rawBytes - committed.rawBytes;
@@ -69,10 +104,13 @@ function diffRawSize(committed: ManifestEntry, built: ManifestEntry): string | n
     return committedRaw === builtRaw ? null : `committed raw=${committedRaw}KB → rebuilt raw=${builtRaw}KB`;
 }
 
-/** Compare two chunk lists as order-independent sets. Returns null when equal. */
-function diffRuntimeChunks(committed: string[] | undefined, built: string[] | undefined): string | null {
-    const committedSet = new Set(committed ?? []);
-    const builtSet = new Set(built ?? []);
+/**
+ * Compare two chunk lists as order-independent sets of hash-stripped names.
+ * Returns null when the two describe the same set of modules.
+ */
+export function diffRuntimeChunks(committed: string[] | undefined, built: string[] | undefined): string | null {
+    const committedSet = new Set((committed ?? []).map(stripChunkHash));
+    const builtSet = new Set((built ?? []).map(stripChunkHash));
 
     const added = [...builtSet].filter((c) => !committedSet.has(c)).sort();
     const removed = [...committedSet].filter((c) => !builtSet.has(c)).sort();
@@ -163,73 +201,104 @@ function readCommittedManifest(rootDir: string): Manifest | null {
     return parseJson<Manifest>(text, "committed legacy manifest");
 }
 
-function main(): void {
-    const rootDir = resolve(__dirname, "..");
-
-    const built = readBuiltManifest(rootDir);
-    const committed = readCommittedManifest(rootDir);
-
-    if (committed === null) {
-        console.error(
-            `Bundle manifest validation FAILED: no committed manifest found under ${MANIFEST_DIR_REL_PATH}/ at HEAD.\n` +
-                `Run 'pnpm build:bundle-scenes' and commit the generated per-scene manifest files.`
-        );
-        process.exit(1);
-    }
-
+/** Collect every difference between the committed and the freshly built manifest. */
+export function collectDrift(committed: Manifest, built: Manifest): string[] {
     const keys = new Set([...Object.keys(built), ...Object.keys(committed)]);
-    const mismatches: string[] = [];
+    const drift: string[] = [];
 
     for (const key of [...keys].sort()) {
         const builtEntry = built[key];
         const committedEntry = committed[key];
 
         if (!builtEntry) {
-            mismatches.push(`  ${key}: present in committed manifest but missing after rebuild`);
+            drift.push(`  ${key}: present in committed manifest but missing after rebuild`);
             continue;
         }
         if (!committedEntry) {
-            mismatches.push(`  ${key}: produced by rebuild but missing from committed manifest`);
+            drift.push(`  ${key}: produced by rebuild but missing from committed manifest`);
             continue;
         }
 
         const rawDiff = diffRawSize(committedEntry, builtEntry);
         if (rawDiff !== null) {
-            mismatches.push(`  ${key}: ${rawDiff}`);
+            drift.push(`  ${key}: ${rawDiff}`);
         }
 
         const builtGzip = roundToWholeKB(builtEntry.gzipKB);
         const committedGzip = roundToWholeKB(committedEntry.gzipKB);
         if (builtGzip !== committedGzip) {
-            mismatches.push(`  ${key}: committed gzip=${committedGzip}KB → rebuilt gzip=${builtGzip}KB`);
+            drift.push(`  ${key}: committed gzip=${committedGzip}KB → rebuilt gzip=${builtGzip}KB`);
         }
 
         const chunkDiff = diffRuntimeChunks(committedEntry.runtimeChunks, builtEntry.runtimeChunks);
         if (chunkDiff !== null) {
-            mismatches.push(`  ${key}: runtime chunks changed (${chunkDiff})`);
+            drift.push(`  ${key}: runtime chunks changed (${chunkDiff})`);
         }
     }
 
-    if (mismatches.length > 0) {
+    return drift;
+}
+
+/** How many drifted scenes to spell out before summarising the rest. */
+const DRIFT_LIST_LIMIT = 40;
+
+function summarizeDrift(drift: string[]): string {
+    if (drift.length <= DRIFT_LIST_LIMIT) {
+        return drift.join("\n");
+    }
+    return `${drift.slice(0, DRIFT_LIST_LIMIT).join("\n")}\n  … and ${drift.length - DRIFT_LIST_LIMIT} more`;
+}
+
+function strictModeRequested(argv: readonly string[]): boolean {
+    return argv.includes("--strict") || process.env.BUNDLE_MANIFEST_STRICT === "true";
+}
+
+function main(): void {
+    const rootDir = process.env.BUNDLE_MANIFEST_ROOT ? resolve(process.env.BUNDLE_MANIFEST_ROOT) : resolve(__dirname, "..");
+    const strict = strictModeRequested(process.argv.slice(2));
+
+    const built = readBuiltManifest(rootDir);
+    const committed = readCommittedManifest(rootDir);
+
+    if (committed === null) {
+        console.error(`No committed manifest found under ${MANIFEST_DIR_REL_PATH}/ at HEAD.\nRun 'pnpm build:bundle-scenes' and commit the generated per-scene manifest files.`);
+        process.exit(1);
+    }
+
+    const drift = collectDrift(committed, built);
+
+    if (drift.length === 0) {
+        console.log(`Bundle manifest is up to date (${Object.keys(built).length} scenes checked).`);
+        console.log("##vso[task.setvariable variable=BUNDLE_MANIFEST_STALE]false");
+        return;
+    }
+
+    const detail =
+        `${drift.length} difference(s) between the committed manifest and this build ` +
+        `(raw compared exactly in bytes, gzip rounded to whole KB, chunk names compared without content hashes):\n` +
+        summarizeDrift(drift);
+
+    if (strict) {
         console.error(
-            `Bundle manifest validation FAILED: per-scene manifest under ${MANIFEST_DIR_REL_PATH}/ is stale.\n` +
-                `This PR changes per-scene bundle output but did not commit the updated manifest files.\n` +
-                `Run 'pnpm build:bundle-scenes' locally and commit the regenerated ${MANIFEST_DIR_REL_PATH}/<scene>.json files.\n` +
+            `Bundle manifest validation FAILED (--strict): ${MANIFEST_DIR_REL_PATH}/ is stale.\n` +
+                `Run 'pnpm build:bundle-scenes' locally and commit the regenerated files.\n` +
                 `\n` +
                 `If the differing scenes are flagged 'deviceDependentChunks' in scene-config.json (113/114/115), a\n` +
                 `plain local build deliberately leaves them alone: their chunk set depends on the GPU, so only a\n` +
                 `software-renderer measurement matches CI. Regenerate those with:\n` +
                 `    pnpm build:bundle-manifest:device\n` +
-                `(that needs a working SwiftShader WebGPU stack — fine on Linux/CI, unreliable on Windows. If it\n` +
-                `cannot run, restore those files to their committed values: they are CI-authored.)\n` +
-                `\n` +
-                `Differences (committed vs rebuilt; raw compared exactly in bytes, gzip rounded to whole KB):\n` +
-                mismatches.join("\n")
+                `\n${detail}`
         );
         process.exit(1);
     }
 
-    console.log(`Bundle manifest is up to date (${Object.keys(built).length} scenes checked).`);
+    // Informational only. Per-scene ceilings (enforced byte-exactly by
+    // `pnpm build:bundle-scenes`) are what gate a size regression; the manifest
+    // itself is refreshed by scripts/commit-bundle-manifest.ts.
+    console.log(`Bundle manifest drift detected — the CI auto-commit step will refresh it.\n${detail}`);
+    console.log("##vso[task.setvariable variable=BUNDLE_MANIFEST_STALE]true");
 }
 
-main();
+if (require.main === module) {
+    main();
+}

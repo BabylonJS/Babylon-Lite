@@ -51,6 +51,8 @@
         "validate:release-markers": "tsx scripts/validate-pr-release-markers.ts",
         "gen:changelog": "tsx scripts/generate-changelog.ts",
         "validate:bundle-manifest": "tsx scripts/validate-bundle-manifest.ts",
+        "validate:bundle-manifest:strict": "tsx scripts/validate-bundle-manifest.ts --strict",
+        "commit:bundle-manifest": "tsx scripts/commit-bundle-manifest.ts",
         "report:api-changes": "tsx scripts/report-api-changes.ts",
         "gen:feature-doc": "tsx scripts/gen-feature-comparison.ts",
         "gen:feature-doc:check": "tsx scripts/gen-feature-comparison.ts --check",

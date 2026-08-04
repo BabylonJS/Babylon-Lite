@@ -220,11 +220,21 @@ PERF_WARMUP=120 PERF_FRAMES=500 pnpm test:perf-cloud
 **Location:** `tests/lite/parity/bundle-size.spec.ts`
 
 Each scene bundle must stay under `maxRawKB` defined in `scene-config.json`
-(gzip size is shown for reference but not enforced).
+(gzip size is shown for reference but not enforced). This ceiling is the gate for
+bundle-size regressions in CI.
 
 ```sh
 pnpm build:bundle-scenes
 pnpm test:bundle-size
+```
+
+The tracked per-scene baseline under `lab/public/bundle/manifest/` is refreshed by
+CI (`pnpm commit:bundle-manifest` pushes it to the PR branch), so you do not need
+to regenerate it by hand. To check locally whether it is in sync:
+
+```sh
+pnpm validate:bundle-manifest          # report drift, always exits 0
+pnpm validate:bundle-manifest:strict   # exit 1 on any drift
 ```
 
 ---
