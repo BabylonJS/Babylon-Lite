@@ -1,5 +1,6 @@
 {
   "rawKB": 96.4,
+  "rawBytes": 98729,
   "gzipKB": 39.8,
   "ignoredRawKB": 1483.8,
   "runtimeChunks": [
@@ -11,6 +12,5 @@
     "scene174-singlelight-hemispheric-wgsl-kfMxUQtb.js",
     "scene174-standard-renderable-DqflF_n-.js",
     "scene174.js"
-  ],
-  "rawBytes": 98729
+  ]
 }

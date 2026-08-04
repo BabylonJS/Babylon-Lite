@@ -1,5 +1,6 @@
 {
   "rawKB": 162.4,
+  "rawBytes": 166308,
   "gzipKB": 66.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -21,7 +22,7 @@
     "scene241-gltf-feature-animation-pointer-Dd741Jir.js",
     "scene241-gltf-feature-animations-BNo2dEVB.js",
     "scene241-gltf-feature-lights-punctual-BX9MUoo6.js",
-    "scene241-gltf-feature-registry-DtpnOInd.js",
+    "scene241-gltf-feature-registry-CEWrJ5On.js",
     "scene241-gltf-json-asset-h2nlumGd.js",
     "scene241-gltf-light-pointer-state-B7kFTRxK.js",
     "scene241-gltf-pbr-builder-ext-gbDFjJEh.js",
@@ -44,6 +45,5 @@
     "scene241-uv-transform-fragment-B8ijWmAK.js",
     "scene241-visibility-DWzOUWwo.js",
     "scene241.js"
-  ],
-  "rawBytes": 166308
+  ]
 }

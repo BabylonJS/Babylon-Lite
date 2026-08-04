@@ -1,12 +1,13 @@
 {
   "rawKB": 104.2,
+  "rawBytes": 106699,
   "gzipKB": 43.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene33-generate-mipmaps-ysS4vyzD.js",
     "scene33-gltf-ext-dielectric-C6hvXXiF.js",
     "scene33-gltf-feature-lights-punctual-Jo-fAQhn.js",
-    "scene33-gltf-feature-registry-DNiOpzjL.js",
+    "scene33-gltf-feature-registry-DhZe569m.js",
     "scene33-gltf-glb-parser-D4DERHwD.js",
     "scene33-gltf-light-pointer-state-B7kFTRxK.js",
     "scene33-gltf-sampler-desc-D-67mIj3.js",
@@ -20,6 +21,5 @@
     "scene33-rgbd-decode-CBCiayil.js",
     "scene33-scene-uniforms-FTYH6Ct0.js",
     "scene33.js"
-  ],
-  "rawBytes": 106699
+  ]
 }
