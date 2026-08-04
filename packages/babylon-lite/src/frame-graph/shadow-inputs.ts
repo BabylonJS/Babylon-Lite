@@ -12,14 +12,51 @@ function getShadowTaskInputs(): WeakMap<ShadowGenerator, readonly Mesh[]> {
 /** Register scene-owned shadow caster inputs for a generator. */
 export function setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): void {
     getShadowTaskInputs().set(shadowGenerator, casterMeshes);
-    if (shadowTaskInputPreloader) {
-        void shadowTaskInputPreloader(shadowGenerator, casterMeshes);
+    if (!shadowTaskInputPreloader) {
+        return;
     }
+    // The preload dynamically imports the no-colour material views for the caster families present in
+    // THIS set. Rendering before it resolves would call a factory that is still undefined, so the set is
+    // parked on the generator and skipped until the import lands. Initial registration is already awaited
+    // through the task's `_preload`; this covers the runtime updates, which cannot await.
+    shadowGenerator._preloadPending = casterMeshes;
+    void shadowTaskInputPreloader(shadowGenerator, casterMeshes).then(
+        () => {
+            if (shadowGenerator._preloadPending === casterMeshes) {
+                shadowGenerator._preloadPending = undefined;
+            }
+        },
+        // Leave the set parked — hence the generator skipped: a failed import means the factory is still
+        // missing, and rendering anyway would throw inside the frame with a far less actionable stack.
+        (error: unknown) => console.error(error)
+    );
 }
 
 /** @internal */
 export function _getShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator): readonly Mesh[] | undefined {
     return shadowTaskInputs?.get(shadowGenerator);
+}
+
+/**
+ * Cap the cascades a caster mesh renders into: the mesh casts only into cascade layers `0..maxCascade`
+ * (0 = the nearest). Lets a scene keep small casters out of the far cascades, where their shadows are
+ * sub-texel anyway — each excluded layer saves that caster's draw + pipeline switch per frame.
+ *
+ * Unset (the default) casts into every cascade. Pass `Infinity` to restore that.
+ * The cap is read when a generator's caster set is (re)supplied through
+ * {@link setShadowTaskCasterMeshes}; to change it for an already-registered caster, re-supply the
+ * caster list (a new array) afterwards. Non-cascaded (single-map) generators ignore the cap.
+ */
+export function setShadowCasterMaxCascade(mesh: Mesh, maxCascade: number): void {
+    if (maxCascade !== Infinity && (!Number.isInteger(maxCascade) || maxCascade < 0)) {
+        throw new RangeError("setShadowCasterMaxCascade requires a non-negative integer or Infinity");
+    }
+    mesh._shadowMaxCascade = maxCascade === Infinity ? undefined : maxCascade;
+}
+
+/** @internal Cascade cap for a caster mesh (see {@link setShadowCasterMaxCascade}); Infinity when unset. */
+export function _getShadowCasterMaxCascade(mesh: Mesh): number {
+    return mesh._shadowMaxCascade ?? Infinity;
 }
 
 /** @internal */

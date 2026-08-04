@@ -72,6 +72,10 @@ export interface SceneLightGpuState {
     _scratch: Float32Array;
     /** @internal */
     _version: number;
+    /** @internal Scene light-list version the UBO was written at. Tracked SEPARATELY from `_version`:
+     *  summing it into the per-light version sum lets the two cancel out (a removed light's version can
+     *  offset the list bump), which would leave the removed light's data uploaded. */
+    _listVersion: number;
     /** @internal */
     _lightCount: number;
     /** @internal */
@@ -94,6 +98,7 @@ export function ensureSceneLightState(engine: EngineContext, scene: SceneContext
         _buffer: createUniformBuffer(engine, scratch),
         _scratch: scratch,
         _version: computeLightsVersion(scene.lights) + (engine._lightFoVersion?.(scene) ?? 0),
+        _listVersion: scene._lightListVersion ?? 0,
         _lightCount: scene.lights.length,
         _byteSize: byteSize,
     };
@@ -111,14 +116,33 @@ export function ensureSceneLightState(engine: EngineContext, scene: SceneContext
 export function refreshSceneLightsUBO(engine: EngineContext, scene: SceneContext): GPUBuffer {
     const state = ensureSceneLightState(engine, scene);
     const version = computeLightsVersion(scene.lights) + (engine._lightFoVersion?.(scene) ?? 0);
-    if (version !== state._version || scene.lights.length !== state._lightCount) {
+    // The per-light version sum alone cannot see a light being SWAPPED for another (same count, and the two
+    // sums can match), which left the UBO holding the removed light's data. The list version is compared
+    // separately rather than summed in, so the two counters can never cancel each other out.
+    const listVersion = scene._lightListVersion ?? 0;
+    if (version !== state._version || listVersion !== state._listVersion || scene.lights.length !== state._lightCount) {
         state._version = version;
+        state._listVersion = listVersion;
         state._lightCount = scene.lights.length;
         fillLightsData(state._scratch, scene.lights);
         engine._applyLightFoOffset?.(state._scratch, scene);
         engine._device.queue.writeBuffer(state._buffer, 0, state._scratch as Float32Array<ArrayBuffer>);
     }
     return state._buffer;
+}
+
+/** @internal Fill `data` with the light-UBO contents for `foScene.lights`, then
+ *  subtract the floating-origin offset of `foScene.camera` (a no-op for non-LWR
+ *  engines, where `engine._applyLightFoOffset` is undefined). Reuses the same
+ *  `fillLightsData` + `applyLightFoOffset` pipeline as the shared scene lights
+ *  state, but lets a caller supply a DIFFERENT camera/lights source. The
+ *  geometry-renderer task uses this to build a lights UBO relative to a
+ *  `config.camera` override so positional light data shares the same origin as
+ *  its origin-relative world/view packing — without perturbing the scene's
+ *  shared lights state (which stays relative to the scene's active camera). */
+export function _writeTaskLightsData(engine: EngineContext, data: Float32Array, foScene: SceneContext): void {
+    fillLightsData(data, foScene.lights);
+    engine._applyLightFoOffset?.(data, foScene);
 }
 
 /** @internal */

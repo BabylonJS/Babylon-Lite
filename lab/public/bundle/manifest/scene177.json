@@ -1,12 +1,15 @@
 {
-  "rawKB": 68.8,
-  "gzipKB": 27.8,
+  "rawKB": 70.2,
+  "gzipKB": 28.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene177-ibl-fragment-CeRrvT96.js",
-    "scene177-pbr-renderable-BzqzbQ9F.js",
+    "scene177-ibl-skybox-wgsl-CFIBOHHx.js",
+    "scene177-iridescence-fragment-DbYifzec.js",
+    "scene177-pbr-renderable-rkBBB9z5.js",
     "scene177-rgbd-decode-DgyvGBcz.js",
     "scene177-scene-uniforms-FTYH6Ct0.js",
     "scene177.js"
-  ]
+  ],
+  "rawBytes": 71906
 }

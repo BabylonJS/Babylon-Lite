@@ -37,6 +37,12 @@ interface CsmDirectionalShadowGeneratorConfig {
 }
 
 function createCsmDirectionalShadowGenerator(engine: EngineContext, light: DirectionalLight, cfg?: CsmDirectionalShadowGeneratorConfig): ShadowGenerator;
+
+function getCsmReceiverTexture(shadowGenerator: ShadowGenerator): Texture2D;
+
+function onCsmReceiverUpdate(shadowGenerator: ShadowGenerator, callback: (data: Float32Array) => void): () => void;
+
+function setShadowCasterMaxCascade(mesh: Mesh, maxCascade: number): void;
 ```
 
 Usage mirrors the other directional generators:
@@ -50,17 +56,46 @@ setShadowTaskCasterMeshes(light.shadowGenerator, casterMeshes);
 await registerSceneWithShadowSupport(scene);
 ```
 
+`setShadowCasterMaxCascade(mesh, maxCascade)` limits a caster to cascade layers
+`0..maxCascade` (`0` is nearest). The default is all cascades; pass `Infinity` to
+restore it. Values must be non-negative integer indexes or `Infinity`. The cap is
+snapshotted when `setShadowTaskCasterMeshes` supplies the caster set, so changing a
+live cap requires re-supplying a new caster-array instance. CSM updates only the
+changed caster's per-cascade task membership; ESM and single-map PCF ignore the cap.
+
+Custom `ShaderMaterial` receivers use the same public generator without reading its
+internal WebGPU resources:
+
+```ts
+const material = createShaderMaterial({
+    // ...sources, attributes, and uniforms...
+    samplers: [{ name: "csmShadow", sampleType: "depth", viewDimension: "2d-array", comparison: true }],
+});
+setShaderTexture(material, "csmShadow", getCsmReceiverTexture(light.shadowGenerator));
+onCsmReceiverUpdate(light.shadowGenerator, (data) => {
+    // Mirror the documented 80-float receiver layout into the custom material.
+});
+```
+
+`getCsmReceiverTexture` accepts only a generator created by
+`createCsmDirectionalShadowGenerator`; other shadow techniques throw. It returns a
+borrowed `Texture2D` whose view is explicitly `"2d-array"`, whose sampler is the
+generator's comparison sampler, and whose sample type is depth. The same wrapper
+object is returned for every call on one generator. It shares the generator's
+lifetime and must not be released or disposed independently.
+
 ## Internal Architecture
 
 ### `ShadowGenerator` extensions (shared interface, type-only)
 
 - `_shadowType` union widened `"esm" | "pcf"` → `"esm" | "pcf" | "csm"`.
-- `_depthView: GPUTextureView` — pre-created receiver-facing view. ESM/PCF set a 2d
-  view, CSM sets a `dimension:"2d-array"` view. Receiver renderables bind
-  `sg._depthView` (instead of `sg._depthTexture.createView()`) so they stay
-  texture-dimension-agnostic with no per-type branch.
 - `_csmCascadeCount?: number` — number of cascades, read by the receiver renderable
   to bake the cascade-select loop bound.
+- `_csmReceiverTexture?: Texture2D` — lazily created borrowed public wrapper for
+  custom receivers. It creates exactly one explicit 2d-array view, is cached on
+  the generator rather than in module state, and establishes one generator-owned
+  texture reference so ShaderMaterial acquire/release cycles cannot destroy the
+  shared shadow map.
 
 ### Receiver UBO layout (`_shadowUBO`, 320 bytes / 80 f32)
 
@@ -84,6 +119,11 @@ caster render targets use a single-layer view
 (`createView({dimension:"2d", baseArrayLayer:i, arrayLayerCount:1})`). Comparison
 sampler `compare:"less"`, linear filtering.
 
+Built-in material receivers bind the generator's internal texture and sampler through
+their material pipeline. Custom `ShaderMaterial` receivers obtain the equivalent
+borrowed `Texture2D` only through `getCsmReceiverTexture`; raw `GPUTexture`,
+`GPUTextureView`, and `GPUSampler` handles never cross that public boundary.
+
 ## Pipeline Configuration
 
 - **Caster pass:** N depth-only render tasks (one per cascade layer), each rendering
@@ -106,10 +146,11 @@ comparisonSampler, csmUBO]` (binding order 0,1,2). The 2d-array view dimension i
 Receiver, per CSM light (suffix `_<lightIndex>`, `N` = baked cascade count):
 
 ```wgsl
-// cascade select from camera-view-space depth (vf.z), LH
+// cascade select from camera-view-space depth, LH
+let viewZ = (scene.view * vec4(vp, 1.0)).z;
 var idx = -1; var diff = 0.0;
 for (var i = 0; i < N; i++) {
-    diff = csmInfo.viewFrustumZ[i] - vf.z;
+    diff = csmInfo.viewFrustumZ[i] - viewZ;
     if (diff >= 0.0) { idx = i; break; }
 }
 if (idx < 0) { idx = N - 1; }
@@ -139,8 +180,11 @@ The `0.99999994` clamp is critical: fragments projecting beyond a cascade's far 
 must compare strictly _less than_ the cleared shadow-map value (1.0) so they read as
 **lit**, not shadowed.
 
-`vp` (world position) and `vf` (camera-view-space position) are existing base
-varyings — CSM reuses them instead of emitting N per-cascade light-space varyings.
+`vp` is the existing world-position varying. Standard CSM derives camera-view-space
+depth from `scene.view × vec4(vp, 1)` in the fragment shader. It must not depend on
+the fog-only `vf` varying, so a non-fog CSM material composes without retaining fog
+WGSL or requiring fog-generated vertex output. CSM still avoids emitting N
+per-cascade light-space varyings.
 
 ## CSM Math (`csm-shadow-task-hooks.ts`)
 
@@ -192,6 +236,19 @@ For `p = (i+1)/N`: `log = minZ*ratio^p`, `uniform = minZ + range*p`,
 `_renderShadowMap` → per frame, dirty-checked on `casterVersion + lightVersion +
 cameraVersion`; recomputes splits + matrices, writes the 320-byte UBO (bumping
 `_version`), updates each cascade camera, executes all cascade tasks.
+
+The custom-receiver texture wrapper is lazy and generator-scoped. The first
+`getCsmReceiverTexture` call validates the CSM technique, creates the array view, and
+caches the wrapper. It also anchors the generator's texture ownership in the shared
+ref-count pool; receiver materials may acquire and release the wrapper without
+destroying the generator-owned depth array. Later calls preserve object/view identity.
+Shadow-map recreation is not supported by the current fixed generator configuration;
+therefore the wrapper remains valid until the generator's GPU resources are disposed
+with the scene.
+
+Each CSM task state also snapshots every caster's maximum cascade. When a new caster
+array is supplied without material changes, the incremental diff removes and re-adds
+only new, removed, or re-capped casters, preserving all unchanged caster packets.
 
 ## Babylon.js Equivalence Map
 
@@ -245,9 +302,19 @@ map back to the same authored world-space distance across changing fitted depth
 ranges, preserve a tightly fitted far caster after the projection reserves bias
 headroom, and produce no bias for invalid or collapsed inputs.
 
+`tests/lite/unit/csm-receiver-texture.test.ts` proves that the public custom-receiver
+adapter creates one explicit 2d-array depth wrapper, reuses the generator texture and
+comparison sampler without exposing them in its signature, preserves wrapper identity,
+survives a ShaderMaterial acquire/release cycle, and rejects ESM/PCF generators.
+
+`tests/lite/unit/shadow-caster-max-cascade.test.ts` validates cap input, default and
+reset behavior, and incremental reassignment of an existing caster across cascade
+tasks after a live cap change.
+
 ## File Manifest
 
-- `shadow/csm-directional-shadow-generator.ts` — public factory + texture/UBO/sampler.
+- `shadow/csm-directional-shadow-generator.ts` — public factory, custom-receiver
+  `Texture2D` adapter, update subscription, and texture/UBO/sampler ownership.
 - `shadow/csm-shadow-task-hooks.ts` — cascade math + N-layer caster render hooks.
 - `shader/fragments/csm-shadow-fragment-core.ts` — receiver WGSL codegen.
 - `material/standard/fragments/std-csm-shadow-fragment.ts` — Standard-family wrapper.

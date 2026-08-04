@@ -16,7 +16,7 @@ function fixture() {
     };
     const writeBuffer = vi.fn();
     const engine = { _device: { queue: { writeBuffer } } } as unknown as EngineContext;
-    const mesh = {
+    const mesh = initMeshTransform({
         _gpu: {
             positionBuffer: buffers.position,
             normalBuffer: buffers.normal,
@@ -24,9 +24,8 @@ function fixture() {
             uvBuffer: buffers.uv,
             uv2Buffer: buffers.uv2,
             tangentBuffer: buffers.tangent,
-        },
-    } as unknown as Mesh;
-    initMeshTransform(mesh);
+        } as Mesh["_gpu"],
+    });
     return { buffers, writeBuffer, engine, mesh };
 }
 

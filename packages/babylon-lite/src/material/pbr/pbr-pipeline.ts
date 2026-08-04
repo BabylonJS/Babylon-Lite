@@ -22,6 +22,7 @@ import { PBR_HAS_NORMAL_MAP, PBR_HAS_EMISSIVE, PBR_HAS_SPEC_GLOSS, PBR_HAS_DOUBL
 import { MSH_HAS_TANGENTS, MSH_HAS_UV2 } from "../mesh-features.js";
 import { REVERSE_DEPTH_COMPARE, targetSignatureKey } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
+import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
 // ─── Shader Bindings (sig-independent) ──────────────────────────────
 
@@ -64,6 +65,10 @@ interface _PbrShaderBindings {
     _meshBGL: GPUBindGroupLayout;
     _shadowBGL: GPUBindGroupLayout | null;
     _composed: ComposedShader;
+    /** Shared across normal/A2C pipeline variants only when the A2C resolver is installed. */
+    _a2cVertModule?: GPUShaderModule;
+    /** @internal */
+    _a2cFragModule?: GPUShaderModule;
     /** Pre-baked partial depth-stencil descriptor for this material's stencil state. Present (and the cache
      *  key carries the resolved `_key`) only when `enableMaterialStencil` was called — otherwise the field is
      *  never assigned and the whole stencil path folds out of stencil-free bundles. */
@@ -137,9 +142,11 @@ export function getOrCreatePbrBindings(
 }
 
 /** Get-or-build the sig-specific pipeline on top of a PBR shader bindings. Called at bind() time. */
-export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetSignature, bindings: _PbrShaderBindings): GPURenderPipeline {
+export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetSignature, bindings: _PbrShaderBindings, material: PbrMaterialProps): GPURenderPipeline {
     ensureDevice(engine);
-    const key = targetSignatureKey(sig);
+    const alphaToCoverageResolver = _getAlphaToCoverageResolver();
+    const useAlphaToCoverage = sig._sampleCount > 1 && !!alphaToCoverageResolver?.(material);
+    const key = `${targetSignatureKey(sig)}${useAlphaToCoverage ? ":a2c" : ""}`;
     const cached = bindings._pipelines.get(key);
     if (cached) {
         return cached;
@@ -154,9 +161,16 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
     const sceneBGL = getSceneBindGroupLayout(engine);
     const bgls: GPUBindGroupLayout[] = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
 
-    const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
+    const vertModule = alphaToCoverageResolver
+        ? (bindings._a2cVertModule ??= device.createShaderModule({ code: composed._vertexWGSL }))
+        : device.createShaderModule({ code: composed._vertexWGSL });
     const noColorOutput = (features2 & PBR2_NO_COLOR_OUTPUT) !== 0;
-    const fragModule = !sig._colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
+    const fragModule =
+        !sig._colorFormat && !noColorOutput
+            ? null
+            : alphaToCoverageResolver
+              ? (bindings._a2cFragModule ??= device.createShaderModule({ code: composed._fragmentWGSL }))
+              : device.createShaderModule({ code: composed._fragmentWGSL });
 
     const fragTarget: GPUColorTargetState | null = noColorOutput ? null : { format: sig._colorFormat!, writeMask: CW.ALL };
     if (hasAlpha && fragTarget) {
@@ -184,7 +198,7 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
                   },
               }
             : {}),
-        multisample: { count: sig._sampleCount },
+        multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
         primitive: _primitiveResolver
             ? _primitiveResolver(meshFeatures, hasDoubleSided)
             : { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },

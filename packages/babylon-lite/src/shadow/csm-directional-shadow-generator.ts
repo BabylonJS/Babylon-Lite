@@ -16,8 +16,10 @@
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
+import type { Texture2D } from "../texture/texture-2d.js";
 import { createShadowParamsUBO } from "./shadow-base.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
+import { acquireTexture } from "../resource/gpu-pool.js";
 import { ensureCsmShadowTaskState, preloadCsmShadowTaskState, renderCsmShadowMap, type CsmConfig, type CsmTaskState } from "./csm-shadow-task-hooks.js";
 import { setCsmStdReceiverFactory, setCsmPbrReceiverFactory } from "./csm-receiver-registry.js";
 import { createStdCsmShadowFragment } from "../material/standard/fragments/std-csm-shadow-fragment.js";
@@ -127,6 +129,39 @@ export function createCsmDirectionalShadowGenerator(engine: EngineContext, _ligh
     };
     sg._renderShadowMap = (eng, state) => renderCsmShadowMap(eng, sg, state as CsmTaskState, csmCfg);
     return sg;
+}
+
+/**
+ * Returns the borrowed depth-array texture wrapper used by a custom CSM receiver.
+ *
+ * The wrapper shares the generator's texture and comparison sampler, is cached per
+ * generator, and remains valid for the generator's lifetime. Callers must not dispose
+ * or release it independently.
+ *
+ * @param sg - A cascaded-shadow generator from {@link createCsmDirectionalShadowGenerator}.
+ * @returns A stable `Texture2D` with a 2d-array depth view.
+ */
+export function getCsmReceiverTexture(sg: ShadowGenerator): Texture2D {
+    if (sg._shadowType !== "csm") {
+        throw new Error("getCsmReceiverTexture requires a CSM shadow generator");
+    }
+    if (sg._csmReceiverTexture) {
+        return sg._csmReceiverTexture;
+    }
+    const texture = sg._depthTexture;
+    const receiverTexture: Texture2D = {
+        texture,
+        view: texture.createView({ dimension: "2d-array" }),
+        sampler: sg._depthSampler,
+        width: texture.width,
+        height: texture.height,
+        _sampleType: "depth",
+    };
+    // ShaderMaterial packets acquire/release every bound Texture2D. Keep the
+    // generator's ownership ref so removing one receiver cannot destroy the map.
+    acquireTexture(receiverTexture);
+    sg._csmReceiverTexture = receiverTexture;
+    return receiverTexture;
 }
 
 /**

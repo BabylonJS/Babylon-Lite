@@ -1,13 +1,17 @@
 /**
  * Tiny Web Audio sound effects + looping background music for the platformer demo,
- * all synthesised at runtime (no audio files to ship). The engine has no audio
- * subsystem, so this is a small clean-room oscillator/noise kit — chiptune-flavoured
- * blips for jump, coin, stomp, bump, power-up, pipe, death, and the level-complete
- * jingle, plus a look-ahead-scheduled chiptune loop ({@link Music}).
+ * all synthesised at runtime (no audio files to ship). They are built on the Lite
+ * audio engine's own AudioContext and mixed through a master GainNode routed into
+ * the engine via `createSoundSourceAsync`, so they share its master bus, unlock
+ * handling, and volume — chiptune-flavoured blips for jump, coin, stomp, bump,
+ * power-up, pipe, death, and the level-complete jingle, plus a
+ * look-ahead-scheduled chiptune loop ({@link Music}).
  *
- * The AudioContext is created lazily and resumed on first user gesture (browser
+ * The engine is created lazily and unlocked on first user gesture (browser
  * autoplay policy); the music scheduler self-guards until the context is running.
  */
+
+import { createAudioEngineAsync, createSoundSourceAsync, disposeAudioEngine, unlockAudioEngineAsync, type AudioEngine } from "babylon-lite";
 
 type Wave = OscillatorType;
 
@@ -114,23 +118,51 @@ export interface Sfx {
 }
 
 export function createSfx(): Sfx {
-    let ctx: AudioContext | null = null;
+    let engine: AudioEngine | null = null;
+    let ctx: BaseAudioContext | null = null;
     let master: GainNode | null = null;
     /** Sub-mix for music, so the loop sits under the SFX without separate volume wiring. */
     let musicGain: GainNode | null = null;
+    let starting = false;
 
-    const ensure = (): AudioContext | null => {
-        if (ctx === null) {
-            const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-            if (!Ctor) return null;
-            ctx = new Ctor();
-            master = ctx.createGain();
-            master.gain.value = 0.22;
-            master.connect(ctx.destination);
-            musicGain = ctx.createGain();
-            musicGain.gain.value = 0.8;
-            musicGain.connect(master);
+    /** Kick off lazy engine creation (idempotent). Must run in a user gesture. */
+    const startEngine = (): void => {
+        if (engine) {
+            void unlockAudioEngineAsync(engine);
+            return;
         }
+        if (starting) return;
+        starting = true;
+        void (async (): Promise<void> => {
+            try {
+                const e = await createAudioEngineAsync();
+                const c = e.audioContext;
+                const m = c.createGain();
+                m.gain.value = 0.22;
+                await createSoundSourceAsync(e, m);
+                const mg = c.createGain();
+                mg.gain.value = 0.8;
+                mg.connect(m);
+                engine = e;
+                ctx = c;
+                master = m;
+                musicGain = mg;
+                await unlockAudioEngineAsync(e);
+            } catch {
+                // Audio unavailable — stay silent. Reset state so a later
+                // gesture can retry a transient failure.
+                engine = null;
+                ctx = null;
+                master = null;
+                musicGain = null;
+                starting = false;
+            }
+        })();
+    };
+
+    /** Trigger engine creation and return the context if it is ready yet (else null). */
+    const ensure = (): BaseAudioContext | null => {
+        startEngine();
         return ctx;
     };
 
@@ -217,8 +249,7 @@ export function createSfx(): Sfx {
 
     return {
         resume(): void {
-            const c = ensure();
-            if (c && c.state === "suspended") void c.resume();
+            startEngine();
         },
         jump(): void {
             if (!ensure()) return;
@@ -314,7 +345,8 @@ export function createSfx(): Sfx {
         },
         dispose(): void {
             stopMusicTimer();
-            if (ctx) void ctx.close();
+            if (engine) disposeAudioEngine(engine);
+            engine = null;
             ctx = null;
             master = null;
             musicGain = null;

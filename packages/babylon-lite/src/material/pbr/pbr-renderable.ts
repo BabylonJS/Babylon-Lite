@@ -106,6 +106,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasAnyUv2 = false;
     let hasAnyVertexColor = false;
     let hasAnyFlatNormal = false;
+    let hasGammaAlbedo = false;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps & { _hasUvTx?: boolean };
@@ -124,6 +125,11 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasAnyUv2 ||= !!m._gpu.uv2Buffer && !!(mat as { _uv2Mask?: number })._uv2Mask;
         hasAnyVertexColor ||= !!m._gpu.colorBuffer;
         hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
+        hasGammaAlbedo ||= !!mat.gammaAlbedo;
+    }
+    const group = scene._groups.get(meshes[0]!.material!._buildGroup)!;
+    if (!hasGammaAlbedo || !group.r) {
+        group._w = hasGammaAlbedo ? null : (mesh) => (mesh.material as PbrMaterialProps | null)?.gammaAlbedo;
     }
 
     // ── Dynamically import fragment creators based on scene capabilities ──
@@ -186,7 +192,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     if (hasTransmissionRefraction) {
         const mod = await import("./pbr-refraction.js");
-        await mod.registerPbrRefraction(scene as SceneContext, engine, _registerPbrExt);
+        await mod.R(scene as SceneContext, engine, _registerPbrExt);
     }
     await _drainPbrExts([
         [needsEmissiveColor, () => import("./fragments/emissive-fragment.js")],
@@ -276,11 +282,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // material-swap / per-pass-override rebuilds (set on pbrGroupBuilder._rebuildSingle).
     // Captures the per-scene context — no separate WeakMap needed.
     const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
-        const materialInput = (materialOverride ?? mesh.material) as PbrMaterialProps;
-        const mat = materialInput;
+        const mat = (materialOverride ?? mesh.material) as PbrMaterialProps;
         const renderFeatures = (mat._renderFeatures ??= _computePbrMaterialFeatures(mat)) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
-        const mi = mesh;
 
         const lr = writeMeshLightSelection(mesh, s.lights);
         const lightCount = lr > 0 ? 1 : -lr;
@@ -296,8 +300,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         // Genuine GPU interleaving. Tight meshes have `_vbLayout` undefined → vbKey ""
         // → composed shader, bindings, and pipeline cache keys are byte-identical to
         // today. Interleaved meshes carry a precomputed vbKey from the loader module.
-        const vbLayout = mi._gpu._vbLayout;
-        const vbKey = mi._gpu._vbKey ?? "";
+        const vbLayout = mesh._gpu._vbLayout;
+        const vbKey = mesh._gpu._vbKey ?? "";
         const uv2Mask = (mat as { _uv2Mask?: number })._uv2Mask ?? 0;
 
         const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey, uv2Mask);
@@ -423,10 +427,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             materialBindGroup: GPUBindGroup,
             cullBinding?: import("../../mesh/thin-instance-cull-binding.js").TiCullBinding
         ): number => {
-            if (!isOverride && mesh.material !== materialInput) {
+            if (!isOverride && mesh.material !== mat) {
                 return 0;
             }
-            const gpu = mi._gpu;
+            const gpu = mesh._gpu;
             pass.setBindGroup(1, materialBindGroup);
             if (shadowBindGroup) {
                 pass.setBindGroup(2, shadowBindGroup);
@@ -482,7 +486,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             _transmissive: needsTaskRefraction,
             mesh,
             bind(eng, sig) {
-                const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings);
+                const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings, mat);
                 const materialBindGroup = needsTaskRefraction
                     ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
                     : materialBindGroupStatic!;
@@ -521,11 +525,13 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     };
 
     scene._disposables.push(
-        () => clearPbrPipelineCache(),
-        () => clearSamplerCache(engine)
+        (engine._pbrCleanup ??= () => {
+            clearPbrPipelineCache();
+            clearSamplerCache(engine);
+        })
     );
 
-    return { renderables, rebuildSingle };
+    return { renderables, rebuildSingle, _G: hasGammaAlbedo };
 }
 
 /** @internal Per-scene PBR context stashed on the singleton `pbrGroupBuilder`

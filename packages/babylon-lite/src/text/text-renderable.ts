@@ -6,17 +6,15 @@ import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../render/renderable.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
-import { createWorldMatrixState } from "../scene/world-matrix-state.js";
+import { composeTrsLocalMatrix, createWorldMatrixState } from "../scene/world-matrix-state.js";
 import { createEulerProxy } from "../scene/scene-node.js";
 import type { EulerProxy } from "../scene/scene-node.js";
-import { mat4Compose } from "../math/mat4-compose.js";
-import { mat4Identity } from "../math/mat4-identity.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mat4, Mat4Storage, Vec3 } from "../math/types.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
-import { getViewProjectionMatrix, getEffectiveAspectRatio } from "../camera/camera.js";
+import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
@@ -86,13 +84,7 @@ export function createTextRenderable(data: TextData, options?: TextRenderableOpt
     const sc = options?.scaling;
     const initRq = rq ?? { x: 0, y: 0, z: 0, w: 1 };
 
-    const wm = createWorldMatrixState(() => {
-        const p = r.position;
-        const q = r.rotationQuaternion;
-        const s = r.scaling;
-        const isIdentity = p.x === 0 && p.y === 0 && p.z === 0 && q.x === 0 && q.y === 0 && q.z === 0 && q.w === 1 && s.x === 1 && s.y === 1 && s.z === 1;
-        return isIdentity ? mat4Identity() : mat4Compose(p.x, p.y, p.z, q.x, q.y, q.z, q.w, s.x, s.y, s.z);
-    });
+    const wm = createWorldMatrixState(() => composeTrsLocalMatrix(r.position, r.rotationQuaternion, r.scaling));
     const markDirty = (): void => {
         r._wmDirty = true;
         wm.markLocalDirty();
@@ -130,7 +122,7 @@ function ensureGpu(r: TextRenderable, engine: EngineContext, target: RenderTarge
     }
     const depthFormat = target._depthStencilFormat ?? null;
     const depthWrite = !r.ignoreDepth;
-    const { pipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite);
+    const { pipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r);
     const key = targetSig(target);
     let gpu = r._gpu;
     if (gpu && gpu.device !== device) {
@@ -193,7 +185,7 @@ function ensureInstanceCapacity(device: GPUDevice, gpu: TextRenderableGpu, neede
 
 function bindTextRenderable(r: TextRenderable, engine: EngineContext, target: RenderTargetSignature): DrawBinding {
     const gpu = ensureGpu(r, engine, target);
-    const { cache } = getOrCreateTextPipeline(engine, target._colorFormat!, target._sampleCount === 1 ? 1 : 4, target._depthStencilFormat ?? null, !r.ignoreDepth);
+    const { cache } = getOrCreateTextPipeline(engine, target._colorFormat!, target._sampleCount === 1 ? 1 : 4, target._depthStencilFormat ?? null, !r.ignoreDepth, r);
     const quadVertex = cache.quadVertexBuffer;
     const bindGroupLayout = cache.bindGroupLayout;
 
@@ -258,7 +250,7 @@ function updateTextRenderable(r: TextRenderable, engine: EngineContext, gpu: Tex
     const camera = context._camera ?? null;
     if (camera) {
         const aspect = getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight);
-        const camVer = camera.worldMatrixVersion;
+        const camVer = _cameraChangeKey(camera);
         if (r._wmDirty || gpu.uploadedCameraVersion !== camVer || gpu.uploadedAspect !== aspect) {
             const vp = getViewProjectionMatrix(camera, aspect) as unknown as Float32Array;
             const wm = r._worldMatrix();

@@ -64,10 +64,7 @@ function findBuiltEntryPoint(packageDir: string): string {
             return full;
         }
     }
-    throw new Error(
-        `Cannot generate API report: no built index.d.ts found under ${packageDir} ` +
-            `(checked build/index.d.ts and dist/index.d.ts).`
-    );
+    throw new Error(`Cannot generate API report: no built index.d.ts found under ${packageDir} ` + `(checked build/index.d.ts and dist/index.d.ts).`);
 }
 
 function generateApiReport(projectRoot: string, outputDir: string): string {
@@ -377,78 +374,6 @@ function isNonBreakingOptionalParameterExpansion(removedLine: string, addedLine:
     return addedSignature.parameters.slice(removedSignature.parameters.length).every(isOptionalParameter);
 }
 
-/**
- * Split a parameter (as rendered in an `.api.md` signature) into its optional/rest markers
- * and its type. `url: string` → `{ prefix: "url", optional: false, rest: false, type: "string" }`;
- * `options?: MeshOptions` → optional; `...defines: string[]` → rest. Returns `undefined` for a
- * parameter with no type annotation (which keeps the change classified as breaking by default).
- */
-function parseParameterType(parameter: string): { optional: boolean; rest: boolean; type: string } | undefined {
-    const rest = parameter.startsWith("...");
-    const body = rest ? parameter.slice(3) : parameter;
-    // Find the first top-level `:` that separates the (identifier) name from the type. Parameter
-    // names cannot contain `<`/`(`/`[`/`{`, so any such bracket means we've entered the type.
-    let colon = -1;
-    for (let i = 0; i < body.length; i += 1) {
-        const ch = body[i]!;
-        if (ch === ":") {
-            colon = i;
-            break;
-        }
-        if (ch === "<" || ch === "(" || ch === "[" || ch === "{") {
-            break;
-        }
-    }
-    if (colon === -1) {
-        return undefined;
-    }
-    const name = body.slice(0, colon);
-    const optional = name.trimEnd().endsWith("?");
-    return { optional, rest, type: body.slice(colon + 1).trim() };
-}
-
-/**
- * Treat a parameter whose type UNION GAINED members (none removed) as non-breaking — e.g. an
- * overload set collapsed into a single implementation signature
- * (`f(x: string)` + `f(x: ArrayBuffer | Blob)` → `f(x: string | ArrayBuffer | Blob)`), or a lone
- * signature whose parameter type was widened (`f(x: string)` → `f(x: string | Color3)`). Widening
- * an accepted parameter type is additive: every prior caller still type-checks. Because
- * `breakingApiLines` tests each removed line against ALL added lines, this classifies every removed
- * overload as non-breaking against the single widened signature that supersedes it.
- *
- * Conservative by construction — the name/generics prefix and return-type suffix must be identical,
- * the parameter count must match, optional/rest markers must match position-for-position, and every
- * removed parameter's union members must be a SUBSET of the corresponding added parameter's members.
- * A narrowed or re-spelled parameter type, a changed return type, or a changed arity all fall
- * through to breaking.
- */
-function isNonBreakingParameterTypeWidening(removedLine: string, addedLine: string): boolean {
-    const removedSignature = parseCallableSignature(removedLine);
-    const addedSignature = parseCallableSignature(addedLine);
-
-    if (!removedSignature || !addedSignature) {
-        return false;
-    }
-
-    if (removedSignature.prefix !== addedSignature.prefix || removedSignature.suffix !== addedSignature.suffix) {
-        return false;
-    }
-
-    if (removedSignature.parameters.length !== addedSignature.parameters.length) {
-        return false;
-    }
-
-    return removedSignature.parameters.every((removedParameter, index) => {
-        const removed = parseParameterType(removedParameter);
-        const added = parseParameterType(addedSignature.parameters[index]!);
-        if (!removed || !added || removed.optional !== added.optional || removed.rest !== added.rest) {
-            return false;
-        }
-        const addedMembers = new Set(splitUnionMembers(added.type));
-        return splitUnionMembers(removed.type).every((member) => addedMembers.has(member));
-    });
-}
-
 const CONST_LITERAL_PATTERN = /^export (?:declare )?const ([A-Za-z_$][\w$]*) = (.+);$/;
 const CONST_TYPED_PATTERN = /^export (?:declare )?const ([A-Za-z_$][\w$]*): (.+);$/;
 
@@ -540,6 +465,255 @@ function isNonBreakingUnionWidening(removedLine: string, addedLine: string): boo
     return removedMembers.every((member) => addedMembers.has(member));
 }
 
+/** Split a single parameter declaration into its optional flag and type, ignoring the
+ *  parameter name. Returns `undefined` for rest params (`...x: T[]`) and anything that
+ *  doesn't look like `name: Type` — those are left to other classifiers / stay breaking. */
+function splitParameterType(parameter: string): { optional: boolean; type: string } | undefined {
+    if (parameter.startsWith("...")) {
+        return undefined;
+    }
+    const match = /^[A-Za-z_$][\w$]*(\?)?\s*:\s*([\s\S]+)$/.exec(parameter);
+    if (!match) {
+        return undefined;
+    }
+    return { optional: match[1] === "?", type: match[2]!.trim() };
+}
+
+interface InterfaceMember {
+    optional: boolean;
+    text: string;
+}
+
+interface InterfaceDeclaration {
+    bases: string[];
+    members: Map<string, InterfaceMember>;
+}
+
+const INTERFACE_HEADER_PATTERN = /^export (?:declare )?interface ([A-Za-z_$][\w$]*)\s*(<[^>]*>)?\s*(?:extends\s+([^{]+))?\{/;
+const INTERFACE_MEMBER_PATTERN = /^(?:readonly\s+)?([A-Za-z_$][\w$]*)\s*(\?)?\s*[:(<]/;
+
+/**
+ * Index every `export interface` in a full `.api.md` report, capturing its `extends`
+ * clause and its own members. Anything we cannot parse with confidence — generic
+ * interfaces, generic or computed base types, index/call signatures, members that
+ * Prettier wrapped across lines — is simply left out of the index, which keeps the
+ * associated change classified as breaking (fail closed).
+ */
+function collectInterfaceDeclarations(report: string): Map<string, InterfaceDeclaration> {
+    const declarations = new Map<string, InterfaceDeclaration>();
+    const lines = report.split(/\r?\n/);
+
+    for (let index = 0; index < lines.length; index += 1) {
+        const header = INTERFACE_HEADER_PATTERN.exec(lines[index]!.trim());
+        if (!header) {
+            continue;
+        }
+        const [, name, typeParameters, extendsClause] = header;
+        if (typeParameters) {
+            continue; // generic interface — substitutability needs real type resolution
+        }
+
+        const bases = (extendsClause ?? "")
+            .split(",")
+            .map((base) => base.trim())
+            .filter((base) => base.length > 0);
+        if (bases.some((base) => !/^[A-Za-z_$][\w$]*$/.test(base))) {
+            continue; // a generic/qualified base type we cannot resolve textually
+        }
+
+        const body = readInterfaceBody(lines, index);
+        if (!body) {
+            continue;
+        }
+
+        const members = new Map<string, InterfaceMember>();
+        let parsable = true;
+        for (const line of body) {
+            const content = normalizeApiLine(line);
+            if (isIgnorableApiLine(content)) {
+                continue;
+            }
+            const member = INTERFACE_MEMBER_PATTERN.exec(content);
+            if (!member) {
+                parsable = false; // wrapped member, index/call signature, etc.
+                break;
+            }
+            members.set(member[1]!, { optional: member[2] === "?", text: content });
+        }
+        if (parsable) {
+            declarations.set(name!, { bases, members });
+        }
+    }
+
+    return declarations;
+}
+
+/**
+ * Return the lines that make up an interface body — those nested exactly one level
+ * inside the declaration's braces. Returns `undefined` if the braces never balance.
+ */
+function readInterfaceBody(lines: string[], headerIndex: number): string[] | undefined {
+    const body: string[] = [];
+    let depth = 0;
+    let started = false;
+
+    for (let index = headerIndex; index < lines.length; index += 1) {
+        const line = lines[index]!;
+        let lineDepth = depth;
+        for (const character of line) {
+            if (character === "{") {
+                depth += 1;
+            } else if (character === "}") {
+                depth -= 1;
+                lineDepth = Math.min(lineDepth, depth);
+            }
+        }
+        if (started && lineDepth >= 1) {
+            body.push(line);
+        }
+        started = true;
+        if (depth === 0) {
+            return body;
+        }
+        if (depth < 0) {
+            return undefined;
+        }
+    }
+
+    return undefined;
+}
+
+/**
+ * Flatten an interface's own members with everything it inherits. Returns `undefined`
+ * when any type in the `extends` chain is missing from the index (e.g. an external or
+ * generic type), so callers fail closed instead of assuming an empty base.
+ */
+function flattenInterfaceMembers(name: string, declarations: Map<string, InterfaceDeclaration>, seen = new Set<string>()): Map<string, InterfaceMember> | undefined {
+    if (seen.has(name)) {
+        return undefined; // cyclic extends chain
+    }
+    seen.add(name);
+
+    const declaration = declarations.get(name);
+    if (!declaration) {
+        return undefined;
+    }
+
+    const flattened = new Map<string, InterfaceMember>();
+    for (const base of declaration.bases) {
+        // A copy per branch: only a genuine cycle along one path is a problem, whereas a
+        // diamond (two bases sharing an ancestor) resolves perfectly well.
+        const baseMembers = flattenInterfaceMembers(base, declarations, new Set(seen));
+        if (!baseMembers) {
+            return undefined;
+        }
+        for (const [memberName, member] of baseMembers) {
+            flattened.set(memberName, member);
+        }
+    }
+    for (const [memberName, member] of declaration.members) {
+        flattened.set(memberName, member);
+    }
+
+    return flattened;
+}
+
+/**
+ * Treat a parameter whose interface type is replaced by one that merely ADDS optional
+ * members — typically via `extends` — as non-breaking. TypeScript is structural, so a
+ * value of the old type is still assignable to the new one when every member the new
+ * type adds is optional, meaning existing callers keep compiling.
+ *
+ * Example: `createTexture2DArrayFromUrls(..., options?: TextureArrayOptions)` →
+ * `(..., options?: TextureArrayFromUrlsOptions)` where
+ * `interface TextureArrayFromUrlsOptions extends TextureArrayOptions, ArrayLayerUploadOptions {}`
+ * and `ArrayLayerUploadOptions` contributes only `invertY?` / `premultiplyAlpha?`.
+ *
+ * Both types are resolved from the *current* report and flattened through their whole
+ * `extends` chain, so inherited members are compared for real rather than inferred from
+ * the diff — the base types usually pre-date the PR and never appear in it. A required
+ * added member, a re-typed shared member, or any type we cannot fully resolve stays
+ * breaking.
+ */
+function isNonBreakingInterfaceSubstitution(removedType: string, addedType: string, declarations: Map<string, InterfaceDeclaration>): boolean {
+    if (removedType === addedType || declarations.size === 0) {
+        return false;
+    }
+
+    const removedMembers = flattenInterfaceMembers(removedType, declarations);
+    const addedMembers = flattenInterfaceMembers(addedType, declarations);
+    if (!removedMembers || !addedMembers) {
+        return false;
+    }
+
+    for (const [memberName, member] of removedMembers) {
+        const replacement = addedMembers.get(memberName);
+        if (!replacement || replacement.text !== member.text) {
+            return false; // a member was dropped or re-typed
+        }
+    }
+
+    for (const [memberName, member] of addedMembers) {
+        if (!removedMembers.has(memberName) && !member.optional) {
+            return false; // a required member was added
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Treat a function/method whose only change is one or more parameters WIDENING their
+ * type to a union superset — every previous top-level union member is still accepted —
+ * as non-breaking. Widening an input parameter is backward-compatible: existing callers
+ * that passed the old type still type-check (TypeScript parameter bivariance/contravariance).
+ *
+ * Example: `removeFromScene(scene: SceneContext, mesh: Mesh)` →
+ * `removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera)` — `Mesh` is
+ * still in the accepted set, so old calls keep compiling. The parameter NAME may change
+ * (names are not part of a positional call contract). A genuine type REPLACEMENT
+ * (`string` → `Color3`, where `string` is not a member of the new type) keeps the old
+ * member out of the new set and so stays breaking. Mirrors {@link isNonBreakingUnionWidening}
+ * for type aliases.
+ *
+ * A parameter whose interface type gains only optional members is also accepted, via
+ * {@link isNonBreakingInterfaceSubstitution}, when the interface index is available.
+ */
+function isNonBreakingParameterWidening(removedLine: string, addedLine: string, declarations: Map<string, InterfaceDeclaration>): boolean {
+    const removedSignature = parseCallableSignature(removedLine);
+    const addedSignature = parseCallableSignature(addedLine);
+    if (!removedSignature || !addedSignature) {
+        return false;
+    }
+    if (removedSignature.prefix !== addedSignature.prefix || removedSignature.suffix !== addedSignature.suffix) {
+        return false;
+    }
+    if (removedSignature.parameters.length === 0 || removedSignature.parameters.length !== addedSignature.parameters.length) {
+        return false;
+    }
+    let widenedAtLeastOne = false;
+    for (let index = 0; index < removedSignature.parameters.length; index += 1) {
+        const removedParam = splitParameterType(removedSignature.parameters[index]!);
+        const addedParam = splitParameterType(addedSignature.parameters[index]!);
+        if (!removedParam || !addedParam || removedParam.optional !== addedParam.optional) {
+            return false;
+        }
+        if (removedParam.type === addedParam.type) {
+            continue;
+        }
+        const addedMembers = new Set(splitUnionMembers(addedParam.type));
+        if (
+            !splitUnionMembers(removedParam.type).every((member) => addedMembers.has(member)) &&
+            !isNonBreakingInterfaceSubstitution(removedParam.type, addedParam.type, declarations)
+        ) {
+            return false; // a member was dropped/replaced → genuine breaking type change
+        }
+        widenedAtLeastOne = true;
+    }
+    // Require an actual widening so a pure parameter rename isn't silently reclassified.
+    return widenedAtLeastOne;
+}
+
 /**
  * The TypedArray / buffer-view types that TypeScript 5.7 made generic over their
  * backing buffer (`Float32Array` → `Float32Array<TArrayBuffer extends ArrayBufferLike>`).
@@ -591,16 +765,24 @@ function isNonBreakingTypedArrayGenericWidening(removedLine: string, addedLine: 
     return normalizeTypedArrayGenerics(removedLine) === normalizeTypedArrayGenerics(addedLine);
 }
 
-export function breakingApiLines(diff: string): string[] {
+/**
+ * Classify the removed public API lines in `diff` that are genuinely breaking.
+ *
+ * `currentReport` is the full text of the PR's `.api.md`. It lets the interface
+ * classifier resolve `extends` chains — the base types usually pre-date the PR and so
+ * never appear in the diff. Omitting it only makes the gate stricter.
+ */
+export function breakingApiLines(diff: string, currentReport = ""): string[] {
     const removedLines = collectChangedApiLines(diff, "-");
     const addedLines = collectChangedApiLines(diff, "+");
+    const declarations = collectInterfaceDeclarations(currentReport);
 
     return removedLines.filter(
         (removedLine) =>
             !addedLines.some(
                 (addedLine) =>
                     isNonBreakingOptionalParameterExpansion(removedLine, addedLine) ||
-                    isNonBreakingParameterTypeWidening(removedLine, addedLine) ||
+                    isNonBreakingParameterWidening(removedLine, addedLine, declarations) ||
                     isNonBreakingConstLiteralWidening(removedLine, addedLine) ||
                     isNonBreakingUnionWidening(removedLine, addedLine) ||
                     isNonBreakingTypedArrayGenericWidening(removedLine, addedLine)
@@ -722,7 +904,7 @@ async function main(): Promise<void> {
         await normalizeApiReport(targetReport, prettierConfig);
 
         const diff = diffReports(rootDir, targetReport, currentReport);
-        const breakingLines = breakingApiLines(diff);
+        const breakingLines = breakingApiLines(diff, readFileSync(currentReport, "utf-8"));
         const comment = formatComment(diff, breakingLines);
 
         mkdirSync(dirname(commentPath), { recursive: true });

@@ -23,6 +23,11 @@ export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
 export { captureScreenshot } from "./engine/screenshot.js";
 export type { Screenshot } from "./engine/screenshot.js";
+export { forceWebGpuDeviceLossForTesting } from "./engine/device-lost-recovery-testing.js";
+export type { DeviceLostRecoveryCallbacks, DeviceLostRecoveryHandle } from "./engine/device-lost-recovery-types.js";
+export { enableDeviceLostSceneRecovery } from "./engine/device-lost-scene-recovery.js";
+export { enableDeviceLostSpriteRecovery } from "./engine/device-lost-sprite-recovery.js";
+export { enableDeviceLostTextRecovery } from "./engine/device-lost-text-recovery.js";
 export {
     createSceneContext,
     createDefaultCamera,
@@ -39,6 +44,12 @@ export {
 export type { SceneContextOptions } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { getFloatingOriginOffset } from "./large-world/floating-origin.js";
+
+// Opt-in full error messages. By default Babylon-Lite throws compact coded errors to keep bundles
+// small; importing either of these pulls in the message table chunk (statically or via a lazy
+// `import()`), so full text is available — `enableErrorDecoding` installs a global decoder and
+// `decodeError` reconstructs a single caught error on demand.
+export { enableErrorDecoding, decodeError } from "./enable-error-decoding.js";
 
 // Subtree visibility toggle (used to hide a node before deferring its disposal,
 // e.g. streaming voxel chunks). Standalone module — bundled only when used.
@@ -121,6 +132,8 @@ export { interpolateArcRotateCamera } from "./camera/arc-rotate-interpolate.js";
 export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "./camera/arc-rotate-interpolate.js";
 export { createFreeCamera } from "./camera/free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
+export { enableOrthographicCamera, disableOrthographicCamera } from "./camera/orthographic.js";
+export type { OrthographicBounds, OrthographicBoundsOptions } from "./camera/orthographic.js";
 
 // Geospatial (globe-orbit) camera
 export {
@@ -180,6 +193,7 @@ export {
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
 export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
+export { getMeshGeometry } from "./mesh/get-mesh-geometry.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
 export { createSphereData } from "./mesh/create-sphere.js";
@@ -205,13 +219,31 @@ export { createTexture2DFromPixels, updateTexture2DFromPixels, createRenderTextu
 export { createTexture3DFromPixels } from "./texture/pixels-texture.js";
 export type { Texture3D, PixelsTexture3DOptions } from "./texture/pixels-texture.js";
 export type { PixelsTexture2DOptions, RenderTexture2DOptions } from "./texture/pixels-texture.js";
+export {
+    createTexture2DArray,
+    createTexture2DArrayFromPixels,
+    updateTexture2DArrayFromPixels,
+    uploadImageToArrayLayer,
+    loadImageToArrayLayer,
+    createTexture2DArrayFromUrls,
+    uploadKtx2Texture2DArray,
+    loadKtx2Texture2DArray,
+} from "./texture/texture-array.js";
+export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions, TextureArrayFromUrlsOptions } from "./texture/texture-array.js";
+export { createDynamicTexture, updateDynamicTexture } from "./texture/dynamic-texture.js";
+export type { DynamicTexture2D, DynamicTexture2DOptions, DynamicTextureUpdateOptions } from "./texture/dynamic-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
+export { createTexture2DArrayFromKtx2 } from "./texture/ktx2-texture-array.js";
+export type { Ktx2TextureArrayOptions } from "./texture/ktx2-texture-array.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
 export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
+export { enableStandardSkeleton, enableStandardUvOffset } from "./material/standard/enable-standard-mesh-features.js";
+export { enableStandardVertexColors } from "./material/standard/enable-standard-vertex-colors.js";
+export { enableMirroredMeshes } from "./mesh/enable-mirrored-meshes.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { setShadowOnly } from "./material/pbr/set-shadow-only.js";
 export type { ShadowOnlyOptions } from "./material/pbr/set-shadow-only.js";
@@ -253,7 +285,7 @@ export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
 export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
-export { rebuildScenePbrPipelines } from "./scene/scene-rebuild.js";
+export { rebuildScenePbrPipelines, rebuildSceneRenderables } from "./scene/scene-rebuild.js";
 export type { ToneMapping } from "./material/pbr/tone-mapping.js";
 export { StandardToneMapping } from "./material/pbr/tone-mapping.js";
 export { AcesToneMapping } from "./material/pbr/pbr-aces-wgsl.js";
@@ -261,6 +293,8 @@ export { NeutralToneMapping } from "./material/pbr/pbr-neutral-wgsl.js";
 export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
 export { enableMaterialStencil } from "./material/enable-material-stencil.js";
+export { getAlphaToCoverage, setAlphaToCoverage } from "./render/alpha-to-coverage.js";
+export type { AlphaToCoverageTarget } from "./render/alpha-to-coverage.js";
 export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────
@@ -283,6 +317,7 @@ export type { SceneNode } from "./scene/scene-node.js";
 export { loadBabylon } from "./loader-babylon/load-babylon.js";
 export { loadEnvironment } from "./loader-env/load-env.js";
 export { loadDdsEnvironment } from "./loader-env/load-dds-env.js";
+export { buildDdsSkyboxRenderable } from "./material/pbr/background-dds-skybox.js";
 export { loadHdrEnvironment } from "./loader-hdr/load-hdr.js";
 export { loadTexture2D, cloneTexture2D } from "./texture/texture-2d.js";
 export { loadSkybox } from "./loader-skybox/load-skybox.js";
@@ -304,9 +339,10 @@ export type { LinearDepthMaterialOptions } from "./render/linear-depth-material.
 export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-shadow-generator.js";
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
-export { createCsmDirectionalShadowGenerator } from "./shadow/csm-directional-shadow-generator.js";
-export { onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
-export { setShadowTaskCasterMeshes } from "./frame-graph/shadow-inputs.js";
+export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
+export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.js";
+export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
+export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
@@ -341,6 +377,7 @@ export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions,
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
 export { bakeVat, bakeVatMany, attachVat } from "./vat/vat-baker.js";
+export { setVatInstanceStorage, setVatTime } from "./vat/vat-baker.js";
 export type { VatBakeResult, VatBakeOptions, VatBakeTarget, VatClip, VatHandle } from "./vat/vat-baker.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
@@ -382,7 +419,7 @@ export { mat4Invert } from "./math/mat4-invert.js";
 export { mat4Multiply } from "./math/mat4-multiply.js";
 export { mat4LookAtLH } from "./math/mat4-look-at-lh.js";
 export { mat4PerspectiveLH } from "./math/mat4-perspective-lh.js";
-export { mat4FromQuat } from "./math/mat4-from-quat.js";
+export { mat4FromQuat, mat4FromQuatInto } from "./math/mat4-from-quat.js";
 export { quatFromRotationMatrix } from "./math/quat-from-rotation-matrix.js";
 export { quatFromLookDirectionRH } from "./math/quat-from-look-direction-rh.js";
 export { mat4Decompose } from "./math/mat4-decompose.js";
@@ -390,6 +427,7 @@ export type { DecomposedTransform } from "./math/mat4-decompose.js";
 export type { Vec2, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";
+export { eulerToQuat, quatToEulerXYZ } from "./math/quat-euler.js";
 export type { GltfMetadata, LiteMetadata } from "./metadata.js";
 
 // ─── Color ───────────────────────────────────────────────────────────
@@ -409,6 +447,8 @@ export {
     setThinInstanceColor,
     enableThinInstanceGpuCulling,
     setThinInstanceCullBoundsPad,
+    setThinInstanceLodPartner,
+    clearThinInstanceLodPartner,
 } from "./mesh/thin-instance.js";
 export {
     addHierarchyInstance,
@@ -418,7 +458,7 @@ export {
     setHierarchyInstanceMatrix,
 } from "./mesh/hierarchy-instance-pool.js";
 export type { HierarchyInstancePool } from "./mesh/hierarchy-instance-pool.js";
-export type { ThinInstanceData } from "./mesh/thin-instance.js";
+export type { ThinInstanceData, ThinInstanceLodPartnerOptions } from "./mesh/thin-instance.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 export type { SceneContext, ImageProcessingConfig, ClipPlane } from "./scene/scene.js";
@@ -487,6 +527,7 @@ export type {
     PropertyAnimationTrackOptions,
 } from "./animation/property-animation.js";
 export type { AnimationClip, GltfAnimationData } from "./animation/types.js";
+export type { BoxOptions } from "./mesh/create-box.js";
 export type { SphereOptions } from "./mesh/create-sphere.js";
 export type { TorusOptions } from "./mesh/create-torus.js";
 export type { GroundOptions } from "./mesh/create-ground.js";
@@ -502,7 +543,7 @@ export { CAP_NONE, CAP_START, CAP_END, CAP_ALL } from "./mesh/create-tube.js";
 
 // ─── Picking ─────────────────────────────────────────────────────────
 export { createGpuPicker, pickAsync, disposePicker } from "./picking/gpu-picker.js";
-export type { GpuPicker, PickDiscardRule, PickOptions } from "./picking/gpu-picker.js";
+export type { GpuPicker, PickDiscardRule, PickIgnore, PickOptions, PickVertexDataAttribute } from "./picking/gpu-picker.js";
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
@@ -546,7 +587,7 @@ export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/sh
 export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
 export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
-export { spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
+export { spriteBlendOpaque, spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
 export {
     createSprite2DLayer,
     addSprite2DIndex,
@@ -641,12 +682,11 @@ export {
 } from "./sprite/sprite-renderer.js";
 
 // ─── Node Particles (NPE) ────────────────────────────────────────────
-export type { Particle } from "./particle/particle.js";
+export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
+export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
+export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
 export type { ParticleSystem } from "./particle/particle-system.js";
 export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
-export type { NodeParticleSet } from "./particle/node/npe-build.js";
-export type { ParseNodeParticleOptions } from "./particle/node/node-particle.js";
-export { parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
 export { registerNodeParticleSet } from "./particle/particle-scene.js";
 export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
@@ -767,6 +807,7 @@ export {
     setNavigationRandomSeed,
     getNavigationRandomSeed,
     raycast,
+    navRayBlocked,
     addBoxObstacle,
     addCylinderObstacle,
     removeObstacle,
@@ -777,6 +818,8 @@ export type { NavigationPlugin, NavCrowd, NavMeshParameters, NavMeshSource, Agen
 // ─── Audio (AudioV2 port) ────────────────────────────────────────────
 export { createAudioEngineAsync, disposeAudioEngine, unlockAudioEngineAsync, setMasterVolume, getMasterVolume } from "./audio/audio-engine.js";
 export type { AudioEngine, AudioEngineOptions, AudioEngineState } from "./audio/audio-engine.js";
+export { createAudioEngineMediaStream, disposeAudioEngineMediaStream } from "./audio/media-stream-output.js";
+export type { AudioEngineMediaStream } from "./audio/media-stream-output.js";
 export { createSoundAsync, playSound, pauseSound, resumeSound, stopSound, disposeSound, setSoundVolume, SoundState } from "./audio/static-sound.js";
 export type { StaticSound, StaticSoundOptions, StaticSoundPlayOptions, StaticSoundStopOptions } from "./audio/static-sound.js";
 export {

@@ -289,6 +289,30 @@ describe("RenderPassTask transparent sorting", () => {
         expect(task._renderables).toHaveLength(0);
     });
 
+    it("uses an override builder that is not registered as a scene group", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const rt = createRenderTarget({
+            lbl: "material-override",
+            dFormat: "depth24plus",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const task = createRenderTask({ name: "material-override", rt }, engine, scene);
+        const mesh = {} as Mesh;
+        const renderable = makeDrawOrderRenderable("override", {}, []);
+        const rebuildSingle = vi.fn(() => renderable);
+        const material = {
+            _buildGroup: { _rebuildSingle: rebuildSingle },
+        } as unknown as Material;
+
+        task.addMesh(mesh, { material });
+        task.record();
+
+        expect(rebuildSingle).toHaveBeenCalledWith(scene, mesh, material);
+        expect(task._renderables).toEqual([renderable]);
+    });
+
     it("re-records a cached bundle invalidated before scene registration", () => {
         const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
         const engine = makeMockEngine({ bundleDescriptors });
@@ -688,6 +712,125 @@ describe("RenderPassTask transparent sorting", () => {
         expect(depthAtt.depthLoadOp).toBe("clear");
         const colorAtt = (descriptor!.colorAttachments as GPURenderPassColorAttachment[])[0]!;
         expect(colorAtt.loadOp).toBe("load");
+    });
+
+    it("loads an rt-owned depth attachment when depthClear is false", async () => {
+        const seenDescriptors: GPURenderPassDescriptor[] = [];
+        const engine = makeMockEngine({ msaaSamples: 1, onBeginPass: (d) => seenDescriptors.push(d) });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+
+        const rt = createRenderTarget({
+            lbl: "overlay",
+            format: "bgra8unorm",
+            dFormat: "depth32float",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const task = createRenderTask({ name: "overlay", rt, clr: false, depthClear: false }, engine, scene);
+        scene._frameGraph._tasks.push(task);
+
+        await registerScene(scene);
+        scene._record();
+
+        const descriptor = seenDescriptors.find((d) => d.depthStencilAttachment);
+        const depthAtt = descriptor!.depthStencilAttachment as GPURenderPassDepthStencilAttachment;
+        expect(depthAtt.depthLoadOp).toBe("load");
+        const colorAtt = (descriptor!.colorAttachments as GPURenderPassColorAttachment[])[0]!;
+        expect(colorAtt.loadOp).toBe("load");
+    });
+
+    it("keeps task-managed external depth clearing when depthClear is false", async () => {
+        const seenDescriptors: GPURenderPassDescriptor[] = [];
+        const engine = makeMockEngine({ msaaSamples: 1, onBeginPass: (d) => seenDescriptors.push(d) });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+
+        const colorRt = createRenderTarget({
+            lbl: "overlay-color",
+            format: "bgra8unorm",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const externalDepth = createRenderTarget({
+            lbl: "task-managed-depth",
+            dFormat: "depth32float",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const task = createRenderTask({ name: "overlay", rt: colorRt, depth: externalDepth, depthClear: false }, engine, scene);
+        scene._frameGraph._tasks.push(task);
+
+        await registerScene(scene);
+        scene._record();
+
+        const descriptor = seenDescriptors.find((d) => d.depthStencilAttachment);
+        const depthAtt = descriptor!.depthStencilAttachment as GPURenderPassDepthStencilAttachment;
+        expect(depthAtt.depthLoadOp).toBe("clear");
+    });
+
+    it("keeps an explicit empty render list when autoMirror is false", () => {
+        const engine = makeMockEngine({ msaaSamples: 1 });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+        scene._renderables.push(makeDrawOrderRenderable("scene", {}, []));
+        const rt = createRenderTarget({ lbl: "explicit", format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
+        const task = createRenderTask({ name: "explicit", rt, autoMirror: false }, engine, scene);
+
+        task.record();
+
+        expect(task._af).toBe(false);
+        expect(task._renderables).toHaveLength(0);
+    });
+
+    it("uses the scene clear color when an explicit task omits clrColor", () => {
+        const seenDescriptors: GPURenderPassDescriptor[] = [];
+        const engine = makeMockEngine({ msaaSamples: 1, onBeginPass: (descriptor) => seenDescriptors.push(descriptor) });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+        const rt = createRenderTarget({ lbl: "explicit-clear", format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
+        const task = createRenderTask({ name: "explicit-clear", rt, autoMirror: false }, engine, scene);
+        task.record();
+
+        task.execute?.();
+
+        const color = (seenDescriptors[0]!.colorAttachments as GPURenderPassColorAttachment[])[0]!;
+        expect(color.loadOp).toBe("clear");
+        expect(color.clearValue).toBe(scene.clearColor);
+    });
+
+    it("skips all pass work while disabled", () => {
+        const seenDescriptors: GPURenderPassDescriptor[] = [];
+        const engine = makeMockEngine({ msaaSamples: 1, onBeginPass: (descriptor) => seenDescriptors.push(descriptor) });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+        const rt = createRenderTarget({ lbl: "disabled", format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
+        const task = createRenderTask({ name: "disabled", rt }, engine, scene);
+        task.record();
+        task.enabled = false;
+
+        expect(task.execute?.()).toBe(0);
+        expect(seenDescriptors).toHaveLength(0);
+    });
+
+    it("does not rebuild or dispose a shared render target", () => {
+        const engine = makeMockEngine({ msaaSamples: 1 });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        scene.camera = makeCamera();
+        const rt = createRenderTarget({ lbl: "shared", format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: { width: 16, height: 16 } });
+        const owner = createRenderTask({ name: "owner", rt }, engine, scene);
+        owner.record();
+        const colorView = rt._colorView;
+        const depthView = rt._depthView;
+        const overlay = createRenderTask({ name: "overlay", rt, sharedRt: true, clr: false, depthClear: false, autoMirror: false }, engine, scene);
+
+        overlay.record();
+        expect(rt._colorView).toBe(colorView);
+        expect(rt._depthView).toBe(depthView);
+
+        overlay.dispose();
+        expect(rt._colorView).toBe(colorView);
+        expect(rt._depthView).toBe(depthView);
     });
 });
 

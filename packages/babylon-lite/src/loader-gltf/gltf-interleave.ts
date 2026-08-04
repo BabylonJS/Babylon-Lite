@@ -65,6 +65,8 @@ export interface AccessorInterleave {
     /** @internal Raw bufferView bytes (shared across attributes). Retained after GPU upload
      *  so the CPU copy can be de-strided lazily on demand. */
     _slice?: Uint8Array;
+    /** @internal Shared lazy de-strided copy for every owner of this primitive. */
+    _cpu?: Float32Array;
 }
 
 /** Per-attribute interleave sources for a primitive (keys mirror MeshVbLayout). */
@@ -347,28 +349,25 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
  *  retention) so the core loader's tight path stays byte-identical to the
  *  non-interleaved engine — keeping interleave bytes out of every glTF scene that
  *  doesn't use it. */
-export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, index: number, material: PbrMaterialProps, name?: string): Mesh {
-    const gpu = buildInterleavedGpu(engine, m);
+export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, index: number, material: PbrMaterialProps, name?: string, source?: Mesh): Mesh {
+    const gpu = source?._gpu ?? buildInterleavedGpu(engine, m);
 
     // AABB: fold strided positions straight from the slice; tight positions normally.
     const [boundMin, boundMax] = m._vb!._p ? computeAabbStrided(m._vb!._p, m._worldMatrix) : computeAabb(m._positions!, m._worldMatrix);
 
-    const mesh = {
+    const mesh = initMeshTransform({
         name: name || `gltf_mesh_${index}`,
         material,
         receiveShadows: false,
         boundMin,
         boundMax,
-        skeleton: null,
-        morphTargets: null,
         _gpu: gpu,
         _flatNormal: m._flatNormal,
-    } as unknown as Mesh;
-    initMeshTransform(mesh);
+    });
 
     // Lazy CPU geometry: the de-strided tight copy is built only on first read.
     installLazyCpu(mesh, m);
-    mesh._cpuIndices = m._indices instanceof U32 ? m._indices : new U32(m._indices);
+    mesh._cpuIndices = source?._cpuIndices ?? (m._indices instanceof U32 ? m._indices : new U32(m._indices));
     engine._dlr?.m(mesh, m._uv2s, m._tangents, m._colors, m._indices, gpu.indexFormat);
 
     return mesh as Mesh;
@@ -452,17 +451,17 @@ export function installLazyCpu(mesh: any, m: GltfMeshData): void {
     }
 }
 
-/** Build a caching lazy-getter descriptor that de-strides `il` on first read. */
+/** Build a lazy shared-cache getter with a per-Mesh copy-on-write override. */
 function lazyCpuDesc(il: AccessorInterleave): PropertyDescriptor {
-    let cached: Float32Array | undefined;
+    let local: Float32Array | undefined;
     return {
         configurable: true,
         enumerable: true,
         get(): Float32Array {
-            return (cached ??= destrideToTight(il));
+            return local ?? (il._cpu ??= destrideToTight(il));
         },
         set(v: Float32Array): void {
-            cached = v;
+            local = v;
         },
     };
 }

@@ -1,13 +1,13 @@
-import type { ParticleBlockEvaluator } from "./npe-types.js";
+import type { NpeBlockEvaluator } from "./npe-build.js";
 
 /**
- * Lazily load the evaluator for a node-particle block class.
+ * Node-particle block registry — side-effect-free lazy dispatch.
  *
- * Each arm is a dynamic `import(...)` so a scene's bundle includes only the block classes its graph
- * actually references — unused blocks tree-shake to zero bytes (the same discipline as the node-material
- * registry). Add new block classes here as scenes need them.
+ * Base blocks are routed here. Optional feature families are routed through small extra registries so
+ * adding feature blocks does not add their loader stubs to every particle scene. This mirrors NME's
+ * `node-registry.ts` pattern; callers only provide a class name and never assemble a registry themselves.
  */
-export async function loadParticleBlockEvaluator(className: string): Promise<ParticleBlockEvaluator> {
+export async function loadNpeBlockEvaluator(className: string): Promise<NpeBlockEvaluator> {
     switch (className) {
         case "SystemBlock":
             return (await import("./blocks/system-block.js")).systemBlock;
@@ -15,49 +15,25 @@ export async function loadParticleBlockEvaluator(className: string): Promise<Par
             return (await import("./blocks/create-particle-block.js")).createParticleBlock;
         case "BoxShapeBlock":
             return (await import("./blocks/box-shape-block.js")).boxShapeBlock;
-        case "SphereShapeBlock":
-            return (await import("./blocks/sphere-shape-block.js")).sphereShapeBlock;
-        case "PointShapeBlock":
-            return (await import("./blocks/point-shape-block.js")).pointShapeBlock;
-        case "ConeShapeBlock":
-            return (await import("./blocks/cone-shape-block.js")).coneShapeBlock;
-        case "CylinderShapeBlock":
-            return (await import("./blocks/cylinder-shape-block.js")).cylinderShapeBlock;
-        case "MeshShapeBlock":
-            return (await import("./blocks/mesh-shape-block.js")).meshShapeBlock;
-        case "ParticleInputBlock":
-            return (await import("./blocks/particle-input-block.js")).particleInputBlock;
-        case "ParticleTextureSourceBlock":
-            return (await import("./blocks/texture-source-block.js")).textureSourceBlock;
-        case "ParticleRandomBlock":
-            return (await import("./blocks/particle-random-block.js")).particleRandomBlock;
-        case "ParticleLerpBlock":
-            return (await import("./blocks/particle-lerp-block.js")).particleLerpBlock;
-        case "ParticleConverterBlock":
-            return (await import("./blocks/particle-converter-block.js")).particleConverterBlock;
-        case "ParticleMathBlock":
-            return (await import("./blocks/particle-math-block.js")).particleMathBlock;
         case "UpdatePositionBlock":
             return (await import("./blocks/update-position-block.js")).updatePositionBlock;
         case "UpdateColorBlock":
             return (await import("./blocks/update-color-block.js")).updateColorBlock;
-        case "UpdateAngleBlock":
-            return (await import("./blocks/update-angle-block.js")).updateAngleBlock;
-        case "UpdateDirectionBlock":
-            return (await import("./blocks/update-direction-block.js")).updateDirectionBlock;
-        case "UpdateSizeBlock":
-            return (await import("./blocks/update-size-block.js")).updateSizeBlock;
-        case "ParticleGradientBlock":
-            return (await import("./blocks/particle-gradient-block.js")).particleGradientBlock;
-        case "ParticleGradientValueBlock":
-            return (await import("./blocks/particle-gradient-value-block.js")).particleGradientValueBlock;
-        case "ParticleVectorLengthBlock":
-            return (await import("./blocks/particle-vector-length-block.js")).particleVectorLengthBlock;
-        case "ParticleConditionBlock":
-            return (await import("./blocks/particle-condition-block.js")).particleConditionBlock;
-        case "ParticleFloatToIntBlock":
-            return (await import("./blocks/particle-float-to-int-block.js")).particleFloatToIntBlock;
+        case "ParticleTextureSourceBlock":
+            return (await import("./blocks/texture-source-block.js")).particleTextureSourceBlock;
+        case "ParticleInputBlock":
+            return (await import("./blocks/particle-input-block.js")).particleInputBlock;
+        case "ParticleMathBlock":
+            return (await import("./blocks/particle-math-compact-block.js")).particleMathCompactBlock;
+        case "ParticleLerpBlock":
+            return (await import("./blocks/particle-lerp-block.js")).particleLerpBlock;
+        case "ParticleConverterBlock":
+            return (await import("./blocks/particle-converter-block.js")).particleConverterBlock;
+        case "ParticleRandomBlock":
+            return (await import("./blocks/particle-random-block.js")).particleRandomBlock;
         default:
-            throw new Error(`NodeParticle: unsupported block class "${className}"`);
+            return className.endsWith("ShapeBlock")
+                ? (await import("./npe-registry-extra-emitters.js")).loadEmitterBlockEvaluator(className)
+                : (await import("./npe-registry-extra.js")).loadExtraBlockEvaluator(className);
     }
 }

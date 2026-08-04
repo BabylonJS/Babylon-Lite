@@ -188,9 +188,13 @@ export function setCameraLimits(camera: ArcRotateCamera, limits: ArcRotateCamera
  * `_beforeRender` inertia hook. Safe to call multiple times.
  */
 export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext, options?: AttachControlOptions): () => void {
-    const angularSensibility = camera.angularSensibility ?? 1000; // Babylon default; HIGHER = slower orbit
-    const panningSensibility = camera.panningSensibility ?? 50; // Babylon default (pixels per unit); LOWER = faster pan
-    const wheelPrecision = camera.wheelPrecision ?? 3; // Babylon default; HIGHER = slower zoom
+    // These tuning values are read LIVE at point-of-use (not snapshotted here) so
+    // that a caller can mutate camera.angularSensibility / panningSensibility /
+    // wheelPrecision after attachControl and have it take effect immediately —
+    // matching Babylon.js, whose camera inputs read these fields on every event.
+    // The fields are always defined (the createArcRotateCamera factory seeds the
+    // Babylon defaults: angularSensibility 1000, panningSensibility 50,
+    // wheelPrecision 3), so the reads below need no ?? fallback.
 
     const ROTATION_EPSILON = 0.001;
     const RADIUS_EPSILON = 0.001;
@@ -264,11 +268,13 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         }
 
         if (isDragging) {
+            const angularSensibility = camera.angularSensibility;
             camera.inertialAlphaOffset -= dx / angularSensibility;
             camera.inertialBetaOffset -= dy / angularSensibility;
         }
 
         if (isPanning) {
+            const panningSensibility = camera.panningSensibility;
             camera.inertialPanningX += -dx / panningSensibility;
             camera.inertialPanningY += dy / panningSensibility;
         }
@@ -282,8 +288,10 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
 
     function onWheel(e: WheelEvent): void {
         e.preventDefault();
-        // Scale by current radius for logarithmic zoom feel
-        camera.inertialRadiusOffset -= (e.deltaY * camera.radius) / (wheelPrecision * 1000);
+        // Read wheelPrecision live so a caller that sets it after attachControl
+        // — as Babylon.js allows — takes effect immediately. Scale by current
+        // radius for logarithmic zoom feel.
+        camera.inertialRadiusOffset -= (e.deltaY * camera.radius) / (camera.wheelPrecision * 1000);
     }
 
     function onContextMenu(e: Event): void {

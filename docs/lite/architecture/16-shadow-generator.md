@@ -54,9 +54,13 @@ export interface ShadowTaskInputs {
 }
 
 export function setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): void;
+
+export function setShadowCasterMaxCascade(mesh: Mesh, maxCascade: number): void;
 ```
 
 Caster meshes are task inputs. Scene setup creates the filter-specific `ShadowGenerator`, assigns it to the light, calls `setShadowTaskCasterMeshes()` to provide the caster list, then calls `registerSceneWithShadowSupport()` instead of `registerScene()` to install the scene-owned shadow task.
+
+`setShadowCasterMaxCascade()` is CSM-specific: it limits a caster to layers `0..maxCascade`, accepts a non-negative integer or `Infinity`, and is applied when a new caster-array instance is supplied. ESM and single-map PCF ignore it.
 
 ### Common ShadowGenerator Interface (`shadow-generator.ts`)
 
@@ -161,6 +165,7 @@ import { ensurePcfShadowTaskState, preloadPcfShadowTaskState, renderPcfShadowMap
 Shadow generators share math and UBO packing helpers only. Caster ownership lives in `ShadowTaskInputs`:
 
 - **`setShadowTaskCasterMeshes()`** — registers the caster mesh list for a generator in lazy task-owned input state.
+- **`setShadowCasterMaxCascade()`** — stores a lazy per-mesh CSM cascade cap; `Infinity` clears it.
 - **`writeShadowUboFields()`** — packs a `ShadowGenerator`'s light matrix (16 floats), depth values (2 floats + 2 padding), and shadowsInfo (4 floats) into a 24-float array for downstream UBO upload.
 - **`buildLightViewMatrix()` / `multiply4x4()`** — shared light-space matrix math for ESM and PCF task paths.
 - **`createShadowParamsUBO()` / `createSharedShadowUBO()`** — shared GPU buffer setup for generator-owned receiver resources.

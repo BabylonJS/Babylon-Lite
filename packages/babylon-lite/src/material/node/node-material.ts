@@ -17,11 +17,13 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MeshGroupBuilder, MeshGroupBuildResult } from "../../render/renderable.js";
 import { parseNodeMaterialSource, findBlockByClassName } from "./node-parser.js";
-import { loadGraphEmitters, emitGraph } from "./node-emitter.js";
+import { bjsTypeToNodeType, loadGraphEmitters, emitGraph, sanitize } from "./node-emitter.js";
 import type { BlockEmitter, NodeBuildState, NodeGraph, NodeValueType } from "./node-types.js";
 import type { Material } from "../material.js";
 import { compileNodePipeline, type NodeCompileResult } from "./node-pipeline.js";
 import type * as NodeEnv from "./node-env.js";
+
+export { bjsTypeToNodeType, sanitize } from "./node-emitter.js";
 
 // ─── Public API types ───────────────────────────────────────────────
 
@@ -339,34 +341,6 @@ async function resolvePbrMrHelpers(state: NodeBuildState): Promise<void> {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
-
-/** @internal Exported only so the lazily-imported geometry renderable
- *  (`node-geometry-renderable.ts`) can reuse it without re-bundling — already
- *  retained here by the parser/UBO writers, so the export costs zero
- *  always-loaded bytes. */
-export function sanitize(name: string): string {
-    return name.replace(/[^A-Za-z0-9_]/g, "_");
-}
-
-/** @internal See {@link sanitize} — exported for the lazy geometry renderable. */
-export function bjsTypeToNodeType(t: number): NodeValueType {
-    if (t === 0x1 || t === 0x2) {
-        return "f32";
-    }
-    if (t === 0x4) {
-        return "vec2f";
-    }
-    if (t === 0x8 || t === 0x20) {
-        return "vec3f";
-    }
-    if (t === 0x10 || t === 0x40) {
-        return "vec4f";
-    }
-    if (t === 0x80) {
-        return "mat4f";
-    }
-    throw new Error(`NodeMaterial: unsupported BJS connection point type 0x${t.toString(16)}`);
-}
 
 /** @internal See {@link sanitize} — exported for the lazy geometry renderable. */
 export function floatCount(type: NodeValueType): number {

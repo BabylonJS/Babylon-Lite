@@ -319,6 +319,7 @@ export function createEffectRenderer(surface: SurfaceContext, effect: EffectWrap
     const renderPassDescriptor: GPURenderPassDescriptor = { label: name, colorAttachments: [colorAttachment] };
 
     const er: EffectRendererInternal = {
+        _kind: "effect-renderer",
         name,
         clearColor,
         _drawCallsPre: 0,

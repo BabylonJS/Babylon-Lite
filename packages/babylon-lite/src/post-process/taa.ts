@@ -27,6 +27,7 @@
 // TAA pay nothing.
 
 import { F32 } from "../engine/typed-arrays.js";
+import { _cameraChangeKey } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
@@ -201,7 +202,7 @@ export function createTaaPostProcessTask(config: TaaPostProcessTaskConfig, engin
         },
         execute(): number {
             const cam = task._sourceRenderTask.scene.camera;
-            const camVer = cam ? cam.worldMatrixVersion : 0;
+            const camVer = cam ? _cameraChangeKey(cam) : 0;
             const moved = camVer !== task._lastCamVer;
             task._lastCamVer = camVer;
 

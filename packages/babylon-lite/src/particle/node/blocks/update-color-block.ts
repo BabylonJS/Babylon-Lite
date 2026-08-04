@@ -1,27 +1,29 @@
-import { copyColor4 } from "../../../math/color4-ref.js";
 import type { Color4 } from "../../../math/types.js";
-import type { ParticleSystem } from "../../particle-system.js";
-import type { ParticleBlockEvaluator } from "../npe-types.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
 
 /**
- * `UpdateColorBlock` — each step, sets the particle colour to the value of its `color` input (typically
- * `currentColour + scaledColorStep` with the alpha clamped). Mirrors BJS `UpdateColorBlock`.
+ * `UpdateColorBlock` — each step, writes the particle colour columns from the `color` input
+ * (typically `currentColour + scaledColorStep`).
  */
-export const updateColorBlock: ParticleBlockEvaluator = {
+export const updateColorBlock: NpeBlockEvaluator = {
     build(block, ctx) {
-        const state = ctx.state;
-        const system = ctx.input(block, "particle")(state) as ParticleSystem;
-        ctx.setOutput(block.id, "output", () => system);
-
+        const system = ctx.state.system!;
+        const buffer = ctx.state.buffer!;
         if (!ctx.isConnected(block, "color")) {
             return;
         }
         const colorGetter = ctx.input(block, "color");
+        const colR = buffer.colorR;
+        const colG = buffer.colorG;
+        const colB = buffer.colorB;
+        const colA = buffer.colorA;
 
-        system._updateQueue.push((particle, sys) => {
-            state.particle = particle;
-            state.system = sys;
-            copyColor4(particle.color, colorGetter(state) as Color4);
+        system.updateSteps.push((i) => {
+            const c = colorGetter(i) as Color4;
+            colR[i] = c.r;
+            colG[i] = c.g;
+            colB[i] = c.b;
+            colA[i] = c.a;
         });
     },
 };

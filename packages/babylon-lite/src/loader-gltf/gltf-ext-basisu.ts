@@ -14,6 +14,7 @@ import type { DecodedPrimitive } from "./gltf-feature.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { resolveAccessor } from "./gltf-parser.js";
+import { resolveBufferUri } from "./gltf-uri.js";
 import { decodeKtx2ImageBitmapFromBuffer, uploadKtx2Texture2D } from "../texture/ktx2-loader.js";
 
 const NAME = "KHR_texture_basisu";
@@ -107,7 +108,7 @@ async function resolveImageBuffer(ctx: BasisuMaterialData, imageIdx: number): Pr
         return copy.buffer;
     }
     if (image.uri) {
-        const url = new URL(image.uri, ctx.baseUrl + "x").href;
+        const url = resolveBufferUri(image.uri, ctx.baseUrl);
         const response = await fetch(url);
         if (!response.ok) {
             throw new Error(`${NAME}: failed to load image ${response.status} ${response.statusText}`);

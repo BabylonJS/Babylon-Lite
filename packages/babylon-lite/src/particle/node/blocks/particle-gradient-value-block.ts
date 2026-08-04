@@ -1,26 +1,17 @@
-import type { ParticleBlockEvaluator, ParticleValue, NpeGetter } from "../npe-types.js";
+import type { NpeBlockEvaluator } from "../npe-build.js";
+import type { NpeGetter, NpeValue } from "../npe-value.js";
 
-/**
- * @internal A single gradient stop, produced by a `ParticleGradientValueBlock` and consumed by its parent
- * `ParticleGradientBlock`. It flows along the graph as the block's output value (mirroring the BJS
- * `*Gradient` connection types). `value` is evaluated lazily, per particle/frame.
- */
-export interface ParticleGradientEntry {
+/** One static gradient stop; its value remains lazy and is evaluated per particle/frame. */
+export interface NpeGradientEntry {
     readonly reference: number;
     readonly value: NpeGetter;
 }
 
-/**
- * `ParticleGradientValueBlock` — one stop of a gradient: a `reference` key (0..1) and a `value` input. Its
- * output carries the stop itself (a {@link ParticleGradientEntry}); the parent `ParticleGradientBlock`
- * reads the reference and evaluates the value. Mirrors BJS `ParticleGradientValueBlock`.
- */
-export const particleGradientValueBlock: ParticleBlockEvaluator = {
+/** `ParticleGradientValueBlock` — emits gradient-stop metadata for its parent gradient block. */
+export const particleGradientValueBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const reference = typeof block.serialized.reference === "number" ? block.serialized.reference : 0;
-        const value = ctx.input(block, "value", () => 0);
-        const entry: ParticleGradientEntry = { reference, value };
-        // The entry is an internal wire value understood only by ParticleGradientBlock.
-        ctx.setOutput(block.id, "output", () => entry as unknown as ParticleValue);
+        const entry: NpeGradientEntry = { reference, value: ctx.input(block, "value", () => 0) };
+        ctx.setOutput(block.id, "output", () => entry as unknown as NpeValue);
     },
 };

@@ -418,34 +418,20 @@ export function createPbrMaterial(props?: Partial<PbrMaterialProps>): PbrMateria
     // roughnessFactor — the glTF defaults). Reachable only via createPbrMaterial, so
     // loader-only PBR scenes (e.g. BoomBox) tree-shake it entirely.
     _installPbrFallbackResolver((engine) => (engine._pbrFallbackTex ??= createSolidTexture2D(engine, 1, 1, 1)));
-    const mat = {
+    return {
         ...props,
         _buildGroup: getPbrGroupBuilder(),
         _uboVersion: 0,
     } as PbrMaterialProps;
-    return mat;
 }
 
 /** Collect all non-null textures referenced by a PBR material (for acquire/release). */
 export function collectPbrBoundTextures(mat: PbrMaterialProps): Texture2D[] {
     const t: Texture2D[] = [];
-    if (mat.baseColorTexture) {
-        t.push(mat.baseColorTexture);
-    }
-    if (mat.normalTexture) {
-        t.push(mat.normalTexture);
-    }
-    if (mat.ormTexture) {
-        t.push(mat.ormTexture);
-    }
-    if (mat.occlusionTexture) {
-        t.push(mat.occlusionTexture);
-    }
-    if (mat.emissiveTexture) {
-        t.push(mat.emissiveTexture);
-    }
-    if (mat.specGlossTexture) {
-        t.push(mat.specGlossTexture);
+    for (const tex of [mat.baseColorTexture, mat.normalTexture, mat.ormTexture, mat.occlusionTexture, mat.emissiveTexture, mat.specGlossTexture]) {
+        if (tex) {
+            t.push(tex);
+        }
     }
     for (const ext of _getPbrExts().values()) {
         ext.textures?.(mat, t);

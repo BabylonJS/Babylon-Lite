@@ -55,7 +55,7 @@ async function collectAssets(bundle: string): Promise<{ bundle: string; assets: 
 
 /** Build the standalone HTML host for a downloaded project. */
 function indexHtml(engineUrl: string, title: string): string {
-    const importMap = JSON.stringify({ imports: { "@babylonjs/lite": engineUrl, "@babylonjs/lite/": `${engineUrl}/` } });
+    const importMap = JSON.stringify({ imports: { "@babylonjs/lite": engineUrl } });
     return `<!doctype html>
 <html lang="en">
     <head>

@@ -16,7 +16,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
-import { getViewProjectionMatrix } from "../camera/camera.js";
+import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import { buildLightViewMatrix, casterVersionSum, createShadowCamera, multiply4x4, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
@@ -74,6 +74,8 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _lastLightVersion: number;
     /** @internal */
     _lastCamVersion: number;
+    /** @internal Effective aspect ratio the cascades were last fit against. */
+    _lastCamAspect: number;
     /** @internal */
     _uboData: Float32Array;
     /** @internal */
@@ -95,6 +97,8 @@ export interface CsmTaskState extends ShadowTaskInternalState {
      *  leave its cached no-color view dangling). This is precise, unlike the global `_materialEpoch` which also
      *  bumps for swaps of unrelated (non-caster) materials. */
     _casterMatGens: Map<Material, number>;
+    /** @internal Per-caster cascade-cap snapshot used to update task membership incrementally. */
+    _casterMaxCascades: Map<Mesh, number | undefined>;
 }
 
 export const preloadCsmShadowTaskState = preloadPcfShadowTaskState;
@@ -149,28 +153,34 @@ export function ensureCsmShadowTaskState(
             }
         }
         if (!casterMatChanged) {
-            const prevSet = new Set(existing._casterMeshes);
             const nextSet = new Set(casterMeshes);
             const views = existing._materialViews;
             const gens = existing._casterMatGens;
+            const caps = existing._casterMaxCascades;
+            const tasks = existing._tasks;
             for (const m of existing._casterMeshes) {
-                if (!nextSet.has(m)) {
-                    for (const t of existing._tasks) {
+                if (!nextSet.has(m) || m._shadowMaxCascade !== caps.get(m)) {
+                    caps.delete(m);
+                    for (const t of tasks) {
                         removeMeshFromTask(t, m);
                     }
                 }
             }
             for (const m of casterMeshes) {
-                if (!prevSet.has(m) && m.material) {
+                const maxCascade = m._shadowMaxCascade;
+                if (!caps.has(m) && m.material) {
                     const view = getNoColorView(m.material, views);
-                    for (const t of existing._tasks) {
-                        t.addMesh(m, { material: view });
+                    for (let c = 0; c < tasks.length; c++) {
+                        if (c <= (maxCascade ?? c)) {
+                            tasks[c]!.addMesh(m, { material: view });
+                        }
                     }
                     gens.set(m.material, effectiveCasterGen(m.material));
                 }
+                caps.set(m, maxCascade);
             }
             // Force each cascade to re-resolve its newly-added pending casters + re-bucket its binding lists.
-            for (const t of existing._tasks) {
+            for (const t of tasks) {
                 t._lastVersion = -1;
             }
             existing._casterMeshes = casterMeshes;
@@ -184,8 +194,7 @@ export function ensureCsmShadowTaskState(
         // state — the caller swaps to it, so the OLD task is never recorded again. Its GPU buffers may still
         // be referenced by the next frame command buffer, especially during async pre-first-frame construction,
         // so retire it only after that frame has submitted and drained. Mirrors resizeMeshGeometry.
-        const old = existing._task;
-        retireGpuResources(engine, () => old.dispose());
+        retireGpuResources(engine, existing._task.dispose);
     }
 
     const materialViews = new Map<Material, MaterialView>();
@@ -215,7 +224,9 @@ export function ensureCsmShadowTaskState(
         const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera, _skipClusteredLights: true }, engine, scene);
         for (const mesh of casterMeshes) {
             const material = mesh.material;
-            if (material) {
+            // Per-caster cascade cap: a capped caster renders only into layers 0..maxCascade (its far-layer
+            // shadow is sub-texel anyway), saving the excluded layers' draws + pipeline switches.
+            if (material && i <= (mesh._shadowMaxCascade ?? i)) {
                 task.addMesh(mesh, { material: getNoColorView(material, materialViews) });
             }
         }
@@ -246,7 +257,9 @@ export function ensureCsmShadowTaskState(
     // Snapshot each caster material's gen so the next caster-set change can tell whether a CASTER material was
     // rebuilt (→ full rebuild) or only the set changed (→ incremental, keeping unchanged casters' packets).
     const casterMatGens = new Map<Material, number>();
+    const casterMaxCascades = new Map<Mesh, number | undefined>();
     for (const m of casterMeshes) {
+        casterMaxCascades.set(m, m._shadowMaxCascade);
         if (m.material) {
             casterMatGens.set(m.material, effectiveCasterGen(m.material));
         }
@@ -260,12 +273,14 @@ export function ensureCsmShadowTaskState(
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastCamVersion: -1,
+        _lastCamAspect: -1,
         _uboData: new Float32Array(80),
         _casterMeshes: casterMeshes,
         _renderableVersion: scene._renderableVersion,
         _materialEpoch: scene._materialEpoch,
         _materialViews: materialViews,
         _casterMatGens: casterMatGens,
+        _casterMaxCascades: casterMaxCascades,
     };
 }
 
@@ -278,12 +293,21 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
     }
     const casterVersion = casterVersionSum(casterMeshes);
     const lightVersion = sg._light.worldMatrixVersion;
-    const camVersion = camera.worldMatrixVersion;
-    if (!cfg._forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion && camVersion === state._lastCamVersion) {
+    const camVersion = _cameraChangeKey(camera);
+    // Effective aspect is part of the key: a viewport or surface resize changes the camera
+    // frustum the cascades are fit to while every version above stays put.
+    const camAspect = csmCameraAspect(state._scene, camera);
+    if (
+        !cfg._forceRefreshEveryFrame &&
+        casterVersion === state._lastCasterVersion &&
+        lightVersion === state._lastLightVersion &&
+        camVersion === state._lastCamVersion &&
+        camAspect === state._lastCamAspect
+    ) {
         return 0;
     }
 
-    const cascades = _computeCsmCascades(engine, camera, sg._light as DirectionalLight, cfg, casterMeshes);
+    const cascades = _computeCsmCascades(state._scene, camera, sg._light as DirectionalLight, cfg, casterMeshes);
 
     _writeCsmUbo(state._uboData, cascades, cfg);
     sg._version++;
@@ -314,6 +338,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
     state._lastCasterVersion = casterVersion;
     state._lastLightVersion = lightVersion;
     state._lastCamVersion = camVersion;
+    state._lastCamAspect = camAspect;
     return state._task.execute?.() ?? 0;
 }
 
@@ -369,7 +394,19 @@ function orthoOffCenterLH(l: number, r: number, b: number, t: number, n: number,
     return m;
 }
 
-function _computeCsmCascades(engine: EngineContext, camera: Camera, light: DirectionalLight, cfg: CsmConfig, casterMeshes: readonly Mesh[]): CsmCascades {
+/** Effective aspect of the surface the scene actually renders into.
+ *
+ *  Not `engine.canvas`: a scene is bound to `scene.surface` (an `EngineContext` is itself a
+ *  `SurfaceContext`, so that is the canvas for the common single-surface case, but an
+ *  auxiliary surface created via `createSurface` has its own swapchain size). Fitting
+ *  cascades to the canvas would use a frustum the scene never draws. `getEffectiveAspectRatio`
+ *  additionally folds in the camera's normalized viewport, matching `_writePassSceneUBO`. */
+function csmCameraAspect(scene: SceneContext, camera: Camera): number {
+    const rt = scene.surface.scRT;
+    return getEffectiveAspectRatio(camera, rt._width, rt._height);
+}
+
+function _computeCsmCascades(scene: SceneContext, camera: Camera, light: DirectionalLight, cfg: CsmConfig, casterMeshes: readonly Mesh[]): CsmCascades {
     const near = camera.nearPlane;
     const far = camera.farPlane;
     const cameraRange = far - near;
@@ -408,7 +445,8 @@ function _computeCsmCascades(engine: EngineContext, camera: Camera, light: Direc
         dz = 1e-13;
     }
 
-    const aspect = engine.canvas.width / engine.canvas.height;
+    // Effective aspect, not the raw canvas ratio: a camera with a normalized viewport renders
+    const aspect = csmCameraAspect(scene, camera);
     const vp = getViewProjectionMatrix(camera, aspect) as unknown as ArrayLike<number>;
     const inv = mat4Invert(vp as never);
     const invViewProj: ArrayLike<number> = (inv as unknown as ArrayLike<number>) ?? vp;

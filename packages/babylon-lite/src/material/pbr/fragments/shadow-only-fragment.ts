@@ -38,6 +38,7 @@
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
+import { PBR_HAS_ALPHA_BLEND } from "../pbr-flags.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
 
 // Feature2 bit local to this lazy module (see pbr-flag-bits.ts): never retained
@@ -106,7 +107,14 @@ export const pbrExt: PbrExt = {
     id: "shadow-only",
     phase: "fragment",
     detect(mat) {
-        return (mat as PbrMaterialProps).shadowOnly ? { f: 0, f2: PBR2_HAS_SHADOW_ONLY } : { f: 0, f2: 0 };
+        // Force PBR_HAS_ALPHA_BLEND so the shadow catcher composites as a transparent
+        // surface regardless of whether the caller set `alpha`/`alphaBlend`. This is
+        // required for correctness: (1) `isTransparent` in pbr-renderable keys off
+        // PBR_HAS_ALPHA_BLEND to admit the mesh into the transparent pass with GPU
+        // blending, and (2) the `/*FA*/` slot this fragment injects only exists in the
+        // template's alpha-blend branch. The bit lives in the shared chunk already, so
+        // forcing it here adds no bytes to scenes that never load this fragment.
+        return (mat as PbrMaterialProps).shadowOnly ? { f: PBR_HAS_ALPHA_BLEND, f2: PBR2_HAS_SHADOW_ONLY } : { f: 0, f2: 0 };
     },
     frag(ctx) {
         if (!(ctx._features2 & PBR2_HAS_SHADOW_ONLY)) {

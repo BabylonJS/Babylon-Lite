@@ -15,12 +15,12 @@
     },
     "dependencies": {
         "babylon-lite": "workspace:*",
-        "fflate": "^0.8.2"
+        "fflate": "^0.8.3"
     },
     "devDependencies": {
-        "@webgpu/types": "^0.1.52",
-        "esbuild-wasm": "^0.25.0",
-        "monaco-editor": "^0.54.0",
+        "@webgpu/types": "^0.1.71",
+        "esbuild-wasm": "0.27.7",
+        "monaco-editor": "^0.56.0",
         "typescript": "^6.0.3",
         "vite": "^6.4.3"
     }

@@ -1,9 +1,10 @@
 {
-  "rawKB": 44,
-  "gzipKB": 16.6,
-  "ignoredRawKB": 680.2,
+  "rawKB": 43.9,
+  "gzipKB": 16.8,
+  "ignoredRawKB": 682.1,
   "runtimeChunks": [
-    "scene181-text-shaper-Cie-Mnk-.js",
+    "scene181-text-shaper-CL-qK3Rv.js",
     "scene181.js"
-  ]
+  ],
+  "rawBytes": 44961
 }

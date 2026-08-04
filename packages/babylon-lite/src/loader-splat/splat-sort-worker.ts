@@ -1,4 +1,4 @@
-import { F32, U32 } from "../engine/typed-arrays.js";
+import { sortSplatsBackToFront, type SplatSortScratch } from "./splat-sort-core.js";
 /** Splat sort worker.
  *
  *  Vite import: `import SortWorker from './splat-sort-worker.ts?worker&inline'`.
@@ -8,78 +8,40 @@ import { F32, U32 } from "../engine/typed-arrays.js";
  *
  *  Protocol
  *  --------
- *  Init (once):  `{ p: Float32Array, n: number }`
+ *  Init (once):  `{ p: Float32Array }`
  *                — buffer is transferred and retained on the worker side.
  *                — positions are in mesh-LOCAL space (stride 3, xyz per splat).
- *  Sort  (N×):   `{ m: Float32Array(16), f: Float32Array(3), c: Float32Array(3), d: BigInt64Array }`
- *                — depthMix is round-tripped via transferable; layout is
- *                  high-32 bits = packed depth (then bit-inverted), low-32 bits = splat index.
- *                  After sort, low-32 bits give the back-to-front order.
+ *  Sort  (N×):   `{ t: Float32Array(4), o: Uint32Array }`
+ *                — `o` is a transferable order buffer owned by the main thread's
+ *                  pool (`mesh._orderPool`); the worker fills it with splat
+ *                  indices in back-to-front order and transfers it back as
+ *                  `{ o }`. The pool holds two buffers, so a second sort job can
+ *                  be in flight while the previous result is still in transit —
+ *                  the worker never idles on the round-trip during camera motion.
  *
- *  Depth recipe (mirrors BJS `_CreateWorker`)
- *  ------------------------------------------
- *  Per-frame the main thread sends the mesh's world matrix, the camera's
- *  world-space forward vector and the camera's world-space position. The
- *  worker collapses these into 4 scalars (a, b, c, d) such that
- *     depth = a*localX + b*localY + c*localZ + d
- *           = cameraForward · (world · localPos - cameraPosition).
- *  This is more robust than the previous `10000 - dot(view-row, pos)` recipe:
- *    - it accounts for non-identity world matrices (BJS Lite previously ignored them);
- *    - it has no magic reference value, so it doesn't lose precision when
- *      depths are large or wrap signs when depths exceed the reference;
- *    - the back-to-front order is produced by bit-inverting the high 32 bits
- *      of each i64 slot (`~indices[2j+1]`) instead of subtracting depths from
- *      a constant — this preserves the full float precision range. */
+ *  The sort itself is the uniform-key counting (radix) sort in
+ *  `splat-sort-core.ts` (O(n)). `t` is the affine depth transform for
+ *  `cameraForward · (world · localPos - cameraPos)`. */
 
-let positions: Float32Array | null = null;
-let vertexCount = 0;
+let positions: Float32Array;
+let scratch: SplatSortScratch;
 
 self.onmessage = (e: MessageEvent) => {
     const data = e.data as {
         p?: Float32Array;
-        n?: number;
-        m?: Float32Array;
-        f?: Float32Array;
-        c?: Float32Array;
-        d?: BigInt64Array;
+        t?: Float32Array;
+        o?: Uint32Array;
     };
 
     if (data.p) {
         positions = data.p;
-        vertexCount = data.n ?? 0;
+        const n = positions.length / 3;
+        scratch = [new Float32Array(n), new Uint32Array(1 << Math.max(10, Math.min(20, Math.round(Math.log2(n / 4)))))];
         return;
     }
 
-    if (!positions || !data.m || !data.f || !data.c || !data.d) {
-        return;
-    }
+    const order = data.o!;
+    sortSplatsBackToFront(positions, order.length, data.t!, order, scratch);
 
-    const m = data.m;
-    const cf = data.f;
-    const cp = data.c;
-    const depthMix = data.d;
-    const indices = new U32(depthMix.buffer);
-    const floatMix = new F32(depthMix.buffer);
-
-    // Collapse cameraForward · (world · localPos - cameraPos) into (a*x + b*y + c*z + d).
-    // Lite column-major: world's column k lives at indices [4k, 4k+1, 4k+2, 4k+3]
-    // (the 4th row is always [0,0,0,1] for an affine matrix, so we skip m[3,7,11,15]).
-    const camDot = cf[0]! * cp[0]! + cf[1]! * cp[1]! + cf[2]! * cp[2]!;
-    const a = cf[0]! * m[0]! + cf[1]! * m[1]! + cf[2]! * m[2]!;
-    const b = cf[0]! * m[4]! + cf[1]! * m[5]! + cf[2]! * m[6]!;
-    const c = cf[0]! * m[8]! + cf[1]! * m[9]! + cf[2]! * m[10]!;
-    const d = cf[0]! * m[12]! + cf[1]! * m[13]! + cf[2]! * m[14]! - camDot;
-
-    for (let j = 0; j < vertexCount; j++) {
-        indices[2 * j] = j;
-        floatMix[2 * j + 1] = a * positions[3 * j]! + b * positions[3 * j + 1]! + c * positions[3 * j + 2]! + d;
-        // Bit-invert the high 32 bits (where the depth float lives) so that
-        // BigInt64Array.sort() yields back-to-front order without subtracting
-        // depths from a constant (which would cap range and erode precision).
-        indices[2 * j + 1] = ~indices[2 * j + 1]!;
-    }
-
-    depthMix.sort();
-
-    (self as unknown as { postMessage: (m: unknown, t?: Transferable[]) => void }).postMessage({ d: depthMix }, [depthMix.buffer]);
+    (self as unknown as { postMessage: (m: unknown, t?: Transferable[]) => void }).postMessage({ o: order }, [order.buffer]);
 };

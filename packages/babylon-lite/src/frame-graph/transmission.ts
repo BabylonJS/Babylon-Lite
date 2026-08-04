@@ -8,7 +8,7 @@ import type { Texture2D } from "../texture/texture-2d.js";
 import { recordMipmaps } from "../texture/generate-mipmaps.js";
 import { biasedMipLevelCount } from "../texture/mip-count.js";
 import type { DrawBinding } from "../render/renderable.js";
-import type { RenderTask } from "./render-task.js";
+import { drawList, type RenderTask } from "./render-task.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createImageProcessingTask } from "./image-processing-task.js";
 
@@ -84,6 +84,28 @@ let blitDevice: GPUDevice | null = null;
 /** Enable scene-color transmission for every render task currently registered in a scene. PBR materials are marked for linear transmission, and a trailing image-processing task is appended when needed. */
 export function enableSceneTransmission(scene: SceneContext, engine: EngineContext): void {
     markPbrMaterialsLinear(scene);
+    enableSceneTransmissionTasks(scene, engine);
+}
+
+/** @internal Prepare linear PBR flags, then commit transmission only after renderable construction succeeds. */
+export function _t(scene: SceneContext, engine: EngineContext): readonly [commit: () => void, rollback: () => void] {
+    const states = scene.meshes.flatMap((mesh) => {
+        const mat = mesh.material as { _linearImageProcessing?: boolean; _renderFeatures?: unknown } | null;
+        return mat ? [[mat, mat._linearImageProcessing, mat._renderFeatures] as const] : [];
+    });
+    markPbrMaterialsLinear(scene);
+    return [
+        () => enableSceneTransmissionTasks(scene, engine),
+        () => {
+            for (const [mat, linear, features] of states) {
+                mat._linearImageProcessing = linear;
+                mat._renderFeatures = features;
+            }
+        },
+    ];
+}
+
+function enableSceneTransmissionTasks(scene: SceneContext, engine: EngineContext): void {
     let lastRenderTask: RenderTask | null = null;
     for (const task of scene._frameGraph._tasks) {
         if ("_renderables" in task) {
@@ -231,7 +253,7 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTask): void {
     sig._depthStencilFormat = cfg.depth?._descriptor.dFormat ?? newRt._descriptor.dFormat;
     sig._depthCompare = newRt._descriptor._depthCompare;
     sig._sampleCount = sampleCount;
-    task._opaqueBundles.length = 0;
+    task._ob.length = 0;
     task._lastVersion = -1;
 }
 
@@ -553,7 +575,7 @@ function drawBaseTask(task: RenderTask, pass: GPURenderPassEncoder): number {
     const rt = task._config.rt;
     const scene = task.scene;
     const opaqueBindings = task._opaqueBindings;
-    const opaqueBundles = task._opaqueBundles;
+    const opaqueBundles = task._ob;
 
     setPassState(task, pass);
 
@@ -574,23 +596,6 @@ function drawBaseTask(task: RenderTask, pass: GPURenderPassEncoder): number {
     pass.executeBundles(opaqueBundles);
     pass.setBindGroup(0, task._sceneBG);
     draws += drawList(pass, task._directBindings, eng);
-    return draws;
-}
-
-function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext): number {
-    let lp: GPURenderPipeline | null = null;
-    let draws = 0;
-    for (const b of list) {
-        const mesh = b.renderable.mesh;
-        if (mesh && mesh.visible === false) {
-            continue;
-        }
-        if (b.pipeline !== lp) {
-            enc.setPipeline(b.pipeline);
-            lp = b.pipeline;
-        }
-        draws += b.draw(enc, engine);
-    }
     return draws;
 }
 

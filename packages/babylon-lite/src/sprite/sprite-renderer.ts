@@ -105,6 +105,8 @@ export interface SpriteRenderer extends RenderingContext {
     _disposed: boolean;
     /** @internal Whether this pass clears the swapchain before drawing. False for HUD overlays. */
     _clear: boolean;
+    /** @internal Offscreen target handle retained so its replacement view can be selected after device recovery. */
+    _target?: Texture2D | null;
     /** @internal Offscreen color-attachment view to render into; null = the swapchain.
      *  Set via {@link setSpriteRendererTarget} (which takes a {@link Texture2D} target)
      *  for render-to-texture / post-process. */
@@ -470,6 +472,7 @@ export function registerSpriteRenderer(sr: SpriteRenderer): void {
  * offscreen scene pass before the presenting pass.
  */
 export function setSpriteRendererTarget(sr: SpriteRenderer, target: Texture2D | null): void {
+    sr._target = target;
     sr._targetView = target ? target.view : null;
 }
 

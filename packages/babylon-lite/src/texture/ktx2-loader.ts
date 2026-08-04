@@ -13,7 +13,8 @@ import type { Texture2D } from "./texture-2d.js";
 import { getCompressedFormat } from "./compressed-formats.js";
 import type { CompressedFormatInfo } from "./compressed-formats.js";
 
-interface Ktx2DecoderCaps {
+/** @internal */
+export interface Ktx2DecoderCaps {
     astc: boolean;
     bptc: boolean;
     s3tc: boolean;
@@ -22,13 +23,17 @@ interface Ktx2DecoderCaps {
     etc1: boolean;
 }
 
-interface Ktx2DecodedMip {
+/** @internal One decoded mip level of one array layer, as reported by the KTX2 decoder. */
+export interface Ktx2DecodedMip {
     width: number;
     height: number;
     data: Uint8Array;
+    /** Array layer this entry belongs to. Only reported by decoders with 2D-array support. */
+    layerIndex?: number;
 }
 
-interface Ktx2DecodedData {
+/** @internal Validated output of the KTX2 decoder. */
+export interface Ktx2DecodedData {
     width: number;
     height: number;
     transcodedFormat: number;
@@ -36,10 +41,14 @@ interface Ktx2DecodedData {
     hasAlpha: boolean;
     transcoderName: string;
     errors?: string;
+    /** For an array texture, `mipmaps` holds `layerCount` consecutive entries per mip level, ordered by
+     *  layer. Only reported by decoders with 2D-array support; absent (undefined) on older decoders. */
+    layerCount?: number;
     mipmaps: Ktx2DecodedMip[];
 }
 
-interface Ktx2Decoder {
+/** @internal Shared decoder handle type (used by the tree-shakeable 2D-array KTX2 helper). */
+export interface Ktx2Decoder {
     decode(data: Uint8Array, caps: Ktx2DecoderCaps, options?: { forceRGBA?: boolean }): Promise<Ktx2DecodedData>;
 }
 
@@ -69,7 +78,8 @@ let _ktx2DecoderPromise: Promise<Ktx2Decoder> | null = null;
 const GL_RGBA8 = 0x8058;
 const GL_R8 = 0x8229;
 const GL_RG8 = 0x822b;
-const RGBA_CAPS: Ktx2DecoderCaps = { astc: false, bptc: false, s3tc: false, pvrtc: false, etc2: false, etc1: false };
+/** @internal RGBA8 (uncompressed) transcode caps — used by the tree-shakeable 2D-array KTX2 helper. */
+export const RGBA_CAPS: Ktx2DecoderCaps = { astc: false, bptc: false, s3tc: false, pvrtc: false, etc2: false, etc1: false };
 
 /** Build the decoder's transcode-target caps from the device's enabled compressed-texture features, so the
  *  Basis transcoder emits a GPU-compressed format (BC7/BC3/ETC2/ASTC) instead of uncompressed RGBA8 — a few
@@ -90,7 +100,8 @@ function deviceKtx2Caps(engine: EngineContext): Ktx2DecoderCaps {
     };
 }
 
-function loadKtx2Decoder(): Promise<Ktx2Decoder> {
+/** @internal Load (once) and cache the shared KTX2/Basis decoder, honoring `setKtx2DecoderUrl`. */
+export function loadKtx2Decoder(): Promise<Ktx2Decoder> {
     if (_ktx2DecoderPromise) {
         return _ktx2DecoderPromise;
     }
@@ -137,7 +148,9 @@ function loadKtx2Decoder(): Promise<Ktx2Decoder> {
     return _ktx2DecoderPromise;
 }
 
-function srgbFormat(format: GPUTextureFormat): GPUTextureFormat {
+/** @internal Map a linear GPU format to its sRGB twin (identity when there is none). Shared with
+ *  texture-array.ts so the KTX2 array path resolves formats exactly like the 2D path. */
+export function srgbFormat(format: GPUTextureFormat): GPUTextureFormat {
     switch (format) {
         case "rgba8unorm":
             return "rgba8unorm-srgb";
@@ -188,7 +201,8 @@ function srgbFormat(format: GPUTextureFormat): GPUTextureFormat {
     }
 }
 
-function uncompressedInfo(glFormat: number): { format: GPUTextureFormat; bytesPerPixel: number } | null {
+/** @internal Map an uncompressed transcode target (a GL internal format) to its WebGPU format + stride. */
+export function uncompressedInfo(glFormat: number): { format: GPUTextureFormat; bytesPerPixel: number } | null {
     switch (glFormat) {
         case GL_RGBA8:
             return { format: "rgba8unorm", bytesPerPixel: 4 };
@@ -216,7 +230,8 @@ function validateDecoded(decoded: Ktx2DecodedData): Ktx2DecodedMip[] {
     return decoded.mipmaps;
 }
 
-function makeSampler(engine: EngineContext, mipCount: number): GPUSampler {
+/** @internal Sampler shared by every codec-decoded KTX2 texture, 2D or array. */
+export function makeSampler(engine: EngineContext, mipCount: number): GPUSampler {
     return getOrCreateSampler(engine, {
         addressModeU: "repeat",
         addressModeV: "repeat",
@@ -281,14 +296,23 @@ function uploadUncompressed(engine: EngineContext, mips: Ktx2DecodedMip[], info:
     return tex2d;
 }
 
+/** @internal Load the decoder and transcode `buffer` with the device's compression caps. The seam other
+ *  texture modules build on (mirrors Babylon.js `KhronosTextureContainer2._decodeAsync`) so they never touch
+ *  the decoder script glue themselves. Transcodes to the best GPU-supported compressed format (or RGBA8 on
+ *  devices without one): the compressed path uploads a few times less data than uncompressed RGBA8 and keeps
+ *  the texture compressed in VRAM. */
+export async function decodeKtx2Async(engine: EngineContext, buffer: ArrayBuffer): Promise<Ktx2DecodedData> {
+    const decoder = await loadKtx2Decoder();
+    const decoded = await decoder.decode(new U8(buffer), deviceKtx2Caps(engine));
+    validateDecoded(decoded);
+    return decoded;
+}
+
 /** Decode a KTX2 texture with the current WebGPU compression caps and upload the
  *  decoder-provided full mip chain directly to a Texture2D. */
 export async function uploadKtx2Texture2D(engine: EngineContext, buffer: ArrayBuffer, sRGB: boolean): Promise<Texture2D> {
-    const decoder = await loadKtx2Decoder();
-    // Transcode to the best GPU-supported compressed format (or RGBA8 on devices without one). The compressed
-    // path below uploads a few times less data than uncompressed RGBA8 and keeps the texture compressed in VRAM.
-    const decoded = await decoder.decode(new U8(buffer), deviceKtx2Caps(engine));
-    const mips = validateDecoded(decoded);
+    const decoded = await decodeKtx2Async(engine, buffer);
+    const mips = decoded.mipmaps;
 
     const compressed = getCompressedFormat(decoded.transcodedFormat);
     if (compressed) {

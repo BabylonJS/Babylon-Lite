@@ -210,28 +210,20 @@ ccAA_factor_y = sqrt(ccSlopeSquare_AA) * 0.75; }`
 let ccAlphaG = ccRough * ccRough + 0.0005 + ccAA_factor_y;`
         : ``;
 
+    const ccTintViewSetup = useCcTint
+        ? `
+let ccIorInv = 1.0 / max(ccIor, 1.0001);
+let ccAbsorptionColor = nme_pbr_colorAtDistance(max(ccTintColor, v3(0.0000001)), max(ccTintAtDistance, 0.0000001));
+let ccVRefract = refract(-V, ccNormalW, ccIorInv);
+let ccNdotVRefract = abs(dot(ccNormalW, ccVRefract)) + 0.0000001;`
+        : ``;
+
     const ccNormalSetup = useClearcoat
         ? useCcBump
             ? `let ccNormalW = nme_perturbNormal(worldPos, Ng, ccBumpUv, ccBumpColor, 1.0);
-let ccNdotV = abs(dot(ccNormalW, V)) + 0.0000001;${
-                  useCcTint
-                      ? `
-let ccIorInv = 1.0 / max(ccIor, 1.0001);
-let ccAbsorptionColor = nme_pbr_colorAtDistance(max(ccTintColor, v3(0.0000001)), max(ccTintAtDistance, 0.0000001));
-let ccVRefract = refract(-V, ccNormalW, ccIorInv);
-let ccNdotVRefract = abs(dot(ccNormalW, ccVRefract)) + 0.0000001;`
-                      : ``
-              }`
+let ccNdotV = abs(dot(ccNormalW, V)) + 0.0000001;${ccTintViewSetup}`
             : `let ccNormalW = Ng;
-let ccNdotV = abs(dot(ccNormalW, V)) + 0.0000001;${
-                  useCcTint
-                      ? `
-let ccIorInv = 1.0 / max(ccIor, 1.0001);
-let ccAbsorptionColor = nme_pbr_colorAtDistance(max(ccTintColor, v3(0.0000001)), max(ccTintAtDistance, 0.0000001));
-let ccVRefract = refract(-V, ccNormalW, ccIorInv);
-let ccNdotVRefract = abs(dot(ccNormalW, ccVRefract)) + 0.0000001;`
-                      : ``
-              }`
+let ccNdotV = abs(dot(ccNormalW, V)) + 0.0000001;${ccTintViewSetup}`
         : `let ccNormalW = N;
 let ccNdotV: f32 = 0.0;`;
 

@@ -4,16 +4,14 @@
  *  no shared MR image). Scene1 (BoomBox) and any vanilla-PBR glTF skip this
  *  module entirely. */
 
-import { U8 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { cloneTexture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import type { GltfMaterialData } from "./gltf-material.js";
-import { linearToSrgbByte } from "../math/color.js";
 import type { TextureWrapFn, GenerateMipmapsFn } from "./gltf-pbr-builder.js";
-import { uploadTex } from "./gltf-pbr-builder.js";
+import { uploadBaseColorFactorTexture, uploadOrmFactorTexture, uploadTex } from "./gltf-pbr-builder.js";
 
 export interface PbrTexturesExt {
     baseColorTexture: Texture2D;
@@ -99,17 +97,7 @@ export function buildDefaultPbrTexturesExt(
     const pbr = raw.pbrMetallicRoughness ?? {};
     const baseColorTexture = mat._baseColorImage
         ? wrap(pickTex(mat._baseColorImage, true, pbr.baseColorTexture), pbr.baseColorTexture)
-        : (() => {
-              const f = mat._baseColorFactor;
-              return uploadTex(
-                  engine,
-                  null,
-                  true,
-                  sampler,
-                  generateMipmaps,
-                  new U8([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
-              );
-          })();
+        : uploadBaseColorFactorTexture(engine, mat._baseColorFactor, sampler, generateMipmaps);
     const normalTexture = mat._normalImage ? wrap(pickTex(mat._normalImage, false, raw.normalTexture), raw.normalTexture) : undefined;
     const emissiveTexture = mat._emissiveImage ? wrap(pickTex(mat._emissiveImage, true, raw.emissiveTexture), raw.emissiveTexture) : undefined;
 
@@ -118,15 +106,13 @@ export function buildDefaultPbrTexturesExt(
     const single = mat._metallicRoughnessImage ?? (occlusionOnUv2 ? null : mat._occlusionImage);
     let ormTexture: Texture2D;
     if (occlusionOnUv2) {
-        const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
+        ormTexture = uploadOrmFactorTexture(engine, mat._roughnessFactor, mat._metallicFactor, sampler, generateMipmaps);
         occlusionTexture = wrap(pickTex(mat._occlusionImage!, false, raw.occlusionTexture), raw.occlusionTexture);
     } else if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
         const ormTi = mat._metallicRoughnessImage ? pbr.metallicRoughnessTexture : raw.occlusionTexture;
         ormTexture = wrap(pickTex(single, false, ormTi), ormTi);
     } else if (!single) {
-        const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
+        ormTexture = uploadOrmFactorTexture(engine, mat._roughnessFactor, mat._metallicFactor, sampler, generateMipmaps);
     } else {
         ormTexture = wrap(pickTex(mat._metallicRoughnessImage!, false, pbr.metallicRoughnessTexture), pbr.metallicRoughnessTexture);
     }

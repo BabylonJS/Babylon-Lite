@@ -31,6 +31,10 @@ export interface AssetContainer {
      *  `enableBoneControl()` was called before loading; otherwise `undefined`.
      *  Drive bones via `getBoneByName()` + the `setBone*` functions. */
     skeletons?: Skeleton[];
+    /** @internal Per-frame animation tick closure pushed onto `scene._beforeRender` by
+     *  `addToScene(scene, container)`. Stored so `removeFromScene(scene, container)` can
+     *  splice it back out, keeping the two calls symmetric. */
+    _beforeRenderHook?: (deltaMs: number) => void;
     /** Deferred scene-wiring hook contributed by a loader feature that needs the
      *  target `SceneContext` (which the loader itself never sees). `addToScene()`
      *  invokes it once, synchronously, while processing the container. Used by

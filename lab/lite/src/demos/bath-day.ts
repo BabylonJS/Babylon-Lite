@@ -25,6 +25,7 @@ import {
     createSceneContext,
     createSolidTexture2D,
     getFrameGraph,
+    loadDdsEnvironment,
     loadGltf,
     onBeforeRender,
     registerScene,
@@ -33,7 +34,6 @@ import {
     AcesToneMapping,
     type RenderTask,
 } from "babylon-lite";
-import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
 import { configureDemoDecoderBases, demoAssetUrl } from "./demo-asset-url.js";
 import { installFetchProgress } from "./loading-progress.js";
 

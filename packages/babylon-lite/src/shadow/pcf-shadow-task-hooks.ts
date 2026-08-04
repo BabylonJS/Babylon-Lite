@@ -61,7 +61,15 @@ export async function preloadPcfShadowTaskState(casterMeshes: readonly Mesh[]): 
     let needsNode = false;
     let needsShader = false;
     for (const mesh of casterMeshes) {
-        const family = mesh.material?._buildGroup._materialFamily;
+        // Resolve the SAME material `getNoColorView` will end up building a view for: an explicit
+        // `_shadowCasterMaterial` override casts through an alternate material, whose family can differ
+        // from the receive material's. Scanning only `mesh.material` would leave that family's factory
+        // unimported and the shadow pass would then call an undefined factory.
+        let material = mesh.material;
+        while (material?._shadowCasterMaterial) {
+            material = material._shadowCasterMaterial;
+        }
+        const family = material?._buildGroup._materialFamily;
         needsStandard ||= family === "standard";
         needsPbr ||= family === "pbr";
         needsNode ||= family === "node";

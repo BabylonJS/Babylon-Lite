@@ -2,6 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import { Observable } from "../src/misc/observable";
 import { Tools } from "../src/misc/tools";
+import { Constants } from "../src/misc/engine-constants";
+
+describe("Constants", () => {
+    it("carries the Babylon.js numeric alpha-blend constants (incl. ALPHA_REPLACE_COLOR = 21)", () => {
+        expect(Constants.ALPHA_DISABLE).toBe(0);
+        expect(Constants.ALPHA_ONEONE).toBe(6);
+        expect(Constants.ALPHA_PREMULTIPLIED).toBe(7);
+        expect(Constants.ALPHA_REPLACE_COLOR).toBe(21);
+    });
+});
 
 describe("Observable", () => {
     it("notifies all observers", () => {
@@ -41,6 +51,59 @@ describe("Observable", () => {
         expect(cb).not.toHaveBeenCalled(); // added during this pass, fires next time
         obs.notifyObservers();
         expect(cb).toHaveBeenCalledTimes(1);
+    });
+
+    it("replays the last notification to late subscribers when notifyIfTriggered is enabled", () => {
+        const obs = new Observable<number>(undefined, true);
+        const seen: number[] = [];
+
+        obs.notifyObservers(3);
+        obs.add((n) => seen.push(n));
+        obs.notifyObservers(5);
+
+        expect(seen).toEqual([3, 5]);
+    });
+
+    it("does not replay to late subscribers by default", () => {
+        const obs = new Observable<number>();
+        const seen: number[] = [];
+
+        obs.notifyObservers(3);
+        obs.add((n) => seen.push(n));
+
+        expect(seen).toEqual([]);
+    });
+
+    it("replays addOnce late subscribers once when notifyIfTriggered is enabled", () => {
+        const obs = new Observable<number>(undefined, true);
+        const seen: number[] = [];
+
+        obs.notifyObservers(3);
+        obs.addOnce((n) => seen.push(n));
+        obs.notifyObservers(5);
+
+        expect(seen).toEqual([3]);
+    });
+
+    it("does not replay an undefined last notification, matching Babylon.js", () => {
+        const obs = new Observable<void>(undefined, true);
+        const cb = vi.fn();
+
+        obs.notifyObservers();
+        obs.add(cb);
+
+        expect(cb).not.toHaveBeenCalled();
+    });
+
+    it("clears the last notified state", () => {
+        const obs = new Observable<number>(undefined, true);
+        const seen: number[] = [];
+
+        obs.notifyObservers(3);
+        obs.cleanLastNotifiedState();
+        obs.add((n) => seen.push(n));
+
+        expect(seen).toEqual([]);
     });
 });
 

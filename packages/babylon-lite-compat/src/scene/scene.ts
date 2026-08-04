@@ -41,16 +41,27 @@ import { StandardMaterial } from "../materials/materials.js";
 import { Animatable } from "../animations/animation.js";
 import type { Animation } from "../animations/animation.js";
 import { AnimationGroup } from "../animations/animation.js";
-import type { CubeTexture, HDRCubeTexture } from "../textures/textures.js";
+import type { BaseTexture, CubeTexture, HDRCubeTexture } from "../textures/textures.js";
 import type { WebGPUEngine } from "../engine/engine.js";
 import { AbstractScene } from "./abstract-scene.js";
+import { Logger } from "../misc/misc-utils.js";
 
-/** Babylon.js EnvironmentHelper default skybox/ground/BRDF assets (match the Lite ports). */
+/** Babylon.js EnvironmentHelper default skybox/ground assets (match the Lite ports). */
 const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
 const DEFAULT_GROUND_URL = "https://assets.babylonjs.com/core/environments/backgroundGround.png";
-const DEFAULT_BRDF_URL = "/brdf-lut.png";
 /** Babylon.js `createDefaultEnvironment` IBL fallback when no `environmentTexture` is set. */
 const DEFAULT_ENV_URL = "https://assets.babylonjs.com/environments/environmentSpecular.env";
+
+/**
+ * Babylon.js resolves the BRDF lookup texture from an embedded Base64 PNG rather than a
+ * URL, so PBR materials work with no asset deployment and no network request. Mirror that
+ * here instead of exposing a URL option: Babylon.js's `IEnvironmentHelperOptions` has no
+ * BRDF field, and a fetched default breaks under SPA dev servers that answer missing files
+ * with a 200 HTML page. Loaded lazily so only apps that load an environment pay for it.
+ */
+async function getBrdfLutUrl(): Promise<string> {
+    return (await import("./brdf-lut-data.js")).BRDF_LUT_DATA_URL;
+}
 
 interface DefaultEnvironmentOptions {
     createSkybox?: boolean;
@@ -135,6 +146,7 @@ export class Scene extends AbstractScene {
     private readonly _pendingAdds: Array<() => void> = [];
     private _started = false;
     private _envTexture: CubeTexture | HDRCubeTexture | null = null;
+    private _brdfTexture: BaseTexture | null = null;
     private _defaultEnvOptions: DefaultEnvironmentOptions | null = null;
     private readonly _shadowGenerators: Array<{ _build(engine: import("babylon-lite").EngineContext): void; _liteGen?: unknown }> = [];
     private readonly _pendingTextures: Array<Promise<void>> = [];
@@ -212,6 +224,16 @@ export class Scene extends AbstractScene {
         this.onBeforeRenderObservable.notifyObservers(this);
     }
 
+    /**
+     * @internal The Lite-core-owned mesh list backing `scene.meshes`. Babylon Lite's
+     * `SceneContext` owns the authoritative array of scene meshes; the base
+     * `AbstractScene.meshes` maps it back onto the canonical compat wrappers. Guarded
+     * for prototype-only instances that have no `_lite` (GPU-free unit tests).
+     */
+    protected override _coreMeshList(): readonly object[] {
+        return (this._lite?.meshes as readonly object[] | undefined) ?? [];
+    }
+
     public getEngine(): WebGPUEngine {
         return this._engine;
     }
@@ -224,6 +246,17 @@ export class Scene extends AbstractScene {
     /** Babylon.js `scene.getUniqueId()` — the process-unique scene id. */
     public getUniqueId(): number {
         return this.uniqueId;
+    }
+
+    /**
+     * @internal Whether the engine has started, i.e. deferred mesh adds have been
+     * flushed and meshes are live in the Lite scene. Used by the mesh `material`
+     * setter and texture-readiness path to decide whether a material change must be
+     * reconciled into the running scene (ensure renderable + rebuild) or is still
+     * safely handled by the boot-time build.
+     */
+    public get _hasStarted(): boolean {
+        return this._started;
     }
 
     /**
@@ -319,7 +352,15 @@ export class Scene extends AbstractScene {
 
     /** @internal Register a `NodeMaterial` whose parse the engine drives after shadow build. */
     public _registerNodeMaterial(material: { _parse(engine: import("babylon-lite").EngineContext, shadowGenerators: readonly unknown[]): Promise<void> }): void {
+        if (this._started) {
+            this._engine._registerLateWork(() => material._parse(this._engine._lite, this._liteShadowGenerators()));
+            return;
+        }
         this._nodeMaterials.push(material);
+    }
+
+    private _liteShadowGenerators(): unknown[] {
+        return this._shadowGenerators.map((g) => g._liteGen).filter((g): g is unknown => g !== undefined);
     }
 
     /**
@@ -333,7 +374,7 @@ export class Scene extends AbstractScene {
             return;
         }
         const engine = this._engine._lite;
-        const liteGens = this._shadowGenerators.map((g) => g._liteGen).filter((g): g is unknown => g !== undefined);
+        const liteGens = this._liteShadowGenerators();
         await Promise.all(this._nodeMaterials.map((m) => m._parse(engine, liteGens)));
         this._nodeMaterials.length = 0;
     }
@@ -541,6 +582,58 @@ export class Scene extends AbstractScene {
     }
 
     /**
+     * Babylon.js `scene.environmentBRDFTexture` — the BRDF lookup used by PBR materials.
+     * Babylon.js defaults this to an embedded Base64 LUT and lets apps swap in one of the
+     * published variants (e.g. `https://assets.babylonjs.com/environments/correlatedMSBRDF_RGBD.png`).
+     *
+     * Two deliberate divergences: the getter returns `null` while unset (Babylon.js
+     * populates it with the decoded default once a PBR material is created, whereas Lite
+     * keeps the default as an embedded data URL and never materialises a texture object),
+     * and the assigned texture's own GPU upload goes unused because Babylon Lite decodes
+     * the LUT itself, from the URL, as part of building the environment.
+     */
+    public get environmentBRDFTexture(): BaseTexture | null {
+        return this._brdfTexture;
+    }
+    public set environmentBRDFTexture(value: BaseTexture | null) {
+        this._brdfTexture = value;
+    }
+
+    /**
+     * Resolve the BRDF LUT URL for the environment loaders: an app-supplied
+     * `environmentBRDFTexture`, else the embedded Babylon.js-style default.
+     */
+    private async _resolveBrdfUrl(): Promise<string> {
+        const override = this._brdfTexture;
+        if (!override) {
+            return await getBrdfLutUrl();
+        }
+        // Compat `Texture` records its source URL as `name`; `CubeTexture`-likes expose `url`.
+        // Procedural textures (`RawTexture`, `DynamicTexture`) have no source at all and leave
+        // `name` empty, which would otherwise resolve to a fetch of the page itself.
+        const url = ((override as unknown as { url?: string }).url ?? override.name).trim();
+        if (!url) {
+            Logger.Warn(
+                `scene.environmentBRDFTexture: the assigned ${override.getClassName()} has no source URL, so the built-in LUT is used instead. ` +
+                    `Assign a \`Texture\` created from a URL to override it.`
+            );
+            return await getBrdfLutUrl();
+        }
+        // Babylon.js also publishes `.dds` LUTs, but Babylon Lite decodes the BRDF LUT with
+        // `createImageBitmap`, which cannot read DDS. Warn and keep the built-in LUT rather
+        // than failing engine startup — the default is the same correlated-MS variant most
+        // apps select anyway, so the scene still renders correctly.
+        if (url.split(/[?#]/)[0]!.toLowerCase().endsWith(".dds")) {
+            Logger.Warn(
+                `scene.environmentBRDFTexture '${url}': Babylon Lite decodes the BRDF LUT from an RGBD-encoded PNG and cannot read DDS, ` +
+                    `so the built-in LUT is used instead. Use the PNG variant (e.g. https://assets.babylonjs.com/environments/correlatedMSBRDF_RGBD.png) to silence this.`
+            );
+            return await getBrdfLutUrl();
+        }
+        return url;
+    }
+
+    /**
      * Babylon.js `scene.createDefaultEnvironment` — adds an IBL skybox and ground.
      * Babylon Lite performs this through `loadEnvironment` (deferred to engine start),
      * combining the environment URL recorded via `scene.environmentTexture` with
@@ -618,13 +711,13 @@ export class Scene extends AbstractScene {
             });
         } else if (envUrl.toLowerCase().endsWith(".dds")) {
             await loadDdsEnvironment(this._lite, envUrl, {
-                brdfUrl: DEFAULT_BRDF_URL,
+                brdfUrl: await this._resolveBrdfUrl(),
                 skipSkybox: !opts?.createSkybox,
                 skipGround: !opts?.createGround,
             });
         } else {
             await loadEnvironment(this._lite, envUrl, {
-                brdfUrl: DEFAULT_BRDF_URL,
+                brdfUrl: await this._resolveBrdfUrl(),
                 skyboxUrl,
                 skipSkybox: !opts?.createSkybox,
                 groundTextureUrl: opts?.createGround ? DEFAULT_GROUND_URL : undefined,
