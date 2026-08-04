@@ -1054,6 +1054,7 @@ export class LinesMesh extends Mesh {
     private _lineMaterial: LinesMaterial;
     private readonly _color: Color3;
     private _alpha = 1;
+    private _suspendLineColorSync = false;
 
     public constructor(name: string, sceneOrLite: Scene | LiteMesh, scene?: Scene, useVertexColor = false, useVertexAlpha = true) {
         const realScene = isCompatScene(sceneOrLite) ? sceneOrLite : scene;
@@ -1070,7 +1071,11 @@ export class LinesMesh extends Mesh {
         this.useVertexAlpha = useVertexAlpha;
         this._lineMaterial = new LinesMaterial("colorShader", lineMaterial, realScene);
         this.material = this._lineMaterial;
-        this._color = createObservableLineColor(() => this._syncLineColor());
+        this._color = createObservableLineColor(() => {
+            if (!this._suspendLineColorSync) {
+                this._syncLineColor();
+            }
+        });
         if (isCompatScene(sceneOrLite)) {
             addPrimitive(this, sceneOrLite);
         }
@@ -1084,7 +1089,12 @@ export class LinesMesh extends Mesh {
         return this._color;
     }
     public set color(value: Color3) {
-        this._color.copyFrom(value);
+        this._suspendLineColorSync = true;
+        try {
+            this._color.copyFrom(value);
+        } finally {
+            this._suspendLineColorSync = false;
+        }
         this._syncLineColor();
     }
 

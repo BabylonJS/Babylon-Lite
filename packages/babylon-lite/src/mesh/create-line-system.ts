@@ -41,10 +41,52 @@ export interface LinesOptions {
 
 export interface LineSystemUpdateOptions extends LineSystemDataOptions {}
 
-function assertFinite(kind: string, value: number): void {
+function assertFinite(kind: string, value: number, operation = "createLineSystemData"): void {
     if (!Number.isFinite(value)) {
-        throw new Error(`createLineSystemData requires finite ${kind} components`);
+        throw new Error(`${operation} requires finite ${kind} components`);
     }
+}
+
+function flattenLineSystemUpdate(options: LineSystemUpdateOptions, vertexCount: number): { positions: Float32Array; colors?: Float32Array } {
+    const { lines, colors } = options;
+    if (colors && colors.length !== lines.length) {
+        throw new Error("updateLineSystem requires one color row per line");
+    }
+
+    const positions = new Float32Array(vertexCount * 3);
+    const vertexColors = colors ? new Float32Array(vertexCount * 4) : undefined;
+    let vertex = 0;
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const line = lines[lineIndex]!;
+        const lineColors = colors?.[lineIndex];
+        if (lineColors && lineColors.length !== line.length) {
+            throw new Error("updateLineSystem requires one color per point");
+        }
+        for (let pointIndex = 0; pointIndex < line.length; pointIndex++) {
+            const point = line[pointIndex]!;
+            assertFinite("position", point.x, "updateLineSystem");
+            assertFinite("position", point.y, "updateLineSystem");
+            assertFinite("position", point.z, "updateLineSystem");
+            const positionOffset = vertex * 3;
+            positions[positionOffset] = point.x;
+            positions[positionOffset + 1] = point.y;
+            positions[positionOffset + 2] = point.z;
+            if (vertexColors && lineColors) {
+                const color = lineColors[pointIndex]!;
+                assertFinite("color", color.r, "updateLineSystem");
+                assertFinite("color", color.g, "updateLineSystem");
+                assertFinite("color", color.b, "updateLineSystem");
+                assertFinite("color", color.a, "updateLineSystem");
+                const colorOffset = vertex * 4;
+                vertexColors[colorOffset] = color.r;
+                vertexColors[colorOffset + 1] = color.g;
+                vertexColors[colorOffset + 2] = color.b;
+                vertexColors[colorOffset + 3] = color.a;
+            }
+            vertex++;
+        }
+    }
+    return { positions, ...(vertexColors ? { colors: vertexColors } : {}) };
 }
 
 /** Flatten independent polylines into one indexed line-list geometry. */
@@ -175,7 +217,11 @@ export function updateLineSystem(engine: EngineContext, mesh: Mesh, options: Lin
         throw new Error("updateLineSystem cannot add colors to a mesh created without vertex colors");
     }
 
-    const data = createLineSystemData(options);
+    let vertexCount = 0;
+    for (const count of pointCounts) {
+        vertexCount += count;
+    }
+    const data = flattenLineSystemUpdate(options, vertexCount);
     updateMeshPositions(engine, mesh, data.positions);
     if (data.colors) {
         updateMeshColors(engine, mesh, data.colors);

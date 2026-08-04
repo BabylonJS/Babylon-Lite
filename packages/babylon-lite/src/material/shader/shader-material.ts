@@ -79,6 +79,8 @@ export interface ShaderMaterialOptions {
     readonly depthBiasSlopeScale?: number;
     /** @internal Primitive topology owned by specialized materials such as LineMaterial. */
     readonly _topology?: GPUPrimitiveTopology;
+    /** @internal Reject meshes without thin-instance data before compiling specialized shaders that require it. */
+    readonly _requiresThinInstances?: boolean;
 }
 
 /** A custom uniform declaration: WGSL identifier, type, and optional default. */
@@ -156,6 +158,8 @@ export interface ShaderMaterial extends Material {
     readonly depthBiasSlopeScale: number;
     /** @internal Primitive topology override. Undefined means triangle-list. */
     readonly _topology?: GPUPrimitiveTopology;
+    /** @internal Whether every mesh using this material must have thin-instance data. */
+    readonly _requiresThinInstances?: boolean;
     /** Optional stencil-test state baked into the main-pass pipeline (mask write / discard). Set after
      *  creation (`mat.stencil = { ... }`) and call `enableMaterialStencil()` before `registerScene`. Default
      *  none. See `StencilState`. */
@@ -332,6 +336,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         depthBias: options.depthBias ?? 0,
         depthBiasSlopeScale: options.depthBiasSlopeScale ?? 0,
         _topology: options._topology,
+        _requiresThinInstances: options._requiresThinInstances,
         _buildGroup: getShaderGroupBuilder(),
         _uboVersion: 0,
         _uniformValues: uniformValues,

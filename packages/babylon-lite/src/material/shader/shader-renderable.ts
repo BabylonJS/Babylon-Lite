@@ -141,6 +141,9 @@ function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: 
 }
 
 function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial, meshes: readonly Mesh[], isOverride = false, getUniformBatch?: UniformBatchFactory): Renderable[] {
+    if (material._requiresThinInstances && meshes.some((mesh) => !mesh.thinInstances)) {
+        throw new Error(`ShaderMaterial "${material.name ?? "<unnamed>"}" requires thin-instance data on every mesh`);
+    }
     const engine = scene.surface.engine;
     const bindings = getOrCreateShaderPipelineBindings(engine, material);
     ensureCustomUbo(engine, material, bindings.customSpec);

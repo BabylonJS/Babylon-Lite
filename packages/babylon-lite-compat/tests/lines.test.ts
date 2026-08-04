@@ -47,7 +47,10 @@ describe("LinesMesh compatibility", () => {
 
         expect(mesh).toBeInstanceOf(LinesMesh);
         expect(Array.from(mesh._lite._cpuIndices!)).toEqual([0, 1, 1, 2, 3, 4]);
+        const materialBefore = mesh._lite.material as unknown as { _uniformVersion: number };
+        const uniformVersion = materialBefore._uniformVersion;
         mesh.color = new Color3(0.2, 0.4, 0.8);
+        expect(materialBefore._uniformVersion).toBe(uniformVersion + 1);
         mesh.alpha = 0.6;
         const material = mesh._lite.material as unknown as { color: { r: number; g: number; b: number; a: number } };
         expect(material.color).toEqual({ r: 0.2, g: 0.4, b: 0.8, a: 0.6 });

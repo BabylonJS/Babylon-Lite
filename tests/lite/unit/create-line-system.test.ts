@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createLineMaterial } from "../../../packages/babylon-lite/src/material/line/line-material";
+import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
 import { createLineSystemData, updateLineSystem } from "../../../packages/babylon-lite/src/mesh/create-line-system";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
 function point(x: number, y: number, z: number) {
     return { x, y, z };
@@ -63,6 +65,12 @@ describe("createLineMaterial", () => {
 
     it("rejects thin-instance colors without thin-instance matrices", () => {
         expect(() => createLineMaterial({ useThinInstanceColors: true })).toThrow("useThinInstances");
+    });
+
+    it("rejects a thin-instance shader variant on a mesh without thin-instance data", () => {
+        const material = createLineMaterial({ useThinInstances: true });
+        const mesh = { material, thinInstances: null } as unknown as Mesh;
+        expect(() => buildShaderMaterialRenderables({} as SceneContext, [mesh])).toThrow("requires thin-instance data");
     });
 });
 

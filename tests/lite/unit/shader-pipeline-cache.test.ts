@@ -27,13 +27,14 @@ function makeEngine() {
     };
 }
 
-function makeMaterial(fragment = "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }", blend?: GPUBlendState) {
+function makeMaterial(fragment = "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }", blend?: GPUBlendState, topology?: GPUPrimitiveTopology) {
     return createShaderMaterial({
         vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
         fragmentSource: fragment,
         attributes: ["position"],
         uniforms: ["world", { name: "tint", type: "vec3<f32>" }],
         ...(blend ? { blend } : {}),
+        _topology: topology,
     });
 }
 
@@ -136,5 +137,21 @@ describe("ShaderMaterial pipeline cache", () => {
         const secondTarget = (secondDescriptor.fragment!.targets as GPUColorTargetState[])[0];
         expect(firstTarget?.blend).toEqual(colorBlend);
         expect(secondTarget?.blend).toEqual(additiveBlend);
+    });
+
+    it("keeps different primitive topologies in separate pipelines", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        const { engine, createRenderPipeline } = makeEngine();
+        const triangles = makeMaterial(undefined, undefined, "triangle-list");
+        const lines = makeMaterial(undefined, undefined, "line-list");
+        enableShaderPipelineCache(engine, [{ material: triangles }, { material: lines }]);
+
+        getOrCreateShaderPipeline(engine, signature, triangles, getOrCreateShaderPipelineBindings(engine, triangles));
+        getOrCreateShaderPipeline(engine, signature, lines, getOrCreateShaderPipelineBindings(engine, lines));
+
+        expect(createRenderPipeline).toHaveBeenCalledTimes(2);
+        expect(createRenderPipeline.mock.calls[0]![0].primitive.topology).toBe("triangle-list");
+        expect(createRenderPipeline.mock.calls[1]![0].primitive.topology).toBe("line-list");
     });
 });

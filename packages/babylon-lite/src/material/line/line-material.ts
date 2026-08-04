@@ -79,6 +79,7 @@ export function createLineMaterial(options: LineMaterialOptions = {}): LineMater
         depthWrite: options.depthWrite,
         depthCompare: options.depthCompare,
         _topology: "line-list",
+        _requiresThinInstances: useThinInstances,
     }) as LineMaterial;
     Object.assign(material, { useVertexColor, useVertexAlpha, useThinInstances, useThinInstanceColors, color });
     return material;
