@@ -3,6 +3,9 @@
 
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { SceneContext } from "../../scene/scene.js";
+import type { Mesh } from "../../mesh/mesh.js";
 
 export * from "./pbr-flag-bits.js";
 
@@ -39,7 +42,7 @@ export interface _PbrFragCtx {
 /** @internal Bind-group entry build context threaded through `PbrExt.bind`. */
 export interface _PbrBindCtx {
     /** @internal */
-    readonly _engine: import("../../engine/engine.js").EngineContext;
+    readonly _engine: EngineContext;
     /** @internal */
     readonly _features: number;
     /** @internal */
@@ -112,11 +115,7 @@ export function _getPbrExtsSorted(): readonly PbrExt[] {
  *  The registry is per-runtime, so a hook fires for every mesh group once any material
  *  opts in — each hook MUST re-check `meshes` and return early when its feature is
  *  absent. */
-export type PbrSceneHook = (
-    scene: import("../../scene/scene.js").SceneContext,
-    engine: import("../../engine/engine.js").EngineContext,
-    meshes: readonly import("../../mesh/mesh.js").Mesh[]
-) => void | Promise<void>;
+export type PbrSceneHook = (scene: SceneContext, engine: EngineContext, meshes: readonly Mesh[]) => void | Promise<void>;
 
 let _pbrSceneHooks: Set<PbrSceneHook> | null = null;
 /** @internal Register a scene-setup hook. Idempotent (keyed by function identity). */
