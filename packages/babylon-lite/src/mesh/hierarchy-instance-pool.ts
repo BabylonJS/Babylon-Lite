@@ -13,7 +13,7 @@ export interface HierarchyInstancePoolBinding {
     /** @internal */
     _meshWorldInverse: Mat4Storage;
     /** @internal */
-    _rootRelativeMeshWorld: Mat4Storage;
+    _meshWorld: Mat4Storage;
 }
 
 /**
@@ -22,6 +22,10 @@ export interface HierarchyInstancePoolBinding {
  * The source meshes become the render carriers for the pool: each descendant
  * mesh receives its own thin-instance matrix buffer, and one logical hierarchy
  * instance updates the matching slot in every buffer.
+ *
+ * An instance matrix composes with the template's own world matrices, exactly
+ * like adding a parent transform node above the hierarchy root: the identity
+ * matrix reproduces the template unchanged.
  */
 export interface HierarchyInstancePool {
     /** Template hierarchy root used to build the pool. */
@@ -67,13 +71,6 @@ export function createHierarchyInstancePool(root: SceneNode, capacity: number): 
         throw new Error("createHierarchyInstancePool requires at least one mesh in the source hierarchy");
     }
 
-    const rootWorld = copyMat4(root.worldMatrix);
-    const rootWorldInverse = mat4Invert(rootWorld as unknown as Mat4);
-    if (!rootWorldInverse) {
-        throw new Error("createHierarchyInstancePool requires an invertible root world matrix");
-    }
-    const rootWorldInverseStorage = rootWorldInverse as unknown as Mat4Storage;
-
     const bindings: HierarchyInstancePoolBinding[] = [];
     for (const mesh of meshes) {
         if (mesh.thinInstances) {
@@ -86,9 +83,6 @@ export function createHierarchyInstancePool(root: SceneNode, capacity: number): 
             throw new Error(`createHierarchyInstancePool requires an invertible world matrix for mesh "${mesh.name}"`);
         }
 
-        const rootRelativeMeshWorld = new F32(16);
-        mat4MultiplyInto(rootRelativeMeshWorld, 0, rootWorldInverseStorage, 0, meshWorld, 0);
-
         const matrices = new F32(capacity * 16);
         setThinInstances(mesh, matrices, capacity);
         setThinInstanceCount(mesh, 0);
@@ -96,7 +90,7 @@ export function createHierarchyInstancePool(root: SceneNode, capacity: number): 
             mesh,
             matrices,
             _meshWorldInverse: meshWorldInverse as unknown as Mat4Storage,
-            _rootRelativeMeshWorld: rootRelativeMeshWorld,
+            _meshWorld: meshWorld,
         });
     }
 
@@ -114,10 +108,12 @@ export function createHierarchyInstancePool(root: SceneNode, capacity: number): 
  * Add one logical hierarchy instance and return its slot index.
  *
  * The same root matrix is expanded into each descendant mesh's thin-instance
- * buffer so child offsets, rotations, and scales are preserved.
+ * buffer so child offsets, rotations, and scales are preserved. It composes with
+ * the template hierarchy rather than replacing the root world matrix, so the
+ * identity matrix draws the template where it already is.
  *
  * @param pool - Pool created by {@link createHierarchyInstancePool}.
- * @param matrix - Desired world matrix for the hierarchy root instance.
+ * @param matrix - World-space transform applied on top of the template hierarchy.
  */
 export function addHierarchyInstance(pool: HierarchyInstancePool, matrix: Mat4): number {
     const index = pool.count;
@@ -137,7 +133,7 @@ export function addHierarchyInstance(pool: HierarchyInstancePool, matrix: Mat4):
  *
  * @param pool - Pool created by {@link createHierarchyInstancePool}.
  * @param index - Active logical instance index to update.
- * @param matrix - Desired world matrix for the hierarchy root instance.
+ * @param matrix - World-space transform applied on top of the template hierarchy.
  */
 export function setHierarchyInstanceMatrix(pool: HierarchyInstancePool, index: number, matrix: Mat4): void {
     assertActiveIndex(pool, index, "setHierarchyInstanceMatrix");
@@ -218,9 +214,14 @@ function copyMat4(src: Mat4): Float32Array {
     return dst;
 }
 
+// The shader draws each thin instance at `finalWorld = mesh.world * instanceMatrix`, so the stored
+// matrix is `meshWorld⁻¹ * rootMatrix * meshWorld`. That composes the requested transform on top of
+// the template's own world matrices (`finalWorld = rootMatrix * meshWorld`) instead of replacing the
+// root world, which would cancel transforms the hierarchy legitimately carries — such as the glTF
+// `__root__` RH→LH `(-1, 1, 1)` flip.
 function writeBindingMatrix(pool: HierarchyInstancePool, binding: HierarchyInstancePoolBinding, index: number, rootMatrix: Mat4): void {
     const rootStorage = rootMatrix as unknown as Mat4Storage;
-    mat4MultiplyInto(pool._scratch, 0, rootStorage, 0, binding._rootRelativeMeshWorld, 0);
+    mat4MultiplyInto(pool._scratch, 0, rootStorage, 0, binding._meshWorld, 0);
     mat4MultiplyInto(binding.matrices, index * 16, binding._meshWorldInverse, 0, pool._scratch, 0);
 }
 
