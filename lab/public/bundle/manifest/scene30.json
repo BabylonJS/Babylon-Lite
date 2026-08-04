@@ -1,26 +1,26 @@
 {
-  "rawKB": 104,
-  "gzipKB": 43.3,
+  "rawKB": 104.4,
+  "rawBytes": 106859,
+  "gzipKB": 43.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene30-alpha-test-fragment-BIxlgW0s.js",
+    "scene30-alpha-test-fragment-DqCLbLcU.js",
     "scene30-generate-mipmaps-C9P_gbtm.js",
     "scene30-gltf-ext-dielectric-C6hvXXiF.js",
     "scene30-gltf-ext-uv-transform-DQN5DAiE.js",
     "scene30-gltf-feature-draco-BSbw1ZBU.js",
-    "scene30-gltf-feature-registry-B_x6vura.js",
+    "scene30-gltf-feature-registry-BRxK-m8Y.js",
     "scene30-gltf-glb-parser-CPRfMQrD.js",
     "scene30-gltf-pbr-builder-ext-CqZZdTfz.js",
     "scene30-ibl-fragment-CeRrvT96.js",
-    "scene30-pbr-refraction-B7iQ99bt.js",
-    "scene30-pbr-renderable-BMSFn-KA.js",
+    "scene30-pbr-refraction-Ccs-lSWJ.js",
+    "scene30-pbr-renderable-dAsplgNs.js",
     "scene30-pbr-template-ext-CiHpOV5G.js",
-    "scene30-pbr-transmission-ext-EDWzFwZ1.js",
+    "scene30-pbr-transmission-ext-Dw3GyqJk.js",
     "scene30-rgbd-decode-PXl8kXni.js",
     "scene30-scene-uniforms-FTYH6Ct0.js",
     "scene30-texture-2d-DQo3n8D6.js",
     "scene30-uv-transform-fragment-B8ijWmAK.js",
     "scene30.js"
-  ],
-  "rawBytes": 106519
+  ]
 }
