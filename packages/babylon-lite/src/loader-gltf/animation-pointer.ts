@@ -33,8 +33,8 @@ export interface PointerMaterial {
      *  is sampled from the ORM texture with its own transform. */
     occlusionTexture?: PointerUvTexture;
     specGlossTexture?: PointerUvTexture;
-    /** Runtime emissive (linear RGB) = emissiveFactor × emissiveStrength. */
-    emissiveColor?: [number, number, number];
+    /** @internal Runtime emissive (linear RGB) = emissiveFactor × emissiveStrength. */
+    _emissiveColor?: [number, number, number];
     /** Runtime base-color factor (linear RGBA). */
     baseColorFactor?: [number, number, number, number];
     roughnessFactor?: number;
@@ -69,17 +69,17 @@ export interface PointerMaterial {
     _animEmissiveStrength?: number;
 }
 
-/** Recompute emissiveColor = factor × strength after either input animates, then
+/** Recompute the emissive color = factor × strength after either input animates, then
  *  flag the material UBO for re-upload. */
 function applyEmissive(mat: PointerMaterial): void {
-    if (!mat.emissiveColor) {
+    if (!mat._emissiveColor) {
         return;
     }
     const f = mat._animEmissiveFactor ?? [0, 0, 0];
     const s = mat._animEmissiveStrength ?? 1;
-    mat.emissiveColor[0] = f[0]! * s;
-    mat.emissiveColor[1] = f[1]! * s;
-    mat.emissiveColor[2] = f[2]! * s;
+    mat._emissiveColor[0] = f[0]! * s;
+    mat._emissiveColor[1] = f[1]! * s;
+    mat._emissiveColor[2] = f[2]! * s;
     mat._uboVersion++;
 }
 
@@ -271,13 +271,13 @@ const _registry: [RegExp, PointerFactory][] = [
         },
     ],
     // /materials/{m}/emissiveFactor — vec3. Recombined with emissiveStrength into
-    // the runtime emissiveColor. Requires the material to carry an emissive slot
+    // the runtime emissive color. Requires the material to carry an emissive slot
     // (non-zero load-time emissiveFactor) so the UBO field exists.
     [
         /^\/materials\/(\d+)\/emissiveFactor$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
-            if (!mat?.emissiveColor) {
+            if (!mat?._emissiveColor) {
                 return null;
             }
             return {
@@ -295,7 +295,7 @@ const _registry: [RegExp, PointerFactory][] = [
         /^\/materials\/(\d+)\/extensions\/KHR_materials_emissive_strength\/emissiveStrength$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
-            if (!mat?.emissiveColor) {
+            if (!mat?._emissiveColor) {
                 return null;
             }
             return {

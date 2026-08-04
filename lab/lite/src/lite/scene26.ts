@@ -2,7 +2,7 @@
 // Based on playground #5H0H89#5 (Georgia Tech Dragon)
 // Dragon with translucent teal PBR material, thickness map, point light, DDS environment
 
-import { addToScene, startEngine, onBeforeRender, createEngine, createSceneContext, createDefaultCamera, attachControl, createPbrMaterial, setPbrSkybox, setPbrSubsurface, createPointLight, createSphere, createBox, createSolidTexture2D, loadDdsEnvironment, loadGltf, loadTexture2D, registerScene, AcesToneMapping } from "babylon-lite";
+import { addToScene, startEngine, onBeforeRender, createEngine, createSceneContext, createDefaultCamera, attachControl, createPbrMaterial, setPbrEmissive, setPbrSkybox, setPbrSubsurface, createPointLight, createSphere, createBox, createSolidTexture2D, loadDdsEnvironment, loadGltf, loadTexture2D, registerScene, AcesToneMapping } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -63,8 +63,8 @@ async function main(): Promise<void> {
     lightSphere.material = createPbrMaterial({
         baseColorTexture: createSolidTexture2D(engine, 1, 1, 1),
         ormTexture: createSolidTexture2D(engine, 1.0, 1.0, 0.0),
-        emissiveColor: [1, 1, 1],
     });
+    setPbrEmissive(lightSphere.material, [1, 1, 1]);
     addToScene(scene, lightSphere);
 
     // Camera: use createDefaultCamera to auto-frame, then add PI to alpha

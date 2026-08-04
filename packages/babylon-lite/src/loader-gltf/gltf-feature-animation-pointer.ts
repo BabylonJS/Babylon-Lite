@@ -106,8 +106,8 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
                 const def = json.materials?.[matIdx];
                 // Seed the separated emissive factor/strength from the asset so an
                 // emissiveFactor or emissiveStrength pointer can recombine them
-                // (emissiveColor is stored pre-multiplied at load).
-                if (def && pm.emissiveColor) {
+                // (the emissive color is stored pre-multiplied at load).
+                if (def && pm._emissiveColor) {
                     const ef = def.emissiveFactor ?? [0, 0, 0];
                     pm._animEmissiveFactor = [ef[0] ?? 0, ef[1] ?? 0, ef[2] ?? 0];
                     pm._animEmissiveStrength = def.extensions?.KHR_materials_emissive_strength?.emissiveStrength ?? 1;

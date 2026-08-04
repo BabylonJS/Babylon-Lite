@@ -8,6 +8,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
+import { setPbrEmissive } from "../material/pbr/set-emissive.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import { mipLevelCount } from "../texture/mip-count.js";
 import { linearToSrgbByte } from "../math/color.js";
@@ -88,7 +89,7 @@ export function assemblePbrProps(
     // present. With no emissive texture, [1,1,1] is a real full-white emissive that must be applied
     // (the glTF default is [0,0,0]) — otherwise the surface renders unlit/dark (Material_03).
     const defaultFactor = (ef[0] === 0 && ef[1] === 0 && ef[2] === 0) || (!!emissiveTexture && ef[0] === 1 && ef[1] === 1 && ef[2] === 1);
-    return {
+    const props = {
         baseColorTexture,
         normalTexture,
         ormTexture,
@@ -98,7 +99,6 @@ export function assemblePbrProps(
         occlusionStrength: mat._occlusionImage ? 1.0 : 0,
         ...(mat._normalScale !== 1 ? { normalTextureScale: mat._normalScale } : undefined),
         ...(mat._metallicRoughnessImage ? { metallicFactor: mat._metallicFactor, roughnessFactor: mat._roughnessFactor } : undefined),
-        ...(!defaultFactor ? { emissiveColor: [ef[0], ef[1], ef[2]] as [number, number, number] } : undefined),
         enableSpecularAA: true,
         ...(mat._alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat._baseColorFactor[3] } : undefined),
         ...(mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3] } : undefined),
@@ -107,6 +107,13 @@ export function assemblePbrProps(
         _buildGroup: getPbrGroupBuilder(),
         _uboVersion: 0,
     } as PbrMaterialProps;
+    // Routed through the setter so the emissive ext is registered. KHR_materials_emissive_strength
+    // arrives via `extLayers` and already called the setter with the strength-scaled value, so it
+    // takes precedence over the raw factor here (matching the previous spread ordering).
+    if (!defaultFactor && !props._emissiveColor) {
+        setPbrEmissive(props, [ef[0], ef[1], ef[2]]);
+    }
+    return props;
 }
 
 function isDefaultBaseColorFactor(f: readonly number[]): boolean {

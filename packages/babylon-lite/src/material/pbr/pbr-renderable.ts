@@ -97,7 +97,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // ── Single O(N) scan over meshes for all scene-wide feature flags ──
     // Flags are plain locals (not an object return) so terser can mangle their names.
     // Replaces ~11 sequential meshes.some() loops (was O(11N)).
-    let needsEmissiveColor = false;
     let hasSomeSkeletons = false;
     let hasSomeMorphs = false;
     let hasSomeThinInstances = false;
@@ -112,7 +111,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps;
-        needsEmissiveColor ||= !!mat.emissiveColor;
         hasSomeSkeletons ||= !!m.skeleton;
         hasSomeMorphs ||= !!m.morphTargets;
         hasSomeThinInstances ||= !!m.thinInstances;
@@ -198,7 +196,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         await hook(scene as SceneContext, engine, meshes);
     }
     await _drainPbrExts([
-        [needsEmissiveColor, () => import("./fragments/emissive-fragment.js")],
         [hasSomeSkeletons, () => import("./fragments/skeleton-fragment.js")],
         [hasSomeMorphs, () => import("./fragments/morph-fragment.js")],
     ]);

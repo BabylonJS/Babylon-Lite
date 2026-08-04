@@ -10,6 +10,7 @@ import { cloneTexture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import { setPbrUvTransform } from "../material/pbr/set-uv-transform.js";
+import { setPbrEmissive } from "../material/pbr/set-emissive.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import type { TextureWrapFn, GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 import { uploadBaseColorFactorTexture, uploadOrmFactorTexture, uploadTex } from "./gltf-pbr-builder.js";
@@ -172,7 +173,6 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         ...(tex.occlusionTexture ? { occlusionTexture: tex.occlusionTexture } : undefined),
         ...(mat._normalScale !== 1 ? { normalTextureScale: mat._normalScale } : undefined),
         ...(mat._metallicRoughnessImage ? { metallicFactor: mat._metallicFactor, roughnessFactor: mat._roughnessFactor } : undefined),
-        ...(!defaultFactor ? { emissiveColor: [ef[0], ef[1], ef[2]] as [number, number, number] } : undefined),
         enableSpecularAA: true,
         ...(mat._alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat._baseColorFactor[3] } : undefined),
         ...(mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3] } : undefined),
@@ -186,6 +186,12 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
     // `_hasUvTx`, which the ext's own `detect` turns into PBR2_HAS_UV_TRANSFORM.
     if (hasAnyUvTx) {
         setPbrUvTransform(props);
+    }
+    // Same for emissive. KHR_materials_emissive_strength arrives via `extLayers` and already
+    // called the setter with the strength-scaled value, so it wins over the raw factor here
+    // (matching the previous spread ordering).
+    if (!defaultFactor && !props._emissiveColor) {
+        setPbrEmissive(props, [ef[0], ef[1], ef[2]]);
     }
     return props;
 }

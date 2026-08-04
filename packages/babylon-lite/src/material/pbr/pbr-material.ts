@@ -17,7 +17,6 @@ import {
     PBR_HAS_ALPHA_BLEND,
     PBR_HAS_DOUBLE_SIDED,
     PBR_HAS_EMISSIVE,
-    PBR_HAS_EMISSIVE_COLOR,
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_OCCLUSION,
     PBR_HAS_SPECULAR_AA,
@@ -63,9 +62,11 @@ export interface PbrMaterialProps extends Material {
     /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
     ormTexture?: Texture2D;
     emissiveTexture?: Texture2D;
-    /** Emissive color as float uniform (linear RGB). Used when no emissiveTexture.
-     *  If both set, emissiveColor multiplies emissiveTexture. */
-    emissiveColor?: [number, number, number];
+    /** @internal Emissive color as float uniform (linear RGB). Used when no emissiveTexture.
+     *  If both set, this multiplies emissiveTexture. Set it via `setPbrEmissive`, which
+     *  also registers the emissive extension — assigning this field directly would leave
+     *  the ext unregistered and silently render no emissive. */
+    _emissiveColor?: [number, number, number];
     /** KHR_materials_pbrSpecularGlossiness: RGB=specular, A=glossiness. */
     specGlossTexture?: Texture2D;
     /** Whether material is double-sided (disables back-face culling). */
@@ -204,7 +205,6 @@ export interface PbrMaterialProps extends Material {
 export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: number; features2: number } {
     let features =
         (mat.emissiveTexture ? PBR_HAS_EMISSIVE : 0) |
-        (mat.emissiveColor ? PBR_HAS_EMISSIVE_COLOR : 0) |
         (mat.normalTexture ? PBR_HAS_NORMAL_MAP : 0) |
         (mat.alphaBlend === true || ((mat.alphaCutOff ?? 0) <= 0 && mat.alpha! < 1) ? PBR_HAS_ALPHA_BLEND : 0) |
         (mat.specGlossTexture ? PBR_HAS_SPEC_GLOSS : 0) |

@@ -9,8 +9,8 @@ export function installPbrTracking(mat: PbrMaterialProps): void {
             trackScalar(mat, key);
         }
     }
-    if (mat.emissiveColor) {
-        mat.emissiveColor = observableColor3(mat.emissiveColor[0], mat.emissiveColor[1], mat.emissiveColor[2], mat as any);
+    if (mat._emissiveColor) {
+        mat._emissiveColor = observableColor3(mat._emissiveColor[0], mat._emissiveColor[1], mat._emissiveColor[2], mat as any);
     }
     if (mat._metallicReflectanceColor) {
         mat._metallicReflectanceColor = observableColor3(mat._metallicReflectanceColor[0], mat._metallicReflectanceColor[1], mat._metallicReflectanceColor[2], mat as any);

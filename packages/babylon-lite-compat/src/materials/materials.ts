@@ -9,7 +9,7 @@
  * material properties are intentionally omitted.
  */
 
-import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty, createSolidTexture2D, rebuildMaterial } from "babylon-lite";
+import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty, createSolidTexture2D, rebuildMaterial, setPbrEmissive } from "babylon-lite";
 import type { StandardMaterialProps, PbrMaterialProps, ClearCoatProps, SheenProps, AnisotropyProps, IridescenceProps, Texture2D, EngineContext } from "babylon-lite";
 
 import { Color3 } from "../math/color.js";
@@ -626,10 +626,10 @@ export class PBRMaterial extends PushMaterial {
     }
 
     public get emissiveColor(): Color3 {
-        return readColor3(this._lite.emissiveColor);
+        return readColor3(this._lite._emissiveColor);
     }
     public set emissiveColor(value: Color3) {
-        this._lite.emissiveColor = [value.r, value.g, value.b];
+        setPbrEmissive(this._lite, [value.r, value.g, value.b]);
         this._markDirty();
     }
 
