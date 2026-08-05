@@ -7,14 +7,14 @@
     "scene1-background-ground-DK7fmypA.js",
     "scene1-cubemap-skybox-material-17JJYMx4.js",
     "scene1-generate-mipmaps-BxsDX3Y-.js",
-    "scene1-gltf-glb-parser-Gdq7NHHd.js",
+    "scene1-gltf-glb-parser-BAsz-rlr.js",
     "scene1-ibl-fragment-CeRrvT96.js",
-    "scene1-pbr-renderable-C8Baarxt.js",
+    "scene1-pbr-renderable-Jcutya34.js",
     "scene1-rgbd-decode-BGE2GEn1.js",
     "scene1-scene-uniforms-FTYH6Ct0.js",
     "scene1-singlelight-hemispheric-wgsl-90xDRzhR.js",
     "scene1-wgsl-helpers-BgB2AJrF.js",
     "scene1.js"
   ],
-  "rawBytes": 90780
+  "rawBytes": 90818
 }

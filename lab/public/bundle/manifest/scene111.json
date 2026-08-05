@@ -3,11 +3,11 @@
   "gzipKB": 54.2,
   "ignoredRawKB": 6.4,
   "runtimeChunks": [
-    "scene111-_math-factory-CFCgddxJ.js",
+    "scene111-_math-factory-BbITHIrZ.js",
     "scene111-esm-shadow-view-D31DF1aY.js",
     "scene111-esm-shadow-view-YPtZFhWe.js",
     "scene111-fragment-output-CfRmfbPv.js",
-    "scene111-input-block-Cx0P5EBj.js",
+    "scene111-input-block-DW8Bdbdo.js",
     "scene111-light-block-Bh96euwW.js",
     "scene111-material-view-Dua1bl7W.js",
     "scene111-multilight-wgsl-D4Jx9t7d.js",
@@ -15,19 +15,19 @@
     "scene111-no-color-view-Bjc7MmC8.js",
     "scene111-no-color-view-D6kJb9cU.js",
     "scene111-node-flags-3CD_c1Kp.js",
-    "scene111-node-registry-Det2U9j1.js",
-    "scene111-node-renderable-CLnqcul1.js",
+    "scene111-node-registry-DcmxyGBz.js",
+    "scene111-node-renderable-DNHfTkdg.js",
     "scene111-node-shadow-CrFRFBZk.js",
-    "scene111-pbr-renderable-DXagTQjm.js",
+    "scene111-pbr-renderable-CohOJ1DX.js",
     "scene111-pbr-shadow-fragment-CFzpdZcF.js",
     "scene111-shader-composer-BSMzKE4Z.js",
     "scene111-shadow-fragment-core-Dbe1xNkt.js",
     "scene111-shadow-task-DEBXmn7W.js",
     "scene111-standard-renderable-I7i2N_Bw.js",
     "scene111-std-shadow-fragment-u3x2t2qW.js",
-    "scene111-transform-block-CSot7L45.js",
+    "scene111-transform-block-wpFbdTrS.js",
     "scene111-vertex-output-C7G5u6Y0.js",
     "scene111.js"
   ],
-  "rawBytes": 135808
+  "rawBytes": 135815
 }
