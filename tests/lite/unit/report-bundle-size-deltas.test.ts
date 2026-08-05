@@ -234,9 +234,18 @@ describe("report-bundle-size-deltas", () => {
             expect(result.comment).toContain("🚨 **1 scene this PR moved now exceeds its ceiling:** `scene1` (+312 B over its 50 KB ceiling)");
         });
 
-        it("stays silent when repo-wide tightness is untouched by the PR", () => {
-            // scene2 is 100 B from its ceiling but this PR did not move it; scene1 moved but has
-            // room to spare. Triggering on repo-wide tightness would put a comment on every PR.
+        it("stays silent when tight scenes this PR did not move are the only tight scenes (noise bound — do not remove)", () => {
+            // This is the guard that keeps the headroom report off every PR, and it is the one
+            // case here that looks redundant from the outside: it asserts an absence, so a
+            // refactor can delete it and every other test still passes. It must not be deleted.
+            //
+            // Roughly half of all scenes sit inside the tight band at any given moment. If the
+            // posting gate ever drops the "this PR moved it" requirement, the report degrades
+            // from an actionable signal into a warning attached to every PR about scenes the
+            // author never touched — which is how a check stops being read at all.
+            //
+            // scene2 is 100 B from its ceiling but is byte-identical to master; scene1 moved
+            // 100 B but has 2400 B of room. Neither is actionable, so nothing should post.
             const result = runReporter({
                 current: {
                     scene1: { rawKB: 97.7, rawBytes: 100000 },

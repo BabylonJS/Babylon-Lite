@@ -314,6 +314,13 @@ function main(): void {
     }
 
     if (!master) {
+        // Bail entirely rather than falling back to a headroom-only report. Headroom is absolute
+        // and would be computable from the current manifest alone, which makes "report headroom
+        // anyway" a tempting change — but movement is not computable without a baseline, and
+        // movement is the sole reason this comment is not posted on every single PR. Roughly half
+        // the scenes sit inside the tight band at any moment, so a baseline-free headroom report
+        // would hand every PR a warning about scenes it never touched. Silence is the correct
+        // degraded behaviour here.
         console.log("Master manifest not found; skipping delta report.");
         console.log("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]false");
         return;
