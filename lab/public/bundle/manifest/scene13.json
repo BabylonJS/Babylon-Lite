@@ -5,14 +5,14 @@
   "runtimeChunks": [
     "scene13-background-ground-ZOdeTpEl.js",
     "scene13-generate-mipmaps-CtVZJxfl.js",
-    "scene13-gltf-glb-parser-DOwo_15_.js",
+    "scene13-gltf-glb-parser-BZCy2KIt.js",
     "scene13-ibl-fragment-CeRrvT96.js",
-    "scene13-pbr-renderable-Dm0M9Wsa.js",
+    "scene13-pbr-renderable-DwQyDlmT.js",
     "scene13-rgbd-decode-BpGE9HNW.js",
     "scene13-scene-uniforms-FTYH6Ct0.js",
     "scene13-singlelight-hemispheric-wgsl-W13_mD5F.js",
     "scene13-wgsl-helpers-BgB2AJrF.js",
     "scene13.js"
   ],
-  "rawBytes": 86416
+  "rawBytes": 86382
 }

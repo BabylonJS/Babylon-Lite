@@ -1,12 +1,12 @@
 {
   "rawKB": 43.4,
-  "rawBytes": 44443,
+  "rawBytes": 44438,
   "gzipKB": 17.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene274-shader-pipeline-cache-DX3HJCz_.js",
-    "scene274-shader-renderable-EoTt_2mp.js",
-    "scene274-uniform-copy-batch-BdIDrXOw.js",
+    "scene274-shader-pipeline-cache-BSncalml.js",
+    "scene274-shader-renderable-BJnRFc3c.js",
+    "scene274-uniform-copy-batch-C3298VV_.js",
     "scene274.js"
   ]
 }

@@ -2431,5 +2431,27 @@
         "tags": ["npe", "particles", "billboards", "attractor"],
         "skipPerf": true,
         "compatParity": true
+    },
+    {
+        "id": 278,
+        "slug": "scene278-line-system",
+        "name": "Scene 278 — Public Line System",
+        "maxMad": 0.15,
+        "maxRawKB": 48,
+        "description": "Public createLineSystem rendering with several independent polylines, a uniform unlit color, per-point RGBA colors, and vertex-alpha blending, compared directly with Babylon.js MeshBuilder.CreateLineSystem.",
+        "tags": ["lines", "procedural", "vertex-color", "alpha"],
+        "skipPerf": true,
+        "compatParity": true
+    },
+    {
+        "id": 279,
+        "slug": "scene279-line-system-update-instances",
+        "name": "Scene 279 — Updated Instanced Line System",
+        "maxMad": 0.15,
+        "maxRawKB": 50,
+        "description": "A fixed-topology line system updated in place before rendering, then drawn through five thin-instance matrices with per-instance RGBA colors, matching Babylon.js LinesMesh update and thinInstanceSetBuffer behavior.",
+        "tags": ["lines", "procedural", "update", "thin-instances", "alpha"],
+        "skipPerf": true,
+        "compatParity": true
     }
 ]
