@@ -17,26 +17,22 @@ const sceneConfig = getSceneConfig(164);
 
 test.skip(!!sceneConfig.skipParity, "Scene 164 skipped via skipParity in scene-config.json");
 
-/** Mean absolute per-channel difference (0–255) between two equally sized screenshots. */
+/** Mean absolute per-channel difference (0–255) between two screenshots, which must be the same size. */
 function screenshotMad(a: Buffer, b: Buffer): number {
     const before = PNG.sync.read(a);
     const after = PNG.sync.read(b);
-    const width = Math.min(before.width, after.width);
-    const height = Math.min(before.height, after.height);
+    // A canvas resize across the loss would make any overlap-only diff meaningless: the compared
+    // region would no longer show the same part of the scene, so a silent pass would be a false one.
+    if (before.width !== after.width || before.height !== after.height) {
+        throw new Error(`Canvas size changed across recovery: ${before.width}x${before.height} before, ${after.width}x${after.height} after.`);
+    }
     let sumDiff = 0;
-    let pixels = 0;
 
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const bi = (y * before.width + x) * 4;
-            const ai = (y * after.width + x) * 4;
-            sumDiff +=
-                (Math.abs(before.data[bi]! - after.data[ai]!) + Math.abs(before.data[bi + 1]! - after.data[ai + 1]!) + Math.abs(before.data[bi + 2]! - after.data[ai + 2]!)) / 3;
-            pixels++;
-        }
+    for (let i = 0; i < before.data.length; i += 4) {
+        sumDiff += (Math.abs(before.data[i]! - after.data[i]!) + Math.abs(before.data[i + 1]! - after.data[i + 1]!) + Math.abs(before.data[i + 2]! - after.data[i + 2]!)) / 3;
     }
 
-    return sumDiff / pixels;
+    return sumDiff / (before.width * before.height);
 }
 
 test("Scene 164 — device-lost recovery reproduces the pre-loss image", async ({ page }, testInfo) => {
