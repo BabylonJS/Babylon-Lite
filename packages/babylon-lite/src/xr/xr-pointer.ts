@@ -16,6 +16,7 @@ import type { SceneContext } from "../scene/scene.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import type { PickingInfo } from "../picking/picking-info.js";
 import type { XrInputManager, XrInputSource } from "./xr-input.js";
+import type { XrFeatureSpec } from "./xr-feature.js";
 import { mat4Decompose } from "../math/mat4-decompose.js";
 import { createBox, createSphere } from "../mesh/mesh-factories.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
@@ -278,4 +279,35 @@ export function disposeXrPointer(pointer: XrPointer): void {
         disposeUnit(pointer, unit);
     }
     pointer._units.clear();
+}
+
+/**
+ * Controller pointer-selection as an opt-in {@link XrFeatureSpec} (Babylon.js
+ * `POINTER_SELECTION`). Pass it to `enterXr({ features: [pointerSelection(...)] })`
+ * and the session creates the laser/cursor visuals, casts each tracked ray per
+ * frame, and disposes everything on exit — no manual `onFrame`/`onEnd` wiring.
+ *
+ * Requires input tracking (do not pass `input: false` to {@link enterXr}); it needs
+ * no native WebXR session feature.
+ *
+ * @param options - Pointer appearance + hover/select callbacks (see {@link XrPointerOptions}).
+ */
+export function pointerSelection(options: XrPointerOptions = {}): XrFeatureSpec {
+    return {
+        create(ctx) {
+            if (!ctx.input) {
+                throw new Error("pointerSelection requires XR input tracking; do not pass input:false to enterXr.");
+            }
+            const input = ctx.input;
+            const pointer = createXrPointer(ctx.engine, ctx.scene, options);
+            return {
+                update(): void {
+                    updateXrPointer(pointer, input);
+                },
+                dispose(): void {
+                    disposeXrPointer(pointer);
+                },
+            };
+        },
+    };
 }

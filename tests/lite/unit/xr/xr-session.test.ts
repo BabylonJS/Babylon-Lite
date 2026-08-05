@@ -364,6 +364,53 @@ describe("xr-session lifecycle", () => {
         await exitXr(ctx);
     });
 
+    it("merges feature session-features, instantiates, drives, and disposes features", async () => {
+        installXrGlobals();
+        const scene = createSceneContext(makeMockEngine());
+        const update = vi.fn();
+        const dispose = vi.fn();
+        let created = 0;
+        const spec = {
+            sessionFeatures: ["hit-test", "local-floor"],
+            create: () => {
+                created++;
+                return { update, dispose };
+            },
+        };
+        const ctx = await enterXr(scene, { input: false, features: [spec] });
+
+        // Session-features merged (deduped against the floor space already requested).
+        const optional = (lastSessionInit!.optionalFeatures as string[]) ?? [];
+        expect(optional).toContain("hit-test");
+        expect(optional.filter((f) => f === "local-floor").length).toBe(1);
+        // Instantiated exactly once, after the session exists.
+        expect(created).toBe(1);
+
+        // Driven each frame, with or without a viewer pose.
+        currentSession.drive(16, makeFrame(makeViewerPose()));
+        currentSession.drive(32, makeFrame(null));
+        expect(update).toHaveBeenCalledTimes(2);
+
+        await exitXr(ctx);
+        expect(dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it("rolls back created features and ends the session when one fails to create", async () => {
+        installXrGlobals();
+        const scene = createSceneContext(makeMockEngine());
+        const disposeOk = vi.fn();
+        const good = { create: () => ({ dispose: disposeOk }) };
+        const bad = {
+            create: () => {
+                throw new Error("feature boom");
+            },
+        };
+        await expect(enterXr(scene, { input: false, features: [good, bad] })).rejects.toThrow(/feature boom/);
+        // The successfully-created feature was disposed and the session ended.
+        expect(disposeOk).toHaveBeenCalledTimes(1);
+        expect(currentSession.ended).toBe(true);
+    });
+
     it("creates an input manager by default and disposes it on exit", async () => {
         installXrGlobals();
         const scene = createSceneContext(makeMockEngine());

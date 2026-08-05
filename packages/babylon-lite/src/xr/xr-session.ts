@@ -10,6 +10,7 @@ import type { XrCamera } from "./xr-camera.js";
 import { createXrCamera, updateXrCameraForView } from "./xr-camera.js";
 import type { XrInputManager, XrInputCallbacks } from "./xr-input.js";
 import { createXrInputManager, disposeXrInputManager, updateXrInputPoses } from "./xr-input.js";
+import type { XrFeatureSpec, XrFeatureHandle } from "./xr-feature.js";
 import type { XrSessionMode, XrReferenceSpaceType } from "./xr-support.js";
 import { isWebGpuXrSupported, isWebXrPresent } from "./xr-support.js";
 import type { XrGpuBinding } from "./xr-webgpu-binding.js";
@@ -34,6 +35,10 @@ export interface XrSessionOptions {
     /** Input-source callbacks, or `false` to disable input tracking entirely.
      *  Defaults to `{}` (sources tracked, no callbacks). */
     input?: XrInputCallbacks | false;
+    /** Opt-in XR features (e.g. `pointerSelection()`). Their native session-feature
+     *  descriptors are merged into `optionalFeatures`, and each is instantiated,
+     *  driven per frame, and disposed automatically by the session. */
+    features?: readonly XrFeatureSpec[];
     /** Called once per `XRFrame` after poses are updated and before rendering. */
     onFrame?: (ctx: XrSessionContext, frame: XRFrame, time: DOMHighResTimeStamp) => void;
     /** Called when the session ends (user exit, `exitXr`, or device-driven). */
@@ -64,6 +69,8 @@ export interface XrSessionContext {
     /** Input manager, or `null` when input tracking is disabled. */
     readonly input: XrInputManager | null;
 
+    /** @internal Live feature instances, driven per frame and disposed on end. */
+    _features: XrFeatureHandle[];
     /** @internal */
     _units: XrEyeUnit[];
     /** @internal */
@@ -115,6 +122,15 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
     if (refType !== "viewer" && refType !== "local" && !requiredFeatures.includes(refType) && !optionalFeatures.includes(refType)) {
         optionalFeatures.push(refType);
     }
+    // Fold each feature's native descriptors into optionalFeatures — they must be
+    // requested now, since a session's feature set is fixed once created.
+    for (const spec of options.features ?? []) {
+        for (const f of spec.sessionFeatures ?? []) {
+            if (!requiredFeatures.includes(f) && !optionalFeatures.includes(f)) {
+                optionalFeatures.push(f);
+            }
+        }
+    }
     const session = await navigator.xr!.requestSession(mode, {
         requiredFeatures,
         optionalFeatures,
@@ -165,6 +181,7 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
             return ctx._units.map((u) => u.camera);
         },
         input,
+        _features: [],
         _units: [],
         _options: options,
         _rafId: 0,
@@ -179,6 +196,21 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
         const c = scene.clearColor;
         ctx._savedClear = { r: c.r, g: c.g, b: c.b, a: c.a };
         c.a = 0;
+    }
+
+    // Instantiate features now that the session, reference space, and input exist.
+    // On failure, roll back anything already created and end the session cleanly.
+    try {
+        for (const spec of options.features ?? []) {
+            ctx._features.push(spec.create(ctx));
+        }
+    } catch (e) {
+        for (const f of ctx._features) {
+            f.dispose?.();
+        }
+        ctx._features.length = 0;
+        await session.end().catch(() => {});
+        throw e instanceof Error ? e : new Error(String(e));
     }
 
     session.addEventListener("end", () => cleanup(ctx), { once: true });
@@ -229,6 +261,11 @@ function onXrFrame(ctx: XrSessionContext, time: DOMHighResTimeStamp, frame: XRFr
         updateXrInputPoses(ctx.input, frame, ctx.referenceSpace);
     }
     ctx._options.onFrame?.(ctx, frame, time);
+    // Drive features after input poses + the app's onFrame, before rendering, so their
+    // scene mutations (e.g. pointer laser transforms) are picked up by `scene._update`.
+    for (const f of ctx._features) {
+        f.update?.(frame, time);
+    }
     if (!pose) {
         // No tracking this frame — skip rendering but keep the loop alive.
         return;
@@ -303,6 +340,11 @@ function cleanup(ctx: XrSessionContext): void {
         ctx.session.cancelAnimationFrame(ctx._rafId);
         ctx._rafId = 0;
     }
+    // Dispose features before input/tasks — they may reference the input manager or scene.
+    for (const f of ctx._features) {
+        f.dispose?.();
+    }
+    ctx._features.length = 0;
     if (ctx.input) {
         disposeXrInputManager(ctx.input);
     }

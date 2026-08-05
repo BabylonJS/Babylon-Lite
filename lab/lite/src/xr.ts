@@ -24,10 +24,7 @@ import {
     isXrSessionSupported,
     enterXr,
     exitXr,
-    createXrPointer,
-    updateXrPointer,
-    disposeXrPointer,
-    type XrPointer,
+    pointerSelection,
     mat4Compose,
     mat4Invert,
     mat4Multiply,
@@ -175,7 +172,6 @@ function setStatus(html: string): void {
 }
 
 let session: XrSessionContext | null = null;
-let pointer: XrPointer | null = null;
 
 /** Map a picked mesh back to its grabbable so pointer-selection can tint it. */
 function grabbableOf(mesh: Mesh): Grabbable | undefined {
@@ -217,41 +213,37 @@ async function startSession(mode: XrSessionMode, scene: Parameters<typeof enterX
                 onSelect: () => setStatus(`${mode}: select`),
                 onSqueeze: () => setStatus(`${mode}: squeeze`),
             },
+            // Controller laser + cursor via the opt-in feature: aim at a cube and pull
+            // the trigger to select it. The session drives + disposes it for us.
+            features: [
+                pointerSelection({
+                    onHoverStart: (mesh) => {
+                        const g = grabbableOf(mesh);
+                        if (g && !heldMeshes.has(mesh)) {
+                            g.material.emissiveColor = GRAB_HIGHLIGHT;
+                        }
+                    },
+                    onHoverEnd: (mesh) => {
+                        const g = grabbableOf(mesh);
+                        if (g && !heldMeshes.has(mesh)) {
+                            g.material.emissiveColor = g.baseEmissive;
+                        }
+                    },
+                    onSelect: (mesh) => pulseSelect(mesh),
+                }),
+            ],
             onFrame: (ctx) => {
                 updateGrab(ctx);
-                if (pointer && ctx.input) {
-                    updateXrPointer(pointer, ctx.input);
-                }
             },
             onEnd: () => {
                 session = null;
                 state.inSession = false;
                 exitBtn.disabled = true;
-                if (pointer) {
-                    disposeXrPointer(pointer);
-                    pointer = null;
-                }
                 for (const source of [...held.keys()]) {
                     releaseGrab(source);
                 }
                 setStatus(`Exited ${mode}.`);
             },
-        });
-        // Controller laser + cursor: aim at a cube and pull the trigger to select it.
-        pointer = createXrPointer(session.engine, scene, {
-            onHoverStart: (mesh) => {
-                const g = grabbableOf(mesh);
-                if (g && !heldMeshes.has(mesh)) {
-                    g.material.emissiveColor = GRAB_HIGHLIGHT;
-                }
-            },
-            onHoverEnd: (mesh) => {
-                const g = grabbableOf(mesh);
-                if (g && !heldMeshes.has(mesh)) {
-                    g.material.emissiveColor = g.baseEmissive;
-                }
-            },
-            onSelect: (mesh) => pulseSelect(mesh),
         });
         state.inSession = true;
         exitBtn.disabled = false;

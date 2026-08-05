@@ -36,8 +36,9 @@ vi.mock("../../../../packages/babylon-lite/src/scene/scene-remove", () => ({ rem
 const { disposeMeshGpu } = vi.hoisted(() => ({ disposeMeshGpu: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/mesh/mesh-dispose", () => ({ disposeMeshGpu }));
 
-import { createXrPointer, updateXrPointer, disposeXrPointer, computePointerVisual } from "../../../../packages/babylon-lite/src/xr/xr-pointer";
+import { createXrPointer, updateXrPointer, disposeXrPointer, computePointerVisual, pointerSelection } from "../../../../packages/babylon-lite/src/xr/xr-pointer";
 import type { XrPointer } from "../../../../packages/babylon-lite/src/xr/xr-pointer";
+import type { XrSessionContext } from "../../../../packages/babylon-lite/src/xr/xr-session";
 import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
@@ -182,5 +183,40 @@ describe("updateXrPointer", () => {
         disposeXrPointer(pointer);
         expect(disposeMeshGpu).toHaveBeenCalledTimes(2);
         expect((pointer as unknown as { _units: Map<unknown, unknown> })._units.size).toBe(0);
+    });
+});
+
+describe("pointerSelection feature", () => {
+    function makeCtx(input: XrInputManager | null): XrSessionContext {
+        return {
+            engine: {} as EngineContext,
+            scene: { meshes: [targetBox(-5)] } as unknown as SceneContext,
+            input,
+        } as unknown as XrSessionContext;
+    }
+
+    it("throws when created without input tracking", () => {
+        const spec = pointerSelection();
+        expect(() => spec.create(makeCtx(null))).toThrow(/requires XR input/);
+    });
+
+    it("needs no native session feature", () => {
+        expect(pointerSelection().sessionFeatures).toBeUndefined();
+    });
+
+    it("creates a pointer on create, casts rays on update, and tears down on dispose", () => {
+        disposeMeshGpu.mockClear();
+        const onSelect = vi.fn();
+        const src = makeSource(IDENTITY);
+        const handle = pointerSelection({ onSelect }).create(makeCtx(makeInput([src])));
+
+        // update drives a real ray cast: the laser + cursor appear for the tracked source.
+        handle.update!({} as XRFrame, 0);
+        (src as unknown as { selecting: boolean }).selecting = true;
+        handle.update!({} as XRFrame, 16);
+        expect(onSelect).toHaveBeenCalledTimes(1);
+
+        handle.dispose!();
+        expect(disposeMeshGpu).toHaveBeenCalledTimes(2); // laser + cursor
     });
 });

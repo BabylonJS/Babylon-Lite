@@ -141,7 +141,9 @@ export { createXrCamera, updateXrCameraForView } from "./xr/xr-camera.js";
 export type { XrCamera } from "./xr/xr-camera.js";
 export { createXrInputManager, updateXrInputPoses, disposeXrInputManager } from "./xr/xr-input.js";
 export type { XrInputManager, XrInputSource, XrInputCallbacks } from "./xr/xr-input.js";
-export { createXrPointer, updateXrPointer, disposeXrPointer, computePointerVisual } from "./xr/xr-pointer.js";
+export { attachXrFeature } from "./xr/xr-feature.js";
+export type { XrFeatureSpec, XrFeatureHandle } from "./xr/xr-feature.js";
+export { createXrPointer, updateXrPointer, disposeXrPointer, computePointerVisual, pointerSelection } from "./xr/xr-pointer.js";
 export type { XrPointer, XrPointerOptions, PointerVisual } from "./xr/xr-pointer.js";
 
 // ─── Lights ──────────────────────────────────────────────────────────
