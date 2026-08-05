@@ -118,9 +118,16 @@ their device-owned textures, samplers, uniform buffers, pipelines, and bind
 groups, and preserves the public `ShadowGenerator` identity. This currently
 supports directional ESM generators, the shadow type used by Babylon Lite
 Viewer; recovery fails explicitly for PCF or CSM instead of resuming with stale
-device resources. ESM retains only its resolved blur kernel in steady state;
-it stores that value in unused padding of the existing shadow UBO's CPU mirror,
-and the loss-only rebuild derives the remaining options from runtime state.
+device resources. ESM retains only the two blur scalars it cannot reconstruct —
+`_blurKernel` and `_blurScale`, held as internal fields on the generator's
+`EsmShadowTaskResources` — and `shadow-recovery.ts` reads them from that object
+during the loss-only rebuild. `_blurScale` is retained rather than re-derived as
+`mapSize / _blurTexH.width` because `blurSize` is not integral for every scale,
+so the round trip through a texture dimension cannot recover the caller's
+original value. Every remaining option is derived from steady-state runtime
+fields: `mapSize`, `bias`, `orthoMinZ`, `orthoMaxZ`, and `forceRefreshEveryFrame`
+from the generator's `_config`, and `darkness`, `depthScale`, and
+`frustumEdgeFalloff` from its `_shadowsInfo` array.
 Rebuilding material groups afterward binds receivers and casters only to
 replacement-device resources.
 
