@@ -11,7 +11,6 @@
  */
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
-import { WGSL_FOG } from "../../shader/wgsl-helpers.js";
 import { MAX_LIGHTS } from "../../light/types.js";
 import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
 
@@ -94,7 +93,6 @@ export function createStandardTemplate(config: StandardTemplateConfig, esmShadow
     const _baseVaryings: Varying[] = [
         { _name: "vp", _type: "vec3<f32>" },
         { _name: "vn", _type: "vec3<f32>" },
-        { _name: "vf", _type: "vec3<f32>" },
     ];
     if (_needsUV) {
         _baseVaryings.push({ _name: "vu", _type: "vec2<f32>" });
@@ -167,7 +165,6 @@ out.vp = worldPos4.xyz;
 let normalWorld = mat3x3<f32>(finalWorld[0].xyz, finalWorld[1].xyz, finalWorld[2].xyz);
 out.vn = normalize(normalWorld * ${normVar});
 out.clipPos = scene.viewProjection * worldPos4;
-out.vf = (scene.view * worldPos4).xyz;
 ${uvPassthrough}
 ${uv2Passthrough}
 /*VB*/
@@ -201,7 +198,7 @@ _1: f32,
 };
 `;
 
-    const helpers = _disableLighting ? WGSL_FOG : WGSL_FOG + LIGHTING_FN;
+    const helpers = _disableLighting ? "" : LIGHTING_FN;
     // reflection, shadow, bump helpers are provided by their respective fragments
 
     // Main fragment body — mirrors old composeFragmentShader exactly
@@ -255,6 +252,9 @@ var color = vec4<f32>(finalDiffuse * baseAmbientColor + finalSpecular + reflecti
         lightingBlock = `var color = vec4<f32>(clamp(emissiveContrib * diffuseColor, vec3<f32>(0.0), vec3<f32>(1.0)) * baseColor, alpha);`;
     }
 
+    // For a color-less pass (depth/shadow only) emit only the early `return;` after the alpha-test slot;
+    // the lighting + color tail below would be unreachable dead code (WGSL "code is unreachable"). The
+    // color path is byte-identical to the previous template, so pixel output is unchanged.
     const _fragmentTemplate = `/*SU*/
 ${lightsStructs}
 ${materialStruct}
@@ -277,16 +277,16 @@ ${diffuseColorCode}
 ${emissiveCode}
 ${specularColorCode}
 /*AT*/
-${_noColorOutput ? "return;" : _esmShadowOutput ? esmShadowDepthCode : ""}
+${
+    _noColorOutput
+        ? "return;"
+        : `${_esmShadowOutput ? esmShadowDepthCode : ""}
 ${lightingBlock}
 /*BC*/
 color = vec4<f32>(max(color.rgb, vec3<f32>(0.0)), color.a);
-if (scene.vFogInfos.x > 0.0) {
-let fog = calcFogFactor(input.vf);
-color = vec4<f32>(mix(scene.vFogColor.rgb, color.rgb, fog), color.a);
-}
 /*BA*/
-${_noColorOutput ? "" : "return color;"}
+return color;`
+}
 }`;
 
     return {

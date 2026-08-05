@@ -24,8 +24,8 @@
  * The engine `scRT` is just another `RenderTarget` here: a task that
  * targets it (`rt`) or resolves into it (`rst`) re-reads its per-frame color view
  * at execute time (the swap texture is re-acquired each frame). `clr: false`
- * switches color + depth `loadOp` to `"load"` so multiple scenes can share the
- * swapchain in one frame (e.g., a 3D scene + a UI overlay scene).
+ * preserves color content, while `depthClear: false` preserves rt-owned depth,
+ * so multiple tasks can share a target in one frame.
  */
 
 import { F32 } from "../engine/typed-arrays.js";
@@ -33,13 +33,13 @@ import type { EngineContext } from "../engine/engine.js";
 import { _vis } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Camera } from "../camera/camera.js";
-import type { Renderable, DrawBinding, DrawUpdateContext } from "../render/renderable.js";
+import type { Renderable, DrawBinding, DrawUpdateContext, DrawUpdateBatch } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Material } from "../material/material.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
-import { getViewMatrix } from "../camera/camera.js";
+import { getViewMatrix, _cameraChangeKey } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { _packSceneUniforms } from "./scene-uniforms-pack.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
@@ -78,29 +78,52 @@ export interface RenderTaskConfig {
     /** Background clear color. May be mutated frame-to-frame. */
     clrColor?: GPUColorDict;
     /** When true, color `loadOp` is "clear"; when false, "load" (overlays previous
-     *  color content). Depth is always cleared when rt-owned and always loaded when
-     *  supplied via `depth`. */
+     *  color content). Depth is cleared when rt-owned (unless `depthClear: false`) and
+     *  follows the eager/task-managed ownership policy when supplied via `depth`. */
     clr?: boolean;
+    /** rt-owned depth `loadOp`. Default true = "clear" (unchanged behaviour). Set false so an
+     *  overlay task drawn into another task's target LOADS that target's existing depth and can
+     *  depth-test against the scene already rendered there. Ignored when `depth` is supplied
+     *  (an external depth is always loaded when eager, task-managed otherwise). */
+    depthClear?: boolean;
+    /** This task draws into a target OWNED BY ANOTHER TASK: it neither builds nor disposes `rt`/
+     *  `rst` (the owner does; `record()` here only wires the pass to the owner's live views, so
+     *  the owning task must be recorded first — place this task after it). Pair with `clr: false`
+     *  and `depthClear: false` for a full overlay pass. Default false. */
+    sharedRt?: boolean;
     /** Per-pass camera override. Null/undefined uses `scene.camera`. */
     cam?: Camera | null;
     /** Use canvas dimensions, not render-target dimensions, for this pass's scene UBO aspect. */
     cs?: boolean;
     /** Scene-texture transmission settings. `copyCount: 0` copies before every transmissive draw.
      *  `generateMipmaps: false` allocates only mip 0 for the refraction texture and skips mip generation.
-     *  `mipLevelCount` caps the generated chain when a material only samples low explicit LODs. */
-    transmission?: { copyCount?: number; generateMipmaps?: boolean; mipLevelCount?: number };
+     *  `mipLevelCount` caps the generated chain when a material only samples low explicit LODs.
+     *  `grabDepth: true` also snapshots the task's DEPTH attachment at the same mid-pass grab (see
+     *  `TransmissionOptions.grabDepth`). */
+    transmission?: { copyCount?: number; generateMipmaps?: boolean; mipLevelCount?: number; grabDepth?: boolean };
+    /** Set false for an explicit render list that never auto-mirrors the scene's renderables,
+     *  even while the task list is empty. Undefined preserves the default auto-mirror behavior. */
+    autoMirror?: boolean;
+    /** @internal Skip clustered-light preparation for passes that never run forward lighting. */
+    _skipClusteredLights?: boolean;
 }
 
 /** A frame-graph task that records a single `RenderPass`, binds the scene's `RenderTarget`, and draws renderables into it. */
 export interface RenderTask extends Task {
     readonly name: string;
+    /** App-driven execute gate, default true. When false the pass is skipped entirely — no
+     *  attachment load, no MSAA resolve, no draws. The owner that KNOWS the task's content toggles
+     *  this (e.g. when its last mesh hides); the engine never scans bindings to decide. Disabling a
+     *  task that owns its target leaves the target's previous content stale — meant for overlay
+     *  tasks (`sharedRt`/`clr: false`), where skipping is a semantic no-op. */
+    enabled?: boolean;
     /** Render tasks are scene-bound because they consume scene camera, lights, and renderables. */
     readonly scene: SceneContext;
     /** Live task configuration. Mutating `clr` or `clrColor` affects subsequent frames. */
     /** @internal */
     readonly _config: RenderTaskConfig;
     /** @internal */
-    _autoFromScene: boolean;
+    _af?: boolean;
 
     /** Source-of-truth renderables. Bucketed binding lists below are derived from
      *  this list at `record()` (or re-sync when auto-filled and `_renderableVersion` changes). */
@@ -113,28 +136,25 @@ export interface RenderTask extends Task {
     /** @internal */
     _transparentBindings: DrawBinding[];
     /** Cached opaque render bundle. Invalidated by renderable list mutations
-     *  (`_lastVersion`) and visibility changes (`_lastVis`). */
+     *  (`_lastVersion`) and the global visibility/resource epoch (`_lastVis`). */
     /** @internal */
-    _opaqueBundles: GPURenderBundle[];
+    _ob: GPURenderBundle[];
     /** @internal */
     _lastVersion: number;
     /** @internal */
     _lastVis: number;
+    /** @internal True once `record()` has run — the task is "live" (GPU target allocated, material batch builders
+     *  present). A runtime `addMesh` after this resolves + re-buckets THIS task immediately (no frame-graph rebuild). */
+    _recorded: boolean;
 
     /** @internal */
     _renderPassDescriptor: GPURenderPassDescriptor;
     /** @internal */
     _colorAttachment: GPURenderPassColorAttachment;
-    /** @internal External depth source from `config.depth`. When unset,
-     *  the pass uses `config.rt._depthView`. */
-    _depthSrc?: RenderTarget;
-    /** @internal External depth/stencil `loadOp` ("load" when `config.depth` is
-     *  set). When unset, defaults to `"clear"`. */
-    _depthLoadOp?: GPULoadOp;
 
     /** Per-task scene UBO + bind group. Created eagerly in createRenderTask
      *  so renderables can reference `_sceneBG` at `bind()` time. Written each
-     *  frame by `writePassSceneUBO`. Destroyed in `dispose()`. */
+     *  frame by `_writePassSceneUBO`. Destroyed in `dispose()`. */
     /** @internal */
     _sceneUBO: GPUBuffer;
     /** @internal */
@@ -151,11 +171,14 @@ export interface RenderTask extends Task {
     _executeWithTransmission?(sampleCount: number): number;
     /** @internal */
     _targetSignature: RenderTargetSignature;
+    /** @internal Lazy feature work flushed after binding updates and before the render pass. */
+    _updateBatches: DrawUpdateBatch[];
 
-    /** Add a mesh to this task's explicit render list with an optional per-pass material override.
-     *  Resolved at `record()` time via `material._buildGroup._rebuildSingle`,
-     *  so the mesh's material family must already have been registered with
-     *  the scene (so its batch builder has run). */
+    /** Add a mesh to this task's explicit render list with an optional per-pass material override. Resolved via
+     *  `material._buildGroup._rebuildSingle`, so the mesh's material family must already have been registered with the
+     *  scene (its batch builder has run). BEFORE the first `record()` the add is QUEUED and drained at record() time;
+     *  AFTER (a live/runtime add) it is resolved + re-bucketed into THIS task immediately, so the mesh renders on the
+     *  next frame without a `frameGraph.build()` (which would re-allocate shared GPU resources across all tasks). */
     addMesh(mesh: Mesh, opts?: { material?: Material }): void;
     /** @internal */
     _pendingMeshes: { mesh: Mesh; material: Material }[];
@@ -173,7 +196,6 @@ interface MutableDrawUpdateContext {
  *  Swapchain-targeted tasks acquire the swap view per-frame at execute time. */
 export function createRenderTask(config: RenderTaskConfig, engine: EngineContext, scene: SceneContext): RenderTask {
     const sc = scene as SceneContext;
-    config.clrColor ??= { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
     config.clr ??= true;
     const desc = config.rt._descriptor;
     // Render upright: row 0 of the GPU texture is the top of the scene. Every
@@ -199,30 +221,31 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
     });
     const colorAttachment = { loadOp: "clear", storeOp: "store" } as GPURenderPassColorAttachment;
     const updateContext: MutableDrawUpdateContext = { targetWidth: 0, targetHeight: 0 };
+    const autoMirror = config.autoMirror !== false;
+    const ownsRt = !config.sharedRt;
     const task: RenderTask = {
         name: config.name,
         _config: config,
         engine: engine,
         scene: sc,
         _passes: [],
-        _autoFromScene: false,
         _renderables: [],
         _opaqueBindings: [],
         _directBindings: [],
         _transparentBindings: [],
-        _opaqueBundles: [],
+        _ob: [],
         _lastVersion: -1,
         _lastVis: 0,
+        _recorded: false,
         _renderPassDescriptor: { colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
-        _depthSrc: config.depth,
-        _depthLoadOp: config.depth ? (config.depth._eager ? "load" : "clear") : undefined,
         _sceneUBO: sceneUBO,
         _sceneBG: sceneBG,
         _lightsUBO: lightsUBO,
         _suData: new F32(SCENE_UBO_BYTES / 4),
         _su: [],
         _targetSignature: targetSignature,
+        _updateBatches: [],
         _pendingMeshes: [],
         addMesh(mesh, opts) {
             const material = opts?.material ?? mesh.material;
@@ -230,22 +253,37 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
                 return;
             }
             task._pendingMeshes.push({ mesh, material });
+            if (task._recorded) {
+                // Live (post-record) add: resolve + re-bucket THIS task now — buildBindings clears its bundle cache
+                // so it re-records on the next execute. Deliberately NOT a frame-graph rebuild (that re-allocates the
+                // shared scene UBO + every task's render target mid-frame and crashes the in-flight submit).
+                resolvePendingMeshes(task, sc);
+                // A live add makes the render list explicit (mirrors record(), where a pending mesh forces
+                // _af = false). Without this, an auto-mirroring task's next scene-version resync in
+                // prepareRenderTaskPass would clear _renderables and drop the just-added mesh.
+                task._af = false;
+                buildBindings(task, engine, targetSignature);
+            }
         },
         record(): void {
-            if (task._autoFromScene) {
+            if (task._af) {
                 task._renderables.length = 0;
             }
             resolvePendingMeshes(task, sc);
-            task._autoFromScene = task._renderables.length === 0;
-            if (task._autoFromScene) {
+            task._af = autoMirror && !task._renderables.length;
+            if (task._af) {
                 task._renderables.push(...sc._renderables);
             }
             // Read config.rt dynamically — transmission retargeting swaps it after
             // the task is created, and the engine scRT must never be rebuilt.
             const rt = config.rt;
-            buildRenderTarget(rt, engine);
-            if (config.rst && (rt._descriptor.samples ?? 1) > 1) {
-                buildRenderTarget(config.rst, engine);
+            // A shared target belongs to another task: (re)building it here would destroy the
+            // textures the owner's recorded pass still references.
+            if (ownsRt) {
+                buildRenderTarget(rt, engine);
+                if (config.rst && (rt._descriptor.samples ?? 1) > 1) {
+                    buildRenderTarget(config.rst, engine);
+                }
             }
             // A non-eager external depth (e.g. the default single-sample scene task's
             // depth, whose colour rt is the depth-less scRT) is task-managed:
@@ -259,24 +297,28 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             refreshTaskSceneBindGroup(task, engine);
             buildBindings(task, engine, targetSignature);
             buildRenderPassDescriptor(task, rt);
+            task._recorded = true; // task is now live — a subsequent addMesh resolves + re-buckets immediately
         },
         execute(): number {
             return executePass(task, engine, targetSignature, updateContext);
         },
         dispose(): void {
-            task._passes.length = 0;
+            task._passes.length = task._opaqueBindings.length = task._directBindings.length = 0;
+            task._transparentBindings.length = task._renderables.length = task._ob.length = 0;
             // disposeRenderTarget no-ops on the engine scRT and on eager
             // GeometryRendererTask depth outputs (both `_eager`), and on an undefined
-            // rst/depth — so these can be passed unconditionally.
-            disposeRenderTarget(config.rt);
-            disposeRenderTarget(config.rst);
+            // rst/depth — so these can be passed unconditionally. A shared target remains
+            // owned by the task that created it.
+            if (ownsRt) {
+                disposeRenderTarget(config.rt);
+                disposeRenderTarget(config.rst);
+            }
             disposeRenderTarget(config.depth);
-            task._opaqueBindings.length = 0;
-            task._directBindings.length = 0;
-            task._transparentBindings.length = 0;
-            task._renderables.length = 0;
-            task._opaqueBundles.length = 0;
             task._sceneUBO.destroy();
+            for (const batch of task._updateBatches) {
+                batch.destroy();
+            }
+            task._updateBatches.length = 0;
         },
     };
     return task;
@@ -290,6 +332,12 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
         return;
     }
     let removed = false;
+    for (let i = task._pendingMeshes.length - 1; i >= 0; i--) {
+        if (task._pendingMeshes[i]!.mesh === mesh) {
+            task._pendingMeshes.splice(i, 1);
+            removed = true;
+        }
+    }
     for (let i = task._renderables.length - 1; i >= 0; i--) {
         if (task._renderables[i]!.mesh === mesh) {
             task._renderables.splice(i, 1);
@@ -305,7 +353,7 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
         }
     }
     if (removed) {
-        task._opaqueBundles.length = 0;
+        task._ob.length = 0;
         task._lastVersion = -1;
     }
 }
@@ -313,13 +361,15 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolvePendingMeshes(task: RenderTask, sc: SceneContext): void {
-    if (task._pendingMeshes.length === 0) {
+    if (!task._pendingMeshes.length) {
         return;
     }
     for (const { mesh, material } of task._pendingMeshes) {
-        const rebuild = material._buildGroup?._rebuildSingle;
+        const builder = material._buildGroup;
+        const group = sc._groups.get(builder);
+        const rebuild = group ? group.r : builder._rebuildSingle;
         if (!rebuild) {
-            throw new Error();
+            throw Error();
         }
         const renderable = rebuild(sc, mesh, material);
         if (!task._renderables.includes(renderable)) {
@@ -348,11 +398,14 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
     const opaque = task._opaqueBindings;
     const direct = task._directBindings;
     const transparent = task._transparentBindings;
-    opaque.length = 0;
-    direct.length = 0;
-    transparent.length = 0;
+    opaque.length = direct.length = transparent.length = 0;
     for (const r of task._renderables) {
         const binding = r.bind(eng, targetSignature);
+        for (const batch of binding._updateBatches ?? []) {
+            if (!task._updateBatches.includes(batch)) {
+                task._updateBatches.push(batch);
+            }
+        }
         if (r.isTransparent || r._transmissive) {
             transparent.push(binding);
         } else if (r._direct) {
@@ -363,26 +416,27 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
     }
     opaque.sort((a, b) => a.renderable.order - b.renderable.order);
     direct.sort((a, b) => a.renderable.order - b.renderable.order);
-    task._opaqueBundles.length = 0;
+    task._ob.length = 0;
     task._lastVersion = (task.scene as SceneContext)._renderableVersion;
 }
 
 function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
+    const config = task._config;
     const att = task._colorAttachment;
     att.view = rt._colorView!;
     // End-of-pass MSAA resolve into a caller-supplied single-sample target.
     // record() only builds the target's color view for an MSAA rt, so its
     // presence is the gate. The swapchain case is wired per-frame in
     // executePass (its view changes each frame); this custom view is stable.
-    att.resolveTarget = task._config.rst?._colorView ?? undefined;
+    att.resolveTarget = config.rst?._colorView ?? undefined;
     task._renderPassDescriptor.colorAttachments = rt._colorView ? [att] : [];
 
-    const depthSrc = task._depthSrc ?? rt;
+    const depthSrc = config.depth ?? rt;
     const depthView = depthSrc._depthView;
     let depthAttachment: GPURenderPassDepthStencilAttachment | undefined;
     if (depthView) {
         const dd = depthSrc._descriptor;
-        const loadOp = task._depthLoadOp ?? "clear";
+        const loadOp = (config.depth ? depthSrc._eager : config.depthClear === false) ? "load" : "clear";
         depthAttachment = {
             view: depthView,
             depthClearValue: dd._depthClearValue ?? 0,
@@ -402,7 +456,7 @@ function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
 function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSignature: RenderTargetSignature, context: DrawUpdateContext): void {
     const sc = task.scene as SceneContext;
     // Auto-resync when the source scene mutates.
-    if (task._autoFromScene && task._lastVersion !== sc._renderableVersion) {
+    if (task._af && task._lastVersion !== sc._renderableVersion) {
         task._renderables.length = 0;
         task._renderables.push(...sc._renderables);
         buildBindings(task, eng, targetSignature);
@@ -414,16 +468,24 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
     // extension raises MAX_LIGHTS after this task was first recorded).
     refreshTaskSceneBindGroup(task, eng);
     const camera = task._config.cam ?? sc.camera;
-    sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
-    writePassSceneUBO(task, eng, sc, camera);
+    if (!task._config._skipClusteredLights && targetSignature._colorFormat) {
+        sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
+    }
+    _writePassSceneUBO(task, eng, sc, camera);
     refreshSceneLightsUBO(eng, sc);
     // Expose the active camera to per-binding `update()` calls. Some renderables
     // (e.g. transparent billboard systems) need it to compute view-space sort
     // depths during their update.
     (context as MutableDrawUpdateContext)._camera = camera;
+    for (const batch of task._updateBatches) {
+        batch.reset();
+    }
     updateBindings(task._opaqueBindings, context);
     updateBindings(task._directBindings, context);
     updateBindings(task._transparentBindings, context);
+    for (const batch of task._updateBatches) {
+        batch.flush(eng);
+    }
     // Per-frame back-to-front sort for transparent bindings — must run AFTER
     // updateBindings so renderables that compute `_worldCenter` inside their
     // own `update()` (billboard systems) are seen with current values.
@@ -431,6 +493,9 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
 }
 
 function executePass(task: RenderTask, eng: EngineContext, targetSignature: RenderTargetSignature, context: DrawUpdateContext): number {
+    if (task.enabled === false) {
+        return 0;
+    }
     const sc = task.scene;
     const sampleCount = targetSignature._sampleCount;
     prepareRenderTaskPass(task, eng, targetSignature, context);
@@ -446,7 +511,7 @@ function executePass(task: RenderTask, eng: EngineContext, targetSignature: Rend
             att.view = cfg.rt._colorView;
         }
         att.resolveTarget = cfg.rst?._colorView ?? undefined;
-        att.clearValue = task._autoFromScene ? sc.clearColor : cfg.clrColor!;
+        att.clearValue = cfg.clrColor ?? sc.clearColor;
         att.loadOp = cfg.clr ? "clear" : "load";
     }
     if (task._executeWithTransmission) {
@@ -467,7 +532,7 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     const rt = cfg.rt;
     const scene = task.scene as SceneContext;
     const opaqueBindings = task._opaqueBindings;
-    const opaqueBundles = task._opaqueBundles;
+    const opaqueBundles = task._ob;
     const sceneBG = task._sceneBG;
 
     const camera = cfg.cam ?? scene.camera;
@@ -485,10 +550,9 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     // Scene bind group (group 0) is task-owned and identical for every draw in this pass.
     pass.setBindGroup(0, sceneBG);
 
-    // Opaque: cached render bundle. Invalidated by scene mutation (_renderableVersion)
-    // or visibility version (_vis). The bundle records group(0) at its start so it can
-    // be replayed standalone (executeBundles inherits no inherited state).
-    if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || opaqueBundles.length === 0) {
+    // Opaque: cached render bundle. Invalidated by scene mutation (_renderableVersion) or
+    // the global visibility/resource epoch (_vis). The bundle records group(0) at its start.
+    if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || !opaqueBundles.length) {
         const desc = rt._descriptor;
         const be = eng._device.createRenderBundleEncoder({
             colorFormats: desc.format ? [desc.format] : [],
@@ -528,13 +592,14 @@ function refreshTaskSceneBindGroup(task: RenderTask, eng: EngineContext): void {
             { binding: 1, resource: { buffer: lightsUBO } },
         ],
     });
-    task._opaqueBundles.length = 0;
+    task._ob.length = 0;
     task._lastVersion = -1;
 }
 
 /** Write the canonical SceneUniforms struct to the task-owned scene UBO.
- *  Bails before touching scratch/GPU when all inputs are unchanged. */
-function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneContext, camera: Camera | null): void {
+ *  Bails before touching scratch/GPU when all inputs are unchanged.
+ *  @internal Exported for unit testing of the scene-UBO change-detection guard. */
+export function _writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneContext, camera: Camera | null): void {
     if (!camera) {
         return;
     }
@@ -545,9 +610,17 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
     const fog = scene.fog;
     const img = scene.imageProcessing;
     const envRotationY = scene.envRotationY || 0;
-    const wv = camera.worldMatrixVersion;
+    // Change key = camera transform version + projection revision, the latter covering both
+    // `fov` / `nearPlane` / `farPlane` writes and orthographic bounds. See `_cameraChangeKey`.
+    const wv = _cameraChangeKey(camera);
+    // `envTextures` identity is tracked so an environment loaded (or swapped) AFTER the scene has reached
+    // steady state invalidates this cache. Its spherical-harmonics irradiance and `lodGenerationScale` are
+    // written into the scene UBO below (via `_packSceneUniforms` + the env-SH contributor); without tracking
+    // it, a late env load would change none of the other guarded inputs, so the UBO would never be rewritten
+    // and the model would keep zero irradiance (dark diffuse, specular-only "mirror" look).
+    const envTextures = scene._envTextures;
     const s = task._su;
-    if (s[0] === camera && s[1] === fog && s[2] === wv && s[3] === aspect && s[4] === envRotationY && s[5] === img.exposure && s[6] === img.contrast) {
+    if (s[0] === camera && s[1] === fog && s[2] === wv && s[3] === aspect && s[4] === envRotationY && s[5] === img.exposure && s[6] === img.contrast && s[7] === envTextures) {
         return;
     }
     s[0] = camera;
@@ -557,6 +630,7 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
     s[4] = envRotationY;
     s[5] = img.exposure;
     s[6] = img.contrast;
+    s[7] = envTextures;
 
     const data = task._suData;
     _packSceneUniforms(data, eng, scene, camera, aspect);
@@ -575,8 +649,8 @@ function updateBindings(list: readonly DrawBinding[], context: DrawUpdateContext
     }
 }
 
-/** Iterate DrawBindings, deduping setPipeline. */
-function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext): number {
+/** @internal Iterate DrawBindings, deduping setPipeline. */
+export function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext): number {
     let lp: GPURenderPipeline | null = null;
     let draws = 0;
     for (const b of list) {

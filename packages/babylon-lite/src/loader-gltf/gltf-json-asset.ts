@@ -14,18 +14,25 @@ export async function parseGltfJsonAsset(buffer: ArrayBuffer, baseUrl: string): 
     return { json, binChunk, baseUrl };
 }
 
-/** Resolve a glTF buffer `uri` to a fetchable URL. With a base URL (the source was a URL string), relative
- *  `.bin` paths resolve against it. Without one (ArrayBuffer/Blob source), only self-contained `data:`/
- *  absolute URIs are resolvable — a bare relative path has no base and throws a clear error.
+/** Fetch and decode an image referenced by an external glTF URI. */
+export async function resolveExternalImage(uri: string, baseUrl: string): Promise<ImageBitmap> {
+    const response = await fetch(resolveBufferUri(uri, baseUrl));
+    if (!response.ok) {
+        throw new Error(`Failed to load image: ${response.status} ${response.statusText}`);
+    }
+    return createImageBitmap(await response.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+}
+
+/** Resolve a glTF buffer `uri` to a fetchable URL. Kept local to JSON glTF chunks so GLB scenes do
+ *  not fetch a shared helper just because feature modules have their own URI resolver.
  *  @internal */
-function resolveBufferUri(uri: string, baseUrl: string): string {
+export function resolveBufferUri(uri: string, baseUrl: string): string {
     if (baseUrl) {
         return new URL(uri, baseUrl + "x").href;
     }
     try {
-        // No base: succeeds for data:/absolute URIs, throws for a relative path (which `new URL` rejects).
-        return new URL(uri).href;
+        return new URL(uri) + "";
     } catch {
-        throw new Error("loadGltf: relative buffer URI needs a base URL.");
+        throw new Error("loadGltf: baseless input can't resolve relative URI; use self-contained GLB or URL with base.");
     }
 }

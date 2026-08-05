@@ -17,7 +17,7 @@
  * If lab/public/bundle/master-manifest.json is available, bundle-size increases
  * relative to master are emitted as warnings only; ceilings remain the blocker.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./parity-fixtures";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 
@@ -29,7 +29,11 @@ const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-in
 const BUNDLE_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/manifest.json");
 const MASTER_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/master-manifest.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-const SCENES = allScenes.filter((s) => s.maxRawKB != null);
+const SCENES = allScenes.filter((s) => {
+    // Scene 114 opts out because WebGPU's optional "primitive-index" feature
+    // changes which picking chunks the browser fetches across machines.
+    return !s.skipBundleSize && s.maxRawKB != null;
+});
 
 interface BundleInfoModule {
     id: string;
@@ -85,25 +89,25 @@ for (const scene of SCENES) {
         page.on("response", onResponse);
 
         // Navigate to the bundle page and wait for the scene to finish rendering
-        await page.goto(`/bundle-scene${scene.id}.html`, { waitUntil: "domcontentloaded" });
         let readyTimedOut = false;
         try {
+            await page.goto(`/bundle-scene${scene.id}.html`, { waitUntil: "domcontentloaded" });
             await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", undefined, { timeout: 20_000 });
         } catch {
             // Some heavy scenes fetch all runtime JS but do not mark the canvas ready in cloud browsers.
             readyTimedOut = true;
+        } finally {
+            // Always detach the listener — the page is shared across tests under
+            // REUSE_BROWSER, so a leaked listener would accumulate. Do NOT close the
+            // page; in default mode Playwright tears it down in fixture teardown.
+            page.off("response", onResponse);
         }
         if (readyTimedOut) {
-            page.off("response", onResponse);
-            await page.close();
             const sceneKey = `scene${scene.id}`;
             const files = BUNDLE_MANIFEST?.[sceneKey]?.runtimeChunks;
             expect(files, `bundle manifest must contain runtime chunks for ${sceneKey}`).toBeTruthy();
             runtimeFiles.length = 0;
             runtimeFiles.push(...files!);
-        } else {
-            page.off("response", onResponse);
-            await page.close();
         }
         for (const file of Array.from(new Set(runtimeFiles))) {
             jsPayloads.push({ url: `/bundle/${file}`, file, body: readFileSync(resolve(__dirname, "../../../lab/public/bundle", file)) });
@@ -200,10 +204,25 @@ for (const scene of SCENES) {
             ).toBe(true);
         }
 
+        // Orthographic projection is an opt-in seam: `camera.ts` holds a module-local projector that
+        // only `enableOrthographicCamera` installs, so the branch folds away for every perspective-only
+        // scene. Guard both directions — no other scene may pull the module in, and scene 268 must.
+        const ORTHO_SCENE_IDS = new Set([268]);
+        if (ORTHO_SCENE_IDS.has(scene.id)) {
+            expect(
+                runtimeModules.some((id) => /\/camera\/orthographic\.[jt]s$/.test(id)),
+                `${scene.slug} MUST include the orthographic camera module; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
+        } else {
+            const offenders = runtimeModules.filter((id) => /\/(camera\/orthographic|math\/mat4-ortho-lh-to-ref)\.[jt]s$/.test(id));
+            expect(offenders, `perspective-only ${scene.slug} must not load orthographic camera modules; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
         // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
-        // List excludes the sprite-using scenes (50-59 and the 92-95 custom-shader scenes). 60-series are
-        // NME demos with no sprites; 1-40 are core 3D.
-        const SPRITE_USING_IDS = new Set([50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 205, 206]);
+        // List excludes the sprite-using scenes (50-59, the 92-98 custom-shader scenes, and the
+        // 117/118 sprite-picking scenes). 60-series are NME demos with no sprites; 1-40 are core 3D.
+        // 262/263/264/276/277 are NPE particle scenes (particles render as billboards).
+        const SPRITE_USING_IDS = new Set([50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));
             expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);

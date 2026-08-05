@@ -324,6 +324,7 @@ export function appendSpriteAtlasFrames(engine: EngineContext, atlas: SpriteAtla
             { offset: dataOffset, bytesPerRow: srcStride, rowsPerImage: s.height },
             { width: s.width, height: s.height }
         );
+        engine._dlr?.w(atlas.texture, s.pixels, placement.xs[i]!, placement.ys[i]!, s.width, s.height, dataOffset, srcStride);
         newIndices[i] = baseIndex + i;
         framesOut.push({
             name: s.name,

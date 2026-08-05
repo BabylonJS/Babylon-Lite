@@ -15,18 +15,22 @@ export interface RebuildMaterialOptions {
  *  UBO-only scalar/vector changes should use markMaterialUboDirty instead. */
 export function rebuildMaterial(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions): void {
     const source = getMaterialSource(materialOrView);
+    (source as { _renderFeatures?: unknown })._renderFeatures = undefined;
     const rebuildViews = options?.rebuildViews !== false;
     let changed = false;
+    const pending: Promise<void>[] = [];
 
     for (const mesh of scene.meshes) {
         if (matchesMaterial(mesh.material, source, materialOrView, rebuildViews)) {
-            rebuildSceneMesh(scene, mesh);
-            if (mesh.material) {
+            const rebuilt = rebuildSceneMesh(scene, mesh);
+            if (typeof rebuilt !== "boolean") {
+                pending.push(rebuilt);
+            } else if (rebuilt && mesh.material) {
                 // Per-material generation (twin of scene-material-swap): lets the CSM detect when a CASTER's own
                 // material was rebuilt — and ONLY then rebuild its shadow views — instead of on the global epoch.
-                (mesh.material as { _csmGen?: number })._csmGen = ((mesh.material as { _csmGen?: number })._csmGen ?? 0) + 1;
+                mesh.material._csmGen = (mesh.material._csmGen ?? 0) + 1;
+                changed = true;
             }
-            changed = true;
         }
     }
 
@@ -34,7 +38,18 @@ export function rebuildMaterial(scene: SceneContext, materialOrView: Material, o
         scene._renderableVersion++;
         scene._materialEpoch++; // material renderables (and their UBOs) were rebuilt → bump the material epoch
     }
-    if (options?.rebuildFrameGraph) {
+    if (pending.length > 0) {
+        void Promise.all(pending)
+            .then(() => {
+                if (options?.rebuildFrameGraph) {
+                    scene._frameGraph.build();
+                }
+            })
+            .catch((error) => {
+                scene._runtimeBuilds?._x(error);
+                console.error(error);
+            });
+    } else if (options?.rebuildFrameGraph) {
         scene._frameGraph.build();
     }
 }
@@ -49,14 +64,22 @@ function matchesMaterial(meshMaterial: Material | null, source: Material, materi
     return meshMaterial === source || (isMaterialView(meshMaterial) && meshMaterial.source === source);
 }
 
-function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): void {
+function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void> {
     const material = mesh.material;
     if (!material) {
-        return;
+        return false;
     }
-    const rebuild = material._buildGroup._rebuildSingle;
-    if (!rebuild) {
-        return;
+    const builder = material._buildGroup;
+    const group = ctx._groups.get(builder);
+    if (mesh._runtimeThinBuild || ctx._runtimeBuilds?.w || (builder._materialFamily === "pbr" && (ctx._built || group?.r))) {
+        if (!ctx._built && !group?.r) {
+            return false;
+        }
+        return import("../scene/scene-runtime-mesh-build.js").then(({ B }) => B(ctx, builder, mesh)).then(() => ctx._runtimeBuilds?._e(false));
+    }
+    const resolved = group ? group.r : builder._rebuildSingle;
+    if (!resolved) {
+        return false;
     }
     const old = ctx._meshDisposables.get(mesh);
     if (old) {
@@ -70,10 +93,11 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): void {
             ctx._renderables.splice(i, 1);
         }
     }
-    const renderable = rebuild(ctx, mesh);
+    const renderable = resolved(ctx, mesh);
     let i = ctx._renderables.length;
     while (i > 0 && ctx._renderables[i - 1]!.order > renderable.order) {
         i--;
     }
     ctx._renderables.splice(i, 0, renderable);
+    return true;
 }

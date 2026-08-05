@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity/parity-fixtures";
 
 test.describe("GPU Picking", () => {
     test("pickAsync hits a sphere at canvas center and misses at corner", async ({ page }) => {
@@ -7,6 +7,7 @@ test.describe("GPU Picking", () => {
 
         const results = await page.evaluate(() => (window as any).__pickTest);
         expect(results.error).toBeNull();
+        expect(results.detailedPickingActive).toBe(results.primitiveIndexAvailable);
 
         // ── Center pick should hit ───────────────────────────────
         expect(results.centerPick).not.toBeNull();
@@ -15,6 +16,18 @@ test.describe("GPU Picking", () => {
         expect(results.centerPick.distance).toBeGreaterThan(0);
         expect(results.centerPick.pickedPoint).not.toBeNull();
         expect(results.centerPick.thinInstanceIndex).toBe(-1);
+        expect(results.vertexDataDiscardPick).not.toBeNull();
+        expect(results.vertexDataDiscardPick.hit).toBe(false);
+        expect(results.worldAdjustedPick).not.toBeNull();
+        expect(results.worldAdjustedPick.hit).toBe(true);
+        expect(results.worldAdjustedPick.pickedPoint).not.toBeNull();
+        expect(results.worldAdjustedPick.pickedPoint[2]).toBeLessThan(-1.2);
+        expect(results.worldAdjustedPick.distance).toBeLessThan(results.centerPick.distance);
+        if (results.detailedPickingActive) {
+            expect(results.worldAdjustedPick.faceId).toBeGreaterThanOrEqual(0);
+        } else {
+            expect(results.worldAdjustedPick.faceId).toBe(-1);
+        }
 
         // Picked point should be near the sphere surface (radius ~0.5, camera at z=5)
         const [px, py, pz] = results.centerPick.pickedPoint;
@@ -23,24 +36,30 @@ test.describe("GPU Picking", () => {
         expect(distFromOrigin).toBeLessThan(1.5);
 
         // ── Detailed picking: faceId, barycentric, normal, UV ───
-        expect(results.centerPick.faceId).toBeGreaterThanOrEqual(0);
-        expect(results.centerPick.bu).toBeGreaterThanOrEqual(0);
-        expect(results.centerPick.bv).toBeGreaterThanOrEqual(0);
-        expect(results.centerPick.bu + results.centerPick.bv).toBeLessThanOrEqual(1.01); // allow tiny float error
+        if (results.detailedPickingActive) {
+            expect(results.centerPick.faceId).toBeGreaterThanOrEqual(0);
+            expect(results.centerPick.bu).toBeGreaterThanOrEqual(0);
+            expect(results.centerPick.bv).toBeGreaterThanOrEqual(0);
+            expect(results.centerPick.bu + results.centerPick.bv).toBeLessThanOrEqual(1.01); // allow tiny float error
 
-        // Normal should be roughly pointing toward camera (positive or negative Z depending on LH)
-        expect(results.centerPick.normal).not.toBeNull();
-        const [nx, ny, nz] = results.centerPick.normal;
-        const normalLen = Math.sqrt(nx * nx + ny * ny + nz * nz);
-        expect(normalLen).toBeCloseTo(1.0, 1); // unit normal
+            // Normal should be roughly pointing toward camera (positive or negative Z depending on LH)
+            expect(results.centerPick.normal).not.toBeNull();
+            const [nx, ny, nz] = results.centerPick.normal;
+            const normalLen = Math.sqrt(nx * nx + ny * ny + nz * nz);
+            expect(normalLen).toBeCloseTo(1.0, 1); // unit normal
 
-        // UV should be in [0, 1]
-        expect(results.centerPick.uv).not.toBeNull();
-        const [u, v] = results.centerPick.uv;
-        expect(u).toBeGreaterThanOrEqual(0);
-        expect(u).toBeLessThanOrEqual(1);
-        expect(v).toBeGreaterThanOrEqual(0);
-        expect(v).toBeLessThanOrEqual(1);
+            // UV should be in [0, 1]
+            expect(results.centerPick.uv).not.toBeNull();
+            const [u, v] = results.centerPick.uv;
+            expect(u).toBeGreaterThanOrEqual(0);
+            expect(u).toBeLessThanOrEqual(1);
+            expect(v).toBeGreaterThanOrEqual(0);
+            expect(v).toBeLessThanOrEqual(1);
+        } else {
+            expect(results.centerPick.faceId).toBe(-1);
+            expect(results.centerPick.normal).toBeNull();
+            expect(results.centerPick.uv).toBeNull();
+        }
 
         // ── Corner pick should miss ─────────────────────────────
         expect(results.missPick).not.toBeNull();

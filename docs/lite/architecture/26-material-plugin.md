@@ -14,7 +14,7 @@ attached per-instance via `material.plugins = [plugin]`.
 plugin system.** No shared/core file (renderables, group builders, flags,
 pipelines) carries any plugin-specific code. Plugin support is an **explicit
 opt-in**: the application imports and calls `enableMaterialPlugins(scene)` (after
-creating materials/meshes, before `registerScene`). That single call is the *only*
+creating materials/meshes, before `registerScene`). That single call is the _only_
 thing that pulls the plugin bridges into a scene's module graph. A scene that
 never calls it produces the exact same bytes as master — verified by content-hash
 equality of every runtime chunk. The plugin's WGSL ships in the user's scene
@@ -25,40 +25,48 @@ module, not the engine.
 ```ts
 // material/plugin/material-plugin.ts (all type-only — erased at build)
 export type MaterialPluginPoint =
-  | "CUSTOM_FRAGMENT_DEFINITIONS"
-  | "CUSTOM_FRAGMENT_MAIN_BEGIN"
-  | "CUSTOM_FRAGMENT_UPDATE_ALPHA"
-  | "CUSTOM_FRAGMENT_UPDATE_DIFFUSE"
-  | "CUSTOM_FRAGMENT_BEFORE_LIGHTS"
-  | "CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION"
-  | "CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR"
-  | "CUSTOM_VERTEX_MAIN_BEGIN"
-  | "CUSTOM_VERTEX_UPDATE_WORLDPOS"
-  | "CUSTOM_VERTEX_MAIN_END";
+    | "CUSTOM_FRAGMENT_DEFINITIONS"
+    | "CUSTOM_FRAGMENT_MAIN_BEGIN"
+    | "CUSTOM_FRAGMENT_UPDATE_ALPHA"
+    | "CUSTOM_FRAGMENT_UPDATE_DIFFUSE"
+    | "CUSTOM_FRAGMENT_BEFORE_LIGHTS"
+    | "CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION"
+    | "CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR"
+    | "CUSTOM_VERTEX_MAIN_BEGIN"
+    | "CUSTOM_VERTEX_UPDATE_WORLDPOS"
+    | "CUSTOM_VERTEX_MAIN_END";
 
-export interface PluginUboField { readonly name: string; readonly type: string; } // WGSL type verbatim
+export interface PluginUboField {
+    readonly name: string;
+    readonly type: string;
+} // WGSL type verbatim
 export interface PluginSamplerDecl {
-  readonly texture: string; readonly sampler: string;
-  readonly textureType?: "texture_2d<f32>";
-  readonly samplerType?: "sampler" | "sampler_non_filtering";
+    readonly texture: string;
+    readonly sampler: string;
+    readonly textureType?: "texture_2d<f32>";
+    readonly samplerType?: "sampler" | "sampler_non_filtering";
 }
-export interface PluginTextureBinding { readonly texture: Texture2D; } // no GPU handles (§4d)
+export interface PluginTextureBinding {
+    readonly texture: Texture2D;
+} // no GPU handles (§4d)
 
 export interface MaterialPlugin {
-  readonly name: string;
-  priority?: number;            // lower runs first; default 500
-  isEnabled?: boolean;          // default true when attached
-  defines?: Record<string, boolean | number>;
-  getCustomCode?(shaderType: "vertex" | "fragment"): Partial<Record<MaterialPluginPoint, string>> | null;
-  getUniforms?(): { ubo?: PluginUboField[] };
-  getSamplers?(): PluginSamplerDecl[];
-  writeUbo?(data: Float32Array, offsets: ReadonlyMap<string, number>): void;
-  bindTextures?(out: PluginTextureBinding[]): void;
-  getActiveTextures?(out: Texture2D[]): void;
+    readonly name: string;
+    priority?: number; // lower runs first; default 500
+    isEnabled?: boolean; // default true when attached
+    defines?: Record<string, boolean | number>;
+    getCustomCode?(shaderType: "vertex" | "fragment"): Partial<Record<MaterialPluginPoint, string>> | null;
+    getUniforms?(): { ubo?: PluginUboField[] };
+    getSamplers?(): PluginSamplerDecl[];
+    writeUbo?(data: Float32Array, offsets: ReadonlyMap<string, number>): void;
+    bindTextures?(out: PluginTextureBinding[]): void;
+    getActiveTextures?(out: Texture2D[]): void;
 }
 
 // material/material.ts
-interface Material { /* … */ plugins?: MaterialPlugin[]; }
+interface Material {
+    /* … */ plugins?: MaterialPlugin[];
+}
 ```
 
 Public exports (`index.ts`): `MaterialPlugin`, `MaterialPluginPoint`,
@@ -70,11 +78,11 @@ entry point.
 
 ```ts
 const mat = createStandardMaterial();
-mat.plugins = [myPlugin];          // attach (any number of materials)
+mat.plugins = [myPlugin]; // attach (any number of materials)
 box.material = mat;
 addToScene(scene, box);
 
-enableMaterialPlugins(scene);      // ← the ONLY thing that loads plugin code
+enableMaterialPlugins(scene); // ← the ONLY thing that loads plugin code
 await registerScene(scene);
 ```
 
@@ -87,7 +95,7 @@ it) and:
    registries. The pre-existing renderable hook loops then invoke them with **zero
    shared-code changes**.
 2. For **Standard** plugin materials only (filtered by `_buildGroup ===
-   standardGroupBuilder`, so PBR materials are never touched), walks `scene.meshes`
+standardGroupBuilder`, so PBR materials are never touched), walks `scene.meshes`
    and pre-bakes the per-signature index into
    `mat._renderFeatures = { features: _computeStandardMaterialFeatures(mat) | (idx<<24) }`.
    This is required because Standard's `_computeStandardMaterialFeatures` is not
@@ -99,18 +107,18 @@ it) leaves every byte of the PBR/Standard core untouched.
 
 ## Injection-point → Lite slot mapping
 
-| BJS `MaterialPluginPoint`                       | Lite slot      | Notes                                  |
-| ----------------------------------------------- | -------------- | -------------------------------------- |
-| CUSTOM_FRAGMENT_DEFINITIONS                      | `_helperFunctions` (HF) | helper fns / structs          |
-| CUSTOM_FRAGMENT_MAIN_BEGIN                       | SV             | fragment scope-vars, after prelude     |
-| CUSTOM_FRAGMENT_UPDATE_ALPHA                     | AT             | alpha-test region                      |
-| CUSTOM_FRAGMENT_UPDATE_DIFFUSE                   | AC             | Standard diffuse update                |
-| CUSTOM_FRAGMENT_BEFORE_LIGHTS                    | MF             | after f0, before lights                |
-| CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION     | AI **and** NI  | ibl + non-ibl color tails              |
-| CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR                 | BC             | after tonemap+gamma (demo uses this)   |
-| CUSTOM_VERTEX_MAIN_BEGIN                         | VR             |                                        |
-| CUSTOM_VERTEX_UPDATE_WORLDPOS                    | VW             |                                        |
-| CUSTOM_VERTEX_MAIN_END                           | VB             |                                        |
+| BJS `MaterialPluginPoint`                    | Lite slot               | Notes                                |
+| -------------------------------------------- | ----------------------- | ------------------------------------ |
+| CUSTOM_FRAGMENT_DEFINITIONS                  | `_helperFunctions` (HF) | helper fns / structs                 |
+| CUSTOM_FRAGMENT_MAIN_BEGIN                   | SV                      | fragment scope-vars, after prelude   |
+| CUSTOM_FRAGMENT_UPDATE_ALPHA                 | AT                      | alpha-test region                    |
+| CUSTOM_FRAGMENT_UPDATE_DIFFUSE               | AC                      | Standard diffuse update              |
+| CUSTOM_FRAGMENT_BEFORE_LIGHTS                | MF                      | after f0, before lights              |
+| CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION | AI **and** NI           | ibl + non-ibl color tails            |
+| CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR             | BC                      | after tonemap+gamma (demo uses this) |
+| CUSTOM_VERTEX_MAIN_BEGIN                     | VR                      |                                      |
+| CUSTOM_VERTEX_UPDATE_WORLDPOS                | VW                      |                                      |
+| CUSTOM_VERTEX_MAIN_END                       | VB                      |                                      |
 
 Only **existing** template slots are reused — no new `/*XX*/` markers are added
 (that would grow every PBR/Standard scene's template). At the `BC` slot the color
@@ -147,27 +155,31 @@ any plugin change — including enabling/disabling (a disabled plugin contribute
 no shader code but still produces a distinct index, hence a distinct key).
 
 ### PBR (`pbr-plugin-bridge.ts`)
+
 A `PbrExt { id: "plugin", phase: "fragment" }` registered via `_registerPbrExt`:
+
 - `detect(mat)` → `{ f: 0, f2: index(mat.plugins) << 24 }` (lazy index assignment).
 - `frag(ctx)` → fragment for `(ctx._features2 >>> 24) & 0xff`.
 - `writeUbo(data, mat, offsets)` → plugin UBO slices into the **material UBO**
   (PBR template has `_baseMaterialUboFields`, so fragment `_uboFields` target it;
   WGSL access is `material.<field>`).
 - `bind` / `textures` → samplers + acquire/release.
-All five hooks are already iterated over the global `_getPbrExts()` registry by
-the core (detect in `_computePbrMaterialFeatures`, frag in `pbr-compose`, writeUbo
-in `writeMaterialData`, bind in `createPbrMeshBindGroup`, textures in
-`collectPbrBoundTextures`), so **no core PBR file is modified at all** —
-`enableMaterialPlugins` simply registers the ext before the build runs.
+  All five hooks are already iterated over the global `_getPbrExts()` registry by
+  the core (detect in `_computePbrMaterialFeatures`, frag in `pbr-compose`, writeUbo
+  in `writeMaterialData`, bind in `createPbrMeshBindGroup`, textures in
+  `collectPbrBoundTextures`), so **no core PBR file is modified at all** —
+  `enableMaterialPlugins` simply registers the ext before the build runs.
 
 ### Standard (`std-plugin-bridge.ts`)
+
 A `StdExt { _id: "plugin", _phase: "mesh", _feature: 0x7f << 24 }` registered via
 `_registerStdExt`. Standard has no per-ext `detect` hook and a fixed-layout
 material UBO, so the bridge:
+
 - pre-bakes the signature index into each plugin material's cached
   `_renderFeatures.features` (`_computeStandardMaterialFeatures(mat) | (idx<<24)`),
   done in `registerStdPlugins` for Standard materials only,
-- delivers plugin uniforms through a **self-managed uniform buffer**, *not* the
+- delivers plugin uniforms through a **self-managed uniform buffer**, _not_ the
   mesh UBO. `buildPluginFragment(plugins, idx, /*forStandard*/ true)` emits a
   dedicated `var<uniform> pluginUbo : pluginUboUniforms;` fragment binding (struct
   declared in `_helperFunctions`) instead of appending `_uboFields` to the mesh
@@ -224,13 +236,13 @@ and grayscale is a linear reduction, the result stays pixel-identical.
 
 ## Babylon.js Equivalence Map
 
-| BJS                                  | Lite                                            |
-| ------------------------------------ | ----------------------------------------------- |
-| `MaterialPluginBase` (class)         | `MaterialPlugin` (plain object)                 |
-| `getCustomCode(type, lang)`          | `getCustomCode(type)` (WGSL only)               |
-| `prepareDefinesBeforeAttributes` etc.| `defines` (folded into cache key)               |
-| `getUniforms()` / `bindForSubMesh`   | `getUniforms()` / `writeUbo()` / `bindTextures` |
-| `RegisterMaterialPlugin` (global)    | (omitted — per-instance attach only)            |
+| BJS                                   | Lite                                            |
+| ------------------------------------- | ----------------------------------------------- |
+| `MaterialPluginBase` (class)          | `MaterialPlugin` (plain object)                 |
+| `getCustomCode(type, lang)`           | `getCustomCode(type)` (WGSL only)               |
+| `prepareDefinesBeforeAttributes` etc. | `defines` (folded into cache key)               |
+| `getUniforms()` / `bindForSubMesh`    | `getUniforms()` / `writeUbo()` / `bindTextures` |
+| `RegisterMaterialPlugin` (global)     | (omitted — per-instance attach only)            |
 
 ## Dependencies
 
@@ -254,7 +266,7 @@ and grayscale is a linear reduction, the result stays pixel-identical.
 - `material/plugin/material-plugin.ts` — public types.
 - `material/plugin/plugin-bridge-shared.ts` — signature + fragment builder
   (`forStandard` chooses mesh-UBO `_uboFields` vs self-managed `pluginUbo` binding)
-  + UBO/texture helpers.
+    - UBO/texture helpers.
 - `material/plugin/pbr-plugin-bridge.ts` — PBR `PbrExt`.
 - `material/plugin/std-plugin-bridge.ts` — Standard `StdExt` + self-managed UBO.
 - `material/plugin/enable-material-plugins.ts` — the opt-in entry point.

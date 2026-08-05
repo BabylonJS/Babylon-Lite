@@ -1,4 +1,5 @@
 # Module: Frame-Graph Post-Process
+
 > Package paths: `packages/babylon-lite/src/frame-graph/`, `packages/babylon-lite/src/post-process/`
 
 ## Purpose
@@ -94,7 +95,11 @@ export interface ExtractHighlightsPostProcessTask extends PostProcessTask {
     exposure: number;
 }
 
-export function createExtractHighlightsPostProcessTask(config: ExtractHighlightsPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): ExtractHighlightsPostProcessTask;
+export function createExtractHighlightsPostProcessTask(
+    config: ExtractHighlightsPostProcessTaskConfig,
+    engine: EngineContext,
+    scene?: SceneContext
+): ExtractHighlightsPostProcessTask;
 
 export interface ChromaticAberrationPostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
     aberrationAmount?: number;
@@ -110,7 +115,11 @@ export interface ChromaticAberrationPostProcessTask extends PostProcessTask {
     centerPosition: { x: number; y: number };
 }
 
-export function createChromaticAberrationPostProcessTask(config: ChromaticAberrationPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): ChromaticAberrationPostProcessTask;
+export function createChromaticAberrationPostProcessTask(
+    config: ChromaticAberrationPostProcessTaskConfig,
+    engine: EngineContext,
+    scene?: SceneContext
+): ChromaticAberrationPostProcessTask;
 
 export interface BloomPostProcessTaskConfig extends PostProcessTaskSettings {
     weight?: number;
@@ -187,12 +196,12 @@ Pipeline:
 
 Bind group `0`:
 
-| Binding | Resource | Visibility |
-| --- | --- | --- |
-| `0` | source sampler (`nearest` or `linear`) | fragment |
-| `1` | source color texture (`texture_2d<f32>`) | fragment |
-| `2+` | optional extra textures (`texture_2d<f32>`) | fragment |
-| `2 + extraTextures.length` or `_shader.uniformBinding` | optional uniform buffer | fragment |
+| Binding                                                | Resource                                    | Visibility |
+| ------------------------------------------------------ | ------------------------------------------- | ---------- |
+| `0`                                                    | source sampler (`nearest` or `linear`)      | fragment   |
+| `1`                                                    | source color texture (`texture_2d<f32>`)    | fragment   |
+| `2+`                                                   | optional extra textures (`texture_2d<f32>`) | fragment   |
+| `2 + extraTextures.length` or `_shader.uniformBinding` | optional uniform buffer                     | fragment   |
 
 `alphaMode` mapping follows the existing Lite/Babylon.js numeric modes used by node-material pipelines:
 
@@ -277,22 +286,22 @@ The current concrete post-processes mirror their Babylon.js thin post-process sh
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js | Babylon Lite |
-| --- | --- |
-| `FrameGraphPostProcessTask` | `PostProcessTask` plain task record |
-| `sourceTexture` handle | `RenderTarget` source with sampled color attachment |
-| `targetTexture` handle | optional `RenderTarget` output |
-| auto-created output texture | internal `RenderTarget` copied from source descriptor |
-| `sourceSamplingMode` | `"nearest"` / `"linear"` sampler selection |
-| `alphaMode` | numeric modes `0`, `1`, `2`, `7` mapped to WebGPU blend state |
-| `viewport` | normalized viewport/scissor on the output pass |
-| `ThinPostProcess` | not present; shader config is direct WGSL |
-| `FrameGraphBlackAndWhiteTask` | `createBlackAndWhitePostProcessTask` |
-| `FrameGraphAnaglyphTask` / `ThinAnaglyphPostProcess` | `createAnaglyphPostProcessTask` |
-| `FrameGraphBlurTask` / `ThinBlurPostProcess` | `createBlurPostProcessTask` |
-| `FrameGraphExtractHighlightsTask` / `ThinExtractHighlightsPostProcess` | `createExtractHighlightsPostProcessTask` |
-| `FrameGraphChromaticAberrationTask` / `ThinChromaticAberrationPostProcess` | `createChromaticAberrationPostProcessTask` |
-| `FrameGraphBloomTask` / `BloomEffect` | `createBloomPostProcessTask` |
+| Babylon.js                                                                 | Babylon Lite                                                  |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `FrameGraphPostProcessTask`                                                | `PostProcessTask` plain task record                           |
+| `sourceTexture` handle                                                     | `RenderTarget` source with sampled color attachment           |
+| `targetTexture` handle                                                     | optional `RenderTarget` output                                |
+| auto-created output texture                                                | internal `RenderTarget` copied from source descriptor         |
+| `sourceSamplingMode`                                                       | `"nearest"` / `"linear"` sampler selection                    |
+| `alphaMode`                                                                | numeric modes `0`, `1`, `2`, `7` mapped to WebGPU blend state |
+| `viewport`                                                                 | normalized viewport/scissor on the output pass                |
+| `ThinPostProcess`                                                          | not present; shader config is direct WGSL                     |
+| `FrameGraphBlackAndWhiteTask`                                              | `createBlackAndWhitePostProcessTask`                          |
+| `FrameGraphAnaglyphTask` / `ThinAnaglyphPostProcess`                       | `createAnaglyphPostProcessTask`                               |
+| `FrameGraphBlurTask` / `ThinBlurPostProcess`                               | `createBlurPostProcessTask`                                   |
+| `FrameGraphExtractHighlightsTask` / `ThinExtractHighlightsPostProcess`     | `createExtractHighlightsPostProcessTask`                      |
+| `FrameGraphChromaticAberrationTask` / `ThinChromaticAberrationPostProcess` | `createChromaticAberrationPostProcessTask`                    |
+| `FrameGraphBloomTask` / `BloomEffect`                                      | `createBloomPostProcessTask`                                  |
 
 ## Dependencies
 

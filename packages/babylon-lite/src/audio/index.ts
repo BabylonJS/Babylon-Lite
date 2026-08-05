@@ -6,6 +6,8 @@
 
 export { createAudioEngineAsync, disposeAudioEngine, unlockAudioEngineAsync, setMasterVolume, getMasterVolume } from "./audio-engine.js";
 export type { AudioEngine, AudioEngineOptions, AudioEngineState } from "./audio-engine.js";
+export { createAudioEngineMediaStream, disposeAudioEngineMediaStream } from "./media-stream-output.js";
+export type { AudioEngineMediaStream } from "./media-stream-output.js";
 
 export { createSoundAsync, playSound, pauseSound, resumeSound, stopSound, disposeSound, setSoundVolume, SoundState } from "./static-sound.js";
 export type { StaticSound, StaticSoundOptions, StaticSoundPlayOptions, StaticSoundStopOptions } from "./static-sound.js";

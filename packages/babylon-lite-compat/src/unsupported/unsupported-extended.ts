@@ -112,13 +112,10 @@ export class SSAO2RenderingPipeline {
 // ─── Particles ───────────────────────────────────────────────────────
 export class ParticleHelper {
     public constructor() {
-        unsupported("ParticleHelper", "Particle systems are not implemented in Babylon Lite.");
-    }
-}
-
-export class ParticleSystemSet {
-    public constructor() {
-        unsupported("ParticleSystemSet", "Particle systems are not implemented in Babylon Lite.");
+        unsupported(
+            "ParticleHelper",
+            "The imperative particle-preset helper is not backed. Babylon Lite renders serialized Node Particle Editor graphs (`NodeParticleSystemSet.ParseFromSnippetAsync` → `buildAsync`), not preset-driven imperative `ParticleSystem`s."
+        );
     }
 }
 
@@ -130,14 +127,9 @@ export class PointsCloudSystem {
 
 // ─── Physics ─────────────────────────────────────────────────────────
 // Babylon Lite ships a Havok-V2 subset via `createHavokWorld` /
-// `createPhysicsAggregate` etc. The Babylon.js plugin/aggregate class model is
-// not wrapped 1:1; use the native physics functions.
-export class HavokPlugin {
-    public constructor() {
-        unsupported("HavokPlugin", "Use the native `createHavokWorld` API; the Babylon.js physics-plugin object is not wrapped.");
-    }
-}
-
+// `createPhysicsAggregate` etc. `HavokPlugin` is wrapped (see
+// `src/physics/physics.ts`); the aggregate/body/shape class model is not wrapped
+// 1:1 — use the native physics functions against `plugin.world`.
 export class PhysicsAggregate {
     public constructor() {
         unsupported("PhysicsAggregate", "Use the native `createPhysicsAggregate` API instead of the Babylon.js PhysicsAggregate class.");

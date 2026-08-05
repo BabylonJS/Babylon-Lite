@@ -7,6 +7,7 @@
  */
 
 import { Vector3 } from "./vector.js";
+import { Quaternion } from "./quaternion.js";
 
 export class Matrix {
     public readonly m: Float32Array;
@@ -89,6 +90,70 @@ export class Matrix {
 
     public getTranslation(): Vector3 {
         return new Vector3(this.m[12]!, this.m[13]!, this.m[14]!);
+    }
+
+    /**
+     * Babylon.js `Matrix.decompose(scale?, rotation?, translation?)` — split this
+     * TRS matrix into its scale, rotation (quaternion), and translation parts,
+     * writing into any provided out-params. Returns `false` (matching BJS) when a
+     * scale axis is zero. The rotation extraction is backed by Lite's
+     * `quatFromRotationMatrix` (via `Quaternion.FromRotationMatrixToRef`); the
+     * negative-determinant `scale.y` flip matches Babylon.js exactly.
+     */
+    public decompose(scale?: Vector3, rotation?: Quaternion, translation?: Vector3): boolean {
+        const m = this.m;
+        if (translation) {
+            translation.copyFromFloats(m[12]!, m[13]!, m[14]!);
+        }
+
+        const sc = scale ?? new Vector3();
+        sc.x = Math.sqrt(m[0]! * m[0]! + m[1]! * m[1]! + m[2]! * m[2]!);
+        sc.y = Math.sqrt(m[4]! * m[4]! + m[5]! * m[5]! + m[6]! * m[6]!);
+        sc.z = Math.sqrt(m[8]! * m[8]! + m[9]! * m[9]! + m[10]! * m[10]!);
+
+        // The handedness flip only depends on the 3x3 rotation/scale submatrix;
+        // translation (row 3) does not affect the determinant sign. A strict
+        // `< 0` check leaves singular matrices (det exactly 0) untouched rather
+        // than applying an arbitrary `scale.y` mirror.
+        const det3 = m[0]! * (m[5]! * m[10]! - m[6]! * m[9]!) - m[1]! * (m[4]! * m[10]! - m[6]! * m[8]!) + m[2]! * (m[4]! * m[9]! - m[5]! * m[8]!);
+        if (det3 < 0) {
+            sc.y *= -1;
+        }
+
+        if (sc.x === 0 || sc.y === 0 || sc.z === 0) {
+            if (rotation) {
+                rotation.set(0, 0, 0, 1);
+            }
+            return false;
+        }
+
+        if (rotation) {
+            const sx = 1 / sc.x;
+            const sy = 1 / sc.y;
+            const sz = 1 / sc.z;
+            // Reuse a scratch matrix to avoid allocating per decompose() call,
+            // which is typically invoked per-node per-frame.
+            const r = (decomposeRotationScratch ??= new Matrix()).m;
+            r[0] = m[0]! * sx;
+            r[1] = m[1]! * sx;
+            r[2] = m[2]! * sx;
+            r[3] = 0;
+            r[4] = m[4]! * sy;
+            r[5] = m[5]! * sy;
+            r[6] = m[6]! * sy;
+            r[7] = 0;
+            r[8] = m[8]! * sz;
+            r[9] = m[9]! * sz;
+            r[10] = m[10]! * sz;
+            r[11] = 0;
+            r[12] = 0;
+            r[13] = 0;
+            r[14] = 0;
+            r[15] = 1;
+            Quaternion.FromRotationMatrixToRef(decomposeRotationScratch!, rotation);
+        }
+
+        return true;
     }
 
     public static FromValues(
@@ -242,6 +307,8 @@ export class Matrix {
         return this;
     }
 }
+
+let decomposeRotationScratch: Matrix | null = null;
 
 type Mat16 = [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number];
 

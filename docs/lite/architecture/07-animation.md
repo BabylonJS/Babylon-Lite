@@ -1,4 +1,5 @@
 # Module: Animation
+
 > Package path: `packages/babylon-lite/src/animation/`
 
 ## Purpose
@@ -11,26 +12,26 @@ Provides a zero-allocation keyframe animation system for glTF animations and use
 
 ```typescript
 // Interpolation modes (numeric for hot-path comparison)
-export const INTERP_LINEAR      = 0;
-export const INTERP_STEP        = 1;
+export const INTERP_LINEAR = 0;
+export const INTERP_STEP = 1;
 export const INTERP_CUBICSPLINE = 2;
 
 // Target paths (numeric)
 export const PATH_TRANSLATION = 0;
-export const PATH_ROTATION    = 1;
-export const PATH_SCALE       = 2;
-export const PATH_WEIGHTS     = 3;
+export const PATH_ROTATION = 1;
+export const PATH_SCALE = 2;
+export const PATH_WEIGHTS = 3;
 ```
 
 ### Types
 
 ```typescript
-export type InterpMode  = 0 | 1 | 2;
-export type TargetPath  = 0 | 1 | 2 | 3;
+export type InterpMode = 0 | 1 | 2;
+export type TargetPath = 0 | 1 | 2 | 3;
 
 export interface AnimationSampler {
-    readonly input: Float32Array;          // keyframe timestamps (seconds, monotonically increasing)
-    readonly output: Float32Array;         // packed values; CUBICSPLINE: [inTangent, value, outTangent] per key
+    readonly input: Float32Array; // keyframe timestamps (seconds, monotonically increasing)
+    readonly output: Float32Array; // packed values; CUBICSPLINE: [inTangent, value, outTangent] per key
     readonly interpolation: InterpMode;
 }
 
@@ -44,15 +45,22 @@ export interface AnimationClip {
     readonly name: string;
     readonly channels: readonly AnimationChannel[];
     readonly samplers: readonly AnimationSampler[];
-    readonly duration: number;             // max of all sampler input times (seconds)
-    readonly frameRate?: number;           // defaults to 60 for glTF clips
+    readonly duration: number; // max of all sampler input times (seconds)
+    readonly frameRate?: number; // defaults to 60 for glTF clips
 }
 
 export interface NodeRest {
-    readonly parentIdx: number;            // -1 for root nodes
-    tx: number; ty: number; tz: number;    // translation
-    rx: number; ry: number; rz: number; rw: number; // rotation quaternion
-    sx: number; sy: number; sz: number;    // scale
+    readonly parentIdx: number; // -1 for root nodes
+    tx: number;
+    ty: number;
+    tz: number; // translation
+    rx: number;
+    ry: number;
+    rz: number;
+    rw: number; // rotation quaternion
+    sx: number;
+    sy: number;
+    sz: number; // scale
 }
 
 export interface SkeletonBinding {
@@ -66,7 +74,7 @@ export interface SkeletonBinding {
 export interface MorphBinding {
     readonly nodeIdx: number;
     readonly weightsBuffer: GPUBuffer;
-    readonly targetCount: number;          // max 4 supported
+    readonly targetCount: number; // max 4 supported
 }
 
 export interface GltfAnimationData {
@@ -152,7 +160,7 @@ export interface SkeletonData {
     readonly boneCount: number;
     readonly jointsBuffer: GPUBuffer;
     readonly weightsBuffer: GPUBuffer;
-    readonly joints1Buffer: GPUBuffer | null;  // 8-bone skinning
+    readonly joints1Buffer: GPUBuffer | null; // 8-bone skinning
     readonly weights1Buffer: GPUBuffer | null;
 }
 
@@ -168,15 +176,15 @@ export interface MorphTargetData {
 ```typescript
 export interface AnimationGroup {
     readonly name: string;
-    readonly duration: number;             // seconds
-    readonly frameRate: number;            // used by goToFrame()
+    readonly duration: number; // seconds
+    readonly frameRate: number; // used by goToFrame()
     isPlaying: boolean;
-    currentTime: number;                   // seconds
+    currentTime: number; // seconds
     readonly targetedAnimations: readonly TargetedAnimation[];
-    speedRatio: number;                    // default 1
-    loopAnimation: boolean;               // default true
-    weight: number;                        // default 1
-    mask?: AnimationGroupMask;             // optional include/exclude target-name filter
+    speedRatio: number; // default 1
+    loopAnimation: boolean; // default true
+    weight: number; // default 1
+    mask?: AnimationGroupMask; // optional include/exclude target-name filter
     _stopped: boolean;
     readonly _ctrl?: AnimationController;
 }
@@ -205,8 +213,8 @@ export enum AnimationGroupMaskMode {
 
 export interface AnimationGroupMask {
     mode: AnimationGroupMaskMode;
-    names: string[];      // target (node/bone) names
-    disabled: boolean;    // when true the mask is ignored (everything animates)
+    names: string[]; // target (node/bone) names
+    disabled: boolean; // when true the mask is ignored (everything animates)
 }
 
 export function createAnimationGroupMask(names?: string[], mode?: AnimationGroupMaskMode): AnimationGroupMask;
@@ -239,11 +247,7 @@ export function crossFadeAnimationGroups(manager: AnimationManager, fromGroup: A
 export function enableAnimationBlending(manager: AnimationManager): void;
 export function setAnimationAdditive(group: AnimationGroup, options?: AnimationAdditiveOptions): void;
 
-export function createPropertyAnimationClip(
-    name: string,
-    tracks: readonly PropertyAnimationTrackOptions[],
-    options?: PropertyAnimationClipOptions
-): PropertyAnimationClip;
+export function createPropertyAnimationClip(name: string, tracks: readonly PropertyAnimationTrackOptions[], options?: PropertyAnimationClipOptions): PropertyAnimationClip;
 
 export function createPropertyAnimationGroup(
     manager: AnimationManager,
@@ -262,8 +266,8 @@ export function createPropertyAnimationGroup(
 export function evaluateSampler(
     sampler: AnimationSampler,
     t: number,
-    stride: number,          // 3 for vec3, 4 for quat
-    isQuat: boolean,         // true → uses slerp for LINEAR, normalizes for CUBICSPLINE
+    stride: number, // 3 for vec3, 4 for quat
+    isQuat: boolean, // true → uses slerp for LINEAR, normalizes for CUBICSPLINE
     dst: Float32Array,
     dstOffset: number
 ): void;
@@ -277,8 +281,8 @@ All animation data uses flat typed arrays for GPU-friendly memory layout:
 
 - **NodeRest**: 10 fields per node (tx,ty,tz, rx,ry,rz,rw, sx,sy,sz) stored in `GltfAnimationData.nodes[]`
 - **AnimationSampler.output**: Packed contiguously:
-  - LINEAR/STEP: `[value0, value1, ...]` — `stride` floats per keyframe
-  - CUBICSPLINE: `[inTangent0, value0, outTangent0, inTangent1, value1, outTangent1, ...]` — `stride * 3` floats per keyframe
+    - LINEAR/STEP: `[value0, value1, ...]` — `stride` floats per keyframe
+    - CUBICSPLINE: `[inTangent0, value0, outTangent0, inTangent1, value1, outTangent1, ...]` — `stride * 3` floats per keyframe
 
 ### Keyframe Search
 
@@ -304,9 +308,9 @@ A module-level `[0,0,0,1]` array is reused for quaternion slerp output to avoid 
 
 ```typescript
 const manager = createAnimationManager();
-startAnimationManager(manager);          // autonomous requestAnimationFrame loop
+startAnimationManager(manager); // autonomous requestAnimationFrame loop
 updateAnimationManager(manager, 16.667); // caller-owned loop
-goToFrame(group, 20);                    // deterministic seek + pose evaluation
+goToFrame(group, 20); // deterministic seek + pose evaluation
 ```
 
 A scene may still own loaded animation groups through `scene.animationGroups`. Non-scene code can create a standalone manager directly and register whichever animatable adapters it wants.
@@ -323,20 +327,17 @@ Manual property animation, matching Babylon.js `beginDirectAnimation(target, [an
 
 ```typescript
 const manager = createAnimationManager();
-const clip = createPropertyAnimationClip(
-    "xSlide",
-    [
-        {
-            path: "position.x",
-            frameRate: 10,
-            keys: [
-                { frame: 0, value: 2 },
-                { frame: 10, value: -2 },
-                { frame: 20, value: 2 },
-            ],
-        },
-    ]
-);
+const clip = createPropertyAnimationClip("xSlide", [
+    {
+        path: "position.x",
+        frameRate: 10,
+        keys: [
+            { frame: 0, value: 2 },
+            { frame: 10, value: -2 },
+            { frame: 20, value: 2 },
+        ],
+    },
+]);
 const group = createPropertyAnimationGroup(manager, box, clip, { fromFrame: 0, toFrame: 20, loop: true });
 startAnimationManager(manager);
 ```
@@ -459,6 +460,7 @@ Additive groups are marked with `setAnimationAdditive(group, { referenceFrame })
 ## Pipeline Configuration
 
 N/A — Animation is a CPU-side system. GPU interaction is limited to:
+
 - `device.queue.writeTexture()` for bone matrix upload (via `skeleton-updater.ts`)
 - `device.queue.writeBuffer()` for morph weight upload
 
@@ -488,28 +490,28 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js API | Babylon Lite |
-|---|---|
-| `new Animation(name, "position.x", frameRate, FLOAT, CYCLE)` | `createPropertyAnimationClip(name, [{ path: "position.x", frameRate, keys }])` |
-| `animation.setKeys(keys)` | keys passed to `createPropertyAnimationClip()` |
-| `scene.beginDirectAnimation(target, [anim], from, to, loop)` | `createPropertyAnimationGroup(manager, target, clip, { fromFrame: from, toFrame: to, loop })` |
-| `AnimationGroup` | `AnimationGroup` interface |
-| `AnimationGroup.play()` | `playAnimation(group)` |
-| `AnimationGroup.pause()` | `pauseAnimation(group)` |
-| `AnimationGroup.stop()` | `stopAnimation(group)` |
-| `AnimationGroup.goToFrame(f)` | `goToFrame(group, f)` (uses `group.frameRate`) |
-| `AnimationGroup.speedRatio` | `group.speedRatio` |
-| `AnimationGroup.loopAnimation` | `group.loopAnimation` |
-| `AnimationGroup.weight` / `setWeightForAllAnimatables()` | `setAnimationWeight(group, weight)`; call `enableAnimationBlending(manager)` for weighted glTF skeleton clips |
-| `AnimationGroup.MakeAnimationAdditive(group, frame)` | `setAnimationAdditive(group, { referenceFrame: frame })` |
-| `AnimationGroup.mask = new AnimationGroupMask(names, mode)` | `group.mask = createAnimationGroupMask(names, mode)` |
-| `AnimationGroupMask` / `AnimationGroupMaskMode` / `mask.retainsTarget(name)` | `AnimationGroupMask` / `AnimationGroupMaskMode` / `animationGroupMaskRetainsTarget(mask, name)` |
-| manual property weighted blending | `enablePropertyAnimationBlending(manager)` + `setAnimationWeight(group, weight)` |
-| manual weight ramp / blending speed | `fadeAnimationWeight(manager, group, { to, durationMs })` |
-| manual cross-fade | `crossFadeAnimationGroups(manager, from, to, { durationMs })` |
-| `scene.animationGroups` | `scene.animationGroups` |
-| `Animation.ANIMATIONTYPE_QUATERNION` | `PATH_ROTATION = 1` |
-| `Animation.ANIMATIONTYPE_VECTOR3` | `PATH_TRANSLATION = 0`, `PATH_SCALE = 2` |
+| Babylon.js API                                                               | Babylon Lite                                                                                                  |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `new Animation(name, "position.x", frameRate, FLOAT, CYCLE)`                 | `createPropertyAnimationClip(name, [{ path: "position.x", frameRate, keys }])`                                |
+| `animation.setKeys(keys)`                                                    | keys passed to `createPropertyAnimationClip()`                                                                |
+| `scene.beginDirectAnimation(target, [anim], from, to, loop)`                 | `createPropertyAnimationGroup(manager, target, clip, { fromFrame: from, toFrame: to, loop })`                 |
+| `AnimationGroup`                                                             | `AnimationGroup` interface                                                                                    |
+| `AnimationGroup.play()`                                                      | `playAnimation(group)`                                                                                        |
+| `AnimationGroup.pause()`                                                     | `pauseAnimation(group)`                                                                                       |
+| `AnimationGroup.stop()`                                                      | `stopAnimation(group)`                                                                                        |
+| `AnimationGroup.goToFrame(f)`                                                | `goToFrame(group, f)` (uses `group.frameRate`)                                                                |
+| `AnimationGroup.speedRatio`                                                  | `group.speedRatio`                                                                                            |
+| `AnimationGroup.loopAnimation`                                               | `group.loopAnimation`                                                                                         |
+| `AnimationGroup.weight` / `setWeightForAllAnimatables()`                     | `setAnimationWeight(group, weight)`; call `enableAnimationBlending(manager)` for weighted glTF skeleton clips |
+| `AnimationGroup.MakeAnimationAdditive(group, frame)`                         | `setAnimationAdditive(group, { referenceFrame: frame })`                                                      |
+| `AnimationGroup.mask = new AnimationGroupMask(names, mode)`                  | `group.mask = createAnimationGroupMask(names, mode)`                                                          |
+| `AnimationGroupMask` / `AnimationGroupMaskMode` / `mask.retainsTarget(name)` | `AnimationGroupMask` / `AnimationGroupMaskMode` / `animationGroupMaskRetainsTarget(mask, name)`               |
+| manual property weighted blending                                            | `enablePropertyAnimationBlending(manager)` + `setAnimationWeight(group, weight)`                              |
+| manual weight ramp / blending speed                                          | `fadeAnimationWeight(manager, group, { to, durationMs })`                                                     |
+| manual cross-fade                                                            | `crossFadeAnimationGroups(manager, from, to, { durationMs })`                                                 |
+| `scene.animationGroups`                                                      | `scene.animationGroups`                                                                                       |
+| `Animation.ANIMATIONTYPE_QUATERNION`                                         | `PATH_ROTATION = 1`                                                                                           |
+| `Animation.ANIMATIONTYPE_VECTOR3`                                            | `PATH_TRANSLATION = 0`, `PATH_SCALE = 2`                                                                      |
 
 ## Dependencies
 
@@ -545,14 +547,14 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 
 ## File Manifest
 
-| File | Purpose |
-|---|---|
-| `types.ts` | All animation data types, interpolation/path constants, GPU-attached data interfaces |
-| `evaluate.ts` | Keyframe interpolation engine (LINEAR, STEP, CUBICSPLINE); binary search; zero-allocation |
-| `animation-group.ts` | User-facing AnimationGroup factory; wraps AnimationController per clip |
-| `animation-group-mask.ts` | Opt-in include/exclude target-name mask (`AnimationGroupMask`); installs the controller's mask resolver on first use |
-| `animation-manager.ts` | Generic animation task scheduler; no 2D, 3D, glTF, or property-animation runtime imports |
-| `animation-group-task.ts` | AnimationGroup-to-AnimationTask adapter, owner tracking, and `getAnimationGroups()` lookup |
-| `property-animation.ts` | Manual property animation clip builder and property path binding |
-| `weighted-pointer-mixer.ts` | Optional manual property weight mixer plus fade/cross-fade scheduling |
-| `weighted-gltf-mixer.ts` | Optional glTF skeleton weighted/additive mixer with single skeleton upload per blended target |
+| File                        | Purpose                                                                                                              |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `types.ts`                  | All animation data types, interpolation/path constants, GPU-attached data interfaces                                 |
+| `evaluate.ts`               | Keyframe interpolation engine (LINEAR, STEP, CUBICSPLINE); binary search; zero-allocation                            |
+| `animation-group.ts`        | User-facing AnimationGroup factory; wraps AnimationController per clip                                               |
+| `animation-group-mask.ts`   | Opt-in include/exclude target-name mask (`AnimationGroupMask`); installs the controller's mask resolver on first use |
+| `animation-manager.ts`      | Generic animation task scheduler; no 2D, 3D, glTF, or property-animation runtime imports                             |
+| `animation-group-task.ts`   | AnimationGroup-to-AnimationTask adapter, owner tracking, and `getAnimationGroups()` lookup                           |
+| `property-animation.ts`     | Manual property animation clip builder and property path binding                                                     |
+| `weighted-pointer-mixer.ts` | Optional manual property weight mixer plus fade/cross-fade scheduling                                                |
+| `weighted-gltf-mixer.ts`    | Optional glTF skeleton weighted/additive mixer with single skeleton upload per blended target                        |

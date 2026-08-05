@@ -30,20 +30,10 @@ export const PBR_HAS_SHEEN_ALBEDO_SCALING = 1 << 30;
 // ─── features2 (extended feature bits) ──────────────────────────────
 // Used when `features` runs out of bits. Threaded separately through
 // composePbr / getOrCreatePbrPipeline / createPbrMeshBindGroup.
-export const PBR2_CC_INT_MAP = 1 << 0;
-export const PBR2_CC_ROUGH_MAP = 1 << 1;
-export const PBR2_CC_NORMAL_MAP = 1 << 2;
-export const PBR2_CC_F0_REMAP_OFF = 1 << 3;
+// 1<<0 .. 1<<3 are clearcoat-local (clearcoat-fragment.ts).
 /** Material has KHR_materials_transmission (refraction through surface). */
 export const PBR2_HAS_REFRACTION = 1 << 4;
-/** Material has KHR_materials_volume (thickness-based Beer-Lambert absorption). */
-export const PBR2_HAS_VOLUME = 1 << 5;
-/** Material has a transmission texture (R channel). */
-export const PBR2_HAS_REFRACTION_MAP = 1 << 6;
-/** Thickness texture samples the G channel (KHR_materials_volume). */
-export const PBR2_HAS_THICKNESS_GLTF_CHANNEL = 1 << 7;
-/** Material is unlit — bypass all lighting (KHR_materials_unlit). */
-export const PBR2_HAS_UNLIT = 1 << 8;
+// 1<<5 .. 1<<7 are refraction/subsurface-local; 1<<8 is unlit-local.
 /** Any bound texture on this material carries a non-identity UV transform
  *  (`uScale/vScale/uOffset/vOffset/uAng` on its Texture2D). Enables per-
  *  texture UV-transform UBO fields + `txfUV` wrapping in the shader. */
@@ -55,28 +45,13 @@ export const PBR2_HAS_REFLECTANCE_FACTORS = 1 << 10;
 export const PBR2_HAS_UV2 = 1 << 11;
 /** Material multiplies textured albedo by a non-default glTF baseColorFactor. */
 export const PBR2_HAS_BASE_COLOR_FACTOR = 1 << 12;
-/** Material has a sheen texture with a KHR_texture_transform. Sheen owns its
- *  own `sheenUVm`/`sheenUVt` UBO fields and applies txfUV locally. */
-export const PBR2_HAS_SHEEN_UV_TX = 1 << 13;
-/** Material participates in the opaque-scene refraction prepass and must be authored in linear space. */
-export const PBR2_LINEAR_IMAGE_PROCESSING = 1 << 14;
+// 1<<13 is sheen-local; 1<<14 is refraction-local.
 /** Material view runs the fragment shader but declares no color output. */
 export const PBR2_NO_COLOR_OUTPUT = 1 << 15;
 /** Material view runs discard/clip logic and writes exponential shadow-map color. */
 export const PBR2_ESM_SHADOW_OUTPUT = 1 << 16;
-/** Material has native PBR iridescence enabled. */
-export const PBR2_HAS_IRIDESCENCE = 1 << 17;
-/** Iridescence intensity texture (R channel). */
-export const PBR2_HAS_IRIDESCENCE_MAP = 1 << 18;
-/** Iridescence thickness texture (G channel). */
-export const PBR2_HAS_IRIDESCENCE_THICKNESS_MAP = 1 << 19;
-/** Material has KHR_materials_dispersion (per-channel chromatic refraction).
- *  Implies PBR2_HAS_VOLUME (the extension requires KHR_materials_volume). */
-export const PBR2_HAS_DISPERSION = 1 << 20;
-/** Material view emits multi-attachment geometry-textures instead of a single
- *  colour. Consumed only by the geometry-renderer task; PBR scenes without
- *  geometry rendering never set this bit. */
-export const PBR2_GEOMETRY_OUTPUT = 1 << 21;
+// 1<<17 .. 1<<19 are iridescence-local; 1<<20 is refraction-local;
+// 1<<21 is geometry-output-local.
 // ─── Extension-local features2 bits (1<<22 .. 1<<28) ────────────────
 // RESERVED here but DEFINED inside their lazy fragment modules so the constants
 // are never retained in the entry/shared chunk for scenes that don't load those
@@ -88,3 +63,4 @@ export const PBR2_GEOMETRY_OUTPUT = 1 << 21;
 //   1<<26  PBR2_REFL_UV_TX                      (reflectance-fragment.ts)
 //   1<<27  PBR2_HAS_ANISO_TEX                    (anisotropy-fragment.ts)
 //   1<<28  PBR2_OCCL_UV_SPLIT                   (uv-transform-fragment.ts + pbr-template-ext.ts)
+//   1<<30  PBR2_HAS_SHADOW_ONLY                 (shadow-only-fragment.ts)

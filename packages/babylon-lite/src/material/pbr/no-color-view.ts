@@ -13,5 +13,8 @@ import { PBR_HAS_ALPHA_BLEND, PBR2_NO_COLOR_OUTPUT } from "./pbr-flags.js";
  *  The view references the source; material state is never copied. */
 export function createPbrNoColorMaterialView(source: PbrMaterialProps): MaterialView {
     const features = source._renderFeatures ?? { features: 0, features2: 0 };
-    return createMaterialView(source, { features: features.features & ~PBR_HAS_ALPHA_BLEND, features2: (features.features2 ?? 0) | PBR2_NO_COLOR_OUTPUT });
+    return createMaterialView(source, {
+        features: features.features & ~PBR_HAS_ALPHA_BLEND,
+        features2: (features.features2 ?? 0) | PBR2_NO_COLOR_OUTPUT,
+    });
 }

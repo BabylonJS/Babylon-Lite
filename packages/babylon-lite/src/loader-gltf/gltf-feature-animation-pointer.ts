@@ -4,18 +4,18 @@
  *  scene that doesn't declare the extension pays zero bytes for pointer
  *  resolution, the non-Float32 sampler converter, or the visibility cascade.
  *
- *  On side-effect import this module installs two callbacks into gltf-animation:
- *   1. A pointer-channel parser (resolves the JSON pointer to a writer fn).
- *   2. A sampler converter that handles the non-Float32/misaligned accessor
- *      cases the fast path in gltf-animation can't express (e.g. the 11-byte
- *      UNSIGNED_BYTE visibility accessor in CubeVisibility.glb).
+ *  On side-effect import this module installs a pointer-channel parser into
+ *  gltf-animation (resolves the JSON pointer to a writer fn) and pulls in the
+ *  lazy sampler converter (`gltf-sampler-denorm`) that handles the
+ *  non-Float32/misaligned accessor cases the fast path can't express (e.g. the
+ *  11-byte UNSIGNED_BYTE visibility accessor in CubeVisibility.glb).
  *
  *  Node-visibility and node-TRS pointers resolve here directly. Material
  *  pointer targets (texture-transform offset/scale/rotation, factors, …) are
  *  resolved by `resolveAnimationPointer` in animation-pointer.ts, invoked from
  *  the pointer-channel parser installed below. */
 
-import { F32, U16, I16, U8, I8 } from "../engine/typed-arrays.js";
+import "./gltf-sampler-denorm.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { AnimationChannel, TargetPath } from "../animation/types.js";
@@ -133,63 +133,32 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
     return map;
 }
 
-_installPointerHandlers(
-    (ptr, c, nodeMap, json, meshes) => {
-        if (!nodeMap) {
-            return null;
-        }
-        // A /nodes/{n}/{translation|rotation|scale|weights} pointer is semantically
-        // identical to a standard glTF channel on node n. Emit a standard channel so it
-        // flows through the proven topological node-TRS / morph writeback (which moves the
-        // node AND its descendants) instead of an opaque per-node writer.
-        const trs = /^\/nodes\/(\d+)\/(translation|rotation|scale|weights)$/.exec(ptr);
-        if (trs) {
-            return { samplerIdx: c.sampler, nodeIdx: +trs[1]!, path: NODE_TRS_PATH[trs[2]!]! };
-        }
-        // Only build the material map when a non-node pointer is actually present.
-        const resolved = resolveAnimationPointer(ptr, { nodes: nodeMap, materials: materialMap(json, meshes), _json: json });
-        if (!resolved) {
-            return null;
-        }
-        const ch: AnimationChannel = {
-            samplerIdx: c.sampler,
-            nodeIdx: -1,
-            path: PATH_POINTER,
-            pointerWriter: resolved.writer,
-            pointerArity: resolved.arity,
-        };
-        return ch;
-    },
-    (src, length, normalized) => {
-        // Convert any animation-sampler payload to a standalone Float32Array.
-        // Handles the cases the aligned-Float32 fast path can't express.
-        const out = new F32(length);
-        if (src instanceof F32) {
-            for (let i = 0; i < length; i++) {
-                out[i] = src[i]!;
-            }
-        } else if (src instanceof U8) {
-            const k = normalized ? 1 / 255 : 1;
-            for (let i = 0; i < length; i++) {
-                out[i] = src[i]! * k;
-            }
-        } else if (src instanceof U16) {
-            const k = normalized ? 1 / 65535 : 1;
-            for (let i = 0; i < length; i++) {
-                out[i] = src[i]! * k;
-            }
-        } else if (src instanceof I8) {
-            for (let i = 0; i < length; i++) {
-                out[i] = normalized ? Math.max(src[i]! / 127, -1) : src[i]!;
-            }
-        } else if (src instanceof I16) {
-            for (let i = 0; i < length; i++) {
-                out[i] = normalized ? Math.max(src[i]! / 32767, -1) : src[i]!;
-            }
-        }
-        return out;
+_installPointerHandlers((ptr, c, nodeMap, json, meshes) => {
+    if (!nodeMap) {
+        return null;
     }
-);
+    // A /nodes/{n}/{translation|rotation|scale|weights} pointer is semantically
+    // identical to a standard glTF channel on node n. Emit a standard channel so it
+    // flows through the proven topological node-TRS / morph writeback (which moves the
+    // node AND its descendants) instead of an opaque per-node writer.
+    const trs = /^\/nodes\/(\d+)\/(translation|rotation|scale|weights)$/.exec(ptr);
+    if (trs) {
+        return { samplerIdx: c.sampler, nodeIdx: +trs[1]!, path: NODE_TRS_PATH[trs[2]!]! };
+    }
+    // Only build the material map when a non-node pointer is actually present.
+    const resolved = resolveAnimationPointer(ptr, { nodes: nodeMap, materials: materialMap(json, meshes), _json: json });
+    if (!resolved) {
+        return null;
+    }
+    const ch: AnimationChannel = {
+        samplerIdx: c.sampler,
+        nodeIdx: -1,
+        path: PATH_POINTER,
+        pointerWriter: resolved.writer,
+        pointerArity: resolved.arity,
+    };
+    return ch;
+});
 
 const feature: GltfFeature = {
     id: "KHR_animation_pointer",

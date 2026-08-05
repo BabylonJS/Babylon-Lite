@@ -97,8 +97,9 @@ mismapping. Once migration is complete you can drop the plugin and import from
   module-level side effects, so it never bloats consumers that don't use it.
 - **Honest:** unsupported Babylon.js APIs throw `LiteCompatError` rather than
   rendering something subtly wrong.
-- **Not** a full Babylon.js reimplementation. Particles, GUI, WebXR, audio, decals,
-  and other features absent from Babylon Lite are out of scope.
+- **Not** a full Babylon.js reimplementation. Classic imperative particle systems,
+  GUI, WebXR, decals, and other features absent from Babylon Lite are out of scope
+  (Node Particle Editor graphs are partially supported).
 
 ## Supported APIs at a glance
 
@@ -108,52 +109,55 @@ overloads within a supported area may still be absent.
 
 | Status | Meaning                                                                 |
 | ------ | ----------------------------------------------------------------------- |
-| ✅      | Common surface implemented and tested where possible                    |
-| ⚡      | A practical subset works; some properties/overloads are absent or throw |
-| ❌      | Not supported on the current Lite API (throws `LiteCompatError`)        |
+| ✅     | Common surface implemented and tested where possible                    |
+| ⚡     | A practical subset works; some properties/overloads are absent or throw |
+| ❌     | Not supported on the current Lite API (throws `LiteCompatError`)        |
 
 ### `@babylonjs/core`
 
-| Feature area                                                                                            | Status | Notes                                                                                                    |
-| ------------------------------------------------------------------------------------------------------- | :----: | -------------------------------------------------------------------------------------------------------- |
-| Math (`Vector*`, `Color*`, `Quaternion`, `Matrix`, `Plane`, `Ray`, `Frustum`, `Scalar`, `Axis`/`Space`) |   ✅    | `Angle` / `Curve3` / `Path3D` partial                                                                    |
-| Engine (`WebGPUEngine`, `Engine`, `ThinEngine`, `NullEngine`)                                           |   ⚡    | async startup + render loop; `beginFrame`/`endFrame` and manual `scene.render()` unsupported             |
-| Scene (clear color, cameras/lights, fog, environment, observables, ready state)                         |   ⚡    | sync `scene.pick` unsupported (use async `GPUPicker`); some scene enumeration needs Lite core            |
-| Cameras (`ArcRotateCamera`, `FreeCamera`/`Universal`/`Target`, `FollowCamera`, `GeospatialCamera`)      |   ✅    | XR / device-orientation / stereoscopic rigs unsupported                                                  |
-| Lights (`Hemispheric`, `Directional`, `Point`, `Spot`)                                                  |   ✅    | `RectAreaLight` / clustered lights unsupported                                                           |
-| Shadows (`ShadowGenerator` directional ESM/PCF, spot PCF)                                               |   ⚡    | `CascadedShadowGenerator` falls back to single cascade                                                   |
-| Meshes & geometry (class chain, `MeshBuilder` primitives, transforms, thin instances, `VertexData`)     |   ⚡    | `CreateLines`/`CreateDecal`/`CreateText`, `InstancedMesh`, LOD/edges/outline, clone/instance unsupported |
-| CSG / CSG2                                                                                              |   ✅    | over Lite boolean ops                                                                                    |
-| Gizmos (position/rotation/scale/bounding-box/light/camera + `GizmoManager`)                             |   ⚡    | over Lite gizmo suite                                                                                    |
-| Materials (`StandardMaterial`, `PBRMaterial`, metallic-rough / spec-gloss, `NodeMaterial`)              |   ⚡    | `ShaderMaterial` (GLSL), `MultiMaterial`, `BackgroundMaterial` unsupported                               |
-| Textures (`Texture`, `RawTexture`, `DynamicTexture`, `CubeTexture`)                                     |   ⚡    | `HDRCubeTexture` / `RenderTargetTexture` / `MirrorTexture` unsupported                                   |
-| Animation (keyframe `Animation`, easing, `Animatable`, `AnimationGroup` incl. weighted/additive blend)  |   ⚡    | CPU evaluation; loaded glTF skeletal blending supported                                                  |
-| Morph targets (`MorphTarget` / `MorphTargetManager`)                                                    |   ✅    | over Lite morph targets                                                                                  |
-| Sprites (`SpriteManager` / `Sprite`)                                                                    |   ⚡    | camera-facing billboards; `SpriteMap` / packed atlas unsupported                                         |
-| Behaviors / Actions (`AutoRotation`, `Framing`, `ActionManager`, conditions)                            |   ⚡    | `ActionManager` is manual-dispatch; drag behaviors need Lite core                                        |
-| Misc (`Observable`, `Tools`, `SmartArray`, `Tags`, gradients, `PerformanceMonitor`)                     |   ✅    |                                                                                                          |
-| Particles, post-processes, layers (glow/highlight), probes, physics, audio, WebXR                       |   ❌    | not in Babylon Lite — use native Lite `create*Task` / Havok-V2 functions                                 |
+| Feature area                                                                                              | Status | Notes                                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------- | :----: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Math (`Vector*`, `Color*`, `Quaternion`, `Matrix`, `Plane`, `Ray`, `Frustum`, `Scalar`, `Axis`/`Space`)   |   ✅   | `Angle` / `Curve3` / `Path3D` partial                                                                                                                                     |
+| Engine (`WebGPUEngine`, `Engine`, `ThinEngine`, `NullEngine`)                                             |   ⚡   | async startup + render loop; `beginFrame`/`endFrame`, MSAA/alpha-to-coverage (`currentSampleCount`/`get`/`setAlphaToCoverage`), and manual `scene.render()` unsupported                                                                              |
+| Scene (clear color, cameras/lights, fog, environment, observables, ready state)                           |   ⚡   | sync `scene.pick` unsupported (use async `GPUPicker`); `scene.meshes` + `getMeshBy*`/`getNodeBy*` now enumerate every mesh via a canonical wrapper registry                                                                             |
+| Cameras (`ArcRotateCamera`, `FreeCamera`/`Universal`/`Target`, `FollowCamera`, `GeospatialCamera`)        |   ✅   | XR / device-orientation / stereoscopic rigs unsupported                                                                                                                   |
+| Lights (`Hemispheric`, `Directional`, `Point`, `Spot`)                                                    |   ✅   | `RectAreaLight` / clustered lights unsupported                                                                                                                            |
+| Shadows (`ShadowGenerator` directional ESM/PCF, spot PCF)                                                 |   ⚡   | `CascadedShadowGenerator` falls back to single cascade                                                                                                                    |
+| Meshes & geometry (class chain, `MeshBuilder` primitives, transforms, thin instances, `clone`, `VertexData`, `Mesh.MergeMeshes`) |   ⚡   | `MergeMeshes` bakes positions/normals/UVs and rejects unsupported attributes/animation; `CreateLines`/`CreateDecal`/`CreateText`/`CreateTiledBox`/`CreateTiledPlane`, `InstancedMesh`, LOD/edges/outline, hardware instances unsupported |
+| CSG / CSG2                                                                                                |   ✅   | over Lite boolean ops                                                                                                                                                     |
+| Gizmos (position/rotation/scale/bounding-box/light/camera + `GizmoManager`)                               |   ⚡   | over Lite gizmo suite; `isEnabled` toggles per-axis interactivity (display-only when disabled)                                                                            |
+| Materials (`StandardMaterial`, `PBRMaterial`, metallic-rough / spec-gloss, `NodeMaterial`)                |   ⚡   | `clone(name)` shares textures with its own renderable; `ShaderMaterial` (GLSL), `MultiMaterial`, `BackgroundMaterial` unsupported                                          |
+| Textures (`Texture`, `RawTexture`, `RawTexture2DArray`, `RawTexture3D`, `DynamicTexture`, `CubeTexture`, `HDRCubeTexture`) |   ⚡   | `HDRCubeTexture` routes to native `loadHdrEnvironment`; `RawTexture2DArray` supports the raw-bytes, image-source/URL, and single-file KTX2 array paths; `RenderTargetTexture` / `MirrorTexture` / `HtmlTexture` unsupported |
+| Animation (keyframe `Animation`, easing, `Animatable`, `AnimationGroup` incl. weighted/additive blend)    |   ⚡   | CPU evaluation; loaded glTF skeletal blending supported                                                                                                                   |
+| Morph targets (`MorphTarget` / `MorphTargetManager`)                                                      |   ✅   | over Lite morph targets                                                                                                                                                   |
+| Sprites (`SpriteManager` / `Sprite`)                                                                      |   ⚡   | camera-facing billboards; `SpriteMap` / packed atlas unsupported                                                                                                          |
+| Behaviors / Actions (`AutoRotation`, `Framing`, `ActionManager`, conditions)                              |   ⚡   | `ActionManager` is manual-dispatch; drag / six-DoF / XR-oriented mesh behaviors throw                                                                                     |
+| Misc (`Observable`, `Tools`, `SmartArray`, `Tags`, gradients, `PerformanceMonitor`)                       |   ✅   |                                                                                                                                                                           |
+| Audio V2 (`AudioEngineV2`, `StaticSound`, `StreamingSound`, `AudioBus`, buses/sources/analyzer)           |   ⚡   | over Lite's AudioV2 port; `MainAudioBus` spatial/analyzer and a second main bus unsupported                                                                               |
+| Physics (`HavokPlugin`, `scene.enablePhysics`/`getPhysicsEngine`, `PhysicsShapeType`/`PhysicsMotionType`) |   ⚡   | Havok V2 over Lite `createHavokWorld`; refresh-rate-independent `useDeltaForWorldStep`. Bodies via native `createPhysicsAggregate` (`PhysicsAggregate` class not wrapped) |
+| Particles (`NodeParticleSystemSet` / `ParticleSystemSet` — Node Particle Editor)                          |   ⚡   | NPE snippet/JSON graphs: `Parse`/`ParseFromSnippetAsync` → `buildAsync` → `start`. Imperative classic/GPU/solid `ParticleSystem` + programmatic block authoring unsupported                                                    |
+| Post-processes, layers (glow/highlight), probes, WebXR                                                    |   ❌   | not in Babylon Lite — use native Lite `create*Task` functions                                                                                                             |
 
 ### `@babylonjs/loaders`
 
 | Feature area                                                                                   | Status | Notes                                                           |
 | ---------------------------------------------------------------------------------------------- | :----: | --------------------------------------------------------------- |
-| glTF 2.0 (+ extensions), `.babylon`                                                            |   ✅    | via Lite `loadGltf` / `loadBabylon`                             |
-| `SceneLoader` (`ImportMeshAsync` / `AppendAsync` / `LoadAssetContainerAsync`), `AssetsManager` |   ⚡    | `AssetContainer` partial                                        |
-| Gaussian Splatting (`.ply` / `.splat` / `.sog` / `.spz`)                                       |   ⚡    | via `GaussianSplattingMesh`; LOD-streaming variants unsupported |
-| `OBJ` / `STL` / `FBX` / `BVH`                                                                  |   ❌    | not in Lite — convert to glTF                                   |
+| glTF 2.0 (+ extensions), `.babylon`                                                            |   ✅   | via Lite `loadGltf` / `loadBabylon`                             |
+| `SceneLoader` (`ImportMeshAsync` / `AppendAsync` / `LoadAssetContainerAsync`), `AssetsManager` |   ⚡   | `AssetContainer` partial                                        |
+| Gaussian Splatting (`.ply` / `.splat` / `.sog` / `.spz`)                                       |   ⚡   | via `GaussianSplattingMesh`; LOD-streaming + glTF-embedded (`KHR_gaussian_splatting`) variants unsupported |
+| `OBJ` / `STL` / `FBX` / `BVH`                                                                  |   ❌   | not in Lite — convert to glTF                                   |
 
 ### `@babylonjs/addons` · `@recast-navigation/*`
 
-| Feature area                                                     | Status | Notes                            |
-| ---------------------------------------------------------------- | :----: | -------------------------------- |
-| `RecastJSPlugin` (navmesh, crowd, path, raycast, off-mesh links, tile-cache obstacles) |   ✅    | over Lite's native Recast-V2 API |
+| Feature area                                                                           | Status | Notes                            |
+| -------------------------------------------------------------------------------------- | :----: | -------------------------------- |
+| `RecastJSPlugin` (navmesh, crowd, path, raycast, off-mesh links, tile-cache obstacles) |   ✅   | over Lite's native Recast-V2 API |
 
 ### `@babylonjs/materials`
 
 | Feature area      | Status | Notes                                                                                          |
 | ----------------- | :----: | ---------------------------------------------------------------------------------------------- |
-| Library materials |   ⚡    | mapped onto the compat material surface where a Lite equivalent exists; unsupported ones throw |
+| Library materials |   ⚡   | mapped onto the compat material surface where a Lite equivalent exists; unsupported ones throw |
 
 > Specifiers outside the supported surface (e.g. `@babylonjs/gui`,
 > `@babylonjs/inspector`) are left untouched by the bundler plugins and resolve to

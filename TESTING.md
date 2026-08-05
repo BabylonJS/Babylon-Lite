@@ -90,9 +90,21 @@ Requires `BROWSERSTACK_USERNAME` and `BROWSERSTACK_ACCESS_KEY` (set in
 `.env.local` or as environment variables). Azure Pipelines gets these from the
 `BabylonJS-BrowserStack` variable group.
 
+The cloud parity config connects to remote Chrome **directly over CDP**
+(`wss://cdp.browserstack.com/playwright`) — it does **not** use
+`browserstack-node-sdk`. Each Playwright worker is its own BrowserStack session,
+so specs shard across `CIWORKERS` parallel cloud browsers. The local Vite dev
+server is exposed to the remote browser through a BrowserStack Local tunnel
+started by the config's `globalSetup` (`config/browserstack-local-tunnel.ts`).
+
 ```sh
 pnpm build:bundle-scenes
+
+# One session (bare invocation never over-claims capacity):
 pnpm test:parity-cloud
+
+# Shard across up to N sessions (falls back to fewer when the plan is busy):
+BSTACK_SESSIONS_REQUIRED=2 bash scripts/browserstack-wait.sh pnpm test:parity-cloud
 ```
 
 ### Golden References
@@ -218,6 +230,28 @@ pnpm test:bundle-size
 ---
 
 ## BrowserStack Configuration
+
+Two jobs use BrowserStack differently:
+
+| Job             | How it connects                                  | Config                                     |
+| --------------- | ------------------------------------------------ | ------------------------------------------ |
+| Parity (Cloud)  | Direct **CDP** (no SDK), sharded across sessions | `config/playwright.parity-cloud.config.ts` |
+| Perf Regression | `browserstack-node-sdk` (SDK-managed tunnel)     | `config/browserstack.yml`                  |
+
+### Parity (CDP)
+
+| Setting           | Value                                                 |
+| ----------------- | ----------------------------------------------------- |
+| Platform          | macOS Sonoma                                          |
+| Browser           | Chrome latest                                         |
+| Parallel sessions | Up to `BSTACK_SESSIONS_REQUIRED` (CI default 2)       |
+| Local tunnel      | `browserstack-local`, started by config `globalSetup` |
+
+`scripts/browserstack-wait.sh` polls the BrowserStack plan, grabs up to the
+requested number of sessions (falling back to fewer when busy), and exports
+`CIWORKERS` so Playwright shards specs across exactly that many cloud browsers.
+
+### Perf (SDK)
 
 **Config file:** `config/browserstack.yml`
 

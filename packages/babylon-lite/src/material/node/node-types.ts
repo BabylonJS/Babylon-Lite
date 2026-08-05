@@ -226,6 +226,10 @@ export interface NodeEmitContext {
     readonly temp: (state: NodeBuildState, prefix?: string) => string;
     /** Cast a typed expression to a target WGSL type when the shapes differ. */
     readonly cast: (value: NodeExpr, target: NodeValueType) => NodeExpr;
+    /** Sanitize a block/input name for use as a WGSL identifier. */
+    readonly sanitize: (name: string) => string;
+    /** Map Babylon.js connection-point flags to Lite's node value types. */
+    readonly bjsTypeToNodeType: (type: number, source?: string) => NodeValueType;
     /** Access the surrounding graph (so emitters can find upstream blocks). */
     readonly graph: NodeGraph;
     /** @internal */

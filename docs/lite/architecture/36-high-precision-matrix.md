@@ -1,11 +1,12 @@
 # Module: High-Precision Matrix (HPM)
+
 > Package paths: `packages/babylon-lite/src/math/_matrix-allocator.ts`, `packages/babylon-lite/src/math/_mat4-storage-f64.ts`, `packages/babylon-lite/src/math/pack-mat4-into-f32.ts`
 
 ## Purpose
 
 High-Precision Matrix (HPM) is the optional Float64 backing for `Mat4`. When the engine is created with `useHighPrecisionMatrix: true`, every matrix allocation on the page returns `Float64Array(16)` instead of `Float32Array(16)`. CPU-side matrix composition (parent-chain world matrices, lookAt, inverse) is then done in F64, which preserves sub-unit precision at large coordinates (~1e5+ from origin) where F32 quantization becomes visible. The single F64→F32 down-cast happens at one explicit boundary — `packMat4IntoF32` — when the matrix is written into a GPU uniform buffer.
 
-HPM is the substrate that Large World Rendering (`35-large-world-rendering.md`) builds on: floating-origin subtracts the eye position from the world translation in F64 *before* the F32 store, recovering the small remainder at full precision.
+HPM is the substrate that Large World Rendering (`35-large-world-rendering.md`) builds on: floating-origin subtracts the eye position from the world translation in F64 _before_ the F32 store, recovering the small remainder at full precision.
 
 ## Public API Surface
 
@@ -128,9 +129,9 @@ The 6 mesh-world callsites pass `_foOffset` as the 5th argument (the scene's `_f
 
 ## Files / size
 
-| File | Purpose |
-|------|---------|
-| `math/_matrix-allocator.ts` (~40 lines) | Process-global lazy-init allocator + install hook |
-| `math/_mat4-storage-f64.ts` (~25 lines) | F64 allocator function + build tag |
+| File                                     | Purpose                                            |
+| ---------------------------------------- | -------------------------------------------------- |
+| `math/_matrix-allocator.ts` (~40 lines)  | Process-global lazy-init allocator + install hook  |
+| `math/_mat4-storage-f64.ts` (~25 lines)  | F64 allocator function + build tag                 |
 | `math/pack-mat4-into-f32.ts` (~60 lines) | Single GPU upload boundary with optional FO offset |
-| `math/types.ts` (Mat4, Mat4Storage) | Opaque branded `Mat4` + raw `Mat4Storage` union |
+| `math/types.ts` (Mat4, Mat4Storage)      | Opaque branded `Mat4` + raw `Mat4Storage` union    |

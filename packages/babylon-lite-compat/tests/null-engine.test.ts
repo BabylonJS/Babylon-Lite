@@ -4,6 +4,9 @@ import { NullEngine, WebGPUEngine, AbstractEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
 import { Animation } from "../src/animations/animation";
 import { Color3, Color4 } from "../src/math/color";
+import { LiteCompatError } from "../src/error";
+import { MeshBuilder } from "../src/meshes/meshes";
+import { stepScene } from "babylon-lite";
 
 /**
  * The headless `NullEngine` runs scene logic with no GPU device — a deviceless
@@ -20,6 +23,16 @@ describe("NullEngine (headless)", () => {
         expect(engine.isWebGPU).toBe(true);
     });
 
+    it("throws LiteCompatError for the MSAA / alpha-to-coverage engine APIs (no Lite backing)", () => {
+        const engine = new NullEngine();
+        expect(() => engine.currentSampleCount).toThrow(LiteCompatError);
+        expect(() => engine.currentSampleCount).toThrow(/currentSampleCount/);
+        expect(() => engine.getAlphaToCoverage()).toThrow(LiteCompatError);
+        expect(() => engine.getAlphaToCoverage()).toThrow(/getAlphaToCoverage/);
+        expect(() => engine.setAlphaToCoverage(true)).toThrow(LiteCompatError);
+        expect(() => engine.setAlphaToCoverage(true)).toThrow(/setAlphaToCoverage/);
+    });
+
     it("constructs a Scene with no GPU context", () => {
         const engine = new NullEngine();
         const scene = new Scene(engine);
@@ -28,6 +41,58 @@ describe("NullEngine (headless)", () => {
         // registries and animation surface still work.
         expect(scene.cameras).toEqual([]);
         expect(scene.dispose()).toBeUndefined();
+    });
+
+    it("backs the scene with a real Lite context (no frame-graph render task)", () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        // The scene is a genuine Lite SceneContext (device-less), not a stub: it owns a
+        // frame graph and a before-render callback list, so Lite drives the simulation.
+        expect(scene._lite.surface).toBe(engine._lite);
+        expect(Array.isArray(scene._lite._beforeRender)).toBe(true);
+        expect(scene._lite._beforeRender.length).toBeGreaterThan(0);
+        // `defaultRenderTask: false` → no render task was appended to the frame graph.
+        expect(scene._lite._frameGraph._tasks.length).toBe(0);
+        scene.dispose();
+    });
+
+    it("forwards independent box dimensions to Babylon Lite", () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        (engine._lite as unknown as { _device: GPUDevice })._device = {
+            createBuffer: ({ size }: GPUBufferDescriptor) => {
+                const mapped = new ArrayBuffer(Number(size));
+                return {
+                    getMappedRange: () => mapped,
+                    unmap: () => undefined,
+                    destroy: () => undefined,
+                } as unknown as GPUBuffer;
+            },
+        } as unknown as GPUDevice;
+        const box = MeshBuilder.CreateBox("panel", { width: 598, height: 18, depth: 530 }, scene);
+        const bounds = box.getBoundingInfo();
+
+        expect(bounds.minimum.asArray()).toEqual([-299, -9, -265]);
+        expect(bounds.maximum.asArray()).toEqual([299, 9, 265]);
+        scene.dispose();
+    });
+
+    it("fires onBeforeRenderObservable when Lite steps the headless scene", () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        let fired = 0;
+        let seenDelta = 0;
+        scene.onBeforeRenderObservable.add(() => {
+            fired++;
+            seenDelta = engine.getDeltaTime();
+        });
+        // Advancing via Lite's `stepScene` (what `runRenderLoop` calls per frame) must
+        // run the scene's before-render callbacks — proving the simulation is Lite-driven.
+        stepScene(engine._lite, scene._lite, 32);
+        stepScene(engine._lite, scene._lite, 32);
+        expect(fired).toBe(2);
+        expect(seenDelta).toBe(32);
+        scene.dispose();
     });
 
     it("defaults clearColor alpha to 1 when assigned a Color3", () => {

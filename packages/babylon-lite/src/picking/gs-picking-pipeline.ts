@@ -27,14 +27,15 @@ import type { EngineContext } from "../engine/engine.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import { applyGsFragments } from "../mesh/GaussianSplatting/gaussian-splatting-pipeline.js";
 import { gsGpuPickingFragment, encodeIdToColor } from "../mesh/GaussianSplatting/gs-gpu-picking-fragment.js";
-import { getPickingSceneBGL } from "./picking-pipeline.js";
+import { getPickingSceneBGL } from "./picking-scene-bgl.js";
 import { getRenderTargetSize } from "../engine/engine.js";
 import { getViewMatrix, getProjectionMatrix } from "../camera/camera.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import type { PickContributor, PickPassContext } from "./pick-contributor.js";
 
 interface GsPickingCache {
     device: GPUDevice;
-    pipeline: GPURenderPipeline;
+    pipelines: Map<string, GPURenderPipeline>;
     meshBGL: GPUBindGroupLayout;
     pickingBGL: GPUBindGroupLayout;
     /** Shared "pick scene" UBO holding the 4x4 pickMatrix (set per pick). */
@@ -44,6 +45,9 @@ interface GsPickingCache {
 }
 
 let _cache: GsPickingCache | null = null;
+
+/** Scratch pick matrix, reused across GS pick draws (recomputed per draw from the pick pixel). */
+const _gsPickMx = new F32(16);
 
 /** Build the GS picking WGSL as a self-contained template literal.
  *
@@ -63,7 +67,7 @@ let _cache: GsPickingCache | null = null;
  *  goes through `minifyTemplateWgsl` (preserves block comments) in the
  *  bundle pipeline, so the slot markers survive minification.
  */
-function buildPickingWgsl(): string {
+function buildPickingWgsl(detailed: boolean): string {
     const wgsl = /* wgsl */ `
 struct GsPickScene { pickMatrix: mat4x4<f32> };
 @group(0) @binding(0) var<uniform> gsPickScene: GsPickScene;
@@ -168,7 +172,7 @@ fn vs(@location(0) corner: vec2<f32>, @location(1) splatIndex: f32) -> VOut {
 }
 
 /*GS_FRAGMENT_DEFINITIONS*/
-struct FsOut { @location(0) color: vec4<f32>, @location(1) depth: vec4<f32> };
+struct FsOut { @location(0) color: vec4<f32>, @location(1) depth: f32${detailed ? ", @location(2) detail: vec4u" : ""} };
 @fragment
 fn fs(in: VOut) -> FsOut {
   /*GS_FRAGMENT_MAIN_BEGIN*/
@@ -182,7 +186,7 @@ fn fs(in: VOut) -> FsOut {
   }
   /*GS_FRAGMENT_BEFORE_FRAGCOLOR*/
   /*GS_FRAGMENT_MAIN_END*/
-  return FsOut(finalColor, vec4<f32>(in.pos.z, 0.0, 0.0, 0.0));
+  return FsOut(finalColor, in.pos.z${detailed ? ", vec4u(0xffffffffu, 0u, 0u, 0u)" : ""});
 }
 `;
     return applyGsFragments(wgsl, [gsGpuPickingFragment]);
@@ -208,10 +212,28 @@ function getCache(engine: EngineContext): GsPickingCache {
         label: "gs-picking-pick-bgl",
         entries: [{ binding: 0, visibility: SS.FRAGMENT, buffer: { type: "uniform" } }],
     });
-    const module = device.createShaderModule({ label: "gs-picking-shader", code: buildPickingWgsl() });
+    const pickMatrixUbo = device.createBuffer({ size: 64, usage: BU.UNIFORM | BU.COPY_DST, label: "gs-picking-scene-ubo" });
+    const sceneBG = device.createBindGroup({
+        label: "gs-picking-scene-bg",
+        layout: getPickingSceneBGL(engine),
+        entries: [{ binding: 0, resource: { buffer: pickMatrixUbo } }],
+    });
+    _cache = { device, pipelines: new Map(), meshBGL, pickingBGL, pickMatrixUbo, sceneBG };
+    return _cache;
+}
+
+function getPickingPipeline(engine: EngineContext, detailed: boolean): GPURenderPipeline {
+    const cache = getCache(engine);
+    const key = detailed ? "detailed" : "basic";
+    const cached = cache.pipelines.get(key);
+    if (cached) {
+        return cached;
+    }
+    const device = engine._device;
+    const module = device.createShaderModule({ label: `gs-picking-${key}-shader`, code: buildPickingWgsl(detailed) });
     const pipeline = device.createRenderPipeline({
-        label: "gs-picking-pipeline",
-        layout: device.createPipelineLayout({ bindGroupLayouts: [getPickingSceneBGL(engine), meshBGL, pickingBGL] }),
+        label: `gs-picking-${key}-pipeline`,
+        layout: device.createPipelineLayout({ bindGroupLayouts: [getPickingSceneBGL(engine), cache.meshBGL, cache.pickingBGL] }),
         vertex: {
             module,
             entryPoint: "vs",
@@ -223,20 +245,14 @@ function getCache(engine: EngineContext): GsPickingCache {
         fragment: {
             module,
             entryPoint: "fs",
-            targets: [{ format: "rgba8unorm" }, { format: "r32float" }],
+            targets: detailed ? [{ format: "rgba8unorm" }, { format: "r32float" }, { format: "rgba32uint" }] : [{ format: "rgba8unorm" }, { format: "r32float" }],
         },
         primitive: { topology: "triangle-list", cullMode: "none" },
         depthStencil: { format: "depth24plus", depthCompare: "less", depthWriteEnabled: true },
         multisample: { count: 1 },
     });
-    const pickMatrixUbo = device.createBuffer({ size: 64, usage: BU.UNIFORM | BU.COPY_DST, label: "gs-picking-scene-ubo" });
-    const sceneBG = device.createBindGroup({
-        label: "gs-picking-scene-bg",
-        layout: getPickingSceneBGL(engine),
-        entries: [{ binding: 0, resource: { buffer: pickMatrixUbo } }],
-    });
-    _cache = { device, pipeline, meshBGL, pickingBGL, pickMatrixUbo, sceneBG };
-    return _cache;
+    cache.pipelines.set(key, pipeline);
+    return pipeline;
 }
 
 /** Write a 4x4 pickMatrix into the shared scene UBO and bind group 0 on `pass`. */
@@ -314,10 +330,9 @@ export function drawGsForPicking(
     res: GsPickMeshResources,
     pickId: number,
     targetWidth: number,
-    targetHeight: number
+    targetHeight: number,
+    detailed = false
 ): void {
-    const cache = getCache(engine);
-
     // ── Per-mesh UBO ────────────────────────────────────────────────
     const cam = scene.camera;
     if (!cam) {
@@ -349,7 +364,7 @@ export function drawGsForPicking(
     res.pickingCpu[3] = 0;
     engine._device.queue.writeBuffer(res.pickingUbo, 0, res.pickingCpu.buffer, 0, 16);
 
-    pass.setPipeline(cache.pipeline);
+    pass.setPipeline(getPickingPipeline(engine, detailed));
     pass.setBindGroup(1, res.meshBG);
     pass.setBindGroup(2, res.pickingBG);
     pass.setVertexBuffer(0, mesh._gs._quadBuffer);
@@ -358,14 +373,24 @@ export function drawGsForPicking(
     pass.drawIndexed(6, mesh.vertexCount);
 }
 
+/** Draw one GS mesh into the shared pick pass as a pick contributor: (re)binds the GS pick
+ *  matrix at group 0, then issues the pick draw with id `baseId`. The GS pipeline zooms its own
+ *  clip-space output onto the pick pixel, so it rebinds group 0 — the next contributor must
+ *  rebind what it needs (billboards rebind the mesh pick VP). */
+export function drawGsMeshForPicking(ctx: PickPassContext, mesh: GaussianSplattingMesh, res: GsPickMeshResources, baseId: number): void {
+    computeGsPickMatrix(_gsPickMx, ctx.px, ctx.py, ctx.w, ctx.h);
+    gsPickWritePickMatrixAndBind(ctx.pass, ctx.engine, _gsPickMx);
+    drawGsForPicking(ctx.pass, ctx.engine, ctx.scene, mesh, res, baseId, ctx.w, ctx.h, ctx.detailed);
+}
+
 /** Compute the pickMatrix for GS picking — same matrix `computePickVP` builds,
  *  but applied to the clip-space output of the GS shader rather than the world.
  *
- *  Maps canvas-NDC (px, py) ↦ (0, 0), and scales by (w, h) so a single canvas
+ *  Maps the exact canvas sample coordinate ↦ (0, 0), and scales by (w, h) so a single canvas
  *  pixel covers the full 1×1 pick render target. */
-export function computeGsPickMatrix(out: Float32Array, px: number, py: number, w: number, h: number): void {
-    const ndcX = (2 * (px + 0.5)) / w - 1;
-    const ndcY = 1 - (2 * (py + 0.5)) / h;
+export function computeGsPickMatrix(out: Float32Array, sampleX: number, sampleY: number, w: number, h: number): void {
+    const ndcX = (2 * sampleX) / w - 1;
+    const ndcY = 1 - (2 * sampleY) / h;
     // column-major mat4
     out[0] = w;
     out[1] = 0;
@@ -383,4 +408,30 @@ export function computeGsPickMatrix(out: Float32Array, px: number, py: number, w
     out[13] = -ndcY * h;
     out[14] = 0;
     out[15] = 1;
+}
+
+/** Build the pick contributor for one GS mesh (one pick id). The picker calls this once (via the pick
+ *  source registered by the GS pipeline) and reuses the result, so the pick GPU resources live in
+ *  this closure and free in `dispose`. */
+export function createPickContributor(mesh: GaussianSplattingMesh): PickContributor {
+    let res: GsPickMeshResources | null = null;
+    return {
+        draw(ctx, baseId) {
+            if (mesh.visible === false) {
+                return baseId + 1;
+            }
+            res ??= createGsPickMeshResources(ctx.engine, mesh);
+            drawGsMeshForPicking(ctx, mesh, res, baseId);
+            return baseId + 1;
+        },
+        resolve(info) {
+            info.pickedMesh = mesh;
+        },
+        dispose() {
+            if (res) {
+                disposeGsPickMeshResources(res);
+                res = null;
+            }
+        },
+    };
 }

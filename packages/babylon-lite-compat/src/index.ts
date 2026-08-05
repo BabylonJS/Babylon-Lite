@@ -60,11 +60,12 @@ export { Light, HemisphericLight, DirectionalLight, PointLight, SpotLight } from
 
 // ─── Meshes ──────────────────────────────────────────────────────────
 export { Mesh, AbstractMesh, TransformNode, GroundMesh, InstancedMesh, VertexData, VertexBuffer, MeshBuilder } from "./meshes/meshes.js";
-export { CreateBox, CreateSphere, CreateGround, CreatePlane, CreateCylinder, CreateTorus, CreateDisc } from "./meshes/meshes.js";
+export { CreateBox, CreateSphere, CreateGround, CreatePlane, CreateCylinder, CreateTorus, CreateDisc, CreateTiledBox, CreateTiledPlane } from "./meshes/meshes.js";
 export { CSG, CSG2, InitializeCSG2Async } from "./meshes/csg.js";
 export { MeshoptCompression } from "./meshes/compression.js";
 export { MorphTarget, MorphTargetManager } from "./morph/morph.js";
 export { GaussianSplattingMesh } from "./meshes/gaussian-splatting.js";
+export type { ISafeOrbitCameraLimits } from "./meshes/gaussian-splatting.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export {
@@ -81,7 +82,15 @@ export {
 } from "./materials/materials.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
-export { BaseTexture, Texture, RawTexture, DynamicTexture, CubeTexture, HDRCubeTexture, RenderTargetTexture } from "./textures/textures.js";
+export { BaseTexture, Texture, RawTexture, RawTexture3D, DynamicTexture, CubeTexture, HDRCubeTexture, RenderTargetTexture } from "./textures/textures.js";
+export {
+    RawTexture2DArray,
+    UploadImageToTexture2DArrayLayer,
+    LoadImageToTexture2DArrayLayerAsync,
+    CreateTexture2DArrayFromImageUrlsAsync,
+    CreateTexture2DArrayFromKTX2Async,
+} from "./textures/raw-texture-2d-array.js";
+export type { IUploadImageToTexture2DArrayLayerOptions, ICreateTexture2DArrayFromImageUrlsOptions, ICreateTexture2DArrayFromKTX2Options } from "./textures/raw-texture-2d-array.js";
 
 // ─── Loading ─────────────────────────────────────────────────────────
 export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync } from "./loading/scene-loader.js";
@@ -160,6 +169,62 @@ export {
     ActionManagerTriggers,
 } from "./actions/actions.js";
 
+// ─── Audio (AudioV2) ─────────────────────────────────────────────────
+export { SoundState, AudioParameterRampShape, SpatialAudioAttachmentType } from "./audio/audio-enums.js";
+export type { AudioAnalyzerFFTSizeType, AudioEngineV2State, IAudioParameterRampOptions } from "./audio/audio-enums.js";
+export {
+    AbstractAudioNode,
+    AbstractNamedAudioNode,
+    AbstractAudioOutNode,
+    AbstractAudioBus,
+    AudioBus,
+    MainAudioBus,
+    AbstractSoundSource,
+    SoundSource,
+    AbstractSound,
+    StaticSound,
+    StreamingSound,
+    StaticSoundBuffer,
+    AudioEngineV2,
+    AbstractSpatialAudio,
+    AbstractSpatialAudioListener,
+    AbstractStereoAudio,
+    AbstractAudioAnalyzer,
+    CreateAudioEngineAsync,
+    CreateSoundAsync,
+    CreateSoundBufferAsync,
+    CreateStreamingSoundAsync,
+    CreateAudioBusAsync,
+    CreateMainAudioBusAsync,
+    CreateSoundSourceAsync,
+    CreateMicrophoneSoundSourceAsync,
+    LastCreatedAudioEngine,
+    OnAudioEngineV2CreatedObservable,
+} from "./audio/audio.js";
+export type {
+    PrimaryAudioBus,
+    StaticSoundSource,
+    SpatialNodeLike,
+    IAudioNodeNameChange,
+    IAudioEngineV2Options,
+    IWebAudioEngineOptions,
+    IVolumeAudioOptions,
+    IAudioAnalyzerOptions,
+    IStereoAudioOptions,
+    ISpatialAudioOptions,
+    IStaticSoundBufferOptions,
+    IAbstractSoundOptions,
+    IStaticSoundOptions,
+    IStaticSoundPlayOptions,
+    IStaticSoundStopOptions,
+    IStaticSoundCloneOptions,
+    IStreamingSoundOptions,
+    IStreamingSoundPlayOptions,
+    IAudioBusOptions,
+    IMainAudioBusOptions,
+    ISoundSourceOptions,
+} from "./audio/audio.js";
+
 // ─── Known but unsupported (throw LiteCompatError on use) ─────────────
 export {
     MultiMaterial,
@@ -177,8 +242,36 @@ export {
     EdgesRenderer,
     OutlineRenderer,
     MirrorTexture,
+    HtmlTexture,
+    HtmlInteractionManager,
+    HtmlRaycastInteractionManager,
+    IsHtmlInCanvasUploadSupported,
+    UploadHtmlElementToTexture,
+    ComputeOverlayCssTransform,
+    GetElementPixelFromUv,
+    IsHtmlInCanvasSupportedNatively,
+    InstallHtmlInCanvasPolyfill,
+    UninstallHtmlInCanvasPolyfill,
     Sound,
+    PointerDragBehavior,
+    BaseSixDofDragBehavior,
+    SixDofDragBehavior,
+    MultiPointerScaleBehavior,
+    AttachToBoxBehavior,
+    FadeInOutBehavior,
+    SurfaceMagnetismBehavior,
+    FollowBehavior,
+    HandConstraintBehavior,
+    InterpolatingBehavior,
+    GeospatialClippingBehavior,
     SceneSerializer,
+} from "./unsupported/unsupported-apis.js";
+export type {
+    IHtmlTextureOptions,
+    IHtmlInteractionManagerOptions,
+    IHtmlRaycastInteractionManagerOptions,
+    IHtmlInCanvasPolyfillModule,
+    IInstallHtmlInCanvasPolyfillOptions,
 } from "./unsupported/unsupported-apis.js";
 export {
     Skeleton,
@@ -199,9 +292,7 @@ export {
     FxaaPostProcess,
     SSAO2RenderingPipeline,
     ParticleHelper,
-    ParticleSystemSet,
     PointsCloudSystem,
-    HavokPlugin,
     PhysicsAggregate,
     PhysicsBody,
     PhysicsShape,
@@ -219,3 +310,8 @@ export {
     VirtualJoystick,
     SceneOptimizer,
 } from "./unsupported/unsupported-extended.js";
+
+export { HavokPlugin, PhysicsEngine, PhysicsShapeType, PhysicsMotionType, PhysicsPrestepType, PhysicsConstraintType } from "./physics/physics.js";
+
+// ─── Node Particle Editor (NPE) ──────────────────────────────────────
+export { NodeParticleSystemSet, ParticleSystemSet } from "./particles/node-particle-system-set.js";

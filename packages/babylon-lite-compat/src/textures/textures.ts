@@ -8,8 +8,17 @@
  * `Texture.LoadAsync`) so the GPU handle is present when the material binds.
  */
 
-import { loadTexture2D, loadBasisTexture2D, loadKtxTexture2D, createTexture2DFromPixels, updateTexture2DFromPixels } from "babylon-lite";
-import type { Texture2D, Texture2DOptions, EngineContext } from "babylon-lite";
+import {
+    loadTexture2D,
+    loadBasisTexture2D,
+    loadKtxTexture2D,
+    createTexture2DFromPixels,
+    updateTexture2DFromPixels,
+    createTexture3DFromPixels,
+    createDynamicTexture,
+    updateDynamicTexture,
+} from "babylon-lite";
+import type { Texture2D, Texture2DOptions, EngineContext, Texture3D, DynamicTexture2D } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
@@ -66,8 +75,45 @@ export abstract class BaseTexture {
     /** @internal The underlying Lite texture handle. Undefined until the async load resolves. */
     public _lite: Texture2D | undefined;
 
+    /** @internal One-shot listeners fired when the GPU handle first resolves (see {@link _onReady}). */
+    private _readyListeners: Array<() => void> | undefined;
+
     public getClassName(): string {
         return "BaseTexture";
+    }
+
+    /**
+     * @internal Register a callback fired once this texture's GPU handle resolves.
+     * Owning compat materials use it to rebind and rebuild once an asynchronously
+     * loaded texture becomes available. Fires immediately if the handle already
+     * exists; otherwise queues until {@link _notifyReady}. One-shot per listener.
+     */
+    public _onReady(listener: () => void): void {
+        if (this._lite) {
+            listener();
+            return;
+        }
+        (this._readyListeners ??= []).push(listener);
+    }
+
+    /** @internal Fire and clear the readiness listeners (called by subclasses once `_lite` resolves). */
+    protected _notifyReady(): void {
+        const listeners = this._readyListeners;
+        if (listeners) {
+            this._readyListeners = undefined;
+            for (const listener of listeners) {
+                listener();
+            }
+        }
+    }
+
+    /**
+     * Babylon.js `BaseTexture.getInternalTexture()` — the backend texture handle. Babylon.js
+     * returns an `InternalTexture`; the compat layer's equivalent is the Lite texture handle,
+     * which is what the compat engine's texture methods accept.
+     */
+    public getInternalTexture(): Texture2D | null {
+        return this._lite ?? null;
     }
 
     public abstract whenReadyAsync(): Promise<void>;
@@ -80,6 +126,7 @@ export abstract class BaseTexture {
 
 export class Texture extends BaseTexture {
     private readonly _ready: Promise<void>;
+    private _onLoadObservable: Observable<Texture> | undefined;
     /** Babylon.js sampling-mode constants (numeric parity). */
     public static readonly NEAREST_SAMPLINGMODE = 1;
     public static readonly BILINEAR_SAMPLINGMODE = 2;
@@ -151,8 +198,14 @@ export class Texture extends BaseTexture {
 
         this._ready = loadCompatTexture(engine, url, loadOpts).then((tex) => {
             this._lite = tex;
-            if (onLoad) {
-                onLoad();
+            try {
+                this._notifyLoadObservable();
+                if (onLoad) {
+                    onLoad();
+                }
+            } finally {
+                // Rebuild after onLoad has configured UV scale and related fields.
+                this._notifyReady();
             }
         });
         // Let the scene await this load before it builds renderables, so the GPU
@@ -190,6 +243,25 @@ export class Texture extends BaseTexture {
 
     public override whenReadyAsync(): Promise<void> {
         return this._ready;
+    }
+
+    /** Babylon.js `Texture.onLoadObservable`, allocated only when code subscribes. */
+    public get onLoadObservable(): Observable<Texture> {
+        let observable = this._onLoadObservable;
+        if (!observable) {
+            observable = new Observable<Texture>(undefined, true);
+            this._onLoadObservable = observable;
+            if (this.isReady()) {
+                observable.notifyObservers(this);
+            }
+        }
+        return observable;
+    }
+
+    private _notifyLoadObservable(): void {
+        if (this._onLoadObservable) {
+            this._onLoadObservable.notifyObservers(this);
+        }
     }
 
     /** Babylon.js `BaseTexture.isReady()` — true once the GPU handle has resolved. */
@@ -240,9 +312,98 @@ export class RawTexture extends BaseTexture {
 }
 
 /**
+ * Babylon.js `RawTexture3D` — a volumetric texture created from raw RGBA8 pixel
+ * bytes (the common case being a colour-grading LUT / colour cube). Backed by
+ * Babylon Lite's `createTexture3DFromPixels`; the GPU handle is available
+ * synchronously after construction.
+ *
+ * Babylon Lite's 3D-texture path is RGBA8-only, so the `format` argument is
+ * recorded for API parity but the upload always treats `data` as tightly-packed
+ * `width * height * depth * 4` RGBA bytes (x fastest, then y, then z).
+ */
+export class RawTexture3D extends BaseTexture {
+    private readonly _scene: Scene;
+    /** Babylon.js `RawTexture3D.is3D` — always true for a 3D texture. */
+    public readonly is3D = true;
+
+    public constructor(
+        data: ArrayBufferView | null,
+        width: number,
+        height: number,
+        depth: number,
+        /** Babylon.js texture format (recorded for parity; Lite uploads RGBA8). */
+        public format: number,
+        scene: Scene,
+        _generateMipMaps = true,
+        _invertY = false,
+        _samplingMode = 3,
+        _textureType?: number,
+        _creationFlags?: number
+    ) {
+        super();
+        this._scene = scene;
+        const bytes = toRgbaBytes(data, width, height, depth);
+        this._lite = createTexture3DFromPixels(scene.getEngine()._lite, bytes, width, height, depth) as Texture3D;
+    }
+
+    public override getClassName(): string {
+        return "RawTexture3D";
+    }
+
+    /** Gets the width of the texture. */
+    public get width(): number {
+        return (this._lite as Texture3D | undefined)?.width ?? 0;
+    }
+
+    /** Gets the height of the texture. */
+    public get height(): number {
+        return (this._lite as Texture3D | undefined)?.height ?? 0;
+    }
+
+    /** Gets the depth of the texture. */
+    public get depth(): number {
+        return (this._lite as Texture3D | undefined)?.depth ?? 0;
+    }
+
+    /**
+     * Replace the texture's pixel contents. Babylon Lite has no in-place 3D update,
+     * so the volume is re-uploaded (a fresh Lite 3D texture handle).
+     */
+    public update(data: ArrayBufferView): void {
+        const bytes = toRgbaBytes(data, this.width, this.height, this.depth);
+        this._lite = createTexture3DFromPixels(this._scene.getEngine()._lite, bytes, this.width, this.height, this.depth) as Texture3D;
+    }
+
+    public override whenReadyAsync(): Promise<void> {
+        return Promise.resolve();
+    }
+}
+
+/**
+ * @internal Coerce a raw `ArrayBufferView` (or a bare `Uint8Array`) into the tightly
+ * packed `width * height * depth * 4` RGBA8 `Uint8Array` Babylon Lite's raw-pixel
+ * texture factories expect (`createTexture3DFromPixels`,
+ * `createTexture2DArrayFromPixels`). Babylon.js allows a `null` data argument
+ * (an empty texture); Lite requires bytes, so `null` becomes a zero-filled volume.
+ * For a 2D array, `depth` is the layer count.
+ */
+export function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number, depth: number): Uint8Array {
+    const expected = width * height * depth * 4;
+    if (data === null) {
+        return new Uint8Array(expected);
+    }
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    // Keep the result tightly packed: trim any trailing bytes beyond width*height*depth*4
+    // so we never upload unintended data past the volume Lite expects.
+    return bytes.byteLength > expected ? bytes.subarray(0, expected) : bytes;
+}
+
+/**
  * Babylon.js `DynamicTexture` — a canvas-backed texture. Draw into
  * `getContext()`, then call `update()` to upload the canvas pixels to the GPU.
- * Backed by Babylon Lite's pixel-texture path.
+ * Backed by Babylon Lite's `createDynamicTexture` / `updateDynamicTexture`, which
+ * blit the canvas straight to the GPU via `copyExternalImageToTexture` (no
+ * `getImageData` CPU readback).
  */
 export class DynamicTexture extends BaseTexture {
     private readonly _scene: Scene;
@@ -250,6 +411,9 @@ export class DynamicTexture extends BaseTexture {
     private readonly _context: CanvasRenderingContext2D;
     private readonly _width: number;
     private readonly _height: number;
+    /** @internal Branded Lite dynamic texture; aliases `_lite` and is the only
+     *  handle `updateDynamicTexture` accepts. */
+    private readonly _dyn: DynamicTexture2D;
 
     public constructor(name: string, options: { width: number; height: number }, scene: Scene) {
         super();
@@ -265,6 +429,10 @@ export class DynamicTexture extends BaseTexture {
             throw new Error("DynamicTexture: 2D canvas context unavailable.");
         }
         this._context = ctx;
+        // Allocate the GPU texture up front (blank until the first draw+update),
+        // matching Babylon.js where the texture exists immediately after construction.
+        this._dyn = createDynamicTexture(scene.getEngine()._lite, options.width, options.height);
+        this._lite = this._dyn;
     }
 
     public override getClassName(): string {
@@ -292,15 +460,14 @@ export class DynamicTexture extends BaseTexture {
         this.update();
     }
 
-    /** Upload the current canvas pixels to the GPU. */
-    public update(): void {
-        const image = this._context.getImageData(0, 0, this._width, this._height);
-        const data = new Uint8Array(image.data.buffer);
-        if (!this._lite) {
-            this._lite = createTexture2DFromPixels(this._scene.getEngine()._lite, data, this._width, this._height);
-        } else {
-            updateTexture2DFromPixels(this._scene.getEngine()._lite, this._lite, data);
-        }
+    /**
+     * Blit the current canvas pixels straight to the GPU texture (no CPU readback).
+     * @param invertY - Flip V so a top-down canvas samples upright. Default `true` (Babylon.js parity).
+     * @param premulAlpha - Treat the upload as premultiplied alpha. Default `false`.
+     * @param _allowGPUOptimization - Accepted for Babylon.js signature parity; the blit is already GPU-direct, so this is a no-op.
+     */
+    public update(invertY: boolean = true, premulAlpha: boolean = false, _allowGPUOptimization: boolean = false): void {
+        updateDynamicTexture(this._scene.getEngine()._lite, this._dyn, this._canvas, { invertY, premultiplyAlpha: premulAlpha });
     }
 
     public override whenReadyAsync(): Promise<void> {
@@ -324,6 +491,13 @@ export class CubeTexture {
     public name: string;
     public gammaSpace = true;
     public level = 1;
+    /**
+     * @internal Which Lite environment loader the scene should route this handle
+     * through at engine start. Plain `.env`/`.dds` cube maps load via
+     * `loadEnvironment`/`loadDdsEnvironment`; `HDRCubeTexture` overrides this to
+     * `"hdr"` so the scene picks `loadHdrEnvironment`.
+     */
+    public readonly _envLoaderKind: "cube" | "hdr" = "cube";
     /** Fires when the cube map is "ready" (resolved on a microtask in this compat layer). */
     public readonly onLoadObservable = new Observable<CubeTexture>();
     private _ready = false;
@@ -344,13 +518,13 @@ export class CubeTexture {
         // Babylon.js fires onLoad once the cube map is ready; some scenes await it
         // before continuing. We resolve on a microtask since the actual GPU upload
         // is deferred to `loadEnvironment` at engine start.
-        setTimeout(() => {
+        queueMicrotask(() => {
             this._ready = true;
             if (onLoad) {
                 onLoad();
             }
             this.onLoadObservable.notifyObservers(this);
-        }, 0);
+        });
     }
 
     /** Babylon.js `BaseTexture.isReady()`. */
@@ -368,10 +542,62 @@ export class CubeTexture {
     }
 }
 
-/** Babylon.js `HDRCubeTexture` — see {@link CubeTexture}; use native `loadHdrEnvironment`. */
+/**
+ * Babylon.js `HDRCubeTexture` — a Radiance `.hdr` (RGBE) equirectangular panorama
+ * used as an environment / IBL source. Like {@link CubeTexture} this is a
+ * lightweight handle that records the `.hdr` URL; the actual GPU work (equirect →
+ * prefiltered cubemap + irradiance SH + BRDF LUT) happens when it is assigned to
+ * `scene.environmentTexture` and the engine starts, at which point the scene
+ * routes it through Babylon Lite's native `loadHdrEnvironment`.
+ */
 export class HDRCubeTexture {
-    public constructor() {
-        unsupported("HDRCubeTexture", "Use the native `loadHdrEnvironment` API; a standalone HDR cube texture object is not wrapped.");
+    /** Source URL of the `.hdr` panorama. */
+    public readonly url: string;
+    /** Requested cubemap face size (BJS `size`); forwarded to Lite's `faceSize`. */
+    public readonly size: number;
+    /** Babylon.js `coordinatesMode` (skybox = 5). Recorded for API parity. */
+    public coordinatesMode = 0;
+    public name: string;
+    public gammaSpace = true;
+    public level = 1;
+    /** @internal Selects Lite's `loadHdrEnvironment` in the scene's env loader. */
+    public readonly _envLoaderKind: "cube" | "hdr" = "hdr";
+    /** Fires when the HDR environment is "ready" (resolved on a microtask). */
+    public readonly onLoadObservable = new Observable<HDRCubeTexture>();
+    private _ready = false;
+
+    public constructor(
+        url: string,
+        _sceneOrEngine?: unknown,
+        size = 256,
+        _noMipmap?: boolean,
+        _generateHarmonics?: boolean,
+        _gammaSpace?: boolean,
+        _prefilterOnLoad?: boolean,
+        onLoad?: (() => void) | null
+    ) {
+        this.url = url;
+        this.size = size;
+        this.name = url;
+        // Babylon.js fires onLoad once the HDR is decoded + prefiltered; the real
+        // GPU work is deferred to `loadHdrEnvironment` at engine start, so we
+        // resolve the readiness signal on a microtask (matches CubeTexture).
+        queueMicrotask(() => {
+            this._ready = true;
+            if (onLoad) {
+                onLoad();
+            }
+            this.onLoadObservable.notifyObservers(this);
+        });
+    }
+
+    /** Babylon.js `BaseTexture.isReady()`. */
+    public isReady(): boolean {
+        return this._ready;
+    }
+
+    public dispose(): void {
+        // GPU resources are owned by the scene's environment, disposed with the scene.
     }
 }
 

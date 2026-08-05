@@ -17,6 +17,11 @@ const screenX = process.env.SCREEN_X;
 const headless = process.env.HEADLESS === "true";
 const isCI = !!process.env.CI;
 
+// REUSE_BROWSER=true (see tests/lite/parity/parity-fixtures.ts) makes every scene
+// parity spec in a worker share ONE reused page/window instead of opening a fresh
+// browser window per test. In headed local runs this keeps a single window in the
+// background rather than popping hundreds of windows to the foreground.
+
 // Tests run their OWN isolated Vite dev server on a dedicated port — NOT the
 // interactive lab (5174). Sharing that server made the lab unresponsive during
 // test runs (its single Node event loop was busy transforming/serving scene
@@ -34,6 +39,9 @@ export default defineConfig({
     timeout: 60_000,
     retries: 2,
     workers: 2,
+    // On CI, bail on the first failing test (after its retries) to save time;
+    // locally we keep running so devs see every failure in one pass.
+    maxFailures: isCI ? 1 : undefined,
     use: {
         channel: "chrome",
         headless,

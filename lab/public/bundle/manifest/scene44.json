@@ -1,0 +1,10 @@
+{
+  "rawKB": 50.5,
+  "gzipKB": 20.4,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene44-standard-renderable-D7O_trHZ.js",
+    "scene44.js"
+  ],
+  "rawBytes": 51708
+}

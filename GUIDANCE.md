@@ -59,6 +59,13 @@
 - Only internal modules (`_gpu`, pipeline builders, renderable builders) may touch GPU handles.
 - Scene setup code in `lab/lite/src/` is the user-facing reference — it must read like a high-level API demo, never like a WebGPU tutorial.
 
+### 4e. One Public Package Entry Point (Critical)
+
+- **`@babylonjs/lite` exposes exactly one package export: `"."`.** Both `packages/babylon-lite/package.json` and the publish-ready package metadata emitted by `packages/babylon-lite/vite.config.ts` must keep `exports` limited to that root entry.
+- **Never add a package subpath export.** When downstream code needs a public value or type, explicitly re-export it by name from `packages/babylon-lite/src/index.ts` and import it from `babylon-lite` (workspace consumers) or `@babylonjs/lite` (published consumers).
+- Root re-exports remain tree-shakable because the package is side-effect-free; alternate package entry points are not required for optional features.
+- `tests/lite/build/public-api-types.test.ts` enforces the root-only export map for both source and emitted package metadata. Do not weaken or bypass that assertion.
+
 ### 4c. Materials Own Shaders (Critical)
 
 - **Shaders are managed by materials, not by the render pipeline.**
@@ -147,14 +154,13 @@ async function main(): Promise<void> {
 ### 0c. Agent Test Commands (Strict)
 
 - **Agents MUST NOT run `pnpm test:perf`.** Performance tests are machine-sensitive and reserved for the user / CI; running them from an agent session wastes time and produces unreliable signal.
-- **Agents run only:** `pnpm build:bundle-scenes` and `pnpm test:parity` (or the individual spec via `pnpm exec playwright test tests/lite/parity/scenes/<spec>.spec.ts`). These cover parity MAD + bundle-size ceilings, which are the agent-enforceable guardrails.
-- **`lab/public/bundle/manifest.json` is MANDATORY on every PR.** After running `pnpm build:bundle-scenes`, the regenerated `lab/public/bundle/manifest.json` (the per-scene runtime-fetched bundle sizes) **must be committed as part of the PR**. This keeps the committed bundle sizes in sync with the code and lets reviewers see bundle-size deltas directly in the diff. A PR that changes runtime code (`packages/babylon-lite/src/**`) or scenes but leaves `manifest.json` stale is incomplete — always rebuild and commit it.
-- `pnpm test` chains build + parity (no perf), which is acceptable.
-- **The parity suite is slow (many minutes). Only run it when the Lite engine changed.** Run `pnpm test` / `pnpm test:parity` **only if you modified `packages/babylon-lite/src/**`** (the engine/runtime). Changes confined to **demos** (`lab/lite/src/demos/**`), **scenes** (`lab/lite/src/scenes/**`), **lab UI**, thumbnails, docs, manifests, or other static lab assets **do not require** running parity or any test suite — they cannot move engine parity. Skip the suites in those cases unless the user explicitly asks.
+- **Agents MUST NOT run all scenes unless the user explicitly requests it.** Do not execute `pnpm test`, full `pnpm test:parity`, or unfiltered `pnpm build:bundle-scenes`; CI owns repository-wide scene coverage.
+- **Use scoped commands:** run individual parity specs with `pnpm exec playwright test tests/lite/parity/scenes/<spec>.spec.ts`, and filter bundle builds with `pnpm exec tsx scripts/build-bundle-scenes.ts --scenes sceneN,sceneM` after `pnpm build:lib` when runtime bytes may change.
+- **The per-scene bundle manifest is MANDATORY for affected runtime scenes.** The bundle-size baseline is **distributed**: one tracked file per scene at `lab/public/bundle/manifest/<scene>.json` (the per-scene runtime-fetched bundle sizes). The single aggregate `lab/public/bundle/manifest.json` is a generated, gitignored artifact — do **not** commit it. Commit the regenerated manifests for the filtered scenes relevant to the change; leave unrelated manifests untouched.
+- **Changes confined to tests, docs, lab UI, thumbnails, or static assets do not require scene bundle or parity runs** unless the user explicitly asks. Use focused unit tests and static checks instead.
 - **Lab-only UI changes do not require parity/test suites.** When a task only changes the lab UI or static lab presentation, do not run parity or other test suites unless explicitly requested; use lightweight static inspection or a lab build only if validation is needed.
-- **Iterate on one scene first.** When working on a specific scene, run only that scene's parity spec during the edit/test loop (e.g. `pnpm exec playwright test tests/lite/parity/scenes/scene36-basis-texture.spec.ts`) instead of the full `pnpm test:parity` suite. This dramatically cuts iteration time. Only run the full suite + `pnpm build:bundle-scenes` as the final guardrail check before declaring success.
+- **Keep final validation scoped too.** Run only the unit tests, filtered bundles, and parity specs affected by the change. Do not add an all-scene "final guardrail"; CI supplies that signal.
 - If perf validation is needed, ask the user to run `pnpm test:perf` locally.
-
 
 ### 1. Live Inspection Tooling (Zero Guesswork)
 
@@ -193,7 +199,6 @@ Hard-won gotchas that have each caused multiple parity failures. Check these fir
 - **Match `loadEnvironment`'s image processing in the BJS reference scene.** `loadEnvironment` enables tone mapping and sets `exposure = 0.8`, `contrast = 1.2` (mirroring BJS `createDefaultEnvironment`). A flat-`clearColor` BJS scene that skips `createDefaultEnvironment` leaves all three at their defaults (tone mapping OFF, 1.0/1.0) — a non-linear mismatch that silently inflates MAD on every IBL-lit model (the dominant residual, ~10-50% darker mid-tones). Set **all three** in the BJS scene: `scene.imageProcessingConfiguration.exposure = 0.8; contrast = 1.2; toneMappingEnabled = true;`. (Tone mapping was the single biggest parity lever on the cx20 scene batch — it dropped multiple scenes from MAD ~1.5 to ~0.01.)
 - **BJS loading overlay leaks into canvas screenshots.** `page.locator("canvas").screenshot()` captures whatever HTML composites over the canvas box, **including Babylon's `babylonjsLoadingDiv` spinner**. A still-fading overlay darkens the whole frame by a scene-dependent amount and inflates MAD (worst on heavy scenes). In BJS reference scenes that import `@babylonjs/core/Loading/loadingScreen` (a required side-effect for some assets), no-op the overlay right after engine init: `engine.displayLoadingUI = function () {};`.
 - **Use the same flat `clearColor` in both engines** for IBL-only test scenes (a buffer clear is pixel-identical across BJS/Lite, unlike a skybox whose projected geometry diverges at arbitrary framings) so the full-image compare passes with no background masking.
-
 
 ### 2. Iterative Scene-Based Evolution
 
@@ -302,7 +307,7 @@ Gallery thumbnails are presentation assets for the lab/pages cards — **not** p
 ### 7b. Lab Bundle Files Panel (per-export tokens)
 
 - After `pnpm build:bundle-scenes`, the lab's **Bundle** tab exposes a **📄 Files** button on every scene card that opens a per-scene breakdown of every chunk, every module, and every **exported symbol (token chip)** that survived tree-shaking, annotated with runtime-loaded vs built-but-not-fetched.
-- Backing data lives in `lab/public/bundle/bundle-info/<scene>.json` (full module + export list) and `lab/public/bundle/manifest.json` (runtime-fetched chunk set per scene).
+- Backing data lives in `lab/public/bundle/bundle-info/<scene>.json` (full module + export list) and the per-scene `lab/public/bundle/manifest/<scene>.json` (runtime-fetched chunk set per scene).
 - **When tasked with reducing bundle size, you MUST consult the bundle files data before proposing changes.** Compare the exported tokens retained for a scene against what the scene's `.ts` file actually imports:
     - Tokens that survive tree-shaking but aren't needed by the scene's features reveal unconditional imports, side-effectful modules, or missing feature gates — these are the real optimization targets.
     - Runtime-loaded chunks whose functionality the scene has explicitly opted out of (e.g. `background-renderable` despite `skipSkybox+skipGround`, `skeleton-*` for a non-skinned GLB) indicate conditional dynamic imports that are missing.

@@ -131,12 +131,16 @@ function getHtmlInputs(): Record<string, string> {
     const liteHtml = readdirSync(resolve(__dirname, "lite"))
         .filter((f) => f.endsWith(".html") && hasBuildableRootScripts(`lite/${f}`))
         .map((f) => [`lite/${f.replace(".html", "")}`, resolve(__dirname, "lite", f)] as const);
+    const glHtml = readdirSync(resolve(__dirname, "gl"))
+        .filter((f) => f.endsWith(".html") && hasBuildableRootScripts(`gl/${f}`))
+        .map((f) => [`gl/${f.replace(".html", "")}`, resolve(__dirname, "gl", f)] as const);
     return Object.fromEntries([
         ["main", resolve(__dirname, "index.html")],
         ...readdirSync(__dirname)
             .filter((f) => f.endsWith(".html") && f !== "index.html" && hasBuildableRootScripts(f))
             .map((f) => [f.replace(".html", ""), resolve(__dirname, f)]),
         ...liteHtml,
+        ...glHtml,
     ]);
 }
 
@@ -177,7 +181,7 @@ function serveReferenceImages(): Plugin {
             server.middlewares.use((req, res, next) => {
                 const url = (req.url ?? "").split("?")[0]; // strip query string
                 const liteHtmlCompat = url.match(
-                    /^\/((?:scene|bundle-scene|bundle-bjs-scene|babylon-ref-scene|bundle-baseline-scene)\d+|demo-[^/]+|dispose-test|leak-test|material-swap-test|picking-test)\.html$/
+                    /^\/((?:scene|bundle-scene|bundle-bjs-scene|babylon-ref-scene|bundle-baseline-scene)\d+|demo-[^/]+|dispose-test|leak-test|material-swap-test|html-texture-test|form3d-test|picking-test|vat-picking-test|billboard-pick-test)\.html$/
                 );
                 if (liteHtmlCompat) {
                     const name = liteHtmlCompat[1];
@@ -196,8 +200,12 @@ function serveReferenceImages(): Plugin {
                         return;
                     }
                 }
-                if (url.startsWith("/reference/lite/") || url.startsWith("/lite/reference/")) {
-                    const refPath = url.startsWith("/lite/reference/") ? `reference/lite/${url.slice("/lite/reference/".length)}` : url.slice(1);
+                // Reference/golden images for either experience:
+                //   /lite/reference/<slug>/<file>  or  /reference/lite/<slug>/<file>  → reference/lite/...
+                //   /gl/reference/<slug>/<file>     or  /reference/gl/<slug>/<file>     → reference/gl/...
+                const refMatch = url.match(/^\/(lite|gl)\/reference\/(.+)$/) ?? url.match(/^\/reference\/(lite|gl)\/(.+)$/);
+                if (refMatch) {
+                    const refPath = `reference/${refMatch[1]}/${refMatch[2]}`;
                     const filePath = resolve(__dirname, "..", refPath);
                     if (existsSync(filePath)) {
                         res.setHeader("Content-Type", "image/png");
@@ -231,12 +239,44 @@ function serveReferenceImages(): Plugin {
                         return;
                     }
                 }
-                if (url === "/perf-manifest.json" || url === "/perf-regression-manifest.json") {
+                if (url === "/perf-manifest.json" || url === "/perf-regression-manifest.json" || url === "/gl/perf-manifest.json" || url === "/gl/perf-regression-manifest.json") {
                     const filePath = resolve(__dirname, "public", url.slice(1));
                     if (existsSync(filePath) && statSync(filePath).isFile()) {
                         res.setHeader("Content-Type", "application/json");
                         res.setHeader("Cache-Control", "no-cache");
                         createReadStream(filePath).pipe(res);
+                        return;
+                    }
+                }
+                // Serve the generated aggregate bundle manifest. The tracked source of
+                // truth is one file per scene under public/bundle/manifest/; the single
+                // aggregate manifest.json is a (gitignored) build output. On a fresh
+                // checkout it hasn't been built yet, so synthesize it on the fly from the
+                // per-scene files so the Bundle tab is populated without a full build.
+                if (url === "/bundle/manifest.json") {
+                    const aggregatePath = resolve(__dirname, "public/bundle/manifest.json");
+                    if (existsSync(aggregatePath) && statSync(aggregatePath).isFile()) {
+                        res.setHeader("Content-Type", "application/json");
+                        res.setHeader("Cache-Control", "no-cache");
+                        createReadStream(aggregatePath).pipe(res);
+                        return;
+                    }
+                    const perSceneDir = resolve(__dirname, "public/bundle/manifest");
+                    if (existsSync(perSceneDir)) {
+                        const files = readdirSync(perSceneDir)
+                            .filter((f) => f.endsWith(".json"))
+                            .sort((a, b) => (parseInt(a.replace(/\D/g, ""), 10) || 0) - (parseInt(b.replace(/\D/g, ""), 10) || 0));
+                        const manifest: Record<string, unknown> = {};
+                        for (const file of files) {
+                            try {
+                                manifest[file.slice(0, -".json".length)] = JSON.parse(readFileSync(resolve(perSceneDir, file), "utf-8"));
+                            } catch {
+                                /* skip malformed per-scene file */
+                            }
+                        }
+                        res.setHeader("Content-Type", "application/json");
+                        res.setHeader("Cache-Control", "no-cache");
+                        res.end(JSON.stringify(manifest));
                         return;
                     }
                 }
@@ -267,7 +307,7 @@ function serveReferenceImages(): Plugin {
                     );
                     return;
                 }
-                if ((url.startsWith("/bundle/") || url.startsWith("/lite/bundle/")) && url.endsWith(".json")) {
+                if ((url.startsWith("/bundle/") || url.startsWith("/lite/bundle/") || url.startsWith("/gl/bundle/")) && url.endsWith(".json")) {
                     const bundlePath = url.startsWith("/lite/bundle/") ? url.slice("/lite/".length) : url.slice(1);
                     const filePath = resolve(__dirname, "public", bundlePath);
                     if (existsSync(filePath) && statSync(filePath).isFile()) {
@@ -298,6 +338,11 @@ function serveReferenceImages(): Plugin {
                         ".wad": "application/octet-stream",
                         ".txt": "text/plain; charset=utf-8",
                         ".md": "text/markdown; charset=utf-8",
+                        // Freeciv tileset grids are plain-text `.spec` / `.tilespec` files read
+                        // via fetch().text(); without an entry here they fall through to the SPA
+                        // HTML fallback and parseSpec chokes on `<!doctype html>`.
+                        ".spec": "text/plain; charset=utf-8",
+                        ".tilespec": "text/plain; charset=utf-8",
                     };
                     const ext = url.slice(url.lastIndexOf(".")).toLowerCase();
                     const assetType = ASSET_TYPES[ext];
@@ -328,7 +373,23 @@ function serveReferenceImages(): Plugin {
                             return null;
                         }
                     };
-                    sig.bundle = mtime(resolve(__dirname, "public/bundle/manifest.json"));
+                    // Newest mtime across the tracked per-scene manifest files, used as a
+                    // fallback when the generated aggregate manifest.json isn't built yet.
+                    const dirNewestMtime = (dir: string): number | null => {
+                        try {
+                            if (!existsSync(dir)) return null;
+                            let newest: number | null = null;
+                            for (const file of readdirSync(dir)) {
+                                if (!file.endsWith(".json")) continue;
+                                const m = mtime(resolve(dir, file));
+                                if (m != null && (newest == null || m > newest)) newest = m;
+                            }
+                            return newest;
+                        } catch {
+                            return null;
+                        }
+                    };
+                    sig.bundle = mtime(resolve(__dirname, "public/bundle/manifest.json")) ?? dirNewestMtime(resolve(__dirname, "public/bundle/manifest"));
                     sig.bundleMaster = mtime(resolve(__dirname, "public/bundle/master-manifest.json"));
                     sig.perf = mtime(resolve(__dirname, "public/perf-manifest.json"));
                     try {
@@ -503,7 +564,31 @@ function tabContentPlugin(): Plugin {
         return { generated: present > 0, mtime, present, total };
     };
 
-    const TARGETS: Record<string, TargetDef> = {
+    const detectParityGl = () => {
+        let present = 0;
+        let total = 0;
+        let mtime: number | null = null;
+        try {
+            const cfgPath = resolve(repoRoot, "scene-config-webgl.json");
+            if (existsSync(cfgPath)) {
+                const cfg = JSON.parse(readFileSync(cfgPath, "utf-8")) as Array<{ slug: string; skipParity?: boolean }>;
+                for (const s of cfg) {
+                    if (s.skipParity) continue;
+                    total++;
+                    const m = mtimeOf(resolve(repoRoot, "reference/gl", s.slug, "test-actual.png"));
+                    if (m != null) {
+                        present++;
+                        mtime = mtime == null ? m : Math.max(mtime, m);
+                    }
+                }
+            }
+        } catch {
+            // ignore
+        }
+        return { generated: present > 0, mtime, present, total };
+    };
+
+    const LITE_TARGETS: Record<string, TargetDef> = {
         parity: { command: "pnpm test:parity", detect: detectParity },
         bundle: { command: "pnpm build:bundle-scenes", detect: fileTarget(resolve(publicDir, "bundle/manifest.json")) },
         demos: { command: "pnpm build:bundle-demos", detect: fileTarget(resolve(publicDir, "bundle/demos-manifest.json")) },
@@ -515,6 +600,44 @@ function tabContentPlugin(): Plugin {
             detect: fileTarget(resolve(publicDir, "perf-regression-manifest.json")),
         },
     };
+
+    // Detect predicate for the GL "Demos" tab. GL demos are static, config-driven
+    // (demos-config-webgl.json) with no build step, so "generated" simply means the
+    // config lists at least one demo. Its Regenerate command runs the cheap GL bundle
+    // build (there is no GL demos-bundle pipeline); the demo cards render from the
+    // static config regardless.
+    const detectDemosGl = () => {
+        try {
+            const cfgPath = resolve(repoRoot, "demos-config-webgl.json");
+            if (existsSync(cfgPath)) {
+                const cfg = JSON.parse(readFileSync(cfgPath, "utf-8")) as unknown[];
+                if (Array.isArray(cfg) && cfg.length > 0) {
+                    return { generated: true, mtime: mtimeOf(cfgPath), present: cfg.length, total: cfg.length };
+                }
+            }
+        } catch {
+            // ignore
+        }
+        return { generated: false, mtime: null, present: 0, total: 0 };
+    };
+
+    // Lite GL experience: parity + perf + bundle + demos + perf-regression all have
+    // GL tooling now. Each target writes under reference/gl/* or lab/public/gl/*:
+    //   parity  → test:parity:gl              → reference/gl/<slug>/test-actual.png
+    //   bundle  → build:bundle-scenes:gl       → lab/public/gl/bundle/manifest.json
+    //   demos   → (static demos-config-webgl)  → cheap GL bundle rebuild on Regenerate
+    //   perf    → test:perf:gl                 → lab/public/gl/perf-manifest.json
+    //   perfreg → test:perf-regression:gl      → lab/public/gl/perf-regression-manifest.json
+    // (perfreg baseline = the Babylon ThinEngine reference, not a prior Lite build.)
+    const GL_TARGETS: Record<string, TargetDef> = {
+        parity: { command: "pnpm test:parity:gl", detect: detectParityGl },
+        bundle: { command: "pnpm build:bundle-scenes:gl", detect: fileTarget(resolve(publicDir, "gl/bundle/manifest.json")) },
+        demos: { command: "pnpm build:bundle-scenes:gl", detect: detectDemosGl },
+        perf: { command: "pnpm test:perf:gl", detect: fileTarget(resolve(publicDir, "gl/perf-manifest.json")) },
+        perfreg: { command: "pnpm test:perf-regression:gl", detect: fileTarget(resolve(publicDir, "gl/perf-regression-manifest.json")) },
+    };
+
+    const targetsFor = (experience: string): Record<string, TargetDef> => (experience === "gl" ? GL_TARGETS : LITE_TARGETS);
 
     type Job = { running: boolean; log: string; done: boolean; ok: boolean; code: number | null; error?: string };
     const jobs: Record<string, Job> = {};
@@ -533,15 +656,21 @@ function tabContentPlugin(): Plugin {
             server.middlewares.use((req, res, next) => {
                 const [path, qs] = (req.url ?? "").split("?");
                 const target = new URLSearchParams(qs ?? "").get("target") ?? "";
+                const experience = new URLSearchParams(qs ?? "").get("experience") === "gl" ? "gl" : "lite";
+                const TARGETS = targetsFor(experience);
+                // Namespace job/lock state per experience so a GL run and a lite run of
+                // the same target (e.g. "perf") never collide. Lite keeps the bare
+                // target key for backwards compatibility.
+                const jobKey = experience === "gl" ? "gl:" + target : target;
 
                 if (path === "/lab-api/gen-status") {
                     const def = TARGETS[target];
                     if (!def) {
-                        json(res, { error: "Unknown target" }, 400);
+                        json(res, { error: experience === "gl" ? `"${target}" is not available for the Lite GL experience.` : "Unknown target" }, 400);
                         return;
                     }
                     const det = def.detect();
-                    const job = jobs[target];
+                    const job = jobs[jobKey];
                     json(res, {
                         generated: det.generated,
                         generating: !!(job && job.running),
@@ -563,16 +692,16 @@ function tabContentPlugin(): Plugin {
                     }
                     const def = TARGETS[target];
                     if (!def) {
-                        json(res, { error: "Unknown target" }, 400);
+                        json(res, { error: experience === "gl" ? `"${target}" is not available for the Lite GL experience.` : "Unknown target" }, 400);
                         return;
                     }
                     if (busy) {
                         json(res, { started: false, error: "A generation is already in progress (" + busy + ")." }, 409);
                         return;
                     }
-                    busy = target;
+                    busy = jobKey;
                     const job: Job = { running: true, log: "", done: false, ok: false, code: null };
-                    jobs[target] = job;
+                    jobs[jobKey] = job;
                     const shellCmd = process.platform === "win32" ? "cmd" : "sh";
                     const shellArgs = process.platform === "win32" ? ["/c", def.command] : ["-c", def.command];
                     const child = spawn(shellCmd, shellArgs, { cwd: repoRoot });
@@ -743,6 +872,10 @@ export default defineConfig({
             // it as first-party code: full HMR + native ?raw WGSL handling.
             // Directory alias so sub-path imports like 'babylon-lite/loader-env/...' work too.
             "babylon-lite": resolve(__dirname, "../packages/babylon-lite/src"),
+            // babylon-lite-gl ships a SINGLE entry (the barrel), so alias the exact
+            // specifier to index.ts — sub-paths are intentionally not resolvable, mirroring
+            // the package's `exports` map and lab/tsconfig.typecheck.json.
+            "babylon-lite-gl": resolve(__dirname, "../packages/babylon-lite-gl/src/index.ts"),
         },
     },
     server: {
@@ -767,12 +900,15 @@ export default defineConfig({
             //   • perf manifests           → single-file writes that force a reload
             ignored: [
                 "**/public/bundle/**",
+                "**/public/gl/bundle/**",
                 "**/public/bundle-baseline/**",
                 "**/public/api-docs/**",
                 "**/public/lite/api-docs/**",
                 "**/public/gl/api-docs/**",
                 "**/public/perf-manifest.json",
                 "**/public/perf-regression-manifest.json",
+                "**/public/gl/perf-manifest.json",
+                "**/public/gl/perf-regression-manifest.json",
                 "**/bundle-baseline-scene*.html",
                 "**/.perf-baseline-worktree/**",
             ],

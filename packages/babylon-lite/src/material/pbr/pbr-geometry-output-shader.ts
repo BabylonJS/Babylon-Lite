@@ -27,12 +27,13 @@
 
 import type { ComposedShader, ShaderFragment, Varying } from "../../shader/fragment-types.js";
 import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
-import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ENV, PBR2_GEOMETRY_OUTPUT, _registerPbrExt, type _PbrBindCtx, type _PbrFragCtx, type PbrExt } from "./pbr-flags.js";
+import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ENV, _registerPbrExt, type _PbrBindCtx, type _PbrFragCtx, type PbrExt } from "./pbr-flags.js";
 import type { createPbrComposer, PbrLightMode } from "./pbr-compose.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
+const PBR2_GEOMETRY_OUTPUT = 1 << 21;
 
 // ─── PBR extension contributing the geometry-params fragment ──────────
 
@@ -188,7 +189,8 @@ export function composePbrGeometryShader(
     vbStrides: MeshVbLayout | undefined,
     vbKey: string,
     attachments: readonly GeometryTextureType[],
-    emitColor: boolean
+    emitColor: boolean,
+    uv2Mask = 0
 ): ComposedShader {
     // Strip PBR_HAS_ALPHA_BLEND: the template's alpha-blend branch returns
     // `finalAlpha = saturate(alpha + luminanceOverAlpha²)` which we don't need
@@ -211,7 +213,8 @@ export function composePbrGeometryShader(
         singleLightType,
         esmShadowDepthCode,
         vbStrides,
-        `${vbKey}:geom:${attachments.join(",")}:${emitColor ? "c" : ""}`
+        `${vbKey}:geom:${attachments.join(",")}:${emitColor ? "c" : ""}`,
+        uv2Mask
     );
 
     const hasIbl = (sceneFeatures & PBR_HAS_ENV) !== 0;

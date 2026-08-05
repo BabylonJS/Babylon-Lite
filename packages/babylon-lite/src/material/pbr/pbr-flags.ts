@@ -22,6 +22,8 @@ export interface _PbrFragCtx {
     readonly _features2: number;
     /** @internal Mesh feature bits, separate from material feature bits. */
     readonly _meshFeatures: number;
+    /** @internal Per-channel UV1 (TEXCOORD_1) selection bitmask (see pbr-material.ts). */
+    readonly _uv2Mask?: number;
     /** @internal */
     readonly _hasIbl: boolean;
     /** @internal */

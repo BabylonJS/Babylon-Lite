@@ -1,5 +1,7 @@
 # Module: Loaders (glTF + .env + HDR + .babylon + Skybox + Splats)
+
 > Package paths:
+>
 > - `packages/babylon-lite/src/loader-gltf/load-gltf.ts` — GLB 2.0 loader
 > - `packages/babylon-lite/src/loader-gltf/gltf-ext-basisu.ts` — glTF `KHR_texture_basisu` feature module
 > - `packages/babylon-lite/src/loader-gltf/gltf-feature-meshopt.ts` + `meshopt-decode.ts` — `EXT_meshopt_compression` feature module + decoder
@@ -7,6 +9,7 @@
 > - `packages/babylon-lite/src/loader-gltf/gltf-feature-xmp.ts` — `KHR_xmp_json_ld` metadata feature module
 > - `packages/babylon-lite/src/loader-gltf/gltf-feature-extras.ts` — `ExtrasAsMetadata` feature module
 > - `packages/babylon-lite/src/loader-gltf/gltf-interleave.ts` — dynamic native interleaved-vertex-buffer support (de-strided CPU copies built lazily on demand)
+> - `packages/babylon-lite/src/loader-gltf/gltf-share.ts` — duplicate-primitive CPU/GPU geometry sharing
 > - `packages/babylon-lite/src/loader-env/load-env.ts` — Babylon .env environment loader
 > - `packages/babylon-lite/src/loader-env/load-dds-env.ts` — DDS cubemap environment loader
 > - `packages/babylon-lite/src/loader-env/env-helpers.ts` — Shared environment assembly helpers
@@ -44,28 +47,28 @@ The Loaders module provides asset loading pipelines plus dynamic glTF feature mo
 ```typescript
 /** Unified result returned by both loadGltf() and loadBabylon(). */
 export interface AssetContainer {
-  /**
-   * Scene entities with world transforms (meshes, transform nodes, lights).
-   * - glTF: single-element [root TransformNode]; meshes live in its hierarchy.
-   * - .babylon: root SceneNodes + LightBase objects in the file.
-   */
-  entities: Array<SceneNode | LightBase>;
+    /**
+     * Scene entities with world transforms (meshes, transform nodes, lights).
+     * - glTF: single-element [root TransformNode]; meshes live in its hierarchy.
+     * - .babylon: root SceneNodes + LightBase objects in the file.
+     */
+    entities: Array<SceneNode | LightBase>;
 
-  /** Animation groups from the file. addToScene() auto-ticks them each frame. */
-  animationGroups?: AnimationGroup[];
+    /** Animation groups from the file. addToScene() auto-ticks them each frame. */
+    animationGroups?: AnimationGroup[];
 
-  /** Scene clear color from the file. addToScene() applies it to ctx.clearColor. */
-  clearColor?: GPUColorDict;
+    /** Scene clear color from the file. addToScene() applies it to ctx.clearColor. */
+    clearColor?: GPUColorDict;
 
-  /** Camera parsed from the file. addToScene() sets it as scene.camera when present. */
-  camera?: Camera;
+    /** Camera parsed from the file. addToScene() sets it as scene.camera when present. */
+    camera?: Camera;
 
-  /** KHR_materials_variants data. Use selectVariant() / getVariantNames() to interact. */
-  materialVariants?: MaterialVariantData;
+    /** KHR_materials_variants data. Use selectVariant() / getVariantNames() to interact. */
+    materialVariants?: MaterialVariantData;
 
-  /** Bone-control handles (one per glTF skin). Populated only after enableBoneControl();
-   *  drive bones via getBoneByName() + setBone*(). See module 13 (Skeleton). */
-  skeletons?: Skeleton[];
+    /** Bone-control handles (one per glTF skin). Populated only after enableBoneControl();
+     *  drive bones via getBoneByName() + setBone*(). See module 13 (Skeleton). */
+    skeletons?: Skeleton[];
 }
 ```
 
@@ -88,28 +91,28 @@ codec to self-host the decoder (e.g. avoid a cross-origin CDN). Equivalent to KT
 ```typescript
 /** Parsed mesh data ready for GPU upload. */
 export interface GltfMeshData {
-  positions: Float32Array;
-  normals: Float32Array;
-  tangents: Float32Array | null;
-  uvs: Float32Array;
-  indices: Uint16Array | Uint32Array;
-  vertexCount: number;
-  indexCount: number;
-  worldMatrix: Mat4;
-  material: GltfMaterialData;
+    positions: Float32Array;
+    normals: Float32Array;
+    tangents: Float32Array | null;
+    uvs: Float32Array;
+    indices: Uint16Array | Uint32Array;
+    vertexCount: number;
+    indexCount: number;
+    worldMatrix: Mat4;
+    material: GltfMaterialData;
 }
 
 /** Parsed PBR material data. */
 export interface GltfMaterialData {
-  baseColorFactor: [number, number, number, number];
-  metallicFactor: number;
-  roughnessFactor: number;
-  emissiveFactor: [number, number, number];
-  baseColorImage: ImageBitmap | null;
-  metallicRoughnessImage: ImageBitmap | null;
-  normalImage: ImageBitmap | null;
-  occlusionImage: ImageBitmap | null;
-  emissiveImage: ImageBitmap | null;
+    baseColorFactor: [number, number, number, number];
+    metallicFactor: number;
+    roughnessFactor: number;
+    emissiveFactor: [number, number, number];
+    baseColorImage: ImageBitmap | null;
+    metallicRoughnessImage: ImageBitmap | null;
+    normalImage: ImageBitmap | null;
+    occlusionImage: ImageBitmap | null;
+    emissiveImage: ImageBitmap | null;
 }
 
 /** Load a glTF/GLB asset from a URL, ArrayBuffer, or Blob; parse it, upload to GPU. Returns an AssetContainer. */
@@ -118,39 +121,45 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
 
 > **Note**: `loadGltf` takes an `Engine` (not `SceneContext`) and returns an `AssetContainer`. The result's `entities` array contains root scene entities; glTF meshes usually hang off a root `TransformNode` hierarchy. Pass the result to `addToScene(scene, result)` — it will traverse the hierarchy, register animation ticks, and integrate everything into the scene. Meshes are the standard `Mesh` type with GPU data in the `_gpu` field and bounding box on `Mesh.boundMin`/`Mesh.boundMax`. Renderable mesh names preserve source glTF `mesh.name` when present; parent transform names still preserve glTF `node.name`.
 >
-> **Local data**: `source` may be a URL `string`, or an `ArrayBuffer`/`Blob` of an already-loaded asset (drag-and-drop, OPFS, a `fetch` body, etc.). GLB-vs-glTF is detected from the data's magic bytes, **not** the URL extension, so object URLs (`blob:…`) and extensionless sources load correctly. `ArrayBuffer`/`Blob` inputs have no base URL, so they must be self-contained (a GLB, or a glTF whose buffers/images use `data:` URIs); a glTF referencing external `.bin`/image files by relative path must be loaded from a URL.
+> **Local data**: `source` may be a URL `string`, or an `ArrayBuffer`/`Blob` of an already-loaded asset (drag-and-drop, OPFS, a `fetch` body, etc.). GLB-vs-glTF is detected from the data's magic bytes, **not** the URL extension, so object URLs (`blob:…`) and extensionless sources load correctly. `ArrayBuffer`/`Blob` inputs and opaque `blob:`/`data:` URL strings have no directory base, so they must be self-contained (a GLB, or a glTF whose buffers/images use `data:` URIs); a glTF referencing external `.bin`/image files by relative path must be loaded from a URL with a resolvable base.
 
 ### `load-env.ts`
 
 ```typescript
 /** GPU-resident environment textures. */
 export interface EnvironmentTextures {
-  specularCube: GPUTexture;
-  specularCubeView: GPUTextureView;
-  brdfLut: GPUTexture;
-  brdfLutView: GPUTextureView;
-  cubeSampler: GPUSampler;
-  brdfSampler: GPUSampler;
-  irradianceSH: Float32Array;
-  sphericalHarmonics: {
-    l00: Float32Array; l1_1: Float32Array; l10: Float32Array; l11: Float32Array;
-    l2_2: Float32Array; l2_1: Float32Array; l20: Float32Array; l21: Float32Array;
-    l22: Float32Array;
-  };
+    specularCube: GPUTexture;
+    specularCubeView: GPUTextureView;
+    brdfLut: GPUTexture;
+    brdfLutView: GPUTextureView;
+    cubeSampler: GPUSampler;
+    brdfSampler: GPUSampler;
+    irradianceSH: Float32Array;
+    sphericalHarmonics: {
+        l00: Float32Array;
+        l1_1: Float32Array;
+        l10: Float32Array;
+        l11: Float32Array;
+        l2_2: Float32Array;
+        l2_1: Float32Array;
+        l20: Float32Array;
+        l21: Float32Array;
+        l22: Float32Array;
+    };
 }
 
 /** Load a Babylon.js .env file, upload cubemap + BRDF LUT to GPU. */
 export async function loadEnvironment(
-  scene: SceneContext,
-  url: string,
-  options: {
-    brdfUrl: string;           // Required: URL of pre-baked BRDF LUT PNG (RGBD-encoded)
-    groundTextureUrl?: string; // Optional: URL of ground texture
-    skipSkybox?: boolean;      // Default: false — skip skybox renderable
-    skipGround?: boolean;      // Default: false — skip ground plane
-    skyboxUrl?: string;        // Override skybox texture URL
-    skyboxSize?: number;       // Default: 1000 — skybox cube half-size
-  },
+    scene: SceneContext,
+    url: string,
+    options: {
+        brdfUrl: string; // Required: URL of pre-baked BRDF LUT PNG (RGBD-encoded)
+        groundTextureUrl?: string; // Optional: URL of ground texture
+        skipSkybox?: boolean; // Default: false — skip skybox renderable
+        skipGround?: boolean; // Default: false — skip ground plane
+        skyboxUrl?: string; // Override skybox texture URL
+        skyboxSize?: number; // Default: 1000 — skybox cube half-size
+    }
 ): Promise<EnvironmentTextures>;
 ```
 
@@ -170,7 +179,7 @@ loadFeatureModules(json)              // dynamic imports, e.g. KHR_texture_basis
   └── material hooks                  // feature-owned texture/material/metadata overrides
   ↓
 extractAllMeshes(json, binChunk)       // for each node with mesh
-  ├── resolveAccessor() × N            // positions, normals, tangents, UVs, indices
+  ├── resolveAccessor() × N             // positions, normals, tangents, UVs, indices
   ├── extractMaterial()                 // PBR factors + textures
   │     └── resolveImage() × 5         // parallel image decode
   └── computeNodeWorldMatrix()         // recursive parent chain + RH→LH root
@@ -178,6 +187,10 @@ extractAllMeshes(json, binChunk)       // for each node with mesh
 GltfMeshData[]
   ↓
 uploadMeshes(device, meshDatas)
+  ├── repeated-primitive gate           // dynamically imports gltf-share only when needed
+  │     ├── canonicalize CPU geometry   // repeated active nodes retain the same arrays
+  │     └── primitive GPU cache         // one MeshGPU upload retained by every active owner
+  ├── shared mesh builders              // identical instance assembly on normal/shared paths
   ├── uploadTexture() × 4              // → Texture2D objects (cached per bitmap + sRGB)
   ├── runMatExts()                     // feature-owned material overrides, e.g. KTX2 textures
   ├── createBufferFromData() × 5       // pos, norm, tan, uv, idx
@@ -193,6 +206,8 @@ AssetContainer { entities: [root], animationGroups }
 ```
 
 **Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. The hot-path cache uses a numeric key (`bitmapId * 2 + +srgb`) so plain-image glTF assets do not pay string-key overhead. Feature modules can maintain their own caches for extension-owned image sources.
+
+**Geometry sharing**: A glTF mesh may be instantiated by multiple nodes. The loader creates a distinct Lite `Mesh` for every node/primitive pair so transforms, bounds, metadata, winding, skins, and morph state remain independent. Normal and repeated-primitive paths use the same internal mesh builders; the lazy `gltf-share` module only canonicalizes immutable geometry, manages ownership, and installs shared recovery. Instances reachable from the selected/default glTF scene share one `MeshGPU` and the same retained CPU attribute arrays when they reference the same immutable primitive. Nodes reachable only from inactive scenes are excluded from that shared ownership group, so they do not increment the active geometry's `_refCount` or pin its buffers. `MeshGPU` ownership is reference-counted so removing one active instance cannot dispose buffers still used by another; device-lost recovery rebuilds each shared geometry only once and preserves the ownership count.
 
 **Animation support**: `loadGltf` extracts glTF animations, creates `AnimationGroup[]` via `createAnimationGroups()`, and returns them in `AssetContainer.animationGroups`. `addToScene()` registers playback with the scene-owned animation manager. Each group exposes `currentTime` (seconds), `goToFrame()` for frame-based seeking, and lightweight `targetedAnimations` metadata for inspecting affected node/path pairs.
 
@@ -246,7 +261,7 @@ glTF uses right-handed coordinates. Babylon Lite uses left-handed. The conversio
 
 ```typescript
 // Root matrix: diag(-1, 1, 1, 1) — negates X axis
-const RH_TO_LH_ROOT: Mat4 = [-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1];
+const RH_TO_LH_ROOT: Mat4 = [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 ```
 
 For top-level nodes: `worldMatrix = RH_TO_LH_ROOT × localMatrix`.
@@ -260,16 +275,17 @@ Parent lookup is done by linear scan (`findParent`): iterates all nodes checking
 
 `uploadTexture(device, bitmap, srgb, sampler)` returns a `Texture2D` (with `texture`, `view`, `sampler`, `width`, `height`).
 
-| Texture | sRGB | Format | Created when |
-|---|---|---|---|
-| `baseColor` | Yes | `rgba8unorm-srgb` | Always (fallback 1×1 white) |
-| `normal` | No | `rgba8unorm` | Always (fallback 1×1 white) |
-| `ORM` | No | `rgba8unorm` | Always (fallback 1×1 white) |
-| `emissive` | Yes | `rgba8unorm-srgb` | Only if glTF has emissive image |
+| Texture     | sRGB | Format            | Created when                    |
+| ----------- | ---- | ----------------- | ------------------------------- |
+| `baseColor` | Yes  | `rgba8unorm-srgb` | Always (fallback 1×1 white)     |
+| `normal`    | No   | `rgba8unorm`      | Always (fallback 1×1 white)     |
+| `ORM`       | No   | `rgba8unorm`      | Always (fallback 1×1 white)     |
+| `emissive`  | Yes  | `rgba8unorm-srgb` | Only if glTF has emissive image |
 
 sRGB textures use `rgba8unorm-srgb` format so the GPU performs exact sRGB→linear conversion on sample. All textures get full mip chains via `generateMipmaps()`.
 
 ORM packing follows glTF convention:
+
 - **R** = Ambient Occlusion
 - **G** = Roughness
 - **B** = Metallic
@@ -425,6 +441,7 @@ EnvironmentTextures → stored on scene._envTextures
 ```
 
 JSON manifest fields:
+
 - `width`: base cubemap face size
 - `irradiance`: object with keys `x,y,z,xx,yy,zz,yz,zx,xy` → each is `[r,g,b]`
 - `specular.mipmaps`: array of `{ position, length }` byte ranges
@@ -442,6 +459,7 @@ a_out    = 1.0
 ```
 
 The process uses GPU staging to avoid Canvas 2D premultiplied-alpha corruption:
+
 1. Upload `ImageBitmap` → temp `rgba8unorm` texture
 2. Copy texture → staging buffer (256-byte aligned rows)
 3. Map staging buffer for CPU read
@@ -451,11 +469,13 @@ The process uses GPU staging to avoid Canvas 2D premultiplied-alpha corruption:
 ### Float16 Conversion (`floatToHalf`)
 
 IEEE 754 binary16 conversion via bit manipulation:
+
 ```
 sign     = (float32_bits >>> 16) & 0x8000
 exponent = ((float32_bits >>> 23) & 0xFF) - 127 + 15
 mantissa = (float32_bits >>> 13) & 0x03FF
 ```
+
 Handles denormalized numbers, overflow (→ infinity), and NaN.
 
 ### BRDF LUT Generation
@@ -465,6 +485,7 @@ Handles denormalized numbers, overflow (→ infinity), and NaN.
 GPU compute split-sum integration (256×256, `rgba16float`, HDR path):
 
 For each texel `(x, y)`:
+
 ```
 NdotV     = max((x + 0.5) / 256, 0.001)
 roughness = max((y + 0.5) / 256, 0.04)
@@ -472,6 +493,7 @@ roughness = max((y + 0.5) / 256, 0.04)
 ```
 
 Output convention (Babylon):
+
 - **R** = `B` (Fresnel bias)
 - **G** = `A + B` (scale + bias)
 - Shader usage: `F0 × A + B = F0 × (brdf.g - brdf.r) + brdf.r`
@@ -514,6 +536,7 @@ return [cos(phi) × sinTheta, sin(phi) × sinTheta, cosTheta]
 #### `radicalInverseVdC`
 
 Van der Corput radical inverse (bit reversal):
+
 ```
 bits = input >>> 0
 bits = ((bits << 16) | (bits >>> 16)) >>> 0
@@ -559,35 +582,35 @@ output_L1_-1 = raw_L1_-1 × B1m
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite | Babylon.js |
-|---|---|
-| `addToScene(scene, await loadGltf(engine, url))` | `BABYLON.SceneLoader.Append(url, scene)` |
-| `Mesh` (with `_gpu` field) | Internal mesh representation |
-| `RH_TO_LH_ROOT` | Root node rotation `[0,1,0,0]` + scale `[1,1,-1]` |
-| `loadEnvironment(scene, url, { brdfUrl })` | `scene.environmentTexture = new BABYLON.CubeTexture.CreateFromPrefilteredData(url)` |
-| `.env` file format | Babylon-proprietary environment file |
-| RGBD decode | `FromRGBD` shader in Babylon |
-| `generateBrdfLut()` (GPU compute, RGBD PNG decode, in rgbd-decode.ts) | Babylon ships pre-baked BRDF LUT (also option for runtime) |
-| `polynomialToPreScaledHarmonics()` | `SphericalHarmonics.FromPolynomial()` + `preScaleForRendering()` |
-| `uploadCubemapRGBD()` | Internal cubemap processing in `HDRCubeTexture` |
-| `KHR_texture_basisu` feature + `uploadKtx2Texture2D()` | BJS `KHR_texture_basisu` loader + `KTX2Decoder` texture upload |
-| Staging buffer RGBD decode | Avoids Canvas 2D premultiplication issue |
-| `loadDdsEnvironment(scene, url, opts)` | `BABYLON.CubeTexture.CreateFromPrefilteredData(url)` with DDS file |
-| `computeSH()` (from DDS mip 0) | BJS `SphericalPolynomial.FromHarmonics` on cubemap |
-| `decodeBrdfPng()` | BJS embedded `environmentBRDFTexture` (RGBD PNG) |
-| `loadHdrEnvironment(scene, url, opts)` | `new BABYLON.HDRCubeTexture(url, scene)` |
-| `parseRGBE()` | BJS `HDRTools.GetCubeMapTextureData()` |
-| `computeSHFromEquirect()` | BJS `SphericalPolynomial.FromEquirectangular()` |
-| `equirectToCubemapGPU()` | BJS `panoramaToCubemap.ts` CPU conversion |
-| `prefilterCubemapGPU()` | BJS `hdrFiltering.ts` GPU prefilter |
-| `generateBrdfLut()` (GPU compute, in hdr-ibl-pipeline.ts) | BJS compute-based BRDF LUT |
-| `loadBabylon(engine, url)` | `BABYLON.SceneLoader.Load("", url, engine)` |
-| `createStandardMaterial()` | `new BABYLON.StandardMaterial("mat", scene)` |
-| `loadTexture2D()` | `new BABYLON.Texture(url, scene)` |
-| `createPointLight()` | `new BABYLON.PointLight("light", pos, scene)` |
-| SubMesh + multiMaterial | `BABYLON.SubMesh` + `BABYLON.MultiMaterial` |
-| `loadSkybox(scene, baseUrl, ext, size)` | `new BABYLON.CubeTexture(url, scene)` + skybox mesh |
-| `buildSkyboxRenderable()` | `skyboxMaterial` + `skyboxMesh` in BJS `EnvironmentHelper` |
+| Babylon Lite                                                          | Babylon.js                                                                          |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `addToScene(scene, await loadGltf(engine, url))`                      | `BABYLON.SceneLoader.Append(url, scene)`                                            |
+| `Mesh` (with `_gpu` field)                                            | Internal mesh representation                                                        |
+| `RH_TO_LH_ROOT`                                                       | Root node rotation `[0,1,0,0]` + scale `[1,1,-1]`                                   |
+| `loadEnvironment(scene, url, { brdfUrl })`                            | `scene.environmentTexture = new BABYLON.CubeTexture.CreateFromPrefilteredData(url)` |
+| `.env` file format                                                    | Babylon-proprietary environment file                                                |
+| RGBD decode                                                           | `FromRGBD` shader in Babylon                                                        |
+| `generateBrdfLut()` (GPU compute, RGBD PNG decode, in rgbd-decode.ts) | Babylon ships pre-baked BRDF LUT (also option for runtime)                          |
+| `polynomialToPreScaledHarmonics()`                                    | `SphericalHarmonics.FromPolynomial()` + `preScaleForRendering()`                    |
+| `uploadCubemapRGBD()`                                                 | Internal cubemap processing in `HDRCubeTexture`                                     |
+| `KHR_texture_basisu` feature + `uploadKtx2Texture2D()`                | BJS `KHR_texture_basisu` loader + `KTX2Decoder` texture upload                      |
+| Staging buffer RGBD decode                                            | Avoids Canvas 2D premultiplication issue                                            |
+| `loadDdsEnvironment(scene, url, opts)`                                | `BABYLON.CubeTexture.CreateFromPrefilteredData(url)` with DDS file                  |
+| `computeSH()` (from DDS mip 0)                                        | BJS `SphericalPolynomial.FromHarmonics` on cubemap                                  |
+| `decodeBrdfPng()`                                                     | BJS embedded `environmentBRDFTexture` (RGBD PNG)                                    |
+| `loadHdrEnvironment(scene, url, opts)`                                | `new BABYLON.HDRCubeTexture(url, scene)`                                            |
+| `parseRGBE()`                                                         | BJS `HDRTools.GetCubeMapTextureData()`                                              |
+| `computeSHFromEquirect()`                                             | BJS `SphericalPolynomial.FromEquirectangular()`                                     |
+| `equirectToCubemapGPU()`                                              | BJS `panoramaToCubemap.ts` CPU conversion                                           |
+| `prefilterCubemapGPU()`                                               | BJS `hdrFiltering.ts` GPU prefilter                                                 |
+| `generateBrdfLut()` (GPU compute, in hdr-ibl-pipeline.ts)             | BJS compute-based BRDF LUT                                                          |
+| `loadBabylon(engine, url)`                                            | `BABYLON.SceneLoader.Load("", url, engine)`                                         |
+| `createStandardMaterial()`                                            | `new BABYLON.StandardMaterial("mat", scene)`                                        |
+| `loadTexture2D()`                                                     | `new BABYLON.Texture(url, scene)`                                                   |
+| `createPointLight()`                                                  | `new BABYLON.PointLight("light", pos, scene)`                                       |
+| SubMesh + multiMaterial                                               | `BABYLON.SubMesh` + `BABYLON.MultiMaterial`                                         |
+| `loadSkybox(scene, baseUrl, ext, size)`                               | `new BABYLON.CubeTexture(url, scene)` + skybox mesh                                 |
+| `buildSkyboxRenderable()`                                             | `skyboxMaterial` + `skyboxMesh` in BJS `EnvironmentHelper`                          |
 
 ## Dependencies
 
@@ -607,76 +630,76 @@ output_L1_-1 = raw_L1_-1 × B1m
 
 ## Test Specification
 
-| Test | Description |
-|---|---|
-| **glTF** | |
-| `parseGlbContainer validates magic` | Non-GLB input throws |
-| `parseGlbContainer extracts JSON + BIN` | Verify correct chunk parsing |
-| `resolveAccessor FLOAT` | Returns Float32Array with correct count |
-| `resolveAccessor UNSIGNED_SHORT` | Returns Uint16Array |
-| `RH_TO_LH_ROOT negates X` | Verify diag(-1,1,1,1) |
-| `computeNodeWorldMatrix top-level` | Pre-multiplied by RH_TO_LH_ROOT |
-| `computeNodeWorldMatrix child` | Parent world × child local |
-| `extractMaterial defaults` | Missing material → baseColorFactor [1,1,1,1], metallic 1, roughness 1 |
-| `uploadTexture sRGB format` | baseColor uses rgba8unorm-srgb |
-| `uploadTexture null fallback` | 1×1 white texture |
-| `computeWorldBounds` | Known positions × identity matrix → correct AABB |
-| `KHR_texture_basisu` | Scene 112 FlightHelmetKTX loads KTX2 texture sources and matches Babylon.js within `maxMad: 0.02` |
-| `KHR_texture_basisu bundle isolation` | Existing scenes have no positive runtime-loaded JS deltas when KTX2 support is present |
-| `Interleaved vertex buffers` | Strided accessors resolve to GPU offset/stride; `gltf-interleave.test.ts` covers strided detection + lazy de-stride |
-| `KHR_xmp_json_ld` | Scene 210 XmpMetadataRoundedCube (genuinely interleaved) matches Babylon.js within `maxMad: 0.2`; metadata surfaced on `AssetContainer.xmpMetadata` |
-| `EXT_meshopt_compression` + `KHR_mesh_quantization` | Scene 211 BrainStem (glTF-Meshopt-EXT) matches Babylon.js within `maxMad: 0.2` |
-| `glTF feature bundle isolation` | Non-interleaved / non-meshopt / non-XMP scenes never load the corresponding dynamic chunk (verified via `coverage:scene`) |
-| **.env** | |
-| `.env magic validation` | Bad magic → throws |
-| `RGBD decode` | Known RGBD values → correct linear HDR |
-| `floatToHalf` | 1.0 → 0x3C00, 0.0 → 0x0000 |
-| `BRDF LUT dimensions` | 256×256, rgba16float |
-| `integrateBRDF NdotV=1 roughness=0.04` | Known approximate values |
-| `radicalInverseVdC(0)` | Returns 0 |
-| `SH conversion roundtrip` | Polynomial → harmonics matches Babylon reference values |
-| **DDS env** | |
-| `DDS header parsing` | Correct width, height, mipCount, dataOffset extraction |
-| `float16ToFloat32` | 0x3C00 → 1.0, 0x0000 → 0.0 |
-| `computeSH from DDS` | Known cubemap data → SH coefficients match BJS reference |
-| `decodeBrdfPng RGBD` | Known PNG RGBD values → correct rgba16float output |
-| **HDR** | |
-| `parseRGBE validates signature` | Missing `#?` → throws |
-| `parseRGBE unsupported format` | Non-`32-bit_rle_rgbe` → throws |
-| `parseRGBE resolution parsing` | Correct width/height extraction |
-| `rgbeToFloat e=0` | Returns (0,0,0) |
-| `rgbeToFloat known values` | `[128, 128, 128, 136]` → `(128, 128, 128)` |
-| `computeSHFromEquirect` | Known equirect data → SH matches reference |
-| `equirectToCubemapGPU output format` | rgba16float, faceSize × faceSize × 6 |
-| `prefilterCubemapGPU mip count` | floor(log2(faceSize)) + 1 mip levels |
-| `generateBrdfLut dimensions` | 256×256, rgba16float |
-| **.babylon** | |
-| `loadBabylon clearColor` | Scene clearColor set from JSON |
-| `loadBabylon materials` | Standard material properties extracted correctly |
-| `loadBabylon textures` | Texture URLs resolved relative to base URL |
-| `loadBabylon multiMaterial` | SubMesh materialIndex maps to correct sub-material |
-| `loadBabylon point lights` | Position, intensity, diffuse, specular, range |
-| `loadBabylon mesh transform` | Position/rotation/scaling applied via initMeshTransform |
-| `loadBabylon maxMeshes` | Respects mesh count limit |
-| `loadBabylon invisible mesh` | isVisible=false skipped |
-| **Skybox** | |
-| `loadSkybox registers SkyboxData` | scene._skybox populated |
-| `loadSkybox deferred builder` | Builder re-enqueues when UBO not ready |
-| `buildSkyboxRenderable order 0` | Renders behind everything |
+| Test                                                | Description                                                                                                                                         |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **glTF**                                            |                                                                                                                                                     |
+| `parseGlbContainer validates magic`                 | Non-GLB input throws                                                                                                                                |
+| `parseGlbContainer extracts JSON + BIN`             | Verify correct chunk parsing                                                                                                                        |
+| `resolveAccessor FLOAT`                             | Returns Float32Array with correct count                                                                                                             |
+| `resolveAccessor UNSIGNED_SHORT`                    | Returns Uint16Array                                                                                                                                 |
+| `RH_TO_LH_ROOT negates X`                           | Verify diag(-1,1,1,1)                                                                                                                               |
+| `computeNodeWorldMatrix top-level`                  | Pre-multiplied by RH_TO_LH_ROOT                                                                                                                     |
+| `computeNodeWorldMatrix child`                      | Parent world × child local                                                                                                                          |
+| `extractMaterial defaults`                          | Missing material → baseColorFactor [1,1,1,1], metallic 1, roughness 1                                                                               |
+| `uploadTexture sRGB format`                         | baseColor uses rgba8unorm-srgb                                                                                                                      |
+| `uploadTexture null fallback`                       | 1×1 white texture                                                                                                                                   |
+| `computeWorldBounds`                                | Known positions × identity matrix → correct AABB                                                                                                    |
+| `KHR_texture_basisu`                                | Scene 112 FlightHelmetKTX loads KTX2 texture sources and matches Babylon.js within `maxMad: 0.02`                                                   |
+| `KHR_texture_basisu bundle isolation`               | Existing scenes have no positive runtime-loaded JS deltas when KTX2 support is present                                                              |
+| `Interleaved vertex buffers`                        | Strided accessors resolve to GPU offset/stride; `gltf-interleave.test.ts` covers strided detection + lazy de-stride                                 |
+| `KHR_xmp_json_ld`                                   | Scene 210 XmpMetadataRoundedCube (genuinely interleaved) matches Babylon.js within `maxMad: 0.2`; metadata surfaced on `AssetContainer.xmpMetadata` |
+| `EXT_meshopt_compression` + `KHR_mesh_quantization` | Scene 211 BrainStem (glTF-Meshopt-EXT) matches Babylon.js within `maxMad: 0.2`                                                                      |
+| `glTF feature bundle isolation`                     | Non-interleaved / non-meshopt / non-XMP scenes never load the corresponding dynamic chunk (verified via `coverage:scene`)                           |
+| **.env**                                            |                                                                                                                                                     |
+| `.env magic validation`                             | Bad magic → throws                                                                                                                                  |
+| `RGBD decode`                                       | Known RGBD values → correct linear HDR                                                                                                              |
+| `floatToHalf`                                       | 1.0 → 0x3C00, 0.0 → 0x0000                                                                                                                          |
+| `BRDF LUT dimensions`                               | 256×256, rgba16float                                                                                                                                |
+| `integrateBRDF NdotV=1 roughness=0.04`              | Known approximate values                                                                                                                            |
+| `radicalInverseVdC(0)`                              | Returns 0                                                                                                                                           |
+| `SH conversion roundtrip`                           | Polynomial → harmonics matches Babylon reference values                                                                                             |
+| **DDS env**                                         |                                                                                                                                                     |
+| `DDS header parsing`                                | Correct width, height, mipCount, dataOffset extraction                                                                                              |
+| `float16ToFloat32`                                  | 0x3C00 → 1.0, 0x0000 → 0.0                                                                                                                          |
+| `computeSH from DDS`                                | Known cubemap data → SH coefficients match BJS reference                                                                                            |
+| `decodeBrdfPng RGBD`                                | Known PNG RGBD values → correct rgba16float output                                                                                                  |
+| **HDR**                                             |                                                                                                                                                     |
+| `parseRGBE validates signature`                     | Missing `#?` → throws                                                                                                                               |
+| `parseRGBE unsupported format`                      | Non-`32-bit_rle_rgbe` → throws                                                                                                                      |
+| `parseRGBE resolution parsing`                      | Correct width/height extraction                                                                                                                     |
+| `rgbeToFloat e=0`                                   | Returns (0,0,0)                                                                                                                                     |
+| `rgbeToFloat known values`                          | `[128, 128, 128, 136]` → `(128, 128, 128)`                                                                                                          |
+| `computeSHFromEquirect`                             | Known equirect data → SH matches reference                                                                                                          |
+| `equirectToCubemapGPU output format`                | rgba16float, faceSize × faceSize × 6                                                                                                                |
+| `prefilterCubemapGPU mip count`                     | floor(log2(faceSize)) + 1 mip levels                                                                                                                |
+| `generateBrdfLut dimensions`                        | 256×256, rgba16float                                                                                                                                |
+| **.babylon**                                        |                                                                                                                                                     |
+| `loadBabylon clearColor`                            | Scene clearColor set from JSON                                                                                                                      |
+| `loadBabylon materials`                             | Standard material properties extracted correctly                                                                                                    |
+| `loadBabylon textures`                              | Texture URLs resolved relative to base URL                                                                                                          |
+| `loadBabylon multiMaterial`                         | SubMesh materialIndex maps to correct sub-material                                                                                                  |
+| `loadBabylon point lights`                          | Position, intensity, diffuse, specular, range                                                                                                       |
+| `loadBabylon mesh transform`                        | Position/rotation/scaling applied via initMeshTransform                                                                                             |
+| `loadBabylon maxMeshes`                             | Respects mesh count limit                                                                                                                           |
+| `loadBabylon invisible mesh`                        | isVisible=false skipped                                                                                                                             |
+| **Skybox**                                          |                                                                                                                                                     |
+| `loadSkybox registers SkyboxData`                   | scene.\_skybox populated                                                                                                                            |
+| `loadSkybox deferred builder`                       | Builder re-enqueues when UBO not ready                                                                                                              |
+| `buildSkyboxRenderable order 0`                     | Renders behind everything                                                                                                                           |
 
 ## File Manifest
 
-| File | Size | Purpose |
-|---|---|---|
-| `src/loader-gltf/load-gltf.ts` | ~413 lines | GLB parsing, mesh extraction, texture upload, world matrix computation |
-| `src/loader-env/load-env.ts` | ~470 lines | .env parsing, RGBD decode, BRDF LUT upload, SH conversion |
-| `src/loader-env/load-dds-env.ts` | ~286 lines | DDS cubemap loader, float16 SH extraction, BRDF PNG decode orchestration |
-| `src/loader-env/env-helpers.ts` | ~34 lines | Shared sampler creation, EnvironmentTextures assembly |
-| `src/loader-env/rgbd-decode.ts` | ~125 lines | Shared GPU compute RGBD PNG/cubemap → rgba16float decode |
-| `src/loader-hdr/load-hdr.ts` | ~102 lines | HDR environment loader orchestrator, deferred background builder |
-| `src/loader-hdr/hdr-parser.ts` | ~218 lines | RGBE CPU parser, RLE scanline decoder, equirect SH computation |
-| `src/loader-hdr/hdr-ibl-pipeline.ts` | ~400 lines | GPU compute: equirect→cubemap, GGX prefilter, BRDF LUT generation |
-| `src/loader-babylon/load-babylon.ts` | ~428 lines | .babylon JSON parser, standard materials, lights, mesh upload |
-| `src/loader-skybox/load-skybox.ts` | ~96 lines | Cube texture loader + deferred skybox registration |
-| `src/loader-skybox/skybox-renderable.ts` | ~32 lines | Skybox renderable builder wrapping skybox-cubemap material |
-| `src/texture/generate-mipmaps.ts` | ~141 lines | GPU mipmap blit (shared utility) |
+| File                                     | Size       | Purpose                                                                  |
+| ---------------------------------------- | ---------- | ------------------------------------------------------------------------ |
+| `src/loader-gltf/load-gltf.ts`           | ~413 lines | GLB parsing, mesh extraction, texture upload, world matrix computation   |
+| `src/loader-env/load-env.ts`             | ~470 lines | .env parsing, RGBD decode, BRDF LUT upload, SH conversion                |
+| `src/loader-env/load-dds-env.ts`         | ~286 lines | DDS cubemap loader, float16 SH extraction, BRDF PNG decode orchestration |
+| `src/loader-env/env-helpers.ts`          | ~34 lines  | Shared sampler creation, EnvironmentTextures assembly                    |
+| `src/loader-env/rgbd-decode.ts`          | ~125 lines | Shared GPU compute RGBD PNG/cubemap → rgba16float decode                 |
+| `src/loader-hdr/load-hdr.ts`             | ~102 lines | HDR environment loader orchestrator, deferred background builder         |
+| `src/loader-hdr/hdr-parser.ts`           | ~218 lines | RGBE CPU parser, RLE scanline decoder, equirect SH computation           |
+| `src/loader-hdr/hdr-ibl-pipeline.ts`     | ~400 lines | GPU compute: equirect→cubemap, GGX prefilter, BRDF LUT generation        |
+| `src/loader-babylon/load-babylon.ts`     | ~428 lines | .babylon JSON parser, standard materials, lights, mesh upload            |
+| `src/loader-skybox/load-skybox.ts`       | ~96 lines  | Cube texture loader + deferred skybox registration                       |
+| `src/loader-skybox/skybox-renderable.ts` | ~32 lines  | Skybox renderable builder wrapping skybox-cubemap material               |
+| `src/texture/generate-mipmaps.ts`        | ~141 lines | GPU mipmap blit (shared utility)                                         |

@@ -22,6 +22,7 @@ import { PBR_HAS_NORMAL_MAP, PBR_HAS_EMISSIVE, PBR_HAS_SPEC_GLOSS, PBR_HAS_DOUBL
 import { MSH_HAS_TANGENTS, MSH_HAS_UV2 } from "../mesh-features.js";
 import { REVERSE_DEPTH_COMPARE, targetSignatureKey } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
+import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
 // ─── Shader Bindings (sig-independent) ──────────────────────────────
 
@@ -46,6 +47,17 @@ export function _installPbrFallbackResolver(resolve: (engine: EngineContext) => 
     _pbrFallbackResolver = resolve;
 }
 
+/** Primitive-state resolver, installed only by the glTF primitive feature (non-triangle topology
+ *  or negative-winding meshes). Module-local with a single exported setter: when no such mesh is in
+ *  the bundle the setter tree-shakes, the bundler proves this is always null, and the
+ *  `_primitiveResolver ? … : { topology: "triangle-list", … }` ternary below folds to the plain
+ *  triangle-list default — every triangle-list PBR scene (e.g. BoomBox) stays byte-identical. */
+let _primitiveResolver: ((meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState) | null = null;
+/** @internal Install the primitive-state resolver (called by the glTF primitive feature). */
+export function _installPbrPrimitiveResolver(resolve: (meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState): void {
+    _primitiveResolver = resolve;
+}
+
 interface _PbrShaderBindings {
     _features: number;
     _features2: number;
@@ -53,6 +65,10 @@ interface _PbrShaderBindings {
     _meshBGL: GPUBindGroupLayout;
     _shadowBGL: GPUBindGroupLayout | null;
     _composed: ComposedShader;
+    /** Shared across normal/A2C pipeline variants only when the A2C resolver is installed. */
+    _a2cVertModule?: GPUShaderModule;
+    /** @internal */
+    _a2cFragModule?: GPUShaderModule;
     /** Pre-baked partial depth-stencil descriptor for this material's stencil state. Present (and the cache
      *  key carries the resolved `_key`) only when `enableMaterialStencil` was called — otherwise the field is
      *  never assigned and the whole stencil path folds out of stencil-free bundles. */
@@ -126,16 +142,18 @@ export function getOrCreatePbrBindings(
 }
 
 /** Get-or-build the sig-specific pipeline on top of a PBR shader bindings. Called at bind() time. */
-export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetSignature, bindings: _PbrShaderBindings): GPURenderPipeline {
+export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetSignature, bindings: _PbrShaderBindings, material: PbrMaterialProps): GPURenderPipeline {
     ensureDevice(engine);
-    const key = targetSignatureKey(sig);
+    const alphaToCoverageResolver = _getAlphaToCoverageResolver();
+    const useAlphaToCoverage = sig._sampleCount > 1 && !!alphaToCoverageResolver?.(material);
+    const key = `${targetSignatureKey(sig)}${useAlphaToCoverage ? ":a2c" : ""}`;
     const cached = bindings._pipelines.get(key);
     if (cached) {
         return cached;
     }
 
     const device = engine._device;
-    const { _features: features, _features2: features2, _composed: composed } = bindings;
+    const { _features: features, _features2: features2, _composed: composed, _meshFeatures: meshFeatures } = bindings;
     const esmShadowOutput = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0;
     const hasAlpha = !esmShadowOutput && (features & PBR_HAS_ALPHA_BLEND) !== 0;
     const hasDoubleSided = (features & PBR_HAS_DOUBLE_SIDED) !== 0;
@@ -143,9 +161,16 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
     const sceneBGL = getSceneBindGroupLayout(engine);
     const bgls: GPUBindGroupLayout[] = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
 
-    const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
+    const vertModule = alphaToCoverageResolver
+        ? (bindings._a2cVertModule ??= device.createShaderModule({ code: composed._vertexWGSL }))
+        : device.createShaderModule({ code: composed._vertexWGSL });
     const noColorOutput = (features2 & PBR2_NO_COLOR_OUTPUT) !== 0;
-    const fragModule = !sig._colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
+    const fragModule =
+        !sig._colorFormat && !noColorOutput
+            ? null
+            : alphaToCoverageResolver
+              ? (bindings._a2cFragModule ??= device.createShaderModule({ code: composed._fragmentWGSL }))
+              : device.createShaderModule({ code: composed._fragmentWGSL });
 
     const fragTarget: GPUColorTargetState | null = noColorOutput ? null : { format: sig._colorFormat!, writeMask: CW.ALL };
     if (hasAlpha && fragTarget) {
@@ -154,6 +179,15 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
             alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
         };
     }
+
+    const basePrimitive: GPUPrimitiveState = _primitiveResolver
+        ? _primitiveResolver(meshFeatures, hasDoubleSided)
+        : { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" };
+    // XR eye targets feed a right-handed view matrix through Lite's left-handed rasterizer, so the whole
+    // target's apparent triangle winding is reversed. Flip frontFace (composing with any per-mesh mirrored
+    // winding) rather than the cull face, matching the mirrored-mesh convention so double-sided front_facing
+    // normals stay correct.
+    const primitive: GPUPrimitiveState = sig._reverseWinding ? { ...basePrimitive, frontFace: basePrimitive.frontFace === "cw" ? "ccw" : "cw" } : basePrimitive;
 
     const pipeline = device.createRenderPipeline({
         layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
@@ -173,8 +207,8 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
                   },
               }
             : {}),
-        multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : sig._reverseWinding ? "front" : "back", frontFace: "ccw" },
+        multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
+        primitive,
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;
@@ -238,7 +272,7 @@ export function createPbrMeshBindGroup(
         addTex(material.normalTexture!);
     }
     addTex(material.ormTexture ?? _pbrFallbackResolver?.(engine)!);
-    if ((features2 & PBR2_HAS_UV2) !== 0 && (meshFeatures & MSH_HAS_UV2) !== 0 && material.occlusionTexture) {
+    if ((features2 & PBR2_HAS_UV2) !== 0 && (meshFeatures & MSH_HAS_UV2) !== 0 && material.occlusionTexture && material.occlusionTexCoord === 1) {
         addTex(material.occlusionTexture);
     }
     if (hasEmissive) {

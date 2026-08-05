@@ -10,7 +10,7 @@
  * Morph scramble deltas come from a shared deterministic mulberry32 seed
  * and weight is pinned via `?freeze=1` for capture reproducibility.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

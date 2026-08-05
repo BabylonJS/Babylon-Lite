@@ -4,5 +4,5 @@
     "outDir": "./dist",
     "rootDir": "."
   },
-  "include": ["lite/src"]
+  "include": ["lite/src", "gl/src"]
 }

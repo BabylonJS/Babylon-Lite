@@ -1,6 +1,6 @@
 import { F32, U32 } from "../engine/typed-arrays.js";
 import { TU, SS } from "../engine/gpu-flags.js";
-import { getProjectionMatrix, getViewMatrix, type Camera } from "../camera/camera.js";
+import { getProjectionMatrix, getViewMatrix, getEffectiveAspectRatio, _cameraChangeKey, type Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
@@ -193,13 +193,17 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
     const tileCountX = Math.max(1, container.horizontalTiles | 0);
     const tileCountY = Math.max(1, container.verticalTiles | 0);
     const zSlices = Math.max(1, container.zSlices | 0);
-    const dataTextureWidth = Math.max(1, Math.min(MAX_DATA_TEXTURE_WIDTH, engine._device.limits.maxTextureDimension2D));
+    const maxDataTextureWidth = Math.max(1, Math.min(MAX_DATA_TEXTURE_WIDTH, engine._device.limits.maxTextureDimension2D));
     const batchCount = Math.max(1, Math.ceil(container.pointLights.length / CLUSTER_BATCH_SIZE));
     const lightTexels = Math.max(1, container.pointLights.length * 2);
+    const maskTexels = Math.max(1, tileCountX * tileCountY * batchCount);
+    const dataTextureWidth = Math.min(maxDataTextureWidth, Math.max(lightTexels, zSlices, maskTexels));
     const lightData = new F32(textureElementCount(lightTexels, 4, dataTextureWidth));
     const sliceData = new U32(textureElementCount(zSlices, 4, dataTextureWidth));
-    const maskTexels = Math.max(1, tileCountX * tileCountY * batchCount);
     const maskData = new U32(textureElementCount(maskTexels, 1, dataTextureWidth));
+    const lightSnapshot = new F32(container.pointLights.length * 8);
+    lightSnapshot.fill(Number.NaN);
+    const activeLights: { light: ClusteredPointLight; depth: number }[] = [];
     const params = new ArrayBuffer(32);
     const paramsU = new U32(params);
     const paramsF = new F32(params);
@@ -213,14 +217,16 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
     paramsU[7] = batchCount;
 
     const paramsBuffer = createUniformBuffer(engine, paramsF, "clustered-light-params");
-    const lightsTexture = createDataTexture(engine, lightData, "rgba32float", 4, lightTexels, "clustered-light-data", dataTextureWidth);
-    const cellsTexture = createDataTexture(engine, sliceData, "rgba32uint", 4, zSlices, "clustered-slice-data", dataTextureWidth);
-    const indicesTexture = createDataTexture(engine, maskData, "r32uint", 1, maskTexels, "clustered-tile-mask-data", dataTextureWidth);
+    const lightsTexture = createDataTexture(engine, "rgba32float", lightTexels, "clustered-light-data", dataTextureWidth);
+    const cellsTexture = createDataTexture(engine, "rgba32uint", zSlices, "clustered-slice-data", dataTextureWidth);
+    const indicesTexture = createDataTexture(engine, "r32uint", maskTexels, "clustered-tile-mask-data", dataTextureWidth);
     let lastCamera: Camera | null | undefined;
     let lastCameraVersion = -1;
     let lastTargetWidth = 0;
     let lastTargetHeight = 0;
+    let lastAspect = -1;
     let lastContainerVersion = -1;
+    let lastLightCount = -1;
     const state: ClusteredLightGpuState = {
         paramsBuffer,
         lightsView: lightsTexture.createView(),
@@ -232,63 +238,138 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
             }
             const safeWidth = Math.max(1, targetWidth);
             const safeHeight = Math.max(1, targetHeight);
+            // Effective aspect, not the raw target ratio: a camera with a normalized viewport
+            // renders through a different projection than width/height implies, and the forward
+            // pass already folds the viewport in (`_writePassSceneUBO`). Binning lights from a
+            // projection the frame never uses puts them in the wrong tiles. It is also part of
+            // the dirty key below, since a viewport change moves it with everything else equal.
+            const aspect = getEffectiveAspectRatio(activeCamera, safeWidth, safeHeight);
             if (
                 activeCamera === lastCamera &&
-                activeCamera.worldMatrixVersion === lastCameraVersion &&
+                _cameraChangeKey(activeCamera) === lastCameraVersion &&
                 safeWidth === lastTargetWidth &&
                 safeHeight === lastTargetHeight &&
-                container._version === lastContainerVersion
+                aspect === lastAspect &&
+                container._version === lastContainerVersion &&
+                container.pointLights.length === lastLightCount
             ) {
                 return;
             }
             if (container.pointLights.length * 2 > lightTexels || Math.ceil(container.pointLights.length / CLUSTER_BATCH_SIZE) > batchCount) {
                 throw new Error("ClusteredLightContainer: light count cannot grow after GPU state creation.");
             }
-            sliceData.fill(0);
-            maskData.fill(0);
-            const aspect = safeWidth / safeHeight;
-            const view = getViewMatrix(activeCamera);
-            const proj = getProjectionMatrix(activeCamera, aspect);
-            const nearZ = activeCamera.nearPlane;
-            const farZ = activeCamera.farPlane;
-            const logFarNear = Math.log(farZ / nearZ);
-            const sliceScale = zSlices / logFarNear;
-            const sliceBias = -(zSlices * Math.log(nearZ)) / logFarNear;
-            const sortedLights = container.pointLights.map((light) => ({ light, depth: viewZ(light.position, view) })).sort((a, b) => a.depth - b.depth);
-            for (let i = 0; i < zSlices; i++) {
-                const off = i * 4;
-                sliceData[off] = EMPTY_SLICE_FIRST;
-                sliceData[off + 1] = 0;
+            let topologyDirty =
+                activeCamera !== lastCamera ||
+                _cameraChangeKey(activeCamera) !== lastCameraVersion ||
+                safeWidth !== lastTargetWidth ||
+                safeHeight !== lastTargetHeight ||
+                aspect !== lastAspect ||
+                container.pointLights.length !== lastLightCount;
+            let lightDataDirty = topologyDirty;
+            if (container._version !== lastContainerVersion || container.pointLights.length !== lastLightCount) {
+                for (let i = 0; i < container.pointLights.length; i++) {
+                    const light = container.pointLights[i]!;
+                    const off = i * 8;
+                    const wasActive = lightSnapshot[off + 3]! > 0 && lightSnapshot[off + 7]! > 0;
+                    const isActive = light.range > 0 && light.intensity > 0;
+                    if (
+                        lightSnapshot[off] !== light.position[0] ||
+                        lightSnapshot[off + 1] !== light.position[1] ||
+                        lightSnapshot[off + 2] !== light.position[2] ||
+                        lightSnapshot[off + 3] !== light.range ||
+                        wasActive !== isActive
+                    ) {
+                        topologyDirty = true;
+                    }
+                    if (
+                        lightSnapshot[off + 4] !== light.diffuse[0] ||
+                        lightSnapshot[off + 5] !== light.diffuse[1] ||
+                        lightSnapshot[off + 6] !== light.diffuse[2] ||
+                        lightSnapshot[off + 7] !== light.intensity
+                    ) {
+                        lightDataDirty = true;
+                    }
+                    lightSnapshot[off] = light.position[0];
+                    lightSnapshot[off + 1] = light.position[1];
+                    lightSnapshot[off + 2] = light.position[2];
+                    lightSnapshot[off + 3] = light.range;
+                    lightSnapshot[off + 4] = light.diffuse[0];
+                    lightSnapshot[off + 5] = light.diffuse[1];
+                    lightSnapshot[off + 6] = light.diffuse[2];
+                    lightSnapshot[off + 7] = light.intensity;
+                }
             }
-            for (let i = 0; i < sortedLights.length; i++) {
-                const { light, depth } = sortedLights[i]!;
-                const off = i * 8;
-                lightData[off] = light.position[0];
-                lightData[off + 1] = light.position[1];
-                lightData[off + 2] = light.position[2];
-                lightData[off + 3] = light.range;
-                lightData[off + 4] = light.diffuse[0];
-                lightData[off + 5] = light.diffuse[1];
-                lightData[off + 6] = light.diffuse[2];
-                lightData[off + 7] = light.intensity;
-                addLightToClusters(sliceData, maskData, light, depth, i, view, proj, tileCountX, tileCountY, zSlices, sliceScale, sliceBias, batchCount);
+            if (!topologyDirty && !lightDataDirty) {
+                lastContainerVersion = container._version;
+                return;
             }
-            paramsU[0] = tileCountX;
-            paramsU[1] = tileCountY;
-            paramsU[2] = zSlices;
-            paramsU[3] = sortedLights.length;
-            paramsF[4] = sliceScale;
-            paramsF[5] = sliceBias;
-            paramsU[7] = batchCount;
-            engine._device.queue.writeBuffer(paramsBuffer, 0, paramsF as Float32Array<ArrayBuffer>);
-            writeDataTexture(engine, lightsTexture, lightData, 4, lightTexels, dataTextureWidth);
-            writeDataTexture(engine, cellsTexture, sliceData, 4, zSlices, dataTextureWidth);
-            writeDataTexture(engine, indicesTexture, maskData, 1, maskTexels, dataTextureWidth);
+
+            if (topologyDirty) {
+                lightDataDirty = true;
+                sliceData.fill(0);
+                activeLights.length = 0;
+                const view = getViewMatrix(activeCamera);
+                const proj = getProjectionMatrix(activeCamera, aspect);
+                const nearZ = activeCamera.nearPlane;
+                const farZ = activeCamera.farPlane;
+                const logFarNear = Math.log(farZ / nearZ);
+                const sliceScale = zSlices / logFarNear;
+                const sliceBias = -(zSlices * Math.log(nearZ)) / logFarNear;
+                for (const light of container.pointLights) {
+                    if (light.range > 0 && light.intensity > 0) {
+                        activeLights.push({ light, depth: viewZ(light.position, view) });
+                    }
+                }
+                activeLights.sort((a, b) => a.depth - b.depth);
+                const activeBatchCount = Math.max(1, Math.ceil(activeLights.length / CLUSTER_BATCH_SIZE));
+                const activeMaskTexels = tileCountX * tileCountY * activeBatchCount;
+                maskData.fill(0, 0, activeMaskTexels);
+                for (let i = 0; i < zSlices; i++) {
+                    const off = i * 4;
+                    sliceData[off] = EMPTY_SLICE_FIRST;
+                    sliceData[off + 1] = 0;
+                }
+                for (let i = 0; i < activeLights.length; i++) {
+                    const { light, depth } = activeLights[i]!;
+                    addLightToClusters(sliceData, maskData, light, depth, i, view, proj, tileCountX, tileCountY, zSlices, sliceScale, sliceBias, activeBatchCount);
+                }
+                paramsU[0] = tileCountX;
+                paramsU[1] = tileCountY;
+                paramsU[2] = zSlices;
+                paramsU[3] = activeLights.length;
+                paramsF[4] = sliceScale;
+                paramsF[5] = sliceBias;
+                paramsU[7] = activeBatchCount;
+                engine._device.queue.writeBuffer(paramsBuffer, 0, paramsF as Float32Array<ArrayBuffer>);
+                writeDataTexture(engine, cellsTexture, sliceData, 4, zSlices, dataTextureWidth);
+                if (activeLights.length > 0) {
+                    writeDataTexture(engine, indicesTexture, maskData, 1, activeMaskTexels, dataTextureWidth);
+                }
+            }
+            if (lightDataDirty) {
+                for (let i = 0; i < activeLights.length; i++) {
+                    const light = activeLights[i]!.light;
+                    const off = i * 8;
+                    lightData[off] = light.position[0];
+                    lightData[off + 1] = light.position[1];
+                    lightData[off + 2] = light.position[2];
+                    lightData[off + 3] = light.range;
+                    lightData[off + 4] = light.diffuse[0];
+                    lightData[off + 5] = light.diffuse[1];
+                    lightData[off + 6] = light.diffuse[2];
+                    lightData[off + 7] = light.intensity;
+                }
+                if (activeLights.length > 0) {
+                    writeDataTexture(engine, lightsTexture, lightData, 4, activeLights.length * 2, dataTextureWidth);
+                }
+            }
             lastCamera = activeCamera;
-            lastCameraVersion = activeCamera.worldMatrixVersion;
+            lastCameraVersion = _cameraChangeKey(activeCamera);
             lastTargetWidth = safeWidth;
             lastTargetHeight = safeHeight;
+            lastAspect = aspect;
             lastContainerVersion = container._version;
+            lastLightCount = container.pointLights.length;
         },
         dispose() {
             paramsBuffer.destroy();
@@ -305,15 +386,7 @@ function textureElementCount(texels: number, components: number, dataTextureWidt
     return dataTextureWidth * Math.max(1, Math.ceil(texels / dataTextureWidth)) * components;
 }
 
-function createDataTexture(
-    engine: EngineContext,
-    data: Float32Array | Uint32Array,
-    format: GPUTextureFormat,
-    components: number,
-    texels: number,
-    label: string,
-    dataTextureWidth: number
-): GPUTexture {
+function createDataTexture(engine: EngineContext, format: GPUTextureFormat, texels: number, label: string, dataTextureWidth: number): GPUTexture {
     const height = Math.max(1, Math.ceil(texels / dataTextureWidth));
     const texture = engine._device.createTexture({
         label,
@@ -321,13 +394,13 @@ function createDataTexture(
         format,
         usage: TU.TEXTURE_BINDING | TU.COPY_DST,
     });
-    writeDataTexture(engine, texture, data, components, texels, dataTextureWidth);
     return texture;
 }
 
 function writeDataTexture(engine: EngineContext, texture: GPUTexture, data: Float32Array | Uint32Array, components: number, texels: number, dataTextureWidth: number): void {
     const height = Math.max(1, Math.ceil(texels / dataTextureWidth));
-    engine._device.queue.writeTexture({ texture }, data.buffer, { bytesPerRow: dataTextureWidth * components * 4, rowsPerImage: height }, { width: dataTextureWidth, height });
+    const width = height > 1 ? dataTextureWidth : Math.max(1, Math.min(texels, dataTextureWidth));
+    engine._device.queue.writeTexture({ texture }, data.buffer, { bytesPerRow: width * components * 4, rowsPerImage: height }, { width, height });
 }
 
 function addLightToClusters(
@@ -403,7 +476,24 @@ function projectedSphereBounds(
     let maxNdcX = 1;
     let minNdcY = -1;
     let maxNdcY = 1;
-    if (vz > range) {
+    // proj[11] is 1 for a perspective projection and 0 for an orthographic one — a
+    // projection-agnostic discriminator that needs no coupling to the camera module.
+    // Under orthographic projection the silhouette is depth-independent: the sphere maps
+    // to an axis-aligned box of exactly its own radius, offset by the (possibly
+    // off-center) projection translation in proj[12]/proj[13], which the perspective
+    // path below ignores entirely.
+    if (proj[11] === 0) {
+        const sx = proj[0]!;
+        const sy = proj[5]!;
+        const cx = sx * vx + proj[12]!;
+        const cy = sy * vy + proj[13]!;
+        const rx = Math.abs(sx * range);
+        const ry = Math.abs(sy * range);
+        minNdcX = Math.max(cx - rx, -1);
+        maxNdcX = Math.min(cx + rx, 1);
+        minNdcY = Math.max(cy - ry, -1);
+        maxNdcY = Math.min(cy + ry, 1);
+    } else if (vz > range) {
         const x0 = projectedSphereEdge(vx, vz, rangeSq, proj[0]!, -1);
         const x1 = projectedSphereEdge(vx, vz, rangeSq, proj[0]!, 1);
         minNdcX = Math.min(x0, x1);

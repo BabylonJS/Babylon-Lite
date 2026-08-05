@@ -49,8 +49,8 @@ interface PbrComposerDeps {
     readonly _getSingleLightBlock: ((type: string) => string) | null;
     readonly _multiLightWGSL: string;
     readonly _multiLightLoop: string;
-    readonly _acesHelpers: string;
-    readonly _acesTonemapCall: string;
+    readonly _toneMappingHelpers: string;
+    readonly _toneMappingCall: string;
     /** Fog WGSL (calcFogFactor helper + blend block), dynamically loaded by pbr-renderable only
      *  when scene.fog is set; "" otherwise so non-fog scenes bundle zero fog bytes. */
     readonly _fogHelper: string;
@@ -61,6 +61,7 @@ interface PbrComposerDeps {
     /** Flat-normal WGSL (face normal from derivatives), dynamically loaded by pbr-renderable only
      *  when a no-NORMAL mesh is present; "" otherwise so normal-having scenes bundle zero bytes. */
     readonly _flatNormalWgsl: string;
+    readonly _gammaTemplate: typeof import("./pbr-template-gamma.js") | null;
     readonly _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null;
     readonly _shadowLights: readonly { readonly lightIndex: number; readonly shadowType: import("./fragments/pbr-shadow-fragment.js").PbrShadowLightSlot["shadowType"] }[];
     readonly _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null;
@@ -76,7 +77,8 @@ type PbrComposeFn = (
     _singleLightType?: string,
     _esmShadowDepthCode?: string,
     _vbStrides?: MeshVbLayout,
-    _vbKey?: string
+    _vbKey?: string,
+    _uv2Mask?: number
 ) => ComposedShader;
 
 /** Create a memoized shader composer for a given scene's resolved PBR deps. */
@@ -87,14 +89,15 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _getSingleLightBlock,
         _multiLightWGSL,
         _multiLightLoop,
-        _acesHelpers,
-        _acesTonemapCall,
+        _toneMappingHelpers,
+        _toneMappingCall,
         _fogHelper,
         _fogBlock,
         _createPbrTemplateExt,
         _anisoExt,
         _iblSkyboxCalc,
         _flatNormalWgsl,
+        _gammaTemplate,
         _createPbrShadowFragment,
         _shadowLights,
         _createThinInstanceFragment,
@@ -109,9 +112,10 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         singleLightType = "",
         _esmShadowDepthCode = "",
         vbStrides?: MeshVbLayout,
-        vbKey = ""
+        vbKey = "",
+        uv2Mask = 0
     ): ComposedShader {
-        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}`;
+        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}:${uv2Mask}`;
         const cached = cache.get(ckey);
         if (cached) {
             return cached;
@@ -143,7 +147,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
                       _hasUvTransform,
                       _hasVertexColor,
                       _hasUv2,
-                      _hasOcclusionUv2: _hasUv2,
+                      _uv2Mask: uv2Mask,
                       _features2: features2,
                       _hasAnyNormal,
                       _hasEmissiveTexture,
@@ -167,8 +171,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _hasTonemap: hasScene(PBR_HAS_TONEMAP),
             _fogHelper: hasScene(PBR_HAS_FOG) ? _fogHelper : "",
             _fogBlock: hasScene(PBR_HAS_FOG) ? _fogBlock : "",
-            _acesHelpers: _acesHelpers,
-            _acesTonemapCall: _acesTonemapCall,
+            _toneMappingHelpers: _toneMappingHelpers,
+            _toneMappingCall: _toneMappingCall,
             _hasAlphaBlend: has(PBR_HAS_ALPHA_BLEND),
             _hasSpecularAA,
             _hasGammaAlbedo: has(PBR_HAS_GAMMA_ALBEDO),
@@ -182,6 +186,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _anisoBrdfFunctions: _hasAnisotropy && _anisoExt ? _anisoExt.ANISO_BRDF_FUNCTIONS : "",
             _anisoTBBlock: _hasAnisotropy && _anisoExt ? _anisoExt.makeAnisotropyTBBlock(hasNormal, (features2 & _anisoExt.PBR2_HAS_ANISO_TEX) !== 0) : "",
             _ext,
+            _gammaTemplate,
             _noColorOutput: (features2 & PBR2_NO_COLOR_OUTPUT) !== 0,
             _esmShadowOutput: (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0,
             _esmShadowDepthCode,
@@ -193,6 +198,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _features: features,
             _features2: features2,
             _meshFeatures: meshFeatures,
+            _uv2Mask: _hasUv2 ? uv2Mask : 0,
             _hasIbl: _hasIbl,
             _hasAnyNormal,
             _hasSpecularAA,

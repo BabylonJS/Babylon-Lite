@@ -9,12 +9,12 @@
  * material properties are intentionally omitted.
  */
 
-import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty, createSolidTexture2D } from "babylon-lite";
+import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty, createSolidTexture2D, rebuildMaterial } from "babylon-lite";
 import type { StandardMaterialProps, PbrMaterialProps, ClearCoatProps, SheenProps, AnisotropyProps, IridescenceProps, Texture2D, EngineContext } from "babylon-lite";
 
 import { Color3 } from "../math/color.js";
 import type { Scene } from "../scene/scene.js";
-import type { BaseTexture, CubeTexture } from "../textures/textures.js";
+import type { BaseTexture, CubeTexture, HDRCubeTexture } from "../textures/textures.js";
 
 type Tuple3 = [number, number, number];
 type Tuple4 = [number, number, number, number];
@@ -56,6 +56,43 @@ export abstract class Material {
         return "Material";
     }
 
+    /**
+     * Babylon.js `Material.clone(name)` — return a deep copy of this material under
+     * a new name. Textures are **shared** by reference (matching Babylon.js), but the
+     * clone gets its **own** Babylon Lite renderable (a fresh `_buildGroup` / UBO from
+     * its factory) rather than aliasing the source's, so the two materials render and
+     * dirty-track independently. Each concrete subclass copies its own property set.
+     */
+    public abstract clone(name: string): Material;
+
+    /**
+     * @internal Copy the shared base + Lite data-property state onto a freshly
+     * constructed clone. The clone keeps the `_buildGroup`/UBO its own factory
+     * created (internal `_`-prefixed fields are never copied), so only the observable
+     * data properties — colours, scalars, and shared texture references — carry over.
+     */
+    protected _cloneBaseInto(target: Material): void {
+        copyLiteMaterialData(this._lite, target._lite);
+        target.transparencyMode = this.transparencyMode;
+        target.wireframe = this.wireframe;
+        target.backFaceCulling = this._backFaceCulling;
+    }
+
+    /** The scene this material was constructed against (Babylon.js `Material.getScene`). */
+    public getScene(): Scene | undefined {
+        return this._scene;
+    }
+
+    /**
+     * The textures currently bound to this material (Babylon.js
+     * `Material.getActiveTextures`). The base material owns no texture slots, so
+     * this returns an empty array; each subclass overrides it to enumerate its own
+     * slots and those of its extensions.
+     */
+    public getActiveTextures(): BaseTexture[] {
+        return [];
+    }
+
     protected _markDirty(): void {
         markMaterialUboDirty(this._lite);
     }
@@ -69,11 +106,52 @@ export abstract class Material {
         // No-op for the base/standard material.
     }
 
+    /**
+     * @internal Adopt an owning scene discovered when the material is first assigned
+     * to a mesh (Babylon.js allows `new StandardMaterial(name)` with no scene, then
+     * `mesh.material = mat`). Needed so the texture-readiness path can reconcile the
+     * material into the running scene. Registers with the scene the first time.
+     */
+    public _adoptScene(scene: Scene): void {
+        if (!this._scene) {
+            this._scene = scene;
+            scene._registerMaterial(this);
+        }
+    }
+
+    /**
+     * @internal Reconcile this material into its scene when the scene is already
+     * live: finalize GPU-facing resources ({@link _ensureRenderable}) and rebuild
+     * the renderables of every mesh using it. A no-op before engine start (the
+     * boot-time build handles those meshes) or when the material has no scene.
+     * Shared by the mesh `material` setter and the texture-readiness callback.
+     */
+    public _refreshInScene(): void {
+        const scene = this._scene;
+        if (!scene?._hasStarted) {
+            return;
+        }
+        this._ensureRenderable(scene.getEngine()._lite);
+        rebuildMaterial(scene._lite, this._lite);
+    }
+
+    /**
+     * @internal Rebind + rebuild this material once an asynchronously loaded texture
+     * assigned to it becomes GPU-ready. Babylon.js `Texture`s load in the background,
+     * so a texture assigned to a material (or a material assigned to a mesh) before
+     * the load resolves must go back through the rebuild path once the handle exists.
+     * Fires immediately when the texture is already ready (then gated by scene state).
+     */
+    protected _watchTexture(texture: { _onReady?: (listener: () => void) => void } | null): void {
+        texture?._onReady?.(() => this._refreshInScene());
+    }
+
     public dispose(): void {
         // No GPU resources are owned by the props object directly; textures are
         // disposed through their own handles. Drop the material from its scene's
         // `scene.materials` registry.
         this._scene?._unregisterMaterial(this);
+        this._scene = undefined;
     }
 }
 
@@ -86,6 +164,26 @@ export abstract class PushMaterial extends Material {
 
 function readColor3(tuple: Tuple3 | undefined): Color3 {
     return tuple ? new Color3(tuple[0], tuple[1], tuple[2]) : new Color3(0, 0, 0);
+}
+
+/**
+ * Copy the observable Babylon Lite material data-properties from `src` onto `dst`.
+ * `_`-prefixed internal fields (`_buildGroup`, `_uboVersion`, render-feature caches)
+ * are skipped so the clone keeps its own renderable state. Arrays (colour/UV tuples)
+ * are copied so mutating one material's colour does not alias the other; object
+ * values (texture handles) are shared by reference, matching Babylon.js clone
+ * semantics. Nested config objects (PBR clearcoat/sheen/…) are re-copied per-subclass.
+ */
+function copyLiteMaterialData(src: object, dst: object): void {
+    const s = src as Record<string, unknown>;
+    const d = dst as Record<string, unknown>;
+    for (const key of Object.keys(s)) {
+        if (key.startsWith("_")) {
+            continue;
+        }
+        const value = s[key];
+        d[key] = Array.isArray(value) ? value.slice() : value;
+    }
 }
 
 export class StandardMaterial extends PushMaterial {
@@ -159,6 +257,7 @@ export class StandardMaterial extends PushMaterial {
     public set diffuseTexture(texture: BaseTexture | null) {
         this._diffuseTexture = texture;
         this._lite.diffuseTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        this._watchTexture(texture);
         this._markDirty();
     }
 
@@ -189,6 +288,7 @@ export class StandardMaterial extends PushMaterial {
     public set bumpTexture(texture: BaseTexture | null) {
         this._bumpTexture = texture;
         this._lite.bumpTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        this._watchTexture(texture);
         this._markDirty();
     }
 
@@ -198,12 +298,28 @@ export class StandardMaterial extends PushMaterial {
     public set emissiveTexture(texture: BaseTexture | null) {
         this._emissiveTexture = texture;
         this._lite.emissiveTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        this._watchTexture(texture);
         this._markDirty();
     }
 
     private _diffuseTexture: BaseTexture | null = null;
     private _bumpTexture: BaseTexture | null = null;
     private _emissiveTexture: BaseTexture | null = null;
+
+    /** Enumerate the standard-material texture slots that are bound (Babylon.js `getActiveTextures`). */
+    public override getActiveTextures(): BaseTexture[] {
+        const textures: BaseTexture[] = [];
+        if (this._diffuseTexture) {
+            textures.push(this._diffuseTexture);
+        }
+        if (this._bumpTexture) {
+            textures.push(this._bumpTexture);
+        }
+        if (this._emissiveTexture) {
+            textures.push(this._emissiveTexture);
+        }
+        return textures;
+    }
 
     /**
      * @internal Re-bind texture maps to the Lite material. Babylon.js `Texture`s
@@ -228,6 +344,21 @@ export class StandardMaterial extends PushMaterial {
             this._lite.emissiveTexture = emissive._lite;
         }
         this._markDirty();
+    }
+
+    /**
+     * Babylon.js `StandardMaterial.clone(name)`. Copies the diffuse/specular/emissive/
+     * ambient colours and scalars, shares the diffuse/bump/emissive texture references,
+     * and gives the clone its own Lite standard-material renderable.
+     */
+    public override clone(name: string): StandardMaterial {
+        const cloned = new StandardMaterial(name, this._scene);
+        this._cloneBaseInto(cloned);
+        cloned.useAlphaFromDiffuseTexture = this.useAlphaFromDiffuseTexture;
+        cloned._diffuseTexture = this._diffuseTexture;
+        cloned._bumpTexture = this._bumpTexture;
+        cloned._emissiveTexture = this._emissiveTexture;
+        return cloned;
     }
 }
 
@@ -314,12 +445,25 @@ export class PBRSheenConfiguration {
         this._markDirty();
     }
 
-    /** Babylon.js `sheen.texture`. Binds the Lite handle if the texture has resolved. */
-    public set texture(value: { _lite?: Texture2D } | null) {
+    /** Babylon.js `sheen.texture`. Retains the wrapper and binds the Lite handle if the texture has resolved. */
+    public get texture(): BaseTexture | null {
+        return this._texture;
+    }
+    public set texture(value: BaseTexture | null) {
+        this._texture = value;
         if (value?._lite) {
             this._props.texture = value._lite;
-            this._markDirty();
+        } else {
+            delete this._props.texture;
         }
+        this._markDirty();
+    }
+
+    private _texture: BaseTexture | null = null;
+
+    /** Enumerate the sheen texture slot for `Material.getActiveTextures`. */
+    public getActiveTextures(): BaseTexture[] {
+        return this._texture ? [this._texture] : [];
     }
 }
 
@@ -407,6 +551,7 @@ export class PBRIridescenceConfiguration {
 export class PBRMaterial extends PushMaterial {
     /** @internal Underlying Babylon Lite PBR-material props. */
     public readonly _lite: PbrMaterialProps;
+    private _albedoFactor: Tuple4 = [1, 1, 1, 1];
 
     public constructor(name: string, scene?: Scene) {
         super(name, scene);
@@ -421,12 +566,11 @@ export class PBRMaterial extends PushMaterial {
     }
 
     public get albedoColor(): Color3 {
-        const f = this._lite.baseColorFactor;
-        return f ? new Color3(f[0], f[1], f[2]) : new Color3(1, 1, 1);
+        return new Color3(this._albedoFactor[0], this._albedoFactor[1], this._albedoFactor[2]);
     }
     public set albedoColor(value: Color3) {
-        const f: Tuple4 = this._lite.baseColorFactor ?? [1, 1, 1, 1];
-        this._lite.baseColorFactor = [value.r, value.g, value.b, f[3]];
+        this._albedoFactor = [value.r, value.g, value.b, this._albedoFactor[3]];
+        this._lite.baseColorFactor = [...this._albedoFactor];
         this._markDirty();
     }
 
@@ -440,10 +584,30 @@ export class PBRMaterial extends PushMaterial {
     }
     public set albedoTexture(texture: BaseTexture | null) {
         this._albedoTexture = texture;
+        this._watchTexture(texture);
         this._markDirty();
     }
 
     private _albedoTexture: BaseTexture | null = null;
+
+    /**
+     * Enumerate every bound PBR texture slot, including extension sub-configurations
+     * (Babylon.js `PBRMaterial.getActiveTextures`).
+     */
+    public override getActiveTextures(): BaseTexture[] {
+        const textures: BaseTexture[] = [];
+        if (this._albedoTexture) {
+            textures.push(this._albedoTexture);
+        }
+        const environmentTexture = this.environmentTexture;
+        if (environmentTexture) {
+            textures.push(environmentTexture);
+        }
+        if (this._sheen) {
+            textures.push(...this._sheen.getActiveTextures());
+        }
+        return textures;
+    }
 
     public get metallic(): number {
         return this._lite.metallicFactor ?? 1;
@@ -562,19 +726,22 @@ export class PBRMaterial extends PushMaterial {
      * environment assigned to a material is routed to the owning scene's
      * environment (the dominant single-IBL case Babylon.js scenes use).
      */
-    public get environmentTexture(): CubeTexture | null {
-        return this._scene?.environmentTexture ?? null;
+    public get environmentTexture(): CubeTexture | HDRCubeTexture | null {
+        return this._environmentTexture ?? this._scene?.environmentTexture ?? null;
     }
-    public set environmentTexture(value: CubeTexture | null) {
+    public set environmentTexture(value: CubeTexture | HDRCubeTexture | null) {
+        this._environmentTexture = value;
         if (this._scene) {
             this._scene.environmentTexture = value;
         }
     }
 
-    public get reflectionTexture(): CubeTexture | null {
+    private _environmentTexture: CubeTexture | HDRCubeTexture | null = null;
+
+    public get reflectionTexture(): CubeTexture | HDRCubeTexture | null {
         return this.environmentTexture;
     }
-    public set reflectionTexture(value: CubeTexture | null) {
+    public set reflectionTexture(value: CubeTexture | HDRCubeTexture | null) {
         this.environmentTexture = value;
     }
 
@@ -587,6 +754,7 @@ export class PBRMaterial extends PushMaterial {
         const albedo = this._albedoTexture as { _lite?: Texture2D; gammaSpace?: boolean } | null;
         if (albedo?._lite) {
             lite.baseColorTexture = albedo._lite;
+            lite.baseColorFactor = [...this._albedoFactor];
             lite.gammaAlbedo = albedo.gammaSpace ?? true;
         }
         // Babylon Lite's PBR pipeline samples baseColorTexture/ormTexture unconditionally,
@@ -594,7 +762,7 @@ export class PBRMaterial extends PushMaterial {
         // 1×1 solid textures. Bake the factors into the textures and neutralize the factors
         // so each contribution is applied exactly once.
         if (!lite.baseColorTexture) {
-            const f = lite.baseColorFactor ?? [1, 1, 1, 1];
+            const f = this._albedoFactor;
             lite.baseColorTexture = createSolidTexture2D(engine, f[0], f[1], f[2], f[3]);
             lite.baseColorFactor = [1, 1, 1, 1];
         }
@@ -604,6 +772,46 @@ export class PBRMaterial extends PushMaterial {
             lite.ormTexture = createSolidTexture2D(engine, 1, rough, metal);
             lite.roughnessFactor = 1;
             lite.metallicFactor = 1;
+        }
+    }
+
+    /**
+     * Babylon.js `PBRMaterial.clone(name)`. Copies the albedo/metallic/roughness/
+     * emissive state, shares the albedo texture reference, gives the clone independent
+     * clearcoat/sheen/anisotropy/iridescence sub-configurations (sharing any nested
+     * texture), and a fresh Lite PBR renderable.
+     */
+    public override clone(name: string): PBRMaterial {
+        const cloned = new PBRMaterial(name, this._scene);
+        this._clonePbrInto(cloned);
+        return cloned;
+    }
+
+    /**
+     * @internal Copy PBR-specific compat + Lite state onto a freshly constructed PBR
+     * clone (used by every `PBRMaterial` subclass so each returns its own concrete
+     * type). The base `_cloneBaseInto` shares the sub-config objects by reference; this
+     * re-copies them so the clone's `clearCoat`/`sheen`/… mutate independently while
+     * still sharing any nested texture handle.
+     */
+    protected _clonePbrInto(target: PBRMaterial): void {
+        this._cloneBaseInto(target);
+        target.forceIrradianceInFragment = this.forceIrradianceInFragment;
+        target._albedoFactor = [...this._albedoFactor];
+        target._albedoTexture = this._albedoTexture;
+        const src = this._lite;
+        const dst = target._lite;
+        if (src.clearCoat) {
+            dst.clearCoat = { ...src.clearCoat };
+        }
+        if (src.sheen) {
+            dst.sheen = { ...src.sheen };
+        }
+        if (src.anisotropy) {
+            dst.anisotropy = { ...src.anisotropy };
+        }
+        if (src.iridescence) {
+            dst.iridescence = { ...src.iridescence };
         }
     }
 }
@@ -623,6 +831,12 @@ export class PBRMetallicRoughnessMaterial extends PBRMaterial {
     }
     public set baseColor(value: Color3) {
         this.albedoColor = value;
+    }
+
+    public override clone(name: string): PBRMetallicRoughnessMaterial {
+        const cloned = new PBRMetallicRoughnessMaterial(name, this._scene);
+        this._clonePbrInto(cloned);
+        return cloned;
     }
 }
 
@@ -651,5 +865,11 @@ export class PBRSpecularGlossinessMaterial extends PBRMaterial {
     }
     public set glossiness(value: number) {
         this.roughness = 1 - value;
+    }
+
+    public override clone(name: string): PBRSpecularGlossinessMaterial {
+        const cloned = new PBRSpecularGlossinessMaterial(name, this._scene);
+        this._clonePbrInto(cloned);
+        return cloned;
     }
 }

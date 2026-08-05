@@ -131,7 +131,9 @@ await startEngine(engine);
 
 Notice the shape is the same: create an engine, build a scene, add a light, load a glTF, set up the environment and camera, then run. The difference is that Lite hands you **plain data plus tree-shakable functions** instead of classes and methods — which is exactly what lets the bundler strip everything you don't use.
 
-> Ready to port a real scene? See the **[Porting Guide](/lite/03-porting-guide)** for a full side-by-side API map.
+> Want to run this without installing anything? Paste it into the **[Lite Playground](https://liteplayground.babylonjs.com)** and hit Run. See the **[Playground guide](04-playground.md)** for a tour.
+
+> Ready to port a real scene? See the **[Porting Guide](03-porting-guide.md)** for a full side-by-side API map.
 
 ---
 
@@ -194,7 +196,7 @@ A few honest notes so you can plan with confidence:
 Babylon Lite is WebGPU-only, so it runs anywhere WebGPU is available: Chrome and Edge 113+, and recent Firefox and Safari. There is no WebGL fallback by design.
 
 **Will Babylon.js features come to Lite?**
-Yes — bringing Lite up toward Babylon.js feature parity is our top priority. Features land as isolated, tree-shakable modules, so the engine grows without bloating your bundle. See the **[Feature Comparison](/lite/02-feature-comparison)** for exactly what's covered today, what's partial, and what's still missing.
+Yes — bringing Lite up toward Babylon.js feature parity is our top priority. Features land as isolated, tree-shakable modules, so the engine grows without bloating your bundle. See the **[Feature Comparison](02-feature-comparison.md)** for exactly what's covered today, what's partial, and what's still missing.
 
 **Can I mix Babylon.js and Babylon Lite in one project?**
 A given scene is built with one engine or the other. Because the APIs are similar in shape, the concepts and assets (glTF, `.env`, textures) carry straight across when you choose which engine fits a project.
@@ -213,7 +215,7 @@ This is just the beginning. On the roadmap:
 
 - **Feature parity with Babylon.js** — closing the gap so more scenes can be built in Lite without compromise.
 - **A Lite Viewer** — a drop-in, ultra-light viewer for showcasing models and scenes with the smallest possible footprint.
-- **A Lite Playground and Sandbox** — the tools you love from the Babylon ecosystem, reimagined for Lite.
+- **A Lite Sandbox** — drag-and-drop model inspection, reimagined for Lite. (The **[Lite Playground](https://liteplayground.babylonjs.com)** is already live — try Lite in your browser today.)
 
 And just as importantly: we want to **hear from you** — what's missing, what you'd need before reaching for Lite, and where it should go next. Your feedback will directly shape the roadmap.
 
@@ -221,10 +223,12 @@ And just as importantly: we want to **hear from you** — what's missing, what y
 
 ## Next steps
 
-- 🚀 **[Getting Started](/lite/01-getting-started)** — install Lite, learn the mental model, and render your first scene.
-- 🔁 **[Porting Guide](/lite/03-porting-guide)** — translate a Babylon.js scene to Babylon Lite, side by side.
-- 📊 **[Feature Comparison](/lite/02-feature-comparison)** — the full Lite-vs-Babylon.js feature matrix, so you can see exactly what's covered, partial, or missing.
-- 🧱 **[Architecture docs](/lite/architecture/00-overview)** — deep dives into the engine internals.
+- 🚀 **[Getting Started](01-getting-started.md)** — install Lite, learn the mental model, and render your first scene.
+- 🛝 **[Lite Playground](04-playground.md)** — try Lite in your browser with zero setup: edit, run, and share snippets live.
+- 🔁 **[Porting Guide](03-porting-guide.md)** — translate a Babylon.js scene to Babylon Lite, side by side.
+- 📊 **[Feature Comparison](02-feature-comparison.md)** — the full Lite-vs-Babylon.js feature matrix, so you can see exactly what's covered, partial, or missing.
+- 🧱 **[Architecture docs](architecture/00-overview.md)** — deep dives into the engine internals.
+- 🧪 **[Headless (Null Engine)](05-headless-null-engine.md)** — run Lite without a GPU for server-side physics and deterministic simulation.
 - 🌐 **[github.com/BabylonJS/Babylon-Lite](https://github.com/BabylonJS/Babylon-Lite)** — explore the code, browse the scene gallery, and follow along with development.
 
 Star the repo, open an issue, and tell us what you'd want before reaching for Lite. **Two engines, one family, moving forward together** — pick the one that fits your project, and switch between them knowing the pixels won't change. 💙

@@ -17,9 +17,13 @@ import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import { GPUPicker } from "@babylonjs/core/Collisions/gpuPicker";
+import { waitForGsSettled } from "./gs-settle";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
+import "@babylonjs/core/Materials/standardMaterial";
 
-const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/Halo_Believe.splat";
+// Vendored locally (lab/public/splats/) to remove remote-CDN network variance
+// from the CI parity capture. Served at the site root by the lab dev server.
+const SPLAT_URL = "/splats/Halo_Believe.splat";
 // Screen-centre coordinates pick the GS mesh in both BJS and Lite (the
 // renderMesh quads cover most of the rendered area for this splat).
 const DEFAULT_PICK_X_RATIO = 0.5;
@@ -71,11 +75,10 @@ function getPickRatios(): [number, number] {
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
 
-    const start = performance.now();
-    while ((gs as unknown as { _canPostToWorker: boolean })._canPostToWorker !== true && performance.now() - start < 5_000) {
-        await new Promise<void>((r) => setTimeout(r, 16));
-    }
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
+    // Wait for the GS depth sort to settle over several rendered frames so the
+    // subsequent GPU pick (and the captured frame) are deterministic. The old
+    // `_canPostToWorker` poll could pick/capture mid-sort on the CI browser.
+    await waitForGsSettled(scene, gs);
 
     const [pickXRatio, pickYRatio] = getPickRatios();
     const pickX = canvas.clientWidth * pickXRatio;

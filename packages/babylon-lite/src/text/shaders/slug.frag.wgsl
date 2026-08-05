@@ -3,6 +3,15 @@
 @group(0) @binding(1) var curveTex: texture_2d<f32>;
 @group(0) @binding(2) var bandTex: texture_2d<f32>;
 
+struct TextU {
+  mvp: mat4x4<f32>,
+  viewport: vec4<f32>,
+  // .a = whole-draw opacity. .x = coverage-gamma reciprocal (1/coverageGamma) applied to
+  // anti-aliased edge coverage below. .yz unused.
+  color: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> textU: TextU;
+
 struct FIn {
   @location(0) vTexcoord: vec2<f32>,
   @location(1) @interpolate(flat) vBanding: vec4<f32>,
@@ -136,5 +145,8 @@ fn main(in: FIn) -> @location(0) vec4<f32> {
     min(abs(xcov), abs(ycov))
   );
   coverage = clamp(coverage, 0.0, 1.0);
+  // Coverage gamma: raise edge coverage to 1/coverageGamma so anti-aliased edges composite
+  // heavier (mimics gamma-space stem darkening). textU.color.x is 1 by default (no-op).
+  coverage = pow(coverage, textU.color.x);
   return in.vColor * coverage;
 }

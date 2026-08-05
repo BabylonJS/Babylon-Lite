@@ -39,9 +39,9 @@ describe("gltf-interleave", () => {
         expect(accessorIsStrided(json, 2)).toBe(false); // TEXCOORD_0 (no byteStride)
     });
 
-    it("leaves strided POSITION/NORMAL CPU fields null (lazy) but records the GPU layout", () => {
+    it("leaves strided POSITION/NORMAL CPU fields null (lazy) but records the GPU layout", async () => {
         const { json, binChunk, primitive } = makeInterleavedAsset();
-        const m = buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0)!;
+        const m = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
         expect(m).toBeDefined();
 
         // Strided position/normal are NOT de-strided eagerly — the tight copy is
@@ -61,9 +61,9 @@ describe("gltf-interleave", () => {
         expect(m._vb!._u).toBeUndefined();
     });
 
-    it("installLazyCpu de-strides position/normal only on first access", () => {
+    it("installLazyCpu de-strides position/normal only on first access", async () => {
         const { json, binChunk, primitive } = makeInterleavedAsset();
-        const m = buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0)!;
+        const m = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
         const mesh: Record<string, unknown> = {};
         installLazyCpu(mesh, m as never);
 
@@ -77,17 +77,43 @@ describe("gltf-interleave", () => {
         expect(mesh._cpuPositions).toBe(mesh._cpuPositions);
     });
 
-    it("computeAabbStrided folds the AABB directly from the strided slice", () => {
+    it("shares lazy CPU copies across meshes created from one cached primitive", async () => {
         const { json, binChunk, primitive } = makeInterleavedAsset();
-        const m = buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0)!;
+        const m = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
+        const first: Record<string, unknown> = {};
+        const second: Record<string, unknown> = {};
+
+        expect(m._vb!._p!._cpu).toBeUndefined();
+        expect(m._vb!._n!._cpu).toBeUndefined();
+        installLazyCpu(first, m as never);
+        installLazyCpu(second, m as never);
+
+        expect(m._vb!._p!._cpu).toBeUndefined();
+        expect(m._vb!._n!._cpu).toBeUndefined();
+        const positions = first._cpuPositions;
+        const normals = first._cpuNormals;
+        expect(m._vb!._p!._cpu).toBe(positions);
+        expect(m._vb!._n!._cpu).toBe(normals);
+        expect(second._cpuPositions).toBe(positions);
+        expect(second._cpuNormals).toBe(normals);
+
+        const replacement = new Float32Array([7, 8, 9]);
+        second._cpuPositions = replacement;
+        expect(second._cpuPositions).toBe(replacement);
+        expect(first._cpuPositions).toBe(positions);
+    });
+
+    it("computeAabbStrided folds the AABB directly from the strided slice", async () => {
+        const { json, binChunk, primitive } = makeInterleavedAsset();
+        const m = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
         const [min, max] = computeAabbStrided(m._vb!._p!);
         expect(min).toEqual([1, 2, 3]);
         expect(max).toEqual([4, 5, 6]);
     });
 
-    it("returns undefined for a fully-tight primitive (caller uses the tight path)", () => {
+    it("returns undefined for a fully-tight primitive (caller uses the tight path)", async () => {
         const { json, binChunk } = makeInterleavedAsset();
         const tightOnly = { attributes: { TEXCOORD_0: 2 } };
-        expect(buildInterleavedPartial(json, binChunk, tightOnly, new Float32Array(16) as never, 0)).toBeUndefined();
+        expect(await buildInterleavedPartial(json, binChunk, tightOnly, new Float32Array(16) as never, 0)).toBeUndefined();
     });
 });

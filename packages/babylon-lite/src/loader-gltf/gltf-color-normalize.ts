@@ -50,3 +50,21 @@ export function normalizeColorToVec4(data: ArrayBufferView, count: number, comps
     }
     return out;
 }
+
+/** Normalize a glTF TEXCOORD_n attribute to a tight float32 VEC2 buffer.
+ *
+ *  The PBR/standard vertex pipeline binds UVs as `float32x2`. glTF TEXCOORD may
+ *  be FLOAT or normalized UNSIGNED_BYTE / UNSIGNED_SHORT (glTF-Asset-Generator
+ *  Mesh_PrimitiveAttribute / Buffer_Interleaved). Binding an integer source to
+ *  the float32x2 layout misreads every vertex (garbage UVs → wrong texturing),
+ *  so integer UVs are normalized to [0,1] here. `data` is the resolved accessor
+ *  view (Float32Array | Uint8Array | Uint16Array) and `count` the vertex count. */
+export function normalizeUvToVec2(data: ArrayBufferView, count: number): Float32Array {
+    const out = new Float32Array(count * 2);
+    const inv = data instanceof Uint16Array ? 1 / 65535 : data instanceof Uint8Array ? 1 / 255 : 1;
+    const s = data as unknown as { [i: number]: number };
+    for (let i = 0; i < count * 2; i++) {
+        out[i] = s[i]! * inv;
+    }
+    return out;
+}

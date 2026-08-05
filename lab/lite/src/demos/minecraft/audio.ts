@@ -1,25 +1,51 @@
-// Tiny synthesized sound effects for block edits — no audio assets, just WebAudio
-// oscillator/noise bursts. The AudioContext must be created from a user gesture
-// (the pointer-lock click), so call initAudio() from there before playing.
+// Synthesized sound effects for block edits, played through the Lite audio
+// engine. No audio assets — just WebAudio oscillator/noise bursts built on the
+// engine's own context and mixed through a master GainNode routed into the
+// engine via `createSoundSourceAsync`. The engine must be created from a user
+// gesture (the pointer-lock click), so call initAudio() from there before playing.
 
-let ctx: AudioContext | null = null;
+import { createAudioEngineAsync, createSoundSourceAsync, unlockAudioEngineAsync, type AudioEngine } from "babylon-lite";
 
-/** Lazily create the AudioContext. Safe to call repeatedly; must run in a gesture. */
+let engine: AudioEngine | null = null;
+let ctx: BaseAudioContext | null = null;
+let master: GainNode | null = null;
+let starting = false;
+
+/** Lazily create + unlock the Lite audio engine. Safe to call repeatedly; must
+ *  run in a user gesture. */
 export function initAudio(): void {
-    if (ctx) {
-        if (ctx.state === "suspended") void ctx.resume();
+    if (engine) {
+        void unlockAudioEngineAsync(engine);
         return;
     }
-    const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (Ctor) ctx = new Ctor();
-    startAmbience();
+    if (starting) return;
+    starting = true;
+    void (async (): Promise<void> => {
+        try {
+            const e = await createAudioEngineAsync();
+            const m = e.audioContext.createGain();
+            await createSoundSourceAsync(e, m);
+            engine = e;
+            ctx = e.audioContext;
+            master = m;
+            await unlockAudioEngineAsync(e);
+            startAmbience();
+        } catch {
+            // Audio unavailable (e.g. headless E2E) — stay silent. Clear any
+            // partially-assigned state and the guard so a later gesture can retry.
+            engine = null;
+            ctx = null;
+            master = null;
+            starting = false;
+        }
+    })();
 }
 
 let ambienceStarted = false;
 
-/** Start a quiet looping wind bed (filtered noise) once the context exists. */
+/** Start a quiet looping wind bed (filtered noise) once the engine exists. */
 function startAmbience(): void {
-    if (!ctx || ambienceStarted) return;
+    if (!ctx || !master || ambienceStarted) return;
     ambienceStarted = true;
     // A long, non-round buffer so the loop seam is hard to perceive.
     const dur = 19;
@@ -52,13 +78,13 @@ function startAmbience(): void {
         src.connect(filter).connect(gain);
         src.start();
     }
-    gain.connect(ctx.destination);
+    gain.connect(master);
     lfo.start();
 }
 
 /** Soft, low footstep thud. Call when the walking player covers ~a block. */
 export function playStep(): void {
-    if (!ctx) return;
+    if (!ctx || !master) return;
     const now = ctx.currentTime;
     const dur = 0.09;
     const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
@@ -77,14 +103,14 @@ export function playStep(): void {
     // Tiny randomisation so consecutive steps don't sound identical.
     gain.gain.setValueAtTime(0.12 + Math.random() * 0.05, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.connect(filter).connect(gain).connect(master);
     src.start(now);
     src.stop(now + dur);
 }
 
 /** Short filtered-noise "thock" for breaking a block. */
 export function playBreak(): void {
-    if (!ctx) return;
+    if (!ctx || !master) return;
     const now = ctx.currentTime;
     const dur = 0.18;
     const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
@@ -102,14 +128,14 @@ export function playBreak(): void {
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.5, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.connect(filter).connect(gain).connect(master);
     src.start(now);
     src.stop(now + dur);
 }
 
 /** Softer, higher "tap" for placing a block. */
 export function playPlace(): void {
-    if (!ctx) return;
+    if (!ctx || !master) return;
     const now = ctx.currentTime;
     const dur = 0.1;
     const osc = ctx.createOscillator();
@@ -119,7 +145,7 @@ export function playPlace(): void {
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.25, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-    osc.connect(gain).connect(ctx.destination);
+    osc.connect(gain).connect(master);
     osc.start(now);
     osc.stop(now + dur);
 }

@@ -83,6 +83,20 @@ The module exposes **two** sprite families:
    from the pure-2D path (no camera). Yaw-locked billboards are axis-locked
    with [0, 1, 0] as the lock axis.
 
+Depth-writing sprites can opt into alpha-to-coverage before scene registration:
+
+- `setAlphaToCoverage(layer, true)` is effective for a scene-hosted
+  `Sprite2DLayer` with `depth: "test-write"` on a multisampled target.
+  The layer keeps its selected blend mode; use `spriteBlendOpaque` for
+  replacement color/depth rendering.
+- `setAlphaToCoverage(system, true)` is effective for a cutout
+  `BillboardSpriteSystem` on a multisampled target. The A2C variant replaces the
+  binary cutoff with continuous texture-alpha sample coverage.
+
+The cutout billboard variant uses replacement color and per-sample depth writes.
+Pure-2D/HUD `SpriteRenderer` layers target a 1x swapchain and retain their normal
+blend descriptors; A2C is neither useful nor enabled on that path.
+
 `SpriteAtlas` and `SpriteFrame` are shared across both families. Clip
 animation, stable handle objects, and parenting are roadmap modules that must
 remain additive and separately importable so index-only scenes pay zero bytes
@@ -369,9 +383,9 @@ effect is built entirely on these — no bespoke engine pass):
 export interface RenderTexture2DOptions {
     addressModeU?: GPUAddressMode; // default 'clamp-to-edge'
     addressModeV?: GPUAddressMode; // default 'clamp-to-edge'
-    minFilter?: GPUFilterMode;     // default 'linear'
-    magFilter?: GPUFilterMode;     // default 'linear'
-    format?: GPUTextureFormat;     // default engine.format (REQUIRED for a SpriteRenderer target)
+    minFilter?: GPUFilterMode; // default 'linear'
+    magFilter?: GPUFilterMode; // default 'linear'
+    format?: GPUTextureFormat; // default engine.format (REQUIRED for a SpriteRenderer target)
 }
 /** An empty Texture2D usable as BOTH a render target and a sampled texture
  *  (RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_DST). */
@@ -730,8 +744,6 @@ export interface Sprite2DProps {
     flipX?: boolean;
     flipY?: boolean;
     visible?: boolean;
-    /** Reserved for picking (PR 5). Accepted but unused today. */
-    pickable?: boolean;
     /** Reserved for clip animation (later PR). Accepted but unused today. */
     clip?: unknown;
     /**
@@ -772,9 +784,9 @@ Observable fields and parenting remain additive follow-up modules.
 ```typescript
 // src/sprite/sprite-2d-handle.ts — optional, tree-shakable Handle API.
 export interface Sprite2DHandle {
-  readonly _entityType: "sprite-2d-handle";
-  readonly layer: Sprite2DLayer;
-  readonly id: number;
+    readonly _entityType: "sprite-2d-handle";
+    readonly layer: Sprite2DLayer;
+    readonly id: number;
 }
 
 export function addSprite2D(layer: Sprite2DLayer, props: Sprite2DProps): Sprite2DHandle;
@@ -807,10 +819,11 @@ export interface SpriteBlendDescriptor {
     readonly _premultipliedOpacity?: boolean;
 }
 
-export const spriteBlendAlpha: SpriteBlendDescriptor;          // straight-alpha "over" (default)
-export const spriteBlendPremultiplied: SpriteBlendDescriptor;  // premultiplied "over"
-export const spriteBlendAdditive: SpriteBlendDescriptor;       // glows/sparks: src*alpha + dst
-export const spriteBlendMultiply: SpriteBlendDescriptor;       // shadow/tint: result = src * dst
+export const spriteBlendOpaque: SpriteBlendDescriptor; // replacement color; no blend
+export const spriteBlendAlpha: SpriteBlendDescriptor; // straight-alpha "over" (default)
+export const spriteBlendPremultiplied: SpriteBlendDescriptor; // premultiplied "over"
+export const spriteBlendAdditive: SpriteBlendDescriptor; // glows/sparks: src*alpha + dst
+export const spriteBlendMultiply: SpriteBlendDescriptor; // shadow/tint: result = src * dst
 
 // src/sprite/billboard-blend.ts — mirrors the above for world-space billboards.
 export interface BillboardBlendDescriptor extends SpriteBlendDescriptor {
@@ -820,7 +833,7 @@ export interface BillboardBlendDescriptor extends SpriteBlendDescriptor {
 
 export const billboardBlendAlpha: BillboardBlendDescriptor;
 export const billboardBlendPremultiplied: BillboardBlendDescriptor;
-export const billboardBlendCutout: BillboardBlendDescriptor;   // alpha-test, depth-writing
+export const billboardBlendCutout: BillboardBlendDescriptor; // alpha-test, depth-writing
 export const billboardBlendAdditive: BillboardBlendDescriptor; // transparent, no depth write
 ```
 
@@ -840,7 +853,7 @@ descriptor passed as `customShader`:
 // src/sprite/sprite-custom-shader.ts
 export type Sprite2DCustomTexture = CustomShaderTexture; // becomes `<name>Tex` + `<name>Samp` in WGSL
 export interface Sprite2DCustomShaderOptions {
-    readonly fragment: string;                              // WGSL fragment body
+    readonly fragment: string; // WGSL fragment body
     readonly extraTextures?: readonly Sprite2DCustomTexture[];
 }
 export function createSprite2DCustomShader(options: Sprite2DCustomShaderOptions): Sprite2DCustomShader;
@@ -863,7 +876,7 @@ crux, and it mirrors the PBR extension registry (`pbr-flags.ts`). The module dec
 interfaces (`SpriteFxHook`, `BillboardFxHook`) whose methods (`initLayer`, `pipelineKeyPart`,
 `shaderModule`, `layoutEntries`, `createLayerFx`, `updateFx`, `bindEntries`, `disposeFx`) each
 take the layer/system **opaquely**, so every `layer.customShader` / `layer.shaderParams` property
-read happens *inside* the tree-shaken impl. It holds two module-level slots
+read happens _inside_ the tree-shaken impl. It holds two module-level slots
 (`let _spriteFxHook: SpriteFxHook | null = null`, `_billboardFxHook`) and the
 `_registerSpriteFxHook` / `_getSpriteFxHook` / `_registerBillboardFxHook` / `_getBillboardFxHook`
 functions — with no module-level side effects. The always-loaded sprite / billboard / pipeline /
@@ -872,7 +885,7 @@ renderer modules only ever call `_getSpriteFxHook()?.method(...)`; the slot stay
 scene ships **zero** custom-shader tokens — not even the public `customShader` / `shaderParams`
 field-name strings. `sprite-pipeline.ts`'s `spritePipelineKey` reaches the feature only through
 `_getSpriteFxHook()?.pipelineKeyPart(layer)` (the `cs${customKey}` segment). The 2D and billboard
-composers share their *mechanics* via `custom-shader-core.ts` (extra-texture bindings, name
+composers share their _mechanics_ via `custom-shader-core.ts` (extra-texture bindings, name
 validation, the `SpriteFx` UBO, key allocation) but keep their own vertex stage and varying
 contract.
 
@@ -888,7 +901,7 @@ backgrounds without re-uploading texture coordinates. The offset is set per spri
 Enabling the flag (1) widens the instance stride by two floats, (2) adds a
 `@location(7) iUvOffset: vec2<f32>` vertex attribute, (3) selects a distinct WGSL variant
 (`let uv = mix(...) + in.iUvOffset`), and (4) adds a `:uv${uvKey}` segment to the pipeline key so
-variants don't collide. The widening is orthogonal to depth and lands *after* the base layout:
+variants don't collide. The widening is orthogonal to depth and lands _after_ the base layout:
 
 ```text
 pure-2D + uvScroll  (15 floats = 60 bytes):  [13..14] uvOffset.xy (float32x2 @ byte offset 52)
@@ -1055,9 +1068,9 @@ export function setBillboardSpriteFrameIndex(system: BillboardSpriteSystem, inde
 
 // src/sprite/billboard-sprite-handle.ts — optional, tree-shakable Handle API.
 export interface BillboardSpriteHandle {
-  readonly _entityType: "billboard-sprite-handle";
-  readonly system: BillboardSpriteSystem;
-  readonly id: number;
+    readonly _entityType: "billboard-sprite-handle";
+    readonly system: BillboardSpriteSystem;
+    readonly id: number;
 }
 
 export function addBillboardSprite(system: BillboardSpriteSystem, init: BillboardSpriteInit): BillboardSpriteHandle;
@@ -1125,9 +1138,10 @@ rather than `_transmissive`.
 Yaw-locked billboards (world-Y axis constraint) are created via
 `createAxisLockedBillboardSystem(atlas, [0, 1, 0], opts)`.
 
-### Roadmap — Picking
+### Picking
 
-The picking APIs below are not part of the current root exports.
+The picking APIs below are exported from the package root (`pickSprite2D`,
+`pickBillboardSprite`, and the `SpritePickInfo` / `BillboardPickInfo` result types).
 
 ```typescript
 // src/sprite/picking/pick-sprite-2d.ts — handles every Sprite2DLayer
@@ -1135,8 +1149,10 @@ The picking APIs below are not part of the current root exports.
 // AND the layers of any SpriteRenderer the caller hands in.
 export function pickSprite2D(layers: ReadonlyArray<Sprite2DLayer>, xPx: number, yPx: number): SpritePickInfo | null;
 
-// src/sprite/picking/pick-billboard.ts — GPU contributor.
-export function pickBillboardSprite(scene: SceneContext, xPx: number, yPx: number): Promise<SpritePickInfo | null>;
+// src/sprite/picking/pick-billboard.ts — GPU picker into the shared mesh pick pass.
+// An optional caller-owned `picker` (from createGpuPicker) is reused across calls for
+// high-frequency picking; when omitted, a transient picker is created and disposed per call.
+export function pickBillboardSprite(scene: SceneContext, xPx: number, yPx: number, picker?: GpuPicker): Promise<BillboardPickInfo | null>;
 ```
 
 `pickSprite2D` is the pure-2D picker: the caller passes whichever
@@ -1149,8 +1165,8 @@ For anchored layers `positionPx` has already been projected CPU-side
 this frame, so the picker hits the same screen rectangle the GPU draws.
 No GPU pick pass for Sprite2D.
 
-`pickBillboardSprite` is a GPU pick contributor; the full design is
-specified under [Picking](#picking) below.
+`pickBillboardSprite` draws into the shared mesh pick pass on the GPU; the full
+design is specified under [Picking](#picking) below.
 
 ### Pure-2D usage — no scene
 
@@ -1224,7 +1240,7 @@ Depth-hosted layers use the same first 52 bytes, plus:
 
 #### Sprite2DLayer `uvScroll` extension (opt-in; +8 B = +2 floats)
 
-Layers created with `uvScroll: true` append two more floats (`uvOffset.xy`) *after* the base
+Layers created with `uvScroll: true` append two more floats (`uvOffset.xy`) _after_ the base
 layout, orthogonally to depth. The wider stride, the extra `@location(7)` attribute, and the
 `+ iUvOffset` WGSL are gated on the per-layer flag, so non-scroll scenes ship none of it.
 
@@ -1328,17 +1344,17 @@ to a storage buffer at `@group(1) @binding(3)` (not a vertex buffer — 3D
 sprite families read sprite data through a storage buffer indexed by a
 sort-indirection vertex attribute, see below). The 24-float layout:
 
-| Offset (floats) | Field         | Notes                                               |
-| --------------- | ------------- | --------------------------------------------------- |
-| 0..2            | `worldPos`    | xyz — anchor position in world space                |
-| 3               | `_reserved`   | 0 (anchored layers use this slot for `depthBias`)   |
-| 4..5            | `_reserved`   | (0,0) (anchored layers use these for `offsetPx`)    |
-| 6..7            | `sizeWorld`   | width/height in world units                         |
-| 8..9            | `pivot`       | normalized [0,1]                                    |
-| 10..11          | `sinCos`      | precomputed sin/cos of rotation                     |
-| 12..15          | `uvRect`      | uvMin.xy, uvMax.xy                                  |
-| 16..19          | `color`       | RGBA tint                                           |
-| 20..23          | `flagsAndPad` | float-encoded `[flipX, flipY, pickable, _reserved]` |
+| Offset (floats) | Field         | Notes                                                |
+| --------------- | ------------- | ---------------------------------------------------- |
+| 0..2            | `worldPos`    | xyz — anchor position in world space                 |
+| 3               | `_reserved`   | 0 (anchored layers use this slot for `depthBias`)    |
+| 4..5            | `_reserved`   | (0,0) (anchored layers use these for `offsetPx`)     |
+| 6..7            | `sizeWorld`   | width/height in world units                          |
+| 8..9            | `pivot`       | normalized [0,1]                                     |
+| 10..11          | `sinCos`      | precomputed sin/cos of rotation                      |
+| 12..15          | `uvRect`      | uvMin.xy, uvMax.xy                                   |
+| 16..19          | `color`       | RGBA tint                                            |
+| 20..23          | `flagsAndPad` | float-encoded `[flipX, flipY, _reserved, _reserved]` |
 
 The lock axis (axis-locked variant only) lives in the **system UBO**, not
 per-sprite. The reserved slots at floats 3..5 stay in the layout because
@@ -1386,7 +1402,7 @@ struct SpriteData {
     sinCos: vec2<f32>,
     uvRect: vec4<f32>,
     color: vec4<f32>,
-    flagsAndPad: vec4<f32>,            // .x flipX, .y flipY, .z pickable, .w reserved
+    flagsAndPad: vec4<f32>,            // .x flipX, .y flipY, .z reserved, .w reserved
 };
 @group(1) @binding(3) var<storage, read> sprites: array<SpriteData>;
 
@@ -1751,116 +1767,102 @@ the sort and upload dirty ranges in logical insertion order.
 
 ## Picking
 
-### `pickSprite2D` — CPU contributor
+Two pickers cover the two families, each matched to where its family lives:
+
+- `pickSprite2D` is **pure CPU**. `Sprite2DLayer` sprites are screen-space
+  rectangles, and pure-2D apps have no scene, camera, or depth target for a GPU
+  pass to hook into.
+- `pickBillboardSprite` is **GPU**. Billboards live in the scene's 3D depth
+  buffer, so picking one must respect occlusion by meshes and nearer billboards;
+  it draws into the same `gpu-picker.ts` 1×1 pick pass the mesh picker uses.
+
+### `pickSprite2D` — CPU rectangle test
 
 `pickSprite2D(layers, xPx, yPx)` takes the caller's `Sprite2DLayer` array
-(typically `spriteRenderer.layers` for HUD overlays or
-`scene._renderables` filtered to the Sprite2D `Renderable`s that
-`addToScene` pushed there) and walks them in
-reverse insertion order. For each candidate sprite it rotates the screen
-point into the sprite's pivot-aware local rectangle. Anchored sprites are
-read at their already-projected `positionPx` — no extra projection at
-pick time. Returns the first hit (last layer, last sprite within that
-layer), or `null`. The caller chooses what to pick by passing the right
-layer array; there is no global registry of sprite layers to walk.
+(`spriteRenderer.layers` for HUD overlays, or the Sprite2D `Renderable`s a scene
+holds) and walks it in reverse draw order: last layer first, and within a layer
+the most-recently-added sprite first, so the topmost-drawn sprite wins. Hidden
+sprites (`visible: false`, stored as a zero-size quad) are skipped. For each
+candidate it rotates the query point into the sprite's pivot-aware local
+rectangle — inverting the vertex shader's pivot offset and rotation — and a point
+that lands in `[0, 1]²` is a hit. It returns the first hit as
+`SpritePickInfo { layer, spriteIndex, u, v }`, where `(u, v)` is the within-quad
+fraction at the hit point, or `null`. `(xPx, yPx)` are in the layers' shared
+local space (the same space as each sprite's `positionPx`); for a panned/zoomed
+layer the caller maps the pointer into that space first. There is no global
+registry — the caller chooses what to pick by passing the right layer array.
 
-### `PickContributor` interface
+### `pickBillboardSprite` — GPU pick into the shared mesh pass
 
-A generic per-scene contributor pattern lives in
-`picking/picking-contributors.ts`:
+`pickBillboardSprite(scene, xPx, yPx, picker?)` runs one `pickAsync` and returns
+the billboard payload that pass attaches on a hit, or `null`. By default it
+creates a transient `GpuPicker` and disposes it per call, so a one-off pick (a
+click) retains no GPU state; for high-frequency picking (hover, drag) the caller
+passes a reusable `GpuPicker` from `createGpuPicker`, so the 1×1 targets, scene
+UBO, and per-source contributors (which compile the pick pipelines) are reused
+across calls and the caller disposes it once. Billboards are drawn into the
+**same** 1×1 pick render pass as meshes, sharing the pick-ID colour target, the
+`r32float` depth target, and the `greater` reverse-Z depth test — so a billboard
+occluded by a mesh or a nearer billboard loses the pick.
 
-```typescript
-export interface PickContributor {
-    /** Issue draw commands into the shared pick pass. Returns the next free pick ID. */
-    draw(ctx: PickPassContext, nextPickId: number): number;
-    /** Try to resolve a pick ID returned by the GPU. Returns the domain-specific
-     *  PickingInfo if this contributor owns the ID, or null otherwise. */
-    resolve(pickId: number, worldPoint: [number, number, number] | null, depth: number): PickingInfo | null;
-}
-```
+Billboards plug into the picker through the generic `PickContributor` seam
+(`registerPickSource` / `scene._pickSources`) — the seam itself is documented in
+[18-picking.md](18-picking.md). `addFacingBillboardSystem` /
+`addAxisLockedBillboardSystem` register **one pick source per billboard system**
+in `billboard-scene.ts`. A source is pure data + a dynamic-import thunk, so
+billboard _rendering_ pulls no pick code; only on the first pick does the picker
+import `billboard-pick-pipeline.ts`, build the contributor via
+`createPickContributor`, and cache its per-picker GPU resources in the
+contributor closure.
 
-`gpu-picker.ts` runs all mesh draws first into the 1×1 ID pass (consuming
-IDs `1..M`), ends that pass, then opens a second render pass that loads
-the same color/depth attachments and dispatches each registered
-contributor with the next free pick ID. Each contributor returns the next
-free ID after its draws; the picker accumulates and uses the result to
-bound mesh-vs-contributor ID dispatch. The depth-test contract (`greater`)
-carries across the pass boundary because the second pass loads the
-previous depth, so closest-hit semantics are preserved across mesh +
-contributor draws.
+**Draw + pick-ID ranges.** On `draw(pickCtx, baseId)` the billboard contributor
+consumes `system.count` pick IDs — even for a hidden or empty system, so the
+id-to-sprite mapping stays positional — and, when there is something to draw,
+calls `drawBillboardSystemForPicking`, which rebinds `@group(0)` to the shared
+pick scene UBO (an earlier contributor may have rebound group 0) and issues the
+draw.
 
-### Per-system contributor (Billboard)
+**Per-system 48-byte pick UBO** (`BILLBOARD_PICK_UBO_BYTES = 48`), packed by
+`packBillboardPickUbo`; the float layout matches the WGSL `BB` struct (`vec3` +
+scalar interleave):
 
-Each `BillboardSpriteSystem` registers exactly one contributor.
-Registration is idempotent (guarded by a `_pickContributorRegistered`
-flag on the system) and lives in the system's renderable build path —
-the contributor module is dynamic-imported only when a billboard
-renderable is actually built, so mesh-only scenes pay zero bytes for
-sprite picking code.
+| Floats | Field      | Notes                                                     |
+| ------ | ---------- | --------------------------------------------------------- |
+| 0..2   | `camRight` | row 0 of the column-major view matrix (`view[0,4,8]`)     |
+| 3      | `baseId`   | `u32` — first pick ID assigned to this system             |
+| 4..6   | `camUp`    | row 1 of the view matrix (`view[1,5,9]`)                  |
+| 7      | `cutoff`   | `f32` — alpha cutoff (cutout systems only; `0` otherwise) |
+| 8..10  | `axis`     | normalized lock axis (axis-locked only; zero for facing)  |
+| 11     | `_pad`     | trailing pad                                              |
 
-**Per-system 80-byte pick UBO**
-(`BILLBOARD_PICK_UBO_BYTES = 80`, layout matches the WGSL struct in
-`billboard-pick-pipeline.ts`):
+`camRight` / `camUp` are the camera basis rows, reproducing the render shader's
+`normalize(view rowN)` so the picked pixel matches the drawn quad. No separate
+billboard scene UBO is bound in the pick pass.
 
-| Offset | Field           | Notes                                                            |
-| ------ | --------------- | ---------------------------------------------------------------- |
-| 0..15  | `cameraRight`   | `vec4<f32>` — xyz from camera world matrix; `w` packs `camPos.x` |
-| 16..31 | `cameraUp`      | `vec4<f32>` — xyz; `w` packs `camPos.y`                          |
-| 32..47 | `cameraForward` | `vec4<f32>` — xyz; `w` packs `camPos.z`                          |
-| 48..63 | `lockAxis`      | `vec4<f32>` — axis variant only; xyz; `w` unused                 |
-| 64..67 | `baseId`        | `u32` — first pick ID assigned to instance 0 in this system      |
-| 68..71 | `alphaCutoff`   | `f32` — used only when cutout pipeline is selected               |
-| 72..79 | `_pad`          | 8 B trailing pad                                                 |
+**Bind groups.** `@group(0)` = the shared pick scene UBO (the same one mesh
+picking uses). `@group(1) @binding(0)` = the per-system pick UBO; cutout systems
+additionally bind the atlas `texture@1` + `sampler@2` for the alpha-test discard.
+Per-instance data is uploaded to a **vertex** buffer in logical (un-sorted) order,
+so `pickId − baseId` is the sprite index directly; a shared two-triangle index
+buffer (`[0, 1, 2, 0, 2, 3]`) draws each quad. A system's instance buffer grows if
+the system outgrows it between picks.
 
-Packing the camera position into the basis vectors' `w` channels keeps
-the UBO at 80 B and avoids binding any separate billboard scene UBO in the
-pick pass.
+**Pipeline cache.** Keyed `"${orientation}|${isCutout ? 1 : 0}"` — at most four
+entries (`facing` / `axis-locked` × cutout flag). Each pipeline bakes the
+variant's basis math in WGSL: `facing` uses `normalize(camRight)` /
+`normalize(camUp)`; `axis-locked` projects `camRight` off the normalized lock
+axis. The fragment writes the pick ID as RGB at `@location(0)` and NDC depth at
+`@location(1)`, matching the mesh picker's two-attachment contract; cutout
+pipelines `discard` below `cutoff`. Depth state is `depth24plus`, compare
+`greater`, write enabled.
 
-**Bind groups.** `@group(0)` = scene UBO (the pick-zoomed VP — same one
-mesh picking uses). `@group(1)` = `tex@0`, `samp@1`, system pick UBO at
-`@2`, packed sprite storage buffer at `@3` (the same buffer used for
-rendering). The bind group is rebuilt lazily — only when
-`system._storage.gpuBuffer` (the JS pointer) changes between picks.
-
-**Per-(variant, isCutout) pipeline cache** (`billboard-pick-pipeline.ts`).
-Cache key is `"${variant}|${isCutout ? 1 : 0}"`. Six entries maximum
-(3 variants × 2 cutout flags). Each pipeline embeds the variant's basis
-math (Facing reads `cameraRight.xyz` / `cameraUp.xyz`; Yaw reconstructs
-`camPos` from the basis `w` channels and computes
-`cross(worldUp, toCam)`; Axis does the same with the lock axis). The
-fragment shader writes the pick ID as RGB and depth as `@location(1)`
-matching the mesh picker's two-color-attachment contract.
-
-**Pick ID assignment.** Each contributor's `draw` is given `nextPickId`,
-draws its sprites with consecutive IDs `[baseId, baseId + count)` (the
-WGSL emits `baseId + sortIndex`), and returns `baseId + count` for the
-next contributor. Contributors track their own `rangeStart` / `rangeEnd`
-for resolve.
-
-**Resolution.** When the GPU picker reads back a pick ID, it iterates
-contributors in registration order; the first one whose range contains
-the ID returns a `PickingInfo`. The billboard contributor smuggles a
-`_spritePick: SpritePickInfo` payload onto the `PickingInfo` object;
-`pickBillboardSprite()` extracts it.
-
-**UV reconstruction at resolve time.** Given the engine's reconstructed
-world hit point `worldPoint` and the camera's world matrix:
-
-1. Look up `meta = system._meta[localIndex]` for `rotation`, `pivot`, `sizeWorld`.
-2. Call `basis = system._basisFn(worldPos, camRight, camUp, camPos)` (no variant branching).
-3. Project `worldPoint - worldPos` onto `basis.right` / `basis.up` to get local-plane `(localX, localY)`.
-4. Inverse-rotate by `meta.rotation` (positive sin/cos rotation in the shader → negate sin here).
-5. Divide by `meta.sizeWorld`, add `meta.pivot`, clamp to `[0, 1]`.
-
-This matches the shader's `(corner - pivot) * sizeWorld` plane definition
-exactly.
-
-Each picker lives in its own file (`pick-sprite-2d.ts`,
-`pick-billboard.ts`) and is imported only when the corresponding `pick*`
-function is called. Apps that never pick a sprite pay zero bytes for the
-picker. Mesh-only scenes additionally pay zero bytes for
-`picking-contributors.ts`'s body — only the lazy `getPickContributors`
-dispatch in `gpu-picker.ts` references it.
+**Resolution.** When the picker reads back a pick ID that the billboard
+contributor owns, it calls the contributor's `resolve(info, spriteIndex)`, which
+sets `info._spritePick = { system, spriteIndex, pickedPoint, distance }` (the
+local id is the sprite index directly). The picked point and distance come from
+the shared pick-depth readback (the same world-point reconstruction the mesh
+picker performs, done once before `resolve`); there is no per-billboard CPU ray
+test and no per-hit UV reconstruction.
 
 ---
 
@@ -2038,7 +2040,6 @@ maps.
 | `rotation` | (via `updateSprite2DIndex` patch — sin/cos at `[off+6..7]`)           | Marks worldMatrix2D dirty                                                    |
 | `frame`    | UV at `[off+8..11]`                                                   | Calls `setSprite2DFrameIndex`                                                |
 | `visible`  | Toggles packed sizePx between value and 0                             | Calls `writeSizePx`                                                          |
-| `pickable` | Updates `_meta[i].pickable`                                           | —                                                                            |
 | `layerZ`   | `[off+16]`                                                            | Clamped to `[0, 1]`                                                          |
 | `parent`   | (only `IParentable2D`; doesn't touch slot directly)                   | Adds/removes from `_parentedHandles`; installs walker on first parent        |
 | `anchor`   | (none directly; CPU projection writes positionPx + layerZ each frame) | Setting `AnchorSource` adds to layer `_anchored` map; setting `null` removes |
@@ -2171,7 +2172,7 @@ never reaches into layer internals.
 | Custom `ShaderMaterial` on a sprite               | `createSprite2DCustomShader` / `createBillboardCustomShader`          | WGSL fragment body + `fx.time` / `fx.params` / extra textures                     |
 | Animated/scrolling texture (`uOffset`/`vOffset`)  | `Sprite2DLayerOptions.uvScroll` + per-sprite `uvOffset`               | Opt-in per-sprite UV offset (parallax)                                            |
 | `AdvancedDynamicTexture` + `Image`                | `Sprite2DLayer` overlay on a 3D `SceneContext`                        | Different scope — no GUI tree                                                     |
-| `scene.pickSprite(x, y)`                          | Roadmap `pickSprite2D` / `pickBillboardSprite`                        | Picking is not in the current root exports                                        |
+| `scene.pickSprite(x, y)`                          | `pickSprite2D` (CPU) / `pickBillboardSprite` (GPU)                    | CPU rect test for layers; GPU pick into the shared mesh pass for billboards       |
 | `SpriteMap` (tile maps)                           | Out of scope                                                          | Future module                                                                     |
 | `SpriteManager` `epsilon` arg                     | _no equivalent_                                                       | Atlases must have transparent border / NPOT / padded sub-rects when bleed matters |
 | Quad VBO                                          | Vertexless (`vertex_index`)                                           | Eliminates the static quad buffer                                                 |
@@ -2344,25 +2345,25 @@ Provides Babylon.js-style per-sprite frame animation for both Sprite2D (index/ha
 - **Zero module-level side effects.** No allocations at import time.
 - **Optional attachment helpers.** Base sprite families never import animation code. The core module has no sprite-family runtime imports; family binding modules import only the specific index or handle helpers they need.
 - **Babylon.js timing semantics:**
-  - Starts immediately at `from` frame
-  - Advances one frame when accumulated time **strictly exceeds** delay (not `>=`)
-  - Large delta (> delay) advances only one frame per update (clamps frame step)
-  - Loop resets to `from`; non-loop lands on `to` and fires callback once
-  - Reverse direction (`from > to`) supported; non-loop reverse ends at `to`
-  - Delay clamped to minimum 1ms
+    - Starts immediately at `from` frame
+    - Advances one frame when accumulated time **strictly exceeds** delay (not `>=`)
+    - Large delta (> delay) advances only one frame per update (clamps frame step)
+    - Loop resets to `from`; non-loop lands on `to` and fires callback once
+    - Reverse direction (`from > to`) supported; non-loop reverse ends at `to`
+    - Delay clamped to minimum 1ms
 - **Index vs handle separation.** Index-only callers pay zero bytes for handle tracking code. Handle-based animations survive swap-remove via stable identity.
 - **Raw-index animations are slot animations.** `playSprite2DIndexAnimation` and `playBillboardSpriteIndexAnimation` intentionally bind to the numeric slot for structurally stable layers/systems. If a caller swap-removes that slot, the animation follows the new occupant. Use the handle helpers for stable sprite identity.
 - **Manager ownership is explicit.** Adding an animation tracks it with the owning manager. Re-adding the same animation to the same manager is an O(1) no-op; adding it to another manager detaches it from the previous owner first. Finish, removal, and clear paths unset the owner internally.
 - **Replay options are explicit.** `playSpriteFrameAnimation` preserves existing callback/removal options when its `options` argument is omitted, and replaces them when an options object is provided.
 - **`removeWhenFinished` option** (equivalent to Babylon.js disposing after an animation finishes):
-  - For handles: calls `removeSprite2D(handle)` or `removeBillboardSprite(handle)`
-  - For raw indices: calls `removeSprite2DIndex(layer, index)` or `removeBillboardSpriteIndex(system, index)` on the current occupant of that slot (swap-remove semantics apply)
+    - For handles: calls `removeSprite2D(handle)` or `removeBillboardSprite(handle)`
+    - For raw indices: calls `removeSprite2DIndex(layer, index)` or `removeBillboardSpriteIndex(system, index)` on the current occupant of that slot (swap-remove semantics apply)
 
 ### API
 
 ```typescript
 export interface SpriteFrameAnimation {
-  readonly _entityType: "sprite-frame-animation";
+    readonly _entityType: "sprite-frame-animation";
     readonly target: SpriteAnimationTarget;
     from: number;
     to: number;
@@ -2370,27 +2371,27 @@ export interface SpriteFrameAnimation {
     loop: boolean;
     delayMs: number;
     accumulatedMs: number;
-  animationStarted: boolean;
+    animationStarted: boolean;
     onEnd?: () => void;
-  removeWhenFinished: boolean;
+    removeWhenFinished: boolean;
 }
 
 export interface SpriteAnimationTarget {
-  readonly setFrame: (frame: number) => void;
-  readonly remove?: () => void;
-  readonly isAlive?: () => boolean;
+    readonly setFrame: (frame: number) => void;
+    readonly remove?: () => void;
+    readonly isAlive?: () => boolean;
 }
 
 export interface SpriteAnimationManager {
-  readonly _entityType: "sprite-animation-manager";
+    readonly _entityType: "sprite-animation-manager";
     animations: SpriteFrameAnimation[];
-  fixedDeltaMs: number;
-  running: boolean;
+    fixedDeltaMs: number;
+    running: boolean;
 }
 
 export interface SpriteAnimationBinding {
-  readonly _entityType: "sprite-animation-binding";
-  active: boolean;
+    readonly _entityType: "sprite-animation-binding";
+    active: boolean;
 }
 
 export interface SpriteAnimationManagerOptions {
@@ -2405,7 +2406,14 @@ export interface PlaySpriteAnimationOptions {
 
 // Core manager (no sprite family imports at module level)
 export function createSpriteAnimationManager(options?: SpriteAnimationManagerOptions): SpriteAnimationManager;
-export function createSpriteFrameAnimation(target: SpriteAnimationTarget, from: number, to: number, loop: boolean, delayMs: number, options?: PlaySpriteAnimationOptions): SpriteFrameAnimation;
+export function createSpriteFrameAnimation(
+    target: SpriteAnimationTarget,
+    from: number,
+    to: number,
+    loop: boolean,
+    delayMs: number,
+    options?: PlaySpriteAnimationOptions
+): SpriteFrameAnimation;
 export function addSpriteAnimation(manager: SpriteAnimationManager, anim: SpriteFrameAnimation): void;
 export function removeSpriteAnimation(manager: SpriteAnimationManager, anim: SpriteFrameAnimation): void;
 export function clearSpriteAnimations(manager: SpriteAnimationManager): void;
@@ -2463,15 +2471,9 @@ export function playBillboardSpriteAnimation(
 ): SpriteFrameAnimation;
 
 // Attachment helpers (optional scene/renderer integration)
-export function attachSpriteAnimationsToScene(
-    scene: SceneContext,
-    manager: SpriteAnimationManager
-): SpriteAnimationBinding;
+export function attachSpriteAnimationsToScene(scene: SceneContext, manager: SpriteAnimationManager): SpriteAnimationBinding;
 
-export function attachSpriteAnimationsToRenderer(
-    sr: SpriteRenderer,
-    manager: SpriteAnimationManager
-): SpriteAnimationBinding;
+export function attachSpriteAnimationsToRenderer(sr: SpriteRenderer, manager: SpriteAnimationManager): SpriteAnimationBinding;
 
 export function disposeSpriteAnimationBinding(binding: SpriteAnimationBinding): void;
 ```
@@ -2505,8 +2507,8 @@ const binding = attachSpriteAnimationsToRenderer(sr, animMgr);
 - `sprite-animation-task.ts` creates the sprite-side `AnimationTask` adapter and registers it with the generic `AnimationManager`. This lets one manager advance glTF/property animation groups and sprite frame animations in the same loop without the animation core importing sprite code.
 - `startSpriteAnimationManager` / `stopSpriteAnimationManager` keep the existing standalone sprite API, but internally schedule the sprite manager through a private generic `AnimationManager` in `sprite-animation-task.ts`. Sprite-specific scene/renderer attachments remain in `sprite-animation.ts`.
 - Attachment helpers:
-  - `attachSpriteAnimationsToScene` unshifts a `_beforeRender` hook that receives scene delta and calls `updateSpriteAnimationManager`. Dispose via `disposeSpriteAnimationBinding`; disposal splices the hook and clears the manager's internal binding state. Scene-attached bindings also register the same cleanup with scene disposal, so `disposeScene(scene)` releases that binding state.
-  - `attachSpriteAnimationsToRenderer` pushes a callback into the renderer's internal before-update hook list; `SpriteRenderer._update` passes the engine's current delta to these hooks before layer upload. Dispose splices only that callback via `disposeSpriteAnimationBinding` and clears the manager's internal binding state. Renderer-attached bindings register the same cleanup with `disposeSpriteRenderer`, so renderer disposal also releases that binding state.
+    - `attachSpriteAnimationsToScene` unshifts a `_beforeRender` hook that receives scene delta and calls `updateSpriteAnimationManager`. Dispose via `disposeSpriteAnimationBinding`; disposal splices the hook and clears the manager's internal binding state. Scene-attached bindings also register the same cleanup with scene disposal, so `disposeScene(scene)` releases that binding state.
+    - `attachSpriteAnimationsToRenderer` pushes a callback into the renderer's internal before-update hook list; `SpriteRenderer._update` passes the engine's current delta to these hooks before layer upload. Dispose splices only that callback via `disposeSpriteAnimationBinding` and clears the manager's internal binding state. Renderer-attached bindings register the same cleanup with `disposeSpriteRenderer`, so renderer disposal also releases that binding state.
 - Family helpers live in separate modules. `sprite-2d-index-animation.ts` imports no handle code; `sprite-2d-handle-animation.ts` imports the stable-handle helpers. Billboard index/handle helpers follow the same split.
 - Index target tracking uses raw slot indices. If the index is swap-removed by non-animation code, the animation follows raw-index semantics and continues targeting the same numeric slot. Callers should use handles for animated sprites that may be removed externally, or manually stop animations before remove.
 - Handle target tracking uses stable `Sprite2DHandle` or `BillboardSpriteHandle`. Swap-remove is safe; the handle stays valid until the animation removes it via `removeWhenFinished`.

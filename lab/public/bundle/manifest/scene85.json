@@ -1,0 +1,24 @@
+{
+  "rawKB": 59.2,
+  "gzipKB": 26,
+  "ignoredRawKB": 6.5,
+  "runtimeChunks": [
+    "scene85-_math-factory-MA2pmMp6.js",
+    "scene85-clamp-block-DbAb8XMB.js",
+    "scene85-color-merger-0HZ9FICW.js",
+    "scene85-dot-block-DDsGUJ15.js",
+    "scene85-fragment-output-CfRmfbPv.js",
+    "scene85-input-block-C07j1mAy.js",
+    "scene85-matrix-blocks-Ag5OJlyi.js",
+    "scene85-node-registry-B_Ghn0yV.js",
+    "scene85-node-registry-extra-advanced-qs4UmS8j.js",
+    "scene85-node-registry-extra-procedural-CuMD23Cn.js",
+    "scene85-node-renderable-CIGPqYtC.js",
+    "scene85-scale-block-6qtIvFiz.js",
+    "scene85-transform-block-D9HgJcZH.js",
+    "scene85-vector-merger-YcC3xFyg.js",
+    "scene85-vertex-output-C7G5u6Y0.js",
+    "scene85.js"
+  ],
+  "rawBytes": 60604
+}

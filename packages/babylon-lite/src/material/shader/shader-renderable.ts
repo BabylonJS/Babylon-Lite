@@ -8,7 +8,7 @@ import type { Material } from "../material.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import { createEmptyUniformBuffer } from "../../resource/gpu-buffers.js";
 import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
-import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix } from "../../camera/camera.js";
+import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix, _cameraChangeKey } from "../../camera/camera.js";
 import type { Camera } from "../../camera/camera.js";
 import { mat4MultiplyInto } from "../../math/mat4-multiply-into.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
@@ -16,6 +16,9 @@ import type { ShaderAttributeName, ShaderMaterial, ShaderUniformType } from "./s
 import type { ShaderPipelineBindings } from "./shader-pipeline.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "./shader-pipeline.js";
+import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
+
+type UniformBatchFactory = (signature: import("../../engine/render-target.js").RenderTargetSignature) => UniformCopyBatch;
 
 /** @internal Exported as a type only (zero runtime bytes) for the dynamically-imported
  *  thin-instance builder. */
@@ -40,6 +43,22 @@ export interface ShaderPacket {
      *  splice this packet out and stop retaining/iterating dead chunk state every
      *  frame (set only for merged opaque renderables). */
     _owner?: ShaderPacket[];
+    /** @internal Inputs of the last system-UBO write, used to skip redundant recompute + writeBuffer
+     *  (see updatePacket). Undefined until the first per-pass update. */
+    _lastCamera?: Camera | null;
+    /** @internal */
+    _lastCameraVersion?: number;
+    /** @internal */
+    _lastMeshWmVersion?: number;
+    /** @internal */
+    _lastTargetWidth?: number;
+    /** @internal */
+    _lastTargetHeight?: number;
+    /** @internal Effective camera aspect (getEffectiveAspectRatio) at the last write — a `camera.viewport`
+     *  change can alter the aspect (hence projection/viewProjection) while target size stays the same. */
+    _lastAspect?: number;
+    /** @internal */
+    _lastAlphaCutoff?: number;
 }
 
 interface ShaderMaterialRenderState extends ShaderMaterial {
@@ -47,17 +66,18 @@ interface ShaderMaterialRenderState extends ShaderMaterial {
     _shaderCustomUbo?: GPUBuffer | null;
     _shaderCustomSpec?: UboSpec | null;
     _shaderCustomData?: ArrayBuffer | null;
+    _shaderCustomBytes?: Uint8Array<ArrayBuffer> | null;
     _shaderCustomVersion?: number;
 }
 
 /** @internal */
 export type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
-export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh[]): MeshGroupBuildResult {
+export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh[], getUniformBatch?: UniformBatchFactory): MeshGroupBuildResult {
     const renderables: Renderable[] = [];
 
     const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable =>
-        buildSingleShaderRenderable(s, mesh, (materialOverride ?? mesh.material) as ShaderMaterial, materialOverride != null);
+        buildSingleShaderRenderable(s, mesh, (materialOverride ?? mesh.material) as ShaderMaterial, materialOverride != null, getUniformBatch);
 
     const byMaterial = new Map<ShaderMaterial, Mesh[]>();
     for (const mesh of meshes) {
@@ -71,7 +91,7 @@ export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh
     }
 
     for (const [material, matMeshes] of byMaterial) {
-        const built = buildMaterialRenderables(scene, material, matMeshes);
+        const built = buildMaterialRenderables(scene, material, matMeshes, false, getUniformBatch);
         renderables.push(...built);
     }
 
@@ -85,42 +105,57 @@ export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh
  *  module exports — so those helpers keep their mangled names in this chunk (an
  *  export would de-mangle them, growing every ShaderMaterial scene's bundle). */
 export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Promise<MeshGroupBuildResult> {
+    let getUniformBatch: UniformBatchFactory | undefined;
+    if (meshes.length > 1) {
+        const { getUniformCopyBatch } = await import("../../render/uniform-copy-batch.js");
+        getUniformBatch = getUniformCopyBatch;
+    }
+    const firstMaterial = meshes[0]?.material;
+    if (firstMaterial && meshes.some((mesh) => mesh.material !== firstMaterial)) {
+        const { enableShaderPipelineCache } = await import("./shader-pipeline-cache.js");
+        enableShaderPipelineCache(scene.surface.engine, meshes);
+    }
+    const buildPlain = (s: SceneContext, plainMeshes: Mesh[]): MeshGroupBuildResult => buildShaderMaterialRenderables(s, plainMeshes, getUniformBatch);
     if (!meshes.some((m) => !!m.thinInstances)) {
-        return buildShaderMaterialRenderables(scene, meshes);
+        return buildPlain(scene, meshes);
     }
     const mod = await import("./shader-thin-instance.js");
     const cull = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled) ? await import("../../mesh/thin-instance-cull-binding.js") : undefined;
     return mod.buildShaderRenderablesWithInstancing(
         scene,
         meshes,
-        buildShaderMaterialRenderables,
+        buildPlain,
         createPacket,
         updatePacket,
         updateCustomUbo,
         getAttrBuffer,
         getOrCreateShaderPipeline,
         getOrCreateShaderPipelineBindings,
+        getUniformBatch,
         cull
     );
 }
 
-function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean): Renderable {
-    return buildMaterialRenderables(scene, material, [mesh], isOverride)[0]!;
+function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean, getUniformBatch?: UniformBatchFactory): Renderable {
+    return buildMaterialRenderables(scene, material, [mesh], isOverride, getUniformBatch)[0]!;
 }
 
-function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial, meshes: readonly Mesh[], isOverride = false): Renderable[] {
+function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial, meshes: readonly Mesh[], isOverride = false, getUniformBatch?: UniformBatchFactory): Renderable[] {
     const engine = scene.surface.engine;
     const bindings = getOrCreateShaderPipelineBindings(engine, material);
     ensureCustomUbo(engine, material, bindings.customSpec);
-    const packets = meshes.map((mesh) => createPacket(scene, material, bindings.systemSpec, mesh));
+    // `isOverride` marks an AUX view packet (a material-override registered into an explicit task, e.g. a
+    // depth/SSAO no-colour view) — route its disposer to `_meshAuxDisposables` so a MAIN-material swap of this
+    // same mesh does not tear it down out from under that task.
+    const packets = meshes.map((mesh) => createPacket(scene, material, bindings.systemSpec, mesh, isOverride));
     const isTransparent = material.needAlphaBlending;
     if (isTransparent) {
-        return packets.map((packet) => createTransparentRenderable(scene, material, packet, isOverride));
+        return packets.map((packet) => createTransparentRenderable(scene, material, packet, isOverride, getUniformBatch));
     }
-    return [createOpaqueRenderable(scene, material, packets, isOverride)];
+    return [createOpaqueRenderable(scene, material, packets, isOverride, getUniformBatch)];
 }
 
-function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh): ShaderPacket {
+function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, aux = false): ShaderPacket {
     const engine = scene.surface.engine;
     const systemUBO = createEmptyUniformBuffer(engine, systemSpec._totalBytes, "shader-system-ubo");
     const systemData = new F32(systemSpec._totalBytes / 4);
@@ -138,11 +173,17 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
     for (const tex of packet._boundTextures) {
         acquireTexture(tex);
     }
-    registerMeshTextureDisposer(scene, mesh, packet);
+    registerMeshTextureDisposer(scene, mesh, packet, aux);
     return packet;
 }
 
-function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, packets: readonly ShaderPacket[], isOverride: boolean): Renderable {
+function createOpaqueRenderable(
+    scene: SceneContext,
+    material: ShaderMaterial,
+    packets: readonly ShaderPacket[],
+    isOverride: boolean,
+    getUniformBatch?: UniformBatchFactory
+): Renderable {
     // Only merged renderables (>1 mesh) can outlive an individual packet's mesh,
     // so give those packets a back-reference enabling disposal-time compaction.
     if (packets.length > 1) {
@@ -150,8 +191,8 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
             packet._owner = packets as ShaderPacket[];
         }
     }
-    const update = (context: DrawUpdateContext): void => {
-        updateCustomUbo(scene.surface.engine, material);
+    const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
+        updateCustomUbo(scene.surface.engine, material, uniformBatch);
         for (const packet of packets) {
             if (packet._disposed) {
                 continue;
@@ -159,7 +200,7 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
             if (!isOverride && packet.mesh.material !== material) {
                 continue;
             }
-            updatePacket(scene, material, packet, context);
+            updatePacket(scene, material, packet, context, uniformBatch);
         }
     };
     const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
@@ -182,24 +223,31 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
         mesh: packets.length === 1 ? packets[0]!.mesh : undefined,
         bind(eng, sig) {
             const bindings = getOrCreateShaderPipelineBindings(eng, material);
-            return { renderable: r, pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings), update, draw: (pass) => draw(pass, eng) };
+            const uniformBatch = getUniformBatch?.(sig);
+            return {
+                renderable: r,
+                pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings),
+                _updateBatches: uniformBatch ? [uniformBatch] : undefined,
+                update: (context) => update(context, uniformBatch),
+                draw: (pass) => draw(pass, eng),
+            };
         },
     };
     return r;
 }
 
-function createTransparentRenderable(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, isOverride: boolean): Renderable {
+function createTransparentRenderable(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, isOverride: boolean, getUniformBatch?: UniformBatchFactory): Renderable {
     const wm = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
     const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
-    const update = (context: DrawUpdateContext): void => {
+    const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
         if (packet._disposed) {
             return;
         }
         if (!isOverride && packet.mesh.material !== material) {
             return;
         }
-        updateCustomUbo(scene.surface.engine, material);
-        updatePacket(scene, material, packet, context);
+        updateCustomUbo(scene.surface.engine, material, uniformBatch);
+        updatePacket(scene, material, packet, context, uniformBatch);
         const m = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
         sortCenter[0] = m[12]!;
         sortCenter[1] = m[13]!;
@@ -223,27 +271,77 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
         _worldCenter: sortCenter,
         bind(eng, sig) {
             const bindings = getOrCreateShaderPipelineBindings(eng, material);
-            return { renderable: r, pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings), update, draw: (pass) => draw(pass, eng) };
+            const uniformBatch = getUniformBatch?.(sig);
+            return {
+                renderable: r,
+                pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings),
+                _updateBatches: uniformBatch ? [uniformBatch] : undefined,
+                update: (context) => update(context, uniformBatch),
+                draw: (pass) => draw(pass, eng),
+            };
         },
     };
     return r;
 }
 
-function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext): void {
+function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void {
     const engine = scene.surface.engine;
     const state = material as ShaderMaterialRenderState;
-    writeSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, context._camera ?? scene.camera, context.targetWidth, context.targetHeight);
-    engine._device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);
+    // Skip the system-UBO recompute + writeBuffer when EVERY input is unchanged since this packet's last
+    // write: same camera (identity + worldMatrixVersion — the same change key the view/projection caches
+    // already rely on), same mesh world-matrix version, same target size and same material uniform version
+    // (alphaCutoff). A packet is updated once per PASS per frame, and most packets are static meshes under
+    // a camera that only moves some frames — these per-packet writeBuffers dominate CPU frame time in
+    // large scenes, and the skipped ones are byte-identical rewrites of what the UBO already holds.
+    const camera = context._camera ?? scene.camera;
+    const cameraVersion = camera ? _cameraChangeKey(camera) : -1;
+    const meshWmVersion = packet.mesh.worldMatrixVersion;
+    // alphaCutoff is compared by VALUE, not by the material's uniform version: animated materials bump
+    // that version every frame (time uniforms and the like live in the CUSTOM ubo, which has its own
+    // version gate), and keying on it would defeat this skip for exactly the materials that dominate.
+    const alphaCutoff = material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4;
+    // Effective aspect keys the view/projection uniforms: getEffectiveAspectRatio folds in the camera's
+    // normalized viewport, which can change (altering projection) with target size and worldMatrixVersion
+    // both unchanged, so targetWidth/Height alone would not catch it.
+    const aspect = camera ? getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight) : 1;
+    if (
+        packet._lastCamera !== camera ||
+        packet._lastCameraVersion !== cameraVersion ||
+        packet._lastMeshWmVersion !== meshWmVersion ||
+        packet._lastTargetWidth !== context.targetWidth ||
+        packet._lastTargetHeight !== context.targetHeight ||
+        packet._lastAspect !== aspect ||
+        packet._lastAlphaCutoff !== alphaCutoff
+    ) {
+        writeSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
+        if (uniformBatch) {
+            uniformBatch.queue(packet.systemUBO, packet.systemData);
+        } else {
+            engine._device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);
+        }
+        packet._lastCamera = camera;
+        packet._lastCameraVersion = cameraVersion;
+        packet._lastMeshWmVersion = meshWmVersion;
+        packet._lastTargetWidth = context.targetWidth;
+        packet._lastTargetHeight = context.targetHeight;
+        packet._lastAspect = aspect;
+        packet._lastAlphaCutoff = alphaCutoff;
+    }
     if (packet._lastResourceVersion !== material._resourceVersion) {
+        // Acquire the NEW bound textures BEFORE releasing the old set: a texture present in both (e.g. a material
+        // that only swapped ONE of its textures) must never transiently drop to ref-count 0, or releaseTexture
+        // would destroy a GPUTexture that the new bind group still uses. (Releasing first destroys a unique
+        // ref-count-1 texture — exposed by a custom material binding a per-material texture nothing else shares.)
+        const newTextures = collectShaderTextures(material);
+        for (const tex of newTextures) {
+            acquireTexture(tex);
+        }
         for (const tex of packet._boundTextures) {
             releaseTexture(tex);
         }
         packet._bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
-        packet._boundTextures = collectShaderTextures(material);
+        packet._boundTextures = newTextures;
         packet._boundStorageBuffers = collectShaderStorageBuffers(material);
-        for (const tex of packet._boundTextures) {
-            acquireTexture(tex);
-        }
         packet._lastResourceVersion = material._resourceVersion;
     }
 }
@@ -251,7 +349,7 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
 function drawPacket(pass: ShaderRenderPass, engine: EngineContext, material: ShaderMaterial, packet: ShaderPacket): void {
     const gpu = packet.mesh._gpu;
     for (let i = 0; i < material.attributes.length; i++) {
-        pass.setVertexBuffer(i, getAttrBuffer(engine, gpu, material.attributes[i]!));
+        pass.setVertexBuffer(i, getAttrBuffer(engine, packet.mesh, material.attributes[i]!));
     }
     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
     pass.setBindGroup(1, packet._bindGroup);
@@ -263,6 +361,7 @@ function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, custom
     if (!customSpec) {
         state._shaderCustomUbo = null;
         state._shaderCustomData = null;
+        state._shaderCustomBytes = null;
         state._shaderCustomVersion = material._uniformVersion;
         return;
     }
@@ -272,11 +371,12 @@ function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, custom
     }
     state._shaderCustomUbo = createEmptyUniformBuffer(engine, customSpec._totalBytes, "shader-custom-ubo");
     state._shaderCustomData = new ArrayBuffer(customSpec._totalBytes);
+    state._shaderCustomBytes = new U8(state._shaderCustomData);
     state._shaderCustomVersion = -1;
     updateCustomUbo(engine, material);
 }
 
-function updateCustomUbo(engine: EngineContext, material: ShaderMaterial): void {
+function updateCustomUbo(engine: EngineContext, material: ShaderMaterial, uniformBatch?: UniformCopyBatch): void {
     const state = material as ShaderMaterialRenderState;
     const customSpec = state._shaderCustomSpec;
     const customUbo = state._shaderCustomUbo;
@@ -284,7 +384,7 @@ function updateCustomUbo(engine: EngineContext, material: ShaderMaterial): void 
     if (!customSpec || !customUbo || !customData || state._shaderCustomVersion === material._uniformVersion) {
         return;
     }
-    const bytes = new U8(customData);
+    const bytes = state._shaderCustomBytes ?? (state._shaderCustomBytes = new U8(customData));
     bytes.fill(0);
     for (const [name, slot] of material._uniformValues) {
         if (_isShaderSystemUniform(name)) {
@@ -295,7 +395,11 @@ function updateCustomUbo(engine: EngineContext, material: ShaderMaterial): void 
             writeTypedValue(customData, offset, slot.decl.type, slot.value);
         }
     }
-    engine._device.queue.writeBuffer(customUbo, 0, bytes);
+    if (uniformBatch) {
+        uniformBatch.queue(customUbo, bytes);
+    } else {
+        engine._device.queue.writeBuffer(customUbo, 0, bytes);
+    }
     state._shaderCustomVersion = material._uniformVersion;
 }
 
@@ -329,9 +433,10 @@ function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, 
     }
     for (const storage of material.storageBufferDecls) {
         const slot = material._storageBufferSlots.get(storage.name);
-        const buffer = slot?.current;
-        if (!buffer) {
-            throw new Error(`ShaderMaterial: storage buffer "${storage.name}" has no GPUBuffer. Call setShaderStorageBuffer() before rendering.`);
+        const storageBuffer = slot?.current;
+        const buffer = storageBuffer?._buffer;
+        if (!buffer || !engine._storageBuffers?.has(storageBuffer)) {
+            throw new Error(`ShaderMaterial storage "${storage.name}" is invalid.`);
         }
         entries.push({ binding: nextBinding++, resource: { buffer } });
     }
@@ -352,31 +457,42 @@ function collectShaderStorageBuffers(material: ShaderMaterial): GPUBuffer[] {
     const buffers: GPUBuffer[] = [];
     for (const slot of material._storageBufferSlots.values()) {
         if (slot.current) {
-            buffers.push(slot.current);
+            const buffer = slot.current._buffer;
+            if (buffer) {
+                buffers.push(buffer);
+            }
         }
     }
     return buffers;
 }
 
-function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: ShaderPacket): void {
-    const list = scene._meshDisposables.get(mesh) ?? [];
-    list.push(() => {
-        packet._disposed = true;
-        if (packet._owner) {
-            const oi = packet._owner.indexOf(packet);
-            if (oi >= 0) {
-                packet._owner.splice(oi, 1);
-            }
-            packet._owner = undefined;
-        }
-        packet.systemUBO.destroy();
-        for (const tex of packet._boundTextures) {
-            releaseTexture(tex);
-        }
-        packet._boundTextures = [];
-        packet._boundStorageBuffers = [];
-    });
-    scene._meshDisposables.set(mesh, list);
+function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: ShaderPacket, aux = false): void {
+    // Aux (override) view packets go in `_meshAuxDisposables` so a main-material swap leaves them alone; main
+    // packets stay in `_meshDisposables` (torn down + rebuilt by the swap drain). Both are drained on real removal.
+    const map = aux ? scene._meshAuxDisposables : scene._meshDisposables;
+    const list = map.get(mesh) ?? [];
+    list.push(
+        Object.assign(
+            () => {
+                packet._disposed = true;
+                if (packet._owner) {
+                    const oi = packet._owner.indexOf(packet);
+                    if (oi >= 0) {
+                        packet._owner.splice(oi, 1);
+                    }
+                    packet._owner = undefined;
+                }
+                packet.systemUBO.destroy();
+                for (const tex of packet._boundTextures) {
+                    releaseTexture(tex);
+                }
+                packet._boundTextures = [];
+                packet._boundStorageBuffers = [];
+            },
+            { p: packet }
+        )
+    );
+    map.set(mesh, list);
 }
 
 function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: ShaderMaterial, mesh: Mesh, camera: Camera | null, targetWidth: number, targetHeight: number): void {
@@ -465,7 +581,14 @@ function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): G
     return buffer;
 }
 
-function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: ShaderAttributeName): GPUBuffer {
+/** Skinning vertex buffers live on the mesh's `skeleton` (live skinning) or `vat` (baked vertex
+ *  animation, which moves them off the dropped skeleton) — not on `MeshGPU`. */
+function getSkinBuffer(mesh: Mesh, field: "jointsBuffer" | "weightsBuffer" | "joints1Buffer" | "weights1Buffer"): GPUBuffer | null {
+    return mesh.vat?.[field] ?? mesh.skeleton?.[field] ?? null;
+}
+
+function getAttrBuffer(engine: EngineContext, mesh: Mesh, name: ShaderAttributeName): GPUBuffer {
+    const gpu = mesh._gpu;
     switch (name) {
         case "position":
             return gpu.positionBuffer;
@@ -479,5 +602,13 @@ function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: ShaderAttribut
             return gpu.tangentBuffer ?? getZeroAttrBuffer(engine, gpu, "tangent");
         case "color":
             return gpu.colorBuffer ?? getZeroAttrBuffer(engine, gpu, "color");
+        case "joints":
+            return getSkinBuffer(mesh, "jointsBuffer") ?? getZeroAttrBuffer(engine, gpu, "joints");
+        case "weights":
+            return getSkinBuffer(mesh, "weightsBuffer") ?? getZeroAttrBuffer(engine, gpu, "weights");
+        case "joints1":
+            return getSkinBuffer(mesh, "joints1Buffer") ?? getZeroAttrBuffer(engine, gpu, "joints1");
+        case "weights1":
+            return getSkinBuffer(mesh, "weights1Buffer") ?? getZeroAttrBuffer(engine, gpu, "weights1");
     }
 }

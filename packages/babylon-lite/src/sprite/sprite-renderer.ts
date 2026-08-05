@@ -29,11 +29,11 @@ import {
     buildSpriteLayerUbo,
     createSpriteInstanceBuffer,
     createSpriteLayerBindGroup,
-    createSpritePipelineCache,
+    acquireSharedSpriteRendererPipelineCache,
     ensureSpriteInstanceBuffer,
     getOrCreateSpritePipeline,
     getSpritePipelineCacheSize,
-    resetSpritePipelineCache,
+    releaseSharedSpriteRendererPipelineCache,
     uploadSpriteInstances,
     writeSpriteLayerUboIfDirty,
 } from "./sprite-pipeline.js";
@@ -85,7 +85,9 @@ export interface SpriteRenderer extends RenderingContext {
     _surface: SurfaceContext;
     /** @internal */
     _indexBuffer: GPUBuffer;
-    /** @internal */
+    /** @internal Reference to the process-wide shared sprite pipeline cache
+     *  (device-keyed). Not owned by this renderer — acquired at create, released
+     *  at dispose; never `reset` per-renderer. */
     _pipelineCache: SpritePipelineCache;
     /** @internal */
     _layerGpu: Map<Sprite2DLayer, LayerGpu>;
@@ -103,6 +105,8 @@ export interface SpriteRenderer extends RenderingContext {
     _disposed: boolean;
     /** @internal Whether this pass clears the swapchain before drawing. False for HUD overlays. */
     _clear: boolean;
+    /** @internal Offscreen target handle retained so its replacement view can be selected after device recovery. */
+    _target?: Texture2D | null;
     /** @internal Offscreen color-attachment view to render into; null = the swapchain.
      *  Set via {@link setSpriteRendererTarget} (which takes a {@link Texture2D} target)
      *  for render-to-texture / post-process. */
@@ -155,8 +159,8 @@ function ensureLayerGpu(rr: SpriteRenderer, layer: Sprite2DLayer): LayerGpu {
     let lg = rr._layerGpu.get(layer);
     if (!lg) {
         const cap = layer._capacity;
-        const instanceBuffer = createSpriteInstanceBuffer(rr._surface.engine._device, layer, "sprite-layer-instances");
-        const uniformBuffer = createEmptyUniformBuffer(rr._surface.engine, LAYER_UBO_BYTES, "sprite-layer-ubo");
+        const instanceBuffer = createSpriteInstanceBuffer(rr._surface.engine._device, layer);
+        const uniformBuffer = createEmptyUniformBuffer(rr._surface.engine, LAYER_UBO_BYTES);
         const fx = _getSpriteFxHook()?.createLayerFx(rr._surface.engine, "sprite-layer-fx-ubo", layer) ?? null;
         lg = {
             layer,
@@ -174,7 +178,7 @@ function ensureLayerGpu(rr: SpriteRenderer, layer: Sprite2DLayer): LayerGpu {
         };
         rr._layerGpu.set(layer, lg);
     }
-    const grown = ensureSpriteInstanceBuffer(rr._surface.engine._device, layer, lg.instanceBuffer, lg.instanceBufferCapacity, "sprite-layer-instances");
+    const grown = ensureSpriteInstanceBuffer(rr._surface.engine._device, layer, lg.instanceBuffer, lg.instanceBufferCapacity);
     if (grown.reallocated) {
         lg.instanceBuffer = grown.buffer;
         lg.instanceBufferCapacity = grown.capacity;
@@ -246,7 +250,7 @@ export function createSpriteRenderer(surface: SurfaceContext, opts: SpriteRender
         _kind: KIND,
         _surface: surface,
         _indexBuffer: indexBuffer,
-        _pipelineCache: createSpritePipelineCache(),
+        _pipelineCache: acquireSharedSpriteRendererPipelineCache(),
         _layerGpu: new Map(),
         _visibleBundles: [],
         _targetWidth: canvas.width,
@@ -269,8 +273,17 @@ export function createSpriteRenderer(surface: SurfaceContext, opts: SpriteRender
     };
 
     // Pre-warm pipelines currently in use, so the first frame doesn't pay compile cost.
-    for (const layer of rr.layers) {
-        getOrCreateSpritePipeline(engine, rr._pipelineCache, surface.format, 1, layer.blendMode, false, false, undefined, undefined, layer);
+    // If pipeline compilation throws here, `rr` is never returned and `disposeSpriteRenderer`
+    // is never called, so unwind the resources we've already acquired (the shared-cache
+    // refcount and the index buffer) to avoid leaking them for the rest of the process.
+    try {
+        for (const layer of rr.layers) {
+            getOrCreateSpritePipeline(engine, rr._pipelineCache, surface.format, 1, layer.blendMode, false, false, undefined, undefined, layer);
+        }
+    } catch (err) {
+        releaseSharedSpriteRendererPipelineCache();
+        indexBuffer.destroy();
+        throw err;
     }
 
     return rr;
@@ -284,7 +297,7 @@ function assertSpriteRendererLayers(layers: readonly Sprite2DLayer[]): void {
 
 function assertSpriteRendererLayer(layer: Sprite2DLayer): void {
     if (layer.depth !== "none") {
-        throw new Error('SpriteRenderer only supports Sprite2DLayer with depth: "none". Use addDepthHostedSpriteLayer(scene, layer) for depth-hosted sprites.');
+        throw new Error('SpriteRenderer requires depth: "none".');
     }
 }
 
@@ -343,7 +356,7 @@ function spriteRendererRecord(rr: SpriteRenderer): number {
     assertSpriteRendererLayers(rr.layers);
     const eng = rr._surface.engine;
     const encoder = eng._currentEncoder;
-    const swapView = rr._targetView ?? eng.scRT._colorView!;
+    const swapView = rr._targetView ?? rr._surface.scRT._colorView!;
 
     // Open a sampleCount=1 render pass on the target view (the swapchain by default, or an
     // offscreen render texture when one is set via setSpriteRendererTarget). This keeps HUD
@@ -459,6 +472,7 @@ export function registerSpriteRenderer(sr: SpriteRenderer): void {
  * offscreen scene pass before the presenting pass.
  */
 export function setSpriteRendererTarget(sr: SpriteRenderer, target: Texture2D | null): void {
+    sr._target = target;
     sr._targetView = target ? target.view : null;
 }
 
@@ -491,7 +505,11 @@ export function disposeSpriteRenderer(sr: SpriteRenderer): void {
     sr._visibleBundles.length = 0;
     sr._beforeUpdate.length = 0;
     sr._indexBuffer.destroy();
-    resetSpritePipelineCache(sr._pipelineCache);
+    // Release our refcount on the process-wide shared pipeline cache instead of
+    // clearing it — other live `SpriteRenderer`s on this device still need the
+    // compiled pipelines. The cache is cleared only when the last renderer is
+    // disposed (refcount hits 0).
+    releaseSharedSpriteRendererPipelineCache();
     sr._layers.length = 0;
 }
 

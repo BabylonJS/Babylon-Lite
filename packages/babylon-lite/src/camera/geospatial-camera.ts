@@ -4,7 +4,7 @@ import type { SceneNode } from "../scene/scene-node.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
-import { mat4LookAtLH } from "../math/mat4-look-at-lh.js";
+import { mat4LookAtWorldLHToRef } from "../math/mat4-look-at-world-lh.js";
 import type { GeospatialLimits } from "./geospatial-limits.js";
 import { createGeospatialLimits, getEffectivePitchMax, GEO_EPSILON } from "./geospatial-limits.js";
 
@@ -215,26 +215,8 @@ export function createGeospatialCamera(options: GeospatialCameraOptions): Geospa
     const _localMat: Mat4 = allocateMat4();
 
     function cameraLocalWorldMatrix(): Mat4 {
-        // camera-to-world = transpose(view R) + eye, like FreeCamera.
         const center3: Vec3 = { x: position.x + lookAt.x, y: position.y + lookAt.y, z: position.z + lookAt.z };
-        const view = mat4LookAtLH(position, center3, upVector);
-        const m = _localMat as unknown as Mat4Storage;
-        m[0] = view[0]!;
-        m[1] = view[4]!;
-        m[2] = view[8]!;
-        m[3] = 0;
-        m[4] = view[1]!;
-        m[5] = view[5]!;
-        m[6] = view[9]!;
-        m[7] = 0;
-        m[8] = view[2]!;
-        m[9] = view[6]!;
-        m[10] = view[10]!;
-        m[11] = 0;
-        m[12] = position.x;
-        m[13] = position.y;
-        m[14] = position.z;
-        m[15] = 1;
+        mat4LookAtWorldLHToRef(_localMat as unknown as Mat4Storage, position, center3, upVector);
         return _localMat;
     }
 

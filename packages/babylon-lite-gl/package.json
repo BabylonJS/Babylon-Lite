@@ -1,0 +1,54 @@
+{
+    "name": "babylon-lite-gl",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Function-based, tree-shakeable WebGL2 micro-engine for fullscreen effects, sprites and dynamic textures — the WebGL counterpart of @babylonjs/lite.",
+    "keywords": [
+        "babylon",
+        "babylonjs",
+        "webgl",
+        "webgl2",
+        "effect",
+        "shader",
+        "sprite",
+        "lite",
+        "rendering"
+    ],
+    "license": "Apache-2.0",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/BabylonJS/Babylon-Lite.git",
+        "directory": "packages/babylon-lite-gl"
+    },
+    "homepage": "https://github.com/BabylonJS/Babylon-Lite/tree/main/packages/babylon-lite-gl",
+    "type": "module",
+    "main": "./src/index.ts",
+    "types": "./src/index.ts",
+    "sideEffects": false,
+    "exports": {
+        ".": {
+            "import": "./src/index.ts",
+            "types": "./src/index.ts"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "node build.mjs",
+        "dev": "tsc -p tsconfig.json --watch"
+    },
+    "publishConfig": {
+        "main": "./dist/index.js",
+        "types": "./dist/index.d.ts",
+        "exports": {
+            ".": {
+                "import": "./dist/index.js",
+                "types": "./dist/index.d.ts"
+            }
+        }
+    },
+    "devDependencies": {
+        "typescript": "^6.0.3"
+    }
+}

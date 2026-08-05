@@ -102,27 +102,48 @@ function buildTouchControls(host: HTMLElement, state: InputState, cleanup: Array
     const makeBtn = (label: string, set: (v: boolean) => void): HTMLElement => {
         const b = document.createElement("div");
         b.textContent = label;
+        // `touch-action:none` on the button ITSELF (not just the wrapper) reliably stops
+        // Android Chrome from claiming the touch for scroll/zoom and firing `pointercancel`.
         b.style.cssText =
-            "pointer-events:auto;width:64px;height:64px;margin:6px;border-radius:14px;display:flex;" +
+            "pointer-events:auto;touch-action:none;width:64px;height:64px;margin:6px;border-radius:14px;display:flex;" +
             "align-items:center;justify-content:center;font:700 26px system-ui,sans-serif;color:#fff;" +
             "background:rgba(20,20,40,.45);border:2px solid rgba(255,255,255,.35);backdrop-filter:blur(2px);";
-        const press = (v: boolean) => (ev: Event): void => {
-            ev.preventDefault();
-            set(v);
+        // Pointer Events unify mouse + touch + pen behind one code path. Tracking every
+        // active pointer id lets a button stay pressed until the LAST finger lifts, and
+        // `setPointerCapture` guarantees the matching `up` fires on THIS element even when
+        // the finger slides off — without it a slid-off release leaves the key stuck on,
+        // the classic Android virtual-gamepad bug.
+        const active = new Set<number>();
+        const paint = (v: boolean): void => {
             b.style.background = v ? "rgba(80,140,255,.6)" : "rgba(20,20,40,.45)";
         };
-        const d = press(true);
-        const u = press(false);
-        b.addEventListener("touchstart", d, { passive: false });
-        b.addEventListener("touchend", u, { passive: false });
-        b.addEventListener("touchcancel", u, { passive: false });
-        b.addEventListener("mousedown", d);
-        b.addEventListener("mouseup", u);
-        b.addEventListener("mouseleave", u);
+        const down = (ev: PointerEvent): void => {
+            ev.preventDefault();
+            if (active.size === 0) {
+                set(true);
+                paint(true);
+            }
+            active.add(ev.pointerId);
+            try {
+                b.setPointerCapture(ev.pointerId);
+            } catch {
+                // Capture is best-effort; input still works without it.
+            }
+        };
+        const up = (ev: PointerEvent): void => {
+            if (!active.delete(ev.pointerId)) return;
+            if (active.size === 0) {
+                set(false);
+                paint(false);
+            }
+        };
+        b.addEventListener("pointerdown", down);
+        b.addEventListener("pointerup", up);
+        b.addEventListener("pointercancel", up);
         cleanup.push(() => {
-            b.removeEventListener("touchstart", d);
-            b.removeEventListener("touchend", u);
-            b.removeEventListener("touchcancel", u);
+            b.removeEventListener("pointerdown", down);
+            b.removeEventListener("pointerup", up);
+            b.removeEventListener("pointercancel", up);
         });
         return b;
     };

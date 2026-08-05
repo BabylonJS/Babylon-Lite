@@ -3,7 +3,9 @@ import type { LightBase } from "./light/types.js";
 import type { AnimationGroup } from "./animation/animation-group.js";
 import type { MaterialVariantData } from "./loader-gltf/material-variants.js";
 import type { Mesh } from "./mesh/mesh.js";
+import type { GaussianSplattingMesh } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import type { Skeleton } from "./skeleton/bone-control.js";
+import type { SceneContext } from "./scene/scene-core.js";
 
 /**
  * Result returned by loadGltf / loadBabylon.
@@ -30,6 +32,25 @@ export interface AssetContainer {
      *  `enableBoneControl()` was called before loading; otherwise `undefined`.
      *  Drive bones via `getBoneByName()` + the `setBone*` functions. */
     skeletons?: Skeleton[];
+    /** @internal Per-frame animation tick closure pushed onto `scene._beforeRender` by
+     *  `addToScene(scene, container)`. Stored so `removeFromScene(scene, container)` can
+     *  splice it back out, keeping the two calls symmetric. */
+    _beforeRenderHook?: (deltaMs: number) => void;
+    /** Deferred scene-wiring hook contributed by a loader feature that needs the
+     *  target `SceneContext` (which the loader itself never sees). `addToScene()`
+     *  invokes it once, synchronously, while processing the container. Used by
+     *  `EXT_lights_image_based` to install its image-based-light environment
+     *  (spherical harmonics + specular cubemap) onto the scene. Lazy features own
+     *  the closure so the core loader/scene stay feature-agnostic.
+     *  @internal */
+    _sceneSetup?: (scene: SceneContext) => void;
+    /** Gaussian Splatting renderables contributed by the `KHR_gaussian_splatting`
+     *  loader feature, one promise per GS primitive. The promises are populated by
+     *  `_sceneSetup` (i.e. during `addToScene`); each resolves to the attached
+     *  {@link GaussianSplattingMesh}. Await `mesh.firstSortReady` to know when the
+     *  first depth sort has landed. `undefined` for assets without GS primitives.
+     *  @internal */
+    _gaussianSplats?: Promise<GaussianSplattingMesh>[];
 }
 
 /**

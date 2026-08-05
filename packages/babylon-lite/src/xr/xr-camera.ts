@@ -1,4 +1,5 @@
 import type { Camera, NormalizedViewport } from "../camera/camera.js";
+import { _cameraChangeKey } from "../camera/camera.js";
 import type { Mat4, Mat4Storage } from "../math/types.js";
 import type { XrEye } from "./xr-support.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
@@ -116,7 +117,10 @@ export function updateXrCameraForView(cam: XrCamera, view: XRView, rtWidth: numb
     p[6] = p[7]! - p[6]!;
     p[10] = p[11]! - p[10]!;
     p[14] = p[15]! - p[14]!;
-    cam._projVer = cam._wmv;
+    // Match the projection cache to the camera's change key (worldMatrixVersion + the projection
+    // revision `getProjectionMatrix` derives from fov/near/far) so the injected matrix is returned
+    // verbatim for this aspect instead of being recomputed as a symmetric frustum.
+    cam._projVer = _cameraChangeKey(cam);
     cam._projAspect = aspect;
     // Force view + view-projection recompute from the new world matrix + injected projection.
     cam._viewVer = -1;

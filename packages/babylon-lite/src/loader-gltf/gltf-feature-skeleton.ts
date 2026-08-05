@@ -3,7 +3,28 @@
 
 import type { GltfFeature } from "./gltf-feature.js";
 import { resolveAccessor } from "./gltf-parser.js";
+import { F32, U16 } from "../engine/typed-arrays.js";
 import { _boneBuilder } from "../skeleton/bone-control-hooks.js";
+
+/** Denormalize a resolved WEIGHTS_n attribute to a tight Float32 VEC4 buffer.
+ *  glTF allows WEIGHTS to be FLOAT or normalized UNSIGNED_BYTE / UNSIGNED_SHORT;
+ *  the skinning pipeline binds weights as `float32x4`, so integer weights read
+ *  raw (0..255 / 0..65535) explode the skin (mesh collapses → blank render).
+ *  Float sources pass through untouched (zero cost for the common case). Kept
+ *  inline (not lazily imported): the denorm is smaller than a dynamic-import
+ *  thunk, and it only ships in the already skin-gated feature chunk. */
+function weightsToFloat32(w: ArrayBufferView): Float32Array {
+    if (w instanceof F32) {
+        return w;
+    }
+    const inv = w instanceof U16 ? 1 / 65535 : 1 / 255;
+    const s = w as unknown as { [i: number]: number; length: number };
+    const out = new F32(s.length);
+    for (let i = 0; i < s.length; i++) {
+        out[i] = s[i]! * inv;
+    }
+    return out;
+}
 
 /** Resolve a vertex attribute by name, preferring any pre-decoded
  *  (e.g. Draco) data over the raw accessor. De-strides interleaved sources:
@@ -41,12 +62,14 @@ const feature: GltfFeature = {
         const primitive = meshData._primitive;
         const decoded = meshData._decoded;
         const joints = (await resolveAttr("JOINTS_0", primitive, decoded, json, binChunk)) as Uint16Array | Uint8Array | null;
-        const weights = (await resolveAttr("WEIGHTS_0", primitive, decoded, json, binChunk)) as Float32Array | null;
-        if (!joints || !weights) {
+        const weightsRaw = await resolveAttr("WEIGHTS_0", primitive, decoded, json, binChunk);
+        if (!joints || !weightsRaw) {
             return;
         }
+        const weights = weightsToFloat32(weightsRaw);
         const joints1 = (await resolveAttr("JOINTS_1", primitive, decoded, json, binChunk)) as Uint16Array | Uint8Array | null;
-        const weights1 = (await resolveAttr("WEIGHTS_1", primitive, decoded, json, binChunk)) as Float32Array | null;
+        const weights1Raw = await resolveAttr("WEIGHTS_1", primitive, decoded, json, binChunk);
+        const weights1 = weights1Raw ? weightsToFloat32(weights1Raw) : null;
 
         const [{ extractSkin, computeBoneTextureData }, { createSkeleton }] = await Promise.all([import("./gltf-animation.js"), import("../skeleton/create-skeleton.js")]);
         const skin = extractSkin(json, binChunk, node.skin, meshData._worldMatrix, parentMap, worldMatrixCache);

@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Babylon Lite GL — Inside the Mandelbulb</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    body { display: flex; align-items: center; justify-content: center; }
+    /* Contained, square (1:1) canvas with margin around it — the mandelbulb is a
+       centered fractal, so locking to a square avoids any window-aspect stretch. */
+    canvas { width: 90vmin; height: 90vmin; display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+  <script src="/loader.js"></script>
+  <script type="module" src="/gl/src/demos/mandelbulb.ts"></script>
+</body>
+</html>

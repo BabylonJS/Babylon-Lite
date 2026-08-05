@@ -73,7 +73,7 @@ function makeCustomSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, extraT
     return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 ${makeExtraBindingsWgsl(spriteGroupIndex, 3, extraTextures)}${makeFxStructWgsl(spriteGroupIndex, fxBinding)}
 @fragment
-fn fs(in: VOut) -> @location(0) vec4<f32> {
+fn fs(in: O) -> @location(0) vec4f {
 ${fragment}
 }`;
 }
@@ -95,7 +95,7 @@ const SPRITE_FX_HOOK: SpriteFxHook = {
         return layer.customShader?._key ?? "";
     },
     shaderModule(engine, hasDepth, layer) {
-        return layer.customShader?._getShaderModule(engine, hasDepth, layer._uvScroll === true) ?? null;
+        return layer.customShader?._getShaderModule(engine, hasDepth, layer._uvScrollAttr != null) ?? null;
     },
     layoutEntries(layer, startBinding) {
         return layer.customShader?._layoutEntries(startBinding) ?? null;

@@ -36,7 +36,7 @@ interface BlockPoint {
 }
 
 function readCaptureFrame(): number | null {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
     const frameValue = params.get("captureFrame");
     if (frameValue !== null) {
         const frame = Number(frameValue);
@@ -50,18 +50,22 @@ function rand(seed: { value: number }): number {
     return seed.value / 0x100000000;
 }
 
+function circlePoint(t: number): BlockPoint {
+    return { x: Math.cos(t) * CIRCLE_RADIUS, y: BALL_SIZE / 4, z: Math.sin(t) * CIRCLE_RADIUS };
+}
+
 function makeCirclePath(samples: number): BlockPoint[] {
     const pts: BlockPoint[] = [];
     for (let i = 0; i <= samples; i++) {
         const t = (i / samples) * Math.PI * 2;
-        pts.push({ x: Math.cos(t) * CIRCLE_RADIUS, y: BALL_SIZE / 4, z: Math.sin(t) * CIRCLE_RADIUS });
+        pts.push(circlePoint(t));
     }
     return pts;
 }
 
 function circlePosition(frame: number): BlockPoint {
     const t = ((frame % TOTAL_FRAMES) / TOTAL_FRAMES) * Math.PI * 2;
-    return { x: Math.cos(t) * CIRCLE_RADIUS, y: BALL_SIZE / 4, z: Math.sin(t) * CIRCLE_RADIUS };
+    return circlePoint(t);
 }
 
 function setTranslation(matrix: Float32Array, offset: number, x: number, y: number, z: number): void {
@@ -190,7 +194,7 @@ async function main(): Promise<void> {
         canvas.dataset.drawCalls = String(engine.drawCallCount);
         if (captureFrame !== null && !captureQueued && frame >= captureFrame) {
             captureQueued = true;
-            window.setTimeout(() => {
+            setTimeout(() => {
                 canvas.dataset.captureReady = "true";
                 stopEngine(engine);
             }, 0);
@@ -205,9 +209,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
-    if (canvas) {
-        canvas.dataset.error = err instanceof Error ? err.message : String(err);
-    }
+    document.querySelector("canvas")?.setAttribute("data-error", err);
     console.error(err);
 });

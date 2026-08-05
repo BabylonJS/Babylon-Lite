@@ -86,21 +86,29 @@ export interface RenderTaskConfig {
     rt: RenderTarget;
     clrColor?: GPUColorDict;
     clr?: boolean;
+    depthClear?: boolean;
+    sharedRt?: boolean;
     cam?: Camera | null;
     cs?: boolean;
+    autoMirror?: boolean;
 }
 ```
 
 Important fields:
 
-| Field | Meaning                                                                                                                             |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `rt`  | Concrete render target. Swapchain tasks use `resolveToSwapchain: true`; RTT tasks allocate color/depth textures.                    |
-| `clr` | `true`/undefined clears color+depth; `false` loads previous content for overlays/multi-scene composition.                           |
-| `cam` | Per-pass camera override; defaults to `scene.camera`.                                                                               |
-| `cs`  | Use canvas dimensions for scene UBO aspect instead of RTT dimensions. Used when an RTT texture must be rendered with canvas aspect. |
+| Field        | Meaning                                                                                                                                                  |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rt`         | Concrete render target. Swapchain tasks use `resolveToSwapchain: true`; RTT tasks allocate color/depth textures.                                         |
+| `clr`        | `true`/undefined clears color; `false` loads previous color content for overlays/multi-scene composition.                                                |
+| `depthClear` | Controls rt-owned depth independently. `true`/undefined clears depth; `false` loads existing depth. External `depth` targets keep their ownership policy. |
+| `sharedRt`   | Uses a target owned and recorded by an earlier task; this task does not build or dispose `rt`/`rst`.                                                      |
+| `cam`        | Per-pass camera override; defaults to `scene.camera`.                                                                                                    |
+| `cs`         | Use canvas dimensions for scene UBO aspect instead of RTT dimensions. Used when an RTT texture must be rendered with canvas aspect.                      |
+| `autoMirror` | Set `false` to keep an empty explicit render list instead of mirroring the scene renderables.                                                             |
 
 `RenderTask.addMesh(mesh, { material })` accepts either a source material or a `MaterialView`. The mesh is resolved at `record()` time through the source material family's `_buildGroup._rebuildSingle` closure, so explicit offscreen tasks can render the same mesh with pass-specific material features without mutating `mesh.material`.
+
+`RenderTask.enabled` defaults to `true`. Setting it to `false` skips the pass before updates, attachment loads, resolves, or draws.
 
 ## Runtime Flow
 
@@ -128,11 +136,11 @@ startEngine/registerScene frame:
 
 At record/re-sync time, a render pass task partitions bindings into:
 
-| Bucket      | Source flag                  | Draw path                                                           |
-| ----------- | ---------------------------- | ------------------------------------------------------------------- |
-| Opaque      | `!isTransparent && !_direct` | Cached `GPURenderBundle` when visibility/version state is unchanged |
-| Direct      | `_direct`                    | Direct draw after opaque bundle                                     |
-| Transparent | `isTransparent || _transmissive` | Direct draw, camera-space-depth sorted back-to-front per pass      |
+| Bucket      | Source flag                        | Draw path                                                           |
+| ----------- | ---------------------------------- | ------------------------------------------------------------------- |
+| Opaque      | `!isTransparent && !_direct`       | Cached `GPURenderBundle` when visibility/version state is unchanged |
+| Direct      | `_direct`                          | Direct draw after opaque bundle                                     |
+| Transparent | `isTransparent \|\| _transmissive` | Direct draw, camera-space-depth sorted back-to-front per pass       |
 
 Opaque and direct bindings are sorted by `renderable.order`. Transparent bindings must remain camera-space-depth sorted and are not pipeline-sorted. `_transmissive` marks true scene-texture refraction surfaces; the render task routes them into the same sorted transparent loop so transmission snapshots happen immediately before the current transmissive draw. `_direct` selects the non-transparent direct-draw bucket; mutable depth-writing sprite/billboard batches set `_direct` without `_transmissive` so they still appear in opaque-scene refraction RTTs.
 
@@ -185,7 +193,20 @@ export type MaterialOrView = Material | MaterialView;
 export function createMaterialView(source: MaterialOrView, renderFeatures: MaterialRenderFeatures): MaterialView;
 export function markMaterialUboDirty(materialOrView: MaterialOrView): void;
 export function rebuildMaterial(scene: SceneContext, materialOrView: MaterialOrView, options?: RebuildMaterialOptions): void;
+
+// Public, read-only material-family discriminator.
+export function getMaterialFamily(material: MaterialOrView): string | undefined;
+
+// Public TypeScript type guards for the well-known core material families.
+export function isPbrMaterial(material: Material): material is PbrMaterialProps;
+export function isStandardMaterial(material: Material): material is StandardMaterialProps;
+export function isShaderMaterial(material: Material): material is ShaderMaterial;
+export function isNodeMaterial(material: Material): material is NodeMaterial;
 ```
+
+`getMaterialFamily()` returns a stable string identifying which concrete family a material belongs to, so scene explorers, serializers, and diagnostics can display the family using only public APIs — never private renderer fields or property-shape heuristics. It unwraps a `MaterialView` to its `source` and reads the family declared on the material's `_buildGroup`. It returns `"pbr"`, `"standard"`, `"shader"` (including the grid material and other `createShaderMaterial`-based materials), `"node"`, or `undefined` (deliberately discoverable from the `string | undefined` signature so callers handle the unknown case). The material-builder surface (`_buildGroup`) is `@internal`, so package consumers cannot author their own builder: a user-created "custom material" is a `createShaderMaterial` (reported as `"shader"`) or a node material (`"node"`), and `getMaterialFamily` will not return an arbitrary user-defined string today. The return type is nonetheless a raw `string` rather than a string-literal union so a new core family can be added without a breaking change, and so the function stays forward-compatible if a public custom-family builder API is introduced later (it passes any tagged string through unchanged).
+
+`isPbrMaterial()`, `isStandardMaterial()`, `isShaderMaterial()`, and `isNodeMaterial()` are formal TypeScript type guards over `getMaterialFamily()`: each narrows a `Material` to the concrete family type (`PbrMaterialProps`, `StandardMaterialProps`, `ShaderMaterial`, `NodeMaterial`). A `MaterialView` over a matching source passes its family's guard, since it inherits every property from the source through its prototype chain. All of these functions are fully tree-shakable: scenes that never call them retain zero bytes for them.
 
 `createMaterialView()` creates a material-compatible object whose prototype is the source material, then stores only view-owned render feature bits and a `source` pointer. Textures, samplers, uniforms, alpha/culling state, extension data, `_buildGroup`, and UBO versions are inherited from the source material. Creating a view from another view collapses to the original source and registers the new view in `source._views`.
 
@@ -229,7 +250,7 @@ Materials carry `_buildGroup: MeshGroupBuilder` on their props. `addToScene()` g
 | `src/frame-graph/frame-graph.ts`         | Ordered task list, build/execute/dispose lifecycle                                                                           |
 | `src/frame-graph/frame-graph-actions.ts` | `addTask`, `addTaskAtStart`, `addTaskBefore` helpers                                                                         |
 | `src/frame-graph/render-task.ts`         | Render task implementation, per-pass scene UBO, renderable bucketing, RTT/swapchain pass execution                           |
-| `src/material/material.ts`               | Shared material, material-view, and render-feature interfaces                                                                 |
-| `src/material/material-view.ts`          | Lightweight material view creation and source normalization                                                                    |
-| `src/material/material-dirty.ts`         | Source-material UBO version bump helper                                                                                        |
-| `src/material/material-rebuild.ts`       | Rebuild helpers for source materials and their views                                                                           |
+| `src/material/material.ts`               | Shared material, material-view, and render-feature interfaces                                                                |
+| `src/material/material-view.ts`          | Lightweight material view creation and source normalization                                                                  |
+| `src/material/material-dirty.ts`         | Source-material UBO version bump helper                                                                                      |
+| `src/material/material-rebuild.ts`       | Rebuild helpers for source materials and their views                                                                         |
