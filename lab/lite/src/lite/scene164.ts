@@ -46,7 +46,14 @@ import {
 } from "babylon-lite";
 
 const SETTLE_FRAMES = 12;
-const POST_RECOVERY_FRAMES = 50;
+/**
+ * Clean frames to render after recovery before signalling `ready`. The animation is pinned, so
+ * every one of these frames is identical — they exist to prove the rebuilt resources keep
+ * rendering stably, not to settle anything. Kept modest because each frame re-renders the ESM
+ * shadow map (`forceRefreshEveryFrame`) for a skinned, morphed caster, which is cheap on a real
+ * adapter but costly under the software WebGPU the bundle measurement runs on.
+ */
+const POST_RECOVERY_FRAMES = 20;
 /** How long to hold the device open when nothing signals `dataset.captured` (bundle harness). */
 const CAPTURE_TIMEOUT_MS = 3000;
 

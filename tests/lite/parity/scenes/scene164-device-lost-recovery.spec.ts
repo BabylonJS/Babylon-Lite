@@ -51,7 +51,7 @@ test("Scene 164 — device-lost recovery reproduces the pre-loss image", async (
 
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.deviceLost === "true", { timeout: 30_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.deviceRecovered === "true", { timeout: 30_000 });
-    await page.waitForFunction(() => Number(document.querySelector("canvas")?.dataset.postRecoveryFrames ?? "0") >= 50, { timeout: 30_000 });
+    await page.waitForFunction(() => Number(document.querySelector("canvas")?.dataset.postRecoveryFrames ?? "0") >= 20, { timeout: 30_000 });
     await page.waitForTimeout(200);
 
     const state = await canvas.evaluate((element) => ({ ...(element as HTMLCanvasElement).dataset }));
