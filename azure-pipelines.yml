@@ -1,17 +1,73 @@
 # Azure Pipelines — Babylon Lite CI
 #
-# Runs on every PR targeting master. Eight parallel jobs:
-#   1. Release Markers  — breaking-change marker validation
-#   2. API Report       — public API diff comment + breaking-change validation
-#   3. Unit Tests       — vitest + plumbing (Playwright)
-#   4. Bundle Size      — ceiling checks
-#   5. Perf Regression  — Lite vs Stable on BrowserStack
-#   6. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
-#   7. Lint             — ESLint + TypeScript type-check
-#   8. Playground Snapshot — per-PR playground deploy + PR comment
+# Runs on every PR targeting master, AND on every push to master. Nine jobs:
 #
+#   Job                     PR   master   Notes
+#   ─────────────────────── ──── ──────── ───────────────────────────────────────
+#   0 Release Markers       yes  no       breaking-change marker validation
+#   1 API Report            yes  no       public API diff comment + validation
+#   2 Unit Tests            yes  yes      vitest + plumbing (Playwright)
+#   3 Bundle Size           yes  no       ceiling checks + delta report
+#   4 Perf Regression       yes  no       Lite vs Stable on BrowserStack
+#   5 Parity (Cloud)        yes  no       pixel-diff on a real-WebGPU cloud browser
+#   6 Lint & Type Check     yes  yes      ESLint + TypeScript type-check
+#   7 Compat Layer          yes  yes      @babylonjs/lite-compat build + tests
+#   8 Playground Snapshot   yes  no       per-PR playground deploy + PR comment
+#
+# ── Why this also runs on master ──────────────────────────────────────────────
+#
+# Azure DevOps builds the *merge commit* for a PR, not the PR head. That is the
+# right thing to validate, but it means a PR's green build only proves that the
+# branch was good against master *as it stood when the build ran*. Two PRs can
+# each be green against that snapshot, both merge, and interact badly — a
+# semantic conflict that neither build could have seen (a renamed export plus a
+# new caller of the old name; a tightened invariant plus new code that violates
+# it; two independently-correct edits to the same behaviour).
+#
+# Without a master trigger nothing notices. The breakage surfaces on the *next*
+# PR's build, which goes red for something it did not do, and that author spends
+# their afternoon bisecting somebody else's merge. Worst case it survives to the
+# weekly npm publish and ships.
+#
+# So master pushes run the deterministic gates — Unit Tests, Lint & Type Check,
+# and Compat Layer. Those three are hermetic (no cloud browser, no external
+# service), which matters more than coverage here: a post-merge failure has no
+# author to nudge and no PR to block, so it is only useful if a red run reliably
+# means "master is broken" rather than "BrowserStack was busy". They finish in
+# parallel in roughly 11 minutes, dominated by Unit Tests.
+#
+# The expensive, externally-dependent suites (Bundle Size, Perf, Parity) stay
+# PR-only. They cost 40-55 minutes each and are flaky in ways that would make a
+# post-merge signal noise rather than information. Bundle-size ceilings are
+# separately enforced on every master push by azure-pipelines-bundle-manifest.yml,
+# which runs `pnpm build:bundle-scenes` and checks `maxRawKB` byte-exactly —
+# that pipeline lands with PR #526, and until it does, master carries no
+# bundle-ceiling enforcement. Adding a 42-minute job here is not the fix for
+# that; landing #526 is.
+#
+# ── Rule for anyone adding a job here ─────────────────────────────────────────
+#
+# A job that reads PR context CANNOT run on a master build. There is no PR, so
+# `System.PullRequest.PullRequestNumber` is empty and anything derived from it
+# (a GitHubComment@0 target, a per-PR deploy path, a PR title/label lookup) is
+# either a no-op or an error. Every such job MUST carry:
+#
+#     condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
+#
+# `Build.SourceBranch` is `refs/pull/<n>/merge` on a PR build and
+# `refs/heads/master` on a master push, so this skips the job exactly when the
+# thing being built *is* master. It is deliberately not `eq(Build.Reason,
+# 'PullRequest')`: that would also skip the job on a manual queue against a
+# feature branch, which is a real workflow (queueing a parity or perf run
+# on-demand) and one this pipeline has always supported.
+#
+# Jobs without that condition run in BOTH contexts, so they must not touch PR
+# variables at all.
 
-trigger: none
+trigger:
+    branches:
+        include:
+            - master
 
 pr:
     branches:
@@ -36,13 +92,18 @@ variables:
 
 stages:
     - stage: CI
-      displayName: "PR Validation"
+      displayName: "Validation"
       jobs:
           # ──────────────────────────────────────────────────────────────
           # Job 0: Release Marker Validation
           # ──────────────────────────────────────────────────────────────
+          # PR-only. This job's entire subject is the pull request: it reads the
+          # PR title, body, and labels to decide whether a breaking change was
+          # declared. On a master build there is no PR to inspect, so the check
+          # has nothing to validate.
           - job: ReleaseMarkers
             displayName: "Release Markers"
+            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -71,8 +132,29 @@ stages:
           # ──────────────────────────────────────────────────────────────
           # Job 1: API Report
           # ──────────────────────────────────────────────────────────────
+          # PR-only, and deliberately so even though it looks deterministic
+          # enough to run post-merge. Two independent reasons:
+          #
+          #   * The diff is empty by construction on master. The baseline is
+          #     built from `git merge-base HEAD origin/master`
+          #     (scripts/report-api-changes.ts) — on a master build that merge
+          #     base IS HEAD, so the report always says "no public API changes",
+          #     POST_API_COMMENT is always false, and the breaking-marker check
+          #     can never fire. It would spend ~2 minutes building the package
+          #     twice (the baseline worktree runs its own `pnpm install`) to
+          #     assert nothing.
+          #   * The only signal left after removing the diff — "the publishable
+          #     package builds and its trimmed index.d.ts is clean" — is already
+          #     covered on master by the Unit Tests job, whose `--project build`
+          #     suite runs `vite build --mode lib` and `--mode dist` and then
+          #     type-checks build/index.d.ts
+          #     (tests/lite/build/public-api-types.test.ts, bundler-harness.ts).
+          #
+          # It also posts a PR comment, which needs a PR number. Please do not
+          # "restore" this on master without a reason that survives both points.
           - job: ApiReport
             displayName: "API Report"
+            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -100,7 +182,11 @@ stages:
                       GITHUB_TOKEN: "$(GITHUB_TOKEN)"
 
                 - task: GitHubComment@0
-                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
+                  # The branch guard is redundant with the job-level condition
+                  # above and is kept deliberately: a GitHubComment@0 whose `id`
+                  # is an empty PR number fails in a confusing way, so the guard
+                  # stays local to the task that would break.
+                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
                   continueOnError: true
                   displayName: "Post API changes to PR"
                   inputs:
@@ -112,6 +198,18 @@ stages:
           # ──────────────────────────────────────────────────────────────
           # Job 2: Unit Tests
           # ──────────────────────────────────────────────────────────────
+          # Runs on PRs AND on master. Hermetic (headless Chromium/SwiftShader,
+          # no cloud browser, no external service), so a red run here means the
+          # code is broken rather than that an outside service was having a bad
+          # day — the property a post-merge gate needs to be actionable. At
+          # ~11 minutes it is the longest of the three master jobs and therefore
+          # sets the post-merge wall time.
+          #
+          # It also carries the package build: `--project build` runs
+          # `vite build --mode lib` and `--mode dist`, which is why the API
+          # Report job is not needed on master (see Job 1).
+          #
+          # Touches no PR variables — keep it that way.
           - job: UnitTests
             displayName: "Unit Tests"
             pool:
@@ -200,8 +298,21 @@ stages:
           # ──────────────────────────────────────────────────────────────
           # Job 3: Bundle Size
           # ──────────────────────────────────────────────────────────────
+          # PR-only. Two reasons, either of which is sufficient:
+          #
+          #   * It is already covered on master. azure-pipelines-bundle-manifest.yml
+          #     runs on every master push and measures every scene with
+          #     `pnpm build:bundle-scenes`, which enforces the per-scene
+          #     `maxRawKB` ceilings from scene-config.json byte-exactly (that
+          #     pipeline lands with PR #526). Duplicating it here would add
+          #     ~42 minutes for a second opinion on the same numbers.
+          #   * The delta half is inherently PR-scoped — it diffs against the
+          #     published master baseline and reports the result as a PR comment,
+          #     which needs a PR number. On master the "delta" would be the
+          #     baseline against itself.
           - job: BundleSize
             displayName: "Bundle Size"
+            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -284,7 +395,10 @@ stages:
                   displayName: "Generate bundle-size delta comment"
 
                 - task: GitHubComment@0
-                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
+                  # See the equivalent guard in Job 1: redundant with the
+                  # job-level condition, kept local to the task that an empty PR
+                  # number would break.
+                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
                   continueOnError: true
                   displayName: "Post bundle-size changes to PR"
                   inputs:
@@ -308,8 +422,16 @@ stages:
           # ──────────────────────────────────────────────────────────────
           # Job 4: Performance Regression
           # ──────────────────────────────────────────────────────────────
+          # PR-only. ~53 minutes on BrowserStack, comparing this build against a
+          # rebuilt stable baseline. It depends on an external service and on
+          # timing measurements taken on shared cloud hardware, so it fails for
+          # reasons unrelated to the code often enough that a post-merge run
+          # would mostly teach people to ignore master failures — the opposite
+          # of what a post-merge gate is for. Its cost is also paid per run, and
+          # it would run on every single merge.
           - job: PerfRegression
             displayName: "Performance: Lite vs Stable"
+            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
             timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
@@ -427,8 +549,17 @@ stages:
           # ──────────────────────────────────────────────────────────────
           # Job 5: Parity (Cloud Browser)
           # ──────────────────────────────────────────────────────────────
+          # PR-only, for the same reason as Perf: ~37 minutes against a
+          # BrowserStack macOS Chrome with real WebGPU. Pixel parity is the
+          # project's core guarantee, so excluding it post-merge is a real gap
+          # — but a gate that depends on a third-party browser farm is a poor
+          # post-merge signal, and running it on every merge would multiply the
+          # cloud cost by the merge rate. The lite-gl parity suite still runs
+          # post-merge inside Unit Tests, headless on SwiftShader, so the parity
+          # harness itself is not entirely unwatched on master.
           - job: ParityCloud
             displayName: "Parity Tests (Cloud Browser)"
+            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
             timeoutInMinutes: 180
             pool:
                 vmImage: "ubuntu-latest"
@@ -504,6 +635,11 @@ stages:
           # ──────────────────────────────────────────────────────────────
           # Job 6: Lint
           # ──────────────────────────────────────────────────────────────
+          # Runs on PRs AND on master. The cheapest post-merge gate that can
+          # catch a semantic conflict: a type error is exactly what you get when
+          # one PR changes a signature and another adds a caller of the old one,
+          # and neither PR's build could have seen the combination. ~2.5 minutes,
+          # fully hermetic, touches no PR variables.
           - job: Lint
             displayName: "Lint & Type Check"
             pool:
@@ -566,6 +702,12 @@ stages:
           # regressions are caught in PR CI. NOTE: this job intentionally does NOT
           # publish the package — @babylonjs/lite-compat is not released yet. The
           # npm-publish pipeline only publishes packages/babylon-lite/build.
+          #
+          # Runs on master too (~2.5 minutes, hermetic, no PR variables). It is
+          # the job most exposed to semantic conflicts: the compat layer is a
+          # thin shim over the engine's public surface, so an engine change that
+          # is internally consistent can still break it, and the engine PR that
+          # caused it has no reason to look.
           - job: Compat
             displayName: "Compat Layer"
             pool:
@@ -627,8 +769,14 @@ stages:
           # snapshots for fork PRs, enable "Make secrets available to builds of
           # forks" in the pipeline's trigger settings — note this exposes the
           # deploy token to fork-authored code, a security trade-off to weigh.
+          #
+          # PR-only: every variable below is derived from the PR number, and the
+          # whole point of the job is a comment on the PR. The master equivalent
+          # already exists as a separate pipeline (azure-pipelines-playground.yml),
+          # which deploys the nightly playground on each push.
           - job: PlaygroundSnapshot
             displayName: "PR Playground Snapshot"
+            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
             pool:
                 vmImage: "ubuntu-latest"
             variables:

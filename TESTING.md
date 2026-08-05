@@ -1,8 +1,9 @@
 # Testing
 
 Babylon Lite uses four categories of automated tests, all orchestrated by
-Playwright and/or Vitest. An Azure Pipelines CI pipeline runs five parallel
-jobs on every PR targeting `master`.
+Playwright and/or Vitest. An Azure Pipelines CI pipeline runs nine parallel
+jobs on every PR targeting `master`, and re-runs the three deterministic ones on
+every push to `master`.
 
 ---
 
@@ -274,17 +275,59 @@ For local development, add these to `.env.local` (git-ignored).
 ## Azure Pipelines CI
 
 **Config:** `azure-pipelines.yml`  
-**Trigger:** PRs targeting `master`
+**Triggers:** PRs targeting `master`, and pushes to `master`
 
-Five parallel jobs:
+| Job                        | What it does                                           | PR  | master |
+| -------------------------- | ------------------------------------------------------ | --- | ------ |
+| **Release Markers**        | Breaking-change marker validation from PR title/labels | ✅  | —      |
+| **API Report**             | Public API diff vs the merge base + PR comment         | ✅  | —      |
+| **Unit Tests**             | Vitest unit/build tests + Playwright plumbing + gl     | ✅  | ✅     |
+| **Bundle Size**            | Ceiling checks + delta vs baseline                     | ✅  | —      |
+| **Perf Regression**        | Current vs baseline on BrowserStack (macOS Chrome)     | ✅  | —      |
+| **Parity (Cloud)**         | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU) | ✅  | —      |
+| **Lint & Type Check**      | ESLint + TypeScript `--noEmit` type-check              | ✅  | ✅     |
+| **Compat Layer**           | `@babylonjs/lite-compat` type-check, build, unit tests | ✅  | ✅     |
+| **PR Playground Snapshot** | Per-PR playground deploy + PR comment                  | ✅  | —      |
 
-| Job                 | What it does                                           |
-| ------------------- | ------------------------------------------------------ |
-| **Unit Tests**      | Vitest unit tests + Playwright plumbing tests          |
-| **Bundle Size**     | Ceiling checks + delta vs baseline                     |
-| **Perf Regression** | Current vs baseline on BrowserStack (macOS Chrome)     |
-| **Parity (Cloud)**  | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU) |
-| **Lint**            | ESLint + TypeScript `--noEmit` type-check              |
+### Post-Merge Validation on `master`
+
+Azure DevOps builds the PR _merge commit_, so a green PR only proves the branch
+was good against `master` as it stood at build time. Two PRs can each be green,
+merge, and interact badly — a semantic conflict neither build could see. Without
+a master run, that surfaces on the _next_ PR's build, which goes red for
+something it did not do.
+
+Every push to `master` therefore re-runs **Unit Tests**, **Lint & Type Check**,
+and **Compat Layer**. They run in parallel, so the post-merge signal arrives in
+roughly **11 minutes** (Unit Tests dominates). All three are hermetic — no cloud
+browser, no external service — which is the point: a post-merge failure has no
+author to nudge and no PR to block, so it is only useful if red reliably means
+"master is broken".
+
+Deliberately excluded from `master`:
+
+- **Perf Regression** (~53 min) and **Parity Cloud** (~37 min) — both depend on
+  BrowserStack. Externally flaky and expensive per run, which would make a
+  post-merge signal noise rather than information.
+- **Bundle Size** (~42 min) — covered on master by
+  `azure-pipelines-bundle-manifest.yml`, which measures every scene on each push
+  and enforces the per-scene `maxRawKB` ceilings byte-exactly. (That pipeline
+  arrives with PR #526; until it merges, master has no bundle-ceiling
+  enforcement. Duplicating a 42-minute job here is not the fix.)
+- **Release Markers**, **API Report**, and **PR Playground Snapshot** — all
+  inherently PR-scoped. They read `System.PullRequest.PullRequestNumber`, post
+  `GitHubComment@0` comments, or diff against the PR's merge base (which on a
+  master build is the build's own commit, so the diff is empty by construction).
+
+Those jobs are gated with
+`condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')`. **Any new
+job that reads PR context must carry the same condition** — see the header
+comment in `azure-pipelines.yml`.
+
+> **Manual follow-up:** failure notifications for master runs are configured in
+> the Azure DevOps UI (Project settings → Notifications), not in YAML. A
+> subscription on "A build fails" scoped to this pipeline is required for the
+> post-merge signal to reach anyone.
 
 ### Required Pipeline Variable Groups
 
