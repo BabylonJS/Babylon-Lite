@@ -18,14 +18,16 @@ export async function rebuildSceneEnvironment(engine: EngineContext, scene: Scen
         return null;
     }
     const source = scene._envRecoverySource;
-    const sphericalHarmonics = current.sphericalHarmonics;
-    scene._envTextures = undefined;
     if (!source) {
         throw new Error("Device-lost Scene recovery requires environment loading after recovery was enabled");
     }
     if (source.kind === "env" && source.hasBackgrounds) {
         throw new Error("Device-lost Scene recovery does not support loadEnvironment backgrounds");
     }
+    // Only detach the textures once the rebuild is known to be possible: an early throw would
+    // otherwise leave the scene without its environment while the error propagates.
+    const sphericalHarmonics = current.sphericalHarmonics;
+    scene._envTextures = undefined;
 
     let replacement: EnvironmentTextures;
     if (source.kind === "env") {
@@ -33,7 +35,7 @@ export async function rebuildSceneEnvironment(engine: EngineContext, scene: Scen
     } else {
         const parser = await import("../loader-hdr/hdr-parser.js");
         const pipeline = await import("../loader-hdr/hdr-ibl-pipeline.js");
-        const buffer = await fetch(source.url).then((response) => response.arrayBuffer());
+        const buffer = await fetchRecoverySource(source.url);
         const hdr = parser.parseRGBE(buffer);
         const irradianceSH = parser.computeSHFromEquirect(hdr.data, hdr.width, hdr.height);
         const sourceCube = pipeline.equirectToCubemapGPU(engine, hdr, source.faceSize);
@@ -93,7 +95,11 @@ async function reloadEnvironmentTextures(
     sphericalHarmonics: Float32Array
 ): Promise<EnvironmentTextures> {
     const brdfPromise = loadBrdfImage(source.brdfUrl);
-    const buffer = await fetch(source.url).then((response) => response.arrayBuffer());
+    // The BRDF fetch runs alongside the .env fetch but is not awaited until later, so a .env
+    // failure would otherwise leave it rejecting unobserved. The rejection is still re-thrown by
+    // the `await brdfPromise` below, which stays the single place BRDF errors surface.
+    brdfPromise.catch(() => {});
+    const buffer = await fetchRecoverySource(source.url);
     const { faceBlobs, irradianceSH, width, mipCount } = parseEnvFile(buffer);
     const faceImages = await Promise.all(faceBlobs.map((blob) => createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" })));
     const rgbd = await import("./rgbd-decode.js");
@@ -105,4 +111,19 @@ async function reloadEnvironmentTextures(
     const brdfLut = rgbd.decodeBrdfPng(engine, brdfImage);
     brdfImage.close();
     return assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 0.8, engine, sphericalHarmonics);
+}
+
+/**
+ * Refetch a recovery source, rejecting a non-OK status before the body is parsed.
+ *
+ * Recovery runs long after the initial load, so an asset that has since gone missing would
+ * otherwise surface as a decode failure ("Invalid .env file: bad magic" for an SPA HTML fallback)
+ * that names neither the URL nor the status.
+ */
+async function fetchRecoverySource(url: string): Promise<ArrayBuffer> {
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Device-lost Scene recovery could not refetch '${url}' (${response.status} ${response.statusText}).`);
+    }
+    return response.arrayBuffer();
 }

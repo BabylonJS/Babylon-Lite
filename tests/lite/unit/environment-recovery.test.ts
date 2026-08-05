@@ -149,13 +149,37 @@ describe("rebuildSceneEnvironment", () => {
     });
 
     it("fails loudly when the environment was loaded before recovery capture was enabled", async () => {
-        await expect(rebuildSceneEnvironment(makeEngine(), makeScene(makeEnvironmentTextures()))).rejects.toThrow(/requires environment loading after recovery was enabled/);
+        const textures = makeEnvironmentTextures();
+        const scene = makeScene(textures);
+
+        await expect(rebuildSceneEnvironment(makeEngine(), scene)).rejects.toThrow(/requires environment loading after recovery was enabled/);
+        // The guards run before the textures are detached, so a scene that cannot recover is not
+        // additionally left without its environment while the error propagates.
+        expect(scene._envTextures).toBe(textures);
     });
 
     it("fails loudly for loadEnvironment backgrounds, which recovery cannot rebuild", async () => {
-        const scene = makeScene(makeEnvironmentTextures(), { ...envSource, hasBackgrounds: true });
+        const textures = makeEnvironmentTextures();
+        const scene = makeScene(textures, { ...envSource, hasBackgrounds: true });
 
         await expect(rebuildSceneEnvironment(makeEngine(), scene)).rejects.toThrow(/does not support loadEnvironment backgrounds/);
+        expect(scene._envTextures).toBe(textures);
+    });
+
+    it("names the URL and status when a recovery source can no longer be fetched", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => new Response("<!doctype html>", { status: 404, statusText: "Not Found" }))
+        );
+        vi.stubGlobal(
+            "createImageBitmap",
+            vi.fn(async () => ({ close: vi.fn() }) as unknown as ImageBitmap)
+        );
+        const scene = makeScene(makeEnvironmentTextures(), envSource);
+
+        // Without the status check this surfaces as "Invalid .env file: bad magic", which names
+        // neither the asset nor the reason it went missing.
+        await expect(rebuildSceneEnvironment(makeEngine(), scene)).rejects.toThrow(/could not refetch '\/assets\/studio\.env' \(404 Not Found\)/);
     });
 
     it("preserves the EnvironmentTextures identity and its spherical harmonics across a rebuild", async () => {
