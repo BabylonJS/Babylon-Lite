@@ -1,7 +1,7 @@
 {
   "rawKB": 100.2,
   "rawBytes": 102587,
-  "gzipKB": 42.8,
+  "gzipKB": 42.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene246-create-skeleton-BidUk-c7.js",

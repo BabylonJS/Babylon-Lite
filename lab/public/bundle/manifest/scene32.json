@@ -1,7 +1,7 @@
 {
   "rawKB": 80.6,
   "rawBytes": 82515,
-  "gzipKB": 33.5,
+  "gzipKB": 33.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene32-generate-mipmaps-Cr6tLrFA.js",

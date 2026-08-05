@@ -269,9 +269,11 @@ async function startSession(mode: XrSessionMode, scene: Parameters<typeof enterX
                     },
                     onSelect: (mesh) => pulseSelect(mesh),
                 }),
-                // Generic controller models rendered at each grip pose, so the hands
-                // are visible in the headset even without online GLB motion controllers.
-                controllerModels(),
+                // Real WebXR Input Profiles controller models loaded from the
+                // registry CDN, with buttons/trigger/thumbstick animated from live
+                // gamepad state (Babylon.js parity). Falls back to a handle box while
+                // a model loads or if the source has no known profile / is offline.
+                controllerModels({ profiles: true }),
             ],
             onFrame: (ctx) => {
                 updateGrab(ctx);

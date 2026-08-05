@@ -1,7 +1,7 @@
 {
   "rawKB": 90.3,
-  "rawBytes": 92453,
-  "gzipKB": 37.5,
+  "rawBytes": 92447,
+  "gzipKB": 37.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene251-create-skeleton-TRK-jHlK.js",

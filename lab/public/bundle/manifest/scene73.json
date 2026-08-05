@@ -1,7 +1,7 @@
 {
   "rawKB": 142.2,
   "rawBytes": 145576,
-  "gzipKB": 57.9,
+  "gzipKB": 58,
   "ignoredRawKB": 3.3,
   "runtimeChunks": [
     "scene73-_math-factory-C7IfuSt9.js",

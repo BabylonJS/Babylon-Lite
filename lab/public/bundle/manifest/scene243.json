@@ -1,7 +1,7 @@
 {
   "rawKB": 98.1,
   "rawBytes": 100412,
-  "gzipKB": 41.6,
+  "gzipKB": 41.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene243-create-morph-targets-C_lcfVOA.js",
