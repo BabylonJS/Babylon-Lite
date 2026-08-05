@@ -325,7 +325,7 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
         light.direction.x,
         light.direction.y,
         light.direction.z,
-        performance.now(),
+        typeof performance !== "undefined" ? performance.now() : Date.now(),
         cameraChanged,
         cfg._forceRefreshEveryFrame || contentChanged,
         cached._onPromote,

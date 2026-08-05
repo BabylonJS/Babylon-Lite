@@ -1,9 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { type EngineContext, type RenderingContext, registerRenderingContext, unregisterRenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { enableSurfaceResizeObserver } from "../../../packages/babylon-lite/src/engine/enable-surface-resize-observer";
 import { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "../../../packages/babylon-lite/src/engine/surface";
-import { vi } from "vitest";
 
 function setDevicePixelRatio(value: number): void {
     Object.defineProperty(globalThis, "devicePixelRatio", { value, configurable: true });
