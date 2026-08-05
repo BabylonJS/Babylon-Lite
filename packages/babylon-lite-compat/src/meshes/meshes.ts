@@ -1114,6 +1114,9 @@ export class LinesMesh extends Mesh {
     }
 
     private _enableThinLineMaterial(useThinInstanceColors: boolean): void {
+        if (this._lineMaterial._lite.useThinInstances && this._lineMaterial._lite.useThinInstanceColors === useThinInstanceColors) {
+            return;
+        }
         const lite = createLineMaterial({
             name: this._lineMaterial.name,
             color: { r: this._color.r, g: this._color.g, b: this._color.b, a: this._alpha },
@@ -1420,8 +1423,8 @@ export const MeshBuilder = {
         return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 
-    CreateLines(name: string, options: LinesBuilderOptions, scene: Scene): LinesMesh {
-        return this.CreateLineSystem(
+    CreateLines(name: string, options: LinesBuilderOptions, scene?: Scene | null): LinesMesh {
+        return CreateLineSystem(
             name,
             {
                 lines: [options.points],
@@ -1435,16 +1438,23 @@ export const MeshBuilder = {
         );
     },
 
-    CreateLineSystem(name: string, options: LineSystemBuilderOptions, scene: Scene): LinesMesh {
-        if (options.material) {
-            return unsupported("MeshBuilder.CreateLineSystem.material", "Custom line materials are not implemented in Babylon Lite compatibility mode.");
-        }
+    CreateLineSystem(name: string, options: LineSystemBuilderOptions, scene?: Scene | null): LinesMesh {
         if (options.instance) {
-            updateLineSystem(engineOf(scene), options.instance._lite, {
+            const instanceScene = options.instance.getScene() ?? scene;
+            if (!instanceScene) {
+                throw new Error("MeshBuilder.CreateLineSystem requires the instance to belong to a scene");
+            }
+            updateLineSystem(engineOf(instanceScene), options.instance._lite, {
                 lines: options.lines,
                 ...(options.colors ? { colors: options.colors } : {}),
             });
             return options.instance;
+        }
+        if (options.material) {
+            return unsupported("MeshBuilder.CreateLineSystem.material", "Custom line materials are not implemented in Babylon Lite compatibility mode.");
+        }
+        if (!scene) {
+            throw new Error("MeshBuilder.CreateLineSystem requires a scene when creating a line system");
         }
         const lite = createLineSystem(engineOf(scene), {
             name,
@@ -1524,12 +1534,12 @@ export function CreateDisc(name: string, options: object, scene: Scene): Mesh {
 }
 
 /** Babylon.js `CreateLines(name, options, scene)` (linesBuilder). */
-export function CreateLines(name: string, options: LinesBuilderOptions, scene: Scene): LinesMesh {
+export function CreateLines(name: string, options: LinesBuilderOptions, scene?: Scene | null): LinesMesh {
     return MeshBuilder.CreateLines(name, options, scene);
 }
 
 /** Babylon.js `CreateLineSystem(name, options, scene)` (linesBuilder). */
-export function CreateLineSystem(name: string, options: LineSystemBuilderOptions, scene: Scene): LinesMesh {
+export function CreateLineSystem(name: string, options: LineSystemBuilderOptions, scene?: Scene | null): LinesMesh {
     return MeshBuilder.CreateLineSystem(name, options, scene);
 }
 

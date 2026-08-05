@@ -45,9 +45,10 @@ function getLineGroupBuilder(): MeshGroupBuilder {
             requireThinInstances(mesh, mesh.material as LineMaterial);
         }
         const result = await shaderBuilder(scene, meshes);
+        const innerRebuildSingle = result.rebuildSingle;
         const rebuildSingle = (rebuildScene: typeof scene, mesh: Mesh, materialOverride?: Material) => {
             requireThinInstances(mesh, (materialOverride ?? mesh.material) as LineMaterial);
-            return result.rebuildSingle(rebuildScene, mesh, materialOverride);
+            return innerRebuildSingle(rebuildScene, mesh, materialOverride);
         };
         builder._rebuildSingle = rebuildSingle;
         return { ...result, rebuildSingle };

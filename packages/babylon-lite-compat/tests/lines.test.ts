@@ -70,15 +70,28 @@ describe("LinesMesh compatibility", () => {
                 colors,
                 instance: mesh,
             },
-            scene
+            null
         );
         expect(updated).toBe(mesh);
         expect(writeBuffer).toHaveBeenCalled();
         expect(Array.from(mesh._lite._cpuPositions!)).toEqual([-1, 0, 0, 2, 1, 0]);
 
         mesh.thinInstanceSetBuffer("matrix", new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]), 16);
+        const matrixMaterial = mesh._lite.material;
+        mesh.thinInstanceSetBuffer("matrix", new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1]), 16);
+        expect(mesh._lite.material).toBe(matrixMaterial);
         mesh.thinInstanceSetBuffer("color", new Float32Array([0.5, 0.75, 1, 0.8]), 4);
+        const colorMaterial = mesh._lite.material;
+        mesh.thinInstanceSetBuffer("color", new Float32Array([1, 0.5, 0.25, 1]), 4);
+        expect(mesh._lite.material).toBe(colorMaterial);
         const material = mesh._lite.material as unknown as { useThinInstances: boolean; useThinInstanceColors: boolean; _topology: string };
         expect(material).toMatchObject({ useThinInstances: true, useThinInstanceColors: true, _topology: "line-list" });
+    });
+
+    it("supports detached CreateLines calls", () => {
+        const { scene } = createScene();
+        const createLines = MeshBuilder.CreateLines;
+        const mesh = createLines("lines", { points: [new Vector3(0, 0, 0), new Vector3(1, 0, 0)] }, scene);
+        expect(mesh).toBeInstanceOf(LinesMesh);
     });
 });
