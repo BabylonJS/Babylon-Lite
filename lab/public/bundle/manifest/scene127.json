@@ -1,5 +1,5 @@
 {
-  "rawKB": 60.3,
+  "rawKB": 60.2,
   "gzipKB": 23.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -7,5 +7,5 @@
     "scene127-uniform-copy-batch-BVlvBXHx.js",
     "scene127.js"
   ],
-  "rawBytes": 61713
+  "rawBytes": 61665
 }

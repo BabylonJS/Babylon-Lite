@@ -4,32 +4,46 @@
 // Same as scene 127 but adds `depthRenderer.alphaBlendedDepth = true` so the GS
 // mesh writes its alpha-modulated depth into the depth RT for soft-edged splats.
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import { Effect } from "@babylonjs/core/Materials/effect";
+import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import { Color4 } from "@babylonjs/core/Maths/math.color";
-import { Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
 import { Scene } from "@babylonjs/core/scene";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
+import { waitForGsSettled } from "./gs-settle";
 import "@babylonjs/core/Rendering/depthRendererSceneComponent";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
 import "@babylonjs/core/Materials/standardMaterial";
+// The splat loader pulls the tree-shakeable GS material (`.pure`) but not the
+// side-effect wrapper that registers the GS depth-pass shaders. Without these,
+// the DepthRenderer tries to fetch `gaussianSplattingDepth.*` at runtime, gets
+// the vite SPA fallback HTML instead, and the GS depth pipeline fails to
+// compile — so the splat cloud is missing from the depth capture. Registering
+// the WGSL shaders explicitly keeps the reference self-contained.
+import "@babylonjs/core/ShadersWGSL/gaussianSplattingDepth.vertex";
+import "@babylonjs/core/ShadersWGSL/gaussianSplattingDepth.fragment";
 
-const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_Believe.splat";
+// Vendored locally (lab/public/splats/) to remove remote-CDN network variance
+// from the CI parity capture. Served at the site root by the lab dev server.
+const SPLAT_URL = "/splats/Halo_Believe.splat";
 
-Effect.ShadersStore["customDepthPixelShader"] = `
-    precision highp float;
-    varying vec2 vUV;
-    uniform sampler2D depthSampler;
-    uniform vec2 cameraMinMaxZ;
-    void main(void) {
-        float depth = texture2D(depthSampler, vUV).r;
-        float linearDepth = depth;
-        gl_FragColor = vec4(linearDepth, linearDepth, linearDepth, 1.0);
-    }
-`;
+// Depth-visualisation post-process authored in WGSL.  The original playground
+// used a GLSL post-process, but under the WebGPU engine a GLSL shader forces
+// BJS to download the twgsl (GLSL->WGSL) transpiler from its CDN at runtime —
+// a network dependency that flakes/black-renders the reference on CI.  Writing
+// the shader in WGSL keeps the capture fully local and deterministic.
+ShaderStore.ShadersStoreWGSL["customDepthPixelShader"] = `varying vUV: vec2f;
+var depthSamplerSampler: sampler;
+var depthSampler: texture_2d<f32>;
+@fragment
+fn main(input: FragmentInputs) -> FragmentOutputs {
+    var depth: f32 = textureSample(depthSampler, depthSamplerSampler, input.vUV).r;
+    fragmentOutputs.color = vec4f(depth, depth, depth, 1.0);
+}`;
 
 (async function () {
     const __initStart = performance.now();
@@ -66,21 +80,24 @@ Effect.ShadersStore["customDepthPixelShader"] = `
     depthRenderer.forceDepthWriteTransparentMeshes = true;
     depthRenderer.alphaBlendedDepth = true;
 
-    const depthPostProcess = new PostProcess("depthPostProcess", "customDepth", ["cameraMinMaxZ"], ["depthSampler"], 1.0, camera);
+    const depthPostProcess = new PostProcess("depthPostProcess", "customDepth", {
+        samplers: ["depthSampler"],
+        size: 1.0,
+        camera,
+        shaderLanguage: ShaderLanguage.WGSL,
+    });
     depthPostProcess.onApply = function (effect) {
         effect.setTexture("depthSampler", depthRenderer.getDepthMap());
-        effect.setVector2("cameraMinMaxZ", new Vector2(camera.minZ, camera.maxZ));
     };
 
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
 
-    const start = performance.now();
-    while ((gs as unknown as { _canPostToWorker: boolean })._canPostToWorker !== true && performance.now() - start < 5_000) {
-        await new Promise<void>((r) => setTimeout(r, 16));
-    }
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
+    // Wait for the GS depth sort to settle over several rendered frames so the
+    // reference capture is deterministic (the old `_canPostToWorker` poll could
+    // capture mid-sort with an unpopulated depth RTT — a black/flaky reference).
+    await waitForGsSettled(scene, gs);
 
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
