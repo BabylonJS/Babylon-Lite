@@ -320,9 +320,11 @@ Deliberately excluded from `master`:
   master build is the build's own commit, so the diff is empty by construction).
 
 Those jobs are gated with
-`condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')`. **Any new
-job that reads PR context must carry the same condition** — see the header
-comment in `azure-pipelines.yml`.
+`condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))`.
+**Any new job that reads PR context must carry the same condition** — see the
+header comment in `azure-pipelines.yml`, which also explains why the
+`succeeded()` half is required (declaring any `condition:` replaces the implicit
+default) and why the master trigger deliberately has no `paths:` filter.
 
 > **Manual follow-up:** failure notifications for master runs are configured in
 > the Azure DevOps UI (Project settings → Notifications), not in YAML. A

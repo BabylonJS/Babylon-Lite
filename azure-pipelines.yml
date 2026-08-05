@@ -52,7 +52,7 @@
 # (a GitHubComment@0 target, a per-PR deploy path, a PR title/label lookup) is
 # either a no-op or an error. Every such job MUST carry:
 #
-#     condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
+#     condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
 #
 # `Build.SourceBranch` is `refs/pull/<n>/merge` on a PR build and
 # `refs/heads/master` on a master push, so this skips the job exactly when the
@@ -61,8 +61,34 @@
 # feature branch, which is a real workflow (queueing a parity or perf run
 # on-demand) and one this pipeline has always supported.
 #
+# The `succeeded()` half is not decoration. Declaring any `condition:` on a job
+# REPLACES the implicit default of `succeeded()`. Every job here is currently
+# independent (no `dependsOn` anywhere in this file), so a bare `ne(...)` would
+# behave identically today — but the moment someone adds a `dependsOn` to a
+# gated job, a bare condition would silently let it run even when its dependency
+# failed. Spelling out `succeeded()` costs nothing and removes that trap.
+#
 # Jobs without that condition run in BOTH contexts, so they must not touch PR
 # variables at all.
+#
+# ── Do not add path filters to the master trigger ─────────────────────────────
+#
+# The trigger below deliberately has no `paths:` filter, so master validation
+# also runs on doc-only and comment-only commits. That is mildly wasteful —
+# ~11 minutes across three agents — and the waste is accepted on purpose.
+#
+# A path filter is precisely the optimisation that lets a real break slip
+# through unvalidated. The failure mode is not hypothetical: the filter has to
+# encode which paths can affect a build, that list is wrong the moment someone
+# adds a config file, a script, a tsconfig `include`, or a generated-doc check
+# that reads source (this repo has one — `pnpm gen:feature-doc:check` in the
+# Lint job compares docs/lite/02-feature-comparison.md against lab HTML). A
+# "docs-only" commit then merges unvalidated, and the next PR eats the red
+# build — which is the exact problem this trigger exists to solve.
+#
+# If the cost ever genuinely matters, batch the trigger (`batch: true`) rather
+# than filtering paths. That reduces the number of runs without ever letting a
+# commit through unvalidated.
 
 trigger:
     branches:
@@ -103,7 +129,7 @@ stages:
           # has nothing to validate.
           - job: ReleaseMarkers
             displayName: "Release Markers"
-            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -154,7 +180,7 @@ stages:
           # "restore" this on master without a reason that survives both points.
           - job: ApiReport
             displayName: "API Report"
-            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -312,7 +338,7 @@ stages:
           #     baseline against itself.
           - job: BundleSize
             displayName: "Bundle Size"
-            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -431,7 +457,7 @@ stages:
           # it would run on every single merge.
           - job: PerfRegression
             displayName: "Performance: Lite vs Stable"
-            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
@@ -559,7 +585,7 @@ stages:
           # harness itself is not entirely unwatched on master.
           - job: ParityCloud
             displayName: "Parity Tests (Cloud Browser)"
-            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             timeoutInMinutes: 180
             pool:
                 vmImage: "ubuntu-latest"
@@ -776,7 +802,7 @@ stages:
           # which deploys the nightly playground on each push.
           - job: PlaygroundSnapshot
             displayName: "PR Playground Snapshot"
-            condition: ne(variables['Build.SourceBranch'], 'refs/heads/master')
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:
