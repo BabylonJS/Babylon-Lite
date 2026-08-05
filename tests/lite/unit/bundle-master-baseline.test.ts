@@ -71,8 +71,10 @@ describe("resolveMasterBundleManifest", () => {
         process.env.BUNDLE_MASTER_MANIFEST_URL = `${baseUrl}/never-published.json`;
 
         // No refs are passed, so the git fallback is consulted; in this repo it may
-        // find a legacy ref. What matters is that a 404 does not throw.
-        await expect(resolveMasterBundleManifest()).resolves.not.toThrow();
+        // find a legacy ref. What matters is that a 404 degrades to a resolved
+        // value instead of rejecting — awaiting is the assertion, since a rejection
+        // fails the test on its own.
+        await resolveMasterBundleManifest();
         expect(requestCount).toBe(1);
     });
 
