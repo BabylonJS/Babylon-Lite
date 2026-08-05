@@ -152,6 +152,8 @@ export interface ShaderMaterial extends Material {
     readonly depthOnlyFragment: boolean;
     readonly depthBias: number;
     readonly depthBiasSlopeScale: number;
+    /** @internal Primitive topology override. Undefined means triangle-list. */
+    readonly _topology?: GPUPrimitiveTopology;
     /** Optional stencil-test state baked into the main-pass pipeline (mask write / discard). Set after
      *  creation (`mat.stencil = { ... }`) and call `enableMaterialStencil()` before `registerScene`. Default
      *  none. See `StencilState`. */
