@@ -58,6 +58,14 @@ export interface EsmShadowTaskResources {
     _shadowUboData: Float32Array;
     /** @internal Blur kernel width retained for loss-only shadow reconstruction. */
     _blurKernel: number;
+    /**
+     * @internal Blur downscale factor retained for loss-only shadow reconstruction.
+     *
+     * Retained rather than re-derived as `mapSize / _blurTexH.width`: `blurSize` is
+     * `mapSize / blurScale`, which is not integral for every scale, so the round-trip through a
+     * texture dimension cannot recover the caller's original value.
+     */
+    _blurScale: number;
 }
 
 /** Configuration for a directional-light ESM shadow generator: map size, depth scale, blur kernel, darkness, and ortho projection bounds. */
@@ -509,6 +517,7 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         _blurVBG: blurVBG,
         _shadowUboData: shadowUboData,
         _blurKernel: blurKernel,
+        _blurScale: blurScale,
     });
     return sg;
 }

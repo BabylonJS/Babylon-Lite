@@ -36,7 +36,7 @@ export async function rebuildSceneShadowGenerators(engine: EngineContext, scene:
             depthScale: generator._shadowsInfo[2],
             bias: generator._config._bias,
             blurKernel: oldResources._blurKernel,
-            blurScale: generator._config._mapSize / oldResources._blurTexH.width,
+            blurScale: oldResources._blurScale,
             darkness: generator._shadowsInfo[0],
             frustumEdgeFalloff: generator._shadowsInfo[3],
             orthoMinZ: generator._config._orthoMinZ,

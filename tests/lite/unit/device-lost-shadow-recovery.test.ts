@@ -135,6 +135,7 @@ describe("device-lost shadow recovery", () => {
         expect(newResources._blurHBG).not.toBe(oldResources._blurHBG);
         expect(newResources._blurVBG).not.toBe(oldResources._blurVBG);
         expect(newResources._blurKernel).toBe(7);
+        expect(newResources._blurScale).toBe(oldResources._blurScale);
         expect(newResources._blurTexH.width).toBe(64);
         expect([...generator._shadowsInfo]).toEqual(oldShadowsInfo);
         for (const resource of [
