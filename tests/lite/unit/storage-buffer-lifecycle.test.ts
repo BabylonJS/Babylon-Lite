@@ -4,7 +4,6 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import { disposeEngine } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { createShaderMaterial, setShaderStorageBuffer } from "../../../packages/babylon-lite/src/material/shader/shader-material.js";
 import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable.js";
-import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { _getStorageBufferHandle, createStorageBuffer, disposeStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
 import { updateStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
@@ -84,7 +83,7 @@ function makeRenderableFixture() {
         attributes: ["position"],
         storageBuffers: [{ name: "cells", type: "array<f32>" }],
     });
-    const mesh = {
+    const mesh = initMeshTransform({
         name: "storage",
         children: [],
         material,
@@ -97,8 +96,7 @@ function makeRenderableFixture() {
             indexCount: 3,
             indexFormat: "uint32",
         },
-    } as unknown as Mesh;
-    initMeshTransform(mesh);
+    });
     const scene = {
         surface: { engine },
         camera: null,

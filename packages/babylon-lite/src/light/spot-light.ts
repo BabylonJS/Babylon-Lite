@@ -11,8 +11,8 @@ import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 export interface SpotLight extends LightBase {
     readonly lightType: "spot";
-    position: ObservableVec3;
-    direction: ObservableVec3;
+    readonly position: ObservableVec3;
+    readonly direction: ObservableVec3;
     /** Full cone angle in radians. */
     angle: number;
     /** Falloff exponent — higher = sharper spotlight. */

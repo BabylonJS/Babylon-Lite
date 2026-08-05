@@ -68,15 +68,26 @@ function cloneMeshNode(mesh: Mesh): Mesh {
     if (mesh._disposed) {
         throw Error(`Mesh "${mesh.name}" cannot be cloned: it was disposed when it left its last scene.`);
     }
-    const meshClone = {
-        ...mesh,
-        name: mesh.name + "_clone",
-        children: [],
-        // Share the SAME `_gpu` object (not a copy) — the wrapper's identity is the ref-count
-        // key in resource/ref-count.ts, so both meshes must point at the exact same instance
-        // for `disposeMeshGpu` to know they're co-owners of the underlying GPUBuffers.
-        _gpu: mesh._gpu,
-    } as unknown as Mesh;
+    const meshClone = initMeshTransform(
+        {
+            ...mesh,
+            name: mesh.name + "_clone",
+            children: [],
+            // Share the SAME `_gpu` object (not a copy) — the wrapper's identity is the ref-count
+            // key in resource/ref-count.ts, so both meshes must point at the exact same instance
+            // for `disposeMeshGpu` to know they're co-owners of the underlying GPUBuffers.
+            _gpu: mesh._gpu,
+        },
+        mesh.position.x,
+        mesh.position.y,
+        mesh.position.z,
+        0,
+        0,
+        0,
+        mesh.scaling.x,
+        mesh.scaling.y,
+        mesh.scaling.z
+    );
     // `skeleton`/`vat`/`morphTargets`/`thinInstances` are already shared by reference via the `...mesh`
     // spread above. Register the extra ownership for all shared GPU resources so `disposeMeshGpu`
     // only destroys their buffers once the LAST owning mesh (source or clone) releases them —
@@ -86,7 +97,6 @@ function cloneMeshNode(mesh: Mesh): Mesh {
             retain(r);
         }
     }
-    initMeshTransform(meshClone, mesh.position.x, mesh.position.y, mesh.position.z, 0, 0, 0, mesh.scaling.x, mesh.scaling.y, mesh.scaling.z);
     // Copy the source rotation as a QUATERNION — the Euler round-trip (mesh.rotation.x/y/z) is lossy
     // near gimbal lock and would skew the clone. set() marks the world matrix dirty so it recomputes.
     const rq = mesh.rotationQuaternion;
