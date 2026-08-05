@@ -194,6 +194,8 @@ export {
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
 export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
+export { createLineSystemData, createLineSystem, createLines, updateLineSystem } from "./mesh/create-line-system.js";
+export type { LineSystemData, LineSystemDataOptions, LineSystemOptions, LinesOptions, LineSystemUpdateOptions } from "./mesh/create-line-system.js";
 export { getMeshGeometry } from "./mesh/get-mesh-geometry.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
@@ -263,6 +265,8 @@ export { createShaderNormalMaterialView } from "./material/shader/normal-view.js
 export type { ShaderNormalViewConfig } from "./material/shader/normal-view.js";
 export { createGridMaterial } from "./material/grid/grid-material.js";
 export type { GridMaterialOptions, GridVec3 } from "./material/grid/grid-material.js";
+export { createLineMaterial, setLineMaterialColor } from "./material/line/line-material.js";
+export type { LineMaterial, LineMaterialOptions } from "./material/line/line-material.js";
 export { createPbrNoColorMaterialView } from "./material/pbr/no-color-view.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
 export { loadNodeBlockEmitterWithGeometry } from "./material/node/node-geometry-block-loader.js";

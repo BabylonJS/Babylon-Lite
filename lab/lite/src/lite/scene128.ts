@@ -22,7 +22,9 @@ import {
     startEngine,
 } from "babylon-lite";
 
-const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_Believe.splat";
+// Vendored locally (lab/public/splats/) to remove remote-CDN network variance
+// from the CI parity capture. Served at the site root by the lab dev server.
+const SPLAT_URL = "/splats/Halo_Believe.splat";
 const NEAR = 0.03;
 const FAR = 15;
 

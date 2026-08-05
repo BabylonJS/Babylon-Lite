@@ -195,7 +195,7 @@ export function getOrCreateShaderPipeline(
               }
             : {}),
         multisample: alphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: material.backFaceCulling ? "back" : "none", frontFace: "ccw" },
+        primitive: { topology: material._topology ?? "triangle-list", cullMode: material.backFaceCulling ? "back" : "none" },
     });
     bindings.pipelines.set(key, pipeline);
     return pipeline;

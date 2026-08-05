@@ -175,6 +175,11 @@ export interface Mesh extends SceneNode {
     _authoredSign?: number;
     /** @internal Reason cloning this mesh is currently forbidden. */
     _clone?: string;
+    /** @internal Non-triangle primitive topology index: 1=point-list, 2=line-list,
+     *  3=line-strip, 4=triangle-strip. Undefined means triangle-list. */
+    _topology?: number;
+    /** @internal Per-polyline point counts retained by createLineSystem for stable-topology updates. */
+    _linePointCounts?: Uint32Array;
     /** @internal Highest CSM cascade this mesh casts into; undefined means all cascades. */
     _shadowMaxCascade?: number;
     /** @internal */

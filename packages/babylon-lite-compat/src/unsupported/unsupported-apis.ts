@@ -88,12 +88,6 @@ export class GlowLayer {
 }
 
 // ─── Mesh-attached renderers / projectors ────────────────────────────
-export class LinesMesh {
-    public constructor() {
-        unsupported("LinesMesh", "Line meshes are not implemented in Babylon Lite.");
-    }
-}
-
 export class GreasedLineMesh {
     public constructor() {
         unsupported("GreasedLineMesh", "Greased-line meshes are not implemented in Babylon Lite.");
