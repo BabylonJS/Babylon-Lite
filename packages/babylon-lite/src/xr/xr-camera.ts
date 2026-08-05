@@ -24,23 +24,22 @@ import { allocateMat4 } from "../math/_matrix-allocator.js";
  *    inject it straight into `_projCache` and set `_projVer`/`_projAspect` so the
  *    cache returns it verbatim for the exact aspect the render task will request.
  *
- * **Handedness + depth conversion.** WebXR reports poses and projections in a
- * *right-handed* frame, while Babylon Lite is *left-handed* with a *reverse-Z*
- * ([near→1, far→0]) depth buffer. Feeding the matrices verbatim flips triangle
- * winding (back-face culling then removes the front faces — the scene looks
- * inside-out) and mismatches the depth test. We therefore convert both matrices
- * on the way in, mirroring Babylon.js `WebXRCamera` (which does the same for
- * left-handed scenes):
- *  - **Pose → world:** `toggleModelMatrixHandInPlace` — negate `m[2,6,8,9,14]`
- *    (conjugate the rotation + translation by `diag(1,1,-1,1)`). The result is a
- *    proper LH rigid transform, so `getViewMatrix`'s transpose-inverse stays exact.
- *  - **Projection:** `toggleProjectionMatrixHandInPlace` — negate the whole Z input
- *    column `m[8,9,10,11]`. Together with the pose toggle this preserves winding, so
- *    normal back-face culling works (no `_reverseCulling` needed).
+ * **Handedness + depth.** WebXR reports poses and projections in a *right-handed*
+ * frame; Babylon Lite's rasterizer is *left-handed* with a *reverse-Z*
+ * ([near→1, far→0]) depth buffer. We feed the pose and projection through
+ * **verbatim** (no handedness toggle) — this keeps the viewer pose, eye positions
+ * and input/controller poses (also right-handed) mutually consistent, so the ray
+ * and scene content land where WebXR places them. The only side effect of the RH
+ * matrices in an LH rasterizer is inverted apparent triangle winding; that is
+ * corrected once, at the target level, by rendering the XR eye targets with
+ * reverse culling (`RenderTargetSignature._reverseWinding`, set in `xr-session`),
+ * so front faces stay visible without moving any geometry.
+ *  - **Pose → world:** copied straight from `XRView.transform.matrix`. It is a
+ *    proper rigid transform, so `getViewMatrix`'s transpose-inverse stays exact.
+ *  - **Projection:** copied straight from `XRView.projectionMatrix`.
  *  - **Reverse-Z:** the WebGPU binding's `XRView.projectionMatrix` targets `z ∈ [0,1]`
  *    (near→0, far→1). Babylon Lite's pipeline expects reverse-Z (near→1, far→0), so we
- *    additionally remap `row2 ← row3 − row2`. Babylon.js skips this (it is not reverse-Z);
- *    it is specific to this engine.
+ *    remap `row2 ← row3 − row2`. This is handedness-independent and specific to this engine.
  */
 export interface XrCamera extends Camera {
     /** Which eye this camera renders (`"left"`, `"right"`, or `"none"` for mono). */
@@ -93,19 +92,13 @@ export function createXrCamera(eye: XrEye): XrCamera {
  *   returns the XR projection verbatim instead of recomputing a symmetric one.
  */
 export function updateXrCameraForView(cam: XrCamera, view: XRView, rtWidth: number, rtHeight: number, viewport: NormalizedViewport): void {
-    // Eye pose (view→world) → world matrix, converted right-handed → left-handed via
-    // `toggleModelMatrixHandInPlace` (negate m[2,6,8,9,14]). Bumping the version
-    // invalidates the view / view-projection caches so they recompute from the new pose.
+    // Eye pose (view→world) → world matrix, copied verbatim (right-handed). Bumping
+    // the version invalidates the view / view-projection caches so they recompute.
     const m = view.transform.matrix;
     const w = cam._world;
     for (let i = 0; i < 16; i++) {
         w[i] = m[i]!;
     }
-    w[2] = -w[2]!;
-    w[6] = -w[6]!;
-    w[8] = -w[8]!;
-    w[9] = -w[9]!;
-    w[14] = -w[14]!;
     cam._wmv = (cam._wmv + 1) | 0;
     cam.viewport = viewport;
 
@@ -116,14 +109,9 @@ export function updateXrCameraForView(cam: XrCamera, view: XRView, rtWidth: numb
     for (let i = 0; i < 16; i++) {
         p[i] = pm[i]!;
     }
-    // Right-handed → left-handed: `toggleProjectionMatrixHandInPlace` negates the Z
-    // input column (m[8,9,10,11]). With the pose toggle above this preserves winding.
-    p[8] = -p[8]!;
-    p[9] = -p[9]!;
-    p[10] = -p[10]!;
-    p[11] = -p[11]!;
     // WebGPU-binding projection is z ∈ [0,1] (near→0, far→1); Babylon Lite is reverse-Z
     // (near→1, far→0). Remap row2 ← row3 − row2 so depth matches the reverse-Z pipeline.
+    // Handedness-independent; winding is handled by reverse culling on the XR eye target.
     p[2] = p[3]! - p[2]!;
     p[6] = p[7]! - p[6]!;
     p[10] = p[11]! - p[10]!;

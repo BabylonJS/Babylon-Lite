@@ -184,6 +184,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _depthStencilFormat: config.depth?._descriptor.dFormat ?? desc.dFormat,
         _depthCompare: desc._depthCompare,
         _sampleCount: desc.samples ?? 1,
+        _reverseWinding: desc._reverseWinding,
     };
 
     const sceneBGL = getSceneBindGroupLayout(engine);

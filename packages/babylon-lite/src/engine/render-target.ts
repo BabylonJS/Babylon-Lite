@@ -25,6 +25,12 @@ export interface RenderTargetSignature {
     readonly _depthCompare?: GPUCompareFunction;
     /** @internal */
     readonly _sampleCount: number;
+    /** @internal Reverse triangle winding for this target: forward pipelines cull
+     *  `front` instead of `back`. Set for WebXR eye targets, which render the
+     *  scene's right-handed XR view/projection matrices verbatim in Babylon Lite's
+     *  left-handed rasterizer — the handedness flip inverts apparent winding, so
+     *  culling must flip to keep front faces visible. Defaults to normal winding. */
+    readonly _reverseWinding?: boolean;
     /** @internal Internal per-task refraction texture shared by transmissive material bindings. */
     readonly _transmissionTexture?: Texture2D | null;
 }
@@ -45,6 +51,9 @@ export interface RenderTargetDescriptor {
     _depthClearValue?: number;
     /** @internal Depth compare for pipelines targeting this RT. Defaults to reverse-Z `"greater-equal"`. */
     _depthCompare?: GPUCompareFunction;
+    /** @internal Reverse triangle winding (cull `front` not `back`) for pipelines
+     *  targeting this RT. Set by WebXR eye targets — see {@link RenderTargetSignature._reverseWinding}. */
+    _reverseWinding?: boolean;
     /** MSAA sample count: `1` = single-sample (no multisampling), `4` = 4x MSAA. */
     samples: number;
     /** A `SurfaceContext` to size to that surface's swapchain (re-resolved each
@@ -57,7 +66,7 @@ export interface RenderTargetDescriptor {
 
 /** Stringified signature used to key pipelines against a render target's attachment set. */
 export function targetSignatureKey(desc: RenderTargetSignature): string {
-    return `${desc._colorFormat ?? "-"}|${desc._depthStencilFormat ?? "-"}|${desc._depthCompare ?? ""}|${desc._sampleCount}`;
+    return `${desc._colorFormat ?? "-"}|${desc._depthStencilFormat ?? "-"}|${desc._depthCompare ?? ""}|${desc._sampleCount}${desc._reverseWinding ? "|rw" : ""}`;
 }
 
 /** Allocated GPU state for a render target. */

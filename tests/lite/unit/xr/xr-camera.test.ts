@@ -4,7 +4,6 @@ import { createXrCamera, updateXrCameraForView } from "../../../../packages/baby
 import { getViewMatrix, getProjectionMatrix, getViewProjectionMatrix } from "../../../../packages/babylon-lite/src/camera/camera";
 import type { NormalizedViewport } from "../../../../packages/babylon-lite/src/camera/camera";
 import type { Mat4Storage } from "../../../../packages/babylon-lite/src/math/types";
-import { mat4PerspectiveLHToRef } from "../../../../packages/babylon-lite/src/math/mat4-perspective-lh-to-ref";
 
 /** Column-major view→world transform: identity rotation + translation. */
 function poseMatrix(tx: number, ty: number, tz: number): Float32Array {
@@ -39,13 +38,10 @@ function rhZeroToOnePerspective(fovy: number, aspect: number, near: number, far:
     return p;
 }
 
-/** Replicates xr-camera's projection conversion (RH→LH toggle + reverse-Z remap). */
+/** Replicates xr-camera's projection conversion (reverse-Z remap only; the RH
+ *  matrix is otherwise kept verbatim, with winding handled by reverse culling). */
 function convertProjection(pm: Float32Array): Float32Array {
     const p = new Float32Array(pm);
-    p[8] = -p[8]!;
-    p[9] = -p[9]!;
-    p[10] = -p[10]!;
-    p[11] = -p[11]!;
     p[2] = p[3]! - p[2]!;
     p[6] = p[7]! - p[6]!;
     p[10] = p[11]! - p[10]!;
@@ -82,23 +78,23 @@ describe("xr-camera matrix injection", () => {
     const viewport: NormalizedViewport = { x: 0, y: 0, width: 0.5, height: 1 };
     const aspect = (rtW / rtH) * (viewport.width / viewport.height);
 
-    it("derives the view matrix as the inverse of the left-handed eye pose", () => {
+    it("derives the view matrix as the inverse of the eye pose", () => {
         const cam = createXrCamera("left");
         const pose = poseMatrix(2, -3, 5);
         updateXrCameraForView(cam, makeView("left", pose, fakeProjection()), rtW, rtH, viewport);
 
         const v = getViewMatrix(cam) as unknown as Mat4Storage;
-        // Right→left handed toggle negates the pose's Z translation (5 → −5); the view
-        // matrix is its inverse, so the Z translation flips back to +5.
+        // Pose is used verbatim (right-handed, no toggle); the view matrix is its
+        // inverse, so a +5 world Z translation becomes −5 in view space.
         expect(v[12]).toBeCloseTo(-2, 6);
         expect(v[13]).toBeCloseTo(3, 6);
-        expect(v[14]).toBeCloseTo(5, 6);
+        expect(v[14]).toBeCloseTo(-5, 6);
         expect(v[0]).toBeCloseTo(1, 6);
         expect(v[5]).toBeCloseTo(1, 6);
         expect(v[10]).toBeCloseTo(1, 6);
     });
 
-    it("converts a right-handed WebXR pose to a proper left-handed rigid transform", () => {
+    it("stores the right-handed WebXR pose verbatim as a rigid transform", () => {
         // Pose: 90° rotation about Y (right-handed) with a translation.
         const c = Math.cos(Math.PI / 2);
         const s = Math.sin(Math.PI / 2);
@@ -116,15 +112,15 @@ describe("xr-camera matrix injection", () => {
         const cam = createXrCamera("left");
         updateXrCameraForView(cam, makeView("left", pose, fakeProjection()), rtW, rtH, viewport);
         const w = cam._world as unknown as Float32Array;
-        // The 3×3 rotation must remain orthonormal with determinant +1 (proper LH rotation),
-        // otherwise getViewMatrix's transpose-inverse would be wrong and winding would flip.
+        // A pure rotation stays orthonormal with determinant +1, so getViewMatrix's
+        // transpose-inverse remains exact.
         const det = w[0]! * (w[5]! * w[10]! - w[6]! * w[9]!) - w[4]! * (w[1]! * w[10]! - w[2]! * w[9]!) + w[8]! * (w[1]! * w[6]! - w[2]! * w[5]!);
         expect(det).toBeCloseTo(1, 5);
-        // Z translation is negated by the handedness toggle.
-        expect(w[14]).toBeCloseTo(-3, 6);
+        // Pose is copied verbatim (no handedness toggle): Z translation preserved.
+        expect(w[14]).toBeCloseTo(3, 6);
     });
 
-    it("injects the per-eye projection with handedness + reverse-Z conversion", () => {
+    it("injects the per-eye projection with reverse-Z conversion", () => {
         const cam = createXrCamera("right");
         const proj = fakeProjection();
         updateXrCameraForView(cam, makeView("right", poseMatrix(0, 0, 0), proj), rtW, rtH, viewport);
@@ -136,10 +132,10 @@ describe("xr-camera matrix injection", () => {
         }
     });
 
-    it("turns a right-handed [0,1] WebXR perspective into Babylon Lite's reverse-Z LH projection", () => {
-        // The whole point of the conversion: a WebGPU-binding projection (RH, z∈[0,1])
-        // must become exactly what the engine's own perspective builder produces (LH,
-        // reverse-Z, z∈[1,0]) so culling and the depth test both work unchanged.
+    it("remaps a right-handed [0,1] WebXR perspective to reverse-Z while keeping it right-handed", () => {
+        // The WebGPU-binding projection (RH, z∈[0,1]) is kept right-handed but its depth
+        // is remapped to Babylon Lite's reverse-Z (near→1, far→0). Winding is corrected by
+        // reverse culling on the XR eye target, not by converting the projection to LH.
         const fovy = 1.2;
         const near = 0.1;
         const far = 100;
@@ -150,11 +146,15 @@ describe("xr-camera matrix injection", () => {
         updateXrCameraForView(cam, makeView("left", poseMatrix(0, 0, 0), rhProj), 1024, 1024, squareVp);
 
         const p = getProjectionMatrix(cam, 1) as unknown as Mat4Storage;
-        const lite = new Float32Array(16);
-        mat4PerspectiveLHToRef(lite as unknown as Mat4Storage, fovy, 1, near, far);
-        for (let i = 0; i < 16; i++) {
-            expect(p[i]).toBeCloseTo(lite[i]!, 5);
-        }
+        // X/Y scale untouched — still the WebXR values.
+        expect(p[0]).toBeCloseTo(rhProj[0]!, 6);
+        expect(p[5]).toBeCloseTo(rhProj[5]!, 6);
+        // Right-handed w = −z_eye preserved verbatim.
+        expect(p[11]).toBeCloseTo(-1, 6);
+        // Reverse-Z: eye-space near maps to NDC 1, far maps to NDC 0.
+        const projectZ = (zEye: number): number => (p[10]! * zEye + p[14]!) / (p[11]! * zEye + p[15]!);
+        expect(projectZ(-near)).toBeCloseTo(1, 5);
+        expect(projectZ(-far)).toBeCloseTo(0, 5);
     });
 
     it("composes view-projection from the injected caches (proj × view)", () => {

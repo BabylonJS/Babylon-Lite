@@ -174,7 +174,7 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
               }
             : {}),
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },
+        primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : sig._reverseWinding ? "front" : "back", frontFace: "ccw" },
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;

@@ -238,6 +238,10 @@ function ensureUnit(ctx: XrSessionContext, index: number, eye: XREye): XrEyeUnit
         dFormat: ctx.depthFormat ?? undefined,
         samples: 1,
         size: { width: layer.textureWidth, height: layer.textureHeight },
+        // XR view/projection are consumed verbatim in their native right-handed form;
+        // the handedness flip vs Lite's left-handed rasterizer inverts apparent winding,
+        // so cull front faces to keep the scene's front faces visible in the headset.
+        _reverseWinding: true,
     });
     // Eager: textures are owned by the XR compositor and supplied per frame, so the
     // frame graph must neither allocate nor destroy them (disposeRenderTarget no-ops).
