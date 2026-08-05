@@ -333,6 +333,54 @@ function writeAggregateBundleManifest(manifest: BundleManifest): void {
     atomicWriteJson(resolve(outDir, MANIFEST_FILE), JSON.stringify(orderBundleManifest(manifest), null, 2));
 }
 
+/**
+ * Read many git blobs in one `git cat-file --batch` call, keyed by the revision
+ * spec that produced them.
+ *
+ * The legacy tracked layout is ~230 files per ref, and spawning `git show` once
+ * per file costs ~15s per resolve — long enough to time out callers and to make
+ * every `build:bundle-scenes` run that misses the published baseline feel hung.
+ * One batched process makes the same read effectively free.
+ *
+ * `--batch` emits `<oid> SP <type> SP <size> LF <contents> LF` per request, or
+ * `<spec> SP missing LF` for one it cannot resolve, so the output is parsed as a
+ * buffer and sliced by the declared byte length rather than split on newlines.
+ */
+function readGitBlobs(specs: string[]): Map<string, string> {
+    const out = new Map<string, string>();
+    if (specs.length === 0) {
+        return out;
+    }
+
+    const stdout = execFileSync("git", ["cat-file", "--batch"], {
+        cwd: ROOT,
+        input: specs.join("\n") + "\n",
+        maxBuffer: 512 * 1024 * 1024,
+        stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let offset = 0;
+    for (const spec of specs) {
+        const newline = stdout.indexOf("\n", offset);
+        if (newline === -1) {
+            break;
+        }
+        const header = stdout.toString("utf-8", offset, newline);
+        offset = newline + 1;
+        const [, type, rawSize] = header.split(" ");
+        const size = Number(rawSize);
+        if (type === undefined || !Number.isFinite(size)) {
+            // "missing" / "ambiguous" responses carry no body to skip past.
+            continue;
+        }
+        if (type === "blob") {
+            out.set(spec, stdout.toString("utf-8", offset, offset + size));
+        }
+        offset += size + 1; // trailing LF after the contents
+    }
+    return out;
+}
+
 function readMasterBundleManifestFromRef(ref: string): BundleManifest | null {
     // Preferred: distributed per-scene tracked files under `manifest/`.
     try {
@@ -346,13 +394,19 @@ function readMasterBundleManifestFromRef(ref: string): BundleManifest | null {
             .map((l) => l.trim())
             .filter((l) => l.endsWith(".json"));
         if (files.length > 0) {
+            const blobs = readGitBlobs(files.map((file) => `${ref}:${file}`));
             const manifest: BundleManifest = {};
             for (const file of files) {
+                const json = blobs.get(`${ref}:${file}`);
+                if (json === undefined) {
+                    continue;
+                }
                 const scene = file.slice(file.lastIndexOf("/") + 1, -".json".length);
-                const json = execFileSync("git", ["show", `${ref}:${file}`], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
                 manifest[scene] = JSON.parse(json) as BundleManifestEntry;
             }
-            return manifest;
+            if (Object.keys(manifest).length > 0) {
+                return manifest;
+            }
         }
     } catch {
         /* fall through to the legacy single-file layout */

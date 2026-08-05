@@ -13,11 +13,16 @@ interface BundleInfo {
 const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
 const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277];
+/** The per-scene manifests are build output, not tracked source, so this spec
+ *  self-skips in CI's Unit Tests job (which runs before any build). The Bundle
+ *  Size job re-runs it after `pnpm build:bundle-scenes`, and local `pnpm test`
+ *  builds first. */
+const HAS_MANIFEST = CANONICAL_PARTICLE_SCENES.every((sceneId) => existsSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`)));
 const UNUSED_FEATURE_CHUNK =
     /registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|direction|angle)-block|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 
 describe("Particle bundle feature isolation", () => {
-    it("canonical particle scenes do not fetch unused optional features", () => {
+    it.skipIf(!HAS_MANIFEST)("canonical particle scenes do not fetch unused optional features", () => {
         for (const sceneId of CANONICAL_PARTICLE_SCENES) {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const chunks = manifest.runtimeChunks ?? [];

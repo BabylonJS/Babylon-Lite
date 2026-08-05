@@ -255,6 +255,13 @@ stages:
                   env:
                       SKIP_BJS: "true"
 
+                # Bundle-content unit specs read the per-scene manifests under
+                # lab/public/bundle/manifest/. Those are build output rather than
+                # tracked source, so the Unit Tests job (which runs vitest before any
+                # build) self-skips them — run them here, where the build exists.
+                - script: npx vitest run --project unit tests/lite/unit/bundle-content-no-f64.test.ts tests/lite/unit/npe-particle-bundle-content.test.ts
+                  displayName: "Bundle content unit tests"
+
                 # Absolute ceiling checks (scene-config.json maxRawKB)
                 - script: npx playwright test tests/lite/parity/bundle-size.spec.ts --reporter=junit
                   displayName: "Bundle size ceiling checks"
