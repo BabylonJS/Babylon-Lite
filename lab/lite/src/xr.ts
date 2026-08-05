@@ -25,6 +25,8 @@ import {
     enterXr,
     exitXr,
     pointerSelection,
+    controllerModels,
+    readXrController,
     mat4Compose,
     mat4Invert,
     mat4Multiply,
@@ -171,6 +173,41 @@ function setStatus(html: string): void {
     statusEl.innerHTML = html;
 }
 
+/** @internal Previous-frame pressed state per source, for button rising-edge detection. */
+const prevPressed = new Map<XRInputSource, { a: boolean; b: boolean; stick: boolean }>();
+
+/**
+ * Read each controller's xr-standard buttons/axes and surface them on the status
+ * line — a live demo of {@link readXrController}. Fires on face-button / thumbstick
+ * press edges and on a strong thumbstick deflection, so it doesn't fight the grab
+ * status every frame.
+ */
+function readControllers(ctx: XrSessionContext): void {
+    if (!ctx.input) {
+        return;
+    }
+    for (const w of ctx.input.inputSources) {
+        const c = readXrController(w);
+        if (!c) {
+            continue;
+        }
+        const a = c.buttonA?.pressed ?? false;
+        const b = c.buttonB?.pressed ?? false;
+        const stick = c.thumbstick?.pressed ?? false;
+        const prev = prevPressed.get(w.source) ?? { a: false, b: false, stick: false };
+        if (a && !prev.a) {
+            setStatus(`${c.handedness} controller: A/X pressed`);
+        } else if (b && !prev.b) {
+            setStatus(`${c.handedness} controller: B/Y pressed`);
+        } else if (stick && !prev.stick) {
+            setStatus(`${c.handedness} controller: thumbstick pressed`);
+        } else if (c.thumbstickAxes && Math.hypot(c.thumbstickAxes[0], c.thumbstickAxes[1]) > 0.6) {
+            setStatus(`${c.handedness} thumbstick: ${c.thumbstickAxes[0].toFixed(2)}, ${c.thumbstickAxes[1].toFixed(2)}`);
+        }
+        prevPressed.set(w.source, { a, b, stick });
+    }
+}
+
 let session: XrSessionContext | null = null;
 
 /** Map a picked mesh back to its grabbable so pointer-selection can tint it. */
@@ -231,14 +268,19 @@ async function startSession(mode: XrSessionMode, scene: Parameters<typeof enterX
                     },
                     onSelect: (mesh) => pulseSelect(mesh),
                 }),
+                // Generic controller models rendered at each grip pose, so the hands
+                // are visible in the headset even without online GLB motion controllers.
+                controllerModels(),
             ],
             onFrame: (ctx) => {
                 updateGrab(ctx);
+                readControllers(ctx);
             },
             onEnd: () => {
                 session = null;
                 state.inSession = false;
                 exitBtn.disabled = true;
+                prevPressed.clear();
                 for (const source of [...held.keys()]) {
                     releaseGrab(source);
                 }

@@ -145,6 +145,10 @@ export { attachXrFeature } from "./xr/xr-feature.js";
 export type { XrFeatureSpec, XrFeatureHandle } from "./xr/xr-feature.js";
 export { createXrPointer, updateXrPointer, disposeXrPointer, computePointerVisual, pointerSelection } from "./xr/xr-pointer.js";
 export type { XrPointer, XrPointerOptions, PointerVisual } from "./xr/xr-pointer.js";
+export { readXrController } from "./xr/xr-controller.js";
+export type { XrControllerComponents, XrButtonState } from "./xr/xr-controller.js";
+export { createXrControllerModels, updateXrControllerModels, disposeXrControllerModels, controllerModels } from "./xr/xr-controller-models.js";
+export type { XrControllerModels, XrControllerModelOptions, XrControllerMeshFactory } from "./xr/xr-controller-models.js";
 
 // ─── Lights ──────────────────────────────────────────────────────────
 export { createHemisphericLight } from "./light/hemispheric.js";
