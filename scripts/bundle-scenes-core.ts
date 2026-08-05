@@ -16,6 +16,15 @@ import { resolve, dirname, join, extname } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
 import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, isVendorRuntimeChunkFile, summarizeRuntimeBundle, type RuntimeJsPayload } from "./bundle-size-accounting";
+import {
+    computeSceneHeadroom,
+    CRITICAL_HEADROOM_BYTES,
+    formatHeadroomThreshold,
+    HEADROOM_LIST_LIMIT,
+    scenesUnderHeadroom,
+    TIGHT_HEADROOM_BYTES,
+    type SceneHeadroomInput,
+} from "./bundle-ceiling-headroom";
 import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
 
 /**
@@ -1342,13 +1351,6 @@ function softwareRenderRequested(): boolean {
  *  measurement as the authoritative one for these three. */
 const DEVICE_DEPENDENT_NOTE = "device-dependent chunk set — differs from the CI-measured baseline (reproduce CI with: pnpm build:bundle-manifest:device)";
 
-/** A scene with less than this much room under its ceiling is reported after a build: at
- *  that margin the next shared-path change lands on it, and finding that out from CI costs
- *  ~35 minutes. */
-const TIGHT_HEADROOM_BYTES = 256;
-/** Cap the tight-headroom list so a build's output stays readable; the rest are counted. */
-const TIGHT_HEADROOM_LIST_LIMIT = 10;
-
 export async function buildBundleScenes(): Promise<void> {
     const t0 = performance.now();
     // Scenes are bundled against the built `build/lib` tree by default; old baseline
@@ -1579,40 +1581,43 @@ export async function buildBundleScenes(): Promise<void> {
  * surfaces in CI's bundle-size job, ~35 minutes later.
  * Comparing exact bytes here surfaces it immediately, and listing the tightest scenes makes
  * a zero-margin scene visible *before* it is the thing that breaks someone else's PR.
+ *
+ * The thresholds and the arithmetic live in `bundle-ceiling-headroom.ts` because the PR
+ * comment reports the same numbers; see that module for why the tight band is 1 KB. Only
+ * the `over` set affects the exit code — the tight list is advisory and never fails a build.
  */
 function reportCeilingHeadroom(scenes: readonly string[], manifest: Record<string, BundleManifestEntry>): void {
-    const over: string[] = [];
-    const tight: { scene: string; headroom: number; ceilingKB: number }[] = [];
+    const inputs: SceneHeadroomInput[] = [];
 
     for (const scene of scenes) {
-        const measured = manifest[scene]?.rawBytes;
+        // Exact bytes only, deliberately: this is the path that can set a non-zero exit code,
+        // and a `rawKB` fallback would let a 0.1 KB-quantised size decide it. The PR comment
+        // does fall back, because being approximate there costs nothing.
+        const measuredBytes = manifest[scene]?.rawBytes;
         const config = sceneConfigByName.get(scene);
         const ceilingKB = config?.maxRawKB;
         // Honour the same opt-out as the ceiling test in bundle-size.spec.ts.
-        if (measured == null || ceilingKB == null || config?.skipBundleSize) {
+        if (measuredBytes == null || ceilingKB == null || config?.skipBundleSize) {
             continue;
         }
-        const ceilingBytes = ceilingKB * 1024;
-        // Compare before rounding: a ceiling like 92.2 KB is 94412.8 bytes, so 94413 bytes is
-        // over by 0.2 — which `Math.round` would turn into `-0` and wave through.
-        if (measured > ceilingBytes) {
-            over.push(`  ${scene}: ${(measured / 1024).toFixed(3)} KB exceeds ceiling ${ceilingKB} KB by ${Math.ceil(measured - ceilingBytes)} bytes`);
-        } else {
-            const headroom = Math.floor(ceilingBytes - measured);
-            if (headroom < TIGHT_HEADROOM_BYTES) {
-                tight.push({ scene, headroom, ceilingKB });
-            }
-        }
+        inputs.push({ scene, measuredBytes, ceilingKB });
     }
 
+    const { over, under } = computeSceneHeadroom(inputs);
+    const tight = scenesUnderHeadroom(under, TIGHT_HEADROOM_BYTES);
+    const critical = scenesUnderHeadroom(under, CRITICAL_HEADROOM_BYTES);
+
     if (tight.length > 0) {
-        tight.sort((a, b) => a.headroom - b.headroom);
-        const shown = tight.slice(0, TIGHT_HEADROOM_LIST_LIMIT).map((t) => `  ${t.scene}: ${t.headroom} B below its ${t.ceilingKB} KB ceiling`);
-        const more = tight.length > shown.length ? `\n  … and ${tight.length - shown.length} more under ${TIGHT_HEADROOM_BYTES} B` : "";
-        console.log(`\n⚠ ${tight.length} scene(s) with little headroom — a shared-path change may push them over:\n${shown.join("\n")}${more}`);
+        const shown = tight.slice(0, HEADROOM_LIST_LIMIT).map((t) => `  ${t.scene}: ${t.headroomBytes} B below its ${t.ceilingKB} KB ceiling`);
+        const more = tight.length > shown.length ? `\n  … and ${tight.length - shown.length} more under ${formatHeadroomThreshold(TIGHT_HEADROOM_BYTES)}` : "";
+        const criticalNote = critical.length > 0 ? `, ${critical.length} under ${formatHeadroomThreshold(CRITICAL_HEADROOM_BYTES)}` : "";
+        console.log(
+            `\n⚠ ${tight.length} scene(s) under ${formatHeadroomThreshold(TIGHT_HEADROOM_BYTES)} of headroom${criticalNote} — a shared-path change may push them over:\n${shown.join("\n")}${more}`
+        );
     }
     if (over.length > 0) {
-        console.error(`\n✘ Bundle-size ceiling exceeded (exact bytes; scene-config.json maxRawKB):\n${over.join("\n")}`);
+        const lines = over.map((o) => `  ${o.scene}: ${(o.measuredBytes / 1024).toFixed(3)} KB exceeds ceiling ${o.ceilingKB} KB by ${o.headroomBytes} bytes`);
+        console.error(`\n✘ Bundle-size ceiling exceeded (exact bytes; scene-config.json maxRawKB):\n${lines.join("\n")}`);
         console.error(`\nRaising a ceiling requires explicit user approval — see GUIDANCE.md.`);
         process.exitCode = 1;
     }
