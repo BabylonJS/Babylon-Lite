@@ -77,10 +77,6 @@ export interface ShaderMaterialOptions {
     /** Slope-scaled depth bias — extra bias proportional to the depth gradient, so steeply-angled (grazing)
      *  surfaces get more bias. Pairs with `depthBias` to kill z-fighting at oblique angles. Default 0. */
     readonly depthBiasSlopeScale?: number;
-    /** @internal Primitive topology owned by specialized materials such as LineMaterial. */
-    readonly _topology?: GPUPrimitiveTopology;
-    /** @internal Reject meshes without thin-instance data before compiling specialized shaders that require it. */
-    readonly _requiresThinInstances?: boolean;
 }
 
 /** A custom uniform declaration: WGSL identifier, type, and optional default. */
@@ -335,8 +331,6 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         depthOnlyFragment: options.depthOnlyFragment ?? false,
         depthBias: options.depthBias ?? 0,
         depthBiasSlopeScale: options.depthBiasSlopeScale ?? 0,
-        _topology: options._topology,
-        _requiresThinInstances: options._requiresThinInstances,
         _buildGroup: getShaderGroupBuilder(),
         _uboVersion: 0,
         _uniformValues: uniformValues,

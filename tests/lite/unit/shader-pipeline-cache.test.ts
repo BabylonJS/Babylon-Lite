@@ -28,14 +28,15 @@ function makeEngine() {
 }
 
 function makeMaterial(fragment = "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }", blend?: GPUBlendState, topology?: GPUPrimitiveTopology) {
-    return createShaderMaterial({
+    const material = createShaderMaterial({
         vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
         fragmentSource: fragment,
         attributes: ["position"],
         uniforms: ["world", { name: "tint", type: "vec3<f32>" }],
         ...(blend ? { blend } : {}),
-        _topology: topology,
     });
+    Object.assign(material, { _topology: topology });
+    return material;
 }
 
 const signature = {
