@@ -413,22 +413,15 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                         mat = createStandardMaterial();
                     }
 
-                    const mesh = {
-                        name: md.name + (subMeshes.length > 1 ? `_sub${sub.materialIndex}` : ""),
-                        id: md.id,
-                        material: mat,
-                        receiveShadows: false,
-                        _gpu: gpu,
-                    } as unknown as Mesh;
-
-                    mesh._cpuPositions = positions;
-                    mesh._cpuNormals = normals;
-                    mesh._cpuUvs = uvs;
-                    mesh._cpuIndices = subIndices;
-
                     // Each mesh carries its own TRS from the node.
-                    initMeshTransform(
-                        mesh,
+                    const mesh = initMeshTransform(
+                        {
+                            name: md.name + (subMeshes.length > 1 ? `_sub${sub.materialIndex}` : ""),
+                            id: md.id,
+                            material: mat,
+                            receiveShadows: false,
+                            _gpu: gpu,
+                        },
                         md.position?.[0] ?? 0,
                         md.position?.[1] ?? 0,
                         md.position?.[2] ?? 0,
@@ -439,6 +432,11 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                         md.scaling?.[1] ?? 1,
                         md.scaling?.[2] ?? 1
                     );
+
+                    mesh._cpuPositions = positions;
+                    mesh._cpuNormals = normals;
+                    mesh._cpuUvs = uvs;
+                    mesh._cpuIndices = subIndices;
 
                     allMeshes.push(mesh as unknown as Mesh);
                     if (!meshesByNodeId.has(md.id)) {

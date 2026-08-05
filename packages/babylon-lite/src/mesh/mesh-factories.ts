@@ -122,15 +122,14 @@ export function createMeshFromData(
     colors?: Float32Array
 ): Mesh {
     const [min, max] = computeAabb(positions);
-    const mesh = {
+    const mesh = initMeshTransform({
         name,
-        material: null as unknown,
+        material: null as unknown as Mesh["material"],
         receiveShadows: false,
         boundMin: isFinite(min[0]) ? min : undefined,
         boundMax: isFinite(max[0]) ? max : undefined,
         _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors),
-    } as unknown as Mesh;
-    initMeshTransform(mesh);
+    });
 
     // Retain CPU geometry for detailed picking (ray-triangle intersection)
     mesh._cpuPositions = positions;

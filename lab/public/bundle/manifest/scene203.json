@@ -1,5 +1,5 @@
 {
-  "rawKB": 50.1,
+  "rawKB": 50,
   "gzipKB": 20.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,5 +9,5 @@
     "scene203-standard-renderable-C3xBSzxG.js",
     "scene203.js"
   ],
-  "rawBytes": 51285
+  "rawBytes": 51220
 }

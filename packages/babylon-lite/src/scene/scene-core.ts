@@ -313,7 +313,7 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
             ? createRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface })
             : surface.scRT;
         const depth = msaa ? undefined : createRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
-        _appendTask(fg, createRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth, clrColor: ctx.clearColor }, eng, ctx));
+        _appendTask(fg, createRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth }, eng, ctx));
     }
     ctx._disposables.push(() => fg.dispose());
     return ctx;
