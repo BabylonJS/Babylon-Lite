@@ -5,10 +5,10 @@
   "runtimeChunks": [
     "scene19-clearcoat-fragment-CPsIQniL.js",
     "scene19-ibl-fragment-CeRrvT96.js",
-    "scene19-pbr-renderable-BcPNsNR9.js",
+    "scene19-pbr-renderable-TsKO9eqC.js",
     "scene19-rgbd-decode-Bhk0icKs.js",
     "scene19-singlelight-hemispheric-wgsl-B2Zus5m2.js",
     "scene19.js"
   ],
-  "rawBytes": 72629
+  "rawBytes": 72634
 }
