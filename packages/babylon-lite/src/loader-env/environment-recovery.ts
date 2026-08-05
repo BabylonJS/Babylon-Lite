@@ -2,7 +2,9 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Renderable } from "../render/renderable.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { EnvironmentTextures } from "./load-env.js";
-import { acquireGPUTexture, getOrCreateSampler, releaseGPUTexture } from "../resource/gpu-pool.js";
+import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
+import { assembleEnvironmentTextures, loadBrdfImage } from "./env-helpers.js";
+import { parseEnvFile } from "./env-parse.js";
 
 /** @internal Loader metadata captured by `_dlr` only while Scene recovery capture is enabled. */
 export type EnvironmentRecoverySource =
@@ -36,7 +38,7 @@ export async function rebuildSceneEnvironment(engine: EngineContext, scene: Scen
         const irradianceSH = parser.computeSHFromEquirect(hdr.data, hdr.width, hdr.height);
         const sourceCube = pipeline.equirectToCubemapGPU(engine, hdr, source.faceSize);
         const specularCube = pipeline.prefilterCubemapGPU(engine, sourceCube, source.faceSize, Math.floor(Math.log2(source.faceSize)) + 1);
-        replacement = assembleRecoveredEnvironment(engine, specularCube, pipeline.generateBrdfLut(engine), irradianceSH, sphericalHarmonics, 1.0);
+        replacement = assembleEnvironmentTextures(specularCube, pipeline.generateBrdfLut(engine), irradianceSH, 1.0, engine, sphericalHarmonics);
     }
 
     Object.assign(current, replacement);
@@ -102,70 +104,5 @@ async function reloadEnvironmentTextures(
     const brdfImage = await brdfPromise;
     const brdfLut = rgbd.decodeBrdfPng(engine, brdfImage);
     brdfImage.close();
-    return assembleRecoveredEnvironment(engine, specularCube, brdfLut, irradianceSH, sphericalHarmonics, 0.8);
-}
-
-function assembleRecoveredEnvironment(
-    engine: EngineContext,
-    specularCube: GPUTexture,
-    brdfLut: GPUTexture,
-    irradianceSH: Float32Array,
-    sphericalHarmonics: Float32Array,
-    lodGenerationScale: number
-): EnvironmentTextures {
-    return {
-        specularCube,
-        specularCubeView: specularCube.createView({ dimension: "cube" }),
-        brdfLut,
-        brdfLutView: brdfLut.createView(),
-        cubeSampler: getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" }),
-        brdfSampler: getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear" }),
-        irradianceSH,
-        sphericalHarmonics,
-        lodGenerationScale,
-    };
-}
-
-function parseEnvFile(buffer: ArrayBuffer): { faceBlobs: Blob[]; irradianceSH: Float32Array; width: number; mipCount: number } {
-    const bytes = new Uint8Array(buffer);
-    const magic = [0x86, 0x16, 0x87, 0x96, 0xf6, 0xd6, 0x96, 0x36];
-    for (let index = 0; index < magic.length; index++) {
-        if (bytes[index] !== magic[index]) {
-            throw new Error("Invalid .env file: bad magic");
-        }
-    }
-    let position = magic.length;
-    while (position < bytes.length && bytes[position] !== 0) {
-        position++;
-    }
-    const manifest = JSON.parse(new TextDecoder().decode(bytes.subarray(magic.length, position)));
-    const binaryStart = position + 1;
-    const width: number = manifest.width;
-    const irradianceSH = new Float32Array(27);
-    const shKeys = ["x", "y", "z", "xx", "yy", "zz", "yz", "zx", "xy"];
-    for (let index = 0; index < shKeys.length; index++) {
-        const coefficient = manifest.irradiance[shKeys[index]!];
-        irradianceSH[index * 3] = coefficient[0];
-        irradianceSH[index * 3 + 1] = coefficient[1];
-        irradianceSH[index * 3 + 2] = coefficient[2];
-    }
-    const faceBlobs = manifest.specular.mipmaps.map(
-        (entry: { position: number; length: number }) =>
-            new Blob([buffer.slice(binaryStart + entry.position, binaryStart + entry.position + entry.length)], {
-                type: manifest.imageType || "image/png",
-            })
-    );
-    return { faceBlobs, irradianceSH, width, mipCount: Math.floor(Math.log2(width)) + 1 };
-}
-
-async function loadBrdfImage(url: string): Promise<ImageBitmap> {
-    const response = await fetch(url);
-    if (response.ok) {
-        try {
-            return await createImageBitmap(await response.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
-        } catch {
-            // Fall through to the URL-specific diagnostic.
-        }
-    }
-    throw new Error(`BRDF LUT '${url}' is not an image (${response.status} ${response.headers.get("content-type") ?? ""}).`);
+    return assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 0.8, engine, sphericalHarmonics);
 }
