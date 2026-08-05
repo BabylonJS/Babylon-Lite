@@ -27,7 +27,7 @@ export async function rebuildSceneShadowGenerators(engine: EngineContext, scene:
 
         // Kept lazy so a CSM-only scene (which throws above) never pulls in the ESM generator.
         const esm = await import("./esm-directional-shadow-generator.js");
-        const oldResources = esm._getEsmShadowTaskResources(generator);
+        const oldResources = esm.getEsmShadowTaskResources(generator);
         if (!oldResources) {
             throw new Error("Device-lost Scene recovery could not find ESM shadow resources");
         }
@@ -43,7 +43,7 @@ export async function rebuildSceneShadowGenerators(engine: EngineContext, scene:
             orthoMaxZ: generator._config._orthoMaxZ,
             forceRefreshEveryFrame: generator._config._forceRefreshEveryFrame,
         });
-        const newResources = esm._getEsmShadowTaskResources(replacement);
+        const newResources = esm.getEsmShadowTaskResources(replacement);
         if (!newResources) {
             throw new Error("Device-lost Scene recovery failed to create ESM shadow resources");
         }
@@ -55,6 +55,6 @@ export async function rebuildSceneShadowGenerators(engine: EngineContext, scene:
         generator._shadowParamsUBO = replacement._shadowParamsUBO;
         generator._shadowUBO = replacement._shadowUBO;
         generator._version++;
-        esm._setEsmShadowTaskResources(generator, newResources);
+        esm.setEsmShadowTaskResources(generator, newResources);
     }
 }

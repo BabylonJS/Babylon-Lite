@@ -5,7 +5,7 @@ import { rebuildRegisteredScenes } from "../../../packages/babylon-lite/src/engi
 import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface.js";
 import { createDirectionalLight } from "../../../packages/babylon-lite/src/light/directional-light.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
-import { createEsmDirectionalShadowGenerator, _getEsmShadowTaskResources } from "../../../packages/babylon-lite/src/shadow/esm-directional-shadow-generator.js";
+import { createEsmDirectionalShadowGenerator, getEsmShadowTaskResources } from "../../../packages/babylon-lite/src/shadow/esm-directional-shadow-generator.js";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 
 interface FakeResource {
@@ -114,7 +114,7 @@ describe("device-lost shadow recovery", () => {
         const oldDepthSampler = generator._depthSampler;
         const oldShadowParamsUbo = generator._shadowParamsUBO;
         const oldShadowUbo = generator._shadowUBO;
-        const oldResources = _getEsmShadowTaskResources(generator)!;
+        const oldResources = getEsmShadowTaskResources(generator)!;
         const oldShadowsInfo = [...generator._shadowsInfo];
         expect(oldResources._blurKernel).toBe(7);
         const identity = generator;
@@ -127,7 +127,7 @@ describe("device-lost shadow recovery", () => {
         expect(generator._depthSampler).not.toBe(oldDepthSampler);
         expect(generator._shadowParamsUBO).not.toBe(oldShadowParamsUbo);
         expect(generator._shadowUBO).not.toBe(oldShadowUbo);
-        const newResources = _getEsmShadowTaskResources(generator)!;
+        const newResources = getEsmShadowTaskResources(generator)!;
         expect(newResources._esmTexture).not.toBe(oldResources._esmTexture);
         expect(newResources._depthBuffer).not.toBe(oldResources._depthBuffer);
         expect(newResources._blurTexH).not.toBe(oldResources._blurTexH);

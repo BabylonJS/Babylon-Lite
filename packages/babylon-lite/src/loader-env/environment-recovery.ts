@@ -8,8 +8,18 @@ import { acquireGPUTexture, getOrCreateSampler, releaseGPUTexture } from "../res
  * Environment textures whose replacement GPU textures are already owned by a recovery-installed
  * scene disposable. The loader's original disposable still references the pre-loss textures, which
  * are destroyed with the lost device, so releasing them again is a harmless no-op.
+ *
+ * Lazily created: a module-level `new WeakSet()` is a module-level side effect, which defeats
+ * tree-shaking for every module that transitively imports this one (see GUIDANCE.md).
  */
-const recoveryOwnedEnvironments = new WeakSet<EnvironmentTextures>();
+let recoveryOwnedEnvironments: WeakSet<EnvironmentTextures> | null = null;
+
+function getRecoveryOwnedEnvironments(): WeakSet<EnvironmentTextures> {
+    if (!recoveryOwnedEnvironments) {
+        recoveryOwnedEnvironments = new WeakSet<EnvironmentTextures>();
+    }
+    return recoveryOwnedEnvironments;
+}
 
 /** @internal Loader metadata captured by `_dlr` only while Scene recovery capture is enabled. */
 export type EnvironmentRecoverySource =
@@ -49,8 +59,9 @@ export async function rebuildSceneEnvironment(engine: EngineContext, scene: Scen
     Object.assign(current, replacement);
     acquireGPUTexture(current.specularCube);
     acquireGPUTexture(current.brdfLut);
-    if (!recoveryOwnedEnvironments.has(current)) {
-        recoveryOwnedEnvironments.add(current);
+    const owned = getRecoveryOwnedEnvironments();
+    if (!owned.has(current)) {
+        owned.add(current);
         scene._disposables.push(() => {
             releaseGPUTexture(current.specularCube);
             releaseGPUTexture(current.brdfLut);

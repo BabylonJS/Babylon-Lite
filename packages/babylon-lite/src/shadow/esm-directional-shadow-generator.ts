@@ -105,13 +105,21 @@ function getEsmShadowTaskResourceMap(): WeakMap<ShadowGenerator, EsmShadowTaskRe
     return esmShadowTaskResources;
 }
 
-/** @internal */
-export function _setEsmShadowTaskResources(sg: ShadowGenerator, resources: EsmShadowTaskResources): void {
+/**
+ * @internal
+ *
+ * Intentionally NOT `_`-prefixed. `shadow-recovery.ts` reaches these through a dynamic-import
+ * namespace object, and the scene bundler's Terser property mangler (`/^_[a-z]/`, see
+ * scripts/bundle-scenes-core.ts) rewrites the namespace *property access* but not the `export`
+ * *binding*. The two desynchronize and recovery dies with "t is not a function" in minified
+ * builds only. Same hazard previously hit `_runDeviceLostRecovery`; do not re-add the underscore.
+ */
+export function setEsmShadowTaskResources(sg: ShadowGenerator, resources: EsmShadowTaskResources): void {
     getEsmShadowTaskResourceMap().set(sg, resources);
 }
 
-/** @internal */
-export function _getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskResources | null {
+/** @internal See {@link setEsmShadowTaskResources} for why this is not `_`-prefixed. */
+export function getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskResources | null {
     return esmShadowTaskResources?.get(sg) ?? null;
 }
 
@@ -238,7 +246,7 @@ function ensureEsmShadowTaskState(
         }
         existing._task.dispose();
     }
-    const resources = _getEsmShadowTaskResources(sg);
+    const resources = getEsmShadowTaskResources(sg);
     if (!resources) {
         throw new Error("ShadowTask: missing ESM metadata.");
     }
@@ -277,7 +285,7 @@ function ensureEsmShadowTaskState(
 }
 
 function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: EsmTaskState): number {
-    const resources = _getEsmShadowTaskResources(sg);
+    const resources = getEsmShadowTaskResources(sg);
     if (!resources) {
         return 0;
     }
@@ -492,7 +500,7 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
     sg._renderShadowMap = (engine, state) => {
         return renderEsmShadowMap(engine, sg, state as EsmTaskState);
     };
-    _setEsmShadowTaskResources(sg, {
+    setEsmShadowTaskResources(sg, {
         _esmTexture: esmTexture,
         _depthBuffer: depthBuf,
         _blurTexH: blurTexH,
