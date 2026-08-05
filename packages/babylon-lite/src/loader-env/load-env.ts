@@ -25,30 +25,28 @@ export interface EnvironmentTextures {
 
 const ENV_MAGIC = new U8([0x86, 0x16, 0x87, 0x96, 0xf6, 0xd6, 0x96, 0x36]);
 
+export interface EnvironmentLoadOptions {
+    groundTextureUrl?: string;
+    skipSkybox?: boolean;
+    skipGround?: boolean;
+    /**
+     * URL for the skybox texture. Extension determines loading strategy:
+     * - `.dds`: loads a DDS cube skybox (e.g. BJS CDN backgroundSkybox.dds). Tree-shaken when unused.
+     * - `.env`: reuses the already-loaded specular cubemap as an HDR skybox (like BJS `createDefaultSkybox`).
+     * Omit for the default flat-color background. Use `skipSkybox` to disable skybox entirely.
+     */
+    skyboxUrl?: string;
+    /** Skybox size matching BJS createDefaultEnvironment skyboxSize option (default 20). */
+    skyboxSize?: number;
+    brdfUrl: string;
+}
+
 /**
  * Load a Babylon.js .env environment file and upload cubemap + BRDF LUT to GPU.
  * BRDF LUT is decoded from a pre-baked RGBD PNG (matching BJS's embedded
  * environmentBRDFTexture) for pixel-perfect parity.
  */
-export async function loadEnvironment(
-    scene: SceneContext,
-    url: string,
-    options: {
-        groundTextureUrl?: string;
-        skipSkybox?: boolean;
-        skipGround?: boolean;
-        /**
-         * URL for the skybox texture. Extension determines loading strategy:
-         * - `.dds`: loads a DDS cube skybox (e.g. BJS CDN backgroundSkybox.dds). Tree-shaken when unused.
-         * - `.env`: reuses the already-loaded specular cubemap as an HDR skybox (like BJS `createDefaultSkybox`).
-         * Omit for the default flat-color background. Use `skipSkybox` to disable skybox entirely.
-         */
-        skyboxUrl?: string;
-        /** Skybox size matching BJS createDefaultEnvironment skyboxSize option (default 20). */
-        skyboxSize?: number;
-        brdfUrl: string;
-    }
-): Promise<EnvironmentTextures> {
+export async function loadEnvironment(scene: SceneContext, url: string, options: EnvironmentLoadOptions): Promise<EnvironmentTextures> {
     const engine = scene.surface.engine;
 
     // Fetch .env and BRDF PNG in parallel
@@ -110,6 +108,7 @@ export async function loadEnvironment(
     // Background renderables (skybox + ground) — deferred so they run AFTER the user
     // has finished tweaking `scene.imageProcessing.*` (skybox/ground/dds materials
     // snapshot exposure/contrast at build time into their per-mesh UBO).
+    engine._dlr?.e(scene, url, options.brdfUrl, !bgOptions.skipSkybox || !bgOptions.skipGround || skyboxUrl != null);
     scene._deferredBuilders.push(async () => {
         const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
         const { groundSize, skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);

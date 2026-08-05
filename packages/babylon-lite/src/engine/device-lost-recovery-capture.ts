@@ -1,9 +1,11 @@
 import type { EngineContext } from "./engine.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
 import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
 
 function attachRecoveryCapture(engine: EngineContext): void {
+    const state = engine._deviceLostRecovery!;
     engine._dlr = {
         u(tex: Texture2D, url: string, opts: Texture2DOptions): void {
             tex._recoverySource = { kind: "url", url, opts: { ...opts } };
@@ -60,6 +62,16 @@ function attachRecoveryCapture(engine: EngineContext): void {
             mesh._cpuColors = colors ?? null;
             mesh._cpuGpuIndices = gpuIndices;
             mesh._cpuIndexFormat = indexFormat;
+        },
+        e(scene: SceneContext, url: string, brdfUrl: string, hasBackgrounds: boolean): void {
+            if (state._meshCaptureRefs) {
+                scene._envRecoverySource = { kind: "env", url, brdfUrl, hasBackgrounds };
+            }
+        },
+        h(scene: SceneContext, url: string, faceSize: number, useCubemapSkybox: boolean, skipGround: boolean, skyboxSize: number | undefined): void {
+            if (state._meshCaptureRefs) {
+                scene._envRecoverySource = { kind: "hdr", url, faceSize, useCubemapSkybox, skipGround, skyboxSize };
+            }
         },
     };
 }

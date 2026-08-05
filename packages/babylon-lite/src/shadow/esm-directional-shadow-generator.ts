@@ -56,6 +56,8 @@ export interface EsmShadowTaskResources {
     _blurVBG: GPUBindGroup;
     /** @internal */
     _shadowUboData: Float32Array;
+    /** @internal Blur kernel width retained for loss-only shadow reconstruction. */
+    _blurKernel: number;
 }
 
 /** Configuration for a directional-light ESM shadow generator: map size, depth scale, blur kernel, darkness, and ortho projection bounds. */
@@ -103,11 +105,13 @@ function getEsmShadowTaskResourceMap(): WeakMap<ShadowGenerator, EsmShadowTaskRe
     return esmShadowTaskResources;
 }
 
-function setEsmShadowTaskResources(sg: ShadowGenerator, resources: EsmShadowTaskResources): void {
+/** @internal */
+export function _setEsmShadowTaskResources(sg: ShadowGenerator, resources: EsmShadowTaskResources): void {
     getEsmShadowTaskResourceMap().set(sg, resources);
 }
 
-function getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskResources | null {
+/** @internal */
+export function _getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskResources | null {
     return esmShadowTaskResources?.get(sg) ?? null;
 }
 
@@ -234,7 +238,7 @@ function ensureEsmShadowTaskState(
         }
         existing._task.dispose();
     }
-    const resources = getEsmShadowTaskResources(sg);
+    const resources = _getEsmShadowTaskResources(sg);
     if (!resources) {
         throw new Error("ShadowTask: missing ESM metadata.");
     }
@@ -273,7 +277,7 @@ function ensureEsmShadowTaskState(
 }
 
 function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: EsmTaskState): number {
-    const resources = getEsmShadowTaskResources(sg);
+    const resources = _getEsmShadowTaskResources(sg);
     if (!resources) {
         return 0;
     }
@@ -488,7 +492,7 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
     sg._renderShadowMap = (engine, state) => {
         return renderEsmShadowMap(engine, sg, state as EsmTaskState);
     };
-    setEsmShadowTaskResources(sg, {
+    _setEsmShadowTaskResources(sg, {
         _esmTexture: esmTexture,
         _depthBuffer: depthBuf,
         _blurTexH: blurTexH,
@@ -496,6 +500,7 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         _blurHBG: blurHBG,
         _blurVBG: blurVBG,
         _shadowUboData: shadowUboData,
+        _blurKernel: blurKernel,
     });
     return sg;
 }

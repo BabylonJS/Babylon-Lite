@@ -10,18 +10,18 @@
     "scene7-gltf-animation-CBEXoXjt.js",
     "scene7-gltf-feature-animations-DBjQPXJn.js",
     "scene7-gltf-feature-extras-VHPteGay.js",
-    "scene7-gltf-feature-registry-DscNVoLY.js",
+    "scene7-gltf-feature-registry-C803DMfW.js",
     "scene7-gltf-feature-skeleton-C4mxkxAa.js",
-    "scene7-gltf-json-asset-DboJkkGT.js",
+    "scene7-gltf-json-asset-5hoZORdS.js",
     "scene7-ibl-fragment-CeRrvT96.js",
-    "scene7-pbr-renderable-CZC_1qbV.js",
+    "scene7-pbr-renderable-BeDCJYSh.js",
     "scene7-rgbd-decode-B_BnEftW.js",
     "scene7-scene-uniforms-FTYH6Ct0.js",
     "scene7-singlelight-hemispheric-wgsl-DoH1sdOa.js",
-    "scene7-skeleton-fragment-DIj210_e.js",
+    "scene7-skeleton-fragment-DK24_Nd2.js",
     "scene7-skybox.vertex-Ban7q6IM-D1KSfOUq.js",
     "scene7-wgsl-helpers-BgB2AJrF.js",
     "scene7.js"
   ],
-  "rawBytes": 108190
+  "rawBytes": 108233
 }
