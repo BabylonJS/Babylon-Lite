@@ -45,9 +45,11 @@ export interface PointerVisual {
 export interface XrPointerOptions {
     /** Maximum beam length in metres when nothing is hit. Default `10`. */
     maxLength?: number;
-    /** Laser emissive colour `[r,g,b]` (0–1). Default cyan `[0.2, 0.8, 1]`. */
+    /** Laser emissive colour `[r,g,b]` (0–1). Default light grey `[0.7, 0.7, 0.7]`
+     *  (matches Babylon.js `laserPointerDefaultColor`). */
     laserColor?: [number, number, number];
-    /** Cursor emissive colour `[r,g,b]` (0–1). Default `[1, 1, 1]`. */
+    /** Cursor emissive colour `[r,g,b]` (0–1). Default `[0.8, 0.8, 0.8]`
+     *  (matches Babylon.js `selectionMeshDefaultColor`). */
     cursorColor?: [number, number, number];
     /** Laser cross-section thickness in metres. Default `0.004`. */
     laserThickness?: number;
@@ -89,8 +91,8 @@ export interface XrPointer {
 
 const DEFAULTS = {
     maxLength: 10,
-    laserColor: [0.2, 0.8, 1] as [number, number, number],
-    cursorColor: [1, 1, 1] as [number, number, number],
+    laserColor: [0.7, 0.7, 0.7] as [number, number, number],
+    cursorColor: [0.8, 0.8, 0.8] as [number, number, number],
     laserThickness: 0.004,
     cursorSize: 0.03,
 };

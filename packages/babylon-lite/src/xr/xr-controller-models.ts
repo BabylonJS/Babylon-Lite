@@ -166,9 +166,9 @@ function startProfileLoad(models: XrControllerModels, source: DomXrInputSource, 
         return;
     }
     unit.loadStarted = true;
-    void mod
-        .loadMotionController(models._engine, source, unit.handedness, opts)
-        .then((model) => {
+    void (async () => {
+        try {
+            const model = await mod.loadMotionController(models._engine, source, unit.handedness, opts);
             if (!model) {
                 return;
             }
@@ -176,6 +176,22 @@ function startProfileLoad(models: XrControllerModels, source: DomXrInputSource, 
                 disposeModel(models, model);
                 return;
             }
+            // The glTF loader mirrors imported models with a `-1` X scale on the synthetic
+            // `__root__` (its right-handed→left-handed conversion). The XR camera feeds WebXR's
+            // right-handed pose/projection through verbatim, so that mirror reads as a flipped
+            // controller in-headset. Neutralise it here (un-mirror the root) so the model matches
+            // the box placeholder's orientation, then enable mirrored-mesh winding so the now
+            // positive-determinant model keeps its front faces (rather than rendering inside-out).
+            const root = model.root;
+            root.scaling.set(-root.scaling.x, root.scaling.y, root.scaling.z);
+            // Loaded glTF meshes are pickable by default. The pointer ray would then hit the
+            // controller model at ~0 m and collapse the laser "inside" the controller; exclude the
+            // model from picking so the ray passes through to the scene.
+            for (const mesh of getContainerMeshes(model.container)) {
+                mesh.pickable = false;
+            }
+            const { enableMirroredMeshes } = await import("../mesh/enable-mirrored-meshes.js");
+            await enableMirroredMeshes(models._scene);
             addToScene(models._scene, model.container);
             setSubtreeVisible(model.root, false);
             unit.model = model;
@@ -186,10 +202,10 @@ function startProfileLoad(models: XrControllerModels, source: DomXrInputSource, 
                 disposeMeshGpu(unit.mesh);
                 unit.mesh = null;
             }
-        })
-        .catch(() => {
+        } catch {
             // Keep the placeholder box on any failure.
-        });
+        }
+    })();
 }
 
 /** @internal Lazily create the unit (placeholder box) for one input source. */
