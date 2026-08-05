@@ -40,13 +40,11 @@ trigger:
 pr: none
 
 variables:
-    # DEPLOYMENT_SERVER / DEPLOY_TOKEN / DEPLOY_ENDPOINT_UPLOAD and
-    # TOOLS_STORAGE_ACCOUNT come from these groups — the same upload path the
-    # playground uses for /v/versions.json. Each group needs to be authorized for
-    # this pipeline once, in the ADO UI.
-    - group: BabylonJS-BrowserStack
+    # DEPLOYMENT_SERVER / DEPLOY_TOKEN / DEPLOY_ENDPOINT_UPLOAD and STORAGE_ACCOUNT
+    # come from this group — the same upload path the failed-Playwright-report and
+    # static-lab-site templates use. It needs to be authorized for this pipeline
+    # once, in the ADO UI.
     - group: BabylonJS-Deployment
-    - group: BabylonJS-CI-Infrastructure
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
@@ -57,17 +55,17 @@ variables:
       value: "true"
     # Public path the baseline is served from. Must stay in sync with
     # DEFAULT_MASTER_MANIFEST_URL in scripts/bundle-scenes-core.ts.
-    # litePlayground maps to https://liteplayground.babylonjs.com/, so this is
-    # served at https://liteplayground.babylonjs.com/bundle-baseline/manifest.json
-    # The deploy server overlays at the given path, so the playground itself and
-    # its sibling /v/<ver>/ snapshots are untouched.
+    # $(STORAGE_ACCOUNT) is served at $(SERVE_DOMAIN), so this lands at
+    # https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json
+    #
+    # This is the CI-artifact host that already serves the per-build test reports
+    # and lab sites under lite/<BuildNumber>/, rather than the playground's
+    # product domain. Those are all build-scoped and therefore never overwritten;
+    # the baseline is deliberately the one stable path, so a reader needs no
+    # build number to find it. That host is not cached, so unlike the playground
+    # origin there is no purge to issue after an overwrite.
     - name: baselineDeployPath
-      value: litePlayground/bundle-baseline
-    # CDN endpoint + profile — used only for the post-deploy purge.
-    - name: cdnEndpoint
-      value: lite-playground
-    - name: cdnProfile
-      value: $(CDN_PROFILE_TOOLS)
+      value: lite/bundle-baseline
 
 stages:
     - stage: BundleBaseline
@@ -121,14 +119,13 @@ stages:
                       BUNDLE_MASTER_MANIFEST_URL: ""
 
                 # Publish the aggregate manifest to the same public storage that
-                # serves liteplayground.babylonjs.com, at a stable path. PR builds
-                # and local developers read it over plain HTTPS — no auth, no ADO
-                # artifact retention window, and it works for fork PRs.
+                # serves the per-build test reports and lab sites, at a stable
+                # path. PR builds and local developers read it over plain HTTPS —
+                # no auth, no ADO artifact retention window, and it works for fork
+                # PRs.
                 #
                 # --fail-with-body so an upload rejection fails the step instead of
-                # silently leaving the baseline stale. The .json would otherwise be
-                # cached at the CDN default TTL, so purge it to keep PR deltas
-                # measured against the current master rather than a stale copy.
+                # silently leaving the baseline stale.
                 - script: |
                       set -euo pipefail
 
@@ -151,9 +148,6 @@ stages:
                         -H "Content-Type: multipart/form-data" \
                         -H "Authorization: ******" \
                         -F "path=$(baselineDeployPath)" \
-                        -F "storageAccount=$(TOOLS_STORAGE_ACCOUNT)" \
+                        -F "storageAccount=$(STORAGE_ACCOUNT)" \
                         -F "zip=@$WORK/baseline.zip"
-
-                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_PURGE)?endpoint=$(cdnEndpoint)&profileName=$(cdnProfile)" --fail-with-body -i -X POST \
-                        -H "Authorization: ******"
                   displayName: "Publish bundle-size baseline"

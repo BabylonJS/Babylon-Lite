@@ -34,7 +34,7 @@ generated build output.
 It is measured once per master build and published to a stable public URL:
 
 ```
-https://liteplayground.babylonjs.com/bundle-baseline/manifest.json
+https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json
 ```
 
 `pnpm build:bundle-scenes` fetches it and writes `master-manifest.json`.

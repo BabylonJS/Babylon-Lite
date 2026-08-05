@@ -207,10 +207,16 @@ const MASTER_MANIFEST_FILE = "master-manifest.json";
  * authors. That made it the repo's dominant source of both merge conflicts (two
  * branches rewriting the same generated files) and red CI (any merge left every
  * other branch's copy stale). It is now measured once per master build and
- * published as a single file to the same public storage that serves
- * liteplayground.babylonjs.com, so no branch — and no bot — ever writes it.
+ * published as a single file to the same public storage that serves the
+ * per-build Playwright reports and lab sites, so no branch — and no bot — ever
+ * writes it.
+ *
+ * Hardcoded rather than configured because the primary readers are fork PR
+ * builds and local `pnpm build:bundle-scenes` runs, neither of which has
+ * pipeline variables. Must stay in sync with `baselineDeployPath` in
+ * `azure-pipelines-bundle-manifest.yml`.
  */
-const DEFAULT_MASTER_MANIFEST_URL = "https://liteplayground.babylonjs.com/bundle-baseline/manifest.json";
+const DEFAULT_MASTER_MANIFEST_URL = "https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json";
 export const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
 export const LITE_BUNDLE_TARGET = "esnext";
 

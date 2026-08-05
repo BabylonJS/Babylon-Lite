@@ -233,7 +233,7 @@ tracked in git. `azure-pipelines-bundle-manifest.yml` re-measures every scene
 after each merge and publishes the aggregate manifest to a stable public URL:
 
 ```
-https://liteplayground.babylonjs.com/bundle-baseline/manifest.json
+https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json
 ```
 
 `pnpm build:bundle-scenes` fetches it automatically and writes
