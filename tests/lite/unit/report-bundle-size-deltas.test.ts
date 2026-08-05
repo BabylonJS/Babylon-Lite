@@ -192,5 +192,68 @@ describe("report-bundle-size-deltas", () => {
             expect(comment).toContain("## Bundle Size Changes");
             expect(comment).not.toContain("Ceiling headroom");
         });
+
+        it("posts a headroom-only comment when the sole change is sub-KB movement into the tight band", () => {
+            // Every rounded delta is zero here, so the delta tables are empty. Gating the comment
+            // on those tables alone would silence the report in exactly the case it exists for.
+            const result = runReporter({
+                current: {
+                    scene1: { rawKB: 97.7, rawBytes: 100000 },
+                    scene2: { rawKB: 49.9, rawBytes: 51100 },
+                },
+                master: {
+                    scene1: { rawKB: 97.6, rawBytes: 99900 },
+                    scene2: { rawKB: 49.5, rawBytes: 50700 },
+                },
+                scenes: [
+                    { id: 1, slug: "scene1", name: "Scene 1 - BoomBox PBR", maxRawKB: 100 },
+                    { id: 2, slug: "scene2", name: "Scene 2 - Sphere", maxRawKB: 50 },
+                ],
+            });
+            const comment = result.comment ?? "";
+
+            expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]true");
+            expect(comment).toContain("No changes at whole-KB resolution");
+            expect(comment).not.toContain("### Increases");
+            expect(comment).not.toContain("### Decreases");
+            expect(comment).toContain("### Ceiling headroom");
+            expect(comment).toContain("⚠️ **1 scene this PR moved sits under 1.0 KB of headroom.**");
+            expect(comment).toContain("Scene 2 - Sphere<br/>`scene2` | 49.9 KB | 50 KB | **100 B** | +400 B");
+            // scene1 moved by 100 B too, but it has 2400 B of room — not a reason to warn.
+            expect(comment).not.toContain("Scene 1 - BoomBox PBR<br/>`scene1` | 97.7 KB");
+        });
+
+        it("posts a headroom-only comment when sub-KB movement pushes a scene over its ceiling", () => {
+            const result = runReporter({
+                current: { scene1: { rawKB: 50.3, rawBytes: 51512 } },
+                master: { scene1: { rawKB: 50.0, rawBytes: 51200 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1 - Sphere", maxRawKB: 50 }],
+            });
+
+            expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]true");
+            expect(result.comment).toContain("🚨 **1 scene this PR moved now exceeds its ceiling:** `scene1` (+312 B over its 50 KB ceiling)");
+        });
+
+        it("stays silent when repo-wide tightness is untouched by the PR", () => {
+            // scene2 is 100 B from its ceiling but this PR did not move it; scene1 moved but has
+            // room to spare. Triggering on repo-wide tightness would put a comment on every PR.
+            const result = runReporter({
+                current: {
+                    scene1: { rawKB: 97.7, rawBytes: 100000 },
+                    scene2: { rawKB: 49.9, rawBytes: 51100 },
+                },
+                master: {
+                    scene1: { rawKB: 97.6, rawBytes: 99900 },
+                    scene2: { rawKB: 49.9, rawBytes: 51100 },
+                },
+                scenes: [
+                    { id: 1, slug: "scene1", name: "Scene 1 - BoomBox PBR", maxRawKB: 100 },
+                    { id: 2, slug: "scene2", name: "Scene 2 - Sphere", maxRawKB: 50 },
+                ],
+            });
+
+            expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]false");
+            expect(result.comment).toContain("No changes detected");
+        });
     });
 });

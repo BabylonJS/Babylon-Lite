@@ -8,8 +8,11 @@
  *
  * Outputs:
  *  - Markdown comment listing all changes rounded to nearest whole KB, followed by a
- *    ceiling-headroom section (see `formatHeadroomSection`)
- *  - Azure DevOps variables for conditional GitHubComment@0 posting
+ *    ceiling-headroom section (see `buildHeadroomReport`)
+ *  - Azure DevOps variables for conditional GitHubComment@0 posting. The comment is posted
+ *    when a rounded delta is nonzero OR when this PR moved a scene into the tight/critical
+ *    headroom band, since sub-KB movement produces no delta rows yet is exactly what puts a
+ *    near-ceiling scene over.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
@@ -155,6 +158,19 @@ function pluralizeScenes(count: number): string {
     return count === 1 ? "1 scene" : `${count} scenes`;
 }
 
+export interface HeadroomReport {
+    /** Rendered markdown lines, empty when no scene has a ceiling to report against. */
+    lines: string[];
+    /**
+     * Whether this PR moved a scene that is now tight, critical, or over its ceiling.
+     *
+     * This is the signal that makes the comment worth posting on its own. Repo-wide tightness
+     * deliberately does not count: it is true on almost every PR, so triggering on it would put
+     * a comment on everything and train people to ignore it.
+     */
+    movedIntoDangerZone: boolean;
+}
+
 /**
  * Render the ceiling-headroom section of the PR comment.
  *
@@ -169,9 +185,9 @@ function pluralizeScenes(count: number): string {
  * Putting it in the comment is what turns it into something an author acts on — so the scenes
  * *this PR moved* are called out uncollapsed, and the repo-wide picture is folded away.
  */
-export function formatHeadroomSection(inputs: readonly SceneHeadroomInput[], movedBytes: ReadonlyMap<string, number>): string[] {
+export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], movedBytes: ReadonlyMap<string, number>): HeadroomReport {
     if (inputs.length === 0) {
-        return [];
+        return { lines: [], movedIntoDangerZone: false };
     }
 
     const { over, under } = computeSceneHeadroom(inputs);
@@ -221,15 +237,32 @@ export function formatHeadroomSection(inputs: readonly SceneHeadroomInput[], mov
             "every later PR's Bundle Size job then fails until the bytes are recovered. If a scene you touched is near zero, consider landing separately.*"
     );
 
-    return lines;
+    return { lines, movedIntoDangerZone: movedAndTight.length > 0 || movedAndOver.length > 0 };
 }
 
-export function formatComment(deltas: BundleDelta[], headroomLines: readonly string[] = []): string {
-    if (deltas.length === 0) {
+/**
+ * Render the comment, or the "nothing to say" placeholder.
+ *
+ * A headroom-only comment is a real case, not a degenerate one. The delta tables round to whole
+ * KB, so a PR whose only effect is a few hundred bytes produces no rows at all — and that is
+ * exactly the change this feature exists to catch, because a few hundred bytes is enough to
+ * consume the headroom of the ~46% of scenes that have under 1 KB of it. Suppressing the comment
+ * whenever the tables are empty would make the report inert in its most important case.
+ */
+export function formatComment(deltas: BundleDelta[], headroom: HeadroomReport = { lines: [], movedIntoDangerZone: false }): string {
+    if (deltas.length === 0 && !headroom.movedIntoDangerZone) {
         return "**Bundle Size**: No changes detected.";
     }
 
     const lines = ["## Bundle Size Changes", ""];
+
+    if (deltas.length === 0) {
+        lines.push("No changes at whole-KB resolution — but this PR moved a scene close to its ceiling.");
+        lines.push("");
+        lines.push(...headroom.lines);
+        return lines.join("\n");
+    }
+
     const increases = deltas.filter((d) => d.deltaKB > 0);
     const decreases = deltas.filter((d) => d.deltaKB < 0);
 
@@ -257,9 +290,9 @@ export function formatComment(deltas: BundleDelta[], headroomLines: readonly str
 
     lines.push("*Sizes rounded to nearest KB. Run `pnpm build:bundle-scenes` locally to verify.*");
 
-    if (headroomLines.length > 0) {
+    if (headroom.lines.length > 0) {
         lines.push("");
-        lines.push(...headroomLines);
+        lines.push(...headroom.lines);
     }
 
     return lines.join("\n");
@@ -288,8 +321,8 @@ function main(): void {
 
     const sceneConfigs = loadSceneConfig(sceneConfigPath);
     const deltas = computeDeltas(current, master, sceneConfigs);
-    const headroomLines = formatHeadroomSection(collectHeadroomInputs(current, sceneConfigs), computeMovedBytes(current, master));
-    const comment = formatComment(deltas, headroomLines);
+    const headroom = buildHeadroomReport(collectHeadroomInputs(current, sceneConfigs), computeMovedBytes(current, master));
+    const comment = formatComment(deltas, headroom);
 
     mkdirSync(dirname(outputPath), { recursive: true });
     writeFileSync(outputPath, comment, "utf-8");
@@ -297,7 +330,12 @@ function main(): void {
     console.log("");
     console.log(comment);
 
-    if (deltas.length > 0) {
+    // Post on a whole-KB delta OR on a move into the danger zone. The second disjunct is not a
+    // nicety: a sub-KB change produces no delta rows at all, so gating on the tables alone would
+    // silence the report in precisely the case it was built for — a few hundred bytes landing on
+    // a scene that had a few hundred bytes of room. Repo-wide tightness is deliberately not a
+    // trigger; without the "this PR moved it" requirement every PR would get a comment.
+    if (deltas.length > 0 || headroom.movedIntoDangerZone) {
         console.log("");
         console.log("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]true");
         const escapedComment = escapeAzureVariableValue(comment);
