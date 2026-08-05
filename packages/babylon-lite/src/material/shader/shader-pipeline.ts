@@ -122,7 +122,6 @@ export function getOrCreateShaderPipeline(
     const device = engine._device;
     const cache = (material as ShaderMaterialPipelineState)._shaderPipelineCache;
     const wantsFragment = !!sig._colorFormat || material.depthOnlyFragment;
-    const topology = material._topology ?? "triangle-list";
     let key = `${targetSignatureKey(sig)}${variantKey}`;
     let vertModule: GPUShaderModule | null = null;
     let fragModule: GPUShaderModule | null = null;
@@ -196,7 +195,7 @@ export function getOrCreateShaderPipeline(
               }
             : {}),
         multisample: alphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
-        primitive: { topology, cullMode: material.backFaceCulling ? "back" : "none", frontFace: "ccw" },
+        primitive: { topology: material._topology ?? "triangle-list", cullMode: material.backFaceCulling ? "back" : "none" },
     });
     bindings.pipelines.set(key, pipeline);
     return pipeline;

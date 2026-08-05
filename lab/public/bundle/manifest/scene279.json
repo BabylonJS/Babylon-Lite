@@ -1,10 +1,10 @@
 {
   "rawKB": 47.8,
-  "rawBytes": 48957,
+  "rawBytes": 48942,
   "gzipKB": 18.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene279-shader-renderable-COIwfvYI.js",
+    "scene279-shader-renderable-Bhc47_uX.js",
     "scene279-shader-thin-instance-DVm1_Uwg.js",
     "scene279-thin-instance-gpu-C7yW4Wks.js",
     "scene279.js"
