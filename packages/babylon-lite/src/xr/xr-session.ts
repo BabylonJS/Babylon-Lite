@@ -120,7 +120,7 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
         // so the engine must have been created with `createEngine(canvas, { xrCompatible: true })`.
         await session.end().catch(() => {});
         const detail = e instanceof Error ? e.message : String(e);
-        throw new Error(`Failed to construct XRGPUBinding: ${detail}. Create the engine with { xrCompatible: true } so its GPU adapter is XR-compatible.`);
+        throw new Error(`Failed to construct XRGPUBinding: ${detail}. Create the engine with { xrCompatible: true } so its GPU adapter is XR-compatible.`, { cause: e });
     }
     const colorFormat = options.colorFormat ?? binding.getPreferredColorFormat();
     const depthFormat = options.depthStencilFormat === undefined ? "depth24plus" : options.depthStencilFormat;

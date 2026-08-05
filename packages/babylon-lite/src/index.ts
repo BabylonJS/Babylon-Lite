@@ -141,6 +141,8 @@ export { createXrCamera, updateXrCameraForView } from "./xr/xr-camera.js";
 export type { XrCamera } from "./xr/xr-camera.js";
 export { createXrInputManager, updateXrInputPoses, disposeXrInputManager } from "./xr/xr-input.js";
 export type { XrInputManager, XrInputSource, XrInputCallbacks } from "./xr/xr-input.js";
+export { createXrPointer, updateXrPointer, disposeXrPointer, computePointerVisual } from "./xr/xr-pointer.js";
+export type { XrPointer, XrPointerOptions, PointerVisual } from "./xr/xr-pointer.js";
 
 // ─── Lights ──────────────────────────────────────────────────────────
 export { createHemisphericLight } from "./light/hemispheric.js";
@@ -465,6 +467,9 @@ export type { GpuPicker, PickDiscardRule, PickOptions } from "./picking/gpu-pick
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
+export { pickWithRay } from "./picking/ray-pick.js";
+export type { RayPickOptions } from "./picking/ray-pick.js";
+export type { Ray } from "./picking/ray.js";
 
 // ─── Gizmos ──────────────────────────────────────────────────────────
 export { createUtilityLayer, registerUtilityLayer, disposeUtilityLayer } from "./gizmo/utility-layer.js";

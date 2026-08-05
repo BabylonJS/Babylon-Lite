@@ -24,6 +24,10 @@ import {
     isXrSessionSupported,
     enterXr,
     exitXr,
+    createXrPointer,
+    updateXrPointer,
+    disposeXrPointer,
+    type XrPointer,
     mat4Compose,
     mat4Invert,
     mat4Multiply,
@@ -101,8 +105,8 @@ function releaseGrab(source: XRInputSource): void {
 }
 
 /**
- * Per-frame grab update. While a controller squeezes (grip) or pulls the trigger
- * near a cube, the cube is rigidly parented to the grip pose: we capture
+ * Per-frame grab update. While a controller squeezes (grip) near a cube, the cube
+ * is rigidly parented to the grip pose: we capture
  * `offset = inverse(grip) · cubeWorld` at grab time, then each frame set
  * `cubeWorld = grip · offset` so translation *and* rotation follow the hand.
  */
@@ -113,7 +117,7 @@ function updateGrab(ctx: XrSessionContext): void {
     const live = new Set<XRInputSource>();
     for (const w of ctx.input.inputSources) {
         live.add(w.source);
-        const grabbing = (w.squeezing || w.selecting) && w.gripTracked;
+        const grabbing = w.squeezing && w.gripTracked;
         const current = held.get(w.source);
 
         if (!grabbing) {
@@ -171,6 +175,27 @@ function setStatus(html: string): void {
 }
 
 let session: XrSessionContext | null = null;
+let pointer: XrPointer | null = null;
+
+/** Map a picked mesh back to its grabbable so pointer-selection can tint it. */
+function grabbableOf(mesh: Mesh): Grabbable | undefined {
+    return grabbables.find((g) => g.mesh === mesh);
+}
+
+/** Flash a cube's emissive to acknowledge a remote (laser) trigger select. */
+function pulseSelect(mesh: Mesh): void {
+    const g = grabbableOf(mesh);
+    if (!g || heldMeshes.has(mesh)) {
+        return;
+    }
+    g.material.emissiveColor = GRAB_HIGHLIGHT;
+    setStatus("Pointer: selected a cube.");
+    setTimeout(() => {
+        if (!heldMeshes.has(mesh)) {
+            g.material.emissiveColor = g.baseEmissive;
+        }
+    }, 300);
+}
 
 async function startSession(mode: XrSessionMode, scene: Parameters<typeof enterXr>[0]): Promise<void> {
     if (session) {
@@ -192,20 +217,45 @@ async function startSession(mode: XrSessionMode, scene: Parameters<typeof enterX
                 onSelect: () => setStatus(`${mode}: select`),
                 onSqueeze: () => setStatus(`${mode}: squeeze`),
             },
-            onFrame: (ctx) => updateGrab(ctx),
+            onFrame: (ctx) => {
+                updateGrab(ctx);
+                if (pointer && ctx.input) {
+                    updateXrPointer(pointer, ctx.input);
+                }
+            },
             onEnd: () => {
                 session = null;
                 state.inSession = false;
                 exitBtn.disabled = true;
+                if (pointer) {
+                    disposeXrPointer(pointer);
+                    pointer = null;
+                }
                 for (const source of [...held.keys()]) {
                     releaseGrab(source);
                 }
                 setStatus(`Exited ${mode}.`);
             },
         });
+        // Controller laser + cursor: aim at a cube and pull the trigger to select it.
+        pointer = createXrPointer(session.engine, scene, {
+            onHoverStart: (mesh) => {
+                const g = grabbableOf(mesh);
+                if (g && !heldMeshes.has(mesh)) {
+                    g.material.emissiveColor = GRAB_HIGHLIGHT;
+                }
+            },
+            onHoverEnd: (mesh) => {
+                const g = grabbableOf(mesh);
+                if (g && !heldMeshes.has(mesh)) {
+                    g.material.emissiveColor = g.baseEmissive;
+                }
+            },
+            onSelect: (mesh) => pulseSelect(mesh),
+        });
         state.inSession = true;
         exitBtn.disabled = false;
-        setStatus(`In <strong>${mode}</strong> session. Put on your headset — grip or trigger near a cube to grab it.`);
+        setStatus(`In <strong>${mode}</strong> session. Aim a controller — the laser highlights a cube; pull the trigger to select, or reach in and grip to grab.`);
     } catch (e) {
         state.error = String(e);
         setStatus(`Failed to enter ${mode}: <code>${String(e)}</code>`);
