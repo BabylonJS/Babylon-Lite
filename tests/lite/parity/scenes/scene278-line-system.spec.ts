@@ -10,7 +10,9 @@ test.skip(!!sceneConfig.skipParity, "Scene 278 skipped via skipParity in scene-c
 
 test("Scene 278 — public line-system rendering matches Babylon.js", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 278, timeout: 60_000, settleMs: 300 });
+    // Native 1 px line coverage depends on the GPU's MSAA sample positions.
+    // Capture the BJS oracle on the same machine so the comparison stays cross-platform.
+    await captureGolden(browser, { sceneId: 278, force: true, timeout: 60_000, settleMs: 300 });
 
     await page.goto("/scene278.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
