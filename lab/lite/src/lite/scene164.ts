@@ -125,7 +125,7 @@ async function main(): Promise<void> {
         skipGround: true,
     });
 
-    const camera = createArcRotateCamera(Math.PI / 2, 1.25, 3.2, { x: 0, y: 0.1, z: 0 });
+    const camera = createArcRotateCamera(Math.PI / 2, 1.15, 1.6, { x: 0.1, y: -0.05, z: 0 });
     camera.nearPlane = 0.1;
     camera.farPlane = 100;
     scene.camera = camera;
@@ -143,17 +143,19 @@ async function main(): Promise<void> {
     const ground = createGround(engine, { width: 8, height: 8 });
     ground.position.set(0, -0.75, 0);
     ground.receiveShadows = true;
+    // Dark, high-contrast shadow on purpose: the pre/post comparison can only catch a shadow
+    // recovery regression to the extent the shadow actually moves pixels.
     ground.material = createPbrMaterial({
         shadowOnly: true,
         shadowOnlyColor: [0, 0, 0],
-        shadowOnlyOpacity: 0.45,
+        shadowOnlyOpacity: 0.95,
         shadowOnlyFalloff: 1,
     });
     addToScene(scene, ground);
 
     light.shadowGenerator = createEsmDirectionalShadowGenerator(engine, light, {
         mapSize: 1024,
-        blurKernel: 48,
+        blurKernel: 16,
         orthoMinZ: 0,
         orthoMaxZ: 1000,
         // The caster is skinned and morphed, so the shadow map has to track the current pose.
