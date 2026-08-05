@@ -119,10 +119,6 @@ export interface EngineContext extends SurfaceContext {
 
     /** @internal */
     _device: GPUDevice;
-    /** @internal Whether the GPU adapter was requested with `xrCompatible: true`
-     *  (set from {@link EngineOptions.xrCompatible}). Read by device-lost recovery
-     *  so the recovered adapter stays XR-compatible. */
-    _xrCompatible?: boolean;
     /** @internal Original creation options retained for optional subsystems such as recovery. */
     _options?: EngineOptions;
     /** @internal Live high-level storage allocations owned by this engine. */
@@ -318,16 +314,22 @@ export interface EngineOptions extends SurfaceOptions {
      * pattern as the F64 storage module).
      */
     useFloatingOrigin?: boolean;
-    /**
-     * Request an **XR-compatible** GPU adapter (`requestAdapter({ xrCompatible: true })`).
-     * Required if you intend to enter an immersive WebGPU XR session with this engine:
-     * the draft WebXR/WebGPU binding throws `InvalidStateError` when `XRGPUBinding` is
-     * constructed with a device whose adapter was not XR-compatible, and WebGPU offers no
-     * way to upgrade an existing device (unlike WebGL's `makeXRCompatible()`). Off by
-     * default so non-XR engines are unaffected. See {@link enterXr}. Preserved across
-     * device-lost recovery so the recovered adapter stays XR-compatible.
-     */
-    xrCompatible?: boolean;
+}
+
+/** Extra `requestAdapter` options contributor, installed only by the WebXR helper
+ *  `enableXrCompatibleAdapter()`. Lets an XR app request an `xrCompatible` GPU adapter without
+ *  every non-XR engine paying for the option: non-XR bundles never call the setter, the bundler
+ *  proves this is always null, and the `_adapterOptionsHook ? … : {}` spread below folds to `{}`,
+ *  so `createEngine`'s adapter request stays byte-identical. */
+let _adapterOptionsHook: (() => GPURequestAdapterOptions) | null = null;
+/** @internal Install extra `requestAdapter` options (called by `enableXrCompatibleAdapter`). */
+export function _installAdapterOptions(hook: () => GPURequestAdapterOptions): void {
+    _adapterOptionsHook = hook;
+}
+/** @internal Resolve the extra adapter options (empty when no hook is installed). Used by
+ *  device-lost recovery so a recovered adapter keeps any XR-compatibility that was requested. */
+export function _getAdapterOptions(): GPURequestAdapterOptions {
+    return _adapterOptionsHook ? _adapterOptionsHook() : {};
 }
 
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
@@ -340,8 +342,7 @@ export interface EngineOptions extends SurfaceOptions {
  *  Accepts either a DOM canvas (main thread) or an `OffscreenCanvas` (e.g. transferred
  *  to a Web Worker) — see {@link RenderCanvas}. */
 export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext> {
-    const xrCompatible = options?.xrCompatible === true;
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance", ...(xrCompatible ? { xrCompatible: true } : {}) });
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance", ...(_adapterOptionsHook ? _adapterOptionsHook() : {}) });
     if (!adapter) {
         throw new Error("WebGPU adapter not available");
     }
@@ -432,7 +433,6 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
             gpuFrameTimeMs: 0,
             useHighPrecisionMatrix: useHpm,
             useFloatingOrigin: useFO,
-            _xrCompatible: xrCompatible,
             _animFrameId: 0,
             _renderFn: null,
             _currentEncoder: undefined,

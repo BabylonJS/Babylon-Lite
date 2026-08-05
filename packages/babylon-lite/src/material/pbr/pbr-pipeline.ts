@@ -58,6 +58,17 @@ export function _installPbrPrimitiveResolver(resolve: (meshFeatures: number, has
     _primitiveResolver = resolve;
 }
 
+/** Reverse-winding hook, installed only by the WebXR module. Flips a pipeline's `frontFace`
+ *  (ccw↔cw) for reverse-winding targets. Module-local with a single exported setter: non-XR
+ *  bundles never call the setter, so the bundler proves this is always null, the
+ *  `_reverseWindingHook && sig._reverseWinding ? … : primitive` guard below folds to the plain
+ *  `primitive`, and every non-XR scene stays byte-identical. */
+let _reverseWindingHook: ((primitive: GPUPrimitiveState) => GPUPrimitiveState) | null = null;
+/** @internal Install the reverse-winding frontFace-flip hook (called by the WebXR module). */
+export function _installPbrReverseWindingHook(hook: (primitive: GPUPrimitiveState) => GPUPrimitiveState): void {
+    _reverseWindingHook = hook;
+}
+
 interface _PbrShaderBindings {
     _features: number;
     _features2: number;
@@ -180,15 +191,6 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
         };
     }
 
-    const basePrimitive: GPUPrimitiveState = _primitiveResolver
-        ? _primitiveResolver(meshFeatures, hasDoubleSided)
-        : { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" };
-    // XR eye targets feed a right-handed view matrix through Lite's left-handed rasterizer, so the whole
-    // target's apparent triangle winding is reversed. Flip frontFace (composing with any per-mesh mirrored
-    // winding) rather than the cull face, matching the mirrored-mesh convention so double-sided front_facing
-    // normals stay correct.
-    const primitive: GPUPrimitiveState = sig._reverseWinding ? { ...basePrimitive, frontFace: basePrimitive.frontFace === "cw" ? "ccw" : "cw" } : basePrimitive;
-
     const pipeline = device.createRenderPipeline({
         layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
         vertex: { module: vertModule, entryPoint: "main", buffers: composed._vertexBufferLayouts },
@@ -208,7 +210,21 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
               }
             : {}),
         multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
-        primitive,
+        // XR eye targets feed a right-handed view matrix through Lite's left-handed rasterizer, so the whole
+        // target's apparent winding is reversed. When the WebXR module installs the hook for a reverse-winding
+        // target it flips frontFace (composing with any per-mesh mirrored winding) to keep front faces visible
+        // and double-sided front_facing normals correct. In non-XR bundles the hook is provably null, so this
+        // whole ternary collapses to its else-branch — byte-identical to the plain resolver expression.
+        primitive:
+            _reverseWindingHook && sig._reverseWinding
+                ? _reverseWindingHook(
+                      _primitiveResolver
+                          ? _primitiveResolver(meshFeatures, hasDoubleSided)
+                          : { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" }
+                  )
+                : _primitiveResolver
+                  ? _primitiveResolver(meshFeatures, hasDoubleSided)
+                  : { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;

@@ -38,6 +38,7 @@ import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Material } from "../material/material.js";
 import type { RenderTarget } from "../engine/render-target.js";
+import type { RenderTargetDescriptor } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { getViewMatrix, _cameraChangeKey } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
@@ -46,6 +47,17 @@ import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import { ensureSceneLightState, refreshSceneLightsUBO } from "../render/lights-ubo.js";
 import type { Task } from "./task.js";
+
+/** Reverse-winding signature contributor, installed only by the WebXR module. Adds `_reverseWinding`
+ *  to a target signature so its pipelines flip frontFace (see the pipeline modules). Module-local with
+ *  a single exported setter: non-XR bundles never call it, the bundler proves this is always null, and
+ *  the `...(_reverseWindingSig ? … : {})` spread below folds away — every non-XR render task's
+ *  signature stays byte-identical. */
+let _reverseWindingSig: ((desc: RenderTargetDescriptor) => { _reverseWinding?: boolean }) | null = null;
+/** @internal Install the reverse-winding target-signature contributor (called by the WebXR module). */
+export function _installReverseWindingSig(contribute: (desc: RenderTargetDescriptor) => { _reverseWinding?: boolean }): void {
+    _reverseWindingSig = contribute;
+}
 
 /** Configuration for `createRenderTask`: render target, clear state, optional camera override, and transmission settings. */
 export interface RenderTaskConfig {
@@ -206,7 +218,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _depthStencilFormat: config.depth?._descriptor.dFormat ?? desc.dFormat,
         _depthCompare: desc._depthCompare,
         _sampleCount: desc.samples ?? 1,
-        _reverseWinding: desc._reverseWinding,
+        ...(_reverseWindingSig ? _reverseWindingSig(desc) : {}),
     };
 
     const sceneBGL = getSceneBindGroupLayout(engine);

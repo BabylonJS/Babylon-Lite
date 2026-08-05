@@ -1,6 +1,6 @@
 {
   "rawKB": 104.2,
-  "rawBytes": 106699,
+  "rawBytes": 106701,
   "gzipKB": 43.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -15,7 +15,7 @@
     "scene33-light-base-XZN89uIK.js",
     "scene33-multilight-wgsl-CBu6p_7G.js",
     "scene33-pbr-refraction-CKPU1F9m.js",
-    "scene33-pbr-renderable-sPDgotDb.js",
+    "scene33-pbr-renderable-DJopmpZx.js",
     "scene33-pbr-transmission-ext-CsWpAbCL.js",
     "scene33-point-light-D2eBm3Z2.js",
     "scene33-rgbd-decode-CBCiayil.js",

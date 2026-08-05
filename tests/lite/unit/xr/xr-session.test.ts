@@ -273,7 +273,7 @@ describe("xr-session lifecycle", () => {
             }
         };
         const scene = createSceneContext(makeMockEngine());
-        await expect(enterXr(scene)).rejects.toThrow(/xrCompatible: true/);
+        await expect(enterXr(scene)).rejects.toThrow(/enableXrCompatibleAdapter\(\)/);
         expect(currentSession.ended).toBe(true);
     });
 

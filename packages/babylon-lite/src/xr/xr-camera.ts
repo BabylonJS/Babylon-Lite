@@ -32,9 +32,11 @@ import { allocateMat4 } from "../math/_matrix-allocator.js";
  * and input/controller poses (also right-handed) mutually consistent, so the ray
  * and scene content land where WebXR places them. The only side effect of the RH
  * matrices in an LH rasterizer is inverted apparent triangle winding; that is
- * corrected once, at the target level, by rendering the XR eye targets with
- * reverse culling (`RenderTargetSignature._reverseWinding`, set in `xr-session`),
- * so front faces stay visible without moving any geometry.
+ * corrected once, at the target level, by flipping the front-face winding on the XR
+ * eye targets (`RenderTargetSignature._reverseWinding`, set in `xr-session`, flips the
+ * forward pipelines' `frontFace` ccw→cw — composing with any per-mesh mirrored winding),
+ * so front faces stay visible and double-sided shading normals stay correct without
+ * moving any geometry.
  *  - **Pose → world:** copied straight from `XRView.transform.matrix`. It is a
  *    proper rigid transform, so `getViewMatrix`'s transpose-inverse stays exact.
  *  - **Projection:** copied straight from `XRView.projectionMatrix`.

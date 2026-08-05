@@ -1,7 +1,7 @@
 {
   "rawKB": 110.4,
-  "rawBytes": 113036,
-  "gzipKB": 47.2,
+  "rawBytes": 113032,
+  "gzipKB": 47.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene39-alpha-test-fragment-BU_lUVzp.js",
@@ -22,7 +22,7 @@
     "scene39-ibl-fragment-CeRrvT96.js",
     "scene39-light-base-CmbxR-6G.js",
     "scene39-light-matrix-CBTBdGsb.js",
-    "scene39-pbr-renderable-9R2jM7x1.js",
+    "scene39-pbr-renderable-_akk2WLI.js",
     "scene39-pbr-template-ext-CiHpOV5G.js",
     "scene39-rgbd-decode-DqA5PDQg.js",
     "scene39-scene-uniforms-FTYH6Ct0.js",

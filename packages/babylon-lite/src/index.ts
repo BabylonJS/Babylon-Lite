@@ -157,6 +157,7 @@ export type { GeospatialFlyOptions } from "./camera/geospatial-camera-fly.js";
 // Forward-looking support for the immersive-web WebXR/WebGPU binding. The binding
 // (XRGPUBinding) is not yet implemented by any browser; gate UI on isXrSessionSupported.
 export { enterXr, exitXr } from "./xr/xr-session.js";
+export { enableXrCompatibleAdapter } from "./xr/xr-adapter.js";
 export type { XrSessionContext, XrSessionOptions } from "./xr/xr-session.js";
 export type { XrGpuBinding, XrGpuBindingConstructor, XrGpuSubImage, XrGpuProjectionLayerInit } from "./xr/xr-webgpu-binding.js";
 export { isWebXrPresent, isWebGpuXrSupported, isXrSessionSupported } from "./xr/xr-support.js";

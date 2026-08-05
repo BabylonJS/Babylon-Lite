@@ -1,6 +1,6 @@
 {
   "rawKB": 91.7,
-  "rawBytes": 93932,
+  "rawBytes": 93928,
   "gzipKB": 37,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,8 +9,8 @@
     "scene47-gltf-feature-registry--2h2LRph.js",
     "scene47-gltf-glb-parser-Dy8gRD43.js",
     "scene47-gltf-sampler-desc-CkHYNGuu.js",
-    "scene47-mesh-features-Dda6QcW-.js",
-    "scene47-standard-renderable-CLVbHJlI.js",
+    "scene47-shader-composer-275imHM6.js",
+    "scene47-standard-renderable-BLSU5TaZ.js",
     "scene47.js"
   ]
 }

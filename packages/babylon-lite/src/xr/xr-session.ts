@@ -13,6 +13,7 @@ import { createXrInputManager, disposeXrInputManager, updateXrInputPoses } from 
 import type { XrFeatureSpec, XrFeatureHandle } from "./xr-feature.js";
 import type { XrSessionMode, XrReferenceSpaceType } from "./xr-support.js";
 import { isWebGpuXrSupported, isWebXrPresent } from "./xr-support.js";
+import { enableXrReverseWinding } from "./xr-winding.js";
 import type { XrGpuBinding } from "./xr-webgpu-binding.js";
 
 /** Options for {@link enterXr}. All fields optional; sensible immersive-VR defaults. */
@@ -90,8 +91,8 @@ export interface XrSessionContext {
  *
  * Requires the **draft** WebXR/WebGPU binding (`XRGPUBinding`), which no browser
  * implements yet — call {@link isXrSessionSupported} first and gate your UI on it.
- * The engine **must** have been created with `{ xrCompatible: true }` (see
- * {@link EngineOptions.xrCompatible}); otherwise the binding throws and this rejects.
+ * The engine's adapter **must** be XR-compatible — call {@link enableXrCompatibleAdapter}
+ * before `createEngine`; otherwise the binding throws and this rejects.
  * The normal canvas render loop is stopped for the session's duration and resumed
  * when it ends.
  *
@@ -111,6 +112,10 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
     const mode: XrSessionMode = options.mode ?? "immersive-vr";
     const engine = scene.surface.engine;
     const device = engine._device;
+
+    // Eye targets flip forward-pipeline frontFace to correct the RH-view/LH-raster handedness flip.
+    // Install the winding hooks now (idempotent); only reachable from enterXr, so non-XR bundles omit it.
+    enableXrReverseWinding();
 
     const refType = options.referenceSpaceType ?? "local-floor";
     const requiredFeatures = ["webgpu", ...(options.requiredFeatures ?? [])];
@@ -142,10 +147,10 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
     } catch (e) {
         // The draft binding throws InvalidStateError when the device's adapter was not
         // requested with `xrCompatible: true`. WebGPU can't upgrade an existing device,
-        // so the engine must have been created with `createEngine(canvas, { xrCompatible: true })`.
+        // so `enableXrCompatibleAdapter()` must have been called before `createEngine`.
         await session.end().catch(() => {});
         const detail = e instanceof Error ? e.message : String(e);
-        throw new Error(`Failed to construct XRGPUBinding: ${detail}. Create the engine with { xrCompatible: true } so its GPU adapter is XR-compatible.`, { cause: e });
+        throw new Error(`Failed to construct XRGPUBinding: ${detail}. Call enableXrCompatibleAdapter() before createEngine so its GPU adapter is XR-compatible.`, { cause: e });
     }
     const colorFormat = options.colorFormat ?? binding.getPreferredColorFormat();
     const depthFormat = options.depthStencilFormat === undefined ? "depth24plus" : options.depthStencilFormat;
@@ -240,7 +245,8 @@ function ensureUnit(ctx: XrSessionContext, index: number, eye: XREye): XrEyeUnit
         size: { width: layer.textureWidth, height: layer.textureHeight },
         // XR view/projection are consumed verbatim in their native right-handed form;
         // the handedness flip vs Lite's left-handed rasterizer inverts apparent winding,
-        // so cull front faces to keep the scene's front faces visible in the headset.
+        // so flip the forward pipelines' frontFace (ccw→cw) to keep the scene's front
+        // faces visible — and double-sided normals correct — in the headset.
         _reverseWinding: true,
     });
     // Eager: textures are owned by the XR compositor and supplied per frame, so the

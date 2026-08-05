@@ -11,6 +11,7 @@
 
 import {
     createEngine,
+    enableXrCompatibleAdapter,
     startEngine,
     createSceneContext,
     createArcRotateCamera,
@@ -298,7 +299,9 @@ async function startSession(mode: XrSessionMode, scene: Parameters<typeof enterX
 
 async function run(): Promise<void> {
     try {
-        const engine = await createEngine(canvas, { xrCompatible: true });
+        // XR needs an XR-compatible GPU adapter; opt in before creating the engine.
+        enableXrCompatibleAdapter();
+        const engine = await createEngine(canvas);
         const scene = createSceneContext(engine);
         scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.4, 2.2, { x: 0, y: 1.15, z: -0.5 });
         addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
