@@ -91,7 +91,7 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
                 material.backFaceCulling,
                 material.depthBias,
                 material.depthBiasSlopeScale,
-                material._topology ?? "triangle-list",
+                material._topology,
                 stencilKey,
             ]);
         },

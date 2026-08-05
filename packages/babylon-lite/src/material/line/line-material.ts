@@ -1,6 +1,10 @@
 import type { Color4 } from "../../math/types.js";
+import type { Material } from "../material.js";
+import type { Mesh } from "../../mesh/mesh.js";
+import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { ShaderMaterial } from "../shader/shader-material.js";
 import { createShaderMaterial, setShaderUniform } from "../shader/shader-material.js";
+import { getShaderGroupBuilder } from "../shader/shader-group-builder.js";
 
 /** Options for the unlit material used by line-list meshes. */
 export interface LineMaterialOptions {
@@ -21,6 +25,35 @@ export interface LineMaterial extends ShaderMaterial {
     readonly useThinInstances: boolean;
     readonly useThinInstanceColors: boolean;
     readonly color: Color4;
+}
+
+let _lineGroupBuilder: MeshGroupBuilder | null = null;
+
+function requireThinInstances(mesh: Mesh, material: LineMaterial): void {
+    if (material.useThinInstances && !mesh.thinInstances) {
+        throw new Error(`LineMaterial "${material.name ?? "<unnamed>"}" requires thin-instance data`);
+    }
+}
+
+function getLineGroupBuilder(): MeshGroupBuilder {
+    if (_lineGroupBuilder) {
+        return _lineGroupBuilder;
+    }
+    const shaderBuilder = getShaderGroupBuilder();
+    const builder: MeshGroupBuilder = async (scene, meshes) => {
+        for (const mesh of meshes) {
+            requireThinInstances(mesh, mesh.material as LineMaterial);
+        }
+        const result = await shaderBuilder(scene, meshes);
+        const rebuildSingle = (rebuildScene: typeof scene, mesh: Mesh, materialOverride?: Material) => {
+            requireThinInstances(mesh, (materialOverride ?? mesh.material) as LineMaterial);
+            return result.rebuildSingle(rebuildScene, mesh, materialOverride);
+        };
+        builder._rebuildSingle = rebuildSingle;
+        return { ...result, rebuildSingle };
+    };
+    builder._materialFamily = "shader";
+    return (_lineGroupBuilder = builder);
 }
 
 function vertexOutput(hasColor: boolean): string {
@@ -79,7 +112,7 @@ export function createLineMaterial(options: LineMaterialOptions = {}): LineMater
         depthWrite: options.depthWrite,
         depthCompare: options.depthCompare,
     }) as LineMaterial;
-    Object.assign(material, { useVertexColor, useVertexAlpha, useThinInstances, useThinInstanceColors, color, _topology: "line-list", _requiresThinInstances: useThinInstances });
+    Object.assign(material, { useVertexColor, useVertexAlpha, useThinInstances, useThinInstanceColors, color, _topology: "line-list", _buildGroup: getLineGroupBuilder() });
     return material;
 }
 
