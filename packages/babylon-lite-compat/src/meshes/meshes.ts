@@ -46,8 +46,7 @@ import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as Lite
 import { Vector3, liteBackedVector3 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
 import { Matrix } from "../math/matrix.js";
-import type { Color4 } from "../math/color.js";
-import { Color3 } from "../math/color.js";
+import { Color3, Color4 } from "../math/color.js";
 import { BoundingInfo } from "../culling/bounding.js";
 import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
@@ -1062,6 +1061,7 @@ export class LinesMesh extends Mesh {
             ? createLineSystem(engineOf(sceneOrLite), {
                   name,
                   lines: [[new Vector3(0, 0, 0)]],
+                  ...(useVertexColor ? { colors: [[new Color4(1, 1, 1, 1)]] } : {}),
                   useVertexAlpha,
               })
             : sceneOrLite;

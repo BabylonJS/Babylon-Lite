@@ -25,6 +25,26 @@ function createScene(): { engine: NullEngine; scene: Scene; writeBuffer: ReturnT
 }
 
 describe("LinesMesh compatibility", () => {
+    it("preserves the requested vertex-color layout when constructed from a scene", () => {
+        const { scene, writeBuffer } = createScene();
+        const mesh = new LinesMesh("lines", scene, undefined, true, false);
+
+        expect(Array.from(mesh._lite._cpuColors!)).toEqual([1, 1, 1, 1]);
+        expect(mesh._lite.hasVertexAlpha).toBe(false);
+        expect(() =>
+            CreateLineSystem(
+                "lines",
+                {
+                    lines: [[new Vector3(1, 2, 3)]],
+                    colors: [[new Color4(0.25, 0.5, 0.75, 1)]],
+                    instance: mesh,
+                },
+                null
+            )
+        ).not.toThrow();
+        expect(writeBuffer).toHaveBeenCalled();
+    });
+
     it("creates independent line-list geometry with Babylon color and alpha properties", () => {
         const { scene } = createScene();
         const mesh = MeshBuilder.CreateLineSystem(
