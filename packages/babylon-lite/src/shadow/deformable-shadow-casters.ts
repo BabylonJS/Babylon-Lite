@@ -21,8 +21,8 @@ interface ShadowMeshEntry {
 interface DeformableShadowState {
     readonly providers: DeformableShadowBoundsProvider[];
     readonly preload: NonNullable<ShadowGenerator["_preloadShadowTask"]>;
-    readonly ensure: NonNullable<ShadowGenerator["_ensureShadowTaskState"]>;
-    readonly render: NonNullable<ShadowGenerator["_renderShadowMap"]>;
+    ensure: NonNullable<ShadowGenerator["_ensureShadowTaskState"]>;
+    render: NonNullable<ShadowGenerator["_renderShadowMap"]>;
     sourceMeshes?: readonly Mesh[];
     shadowMeshes?: readonly Mesh[];
     entries?: ShadowMeshEntry[];
@@ -126,12 +126,16 @@ export function enableDeformableShadowBounds(generator: ShadowGenerator, provide
     };
     state.providers[kindIndex] = provider;
     (states ??= new WeakMap()).set(generator, state);
+    generator._replaceShadowTaskHooks = (nextEnsure, nextRender) => {
+        state!.ensure = nextEnsure;
+        state!.render = nextRender;
+    };
 
     generator._preloadShadowTask = (casterMeshes) => preload(mapCasterMeshes(state!, casterMeshes));
     generator._ensureShadowTaskState = (engine, scene, casterMeshes) => {
         prepareExistingState(generator, state!);
         const shadowMeshes = mapCasterMeshes(state!, casterMeshes);
-        const taskState = ensure(engine, scene, shadowMeshes);
+        const taskState = state!.ensure(engine, scene, shadowMeshes);
         restoreSourceCasters(taskState, casterMeshes);
         return taskState;
     };
@@ -139,7 +143,7 @@ export function enableDeformableShadowBounds(generator: ShadowGenerator, provide
         const shadowMeshes = state!.shadowMeshes;
         const sourceMeshes = state!.sourceMeshes;
         if (!shadowMeshes || !sourceMeshes) {
-            return render(engine, taskState);
+            return state!.render(engine, taskState);
         }
         for (const entry of state!.entries ?? []) {
             if (updateShadowMesh(entry)) {
@@ -148,7 +152,7 @@ export function enableDeformableShadowBounds(generator: ShadowGenerator, provide
         }
         taskState._casterMeshes = shadowMeshes;
         try {
-            return render(engine, taskState);
+            return state!.render(engine, taskState);
         } finally {
             restoreSourceCasters(taskState, sourceMeshes);
         }

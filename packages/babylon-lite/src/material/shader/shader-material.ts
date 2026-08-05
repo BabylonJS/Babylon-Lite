@@ -113,6 +113,13 @@ export interface ShaderDefine {
 export interface ShaderUniformSlot {
     readonly decl: ShaderUniformDecl;
     readonly value: Float32Array;
+    /** @internal Per-SLOT write counter, bumped by `setUniformValue` only when the value actually changes.
+     *  The custom-UBO serializer keeps the counter it last serialized for each slot, so a frame that bumps
+     *  the material's `_uniformVersion` re-serializes ONLY the handful of slots that moved instead of the
+     *  whole packet (see `updateCustomUbo`). Slots built outside this module (material views that clone the
+     *  slot map) may lack it: an absent/never-bumped counter simply never compares equal to a stored one, so
+     *  those slots fall back to today's rewrite-every-time behaviour and can never go stale. */
+    _v?: number;
 }
 
 export interface ShaderTextureSlot {
@@ -257,7 +264,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         const decl = typeof opt === "string" ? normalizeSystemUniform(opt) : normalizeCustomUniform(opt);
         assertUniqueName(usedNames, "uniform", decl.name);
         uniformDecls.push(decl);
-        uniformValues.set(decl.name, { decl, value: normalizeUniformValue(decl, decl.defaultValue ?? defaultUniformValue(decl)) });
+        uniformValues.set(decl.name, { decl, value: normalizeUniformValue(decl, decl.defaultValue ?? defaultUniformValue(decl)), _v: 0 });
     }
 
     const samplerDecls: ShaderSamplerDecl[] = [];
@@ -402,20 +409,32 @@ function setUniformValue(material: ShaderMaterial, name: string, value: number |
     if (!slot) {
         throw new Error(`ShaderMaterial: uniform "${name}" was not declared.`);
     }
-    const count = elementCount(slot.decl.type);
+    // The stored array was normalized to exactly `elementCount(decl.type)` entries at creation, so its length
+    // IS the declared element count — reading it here avoids re-walking the type string on every write, and
+    // this runs tens of thousands of times per frame in uniform-heavy scenes.
+    const store = slot.value;
+    const count = store.length;
     const length = typeof value === "number" ? 1 : value.length;
     if (length !== count) {
         throw new Error(`ShaderMaterial: uniform "${slot.decl.name}" of type ${slot.decl.type} expects ${count} value(s), got ${length}.`);
     }
 
+    // Compare and copy in ONE pass. `Math.fround` is what the Float32Array store would apply anyway, so
+    // comparing against the rounded value and assigning it is byte-for-byte what the old compare-then-copy
+    // pair produced — at half the loop work for the mat4x4 case that dominates.
     let changed = false;
     if (typeof value === "number") {
-        changed = slot.value[0] !== Math.fround(value);
+        const v = Math.fround(value);
+        if (store[0] !== v) {
+            store[0] = v;
+            changed = true;
+        }
     } else {
         for (let i = 0; i < count; i++) {
-            if (slot.value[i] !== Math.fround(value[i]!)) {
+            const v = Math.fround(value[i]!);
+            if (store[i] !== v) {
+                store[i] = v;
                 changed = true;
-                break;
             }
         }
     }
@@ -423,13 +442,9 @@ function setUniformValue(material: ShaderMaterial, name: string, value: number |
         return;
     }
 
-    if (typeof value === "number") {
-        slot.value[0] = value;
-    } else {
-        for (let i = 0; i < count; i++) {
-            slot.value[i] = value[i]!;
-        }
-    }
+    // `| 0` tolerates a slot built outside this module (a material view cloning the slot map) that never
+    // carried a counter: it starts the counter at 1 rather than producing NaN.
+    slot._v = (slot._v! | 0) + 1;
     material._uniformVersion++;
     material._uboVersion = material._uniformVersion;
 }
