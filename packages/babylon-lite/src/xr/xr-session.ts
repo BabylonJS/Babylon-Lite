@@ -105,10 +105,19 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
     const engine = scene.surface.engine;
     const device = engine._device;
 
+    const refType = options.referenceSpaceType ?? "local-floor";
     const requiredFeatures = ["webgpu", ...(options.requiredFeatures ?? [])];
+    const optionalFeatures = [...(options.optionalFeatures ?? [])];
+    // Reference spaces other than `viewer`/`local` are only granted when requested as
+    // a session feature; otherwise `requestReferenceSpace(refType)` rejects and we fall
+    // back to `local` (origin at head height, which sinks the floor ~1.5 m). Request it
+    // as *optional* so headsets without floor tracking still start (then fall back).
+    if (refType !== "viewer" && refType !== "local" && !requiredFeatures.includes(refType) && !optionalFeatures.includes(refType)) {
+        optionalFeatures.push(refType);
+    }
     const session = await navigator.xr!.requestSession(mode, {
         requiredFeatures,
-        optionalFeatures: options.optionalFeatures ?? [],
+        optionalFeatures,
     });
 
     let binding: XrGpuBinding;
@@ -130,7 +139,6 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
     });
     await session.updateRenderState({ layers: [layer] });
 
-    const refType = options.referenceSpaceType ?? "local-floor";
     let referenceSpace: XRReferenceSpace;
     try {
         referenceSpace = await session.requestReferenceSpace(refType);

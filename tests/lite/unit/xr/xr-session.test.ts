@@ -109,6 +109,9 @@ class FakeXrSession {
     nextId = 1;
     renderState: unknown = null;
     ended = false;
+    requestedRefSpaces: XRReferenceSpaceType[] = [];
+    /** Reference-space types this fake headset will grant; others reject (spec behaviour). */
+    grantedRefSpaces: XRReferenceSpaceType[] = ["viewer", "local", "local-floor", "bounded-floor", "unbounded"];
 
     requestAnimationFrame(cb: XRFrameRequestCallback): number {
         const id = this.nextId++;
@@ -121,7 +124,11 @@ class FakeXrSession {
     async updateRenderState(state: unknown): Promise<void> {
         this.renderState = state;
     }
-    async requestReferenceSpace(): Promise<XRReferenceSpace> {
+    async requestReferenceSpace(type: XRReferenceSpaceType): Promise<XRReferenceSpace> {
+        this.requestedRefSpaces.push(type);
+        if (!this.grantedRefSpaces.includes(type)) {
+            throw new DOMException(`Reference space ${type} not supported`, "NotSupportedError");
+        }
         return {} as XRReferenceSpace;
     }
     async end(): Promise<void> {
@@ -174,13 +181,18 @@ function makeFrame(pose: XRViewerPose | null): XRFrame {
 }
 
 let currentSession: FakeXrSession;
+let lastSessionInit: XRSessionInit | undefined;
 
-function installXrGlobals(opts?: { sessionSupported?: boolean }): void {
+function installXrGlobals(opts?: { sessionSupported?: boolean; grantedRefSpaces?: XRReferenceSpaceType[] }): void {
     const g = globalThis as Record<string, unknown>;
     g.navigator = {
         xr: {
-            requestSession: async () => {
+            requestSession: async (_mode: XRSessionMode, init?: XRSessionInit) => {
+                lastSessionInit = init;
                 currentSession = new FakeXrSession();
+                if (opts?.grantedRefSpaces) {
+                    currentSession.grantedRefSpaces = opts.grantedRefSpaces;
+                }
                 return currentSession as unknown as XRSession;
             },
             isSessionSupported: async () => opts?.sessionSupported ?? true,
@@ -319,6 +331,36 @@ describe("xr-session lifecycle", () => {
         scene.clearColor = { r: 0.1, g: 0.2, b: 0.3, a: 1 };
         const ctx = await enterXr(scene, { mode: "immersive-vr", input: false });
         expect(scene.clearColor.a).toBe(1);
+        await exitXr(ctx);
+    });
+
+    it("requests local-floor as an optional feature and obtains it", async () => {
+        installXrGlobals();
+        const scene = createSceneContext(makeMockEngine());
+        const ctx = await enterXr(scene, { input: false });
+        // Floor-relative spaces are only granted when listed as a session feature; if we
+        // forget, the headset origin sits at head height and the floor sinks ~1.5 m.
+        expect((lastSessionInit!.optionalFeatures as string[]) ?? []).toContain("local-floor");
+        expect(currentSession.requestedRefSpaces).toEqual(["local-floor"]);
+        await exitXr(ctx);
+    });
+
+    it("falls back to local when the headset cannot grant the floor space", async () => {
+        installXrGlobals({ grantedRefSpaces: ["viewer", "local"] });
+        const scene = createSceneContext(makeMockEngine());
+        const ctx = await enterXr(scene, { input: false });
+        expect(currentSession.requestedRefSpaces).toEqual(["local-floor", "local"]);
+        await exitXr(ctx);
+    });
+
+    it("does not duplicate an explicitly requested reference space in features", async () => {
+        installXrGlobals();
+        const scene = createSceneContext(makeMockEngine());
+        const ctx = await enterXr(scene, { input: false, referenceSpaceType: "local", optionalFeatures: ["local"] });
+        // `local` needs no feature entry; it must not be added twice.
+        const optional = (lastSessionInit!.optionalFeatures as string[]) ?? [];
+        expect(optional.filter((f) => f === "local").length).toBe(1);
+        expect(currentSession.requestedRefSpaces).toEqual(["local"]);
         await exitXr(ctx);
     });
 
