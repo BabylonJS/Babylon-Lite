@@ -1,16 +1,16 @@
 {
-  "rawKB": 80.9,
+  "rawKB": 80.8,
   "gzipKB": 32.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene215-material-view-Dua1bl7W.js",
     "scene215-multilight-wgsl-SRROL6UG.js",
     "scene215-no-color-view-DS70AbGo.js",
-    "scene215-pbr-renderable-O0cTDKAo.js",
+    "scene215-pbr-renderable-DpsC7T9u.js",
     "scene215-pbr-shadow-fragment-DGl6YcUJ.js",
     "scene215-shadow-task-BM34zMuF.js",
     "scene215-singlelight-directional-wgsl-BpRi11tU.js",
     "scene215.js"
   ],
-  "rawBytes": 82850
+  "rawBytes": 82765
 }

@@ -24,31 +24,6 @@ import { REVERSE_DEPTH_COMPARE, targetSignatureKey } from "../../engine/render-t
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
-const MSH_REVERSE_WINDING = 1 << 11;
-
-/** @internal Resolve the primitive state for a draw.
- *
- *  Only the COMMON case is spelled out here, because this sits on the shared PBR pipeline path and
- *  every byte lands in every PBR scene: a triangle list, culled per the material, wound per the
- *  mesh's mirror bit. The winding term is the one that matters for correctness — a mirrored glTF
- *  mesh must flip `frontFace`, or WebGPU's `@builtin(front_facing)` comes out inverted and the
- *  double-sided shader flips the shading normal on the VISIBLE side, rendering it black.
- *
- *  Everything exotic (point/line/strip topologies and `stripIndexFormat`) arrives as a ready-made
- *  partial in `exotic`, built by whoever knew the mesh was exotic — for glTF that is the lazy
- *  primitive feature. Resolving it here instead cost ~144 bytes of topology names and branches in
- *  every scene, which pushed eleven of them past their bundle ceilings; as data it costs a spread.
- *  It cannot be a hook: the installer would sit in a chunk that every glTF scene can reach, so the
- *  bundler could never prove the binding null and the branch would never fold. */
-export function _resolvePrimitive(meshFeatures: number, hasDoubleSided: boolean, exotic?: GPUPrimitiveState): GPUPrimitiveState {
-    return {
-        topology: "triangle-list",
-        cullMode: hasDoubleSided ? "none" : "back",
-        frontFace: meshFeatures & MSH_REVERSE_WINDING ? "cw" : "ccw",
-        ...exotic,
-    };
-}
-
 // ─── Shader Bindings (sig-independent) ──────────────────────────────
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
@@ -167,7 +142,7 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
     }
 
     const device = engine._device;
-    const { _features: features, _features2: features2, _composed: composed, _meshFeatures: meshFeatures } = bindings;
+    const { _features: features, _features2: features2, _composed: composed } = bindings;
     const esmShadowOutput = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0;
     const hasAlpha = !esmShadowOutput && (features & PBR_HAS_ALPHA_BLEND) !== 0;
     const hasDoubleSided = (features & PBR_HAS_DOUBLE_SIDED) !== 0;
@@ -213,7 +188,14 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
               }
             : {}),
         multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
-        primitive: _resolvePrimitive(meshFeatures, hasDoubleSided, composed._prim),
+        // `topology` and `frontFace` are omitted deliberately: WebGPU already defaults them to
+        // "triangle-list" and "ccw", so naming them costs every PBR scene ~42 bytes to restate the
+        // spec. Anything unusual — a non-triangle topology, a strip's index format, or a mirrored
+        // mesh's reversed winding — arrives pre-built in `_prim` and overrides through the spread.
+        // Resolving those cases here instead costs the topology names, the winding branch and a call
+        // in scenes that never draw such a mesh, which is what pushed a dozen scenes past their
+        // bundle ceilings. See ComposedShader._prim.
+        primitive: { cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", ...composed._prim },
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;

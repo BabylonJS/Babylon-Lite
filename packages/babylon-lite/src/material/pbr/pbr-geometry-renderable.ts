@@ -37,7 +37,7 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./pbr-material.js";
 import { _computePbrMaterialFeatures } from "./pbr-material.js";
 import { PBR_HAS_ALPHA_BLEND, PBR_HAS_DOUBLE_SIDED, PBR_HAS_NORMAL_MAP, PBR2_HAS_UV2 } from "./pbr-flags.js";
-import { _resolvePrimitive, createPbrMeshBindGroup } from "./pbr-pipeline.js";
+import { createPbrMeshBindGroup } from "./pbr-pipeline.js";
 import type { _PbrGeometryContext } from "./pbr-renderable.js";
 import { _writeMaterialData } from "./pbr-renderable.js";
 import type { PbrGeometryMaterialView } from "./pbr-geometry-view.js";
@@ -138,7 +138,9 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const receiveShadows = mesh.receiveShadows && hasSomeShadows && !(view._camera && engine.useFloatingOrigin);
     const lightMode: 0 | 1 | 2 = lightCount === 0 ? 0 : lightCount === 1 && !receiveShadows ? 1 : 2;
     const singleLightType = lightMode === 1 ? _getPackedSingleLightType(scene.lights, lr - 1) : "";
-    const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
+    // Same fold as the forward pass (see pbr-renderable.ts): these bits key the composed variant, so
+    // the Standard path must not pay to read them.
+    const meshFeatures = _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
 
     const variantKey = _variantKey(meshFeatures, lightMode, singleLightType);
     const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, variantKey);
@@ -467,10 +469,14 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
     const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState ? { format: fmt, blend: blendState } : { format: fmt }));
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;
-    const primitive = _resolvePrimitive(res._meshFeatures, hasDoubleSided, res._composed._prim);
-    if (view._reverseCulling && primitive.cullMode !== "none") {
-        primitive.cullMode = primitive.cullMode === "front" ? "back" : "front";
-    }
+    // Match the forward pass: `topology`/`frontFace` left to their WebGPU defaults ("triangle-list",
+    // "ccw"), with anything exotic (topology, strip index format, mirrored winding) overriding
+    // through `_prim`. The variant key includes meshFeatures, so every primitive-state combination
+    // gets its own pipeline.
+    const primitive: GPUPrimitiveState = {
+        cullMode: hasDoubleSided ? "none" : view._reverseCulling ? "front" : "back",
+        ...res._composed._prim,
+    };
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,
         vertex: { module: res._vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
@@ -487,7 +493,6 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
             : undefined,
         multisample: { count: sig._sampleCount },
         // Match the forward pass's topology, strip index format, culling, and mirrored winding.
-        // The variant key includes meshFeatures, so every primitive-state combination gets its own pipeline.
         primitive,
     });
     res._pipelines.set(key, pipeline);

@@ -13,11 +13,9 @@ export const MSH_VAT = 1 << 9;
 /** Mesh has no NORMAL attribute → must be flat-shaded (glTF spec). */
 export const MSH_FLAT_NORMAL = 1 << 10;
 // Bits 11-15 (negative-winding + 3-bit topology index + uint32-strip flag) are owned by the lazy
-// glTF primitive feature. It pre-encodes those bits on affected meshes, so the loader's resolver
-// machinery stays out of the shared mesh-feature path.
-/** Reverse-winding bit. Named here — unlike the topology bits — because the live winding rule
- *  below has to be able to CLEAR it, not just contribute it. */
-const MSH_REVERSE_WINDING = 1 << 11;
+// glTF primitive feature, which pre-encodes them on the affected meshes as `_primitiveFeatures`.
+// The PBR renderables fold those in themselves — they exist only to key the composed shader variant,
+// which the Standard path has no equivalent of — so nothing here has to read them.
 
 /** Extra mesh-feature encoder installed only by runtime opt-ins such as mirrored procedural meshes. */
 let _meshFeatureExtra: ((mesh: Mesh) => number) | null = null;
@@ -67,17 +65,8 @@ export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number
     if (receiveShadows) {
         features |= MSH_RECEIVE_SHADOWS;
     }
-    const primitiveFeatures = (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0;
     if (_meshFeatureExtra) {
-        // The live rule OWNS the winding bit; the loader's is only a snapshot of the determinant at
-        // load time. `enableMirroredMeshes` derives winding from the CURRENT world matrix, so a glTF
-        // mesh that was mirrored at load and is later un-mirrored (re-parented, scale sign flipped)
-        // must lose the bit. OR-ing the two could only ever set it, leaving the rebuilt pipeline
-        // stuck on frontFace "cw" — the same inside-out/black rendering this branch exists to fix,
-        // just in the opposite direction. The loader's topology bits are untouched.
-        features |= (primitiveFeatures & ~MSH_REVERSE_WINDING) | _meshFeatureExtra(mesh);
-    } else {
-        features |= primitiveFeatures;
+        features |= _meshFeatureExtra(mesh);
     }
     return features;
 }

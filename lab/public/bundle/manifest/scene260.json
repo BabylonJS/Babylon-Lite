@@ -5,15 +5,15 @@
   "runtimeChunks": [
     "scene260-flat-normal-wgsl-Cm9mM4tC.js",
     "scene260-generate-mipmaps-BnwWStsP.js",
-    "scene260-gltf-feature-primitive-DX3b6b19.js",
-    "scene260-gltf-feature-registry-DZXD-PGL.js",
+    "scene260-gltf-feature-primitive-BZTmheNJ.js",
+    "scene260-gltf-feature-registry-Dv_xZKH9.js",
     "scene260-gltf-json-asset-yi5RiuZK.js",
     "scene260-gltf-normals-DYhLwXNX.js",
     "scene260-ibl-fragment-CeRrvT96.js",
-    "scene260-pbr-renderable-C3ooRpiY.js",
+    "scene260-pbr-renderable-JBVaxhAa.js",
     "scene260-rgbd-decode-BHKCP5vu.js",
     "scene260-scene-uniforms-FTYH6Ct0.js",
     "scene260.js"
   ],
-  "rawBytes": 82980
+  "rawBytes": 82925
 }
