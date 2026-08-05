@@ -6,10 +6,10 @@
   "runtimeChunks": [
     "scene32-generate-mipmaps-Cr6tLrFA.js",
     "scene32-gltf-ext-unlit-1vUYfF7v.js",
-    "scene32-gltf-feature-registry-CXfdZ9WJ.js",
-    "scene32-gltf-glb-parser-Bd_HZTkZ.js",
+    "scene32-gltf-feature-registry-CezyaQ0p.js",
+    "scene32-gltf-glb-parser-vKdiR_xQ.js",
     "scene32-ibl-fragment-CeRrvT96.js",
-    "scene32-pbr-renderable-BO8Id-5t.js",
+    "scene32-pbr-renderable-CRpBAqmj.js",
     "scene32-rgbd-decode-BtmH8I2g.js",
     "scene32-scene-uniforms-FTYH6Ct0.js",
     "scene32-unlit-fragment-DWtvt7yQ.js",

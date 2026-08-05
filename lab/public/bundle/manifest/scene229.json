@@ -5,11 +5,11 @@
   "runtimeChunks": [
     "scene229-flat-normal-wgsl-Cm9mM4tC.js",
     "scene229-generate-mipmaps-JbqPm3IE.js",
-    "scene229-gltf-json-asset-BD61fY8n.js",
+    "scene229-gltf-json-asset-CeU_zlcK.js",
     "scene229-gltf-normals-DYhLwXNX.js",
-    "scene229-pbr-renderable-C3gzqR-X.js",
+    "scene229-pbr-renderable-DNa6OVyX.js",
     "scene229-unlit-fragment-DWtvt7yQ.js",
     "scene229.js"
   ],
-  "rawBytes": 70152
+  "rawBytes": 70150
 }
