@@ -48,6 +48,9 @@ interface RecoverableRenderTask {
  */
 export async function rebuildRegisteredScenes(engine: EngineContext): Promise<void> {
     clearSceneBGLCache();
+    // Engine-scoped and lazily recreated by the PBR fallback resolver, so it must be cleared once
+    // per recovery. Clearing it per scene would orphan the fallback each later scene rebuilt.
+    engine._pbrFallbackTex = undefined;
     for (const surface of engine.surfaces) {
         for (const ctx of surface._renderingContexts) {
             if (ctx._kind !== "scene") {
@@ -63,7 +66,6 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
 }
 
 async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Promise<void> {
-    engine._pbrFallbackTex = undefined;
     // The environment and shadow rebuild logic each live in their own module, reached only
     // through these lazy imports so recovery-enabled scenes that use neither carry neither.
     let environmentSource: EnvironmentRecoverySource | null = null;

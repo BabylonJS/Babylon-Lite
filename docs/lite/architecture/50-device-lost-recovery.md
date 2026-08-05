@@ -131,11 +131,13 @@ from the generator's `_config`, and `darkness`, `depthScale`, and
 Rebuilding material groups afterward binds receivers and casters only to
 replacement-device resources.
 
-The shared 1x1 PBR fallback texture is cleared before any PBR group rebuild.
-Factor-only and shadow-only PBR materials therefore recreate the fallback
-lazily on the replacement device. The environment and shadows are restored
-before PBR groups rebuild so their captured shader builders see the correct
-light and shadow state.
+The shared 1x1 PBR fallback texture is cleared once per recovery, before any
+scene is rebuilt, because it is engine-scoped and the PBR fallback resolver
+recreates it lazily — clearing it per scene would orphan the texture created by
+each earlier scene. Factor-only and shadow-only PBR materials therefore recreate
+the fallback lazily on the replacement device. The environment and shadows are
+restored before PBR groups rebuild so their captured shader builders see the
+correct light and shadow state.
 
 ### SpriteRenderer
 
