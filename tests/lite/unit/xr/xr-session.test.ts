@@ -252,6 +252,19 @@ describe("xr-session lifecycle", () => {
         await expect(enterXr(scene)).rejects.toThrow(/WebGPU XR is not supported/);
     });
 
+    it("wraps an XRGPUBinding InvalidStateError and ends the session", async () => {
+        installXrGlobals();
+        // Simulate a device whose adapter was not xrCompatible: the binding ctor throws.
+        (g as Record<string, unknown>).XRGPUBinding = class {
+            constructor() {
+                throw new DOMException("WebGPU device must be created by a compatible adapter", "InvalidStateError");
+            }
+        };
+        const scene = createSceneContext(makeMockEngine());
+        await expect(enterXr(scene)).rejects.toThrow(/xrCompatible: true/);
+        expect(currentSession.ended).toBe(true);
+    });
+
     it("enters, renders both eyes on a frame, and exits", async () => {
         installXrGlobals();
         const scene = createSceneContext(makeMockEngine());

@@ -179,7 +179,7 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
     stopEngine(engine);
 
     try {
-        const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+        const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance", ...(engine._xrCompatible ? { xrCompatible: true } : {}) });
         if (!adapter) {
             throw new Error("WebGPU adapter not available during device recovery");
         }

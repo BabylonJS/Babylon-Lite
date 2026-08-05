@@ -115,6 +115,10 @@ export interface EngineContext extends SurfaceContext {
 
     /** @internal */
     _device: GPUDevice;
+    /** @internal Whether the GPU adapter was requested with `xrCompatible: true`
+     *  (set from {@link EngineOptions.xrCompatible}). Read by device-lost recovery
+     *  so the recovered adapter stays XR-compatible. */
+    _xrCompatible?: boolean;
     /** @internal Shared 1×1 white texture used as the default baseColor / ORM for
      *  factor-only PBR materials (created via `createPbrMaterial` without textures).
      *  A white ORM yields `metallic = metallicFactor`, `roughness = roughnessFactor`,
@@ -284,6 +288,16 @@ export interface EngineOptions extends SurfaceOptions {
      * pattern as the F64 storage module).
      */
     useFloatingOrigin?: boolean;
+    /**
+     * Request an **XR-compatible** GPU adapter (`requestAdapter({ xrCompatible: true })`).
+     * Required if you intend to enter an immersive WebGPU XR session with this engine:
+     * the draft WebXR/WebGPU binding throws `InvalidStateError` when `XRGPUBinding` is
+     * constructed with a device whose adapter was not XR-compatible, and WebGPU offers no
+     * way to upgrade an existing device (unlike WebGL's `makeXRCompatible()`). Off by
+     * default so non-XR engines are unaffected. See {@link enterXr}. Preserved across
+     * device-lost recovery so the recovered adapter stays XR-compatible.
+     */
+    xrCompatible?: boolean;
 }
 
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
@@ -296,7 +310,8 @@ export interface EngineOptions extends SurfaceOptions {
  *  Accepts either a DOM canvas (main thread) or an `OffscreenCanvas` (e.g. transferred
  *  to a Web Worker) — see {@link RenderCanvas}. */
 export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext> {
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    const xrCompatible = options?.xrCompatible === true;
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance", ...(xrCompatible ? { xrCompatible: true } : {}) });
     if (!adapter) {
         throw new Error("WebGPU adapter not available");
     }
@@ -383,6 +398,7 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
             gpuFrameTimeMs: 0,
             useHighPrecisionMatrix: useHpm,
             useFloatingOrigin: useFO,
+            _xrCompatible: xrCompatible,
             _animFrameId: 0,
             _renderFn: null,
             _currentEncoder: undefined,
