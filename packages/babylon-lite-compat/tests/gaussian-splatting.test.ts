@@ -24,6 +24,15 @@ describe("GaussianSplattingMesh", () => {
         expect(gs._canPostToWorker).toBe(false);
     });
 
+    it("reports _canPostToWorker false while a Lite sort is in flight", () => {
+        const gs = new GaussianSplattingMesh("splat");
+        const state = gs as unknown as { _gs: { _orderPool: Uint32Array[] } };
+        state._gs = { _orderPool: [new Uint32Array(1)] };
+        expect(gs._canPostToWorker).toBe(false);
+        state._gs._orderPool.push(new Uint32Array(1));
+        expect(gs._canPostToWorker).toBe(true);
+    });
+
     it("buffers transforms set before load on its placeholder node", () => {
         const gs = new GaussianSplattingMesh("splat");
         gs.position.y = 1.7;

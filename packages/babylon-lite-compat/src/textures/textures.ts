@@ -522,7 +522,7 @@ export class CubeTexture extends BaseTexture {
         // Babylon.js fires onLoad once the cube map is ready; some scenes await it
         // before continuing. We resolve on a microtask since the actual GPU upload
         // is deferred to `loadEnvironment` at engine start.
-        this._readyPromise = new Promise<void>((resolve) => {
+        this._readyPromise = new Promise((resolve) => {
             queueMicrotask(() => {
                 this._ready = true;
                 if (onLoad) {
@@ -543,7 +543,6 @@ export class CubeTexture extends BaseTexture {
         return this._ready;
     }
 
-    /** Babylon.js `BaseTexture.whenReadyAsync()` — settles with {@link isReady}. */
     public override whenReadyAsync(): Promise<void> {
         return this._readyPromise;
     }
@@ -599,7 +598,7 @@ export class HDRCubeTexture extends BaseTexture {
         // Babylon.js fires onLoad once the HDR is decoded + prefiltered; the real
         // GPU work is deferred to `loadHdrEnvironment` at engine start, so we
         // resolve the readiness signal on a microtask (matches CubeTexture).
-        this._readyPromise = new Promise<void>((resolve) => {
+        this._readyPromise = new Promise((resolve) => {
             queueMicrotask(() => {
                 this._ready = true;
                 if (onLoad) {
@@ -620,7 +619,6 @@ export class HDRCubeTexture extends BaseTexture {
         return this._ready;
     }
 
-    /** Babylon.js `BaseTexture.whenReadyAsync()` — settles with {@link isReady}. */
     public override whenReadyAsync(): Promise<void> {
         return this._readyPromise;
     }

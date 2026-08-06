@@ -11,18 +11,18 @@ import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh"
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import { mat4Compose } from "../../../packages/babylon-lite/src/math/mat4-compose";
+import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
 import { mat4Multiply } from "../../../packages/babylon-lite/src/math/mat4-multiply";
 import { mat4Translation } from "../../../packages/babylon-lite/src/math/mat4-translation";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 
 function makeMesh(name: string): Mesh {
-    const mesh = {
+    const mesh = initMeshTransform({
         name,
-        material: {},
+        material: {} as Mesh["material"],
         receiveShadows: false,
-        _gpu: {},
-    } as unknown as Mesh;
-    initMeshTransform(mesh);
+        _gpu: {} as Mesh["_gpu"],
+    });
     return mesh;
 }
 
@@ -73,6 +73,26 @@ describe("hierarchy instance pool", () => {
         const actualFinalWorld = mat4Multiply(mesh.worldMatrix, perMeshMatrix);
         const expectedFinalWorld = mat4Multiply(rootInstance, mesh.worldMatrix);
         expectMatrixClose(actualFinalWorld, expectedFinalWorld);
+    });
+
+    it("composes the instance matrix with a flipped glTF-style root instead of replacing it", () => {
+        // `loadGltf()` roots carry the RH→LH conversion as scaling (-1, 1, 1).
+        const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+        const mesh = makeMesh("leaf");
+        mesh.position.set(2, 0, 0);
+        root.children.push(mesh);
+
+        const pool = createHierarchyInstancePool(root, 2);
+        const templateWorld = readMatrix(mesh.worldMatrix as unknown as Float32Array, 0);
+
+        addHierarchyInstance(pool, mat4Identity());
+        const identityWorld = mat4Multiply(mesh.worldMatrix, readMatrix(mesh.thinInstances!.matrices as Float32Array, 0));
+        expectMatrixClose(identityWorld, templateWorld);
+
+        const offset = mat4Translation(5, 0, 0);
+        addHierarchyInstance(pool, offset);
+        const offsetWorld = mat4Multiply(mesh.worldMatrix, readMatrix(mesh.thinInstances!.matrices as Float32Array, 1));
+        expectMatrixClose(offsetWorld, mat4Multiply(offset, templateWorld));
     });
 
     it("updates and swap-removes logical hierarchy instance slots across meshes", () => {

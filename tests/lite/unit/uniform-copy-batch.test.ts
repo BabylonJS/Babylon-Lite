@@ -23,6 +23,27 @@ function makeDevice() {
 }
 
 describe("uniform copy batching", () => {
+    it("reuses the byte view while the queued staging array is unchanged", () => {
+        const signature = {} as RenderTargetSignature;
+        const batch = getUniformCopyBatch(signature);
+        const { device } = makeDevice();
+        const encoder = { copyBufferToBuffer: vi.fn() } as unknown as GPUCommandEncoder;
+        const engine = { _device: device, _currentEncoder: encoder } as unknown as EngineContext;
+        const destination = {} as GPUBuffer;
+        const data = new Float32Array([1, 2, 3, 4]);
+
+        batch.queue(destination, data);
+        batch.flush(engine);
+        const firstView = batch._copies[0]!._u8;
+        batch.reset();
+        data[0] = 5;
+        batch.queue(destination, data);
+        batch.flush(engine);
+
+        expect(batch._copies[0]!._u8).toBe(firstView);
+        batch.destroy();
+    });
+
     it("recreates its staging buffer after device recovery", () => {
         const signature = {} as RenderTargetSignature;
         const batch = getUniformCopyBatch(signature);

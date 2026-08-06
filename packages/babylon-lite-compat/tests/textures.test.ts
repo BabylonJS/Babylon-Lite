@@ -227,8 +227,12 @@ describe("HDRCubeTexture", () => {
     });
 
     it("is distinct from the plain CubeTexture loader kind", () => {
-        expect(new CubeTexture("https://h/env.env")._envLoaderKind).toBe("cube");
-        expect(new HDRCubeTexture("https://h/room.hdr")._envLoaderKind).toBe("hdr");
+        const cube = new CubeTexture("https://h/env.env");
+        const hdr = new HDRCubeTexture("https://h/room.hdr");
+        expect(cube).toBeInstanceOf(BaseTexture);
+        expect(hdr).toBeInstanceOf(BaseTexture);
+        expect(cube._envLoaderKind).toBe("cube");
+        expect(hdr._envLoaderKind).toBe("hdr");
     });
 });
 

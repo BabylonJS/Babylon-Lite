@@ -59,8 +59,20 @@ export {
 export { Light, HemisphericLight, DirectionalLight, PointLight, SpotLight } from "./lights/lights.js";
 
 // ─── Meshes ──────────────────────────────────────────────────────────
-export { Mesh, AbstractMesh, TransformNode, GroundMesh, InstancedMesh, VertexData, VertexBuffer, MeshBuilder } from "./meshes/meshes.js";
-export { CreateBox, CreateSphere, CreateGround, CreatePlane, CreateCylinder, CreateTorus, CreateDisc, CreateTiledBox, CreateTiledPlane } from "./meshes/meshes.js";
+export { Mesh, LinesMesh, AbstractMesh, TransformNode, GroundMesh, InstancedMesh, VertexData, VertexBuffer, MeshBuilder } from "./meshes/meshes.js";
+export {
+    CreateBox,
+    CreateSphere,
+    CreateGround,
+    CreatePlane,
+    CreateCylinder,
+    CreateTorus,
+    CreateDisc,
+    CreateLines,
+    CreateLineSystem,
+    CreateTiledBox,
+    CreateTiledPlane,
+} from "./meshes/meshes.js";
 export { CSG, CSG2, InitializeCSG2Async } from "./meshes/csg.js";
 export { MeshoptCompression } from "./meshes/compression.js";
 export { MorphTarget, MorphTargetManager } from "./morph/morph.js";
@@ -236,7 +248,6 @@ export {
     SolidParticleSystem,
     HighlightLayer,
     GlowLayer,
-    LinesMesh,
     GreasedLineMesh,
     EdgesRenderer,
     OutlineRenderer,

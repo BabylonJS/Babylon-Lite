@@ -125,6 +125,22 @@ describe("glyph storage ownership", () => {
         expect(storage._curveSets.get("g")!.atlas).not.toBe(cs.atlas);
     });
 
+    it("re-registering a glyph id cannot change its packed geometry (existing outline wins)", () => {
+        const storage = createGlyphStorage(new Map([["f", new Map([[1, makeGlyph(1)]])]]));
+        const td = createTextData(storage, [{ curveSet: "f", glyphs: [{ glyphId: 1, x: 0, y: 0 }], pixelsPerFontUnit: 1 }]);
+        // Bounds + band transform occupy instance floats 0..3 and 12..15.
+        const original = Array.from(td._instances.subarray(0, 16));
+
+        // Re-registering id=1 with wildly different bounds is skipped by design. The atlas
+        // band texels were already baked from the original bounds, so the geometry the packer
+        // emits must keep agreeing with them — whether it reads the outline live or a snapshot.
+        updateGlyphStorage(storage, "f", new Map([[1, { ...makeGlyph(1), bounds: { xMin: -500, yMin: -500, xMax: 500, yMax: 500 } }]]));
+        expect(storage._curveSets.get("f")!.curves.get(1)!.bounds).toEqual({ xMin: 0, yMin: -20, xMax: 100, yMax: 100 });
+
+        updateTextData(td, { update: "reset" });
+        expect(Array.from(td._instances.subarray(0, 16))).toEqual(original);
+    });
+
     it("reset compaction (no runs, no storage) re-lays-out slots and frees dead-slot gaps", () => {
         const storage = createGlyphStorage(
             new Map([

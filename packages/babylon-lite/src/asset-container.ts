@@ -3,6 +3,7 @@ import type { LightBase } from "./light/types.js";
 import type { AnimationGroup } from "./animation/animation-group.js";
 import type { MaterialVariantData } from "./loader-gltf/material-variants.js";
 import type { Mesh } from "./mesh/mesh.js";
+import type { GaussianSplattingMesh } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import type { Skeleton } from "./skeleton/bone-control.js";
 import type { SceneContext } from "./scene/scene-core.js";
 
@@ -43,6 +44,13 @@ export interface AssetContainer {
      *  the closure so the core loader/scene stay feature-agnostic.
      *  @internal */
     _sceneSetup?: (scene: SceneContext) => void;
+    /** Gaussian Splatting renderables contributed by the `KHR_gaussian_splatting`
+     *  loader feature, one promise per GS primitive. The promises are populated by
+     *  `_sceneSetup` (i.e. during `addToScene`); each resolves to the attached
+     *  {@link GaussianSplattingMesh}. Await `mesh.firstSortReady` to know when the
+     *  first depth sort has landed. `undefined` for assets without GS primitives.
+     *  @internal */
+    _gaussianSplats?: Promise<GaussianSplattingMesh>[];
 }
 
 /**

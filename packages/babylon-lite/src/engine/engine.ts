@@ -9,6 +9,7 @@ import type { GpuFrameTimer } from "./gpu-timer.js";
 import type { GpuTaskTimer } from "./gpu-task-timer.js";
 import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
 import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import { disposeGpuResourceRetirements, flushGpuResourceRetirements } from "./gpu-resource-retirement.js";
 
 // `__BL_VERSION__` is replaced at build time with the resolved package version
@@ -134,8 +135,9 @@ export interface EngineContext extends SurfaceContext {
      *  A white ORM yields `metallic = metallicFactor`, `roughness = roughnessFactor`,
      *  matching the glTF/Babylon.js defaults. Lazily created on first use by the
      *  fallback resolver that `createPbrMaterial` installs into the PBR pipeline, so
-     *  loader-only PBR scenes pay zero bundle bytes. Device-lost recovery rebuilds it
-     *  in place via the solid-texture recovery path. */
+     *  loader-only PBR scenes pay zero bundle bytes. Device-lost recovery clears it
+     *  before rebuilding PBR groups so the resolver recreates it on the replacement
+     *  device. */
     _pbrFallbackTex?: Texture2D;
     /** @internal Stable cache cleanup callbacks used by scene material groups. */
     _pbrCleanup?: () => void;
@@ -253,6 +255,16 @@ interface DeviceLostRecoveryCapture {
         colors: Float32Array | null | undefined,
         gpuIndices: Uint16Array | Uint32Array,
         indexFormat: GPUIndexFormat
+    ): void;
+    e(scene: SceneContext, url: string, brdfUrl: string, hasBackgrounds: boolean): void;
+    h(
+        scene: SceneContext,
+        url: string,
+        faceSize: number,
+        useCubemapSkybox: boolean,
+        skipGround: boolean,
+        skyboxSize: number | undefined,
+        skyboxPosition: [number, number, number] | undefined
     ): void;
 }
 
@@ -523,6 +535,7 @@ export function disposeEngine(engine: EngineContext): void {
     const surfaces = engine._surfaces;
     for (const s of surfaces) {
         s._renderingContexts.length = 0;
+        s._ro?.disconnect();
         s._context.unconfigure();
     }
     surfaces.length = 0;

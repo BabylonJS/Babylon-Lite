@@ -4,8 +4,8 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { createShaderMaterial, setShaderFloat, setShaderUniform } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
+import { createShaderNoColorMaterialView } from "../../../packages/babylon-lite/src/material/shader/no-color-view";
 import { enableShaderUniformRangeUpdates } from "../../../packages/babylon-lite/src/material/shader/shader-uniform-range";
-import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { UniformCopyBatch } from "../../../packages/babylon-lite/src/render/uniform-copy-batch";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
@@ -57,7 +57,7 @@ function fixture(getUniformBatch?: () => UniformCopyBatch, enabled = true) {
             { name: "tint", type: "vec3<f32>" },
         ],
     });
-    const mesh = {
+    const mesh = initMeshTransform({
         name: "range",
         children: [],
         material,
@@ -70,8 +70,7 @@ function fixture(getUniformBatch?: () => UniformCopyBatch, enabled = true) {
             indexCount: 3,
             indexFormat: "uint32",
         },
-    } as unknown as Mesh;
-    initMeshTransform(mesh);
+    });
     const scene = {
         surface: { engine },
         camera: null,
@@ -194,6 +193,38 @@ describe("ShaderMaterial ranged custom UBO updates", () => {
 
         const customWrite = writeBuffer.mock.calls.find((call) => call[0] === customBuffer)!;
         expect(customWrite[4]).toBe(12);
+    });
+
+    it("propagates direct mutations to material-view custom UBOs", () => {
+        const source = fixture();
+        const view = createShaderNoColorMaterialView(source.material);
+        (view as unknown as { _shaderBindings?: undefined })._shaderBindings = undefined;
+        const mesh = initMeshTransform({
+            name: "range-view",
+            children: [],
+            material: view,
+            receiveShadows: false,
+            _gpu: {
+                positionBuffer: {} as GPUBuffer,
+                normalBuffer: {} as GPUBuffer,
+                uvBuffer: {} as GPUBuffer,
+                indexBuffer: {} as GPUBuffer,
+                indexCount: 3,
+                indexFormat: "uint32",
+            },
+        });
+        const result = buildShaderMaterialRenderables(source.scene, [mesh]);
+        const binding = result.renderables[0]!.bind(source.engine, { _depthStencilFormat: "depth32float", _sampleCount: 1 });
+        const viewBuffer = (view as unknown as { _shaderCustomUbo: GPUBuffer })._shaderCustomUbo;
+
+        source.material._uniformValues.get("tint")!.value.set([0.2, 0.4, 0.6]);
+        source.scene._beforeRender[0]!(0);
+        expect(viewBuffer).toBeDefined();
+        expect((view as unknown as { _shaderCustomVersion: number })._shaderCustomVersion).not.toBe(source.material._uniformVersion);
+        source.writeBuffer.mockClear();
+        binding.update!({ targetWidth: 64, targetHeight: 64 });
+
+        expect(source.writeBuffer.mock.calls.some((call) => call[0] === viewBuffer)).toBe(true);
     });
 
     it("preserves one version increment per public uniform setter", () => {

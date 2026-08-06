@@ -83,11 +83,15 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
                 ]),
                 material.needAlphaBlending,
                 material.blendMode,
+                // The explicit blend override participates in the cross-material key: two materials
+                // sharing modules but differing only by `blend` must not collide on one pipeline.
+                material.blend ?? null,
                 material.depthWrite,
                 material.depthCompare,
                 material.backFaceCulling,
                 material.depthBias,
                 material.depthBiasSlopeScale,
+                material._topology,
                 stencilKey,
             ]);
         },

@@ -21,13 +21,19 @@ export async function loadBrdfImage(url: string): Promise<ImageBitmap> {
     throw new Error(`BRDF LUT '${url}' is not an image (${response.status} ${response.headers.get("content-type") ?? ""}).`);
 }
 
-/** Assemble the EnvironmentTextures object from pre-computed components */
+/**
+ * Assemble the EnvironmentTextures object from pre-computed components.
+ *
+ * `sphericalHarmonics` may be supplied to reuse the array from a previous assembly — device-lost
+ * recovery re-parses the same source file, so recomputing would only rebuild an identical array.
+ */
 export function assembleEnvironmentTextures(
     specularCube: GPUTexture,
     brdfLut: GPUTexture,
     irradianceSH: Float32Array,
     lodGenerationScale: number,
-    engine: EngineContext
+    engine: EngineContext,
+    sphericalHarmonics?: Float32Array
 ): EnvironmentTextures {
     return {
         specularCube,
@@ -37,7 +43,7 @@ export function assembleEnvironmentTextures(
         cubeSampler: getTrilinearSampler(engine),
         brdfSampler: getBilinearSampler(engine),
         irradianceSH,
-        sphericalHarmonics: polynomialToPreScaledHarmonics(irradianceSH),
+        sphericalHarmonics: sphericalHarmonics ?? polynomialToPreScaledHarmonics(irradianceSH),
         lodGenerationScale,
     };
 }

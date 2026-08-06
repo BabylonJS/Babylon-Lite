@@ -19,14 +19,15 @@ export interface ThinInstanceDrawBuffers {
 export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean): boolean {
     const device = engine._device;
     const needsStorage = ti._gpuCullingEnabled;
-    const retiredBuffers: GPUBuffer[] = [];
+    let retiredMatrix: GPUBuffer | null = null;
+    let retiredColor: GPUBuffer | null = null;
     let recreated = false;
     if (ti._version !== ti._gpuVersion || ti._gpuBufferStorage !== needsStorage) {
         const byteSize = ti.count * 64;
         let bufferRecreated = false;
         if (!ti._gpuBuffer || ti._gpuBuffer.size < byteSize || ti._gpuBufferStorage !== needsStorage) {
             if (ti._gpuBuffer) {
-                retiredBuffers.push(ti._gpuBuffer);
+                retiredMatrix = ti._gpuBuffer;
             }
             ti._gpuBuffer = device.createBuffer({
                 label: "thin-instance-matrices",
@@ -77,7 +78,7 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
             let colorRecreated = false;
             if (!ti._colorGpuBuffer || ti._colorGpuBuffer.size < colorByteSize || ti._colorGpuBufferStorage !== needsStorage) {
                 if (ti._colorGpuBuffer) {
-                    retiredBuffers.push(ti._colorGpuBuffer);
+                    retiredColor = ti._colorGpuBuffer;
                 }
                 ti._colorGpuBuffer = device.createBuffer({
                     label: "thin-instance-colors",
@@ -99,11 +100,10 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
             ti._colorGpuVersion = ti._colorVersion;
         }
     }
-    if (retiredBuffers.length > 0) {
+    if (retiredMatrix || retiredColor) {
         retireGpuResources(engine, () => {
-            for (const buffer of retiredBuffers) {
-                buffer.destroy();
-            }
+            retiredMatrix?.destroy();
+            retiredColor?.destroy();
         });
     }
     if (recreated) {

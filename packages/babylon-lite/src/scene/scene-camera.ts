@@ -1,6 +1,7 @@
 import type { SceneContext } from "./scene-core.js";
 import type { ArcRotateCamera } from "../camera/arc-rotate.js";
 import { createArcRotateCamera } from "../camera/arc-rotate.js";
+import { emptyWorldAabb, expandWorldAabbForMesh } from "../mesh/mesh-world-bounds.js";
 import { vec3 } from "../math/vec3-ctor.js";
 
 /** Create an ArcRotateCamera framed to fit all loaded meshes, assign it to scene.
@@ -15,34 +16,22 @@ export function createDefaultCamera(scene: SceneContext): ArcRotateCamera {
         maxY = -Infinity,
         maxZ = -Infinity;
 
+    // `boundMin`/`boundMax` are object-local, so each mesh's box has to go through its world matrix (and
+    // through every thin-instance matrix) to frame where the geometry actually is — the shared helper keeps
+    // that composition identical to the render and shadow paths.
+    const acc = emptyWorldAabb();
     for (const m of scene.meshes) {
-        const boundMin = m.boundMin;
-        const boundMax = m.boundMax;
-        if (!boundMin || !boundMax) {
-            continue;
-        }
         if (m.visible === false) {
             continue;
         }
-        if (boundMin[0]! < minX) {
-            minX = boundMin[0]!;
-        }
-        if (boundMin[1]! < minY) {
-            minY = boundMin[1]!;
-        }
-        if (boundMin[2]! < minZ) {
-            minZ = boundMin[2]!;
-        }
-        if (boundMax[0]! > maxX) {
-            maxX = boundMax[0]!;
-        }
-        if (boundMax[1]! > maxY) {
-            maxY = boundMax[1]!;
-        }
-        if (boundMax[2]! > maxZ) {
-            maxZ = boundMax[2]!;
-        }
+        expandWorldAabbForMesh(acc, m);
     }
+    minX = acc.minX;
+    minY = acc.minY;
+    minZ = acc.minZ;
+    maxX = acc.maxX;
+    maxY = acc.maxY;
+    maxZ = acc.maxZ;
 
     // Babylon formula: radius = worldSize.length() * 1.5
     const sx = maxX - minX,

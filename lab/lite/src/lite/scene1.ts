@@ -13,7 +13,7 @@ import {
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const canvas = document.querySelector("canvas")!;
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
@@ -27,16 +27,18 @@ async function main(): Promise<void> {
     });
 
     const cam = createDefaultCamera(scene);
-    cam.alpha = 1.77538207638442;
+    cam.alpha = 1.77538;
     attachControl(cam, canvas, scene);
 
-    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight());
 
     await registerScene(scene);
     await startEngine(engine);
-    canvas.dataset.drawCalls = String(engine.drawCallCount);
-    canvas.dataset.initMs = String(performance.now() - __initStart);
-    canvas.dataset.ready = "true";
+    Object.assign(canvas.dataset, {
+        drawCalls: engine.drawCallCount,
+        initMs: performance.now() - __initStart,
+        ready: true,
+    });
 }
 
 main().catch(console.error);

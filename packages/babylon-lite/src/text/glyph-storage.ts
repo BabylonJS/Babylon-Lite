@@ -97,9 +97,19 @@ export type AtlasSlot = {
     /** vBandCount - 1, hBandCount - 1 (matching the fragment shader expectations). */
     bandMaxX: number;
     bandMaxY: number;
-    /** Number of bands per axis used when packing (≤ 8). */
-    vBandCount: number;
-    hBandCount: number;
+    /** Glyph bounds in font units, copied from `GlyphCurves.bounds` at pack time. Slots are
+     *  append-only and never moved, so these can never go stale. */
+    xMin: number;
+    yMin: number;
+    xMax: number;
+    yMax: number;
+    /** Band-space transform derived from the bounds and band counts:
+     *  `band = pos * bandScale + bandOffset`. Precomputed here because it depends only on the
+     *  glyph, so the per-instance packer never has to re-derive it. */
+    bandScaleX: number;
+    bandScaleY: number;
+    bandOffsetX: number;
+    bandOffsetY: number;
 };
 
 /** @internal CPU + (lazy) GPU staging packed from a `GlyphStorage`'s glyph outlines.
@@ -320,14 +330,26 @@ export function packAppendGlyph(atlas: SharedAtlas, glyph: GlyphCurves): AtlasSl
 
     atlas.version++;
 
+    const { xMin, yMin, xMax, yMax } = glyph.bounds;
+    const widthFu = xMax - xMin;
+    const heightFu = yMax - yMin;
+    const bandScaleX = widthFu > 0 ? bands.vBandCount / widthFu : 0;
+    const bandScaleY = heightFu > 0 ? bands.hBandCount / heightFu : 0;
+
     return {
         curveTexelStart: startTexel,
         glyphLocX,
         glyphLocY,
         bandMaxX: bands.vBandCount - 1,
         bandMaxY: bands.hBandCount - 1,
-        vBandCount: bands.vBandCount,
-        hBandCount: bands.hBandCount,
+        xMin,
+        yMin,
+        xMax,
+        yMax,
+        bandScaleX,
+        bandScaleY,
+        bandOffsetX: -xMin * bandScaleX,
+        bandOffsetY: -yMin * bandScaleY,
     };
 }
 

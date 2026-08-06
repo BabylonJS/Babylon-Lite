@@ -128,7 +128,7 @@ describe("loadGltf geometry sharing", () => {
         const second = root.children[1]!.children[0] as Mesh;
 
         expect(first).not.toBe(second);
-        expect(second.boundMin).not.toEqual(first.boundMin);
+        expect(second.boundMin).toEqual(first.boundMin);
 
         expect(second._gpu).toBe(first._gpu);
         expect(second._cpuPositions).toBe(first._cpuPositions);

@@ -67,6 +67,9 @@ export function removeThinInstance(mesh: Mesh, index: number): void;
 /** Bump _version after direct manipulation of the matrices Float32Array. */
 export function flushThinInstances(mesh: Mesh): void;
 
+/** Include exact thin-instance placements in default-camera and environment auto-sizing. */
+export function enableThinInstanceWorldBounds(mesh: Mesh): void;
+
 /** Set per-instance RGBA colors. Bumps _colorVersion. */
 export function setThinInstanceColors(mesh: Mesh, colors: Float32Array): void;
 
@@ -100,6 +103,12 @@ Call `enableThinInstanceDynamicDrawCount()` before `registerScene()` when a sync
 counts interactively. Its next normal GPU sync creates the stable indirect argument buffer during warm-up,
 so the first later count change does not invalidate cached render bundles.
 
+`enableThinInstanceWorldBounds()` is a setup-time, tree-shakable opt-in for hand-built thin-instance meshes
+that will be consumed by `createDefaultCamera()` or automatic environment sizing. It expands the prototype's
+object-local box through `mesh.worldMatrix × instanceMatrix` for every active instance and ignores parked
+instances whose linear transform is effectively zero. Call it after `setThinInstances()` and before camera or
+environment creation. The glTF `EXT_mesh_gpu_instancing` feature enables it automatically.
+
 ### Functions — Hierarchy Instance Pools (`hierarchy-instance-pool.ts`)
 
 For the old Babylon.js `parentNode.instantiateHierarchy()` prop workflow, Lite exposes a small opt-in helper that keeps the rendering path thin-instance based while preserving child mesh offsets/rotations/scales:
@@ -120,6 +129,8 @@ export function removeHierarchyInstance(pool: HierarchyInstancePool, index: numb
 /** Change active logical count without reallocating buffers. */
 export function setHierarchyInstanceCount(pool: HierarchyInstancePool, count: number): void;
 ```
+
+The instance `matrix` **composes** with the template hierarchy — it behaves like a parent transform node added above the root, so the final world of each descendant is `matrix * meshWorld` (stored per mesh as `meshWorld⁻¹ * matrix * meshWorld`, since the shader draws at `finalWorld = mesh.world * instanceMatrix`). The identity matrix therefore reproduces the template unchanged. The pool must not divide out the root's world matrix: a `loadGltf()` root carries the RH→LH conversion as scaling `(-1, 1, 1)`, and cancelling it would mirror every instance and invert its winding.
 
 `createHierarchyInstancePool()` walks all descendant meshes and assigns each one its own thin-instance matrix buffer at the requested capacity, then sets active count to zero. The source meshes therefore become render carriers for the pool: they do not draw the template by themselves, but they must stay `visible !== false` so their thin instances can draw. Do not hide a hierarchy pool with `setSubtreeVisible(root, false)`; clear it with `setHierarchyInstanceCount(pool, 0)` instead. When growing, prefer `addHierarchyInstance(pool, matrix)` so the newly visible slot has a defined matrix before the next frame.
 

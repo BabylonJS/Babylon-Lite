@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { type EngineContext, type RenderingContext, registerRenderingContext, unregisterRenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { createSurface, disposeSurface, setSurfaceSize } from "../../../packages/babylon-lite/src/engine/surface";
+import { enableSurfaceResizeObserver } from "../../../packages/babylon-lite/src/engine/enable-surface-resize-observer";
+import { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "../../../packages/babylon-lite/src/engine/surface";
 
 function setDevicePixelRatio(value: number): void {
     Object.defineProperty(globalThis, "devicePixelRatio", { value, configurable: true });
@@ -103,6 +104,40 @@ function makeRenderingContext(onResize?: () => void): RenderingContext {
 }
 
 describe("createSurface / disposeSurface", () => {
+    it("uses ResizeObserver dimensions and disconnects it on disposal", () => {
+        const callbacks: ResizeObserverCallback[] = [];
+        const observe = vi.fn();
+        const disconnect = vi.fn();
+        const previous = globalThis.ResizeObserver;
+        globalThis.ResizeObserver = class {
+            constructor(callback: ResizeObserverCallback) {
+                callbacks.push(callback);
+            }
+            observe = observe;
+            unobserve(): void {
+                return;
+            }
+            disconnect = disconnect;
+        };
+        try {
+            const engine = makeMockEngine();
+            const canvas = makeMockCanvas({ clientWidth: 10, clientHeight: 10 });
+            const aux = createSurface(engine, canvas);
+            enableSurfaceResizeObserver(aux);
+            callbacks[0]!([{ contentRect: { width: 123.6, height: 45.2 } } as ResizeObserverEntry], {} as ResizeObserver);
+
+            resizeSurface(aux);
+
+            expect(observe).toHaveBeenCalledWith(canvas);
+            expect(canvas.width).toBe(124);
+            expect(canvas.height).toBe(45);
+            disposeSurface(aux);
+            expect(disconnect).toHaveBeenCalledOnce();
+        } finally {
+            globalThis.ResizeObserver = previous;
+        }
+    });
+
     it("appends an auxiliary surface and shares the engine's device", () => {
         const engine = makeMockEngine();
         const auxCanvas = makeMockCanvas({ clientWidth: 200, clientHeight: 100 });

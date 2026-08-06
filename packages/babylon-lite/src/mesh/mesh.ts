@@ -9,6 +9,7 @@ import type { SkeletonData, MorphTargetData, VatData } from "../animation/types.
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
+import type { WorldAabbAcc } from "./mesh-world-bounds.js";
 import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "../scene/world-matrix-state.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { createEulerProxy } from "../scene/scene-node.js";
@@ -93,7 +94,31 @@ export interface Mesh extends SceneNode {
     id?: string;
     material: Material;
     receiveShadows: boolean;
-    /** World-space bounding box (set by loaders for camera framing). */
+    /** OBJECT-LOCAL axis-aligned bounding box of this mesh's own geometry — the box the vertex
+     *  buffer occupies BEFORE `worldMatrix`, and before any thin-instance matrix. Every reader
+     *  composes it the same way the shaders do:
+     *    plain mesh        → `worldMatrix × corner`
+     *    thin-instanced    → `worldMatrix × instanceMatrix × corner`
+     *
+     *  Local, not world, because it is the only frame that survives the mesh moving. A `Mesh` owns a
+     *  live TRS plus a parent chain, so a world-baked box goes stale the instant anything in that chain
+     *  changes and there is no way to recover the local box from it. Local also is the only frame in which
+     *  a thin-instance prototype can be expressed at all: one prototype box is reused under hundreds of
+     *  instance matrices, so it cannot hold any one instance's world placement. The shadow fit
+     *  (`computeDirectionalLightMatrix`, `_castersWorldAabb`), the GPU thin-instance cull, the Havok shape
+     *  extents and `computeMaxExtents` all rely on exactly this.
+     *
+     *  This used to be documented as world-space, and the glTF loader honoured that by baking the node's
+     *  world matrix in while leaving the mesh parented under that same node — so every reader that
+     *  (correctly) applied `worldMatrix` transformed loaded meshes twice, and CSM cascades mis-fit for any
+     *  parented glTF caster. Loaders now publish the raw geometry box and let the node chain supply the
+     *  transform, which is lossless: the mesh's `worldMatrix` already reproduces that node's world matrix.
+     *  Consumers that need a loaded model's box in its ROOT frame must compose it with the node
+     *  world-at-load matrix themselves.
+     *
+     *  A consumer MAY overwrite these with a wider hand-computed box (e.g. a thin-instance prototype
+     *  publishing the union of all its placements onto an identity-world mesh) — the contract is only that
+     *  the box is stated in the frame `worldMatrix` maps out of. */
     boundMin?: [number, number, number];
     boundMax?: [number, number, number];
     /** Skeleton GPU data (skeletal animation). Type-only — no module dependency. */
@@ -116,6 +141,8 @@ export interface Mesh extends SceneNode {
     renderOnTop?: boolean;
     /** Thin instance data (CPU-side). GPU buffer managed by render system. */
     thinInstances?: ThinInstanceData | null;
+    /** @internal Optional feature-owned setup-time world-bounds expansion. */
+    _expandWorldBounds?: (bounds: WorldAabbAcc, mesh: Mesh) => void;
     /** Explicit opt-in that this mesh's RGBA vertex colours drive translucency
      *  (Babylon `AbstractMesh.hasVertexAlpha`). When `true` and the mesh actually
      *  carries a vertex-colour buffer, the Standard forward and geometry paths
@@ -148,6 +175,11 @@ export interface Mesh extends SceneNode {
     _authoredSign?: number;
     /** @internal Reason cloning this mesh is currently forbidden. */
     _clone?: string;
+    /** @internal Non-triangle primitive topology index: 1=point-list, 2=line-list,
+     *  3=line-strip, 4=triangle-strip. Undefined means triangle-list. */
+    _topology?: number;
+    /** @internal Per-polyline point counts retained by createLineSystem for stable-topology updates. */
+    _linePointCounts?: Uint32Array;
     /** @internal Highest CSM cascade this mesh casts into; undefined means all cascades. */
     _shadowMaxCascade?: number;
     /** @internal */
@@ -172,16 +204,18 @@ export interface Mesh extends SceneNode {
 
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.
  *  Used by all mesh creation paths (factories, loaders). */
-export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): void {
+export function initMeshTransform(partialMesh: Partial<Mesh> & { _flatNormal?: boolean }, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): Mesh {
     const wm = createWorldMatrixState(() => composeTrsLocalMatrix(mesh.position, mesh.rotationQuaternion, mesh.scaling));
     const onWmDirty = () => wm.markLocalDirty();
 
     const [iqx, iqy, iqz, iqw] = eulerToQuat(rx, ry, rz);
     const rq = new ObservableQuat(iqx, iqy, iqz, iqw, onWmDirty);
-    mesh.rotationQuaternion = rq;
-    mesh.rotation = createEulerProxy(rq);
-    mesh.position = new ObservableVec3(px, py, pz, onWmDirty);
-    mesh.scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
+    const rotationQuaternion = rq;
+    const rotation = createEulerProxy(rq);
+    const position = new ObservableVec3(px, py, pz, onWmDirty);
+    const scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
+
+    const mesh = { ...partialMesh, position, rotationQuaternion, rotation, scaling } as Mesh;
 
     if (!(mesh as unknown as Record<string, unknown>).children) {
         (mesh as unknown as Record<string, unknown>).children = [];
@@ -212,6 +246,7 @@ export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry
         enumerable: false,
     });
     attachWorldMatrixState(mesh, wm);
+    return mesh;
 }
 
 // ─── GPU Geometry Upload ─────────────────────────────────────────────

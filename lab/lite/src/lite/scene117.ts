@@ -27,10 +27,8 @@ const TARGET_ROW = 1;
 const TARGET_INDEX = TARGET_ROW * GRID_COLS + TARGET_COL;
 const HIGHLIGHT_COLOR: [number, number, number, number] = [1, 0.85, 0.1, 1];
 
-async function waitFrames(frameCount: number): Promise<void> {
-    for (let i = 0; i < frameCount; i++) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    }
+function waitTwoFrames(): Promise<number> {
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 }
 
 async function main(): Promise<void> {
@@ -66,24 +64,22 @@ async function main(): Promise<void> {
     registerSpriteRenderer(sr);
 
     await startEngine(engine);
-    await waitFrames(2);
+    await waitTwoFrames();
 
     // Pick the centre sprite (its positionPx is exactly screen centre in identity-view layer space).
     const hit = pickSprite2D(sr.layers, canvas.width / 2, canvas.height / 2);
-    let highlightApplied = false;
     if (hit) {
         updateSprite2DIndex(hit.layer, hit.spriteIndex, { color: HIGHLIGHT_COLOR });
-        highlightApplied = true;
     }
 
-    await waitFrames(2);
+    await waitTwoFrames();
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.pickedHit = hit ? String(hit.spriteIndex) : "miss";
     canvas.dataset.expectedIndex = String(TARGET_INDEX);
     canvas.dataset.pickedU = hit ? hit.u.toPrecision(6) : "";
     canvas.dataset.pickedV = hit ? hit.v.toPrecision(6) : "";
-    canvas.dataset.highlightApplied = String(highlightApplied);
+    canvas.dataset.highlightApplied = String(!!hit);
     canvas.dataset.ready = "true";
 }
 
