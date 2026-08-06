@@ -126,7 +126,9 @@ export function enableDeformableShadowBounds(generator: ShadowGenerator, provide
     };
     state.providers[kindIndex] = provider;
     (states ??= new WeakMap()).set(generator, state);
+    const previousReplacer = generator._replaceShadowTaskHooks;
     generator._replaceShadowTaskHooks = (nextEnsure, nextRender) => {
+        previousReplacer?.(nextEnsure, nextRender);
         state!.ensure = nextEnsure;
         state!.render = nextRender;
     };

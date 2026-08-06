@@ -78,6 +78,19 @@ describe("enableCsmStaticCache", () => {
         await expect(enableCsmStaticCache(registeredEngine, registered, { refitAngle: 0.05 })).rejects.toThrow("before scene registration");
     });
 
+    it("preserves a previously installed shadow task hook replacer", () => {
+        const { generator } = makeGenerator();
+        const previousReplacer = vi.fn();
+        generator._replaceShadowTaskHooks = previousReplacer;
+        enableMorphTargetShadows(generator);
+        const nextEnsure = vi.fn();
+        const nextRender = vi.fn();
+
+        generator._replaceShadowTaskHooks!(nextEnsure, nextRender);
+
+        expect(previousReplacer).toHaveBeenCalledWith(nextEnsure, nextRender);
+    });
+
     it.each(["deformation-first", "cache-first"] as const)("composes with deformable shadows when enabled %s", async (order) => {
         const { generator } = makeGenerator();
         const engine = { _device: { createTexture: vi.fn(() => ({ destroy: vi.fn() })) }, surfaces: [{ _renderingContexts: [] }] } as unknown as EngineContext;
