@@ -137,7 +137,9 @@ function loadingMeshFactory(engine: EngineContext, _scene: SceneContext, handedn
     const mesh = createBox(engine, 1);
     mesh.name = `xr-controller-loading-${handedness}`;
     const mat = createStandardMaterial();
-    mat.diffuseColor = [0, 0, 0];
+    // Diffuse must stay white: with `disableLighting` the shader multiplies
+    // emissive by diffuse, so a zero diffuse would render the ghost black.
+    mat.diffuseColor = [1, 1, 1];
     mat.emissiveColor = [LOADING_GLOW[0], LOADING_GLOW[1], LOADING_GLOW[2]];
     mat.disableLighting = true;
     mat.alpha = 0.45;

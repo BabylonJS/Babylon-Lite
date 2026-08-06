@@ -113,6 +113,10 @@ const DEFAULTS = {
     cursorSize: 0.03,
 };
 
+/** @internal Hits closer than this (metres) are treated as "inside a mesh" and
+ *  ignored, so a bounding box enclosing the controller can't pin the cursor. */
+const MIN_PICK_DISTANCE = 0.02;
+
 /**
  * Pure geometry for the laser + cursor given a ray and a hit distance. Separated
  * from mesh mutation so it is unit-testable without a GPU device.
@@ -158,7 +162,9 @@ export function createXrPointer(engine: EngineContext, scene: SceneContext, opti
 /** @internal Build an unlit emissive material for a pointer visual. */
 function unlitMaterial(color: [number, number, number], doubleSided = false): StandardMaterialProps {
     const mat = createStandardMaterial();
-    mat.diffuseColor = [0, 0, 0];
+    // Keep diffuse white: with `disableLighting` the shader outputs
+    // `emissive * diffuse * baseColor`, so a zero diffuse would render black.
+    mat.diffuseColor = [1, 1, 1];
     mat.emissiveColor = [color[0], color[1], color[2]];
     mat.disableLighting = true;
     if (doubleSided) {
@@ -167,19 +173,20 @@ function unlitMaterial(color: [number, number, number], doubleSided = false): St
     return mat;
 }
 
-/** @internal Orient a torus ring (hole axis = local +Y) to face along `forward`,
- *  i.e. rotate local +Y onto the ray direction via the shortest arc. */
-function orientRingToForward(ring: Mesh, forward: [number, number, number]): void {
-    const d = forward[1]; // dot((0,1,0), forward)
+/** @internal Orient a torus ring (hole axis = local +Y) so its hole axis aligns with
+ *  `dir` (a unit vector) via the shortest arc — used to lay the ring flat on the
+ *  surface it points at (dir = surface normal) or, failing that, face the ray. */
+function orientRingToDir(ring: Mesh, dir: [number, number, number]): void {
+    const d = dir[1]; // dot((0,1,0), dir)
     if (d < -0.999999) {
         // Antiparallel: 180° about X.
         ring.rotationQuaternion.set(1, 0, 0, 0);
         return;
     }
-    // axis = cross((0,1,0), forward) = (fz, 0, -fx); w = 1 + dot.
-    const x = forward[2];
+    // axis = cross((0,1,0), dir) = (dz, 0, -dx); w = 1 + dot.
+    const x = dir[2];
     const y = 0;
-    const z = -forward[0];
+    const z = -dir[0];
     const w = 1 + d;
     const len = Math.hypot(x, y, z, w) || 1;
     ring.rotationQuaternion.set(x / len, y / len, z / len, w / len);
@@ -204,12 +211,12 @@ function ensureUnit(pointer: XrPointer, source: DomXrInputSource): PointerUnit {
     laser.receiveShadows = false;
     laser.visible = false;
 
-    // Selection ring (Babylon.js "gazeTracker" torus): a flat ring placed at the hit
-    // point and oriented to face the controller. Double-sided so it reads from behind.
+    // Selection ring (Babylon.js "gazeTracker" torus): a thin flat ring laid on the
+    // surface it points at. Double-sided so it reads from either side.
     const cursor = createTorus(engine, {
         diameter: opts.cursorSize,
-        thickness: opts.cursorSize * 0.35,
-        tessellation: 20,
+        thickness: opts.cursorSize * 0.12,
+        tessellation: 24,
     });
     cursor.name = "xr-pointer-cursor";
     const cursorMat = unlitMaterial(opts.cursorColor, true);
@@ -277,8 +284,12 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager): void
         const forward: [number, number, number] = [fx, fy, fz];
 
         const info = pickWithRay(scene, { origin, direction: forward, length: opts.maxLength }, { predicate: opts.predicate });
-        const hitMesh = info.hit ? (info.pickedMesh as Mesh | null) : null;
-        const visual = computePointerVisual(origin, forward, info.hit ? info.distance : -1, opts.maxLength);
+        // Ignore hits at (near) zero distance: those happen when the ray origin sits
+        // inside a mesh's bounding box (e.g. a cube floating around the controller),
+        // which would otherwise pin the cursor to the controller and never release.
+        const hit = info.hit && info.distance > MIN_PICK_DISTANCE;
+        const hitMesh = hit ? (info.pickedMesh as Mesh | null) : null;
+        const visual = computePointerVisual(origin, forward, hit ? info.distance : -1, opts.maxLength);
 
         // Laser: oriented by the target-ray rotation, centred on the beam, scaled to length.
         const rot = mat4Decompose(m).rotation;
@@ -288,13 +299,18 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager): void
         unit.laser.visible = true;
 
         // Selection ring at the hit point: scaled with distance (so it keeps a roughly
-        // constant apparent size) and rotated to face back along the ray toward the
-        // controller. Hidden entirely on a miss.
+        // constant apparent size) and laid flat on the hit surface via its normal
+        // (falling back to facing the controller). Hidden entirely on a miss.
         if (visual.hit) {
             unit.cursor.position.set(visual.cursorPosition[0], visual.cursorPosition[1], visual.cursorPosition[2]);
             const s = Math.sqrt(info.distance) || 1;
             unit.cursor.scaling.set(s, s, s);
-            orientRingToForward(unit.cursor, forward);
+            const n = info.pickedNormalWorld;
+            if (n) {
+                orientRingToDir(unit.cursor, n as [number, number, number]);
+            } else {
+                orientRingToDir(unit.cursor, [-fx, -fy, -fz]);
+            }
             unit.cursor.visible = true;
         } else {
             unit.cursor.visible = false;

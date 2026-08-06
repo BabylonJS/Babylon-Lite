@@ -99,10 +99,13 @@ function transformDir(m: Mat4, x: number, y: number, z: number, out: [number, nu
 
 /** @internal Ray/AABB slab test. Returns the nearest positive entry distance (t along
  *  the ray, in the ray's own units) or `-1` on a miss. `t` is comparable to world
- *  distance because the local ray shares the world ray's parameterisation. */
-function rayAabb(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, aabb: LocalAabb, maxT: number): number {
+ *  distance because the local ray shares the world ray's parameterisation. On a hit
+ *  entering from outside the box, `axisOut[0]` is set to the entry slab axis (0/1/2);
+ *  it stays `-1` when the ray origin is already inside the box (t = 0). */
+function rayAabb(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, aabb: LocalAabb, maxT: number, axisOut: number[]): number {
     let tmin = 0;
     let tmax = maxT;
+    let axis = -1;
     const o = [ox, oy, oz];
     const d = [dx, dy, dz];
     for (let a = 0; a < 3; a++) {
@@ -126,6 +129,7 @@ function rayAabb(ox: number, oy: number, oz: number, dx: number, dy: number, dz:
             }
             if (t1 > tmin) {
                 tmin = t1;
+                axis = a;
             }
             if (t2 < tmax) {
                 tmax = t2;
@@ -135,6 +139,7 @@ function rayAabb(ox: number, oy: number, oz: number, dx: number, dy: number, dz:
             }
         }
     }
+    axisOut[0] = axis;
     return tmin;
 }
 
@@ -157,9 +162,13 @@ export function pickWithRay(scene: SceneContext, ray: Ray, options?: RayPickOpti
 
     const localOrigin: [number, number, number] = [0, 0, 0];
     const localDir: [number, number, number] = [0, 0, 0];
+    const axisOut = [-1];
 
     let bestT = ray.length;
     let bestMesh: Mesh | null = null;
+    let bestAxis = -1;
+    let bestDirSign = 0;
+    let bestInvWorld: Mat4 | null = null;
 
     for (let i = 0; i < meshes.length; i++) {
         const mesh = meshes[i]!;
@@ -179,10 +188,14 @@ export function pickWithRay(scene: SceneContext, ray: Ray, options?: RayPickOpti
         }
         transformPoint(invWorld, ox, oy, oz, localOrigin);
         transformDir(invWorld, dx, dy, dz, localDir);
-        const t = rayAabb(localOrigin[0], localOrigin[1], localOrigin[2], localDir[0], localDir[1], localDir[2], aabb, bestT);
+        axisOut[0] = -1;
+        const t = rayAabb(localOrigin[0], localOrigin[1], localOrigin[2], localDir[0], localDir[1], localDir[2], aabb, bestT, axisOut);
         if (t >= 0 && t < bestT) {
             bestT = t;
             bestMesh = mesh;
+            bestAxis = axisOut[0]!;
+            bestDirSign = bestAxis >= 0 ? Math.sign(localDir[bestAxis]!) : 0;
+            bestInvWorld = invWorld;
         }
     }
 
@@ -191,6 +204,22 @@ export function pickWithRay(scene: SceneContext, ray: Ray, options?: RayPickOpti
         info.distance = bestT;
         info.pickedMesh = bestMesh;
         info.pickedPoint = [ox + dx * bestT, oy + dy * bestT, oz + dz * bestT];
+        // Outward face normal at the entry face (only when entering from outside):
+        // local axis normal points opposite the ray, transformed to world by the
+        // inverse-transpose of the mesh world matrix (= transpose of `invWorld`).
+        if (bestAxis >= 0 && bestInvWorld) {
+            const nl = [0, 0, 0];
+            nl[bestAxis] = -bestDirSign;
+            const iw = bestInvWorld;
+            let wnx = iw[0]! * nl[0]! + iw[1]! * nl[1]! + iw[2]! * nl[2]!;
+            let wny = iw[4]! * nl[0]! + iw[5]! * nl[1]! + iw[6]! * nl[2]!;
+            let wnz = iw[8]! * nl[0]! + iw[9]! * nl[1]! + iw[10]! * nl[2]!;
+            const len = Math.hypot(wnx, wny, wnz) || 1;
+            wnx /= len;
+            wny /= len;
+            wnz /= len;
+            info.pickedNormalWorld = [wnx, wny, wnz];
+        }
     }
     return info;
 }
