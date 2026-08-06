@@ -16,6 +16,8 @@ vi.mock("../../../../packages/babylon-lite/src/asset-container", () => ({ getCon
 vi.mock("../../../../packages/babylon-lite/src/material/standard/create-standard-material", () => ({
     createStandardMaterial: vi.fn(() => ({ diffuseColor: [0, 0, 0], alpha: 1 })),
 }));
+const { enableStandardSkeleton } = vi.hoisted(() => ({ enableStandardSkeleton: vi.fn() }));
+vi.mock("../../../../packages/babylon-lite/src/material/standard/enable-standard-mesh-features", () => ({ enableStandardSkeleton }));
 const { addToScene } = vi.hoisted(() => ({ addToScene: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/scene/scene-core", () => ({ addToScene }));
 const { removeFromScene } = vi.hoisted(() => ({ removeFromScene: vi.fn() }));
@@ -90,6 +92,9 @@ describe("loadHandMesh", () => {
         const loaded = await loadHandMesh({} as EngineContext, {} as SceneContext, "right", OPTS);
 
         expect(enableBoneControl).toHaveBeenCalled();
+        // The hand GLB is skinned + gets a Standard material, so Standard skinning must
+        // be enabled or it would render frozen at bind pose.
+        expect(enableStandardSkeleton).toHaveBeenCalled();
         // Right-hand GLB URL resolved against the base.
         expect(loadGltf).toHaveBeenCalledWith(expect.anything(), "https://cdn.example/HandMeshes/r_hand_rhs.glb");
         expect(loaded).not.toBeNull();

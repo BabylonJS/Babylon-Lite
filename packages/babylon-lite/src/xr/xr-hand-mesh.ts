@@ -29,6 +29,7 @@ import { loadGltf } from "../loader-gltf/load-gltf.js";
 import { enableBoneControl, getBoneByName, setBonePoseDeferred, bakeSkeleton } from "../skeleton/bone-control.js";
 import { getContainerMeshes } from "../asset-container.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
+import { enableStandardSkeleton } from "../material/standard/enable-standard-mesh-features.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
@@ -124,7 +125,11 @@ export async function loadHandMesh(engine: EngineContext, scene: SceneContext, h
     }
 
     // Semi-transparent tinted material (approximates Babylon's translucent hand shader,
-    // which is a NodeMaterial Lite can't parse). Lit, so the hand still shades.
+    // which is a NodeMaterial Lite can't parse). Lit, so the hand still shades. The hand
+    // GLB is skinned, so the Standard skinning ext must be enabled or the mesh would
+    // render frozen at bind pose (invisible / at the origin) instead of tracking the
+    // joints. Idempotent + process-global, same opt-in pattern as `enableBoneControl`.
+    enableStandardSkeleton();
     const mat = createStandardMaterial();
     mat.diffuseColor = [opts.color[0], opts.color[1], opts.color[2]];
     mat.alpha = opts.alpha;
