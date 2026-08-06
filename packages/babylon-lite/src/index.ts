@@ -174,6 +174,8 @@ export { readXrController } from "./xr/xr-controller.js";
 export type { XrControllerComponents, XrButtonState } from "./xr/xr-controller.js";
 export { createXrControllerModels, updateXrControllerModels, disposeXrControllerModels, controllerModels } from "./xr/xr-controller-models.js";
 export type { XrControllerModels, XrControllerModelOptions, XrControllerMeshFactory } from "./xr/xr-controller-models.js";
+export { createXrHandTracking, updateXrHandTracking, disposeXrHandTracking, handTracking } from "./xr/xr-hand.js";
+export type { XrHandTracking, XrHandTrackingOptions, XrHandJointMeshFactory } from "./xr/xr-hand.js";
 export { loadMotionController, updateMotionController, DEFAULT_PROFILES_BASE_URL } from "./xr/xr-motion-controller.js";
 export type { MotionController, XrMotionControllerProfileOptions } from "./xr/xr-motion-controller.js";
 

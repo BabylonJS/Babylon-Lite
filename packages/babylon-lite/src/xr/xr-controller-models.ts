@@ -293,6 +293,11 @@ export function updateXrControllerModels(models: XrControllerModels, input: XrIn
     ensureModule(models);
 
     for (const src of input.inputSources) {
+        // Hand-tracking sources render as joint spheres via the `handTracking` feature,
+        // not a controller model — skip them so a tracked hand never spawns a handle box.
+        if (src.source.hand) {
+            continue;
+        }
         seen.add(src.source);
         const unit = ensureUnit(models, src.source, src.handedness);
         startProfileLoad(models, src.source, unit);

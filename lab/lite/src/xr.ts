@@ -28,6 +28,7 @@ import {
     exitXr,
     pointerSelection,
     controllerModels,
+    handTracking,
     readXrController,
     mat4Compose,
     mat4Invert,
@@ -285,6 +286,11 @@ async function startSession(mode: XrSessionMode, scene: Parameters<typeof enterX
                 // gamepad state (Babylon.js parity). Falls back to a handle box while
                 // a model loads or if the source has no known profile / is offline.
                 controllerModels({ profiles: true }),
+                // Hand-tracking joint spheres (Babylon.js parity). When the runtime
+                // reports articulated hands, each hand renders 25 joint dots; the
+                // pointer ray + pinch-to-select keep working on hands too. No-op on
+                // devices without hand tracking.
+                handTracking(),
             ],
             onFrame: (ctx) => {
                 updateGrab(ctx);
