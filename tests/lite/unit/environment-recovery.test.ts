@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
+import { buildHdrSkyboxRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-hdr-skybox.js";
+import { computeSceneSize } from "../../../packages/babylon-lite/src/material/pbr/scene-size.js";
 import { parseEnvFile } from "../../../packages/babylon-lite/src/loader-env/env-parse.js";
-import { rebuildSceneEnvironment } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
+import { rebuildSceneEnvironment, rebuildSceneEnvironmentBackgrounds } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
 import type { EnvironmentRecoverySource } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
 import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
@@ -10,6 +12,18 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 vi.mock("../../../packages/babylon-lite/src/loader-env/rgbd-decode.js", () => ({
     uploadCubemapRGBD: vi.fn(() => makeTexture("specular")),
     decodeBrdfPng: vi.fn(() => makeTexture("brdf")),
+}));
+
+vi.mock("../../../packages/babylon-lite/src/material/pbr/background-hdr-skybox.js", () => ({
+    buildHdrSkyboxRenderable: vi.fn(() => ({ kind: "hdr-skybox" })),
+}));
+
+vi.mock("../../../packages/babylon-lite/src/material/pbr/scene-size.js", () => ({
+    computeSceneSize: vi.fn(() => ({
+        groundSize: 12,
+        skyboxSize: 24,
+        rootPosition: [1, 2, 3],
+    })),
 }));
 
 /** The subset of the fake texture the ref-count assertions need. */
@@ -95,6 +109,7 @@ describe("parseEnvFile", () => {
 
 describe("rebuildSceneEnvironment", () => {
     afterEach(() => {
+        vi.clearAllMocks();
         vi.unstubAllGlobals();
     });
 
@@ -229,5 +244,27 @@ describe("rebuildSceneEnvironment", () => {
         for (const texture of [first.specularCube, first.brdfLut, second.specularCube, second.brdfLut]) {
             expect(texture.destroy).toHaveBeenCalledOnce();
         }
+    });
+
+    it("restores an explicit HDR skybox size and position without recomputing scene bounds", async () => {
+        const textures = makeEnvironmentTextures();
+        const scene = {
+            ...makeScene(textures),
+            surface: { engine: makeEngine() },
+        } as SceneContext;
+        const source: EnvironmentRecoverySource = {
+            kind: "hdr",
+            url: "/assets/studio.hdr",
+            faceSize: 256,
+            useCubemapSkybox: true,
+            skipGround: true,
+            skyboxSize: 30,
+            skyboxPosition: [4, 5, 6],
+        };
+
+        await expect(rebuildSceneEnvironmentBackgrounds(scene, source)).resolves.toHaveLength(1);
+
+        expect(computeSceneSize).not.toHaveBeenCalled();
+        expect(buildHdrSkyboxRenderable).toHaveBeenCalledWith(scene, textures, 15, [4, 5, 6], expect.any(Array));
     });
 });

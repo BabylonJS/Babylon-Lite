@@ -1,5 +1,5 @@
 {
-  "rawKB": 59.8,
+  "rawKB": 59.9,
   "gzipKB": 23.8,
   "ignoredRawKB": 1483.8,
   "runtimeChunks": [
@@ -7,5 +7,5 @@
     "scene172-standard-renderable-dn-Vs64N.js",
     "scene172.js"
   ],
-  "rawBytes": 61275
+  "rawBytes": 61297
 }

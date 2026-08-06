@@ -419,6 +419,9 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
     task._lastVersion = (task.scene as SceneContext)._renderableVersion;
 }
 
+/** @internal Lazy task-transfer support. */
+export { resolvePendingMeshes as _resolvePendingMeshes, buildBindings as _buildBindings };
+
 function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
     const config = task._config;
     const att = task._colorAttachment;
@@ -467,11 +470,14 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
     // extension raises MAX_LIGHTS after this task was first recorded).
     refreshTaskSceneBindGroup(task, eng);
     const camera = task._config.cam ?? sc.camera;
-    if (!task._config._skipClusteredLights && targetSignature._colorFormat) {
-        sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
+    // Depth-only passes use no-colour views, so only colour passes need scene-light work.
+    if (targetSignature._colorFormat) {
+        if (!task._config._skipClusteredLights) {
+            sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
+        }
+        refreshSceneLightsUBO(eng, sc);
     }
     _writePassSceneUBO(task, eng, sc, camera);
-    refreshSceneLightsUBO(eng, sc);
     // Expose the active camera to per-binding `update()` calls. Some renderables
     // (e.g. transparent billboard systems) need it to compute view-space sort
     // depths during their update.

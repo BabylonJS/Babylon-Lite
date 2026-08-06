@@ -1,5 +1,5 @@
 {
-  "rawKB": 64.7,
+  "rawKB": 64.8,
   "gzipKB": 25.3,
   "ignoredRawKB": 1483.8,
   "runtimeChunks": [
@@ -7,5 +7,5 @@
     "scene173-standard-renderable-DmR_ooSM.js",
     "scene173.js"
   ],
-  "rawBytes": 66300
+  "rawBytes": 66323
 }
