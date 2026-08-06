@@ -67,6 +67,8 @@ export interface XrSessionContext {
     readonly session: XRSession;
     readonly binding: XrGpuBinding;
     readonly layer: XRProjectionLayer;
+    /** Active reference space the session renders + tracks input against. Teleportation
+     *  swaps this for an offset space to move the viewer. */
     readonly referenceSpace: XRReferenceSpace;
     readonly scene: SceneContext;
     readonly engine: EngineContext;
@@ -79,6 +81,9 @@ export interface XrSessionContext {
 
     /** @internal Live feature instances, driven per frame and disposed on end. */
     _features: XrFeatureHandle[];
+    /** @internal Mutable backing for {@link referenceSpace}. Teleportation swaps this to
+     *  an offset reference space; the public getter always reflects the current one. */
+    _referenceSpace: XRReferenceSpace;
     /** @internal */
     _units: XrEyeUnit[];
     /** @internal */
@@ -188,7 +193,9 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
         session,
         binding,
         layer,
-        referenceSpace,
+        get referenceSpace() {
+            return ctx._referenceSpace;
+        },
         scene,
         engine,
         colorFormat,
@@ -198,6 +205,7 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
         },
         input,
         _features: [],
+        _referenceSpace: referenceSpace,
         _units: [],
         _options: options,
         _rafId: 0,

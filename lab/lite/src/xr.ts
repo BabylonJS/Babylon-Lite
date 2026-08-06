@@ -29,6 +29,7 @@ import {
     pointerSelection,
     controllerModels,
     handTracking,
+    teleportation,
     readXrController,
     mat4Compose,
     mat4Invert,
@@ -83,6 +84,8 @@ const GRAB_RADIUS_SQ = GRAB_RADIUS * GRAB_RADIUS;
 const GRAB_HIGHLIGHT: [number, number, number] = [0.35, 0.3, 0.05];
 
 const grabbables: Grabbable[] = [];
+/** The teleportable floor, created in `run()` and passed to the teleportation feature. */
+let floor: Mesh | null = null;
 /** Set a grabbable material's emissive tint. Runtime emissive edits must mark the
  *  material UBO dirty or the change never reaches the GPU (the UBO only re-uploads
  *  when its version bumps). */
@@ -265,8 +268,9 @@ async function startSession(mode: XrSessionMode, scene: Parameters<typeof enterX
             features: [
                 pointerSelection({
                     // Don't let the ray latch onto a cube the user is currently holding
-                    // (its AABB encloses the controller, which would pin the cursor).
-                    predicate: (mesh) => !heldMeshes.has(mesh as Mesh),
+                    // (its AABB encloses the controller, which would pin the cursor), nor
+                    // onto the floor (that's the teleport target, not a selectable object).
+                    predicate: (mesh) => mesh !== floor && !heldMeshes.has(mesh as Mesh),
                     onHoverStart: (mesh) => {
                         const g = grabbableOf(mesh);
                         if (g && !heldMeshes.has(mesh)) {
@@ -291,6 +295,10 @@ async function startSession(mode: XrSessionMode, scene: Parameters<typeof enterX
                 // pointer ray + pinch-to-select keep working on hands too. No-op on
                 // devices without hand tracking.
                 handTracking(),
+                // Thumbstick teleportation + snap-turn (Babylon.js parity). Push a
+                // thumbstick forward to aim at the floor and release to teleport; push
+                // left/right to snap-turn.
+                teleportation({ floorMeshes: floor ? [floor] : [] }),
             ],
             onFrame: (ctx) => {
                 updateGrab(ctx);
@@ -324,6 +332,20 @@ async function run(): Promise<void> {
         const scene = createSceneContext(engine);
         scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.4, 2.2, { x: 0, y: 1.15, z: -0.5 });
         addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+
+        // A large flat floor at y=0 so teleportation has somewhere to land. Top face
+        // sits exactly on the local-floor origin plane; the box is thin.
+        {
+            const g = createBox(engine, 1);
+            g.name = "floor";
+            g.scaling.set(12, 0.02, 12);
+            g.position.set(0, -0.01, 0);
+            const gmat = createStandardMaterial();
+            gmat.diffuseColor = [0.22, 0.24, 0.3];
+            g.material = gmat;
+            addToScene(scene, g);
+            floor = g;
+        }
 
         // Five small cubes in a shallow arc directly in front, at roughly chest
         // height and within arm's reach, so they can be grabbed in the headset.

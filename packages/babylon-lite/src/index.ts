@@ -176,6 +176,8 @@ export { createXrControllerModels, updateXrControllerModels, disposeXrController
 export type { XrControllerModels, XrControllerModelOptions, XrControllerMeshFactory } from "./xr/xr-controller-models.js";
 export { createXrHandTracking, updateXrHandTracking, disposeXrHandTracking, handTracking } from "./xr/xr-hand.js";
 export type { XrHandTracking, XrHandTrackingOptions, XrHandJointMeshFactory } from "./xr/xr-hand.js";
+export { createXrTeleportation, updateXrTeleportation, disposeXrTeleportation, teleportation } from "./xr/xr-teleport.js";
+export type { XrTeleportation, XrTeleportationOptions } from "./xr/xr-teleport.js";
 export { loadMotionController, updateMotionController, DEFAULT_PROFILES_BASE_URL } from "./xr/xr-motion-controller.js";
 export type { MotionController, XrMotionControllerProfileOptions } from "./xr/xr-motion-controller.js";
 
