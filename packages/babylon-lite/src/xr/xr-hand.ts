@@ -56,7 +56,9 @@ export interface XrHandTrackingOptions {
     handMeshRightFilename?: string;
     /** Hand-mesh diffuse tint. Default Babylon's hand purple. */
     handColor?: readonly [number, number, number];
-    /** Hand-mesh alpha (`< 1` = translucent). Default `0.65`. */
+    /** Hand-mesh alpha (`< 1` = translucent). Default `1` (opaque). A translucent hand
+     *  shows its own far fingers through the near ones (nearer fragments can't occlude
+     *  farther ones once alpha blending disables depth writes), so the default is solid. */
     handAlpha?: number;
     /** Diffuse colour of the default joint spheres. Defaults to a light blue-white. */
     jointColor?: readonly [number, number, number];
@@ -143,7 +145,7 @@ export function createXrHandTracking(engine: EngineContext, scene: SceneContext,
             leftFilename: options.handMeshLeftFilename ?? DEFAULT_HAND_LEFT,
             rightFilename: options.handMeshRightFilename ?? DEFAULT_HAND_RIGHT,
             color: options.handColor ?? DEFAULT_HAND_COLOR,
-            alpha: options.handAlpha ?? 0.65,
+            alpha: options.handAlpha ?? 1,
         },
         _mod: null,
         _modLoading: false,
