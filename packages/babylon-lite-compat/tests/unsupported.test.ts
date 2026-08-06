@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { LiteCompatError, unsupported } from "../src/error";
+import { ParticleSystem } from "../src/particles/particle-system";
 import {
     MultiMaterial,
     ShaderMaterial,
     RectAreaLight,
     ClusteredLightContainer,
-    ParticleSystem,
     GPUParticleSystem,
     SolidParticleSystem,
     HighlightLayer,
