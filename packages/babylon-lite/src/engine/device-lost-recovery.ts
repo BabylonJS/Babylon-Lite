@@ -109,7 +109,7 @@ function arm(engine: EngineContext, state: DeviceLostRecoveryState): void {
         }
 
         void import("./device-lost-recovery-run.js")
-            .then(({ _runDeviceLostRecovery }) => _runDeviceLostRecovery(engine, state, registrations))
+            .then(({ runDeviceLostRecovery }) => runDeviceLostRecovery(engine, state, registrations))
             .then(
                 () => {
                     arm(engine, state);
