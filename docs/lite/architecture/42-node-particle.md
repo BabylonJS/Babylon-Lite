@@ -1185,7 +1185,7 @@ Use conversion for graph extraction. The oracle's direct parse path does not pre
 
 ### 13.3 Visual scenes
 
-All six Lite scenes seed after build, synchronize one billboard, register the frozen scene, and use a black clear color. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 278 prepares its flow matrix once and runs 300 ratio-1 steps. Its Babylon reference calls `scene.updateTransformMatrix(true)` before those manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render.
+All six Lite scenes seed after build, synchronize one billboard, register the frozen scene, and use a black clear color. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 280 prepares its flow matrix once and runs 300 ratio-1 steps. Its Babylon reference calls `scene.updateTransformMatrix(true)` before those manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render.
 
 | Scene                          | Coverage                                                                      | Camera                                                     | MAD ceiling | Raw ceiling |
 | ------------------------------ | ----------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------- | ----------- |
@@ -1194,11 +1194,11 @@ All six Lite scenes seed after build, synchronize one billboard, register the fr
 | 264 `scene264-npe-change-size` | Gradient, GradientValue, UpdateSize                                           | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01`      | `44.1 KB`   |
 | 276 `scene276-npe-animations`  | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30       | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
 | 277 `scene277-npe-attractor`   | UpdateAttractor after position integration, attractor `(0,2,0)`, strength `8` | alpha `-pi/2`, beta `1.2`, radius `5`, target `(0,0.8,0)`  | `0.01`      | `45.0 KB`   |
-| 278 `scene278-npe-flow-map`    | UpdateFlowMap after integration, flipped repel map, strength `15`, size `0.6` | alpha `pi/2`, beta `pi/2`, radius `9`, target `(-5,0,0)`   | `0.01`      | `45.0 KB`   |
+| 280 `scene280-npe-flow-map`    | UpdateFlowMap after integration, flipped repel map, strength `15`, size `0.6` | alpha `pi/2`, beta `pi/2`, radius `9`, target `(-5,0,0)`   | `0.01`      | `45.0 KB`   |
 
 Each camera uses near plane `0.1` and far plane `100`. Each scene sets both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start.
 
-Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, and 278 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all six scenes.
+Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, and 280 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all six scenes.
 
 ### 13.4 Bundle manifests and conditional content
 
@@ -1207,15 +1207,15 @@ Current tracked measurements are:
 | Scene | Runtime raw | Runtime gzip | Ignored graph payload raw |   Ceiling |
 | ----- | ----------: | -----------: | ------------------------: | --------: |
 | 262   |   `40.2 KB` |    `24.2 KB` |                 `28.5 KB` | `44.1 KB` |
-| 263   |   `42.3 KB` |    `24.8 KB` |                 `27.5 KB` | `44.1 KB` |
+| 263   |   `42.2 KB` |    `24.8 KB` |                 `27.5 KB` | `44.1 KB` |
 | 264   |   `40.4 KB` |    `26.0 KB` |                 `34.4 KB` | `44.1 KB` |
-| 276   |   `44.5 KB` |    `25.3 KB` |                 `27.1 KB` | `45.0 KB` |
-| 277   |   `42.2 KB` |    `25.4 KB` |                 `29.8 KB` | `45.0 KB` |
-| 278   |   `43.0 KB` |    `26.2 KB` |                 `31.0 KB` | `45.0 KB` |
+| 276   |   `44.4 KB` |    `25.4 KB` |                 `27.1 KB` | `45.0 KB` |
+| 277   |   `42.2 KB` |    `25.5 KB` |                 `29.8 KB` | `45.0 KB` |
+| 280   |   `43.0 KB` |    `26.2 KB` |                 `31.0 KB` | `45.0 KB` |
 
-Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, and 278 as sprite users because particles render through billboard sprite modules.
+Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, and 280 as sprite users because particles render through billboard sprite modules.
 
-The particle bundle-content test always requires a nonempty runtime chunk list for each of the six scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/direction/angle update, CPU texture decode, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, and scene 278 must fetch `update-flow-map-block` plus the remaining optional registry. Only scene 278 may include `npe-texture-content` in a fetched runtime chunk.
+The particle bundle-content test always requires a nonempty runtime chunk list for each of the six scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/direction/angle update, CPU texture decode, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, and scene 280 must fetch `update-flow-map-block` plus the remaining optional registry. Only scene 280 may include `npe-texture-content` in a fetched runtime chunk.
 
 When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, and `math/mat4-invert.ts`. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
 
@@ -1337,25 +1337,25 @@ lab/lite/src/lite/scene263.ts
 lab/lite/src/lite/scene264.ts
 lab/lite/src/lite/scene276.ts
 lab/lite/src/lite/scene277.ts
-lab/lite/src/lite/scene278.ts
+lab/lite/src/lite/scene280.ts
 lab/lite/src/shared/scene262-npe.ts
 lab/lite/src/shared/scene263-npe.ts
 lab/lite/src/shared/scene264-npe.ts
 lab/lite/src/shared/scene276-npe.ts
 lab/lite/src/shared/scene277-npe.ts
-lab/lite/src/shared/scene278-npe.ts
+lab/lite/src/shared/scene280-npe.ts
 lab/public/bundle/manifest/scene262.json
 lab/public/bundle/manifest/scene263.json
 lab/public/bundle/manifest/scene264.json
 lab/public/bundle/manifest/scene276.json
 lab/public/bundle/manifest/scene277.json
-lab/public/bundle/manifest/scene278.json
+lab/public/bundle/manifest/scene280.json
 tests/lite/parity/scenes/scene262-npe-size.spec.ts
 tests/lite/parity/scenes/scene263-npe-sphere.spec.ts
 tests/lite/parity/scenes/scene264-npe-change-size.spec.ts
 tests/lite/parity/scenes/scene276-npe-animations.spec.ts
 tests/lite/parity/scenes/scene277-npe-attractor.spec.ts
-tests/lite/parity/scenes/scene278-npe-flow-map.spec.ts
+tests/lite/parity/scenes/scene280-npe-flow-map.spec.ts
 tests/lite/unit/npe-particle-flow-map.test.ts
 tests/lite/unit/npe-particle-bundle-content.test.ts
 ```

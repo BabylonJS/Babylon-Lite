@@ -12,7 +12,7 @@ interface BundleInfo {
 
 const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
-const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 278];
+const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280];
 const UNUSED_FEATURE_CHUNK =
     /registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|direction|angle)-block|npe-texture-content|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 
@@ -27,7 +27,7 @@ describe("Particle bundle feature isolation", () => {
                     UNUSED_FEATURE_CHUNK.test(chunk) &&
                     !(sceneId === 263 && chunk.includes("registry-extra-emitters")) &&
                     !(sceneId === 277 && (chunk.includes("registry-extra-remaining") || chunk.includes("update-attractor-block"))) &&
-                    !(sceneId === 278 && (chunk.includes("registry-extra-remaining") || chunk.includes("update-flow-map-block") || chunk.includes("npe-texture-content")))
+                    !(sceneId === 280 && (chunk.includes("registry-extra-remaining") || chunk.includes("update-flow-map-block") || chunk.includes("npe-texture-content")))
             );
             expect(offenders, `scene${sceneId} fetches unused particle feature chunks`).toEqual([]);
             if (sceneId === 277) {
@@ -40,14 +40,14 @@ describe("Particle bundle feature isolation", () => {
                     "scene277 must fetch the remaining optional registry"
                 ).toBe(true);
             }
-            if (sceneId === 278) {
+            if (sceneId === 280) {
                 expect(
                     chunks.some((chunk) => chunk.includes("update-flow-map-block")),
-                    "scene278 must fetch the flow-map evaluator"
+                    "scene280 must fetch the flow-map evaluator"
                 ).toBe(true);
                 expect(
                     chunks.some((chunk) => chunk.includes("registry-extra-remaining")),
-                    "scene278 must fetch the remaining optional registry"
+                    "scene280 must fetch the remaining optional registry"
                 ).toBe(true);
             }
 
@@ -68,7 +68,7 @@ describe("Particle bundle feature isolation", () => {
                             id
                         ) &&
                         !(sceneId === 277 && (id.includes("npe-registry-extra-remaining") || id.includes("update-attractor-block"))) &&
-                        !(sceneId === 278 && (id.includes("npe-registry-extra-remaining") || id.includes("update-flow-map-block") || id.includes("npe-texture-content")))
+                        !(sceneId === 280 && (id.includes("npe-registry-extra-remaining") || id.includes("update-flow-map-block") || id.includes("npe-texture-content")))
                 );
             expect(moduleOffenders, `scene${sceneId} folds unused optional particle features into runtime chunks`).toEqual([]);
         }

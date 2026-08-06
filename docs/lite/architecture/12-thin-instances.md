@@ -121,6 +121,8 @@ export function removeHierarchyInstance(pool: HierarchyInstancePool, index: numb
 export function setHierarchyInstanceCount(pool: HierarchyInstancePool, count: number): void;
 ```
 
+The instance `matrix` **composes** with the template hierarchy — it behaves like a parent transform node added above the root, so the final world of each descendant is `matrix * meshWorld` (stored per mesh as `meshWorld⁻¹ * matrix * meshWorld`, since the shader draws at `finalWorld = mesh.world * instanceMatrix`). The identity matrix therefore reproduces the template unchanged. The pool must not divide out the root's world matrix: a `loadGltf()` root carries the RH→LH conversion as scaling `(-1, 1, 1)`, and cancelling it would mirror every instance and invert its winding.
+
 `createHierarchyInstancePool()` walks all descendant meshes and assigns each one its own thin-instance matrix buffer at the requested capacity, then sets active count to zero. The source meshes therefore become render carriers for the pool: they do not draw the template by themselves, but they must stay `visible !== false` so their thin instances can draw. Do not hide a hierarchy pool with `setSubtreeVisible(root, false)`; clear it with `setHierarchyInstanceCount(pool, 0)` instead. When growing, prefer `addHierarchyInstance(pool, matrix)` so the newly visible slot has a defined matrix before the next frame.
 
 ### Functions — GPU Sync (`thin-instance-gpu.ts`)

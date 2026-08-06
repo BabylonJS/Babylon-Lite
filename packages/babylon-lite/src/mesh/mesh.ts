@@ -148,6 +148,11 @@ export interface Mesh extends SceneNode {
     _authoredSign?: number;
     /** @internal Reason cloning this mesh is currently forbidden. */
     _clone?: string;
+    /** @internal Non-triangle primitive topology index: 1=point-list, 2=line-list,
+     *  3=line-strip, 4=triangle-strip. Undefined means triangle-list. */
+    _topology?: number;
+    /** @internal Per-polyline point counts retained by createLineSystem for stable-topology updates. */
+    _linePointCounts?: Uint32Array;
     /** @internal Highest CSM cascade this mesh casts into; undefined means all cascades. */
     _shadowMaxCascade?: number;
     /** @internal */
@@ -172,16 +177,18 @@ export interface Mesh extends SceneNode {
 
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.
  *  Used by all mesh creation paths (factories, loaders). */
-export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): void {
+export function initMeshTransform(partialMesh: Partial<Mesh> & { _flatNormal?: boolean }, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): Mesh {
     const wm = createWorldMatrixState(() => composeTrsLocalMatrix(mesh.position, mesh.rotationQuaternion, mesh.scaling));
     const onWmDirty = () => wm.markLocalDirty();
 
     const [iqx, iqy, iqz, iqw] = eulerToQuat(rx, ry, rz);
     const rq = new ObservableQuat(iqx, iqy, iqz, iqw, onWmDirty);
-    mesh.rotationQuaternion = rq;
-    mesh.rotation = createEulerProxy(rq);
-    mesh.position = new ObservableVec3(px, py, pz, onWmDirty);
-    mesh.scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
+    const rotationQuaternion = rq;
+    const rotation = createEulerProxy(rq);
+    const position = new ObservableVec3(px, py, pz, onWmDirty);
+    const scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
+
+    const mesh = { ...partialMesh, position, rotationQuaternion, rotation, scaling } as Mesh;
 
     if (!(mesh as unknown as Record<string, unknown>).children) {
         (mesh as unknown as Record<string, unknown>).children = [];
@@ -212,6 +219,7 @@ export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry
         enumerable: false,
     });
     attachWorldMatrixState(mesh, wm);
+    return mesh;
 }
 
 // ─── GPU Geometry Upload ─────────────────────────────────────────────

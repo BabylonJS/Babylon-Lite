@@ -25,12 +25,12 @@ function setBlockValue(blocks: MutableBlock[], name: string, value: number | num
 }
 
 /**
- * Scene 278 - NPE UpdateFlowMapBlock graph derived from the canonical scene 262 particle graph.
+ * Scene 280 - NPE UpdateFlowMapBlock graph derived from the canonical scene 262 particle graph.
  * The value edits depend on scene 262's block names; update them if that serialized fixture is regenerated.
  * The flow setup mirrors Babylon.js visual test "Particles - Flowmaps" (#39BW3H#0) with the asymmetric
  * repel-spots map used by playground #PPC2EI#7.
  */
-export function createScene278NpeJson(): unknown {
+export function createScene280NpeJson(): unknown {
     const graph = structuredClone(SCENE262_NPE_JSON) as unknown as { blocks: MutableBlock[] };
     const system = graph.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;
     const particle = system.inputs.find((input) => input.name === "particle")!;

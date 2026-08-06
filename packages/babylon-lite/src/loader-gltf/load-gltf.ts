@@ -108,7 +108,7 @@ function buildTightGltfMesh(engine: EngineContext, meshData: GltfMeshData, mater
               indexFormat: (uint32 ? "uint32" : "uint16") as GPUIndexFormat,
           } satisfies MeshGPU);
 
-    const mesh = {
+    const mesh = initMeshTransform({
         name,
         material,
         receiveShadows: false,
@@ -116,8 +116,7 @@ function buildTightGltfMesh(engine: EngineContext, meshData: GltfMeshData, mater
         boundMax,
         _gpu: gpu,
         _flatNormal: meshData._flatNormal,
-    } as unknown as Mesh;
-    initMeshTransform(mesh);
+    });
     mesh._cpuPositions = meshData._positions!;
     mesh._cpuNormals = meshData._normals!;
     mesh._cpuUvs = meshData._uvs!;

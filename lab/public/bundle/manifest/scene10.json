@@ -1,11 +1,11 @@
 {
-  "rawKB": 53.2,
+  "rawKB": 53.1,
   "gzipKB": 22,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene10-pbr-renderable-D-p5QF8J.js",
+    "scene10-pbr-renderable-B6Y5g2Xm.js",
     "scene10-singlelight-hemispheric-wgsl-xIKr6fiL.js",
     "scene10.js"
   ],
-  "rawBytes": 54452
+  "rawBytes": 54382
 }

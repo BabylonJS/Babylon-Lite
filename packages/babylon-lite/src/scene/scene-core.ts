@@ -15,6 +15,7 @@ import type { Renderable, PrePassRenderable, SceneUniformUpdater, MeshGroupBuild
 import type { TransformNode } from "./transform-node.js";
 import type { SceneNode } from "./scene-node.js";
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
+import type { EnvironmentRecoverySource } from "../loader-env/environment-recovery.js";
 import type { FrameGraph } from "../frame-graph/frame-graph.js";
 import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
 import { createRenderTask } from "../frame-graph/render-task.js";
@@ -196,6 +197,8 @@ export interface SceneContext extends RenderingContext {
     // ─── Stashed internal state (typed to avoid `as any` casts) ────
     /** @internal */
     _envTextures?: EnvironmentTextures;
+    /** @internal Loader metadata retained only while Scene recovery capture is enabled. */
+    _envRecoverySource?: EnvironmentRecoverySource;
     /** @internal Scene-owned shared LightsUniforms UBO state (group 0 binding 1). */
     _lightGpuState?: SceneLightGpuState;
 
@@ -310,7 +313,7 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
             ? createRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface })
             : surface.scRT;
         const depth = msaa ? undefined : createRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
-        _appendTask(fg, createRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth, clrColor: ctx.clearColor }, eng, ctx));
+        _appendTask(fg, createRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth }, eng, ctx));
     }
     ctx._disposables.push(() => fg.dispose());
     return ctx;

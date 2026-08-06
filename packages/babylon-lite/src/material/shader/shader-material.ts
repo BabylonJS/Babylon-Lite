@@ -47,6 +47,10 @@ export interface ShaderMaterialOptions {
      *  standard src-over; "additive" adds the fragment's premultiplied-by-alpha
      *  color to the framebuffer, which is the right choice for glows/light FX. */
     readonly blendMode?: "alpha" | "additive";
+    /** Explicit color-target blend state. When provided it REPLACES the blend `needAlphaBlending`/
+     *  `blendMode` would have chosen entirely — e.g. a material compositing color as ordinary
+     *  src-over while stamping the target's ALPHA channel to a fixed value (alpha zero/zero). */
+    readonly blend?: GPUBlendState;
     /** Mark this surface as transmissive/refractive: the renderer grabs the opaque scene color
      *  behind it just before it draws, so the fragment can sample what is *through* it (water,
      *  glass). Requires `needAlphaBlending` (the surface composites over the grabbed scene
@@ -56,6 +60,10 @@ export interface ShaderMaterialOptions {
     readonly transmissive?: boolean;
     readonly needAlphaTesting?: boolean;
     readonly backFaceCulling?: boolean;
+    /** Depth-buffer writes for this material's draws. Defaults to `true` for opaque materials and
+     *  `false` for alpha-blended ones (`needAlphaBlending`). An EXPLICIT value always wins: a blended
+     *  volume/veil may set `depthWrite: true` to publish its fragment depth so later draws depth-test
+     *  against it instead of compositing over it. */
     readonly depthWrite?: boolean;
     readonly depthCompare?: GPUCompareFunction;
     /** Compile/run the fragment stage even for depth-only render targets (no colour attachments).
@@ -133,6 +141,8 @@ export interface ShaderMaterial extends Material {
     readonly _tic?: boolean | 0;
     readonly needAlphaBlending: boolean;
     readonly blendMode: "alpha" | "additive";
+    /** Explicit blend-state override (see `ShaderMaterialOptions.blend`). */
+    readonly blend?: GPUBlendState;
     /** True for transmissive/refractive surfaces (see `ShaderMaterialOptions.transmissive`). */
     readonly transmissive: boolean;
     readonly needAlphaTesting: boolean;
@@ -142,6 +152,8 @@ export interface ShaderMaterial extends Material {
     readonly depthOnlyFragment: boolean;
     readonly depthBias: number;
     readonly depthBiasSlopeScale: number;
+    /** @internal Primitive topology override. Undefined means triangle-list. */
+    readonly _topology?: GPUPrimitiveTopology;
     /** Optional stencil-test state baked into the main-pass pipeline (mask write / discard). Set after
      *  creation (`mat.stencil = { ... }`) and call `enableMaterialStencil()` before `registerScene`. Default
      *  none. See `StencilState`. */
@@ -289,7 +301,8 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
     }
     defines.sort((a, b) => a.name.localeCompare(b.name));
 
-    if (options.transmissive && !(options.needAlphaBlending ?? false)) {
+    const needAlphaBlending = options.needAlphaBlending ?? !!options.blend;
+    if (options.transmissive && !needAlphaBlending) {
         throw new Error("ShaderMaterial: `transmissive` requires `needAlphaBlending` (the surface composites over the grabbed opaque scene color).");
     }
 
@@ -303,12 +316,15 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         storageBufferDecls,
         defines,
         _tic: options.useThinInstanceColors,
-        needAlphaBlending: options.needAlphaBlending ?? false,
+        needAlphaBlending,
         blendMode: options.blendMode ?? "alpha",
+        ...(options.blend ? { blend: options.blend } : {}),
         transmissive: options.transmissive ?? false,
         needAlphaTesting: options.needAlphaTesting ?? false,
         backFaceCulling: options.backFaceCulling ?? true,
-        depthWrite: options.depthWrite ?? true,
+        // Blended materials default to depth-read-only; an explicit option always wins (see the
+        // ShaderMaterialOptions doc). Opaque materials keep the depth-writing default.
+        depthWrite: options.depthWrite ?? !needAlphaBlending,
         depthCompare: options.depthCompare ?? "greater-equal",
         depthOnlyFragment: options.depthOnlyFragment ?? false,
         depthBias: options.depthBias ?? 0,

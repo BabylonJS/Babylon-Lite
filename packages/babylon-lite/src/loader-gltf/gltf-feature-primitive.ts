@@ -17,7 +17,7 @@ const feature: GltfFeature = {
         const mode = (meshData as { _primitive?: { mode?: number } })._primitive?.mode;
         const topo = mode === 0 ? 1 : mode === 1 ? 2 : mode === 3 ? 3 : mode === 5 ? 4 : undefined;
         if (topo) {
-            (mesh as { _topology?: number })._topology = topo;
+            mesh._topology = topo;
         }
         // A mesh whose net world-matrix determinant is positive (mirrored vs the RH→LH root flip) has
         // reversed triangle winding; flag it so the pipeline culls "front" (matching BJS, which flips

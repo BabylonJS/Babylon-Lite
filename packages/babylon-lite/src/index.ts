@@ -193,6 +193,8 @@ export {
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
 export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
+export { createLineSystemData, createLineSystem, createLines, updateLineSystem } from "./mesh/create-line-system.js";
+export type { LineSystemData, LineSystemDataOptions, LineSystemOptions, LinesOptions, LineSystemUpdateOptions } from "./mesh/create-line-system.js";
 export { getMeshGeometry } from "./mesh/get-mesh-geometry.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
@@ -232,6 +234,8 @@ export {
 export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions, TextureArrayFromUrlsOptions } from "./texture/texture-array.js";
 export { createDynamicTexture, updateDynamicTexture } from "./texture/dynamic-texture.js";
 export type { DynamicTexture2D, DynamicTexture2DOptions, DynamicTextureUpdateOptions } from "./texture/dynamic-texture.js";
+export { createHtmlTexture, updateHtmlTexture, requestHtmlTextureUpdate, disposeHtmlTexture, isHtmlInCanvasSupported } from "./texture/html-texture.js";
+export type { HtmlTexture2D, HtmlTexture2DOptions } from "./texture/html-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
@@ -260,6 +264,8 @@ export { createShaderNormalMaterialView } from "./material/shader/normal-view.js
 export type { ShaderNormalViewConfig } from "./material/shader/normal-view.js";
 export { createGridMaterial } from "./material/grid/grid-material.js";
 export type { GridMaterialOptions, GridVec3 } from "./material/grid/grid-material.js";
+export { createLineMaterial, setLineMaterialColor } from "./material/line/line-material.js";
+export type { LineMaterial, LineMaterialOptions } from "./material/line/line-material.js";
 export { createPbrNoColorMaterialView } from "./material/pbr/no-color-view.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
 export { loadNodeBlockEmitterWithGeometry } from "./material/node/node-geometry-block-loader.js";
@@ -782,6 +788,7 @@ export {
     createDebugNavMeshGeometry,
     getClosestPoint,
     findClosestPointWithin,
+    findClosestPointWithinInto,
     computePath,
     createNavCrowd,
     addAgent,
@@ -795,6 +802,7 @@ export {
     getNavigationRandomSeed,
     raycast,
     navRayBlocked,
+    navRayBlockedFast,
     addBoxObstacle,
     addCylinderObstacle,
     removeObstacle,
