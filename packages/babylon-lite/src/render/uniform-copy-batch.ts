@@ -8,6 +8,13 @@ interface UniformCopy {
     buffer: GPUBuffer;
     data: ArrayBufferView<ArrayBufferLike>;
     offset: number;
+    /** @internal Byte view over `data`, cached across frames. Callers queue the SAME staging array every
+     *  frame (a material's uniform image, a packet's system block), so rebuilding this view per copy per
+     *  frame was hundreds of throwaway allocations per frame in a material-heavy scene. Rebuilt only when
+     *  `data` itself is a different object. */
+    _u8?: Uint8Array;
+    /** @internal The `data` object `_u8` was built from. */
+    _for?: ArrayBufferView<ArrayBufferLike>;
 }
 
 /** @internal Per-render-task staging state for batched uniform uploads. */
@@ -91,7 +98,12 @@ function flushUniformCopyBatch(engine: EngineContext, batch: UniformCopyBatch): 
     for (let i = 0; i < count; i++) {
         const copy = copies[i]!;
         cursor = align4(cursor);
-        bytes.set(new U8(copy.data.buffer, copy.data.byteOffset, copy.data.byteLength), cursor);
+        let u8 = copy._u8;
+        if (!u8 || copy._for !== copy.data) {
+            u8 = copy._u8 = new U8(copy.data.buffer, copy.data.byteOffset, copy.data.byteLength);
+            copy._for = copy.data;
+        }
+        bytes.set(u8, cursor);
         cursor += copy.data.byteLength;
     }
     engine._device.queue.writeBuffer(batch._buffer!, 0, bytes.buffer, bytes.byteOffset, totalBytes);

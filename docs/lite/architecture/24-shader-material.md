@@ -199,10 +199,16 @@ export type ShaderUniformValue = number | readonly number[] | Float32Array;
 
 export function setShaderUniform(material: ShaderMaterial, name: string, value: ShaderUniformValue): void;
 export function setShaderTexture(material: ShaderMaterial, name: string, texture: Texture2D | null): void;
+export function enableShaderMaterialUniformCaching(): void;
 export function enableShaderUniformRangeUpdates(scene: SceneContext, material: ShaderMaterial): void;
 ```
 
 `setShaderUniform` validates that the name exists, the declared type is custom or settable, and the supplied float count matches the declaration. It increments `_uniformVersion` and `_uboVersion`.
+
+`enableShaderMaterialUniformCaching` is a process-wide opt-in for scenes with many ShaderMaterials. It caches each
+material's system/custom UBO layout and typed-array views, and serializes only custom uniform slots whose setter
+version changed. Call it before scene registration. Scenes that do not opt in retain the compact default serializer
+and do not include the caching implementation in their bundle.
 
 `enableShaderUniformRangeUpdates` is an opt-in for materials with large custom UBOs and one or a few animated
 values. After the custom UBO has been packed once, each changed custom value is written directly into the
@@ -467,7 +473,7 @@ fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
 | `setFloat`, `setVector3`, `setTexture` methods    | `setShaderUniform`, `setShaderTexture` standalone functions                |
 | `needAlphaBlending`                               | Transparent renderable + blend pipeline                                    |
 | `needAlphaTesting`                                | Hint only; shader performs discard                                         |
-| Per-draw thin-instance color opt-out              | `useThinInstanceColors: false` on a color-independent ShaderMaterial        |
+| Per-draw thin-instance color opt-out              | `useThinInstanceColors: false` on a color-independent ShaderMaterial       |
 
 ## Dependencies
 
@@ -491,7 +497,7 @@ Use Babylon.js doc playgrounds as BJS reference concepts while keeping Lite sour
 | ShaderMaterial uniform update  | Doc playground `#5T8G3I#16`       | Custom scalar/vector/color uniform mutation through `setShaderUniform` |
 | ShaderMaterial defines variant | Derived from doc `defines` option | WGSL const define emitted into prelude and included in pipeline key    |
 | ShaderMaterial alpha           | Lite-authored WGSL reference      | `needAlphaBlending` and explicit shader-side discard for alpha testing |
-| Thin-instance color opt-out    | Lite unit contract                | Override keeps matrix instancing but omits color layout, sync and bind  |
+| Thin-instance color opt-out    | Lite unit contract                | Override keeps matrix instancing but omits color layout, sync and bind |
 
 Implementation should add lab scenes using the next available scene IDs, plus parity specs and bundle-size ceilings. The BJS side may use Babylon `ShaderMaterial` with GLSL from the docs; the Lite side must use equivalent WGSL and the new Lite `ShaderMaterial`.
 

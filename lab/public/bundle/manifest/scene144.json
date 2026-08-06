@@ -1,6 +1,6 @@
 {
   "rawKB": 112.2,
-  "rawBytes": 114912,
+  "rawBytes": 114898,
   "gzipKB": 46,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,18 +8,18 @@
     "scene144-generate-mipmaps-C5YJgJPl.js",
     "scene144-gltf-animation-CpVtse4V.js",
     "scene144-gltf-ext-spec-gloss-D60sFZYX.js",
-    "scene144-gltf-feature-animations-CSB0Icv4.js",
+    "scene144-gltf-feature-animations-Ev5-LA9d.js",
     "scene144-gltf-feature-extras-VHPteGay.js",
-    "scene144-gltf-feature-registry-BBOXcZV3.js",
+    "scene144-gltf-feature-registry-DNCBn7kg.js",
     "scene144-gltf-feature-skeleton-XJsg8lSp.js",
     "scene144-gltf-glb-parser-h48FD3AD.js",
     "scene144-gltf-pbr-builder-ext-CfC-j6Ec.js",
     "scene144-ibl-fragment-CeRrvT96.js",
-    "scene144-pbr-renderable-eWNuV-Xe.js",
+    "scene144-pbr-renderable-ub1S_pqQ.js",
     "scene144-pbr-template-ext-CiHpOV5G.js",
     "scene144-rgbd-decode-CxdrPy1h.js",
     "scene144-scene-uniforms-FTYH6Ct0.js",
-    "scene144-skeleton-fragment-C7N1CbaC.js",
+    "scene144-skeleton-fragment-DzIf5fum.js",
     "scene144-texture-2d-DQo3n8D6.js",
     "scene144.js"
   ]

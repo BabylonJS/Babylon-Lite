@@ -84,7 +84,6 @@ export function createCsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         _lambda: cfg.lambda ?? 0.5,
         _cascadeBlendPercentage: cfg.cascadeBlendPercentage ?? 0.1,
         _stabilizeCascades: cfg.stabilizeCascades ?? false,
-        _depthClamp: false,
         _shadowMaxZ: cfg.shadowMaxZ ?? null,
         _bias: bias,
         _worldSpaceBias: worldSpaceBias === undefined ? null : Number.isFinite(worldSpaceBias) && worldSpaceBias > 0 ? worldSpaceBias : 0,
@@ -112,11 +111,7 @@ export function createCsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         _depthValues: new Float32Array([0, 1]),
         _shadowParamsUBO: createShadowParamsUBO(engine, bias, 1.0 / mapSize),
         _shadowUBO: createUniformBuffer(engine, new Float32Array(80)),
-        _config: {
-            _mapSize: mapSize,
-            _bias: bias,
-            _forceRefreshEveryFrame: csmCfg._forceRefreshEveryFrame,
-        },
+        _config: csmCfg,
         _version: 0,
         _csmCascadeCount: numCascades,
     };
@@ -184,15 +179,16 @@ export function getCsmReceiverTexture(sg: ShadowGenerator): Texture2D {
  * @returns A disposer that unregisters this callback.
  */
 export function onCsmReceiverUpdate(sg: ShadowGenerator, cb: (data: Float32Array) => void): () => void {
-    (sg._onReceiverData ??= []).push(cb);
+    const callbacks = (sg._onReceiverData ??= []);
+    callbacks.push(cb);
+    const state = sg._shadowTaskState as CsmTaskState | undefined;
+    if (state) {
+        cb(state._uboData);
+    }
     return () => {
-        const list = sg._onReceiverData;
-        if (!list) {
-            return;
-        }
-        const i = list.indexOf(cb);
+        const i = callbacks.indexOf(cb);
         if (i >= 0) {
-            list.splice(i, 1);
+            callbacks.splice(i, 1);
         }
     };
 }

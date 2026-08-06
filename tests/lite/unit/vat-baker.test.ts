@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { AnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group";
-import type { SkeletonBinding, SkeletonData } from "../../../packages/babylon-lite/src/animation/types";
+import { goToFrame, stopAnimation } from "../../../packages/babylon-lite/src/animation/animation-group";
+import { INTERP_LINEAR, PATH_ROTATION, PATH_TRANSLATION } from "../../../packages/babylon-lite/src/animation/types";
+import type { AnimationClip, NodeRest, SkeletonBinding, SkeletonData } from "../../../packages/babylon-lite/src/animation/types";
+import { createAnimationController } from "../../../packages/babylon-lite/src/skeleton/skeleton-updater";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
@@ -117,6 +120,182 @@ function binding(skeleton: SkeletonData): SkeletonBinding {
         runtimeSkeleton: skeleton,
     };
 }
+
+/** A rig with `boneCount` real bones — enough for a capture request to address more than bone 0. */
+function makeRigSkeleton(boneCount: number): SkeletonData {
+    const jointsBuffer = fakeBuffer();
+    const weightsBuffer = fakeBuffer();
+    return {
+        boneTexture: fakeTexture(),
+        boneCount,
+        jointsBuffer,
+        weightsBuffer,
+        joints: new Uint8Array(4 * boneCount),
+        weights: new Float32Array(4 * boneCount),
+        boneMatrices: new Float32Array(16 * boneCount),
+        joints1Buffer: null,
+        weights1Buffer: null,
+        joints1: null,
+        weights1: null,
+        _skinBuffers: { jointsBuffer, weightsBuffer, joints1Buffer: null, weights1Buffer: null },
+    };
+}
+
+/** A three-joint chain driven by a REAL AnimationController, so both the bake pass and a `goToFrame`
+ *  seek run the production evaluation/composition math rather than a stub. */
+function makeChainRig(): { group: AnimationGroup; skeleton: SkeletonData; binding: SkeletonBinding } {
+    const skeleton = makeRigSkeleton(3);
+    const identity = (): Float32Array => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    const inverseBindMatrices = new Float32Array(48);
+    for (let bone = 0; bone < 3; bone++) {
+        inverseBindMatrices.set(identity(), bone * 16);
+        inverseBindMatrices[bone * 16 + 13] = -bone; // distinct IBM per bone so the three rows cannot coincide
+    }
+    const binding: SkeletonBinding = {
+        jointNodes: [0, 1, 2],
+        inverseBindMatrices,
+        invMeshWorld: identity() as unknown as Mat4,
+        boneTexture: skeleton.boneTexture,
+        boneCount: 3,
+        boneMatrices: skeleton.boneMatrices,
+        runtimeSkeleton: skeleton,
+    };
+    const nodes: NodeRest[] = [0, 1, 2].map((i) => ({
+        parentIdx: i - 1,
+        tx: 0,
+        ty: i,
+        tz: 0,
+        rx: 0,
+        ry: 0,
+        rz: 0,
+        rw: 1,
+        sx: 1,
+        sy: 1,
+        sz: 1,
+    }));
+    const halfRoot = Math.SQRT1_2;
+    const clip: AnimationClip = {
+        name: "walk",
+        duration: 1,
+        frameRate: 4,
+        channels: [
+            { samplerIdx: 0, nodeIdx: 1, path: PATH_TRANSLATION },
+            { samplerIdx: 1, nodeIdx: 2, path: PATH_ROTATION },
+        ],
+        samplers: [
+            { input: new Float32Array([0, 1]), output: new Float32Array([0, 0, 0, 0.7, 1.3, -0.4]), interpolation: INTERP_LINEAR },
+            { input: new Float32Array([0, 1]), output: new Float32Array([0, 0, 0, 1, 0, halfRoot, 0, halfRoot]), interpolation: INTERP_LINEAR },
+        ],
+    };
+    const ctrl = createAnimationController(clip, nodes, [binding], []);
+    const group = {
+        name: "walk",
+        duration: 1,
+        frameRate: 4,
+        isPlaying: false,
+        currentTime: 0,
+        targetedAnimations: [],
+        speedRatio: 1,
+        loopAnimation: false,
+        weight: 1,
+        _stopped: false,
+        _ctrl: ctrl,
+        _gltfMixer: [clip, nodes, [binding]],
+    } as unknown as AnimationGroup;
+    return { group, skeleton, binding };
+}
+
+/** Exact float comparison by bit pattern — `toEqual` on Float32Arrays would also accept a NaN mismatch. */
+function sameBits(a: Float32Array, b: Float32Array): boolean {
+    if (a.length !== b.length) {
+        return false;
+    }
+    const au = new Uint32Array(a.buffer, a.byteOffset, a.length);
+    const bu = new Uint32Array(b.buffer, b.byteOffset, b.length);
+    for (let i = 0; i < au.length; i++) {
+        if (au[i] !== bu[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+describe("VAT bone-matrix capture", () => {
+    it("captures the same bits a per-frame goToFrame seek would read from the live skeleton", () => {
+        const captured = makeChainRig();
+        const mesh = makeMesh("rig", captured.skeleton);
+        const { engine } = makeEngine();
+
+        const baked = bakeVatMany(engine, [{ mesh, captureBoneMatrices: [0, 2] }], [captured.group])[0]!;
+
+        expect(baked.frameCount).toBe(5);
+        expect(Object.keys(baked.boneMatrices ?? {})).toEqual(["0", "2"]);
+
+        // The path this replaced: re-seek the same public group at every integer frame with an engine (which
+        // is what forced the per-frame bone-texture upload) and keep the requested rows.
+        const reference = makeChainRig();
+        const expected = new Map<number, Float32Array>([
+            [0, new Float32Array(baked.frameCount * 16)],
+            [2, new Float32Array(baked.frameCount * 16)],
+        ]);
+        for (let frame = 0; frame < baked.frameCount; frame++) {
+            goToFrame(reference.group, frame, engine);
+            for (const [bone, track] of expected) {
+                track.set(reference.binding.boneMatrices.subarray(bone * 16, bone * 16 + 16), frame * 16);
+            }
+        }
+        stopAnimation(reference.group);
+
+        for (const [bone, track] of expected) {
+            expect(
+                track.some((v) => v !== 0),
+                `bone ${bone} reference is not all zeros`
+            ).toBe(true);
+            expect(sameBits(baked.boneMatrices![bone]!, track), `bone ${bone} bit-identical`).toBe(true);
+        }
+        expect(sameBits(baked.boneMatrices![0]!, baked.boneMatrices![2]!)).toBe(false);
+    });
+
+    it("captures exactly the rows uploaded into the baked texture", () => {
+        const { group, skeleton } = makeChainRig();
+        const mesh = makeMesh("rig", skeleton);
+        const { engine, queue } = makeEngine();
+
+        const baked = bakeVatMany(engine, [{ mesh, captureBoneMatrices: [1] }], [group])[0]!;
+
+        const uploaded = new Float32Array(queue.writeTexture.mock.calls[0]![1] as ArrayBuffer);
+        const track = baked.boneMatrices![1]!;
+        for (let row = 0; row < baked.frameCount; row++) {
+            expect(sameBits(track.subarray(row * 16, row * 16 + 16), uploaded.subarray(row * 48 + 16, row * 48 + 32)), `row ${row}`).toBe(true);
+        }
+    });
+
+    it("uploads a texture payload the capture request cannot change", () => {
+        const bakeAndReadTexture = (captureBoneMatrices?: readonly number[]): Float32Array => {
+            const { group, skeleton } = makeChainRig();
+            const mesh = makeMesh("rig", skeleton);
+            const { engine, queue } = makeEngine();
+            const target = captureBoneMatrices ? { mesh, captureBoneMatrices } : { mesh };
+            const baked = bakeVatMany(engine, [target], [group])[0]!;
+            expect(queue.writeTexture).toHaveBeenCalledTimes(1);
+            const call = queue.writeTexture.mock.calls[0]!;
+            expect(call[2]).toEqual({ bytesPerRow: 12 * 16, rowsPerImage: baked.frameCount });
+            return new Float32Array(call[1] as ArrayBuffer);
+        };
+
+        // The un-requested bake is exactly the pre-capture behaviour, so this is the pre/post byte comparison.
+        expect(sameBits(bakeAndReadTexture([0, 1, 2]), bakeAndReadTexture())).toBe(true);
+    });
+
+    it("omits bones outside the skeleton and captures nothing when not requested", () => {
+        const { group, skeleton } = makeChainRig();
+        const mesh = makeMesh("rig", skeleton);
+        const { engine } = makeEngine();
+
+        expect(bakeVatMany(engine, [{ mesh }], [group])[0]!.boneMatrices).toBeUndefined();
+        expect(Object.keys(bakeVatMany(engine, [{ mesh, captureBoneMatrices: [1, 7, -1] }], [group])[0]!.boneMatrices ?? {})).toEqual(["1"]);
+    });
+});
 
 describe("VAT batching", () => {
     it("evaluates each frame once and shares exactly equal sibling payloads", () => {

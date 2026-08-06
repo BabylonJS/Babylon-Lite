@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { getCsmReceiverTexture } from "../../../packages/babylon-lite/src/shadow/csm-directional-shadow-generator";
+import { getCsmReceiverTexture, onCsmReceiverUpdate } from "../../../packages/babylon-lite/src/shadow/csm-directional-shadow-generator";
 import { acquireTexture, releaseTexture } from "../../../packages/babylon-lite/src/resource/gpu-pool";
+import type { CsmTaskState } from "../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks";
 import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 
 function fakeShadowGenerator(type: ShadowGenerator["_shadowType"] = "csm") {
@@ -53,5 +54,20 @@ describe("CSM receiver texture", () => {
 
         expect(() => getCsmReceiverTexture(generator)).toThrow("requires a CSM shadow generator");
         expect(texture.createView).not.toHaveBeenCalled();
+    });
+
+    it("replays the last receiver data to a late subscriber", () => {
+        const { generator } = fakeShadowGenerator();
+        const data = new Float32Array(80);
+        data[76] = 4;
+        generator._shadowTaskState = { _uboData: data, _cameraVersion: 1 } as CsmTaskState;
+        const callback = vi.fn();
+
+        const dispose = onCsmReceiverUpdate(generator, callback);
+
+        expect(callback).toHaveBeenCalledOnce();
+        expect(callback).toHaveBeenCalledWith(data);
+        dispose();
+        expect(generator._onReceiverData).toEqual([]);
     });
 });
