@@ -6,8 +6,7 @@ import { addToScene, startEngine, createEngine, createSceneContext, createDefaul
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const data = canvas.dataset;
+    const canvas = document.querySelector("canvas")!;
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
@@ -26,14 +25,17 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
     await startEngine(engine);
-    data.drawCalls = String(engine.drawCallCount);
-    data.camAlpha = String(cam.alpha);
-    data.camBeta = String(cam.beta);
-    data.camRadius = String(cam.radius);
-    data.camTarget = `${cam.target.x},${cam.target.y},${cam.target.z}`;
-    data.camFov = String(cam.fov);
-    data.initMs = String(performance.now() - __initStart);
-    data.ready = "true";
+    const { x, y, z } = cam.target;
+    Object.assign(canvas.dataset, {
+        drawCalls: engine.drawCallCount,
+        camAlpha: cam.alpha,
+        camBeta: cam.beta,
+        camRadius: cam.radius,
+        camTarget: `${x},${y},${z}`,
+        camFov: cam.fov,
+        initMs: performance.now() - __initStart,
+        ready: true,
+    });
 }
 
 main().catch(console.error);

@@ -68,9 +68,17 @@ function attachRecoveryCapture(engine: EngineContext): void {
                 scene._envRecoverySource = { kind: "env", url, brdfUrl, hasBackgrounds };
             }
         },
-        h(scene: SceneContext, url: string, faceSize: number, useCubemapSkybox: boolean, skipGround: boolean, skyboxSize: number | undefined): void {
+        h(
+            scene: SceneContext,
+            url: string,
+            faceSize: number,
+            useCubemapSkybox: boolean,
+            skipGround: boolean,
+            skyboxSize: number | undefined,
+            skyboxPosition: [number, number, number] | undefined
+        ): void {
             if (state._meshCaptureRefs) {
-                scene._envRecoverySource = { kind: "hdr", url, faceSize, useCubemapSkybox, skipGround, skyboxSize };
+                scene._envRecoverySource = { kind: "hdr", url, faceSize, useCubemapSkybox, skipGround, skyboxSize, skyboxPosition };
             }
         },
     };

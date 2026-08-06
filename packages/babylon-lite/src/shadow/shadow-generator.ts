@@ -51,6 +51,15 @@ export interface ShadowGenerator {
     _version: number;
     /** @internal */
     _shadowTaskState?: ShadowTaskInternalState;
+    /** @internal Opt-in CSM cache state; undefined for the default path and other techniques. */
+    _csmCache?: {
+        /** @internal */
+        _refitAngle: number;
+        /** @internal */
+        _refitMaxIntervalMs: number;
+        /** @internal */
+        _loaded?: boolean;
+    };
     /** @internal Optional callbacks invoked each frame the receiver UBO is (re)written, after the
      *  GPU upload and before the shadow map / main pass render. Used by custom ShaderMaterial
      *  receivers (e.g. CSM) to mirror the fresh transforms into their own uniforms without a
@@ -69,4 +78,6 @@ export interface ShadowGenerator {
     ): ShadowTaskInternalState;
     /** @internal Records the shadow-map render pass for the given task state and returns the number of draw calls issued. */
     _renderShadowMap?(engine: import("../engine/engine.js").EngineContext, state: ShadowTaskInternalState): number;
+    /** @internal Replaces the innermost task hooks while preserving installed caster adapters. */
+    _replaceShadowTaskHooks?(ensure: NonNullable<ShadowGenerator["_ensureShadowTaskState"]>, render: NonNullable<ShadowGenerator["_renderShadowMap"]>): void;
 }

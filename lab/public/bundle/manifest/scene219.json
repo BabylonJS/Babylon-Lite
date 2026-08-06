@@ -1,23 +1,23 @@
 {
-  "rawKB": 98,
-  "rawBytes": 100381,
-  "gzipKB": 40.9,
+  "rawKB": 97.6,
+  "rawBytes": 99949,
+  "gzipKB": 40.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene219-create-skeleton-DiYVkAw9.js",
     "scene219-generate-mipmaps-DXWcxvZA.js",
     "scene219-gltf-animation-D7QL6o8Y.js",
     "scene219-gltf-ext-spec-gloss-D60sFZYX.js",
-    "scene219-gltf-feature-animations-DRRHENMq.js",
+    "scene219-gltf-feature-animations-BUxo7d0R.js",
     "scene219-gltf-feature-extras-VHPteGay.js",
-    "scene219-gltf-feature-registry-BwCRSOfF.js",
+    "scene219-gltf-feature-registry-PORiMDK4.js",
     "scene219-gltf-feature-skeleton-BbV2xOa1.js",
     "scene219-gltf-glb-parser-5SmIfSMw.js",
     "scene219-gltf-sampler-desc-BRbZ0K5P.js",
-    "scene219-pbr-renderable-DUgJgAEo.js",
+    "scene219-pbr-renderable-DpSaVx6o.js",
     "scene219-singlelight-hemispheric-wgsl-EeXbMoFE.js",
     "scene219-thin-instance-fragment-CBn2miAC.js",
-    "scene219-thin-instance-gpu-BgmBLRd_.js",
+    "scene219-thin-instance-gpu-BN4yu5aR.js",
     "scene219.js"
   ]
 }

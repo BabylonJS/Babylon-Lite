@@ -257,7 +257,15 @@ interface DeviceLostRecoveryCapture {
         indexFormat: GPUIndexFormat
     ): void;
     e(scene: SceneContext, url: string, brdfUrl: string, hasBackgrounds: boolean): void;
-    h(scene: SceneContext, url: string, faceSize: number, useCubemapSkybox: boolean, skipGround: boolean, skyboxSize: number | undefined): void;
+    h(
+        scene: SceneContext,
+        url: string,
+        faceSize: number,
+        useCubemapSkybox: boolean,
+        skipGround: boolean,
+        skyboxSize: number | undefined,
+        skyboxPosition: [number, number, number] | undefined
+    ): void;
 }
 
 /** @internal Return true if `context` is already registered on `surface`. */
@@ -527,6 +535,7 @@ export function disposeEngine(engine: EngineContext): void {
     const surfaces = engine._surfaces;
     for (const s of surfaces) {
         s._renderingContexts.length = 0;
+        s._ro?.disconnect();
         s._context.unconfigure();
     }
     surfaces.length = 0;
