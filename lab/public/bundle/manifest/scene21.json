@@ -1,5 +1,5 @@
 {
-  "rawKB": 86.3,
+  "rawKB": 86.4,
   "gzipKB": 35.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,11 +8,11 @@
     "scene21-generate-mipmaps-CfM7UHZZ.js",
     "scene21-gltf-glb-parser-BeL5l-Tu.js",
     "scene21-ibl-fragment-CeRrvT96.js",
-    "scene21-pbr-renderable-CdSCycye.js",
+    "scene21-pbr-renderable-CHk2DG6U.js",
     "scene21-rgbd-decode-Btjg7lXq.js",
     "scene21-scene-uniforms-FTYH6Ct0.js",
     "scene21-sheen-fragment-_mQhtdZq.js",
     "scene21.js"
   ],
-  "rawBytes": 88417
+  "rawBytes": 88437
 }

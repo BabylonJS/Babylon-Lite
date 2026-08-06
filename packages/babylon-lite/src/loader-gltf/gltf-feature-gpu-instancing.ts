@@ -18,13 +18,9 @@ import { F32 } from "../engine/typed-arrays.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { resolveAccessor } from "./gltf-parser.js";
-import { computeAabb } from "../math/compute-aabb.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
-import { mat4Multiply } from "../math/mat4-multiply.js";
-import type { Mat4 } from "../math/types.js";
-import type { Mat4Storage } from "../math/types.js";
 import { setThinInstances } from "../mesh/thin-instance.js";
-import { getLoaderTmpInstance } from "./_loader-scratch.js";
+import { enableThinInstanceWorldBounds } from "../mesh/enable-thin-instance-world-bounds.js";
 
 /** Collect every Mesh child (direct children only — matches buildNodeHierarchy). */
 function collectMeshesUnderNode(tn: { children?: unknown[] } | undefined): Mesh[] {
@@ -102,91 +98,16 @@ const ext: GltfFeature = {
                 sAcc ? (sAcc._data as Float32Array) : null,
                 count
             );
-            const nodeWorld = ctx._worldMatrixCache.get(nodeIdx);
             for (const mesh of meshesForNode) {
+                // Bounds are left as the loader's object-local prototype box (see `Mesh.boundMin`). Readers that
+                // care about the instanced spread compose `worldMatrix × instanceMatrix × corner` themselves —
+                // the same composition thin-instance-fragment draws with — so folding the node world matrix and
+                // the instance grid into the box here would be counted a second time by every one of them.
                 setThinInstances(mesh, matrices, count);
-                expandMeshAabbForInstances(mesh, matrices, count, nodeWorld);
+                enableThinInstanceWorldBounds(mesh);
             }
         }
         return {};
     },
 };
 export default ext;
-
-/** Expand a mesh's world-space AABB to enclose all thin instances so that
- *  auto-framing cameras see the full instanced grid, not just the base mesh.
- *  Uses the module-level `getLoaderTmpInstance()` scratch for the per-iteration
- *  instance world matrix — no per-call allocation. */
-function expandMeshAabbForInstances(mesh: Mesh, matrices: Float32Array, count: number, nodeWorld: Mat4 | undefined): void {
-    const positions = mesh._cpuPositions;
-    if (!positions || !nodeWorld || count === 0) {
-        return;
-    }
-    // Local AABB of the base mesh (before any per-instance / node transform).
-    const [lmin, lmax] = computeAabb(positions);
-    if (!isFinite(lmin[0]!)) {
-        return;
-    }
-    // 8 corners of the local AABB, packed as 24 floats for computeAabb.
-    const corners = new F32([
-        lmin[0]!,
-        lmin[1]!,
-        lmin[2]!,
-        lmax[0]!,
-        lmin[1]!,
-        lmin[2]!,
-        lmin[0]!,
-        lmax[1]!,
-        lmin[2]!,
-        lmax[0]!,
-        lmax[1]!,
-        lmin[2]!,
-        lmin[0]!,
-        lmin[1]!,
-        lmax[2]!,
-        lmax[0]!,
-        lmin[1]!,
-        lmax[2]!,
-        lmin[0]!,
-        lmax[1]!,
-        lmax[2]!,
-        lmax[0]!,
-        lmax[1]!,
-        lmax[2]!,
-    ]);
-    let wMinX = Infinity,
-        wMinY = Infinity,
-        wMinZ = Infinity;
-    let wMaxX = -Infinity,
-        wMaxY = -Infinity,
-        wMaxZ = -Infinity;
-    const instWorld = getLoaderTmpInstance();
-    const instBuf = instWorld as unknown as Mat4Storage;
-    for (let i = 0; i < count; i++) {
-        for (let k = 0; k < 16; k++) {
-            instBuf[k] = matrices[i * 16 + k]!;
-        }
-        const combined = mat4Multiply(nodeWorld, instWorld);
-        const [imin, imax] = computeAabb(corners, combined);
-        if (imin[0]! < wMinX) {
-            wMinX = imin[0]!;
-        }
-        if (imin[1]! < wMinY) {
-            wMinY = imin[1]!;
-        }
-        if (imin[2]! < wMinZ) {
-            wMinZ = imin[2]!;
-        }
-        if (imax[0]! > wMaxX) {
-            wMaxX = imax[0]!;
-        }
-        if (imax[1]! > wMaxY) {
-            wMaxY = imax[1]!;
-        }
-        if (imax[2]! > wMaxZ) {
-            wMaxZ = imax[2]!;
-        }
-    }
-    mesh.boundMin = [wMinX, wMinY, wMinZ];
-    mesh.boundMax = [wMaxX, wMaxY, wMaxZ];
-}

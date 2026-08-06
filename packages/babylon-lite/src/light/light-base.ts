@@ -13,7 +13,7 @@ export { ObservableVec3 } from "../math/observable-vec3.js";
 export interface LightVersionState {
     /** @internal */
     _lightVersion: number;
-    bump(): void;
+    b(): void;
 }
 
 /** Create the world-matrix state + dirty callback shared by all light types. */
@@ -21,7 +21,7 @@ export function createLightBase(getLocalMatrix: () => Mat4): { wm: WorldMatrixAc
     const wm = createWorldMatrixState(getLocalMatrix);
     const lvs: LightVersionState = {
         _lightVersion: 0,
-        bump() {
+        b() {
             lvs._lightVersion++;
         },
     };
@@ -70,6 +70,9 @@ export function applyWorldMatrixAccessors<R>(target: object, wm: WorldMatrixAcce
             enumerable: false,
             configurable: true,
         });
+        // Direct scalar/array writes cannot notify, so expose the version-only bump without
+        // dirtying the world matrix (unlike a no-op ObservableVec3 set).
+        (target as { _bumpLightVersion?: () => void })._bumpLightVersion = lvs.b;
     }
     // Tag so children parented to this light get push invalidation (O(1) reads).
     attachWorldMatrixState(target, wm);

@@ -1,10 +1,10 @@
 {
-  "rawKB": 54.5,
-  "gzipKB": 21.9,
+  "rawKB": 54.6,
+  "gzipKB": 22,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene48-standard-renderable-DmbKr-oj.js",
     "scene48.js"
   ],
-  "rawBytes": 55857
+  "rawBytes": 55879
 }

@@ -67,6 +67,9 @@ export function removeThinInstance(mesh: Mesh, index: number): void;
 /** Bump _version after direct manipulation of the matrices Float32Array. */
 export function flushThinInstances(mesh: Mesh): void;
 
+/** Include exact thin-instance placements in default-camera and environment auto-sizing. */
+export function enableThinInstanceWorldBounds(mesh: Mesh): void;
+
 /** Set per-instance RGBA colors. Bumps _colorVersion. */
 export function setThinInstanceColors(mesh: Mesh, colors: Float32Array): void;
 
@@ -99,6 +102,12 @@ matrix range `[0, count)` dirty for upload.
 Call `enableThinInstanceDynamicDrawCount()` before `registerScene()` when a synchronized pool will change
 counts interactively. Its next normal GPU sync creates the stable indirect argument buffer during warm-up,
 so the first later count change does not invalidate cached render bundles.
+
+`enableThinInstanceWorldBounds()` is a setup-time, tree-shakable opt-in for hand-built thin-instance meshes
+that will be consumed by `createDefaultCamera()` or automatic environment sizing. It expands the prototype's
+object-local box through `mesh.worldMatrix × instanceMatrix` for every active instance and ignores parked
+instances whose linear transform is effectively zero. Call it after `setThinInstances()` and before camera or
+environment creation. The glTF `EXT_mesh_gpu_instancing` feature enables it automatically.
 
 ### Functions — Hierarchy Instance Pools (`hierarchy-instance-pool.ts`)
 

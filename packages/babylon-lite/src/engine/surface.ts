@@ -84,6 +84,13 @@ export interface SurfaceContext {
      *  (first clears; subsequent overlay). */
     _renderingContexts: RenderingContext[];
 
+    /** @internal Layout observer and its cached CSS dimensions. */
+    _ro?: ResizeObserver;
+    /** @internal */
+    _w?: number;
+    /** @internal */
+    _h?: number;
+
     /** @internal Pending `captureScreenshot` requests for this surface. Serviced by
      *  `renderFrame` on a subsequent frame (one shared copy of the surface's swapchain
      *  texture resolves all queued requests), then cleared. Undefined when nothing is
@@ -245,8 +252,9 @@ export function resizeSurface(surface: SurfaceContext): void {
     if (!isDomCanvas(canvas)) {
         return;
     }
-    const clientWidth = canvas.clientWidth;
-    const clientHeight = canvas.clientHeight;
+    // Prefer the optional observer cache; otherwise read the DOM layout directly.
+    const clientWidth = surface._w ?? canvas.clientWidth;
+    const clientHeight = surface._h ?? canvas.clientHeight;
     if (!(clientWidth > 0 && clientHeight > 0)) {
         return;
     }
@@ -294,6 +302,7 @@ export function disposeSurface(surface: SurfaceContext): void {
         throw new Error("Babylon Lite: disposeSurface cannot dispose the engine's primary surface — use disposeEngine instead.");
     }
     surface._renderingContexts.length = 0;
+    surface._ro?.disconnect();
     surface._context.unconfigure();
     const list = surface.engine._surfaces;
     const i = list.indexOf(surface);

@@ -527,6 +527,7 @@ export function disposeEngine(engine: EngineContext): void {
     const surfaces = engine._surfaces;
     for (const s of surfaces) {
         s._renderingContexts.length = 0;
+        s._ro?.disconnect();
         s._context.unconfigure();
     }
     surfaces.length = 0;

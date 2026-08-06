@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
+import { buildHdrSkyboxRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-hdr-skybox.js";
+import { computeSceneSize } from "../../../packages/babylon-lite/src/material/pbr/scene-size.js";
 import { parseEnvFile } from "../../../packages/babylon-lite/src/loader-env/env-parse.js";
 import { EnvironmentBackgroundKind, rebuildSceneEnvironment, rebuildSceneEnvironmentBackgrounds } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
 import type { EnvironmentBackgroundSource, EnvironmentRecoverySource } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
@@ -133,6 +135,7 @@ function makeEnvironmentTextures(): EnvironmentTextures {
 
 describe("rebuildSceneEnvironment", () => {
     afterEach(() => {
+        vi.clearAllMocks();
         vi.unstubAllGlobals();
     });
 
@@ -258,6 +261,10 @@ describe("rebuildSceneEnvironment", () => {
 });
 
 describe("rebuildSceneEnvironmentBackgrounds", () => {
+    afterEach(() => {
+        vi.clearAllMocks();
+    });
+
     function makeBackgroundScene(textures: EnvironmentTextures | undefined): SceneContext {
         return {
             _envTextures: textures,
@@ -282,6 +289,20 @@ describe("rebuildSceneEnvironmentBackgrounds", () => {
         // One .env drives both the IBL and the backdrop, so `loadEnvironment` skips the solid
         // skybox and builds the HDR one instead.
         await expect(kinds([[EnvironmentBackgroundKind.HdrSkybox, 10, [0, 0, 0]]])).resolves.toEqual(["hdr-skybox"]);
+    });
+
+    it("restores the exact size and position each background was built with, never recomputing scene bounds", async () => {
+        // The descriptor records the values the builder actually used, so an explicitly placed
+        // skybox (`skyboxSize` + `skyboxPosition`) survives recovery unchanged. Discovery extends
+        // that guarantee to every background: scene bounds are never re-derived, so a scene whose
+        // contents shifted after load cannot have its backdrop silently resized or moved.
+        const scene = makeBackgroundScene(makeEnvironmentTextures());
+        const textures = scene._envTextures;
+
+        await expect(rebuildSceneEnvironmentBackgrounds(scene, [[EnvironmentBackgroundKind.HdrSkybox, 15, [4, 5, 6]]])).resolves.toHaveLength(1);
+
+        expect(computeSceneSize).not.toHaveBeenCalled();
+        expect(buildHdrSkyboxRenderable).toHaveBeenCalledWith(scene, textures, 15, [4, 5, 6], expect.any(Array));
     });
 
     it("rebuilds a DDS skybox from its discovered URL", async () => {

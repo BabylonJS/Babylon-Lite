@@ -611,6 +611,9 @@ export class PBRMaterial extends PushMaterial {
         }
         const environmentTexture = this.environmentTexture;
         if (environmentTexture) {
+            // Babylon Lite applies the environment scene-wide, but Babylon.js surfaces
+            // it in the material's active-texture list, and compat `CubeTexture` /
+            // `HDRCubeTexture` are `BaseTexture` subclasses just as in Babylon.js.
             textures.push(environmentTexture);
         }
         if (this._sheen) {

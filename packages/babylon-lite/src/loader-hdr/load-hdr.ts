@@ -33,6 +33,8 @@ export interface HdrLoadOptions {
     skipGround?: boolean;
     /** Skybox size matching BJS createDefaultEnvironment skyboxSize option. */
     skyboxSize?: number;
+    /** Explicit skybox origin. When paired with `skyboxSize`, skips automatic scene-bounds sizing. */
+    skyboxPosition?: [number, number, number];
 }
 
 /**
@@ -91,8 +93,14 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
     engine._dlr?.h(scene, url, faceSize);
     scene._deferredBuilders.push(async () => {
         if (useHdr && textures.specularCubeView) {
-            const { computeSceneSize } = await import("../material/pbr/scene-size.js");
-            const { skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
+            let autoSkyboxSize = options?.skyboxSize;
+            let rootPosition = options?.skyboxPosition;
+            if (autoSkyboxSize === undefined || rootPosition === undefined) {
+                const { computeSceneSize } = await import("../material/pbr/scene-size.js");
+                const size = computeSceneSize(scene, autoSkyboxSize);
+                autoSkyboxSize = size.skyboxSize;
+                rootPosition = size.rootPosition;
+            }
             const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
             const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
             scene._renderables.push(buildHdrSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));

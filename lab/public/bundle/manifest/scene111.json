@@ -1,5 +1,5 @@
 {
-  "rawKB": 132.6,
+  "rawKB": 132.7,
   "gzipKB": 54.2,
   "ignoredRawKB": 6.4,
   "runtimeChunks": [
@@ -18,7 +18,7 @@
     "scene111-node-registry-sr3sRJ7R.js",
     "scene111-node-renderable-D8JrhVY0.js",
     "scene111-node-shadow-CrFRFBZk.js",
-    "scene111-pbr-renderable-BFZweEIR.js",
+    "scene111-pbr-renderable-CZvCqNbs.js",
     "scene111-pbr-shadow-fragment-CFzpdZcF.js",
     "scene111-shader-composer-BSMzKE4Z.js",
     "scene111-shadow-fragment-core-Dbe1xNkt.js",
@@ -29,5 +29,5 @@
     "scene111-vertex-output-C7G5u6Y0.js",
     "scene111.js"
   ],
-  "rawBytes": 135820
+  "rawBytes": 135841
 }

@@ -235,3 +235,33 @@ describe("HDRCubeTexture", () => {
         expect(hdr._envLoaderKind).toBe("hdr");
     });
 });
+
+/**
+ * Babylon.js models `CubeTexture`/`HDRCubeTexture` as `BaseTexture` subclasses, and
+ * ported code relies on that (they show up in `BaseTexture[]` surfaces such as
+ * `Material.getActiveTextures()`). The compat handles keep that relationship even
+ * though the environment has no standalone Lite GPU handle of its own.
+ */
+describe("environment handles are BaseTexture subclasses", () => {
+    it("extends BaseTexture and reports the Babylon.js class name", () => {
+        const cube = new CubeTexture("https://h/env.env");
+        const hdr = new HDRCubeTexture("https://h/room.hdr");
+        expect(cube).toBeInstanceOf(BaseTexture);
+        expect(hdr).toBeInstanceOf(BaseTexture);
+        expect(cube.getClassName()).toBe("CubeTexture");
+        expect(hdr.getClassName()).toBe("HDRCubeTexture");
+    });
+
+    it("has no standalone Lite handle (the scene owns the environment upload)", () => {
+        expect(new CubeTexture("https://h/env.env").getInternalTexture()).toBeNull();
+        expect(new HDRCubeTexture("https://h/room.hdr").getInternalTexture()).toBeNull();
+    });
+
+    it("settles whenReadyAsync() alongside isReady()", async () => {
+        const cube = new CubeTexture("https://h/env.env");
+        const hdr = new HDRCubeTexture("https://h/room.hdr");
+        await Promise.all([cube.whenReadyAsync(), hdr.whenReadyAsync()]);
+        expect(cube.isReady()).toBe(true);
+        expect(hdr.isReady()).toBe(true);
+    });
+});

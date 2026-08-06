@@ -1,6 +1,6 @@
 {
   "rawKB": 59.8,
-  "gzipKB": 27.2,
+  "gzipKB": 27.3,
   "ignoredRawKB": 8.1,
   "runtimeChunks": [
     "scene79-_math-factory-BF9KgtxW.js",
@@ -23,5 +23,5 @@
     "scene79-wave-block-CexQ4Oe_.js",
     "scene79.js"
   ],
-  "rawBytes": 61209
+  "rawBytes": 61222
 }
