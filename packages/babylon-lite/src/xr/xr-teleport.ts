@@ -7,8 +7,9 @@
  *    under gravity), so you can aim *up* onto higher platforms or *down* off ledges —
  *    teleporting to floors at different heights, not just the one you stand on.
  *  - **Landing direction.** While aiming, lean the stick left/right to choose which way
- *    you'll face after landing; a floor arrow previews it. Release to teleport there and
- *    rotate to that heading in one step.
+ *    you'll face after landing; a floor arrow (floating just outside the ring) previews it.
+ *    Let the stick spring back to centre to teleport there and rotate to that heading in one
+ *    step — the teleport commits on the *return to centre*, not on a partial release.
  *  - **Snap turn.** With the stick centred forward-wise, a left/right push snap-turns in
  *    place by a fixed angle.
  *
@@ -77,14 +78,24 @@ const RETICLE_DIAMETER = 0.4;
 const ARC_HALF_WIDTH = 0.008;
 /** @internal Number of points sampled along the aim arc (ribbon = 2 verts per point). */
 const ARC_POINTS = 20;
-/** @internal Landing-arrow length in metres (flat triangle laid on the floor). */
-const INDICATOR_LENGTH = 0.22;
+/** @internal Landing-arrow length in metres (flat triangle laid on the floor). Sized to
+ *  read clearly from across a room, since it sits OUTSIDE the ring (see {@link orientIndicator}). */
+const INDICATOR_LENGTH = 0.3;
 /** @internal Landing-arrow half-width in metres. */
-const INDICATOR_HALF_WIDTH = 0.09;
+const INDICATOR_HALF_WIDTH = 0.13;
+/** @internal Gap (metres) between the ring's outer edge and the landing arrow's base, so the
+ *  arrow floats just beyond the reticle rather than overlapping it (Babylon-style, clearer from far). */
+const INDICATOR_GAP = 0.05;
 /** @internal A floor pick's world normal must be at least this upward (dot with +Y). */
 const FLOOR_NORMAL_MIN_Y = 0.6;
 /** @internal Stick sideways lean below this contributes no landing rotation (deadzone). */
 const TURN_DEADZONE = 0.15;
+/** @internal Stick magnitude at/below which the stick counts as centred — this, not a partial
+ *  release, is what commits the teleport (matches Babylon: teleport happens when you let go). */
+const CENTER_DEADZONE = 0.2;
+/** @internal While the stick is deflected past this the landing heading tracks the lean; below it
+ *  the last heading is frozen so the arrow doesn't spin as the stick springs back to centre. */
+const HEADING_FREEZE = 0.35;
 
 /** @internal Per-controller teleport visuals + activation state. */
 interface TeleportUnit {
@@ -405,9 +416,12 @@ function updateArcRibbon(tp: XrTeleportation, unit: TeleportUnit, camPos: [numbe
     updateMeshPositions(tp._engine, unit.arc, out);
 }
 
-/** @internal Point the landing arrow along `dir` (horizontal), laid flat on the floor at `at`. */
+/** @internal Point the landing arrow along `dir` (horizontal), laid flat on the floor, floating
+ *  just OUTSIDE the ring so it reads clearly from a distance (Babylon-style). */
 function orientIndicator(indicator: Mesh, at: [number, number, number], dir: [number, number, number]): void {
-    indicator.position.set(at[0], at[1], at[2]);
+    // Push the arrow out past the ring's edge along the heading, so its base clears the reticle.
+    const off = RETICLE_DIAMETER / 2 + INDICATOR_GAP;
+    indicator.position.set(at[0] + dir[0] * off, at[1], at[2] + dir[2] * off);
     // Yaw so local +Z maps onto `dir`: Ry(θ)·(0,0,1) = (sinθ, 0, cosθ).
     const yaw = Math.atan2(dir[0], dir[2]);
     const half = yaw / 2;
@@ -456,25 +470,37 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
         seen.add(src.source);
         const unit = ensureUnit(tp, src.source);
         const [tx, ty] = readThumbstick(gamepad);
-        const forward = ty <= -opts.thumbstickThreshold;
+        const mag = Math.hypot(tx, ty);
+        const centered = mag < CENTER_DEADZONE;
 
-        // --- Snap turn (only when not aiming) ---
-        if (opts.snapTurn && !forward && Math.abs(tx) >= opts.thumbstickThreshold) {
-            if (!unit.turnLatched) {
-                const pose = frame.getViewerPose(ref);
-                if (pose) {
-                    const p = pose.transform.position;
-                    ref = turnRef(ref, [p.x, p.y, p.z], tx > 0 ? opts.rotationAngle : -opts.rotationAngle);
+        // A forward push past the threshold engages aim mode. Once engaged we STAY in aim
+        // mode — no matter how the stick is leaned to pick a heading — until the stick
+        // springs back to centre, which is what actually commits the teleport. This matches
+        // Babylon: you teleport when you let go, not partway back.
+        if (ty <= -opts.thumbstickThreshold) {
+            unit.aiming = true;
+        }
+
+        // --- Snap turn (only when NOT aiming) ---
+        if (!unit.aiming) {
+            if (opts.snapTurn && Math.abs(tx) >= opts.thumbstickThreshold && Math.abs(ty) < opts.thumbstickThreshold) {
+                if (!unit.turnLatched) {
+                    const pose = frame.getViewerPose(ref);
+                    if (pose) {
+                        const p = pose.transform.position;
+                        ref = turnRef(ref, [p.x, p.y, p.z], tx > 0 ? opts.rotationAngle : -opts.rotationAngle);
+                    }
+                    unit.turnLatched = true;
                 }
-                unit.turnLatched = true;
+            } else if (Math.abs(tx) < opts.thumbstickThreshold * 0.5) {
+                unit.turnLatched = false;
             }
-        } else if (Math.abs(tx) < opts.thumbstickThreshold * 0.5) {
-            unit.turnLatched = false;
         }
 
         // --- Aim / teleport ---
-        if (forward) {
-            unit.aiming = true;
+        if (unit.aiming && !centered) {
+            // Holding: aim the parabolic arc (direction comes from the controller ray, not the
+            // stick) and preview the landing reticle + heading arrow.
             if (src.targetRayTracked) {
                 const m = src.targetRayMatrix as unknown as Mat4;
                 const origin: [number, number, number] = [m[12]!, m[13]!, m[14]!];
@@ -500,16 +526,24 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                     orientRingToNormal(unit.reticle, info.normal ?? [0, 1, 0]);
                     setSubtreeVisible(unit.reticle, true);
 
-                    // Landing heading: stick lean rotates the current view-forward.
-                    const turn = Math.abs(tx) >= TURN_DEADZONE && opts.rotateToDirection ? Math.atan2(tx, -ty) : 0;
-                    unit.landingTurn = turn;
-                    const fwd = pose ? viewForward(pose) : null;
-                    if (opts.rotateToDirection && fwd) {
-                        // Preview arrow points where you'll face: view-forward rotated by −turn
-                        // (the reference-space offset reports the view rotated by −turn).
-                        orientIndicator(unit.indicator, info.point, rotateY(fwd, -turn));
-                        setSubtreeVisible(unit.indicator, true);
+                    // Landing heading: the stick lean rotates the current view-forward. Only
+                    // update it while the stick is strongly deflected; freeze the last value as
+                    // it springs back so the arrow doesn't whip around on release.
+                    if (opts.rotateToDirection) {
+                        if (mag >= HEADING_FREEZE) {
+                            unit.landingTurn = Math.abs(tx) >= TURN_DEADZONE ? Math.atan2(tx, -ty) : 0;
+                        }
+                        const fwd = pose ? viewForward(pose) : null;
+                        if (fwd) {
+                            // Preview arrow points where you'll face: view-forward rotated by −turn
+                            // (the reference-space offset reports the view rotated by −turn).
+                            orientIndicator(unit.indicator, info.point, rotateY(fwd, -unit.landingTurn));
+                            setSubtreeVisible(unit.indicator, true);
+                        } else {
+                            setSubtreeVisible(unit.indicator, false);
+                        }
                     } else {
+                        unit.landingTurn = 0;
                         setSubtreeVisible(unit.indicator, false);
                     }
                 } else {
@@ -519,9 +553,9 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                     setSubtreeVisible(unit.indicator, false);
                 }
             }
-        } else {
-            // Release: commit the teleport to the last valid target, then clear visuals.
-            if (unit.aiming && unit.target) {
+        } else if (unit.aiming && centered) {
+            // Released at centre: commit the teleport to the last valid target, then clear visuals.
+            if (unit.target) {
                 const pose = frame.getViewerPose(ref);
                 if (pose) {
                     const p = pose.transform.position;
@@ -534,6 +568,7 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                 }
             }
             unit.aiming = false;
+            unit.turnLatched = false;
             unit.target = null;
             unit.landingTurn = 0;
             setSubtreeVisible(unit.arc, false);

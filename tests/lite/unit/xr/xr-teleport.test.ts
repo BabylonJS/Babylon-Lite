@@ -262,6 +262,22 @@ describe("updateXrTeleportation — landing direction", () => {
         expect((lastTransform!.orient as { y: number }).y).toBeCloseTo(Math.sin(Math.atan2(0.5, 1) / 2), 6);
     });
 
+    it("freezes the landing heading as the stick springs back to centre", () => {
+        const tp = make({ floorMeshes: [FLOOR] });
+        floorHit([0, 0, -5]);
+        // Frame 1: strong forward-right lean sets the heading.
+        const src = makeSource({ gamepad: { axes: [0, 0, 0.5, -1] } });
+        const ref0 = makeRef("r0");
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), ref0);
+        const chosen = Math.atan2(0.5, 1);
+        expect(unitFor(tp, src).landingTurn).toBeCloseTo(chosen, 6);
+        // Frame 2: stick springs back below the freeze threshold (but not yet centred) with a
+        // different lean direction — the heading must hold its chosen value, not track the noise.
+        (src.source.gamepad as unknown as { axes: number[] }).axes = [0, 0, 0.1, -0.28];
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), ref0);
+        expect(unitFor(tp, src).landingTurn).toBeCloseTo(chosen, 6);
+    });
+
     it("does not rotate when rotateToDirection is disabled", () => {
         const tp = make({ floorMeshes: [FLOOR], rotateToDirection: false });
         floorHit([0, 0, -5]);
@@ -301,16 +317,26 @@ describe("updateXrTeleportation — teleport on release", () => {
         expect(unitFor(tp, src).reticle.visible).toBe(false);
     });
 
-    it("does not teleport when released without a valid floor target", () => {
+    it("does not teleport on a partial release — only when the stick returns to centre", () => {
         const tp = make({ floorMeshes: [FLOOR] });
-        pickWithRay.mockReturnValue({ hit: false, pickedPoint: null, pickedNormalWorld: null, distance: 0, pickedMesh: null });
+        floorHit([2, 0, -5]);
         const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
         const ref0 = makeRef("r0");
-        updateXrTeleportation(tp, makeInput([src]), makeFrame(), ref0); // aim, no floor
-        (src.source.gamepad as unknown as { axes: number[] }).axes = [0, 0, 0, 0];
-        const out = updateXrTeleportation(tp, makeInput([src]), makeFrame(), ref0); // release
+        // Frame 1: aim (full forward).
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0), ref0);
+        // Frame 2: stick eased back but still well past centre → keep aiming, do NOT teleport.
+        (src.source.gamepad as unknown as { axes: number[] }).axes = [0, 0, 0, -0.5];
+        const mid = updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0), ref0);
         expect((ref0 as unknown as { getOffsetReferenceSpace: ReturnType<typeof vi.fn> }).getOffsetReferenceSpace).not.toHaveBeenCalled();
-        expect(out).toBe(ref0);
+        expect(mid).toBe(ref0);
+        expect(unitFor(tp, src).aiming).toBe(true);
+        expect(unitFor(tp, src).arc.visible).toBe(true);
+        // Frame 3: stick returns to centre → teleport commits now.
+        (src.source.gamepad as unknown as { axes: number[] }).axes = [0, 0, 0, 0];
+        const out = updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0), ref0);
+        expect((ref0 as unknown as { getOffsetReferenceSpace: ReturnType<typeof vi.fn> }).getOffsetReferenceSpace).toHaveBeenCalledTimes(1);
+        expect(out).not.toBe(ref0);
+        expect(unitFor(tp, src).aiming).toBe(false);
     });
 });
 
