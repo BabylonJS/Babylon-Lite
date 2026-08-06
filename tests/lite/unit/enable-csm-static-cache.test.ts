@@ -78,17 +78,42 @@ describe("enableCsmStaticCache", () => {
         await expect(enableCsmStaticCache(registeredEngine, registered, { refitAngle: 0.05 })).rejects.toThrow("before scene registration");
     });
 
-    it("preserves a previously installed shadow task hook replacer", () => {
+    it("preserves a previously installed caster adapter when task hooks are replaced", async () => {
         const { generator } = makeGenerator();
-        const previousReplacer = vi.fn();
-        generator._replaceShadowTaskHooks = previousReplacer;
+        const calls: string[] = [];
+        let innerEnsure = generator._ensureShadowTaskState!;
+        let innerRender = generator._renderShadowMap!;
+        generator._ensureShadowTaskState = (...args) => {
+            calls.push("previous ensure");
+            return innerEnsure(...args);
+        };
+        generator._renderShadowMap = (...args) => {
+            calls.push("previous render");
+            return innerRender(...args);
+        };
+        generator._replaceShadowTaskHooks = (nextEnsure, nextRender) => {
+            innerEnsure = nextEnsure;
+            innerRender = nextRender;
+        };
         enableMorphTargetShadows(generator);
-        const nextEnsure = vi.fn();
-        const nextRender = vi.fn();
+        const caster = morphCaster();
+        const casters = [caster];
+        const nextEnsure = vi.fn((_engine: EngineContext, _scene: SceneContext, casterMeshes: readonly Mesh[]) => {
+            calls.push("replacement ensure");
+            return { _casterMeshes: casterMeshes } as ShadowTaskInternalState;
+        });
+        const nextRender = vi.fn(() => {
+            calls.push("replacement render");
+            return 1;
+        });
 
         generator._replaceShadowTaskHooks!(nextEnsure, nextRender);
+        await generator._preloadShadowTask!(casters);
+        const state = generator._ensureShadowTaskState!({} as EngineContext, {} as SceneContext, casters);
+        generator._renderShadowMap!({} as EngineContext, state);
 
-        expect(previousReplacer).toHaveBeenCalledWith(nextEnsure, nextRender);
+        expect(calls).toEqual(["previous ensure", "replacement ensure", "previous render", "replacement render"]);
+        expect(state._casterMeshes).toBe(casters);
     });
 
     it.each(["deformation-first", "cache-first"] as const)("composes with deformable shadows when enabled %s", async (order) => {
