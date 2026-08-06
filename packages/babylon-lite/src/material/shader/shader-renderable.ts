@@ -12,7 +12,7 @@ import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewPro
 import type { Camera } from "../../camera/camera.js";
 import { mat4MultiplyInto } from "../../math/mat4-multiply-into.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
-import type { ShaderAttributeName, ShaderMaterial, ShaderUniformSlot } from "./shader-material.js";
+import type { ShaderAttributeName, ShaderMaterial, ShaderUniformType } from "./shader-material.js";
 import type { ShaderPipelineBindings } from "./shader-pipeline.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "./shader-pipeline.js";
@@ -68,152 +68,37 @@ interface ShaderMaterialRenderState extends ShaderMaterial {
     _shaderCustomData?: ArrayBuffer | null;
     _shaderCustomBytes?: Uint8Array<ArrayBuffer> | null;
     _shaderCustomVersion?: number;
-    _shaderCustomPlan?: CustomWritePlan;
-    _shaderSystemPlan?: SystemWritePlan;
 }
 
-/** @internal Per-material serialization plan for the CUSTOM uniform block, resolved once per UBO
- *  allocation instead of re-walking `_uniformValues` + `spec._offsets` on every frame.
- *
- *  `_lastV[i]` is the value of `slots[i]._v` at this material's last serialization, so a frame that
- *  bumped `_uniformVersion` rewrites ONLY the slots whose own counter moved. On the live game save a
- *  bumped material typically has 2-3 of ~40 slots actually changed, so this skips ~93% of the writes.
- *  The counter lives on the SLOT (not on a proxy over its array — the 2026-08-03 `?urange` experiment
- *  proved per-element interception costs far more than the serialization it saves), and it is set at
- *  the single choke point that already compares old vs new (`setUniformValue`), so marking is one
- *  integer increment on a branch that was taken anyway. */
-interface CustomWritePlan {
-    /** Material this plan was resolved for — a material VIEW inherits `_shaderCustomPlan` through its
-     *  prototype chain, so identity must be checked, not just presence. */
-    readonly owner: ShaderMaterial;
-    /** Backing store identity: a new UBO allocation (device loss, HMR, shader rebuild) invalidates the plan. */
-    readonly data: ArrayBuffer;
-    readonly size: number;
-    readonly f32: Float32Array;
-    readonly u32: Uint32Array;
-    readonly i32: Int32Array;
-    readonly slots: readonly ShaderUniformSlot[];
-    /** Element index (not byte offset) into the view selected by `_kinds`. */
-    readonly _index: Int32Array;
-    /** 0 = f32 (length elements), 1 = u32 (1 element), 2 = i32 (1 element). */
-    readonly _kinds: Uint8Array;
-    /** Element count per slot — fixed at slot creation, so the write loop never reloads `value.length`. */
-    readonly _lens: Int32Array;
-    readonly _lastV: Int32Array;
-}
+/** @internal */
+export type ShaderSystemUniformWriter = (
+    data: Float32Array,
+    spec: UboSpec,
+    material: ShaderMaterial,
+    mesh: Mesh,
+    camera: Camera | null,
+    targetWidth: number,
+    targetHeight: number
+) => void;
 
-/** @internal System-uniform opcodes — a numeric switch replaces the per-uniform name lookup +
- *  string switch `writeSystemUniforms` used to run for every packet, every pass, every frame. */
-const OP_WORLD = 0;
-const OP_VIEW = 1;
-const OP_PROJECTION = 2;
-const OP_VIEW_PROJECTION = 3;
-const OP_WORLD_VIEW = 4;
-const OP_WORLD_VIEW_PROJECTION = 5;
-const OP_CAMERA_POSITION = 6;
-const OP_SCREEN_SIZE = 7;
-const OP_ALPHA_CUTOFF = 8;
+/** @internal */
+export type ShaderCustomUniformWriter = (
+    engine: EngineContext,
+    material: ShaderMaterial,
+    spec: UboSpec,
+    data: ArrayBuffer,
+    ubo: GPUBuffer,
+    bytes: Uint8Array<ArrayBuffer>,
+    uniformBatch?: UniformCopyBatch
+) => void;
 
-/** @internal Per-material plan for the SYSTEM uniform block (see `CustomWritePlan` for the ownership rules). */
-interface SystemWritePlan {
-    readonly owner: ShaderMaterial;
-    readonly spec: UboSpec;
-    readonly ops: Uint8Array;
-    /** Float index into the packet's `systemData` for each op. */
-    readonly _at: Int32Array;
-    /** The `alphaCutoff` slot resolved once, for both the system write and `updatePacket`'s skip test. */
-    readonly alphaSlot: ShaderUniformSlot | undefined;
-}
+let systemUniformWriter: ShaderSystemUniformWriter = writeSystemUniforms;
+let customUniformWriter: ShaderCustomUniformWriter = writeCustomUniforms;
 
-const SYS_OPS: Record<string, number> = {
-    world: OP_WORLD,
-    view: OP_VIEW,
-    projection: OP_PROJECTION,
-    viewProjection: OP_VIEW_PROJECTION,
-    worldView: OP_WORLD_VIEW,
-    worldViewProjection: OP_WORLD_VIEW_PROJECTION,
-    cameraPosition: OP_CAMERA_POSITION,
-    screenSize: OP_SCREEN_SIZE,
-    alphaCutoff: OP_ALPHA_CUTOFF,
-};
-
-function getSystemPlan(material: ShaderMaterial, spec: UboSpec): SystemWritePlan {
-    const state = material as ShaderMaterialRenderState;
-    const cached = state._shaderSystemPlan;
-    if (cached && cached.owner === material && cached.spec === spec) {
-        return cached;
-    }
-    const ops: number[] = [];
-    const at: number[] = [];
-    for (const uniform of material.uniformDecls) {
-        if (!_isShaderSystemUniform(uniform.name)) {
-            continue;
-        }
-        const offset = spec._offsets.get(uniform.name);
-        if (offset === undefined) {
-            continue;
-        }
-        ops.push(SYS_OPS[uniform.name]!);
-        at.push(offset / 4);
-    }
-    const plan: SystemWritePlan = {
-        owner: material,
-        spec,
-        ops: new U8(ops),
-        _at: new I32(at),
-        alphaSlot: material._uniformValues.get("alphaCutoff"),
-    };
-    state._shaderSystemPlan = plan;
-    return plan;
-}
-
-function getCustomPlan(material: ShaderMaterial, spec: UboSpec, data: ArrayBuffer): CustomWritePlan {
-    const state = material as ShaderMaterialRenderState;
-    const cached = state._shaderCustomPlan;
-    if (cached && cached.owner === material && cached.data === data && cached.size === material._uniformValues.size) {
-        return cached;
-    }
-    const slots: ShaderUniformSlot[] = [];
-    const index: number[] = [];
-    const kinds: number[] = [];
-    const lens: number[] = [];
-    for (const [name, slot] of material._uniformValues) {
-        if (_isShaderSystemUniform(name)) {
-            continue;
-        }
-        const offset = spec._offsets.get(name);
-        if (offset === undefined) {
-            continue;
-        }
-        // Give the counter a numeric identity up front. Slots cloned by a material view may arrive without
-        // one; leaving it `undefined` would both make the hot compare polymorphic and, more importantly,
-        // never compare equal to a stored counter — a correct but permanently-rewriting slot.
-        if (typeof slot._v !== "number") {
-            slot._v = 0;
-        }
-        slots.push(slot);
-        const type = slot.decl.type;
-        kinds.push(type === "u32" ? 1 : type === "i32" ? 2 : 0);
-        index.push(offset / 4);
-        lens.push(slot.value.length);
-    }
-    const plan: CustomWritePlan = {
-        owner: material,
-        data,
-        size: material._uniformValues.size,
-        f32: new F32(data),
-        u32: new U32(data),
-        i32: new I32(data),
-        slots,
-        _index: new I32(index),
-        _kinds: new U8(kinds),
-        _lens: new I32(lens),
-        // -1 can never equal a slot counter (they start at 0 and only increment), so the first pass over a
-        // fresh plan writes every slot — the full initialization the old unconditional loop performed.
-        _lastV: new I32(slots.length).fill(-1),
-    };
-    state._shaderCustomPlan = plan;
-    return plan;
+/** @internal Install the optional cached ShaderMaterial uniform writers. */
+export function _installShaderUniformWriters(systemWriter: ShaderSystemUniformWriter, customWriter: ShaderCustomUniformWriter): void {
+    systemUniformWriter = systemWriter;
+    customUniformWriter = customWriter;
 }
 
 /** @internal */
@@ -305,7 +190,7 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
     const engine = scene.surface.engine;
     const systemUBO = createEmptyUniformBuffer(engine, systemSpec._totalBytes, "shader-system-ubo");
     const systemData = new F32(systemSpec._totalBytes / 4);
-    writeSystemUniforms(systemData, getSystemPlan(material, systemSpec), mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
+    systemUniformWriter(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
     engine._device.queue.writeBuffer(systemUBO, 0, systemData);
     const packet: ShaderPacket = {
         mesh,
@@ -442,13 +327,10 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
     const camera = context._camera ?? scene.camera;
     const cameraVersion = camera ? _cameraChangeKey(camera) : -1;
     const meshWmVersion = packet.mesh.worldMatrixVersion;
-    // The plan resolves the system layout AND the alphaCutoff slot once per material, so neither this skip
-    // test nor the write below re-walks `_uniformValues` for every packet of every pass.
-    const plan = getSystemPlan(material, state._shaderBindings!.systemSpec);
     // alphaCutoff is compared by VALUE, not by the material's uniform version: animated materials bump
     // that version every frame (time uniforms and the like live in the CUSTOM ubo, which has its own
     // version gate), and keying on it would defeat this skip for exactly the materials that dominate.
-    const alphaCutoff = plan.alphaSlot?.value[0] ?? 0.4;
+    const alphaCutoff = material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4;
     // Effective aspect keys the view/projection uniforms: getEffectiveAspectRatio folds in the camera's
     // normalized viewport, which can change (altering projection) with target size and worldMatrixVersion
     // both unchanged, so targetWidth/Height alone would not catch it.
@@ -462,7 +344,7 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         packet._lastAspect !== aspect ||
         packet._lastAlphaCutoff !== alphaCutoff
     ) {
-        writeSystemUniforms(packet.systemData, plan, packet.mesh, camera, context.targetWidth, context.targetHeight);
+        systemUniformWriter(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
         if (uniformBatch) {
             uniformBatch.queue(packet.systemUBO, packet.systemData);
         } else {
@@ -534,59 +416,46 @@ function updateCustomUbo(engine: EngineContext, material: ShaderMaterial, unifor
         return;
     }
     const bytes = state._shaderCustomBytes ?? (state._shaderCustomBytes = new U8(customData));
-    // Serialize only the slots whose own counter moved since THIS material last wrote them. The material's
-    // `_uniformVersion` says "something changed"; the per-slot counters say WHAT — and on the live game save a
-    // bumped material has ~4-8% of its slots actually moving (one shared per-frame scene value such as time or
-    // sun direction bumps every material's version). The old loop re-walked the whole `_uniformValues` map,
-    // re-resolved each offset, and allocated a fresh typed-array view per value; the plan's cached views and
-    // counters remove all three. The staged bytes remain a full, always-valid image of the UBO, so the upload
-    // stays a whole-buffer copy — no partial ranges, and the GPU sees byte-identical contents.
-    const plan = getCustomPlan(material, customSpec, customData);
-    const slots = plan.slots;
-    const lastV = plan._lastV;
-    const index = plan._index;
-    const kinds = plan._kinds;
-    const lens = plan._lens;
-    const f32 = plan.f32;
-    const count = slots.length;
-    let wrote = false;
-    for (let i = 0; i < count; i++) {
-        const slot = slots[i]!;
-        const v = slot._v!;
-        if (v === lastV[i]) {
+    customUniformWriter(engine, material, customSpec, customData, customUbo, bytes, uniformBatch);
+    state._shaderCustomVersion = material._uniformVersion;
+}
+
+function writeCustomUniforms(
+    engine: EngineContext,
+    material: ShaderMaterial,
+    spec: UboSpec,
+    data: ArrayBuffer,
+    ubo: GPUBuffer,
+    bytes: Uint8Array<ArrayBuffer>,
+    uniformBatch?: UniformCopyBatch
+): void {
+    bytes.fill(0);
+    for (const [name, slot] of material._uniformValues) {
+        if (_isShaderSystemUniform(name)) {
             continue;
         }
-        lastV[i] = v;
-        wrote = true;
-        const at = index[i]!;
-        const value = slot.value;
-        const kind = kinds[i]!;
-        if (kind === 1) {
-            plan.u32[at] = value[0]!;
-        } else if (kind === 2) {
-            plan.i32[at] = value[0]!;
-        } else {
-            const n = lens[i]!;
-            if (n === 1) {
-                f32[at] = value[0]!;
-            } else {
-                // Typed-array `set` is a memcpy for the mat4/vec4 slots that dominate byte volume.
-                f32.set(value, at);
-            }
+        const offset = spec._offsets.get(name);
+        if (offset !== undefined) {
+            writeTypedValue(data, offset, slot.decl.type, slot.value);
         }
     }
-    // A version bump with no custom slot behind it (an `alphaCutoff`-only write, or a slot this material's
-    // block does not carry) leaves the staged bytes untouched, so the upload would be a byte-identical rewrite.
-    if (!wrote) {
-        state._shaderCustomVersion = material._uniformVersion;
+    if (uniformBatch) {
+        uniformBatch.queue(ubo, bytes);
+    } else {
+        engine._device.queue.writeBuffer(ubo, 0, bytes);
+    }
+}
+
+function writeTypedValue(data: ArrayBuffer, offset: number, type: ShaderUniformType, value: Float32Array): void {
+    if (type === "u32") {
+        new U32(data, offset, 1)[0] = value[0]!;
         return;
     }
-    if (uniformBatch) {
-        uniformBatch.queue(customUbo, bytes);
-    } else {
-        engine._device.queue.writeBuffer(customUbo, 0, bytes);
+    if (type === "i32") {
+        new I32(data, offset, 1)[0] = value[0]!;
+        return;
     }
-    state._shaderCustomVersion = material._uniformVersion;
+    new F32(data, offset, value.length).set(value);
 }
 
 function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, systemUBO: GPUBuffer): GPUBindGroup {
@@ -669,59 +538,65 @@ function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: Sh
     map.set(mesh, list);
 }
 
-/** Fill one packet's system block. Driven by the material's cached `SystemWritePlan` (opcodes + float
- *  indices resolved once) rather than re-walking `uniformDecls` and `spec._offsets` per packet per pass:
- *  during a camera move EVERY packet rewrites this block, so the per-uniform map lookup and string switch
- *  were pure per-frame overhead.
- *
- *  The old `data.fill(0)` is gone: `data` is allocated zeroed and every declared uniform below writes its
- *  full slot on every call (matrix slots explicitly zero themselves when there is no camera, exactly as the
- *  clear-then-skip pair used to), so padding bytes are untouched and the block is byte-identical. */
-function writeSystemUniforms(data: Float32Array, plan: SystemWritePlan, mesh: Mesh, camera: Camera | null, targetWidth: number, targetHeight: number): void {
+function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: ShaderMaterial, mesh: Mesh, camera: Camera | null, targetWidth: number, targetHeight: number): void {
+    data.fill(0);
     const world = mesh.worldMatrix as unknown as Float32Array;
     const aspect = camera ? getEffectiveAspectRatio(camera, targetWidth, targetHeight) : 1;
     const view = camera ? (getViewMatrix(camera) as unknown as Float32Array) : null;
     const projection = camera ? (getProjectionMatrix(camera, aspect) as unknown as Float32Array) : null;
     const viewProjection = camera ? (getViewProjectionMatrix(camera, aspect) as unknown as Float32Array) : null;
-    const ops = plan.ops;
-    const at = plan._at;
-    for (let i = 0; i < ops.length; i++) {
-        const f = at[i]!;
-        switch (ops[i]!) {
-            case OP_WORLD:
+    for (const uniform of material.uniformDecls) {
+        if (!_isShaderSystemUniform(uniform.name)) {
+            continue;
+        }
+        const offset = spec._offsets.get(uniform.name);
+        if (offset === undefined) {
+            continue;
+        }
+        const f = offset / 4;
+        switch (uniform.name) {
+            case "world":
                 data.set(world, f);
                 break;
-            case OP_VIEW:
-                view ? data.set(view, f) : data.fill(0, f, f + 16);
+            case "view":
+                if (view) {
+                    data.set(view, f);
+                }
                 break;
-            case OP_PROJECTION:
-                projection ? data.set(projection, f) : data.fill(0, f, f + 16);
+            case "projection":
+                if (projection) {
+                    data.set(projection, f);
+                }
                 break;
-            case OP_VIEW_PROJECTION:
-                viewProjection ? data.set(viewProjection, f) : data.fill(0, f, f + 16);
+            case "viewProjection":
+                if (viewProjection) {
+                    data.set(viewProjection, f);
+                }
                 break;
-            case OP_WORLD_VIEW:
-                view ? mat4MultiplyInto(data, f, view, 0, world, 0) : data.fill(0, f, f + 16);
+            case "worldView":
+                if (view) {
+                    mat4MultiplyInto(data, f, view, 0, world, 0);
+                }
                 break;
-            case OP_WORLD_VIEW_PROJECTION:
-                viewProjection ? mat4MultiplyInto(data, f, viewProjection, 0, world, 0) : data.fill(0, f, f + 16);
+            case "worldViewProjection":
+                if (viewProjection) {
+                    mat4MultiplyInto(data, f, viewProjection, 0, world, 0);
+                }
                 break;
-            case OP_CAMERA_POSITION:
+            case "cameraPosition":
                 if (camera) {
                     const wm = camera.worldMatrix as unknown as ArrayLike<number>;
                     data[f] = wm[12]!;
                     data[f + 1] = wm[13]!;
                     data[f + 2] = wm[14]!;
-                } else {
-                    data[f] = data[f + 1] = data[f + 2] = 0;
                 }
                 break;
-            case OP_SCREEN_SIZE:
+            case "screenSize":
                 data[f] = targetWidth;
                 data[f + 1] = targetHeight;
                 break;
-            case OP_ALPHA_CUTOFF:
-                data[f] = plan.alphaSlot?.value[0] ?? 0.4;
+            case "alphaCutoff":
+                data[f] = material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4;
                 break;
         }
     }

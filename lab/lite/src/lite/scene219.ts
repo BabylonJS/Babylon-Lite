@@ -14,7 +14,7 @@ import {
     startEngine,
     createEngine,
     createSceneContext,
-    createDefaultCamera,
+    createArcRotateCamera,
     createHemisphericLight,
     loadGltf,
     attachControl,
@@ -70,9 +70,9 @@ async function main(): Promise<void> {
         }
     }
 
-    const cam = createDefaultCamera(scene);
-    cam.alpha = 0; // side view, matching scene 218 / scene 11
-    cam.beta = Math.PI / 2.2;
+    // Fixed framing avoids pulling the generic world-bounds camera helper into this tightly-budgeted VAT demo.
+    const cam = createArcRotateCamera(0, Math.PI / 2.2, 28.816, { x: 0, y: 2.36936, z: -0.65368 });
+    scene.camera = cam;
     attachControl(cam, canvas, scene);
     addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
