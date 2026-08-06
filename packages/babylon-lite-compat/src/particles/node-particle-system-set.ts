@@ -61,7 +61,15 @@ export class ParticleSystemSet {
         }
         if (!this._systems) {
             const scene = this._scene;
-            this._systems = this._lite.systems.map((s) => ParticleSystem._fromLite(s, scene));
+            this._systems = this._lite.systems.map((s) => {
+                const system = ParticleSystem._fromLite(s, scene);
+                // Wrappers materialized after set-level registration must not build a
+                // second billboard for a system Lite already renders.
+                if (this._started) {
+                    system._releaseBillboardToSet();
+                }
+                return system;
+            });
         }
         return this._systems;
     }
@@ -70,13 +78,33 @@ export class ParticleSystemSet {
      * Babylon.js `ParticleSystemSet.start()` — begin all systems. Forwards to Lite
      * `registerNodeParticleSet`, which renders each system as a camera-facing
      * billboard and advances it once per frame. Idempotent.
+     *
+     * Per-system wrapper state (`systems[i].particleTexture`) is pushed onto the
+     * backing Lite systems first, so the standard
+     * `set.systems[i].particleTexture = texture; set.start()` sequence renders with
+     * the assigned texture rather than the graph's. Registration is deferred to
+     * engine start (`scene._deferAdd`, which runs after the scene's pending texture
+     * loads settle) because a compat `Texture` resolves its GPU handle
+     * asynchronously and Lite's billboard build needs it.
      */
     public start(): void {
         if (this._started || !this._lite || !this._scene) {
             return;
         }
         this._started = true;
-        registerNodeParticleSet(this._scene._lite, this._lite, { autoStart: true });
+        const scene = this._scene;
+        const lite = this._lite;
+        // Claim billboard rendering synchronously so an already-scheduled per-system
+        // build (from `systems[i].start()`) is skipped when the deferred adds flush.
+        for (const system of this._systems ?? []) {
+            system._releaseBillboardToSet();
+        }
+        scene._deferAdd(() => {
+            for (const system of this._systems ?? []) {
+                system._bindTexture();
+            }
+            registerNodeParticleSet(scene._lite, lite, { autoStart: true });
+        });
     }
 
     /**

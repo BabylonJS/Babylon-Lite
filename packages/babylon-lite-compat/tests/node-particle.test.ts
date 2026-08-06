@@ -110,13 +110,65 @@ describe("ParticleSystemSet", () => {
         registerMock.mockReset();
         const liteSet = { systems: [] } as unknown as LiteNodeParticleSet;
         parseMock.mockResolvedValueOnce(liteSet);
-        const { scene, liteScene } = makeScene();
+        const { scene, liteScene, deferred } = makeScene();
 
         const set = await NodeParticleSystemSet.Parse({}).buildAsync(scene);
         set.start();
         set.start();
+        // Registration waits for engine start, when the scene's texture loads have settled.
+        expect(registerMock).not.toHaveBeenCalled();
+        expect(deferred).toHaveLength(1);
+
+        deferred[0]!();
         expect(registerMock).toHaveBeenCalledTimes(1);
         expect(registerMock).toHaveBeenCalledWith(liteScene, liteSet, { autoStart: true });
+    });
+
+    it("start() pushes wrapper particleTexture onto the Lite systems before registering", async () => {
+        parseMock.mockReset();
+        registerMock.mockReset();
+        const s0 = { updateSpeed: 0.1, texture: null as unknown };
+        const s1 = { updateSpeed: 0.1, texture: null as unknown };
+        const liteSet = { systems: [s0, s1] } as unknown as LiteNodeParticleSet;
+        parseMock.mockResolvedValueOnce(liteSet);
+        const { scene, deferred } = makeScene();
+
+        const set = await NodeParticleSystemSet.Parse({}).buildAsync(scene);
+        // The standard Babylon.js sequence: assign per-system textures, then start the set.
+        const tex0 = { gpu: "tex0" };
+        const tex1 = { gpu: "tex1" };
+        set.systems[0]!.particleTexture = { _lite: tex0 } as never;
+        set.systems[1]!.particleTexture = { _lite: tex1 } as never;
+        set.start();
+
+        deferred[0]!();
+        expect(s0.texture).toBe(tex0);
+        expect(s1.texture).toBe(tex1);
+        expect(registerMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("start() suppresses the per-system billboard build (Lite renders the set)", async () => {
+        parseMock.mockReset();
+        registerMock.mockReset();
+        createBillboardMock.mockReset();
+        addBillboardMock.mockReset();
+        const s0 = { updateSpeed: 0.1, texture: null as unknown };
+        const liteSet = { systems: [s0] } as unknown as LiteNodeParticleSet;
+        parseMock.mockResolvedValueOnce(liteSet);
+        const { scene, deferred } = makeScene();
+
+        const set = await NodeParticleSystemSet.Parse({}).buildAsync(scene);
+        const system = set.systems[0]!;
+        system.particleTexture = { _lite: { gpu: "tex" } } as never;
+        system.start();
+        set.start();
+
+        for (const add of deferred) {
+            add();
+        }
+        expect(createBillboardMock).not.toHaveBeenCalled();
+        expect(addBillboardMock).not.toHaveBeenCalled();
+        expect(registerMock).toHaveBeenCalledTimes(1);
     });
 
     it("dispose() stops every built system via stopParticleSystem", async () => {
@@ -195,21 +247,36 @@ describe("ParticleSystem (per-system NPE handle)", () => {
         expect(lite.updateSpeed).toBe(0);
     });
 
-    it("start() forwards to startParticleSystem once (idempotent)", async () => {
+    it("start() forwards to startParticleSystem on every call (Babylon.js restarts emission)", async () => {
         const lite = { updateSpeed: 0.1, texture: null };
         const { system } = await buildOneSystem(lite);
         system.start();
         system.start();
-        expect(startMock).toHaveBeenCalledTimes(1);
-        expect(startMock).toHaveBeenCalledWith(lite);
+        expect(startMock.mock.calls).toEqual([[lite], [lite]]);
     });
 
-    it("animate() forwards to animateParticleSystem with the parity ratio 1", async () => {
+    it("start() → stop() → start() resumes emission", async () => {
+        const lite = { updateSpeed: 0.1, texture: null };
+        const { system, deferred } = await buildOneSystem(lite);
+        system.start();
+        system.stop();
+        system.start();
+        expect(startMock).toHaveBeenCalledTimes(2);
+        expect(stopMock).toHaveBeenCalledTimes(1);
+        // The one-time billboard build stays scheduled exactly once.
+        expect(deferred).toHaveLength(1);
+    });
+
+    it("animate() uses preWarmStepOffset while prewarming and ratio 1 otherwise", async () => {
         const lite = { updateSpeed: 0.1, texture: null };
         const { system } = await buildOneSystem(lite);
+        system.preWarmStepOffset = 4;
         system.animate(true);
         system.animate();
+        system.preWarmStepOffset = 1;
+        system.animate(true);
         expect(animateMock.mock.calls).toEqual([
+            [lite, 4],
             [lite, 1],
             [lite, 1],
         ]);

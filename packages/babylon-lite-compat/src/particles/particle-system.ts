@@ -46,15 +46,15 @@ export class ParticleSystem {
 
     /**
      * Babylon.js `ParticleSystem.preWarmStepOffset` — the step ratio applied during
-     * prewarm cycles. Accepted for parity; ported deterministic scenes drive the
-     * prewarm explicitly via repeated {@link animate} calls, so this is recorded but
-     * does not itself advance the simulation.
+     * prewarm cycles. Multiplies {@link updateSpeed} on every `animate(true)` call,
+     * matching Babylon.js (which uses `updateSpeed * preWarmStepOffset` while
+     * prewarming and the regular animation ratio otherwise).
      */
     public preWarmStepOffset = 1;
 
     private _texture: Texture | null = null;
-    private _started = false;
     private _billboardScheduled = false;
+    private _billboardOwnedBySet = false;
 
     /**
      * Babylon.js `new ParticleSystem(name, capacity, scene)`. The imperative
@@ -82,8 +82,8 @@ export class ParticleSystem {
         system._scene = scene;
         system.preWarmStepOffset = 1;
         system._texture = null;
-        system._started = false;
         system._billboardScheduled = false;
+        system._billboardOwnedBySet = false;
         return system;
     }
 
@@ -116,28 +116,28 @@ export class ParticleSystem {
 
     /**
      * Babylon.js `ParticleSystem.start()` — begin emission. Forwards to Lite
-     * `startParticleSystem` and schedules the camera-facing billboard build for
-     * engine start (once the particle texture has loaded and the deterministic
-     * prewarm has run). Idempotent.
+     * `startParticleSystem` (which clears the stopped flag and resets the frame
+     * counter, so `start()` → `stop()` → `start()` resumes emission) and schedules
+     * the camera-facing billboard build for engine start. The billboard build is
+     * separately guarded, so it happens exactly once however often `start()` runs.
      */
     public start(): void {
-        if (!this._lite || this._started) {
+        if (!this._lite) {
             return;
         }
-        this._started = true;
         startParticleSystem(this._lite);
         this._scheduleBillboard();
     }
 
     /**
      * Babylon.js `ParticleSystem.animate(preWarmOnly?)` — advance the simulation by
-     * one deterministic step. Forwards to Lite `animateParticleSystem` with the
-     * animation ratio of `1` used by the parity ports' seeded prewarm loop.
+     * one deterministic step. Forwards to Lite `animateParticleSystem` with Babylon.js's
+     * step ratio: {@link preWarmStepOffset} while prewarming, otherwise the ratio `1`
+     * used by the parity ports' seeded step loop.
      */
-    public animate(_preWarmOnly?: boolean): void {
-        void _preWarmOnly;
+    public animate(preWarmOnly = false): void {
         if (this._lite) {
-            animateParticleSystem(this._lite, 1);
+            animateParticleSystem(this._lite, preWarmOnly ? this.preWarmStepOffset : 1);
         }
     }
 
@@ -154,6 +154,31 @@ export class ParticleSystem {
     }
 
     /**
+     * @internal Bind the recorded {@link particleTexture}'s GPU handle onto the backing
+     * Lite system. Called from the deferred per-system billboard build and from
+     * {@link ParticleSystemSet.start} before set-level registration, so a
+     * wrapper-assigned texture wins over whatever the graph baked in. A no-op while
+     * the compat `Texture` is still loading (callers run after the scene's pending
+     * texture loads settle).
+     */
+    public _bindTexture(): void {
+        const liteTexture = this._texture?._lite as Texture2D | undefined;
+        if (this._lite && liteTexture) {
+            this._lite.texture = liteTexture;
+        }
+    }
+
+    /**
+     * @internal Hand billboard rendering to the owning {@link ParticleSystemSet}: Lite's
+     * `registerNodeParticleSet` builds and per-frame syncs a billboard for every system
+     * in the set, so this wrapper's one-shot build must be skipped to avoid rendering
+     * the same particles twice.
+     */
+    public _releaseBillboardToSet(): void {
+        this._billboardOwnedBySet = true;
+    }
+
+    /**
      * Schedule the one-time billboard build. Deferred to engine start (via the
      * scene's `_deferAdd`, which runs after pending texture loads settle), so the
      * particle system is already prewarmed/frozen and its texture GPU handle is
@@ -167,10 +192,12 @@ export class ParticleSystem {
         const scene = this._scene;
         const lite = this._lite;
         scene._deferAdd(() => {
-            const liteTexture = this._texture?._lite as Texture2D | undefined;
-            if (liteTexture) {
-                lite.texture = liteTexture;
+            // Re-checked at flush time: the owning set may have claimed billboard
+            // rendering after this build was scheduled.
+            if (this._billboardOwnedBySet) {
+                return;
             }
+            this._bindTexture();
             if (!lite.texture) {
                 return;
             }
