@@ -14,7 +14,7 @@ import { mat4GetTranslationToRef } from "../../math/mat4-transform.js";
 import type { ParticleGraph, ParsedParticleBlock, ParsedParticleInput } from "./npe-types.js";
 import type { ParticleBuffer } from "../particle-buffer.js";
 import { createParticleSystem, type ParticleSystem } from "../particle-system.js";
-import type { NpeGetter, NpeValue } from "./npe-value.js";
+import type { NpeGetter, NpeGraphValue, NpeValue } from "./npe-value.js";
 import { loadNpeBlockEvaluator } from "./npe-registry.js";
 
 function isInputConnected(input: ParsedParticleInput | undefined): input is ParsedParticleInput & { targetBlockId: number; targetConnectionName: string } {
@@ -56,15 +56,16 @@ export interface NpeBuildState {
     isLocal: boolean;
     scene: SceneContext;
     textureBaseUrl?: string;
+    billboardTextureBlockId?: number;
 }
 
 /** Build context handed to each NPE block evaluator. */
 export interface NpeBuildContext {
     state: NpeBuildState;
     engine: EngineContext;
-    input(block: ParsedParticleBlock, name: string, fallback?: NpeGetter): NpeGetter;
+    input<T extends NpeGraphValue = NpeValue>(block: ParsedParticleBlock, name: string, fallback?: NpeGetter<T>): NpeGetter<T>;
     isConnected(block: ParsedParticleBlock, name: string): boolean;
-    setOutput(blockId: number, name: string, getter: NpeGetter): void;
+    setOutput<T extends NpeGraphValue>(blockId: number, name: string, getter: NpeGetter<T>): void;
     addBuildPromise(promise: Promise<void>): void;
 }
 
@@ -113,6 +114,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             emitter.y = e.y;
             emitter.z = e.z;
         }
+        const billboardTextureInput = systemBlock.inputs.find((input) => input.name === "texture");
         const state: NpeBuildState = {
             system,
             buffer: system.buffer,
@@ -122,37 +124,38 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             isLocal: systemBlock.serialized.isLocal === true,
             scene,
             textureBaseUrl: options.textureBaseUrl,
+            billboardTextureBlockId: isInputConnected(billboardTextureInput) ? billboardTextureInput.targetBlockId : undefined,
         };
 
-        const outputs = new Map<string, NpeGetter>();
+        const outputs = new Map<string, NpeGetter<NpeGraphValue>>();
         const built = new Set<number>();
 
         const ctx: NpeBuildContext = {
             state,
             engine,
-            input(block, name, fallback) {
+            input<T extends NpeGraphValue = NpeValue>(block: ParsedParticleBlock, name: string, fallback?: NpeGetter<T>): NpeGetter<T> {
                 const input = block.inputs.find((i) => i.name === name);
                 if (isInputConnected(input)) {
                     const getter = outputs.get(`${input.targetBlockId}:${input.targetConnectionName}`);
                     if (getter) {
-                        return getter;
+                        return getter as NpeGetter<T>;
                     }
                     throw new Error(`NodeParticle: unresolved connection ${block.className}.${name}`);
                 }
                 if (input) {
                     const literal = parseInputLiteral(input);
                     if (literal !== undefined) {
-                        return () => literal;
+                        return (() => literal) as unknown as NpeGetter<T>;
                     }
                 }
-                return fallback ?? (() => null as unknown as NpeValue);
+                return fallback ?? (() => null as unknown as T);
             },
             isConnected(block, name) {
                 const input = block.inputs.find((i) => i.name === name);
                 return isInputConnected(input);
             },
-            setOutput(blockId, name, getter) {
-                outputs.set(`${blockId}:${name}`, getter);
+            setOutput<T extends NpeGraphValue>(blockId: number, name: string, getter: NpeGetter<T>) {
+                outputs.set(`${blockId}:${name}`, getter as NpeGetter<NpeGraphValue>);
             },
             addBuildPromise(promise) {
                 buildPromises.push(promise);

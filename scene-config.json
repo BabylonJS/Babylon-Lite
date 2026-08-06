@@ -2434,5 +2434,16 @@
         "tags": ["npe", "particles", "billboards", "attractor"],
         "skipPerf": true,
         "compatParity": true
+    },
+    {
+        "id": 278,
+        "slug": "scene278-npe-flow-map",
+        "name": "Scene 278 — NPE Particles: Flow Map",
+        "maxMad": 0.01,
+        "maxRawKB": 47,
+        "description": "A serialized NPE particle graph with UpdateFlowMapBlock projecting particle positions into an asymmetric RGBA flow field and applying alpha-weighted direction changes. Uses separate flow and billboard texture sources, deterministic seeded simulation, and a frozen camera-facing billboard frame.",
+        "tags": ["npe", "particles", "billboards", "flow-map"],
+        "skipPerf": true,
+        "compatParity": true
     }
 ]
