@@ -298,19 +298,17 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager): void
         unit.laser.scaling.set(opts.laserThickness, opts.laserThickness, visual.beamLength);
         unit.laser.visible = true;
 
-        // Selection ring at the hit point: scaled with distance (so it keeps a roughly
-        // constant apparent size) and laid flat on the hit surface via its normal
-        // (falling back to facing the controller). Hidden entirely on a miss.
+        // Selection ring: laid flat on the hit surface (hole axis along the surface
+        // normal), scaled with distance to keep a roughly constant apparent size, and
+        // nudged slightly off the surface toward the controller so the coplanar ring
+        // doesn't z-fight / hide inside the face. Hidden entirely on a miss.
         if (visual.hit) {
-            unit.cursor.position.set(visual.cursorPosition[0], visual.cursorPosition[1], visual.cursorPosition[2]);
             const s = Math.sqrt(info.distance) || 1;
+            const off = 0.008 * s;
+            const n = (info.pickedNormalWorld as [number, number, number] | null) ?? [-fx, -fy, -fz];
+            unit.cursor.position.set(visual.cursorPosition[0] + n[0] * off, visual.cursorPosition[1] + n[1] * off, visual.cursorPosition[2] + n[2] * off);
             unit.cursor.scaling.set(s, s, s);
-            const n = info.pickedNormalWorld;
-            if (n) {
-                orientRingToDir(unit.cursor, n as [number, number, number]);
-            } else {
-                orientRingToDir(unit.cursor, [-fx, -fy, -fz]);
-            }
+            orientRingToDir(unit.cursor, n);
             unit.cursor.visible = true;
         } else {
             unit.cursor.visible = false;

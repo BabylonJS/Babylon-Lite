@@ -33,6 +33,13 @@ export interface XrSessionOptions {
      *  Defaults to `"depth24plus"`. Pass `null` to render without a compositor depth
      *  attachment (Babylon Lite then renders color-only — supply your own depth if needed). */
     depthStencilFormat?: GPUTextureFormat | null;
+    /** XR projection near-clip distance in metres. Smaller lets objects (e.g. a
+     *  controller or a grabbed cube) come right up to the eyes without clipping.
+     *  Defaults to `0.02`. */
+    depthNear?: number;
+    /** XR projection far-clip distance in metres. Defaults to the UA value when
+     *  omitted (typically 1000). */
+    depthFar?: number;
     /** Input-source callbacks, or `false` to disable input tracking entirely.
      *  Defaults to `{}` (sources tracked, no callbacks). */
     input?: XrInputCallbacks | false;
@@ -158,7 +165,11 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
         colorFormat,
         depthStencilFormat: depthFormat ?? undefined,
     });
-    await session.updateRenderState({ layers: [layer] });
+    await session.updateRenderState({
+        layers: [layer],
+        depthNear: options.depthNear ?? 0.02,
+        ...(options.depthFar !== undefined ? { depthFar: options.depthFar } : {}),
+    });
 
     let referenceSpace: XRReferenceSpace;
     try {

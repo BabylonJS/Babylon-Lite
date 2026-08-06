@@ -111,7 +111,9 @@ describe("updateXrPointer", () => {
         expect(unit.cursor.visible).toBe(true);
         expect(unit.laser.pickable).toBe(false); // must never pick itself
         expect(unit.cursor.pickable).toBe(false);
-        expect(unit.cursor.position.z).toBeCloseTo(-4, 5);
+        // Ring sits at the hit (z=-4) nudged slightly off the surface toward the
+        // controller (+Z) by 0.008*sqrt(distance) so it doesn't z-fight the face.
+        expect(unit.cursor.position.z).toBeCloseTo(-4 + 0.008 * Math.sqrt(4), 5);
         expect(unit.laser.scaling.z).toBeCloseTo(4, 5);
     });
 
