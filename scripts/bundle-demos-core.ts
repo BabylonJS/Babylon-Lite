@@ -51,6 +51,7 @@ const TETRIS_SRC = resolve(labDir, "public/tetris");
 const PLATFORMER_SRC = resolve(labDir, "public/platformer");
 const SANDBLOX_SRC = resolve(labDir, "public/sandblox");
 const RACER_SRC = resolve(labDir, "public/racer");
+const SCREEN_SPACE_EFFECTS_SRC = resolve(labDir, "public/screen-space-effects");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
 const _demoRequire = createRequire(import.meta.url);
@@ -246,6 +247,10 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
         // CC0 Kenney car / track / prop GLBs + smoke sprite + audio, fetched by
         // fetch-racer.ts and resolved at runtime via demoAssetUrl("./racer/...").
         copyRequiredDir(RACER_SRC, resolve(demosDir, "racer"), "Racer");
+    }
+
+    if (demos.some((demo) => demo.slug === "screen-space-effects")) {
+        copyRequiredDir(SCREEN_SPACE_EFFECTS_SRC, resolve(demosDir, "screen-space-effects"), "Screen-space effects");
     }
 
     if (demos.some((demo) => demo.slug === "bath-day")) {
