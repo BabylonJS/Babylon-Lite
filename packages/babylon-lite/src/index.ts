@@ -673,7 +673,7 @@ export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
 export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
 export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
 export type { ParticleSystem } from "./particle/particle-system.js";
-export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
+export { animateParticleSystem, prepareParticleSystemFrame, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
 export { registerNodeParticleSet } from "./particle/particle-scene.js";
 export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";

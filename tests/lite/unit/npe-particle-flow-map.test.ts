@@ -1,33 +1,58 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
-import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4";
-import { createParticleBuffer } from "../../../packages/babylon-lite/src/particle/particle-buffer";
-import { createParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
+import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../../packages/babylon-lite/src/math/_matrix-allocator";
+import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
+import { createParticleSystem, prepareParticleSystemFrame } from "../../../packages/babylon-lite/src/particle/particle-system";
 import { particleTextureSourceBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/texture-source-block";
-import { applyFlowMapToParticle, updateFlowMapBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-flow-map-block";
+import { updateFlowMapBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-flow-map-block";
 import type { NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { loadNpeTextureContent } from "../../../packages/babylon-lite/src/particle/node/npe-texture-content";
 import type { ParsedParticleBlock } from "../../../packages/babylon-lite/src/particle/node/npe-types";
 import type { NpeGetter, NpeTextureContent, NpeTextureValue } from "../../../packages/babylon-lite/src/particle/node/npe-value";
+import { buildNodeParticleGraph } from "./particle-test-utils";
 
-function flowMap(data: number[]): NpeTextureContent {
-    return { width: 2, height: 2, data: new Uint8ClampedArray(data) };
+function flowMap(data: number[], width = 1, height = 1): NpeTextureContent {
+    return { width, height, data: new Uint8ClampedArray(data) };
+}
+
+async function attachFlowMap(system: ReturnType<typeof createParticleSystem>, map: NpeTextureContent, strengthGetter: () => number): Promise<void> {
+    const source: NpeTextureValue = {
+        url: "flow.png",
+        invertY: false,
+        _content: Promise.resolve(map),
+    };
+    const promises: Promise<void>[] = [];
+    const ctx = {
+        state: { system, buffer: system.buffer },
+        input(_block: ParsedParticleBlock, name: string): NpeGetter<NpeTextureValue> | NpeGetter {
+            return name === "flowMap" ? () => source : strengthGetter;
+        },
+        addBuildPromise(promise: Promise<void>) {
+            promises.push(promise);
+        },
+    } as unknown as NpeBuildContext;
+    const block = { id: 1, className: "UpdateFlowMapBlock", name: "flow", inputs: [], serialized: {} } as ParsedParticleBlock;
+    updateFlowMapBlock.build(block, ctx);
+    await Promise.all(promises);
 }
 
 afterEach(() => {
     vi.unstubAllGlobals();
+    _resetMatrixAllocatorForTests();
 });
 
 describe("NPE UpdateFlowMapBlock", () => {
-    it("samples projected RGBA flow with alpha-weighted strength", () => {
-        const map = flowMap([255, 128, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        const buffer = createParticleBuffer(1);
-        const screen = { x: 0, y: 0, z: 0 };
-        buffer.posX[0] = -0.5;
-        buffer.posY[0] = 0.5;
+    it("samples projected RGBA flow with alpha-weighted strength", async () => {
+        const map = flowMap([255, 128, 0, 128]);
+        const system = createParticleSystem(1);
+        const buffer = system.buffer;
         buffer.dirX[0] = 1;
+        await attachFlowMap(system, map, () => 2);
+        const camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 10, { x: 0, y: 0, z: 0 });
+        prepareParticleSystemFrame(system, camera, 100, 100);
+        system._scaledStep = 1;
 
-        applyFlowMapToParticle(map, mat4Identity(), 2, buffer, 0, screen);
+        system.updateSteps[0]!(0);
 
         const scale = 2 * (128 / 255);
         expect(buffer.dirX[0]).toBeCloseTo(1 + scale, 6);
@@ -35,58 +60,74 @@ describe("NPE UpdateFlowMapBlock", () => {
         expect(buffer.dirZ[0]).toBeCloseTo(-scale, 6);
     });
 
-    it("rejects samples outside the screen and ignores transparent pixels", () => {
-        const map = flowMap([255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]);
-        const buffer = createParticleBuffer(1);
-        const screen = { x: 0, y: 0, z: 0 };
-        buffer.posX[0] = -0.5;
-        buffer.posY[0] = 0.5;
-        buffer.dirX[0] = 3;
+    it("samples a bottom-row texel with the full row stride", async () => {
+        const map = flowMap([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 128, 128, 255], 2, 2);
+        const system = createParticleSystem(1);
+        system.buffer.posY[0] = -1;
+        await attachFlowMap(system, map, () => 1);
+        const camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 10, { x: 0, y: 0, z: 0 });
+        prepareParticleSystemFrame(system, camera, 100, 100);
+        system._scaledStep = 1;
 
-        applyFlowMapToParticle(map, mat4Identity(), 4, buffer, 0, screen);
-        expect(buffer.dirX[0]).toBe(3);
+        system.updateSteps[0]!(0);
 
-        buffer.posX[0] = 1;
-        applyFlowMapToParticle(map, mat4Identity(), 4, buffer, 0, screen);
-        expect(buffer.dirX[0]).toBe(3);
+        expect(system.buffer.dirX[0]).toBeCloseTo(1, 6);
+        expect(system.buffer.dirY[0]).toBeCloseTo(1 / 255, 6);
+        expect(system.buffer.dirZ[0]).toBeCloseTo(1 / 255, 6);
+    });
+
+    it("allocates its prepared matrix through the HPM policy", async () => {
+        const allocations: Float64Array[] = [];
+        _setHpmAllocator(() => {
+            const matrix = new Float64Array(16);
+            allocations.push(matrix);
+            return matrix as unknown as Mat4;
+        });
+
+        await attachFlowMap(createParticleSystem(1), flowMap([255, 128, 128, 255]), () => 1);
+
+        expect(allocations).toHaveLength(1);
+        expect(allocations[0]).toBeInstanceOf(Float64Array);
+    });
+
+    it("rejects samples outside the screen and ignores transparent pixels", async () => {
+        const camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 10, { x: 0, y: 0, z: 0 });
+        const transparent = createParticleSystem(1);
+        transparent.buffer.dirX[0] = 3;
+        await attachFlowMap(transparent, flowMap([255, 255, 255, 0]), () => 4);
+        prepareParticleSystemFrame(transparent, camera, 100, 100);
+        transparent._scaledStep = 1;
+        transparent.updateSteps[0]!(0);
+        expect(transparent.buffer.dirX[0]).toBe(3);
+
+        const outside = createParticleSystem(1);
+        outside.buffer.posX[0] = 1000;
+        outside.buffer.dirX[0] = 3;
+        let strengthCalls = 0;
+        await attachFlowMap(outside, flowMap([255, 255, 255, 255]), () => {
+            strengthCalls++;
+            return 4;
+        });
+        prepareParticleSystemFrame(outside, camera, 100, 100);
+        outside._scaledStep = 1;
+        outside.updateSteps[0]!(0);
+        expect(outside.buffer.dirX[0]).toBe(3);
+        expect(strengthCalls).toBe(1);
     });
 
     it("evaluates strength per particle and applies the current scaled step", async () => {
         const system = createParticleSystem(1);
         const map: NpeTextureContent = { width: 1, height: 1, data: new Uint8ClampedArray([255, 128, 128, 255]) };
-        const source: NpeTextureValue = {
-            url: "flow.png",
-            invertY: false,
-            _content: Promise.resolve(map),
-        };
         const camera = createArcRotateCamera(0, Math.PI / 2, 10, { x: 0, y: 0, z: 0 });
-        const promises: Promise<void>[] = [];
         let strength = 8;
         let strengthCalls = 0;
-        const ctx = {
-            state: {
-                system,
-                buffer: system.buffer,
-                scene: { camera, surface: { canvas: { width: 100, height: 100 } } },
-            },
-            input(_block: ParsedParticleBlock, name: string): NpeGetter<NpeTextureValue> | NpeGetter {
-                if (name === "flowMap") {
-                    return () => source;
-                }
-                return () => {
-                    strengthCalls++;
-                    return strength;
-                };
-            },
-            addBuildPromise(promise: Promise<void>) {
-                promises.push(promise);
-            },
-        } as unknown as NpeBuildContext;
-        const block = { id: 1, className: "UpdateFlowMapBlock", name: "flow", inputs: [], serialized: {} } as ParsedParticleBlock;
+        await attachFlowMap(system, map, () => {
+            strengthCalls++;
+            return strength;
+        });
 
-        updateFlowMapBlock.build(block, ctx);
-        await Promise.all(promises);
-
+        prepareParticleSystemFrame(system, camera, 100, 100);
+        camera._vpCache.fill(0);
         system._scaledStep = 0.25;
         system.updateSteps[0]!(0);
         strength = 4;
@@ -95,6 +136,71 @@ describe("NPE UpdateFlowMapBlock", () => {
 
         expect(system.buffer.dirX[0]).toBeCloseTo(4, 6);
         expect(strengthCalls).toBe(2);
+    });
+
+    it("builds registry and texture wiring through a parsed graph", async () => {
+        const data = new Uint8ClampedArray([255, 128, 128, 255]);
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => ({ ok: true, blob: async () => ({}) }))
+        );
+        vi.stubGlobal(
+            "createImageBitmap",
+            vi.fn(async () => ({ width: 1, height: 1, close: vi.fn() }))
+        );
+        vi.stubGlobal(
+            "OffscreenCanvas",
+            vi.fn(function (this: { getContext: () => unknown }) {
+                this.getContext = () => ({ setTransform: vi.fn(), drawImage: vi.fn(), getImageData: () => ({ data }) });
+            })
+        );
+        const system = await buildNodeParticleGraph({
+            blocks: [
+                {
+                    customType: "BABYLON.SystemBlock",
+                    id: 4,
+                    capacity: 2,
+                    inputs: [
+                        { name: "particle", targetBlockId: 3, targetConnectionName: "output" },
+                        { name: "texture", targetBlockId: 5, targetConnectionName: "texture" },
+                    ],
+                },
+                {
+                    customType: "BABYLON.UpdateFlowMapBlock",
+                    id: 3,
+                    inputs: [
+                        { name: "particle", targetBlockId: 1, targetConnectionName: "output" },
+                        { name: "flowMap", targetBlockId: 2, targetConnectionName: "texture" },
+                        { name: "strength", valueType: "number", value: 2 },
+                    ],
+                },
+                { customType: "BABYLON.CreateParticleBlock", id: 1, inputs: [] },
+                {
+                    customType: "BABYLON.ParticleTextureSourceBlock",
+                    id: 2,
+                    textureDataUrl: "data:image/png;base64,AA==",
+                    invertY: false,
+                    inputs: [],
+                },
+                { customType: "BABYLON.ParticleTextureSourceBlock", id: 5, url: "", invertY: true, inputs: [] },
+            ],
+        });
+        const frameStep = system._frameSteps![0]!;
+        let frameCalls = 0;
+        system._frameSteps![0] = (...args) => {
+            frameCalls++;
+            frameStep(...args);
+        };
+        const camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 10, { x: 0, y: 0, z: 0 });
+        prepareParticleSystemFrame(system, camera, 0, 0);
+        system._scaledStep = 0.5;
+
+        system.updateSteps[0]!(0);
+        system.updateSteps[0]!(1);
+
+        expect(frameCalls).toBe(1);
+        expect(system.buffer.dirX[0]).toBeCloseTo(1, 6);
+        expect(system.buffer.dirX[1]).toBeCloseTo(1, 6);
     });
 
     it("caches converter-style data URL decoding and honors invertY", async () => {
@@ -148,5 +254,26 @@ describe("NPE UpdateFlowMapBlock", () => {
         particleTextureSourceBlock.build(block, ctx);
 
         expect(output?.(0)).toMatchObject({ url: "data:image/png;base64,AA==", invertY: true });
+    });
+
+    it("rejects unsupported texture URL schemes", () => {
+        const block = {
+            id: 3,
+            className: "ParticleTextureSourceBlock",
+            name: "flow texture",
+            inputs: [],
+            serialized: { url: "javascript:alert(1)", invertY: false },
+        } as ParsedParticleBlock;
+        let output: NpeGetter<NpeTextureValue> | undefined;
+        const ctx = {
+            state: { textureBaseUrl: "https://example.test/textures/", billboardTextureBlockId: 2 },
+            setOutput(_blockId: number, _name: string, getter: NpeGetter<NpeTextureValue>) {
+                output = getter;
+            },
+        } as unknown as NpeBuildContext;
+
+        particleTextureSourceBlock.build(block, ctx);
+
+        expect(output?.(0).url).toBe("");
     });
 });

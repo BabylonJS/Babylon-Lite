@@ -1,6 +1,7 @@
 import { getEffectiveAspectRatio, getViewProjectionMatrix } from "../../../camera/camera.js";
+import { allocateMat4 } from "../../../math/_matrix-allocator.js";
 import { transformCoordinatesToRef } from "../../../math/mat4-transform.js";
-import type { Mat4, Vec3 } from "../../../math/types.js";
+import type { Mat4, Mat4Storage, Vec3 } from "../../../math/types.js";
 import type { ParticleBuffer } from "../../particle-buffer.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 import { loadNpeTextureContent } from "../npe-texture-content.js";
@@ -11,7 +12,7 @@ function isTextureValue(value: unknown): value is NpeTextureValue {
 }
 
 /** Apply one screen-space flow-map sample to a particle direction. */
-export function applyFlowMapToParticle(map: NpeTextureContent, matrix: Mat4, scaledStrength: number, buffer: ParticleBuffer, i: number, screen: Vec3): void {
+function applyFlowMapToParticle(map: NpeTextureContent, matrix: Mat4, scaledStrength: number, buffer: ParticleBuffer, i: number, screen: Vec3): void {
     transformCoordinatesToRef(buffer.posX[i]!, buffer.posY[i]!, buffer.posZ[i]!, matrix, screen);
     const x = Math.floor((screen.x * 0.5 + 0.5) * map.width);
     const y = Math.floor((1 - (screen.y * 0.5 + 0.5)) * map.height);
@@ -31,11 +32,13 @@ export const updateFlowMapBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;
-        const scene = ctx.state.scene;
         const sourceValue = ctx.input<NpeTextureValue>(block, "flowMap")(0);
         const strengthGetter = ctx.input(block, "strength", () => 1);
         const screen: Vec3 = { x: 0, y: 0, z: 0 };
+        const matrix = allocateMat4();
+        const matrixStorage = matrix as unknown as Mat4Storage;
         let flowMap: NpeTextureContent | null = null;
+        let matrixReady = false;
 
         if (isTextureValue(sourceValue)) {
             ctx.addBuildPromise(
@@ -47,13 +50,20 @@ export const updateFlowMapBlock: NpeBlockEvaluator = {
             );
         }
 
-        system.updateSteps.push((i) => {
-            const camera = scene.camera;
-            if (!flowMap || !camera) {
+        (system._frameSteps ??= []).push((camera, targetWidth, targetHeight) => {
+            if (!camera) {
+                matrixReady = false;
                 return;
             }
-            const canvas = scene.surface.canvas;
-            const matrix = getViewProjectionMatrix(camera, getEffectiveAspectRatio(camera, canvas.width, canvas.height));
+            const cameraMatrix = getViewProjectionMatrix(camera, getEffectiveAspectRatio(camera, targetWidth, targetHeight));
+            matrixStorage.set(cameraMatrix as unknown as Mat4Storage);
+            matrixReady = true;
+        });
+
+        system.updateSteps.push((i) => {
+            if (!flowMap || !matrixReady) {
+                return;
+            }
             const strength = strengthGetter(i) as number;
             applyFlowMapToParticle(flowMap, matrix, strength * system._scaledStep, buffer, i, screen);
         });

@@ -20,7 +20,7 @@ The design requirements are:
 
 ## 2. Package-root API
 
-`packages/babylon-lite/src/index.ts` exports exactly nine node-particle functions and five node-particle types.
+`packages/babylon-lite/src/index.ts` exports exactly ten node-particle functions and five node-particle types.
 
 ### 2.1 Functions
 
@@ -33,6 +33,7 @@ function parseNodeParticleSetFromSnippet(engine: EngineContext, scene: SceneCont
 
 function startParticleSystem(system: ParticleSystem): void;
 function stopParticleSystem(system: ParticleSystem): void;
+function prepareParticleSystemFrame(system: ParticleSystem, camera: Camera | null | undefined, targetWidth: number, targetHeight: number): void;
 function animateParticleSystem(system: ParticleSystem, scaledRatio: number): void;
 
 function createParticleBillboard(system: ParticleSystem): FacingBillboardSpriteSystem;
@@ -96,7 +97,7 @@ serialized value or snippet response
     -> ParticleGraph
     -> buildNodeParticleSet
     -> NodeParticleSet { systems }
-    -> startParticleSystem / stopParticleSystem / animateParticleSystem
+    -> startParticleSystem / stopParticleSystem / prepareParticleSystemFrame / animateParticleSystem
     -> createParticleBillboard + syncParticleBillboard
     -> addFacingBillboardSystem or registerNodeParticleSet
 ```
@@ -267,6 +268,7 @@ interface ParticleSystem {
     _writeColorDead?: (i: number, color: Color4) => void;
     _suppressInitialDirectionCapture?: boolean;
     _seedLocalPosition?: ParticleStep;
+    _frameSteps?: Array<(camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void>;
 }
 ```
 
@@ -298,7 +300,13 @@ Optional internal fields are absent until a feature installs them.
 
 Starting a stopped system resets simulated time and permits emission while retaining all live particles and fractional emission carry.
 
-### 5.3 One animation call
+### 5.3 Frame preparation
+
+`prepareParticleSystemFrame(system, camera, targetWidth, targetHeight)` returns immediately when `_frameSteps` is absent. Otherwise it clamps width and height independently to at least `1`, then invokes every frame step in array order with the camera and safe dimensions. The function does not retain the scene or camera. Features copy or reference only the derived state they need for subsequent particle updates.
+
+Live registration calls frame preparation once immediately before each animation call. Manual simulation that uses a camera-dependent block calls it explicitly whenever the camera or target size changes. A static frozen simulation may call it once before its step loop.
+
+### 5.4 One animation call
 
 `animateParticleSystem(system, scaledRatio)` returns immediately when `_started` is false. Otherwise it performs these operations in this exact order:
 
@@ -313,7 +321,7 @@ Starting a stopped system resets simulated time and permits emission while retai
 
 The `>> 0` operations use JavaScript signed 32-bit conversion. Rates, ratios, and speeds are not clamped or validated.
 
-### 5.4 Existing-particle update and death
+### 5.5 Existing-particle update and death
 
 For each dense slot, in ascending slot order:
 
@@ -334,7 +342,7 @@ For each dense slot, in ascending slot order:
 
 Update steps run once on the death boundary before the slot is recycled. `_scaledStep` contains the lifetime-clamped per-particle step. `_scaledUpdateSpeed` retains the full call-wide value, including while a dying particle is evaluated.
 
-### 5.5 Creation
+### 5.6 Creation
 
 For every requested birth, `spawnParticle` is called. A `-1` result stops the creation loop, so no creation getter and no creation random draw runs for that birth or any remaining requested birth.
 
@@ -351,7 +359,7 @@ Successful births run non-null slots in this fixed order:
 
 This order is independent of graph traversal and is part of the random-consumption contract. Sprite birth initialization is attached to `createColorDead` and runs after its captured color-dead step.
 
-### 5.6 Determinism requirements
+### 5.7 Determinism requirements
 
 - Shape emitters use `randomRange(min, max)`. It returns `min` without calling `Math.random()` when `min === max`; otherwise it returns `Math.random() * (max - min) + min`.
 - `ParticleRandomBlock` always consumes a draw per output component, including equal bounds.
@@ -895,7 +903,7 @@ The block installs scalar `output`: `abs(value)` for a scalar, Euclidean length 
 
 ### 9.20 ParticleTextureSourceBlock
 
-The raw source is a nonempty string `serialized.textureDataUrl` when present, otherwise string `serialized.url`, otherwise the empty string. A source is considered absolute when it starts with a URI scheme matching `^[a-z][a-z\d+.-]*:`, starts with `//`, or starts with `/`. This includes data URLs. When a nonempty source is relative and `textureBaseUrl` exists, `new URL(rawUrl, base).href` resolves it.
+The raw source is a nonempty string `serialized.textureDataUrl` when present, otherwise string `serialized.url`, otherwise the empty string. Explicit schemes are accepted only for `http`, `https`, `data`, and `blob`; an unsupported scheme produces an empty resolved URL. A source is absolute when it has an accepted scheme, starts with `//`, or starts with `/`. When a nonempty source is relative and `textureBaseUrl` exists, `new URL(rawUrl, base).href` resolves it.
 
 `serialized.invertY` defaults to true by testing `!== false`. The block installs `texture`, returning one `NpeTextureValue` containing the resolved URL and block invert-Y value.
 
@@ -962,7 +970,9 @@ Inputs are `particle`, `flowMap`, and `strength`; `strength` defaults to `1`. Th
 
 During build, the first CPU request for a texture value calls `loadNpeTextureContent`. It fetches the resolved URL and rejects a non-OK response, decodes an `ImageBitmap` with `premultiplyAlpha: "none"` and `colorSpaceConversion: "none"`, and draws it into an `OffscreenCanvas` when available or an HTML canvas otherwise. For `invertY === true`, the canvas transform vertically flips the bitmap before `getImageData`; false preserves source row order. The resulting `{ width, height, data: Uint8ClampedArray }` promise is cached on the texture value. The evaluator catches decode failures and retains a null map, making every update a no-op.
 
-For each particle update, the evaluator reads `scene.camera`. A missing camera or map returns immediately without evaluating strength. Otherwise it computes the camera view-projection matrix with the effective viewport aspect from `scene.surface.canvas.width` and `.height`, transforms the current particle position through the matrix including perspective divide, and samples nearest-neighbor RGBA data:
+The block installs one optional frame step that derives the camera view-projection matrix with the effective viewport aspect, then copies all 16 components into an evaluator-owned matrix from `allocateMat4()`. Its storage therefore follows the process-wide F32/F64 matrix policy. It never retains `SceneContext`, `Camera`, or camera-owned matrix storage. A missing camera marks the prepared matrix unavailable. Width and height have already been clamped to at least `1` by `prepareParticleSystemFrame`, so aspect calculation cannot divide by a zero target height.
+
+For each particle update, a missing prepared matrix or map returns immediately without evaluating strength. Otherwise the evaluator transforms the current particle position through the prepared matrix including perspective divide and samples nearest-neighbor RGBA data:
 
 ```text
 screen = transformCoordinates(position, viewProjection)
@@ -981,7 +991,7 @@ direction.y += (data[index + 1] / 255 * 2 - 1) * alphaStrength
 direction.z += (data[index + 2] / 255 * 2 - 1) * alphaStrength
 ```
 
-`strength` is evaluated for every particle after the map and bounds checks. `scaledStep` is the particle's lifetime-clamped `system._scaledStep`. RGB byte value `127.5` is neutral; integer bytes therefore have no exact zero except through alpha or strength. Alpha zero produces no force. Coordinates at `screen.x === 1` or `screen.y === -1` map to the exclusive upper edge and are rejected.
+`strength` is evaluated for every particle after the map and prepared-matrix checks and before the bounds check. `scaledStep` is the particle's lifetime-clamped `system._scaledStep`. RGB byte value `127.5` is neutral; integer bytes therefore have no exact zero except through alpha or strength. Alpha zero produces no force. Coordinates at `screen.x === 1` or `screen.y === -1` map to the exclusive upper edge and are rejected.
 
 The block uses one reused screen-position scratch and allocates nothing per particle. It observes position and direction from earlier update steps; later steps observe its direction change. It does not integrate position. Local systems use the same evaluator and current stored position; there is no separate local flow-map variant.
 
@@ -1068,6 +1078,8 @@ Each callback computes:
 
 ```ts
 const ratio = deltaMs > 0 ? deltaMs / (1000 / 60) : 1;
+const canvas = scene.surface.canvas;
+prepareParticleSystemFrame(system, scene.camera, canvas.width, canvas.height);
 animateParticleSystem(system, ratio);
 syncParticleBillboard(system, billboard);
 ```
@@ -1153,7 +1165,7 @@ The current unit categories are:
 - Emitters: Point, Box, Sphere, directed Sphere, Hemisphere, Cone, directed Cone, Cylinder, directed Cylinder, Mesh, rotated Cylinder, all six transformed local shapes, mesh vertex color, mesh InitialDirection, shared volatile bounds, and local source build/read guards.
 - Value correctness: shared-scratch Math, Lerp/Gradient endpoints, Random min/max aliasing, lock modes, Uint32 id edge cases, and capacity-bounded OncePerParticle caches.
 - Attractors: softened inverse-square attraction, negative-strength repulsion, defaults, coincident-point handling, lifetime-clamped step scaling, and lazy evaluator isolation.
-- Flow maps: projected nearest-neighbor sampling, vertical screen mapping, RGBA force decoding, alpha and bounds handling, per-particle strength evaluation, lifetime-clamped step scaling, and lazy texture/evaluator isolation.
+- Flow maps: projected nearest-neighbor sampling including non-zero row stride, vertical screen mapping, RGBA force decoding, alpha and bounds handling, per-particle strength evaluation, lifetime-clamped step scaling, allocator-selected F32/F64 matrix snapshots, and lazy texture/evaluator isolation.
 - Feature isolation: runtime chunk manifests and, when bundle-info exists, fetched module contents.
 - Path ownership: the `particle/soa` source directory and `particle-soa*.test.ts` unit-test names must not exist. TypeScript compilation validates all source and test imports.
 
@@ -1173,16 +1185,16 @@ Use conversion for graph extraction. The oracle's direct parse path does not pre
 
 ### 13.3 Visual scenes
 
-All six Lite scenes seed after build, synchronize one billboard, register the frozen scene, and use a black clear color. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 278 runs 300 ratio-1 steps. Its Babylon reference calls `scene.updateTransformMatrix(true)` before those manual steps because UpdateFlowMap reads the scene transform matrix before the first render.
+All six Lite scenes seed after build, synchronize one billboard, register the frozen scene, and use a black clear color. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 278 prepares its flow matrix once and runs 300 ratio-1 steps. Its Babylon reference calls `scene.updateTransformMatrix(true)` before those manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render.
 
-| Scene                          | Coverage                                                                       | Camera                                                     | MAD ceiling | Raw ceiling |
-| ------------------------------ | ------------------------------------------------------------------------------ | ---------------------------------------------------------- | ----------- | ----------- |
-| 262 `scene262-npe-size`        | Basic Properties - Size, Box                                                   | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)`  | `0.01`      | `44.1 KB`   |
-| 263 `scene263-npe-sphere`      | Sphere emitter                                                                 | alpha `-pi/2`, beta `1.2`, radius `14`, target origin      | `0.01`      | `44.1 KB`   |
-| 264 `scene264-npe-change-size` | Gradient, GradientValue, UpdateSize                                            | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01`      | `44.1 KB`   |
-| 276 `scene276-npe-animations`  | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30        | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
-| 277 `scene277-npe-attractor`   | UpdateAttractor after position integration, attractor `(0,2,0)`, strength `8`  | alpha `-pi/2`, beta `1.2`, radius `5`, target `(0,0.8,0)`  | `0.01`      | `45.0 KB`   |
-| 278 `scene278-npe-flow-map`    | UpdateFlowMap after integration, asymmetric repel map, strength `15`, 59 alive | alpha `pi/2`, beta `pi/2`, radius `12`, target `(-5,0,0)`  | `0.01`      | `47.0 KB`   |
+| Scene                          | Coverage                                                                      | Camera                                                     | MAD ceiling | Raw ceiling |
+| ------------------------------ | ----------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------- | ----------- |
+| 262 `scene262-npe-size`        | Basic Properties - Size, Box                                                  | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)`  | `0.01`      | `44.1 KB`   |
+| 263 `scene263-npe-sphere`      | Sphere emitter                                                                | alpha `-pi/2`, beta `1.2`, radius `14`, target origin      | `0.01`      | `44.1 KB`   |
+| 264 `scene264-npe-change-size` | Gradient, GradientValue, UpdateSize                                           | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01`      | `44.1 KB`   |
+| 276 `scene276-npe-animations`  | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30       | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
+| 277 `scene277-npe-attractor`   | UpdateAttractor after position integration, attractor `(0,2,0)`, strength `8` | alpha `-pi/2`, beta `1.2`, radius `5`, target `(0,0.8,0)`  | `0.01`      | `45.0 KB`   |
+| 278 `scene278-npe-flow-map`    | UpdateFlowMap after integration, flipped repel map, strength `15`, size `0.6` | alpha `pi/2`, beta `pi/2`, radius `9`, target `(-5,0,0)`   | `0.01`      | `45.0 KB`   |
 
 Each camera uses near plane `0.1` and far plane `100`. Each scene sets both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start.
 
@@ -1194,12 +1206,12 @@ Current tracked measurements are:
 
 | Scene | Runtime raw | Runtime gzip | Ignored graph payload raw |   Ceiling |
 | ----- | ----------: | -----------: | ------------------------: | --------: |
-| 262   |   `40.1 KB` |    `24.2 KB` |                 `28.5 KB` | `44.1 KB` |
-| 263   |   `42.2 KB` |    `24.8 KB` |                 `27.5 KB` | `44.1 KB` |
-| 264   |   `40.3 KB` |    `25.9 KB` |                 `34.4 KB` | `44.1 KB` |
-| 276   |   `44.4 KB` |    `25.3 KB` |                 `27.1 KB` | `45.0 KB` |
-| 277   |   `42.1 KB` |    `25.4 KB` |                 `29.8 KB` | `45.0 KB` |
-| 278   |   `42.8 KB` |    `26.1 KB` |                 `31.0 KB` | `47.0 KB` |
+| 262   |   `40.2 KB` |    `24.2 KB` |                 `28.5 KB` | `44.1 KB` |
+| 263   |   `42.3 KB` |    `24.8 KB` |                 `27.5 KB` | `44.1 KB` |
+| 264   |   `40.4 KB` |    `26.0 KB` |                 `34.4 KB` | `44.1 KB` |
+| 276   |   `44.5 KB` |    `25.3 KB` |                 `27.1 KB` | `45.0 KB` |
+| 277   |   `42.2 KB` |    `25.4 KB` |                 `29.8 KB` | `45.0 KB` |
+| 278   |   `43.0 KB` |    `26.2 KB` |                 `31.0 KB` | `45.0 KB` |
 
 Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, and 278 as sprite users because particles render through billboard sprite modules.
 

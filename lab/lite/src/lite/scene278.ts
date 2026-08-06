@@ -10,6 +10,7 @@ import {
     createParticleBillboard,
     createSceneContext,
     parseNodeParticleSource,
+    prepareParticleSystemFrame,
     registerScene,
     startEngine,
     startParticleSystem,
@@ -26,7 +27,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    const camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 12, { x: -5, y: 0, z: 0 });
+    const camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 9, { x: -5, y: 0, z: 0 });
     camera.nearPlane = 0.1;
     camera.farPlane = 100;
     scene.camera = camera;
@@ -45,6 +46,7 @@ async function main(): Promise<void> {
         return x - Math.floor(x);
     };
 
+    prepareParticleSystemFrame(system, camera, canvas.width, canvas.height);
     startParticleSystem(system);
     for (let i = 0; i < STEPS; i++) {
         animateParticleSystem(system, 1);

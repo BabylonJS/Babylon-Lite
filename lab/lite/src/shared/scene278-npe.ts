@@ -24,7 +24,12 @@ function setBlockValue(blocks: MutableBlock[], name: string, value: number | num
     blocks.find((block) => block.name === name)!.value = value;
 }
 
-/** Scene 278 - NPE UpdateFlowMapBlock graph derived from the canonical scene 262 particle graph. */
+/**
+ * Scene 278 - NPE UpdateFlowMapBlock graph derived from the canonical scene 262 particle graph.
+ * The value edits depend on scene 262's block names; update them if that serialized fixture is regenerated.
+ * The flow setup mirrors Babylon.js visual test "Particles - Flowmaps" (#39BW3H#0) with the asymmetric
+ * repel-spots map used by playground #PPC2EI#7.
+ */
 export function createScene278NpeJson(): unknown {
     const graph = structuredClone(SCENE262_NPE_JSON) as unknown as { blocks: MutableBlock[] };
     const system = graph.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;
@@ -71,7 +76,7 @@ export function createScene278NpeJson(): unknown {
             outputs: [{ name: "texture" }],
             url: "https://assets.babylonjs.com/textures/particleFlowMap_repelSpots.png",
             serializedCachedData: false,
-            invertY: false,
+            invertY: true,
         }
     );
 
@@ -83,8 +88,8 @@ export function createScene278NpeJson(): unknown {
     setBlockValue(graph.blocks, "Max Emit Power", 1);
     setBlockValue(graph.blocks, "Min Lifetime", 6);
     setBlockValue(graph.blocks, "Max Lifetime", 6);
-    setBlockValue(graph.blocks, "Min size", 0.25);
-    setBlockValue(graph.blocks, "Max size", 0.25);
+    setBlockValue(graph.blocks, "Min size", 0.6);
+    setBlockValue(graph.blocks, "Max size", 0.6);
     setBlockValue(graph.blocks, "Direction 1", [1, 0, 0]);
     setBlockValue(graph.blocks, "Direction 2", [1, 0, 0]);
     setBlockValue(graph.blocks, "Min Emit Box", [-7, -0.1, 0]);

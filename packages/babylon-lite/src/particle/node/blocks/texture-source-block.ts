@@ -11,8 +11,13 @@ export const particleTextureSourceBlock: NpeBlockEvaluator = {
         const textureDataUrl = typeof block.serialized.textureDataUrl === "string" ? block.serialized.textureDataUrl : "";
         const rawUrl = textureDataUrl || (typeof block.serialized.url === "string" ? block.serialized.url : "");
         const base = ctx.state.textureBaseUrl;
-        const isAbsolute = /^[a-z][a-z\d+.-]*:/i.test(rawUrl) || rawUrl.startsWith("//") || rawUrl.startsWith("/");
-        const url = rawUrl && base && !isAbsolute ? new URL(rawUrl, base).href : rawUrl;
+        const scheme = /^([a-z][a-z\d+.-]*):/i.exec(rawUrl)?.[1];
+        const supportedScheme = !scheme || /^(https?|data|blob)$/i.test(scheme);
+        const isAbsolute = !!scheme || rawUrl.startsWith("//") || rawUrl.startsWith("/");
+        let url = "";
+        if (supportedScheme) {
+            url = rawUrl && base && !isAbsolute ? new URL(rawUrl, base).href : rawUrl;
+        }
         // Babylon.js's ParticleTextureSourceBlock.invertY defaults to true; the billboard renderer samples V
         // opposite to the BJS particle shader, so upload with the opposite flip to land on the same pixels.
         const blockInvertY = block.serialized.invertY !== false;
