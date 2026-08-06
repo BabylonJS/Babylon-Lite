@@ -10,7 +10,7 @@
  *      the next frame.
  *
  * The module exports pure functions for the reset matrix, the accumulation ramp, and the
- * bounded phase window so they can be unit tested without a GPU device. All GPU state
+ * rotating phase index so they can be unit tested without a GPU device. All GPU state
  * lives behind `createScreenSpaceTemporalOwner`, which is only invoked by the two public
  * task factories — importing this module in isolation allocates nothing at module scope.
  */
@@ -50,29 +50,10 @@ export function advanceAccumulation(current: number, reset: boolean, temporalSam
     return Math.min(current + 1, Math.max(1, temporalSamples));
 }
 
-/** Bounded ray-rotation phase window state: `index` is a monotonic rotation counter,
- *  `remaining` counts down the number of frames left before the window freezes. */
-export interface ScreenSpacePhaseWindow {
-    readonly index: number;
-    readonly remaining: number;
-}
-
-/** Advance the phase window for one frame.
- *  - `restart` (history invalidated) reopens the window at `temporalSamples` and zeroes the index.
- *  - `cameraMoved` (with no restart) reopens the window without disturbing valid reprojected history.
- *  - Otherwise the window drains by one frame until it reaches 0, then freezes (index stays put). */
-export function advancePhaseWindow(state: ScreenSpacePhaseWindow, cameraMoved: boolean, restart: boolean, temporalSamples: number): ScreenSpacePhaseWindow {
-    const bound = Math.max(1, temporalSamples);
-    if (restart) {
-        return { index: 0, remaining: bound };
-    }
-    if (cameraMoved) {
-        return { index: state.index + 1, remaining: bound };
-    }
-    if (state.remaining > 0) {
-        return { index: state.index + 1, remaining: state.remaining - 1 };
-    }
-    return state;
+/** Advance the continuously rotating producer phase, restarting at zero only
+ *  when temporal history is invalidated. */
+export function advancePhaseIndex(index: number, restart: boolean): number {
+    return restart ? 0 : index + 1;
 }
 
 /** Map a phase index to the [0, 1) rotation fraction consumed by the producer noise. */
@@ -99,7 +80,7 @@ export interface ScreenSpaceResetDecision {
 
 /** Decide whether to invalidate temporal history and/or restart the phase sequence this
  *  frame. Camera motion keeps valid history and advances the existing phase sequence
- *  through `advancePhaseWindow`; invalidation events restart that sequence at phase zero. */
+ *  through `advancePhaseIndex`; invalidation events restart that sequence at phase zero. */
 export function decideScreenSpaceReset(ev: ScreenSpaceResetEvent): ScreenSpaceResetDecision {
     const invalidateHistory = ev.firstAllocation || ev.targetReallocated || ev.sourceIdentityChanged || ev.resetVersionChanged || ev.enabledTransitionedOn || ev.singularInverse;
     const restartPhase = invalidateHistory;
@@ -204,13 +185,65 @@ const GI_FUSED_FILTER_WGSL = `fn ssFusedGiFilter(coord:vec2i,effectDims:vec2f,de
   return sum/max(totalWeight,1e-4);
 }`;
 
+/** Same-surface temporal supersampling for scalar contact shadows. Each phase
+ *  selects one tap inside a bounded disk; depth validation prevents filtering
+ *  across silhouettes while the temporal mean turns binary march hits into a
+ *  stable, continuous contact term. */
+const CONTACT_TEMPORAL_SAMPLE_WGSL = `fn ssFusedContactFilter(coord:vec2i,effectDims:vec2f,depthDims:vec2f)->f32{
+  let centerUv=ssTexelUv(coord,effectDims);
+  let centerDepth=textureLoad(ssCurrentDepth,ssUvToCoord(centerUv,depthDims),0);
+  let centerWorld=ssWorldFromDepth(centerUv,centerDepth,ssTemporal.invViewProj);
+  let centerDist=(ssTemporal.currentView*vec4f(centerWorld,1.0)).z;
+  let offsets=array<vec2i,9>(vec2i(-1,-1),vec2i(0,-1),vec2i(1,-1),vec2i(-1,0),vec2i(0,0),vec2i(1,0),vec2i(-1,1),vec2i(0,1),vec2i(1,1));
+  let spatialWeights=array<f32,9>(0.5,0.75,0.5,0.75,1.0,0.75,0.5,0.75,0.5);
+  var sum=0.0;
+  var totalWeight=0.0;
+  for(var i=0;i<9;i=i+1){
+    let tapCoord=ssClampCoord(coord+offsets[i],effectDims);
+    let tapUv=ssTexelUv(tapCoord,effectDims);
+    let tapDepth=textureLoad(ssCurrentDepth,ssUvToCoord(tapUv,depthDims),0);
+    if(ssIsClearDepth(tapDepth)){continue;}
+    let tapWorld=ssWorldFromDepth(tapUv,tapDepth,ssTemporal.invViewProj);
+    let tapDist=(ssTemporal.currentView*vec4f(tapWorld,1.0)).z;
+    let relErr=abs(tapDist-centerDist)/max(centerDist,0.001);
+    if(relErr>0.04){continue;}
+    let weight=spatialWeights[i]*(1.0-relErr/0.04);
+    sum=sum+textureLoad(ssRawTex,tapCoord,0).r*weight;
+    totalWeight=totalWeight+weight;
+  }
+  return sum/max(totalWeight,1e-4);
+}
+
+fn ssContactTemporalSample(coord:vec2i,effectDims:vec2f,depthDims:vec2f)->f32{
+  let radius=max(ssTemporal.params.y,0.0);
+  if(radius<=0.0){return ssFusedContactFilter(coord,effectDims,depthDims);}
+  let phase=ssTemporal.params.z;
+  let angle=phase*2.39996323;
+  let radial=sqrt(fract(phase*0.754877666));
+  let offset=vec2i(round(vec2f(cos(angle),sin(angle))*radial*radius));
+  if(all(offset==vec2i(0))){return ssFusedContactFilter(coord,effectDims,depthDims);}
+  let sampleCoord=ssClampCoord(coord+offset,effectDims);
+  let centerUv=ssTexelUv(coord,effectDims);
+  let sampleUv=ssTexelUv(sampleCoord,effectDims);
+  let centerDepth=textureLoad(ssCurrentDepth,ssUvToCoord(centerUv,depthDims),0);
+  let sampleDepth=textureLoad(ssCurrentDepth,ssUvToCoord(sampleUv,depthDims),0);
+  if(ssIsClearDepth(sampleDepth)){return ssFusedContactFilter(coord,effectDims,depthDims);}
+  let centerWorld=ssWorldFromDepth(centerUv,centerDepth,ssTemporal.invViewProj);
+  let sampleWorld=ssWorldFromDepth(sampleUv,sampleDepth,ssTemporal.invViewProj);
+  let centerDist=(ssTemporal.currentView*vec4f(centerWorld,1.0)).z;
+  let sampleDist=(ssTemporal.currentView*vec4f(sampleWorld,1.0)).z;
+  let relErr=abs(sampleDist-centerDist)/max(centerDist,0.001);
+  if(relErr>0.04){return ssFusedContactFilter(coord,effectDims,depthDims);}
+  return ssFusedContactFilter(sampleCoord,effectDims,depthDims);
+}`;
+
 /** Build the resolve-pass fragment shader for a given temporal kind. Both kinds share the
  *  reconstruction, reprojection-rejection, and 3x3 neighborhood-clamp logic; only the raw
- *  sample (single nearest tap for scalar, fused five-tap filter for color) and the
+ *  sample (same-surface temporal disk for scalar, fused filter for color) and the
  *  history channel layout (`.r`/`.g` vs `.rgb`/`.a`) differ. */
 function resolveFragmentWGSL(kind: ScreenSpaceTemporalKind): string {
     const isColor = kind === "color";
-    const rawSample = isColor ? `let rawValue=ssFusedGiFilter(coord,effectDims,depthDims);` : `let rawValue=textureLoad(ssRawTex,coord,0).r;`;
+    const rawSample = isColor ? `let rawValue=ssFusedGiFilter(coord,effectDims,depthDims);` : `let rawValue=ssContactTemporalSample(coord,effectDims,depthDims);`;
     const historyChannel = isColor ? "hist.rgb" : "hist.r";
     const storedPrevChannel = isColor ? "hist.a" : "hist.g";
     const zero = isColor ? "vec3f(0.0)" : "0.0";
@@ -233,7 +266,7 @@ function resolveFragmentWGSL(kind: ScreenSpaceTemporalKind): string {
   historyValue=clamp(historyValue,mn,mx);`;
     const output = isColor ? `vec4f(mix(historyValue,rawValue,weight),curDist)` : `vec4f(mix(historyValue,rawValue,weight),curDist,0.0,0.0)`;
 
-    return `${isColor ? GI_FUSED_FILTER_WGSL : ""}
+    return `${isColor ? GI_FUSED_FILTER_WGSL : CONTACT_TEMPORAL_SAMPLE_WGSL}
 @fragment fn ssResolveFragment(v:SsVOut)->@location(0) vec4f{
   let coord=vec2i(v.position.xy);
   let effectDims=ssTemporal.effectDims;
@@ -301,6 +334,10 @@ export interface ScreenSpaceTemporalResolveInputs {
     viewProjMatrix: Mat4;
     /** Blend weight of the current estimate against reprojected history (see `computeTemporalWeight`). */
     weight: number;
+    /** Same-surface spatial supersampling radius in effect pixels (scalar/contact only). */
+    spatialRadius?: number;
+    /** Integer temporal phase selecting the scalar supersampling tap. */
+    spatialPhase?: number;
 }
 
 /** The shared temporal owner: allocates the stable/history targets, builds the resolve
@@ -464,6 +501,8 @@ export function createScreenSpaceTemporalOwner(config: ScreenSpaceTemporalOwnerC
             uniformData[66] = inputs.depthWidth;
             uniformData[67] = inputs.depthHeight;
             uniformData[68] = inputs.weight;
+            uniformData[69] = inputs.spatialRadius ?? 0;
+            uniformData[70] = inputs.spatialPhase ?? 0;
             engine._device.queue.writeBuffer(uniformBuffer!, 0, uniformData as Float32Array<ArrayBuffer>);
 
             renderPassDescriptor.colorAttachments = [{ view: stable._colorView!, loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 0 } }];

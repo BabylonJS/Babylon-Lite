@@ -30,6 +30,7 @@ export interface ScreenSpaceContactShadowsPostProcessTaskConfig {
     normalBias?: number;
     temporalWeight?: number;
     temporalSamples?: number;
+    spatialRadius?: number;
     resetVersion?: number;
     composition?: "none" | "multiply";
 }
@@ -50,6 +51,7 @@ export interface ScreenSpaceContactShadowsPostProcessTask extends Task {
     bias: number;
     normalBias: number;
     temporalWeight: number;
+    spatialRadius: number;
     resetVersion: number;
     readonly lightDirection: Vec3;
 }
@@ -69,6 +71,7 @@ export interface ScreenSpaceGlobalIlluminationPostProcessTaskConfig {
     resolutionScale?: number;
     intensity?: number;
     stepCount?: number;
+    rayCount?: number;
     rayLength?: number;
     thickness?: number;
     bias?: number;
@@ -93,6 +96,7 @@ export interface ScreenSpaceGlobalIlluminationPostProcessTask extends Task {
     enabled: boolean;
     intensity: number;
     stepCount: number;
+    rayCount: number;
     rayLength: number;
     thickness: number;
     bias: number;
@@ -129,6 +133,8 @@ The composite target must differ from `sourceTexture`; sampling and rendering th
 | `normalBias`                |         `0.035` |                 n/a |               `[0.001, 100]` |
 | `temporalWeight`            |        `1 / 32` |            `1 / 64` |                     `[0, 1]` |
 | `temporalSamples`           |            `32` |                `64` |           integer `[1, 256]` |
+| `spatialRadius`             |           `1.5` |                 n/a |                     `[0, 4]` |
+| `rayCount`                  |             n/a |                 `1` |             integer `[1, 8]` |
 | `fadeStart`                 |             n/a |                `20` |                `[0, 100000]` |
 | `fadeEnd`                   |             n/a |                `60` | at least `fadeStart + 0.001` |
 | `edgeFade`                  |             n/a |               `0.1` |               `[0.001, 0.5]` |
@@ -149,7 +155,7 @@ The default contact tint is `[0.35, 0.38, 0.48]`. The default compositions are `
 - closest-neighbor depth normal reconstruction;
 - manually bilinear continuous depth;
 - dual-surface intersection requiring the ray to be behind both discrete and continuous depth while inside the configured thickness slab;
-- decorrelated screen-space hash noise and bounded phase rotation.
+- decorrelated screen-space hash noise and wrapped phase rotation.
 
 The source is a pure string factory. It performs no module-level allocation and has no side effects.
 
@@ -157,16 +163,18 @@ The source is a pure string factory. It performs no module-level allocation and 
 
 `screen-space-temporal.ts` creates the two internal passes used after either producer:
 
-1. **Resolve:** reconstruct the current world position, reproject through the previous view-projection, reject off-screen or depth-mismatched history, clamp accepted history to the current 3x3 neighborhood, and blend the current estimate.
+1. **Resolve:** reconstruct the current world position, select the contact-shadow tap from a depth-validated temporal disk when resolving scalar data, reproject through the previous view-projection, reject off-screen or depth-mismatched history, clamp accepted history to the current 3x3 neighborhood, and blend the current estimate.
 2. **History copy:** copy the resolved stable target into the history target used by the next frame.
 
 Scalar history uses `rg16float`: effect value in `.r`, current view distance in `.g`.
 Color history uses `rgba16float`: indirect color in `.rgb`, current view distance in `.a`.
 
+The scalar resolve first applies a depth-aware 3x3 filter so the initial frame does not expose the producer's binary march pattern. It then rotates that filtered tap continuously through a disk of `spatialRadius` effect pixels. Taps are accepted only when their reconstructed view distance is within the same 4% threshold as temporal history, preventing silhouettes from bleeding while turning contact hits into a continuous stable contour.
+
 The temporal state owns two independent counters:
 
-- **Accumulation count** controls `max(configuredWeight, 1 / accumulatedSamples)`. It resets only after first allocation, target reallocation, disabled-to-enabled transition, singular inverse matrix, or `resetVersion` change. Camera motion does not reset it.
-- **Phase window** controls producer ray rotation. Camera motion reopens the window but retains valid reprojected history. Continuous camera motion keeps advancing phases; once motion stops, the window drains for `temporalSamples` frames and then freezes.
+- **Accumulation count** controls `max(configuredWeight, 1 / accumulatedSamples)` and clamps at `temporalSamples`, preserving animated sources and runtime parameter changes even when `temporalWeight` is zero. It resets only after first allocation, target reallocation, disabled-to-enabled transition, singular inverse matrix, or `resetVersion` change. Camera motion does not reset it.
+- **Phase index** rotates the producer sample continuously. History invalidation restarts it at zero; camera motion retains valid reprojected history and keeps advancing the sequence.
 
 The task stores both the previous view-projection and previous view matrices. A current world position is transformed by the previous view matrix to obtain its expected previous view distance and by the previous view-projection to obtain its history UV. History is rejected when:
 
@@ -181,16 +189,16 @@ Camera motion does not discard valid history. World-space reprojection retains m
 
 ### Reset matrix
 
-| Event                                |  Invalidate history | Restart phase window |
-| ------------------------------------ | ------------------: | -------------------: |
-| First allocation                     |                 yes |                  yes |
-| Owned-target reallocation            |                 yes |                  yes |
-| Source/depth texture identity change |                 yes |                  yes |
-| Camera movement                      |                  no |                   no |
-| `resetVersion` change                |                 yes |                  yes |
-| Disabled → enabled                   |                 yes |                  yes |
-| Enabled → disabled                   | write identity once |                   no |
-| Unrelated frame-graph rebuild        |                  no |                   no |
+| Event                                |  Invalidate history | Restart phase sequence |
+| ------------------------------------ | ------------------: | ---------------------: |
+| First allocation                     |                 yes |                    yes |
+| Owned-target reallocation            |                 yes |                    yes |
+| Source/depth texture identity change |                 yes |                    yes |
+| Camera movement                      |                  no |                     no |
+| `resetVersion` change                |                 yes |                    yes |
+| Disabled → enabled                   |                 yes |                    yes |
+| Enabled → disabled                   | write identity once |                     no |
+| Unrelated frame-graph rebuild        |                  no |                     no |
 
 ### Task ownership
 
@@ -256,11 +264,11 @@ result.rgb = source.rgb * mix(vec3f(1), tint, amount);
 ### Global-illumination producer
 
 1. Load receiver depth and reconstruct receiver world position and normal.
-2. Generate one cosine-weighted hemisphere direction from pixel noise and temporal phase.
-3. March over `rayLength` with the shared dual-surface intersection.
-4. On hit, sample the already-lit `sourceTexture` at the hit UV.
+2. Generate `rayCount` independently seeded cosine-weighted hemisphere directions from pixel noise and temporal phase.
+3. March each ray over `rayLength` with the shared dual-surface intersection.
+4. On each hit, sample the already-lit `sourceTexture` at the hit UV.
 5. Apply receiver-distance and screen-border fades.
-6. Store indirect color; a miss stores zero.
+6. Store the average indirect color; misses contribute zero.
 
 The additive composite adds `illumination * intensity`.
 

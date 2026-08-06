@@ -64,9 +64,9 @@ async function main(): Promise<void> {
     scene.camera = camera;
     attachControl(camera, canvas, scene);
 
-    addToScene(scene, createHemisphericLight([0, 1, 0], 0.15));
-    addToScene(scene, createPointLight([0, 2.9, 0], 3));
-    const sun = createDirectionalLight([0.35, -1, 0.25], 0.65);
+    addToScene(scene, createHemisphericLight([0, 1, 0], 0.08));
+    addToScene(scene, createPointLight([0, 2.9, 0], 1.6));
+    const sun = createDirectionalLight([0.3, -1, 0.18], 0.9);
     addToScene(scene, sun);
 
     const sceneTarget = createRenderTarget({
@@ -92,14 +92,16 @@ async function main(): Promise<void> {
             sourceTexture: sceneTarget,
             camera,
             lightDirection: sun.direction,
-            maxDistance: 0.28,
-            thickness: 0.22,
-            bias: 0.02,
-            normalBias: 0.045,
-            intensity: 0.85,
+            stepCount: 12,
+            maxDistance: 0.32,
+            thickness: 0.35,
+            bias: 0.03,
+            normalBias: 0.035,
+            intensity: 0.65,
             tint: [0.08, 0.1, 0.16],
             temporalWeight: 1 / 64,
             temporalSamples: 64,
+            spatialRadius: 0.75,
         },
         engine,
         scene
@@ -111,16 +113,20 @@ async function main(): Promise<void> {
             depthTexture: sceneTarget,
             camera,
             targetTexture: engine.scRT,
-            composition: "additive",
-            resolutionScale: 1,
-            intensity: 0.3,
-            rayLength: 2.5,
+            composition: "color-bleed",
+            resolutionScale: 0.75,
+            intensity: 1.9,
+            stepCount: 8,
+            rayCount: 4,
+            rayLength: 2.2,
             thickness: 0.45,
-            bias: 0.04,
+            bias: 0.05,
             fadeStart: 0,
             fadeEnd: 20,
-            temporalWeight: 1 / 256,
-            temporalSamples: 256,
+            temporalWeight: 1 / 64,
+            temporalSamples: 64,
+            colorBleedGain: 1.2,
+            colorBleedMax: 0.5,
         },
         engine,
         scene

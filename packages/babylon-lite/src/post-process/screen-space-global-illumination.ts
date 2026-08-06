@@ -28,7 +28,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import { screenSpaceRaymarchWGSL } from "./screen-space-raymarch-wgsl.js";
 import {
     advanceAccumulation,
-    advancePhaseWindow,
+    advancePhaseIndex,
     assertScreenSpaceTargetNotAliasingSource,
     computeScreenSpaceScaledSize,
     computeTemporalWeight,
@@ -38,7 +38,7 @@ import {
     phaseValue,
     resolveScreenSpaceSourceSize,
 } from "./screen-space-temporal.js";
-import type { ScreenSpacePhaseWindow, ScreenSpaceTemporalOwner } from "./screen-space-temporal.js";
+import type { ScreenSpaceTemporalOwner } from "./screen-space-temporal.js";
 
 /** Configuration for `createScreenSpaceGlobalIlluminationPostProcessTask`. */
 export interface ScreenSpaceGlobalIlluminationPostProcessTaskConfig {
@@ -53,6 +53,8 @@ export interface ScreenSpaceGlobalIlluminationPostProcessTaskConfig {
     resolutionScale?: number;
     intensity?: number;
     stepCount?: number;
+    /** Independently seeded hemisphere rays traced per effect pixel. */
+    rayCount?: number;
     rayLength?: number;
     thickness?: number;
     bias?: number;
@@ -79,6 +81,7 @@ export interface ScreenSpaceGlobalIlluminationPostProcessTask extends Task {
     enabled: boolean;
     intensity: number;
     stepCount: number;
+    rayCount: number;
     rayLength: number;
     thickness: number;
     bias: number;
@@ -98,6 +101,7 @@ export function clampScreenSpaceGlobalIlluminationConfig(config: ScreenSpaceGlob
     resolutionScale: number;
     intensity: number;
     stepCount: number;
+    rayCount: number;
     rayLength: number;
     thickness: number;
     bias: number;
@@ -115,6 +119,7 @@ export function clampScreenSpaceGlobalIlluminationConfig(config: ScreenSpaceGlob
         resolutionScale: CLAMP(config.resolutionScale ?? 0.5, 0.25, 1),
         intensity: CLAMP(config.intensity ?? 1, 0, 4),
         stepCount: Math.round(CLAMP(config.stepCount ?? 8, 1, 64)),
+        rayCount: Math.round(CLAMP(config.rayCount ?? 1, 1, 8)),
         rayLength: CLAMP(config.rayLength ?? 2, 0.001, 1000),
         thickness: CLAMP(config.thickness ?? 0.45, 0.001, 1000),
         bias: CLAMP(config.bias ?? 0.05, 0, 100),
@@ -132,7 +137,7 @@ export function clampScreenSpaceGlobalIlluminationConfig(config: ScreenSpaceGlob
 export const SS_GI_PRODUCER_UNIFORM_FLOATS = 48;
 const SS_GI_PRODUCER_UNIFORM_BYTES = SS_GI_PRODUCER_UNIFORM_FLOATS * 4;
 
-const GI_PRODUCER_UNIFORM_WGSL = `struct SsGiParams{invViewProj:mat4x4f,viewProj:mat4x4f,cameraPos:vec3f,stepCount:f32,rayLength:f32,thickness:f32,bias:f32,fadeStart:f32,fadeEnd:f32,edgeFade:f32,phase:f32,pad0:f32,outputDims:vec2f,depthDims:vec2f}`;
+const GI_PRODUCER_UNIFORM_WGSL = `struct SsGiParams{invViewProj:mat4x4f,viewProj:mat4x4f,cameraPos:vec3f,stepCount:f32,rayLength:f32,thickness:f32,bias:f32,fadeStart:f32,fadeEnd:f32,edgeFade:f32,phase:f32,rayCount:f32,outputDims:vec2f,depthDims:vec2f}`;
 
 const GI_PRODUCER_BINDINGS_WGSL = `@group(0)@binding(0) var ssGiDepth:texture_depth_2d;
 @group(0)@binding(1) var ssGiColorSampler:sampler;
@@ -166,27 +171,35 @@ const GI_PRODUCER_FRAGMENT_WGSL = `@fragment fn ssGiFragment(v:SsGVOut)->@locati
   let worldPos=ssWorldFromDepth(uv,depth,ssGi.invViewProj);
   let normal=ssNormalFromDepth(uv,ssGi.depthDims,ssGi.invViewProj,ssGiDepth);
   let originPos=worldPos+normal*ssGi.bias;
-  let u1=ssPhaseAngle(vec2f(coord),ssGi.phase);
-  let u2=fract(ssScreenSpaceNoise(vec2f(coord)*1.7+vec2f(23.11,9.07))+ssGi.phase*0.61803399);
-  let dither=fract(ssScreenSpaceNoise(vec2f(coord)*0.731+vec2f(11.317,31.179))+ssGi.phase*0.38196601);
-  let rayDir=ssCosineHemisphere(normal,u1,u2);
   let stepCount=max(1u,u32(ssGi.stepCount));
   let stepLen=ssGi.rayLength/f32(stepCount);
-  var color=vec3f(0.0);
-  for(var i:u32=0u;i<stepCount;i=i+1u){
-    let t=(f32(i)+0.35+0.65*dither)*stepLen;
-    let samplePos=originPos+rayDir*t;
-    let hit=ssDualSurfaceHit(samplePos,ssGi.cameraPos,ssGi.viewProj,ssGi.invViewProj,ssGi.depthDims,ssGiDepth,ssGi.bias,ssGi.thickness);
-    if(hit.hit){
-      let edge=min(min(hit.uv.x,1.0-hit.uv.x),min(hit.uv.y,1.0-hit.uv.y))/max(ssGi.edgeFade,1e-4);
-      let edgeFactor=clamp(edge,0.0,1.0);
-      let distFade=clamp(1.0-smoothstep(ssGi.fadeStart,ssGi.fadeEnd,hit.rayDist),0.0,1.0);
-      let litColor=textureSampleLevel(ssGiColor,ssGiColorSampler,hit.uv,0.0).rgb;
-      color=litColor*edgeFactor*distFade;
-      break;
+  let rayCount=max(1u,min(8u,u32(ssGi.rayCount)));
+  var colorSum=vec3f(0.0);
+  for(var rayIndex:u32=0u;rayIndex<8u;rayIndex=rayIndex+1u){
+    if(rayIndex>=rayCount){break;}
+    let raySeed=f32(rayIndex);
+    let seedOffset=vec2f(raySeed*37.719,raySeed*17.173);
+    let u1=fract(ssPhaseAngle(vec2f(coord)+seedOffset,ssGi.phase)+raySeed*0.754877666);
+    let u2=fract(ssScreenSpaceNoise(vec2f(coord)*1.7+vec2f(23.11,9.07)+seedOffset)+ssGi.phase*0.61803399);
+    let dither=fract(ssScreenSpaceNoise(vec2f(coord)*0.731+vec2f(11.317,31.179)+seedOffset)+ssGi.phase*0.38196601);
+    let rayDir=ssCosineHemisphere(normal,u1,u2);
+    var rayColor=vec3f(0.0);
+    for(var i:u32=0u;i<stepCount;i=i+1u){
+      let t=(f32(i)+0.35+0.65*dither)*stepLen;
+      let samplePos=originPos+rayDir*t;
+      let hit=ssDualSurfaceHit(samplePos,ssGi.cameraPos,ssGi.viewProj,ssGi.invViewProj,ssGi.depthDims,ssGiDepth,ssGi.bias,ssGi.thickness);
+      if(hit.hit){
+        let edge=min(min(hit.uv.x,1.0-hit.uv.x),min(hit.uv.y,1.0-hit.uv.y))/max(ssGi.edgeFade,1e-4);
+        let edgeFactor=clamp(edge,0.0,1.0);
+        let distFade=clamp(1.0-smoothstep(ssGi.fadeStart,ssGi.fadeEnd,hit.rayDist),0.0,1.0);
+        let litColor=textureSampleLevel(ssGiColor,ssGiColorSampler,hit.uv,0.0).rgb;
+        rayColor=litColor*edgeFactor*distFade;
+        break;
+      }
     }
+    colorSum=colorSum+rayColor;
   }
-  return vec4f(color,1.0);
+  return vec4f(colorSum/f32(rayCount),1.0);
 }`;
 
 /** Full GI producer shader module source. Exported for WGSL-contract unit tests. */
@@ -298,7 +311,7 @@ export function createScreenSpaceGlobalIlluminationPostProcessTask(
     let lastColorTexture: GPUTexture | null = null;
     let lastCameraKey = -1;
     let accumulatedSamples = 1;
-    let phaseWindow: ScreenSpacePhaseWindow = { index: 0, remaining: params.temporalSamples };
+    let phaseIndex = 0;
     let prevInvViewProjNull = false;
 
     function ensureProducerPipeline(): void {
@@ -355,6 +368,7 @@ export function createScreenSpaceGlobalIlluminationPostProcessTask(
         enabled: true,
         intensity: params.intensity,
         stepCount: params.stepCount,
+        rayCount: params.rayCount,
         rayLength: params.rayLength,
         thickness: params.thickness,
         bias: params.bias,
@@ -436,14 +450,15 @@ export function createScreenSpaceGlobalIlluminationPostProcessTask(
 
             accumulatedSamples = advanceAccumulation(accumulatedSamples, decision.invalidateHistory, params.temporalSamples);
             const weight = computeTemporalWeight(CLAMP(task.temporalWeight, 0, 1), accumulatedSamples);
-            phaseWindow = advancePhaseWindow(phaseWindow, moved, decision.restartPhase, params.temporalSamples);
-            const phase = phaseValue(phaseWindow.index, params.temporalSamples);
+            phaseIndex = advancePhaseIndex(phaseIndex, decision.restartPhase);
+            const phase = phaseValue(phaseIndex, params.temporalSamples);
 
             if (identityChanged(boundDepthForProducer, depthSource._depthTexture) || identityChanged(boundColorForProducer, source._colorTexture) || !producerBindGroup) {
                 rebuildProducerBindGroup();
             }
 
             const stepCount = Math.round(CLAMP(task.stepCount, 1, 64));
+            const rayCount = Math.round(CLAMP(task.rayCount, 1, 8));
             const rayLength = CLAMP(task.rayLength, 0.001, 1000);
             const thickness = CLAMP(task.thickness, 0.001, 1000);
             const bias = CLAMP(task.bias, 0, 100);
@@ -464,6 +479,7 @@ export function createScreenSpaceGlobalIlluminationPostProcessTask(
             producerUniformData[40] = fadeEnd;
             producerUniformData[41] = edgeFade;
             producerUniformData[42] = phase;
+            producerUniformData[43] = rayCount;
             producerUniformData[44] = width;
             producerUniformData[45] = height;
             producerUniformData[46] = depthSource._width;

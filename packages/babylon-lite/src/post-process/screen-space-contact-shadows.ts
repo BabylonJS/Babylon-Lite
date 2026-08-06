@@ -29,7 +29,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import { screenSpaceRaymarchWGSL } from "./screen-space-raymarch-wgsl.js";
 import {
     advanceAccumulation,
-    advancePhaseWindow,
+    advancePhaseIndex,
     assertScreenSpaceTargetNotAliasingSource,
     computeScreenSpaceScaledSize,
     computeTemporalWeight,
@@ -39,7 +39,7 @@ import {
     phaseValue,
     resolveScreenSpaceSourceSize,
 } from "./screen-space-temporal.js";
-import type { ScreenSpacePhaseWindow, ScreenSpaceTemporalOwner } from "./screen-space-temporal.js";
+import type { ScreenSpaceTemporalOwner } from "./screen-space-temporal.js";
 
 /** Configuration for `createScreenSpaceContactShadowsPostProcessTask`. */
 export interface ScreenSpaceContactShadowsPostProcessTaskConfig {
@@ -62,6 +62,8 @@ export interface ScreenSpaceContactShadowsPostProcessTaskConfig {
     normalBias?: number;
     temporalWeight?: number;
     temporalSamples?: number;
+    /** Same-surface temporal supersampling radius in effect pixels. */
+    spatialRadius?: number;
     resetVersion?: number;
     composition?: "none" | "multiply";
 }
@@ -84,6 +86,7 @@ export interface ScreenSpaceContactShadowsPostProcessTask extends Task {
     bias: number;
     normalBias: number;
     temporalWeight: number;
+    spatialRadius: number;
     resetVersion: number;
     readonly lightDirection: { x: number; y: number; z: number };
 }
@@ -102,6 +105,7 @@ export function clampScreenSpaceContactShadowsConfig(config: ScreenSpaceContactS
     normalBias: number;
     temporalWeight: number;
     temporalSamples: number;
+    spatialRadius: number;
 } {
     return {
         resolutionScale: CLAMP(config.resolutionScale ?? 1, 0.25, 1),
@@ -114,6 +118,7 @@ export function clampScreenSpaceContactShadowsConfig(config: ScreenSpaceContactS
         normalBias: CLAMP(config.normalBias ?? 0.035, 0.001, 100),
         temporalWeight: CLAMP(config.temporalWeight ?? 1 / 32, 0, 1),
         temporalSamples: Math.round(CLAMP(config.temporalSamples ?? 32, 1, 256)),
+        spatialRadius: CLAMP(config.spatialRadius ?? 1.5, 0, 4),
     };
 }
 
@@ -268,7 +273,7 @@ export function createScreenSpaceContactShadowsPostProcessTask(
     let lastDepthTexture: GPUTexture | null = null;
     let lastCameraKey = -1;
     let accumulatedSamples = 1;
-    let phaseWindow: ScreenSpacePhaseWindow = { index: 0, remaining: params.temporalSamples };
+    let phaseIndex = 0;
     let prevInvViewProjNull = false;
 
     function ensureProducerPipeline(): void {
@@ -326,6 +331,7 @@ export function createScreenSpaceContactShadowsPostProcessTask(
         bias: params.bias,
         normalBias: params.normalBias,
         temporalWeight: params.temporalWeight,
+        spatialRadius: params.spatialRadius,
         resetVersion: params.resetVersion,
         lightDirection: params.lightDirection,
         record(): void {
@@ -398,8 +404,8 @@ export function createScreenSpaceContactShadowsPostProcessTask(
 
             accumulatedSamples = advanceAccumulation(accumulatedSamples, decision.invalidateHistory, params.temporalSamples);
             const weight = computeTemporalWeight(CLAMP(task.temporalWeight, 0, 1), accumulatedSamples);
-            phaseWindow = advancePhaseWindow(phaseWindow, moved, decision.restartPhase, params.temporalSamples);
-            const phase = phaseValue(phaseWindow.index, params.temporalSamples);
+            phaseIndex = advancePhaseIndex(phaseIndex, decision.restartPhase);
+            const phase = phaseValue(phaseIndex, params.temporalSamples);
 
             if (identityChanged(boundDepthForProducer, depthSource._depthTexture) || !producerBindGroup) {
                 rebuildProducerBindGroup();
@@ -455,6 +461,8 @@ export function createScreenSpaceContactShadowsPostProcessTask(
                     viewMatrix,
                     viewProjMatrix: viewProj,
                     weight,
+                    spatialRadius: CLAMP(task.spatialRadius, 0, 4),
+                    spatialPhase: phaseIndex % Math.max(1, params.temporalSamples),
                 });
 
             lastEnabled = true;

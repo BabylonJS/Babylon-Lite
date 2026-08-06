@@ -3,7 +3,7 @@
  * (see `docs/lite/architecture/52-screen-space-effects.md`).
  *
  * Split into three groups:
- *   1. Pure math/state functions (reset matrix, accumulation ramp, phase window,
+ *   1. Pure math/state functions (reset matrix, accumulation ramp, phase index,
  *      reprojection rejection, resolution scaling, config clamping) — no GPU device.
  *   2. WGSL-contract assertions — the generated shader source contains the documented
  *      history layouts and dual-surface/tangent-plane/hemisphere contracts, and the two
@@ -33,7 +33,7 @@ import {
 import { screenSpaceRaymarchWGSL } from "../../../packages/babylon-lite/src/post-process/screen-space-raymarch-wgsl";
 import {
     advanceAccumulation,
-    advancePhaseWindow,
+    advancePhaseIndex,
     assertScreenSpaceTargetNotAliasingSource,
     clampScreenSpaceResolutionScale,
     computeScreenSpaceScaledSize,
@@ -45,7 +45,6 @@ import {
     resolveScreenSpaceSourceSize,
     screenSpaceTemporalResolveWGSL,
     SS_TEMPORAL_UNIFORM_FLOATS,
-    type ScreenSpacePhaseWindow,
     type ScreenSpaceResetEvent,
 } from "../../../packages/babylon-lite/src/post-process/screen-space-temporal";
 
@@ -107,28 +106,14 @@ describe("advanceAccumulation", () => {
     });
 });
 
-describe("advancePhaseWindow / phaseValue", () => {
-    it("restart reopens the window at temporalSamples and zeroes the index", () => {
-        const state: ScreenSpacePhaseWindow = { index: 9, remaining: 0 };
-        const next = advancePhaseWindow(state, false, true, 16);
-        expect(next).toEqual({ index: 0, remaining: 16 });
+describe("advancePhaseIndex / phaseValue", () => {
+    it("restart zeroes the phase index", () => {
+        expect(advancePhaseIndex(9, true)).toBe(0);
     });
 
-    it("camera motion alone reopens the window but keeps advancing the index", () => {
-        const state: ScreenSpacePhaseWindow = { index: 3, remaining: 0 };
-        const next = advancePhaseWindow(state, true, false, 16);
-        expect(next).toEqual({ index: 4, remaining: 16 });
-    });
-
-    it("drains by one frame per call while stationary, then freezes", () => {
-        let state: ScreenSpacePhaseWindow = { index: 0, remaining: 2 };
-        state = advancePhaseWindow(state, false, false, 16);
-        expect(state).toEqual({ index: 1, remaining: 1 });
-        state = advancePhaseWindow(state, false, false, 16);
-        expect(state).toEqual({ index: 2, remaining: 0 });
-        const frozen = advancePhaseWindow(state, false, false, 16);
-        expect(frozen).toEqual({ index: 2, remaining: 0 }); // frozen: same reference-equal value
-        expect(frozen).toBe(state);
+    it("keeps rotating continuously while history remains valid", () => {
+        expect(advancePhaseIndex(3, false)).toBe(4);
+        expect(advancePhaseIndex(64, false)).toBe(65);
     });
 
     it("phaseValue wraps into [0, 1) modulo temporalSamples", () => {
@@ -159,9 +144,9 @@ describe("decideScreenSpaceReset (reset matrix)", () => {
     it("source/depth identity change invalidates history and restarts phase", () => {
         expect(decideScreenSpaceReset({ ...base, sourceIdentityChanged: true })).toEqual({ invalidateHistory: true, restartPhase: true });
     });
-    it("camera movement keeps history and lets the phase window advance without resetting its index", () => {
+    it("camera movement keeps history and advances the phase without resetting its index", () => {
         expect(decideScreenSpaceReset({ ...base, cameraMoved: true })).toEqual({ invalidateHistory: false, restartPhase: false });
-        expect(advancePhaseWindow({ index: 7, remaining: 0 }, true, false, 16)).toEqual({ index: 8, remaining: 16 });
+        expect(advancePhaseIndex(7, false)).toBe(8);
     });
     it("resetVersion change invalidates history and restarts phase", () => {
         expect(decideScreenSpaceReset({ ...base, resetVersionChanged: true })).toEqual({ invalidateHistory: true, restartPhase: true });
@@ -296,14 +281,23 @@ describe("clampScreenSpaceContactShadowsConfig", () => {
         expect(clamped.normalBias).toBe(0.035);
         expect(clamped.temporalWeight).toBeCloseTo(1 / 32, 10);
         expect(clamped.temporalSamples).toBe(32);
+        expect(clamped.spatialRadius).toBe(1.5);
     });
     it("clamps out-of-range inputs", () => {
-        const clamped = clampScreenSpaceContactShadowsConfig({ resolutionScale: 5, intensity: -1, stepCount: 0, temporalSamples: 10000, normalBias: 0 } as never);
+        const clamped = clampScreenSpaceContactShadowsConfig({
+            resolutionScale: 5,
+            intensity: -1,
+            stepCount: 0,
+            temporalSamples: 10000,
+            normalBias: 0,
+            spatialRadius: 99,
+        } as never);
         expect(clamped.resolutionScale).toBe(1);
         expect(clamped.intensity).toBe(0);
         expect(clamped.stepCount).toBe(1);
         expect(clamped.temporalSamples).toBe(256);
         expect(clamped.normalBias).toBe(0.001);
+        expect(clamped.spatialRadius).toBe(4);
     });
 });
 
@@ -313,6 +307,7 @@ describe("clampScreenSpaceGlobalIlluminationConfig", () => {
         expect(clamped.resolutionScale).toBe(0.5);
         expect(clamped.intensity).toBe(1);
         expect(clamped.stepCount).toBe(8);
+        expect(clamped.rayCount).toBe(1);
         expect(clamped.rayLength).toBe(2);
         expect(clamped.thickness).toBe(0.45);
         expect(clamped.bias).toBe(0.05);
@@ -328,6 +323,11 @@ describe("clampScreenSpaceGlobalIlluminationConfig", () => {
         const clamped = clampScreenSpaceGlobalIlluminationConfig({ fadeStart: 50, fadeEnd: 10 } as never);
         expect(clamped.fadeStart).toBe(50);
         expect(clamped.fadeEnd).toBeCloseTo(50.001, 10);
+    });
+    it("clamps rayCount to the supported [1, 8] range", () => {
+        expect(clampScreenSpaceGlobalIlluminationConfig({ rayCount: 0 } as never).rayCount).toBe(1);
+        expect(clampScreenSpaceGlobalIlluminationConfig({ rayCount: 99 } as never).rayCount).toBe(8);
+        expect(clampScreenSpaceGlobalIlluminationConfig({ rayCount: 3.6 } as never).rayCount).toBe(4);
     });
 });
 
@@ -420,7 +420,9 @@ describe("screen-space-global-illumination producer WGSL", () => {
 
     it("contains cosine-weighted hemisphere sampling", () => {
         expect(src).toContain("fn ssCosineHemisphere(n:vec3f,u1:f32,u2:f32)->vec3f{");
-        expect(src).toContain("ssScreenSpaceNoise(vec2f(coord)*0.731+vec2f(11.317,31.179))");
+        expect(src).toContain("let rayCount=max(1u,min(8u,u32(ssGi.rayCount)));");
+        expect(src).toContain("if(rayIndex>=rayCount){break;}");
+        expect(src).toContain("colorSum/f32(rayCount)");
     });
 
     it("samples the already-lit source color at the hit UV, gated by receiver-distance and screen-edge fades", () => {
@@ -450,6 +452,12 @@ describe("screen-space temporal resolve WGSL", () => {
         const src = screenSpaceTemporalResolveWGSL("scalar");
         expect(src).toContain("historyValue=hist.r;");
         expect(src).toContain("let storedPrev=hist.g;");
+        expect(src).toContain("fn ssContactTemporalSample(");
+        expect(src).toContain("fn ssFusedContactFilter(");
+        expect(src).not.toContain("let centerValue=ssFusedContactFilter(");
+        expect(src).toContain("let radius=max(ssTemporal.params.y,0.0);");
+        expect(src).toContain("if(relErr>0.04){return ssFusedContactFilter(coord,effectDims,depthDims);}");
+        expect(src).toContain("let spatialWeights=array<f32,9>(0.5,0.75,0.5,0.75,1.0,0.75,0.5,0.75,0.5);");
         expect(src).not.toContain("ssFusedGiFilter");
     });
 
