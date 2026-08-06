@@ -302,7 +302,7 @@ Starting a stopped system resets simulated time and permits emission while retai
 
 ### 5.3 Frame preparation
 
-`prepareParticleSystemFrame(system, camera, targetWidth, targetHeight)` returns immediately when `_frameSteps` is absent. Otherwise it clamps width and height independently to at least `1`, then invokes every frame step in array order with the camera and safe dimensions. The function does not retain the scene or camera. Features copy or reference only the derived state they need for subsequent particle updates.
+`prepareParticleSystemFrame(system, camera, targetWidth, targetHeight)` returns immediately when `_frameSteps` is absent. Otherwise it normalizes each non-finite or non-positive dimension to `1`, clamps positive fractional dimensions to at least `1`, then invokes every frame step in array order with the camera and safe dimensions. The function does not retain the scene or camera. Features copy or reference only the derived state they need for subsequent particle updates.
 
 Live registration calls frame preparation once immediately before each animation call. Manual simulation that uses a camera-dependent block calls it explicitly whenever the camera or target size changes. A static frozen simulation may call it once before its step loop.
 

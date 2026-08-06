@@ -127,8 +127,8 @@ export function prepareParticleSystemFrame(system: ParticleSystem, camera: Camer
     if (!steps) {
         return;
     }
-    const safeWidth = Math.max(1, targetWidth);
-    const safeHeight = Math.max(1, targetHeight);
+    const safeWidth = Number.isFinite(targetWidth) && targetWidth > 0 ? Math.max(1, targetWidth) : 1;
+    const safeHeight = Number.isFinite(targetHeight) && targetHeight > 0 ? Math.max(1, targetHeight) : 1;
     for (let i = 0; i < steps.length; i++) {
         steps[i]!(camera, safeWidth, safeHeight);
     }
