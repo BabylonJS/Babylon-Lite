@@ -36,23 +36,59 @@ import {
     updateMeshUvs,
     createGroundFromHeightMap,
     computeAabb,
+    createLineSystem,
+    updateLineSystem,
+    createLineMaterial,
+    setLineMaterialColor,
 } from "babylon-lite";
-import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer } from "babylon-lite";
+import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer, LineMaterial as LiteLineMaterial } from "babylon-lite";
 
 import { Vector3, liteBackedVector3 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
 import { Matrix } from "../math/matrix.js";
+import { Color3, Color4 } from "../math/color.js";
 import { BoundingInfo } from "../culling/bounding.js";
 import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
+import { Material as CompatMaterialBase } from "../materials/materials.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { NodeMaterial } from "../materials/node-material.js";
 import { mergeMeshGeometry } from "./merge-mesh-geometry.js";
 import type { GridMaterial } from "../materials/grid-material.js";
 import type { MorphTargetManager } from "../morph/morph.js";
 
-type CompatMaterial = StandardMaterial | PBRMaterial | NodeMaterial | GridMaterial;
+type CompatMaterial = StandardMaterial | PBRMaterial | NodeMaterial | GridMaterial | LinesMaterial;
+
+class LinesMaterial extends CompatMaterialBase {
+    public readonly _lite: LiteLineMaterial;
+
+    public constructor(name: string, lite: LiteLineMaterial, scene?: Scene) {
+        super(name, scene);
+        this._lite = lite;
+    }
+
+    public override getClassName(): string {
+        return "ShaderMaterial";
+    }
+
+    public override clone(name: string): LinesMaterial {
+        return new LinesMaterial(
+            name,
+            createLineMaterial({
+                name,
+                color: this._lite.color,
+                useVertexColor: this._lite.useVertexColor,
+                useVertexAlpha: this._lite.useVertexAlpha,
+                useThinInstances: this._lite.useThinInstances,
+                useThinInstanceColors: this._lite.useThinInstanceColors,
+                depthWrite: this._lite.depthWrite,
+                depthCompare: this._lite.depthCompare,
+            }),
+            this.getScene()
+        );
+    }
+}
 
 /**
  * @internal Runtime discriminator for the `Mesh` constructor's two call shapes:
@@ -972,6 +1008,134 @@ export class Mesh extends AbstractMesh {
     }
 }
 
+function createObservableLineColor(onChange: (color: Color3) => void): Color3 {
+    const color = new Color3(1, 1, 1);
+    let r = color.r;
+    let g = color.g;
+    let b = color.b;
+    Object.defineProperties(color, {
+        r: {
+            get: () => r,
+            set: (value: number) => {
+                r = value;
+                onChange(color);
+            },
+            enumerable: true,
+            configurable: true,
+        },
+        g: {
+            get: () => g,
+            set: (value: number) => {
+                g = value;
+                onChange(color);
+            },
+            enumerable: true,
+            configurable: true,
+        },
+        b: {
+            get: () => b,
+            set: (value: number) => {
+                b = value;
+                onChange(color);
+            },
+            enumerable: true,
+            configurable: true,
+        },
+    });
+    return color;
+}
+
+/** Babylon.js `LinesMesh` backed by a Babylon Lite line-system mesh. */
+export class LinesMesh extends Mesh {
+    public readonly useVertexColor: boolean;
+    public readonly useVertexAlpha: boolean;
+    public intersectionThreshold = 0.1;
+    private _lineMaterial: LinesMaterial;
+    private readonly _color: Color3;
+    private _alpha = 1;
+    private _suspendLineColorSync = false;
+
+    public constructor(name: string, sceneOrLite: Scene | LiteMesh, scene?: Scene, useVertexColor = false, useVertexAlpha = true) {
+        const realScene = isCompatScene(sceneOrLite) ? sceneOrLite : scene;
+        const lite = isCompatScene(sceneOrLite)
+            ? createLineSystem(engineOf(sceneOrLite), {
+                  name,
+                  lines: [[new Vector3(0, 0, 0)]],
+                  ...(useVertexColor ? { colors: [[new Color4(1, 1, 1, 1)]] } : {}),
+                  useVertexAlpha,
+              })
+            : sceneOrLite;
+        const lineMaterial = lite.material as LiteLineMaterial;
+        super(name, lite, realScene);
+        this.useVertexColor = useVertexColor;
+        this.useVertexAlpha = useVertexAlpha;
+        this._lineMaterial = new LinesMaterial("colorShader", lineMaterial, realScene);
+        this.material = this._lineMaterial;
+        this._color = createObservableLineColor(() => {
+            if (!this._suspendLineColorSync) {
+                this._syncLineColor();
+            }
+        });
+        if (isCompatScene(sceneOrLite)) {
+            addPrimitive(this, sceneOrLite);
+        }
+    }
+
+    public override getClassName(): string {
+        return "LinesMesh";
+    }
+
+    public get color(): Color3 {
+        return this._color;
+    }
+    public set color(value: Color3) {
+        this._suspendLineColorSync = true;
+        try {
+            this._color.copyFrom(value);
+        } finally {
+            this._suspendLineColorSync = false;
+        }
+        this._syncLineColor();
+    }
+
+    public get alpha(): number {
+        return this._alpha;
+    }
+    public set alpha(value: number) {
+        this._alpha = value;
+        this._syncLineColor();
+    }
+
+    public override thinInstanceSetBuffer(kind: string, buffer: Float32Array | null, stride = 16): void {
+        super.thinInstanceSetBuffer(kind, buffer, stride);
+        if (buffer && (kind === "matrix" || kind === "color")) {
+            this._enableThinLineMaterial(kind === "color" || this._lineMaterial._lite.useThinInstanceColors);
+        }
+    }
+
+    private _enableThinLineMaterial(useThinInstanceColors: boolean): void {
+        if (this._lineMaterial._lite.useThinInstances && this._lineMaterial._lite.useThinInstanceColors === useThinInstanceColors) {
+            return;
+        }
+        const lite = createLineMaterial({
+            name: this._lineMaterial.name,
+            color: { r: this._color.r, g: this._color.g, b: this._color.b, a: this._alpha },
+            useVertexColor: this.useVertexColor,
+            useVertexAlpha: this.useVertexAlpha,
+            useThinInstances: true,
+            useThinInstanceColors,
+            depthWrite: this._lineMaterial._lite.depthWrite,
+            depthCompare: this._lineMaterial._lite.depthCompare,
+        });
+        this._lineMaterial = new LinesMaterial(this._lineMaterial.name, lite, this.getScene());
+        this.material = this._lineMaterial;
+    }
+
+    private _syncLineColor(): void {
+        setLineMaterialColor(this._lineMaterial._lite, { r: this._color.r, g: this._color.g, b: this._color.b, a: this._alpha });
+    }
+}
+
 /** Babylon.js `GroundMesh` — a ground plane mesh. CPU height queries are not modelled. */
 export class GroundMesh extends Mesh {
     public override getClassName(): string {
@@ -1087,6 +1251,22 @@ interface CylinderOptions {
     height?: number;
     diameter?: number;
     tessellation?: number;
+}
+interface LineSystemBuilderOptions {
+    lines: Vector3[][];
+    updatable?: boolean;
+    instance?: LinesMesh | null;
+    colors?: Color4[][] | null;
+    useVertexAlpha?: boolean;
+    material?: unknown;
+}
+interface LinesBuilderOptions {
+    points: Vector3[];
+    updatable?: boolean;
+    instance?: LinesMesh | null;
+    colors?: Color4[];
+    useVertexAlpha?: boolean;
+    material?: unknown;
 }
 
 function engineOf(scene: Scene): EngineContext {
@@ -1243,15 +1423,49 @@ export const MeshBuilder = {
         return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 
+    CreateLines(name: string, options: LinesBuilderOptions, scene?: Scene | null): LinesMesh {
+        return CreateLineSystem(
+            name,
+            {
+                lines: [options.points],
+                updatable: options.updatable,
+                instance: options.instance,
+                colors: options.colors ? [options.colors] : undefined,
+                useVertexAlpha: options.useVertexAlpha,
+                material: options.material,
+            },
+            scene
+        );
+    },
+
+    CreateLineSystem(name: string, options: LineSystemBuilderOptions, scene?: Scene | null): LinesMesh {
+        if (options.instance) {
+            const instanceScene = options.instance.getScene() ?? scene;
+            if (!instanceScene) {
+                throw new Error("MeshBuilder.CreateLineSystem requires the instance to belong to a scene");
+            }
+            updateLineSystem(engineOf(instanceScene), options.instance._lite, {
+                lines: options.lines,
+                ...(options.colors ? { colors: options.colors } : {}),
+            });
+            return options.instance;
+        }
+        if (options.material) {
+            return unsupported("MeshBuilder.CreateLineSystem.material", "Custom line materials are not implemented in Babylon Lite compatibility mode.");
+        }
+        if (!scene) {
+            throw new Error("MeshBuilder.CreateLineSystem requires a scene when creating a line system");
+        }
+        const lite = createLineSystem(engineOf(scene), {
+            name,
+            lines: options.lines,
+            ...(options.colors ? { colors: options.colors } : {}),
+            useVertexAlpha: options.useVertexAlpha,
+        });
+        return addPrimitive(new LinesMesh(name, lite, scene, !!options.colors, options.useVertexAlpha ?? true), scene) as LinesMesh;
+    },
+
     // ── Known but unsupported (not present in Babylon Lite) ────────────────
-    CreateLines(): never {
-        return unsupported("MeshBuilder.CreateLines", "Line meshes are not implemented in Babylon Lite.");
-    },
-
-    CreateLineSystem(): never {
-        return unsupported("MeshBuilder.CreateLineSystem", "Line meshes are not implemented in Babylon Lite.");
-    },
-
     CreateDashedLines(): never {
         return unsupported("MeshBuilder.CreateDashedLines", "Dashed line meshes are not implemented in Babylon Lite.");
     },
@@ -1317,6 +1531,16 @@ export function CreateTorus(name: string, options: object, scene: Scene): Mesh {
 /** Babylon.js `CreateDisc(name, options, scene)` (discBuilder). */
 export function CreateDisc(name: string, options: object, scene: Scene): Mesh {
     return MeshBuilder.CreateDisc(name, options, scene);
+}
+
+/** Babylon.js `CreateLines(name, options, scene)` (linesBuilder). */
+export function CreateLines(name: string, options: LinesBuilderOptions, scene?: Scene | null): LinesMesh {
+    return MeshBuilder.CreateLines(name, options, scene);
+}
+
+/** Babylon.js `CreateLineSystem(name, options, scene)` (linesBuilder). */
+export function CreateLineSystem(name: string, options: LineSystemBuilderOptions, scene?: Scene | null): LinesMesh {
+    return MeshBuilder.CreateLineSystem(name, options, scene);
 }
 
 /** Babylon.js `CreateTiledBox(name, options, scene)` (tiledBoxBuilder) — throwing stub (see `MeshBuilder.CreateTiledBox`). */

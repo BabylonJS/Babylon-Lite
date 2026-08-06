@@ -1309,9 +1309,7 @@
         "name": "Scene 127 — Gaussian Splatting Depth Rendering",
         "maxMad": 3,
         "description": "Port of PG #V80DRL#12 — visualizes camera-space linear depth for box+sphere+ground+GS, using createLinearDepthMaterial on standard meshes and gsLinearDepthFragment on the GS splat.",
-        "tags": ["gaussian-splatting", "depth-rendering"],
-        "skipParityOnCI": true,
-        "skipNotes": "Scene 127 parity is skipped on CI because the BJS reference capture is unreliable on CI/BrowserStack, not because of a Babylon Lite regression. The reference loads a Gaussian-Splatting mesh from a third-party CDN and visualizes camera-space linear depth through a DepthRenderer RTT + depth PostProcess; on the cloud browser the depth RTT can be sampled before it is populated (and the remote splat's GPU sort may not have settled) at the moment the page marks ready, yielding a bad live reference image. Local parity still runs and passes with wide margin (MAD ~0.06 vs limit 3) against the same freshly-captured 9.19.0 reference, so this is a reference-readiness/network artifact, not an engine-version divergence. Re-enable once the reference readiness signal (settled depth frame + confirmed splat load) is reliable on CI."
+        "tags": ["gaussian-splatting", "depth-rendering"]
     },
     {
         "id": 128,
@@ -1319,9 +1317,7 @@
         "name": "Scene 128 — Gaussian Splatting Depth Rendering (Alpha-blended)",
         "maxMad": 1,
         "description": "Port of PG #V80DRL#19 — same as scene 127 but uses gsAlphaBlendedDepthFragment so the GS splat writes alpha-modulated depth for soft-edged splats.",
-        "tags": ["gaussian-splatting", "depth-rendering", "alpha-blend"],
-        "skipParityOnCI": true,
-        "skipNotes": "Scene 128 parity is skipped on CI for the same reason as scene 127 (its alpha-blended depth variant): the BJS reference loads a Gaussian-Splatting mesh from a third-party CDN and writes alpha-modulated depth through a DepthRenderer RTT + depth PostProcess, and on CI/BrowserStack the depth RTT can be sampled empty (and the remote splat sort unsettled) when the page marks ready, producing a bad live reference rather than a Babylon Lite regression. Local parity still runs and passes (MAD ~0.24 vs limit 1) against the same freshly-captured 9.19.0 reference, so this is a reference-readiness/network artifact, not an engine-version divergence. Re-enable once the reference readiness signal is reliable on CI."
+        "tags": ["gaussian-splatting", "depth-rendering", "alpha-blend"]
     },
     {
         "id": 129,
@@ -1330,9 +1326,7 @@
         "maxMad": 1,
         "description": "Minimal port of PG #3LNCE6#36 — extends GPU picking to handle GaussianSplattingMesh via the gsGpuPickingFragment plugin and the dedicated gs-picking-pipeline. Ground disappears when picking is not valid;",
         "tags": ["gaussian-splatting", "gpu-picking"],
-        "compatParity": true,
-        "skipParityOnCI": true,
-        "skipNotes": "Scene 129 parity is skipped on CI for the same root cause as scenes 127/128: the BJS reference loads a Gaussian-Splatting mesh from a third-party CDN and exercises GPU picking of the splat; on CI/BrowserStack the remote splat fetch + GS worker sort may not have settled (and the picking pipeline not stabilized) when the page marks ready, producing a bad live reference rather than a Babylon Lite regression. Local parity still runs and passes against the same freshly-captured 9.19.0 reference, so this is a reference-readiness/network artifact, not an engine-version divergence. compatParity is retained. Re-enable once the reference readiness signal is reliable on CI."
+        "compatParity": true
     },
     {
         "id": 140,
@@ -1593,10 +1587,9 @@
         "slug": "scene164-device-lost-recovery",
         "name": "Scene 164 - Device Lost Recovery",
         "maxMad": 0.01,
-        "maxRegionMad": 0.08,
-        "maxRawKB": 98.9,
-        "description": "Scene 5 Alien glTF forces WebGPU device loss and validates opt-in automatic recovery without an app rebuild callback.",
-        "tags": ["pbr", "gltf", "anim", "recovery"],
+        "maxRawKB": 142.5,
+        "description": "Forces WebGPU device loss on a scene that exercises every resource family the recovery pipeline must rebuild - a skinned, morphed, animated glTF plus IBL environment, PBR fallback texture, and an ESM directional shadow generator with a shadow-only receiver - then verifies the post-recovery image matches the pre-loss image and that Viewer-order teardown (disable recovery, stop engine, dispose scene, dispose engine) is clean. Lite-only: device loss has no stable-Babylon counterpart, so the comparison is pre-loss vs post-recovery within the same run.",
+        "tags": ["gltf", "pbr", "environment", "shadows", "skeleton", "morph", "anim", "recovery"],
         "skipPerf": true
     },
     {
@@ -1894,7 +1887,7 @@
         "slug": "scene214-cascaded-shadows",
         "name": "Scene 214 — Cascaded Shadow Maps",
         "maxMad": 0.4,
-        "maxRawKB": 69.42,
+        "maxRawKB": 69.5,
         "description": "A deterministic field of 200 green torus-knot casters (playground #KY0N7T#84) drops shadows onto a large Standard ground receiver, lit by a single DirectionalLight with a 4-cascade CascadedShadowGenerator (PCF5). A seeded PRNG places every knot identically to the Babylon.js CSM oracle; cascade Z bounds auto-fit the caster AABB.",
         "tags": ["shadows", "csm", "standard", "directional"],
         "skipPerf": true
@@ -2436,6 +2429,28 @@
         "maxRawKB": 45,
         "description": "A serialized NPE particle graph with UpdateAttractorBlock applying a softened inverse-square force toward a point above the emitter after position integration. Uses deterministic seeded simulation and a frozen camera-facing billboard frame.",
         "tags": ["npe", "particles", "billboards", "attractor"],
+        "skipPerf": true,
+        "compatParity": true
+    },
+    {
+        "id": 278,
+        "slug": "scene278-line-system",
+        "name": "Scene 278 — Public Line System",
+        "maxMad": 0.15,
+        "maxRawKB": 48,
+        "description": "Public createLineSystem rendering with several independent polylines, a uniform unlit color, per-point RGBA colors, and vertex-alpha blending, compared directly with Babylon.js MeshBuilder.CreateLineSystem.",
+        "tags": ["lines", "procedural", "vertex-color", "alpha"],
+        "skipPerf": true,
+        "compatParity": true
+    },
+    {
+        "id": 279,
+        "slug": "scene279-line-system-update-instances",
+        "name": "Scene 279 — Updated Instanced Line System",
+        "maxMad": 0.15,
+        "maxRawKB": 50,
+        "description": "A fixed-topology line system updated in place before rendering, then drawn through five thin-instance matrices with per-instance RGBA colors, matching Babylon.js LinesMesh update and thinInstanceSetBuffer behavior.",
+        "tags": ["lines", "procedural", "update", "thin-instances", "alpha"],
         "skipPerf": true,
         "compatParity": true
     }

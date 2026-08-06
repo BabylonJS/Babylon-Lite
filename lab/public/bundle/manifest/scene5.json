@@ -10,15 +10,15 @@
     "scene5-gltf-color-normalize-4-WGzPL2.js",
     "scene5-gltf-feature-animations-CVgk6zDA.js",
     "scene5-gltf-feature-morph-BNcyLEaQ.js",
-    "scene5-gltf-feature-registry-D6c8dhS1.js",
+    "scene5-gltf-feature-registry-B60SdObw.js",
     "scene5-gltf-feature-skeleton-CS2rGTAx.js",
-    "scene5-gltf-json-asset-PrBgaXiL.js",
-    "scene5-morph-fragment-CA8ZEpqn.js",
-    "scene5-pbr-renderable-cPZ7d0GG.js",
+    "scene5-gltf-json-asset-BHgPYtX8.js",
+    "scene5-morph-fragment-CtUr6coj.js",
+    "scene5-pbr-renderable-eGYyQeyF.js",
     "scene5-pbr-template-ext-CiHpOV5G.js",
     "scene5-singlelight-hemispheric-wgsl-a_zJjBYS.js",
-    "scene5-skeleton-fragment-xvCv9wEX.js",
+    "scene5-skeleton-fragment-CZdkX_tq.js",
     "scene5.js"
   ],
-  "rawBytes": 94806
+  "rawBytes": 94809
 }

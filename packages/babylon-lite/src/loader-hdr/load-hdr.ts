@@ -87,6 +87,7 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
     // exposure/contrast at build time into their per-mesh UBO).
     const useHdr = !!options?.useCubemapSkybox;
     const skipGround = !!options?.skipGround;
+    engine._dlr?.h(scene, url, faceSize, useHdr, skipGround, options?.skyboxSize);
     scene._deferredBuilders.push(async () => {
         if (useHdr && textures.specularCubeView) {
             const { computeSceneSize } = await import("../material/pbr/scene-size.js");
