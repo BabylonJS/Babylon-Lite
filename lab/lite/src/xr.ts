@@ -18,6 +18,7 @@ import {
     createHemisphericLight,
     createBox,
     createStandardMaterial,
+    markMaterialUboDirty,
     addToScene,
     registerScene,
     isWebXrPresent,
@@ -81,6 +82,13 @@ const GRAB_RADIUS_SQ = GRAB_RADIUS * GRAB_RADIUS;
 const GRAB_HIGHLIGHT: [number, number, number] = [0.35, 0.3, 0.05];
 
 const grabbables: Grabbable[] = [];
+/** Set a grabbable material's emissive tint. Runtime emissive edits must mark the
+ *  material UBO dirty or the change never reaches the GPU (the UBO only re-uploads
+ *  when its version bumps). */
+function setEmissive(material: Grabbable["material"], color: readonly [number, number, number]): void {
+    material.emissiveColor = [color[0], color[1], color[2]];
+    markMaterialUboDirty(material);
+}
 /** Cubes currently held, so two controllers never grab the same one. */
 const heldMeshes = new Set<Mesh>();
 /** Per input-source hold: the cube and its rigid offset in the grip's local frame. */
@@ -99,7 +107,7 @@ function releaseGrab(source: XRInputSource): void {
     if (!current) {
         return;
     }
-    current.grabbable.material.emissiveColor = current.grabbable.baseEmissive;
+    setEmissive(current.grabbable.material, current.grabbable.baseEmissive);
     heldMeshes.delete(current.grabbable.mesh);
     held.delete(source);
 }
@@ -157,7 +165,7 @@ function updateGrab(ctx: XrSessionContext): void {
             if (inv) {
                 held.set(w.source, { grabbable: best, offset: mat4Multiply(inv, meshWorldMatrix(best.mesh)) });
                 heldMeshes.add(best.mesh);
-                best.material.emissiveColor = GRAB_HIGHLIGHT;
+                setEmissive(best.material, GRAB_HIGHLIGHT);
             }
         }
     }
@@ -222,11 +230,11 @@ function pulseSelect(mesh: Mesh): void {
     if (!g || heldMeshes.has(mesh)) {
         return;
     }
-    g.material.emissiveColor = GRAB_HIGHLIGHT;
+    setEmissive(g.material, GRAB_HIGHLIGHT);
     setStatus("Pointer: selected a cube.");
     setTimeout(() => {
         if (!heldMeshes.has(mesh)) {
-            g.material.emissiveColor = g.baseEmissive;
+            setEmissive(g.material, g.baseEmissive);
         }
     }, 300);
 }
@@ -261,13 +269,13 @@ async function startSession(mode: XrSessionMode, scene: Parameters<typeof enterX
                     onHoverStart: (mesh) => {
                         const g = grabbableOf(mesh);
                         if (g && !heldMeshes.has(mesh)) {
-                            g.material.emissiveColor = GRAB_HIGHLIGHT;
+                            setEmissive(g.material, GRAB_HIGHLIGHT);
                         }
                     },
                     onHoverEnd: (mesh) => {
                         const g = grabbableOf(mesh);
                         if (g && !heldMeshes.has(mesh)) {
-                            g.material.emissiveColor = g.baseEmissive;
+                            setEmissive(g.material, g.baseEmissive);
                         }
                     },
                     onSelect: (mesh) => pulseSelect(mesh),

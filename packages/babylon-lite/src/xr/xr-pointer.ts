@@ -24,6 +24,8 @@ import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { pickWithRay } from "../picking/ray-pick.js";
+import { setSubtreeVisible } from "../scene/visibility.js";
+import { markMaterialUboDirty } from "../material/material-dirty.js";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -251,7 +253,7 @@ function disposeUnit(pointer: XrPointer, unit: PointerUnit): void {
  * callbacks. Call once per XR frame (e.g. from `enterXr`'s `onFrame`), after
  * {@link updateXrInputPoses} has refreshed the input poses.
  */
-export function updateXrPointer(pointer: XrPointer, input: XrInputManager): void {
+export function updateXrPointer(pointer: XrPointer, input: XrInputManager, eyePosition?: readonly [number, number, number] | null): void {
     const opts = pointer._options;
     const scene = pointer._scene;
     const seen = new Set<DomXrInputSource>();
@@ -261,8 +263,8 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager): void
         const unit = ensureUnit(pointer, src.source);
 
         if (!src.targetRayTracked) {
-            unit.laser.visible = false;
-            unit.cursor.visible = false;
+            setSubtreeVisible(unit.laser, false);
+            setSubtreeVisible(unit.cursor, false);
             if (unit.hovered) {
                 opts.onHoverEnd?.(unit.hovered, src);
                 unit.hovered = null;
@@ -296,32 +298,38 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager): void
         unit.laser.rotationQuaternion.set(rot.x, rot.y, rot.z, rot.w);
         unit.laser.position.set(visual.laserPosition[0], visual.laserPosition[1], visual.laserPosition[2]);
         unit.laser.scaling.set(opts.laserThickness, opts.laserThickness, visual.beamLength);
-        unit.laser.visible = true;
+        setSubtreeVisible(unit.laser, true);
 
         // Selection ring: laid flat on the hit surface (hole axis along the surface
-        // normal), scaled with distance to keep a roughly constant apparent size, and
-        // nudged slightly off the surface toward the controller so the coplanar ring
-        // doesn't z-fight / hide inside the face. Hidden entirely on a miss.
+        // normal) and sized so it keeps a constant *apparent* size — its world size
+        // scales with the distance from the viewer's eye to the hit, not from the
+        // controller, so a near and a far target look the same on screen. A small
+        // distance-proportional nudge off the surface avoids z-fighting the coplanar
+        // ring against the face. Hidden entirely on a miss.
         if (visual.hit) {
-            const s = Math.sqrt(info.distance) || 1;
-            const off = 0.008 * s;
+            const hp = visual.cursorPosition;
+            const refDist = eyePosition ? Math.hypot(hp[0] - eyePosition[0], hp[1] - eyePosition[1], hp[2] - eyePosition[2]) || info.distance : info.distance;
+            const off = 0.003 * refDist;
             const n = (info.pickedNormalWorld as [number, number, number] | null) ?? [-fx, -fy, -fz];
-            unit.cursor.position.set(visual.cursorPosition[0] + n[0] * off, visual.cursorPosition[1] + n[1] * off, visual.cursorPosition[2] + n[2] * off);
-            unit.cursor.scaling.set(s, s, s);
+            unit.cursor.position.set(hp[0] + n[0] * off, hp[1] + n[1] * off, hp[2] + n[2] * off);
+            unit.cursor.scaling.set(refDist, refDist, refDist);
             orientRingToDir(unit.cursor, n);
-            unit.cursor.visible = true;
+            setSubtreeVisible(unit.cursor, true);
         } else {
-            unit.cursor.visible = false;
+            setSubtreeVisible(unit.cursor, false);
         }
 
         // Picked-state colours: brighten the laser and turn the ring blue while pointing
-        // at a mesh (Babylon.js picked vs. default colours), plain otherwise.
+        // at a mesh (Babylon.js picked vs. default colours), plain otherwise. Runtime
+        // emissive edits must mark the material UBO dirty or they never reach the GPU.
         const picked = hitMesh !== null;
         if (picked !== unit.picked) {
             const lc = picked ? opts.laserPickedColor : opts.laserColor;
             const cc = picked ? opts.cursorPickedColor : opts.cursorColor;
             unit.laserMat.emissiveColor = [lc[0], lc[1], lc[2]];
             unit.cursorMat.emissiveColor = [cc[0], cc[1], cc[2]];
+            markMaterialUboDirty(unit.laserMat);
+            markMaterialUboDirty(unit.cursorMat);
             unit.picked = picked;
         }
 
@@ -378,10 +386,14 @@ export function pointerSelection(options: XrPointerOptions = {}): XrFeatureSpec 
                 throw new Error("pointerSelection requires XR input tracking; do not pass input:false to enterXr.");
             }
             const input = ctx.input;
+            const referenceSpace = ctx.referenceSpace;
             const pointer = createXrPointer(ctx.engine, ctx.scene, options);
             return {
-                update(): void {
-                    updateXrPointer(pointer, input);
+                update(frame): void {
+                    const pose = frame.getViewerPose?.(referenceSpace);
+                    const p = pose?.transform.position;
+                    const eye: [number, number, number] | null = p ? [p.x, p.y, p.z] : null;
+                    updateXrPointer(pointer, input, eye);
                 },
                 dispose(): void {
                     disposeXrPointer(pointer);

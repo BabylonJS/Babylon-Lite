@@ -21,6 +21,7 @@ function fakeMesh() {
         pickable: undefined as boolean | undefined,
         receiveShadows: false,
         visible: false,
+        children: [] as unknown[],
         position: vec(0, 0, 0),
         scaling: vec(1, 1, 1),
         rotationQuaternion: vec(0, 0, 0, 1),
@@ -111,9 +112,10 @@ describe("updateXrPointer", () => {
         expect(unit.cursor.visible).toBe(true);
         expect(unit.laser.pickable).toBe(false); // must never pick itself
         expect(unit.cursor.pickable).toBe(false);
-        // Ring sits at the hit (z=-4) nudged slightly off the surface toward the
-        // controller (+Z) by 0.008*sqrt(distance) so it doesn't z-fight the face.
-        expect(unit.cursor.position.z).toBeCloseTo(-4 + 0.008 * Math.sqrt(4), 5);
+        // Ring sits at the hit (z=-4) nudged slightly off the surface along the hit
+        // normal by 0.003*refDist so it doesn't z-fight the face. With no eye position
+        // supplied, refDist falls back to the controller→hit distance (4).
+        expect(unit.cursor.position.z).toBeCloseTo(-4 + 0.003 * 4, 5);
         expect(unit.laser.scaling.z).toBeCloseTo(4, 5);
     });
 
