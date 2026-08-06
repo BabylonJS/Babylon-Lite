@@ -147,6 +147,31 @@ export function setBoneVisible(skeleton: Skeleton, bone: Bone, visible: boolean)
     }
 }
 
+/** Override a bone's local translation + rotation together **without** re-baking.
+ *  For per-frame drivers that pose many bones each frame (e.g. WebXR hand tracking):
+ *  call this for every bone, then {@link bakeSkeleton} once to recompute + upload the
+ *  skin a single time, instead of paying a full bake per {@link setBonePosition} /
+ *  {@link setBoneRotationQuaternion} call. Like those setters, each masked component is
+ *  overwritten every frame by a clip that animates the same bone. */
+export function setBonePoseDeferred(skeleton: Skeleton, bone: Bone, px: number, py: number, pz: number, rx: number, ry: number, rz: number, rw: number): void {
+    const o = ensureOverride(skeleton, bone);
+    o.tx = px;
+    o.ty = py;
+    o.tz = pz;
+    o.rx = rx;
+    o.ry = ry;
+    o.rz = rz;
+    o.rw = rw;
+    o.mask |= 3;
+}
+
+/** Recompute a skeleton's node hierarchy from rest + overrides and upload its bone
+ *  matrices. Pair with {@link setBonePoseDeferred} (which skips baking) to apply a
+ *  batch of per-frame bone edits with a single GPU upload. */
+export function bakeSkeleton(skeleton: Skeleton): void {
+    skeleton._bake();
+}
+
 /** Remove all overrides for a bone, reverting it to animation / rest pose, then re-bake. */
 export function clearBoneOverride(skeleton: Skeleton, bone: Bone): void {
     if (skeleton._overrides.delete(bone._nodeIndex)) {

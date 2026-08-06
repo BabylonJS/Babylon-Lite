@@ -1,13 +1,14 @@
 /**
- * WebXR hand tracking — joint-sphere visuals rendered at each tracked hand's 25
- * skeleton joints, ported in spirit from Babylon.js `WebXRHandTracking` (its
- * default "dot" hand visual). Each joint is a small lit sphere positioned and
- * sized (from the joint's reported radius) every frame from `frame.getJointPose`.
+ * WebXR hand tracking — by default a solid **rigged hand mesh** (Babylon.js's
+ * `r_hand_rhs.glb` / `l_hand_rhs.glb`, skinned to the 25 tracked joints), falling
+ * back to per-joint **spheres** while the mesh loads, if it can't be loaded, or when
+ * `handMeshes: false`. Ported in spirit from Babylon.js `WebXRHandTracking`.
  *
  * Structure mirrors {@link XrPointer} / {@link XrControllerModels}: a per-DOM-source
- * unit map, meshes created on first sight of a joint and disposed on disconnect,
- * hidden while a joint is untracked. Pure data + free functions (pillar 4b);
- * nothing runs unless the app imports and drives it.
+ * unit map, visuals created lazily and disposed on disconnect. The rigged-mesh loader
+ * (`xr-hand-mesh`) is **dynamic-imported** only when hand meshes are enabled,
+ * so the sphere-only path carries none of the glTF-loader / bone-control weight. Pure
+ * data + free functions (pillar 4b); nothing runs unless the app imports and drives it.
  *
  * The feature declares the native `hand-tracking` session feature (folded into the
  * session's `optionalFeatures` by {@link enterXr}); on a device without hand support
@@ -22,6 +23,7 @@ import type { SceneContext } from "../scene/scene.js";
 import type { XrInputManager } from "./xr-input.js";
 import type { XrFeatureSpec } from "./xr-feature.js";
 import type { XrHandedness } from "./xr-support.js";
+import type { HandMeshOptions, LoadedHandMesh } from "./xr-hand-mesh.js";
 import { createSphere } from "../mesh/mesh-factories.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import { addToScene } from "../scene/scene-core.js";
@@ -33,12 +35,29 @@ import { setSubtreeVisible } from "../scene/visibility.js";
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
 type DomXrInputSource = XRInputSource;
 
+/** @internal The lazily dynamic-imported hand-mesh module surface. */
+type HandMeshModule = typeof import("./xr-hand-mesh.js");
+
 /** Builds the mesh drawn for one hand joint. It should be a ~1 m-diameter unit mesh
  *  centred on the origin; the feature scales it per frame to the joint's real radius. */
 export type XrHandJointMeshFactory = (engine: EngineContext, scene: SceneContext, handedness: XrHandedness) => Mesh;
 
 /** Options for {@link handTracking} / {@link createXrHandTracking}. */
 export interface XrHandTrackingOptions {
+    /** Load Babylon.js's rigged hand mesh (skinned to the joints) instead of only the
+     *  joint spheres. Default `true`. The spheres still show while the mesh loads and if
+     *  it can't be loaded. Set `false` for the lightweight dots-only visual. */
+    handMeshes?: boolean;
+    /** Base URL the hand GLBs are fetched from (must end in `/`). Defaults to Babylon's CDN. */
+    handMeshBaseUrl?: string;
+    /** Left-hand GLB filename. Default `l_hand_rhs.glb`. */
+    handMeshLeftFilename?: string;
+    /** Right-hand GLB filename. Default `r_hand_rhs.glb`. */
+    handMeshRightFilename?: string;
+    /** Hand-mesh diffuse tint. Default Babylon's hand purple. */
+    handColor?: readonly [number, number, number];
+    /** Hand-mesh alpha (`< 1` = translucent). Default `0.65`. */
+    handAlpha?: number;
     /** Diffuse colour of the default joint spheres. Defaults to a light blue-white. */
     jointColor?: readonly [number, number, number];
     /** Custom per-joint mesh builder (see {@link XrHandJointMeshFactory}). Defaults to a
@@ -50,14 +69,26 @@ export interface XrHandTrackingOptions {
 
 /** @internal Default joint-sphere tint (Babylon.js hand-dot look). */
 const DEFAULT_JOINT_COLOR: [number, number, number] = [0.7, 0.78, 0.95];
+/** @internal Default hand-mesh tint (Babylon's `base` hand colour rgb(116,63,203)). */
+const DEFAULT_HAND_COLOR: [number, number, number] = [0.455, 0.247, 0.796];
 /** @internal Fallback world radius (m) when a joint pose omits `radius`. */
 const FALLBACK_RADIUS = 0.008;
+/** @internal Babylon's default hand-mesh CDN base + filenames. */
+const DEFAULT_HAND_BASE_URL = "https://assets.babylonjs.com/core/HandMeshes/";
+const DEFAULT_HAND_RIGHT = "r_hand_rhs.glb";
+const DEFAULT_HAND_LEFT = "l_hand_rhs.glb";
 
-/** @internal Per-hand visual: one sphere per joint, created lazily as joints appear. */
+/** @internal Per-hand visual: joint spheres (placeholder/fallback) + optional rigged mesh. */
 interface HandUnit {
     handedness: XrHandedness;
     /** Joint name → its sphere mesh. */
     joints: Map<XRHandJoint, Mesh>;
+    /** The loaded rigged hand mesh, once ready (spheres are retired when it lands). */
+    mesh: LoadedHandMesh | null;
+    /** True once the async mesh load has been kicked off for this hand. */
+    meshLoadStarted: boolean;
+    /** True once the source disconnected, so an in-flight load disposes on arrival. */
+    retired: boolean;
 }
 
 /** A hand-tracking manager. Create with {@link createXrHandTracking}, drive with
@@ -71,6 +102,14 @@ export interface XrHandTracking {
     _factory: XrHandJointMeshFactory;
     /** @internal */
     _jointScale: number;
+    /** @internal Whether to load the rigged hand mesh. */
+    _handMeshes: boolean;
+    /** @internal Resolved hand-mesh load options. */
+    _handMeshOpts: HandMeshOptions;
+    /** @internal Dynamic-imported hand-mesh module, once loaded. */
+    _mod: HandMeshModule | null;
+    /** @internal True while the hand-mesh module import is in flight. */
+    _modLoading: boolean;
     /** @internal Visuals per DOM input source that exposes a hand. */
     _units: Map<DomXrInputSource, HandUnit>;
 }
@@ -98,8 +137,60 @@ export function createXrHandTracking(engine: EngineContext, scene: SceneContext,
         _scene: scene,
         _factory: options.jointMeshFactory ?? makeDefaultFactory(options.jointColor ?? DEFAULT_JOINT_COLOR),
         _jointScale: options.jointScale ?? 1,
+        _handMeshes: options.handMeshes ?? true,
+        _handMeshOpts: {
+            baseUrl: options.handMeshBaseUrl ?? DEFAULT_HAND_BASE_URL,
+            leftFilename: options.handMeshLeftFilename ?? DEFAULT_HAND_LEFT,
+            rightFilename: options.handMeshRightFilename ?? DEFAULT_HAND_RIGHT,
+            color: options.handColor ?? DEFAULT_HAND_COLOR,
+            alpha: options.handAlpha ?? 0.65,
+        },
+        _mod: null,
+        _modLoading: false,
         _units: new Map(),
     };
+}
+
+/** @internal Kick off the one-time dynamic import of the hand-mesh loader. */
+function ensureModule(handTracking: XrHandTracking): void {
+    if (handTracking._mod || handTracking._modLoading || !handTracking._handMeshes) {
+        return;
+    }
+    handTracking._modLoading = true;
+    void import("./xr-hand-mesh.js")
+        .then((m) => {
+            handTracking._mod = m;
+        })
+        .catch(() => {
+            // Loader unavailable → stay on the joint spheres.
+            handTracking._handMeshes = false;
+        });
+}
+
+/** @internal Begin loading a hand's rigged mesh (once). On success the joint spheres
+ *  are retired and the mesh becomes the active visual. */
+function startMeshLoad(handTracking: XrHandTracking, unit: HandUnit): void {
+    const mod = handTracking._mod;
+    if (!mod || unit.meshLoadStarted) {
+        return;
+    }
+    unit.meshLoadStarted = true;
+    void (async () => {
+        try {
+            const loaded = await mod.loadHandMesh(handTracking._engine, handTracking._scene, unit.handedness, handTracking._handMeshOpts);
+            if (!loaded) {
+                return; // no skeleton → keep spheres
+            }
+            if (unit.retired) {
+                mod.disposeHandMesh(handTracking._scene, loaded);
+                return;
+            }
+            unit.mesh = loaded;
+            disposeSpheres(handTracking, unit); // retire the placeholder dots
+        } catch {
+            // Keep the joint spheres on any failure.
+        }
+    })();
 }
 
 /** @internal Lazily create the per-hand unit. */
@@ -108,7 +199,7 @@ function ensureUnit(handTracking: XrHandTracking, source: DomXrInputSource, hand
     if (existing) {
         return existing;
     }
-    const unit: HandUnit = { handedness, joints: new Map() };
+    const unit: HandUnit = { handedness, joints: new Map(), mesh: null, meshLoadStarted: false, retired: false };
     handTracking._units.set(source, unit);
     return unit;
 }
@@ -126,8 +217,9 @@ function ensureJoint(handTracking: XrHandTracking, unit: HandUnit, joint: XRHand
     return mesh;
 }
 
-/** @internal Dispose one hand's joint spheres and remove them from the scene. */
-function disposeUnit(handTracking: XrHandTracking, unit: HandUnit): void {
+/** @internal Dispose one hand's joint spheres (kept separate so the mesh load can retire
+ *  them without touching the rigged mesh). */
+function disposeSpheres(handTracking: XrHandTracking, unit: HandUnit): void {
     for (const mesh of unit.joints.values()) {
         removeFromScene(handTracking._scene, mesh);
         disposeMeshGpu(mesh);
@@ -135,17 +227,32 @@ function disposeUnit(handTracking: XrHandTracking, unit: HandUnit): void {
     unit.joints.clear();
 }
 
+/** @internal Dispose one hand's visuals (spheres + rigged mesh) and detach from the scene. */
+function disposeUnit(handTracking: XrHandTracking, unit: HandUnit): void {
+    unit.retired = true;
+    disposeSpheres(handTracking, unit);
+    if (unit.mesh && handTracking._mod) {
+        handTracking._mod.disposeHandMesh(handTracking._scene, unit.mesh);
+        unit.mesh = null;
+    }
+}
+
 /**
- * Update every tracked hand's joint spheres for the current frame: for each input
- * source that exposes an {@link XRHand}, place and size a sphere at each joint from
- * `frame.getJointPose`, hiding joints (or whole hands) that aren't tracked this
- * frame. Call once per XR frame after {@link updateXrInputPoses}.
+ * Update every tracked hand for the current frame. For each input source that exposes
+ * an {@link XRHand}: pose its rigged mesh from the joint poses when loaded, otherwise
+ * place + size a sphere at each joint from `frame.getJointPose` (also the placeholder
+ * while the mesh loads). Hides joints/hands not tracked this frame. Call once per XR
+ * frame after {@link updateXrInputPoses}.
  */
 export function updateXrHandTracking(handTracking: XrHandTracking, input: XrInputManager, frame: XRFrame, referenceSpace: XRReferenceSpace): void {
     const seen = new Set<DomXrInputSource>();
     // `getJointPose` is optional in the WebXR API (only present with hand-tracking);
     // bail out cleanly on devices/sessions that lack it.
     const getJointPose = frame.getJointPose;
+
+    if (handTracking._handMeshes) {
+        ensureModule(handTracking);
+    }
 
     for (const src of input.inputSources) {
         const hand = src.source.hand;
@@ -155,6 +262,19 @@ export function updateXrHandTracking(handTracking: XrHandTracking, input: XrInpu
         seen.add(src.source);
         const unit = ensureUnit(handTracking, src.source, src.handedness);
 
+        // Rigged-mesh path: kick off the load once the module is ready, and pose the
+        // mesh each frame once it lands (spheres have been retired by then).
+        if (handTracking._handMeshes) {
+            if (!unit.mesh) {
+                startMeshLoad(handTracking, unit);
+            }
+            if (unit.mesh) {
+                handTracking._mod!.poseHandMesh(unit.mesh, hand, frame, referenceSpace);
+                continue;
+            }
+        }
+
+        // Joint-sphere path (dots-only, or the placeholder while the mesh loads).
         if (!getJointPose) {
             continue;
         }
@@ -193,16 +313,17 @@ export function disposeXrHandTracking(handTracking: XrHandTracking): void {
 }
 
 /**
- * Hand-tracking joint visuals as an opt-in {@link XrFeatureSpec} (Babylon.js
- * `HAND_TRACKING`). Pass it to `enterXr({ features: [handTracking(...)] })` and the
- * session renders a sphere at each tracked hand joint, tracking connect/disconnect
- * and disposing on exit — no manual `onFrame`/`onEnd` wiring.
+ * Hand-tracking visuals as an opt-in {@link XrFeatureSpec} (Babylon.js `HAND_TRACKING`).
+ * Pass it to `enterXr({ features: [handTracking(...)] })` and the session renders each
+ * tracked hand — a rigged hand mesh by default, joint spheres while it loads or when
+ * `handMeshes:false` — tracking connect/disconnect and disposing on exit (no manual
+ * `onFrame`/`onEnd` wiring).
  *
  * Requires input tracking (do not pass `input: false` to {@link enterXr}) and requests
  * the native `hand-tracking` session feature (optional — degrades to a no-op where
  * unsupported).
  *
- * @param options - Joint appearance (see {@link XrHandTrackingOptions}).
+ * @param options - Appearance + mesh options (see {@link XrHandTrackingOptions}).
  */
 export function handTracking(options: XrHandTrackingOptions = {}): XrFeatureSpec {
     return {
@@ -212,11 +333,11 @@ export function handTracking(options: XrHandTrackingOptions = {}): XrFeatureSpec
                 throw new Error("handTracking requires XR input tracking; do not pass input:false to enterXr.");
             }
             const input = ctx.input;
-            const referenceSpace = ctx.referenceSpace;
             const tracking = createXrHandTracking(ctx.engine, ctx.scene, options);
             return {
                 update(frame): void {
-                    updateXrHandTracking(tracking, input, frame, referenceSpace);
+                    // Read the reference space fresh each frame — teleportation swaps it.
+                    updateXrHandTracking(tracking, input, frame, ctx.referenceSpace);
                 },
                 dispose(): void {
                     disposeXrHandTracking(tracking);

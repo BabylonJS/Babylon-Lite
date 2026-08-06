@@ -38,6 +38,15 @@ vi.mock("../../../../packages/babylon-lite/src/scene/scene-core", () => ({ addTo
 vi.mock("../../../../packages/babylon-lite/src/scene/scene-remove", () => ({ removeFromScene: vi.fn() }));
 const { disposeMeshGpu } = vi.hoisted(() => ({ disposeMeshGpu: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/mesh/mesh-dispose", () => ({ disposeMeshGpu }));
+// Mock the dynamic-imported rigged-mesh module so the mesh path can be driven without
+// a real glTF load. Only the mesh-path tests below exercise it; sphere tests pin
+// handMeshes:false and never import it.
+const { loadHandMesh, poseHandMesh, disposeHandMesh } = vi.hoisted(() => ({
+    loadHandMesh: vi.fn(),
+    poseHandMesh: vi.fn(),
+    disposeHandMesh: vi.fn(),
+}));
+vi.mock("../../../../packages/babylon-lite/src/xr/xr-hand-mesh", () => ({ loadHandMesh, poseHandMesh, disposeHandMesh }));
 
 import { createXrHandTracking, updateXrHandTracking, disposeXrHandTracking, handTracking } from "../../../../packages/babylon-lite/src/xr/xr-hand";
 import type { XrHandTracking } from "../../../../packages/babylon-lite/src/xr/xr-hand";
@@ -89,7 +98,9 @@ function jointsOf(t: XrHandTracking, src: XrInputSource) {
 }
 
 function makeTracking(): XrHandTracking {
-    return createXrHandTracking({} as EngineContext, {} as SceneContext);
+    // Pin these to the joint-sphere path; the rigged-mesh path is covered separately
+    // (and in xr-hand-mesh.test.ts) so it doesn't fire the dynamic import here.
+    return createXrHandTracking({} as EngineContext, {} as SceneContext, { handMeshes: false });
 }
 
 describe("updateXrHandTracking", () => {
@@ -220,12 +231,86 @@ describe("handTracking feature", () => {
     it("creates on create, updates joints on update, tears down on dispose", () => {
         disposeMeshGpu.mockClear();
         const src = makeSource(fakeHand());
-        const handle = handTracking().create(makeCtx(makeInput([src])));
+        const handle = handTracking({ handMeshes: false }).create(makeCtx(makeInput([src])));
         handle.update!(
             makeFrame(() => ({ x: 0, y: 0, z: 0, radius: 0.01 })),
             0
         );
         handle.dispose!();
         expect(disposeMeshGpu).toHaveBeenCalledTimes(JOINTS.length);
+    });
+});
+
+describe("updateXrHandTracking — rigged mesh path", () => {
+    // Let the dynamic import + async load settle (microtasks + a macrotask).
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+
+    function makeMeshTracking(): XrHandTracking {
+        return createXrHandTracking({} as EngineContext, {} as SceneContext, {}); // handMeshes defaults on
+    }
+
+    it("shows spheres while loading, retires them once the mesh lands, then poses it", async () => {
+        disposeMeshGpu.mockClear();
+        loadHandMesh.mockReset();
+        poseHandMesh.mockReset();
+        const fakeLoaded = { shown: false };
+        loadHandMesh.mockResolvedValue(fakeLoaded);
+
+        const t = makeMeshTracking();
+        const src = makeSource(fakeHand());
+        const frame = makeFrame(() => ({ x: 0, y: 0, z: 0, radius: 0.01 }));
+
+        // Frame 1: module import kicked off; the mesh isn't ready, so spheres act as the placeholder.
+        updateXrHandTracking(t, makeInput([src]), frame, REF);
+        expect(jointsOf(t, src).size).toBe(JOINTS.length);
+        expect(loadHandMesh).not.toHaveBeenCalled();
+        await flush(); // module import resolves
+
+        // Frame 2: module ready → the async mesh load starts (spheres still shown this frame).
+        updateXrHandTracking(t, makeInput([src]), frame, REF);
+        expect(loadHandMesh).toHaveBeenCalledTimes(1);
+        await flush(); // loadHandMesh resolves → mesh adopted, spheres retired
+
+        // Frame 3: mesh present → it is posed and the spheres are gone.
+        updateXrHandTracking(t, makeInput([src]), frame, REF);
+        expect(poseHandMesh).toHaveBeenCalledWith(fakeLoaded, expect.anything(), frame, REF);
+        expect(jointsOf(t, src).size).toBe(0);
+    });
+
+    it("keeps the joint spheres when the model has no skeleton (load returns null)", async () => {
+        loadHandMesh.mockReset();
+        poseHandMesh.mockReset();
+        loadHandMesh.mockResolvedValue(null);
+
+        const t = makeMeshTracking();
+        const src = makeSource(fakeHand());
+        const frame = makeFrame(() => ({ x: 0, y: 0, z: 0, radius: 0.01 }));
+        updateXrHandTracking(t, makeInput([src]), frame, REF);
+        await flush();
+        updateXrHandTracking(t, makeInput([src]), frame, REF);
+        await flush();
+        updateXrHandTracking(t, makeInput([src]), frame, REF);
+
+        expect(poseHandMesh).not.toHaveBeenCalled();
+        expect(jointsOf(t, src).size).toBe(JOINTS.length); // spheres remain
+    });
+
+    it("disposes the loaded mesh when the hand disconnects", async () => {
+        loadHandMesh.mockReset();
+        disposeHandMesh.mockReset();
+        const fakeLoaded = { shown: false };
+        loadHandMesh.mockResolvedValue(fakeLoaded);
+
+        const t = makeMeshTracking();
+        const src = makeSource(fakeHand());
+        const frame = makeFrame(() => ({ x: 0, y: 0, z: 0, radius: 0.01 }));
+        updateXrHandTracking(t, makeInput([src]), frame, REF);
+        await flush();
+        updateXrHandTracking(t, makeInput([src]), frame, REF);
+        await flush();
+        // Hand gone.
+        updateXrHandTracking(t, makeInput([]), frame, REF);
+        expect(disposeHandMesh).toHaveBeenCalledWith(expect.anything(), fakeLoaded);
+        expect((t as unknown as { _units: Map<unknown, unknown> })._units.size).toBe(0);
     });
 });

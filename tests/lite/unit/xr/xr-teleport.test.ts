@@ -208,7 +208,7 @@ describe("updateXrTeleportation — teleport on release", () => {
         // Frame 1: aim.
         updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0), ref0);
         // Frame 2: release (neutral stick) → teleport.
-        src.source.gamepad!.axes = [0, 0, 0, 0] as unknown as readonly number[];
+        (src.source.gamepad as unknown as { axes: number[] }).axes = [0, 0, 0, 0];
         const out = updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0), ref0);
 
         expect((ref0 as unknown as { getOffsetReferenceSpace: ReturnType<typeof vi.fn> }).getOffsetReferenceSpace).toHaveBeenCalledTimes(1);
@@ -229,7 +229,7 @@ describe("updateXrTeleportation — teleport on release", () => {
         const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
         const ref0 = makeRef("r0");
         updateXrTeleportation(tp, makeInput([src]), makeFrame(), ref0); // aim, no floor
-        src.source.gamepad!.axes = [0, 0, 0, 0] as unknown as readonly number[];
+        (src.source.gamepad as unknown as { axes: number[] }).axes = [0, 0, 0, 0];
         const out = updateXrTeleportation(tp, makeInput([src]), makeFrame(), ref0); // release
         expect((ref0 as unknown as { getOffsetReferenceSpace: ReturnType<typeof vi.fn> }).getOffsetReferenceSpace).not.toHaveBeenCalled();
         expect(out).toBe(ref0);
@@ -253,7 +253,7 @@ describe("updateXrTeleportation — snap turn", () => {
         expect(unitFor(tp, src).turnLatched).toBe(true);
 
         // Recenter → unlatches.
-        src.source.gamepad!.axes = [0, 0, 0, 0] as unknown as readonly number[];
+        (src.source.gamepad as unknown as { axes: number[] }).axes = [0, 0, 0, 0];
         updateXrTeleportation(tp, makeInput([src]), makeFrame(), a);
         expect(unitFor(tp, src).turnLatched).toBe(false);
     });
