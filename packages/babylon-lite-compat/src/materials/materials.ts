@@ -601,10 +601,10 @@ export class PBRMaterial extends PushMaterial {
         }
         const environmentTexture = this.environmentTexture;
         if (environmentTexture) {
-            // `CubeTexture`/`HDRCubeTexture` are standalone environment handles in the
-            // compat layer (not `BaseTexture` subclasses), but BJS surfaces them in the
-            // `BaseTexture[]` active-texture list, so widen to match that shape.
-            textures.push(environmentTexture as unknown as BaseTexture);
+            // Babylon Lite applies the environment scene-wide, but Babylon.js surfaces
+            // it in the material's active-texture list, and compat `CubeTexture` /
+            // `HDRCubeTexture` are `BaseTexture` subclasses just as in Babylon.js.
+            textures.push(environmentTexture);
         }
         if (this._sheen) {
             textures.push(...this._sheen.getActiveTextures());

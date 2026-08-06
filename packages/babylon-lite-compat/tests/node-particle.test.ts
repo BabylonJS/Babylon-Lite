@@ -141,6 +141,7 @@ describe("ParticleSystemSet", () => {
         set.systems[1]!.particleTexture = { _lite: tex1 } as never;
         set.start();
 
+        expect(deferred).toHaveLength(1);
         deferred[0]!();
         expect(s0.texture).toBe(tex0);
         expect(s1.texture).toBe(tex1);
@@ -163,6 +164,7 @@ describe("ParticleSystemSet", () => {
         system.start();
         set.start();
 
+        expect(deferred.length).toBeGreaterThan(0);
         for (const add of deferred) {
             add();
         }
@@ -314,6 +316,7 @@ describe("ParticleSystem (per-system NPE handle)", () => {
         const lite = { updateSpeed: 0.1, texture: null as unknown };
         const { system, deferred } = await buildOneSystem(lite);
         system.start();
+        expect(deferred).toHaveLength(1);
         deferred[0]!();
         expect(createBillboardMock).not.toHaveBeenCalled();
         expect(addBillboardMock).not.toHaveBeenCalled();
