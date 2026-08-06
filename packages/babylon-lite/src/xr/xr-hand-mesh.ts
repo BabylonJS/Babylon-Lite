@@ -29,7 +29,7 @@ import { loadGltf } from "../loader-gltf/load-gltf.js";
 import { enableBoneControl, getBoneByName, setBonePoseDeferred, bakeSkeleton } from "../skeleton/bone-control.js";
 import { getContainerMeshes } from "../asset-container.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
-import { enableStandardSkeleton } from "../material/standard/enable-standard-mesh-features.js";
+import { enableStandardSkeleton, whenStandardMeshFeaturesReady } from "../material/standard/enable-standard-mesh-features.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
@@ -104,6 +104,12 @@ export async function loadHandMesh(engine: EngineContext, scene: SceneContext, h
     // Bone control is opt-in and must be enabled BEFORE the glTF is parsed so the
     // loader surfaces `container.skeletons`. Idempotent + process-global.
     enableBoneControl();
+    // The hand GLB is skinned, so the Standard skinning ext must be registered or the mesh
+    // renders frozen at bind pose (invisible / at the origin) instead of tracking the joints.
+    // Enable it BEFORE the (network-bound) glTF load so its dynamic import overlaps the fetch
+    // and is almost certainly registered by the time we add the mesh below. Idempotent +
+    // process-global, same opt-in pattern as `enableBoneControl`.
+    enableStandardSkeleton();
 
     const file = handedness === "right" ? opts.rightFilename : opts.leftFilename;
     const url = new URL(file, opts.baseUrl).href;
@@ -125,11 +131,7 @@ export async function loadHandMesh(engine: EngineContext, scene: SceneContext, h
     }
 
     // Semi-transparent tinted material (approximates Babylon's translucent hand shader,
-    // which is a NodeMaterial Lite can't parse). Lit, so the hand still shades. The hand
-    // GLB is skinned, so the Standard skinning ext must be enabled or the mesh would
-    // render frozen at bind pose (invisible / at the origin) instead of tracking the
-    // joints. Idempotent + process-global, same opt-in pattern as `enableBoneControl`.
-    enableStandardSkeleton();
+    // which is a NodeMaterial Lite can't parse). Lit, so the hand still shades.
     const mat = createStandardMaterial();
     mat.diffuseColor = [opts.color[0], opts.color[1], opts.color[2]];
     mat.alpha = opts.alpha;
@@ -146,6 +148,12 @@ export async function loadHandMesh(engine: EngineContext, scene: SceneContext, h
     root.scaling.set(-root.scaling.x, root.scaling.y, root.scaling.z);
     const { enableMirroredMeshes } = await import("../mesh/enable-mirrored-meshes.js");
     await enableMirroredMeshes(scene);
+
+    // Guarantee the skinning ext is registered before the mesh is added: a mesh added after
+    // the first frame is built through the synchronous rebuild path, which cannot import the
+    // ext itself. Without this, adding the hand while controllers are already shown races the
+    // ext import and the mesh renders frozen at bind pose (stuck at the origin).
+    await whenStandardMeshFeaturesReady();
 
     addToScene(scene, container);
     setSubtreeVisible(root, false);

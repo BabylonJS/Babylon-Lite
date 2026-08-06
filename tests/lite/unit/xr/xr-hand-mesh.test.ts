@@ -16,8 +16,11 @@ vi.mock("../../../../packages/babylon-lite/src/asset-container", () => ({ getCon
 vi.mock("../../../../packages/babylon-lite/src/material/standard/create-standard-material", () => ({
     createStandardMaterial: vi.fn(() => ({ diffuseColor: [0, 0, 0], alpha: 1 })),
 }));
-const { enableStandardSkeleton } = vi.hoisted(() => ({ enableStandardSkeleton: vi.fn() }));
-vi.mock("../../../../packages/babylon-lite/src/material/standard/enable-standard-mesh-features", () => ({ enableStandardSkeleton }));
+const { enableStandardSkeleton, whenStandardMeshFeaturesReady } = vi.hoisted(() => ({
+    enableStandardSkeleton: vi.fn(),
+    whenStandardMeshFeaturesReady: vi.fn(() => Promise.resolve()),
+}));
+vi.mock("../../../../packages/babylon-lite/src/material/standard/enable-standard-mesh-features", () => ({ enableStandardSkeleton, whenStandardMeshFeaturesReady }));
 const { addToScene } = vi.hoisted(() => ({ addToScene: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/scene/scene-core", () => ({ addToScene }));
 const { removeFromScene } = vi.hoisted(() => ({ removeFromScene: vi.fn() }));
@@ -122,6 +125,24 @@ describe("loadHandMesh", () => {
         expect(enableMirroredMeshes).toHaveBeenCalled();
         expect(addToScene).toHaveBeenCalled();
         expect(root.visible).toBe(false);
+    });
+
+    it("awaits the skinning ext registration before adding the mesh, so a late add isn't built at bind pose", async () => {
+        const root = fakeRoot();
+        loadGltf.mockResolvedValue(fakeContainer(root, { tag: "skel" }));
+        getBoneByName.mockImplementation((_s: unknown, name: string) => ({ name }));
+        let resolveReady!: () => void;
+        whenStandardMeshFeaturesReady.mockReturnValueOnce(new Promise<void>((r) => (resolveReady = r)));
+        addToScene.mockClear();
+
+        const pending = loadHandMesh({} as EngineContext, {} as SceneContext, "right", OPTS);
+        await Promise.resolve();
+        // Ext not registered yet → the mesh must NOT have been added to the scene.
+        expect(addToScene).not.toHaveBeenCalled();
+        resolveReady();
+        await pending;
+        expect(whenStandardMeshFeaturesReady).toHaveBeenCalled();
+        expect(addToScene).toHaveBeenCalled();
     });
 
     it("returns null when the model has no skeleton (bone control unavailable)", async () => {
