@@ -1,10 +1,10 @@
 {
-  "rawKB": 89,
+  "rawKB": 88.9,
   "gzipKB": 37.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene14-background-dds-skybox--GK6CC4j.js",
-    "scene14-background-ground-Dtawtan4.js",
+    "scene14-background-dds-skybox-DKtvyYtg.js",
+    "scene14-background-ground-DcUbtWhH.js",
     "scene14-cubemap-skybox-material-DvrXr171.js",
     "scene14-generate-mipmaps-Tx1TIb9d.js",
     "scene14-gltf-glb-parser-Cq5dw6XV.js",
@@ -16,5 +16,5 @@
     "scene14-wgsl-helpers-BgB2AJrF.js",
     "scene14.js"
   ],
-  "rawBytes": 91113
+  "rawBytes": 91069
 }

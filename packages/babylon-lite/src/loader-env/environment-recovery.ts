@@ -10,10 +10,11 @@ import { parseEnvFile } from "./env-parse.js";
 export type EnvironmentRecoverySource = { kind: "env"; url: string; brdfUrl: string } | { kind: "hdr"; url: string; faceSize: number };
 
 /**
- * @internal Kind of loader-owned background renderable, captured by `_dlr.b`.
+ * @internal Kind of loader-owned background renderable, stamped as `Renderable._rb[0]`.
  *
- * Encoded as a number rather than a string so the capture seam — which sits in the loaders' hot
- * bundled path — folds to a single character per call site.
+ * Encoded as a number rather than a string so the descriptor each builder stamps stays a compact
+ * array literal. Builders write the numeric literal directly (with an inline comment) because
+ * `isolatedModules` forbids reading a `const enum` across module boundaries.
  */
 export const enum EnvironmentBackgroundKind {
     SolidSkybox = 0,
@@ -23,20 +24,17 @@ export const enum EnvironmentBackgroundKind {
 }
 
 /**
- * @internal One loader-owned background renderable, recorded as it is built.
+ * @internal One loader-owned background renderable: `[kind, size, rootPosition, url?]`.
  *
- * Captured at build time rather than derived from load options so the seam costs nothing in scenes
- * that build no backgrounds: the `_dlr.b` calls sit inside the same statically-foldable `if` blocks
- * as the builders themselves, so Rollup drops them alongside the background it describes.
+ * Stamped onto the renderable by its own builder (`Renderable._rb`) from arguments the builder
+ * already receives, so the always-bundled loader path carries no per-background recovery code at
+ * all. Recovery rediscovers these by traversing `scene._renderables`, the same way material
+ * textures already recover.
+ *
+ * `kind` is an {@link EnvironmentBackgroundKind}; `size` is a skybox half-size or a ground size;
+ * `url` is the texture URL for the DDS skybox and the ground plane, both of which refetch it.
  */
-export type EnvironmentBackgroundSource = {
-    kind: EnvironmentBackgroundKind;
-    /** Skybox half-size for skyboxes, ground size for the ground plane. */
-    size: number;
-    rootPosition: [number, number, number];
-    /** Texture URL for the DDS skybox and the ground plane; both refetch it during recovery. */
-    url?: string;
-};
+export type EnvironmentBackgroundSource = NonNullable<Renderable["_rb"]>;
 
 /** @internal Rebuild scene environment resources while preserving the EnvironmentTextures identity. */
 export async function rebuildSceneEnvironment(engine: EngineContext, scene: SceneContext): Promise<EnvironmentRecoverySource | null> {
@@ -87,23 +85,21 @@ export async function rebuildSceneEnvironment(engine: EngineContext, scene: Scen
 /**
  * @internal Rebuild loader-owned skybox and ground renderables after material groups.
  *
- * Replays the descriptors recorded as each background was originally built, so every loader path
- * recovers through one mechanism and recovery never has to re-derive a loader's background-strategy
- * rules.
+ * `captured` holds the descriptors discovered on the pre-loss renderables (see `Renderable._rb`),
+ * so every loader path recovers through one mechanism and recovery never has to re-derive a
+ * loader's background-strategy rules.
  */
-export async function rebuildSceneEnvironmentBackgrounds(scene: SceneContext): Promise<Renderable[]> {
+export async function rebuildSceneEnvironmentBackgrounds(scene: SceneContext, captured: readonly EnvironmentBackgroundSource[]): Promise<Renderable[]> {
     const textures = scene._envTextures;
-    const captured = scene._envBackgroundSources;
-    if (!textures || !captured) {
+    if (!textures || captured.length === 0) {
         return [];
     }
     const engine = scene.surface.engine;
     const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
     const renderables: Renderable[] = [];
 
-    for (const background of captured) {
-        const { size, rootPosition, url } = background;
-        switch (background.kind) {
+    for (const [kind, size, rootPosition, url] of captured) {
+        switch (kind as EnvironmentBackgroundKind) {
             case EnvironmentBackgroundKind.SolidSkybox: {
                 const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
                 renderables.push(buildSolidSkyboxRenderable(scene, textures, size, rootPosition, primaryColor));

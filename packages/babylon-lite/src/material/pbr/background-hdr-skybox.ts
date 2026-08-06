@@ -70,6 +70,7 @@ export function buildHdrSkyboxRenderable(
             };
         },
     };
+    r._rb = [3 /* EnvironmentBackgroundKind.HdrSkybox */, skyHalfSize, rootPosition];
     return r;
 }
 

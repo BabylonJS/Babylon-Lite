@@ -82,6 +82,7 @@ export async function buildGroundRenderable(
             };
         },
     };
+    r._rb = [1 /* EnvironmentBackgroundKind.Ground */, groundSize, rootPosition, groundTextureUrl];
     return r;
 }
 

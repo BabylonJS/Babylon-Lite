@@ -1,11 +1,11 @@
 {
-  "rawKB": 106.2,
-  "rawBytes": 108741,
-  "gzipKB": 45.3,
+  "rawKB": 106.1,
+  "rawBytes": 108697,
+  "gzipKB": 45.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene7-background-ground-CmUWWylC.js",
-    "scene7-background-solid-skybox-gseoj8nJ.js",
+    "scene7-background-ground-CtyxhCD8.js",
+    "scene7-background-solid-skybox-Gsjt9M6z.js",
     "scene7-bgl-helpers-Bob3fM5m.js",
     "scene7-create-skeleton-BmmRSwUy.js",
     "scene7-generate-mipmaps-DeX_eOlr.js",

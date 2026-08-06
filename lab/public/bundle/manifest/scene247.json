@@ -1,7 +1,7 @@
 {
   "rawKB": 86.7,
-  "rawBytes": 88828,
-  "gzipKB": 36.6,
+  "rawBytes": 88792,
+  "gzipKB": 36.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene247-generate-mipmaps-Ca5oZGgo.js",

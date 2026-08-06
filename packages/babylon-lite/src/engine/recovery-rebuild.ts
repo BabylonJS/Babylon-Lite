@@ -10,7 +10,8 @@ import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { createSkeleton } from "../skeleton/create-skeleton.js";
 import type { createMorphTargets } from "../morph/create-morph-targets.js";
-import type { EnvironmentRecoverySource } from "../loader-env/environment-recovery.js";
+import type { EnvironmentBackgroundSource, EnvironmentRecoverySource } from "../loader-env/environment-recovery.js";
+import type { Renderable } from "../render/renderable.js";
 
 interface MutableSkeleton {
     boneTexture: GPUTexture;
@@ -86,6 +87,12 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
         return;
     }
 
+    // Snapshot the loader-owned background descriptors before the renderable list is truncated
+    // below. Discovering them here — rather than recording them through a capture seam — keeps
+    // `loadEnvironment` / `loadHdr` free of any per-background recovery cost, and this whole
+    // module is only ever fetched on the recovery path.
+    const backgrounds = scene._renderables.filter((r): r is Renderable & { _rb: EnvironmentBackgroundSource } => !!r._rb).map((r) => r._rb);
+
     scene._renderables.length = scene._uniformUpdaters.length = 0;
     scene._meshDisposables.clear();
     scene._meshAuxDisposables.clear();
@@ -105,9 +112,9 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
             scene._uniformUpdaters.push(result.updater);
         }
     }
-    if (environmentSource) {
+    if (environmentSource && backgrounds.length > 0) {
         const { rebuildSceneEnvironmentBackgrounds } = await import("../loader-env/environment-recovery.js");
-        scene._renderables.push(...(await runRecoveryStep("rebuilding environment backgrounds", () => rebuildSceneEnvironmentBackgrounds(scene))));
+        scene._renderables.push(...(await runRecoveryStep("rebuilding environment backgrounds", () => rebuildSceneEnvironmentBackgrounds(scene, backgrounds))));
     }
     scene._renderables.sort((a, b) => a.order - b.order);
     scene._renderableVersion++;

@@ -142,6 +142,7 @@ export function buildSolidSkyboxRenderable(
             };
         },
     };
+    r._rb = [0 /* EnvironmentBackgroundKind.SolidSkybox */, skyHalfSize, rootPosition];
     return r;
 }
 

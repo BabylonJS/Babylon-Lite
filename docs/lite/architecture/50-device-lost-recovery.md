@@ -102,16 +102,27 @@ rebuild — lives in `device-lost-recovery-capture.ts` and
 `enableDeviceLostSceneRecovery`. Applications that never enable recovery pull in
 none of those chunks.
 
-Backgrounds are captured as they are built, not described up front.
-`engine._dlr?.g(scene, kind, size, rootPosition, url?)` sits inside the same
-`if` block as each background builder, so Rollup drops the capture alongside the
-background it describes and a scene that builds no backgrounds pays nothing.
-Describing backgrounds up front instead — capturing the loaders' strategy inputs
-and re-deriving the rules during recovery — was measured at ~65 B for *every*
-environment-loading scene; per-background capture costs ~21 B only for scenes
-that actually build one, an 84% reduction across the bundle-size corpus. It also
-lets both loaders share one rebuild path instead of each re-deriving its own
-background rules.
+Backgrounds are discovered, not captured. Each background builder stamps its own
+rebuild descriptor — `[kind, size, rootPosition, url?]` — onto the `Renderable`
+it returns (`Renderable._rb`), from arguments it already receives. Recovery
+snapshots those descriptors while traversing `scene._renderables`, the same way
+material textures already recover, so the always-bundled `loadEnvironment` /
+`loadHdr` path carries no per-background recovery code at all and the residual
+cost lands only in `background-*.js`, which a scene already pays for whenever it
+builds that background.
+
+Two capture-based designs were measured first and rejected. Describing
+backgrounds up front — passing the loaders' strategy inputs to one seam and
+re-deriving the rules during recovery — cost ~65 B for *every* environment-loading
+scene. Per-background capture (`engine._dlr?.g(...)` inside each builder's `if`
+block) narrowed that to ~21 B, but still only for scenes that build a background.
+Discovery removes the loader seam entirely: across the 26 affected bundle-size
+scenes the change now measures between −29 B and +12 B against the pre-feature
+baseline, net −143 B, with 14 of 25 scenes smaller than before. The descriptor is
+stamped unconditionally rather than gated on capture being enabled; a handful of
+3–4 element arrays per scene is far cheaper than the branch that would guard them.
+Discovery also lets both loaders share one rebuild path instead of each
+re-deriving its own background rules.
 
 Capture arguments must stay primitive. Rollup tracks the property values of
 object literals and uses them to prove branches dead. Passing an object whose
@@ -120,8 +131,8 @@ properties gate tree-shakeable code — such as `bgOptions`, whose `skipSkybox` 
 forces Rollup to deoptimize it, because the unknown callee could mutate it. It
 then loses the known property values and retains `background-ground.js`
 (+4,968 B) and `background-solid-skybox.js` (+1,882 B) in scenes that had
-tree-shaken them. Passing already-computed scalars keeps the seam at a few dozen
-bytes per environment-loading scene.
+tree-shaken them. This is why the remaining seams (`_dlr.e` / `_dlr.h`) pass
+already-computed scalars.
 
 Shadow generators are recovered in place before material groups are rebuilt.
 Recovery deduplicates generators referenced by `scene.lights` and

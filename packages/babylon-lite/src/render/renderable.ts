@@ -82,6 +82,15 @@ export interface Renderable {
      *  the geometry-renderer path so its owning task can retire per-mesh resources
      *  on re-record/dispose. Idempotent. */
     _geometryDispose?: () => void;
+    /** @internal Device-lost rebuild descriptor for loader-owned background renderables:
+     *  `[kind, size, rootPosition, url?]`, where `kind` is an `EnvironmentBackgroundKind`
+     *  and `size` is a skybox half-size or a ground size.
+     *
+     *  Stamped by the background builders themselves, from arguments they already receive, so
+     *  recovery rediscovers backgrounds by traversing `scene._renderables` rather than through a
+     *  capture seam in the always-bundled loader path. Traversal is how material textures already
+     *  recover, and it keeps `loadEnvironment` / `loadHdr` free of any per-background recovery cost. */
+    _rb?: [number, number, [number, number, number], string?];
     /**
      * Resolve target-specific GPU state (pipeline) and return a `DrawBinding` whose
      * `draw` closure captures that state. Called by the render pass task at build/insert
