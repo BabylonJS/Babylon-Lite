@@ -18,7 +18,7 @@ import type { PickingInfo } from "../picking/picking-info.js";
 import type { XrInputManager, XrInputSource } from "./xr-input.js";
 import type { XrFeatureSpec } from "./xr-feature.js";
 import { mat4Decompose } from "../math/mat4-decompose.js";
-import { createBox, createSphere } from "../mesh/mesh-factories.js";
+import { createBox, createTorus } from "../mesh/mesh-factories.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
@@ -45,15 +45,22 @@ export interface PointerVisual {
 export interface XrPointerOptions {
     /** Maximum beam length in metres when nothing is hit. Default `10`. */
     maxLength?: number;
-    /** Laser emissive colour `[r,g,b]` (0–1). Default light grey `[0.7, 0.7, 0.7]`
-     *  (matches Babylon.js `laserPointerDefaultColor`). */
+    /** Laser emissive colour `[r,g,b]` (0–1) while not pointing at a mesh. Default
+     *  light grey `[0.7, 0.7, 0.7]` (Babylon.js `laserPointerDefaultColor`). */
     laserColor?: [number, number, number];
-    /** Cursor emissive colour `[r,g,b]` (0–1). Default `[0.8, 0.8, 0.8]`
-     *  (matches Babylon.js `selectionMeshDefaultColor`). */
+    /** Laser emissive colour `[r,g,b]` (0–1) while pointing at a mesh. Default
+     *  `[0.9, 0.9, 0.9]` (Babylon.js `laserPointerPickedColor`). */
+    laserPickedColor?: [number, number, number];
+    /** Cursor (selection ring) emissive colour `[r,g,b]` (0–1) while not pointing at a
+     *  mesh. Default `[0.8, 0.8, 0.8]` (Babylon.js `selectionMeshDefaultColor`). */
     cursorColor?: [number, number, number];
+    /** Cursor (selection ring) emissive colour `[r,g,b]` (0–1) while pointing at a mesh.
+     *  Default blue `[0.3, 0.3, 1]` (Babylon.js `selectionMeshPickedColor`). */
+    cursorPickedColor?: [number, number, number];
     /** Laser cross-section thickness in metres. Default `0.004`. */
     laserThickness?: number;
-    /** Cursor sphere diameter in metres. Default `0.03`. */
+    /** Selection-ring base outer diameter in metres (scaled up with hit distance so it
+     *  keeps a roughly constant apparent size, like Babylon.js). Default `0.03`. */
     cursorSize?: number;
     /** Restrict which meshes the ray can pick (in addition to `mesh.pickable`). */
     predicate?: (mesh: Mesh) => boolean;
@@ -68,9 +75,16 @@ export interface XrPointerOptions {
 /** @internal Per-input-source laser + cursor visuals and interaction state. */
 interface PointerUnit {
     laser: Mesh;
+    /** Selection ring placed at the hit point (Babylon.js "gazeTracker" torus). */
     cursor: Mesh;
+    /** Laser material, so its emissive colour can switch on hover without a rebuild. */
+    laserMat: StandardMaterialProps;
+    /** Cursor material, likewise. */
+    cursorMat: StandardMaterialProps;
     /** The mesh currently under this source's ray, if any. */
     hovered: Mesh | null;
+    /** Last emissive state pushed to the materials (`true` = picked), to avoid redundant writes. */
+    picked: boolean;
     /** `selecting` state on the previous frame, for edge detection. */
     wasSelecting: boolean;
 }
@@ -92,7 +106,9 @@ export interface XrPointer {
 const DEFAULTS = {
     maxLength: 10,
     laserColor: [0.7, 0.7, 0.7] as [number, number, number],
+    laserPickedColor: [0.9, 0.9, 0.9] as [number, number, number],
     cursorColor: [0.8, 0.8, 0.8] as [number, number, number],
+    cursorPickedColor: [0.3, 0.3, 1] as [number, number, number],
     laserThickness: 0.004,
     cursorSize: 0.03,
 };
@@ -125,7 +141,9 @@ export function createXrPointer(engine: EngineContext, scene: SceneContext, opti
         _options: {
             maxLength: options.maxLength ?? DEFAULTS.maxLength,
             laserColor: options.laserColor ?? DEFAULTS.laserColor,
+            laserPickedColor: options.laserPickedColor ?? DEFAULTS.laserPickedColor,
             cursorColor: options.cursorColor ?? DEFAULTS.cursorColor,
+            cursorPickedColor: options.cursorPickedColor ?? DEFAULTS.cursorPickedColor,
             laserThickness: options.laserThickness ?? DEFAULTS.laserThickness,
             cursorSize: options.cursorSize ?? DEFAULTS.cursorSize,
             predicate: options.predicate,
@@ -138,12 +156,33 @@ export function createXrPointer(engine: EngineContext, scene: SceneContext, opti
 }
 
 /** @internal Build an unlit emissive material for a pointer visual. */
-function unlitMaterial(color: [number, number, number]): StandardMaterialProps {
+function unlitMaterial(color: [number, number, number], doubleSided = false): StandardMaterialProps {
     const mat = createStandardMaterial();
     mat.diffuseColor = [0, 0, 0];
     mat.emissiveColor = [color[0], color[1], color[2]];
     mat.disableLighting = true;
+    if (doubleSided) {
+        mat.backFaceCulling = false;
+    }
     return mat;
+}
+
+/** @internal Orient a torus ring (hole axis = local +Y) to face along `forward`,
+ *  i.e. rotate local +Y onto the ray direction via the shortest arc. */
+function orientRingToForward(ring: Mesh, forward: [number, number, number]): void {
+    const d = forward[1]; // dot((0,1,0), forward)
+    if (d < -0.999999) {
+        // Antiparallel: 180° about X.
+        ring.rotationQuaternion.set(1, 0, 0, 0);
+        return;
+    }
+    // axis = cross((0,1,0), forward) = (fz, 0, -fx); w = 1 + dot.
+    const x = forward[2];
+    const y = 0;
+    const z = -forward[0];
+    const w = 1 + d;
+    const len = Math.hypot(x, y, z, w) || 1;
+    ring.rotationQuaternion.set(x / len, y / len, z / len, w / len);
 }
 
 /** @internal Lazily create the laser + cursor meshes for one input source. */
@@ -159,14 +198,22 @@ function ensureUnit(pointer: XrPointer, source: DomXrInputSource): PointerUnit {
     // spans the beam, centred on the ray line.
     const laser = createBox(engine, 1);
     laser.name = "xr-pointer-laser";
-    laser.material = unlitMaterial(opts.laserColor) as unknown as Mesh["material"];
+    const laserMat = unlitMaterial(opts.laserColor);
+    laser.material = laserMat as unknown as Mesh["material"];
     laser.pickable = false;
     laser.receiveShadows = false;
     laser.visible = false;
 
-    const cursor = createSphere(engine, { diameter: opts.cursorSize, segments: 12 });
+    // Selection ring (Babylon.js "gazeTracker" torus): a flat ring placed at the hit
+    // point and oriented to face the controller. Double-sided so it reads from behind.
+    const cursor = createTorus(engine, {
+        diameter: opts.cursorSize,
+        thickness: opts.cursorSize * 0.35,
+        tessellation: 20,
+    });
     cursor.name = "xr-pointer-cursor";
-    cursor.material = unlitMaterial(opts.cursorColor) as unknown as Mesh["material"];
+    const cursorMat = unlitMaterial(opts.cursorColor, true);
+    cursor.material = cursorMat as unknown as Mesh["material"];
     cursor.pickable = false;
     cursor.receiveShadows = false;
     cursor.visible = false;
@@ -174,7 +221,7 @@ function ensureUnit(pointer: XrPointer, source: DomXrInputSource): PointerUnit {
     addToScene(pointer._scene, laser);
     addToScene(pointer._scene, cursor);
 
-    const unit: PointerUnit = { laser, cursor, hovered: null, wasSelecting: false };
+    const unit: PointerUnit = { laser, cursor, laserMat, cursorMat, hovered: null, picked: false, wasSelecting: false };
     pointer._units.set(source, unit);
     return unit;
 }
@@ -240,12 +287,28 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager): void
         unit.laser.scaling.set(opts.laserThickness, opts.laserThickness, visual.beamLength);
         unit.laser.visible = true;
 
-        // Cursor at the hit point.
+        // Selection ring at the hit point: scaled with distance (so it keeps a roughly
+        // constant apparent size) and rotated to face back along the ray toward the
+        // controller. Hidden entirely on a miss.
         if (visual.hit) {
             unit.cursor.position.set(visual.cursorPosition[0], visual.cursorPosition[1], visual.cursorPosition[2]);
+            const s = Math.sqrt(info.distance) || 1;
+            unit.cursor.scaling.set(s, s, s);
+            orientRingToForward(unit.cursor, forward);
             unit.cursor.visible = true;
         } else {
             unit.cursor.visible = false;
+        }
+
+        // Picked-state colours: brighten the laser and turn the ring blue while pointing
+        // at a mesh (Babylon.js picked vs. default colours), plain otherwise.
+        const picked = hitMesh !== null;
+        if (picked !== unit.picked) {
+            const lc = picked ? opts.laserPickedColor : opts.laserColor;
+            const cc = picked ? opts.cursorPickedColor : opts.cursorColor;
+            unit.laserMat.emissiveColor = [lc[0], lc[1], lc[2]];
+            unit.cursorMat.emissiveColor = [cc[0], cc[1], cc[2]];
+            unit.picked = picked;
         }
 
         // Hover transitions.

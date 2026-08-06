@@ -28,6 +28,7 @@ import type { XrFeatureSpec } from "./xr-feature.js";
 import { mat4Decompose } from "../math/mat4-decompose.js";
 import { createBox } from "../mesh/mesh-factories.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
+import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
@@ -68,6 +69,8 @@ interface ControllerUnit {
     mesh: Mesh | null;
     /** Loaded profile model, once resolved. */
     model: MotionController | null;
+    /** Placeholder material, when the loading-styled factory is used (for pulsing). */
+    placeholderMat: StandardMaterialProps | null;
     /** The node positioned at the grip each frame — the model root if present, else the box. */
     active: SceneNode;
     /** True once a profile load has been kicked off for this source (success or failure). */
@@ -86,6 +89,9 @@ export interface XrControllerModels {
     _scene: SceneContext;
     /** @internal */
     _factory: XrControllerMeshFactory;
+    /** @internal True when the placeholder is the loading-styled ghost (pulsed each
+     *  frame while the real model loads). False for a custom or box-only factory. */
+    _loadingStyle: boolean;
     /** @internal Profile-loading options, or null when disabled. */
     _profiles: XrMotionControllerProfileOptions | null;
     /** @internal Dynamic-imported motion-controller module, once loaded. */
@@ -121,13 +127,40 @@ function defaultMeshFactory(engine: EngineContext, _scene: SceneContext, handedn
     return mesh;
 }
 
+/** @internal Soft blue-white glow colour for the loading placeholder. */
+const LOADING_GLOW: [number, number, number] = [0.55, 0.72, 1];
+
+/** @internal Loading-state placeholder used while a real profile model streams in:
+ *  a small translucent, unlit ghost box that gently pulses (see the update loop) so
+ *  it reads as "loading" rather than a final controller. */
+function loadingMeshFactory(engine: EngineContext, _scene: SceneContext, handedness: XrHandedness): Mesh {
+    const mesh = createBox(engine, 1);
+    mesh.name = `xr-controller-loading-${handedness}`;
+    const mat = createStandardMaterial();
+    mat.diffuseColor = [0, 0, 0];
+    mat.emissiveColor = [LOADING_GLOW[0], LOADING_GLOW[1], LOADING_GLOW[2]];
+    mat.disableLighting = true;
+    mat.alpha = 0.45;
+    mesh.material = mat as unknown as Mesh["material"];
+    mesh.pickable = false;
+    mesh.receiveShadows = false;
+    // Slightly smaller than the solid handle so it reads as an insubstantial ghost.
+    mesh.scaling.set(0.035, 0.035, 0.11);
+    mesh.visible = false;
+    return mesh;
+}
+
 /** Create a controller-model manager bound to a scene. */
 export function createXrControllerModels(engine: EngineContext, scene: SceneContext, options: XrControllerModelOptions = {}): XrControllerModels {
     const profiles = options.profiles ? (options.profiles === true ? {} : options.profiles) : null;
+    // With profiles on and no custom factory, use the loading-styled ghost placeholder
+    // (it's replaced by the real model once loaded); otherwise the solid handle box.
+    const loadingStyle = !options.meshFactory && profiles !== null;
     return {
         _engine: engine,
         _scene: scene,
-        _factory: options.meshFactory ?? defaultMeshFactory,
+        _factory: options.meshFactory ?? (loadingStyle ? loadingMeshFactory : defaultMeshFactory),
+        _loadingStyle: loadingStyle,
         _profiles: profiles,
         _mod: null,
         _units: new Map(),
@@ -216,7 +249,8 @@ function ensureUnit(models: XrControllerModels, source: DomXrInputSource, handed
     }
     const mesh = models._factory(models._engine, models._scene, handedness);
     addToScene(models._scene, mesh);
-    const unit: ControllerUnit = { handedness, mesh, model: null, active: mesh, loadStarted: false, retired: false };
+    const placeholderMat = models._loadingStyle ? (mesh.material as unknown as StandardMaterialProps) : null;
+    const unit: ControllerUnit = { handedness, mesh, model: null, placeholderMat, active: mesh, loadStarted: false, retired: false };
     models._units.set(source, unit);
     return unit;
 }
@@ -271,6 +305,14 @@ export function updateXrControllerModels(models: XrControllerModels, input: XrIn
         unit.active.position.set(m[12]!, m[13]!, m[14]!);
         unit.active.rotationQuaternion.set(rot.x, rot.y, rot.z, rot.w);
         setUnitVisible(unit, true);
+
+        // Pulse the loading ghost while the real model is still streaming in.
+        if (unit.placeholderMat && unit.mesh && !unit.model) {
+            const p = 0.5 + 0.5 * Math.sin(performance.now() * 0.004);
+            unit.placeholderMat.alpha = 0.25 + 0.35 * p;
+            const k = 0.6 + 0.4 * p;
+            unit.placeholderMat.emissiveColor = [LOADING_GLOW[0] * k, LOADING_GLOW[1] * k, LOADING_GLOW[2] * k];
+        }
 
         if (unit.model && models._mod) {
             models._mod.updateMotionController(unit.model, src.source.gamepad ?? null);

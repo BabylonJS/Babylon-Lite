@@ -255,6 +255,9 @@ async function startSession(mode: XrSessionMode, scene: Parameters<typeof enterX
             // the trigger to select it. The session drives + disposes it for us.
             features: [
                 pointerSelection({
+                    // Don't let the ray latch onto a cube the user is currently holding
+                    // (its AABB encloses the controller, which would pin the cursor).
+                    predicate: (mesh) => !heldMeshes.has(mesh as Mesh),
                     onHoverStart: (mesh) => {
                         const g = grabbableOf(mesh);
                         if (g && !heldMeshes.has(mesh)) {

@@ -30,6 +30,7 @@ function fakeMesh() {
 vi.mock("../../../../packages/babylon-lite/src/mesh/mesh-factories", () => ({
     createBox: vi.fn(() => fakeMesh()),
     createSphere: vi.fn(() => fakeMesh()),
+    createTorus: vi.fn(() => fakeMesh()),
 }));
 vi.mock("../../../../packages/babylon-lite/src/scene/scene-core", () => ({ addToScene: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/scene/scene-remove", () => ({ removeFromScene: vi.fn() }));
