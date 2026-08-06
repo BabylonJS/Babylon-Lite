@@ -1,6 +1,6 @@
 {
   "rawKB": 96.3,
-  "rawBytes": 98597,
+  "rawBytes": 98599,
   "gzipKB": 39.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,12 +8,12 @@
     "scene158-generate-mipmaps-BVPXqb4h.js",
     "scene158-gltf-animation-BGV5WK7I.js",
     "scene158-gltf-feature-animations-D457Gsp8.js",
-    "scene158-gltf-feature-registry-DF6nTznu.js",
+    "scene158-gltf-feature-registry-Dkloq_mx.js",
     "scene158-gltf-feature-skeleton-DPClZDlE.js",
-    "scene158-gltf-glb-parser-BXXv9nTE.js",
+    "scene158-gltf-glb-parser-w6cOHMOp.js",
     "scene158-multilight-wgsl-D_3KZk-5.js",
-    "scene158-pbr-renderable-DvUP_QIY.js",
-    "scene158-skeleton-fragment-DOyf-8Ye.js",
+    "scene158-pbr-renderable-CMIXGwyS.js",
+    "scene158-skeleton-fragment-BgVP7c_4.js",
     "scene158.js"
   ]
 }

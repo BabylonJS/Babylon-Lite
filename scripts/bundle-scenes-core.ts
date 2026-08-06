@@ -1321,6 +1321,18 @@ const READY_TIMEOUT_MS_DEFAULT = 50_000;
  * under SwiftShader, so the bundle measurement flakes with the identical
  * "did not become ready (timed out after 50s …)" error across unrelated PRs.
  *
+ * scene164 (device-lost recovery) is slow for a related but distinct reason: it is
+ * the one scene that deliberately destroys the WebGPU device and rebuilds the whole
+ * resource graph — environment cubemap mips, BRDF LUT, every material texture, meshes,
+ * skeletons, morph targets and the ESM shadow pipelines — and only signals `ready`
+ * after rendering settled post-recovery frames. Every frame it draws re-renders a
+ * 1024² ESM shadow map (`forceRefreshEveryFrame`, required so the map tracks the
+ * pinned pose) for a skinned and morphed caster, so it draws far more expensive
+ * frames than a typical scene, which reaches `ready` after a handful. `dataset.ready`
+ * is withheld until after recovery on purpose — setting it earlier would exclude the
+ * entire recovery path from this scene's recorded size — so that work cannot be moved
+ * outside the measured window.
+ *
  * Recording a size only once the scene renders is intentional (the render
  * pipeline's lazy chunks load on first render), so the right fix is a larger
  * budget for these scenes rather than measuring a truncated bundle. We grant the
@@ -1329,6 +1341,7 @@ const READY_TIMEOUT_MS_DEFAULT = 50_000;
  */
 const READY_TIMEOUT_OVERRIDES_MS: Readonly<Record<string, number>> = {
     scene129: 150_000,
+    scene164: 150_000,
 };
 
 function readyTimeoutForScene(scene: string): number {

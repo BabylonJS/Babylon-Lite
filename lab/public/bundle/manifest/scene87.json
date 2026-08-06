@@ -3,21 +3,21 @@
   "gzipKB": 37.5,
   "ignoredRawKB": 12,
   "runtimeChunks": [
-    "scene87-_math-factory-zb9yKGJ8.js",
+    "scene87-_math-factory-Bbzqwsi-.js",
     "scene87-fragment-output-CfRmfbPv.js",
     "scene87-image-processing-block-BZE0hSms.js",
-    "scene87-input-block-CANLIkMM.js",
+    "scene87-input-block-Daq9A2ni.js",
     "scene87-iridescence-block-BtJ3SYHs.js",
-    "scene87-node-env-WLu-voRZ.js",
-    "scene87-node-registry-BSepgwDY.js",
-    "scene87-node-registry-extra-compat-C_5H2B21.js",
-    "scene87-node-renderable-C5fW1htd.js",
+    "scene87-node-env-CP3pLo0g.js",
+    "scene87-node-registry-Cs2689fv.js",
+    "scene87-node-registry-extra-compat-DVrP2vUP.js",
+    "scene87-node-renderable-DD8pxtFp.js",
     "scene87-pbr-metallic-roughness-block-full-EIk_8P1r.js",
     "scene87-reflection-block-CIXuH-z0.js",
     "scene87-rgbd-decode-BJ_cKDfL.js",
-    "scene87-transform-block-q0Z8-21l.js",
+    "scene87-transform-block-C7e3aRra.js",
     "scene87-vertex-output-C7G5u6Y0.js",
     "scene87.js"
   ],
-  "rawBytes": 95092
+  "rawBytes": 95131
 }
