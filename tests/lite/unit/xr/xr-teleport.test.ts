@@ -234,8 +234,8 @@ describe("updateXrTeleportation — parabolic arc", () => {
         pickWithRay.mockReturnValue({ hit: false, pickedPoint: null, pickedNormalWorld: null, distance: 0, pickedMesh: null });
         const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
         updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), makeRef("r0"));
-        // 20 arc points → 19 segments, all missing, so 19 ray picks.
-        expect(pickWithRay).toHaveBeenCalledTimes(19);
+        // 32 arc points → 31 segments, all missing, so 31 ray picks.
+        expect(pickWithRay).toHaveBeenCalledTimes(31);
     });
 });
 

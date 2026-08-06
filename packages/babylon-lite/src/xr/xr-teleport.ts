@@ -76,8 +76,10 @@ const DEFAULT_COLOR: [number, number, number] = [0.3, 0.6, 1];
 const RETICLE_DIAMETER = 0.4;
 /** @internal Half-width (metres) of the ribbon arc's cross-section. */
 const ARC_HALF_WIDTH = 0.008;
-/** @internal Number of points sampled along the aim arc (ribbon = 2 verts per point). */
-const ARC_POINTS = 20;
+/** @internal Number of points sampled along the aim arc (ribbon = 2 verts per point). Sampled
+ *  non-linearly (see {@link traceArc}) so the dense near field reads as a smooth curve rather
+ *  than a few long straight chords. */
+const ARC_POINTS = 32;
 /** @internal Landing-arrow length in metres (flat triangle laid on the floor). Sized to
  *  read clearly from across a room, since it sits OUTSIDE the ring (see {@link orientIndicator}). */
 const INDICATOR_LENGTH = 0.3;
@@ -342,8 +344,8 @@ function traceArc(
     const opts = tp._options;
     const speed = opts.parabolaSpeed;
     const g = opts.parabolic ? opts.gravity : 0;
-    // Constant time step so the initial-velocity reach ≈ maxLength regardless of speed.
-    const dt = opts.maxLength / ((ARC_POINTS - 1) * speed);
+    // Total flight time so the arc's horizontal reach ≈ maxLength at the last sample.
+    const maxTime = opts.maxLength / speed;
 
     outPath[0] = origin[0];
     outPath[1] = origin[1];
@@ -353,7 +355,12 @@ function traceArc(
         pz = origin[2];
 
     for (let i = 1; i < ARC_POINTS; i++) {
-        const t = i * dt;
+        // Sample time ∝ fraction² so points bunch up near the origin, where the parabola bends
+        // most and where teleports usually land — the near arc then reads as a smooth curve
+        // instead of a handful of long straight chords. The sparse far tail (which typically
+        // ends up underground and collapses onto the floor hit) stays cheap.
+        const f = i / (ARC_POINTS - 1);
+        const t = maxTime * f * f;
         const cx = origin[0] + dir[0] * speed * t;
         const cy = origin[1] + dir[1] * speed * t - 0.5 * g * t * t;
         const cz = origin[2] + dir[2] * speed * t;
