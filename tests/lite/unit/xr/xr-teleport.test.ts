@@ -278,6 +278,20 @@ describe("updateXrTeleportation — landing direction", () => {
         expect(unitFor(tp, src).landingTurn).toBeCloseTo(chosen, 6);
     });
 
+    it("sets a ~180° heading for a backward stick push without flipping to 0 (no deadzone flip)", () => {
+        const tp = make({ floorMeshes: [FLOOR] });
+        floorHit([0, 0, -5]);
+        // Frame 1: engage aim with a forward push.
+        const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
+        const ref0 = makeRef("r0");
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), ref0);
+        // Frame 2: sweep the stick to straight-back (still deflected). Heading must be ~π, not 0
+        // (the old |tx| deadzone wrongly zeroed a pure-back push, flipping the arrow to forward).
+        (src.source.gamepad as unknown as { axes: number[] }).axes = [0, 0, 0, 1];
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), ref0);
+        expect(Math.abs(unitFor(tp, src).landingTurn)).toBeCloseTo(Math.PI, 6);
+    });
+
     it("does not rotate when rotateToDirection is disabled", () => {
         const tp = make({ floorMeshes: [FLOOR], rotateToDirection: false });
         floorHit([0, 0, -5]);

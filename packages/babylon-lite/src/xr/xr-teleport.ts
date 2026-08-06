@@ -86,10 +86,11 @@ const INDICATOR_HALF_WIDTH = 0.13;
 /** @internal Gap (metres) between the ring's outer edge and the landing arrow's base, so the
  *  arrow floats just beyond the reticle rather than overlapping it (Babylon-style, clearer from far). */
 const INDICATOR_GAP = 0.05;
+/** @internal Small lift (metres) of the landing arrow above the floor so its flat triangle isn't
+ *  coplanar with the floor surface (which z-fights and flickers). */
+const INDICATOR_LIFT = 0.02;
 /** @internal A floor pick's world normal must be at least this upward (dot with +Y). */
 const FLOOR_NORMAL_MIN_Y = 0.6;
-/** @internal Stick sideways lean below this contributes no landing rotation (deadzone). */
-const TURN_DEADZONE = 0.15;
 /** @internal Stick magnitude at/below which the stick counts as centred — this, not a partial
  *  release, is what commits the teleport (matches Babylon: teleport happens when you let go). */
 const CENTER_DEADZONE = 0.2;
@@ -419,9 +420,10 @@ function updateArcRibbon(tp: XrTeleportation, unit: TeleportUnit, camPos: [numbe
 /** @internal Point the landing arrow along `dir` (horizontal), laid flat on the floor, floating
  *  just OUTSIDE the ring so it reads clearly from a distance (Babylon-style). */
 function orientIndicator(indicator: Mesh, at: [number, number, number], dir: [number, number, number]): void {
-    // Push the arrow out past the ring's edge along the heading, so its base clears the reticle.
+    // Push the arrow out past the ring's edge along the heading, so its base clears the reticle,
+    // and lift it slightly so its flat triangle doesn't z-fight (flicker) with the floor.
     const off = RETICLE_DIAMETER / 2 + INDICATOR_GAP;
-    indicator.position.set(at[0] + dir[0] * off, at[1], at[2] + dir[2] * off);
+    indicator.position.set(at[0] + dir[0] * off, at[1] + INDICATOR_LIFT, at[2] + dir[2] * off);
     // Yaw so local +Z maps onto `dir`: Ry(θ)·(0,0,1) = (sinθ, 0, cosθ).
     const yaw = Math.atan2(dir[0], dir[2]);
     const half = yaw / 2;
@@ -531,7 +533,10 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                     // it springs back so the arrow doesn't whip around on release.
                     if (opts.rotateToDirection) {
                         if (mag >= HEADING_FREEZE) {
-                            unit.landingTurn = Math.abs(tx) >= TURN_DEADZONE ? Math.atan2(tx, -ty) : 0;
+                            // atan2 already gives 0 for a pure-forward push and ±π for a pure-back
+                            // push, varying smoothly in between — no hard deadzone (a |tx| gate would
+                            // wrongly zero the 180° back-push too, making the arrow flip near backward).
+                            unit.landingTurn = Math.atan2(tx, -ty);
                         }
                         const fwd = pose ? viewForward(pose) : null;
                         if (fwd) {
