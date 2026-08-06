@@ -79,16 +79,17 @@ rebuilds textures, geometry, skeletons, morph targets, environment lighting,
 shadow generators, renderables, scene/light bind groups, frame-graph tasks, and
 render targets.
 
-Environment recovery supports lighting-only `loadEnvironment` (`.env`) calls
-and `loadHdrEnvironment`. Recovery must be enabled before the environment is
+Environment recovery supports `loadEnvironment` (`.env`) and
+`loadHdrEnvironment`. Recovery must be enabled before the environment is
 loaded so the URL/settings source is retained. It recreates the specular cube
 and BRDF LUT on the replacement device while preserving the public
 `EnvironmentTextures` object identity, and installs a single scene disposable
-that owns the replacement textures. HDR loader-owned skybox and ground
-renderables are recreated after material groups rebuild. `.env` calls that
-create loader-owned backgrounds, DDS environments, and glTF
-`EXT_lights_image_based` environments are not yet recoverable; recovery fails
-explicitly rather than rendering with stale device resources.
+that owns the replacement textures. Loader-owned skybox and ground renderables
+are recreated after material groups rebuild, for both loaders: the solid
+skybox, the ground plane, the DDS cube skybox, and the HDR skybox that reuses
+the lighting cubemap. glTF `EXT_lights_image_based` environments are not yet
+recoverable; recovery fails explicitly rather than rendering with stale device
+resources.
 
 ### Loader capture seam
 
@@ -100,6 +101,17 @@ rebuild — lives in `device-lost-recovery-capture.ts` and
 `loader-env/environment-recovery.ts`, which are reachable only from
 `enableDeviceLostSceneRecovery`. Applications that never enable recovery pull in
 none of those chunks.
+
+Backgrounds are captured as they are built, not described up front.
+`engine._dlr?.g(scene, kind, size, rootPosition, url?)` sits inside the same
+`if` block as each background builder, so Rollup drops the capture alongside the
+background it describes and a scene that builds no backgrounds pays nothing.
+Describing backgrounds up front instead — capturing the loaders' strategy inputs
+and re-deriving the rules during recovery — was measured at ~65 B for *every*
+environment-loading scene; per-background capture costs ~21 B only for scenes
+that actually build one, an 84% reduction across the bundle-size corpus. It also
+lets both loaders share one rebuild path instead of each re-deriving its own
+background rules.
 
 Capture arguments must stay primitive. Rollup tracks the property values of
 object literals and uses them to prove branches dead. Passing an object whose

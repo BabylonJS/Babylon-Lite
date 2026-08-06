@@ -2,14 +2,36 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { parseEnvFile } from "../../../packages/babylon-lite/src/loader-env/env-parse.js";
-import { rebuildSceneEnvironment } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
-import type { EnvironmentRecoverySource } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
+import { EnvironmentBackgroundKind, rebuildSceneEnvironment, rebuildSceneEnvironmentBackgrounds } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
+import type { EnvironmentBackgroundSource, EnvironmentRecoverySource } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
+import { buildDdsSkyboxRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-dds-skybox.js";
+import { buildGroundRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-ground.js";
 import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
 
 vi.mock("../../../packages/babylon-lite/src/loader-env/rgbd-decode.js", () => ({
     uploadCubemapRGBD: vi.fn(() => makeTexture("specular")),
     decodeBrdfPng: vi.fn(() => makeTexture("brdf")),
+}));
+
+vi.mock("../../../packages/babylon-lite/src/material/pbr/scene-size.js", () => ({
+    computeSceneSize: vi.fn(() => ({ groundSize: 100, skyboxSize: 20, rootPosition: [0, 0, 0] })),
+}));
+
+vi.mock("../../../packages/babylon-lite/src/material/pbr/background-solid-skybox.js", () => ({
+    buildSolidSkyboxRenderable: vi.fn(() => ({ order: 0, kind: "solid-skybox" })),
+}));
+
+vi.mock("../../../packages/babylon-lite/src/material/pbr/background-hdr-skybox.js", () => ({
+    buildHdrSkyboxRenderable: vi.fn(() => ({ order: 0, kind: "hdr-skybox" })),
+}));
+
+vi.mock("../../../packages/babylon-lite/src/material/pbr/background-dds-skybox.js", () => ({
+    buildDdsSkyboxRenderable: vi.fn(async () => ({ order: 0, kind: "dds-skybox" })),
+}));
+
+vi.mock("../../../packages/babylon-lite/src/material/pbr/background-ground.js", () => ({
+    buildGroundRenderable: vi.fn(async () => ({ order: 1, kind: "ground" })),
 }));
 
 /** The subset of the fake texture the ref-count assertions need. */
@@ -93,16 +115,26 @@ describe("parseEnvFile", () => {
     });
 });
 
+function makeEngine(): EngineContext {
+    return {
+        _device: { createSampler: vi.fn(() => ({}) as GPUSampler) },
+    } as unknown as EngineContext;
+}
+
+function makeEnvironmentTextures(): EnvironmentTextures {
+    return {
+        specularCube: makeTexture("original-specular"),
+        brdfLut: makeTexture("original-brdf"),
+        irradianceSH: new Float32Array(27),
+        sphericalHarmonics: new Float32Array(36),
+        lodGenerationScale: 0.8,
+    } as unknown as EnvironmentTextures;
+}
+
 describe("rebuildSceneEnvironment", () => {
     afterEach(() => {
         vi.unstubAllGlobals();
     });
-
-    function makeEngine(): EngineContext {
-        return {
-            _device: { createSampler: vi.fn(() => ({}) as GPUSampler) },
-        } as unknown as EngineContext;
-    }
 
     function makeScene(textures: EnvironmentTextures | undefined, source?: EnvironmentRecoverySource): SceneContext {
         return {
@@ -110,16 +142,6 @@ describe("rebuildSceneEnvironment", () => {
             _envRecoverySource: source,
             _disposables: [],
         } as unknown as SceneContext;
-    }
-
-    function makeEnvironmentTextures(): EnvironmentTextures {
-        return {
-            specularCube: makeTexture("original-specular"),
-            brdfLut: makeTexture("original-brdf"),
-            irradianceSH: new Float32Array(27),
-            sphericalHarmonics: new Float32Array(36),
-            lodGenerationScale: 0.8,
-        } as unknown as EnvironmentTextures;
     }
 
     function stubNetwork(): void {
@@ -138,7 +160,6 @@ describe("rebuildSceneEnvironment", () => {
         kind: "env",
         url: "/assets/studio.env",
         brdfUrl: "/assets/brdf.png",
-        hasBackgrounds: false,
     };
 
     it("is a no-op for a scene that never loaded an environment", async () => {
@@ -158,11 +179,15 @@ describe("rebuildSceneEnvironment", () => {
         expect(scene._envTextures).toBe(textures);
     });
 
-    it("fails loudly for loadEnvironment backgrounds, which recovery cannot rebuild", async () => {
+    it("rebuilds a scene whose environment also owns loader-built backgrounds", async () => {
+        stubNetwork();
         const textures = makeEnvironmentTextures();
-        const scene = makeScene(textures, { ...envSource, hasBackgrounds: true });
+        const scene = makeScene(textures, envSource);
+        scene._envBackgroundSources = [{ kind: EnvironmentBackgroundKind.HdrSkybox, size: 10, rootPosition: [0, 0, 0] }];
 
-        await expect(rebuildSceneEnvironment(makeEngine(), scene)).rejects.toThrow(/does not support loadEnvironment backgrounds/);
+        // Backgrounds used to abort recovery outright; the textures must now rebuild like any other
+        // environment, with the renderables themselves recreated by `rebuildSceneEnvironmentBackgrounds`.
+        await expect(rebuildSceneEnvironment(makeEngine(), scene)).resolves.toEqual(envSource);
         expect(scene._envTextures).toBe(textures);
     });
 
@@ -229,5 +254,66 @@ describe("rebuildSceneEnvironment", () => {
         for (const texture of [first.specularCube, first.brdfLut, second.specularCube, second.brdfLut]) {
             expect(texture.destroy).toHaveBeenCalledOnce();
         }
+    });
+});
+
+describe("rebuildSceneEnvironmentBackgrounds", () => {
+    function makeBackgroundScene(textures: EnvironmentTextures | undefined, backgrounds?: EnvironmentBackgroundSource[]): SceneContext {
+        return {
+            _envTextures: textures,
+            _envBackgroundSources: backgrounds,
+            surface: { engine: makeEngine() },
+        } as unknown as SceneContext;
+    }
+
+    const kinds = async (backgrounds: EnvironmentBackgroundSource[]) =>
+        (await rebuildSceneEnvironmentBackgrounds(makeBackgroundScene(makeEnvironmentTextures(), backgrounds))).map(
+            (renderable) => (renderable as unknown as { kind: string }).kind
+        );
+
+    it("builds nothing for a scene that never loaded an environment", async () => {
+        await expect(rebuildSceneEnvironmentBackgrounds(makeBackgroundScene(undefined, []))).resolves.toEqual([]);
+    });
+
+    it("builds nothing for an environment that owns no backgrounds", async () => {
+        await expect(rebuildSceneEnvironmentBackgrounds(makeBackgroundScene(makeEnvironmentTextures()))).resolves.toEqual([]);
+    });
+
+    it("rebuilds an HDR skybox, the Viewer's `environmentSkybox` case", async () => {
+        // One .env drives both the IBL and the backdrop, so `loadEnvironment` skips the solid
+        // skybox and builds the HDR one instead.
+        await expect(kinds([{ kind: EnvironmentBackgroundKind.HdrSkybox, size: 10, rootPosition: [0, 0, 0] }])).resolves.toEqual(["hdr-skybox"]);
+    });
+
+    it("rebuilds a DDS skybox from its captured URL", async () => {
+        const url = "/assets/backgroundSkybox.dds";
+        await expect(kinds([{ kind: EnvironmentBackgroundKind.DdsSkybox, size: 10, rootPosition: [0, 0, 0], url }])).resolves.toEqual(["dds-skybox"]);
+        expect(buildDdsSkyboxRenderable).toHaveBeenCalledWith(expect.anything(), 10, [0, 0, 0], expect.anything(), url);
+    });
+
+    it("rebuilds the ground from its captured URL", async () => {
+        const url = "/assets/backgroundGround.png";
+        await expect(kinds([{ kind: EnvironmentBackgroundKind.Ground, size: 100, rootPosition: [0, 0, 0], url }])).resolves.toEqual(["ground"]);
+        // The preloaded ImageBitmap from the original load belongs to the lost device, so recovery
+        // must pass only the URL and let the builder refetch it.
+        expect(buildGroundRenderable).toHaveBeenCalledWith(expect.anything(), 100, [0, 0, 0], expect.anything(), url);
+    });
+
+    it("rebuilds every captured background, in capture order", async () => {
+        await expect(
+            kinds([
+                { kind: EnvironmentBackgroundKind.SolidSkybox, size: 10, rootPosition: [0, 0, 0] },
+                { kind: EnvironmentBackgroundKind.Ground, size: 100, rootPosition: [0, 0, 0] },
+            ])
+        ).resolves.toEqual(["solid-skybox", "ground"]);
+    });
+
+    it("rebuilds HDR-environment backgrounds through the same descriptors", async () => {
+        await expect(
+            kinds([
+                { kind: EnvironmentBackgroundKind.HdrSkybox, size: 10, rootPosition: [0, 0, 0] },
+                { kind: EnvironmentBackgroundKind.Ground, size: 100, rootPosition: [0, 0, 0] },
+            ])
+        ).resolves.toEqual(["hdr-skybox", "ground"]);
     });
 });

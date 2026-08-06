@@ -1,6 +1,7 @@
 import type { EngineContext } from "./engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import type { EnvironmentBackgroundKind } from "../loader-env/environment-recovery.js";
 import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
 import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
 
@@ -63,14 +64,19 @@ function attachRecoveryCapture(engine: EngineContext): void {
             mesh._cpuGpuIndices = gpuIndices;
             mesh._cpuIndexFormat = indexFormat;
         },
-        e(scene: SceneContext, url: string, brdfUrl: string, hasBackgrounds: boolean): void {
+        e(scene: SceneContext, url: string, brdfUrl: string): void {
             if (state._meshCaptureRefs) {
-                scene._envRecoverySource = { kind: "env", url, brdfUrl, hasBackgrounds };
+                scene._envRecoverySource = { kind: "env", url, brdfUrl };
             }
         },
-        h(scene: SceneContext, url: string, faceSize: number, useCubemapSkybox: boolean, skipGround: boolean, skyboxSize: number | undefined): void {
+        h(scene: SceneContext, url: string, faceSize: number): void {
             if (state._meshCaptureRefs) {
-                scene._envRecoverySource = { kind: "hdr", url, faceSize, useCubemapSkybox, skipGround, skyboxSize };
+                scene._envRecoverySource = { kind: "hdr", url, faceSize };
+            }
+        },
+        g(scene: SceneContext, kind: EnvironmentBackgroundKind, size: number, rootPosition: [number, number, number], url?: string): void {
+            if (state._meshCaptureRefs) {
+                (scene._envBackgroundSources ??= []).push({ kind, size, rootPosition, url });
             }
         },
     };

@@ -107,7 +107,7 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
     }
     if (environmentSource) {
         const { rebuildSceneEnvironmentBackgrounds } = await import("../loader-env/environment-recovery.js");
-        scene._renderables.push(...(await runRecoveryStep("rebuilding environment backgrounds", () => rebuildSceneEnvironmentBackgrounds(scene, environmentSource))));
+        scene._renderables.push(...(await runRecoveryStep("rebuilding environment backgrounds", () => rebuildSceneEnvironmentBackgrounds(scene))));
     }
     scene._renderables.sort((a, b) => a.order - b.order);
     scene._renderableVersion++;

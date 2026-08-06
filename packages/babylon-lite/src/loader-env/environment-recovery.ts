@@ -7,9 +7,36 @@ import { assembleEnvironmentTextures, loadBrdfImage } from "./env-helpers.js";
 import { parseEnvFile } from "./env-parse.js";
 
 /** @internal Loader metadata captured by `_dlr` only while Scene recovery capture is enabled. */
-export type EnvironmentRecoverySource =
-    | { kind: "env"; url: string; brdfUrl: string; hasBackgrounds: boolean }
-    | { kind: "hdr"; url: string; faceSize: number; useCubemapSkybox: boolean; skipGround: boolean; skyboxSize: number | undefined };
+export type EnvironmentRecoverySource = { kind: "env"; url: string; brdfUrl: string } | { kind: "hdr"; url: string; faceSize: number };
+
+/**
+ * @internal Kind of loader-owned background renderable, captured by `_dlr.b`.
+ *
+ * Encoded as a number rather than a string so the capture seam — which sits in the loaders' hot
+ * bundled path — folds to a single character per call site.
+ */
+export const enum EnvironmentBackgroundKind {
+    SolidSkybox = 0,
+    Ground = 1,
+    DdsSkybox = 2,
+    HdrSkybox = 3,
+}
+
+/**
+ * @internal One loader-owned background renderable, recorded as it is built.
+ *
+ * Captured at build time rather than derived from load options so the seam costs nothing in scenes
+ * that build no backgrounds: the `_dlr.b` calls sit inside the same statically-foldable `if` blocks
+ * as the builders themselves, so Rollup drops them alongside the background it describes.
+ */
+export type EnvironmentBackgroundSource = {
+    kind: EnvironmentBackgroundKind;
+    /** Skybox half-size for skyboxes, ground size for the ground plane. */
+    size: number;
+    rootPosition: [number, number, number];
+    /** Texture URL for the DDS skybox and the ground plane; both refetch it during recovery. */
+    url?: string;
+};
 
 /** @internal Rebuild scene environment resources while preserving the EnvironmentTextures identity. */
 export async function rebuildSceneEnvironment(engine: EngineContext, scene: SceneContext): Promise<EnvironmentRecoverySource | null> {
@@ -20,9 +47,6 @@ export async function rebuildSceneEnvironment(engine: EngineContext, scene: Scen
     const source = scene._envRecoverySource;
     if (!source) {
         throw new Error("Device-lost Scene recovery requires environment loading after recovery was enabled");
-    }
-    if (source.kind === "env" && source.hasBackgrounds) {
-        throw new Error("Device-lost Scene recovery does not support loadEnvironment backgrounds");
     }
     // Only detach the textures once the rebuild is known to be possible: an early throw would
     // otherwise leave the scene without its environment while the error propagates.
@@ -60,31 +84,47 @@ export async function rebuildSceneEnvironment(engine: EngineContext, scene: Scen
     return source;
 }
 
-/** @internal Rebuild loader-owned skybox and ground renderables after material groups. */
-export async function rebuildSceneEnvironmentBackgrounds(scene: SceneContext, source: EnvironmentRecoverySource): Promise<Renderable[]> {
+/**
+ * @internal Rebuild loader-owned skybox and ground renderables after material groups.
+ *
+ * Replays the descriptors recorded as each background was originally built, so every loader path
+ * recovers through one mechanism and recovery never has to re-derive a loader's background-strategy
+ * rules.
+ */
+export async function rebuildSceneEnvironmentBackgrounds(scene: SceneContext): Promise<Renderable[]> {
     const textures = scene._envTextures;
-    if (!textures) {
-        return [];
-    }
-    if (source.kind === "env") {
+    const captured = scene._envBackgroundSources;
+    if (!textures || !captured) {
         return [];
     }
     const engine = scene.surface.engine;
     const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
-    const { computeSceneSize } = await import("../material/pbr/scene-size.js");
-
-    const { groundSize, skyboxSize, rootPosition } = computeSceneSize(scene, source.skyboxSize);
     const renderables: Renderable[] = [];
-    if (source.useCubemapSkybox) {
-        const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
-        renderables.push(buildHdrSkyboxRenderable(scene, textures, skyboxSize / 2, rootPosition, primaryColor));
-    } else {
-        const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
-        renderables.push(buildSolidSkyboxRenderable(scene, textures, skyboxSize / 2, rootPosition, primaryColor));
-    }
-    if (!source.skipGround) {
-        const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
-        renderables.push(await buildGroundRenderable(engine, groundSize, rootPosition, primaryColor));
+
+    for (const background of captured) {
+        const { size, rootPosition, url } = background;
+        switch (background.kind) {
+            case EnvironmentBackgroundKind.SolidSkybox: {
+                const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
+                renderables.push(buildSolidSkyboxRenderable(scene, textures, size, rootPosition, primaryColor));
+                break;
+            }
+            case EnvironmentBackgroundKind.Ground: {
+                const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
+                renderables.push(await buildGroundRenderable(engine, size, rootPosition, primaryColor, url));
+                break;
+            }
+            case EnvironmentBackgroundKind.DdsSkybox: {
+                const { buildDdsSkyboxRenderable } = await import("../material/pbr/background-dds-skybox.js");
+                renderables.push(await buildDdsSkyboxRenderable(scene, size, rootPosition, primaryColor, url));
+                break;
+            }
+            default: {
+                const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
+                renderables.push(buildHdrSkyboxRenderable(scene, textures, size, rootPosition, primaryColor));
+                break;
+            }
+        }
     }
     return renderables;
 }

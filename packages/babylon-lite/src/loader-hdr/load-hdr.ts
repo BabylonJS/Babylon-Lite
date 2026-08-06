@@ -87,7 +87,7 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
     // exposure/contrast at build time into their per-mesh UBO).
     const useHdr = !!options?.useCubemapSkybox;
     const skipGround = !!options?.skipGround;
-    engine._dlr?.h(scene, url, faceSize, useHdr, skipGround, options?.skyboxSize);
+    engine._dlr?.h(scene, url, faceSize);
     scene._deferredBuilders.push(async () => {
         if (useHdr && textures.specularCubeView) {
             const { computeSceneSize } = await import("../material/pbr/scene-size.js");
@@ -95,6 +95,7 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
             const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
             const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
             scene._renderables.push(buildHdrSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
+            engine._dlr?.g(scene, 3, autoSkyboxSize / 2, rootPosition);
         }
         if (!useHdr || !skipGround) {
             const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
@@ -103,10 +104,12 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
             if (!useHdr) {
                 const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
                 scene._renderables.push(buildSolidSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
+                engine._dlr?.g(scene, 0, autoSkyboxSize / 2, rootPosition);
             }
             if (!skipGround) {
                 const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
                 scene._renderables.push(await buildGroundRenderable(engine, groundSize, rootPosition, primaryColor));
+                engine._dlr?.g(scene, 1, groundSize, rootPosition);
             }
         }
     });
