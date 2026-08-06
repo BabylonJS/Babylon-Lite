@@ -1,16 +1,23 @@
 /**
  * WebXR controller teleportation — thumbstick-driven locomotion, ported in spirit
- * from Babylon.js `WebXRMotionControllerTeleportation`. Push a controller's
- * thumbstick forward to aim: a laser + a flat ring reticle track the floor under
- * the ray; release the stick to teleport the viewer to that spot. Push the stick
- * left/right to snap-turn by a fixed angle.
+ * from Babylon.js `WebXRMotionControllerTeleportation`, at feature parity:
  *
- * The viewer is moved by swapping the session's reference space for an
- * `XRRigidTransform` offset space (`getOffsetReferenceSpace`) — the WebXR-native way
- * to relocate the origin — so the physical room stays put while the scene shifts
- * under the user. Structure mirrors {@link XrPointer}: a per-DOM-source unit map,
- * visuals created lazily and hidden while inactive. Pure data + free functions
- * (pillar 4b); nothing runs unless the app imports and drives it.
+ *  - **Parabolic aim ray.** Push a controller's thumbstick forward to aim. The ray is
+ *    a projectile arc (initial velocity along the controller's forward, curving down
+ *    under gravity), so you can aim *up* onto higher platforms or *down* off ledges —
+ *    teleporting to floors at different heights, not just the one you stand on.
+ *  - **Landing direction.** While aiming, lean the stick left/right to choose which way
+ *    you'll face after landing; a floor arrow previews it. Release to teleport there and
+ *    rotate to that heading in one step.
+ *  - **Snap turn.** With the stick centred forward-wise, a left/right push snap-turns in
+ *    place by a fixed angle.
+ *
+ * The arc is drawn as a single camera-facing ribbon mesh whose vertices are rewritten
+ * in place each frame ({@link updateMeshPositions}) — one draw call per controller, zero
+ * per-frame allocation. The viewer is moved by swapping the session's reference space for
+ * an `XRRigidTransform` offset space (`getOffsetReferenceSpace`) — the WebXR-native way to
+ * relocate the origin — so the physical room stays put while the scene shifts under the
+ * user. Pure data + free functions (pillar 4b); nothing runs unless the app drives it.
  */
 
 import type { EngineContext } from "../engine/engine.js";
@@ -19,15 +26,13 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { XrInputManager } from "./xr-input.js";
 import type { XrFeatureSpec } from "./xr-feature.js";
-import { mat4Decompose } from "../math/mat4-decompose.js";
-import { createBox, createTorus } from "../mesh/mesh-factories.js";
+import { createMeshFromData, createTorus, updateMeshPositions } from "../mesh/mesh-factories.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
 import { pickWithRay } from "../picking/ray-pick.js";
-import { computePointerVisual } from "./xr-pointer.js";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -41,11 +46,22 @@ export interface XrTeleportationOptions {
     /** Predicate selecting teleportable floor meshes (alternative to {@link floorMeshes}).
      *  When neither is given, any surface whose world normal points roughly up is floor. */
     floorPredicate?: (mesh: Mesh) => boolean;
-    /** Reticle + laser tint while aiming at valid floor. Default Babylon teleport blue. */
+    /** Reticle + arc tint while aiming at valid floor. Default Babylon teleport blue. */
     color?: readonly [number, number, number];
-    /** Max ray length in metres. Default `20`. */
+    /** Max horizontal reach of the aim arc in metres. Default `20`. */
     maxLength?: number;
-    /** Enable thumbstick left/right snap-turn. Default `true`. */
+    /** Parabolic aim arc (curves down under gravity so you can aim up/down onto floors at
+     *  other heights). Set `false` for a straight ray. Default `true`. */
+    parabolic?: boolean;
+    /** Launch speed (m/s) of the parabolic arc — higher flattens it, lower curves it more.
+     *  Only affects arc shape, not reach. Default `7`. */
+    parabolaSpeed?: number;
+    /** Downward acceleration (m/s²) applied to the parabolic arc. Default `9.8`. */
+    gravity?: number;
+    /** Let the stick's left/right lean set the heading you face after teleporting, previewed
+     *  by a floor arrow. Default `true`. */
+    rotateToDirection?: boolean;
+    /** Enable thumbstick left/right snap-turn (when not aiming). Default `true`. */
     snapTurn?: boolean;
     /** Snap-turn step in radians. Default `Math.PI / 4` (45°). */
     rotationAngle?: number;
@@ -53,25 +69,41 @@ export interface XrTeleportationOptions {
     thumbstickThreshold?: number;
 }
 
-/** @internal Default reticle/laser colour (Babylon teleport blue). */
+/** @internal Default reticle/arc colour (Babylon teleport blue). */
 const DEFAULT_COLOR: [number, number, number] = [0.3, 0.6, 1];
 /** @internal Reticle ring diameter in metres before orienting flat on the floor. */
 const RETICLE_DIAMETER = 0.4;
-/** @internal Laser cross-section (metres). */
-const LASER_THICKNESS = 0.006;
+/** @internal Half-width (metres) of the ribbon arc's cross-section. */
+const ARC_HALF_WIDTH = 0.008;
+/** @internal Number of points sampled along the aim arc (ribbon = 2 verts per point). */
+const ARC_POINTS = 20;
+/** @internal Landing-arrow length in metres (flat triangle laid on the floor). */
+const INDICATOR_LENGTH = 0.22;
+/** @internal Landing-arrow half-width in metres. */
+const INDICATOR_HALF_WIDTH = 0.09;
 /** @internal A floor pick's world normal must be at least this upward (dot with +Y). */
 const FLOOR_NORMAL_MIN_Y = 0.6;
+/** @internal Stick sideways lean below this contributes no landing rotation (deadzone). */
+const TURN_DEADZONE = 0.15;
 
 /** @internal Per-controller teleport visuals + activation state. */
 interface TeleportUnit {
-    /** Straight aim laser (shown while the thumbstick is pushed forward). */
-    laser: Mesh;
+    /** Parabolic aim arc ribbon (shown while the thumbstick is pushed forward). */
+    arc: Mesh;
     /** Flat ring reticle on the floor (shown only on a valid floor hit). */
     reticle: Mesh;
+    /** Flat arrow previewing the post-teleport heading (shown with the reticle). */
+    indicator: Mesh;
+    /** Reused world-space arc sample points (`ARC_POINTS` × xyz). */
+    arcPath: Float32Array;
+    /** Reused ribbon vertex scratch (`2 × ARC_POINTS` × xyz) uploaded each frame. */
+    arcVerts: Float32Array;
     /** True while the thumbstick is pushed forward (aim mode). */
     aiming: boolean;
     /** Last valid floor hit point, or null when the aim isn't on floor. */
     target: [number, number, number] | null;
+    /** Heading offset (radians) chosen by the stick lean, applied on release. */
+    landingTurn: number;
     /** True while a snap-turn is latched (stick held past threshold), for debounce. */
     turnLatched: boolean;
 }
@@ -84,7 +116,9 @@ export interface XrTeleportation {
     /** @internal */
     _scene: SceneContext;
     /** @internal */
-    _options: Required<Pick<XrTeleportationOptions, "maxLength" | "snapTurn" | "rotationAngle" | "thumbstickThreshold">> & { color: [number, number, number] };
+    _options: Required<
+        Pick<XrTeleportationOptions, "maxLength" | "parabolic" | "parabolaSpeed" | "gravity" | "rotateToDirection" | "snapTurn" | "rotationAngle" | "thumbstickThreshold">
+    > & { color: [number, number, number] };
     /** @internal Floor test derived from `floorMeshes` / `floorPredicate` / normal fallback. */
     _isFloor: (mesh: Mesh, normalWorld: [number, number, number] | null) => boolean;
     /** @internal Height (m) of the floor the viewer currently stands on; updated per teleport
@@ -109,13 +143,17 @@ function makeFloorTest(options: XrTeleportationOptions): (mesh: Mesh, normalWorl
 }
 
 /** @internal Unlit material in the teleport tint (reads clearly against any scene). */
-function tintMaterial(color: readonly [number, number, number]): Mesh["material"] {
+function tintMaterial(color: readonly [number, number, number], alpha: number, twoSided: boolean): Mesh["material"] {
     const mat = createStandardMaterial();
     // With lighting disabled the shader multiplies emissive by diffuse, so diffuse
     // must stay white or the mesh renders black.
     mat.diffuseColor = [1, 1, 1];
     mat.emissiveColor = [color[0], color[1], color[2]];
     mat.disableLighting = true;
+    mat.alpha = alpha;
+    if (twoSided) {
+        mat.backFaceCulling = false;
+    }
     return mat as unknown as Mesh["material"];
 }
 
@@ -128,6 +166,10 @@ export function createXrTeleportation(engine: EngineContext, scene: SceneContext
         _options: {
             color: [color[0], color[1], color[2]],
             maxLength: options.maxLength ?? 20,
+            parabolic: options.parabolic ?? true,
+            parabolaSpeed: options.parabolaSpeed ?? 7,
+            gravity: options.gravity ?? 9.8,
+            rotateToDirection: options.rotateToDirection ?? true,
             snapTurn: options.snapTurn ?? true,
             rotationAngle: options.rotationAngle ?? Math.PI / 4,
             thumbstickThreshold: options.thumbstickThreshold ?? 0.7,
@@ -138,40 +180,93 @@ export function createXrTeleportation(engine: EngineContext, scene: SceneContext
     };
 }
 
-/** @internal Lazily create a controller's laser + reticle. */
+/** @internal Ribbon strip index buffer for `ARC_POINTS` rung pairs (left = 2i, right = 2i+1). */
+function buildArcIndices(): Uint32Array {
+    const idx = new Uint32Array((ARC_POINTS - 1) * 6);
+    for (let i = 0; i < ARC_POINTS - 1; i++) {
+        const a = 2 * i,
+            b = 2 * i + 1,
+            c = 2 * i + 2,
+            d = 2 * i + 3;
+        const o = i * 6;
+        idx[o] = a;
+        idx[o + 1] = b;
+        idx[o + 2] = c;
+        idx[o + 3] = b;
+        idx[o + 4] = d;
+        idx[o + 5] = c;
+    }
+    return idx;
+}
+
+/** @internal Lazily create a controller's arc + reticle + landing arrow. */
 function ensureUnit(tp: XrTeleportation, source: DomXrInputSource): TeleportUnit {
     const existing = tp._units.get(source);
     if (existing) {
         return existing;
     }
     const color = tp._options.color;
-    const laser = createBox(tp._engine, 1);
-    laser.name = "xr-teleport-laser";
-    laser.material = tintMaterial(color);
-    laser.pickable = false;
-    laser.receiveShadows = false;
-    laser.visible = false;
+    const engine = tp._engine;
 
-    const reticle = createTorus(tp._engine, { diameter: RETICLE_DIAMETER, thickness: RETICLE_DIAMETER * 0.14, tessellation: 40 });
+    const arcVerts = new Float32Array(2 * ARC_POINTS * 3);
+    const arcNormals = new Float32Array(2 * ARC_POINTS * 3);
+    for (let i = 0; i < 2 * ARC_POINTS; i++) {
+        arcNormals[i * 3 + 1] = 1;
+    }
+    const arc = createMeshFromData(engine, "xr-teleport-arc", arcVerts.slice(), arcNormals, buildArcIndices());
+    arc.material = tintMaterial(color, 0.85, true);
+    arc.pickable = false;
+    arc.receiveShadows = false;
+    arc.visible = false;
+
+    const reticle = createTorus(engine, { diameter: RETICLE_DIAMETER, thickness: RETICLE_DIAMETER * 0.14, tessellation: 40 });
     reticle.name = "xr-teleport-reticle";
-    reticle.material = tintMaterial(color);
+    reticle.material = tintMaterial(color, 1, false);
     reticle.pickable = false;
     reticle.receiveShadows = false;
     reticle.visible = false;
 
-    addToScene(tp._scene, laser);
+    // Flat arrow triangle in the XZ plane pointing +Z (tip forward), laid on the floor.
+    const w = INDICATOR_HALF_WIDTH;
+    const l = INDICATOR_LENGTH;
+    const indicator = createMeshFromData(
+        engine,
+        "xr-teleport-arrow",
+        new Float32Array([-w, 0, 0, w, 0, 0, 0, 0, l]),
+        new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
+        new Uint32Array([0, 1, 2])
+    );
+    indicator.material = tintMaterial(color, 1, true);
+    indicator.pickable = false;
+    indicator.receiveShadows = false;
+    indicator.visible = false;
+
+    addToScene(tp._scene, arc);
     addToScene(tp._scene, reticle);
-    const unit: TeleportUnit = { laser, reticle, aiming: false, target: null, turnLatched: false };
+    addToScene(tp._scene, indicator);
+    const unit: TeleportUnit = {
+        arc,
+        reticle,
+        indicator,
+        arcPath: new Float32Array(ARC_POINTS * 3),
+        arcVerts,
+        aiming: false,
+        target: null,
+        landingTurn: 0,
+        turnLatched: false,
+    };
     tp._units.set(source, unit);
     return unit;
 }
 
 /** @internal Dispose one unit's visuals. */
 function disposeUnit(tp: XrTeleportation, unit: TeleportUnit): void {
-    removeFromScene(tp._scene, unit.laser);
+    removeFromScene(tp._scene, unit.arc);
     removeFromScene(tp._scene, unit.reticle);
-    disposeMeshGpu(unit.laser);
+    removeFromScene(tp._scene, unit.indicator);
+    disposeMeshGpu(unit.arc);
     disposeMeshGpu(unit.reticle);
+    disposeMeshGpu(unit.indicator);
 }
 
 /** @internal Shortest-arc quaternion rotating local +Y onto world `n` (both unit).
@@ -204,6 +299,121 @@ function readThumbstick(gamepad: Gamepad): [number, number] {
     return [x, y];
 }
 
+/** @internal Horizontal view-forward direction from a viewer pose's orientation, or null
+ *  when the runtime doesn't expose orientation. Forward = local −Z rotated by the quaternion. */
+function viewForward(pose: XRViewerPose): [number, number, number] | null {
+    const o = pose.transform.orientation as { x: number; y: number; z: number; w: number } | undefined;
+    if (!o) {
+        return null;
+    }
+    const fx = -2 * (o.x * o.z + o.w * o.y);
+    const fz = -(1 - 2 * (o.x * o.x + o.y * o.y));
+    const len = Math.hypot(fx, fz) || 1;
+    return [fx / len, 0, fz / len];
+}
+
+/** @internal Rotate a horizontal vector about world +Y by `a` (matches `Ry(a)`). */
+function rotateY(v: [number, number, number], a: number): [number, number, number] {
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    return [v[0] * c + v[2] * s, 0, -v[0] * s + v[2] * c];
+}
+
+/** @internal March the aim arc sampling `ARC_POINTS` world points into `outPath`, stopping at
+ *  the first surface it strikes (collapsing the tail onto that point). Returns the hit, if any. */
+function traceArc(
+    tp: XrTeleportation,
+    origin: [number, number, number],
+    dir: [number, number, number],
+    outPath: Float32Array
+): { hit: boolean; point: [number, number, number]; normal: [number, number, number] | null; mesh: Mesh | null } {
+    const opts = tp._options;
+    const speed = opts.parabolaSpeed;
+    const g = opts.parabolic ? opts.gravity : 0;
+    // Constant time step so the initial-velocity reach ≈ maxLength regardless of speed.
+    const dt = opts.maxLength / ((ARC_POINTS - 1) * speed);
+
+    outPath[0] = origin[0];
+    outPath[1] = origin[1];
+    outPath[2] = origin[2];
+    let px = origin[0],
+        py = origin[1],
+        pz = origin[2];
+
+    for (let i = 1; i < ARC_POINTS; i++) {
+        const t = i * dt;
+        const cx = origin[0] + dir[0] * speed * t;
+        const cy = origin[1] + dir[1] * speed * t - 0.5 * g * t * t;
+        const cz = origin[2] + dir[2] * speed * t;
+        const dx = cx - px,
+            dy = cy - py,
+            dz = cz - pz;
+        const len = Math.hypot(dx, dy, dz) || 1e-6;
+        const info = pickWithRay(tp._scene, { origin: [px, py, pz], direction: [dx / len, dy / len, dz / len], length: len });
+        if (info.hit && info.pickedPoint) {
+            const hp = info.pickedPoint as [number, number, number];
+            for (let j = i; j < ARC_POINTS; j++) {
+                outPath[j * 3] = hp[0];
+                outPath[j * 3 + 1] = hp[1];
+                outPath[j * 3 + 2] = hp[2];
+            }
+            return { hit: true, point: [hp[0], hp[1], hp[2]], normal: info.pickedNormalWorld as [number, number, number] | null, mesh: info.pickedMesh as Mesh | null };
+        }
+        outPath[i * 3] = cx;
+        outPath[i * 3 + 1] = cy;
+        outPath[i * 3 + 2] = cz;
+        px = cx;
+        py = cy;
+        pz = cz;
+    }
+    return { hit: false, point: [px, py, pz], normal: null, mesh: null };
+}
+
+/** @internal Rewrite the ribbon vertices so it hugs the arc as a camera-facing strip. */
+function updateArcRibbon(tp: XrTeleportation, unit: TeleportUnit, camPos: [number, number, number]): void {
+    const path = unit.arcPath;
+    const out = unit.arcVerts;
+    const hw = ARC_HALF_WIDTH;
+    for (let i = 0; i < ARC_POINTS; i++) {
+        const cx = path[i * 3]!,
+            cy = path[i * 3 + 1]!,
+            cz = path[i * 3 + 2]!;
+        const i0 = i > 0 ? i - 1 : 0;
+        const i1 = i < ARC_POINTS - 1 ? i + 1 : ARC_POINTS - 1;
+        const tx = path[i1 * 3]! - path[i0 * 3]!;
+        const ty = path[i1 * 3 + 1]! - path[i0 * 3 + 1]!;
+        const tz = path[i1 * 3 + 2]! - path[i0 * 3 + 2]!;
+        const vx = camPos[0] - cx,
+            vy = camPos[1] - cy,
+            vz = camPos[2] - cz;
+        // side = tangent × viewDir (perpendicular to both → faces the camera).
+        let sx = ty * vz - tz * vy;
+        let sy = tz * vx - tx * vz;
+        let sz = tx * vy - ty * vx;
+        const sl = Math.hypot(sx, sy, sz) || 1;
+        sx = (sx / sl) * hw;
+        sy = (sy / sl) * hw;
+        sz = (sz / sl) * hw;
+        const o = i * 6;
+        out[o] = cx + sx;
+        out[o + 1] = cy + sy;
+        out[o + 2] = cz + sz;
+        out[o + 3] = cx - sx;
+        out[o + 4] = cy - sy;
+        out[o + 5] = cz - sz;
+    }
+    updateMeshPositions(tp._engine, unit.arc, out);
+}
+
+/** @internal Point the landing arrow along `dir` (horizontal), laid flat on the floor at `at`. */
+function orientIndicator(indicator: Mesh, at: [number, number, number], dir: [number, number, number]): void {
+    indicator.position.set(at[0], at[1], at[2]);
+    // Yaw so local +Z maps onto `dir`: Ry(θ)·(0,0,1) = (sinθ, 0, cosθ).
+    const yaw = Math.atan2(dir[0], dir[2]);
+    const half = yaw / 2;
+    indicator.rotationQuaternion.set(0, Math.sin(half), 0, Math.cos(half));
+}
+
 /** @internal Offset the reference space so the viewer's feet move from `from` (its
  *  current position in `ref`) to floor point `to`, preserving eye height. Returns the
  *  new reference space. */
@@ -212,8 +422,8 @@ function teleportRef(ref: XRReferenceSpace, from: [number, number, number], to: 
     return ref.getOffsetReferenceSpace(new XRRigidTransform(t));
 }
 
-/** @internal Offset the reference space to snap-rotate the view by `angle` (radians,
- *  about world +Y) around the viewer position `v`. Returns the new reference space. */
+/** @internal Offset the reference space to rotate the view by `angle` (radians, about
+ *  world +Y) around the viewer position `v`. Returns the new reference space. */
 function turnRef(ref: XRReferenceSpace, v: [number, number, number], angle: number): XRReferenceSpace {
     const c = Math.cos(angle);
     const s = Math.sin(angle);
@@ -225,11 +435,12 @@ function turnRef(ref: XRReferenceSpace, v: [number, number, number], angle: numb
 }
 
 /**
- * Drive teleportation for the current frame: read each controller's thumbstick, aim
- * a laser + floor reticle while it's pushed forward, teleport on release, and
- * snap-turn on sideways pushes. Returns the (possibly new) reference space — the
- * caller must adopt it for subsequent frames (the {@link teleportation} feature does
- * this automatically). Call once per XR frame after {@link updateXrInputPoses}.
+ * Drive teleportation for the current frame: read each controller's thumbstick, aim a
+ * parabolic arc + floor reticle while it's pushed forward, teleport (and rotate to the
+ * chosen heading) on release, and snap-turn on sideways pushes. Returns the (possibly
+ * new) reference space — the caller must adopt it for subsequent frames (the
+ * {@link teleportation} feature does this automatically). Call once per XR frame after
+ * {@link updateXrInputPoses}.
  */
 export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager, frame: XRFrame, referenceSpace: XRReferenceSpace): XRReferenceSpace {
     const seen = new Set<DomXrInputSource>();
@@ -275,26 +486,37 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                 fy /= flen;
                 fz /= flen;
                 const dir: [number, number, number] = [fx, fy, fz];
-                const info = pickWithRay(tp._scene, { origin, direction: dir, length: opts.maxLength });
-                const normal = info.pickedNormalWorld as [number, number, number] | null;
-                const onFloor = info.hit && info.pickedPoint !== null && tp._isFloor(info.pickedMesh as Mesh, normal);
 
-                const visual = computePointerVisual(origin, dir, info.hit ? info.distance : -1, opts.maxLength);
-                const rot = mat4Decompose(m).rotation;
-                unit.laser.rotationQuaternion.set(rot.x, rot.y, rot.z, rot.w);
-                unit.laser.position.set(visual.laserPosition[0], visual.laserPosition[1], visual.laserPosition[2]);
-                unit.laser.scaling.set(LASER_THICKNESS, LASER_THICKNESS, visual.beamLength);
-                setSubtreeVisible(unit.laser, true);
+                const info = traceArc(tp, origin, dir, unit.arcPath);
+                const pose = frame.getViewerPose(ref);
+                const camPos: [number, number, number] = pose ? [pose.transform.position.x, pose.transform.position.y, pose.transform.position.z] : origin;
+                updateArcRibbon(tp, unit, camPos);
+                setSubtreeVisible(unit.arc, true);
 
+                const onFloor = info.hit && tp._isFloor(info.mesh as Mesh, info.normal);
                 if (onFloor) {
-                    const hp = info.pickedPoint!;
-                    unit.target = [hp[0], hp[1], hp[2]];
-                    unit.reticle.position.set(hp[0], hp[1], hp[2]);
-                    orientRingToNormal(unit.reticle, normal ?? [0, 1, 0]);
+                    unit.target = info.point;
+                    unit.reticle.position.set(info.point[0], info.point[1], info.point[2]);
+                    orientRingToNormal(unit.reticle, info.normal ?? [0, 1, 0]);
                     setSubtreeVisible(unit.reticle, true);
+
+                    // Landing heading: stick lean rotates the current view-forward.
+                    const turn = Math.abs(tx) >= TURN_DEADZONE && opts.rotateToDirection ? Math.atan2(tx, -ty) : 0;
+                    unit.landingTurn = turn;
+                    const fwd = pose ? viewForward(pose) : null;
+                    if (opts.rotateToDirection && fwd) {
+                        // Preview arrow points where you'll face: view-forward rotated by −turn
+                        // (the reference-space offset reports the view rotated by −turn).
+                        orientIndicator(unit.indicator, info.point, rotateY(fwd, -turn));
+                        setSubtreeVisible(unit.indicator, true);
+                    } else {
+                        setSubtreeVisible(unit.indicator, false);
+                    }
                 } else {
                     unit.target = null;
+                    unit.landingTurn = 0;
                     setSubtreeVisible(unit.reticle, false);
+                    setSubtreeVisible(unit.indicator, false);
                 }
             }
         } else {
@@ -303,14 +525,20 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                 const pose = frame.getViewerPose(ref);
                 if (pose) {
                     const p = pose.transform.position;
-                    ref = teleportRef(ref, [p.x, p.y, p.z], unit.target, tp._floorY);
-                    tp._floorY = unit.target[1];
+                    const target = unit.target;
+                    ref = teleportRef(ref, [p.x, p.y, p.z], target, tp._floorY);
+                    tp._floorY = target[1];
+                    if (opts.rotateToDirection && Math.abs(unit.landingTurn) > 1e-4) {
+                        ref = turnRef(ref, target, unit.landingTurn);
+                    }
                 }
             }
             unit.aiming = false;
             unit.target = null;
-            setSubtreeVisible(unit.laser, false);
+            unit.landingTurn = 0;
+            setSubtreeVisible(unit.arc, false);
             setSubtreeVisible(unit.reticle, false);
+            setSubtreeVisible(unit.indicator, false);
         }
     }
 
@@ -335,12 +563,13 @@ export function disposeXrTeleportation(tp: XrTeleportation): void {
 /**
  * Controller teleportation as an opt-in {@link XrFeatureSpec} (Babylon.js
  * `TELEPORTATION`). Pass it to `enterXr({ features: [teleportation({ floorMeshes })] })`:
- * push a thumbstick forward to aim a laser + floor reticle, release to teleport,
- * push sideways to snap-turn. The session drives + disposes it and adopts the offset
- * reference space each frame — no manual wiring.
+ * push a thumbstick forward to aim a parabolic arc + floor reticle, lean sideways to pick
+ * a heading, release to teleport there facing that way; push sideways (centred) to
+ * snap-turn. The session drives + disposes it and adopts the offset reference space each
+ * frame — no manual wiring.
  *
- * Requires input tracking (do not pass `input: false` to {@link enterXr}); it needs
- * no native WebXR session feature.
+ * Requires input tracking (do not pass `input: false` to {@link enterXr}); it needs no
+ * native WebXR session feature.
  *
  * @param options - Floor selection + appearance (see {@link XrTeleportationOptions}).
  */

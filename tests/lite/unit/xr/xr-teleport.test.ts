@@ -29,12 +29,14 @@ function fakeMesh() {
     };
 }
 
+const { updateMeshPositions } = vi.hoisted(() => ({ updateMeshPositions: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/mesh/mesh-factories", () => ({
-    createBox: vi.fn(() => fakeMesh()),
+    createMeshFromData: vi.fn(() => fakeMesh()),
     createTorus: vi.fn(() => fakeMesh()),
+    updateMeshPositions,
 }));
 vi.mock("../../../../packages/babylon-lite/src/material/standard/create-standard-material", () => ({
-    createStandardMaterial: vi.fn(() => ({ diffuseColor: [0, 0, 0], emissiveColor: [0, 0, 0], disableLighting: false })),
+    createStandardMaterial: vi.fn(() => ({ diffuseColor: [0, 0, 0], emissiveColor: [0, 0, 0], disableLighting: false, alpha: 1, backFaceCulling: true })),
 }));
 vi.mock("../../../../packages/babylon-lite/src/scene/scene-core", () => ({ addToScene: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/scene/scene-remove", () => ({ removeFromScene: vi.fn() }));
@@ -49,17 +51,6 @@ vi.mock("../../../../packages/babylon-lite/src/scene/visibility", () => ({
 }));
 const { pickWithRay } = vi.hoisted(() => ({ pickWithRay: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/picking/ray-pick", () => ({ pickWithRay }));
-vi.mock("../../../../packages/babylon-lite/src/xr/xr-pointer", () => ({
-    computePointerVisual: vi.fn((_o: unknown, _d: unknown, distance: number, maxLength: number) => ({
-        beamLength: distance > 0 ? distance : maxLength,
-        laserPosition: [0, 0, 0],
-        cursorPosition: [0, 0, 0],
-        hit: distance > 0,
-    })),
-}));
-vi.mock("../../../../packages/babylon-lite/src/math/mat4-decompose", () => ({
-    mat4Decompose: vi.fn(() => ({ rotation: { x: 0, y: 0, z: 0, w: 1 }, position: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } })),
-}));
 
 import { createXrTeleportation, updateXrTeleportation, disposeXrTeleportation, teleportation } from "../../../../packages/babylon-lite/src/xr/xr-teleport";
 import type { XrTeleportation, XrTeleportationOptions } from "../../../../packages/babylon-lite/src/xr/xr-teleport";
@@ -124,17 +115,29 @@ function makeInput(sources: XrInputSource[]): XrInputManager {
     return { inputSources: sources } as unknown as XrInputManager;
 }
 
-/** Viewer pose at (vx,vy,vz). */
-function makeFrame(vx = 0, vy = 1.5, vz = 0): XRFrame {
+/** Viewer pose at (vx,vy,vz), optionally with an orientation quaternion (for landing dir). */
+function makeFrame(vx = 0, vy = 1.5, vz = 0, orient?: { x: number; y: number; z: number; w: number }): XRFrame {
     return {
-        getViewerPose: vi.fn(() => ({ transform: { position: { x: vx, y: vy, z: vz } } })),
+        getViewerPose: vi.fn(() => ({ transform: { position: { x: vx, y: vy, z: vz }, orientation: orient } })),
     } as unknown as XRFrame;
 }
 
 function unitFor(tp: XrTeleportation, src: XrInputSource) {
     return (
         tp as unknown as {
-            _units: Map<unknown, { laser: ReturnType<typeof fakeMesh>; reticle: ReturnType<typeof fakeMesh>; aiming: boolean; target: number[] | null; turnLatched: boolean }>;
+            _units: Map<
+                unknown,
+                {
+                    arc: ReturnType<typeof fakeMesh>;
+                    reticle: ReturnType<typeof fakeMesh>;
+                    indicator: ReturnType<typeof fakeMesh>;
+                    arcPath: Float32Array;
+                    aiming: boolean;
+                    target: number[] | null;
+                    landingTurn: number;
+                    turnLatched: boolean;
+                }
+            >;
         }
     )._units.get((src as unknown as { source: unknown }).source)!;
 }
@@ -164,7 +167,7 @@ describe("updateXrTeleportation — aiming", () => {
 
         const u = unitFor(tp, src);
         expect(u.aiming).toBe(true);
-        expect(u.laser.visible).toBe(true);
+        expect(u.arc.visible).toBe(true);
         expect(u.reticle.visible).toBe(true);
         expect(u.target).toEqual([2, 0, -5]);
         expect([u.reticle.position.x, u.reticle.position.y, u.reticle.position.z]).toEqual([2, 0, -5]);
@@ -178,7 +181,7 @@ describe("updateXrTeleportation — aiming", () => {
         updateXrTeleportation(tp, makeInput([src]), makeFrame(), makeRef("r0"));
 
         const u = unitFor(tp, src);
-        expect(u.laser.visible).toBe(true);
+        expect(u.arc.visible).toBe(true);
         expect(u.reticle.visible).toBe(false);
         expect(u.target).toBeNull();
     });
@@ -196,6 +199,81 @@ describe("updateXrTeleportation — aiming", () => {
         const src2 = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
         updateXrTeleportation(tp2, makeInput([src2]), makeFrame(), makeRef("r0"));
         expect(unitFor(tp2, src2).reticle.visible).toBe(false);
+    });
+});
+
+describe("updateXrTeleportation — parabolic arc", () => {
+    const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
+
+    it("marches a downward-curving arc and uploads the ribbon each frame", () => {
+        const tp = make({ floorMeshes: [FLOOR] });
+        // Never hit anything → the arc is sampled to full length so its shape is visible.
+        pickWithRay.mockReturnValue({ hit: false, pickedPoint: null, pickedNormalWorld: null, distance: 0, pickedMesh: null });
+        updateMeshPositions.mockClear();
+        const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] }, ray: rayMatrix(0, 1.5, 0) }); // aim horizontally (-Z)
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), makeRef("r0"));
+
+        const u = unitFor(tp, src);
+        expect(u.arc.visible).toBe(true);
+        expect(updateMeshPositions).toHaveBeenCalledTimes(1);
+        // Gravity pulls the arc down: the last sample sits well below the launch height.
+        const n = u.arcPath.length / 3;
+        const firstY = u.arcPath[1]!;
+        const lastY = u.arcPath[(n - 1) * 3 + 1]!;
+        expect(lastY).toBeLessThan(firstY - 0.5);
+        // A straight (non-parabolic) aim keeps the arc flat instead.
+        const tp2 = make({ floorMeshes: [FLOOR], parabolic: false });
+        const src2 = makeSource({ gamepad: { axes: [0, 0, 0, -1] }, ray: rayMatrix(0, 1.5, 0) });
+        updateXrTeleportation(tp2, makeInput([src2]), makeFrame(0, 1.5, 0, IDENTITY), makeRef("r0"));
+        const u2 = unitFor(tp2, src2);
+        expect(u2.arcPath[(n - 1) * 3 + 1]).toBeCloseTo(1.5, 5);
+    });
+
+    it("picks along successive segments until something is struck", () => {
+        const tp = make({ floorMeshes: [FLOOR] });
+        pickWithRay.mockReturnValue({ hit: false, pickedPoint: null, pickedNormalWorld: null, distance: 0, pickedMesh: null });
+        const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), makeRef("r0"));
+        // 20 arc points → 19 segments, all missing, so 19 ray picks.
+        expect(pickWithRay).toHaveBeenCalledTimes(19);
+    });
+});
+
+describe("updateXrTeleportation — landing direction", () => {
+    const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
+
+    it("previews a heading arrow while aiming and rotates to it on release", () => {
+        const tp = make({ floorMeshes: [FLOOR] });
+        floorHit([0, 0, -5]);
+        // Aim forward with a rightward lean → a non-zero landing turn.
+        const src = makeSource({ gamepad: { axes: [0, 0, 0.5, -1] } });
+        const ref0 = makeRef("r0");
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), ref0);
+
+        const u = unitFor(tp, src);
+        expect(u.indicator.visible).toBe(true);
+        expect(u.landingTurn).toBeCloseTo(Math.atan2(0.5, 1), 6);
+
+        // Release → teleport, then a turn (two offset spaces chained; the last is the turn).
+        (src.source.gamepad as unknown as { axes: number[] }).axes = [0, 0, 0, 0];
+        const out = updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), ref0);
+        expect(out).not.toBe(ref0);
+        // The final transform constructed is the yaw turn about world +Y.
+        expect((lastTransform!.orient as { y: number }).y).toBeCloseTo(Math.sin(Math.atan2(0.5, 1) / 2), 6);
+    });
+
+    it("does not rotate when rotateToDirection is disabled", () => {
+        const tp = make({ floorMeshes: [FLOOR], rotateToDirection: false });
+        floorHit([0, 0, -5]);
+        const src = makeSource({ gamepad: { axes: [0, 0, 0.5, -1] } });
+        const ref0 = makeRef("r0");
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), ref0);
+        expect(unitFor(tp, src).indicator.visible).toBe(false);
+        expect(unitFor(tp, src).landingTurn).toBe(0);
+        (src.source.gamepad as unknown as { axes: number[] }).axes = [0, 0, 0, 0];
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), ref0);
+        // Only a translation was applied (no orientation on the offset transform).
+        expect((lastTransform!.orient as unknown) ?? undefined).toBeUndefined();
     });
 });
 
@@ -219,7 +297,7 @@ describe("updateXrTeleportation — teleport on release", () => {
         // Standing floor height updated so the next teleport preserves eye height.
         expect((tp as unknown as { _floorY: number })._floorY).toBe(0);
         // Visuals cleared after teleport.
-        expect(unitFor(tp, src).laser.visible).toBe(false);
+        expect(unitFor(tp, src).arc.visible).toBe(false);
         expect(unitFor(tp, src).reticle.visible).toBe(false);
     });
 
@@ -283,19 +361,19 @@ describe("updateXrTeleportation — source lifecycle", () => {
         updateXrTeleportation(tp, makeInput([src]), makeFrame(), makeRef("r0"));
         expect((tp as unknown as { _units: Map<unknown, unknown> })._units.size).toBe(1);
         updateXrTeleportation(tp, makeInput([]), makeFrame(), makeRef("r0"));
-        expect(disposeMeshGpu).toHaveBeenCalledTimes(2); // laser + reticle
+        expect(disposeMeshGpu).toHaveBeenCalledTimes(3); // arc + reticle + indicator
         expect((tp as unknown as { _units: Map<unknown, unknown> })._units.size).toBe(0);
     });
 });
 
 describe("disposeXrTeleportation", () => {
-    it("tears down every controller's laser + reticle", () => {
+    it("tears down every controller's arc + reticle + indicator", () => {
         const tp = make({ floorMeshes: [FLOOR] });
         floorHit([0, 0, -3]);
         const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
         updateXrTeleportation(tp, makeInput([src]), makeFrame(), makeRef("r0"));
         disposeXrTeleportation(tp);
-        expect(disposeMeshGpu).toHaveBeenCalledTimes(2);
+        expect(disposeMeshGpu).toHaveBeenCalledTimes(3);
         expect((tp as unknown as { _units: Map<unknown, unknown> })._units.size).toBe(0);
     });
 });
