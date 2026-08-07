@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createParticleSystem, startParticleSystem, animateParticleSystem, prepareParticleSystemFrame } from "../../../packages/babylon-lite/src/particle/particle-system";
+import { createParticleSystem, startParticleSystem, animateParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 
 /**
  * SPIKE validation for the data-oriented simulation loop. Hand-wires minimal create/update steps and
@@ -68,23 +68,5 @@ describe("Particle system simulation loop", () => {
         for (let i = 0; i < b.alive; i++) {
             expect(b.age[i]!).toBeLessThanOrEqual(1 + 1e-9);
         }
-    });
-
-    it("normalizes invalid frame dimensions before feature preparation", () => {
-        const system = createParticleSystem(1);
-        const dimensions: Array<[number, number]> = [];
-        system._frameSteps = [(_camera, width, height) => dimensions.push([width, height])];
-
-        prepareParticleSystemFrame(system, null, Number.NaN, Number.POSITIVE_INFINITY);
-        prepareParticleSystemFrame(system, null, Number.NEGATIVE_INFINITY, -2);
-        prepareParticleSystemFrame(system, null, 0, 0.5);
-        prepareParticleSystemFrame(system, null, 640, 480);
-
-        expect(dimensions).toEqual([
-            [1, 1],
-            [1, 1],
-            [1, 1],
-            [640, 480],
-        ]);
     });
 });

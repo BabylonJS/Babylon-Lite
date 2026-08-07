@@ -1,7 +1,7 @@
 {
   "rawKB": 40.2,
-  "rawBytes": 41135,
-  "gzipKB": 24.2,
+  "rawBytes": 41177,
+  "gzipKB": 24.3,
   "ignoredRawKB": 28.5,
   "runtimeChunks": [
     "scene262-billboard-renderable-E4CcdjdK.js",

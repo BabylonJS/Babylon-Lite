@@ -1,6 +1,6 @@
 {
   "rawKB": 44.5,
-  "rawBytes": 45527,
+  "rawBytes": 45569,
   "gzipKB": 25.4,
   "ignoredRawKB": 27.1,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene276-create-particle-block-CiseX6ot.js",
     "scene276-generate-mipmaps-BScAEFZS.js",
     "scene276-npe-contextual-DcCy6blJ.js",
-    "scene276-npe-registry-extra-CH16unty.js",
+    "scene276-npe-registry-extra-haSz0cIK.js",
     "scene276-particle-converter-block-CVHvXC1Y.js",
     "scene276-particle-input-block-DfSRd2z3.js",
     "scene276-particle-lerp-block-DmOawfA2.js",

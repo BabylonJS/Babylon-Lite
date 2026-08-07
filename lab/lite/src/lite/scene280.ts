@@ -10,7 +10,6 @@ import {
     createParticleBillboard,
     createSceneContext,
     parseNodeParticleSource,
-    prepareParticleSystemFrame,
     registerScene,
     startEngine,
     startParticleSystem,
@@ -46,7 +45,6 @@ async function main(): Promise<void> {
         return x - Math.floor(x);
     };
 
-    prepareParticleSystemFrame(system, camera, canvas.width, canvas.height);
     startParticleSystem(system);
     for (let i = 0; i < STEPS; i++) {
         animateParticleSystem(system, 1);

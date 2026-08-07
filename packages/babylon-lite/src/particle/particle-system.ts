@@ -11,9 +11,6 @@ import { createParticleBuffer, killParticle, spawnParticle, type ParticleBuffer 
 import type { ParticleStep } from "./node/npe-value.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { Color4 } from "../math/types.js";
-import type { Camera } from "../camera/camera.js";
-
-type ParticleFrameStep = (camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void;
 
 /**
  * Minimal sprite-sheet handle carried on a system whose graph uses the sprite feature (null otherwise).
@@ -77,8 +74,6 @@ export interface ParticleSystem {
     _suppressInitialDirectionCapture?: boolean;
     /** @internal Local-position source hook installed only for emitter-local graphs that read source 0x18. */
     _seedLocalPosition?: ParticleStep;
-    /** @internal Optional feature preparation run once per rendered or manually prepared frame. */
-    _frameSteps?: ParticleFrameStep[];
 }
 
 /** Create a data-oriented particle system with an empty buffer of the given capacity. */
@@ -119,19 +114,6 @@ export function startParticleSystem(system: ParticleSystem): void {
 /** Stop emission. Existing particles continue until they expire. */
 export function stopParticleSystem(system: ParticleSystem): void {
     system._stopped = true;
-}
-
-/** Prepare optional camera-dependent particle features for one simulation frame. */
-export function prepareParticleSystemFrame(system: ParticleSystem, camera: Camera | null | undefined, targetWidth: number, targetHeight: number): void {
-    const steps = system._frameSteps;
-    if (!steps) {
-        return;
-    }
-    const safeWidth = Number.isFinite(targetWidth) && targetWidth > 0 ? Math.max(1, targetWidth) : 1;
-    const safeHeight = Number.isFinite(targetHeight) && targetHeight > 0 ? Math.max(1, targetHeight) : 1;
-    for (let i = 0; i < steps.length; i++) {
-        steps[i]!(camera, safeWidth, safeHeight);
-    }
 }
 
 /**

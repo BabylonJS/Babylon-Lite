@@ -20,7 +20,7 @@ The design requirements are:
 
 ## 2. Package-root API
 
-`packages/babylon-lite/src/index.ts` exports exactly ten node-particle functions and five node-particle types.
+`packages/babylon-lite/src/index.ts` exports exactly nine node-particle functions and five node-particle types.
 
 ### 2.1 Functions
 
@@ -33,8 +33,7 @@ function parseNodeParticleSetFromSnippet(engine: EngineContext, scene: SceneCont
 
 function startParticleSystem(system: ParticleSystem): void;
 function stopParticleSystem(system: ParticleSystem): void;
-function prepareParticleSystemFrame(system: ParticleSystem, camera: Camera | null | undefined, targetWidth: number, targetHeight: number): void;
-function animateParticleSystem(system: ParticleSystem, scaledRatio: number): void;
+function animateParticleSystem(system: ParticleSystem, scaledRatio: number, camera?: Camera | null, targetWidth?: number, targetHeight?: number): void;
 
 function createParticleBillboard(system: ParticleSystem): FacingBillboardSpriteSystem;
 function syncParticleBillboard(system: ParticleSystem, billboard: FacingBillboardSpriteSystem): void;
@@ -82,7 +81,7 @@ The following symbols are implementation APIs and are not node-particle package-
 - Build types: `NpeBuildState`, `NpeBuildContext`, and `NpeBlockEvaluator`.
 - Value types: `NpeValue`, `NpeGraphValue`, `NpeTextureValue`, `NpeTextureContent`, `NpeGetter`, `ScalarGetter`, `Vec3Getter`, `Color4Getter`, and `ParticleStep`.
 - Storage types and functions: `ParticleColumn`, `ParticleBuffer`, `createParticleBuffer`, `column`, `spawnParticle`, and `killParticle`.
-- Runtime construction: `ParticleSpriteHandle` and `createParticleSystem`.
+- Runtime construction: `ParticleSpriteHandle`, `createParticleSystem`, and `prepareParticleSystemFrame`.
 - Sprite features: `SpriteSheetConfig`, `SpriteSheet`, `useSpriteSheet`, and `useRandomSpriteSheet`.
 - Snippet transport: `fetchNodeParticleSnippet`.
 - Contextual factories, local-position helpers, evaluator values, and registry loaders.
@@ -97,7 +96,7 @@ serialized value or snippet response
     -> ParticleGraph
     -> buildNodeParticleSet
     -> NodeParticleSet { systems }
-    -> startParticleSystem / stopParticleSystem / prepareParticleSystemFrame / animateParticleSystem
+    -> startParticleSystem / stopParticleSystem / animateParticleSystem
     -> createParticleBillboard + syncParticleBillboard
     -> addFacingBillboardSystem or registerNodeParticleSet
 ```
@@ -302,22 +301,26 @@ Starting a stopped system resets simulated time and permits emission while retai
 
 ### 5.3 Frame preparation
 
-`prepareParticleSystemFrame(system, camera, targetWidth, targetHeight)` returns immediately when `_frameSteps` is absent. Otherwise it normalizes each non-finite or non-positive dimension to `1`, clamps positive fractional dimensions to at least `1`, then invokes every frame step in array order with the camera and safe dimensions. The function does not retain the scene or camera. Features copy or reference only the derived state they need for subsequent particle updates.
+`prepareParticleSystemFrame` is internal to the particle module. `animateParticleSystem` invokes it before simulation when its optional `camera` argument is not `undefined`; passing `null` explicitly clears camera-dependent feature state. Omitting the argument retains the last prepared state.
 
-Live registration calls frame preparation once immediately before each animation call. Manual simulation that uses a camera-dependent block calls it explicitly whenever the camera or target size changes. A static frozen simulation may call it once before its step loop.
+The helper returns immediately when `_frameSteps` is absent. Otherwise it normalizes each non-finite or non-positive dimension to `1`, clamps positive fractional dimensions to at least `1`, then invokes every frame step in array order with the camera and safe dimensions. It does not retain the scene or camera. Features copy or reference only the derived state they need for subsequent particle updates.
+
+Live registration passes the current camera and canvas dimensions to every animation call. Manual simulation that uses a camera-dependent block does the same whenever the camera or target size can change.
 
 ### 5.4 One animation call
 
-`animateParticleSystem(system, scaledRatio)` returns immediately when `_started` is false. Otherwise it performs these operations in this exact order:
+`animateParticleSystem(system, scaledRatio, camera?, targetWidth = 1, targetHeight = 1)` performs these operations in this exact order:
 
-1. Compute `scaledUpdateSpeed = updateSpeed * scaledRatio` and assign it to `_scaledUpdateSpeed`.
-2. Evaluate `_emitRateGetter()` when present; otherwise read `emitRate`. A connected getter observes the current `_actualFrame` before this call advances it.
-3. Compute `emission = emitRate * scaledUpdateSpeed` and `newParticles = emission >> 0`.
-4. Add `emission - newParticles` to `_newPartsExcess`. Only when `_newPartsExcess > 1.0`, take `extra = _newPartsExcess >> 0`, add `extra` to `newParticles`, and subtract `extra` from `_newPartsExcess`. Equality with `1.0` does not release a particle.
-5. If `_stopped` was already true, set `newParticles = 0`. The rate getter and fractional-carry calculation have already run.
-6. If `_stopped` was false, add `scaledUpdateSpeed` to `_actualFrame`. When `targetStopDuration` is truthy and `_actualFrame >= targetStopDuration`, call `stopParticleSystem`. The `newParticles` count computed for this call is retained, so the threshold call still creates its computed cohort.
-7. Update all particles that were live at the start of the update loop.
-8. Create up to `newParticles`, subject to capacity.
+1. When `camera !== undefined`, prepare optional frame state with the supplied camera and target dimensions.
+2. Return when `_started` is false.
+3. Compute `scaledUpdateSpeed = updateSpeed * scaledRatio` and assign it to `_scaledUpdateSpeed`.
+4. Evaluate `_emitRateGetter()` when present; otherwise read `emitRate`. A connected getter observes the current `_actualFrame` before this call advances it.
+5. Compute `emission = emitRate * scaledUpdateSpeed` and `newParticles = emission >> 0`.
+6. Add `emission - newParticles` to `_newPartsExcess`. Only when `_newPartsExcess > 1.0`, take `extra = _newPartsExcess >> 0`, add `extra` to `newParticles`, and subtract `extra` from `_newPartsExcess`. Equality with `1.0` does not release a particle.
+7. If `_stopped` was already true, set `newParticles = 0`. The rate getter and fractional-carry calculation have already run.
+8. If `_stopped` was false, add `scaledUpdateSpeed` to `_actualFrame`. When `targetStopDuration` is truthy and `_actualFrame >= targetStopDuration`, call `stopParticleSystem`. The `newParticles` count computed for this call is retained, so the threshold call still creates its computed cohort.
+9. Update all particles that were live at the start of the update loop.
+10. Create up to `newParticles`, subject to capacity.
 
 The `>> 0` operations use JavaScript signed 32-bit conversion. Rates, ratios, and speeds are not clamped or validated.
 
@@ -970,7 +973,7 @@ Inputs are `particle`, `flowMap`, and `strength`; `strength` defaults to `1`. Th
 
 During build, the first CPU request for a texture value calls `loadNpeTextureContent`. It fetches the resolved URL and rejects a non-OK response, decodes an `ImageBitmap` with `premultiplyAlpha: "none"` and `colorSpaceConversion: "none"`, and draws it into an `OffscreenCanvas` when available or an HTML canvas otherwise. For `invertY === true`, the canvas transform vertically flips the bitmap before `getImageData`; false preserves source row order. The resulting `{ width, height, data: Uint8ClampedArray }` promise is cached on the texture value. The evaluator catches decode failures and retains a null map, making every update a no-op.
 
-The block installs one optional frame step that derives the camera view-projection matrix with the effective viewport aspect, then copies all 16 components into an evaluator-owned matrix from `allocateMat4()`. Its storage therefore follows the process-wide F32/F64 matrix policy. It never retains `SceneContext`, `Camera`, or camera-owned matrix storage. A missing camera marks the prepared matrix unavailable. Width and height have already been clamped to at least `1` by `prepareParticleSystemFrame`, so aspect calculation cannot divide by a zero target height.
+The block installs one optional frame step that derives the camera view-projection matrix with the effective viewport aspect, then copies all 16 components into an evaluator-owned matrix from `allocateMat4()`. Its storage therefore follows the process-wide F32/F64 matrix policy. It never retains `SceneContext`, `Camera`, or camera-owned matrix storage. A missing camera marks the prepared matrix unavailable. Width and height have already been normalized by the frame preparation inside `animateParticleSystem`, so aspect calculation cannot divide by a zero or non-finite target height.
 
 For each particle update, a missing prepared matrix or map returns immediately without evaluating strength. Otherwise the evaluator transforms the current particle position through the prepared matrix including perspective divide and samples nearest-neighbor RGBA data:
 
@@ -1079,8 +1082,7 @@ Each callback computes:
 ```ts
 const ratio = deltaMs > 0 ? deltaMs / (1000 / 60) : 1;
 const canvas = scene.surface.canvas;
-prepareParticleSystemFrame(system, scene.camera, canvas.width, canvas.height);
-animateParticleSystem(system, ratio);
+animateParticleSystem(system, ratio, scene.camera, canvas.width, canvas.height);
 syncParticleBillboard(system, billboard);
 ```
 
@@ -1185,7 +1187,7 @@ Use conversion for graph extraction. The oracle's direct parse path does not pre
 
 ### 13.3 Visual scenes
 
-All six Lite scenes seed after build, synchronize one billboard, register the frozen scene, and use a black clear color. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 280 prepares its flow matrix once and runs 300 ratio-1 steps. Its Babylon reference calls `scene.updateTransformMatrix(true)` before those manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render.
+All six Lite scenes seed after build, synchronize one billboard, register the frozen scene, and use a black clear color. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 280 runs 300 ratio-1 steps while passing its camera and canvas dimensions to each animation call. Its Babylon reference calls `scene.updateTransformMatrix(true)` before those manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render.
 
 | Scene                          | Coverage                                                                      | Camera                                                     | MAD ceiling | Raw ceiling |
 | ------------------------------ | ----------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------- | ----------- |
@@ -1206,12 +1208,12 @@ Current tracked measurements are:
 
 | Scene | Runtime raw | Runtime gzip | Ignored graph payload raw |   Ceiling |
 | ----- | ----------: | -----------: | ------------------------: | --------: |
-| 262   |   `40.2 KB` |    `24.2 KB` |                 `28.5 KB` | `44.1 KB` |
-| 263   |   `42.3 KB` |    `24.8 KB` |                 `27.5 KB` | `44.1 KB` |
+| 262   |   `40.2 KB` |    `24.3 KB` |                 `28.5 KB` | `44.1 KB` |
+| 263   |   `42.3 KB` |    `24.9 KB` |                 `27.5 KB` | `44.1 KB` |
 | 264   |   `40.4 KB` |    `26.1 KB` |                 `34.4 KB` | `44.1 KB` |
 | 276   |   `44.5 KB` |    `25.4 KB` |                 `27.1 KB` | `45.0 KB` |
 | 277   |   `42.2 KB` |    `25.5 KB` |                 `29.8 KB` | `45.0 KB` |
-| 280   |   `43.0 KB` |    `26.3 KB` |                 `31.0 KB` | `45.0 KB` |
+| 280   |   `43.1 KB` |    `26.3 KB` |                 `31.0 KB` | `45.0 KB` |
 
 Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, and 280 as sprite users because particles render through billboard sprite modules.
 
