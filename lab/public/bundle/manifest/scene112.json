@@ -1,6 +1,6 @@
 {
   "rawKB": 120.4,
-  "rawBytes": 123315,
+  "rawBytes": 123308,
   "gzipKB": 49.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -15,7 +15,7 @@
     "scene112-gltf-uri-6vf9MtoR.js",
     "scene112-ibl-fragment-CeRrvT96.js",
     "scene112-pbr-refraction-DYF8TAbj.js",
-    "scene112-pbr-renderable-DFJJJ6QC.js",
+    "scene112-pbr-renderable-BWcp0HlB.js",
     "scene112-pbr-transmission-ext-Dmi7yN5-.js",
     "scene112-rgbd-decode-CFyrlDIY.js",
     "scene112-scene-uniforms-FTYH6Ct0.js",

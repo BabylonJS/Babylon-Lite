@@ -1,6 +1,6 @@
 {
   "rawKB": 82.9,
-  "rawBytes": 84872,
+  "rawBytes": 84873,
   "gzipKB": 34.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -11,7 +11,7 @@
     "scene27-gltf-glb-parser-ta3sC0WE.js",
     "scene27-gltf-pbr-builder-ext-ws3zROCS.js",
     "scene27-gltf-variants-KZlbOgDK.js",
-    "scene27-pbr-renderable-CVio2g23.js",
+    "scene27-pbr-renderable-CJwKGJ1L.js",
     "scene27-reflectance-fragment-DPofT8oq.js",
     "scene27-singlelight-hemispheric-wgsl-CY3dPlaq.js",
     "scene27-texture-2d-DQo3n8D6.js",

@@ -3,10 +3,10 @@
   "gzipKB": 23.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene43-standard-renderable-BIoDts06.js",
+    "scene43-standard-renderable-DeDvW003.js",
     "scene43-thin-instance-fragment-CBn2miAC.js",
     "scene43-thin-instance-gpu-QMvNfGhb.js",
     "scene43.js"
   ],
-  "rawBytes": 60642
+  "rawBytes": 60645
 }

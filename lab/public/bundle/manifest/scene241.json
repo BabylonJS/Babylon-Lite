@@ -1,7 +1,7 @@
 {
   "rawKB": 162.4,
-  "rawBytes": 166348,
-  "gzipKB": 66.8,
+  "rawBytes": 166345,
+  "gzipKB": 66.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene241-alpha-test-fragment-Dm_a4KUy.js",
@@ -31,7 +31,7 @@
     "scene241-light-base-B750XL1n.js",
     "scene241-light-matrix-CtsX4GmG.js",
     "scene241-pbr-refraction-CUZfLfM5.js",
-    "scene241-pbr-renderable-F-Yhs9wO.js",
+    "scene241-pbr-renderable-C7r77dyJ.js",
     "scene241-pbr-template-ext-CiHpOV5G.js",
     "scene241-pbr-transmission-ext-Ckwmsfin.js",
     "scene241-reflectance-fragment-B903y6Vy.js",

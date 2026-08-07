@@ -1,6 +1,6 @@
 {
-  "rawKB": 92.4,
-  "rawBytes": 94666,
+  "rawKB": 92.5,
+  "rawBytes": 94673,
   "gzipKB": 38.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -13,8 +13,8 @@
     "scene99-gltf-feature-skeleton-CiMH1DyW.js",
     "scene99-gltf-glb-parser-BPGKZLxU.js",
     "scene99-multilight-wgsl-CZoyLoRC.js",
-    "scene99-pbr-renderable-BHBxOJMA.js",
-    "scene99-skeleton-fragment-Cvaz5355.js",
+    "scene99-pbr-renderable-JgYQwMCU.js",
+    "scene99-skeleton-fragment-D9grdDvW.js",
     "scene99-types-BVAXdTdf.js",
     "scene99.js"
   ]
