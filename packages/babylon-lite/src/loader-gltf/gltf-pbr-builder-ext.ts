@@ -130,19 +130,11 @@ export function buildDefaultPbrTexturesExt(
     return { baseColorTexture, ormTexture, normalTexture, emissiveTexture, occlusionTexture };
 }
 
-/** True when any of this material's textures carries a KHR_texture_transform, and the
- *  uv-transform ext therefore has to be registered via `setPbrUvTransform`.
- *
- *  Split out for the same reason as `needsGltfEmissive`: `setPbrUvTransform` statically
- *  imports the uv-transform fragment, so a static import here bundled that fragment into
- *  every scene that reaches this slow path — including scenes that only reach it for
- *  occlusion-on-UV2 and use no texture transform at all (scene27/144/243 each paid 721 B).
- *  Callers own the conditional `import("../material/pbr/set-uv-transform.js")`.
+/** True when any of this material's textures carries a KHR_texture_transform.
  *
  *  `_hasTx` is stamped on wrapped textures by gltf-ext-uv-transform, so this is only ever
- *  true when that extension actually ran. Callers must apply it before emissive to keep
- *  ext registration order unchanged. */
-export function needsGltfUvTransform(tex: PbrTexturesExt): boolean {
+ *  true when that extension actually ran. */
+function needsGltfUvTransform(tex: PbrTexturesExt): boolean {
     // Checked here rather than in the renderer so it doesn't scan 5 textures per mesh.
     return (
         !!(tex.baseColorTexture as { _hasTx?: true })._hasTx ||
@@ -153,9 +145,30 @@ export function needsGltfUvTransform(tex: PbrTexturesExt): boolean {
     );
 }
 
+/** Registers the uv-transform ext on `props` when any texture carries a
+ *  KHR_texture_transform.
+ *
+ *  `setPbrUvTransform` statically imports the uv-transform fragment, so the import has to
+ *  stay conditional or every scene reaching this slow path pays for it — including scenes
+ *  that only reach it for occlusion-on-UV2 (scene27/144/243 each paid 721 B).
+ *
+ *  The gate and the `import` live here rather than at the call sites so the dynamic-import
+ *  plumbing is emitted once, into this slow-path chunk, instead of into load-gltf.js and
+ *  gltf-variants.js. load-gltf.js is fetched by every glTF scene, so a call site there
+ *  charged ~200 B to fast-path scenes that can never reach this branch (scene41/scene47).
+ *
+ *  Must be applied before emissive to keep ext registration order unchanged. */
+export async function applyGltfUvTransform(props: PbrMaterialProps, tex: PbrTexturesExt): Promise<void> {
+    if (!needsGltfUvTransform(tex)) {
+        return;
+    }
+    const { setPbrUvTransform } = await import("../material/pbr/set-uv-transform.js");
+    setPbrUvTransform(props);
+}
+
 /** Slow-path assembly: adds occlusionTexCoord and occlusionTexture props.
- *  UV-transform and emissive are applied by the caller — see `needsGltfUvTransform`
- *  and `needsGltfEmissive` in gltf-pbr-builder.ts. */
+ *  UV-transform and emissive are applied by the caller — see `applyGltfUvTransform`
+ *  above and `needsGltfEmissive` in gltf-pbr-builder.ts. */
 export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, extLayers: Partial<PbrMaterialProps> | undefined): PbrMaterialProps {
     // Per-channel UV1 (TEXCOORD_1) selection bitmask. Computed here on the slow path — the only
     // place a texture can carry texCoord:1 — so the always-loaded fast path just reads `_uv2Mask`.

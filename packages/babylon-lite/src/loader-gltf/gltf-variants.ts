@@ -14,7 +14,7 @@ import type { MaterialVariantData, VariantMeshEntry } from "./material-variants.
 import type { EngineContext } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 import { uploadTex, type GenerateMipmapsFn, type TextureWrapFn, identityTexWrap, needsGltfEmissive } from "./gltf-pbr-builder.js";
-import { buildDefaultPbrTexturesExt, assemblePbrPropsExt, needsGltfUvTransform } from "./gltf-pbr-builder-ext.js";
+import { buildDefaultPbrTexturesExt, assemblePbrPropsExt, applyGltfUvTransform } from "./gltf-pbr-builder-ext.js";
 
 /**
  * Self-contained variant material loader.
@@ -75,10 +75,7 @@ export async function loadVariantMaterials(
                 // UV-transform and emissive are opt-in — see the matching gates in load-gltf.ts.
                 // Order matters: uv-transform registers its ext first, as it did when both lived
                 // inside assemblePbrPropsExt.
-                if (needsGltfUvTransform(tex)) {
-                    const { setPbrUvTransform } = await import("../material/pbr/set-uv-transform.js");
-                    setPbrUvTransform(props);
-                }
+                await applyGltfUvTransform(props, tex);
                 // Emissive is opt-in — see the matching gate in load-gltf.ts.
                 if (!props._emissiveColor && needsGltfEmissive(gltfMat, props.emissiveTexture)) {
                     const { setPbrEmissive } = await import("../material/pbr/set-emissive.js");
