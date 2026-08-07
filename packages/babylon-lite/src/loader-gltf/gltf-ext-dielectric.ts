@@ -33,9 +33,7 @@
  *  Until then, transmissive materials render as opaque. */
 import type { GltfFeature } from "./gltf-feature.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
-import { setPbrMetallicReflectance, type MetallicReflectanceOptions } from "../material/pbr/set-metallic-reflectance.js";
-import { setPbrTransmission } from "../material/pbr/set-transmission.js";
-import { setPbrDispersion } from "../material/pbr/set-dispersion.js";
+import type { MetallicReflectanceOptions } from "../material/pbr/set-metallic-reflectance.js";
 
 const ext: GltfFeature = {
     id: "KHR_materials_dielectric",
@@ -53,7 +51,44 @@ const ext: GltfFeature = {
             return null;
         }
 
-        const [specTex, specColTex, thickTex, transTex] = await Promise.all([
+        // Each setter statically imports its extension implementation — that is exactly how
+        // the opt-in pattern works, and it is why they must NOT be imported statically here.
+        // A static import makes every asset that merely *declares* a dielectric extension
+        // (KHR_materials_ior/_specular are near-universal in modern exporters) pay for the
+        // whole refraction/transmission stack: this handler is ~1 KB, but the chunk a static
+        // import dragged in was ~21 KB, charged even to assets with no transmissive material.
+        //
+        // This differs from the probe-style dynamic imports removed from pbr-renderable.ts,
+        // where the probe itself was the cost being eliminated. Here the decision is genuinely
+        // asset-driven and only knowable at runtime, so a dynamic import is the right tool.
+        //
+        // The predicates below read the raw extension JSON so each fetch starts as soon as we
+        // know it is needed: the imports are issued alongside the texture loads and overlap
+        // with them, rather than serialising after the textures resolve.
+        //
+        // INVARIANT: every `needs*` predicate must remain a SUPERSET of the guard at its call
+        // site. They test whether a texture is *declared*, while the guards test whether it
+        // actually loaded. Being over-eager costs at most one unused fetch; being under-eager
+        // would silently skip the setter.
+        const ior: number = typeof eIor?.ior === "number" ? eIor.ior : 1.5;
+        const intensity: number = typeof eTx?.transmissionFactor === "number" ? eTx.transmissionFactor : 0;
+        const thicknessFactor: number = typeof eVol?.thicknessFactor === "number" ? eVol.thicknessFactor : 0;
+        const dispersion: number = typeof eDisp?.dispersion === "number" ? eDisp.dispersion : 0;
+        const specColFactor = eSp?.specularColorFactor;
+
+        const needsTransmission = !!eTx && (intensity > 0 || !!eTx.transmissionTexture);
+        // NOTE: `subsurface.refraction` is set either by the `eIor` block below OR by
+        // setPbrTransmission itself (set-transmission.ts does `(mat._subsurface ??= {}).refraction = ...`
+        // and mutates `subsurface` in place), so dispersion must account for both paths.
+        const needsDispersion = dispersion > 0 && (!!eIor || needsTransmission) && !!eVol && (thicknessFactor > 0 || !!eVol.thicknessTexture);
+        const needsReflectance =
+            !!eSp?.specularTexture ||
+            !!eSp?.specularColorTexture ||
+            (!!eIor && ior !== 1.5) ||
+            (typeof eSp?.specularFactor === "number" && Math.abs(eSp.specularFactor - 1) > 1e-6) ||
+            (Array.isArray(specColFactor) && specColFactor.length === 3 && (specColFactor[0] !== 1 || specColFactor[1] !== 1 || specColFactor[2] !== 1));
+
+        const [specTex, specColTex, thickTex, transTex, transmissionMod, dispersionMod, reflectanceMod] = await Promise.all([
             ctx._texture(eSp?.specularTexture, false),
             // specularColorTexture is sRGB-encoded, but the reflectance shader applies its
             // own pow(2.2) (matching BJS toLinearSpace on a gammaSpace texture). Load it as
@@ -63,6 +98,9 @@ const ext: GltfFeature = {
             ctx._texture(eSp?.specularColorTexture, false),
             ctx._texture(eVol?.thicknessTexture, false),
             ctx._texture(eTx?.transmissionTexture, false),
+            needsTransmission ? import("../material/pbr/set-transmission.js") : undefined,
+            needsDispersion ? import("../material/pbr/set-dispersion.js") : undefined,
+            needsReflectance ? import("../material/pbr/set-metallic-reflectance.js") : undefined,
         ]);
 
         const out: Partial<PbrMaterialProps> = {};
@@ -76,7 +114,6 @@ const ext: GltfFeature = {
         let hasRefl = false;
 
         if (eIor) {
-            const ior: number = typeof eIor.ior === "number" ? eIor.ior : 1.5;
             // Skip writing metallicF0Factor at default IOR 1.5 (F0=0.04 → factor=1).
             // JS floats compute ((0.5/2.5)^2)/0.04 as 1.0000000000000002, which
             // would trigger the reflectance-factor code path and pull in the
@@ -119,7 +156,6 @@ const ext: GltfFeature = {
         }
 
         if (eVol) {
-            const thicknessFactor: number = typeof eVol.thicknessFactor === "number" ? eVol.thicknessFactor : 0;
             if (thicknessFactor > 0 || thickTex) {
                 subsurface.thickness = {
                     min: 0,
@@ -145,21 +181,20 @@ const ext: GltfFeature = {
             }
         }
 
-        if (eTx) {
-            const intensity: number = typeof eTx.transmissionFactor === "number" ? eTx.transmissionFactor : 0;
-            if (intensity > 0 || transTex) {
-                // Route through the setter so the transmission scene hook (frame-graph
-                // rewiring + refraction ext) gets registered. Publishing `subsurface` onto
-                // `out` first lets the setter mutate it in place — the tail assignment
-                // below is then a no-op.
-                out._subsurface = subsurface;
-                setPbrTransmission(out, {
-                    ...(subsurface.refraction ?? {}),
-                    intensity,
-                    useThicknessAsDepth: !!subsurface.thickness,
-                    ...(transTex ? { texture: transTex } : undefined),
-                });
-            }
+        // `transmissionMod` is non-undefined exactly when `needsTransmission` held, which is a
+        // superset of this guard (it accepts a declared transmissionTexture that failed to load).
+        if (transmissionMod && (intensity > 0 || transTex)) {
+            // Route through the setter so the transmission scene hook (frame-graph
+            // rewiring + refraction ext) gets registered. Publishing `subsurface` onto
+            // `out` first lets the setter mutate it in place — the tail assignment
+            // below is then a no-op.
+            out._subsurface = subsurface;
+            transmissionMod.setPbrTransmission(out, {
+                ...(subsurface.refraction ?? {}),
+                intensity,
+                useThicknessAsDepth: !!subsurface.thickness,
+                ...(transTex ? { texture: transTex } : undefined),
+            });
         }
 
         // KHR_materials_dispersion: per-channel chromatic refraction. Only meaningful on
@@ -167,9 +202,9 @@ const ext: GltfFeature = {
         // The shader spread uses Babylon's empirical dispersion strength with a fixed Abbe
         // number of 20, so the glTF dispersion value maps to strength = 20 / dispersion
         // (larger glTF dispersion ⇒ larger Abbe ⇒ weaker chromatic spread).
-        if (eDisp && typeof eDisp.dispersion === "number" && eDisp.dispersion > 0 && subsurface.refraction && subsurface.thickness) {
+        if (dispersionMod && subsurface.refraction && subsurface.thickness) {
             out._subsurface = subsurface;
-            setPbrDispersion(out, 20.0 / eDisp.dispersion);
+            dispersionMod.setPbrDispersion(out, 20.0 / dispersion);
         }
 
         if (Object.keys(subsurface).length > 0) {
@@ -178,8 +213,8 @@ const ext: GltfFeature = {
         // Apply the reflectance ext when any dielectric-reflectance field was populated.
         // setPbrMetallicReflectance writes the fields onto `out` and registers the ext.
         // Refraction/volume subsurface data does NOT register the reflectance ext.
-        if (reflOpts.texture || reflOpts.reflectanceTexture || hasRefl) {
-            setPbrMetallicReflectance(out, reflOpts);
+        if (reflectanceMod && (reflOpts.texture || reflOpts.reflectanceTexture || hasRefl)) {
+            reflectanceMod.setPbrMetallicReflectance(out, reflOpts);
         }
         return Object.keys(out).length > 0 ? out : null;
     },
