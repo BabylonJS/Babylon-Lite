@@ -90,6 +90,7 @@ async function main(): Promise<void> {
     let environmentIdentity: EnvironmentTextures | undefined;
     let oldFallback: GPUTexture;
     let oldShadow: GPUTexture;
+    let oldRenderableCount: number;
 
     const freezeAnimation = (): void => {
         for (const group of scene.animationGroups) {
@@ -111,6 +112,10 @@ async function main(): Promise<void> {
             canvas.dataset.environmentRebuilt = String(scene._envTextures?.specularCube !== oldEnvironment);
             canvas.dataset.fallbackRebuilt = String(engine._pbrFallbackTex?.texture !== oldFallback);
             canvas.dataset.shadowRebuilt = String(light.shadowGenerator?._depthTexture !== oldShadow);
+            // The loader-owned HDR skybox is not reachable from any material, so a recovery that
+            // silently dropped it would still render — just without the backdrop. Comparing the
+            // renderable count catches that where the image comparison alone might not.
+            canvas.dataset.backgroundsRebuilt = String(scene._renderables.length === oldRenderableCount);
             // Animation state is rebuilt with the rest of the scene, so re-pin the clip to the
             // same frame the reference render uses.
             freezeAnimation();
@@ -126,9 +131,14 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.fixedDeltaMs = 16;
 
-    await loadEnvironment(scene, "https://assets.babylonjs.com/core/environments/environmentSpecular.env", {
+    // The Viewer's `environmentSkybox` shape: one .env drives both the IBL and the backdrop, so
+    // `loadEnvironment` builds an HDR skybox renderable that the generic material walk cannot
+    // reach. Recovering it is what the Viewer integration failed on before backgrounds were
+    // captured, so this scene must build one rather than skipping all backgrounds.
+    const environmentUrl = "https://assets.babylonjs.com/core/environments/environmentSpecular.env";
+    await loadEnvironment(scene, environmentUrl, {
         brdfUrl: "/brdf-lut.png",
-        skipSkybox: true,
+        skyboxUrl: environmentUrl,
         skipGround: true,
     });
 
@@ -201,6 +211,7 @@ async function main(): Promise<void> {
     oldEnvironment = scene._envTextures!.specularCube;
     oldFallback = engine._pbrFallbackTex!.texture;
     oldShadow = light.shadowGenerator._depthTexture;
+    oldRenderableCount = scene._renderables.length;
 
     // Viewer-shaped teardown: disable recovery first, then stop rendering, then tear down
     // scene and engine. Exercised by the parity spec after post-recovery frames are drawn.

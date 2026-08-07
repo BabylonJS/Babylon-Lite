@@ -1,10 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
-import { buildHdrSkyboxRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-hdr-skybox.js";
-import { computeSceneSize } from "../../../packages/babylon-lite/src/material/pbr/scene-size.js";
 import { parseEnvFile } from "../../../packages/babylon-lite/src/loader-env/env-parse.js";
-import { rebuildSceneEnvironment, rebuildSceneEnvironmentBackgrounds } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
+import { rebuildSceneEnvironment } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
 import type { EnvironmentRecoverySource } from "../../../packages/babylon-lite/src/loader-env/environment-recovery.js";
 import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
@@ -12,18 +10,6 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 vi.mock("../../../packages/babylon-lite/src/loader-env/rgbd-decode.js", () => ({
     uploadCubemapRGBD: vi.fn(() => makeTexture("specular")),
     decodeBrdfPng: vi.fn(() => makeTexture("brdf")),
-}));
-
-vi.mock("../../../packages/babylon-lite/src/material/pbr/background-hdr-skybox.js", () => ({
-    buildHdrSkyboxRenderable: vi.fn(() => ({ kind: "hdr-skybox" })),
-}));
-
-vi.mock("../../../packages/babylon-lite/src/material/pbr/scene-size.js", () => ({
-    computeSceneSize: vi.fn(() => ({
-        groundSize: 12,
-        skyboxSize: 24,
-        rootPosition: [1, 2, 3],
-    })),
 }));
 
 /** The subset of the fake texture the ref-count assertions need. */
@@ -107,17 +93,27 @@ describe("parseEnvFile", () => {
     });
 });
 
+function makeEngine(): EngineContext {
+    return {
+        _device: { createSampler: vi.fn(() => ({}) as GPUSampler) },
+    } as unknown as EngineContext;
+}
+
+function makeEnvironmentTextures(): EnvironmentTextures {
+    return {
+        specularCube: makeTexture("original-specular"),
+        brdfLut: makeTexture("original-brdf"),
+        irradianceSH: new Float32Array(27),
+        sphericalHarmonics: new Float32Array(36),
+        lodGenerationScale: 0.8,
+    } as unknown as EnvironmentTextures;
+}
+
 describe("rebuildSceneEnvironment", () => {
     afterEach(() => {
         vi.clearAllMocks();
         vi.unstubAllGlobals();
     });
-
-    function makeEngine(): EngineContext {
-        return {
-            _device: { createSampler: vi.fn(() => ({}) as GPUSampler) },
-        } as unknown as EngineContext;
-    }
 
     function makeScene(textures: EnvironmentTextures | undefined, source?: EnvironmentRecoverySource): SceneContext {
         return {
@@ -125,16 +121,6 @@ describe("rebuildSceneEnvironment", () => {
             _envRecoverySource: source,
             _disposables: [],
         } as unknown as SceneContext;
-    }
-
-    function makeEnvironmentTextures(): EnvironmentTextures {
-        return {
-            specularCube: makeTexture("original-specular"),
-            brdfLut: makeTexture("original-brdf"),
-            irradianceSH: new Float32Array(27),
-            sphericalHarmonics: new Float32Array(36),
-            lodGenerationScale: 0.8,
-        } as unknown as EnvironmentTextures;
     }
 
     function stubNetwork(): void {
@@ -153,13 +139,14 @@ describe("rebuildSceneEnvironment", () => {
         kind: "env",
         url: "/assets/studio.env",
         brdfUrl: "/assets/brdf.png",
-        hasBackgrounds: false,
     };
 
     it("is a no-op for a scene that never loaded an environment", async () => {
         const scene = makeScene(undefined);
 
-        await expect(rebuildSceneEnvironment(makeEngine(), scene)).resolves.toBeNull();
+        await rebuildSceneEnvironment(makeEngine(), scene);
+
+        expect(scene._envTextures).toBeUndefined();
         expect(scene._disposables).toHaveLength(0);
     });
 
@@ -173,12 +160,18 @@ describe("rebuildSceneEnvironment", () => {
         expect(scene._envTextures).toBe(textures);
     });
 
-    it("fails loudly for loadEnvironment backgrounds, which recovery cannot rebuild", async () => {
+    it("rebuilds a scene whose environment also owns loader-built backgrounds", async () => {
+        stubNetwork();
         const textures = makeEnvironmentTextures();
-        const scene = makeScene(textures, { ...envSource, hasBackgrounds: true });
+        const scene = makeScene(textures, envSource);
 
-        await expect(rebuildSceneEnvironment(makeEngine(), scene)).rejects.toThrow(/does not support loadEnvironment backgrounds/);
+        // Backgrounds used to abort recovery outright; the textures must now rebuild like any other
+        // environment. The background renderables themselves are recreated separately, by replaying
+        // the rebuild thunks recovery discovers on them, so this path is unaffected by their presence.
+        await rebuildSceneEnvironment(makeEngine(), scene);
+
         expect(scene._envTextures).toBe(textures);
+        expect(scene._envRecoverySource).toEqual(envSource);
     });
 
     it("names the URL and status when a recovery source can no longer be fetched", async () => {
@@ -204,7 +197,7 @@ describe("rebuildSceneEnvironment", () => {
         const originalCube = textures.specularCube;
         const scene = makeScene(textures, envSource);
 
-        await expect(rebuildSceneEnvironment(makeEngine(), scene)).resolves.toEqual(envSource);
+        await rebuildSceneEnvironment(makeEngine(), scene);
 
         expect(scene._envTextures).toBe(textures);
         expect(scene._envRecoverySource).toEqual(envSource);
@@ -244,27 +237,5 @@ describe("rebuildSceneEnvironment", () => {
         for (const texture of [first.specularCube, first.brdfLut, second.specularCube, second.brdfLut]) {
             expect(texture.destroy).toHaveBeenCalledOnce();
         }
-    });
-
-    it("restores an explicit HDR skybox size and position without recomputing scene bounds", async () => {
-        const textures = makeEnvironmentTextures();
-        const scene = {
-            ...makeScene(textures),
-            surface: { engine: makeEngine() },
-        } as SceneContext;
-        const source: EnvironmentRecoverySource = {
-            kind: "hdr",
-            url: "/assets/studio.hdr",
-            faceSize: 256,
-            useCubemapSkybox: true,
-            skipGround: true,
-            skyboxSize: 30,
-            skyboxPosition: [4, 5, 6],
-        };
-
-        await expect(rebuildSceneEnvironmentBackgrounds(scene, source)).resolves.toHaveLength(1);
-
-        expect(computeSceneSize).not.toHaveBeenCalled();
-        expect(buildHdrSkyboxRenderable).toHaveBeenCalledWith(scene, textures, 15, [4, 5, 6], expect.any(Array));
     });
 });

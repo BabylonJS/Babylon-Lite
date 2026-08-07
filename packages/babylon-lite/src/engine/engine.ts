@@ -256,16 +256,8 @@ interface DeviceLostRecoveryCapture {
         gpuIndices: Uint16Array | Uint32Array,
         indexFormat: GPUIndexFormat
     ): void;
-    e(scene: SceneContext, url: string, brdfUrl: string, hasBackgrounds: boolean): void;
-    h(
-        scene: SceneContext,
-        url: string,
-        faceSize: number,
-        useCubemapSkybox: boolean,
-        skipGround: boolean,
-        skyboxSize: number | undefined,
-        skyboxPosition: [number, number, number] | undefined
-    ): void;
+    e(scene: SceneContext, url: string, brdfUrl: string): void;
+    h(scene: SceneContext, url: string, faceSize: number): void;
 }
 
 /** @internal Return true if `context` is already registered on `surface`. */

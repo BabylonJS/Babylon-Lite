@@ -108,7 +108,10 @@ export async function loadEnvironment(
     // Background renderables (skybox + ground) — deferred so they run AFTER the user
     // has finished tweaking `scene.imageProcessing.*` (skybox/ground/dds materials
     // snapshot exposure/contrast at build time into their per-mesh UBO).
-    engine._dlr?.e(scene, url, options.brdfUrl, !bgOptions.skipSkybox || !bgOptions.skipGround || skyboxIsDds || skyboxIsEnv);
+    // Only `url` / `brdfUrl` are captured here. Backgrounds cost nothing on this path: each
+    // builder stamps its own rebuild thunk onto the renderable it returns (`Renderable._rebuild`),
+    // and recovery rediscovers them by traversal.
+    engine._dlr?.e(scene, url, options.brdfUrl);
     scene._deferredBuilders.push(async () => {
         const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
         const { groundSize, skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);

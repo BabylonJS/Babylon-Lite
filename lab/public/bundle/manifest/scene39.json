@@ -1,6 +1,6 @@
 {
   "rawKB": 110.4,
-  "rawBytes": 113055,
+  "rawBytes": 113049,
   "gzipKB": 47.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -13,8 +13,8 @@
     "scene39-gltf-feature-animation-pointer-DHtxeSyN.js",
     "scene39-gltf-feature-animations-BWUaqxWM.js",
     "scene39-gltf-feature-lights-punctual-C6t_MIQI.js",
-    "scene39-gltf-feature-registry-BSJgOD-U.js",
-    "scene39-gltf-json-asset-CfuUxWSx.js",
+    "scene39-gltf-feature-registry-BpV2kaeg.js",
+    "scene39-gltf-json-asset-jTv0zEZQ.js",
     "scene39-gltf-light-pointer-state-B7kFTRxK.js",
     "scene39-gltf-pbr-builder-ext-DyaMnJed.js",
     "scene39-gltf-sampler-desc-DY59huRr.js",
@@ -22,7 +22,7 @@
     "scene39-ibl-fragment-CeRrvT96.js",
     "scene39-light-base-D9bDMkqd.js",
     "scene39-light-matrix-CBTBdGsb.js",
-    "scene39-pbr-renderable-Cw3afFG5.js",
+    "scene39-pbr-renderable-_Bv6p_o5.js",
     "scene39-pbr-template-ext-CiHpOV5G.js",
     "scene39-rgbd-decode-DqA5PDQg.js",
     "scene39-scene-uniforms-FTYH6Ct0.js",

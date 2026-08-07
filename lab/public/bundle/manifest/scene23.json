@@ -4,15 +4,15 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene23-anisotropy-fragment-CbNkTpSR.js",
-    "scene23-background-dds-skybox-o77MthFd.js",
-    "scene23-background-ground-DmmKHN9b.js",
+    "scene23-background-dds-skybox-FRD-pQdD.js",
+    "scene23-background-ground-cMibPzRq.js",
     "scene23-cubemap-skybox-material-sjF5EPm1.js",
     "scene23-ibl-fragment-CeRrvT96.js",
-    "scene23-pbr-renderable-CRn83-jy.js",
+    "scene23-pbr-renderable-CgwKFLIu.js",
     "scene23-rgbd-decode-BeChsxxY.js",
     "scene23-scene-uniforms-FTYH6Ct0.js",
     "scene23-wgsl-helpers-BgB2AJrF.js",
     "scene23.js"
   ],
-  "rawBytes": 80963
+  "rawBytes": 81016
 }

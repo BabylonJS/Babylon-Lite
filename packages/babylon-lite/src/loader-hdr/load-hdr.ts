@@ -86,10 +86,11 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
 
     // Background renderables (skybox + ground) — deferred so they run AFTER the user
     // has finished tweaking `scene.imageProcessing.*` (skybox materials snapshot
-    // exposure/contrast at build time into their per-mesh UBO).
+    // exposure/contrast at build time into their per-mesh UBO). Backgrounds cost nothing here:
+    // each builder stamps its own rebuild descriptor onto the renderable it returns.
     const useHdr = !!options?.useCubemapSkybox;
     const skipGround = !!options?.skipGround;
-    engine._dlr?.h(scene, url, faceSize, useHdr, skipGround, options?.skyboxSize, options?.skyboxPosition);
+    engine._dlr?.h(scene, url, faceSize);
     scene._deferredBuilders.push(async () => {
         if (useHdr && textures.specularCubeView) {
             let autoSkyboxSize = options?.skyboxSize;
