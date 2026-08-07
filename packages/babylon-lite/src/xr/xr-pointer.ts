@@ -97,6 +97,9 @@ interface PointerUnit {
     cursorMat: StandardMaterialProps;
     /** The mesh currently under this source's ray, if any. */
     hovered: Mesh | null;
+    /** Last {@link XrInputSource} wrapper seen for this unit, so a disconnect-time
+     *  `onHoverEnd` can still hand callers a real source (never `undefined`). */
+    lastInput: XrInputSource | null;
     /** Last emissive state pushed to the materials (`true` = picked), to avoid redundant writes. */
     picked: boolean;
     /** `selecting` state on the previous frame, for edge detection. */
@@ -251,7 +254,7 @@ function ensureUnit(pointer: XrPointer, source: DomXrInputSource): PointerUnit {
     addToScene(pointer._scene, laser);
     addToScene(pointer._scene, cursor);
 
-    const unit: PointerUnit = { laser, cursor, laserMat, cursorMat, hovered: null, picked: false, wasSelecting: false };
+    const unit: PointerUnit = { laser, cursor, laserMat, cursorMat, hovered: null, lastInput: null, picked: false, wasSelecting: false };
     pointer._units.set(source, unit);
     return unit;
 }
@@ -259,7 +262,11 @@ function ensureUnit(pointer: XrPointer, source: DomXrInputSource): PointerUnit {
 /** @internal Dispose one unit's meshes and remove them from the scene. */
 function disposeUnit(pointer: XrPointer, unit: PointerUnit): void {
     if (unit.hovered) {
-        pointer._options.onHoverEnd?.(unit.hovered, undefined as unknown as XrInputSource);
+        // The source is disconnecting; hand the callback the last real input we saw for
+        // this unit (a hover can only have been set while it was live, so this is set).
+        if (unit.lastInput) {
+            pointer._options.onHoverEnd?.(unit.hovered, unit.lastInput);
+        }
         unit.hovered = null;
     }
     removeFromScene(pointer._scene, unit.laser);
@@ -322,6 +329,7 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager, eyePo
 
     for (const src of input.inputSources) {
         const unit = pointer._units.get(src.source)!;
+        unit.lastInput = src;
         const isActive = !singleActive || src.source === pointer._activeSource;
 
         // Inactive controllers (single-active mode) and untracked rays show no pointer.

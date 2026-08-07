@@ -31,8 +31,13 @@ export interface RayPickOptions {
 }
 
 // Local AABBs are cached by the identity of the mesh's CPU position array, so the
-// cache self-invalidates if a mesh's geometry is replaced.
-const aabbCache = new WeakMap<Float32Array, LocalAabb>();
+// cache self-invalidates if a mesh's geometry is replaced. Lazily created so that
+// merely importing this module stays side-effect-free (GUIDANCE: no top-level
+// `new Map/WeakMap/Set`).
+let _aabbCache: WeakMap<Float32Array, LocalAabb> | null = null;
+function aabbCache(): WeakMap<Float32Array, LocalAabb> {
+    return (_aabbCache ??= new WeakMap());
+}
 
 /** @internal Compute (and cache) a mesh's local-space AABB from its CPU positions. */
 function localAabb(mesh: Mesh): LocalAabb | null {
@@ -40,7 +45,8 @@ function localAabb(mesh: Mesh): LocalAabb | null {
     if (!positions || positions.length < 3) {
         return null;
     }
-    const cached = aabbCache.get(positions);
+    const cache = aabbCache();
+    const cached = cache.get(positions);
     if (cached) {
         return cached;
     }
@@ -74,7 +80,7 @@ function localAabb(mesh: Mesh): LocalAabb | null {
         }
     }
     const aabb: LocalAabb = { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] };
-    aabbCache.set(positions, aabb);
+    cache.set(positions, aabb);
     return aabb;
 }
 

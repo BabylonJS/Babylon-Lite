@@ -102,7 +102,9 @@ export function updateXrCameraForView(cam: XrCamera, view: XRView, rtWidth: numb
     for (let i = 0; i < 16; i++) {
         w[i] = m[i]!;
     }
-    cam._wmv = (cam._wmv + 1) | 0;
+    // Monotonic bump (never truncated to int32: `worldMatrixVersion` must never
+    // decrease per the camera.ts contract; a plain +1 stays exact up to 2^53).
+    cam._wmv = cam._wmv + 1;
     cam.viewport = viewport;
 
     // Inject the per-eye projection so getProjectionMatrix returns it unchanged.
