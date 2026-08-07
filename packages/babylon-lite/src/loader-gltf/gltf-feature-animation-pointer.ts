@@ -24,7 +24,6 @@ import type { PointerMaterial } from "./animation-pointer.js";
 import { resolveAnimationPointer } from "./animation-pointer.js";
 import { _installPointerHandlers } from "./gltf-animation.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
-import { setPbrUvTransform } from "../material/pbr/set-uv-transform.js";
 
 // Node TRS/weights pointer targets map 1:1 onto the standard glTF channel paths.
 const NODE_TRS_PATH: Record<string, TargetPath> = {
@@ -50,12 +49,16 @@ const _MAT_EXT_POINTER_RE =
 // Animated baseColorFactor white-fallback pointer — handling lives in
 // animation-pointer-basecolor.ts.
 const _BASE_COLOR_POINTER_RE = /^\/materials\/\d+\/pbrMetallicRoughness\/baseColorFactor$/;
+// Animated texture-transform pointer — opts the asset into the UV-transform setter
+// (and the shader fragment it registers). Capture group 1 is the material index.
+const _UV_TX_POINTER_RE = /^\/materials\/(\d+)\/.*\/KHR_texture_transform\/(?:offset|scale|rotation)$/;
 
 // Populated in preParse from the lazily-imported sub-modules, so materialMap + applyMaterial
 // can delegate without re-importing. Each sub-module is fetched only when its pointer is
 // present, so a node-only scene (scene34) loads none of them.
 let _matExtMod: typeof import("./animation-pointer-ext.js") | null = null;
 let _baseColorMod: typeof import("./animation-pointer-basecolor.js") | null = null;
+let _uvTransformMod: typeof import("../material/pbr/set-uv-transform.js") | null = null;
 function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | undefined)[] {
     if (meshes === _matMapKey) {
         return _matMap;
@@ -83,7 +86,7 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
             if (m) {
                 baseColorAnimated.add(+m[1]!);
             }
-            const tx = ptr && /^\/materials\/(\d+)\/.*\/KHR_texture_transform\/(offset|scale|rotation)$/.exec(ptr);
+            const tx = ptr && _UV_TX_POINTER_RE.exec(ptr);
             if (tx) {
                 uvTransformAnimated.add(+tx[1]!);
             }
@@ -120,9 +123,12 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
                 }
                 // Force the per-texture UV-transform machinery when a pointer animates a
                 // texture transform that is identity at load (so the matrices exist for the
-                // animation to drive — see uvTransformAnimated above).
+                // animation to drive — see uvTransformAnimated above). The setter is loaded
+                // by preParse only when such a pointer exists, so scenes that animate other
+                // things (scene34 node visibility, scene242 emissive) never pull the
+                // UV-transform shader fragment in.
                 if (uvTransformAnimated.has(matIdx)) {
-                    setPbrUvTransform(pm as Partial<PbrMaterialProps>);
+                    _uvTransformMod!.setPbrUvTransform(pm as Partial<PbrMaterialProps>);
                 }
                 map[matIdx] = pm;
             }
@@ -172,6 +178,7 @@ const feature: GltfFeature = {
         let hasLightPointer = false;
         let hasMatExtPointer = false;
         let hasBaseColorPointer = false;
+        let hasUvTransformPointer = false;
         for (const anim of json.animations ?? []) {
             for (const ch of anim.channels ?? []) {
                 const ptr = ch.target?.extensions?.KHR_animation_pointer?.pointer as string | undefined;
@@ -187,6 +194,9 @@ const feature: GltfFeature = {
                 if (_MAT_EXT_POINTER_RE.test(ptr)) {
                     hasMatExtPointer = true;
                 }
+                if (_UV_TX_POINTER_RE.test(ptr)) {
+                    hasUvTransformPointer = true;
+                }
             }
         }
         // Each pointer-writer set lives in its own module fetched only when its pointer is
@@ -201,6 +211,11 @@ const feature: GltfFeature = {
         }
         if (hasMatExtPointer) {
             _matExtMod = await import("./animation-pointer-ext.js");
+        }
+        // Same detection materialMap uses to populate `uvTransformAnimated`, so the setter
+        // is present whenever that set is non-empty.
+        if (hasUvTransformPointer) {
+            _uvTransformMod = await import("../material/pbr/set-uv-transform.js");
         }
     },
     // Animated baseColorFactor on untextured materials needs a white 1×1 fallback so the
