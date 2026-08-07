@@ -1,5 +1,4 @@
 import type { EngineContext } from "../engine/engine.js";
-import type { Renderable } from "../render/renderable.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { EnvironmentTextures } from "./load-env.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
@@ -7,30 +6,17 @@ import { assembleEnvironmentTextures, loadBrdfImage } from "./env-helpers.js";
 import { parseEnvFile } from "./env-parse.js";
 
 /** @internal Loader metadata captured by `_dlr` only while Scene recovery capture is enabled. */
-export type EnvironmentRecoverySource =
-    | { kind: "env"; url: string; brdfUrl: string; hasBackgrounds: boolean }
-    | {
-          kind: "hdr";
-          url: string;
-          faceSize: number;
-          useCubemapSkybox: boolean;
-          skipGround: boolean;
-          skyboxSize: number | undefined;
-          skyboxPosition: [number, number, number] | undefined;
-      };
+export type EnvironmentRecoverySource = { kind: "env"; url: string; brdfUrl: string } | { kind: "hdr"; url: string; faceSize: number };
 
 /** @internal Rebuild scene environment resources while preserving the EnvironmentTextures identity. */
-export async function rebuildSceneEnvironment(engine: EngineContext, scene: SceneContext): Promise<EnvironmentRecoverySource | null> {
+export async function rebuildSceneEnvironment(engine: EngineContext, scene: SceneContext): Promise<void> {
     const current = scene._envTextures;
     if (!current) {
-        return null;
+        return;
     }
     const source = scene._envRecoverySource;
     if (!source) {
         throw new Error("Device-lost Scene recovery requires environment loading after recovery was enabled");
-    }
-    if (source.kind === "env" && source.hasBackgrounds) {
-        throw new Error("Device-lost Scene recovery does not support loadEnvironment backgrounds");
     }
     // Only detach the textures once the rebuild is known to be possible: an early throw would
     // otherwise leave the scene without its environment while the error propagates.
@@ -65,46 +51,6 @@ export async function rebuildSceneEnvironment(engine: EngineContext, scene: Scen
     });
     scene._envTextures = current;
     scene._envRecoverySource = source;
-    return source;
-}
-
-/** @internal Rebuild loader-owned skybox and ground renderables after material groups. */
-export async function rebuildSceneEnvironmentBackgrounds(scene: SceneContext, source: EnvironmentRecoverySource): Promise<Renderable[]> {
-    const textures = scene._envTextures;
-    if (!textures) {
-        return [];
-    }
-    if (source.kind === "env") {
-        return [];
-    }
-    const engine = scene.surface.engine;
-    const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
-    const renderables: Renderable[] = [];
-    if (source.useCubemapSkybox) {
-        let skyboxSize = source.skyboxSize;
-        let rootPosition = source.skyboxPosition;
-        if (skyboxSize === undefined || rootPosition === undefined) {
-            const { computeSceneSize } = await import("../material/pbr/scene-size.js");
-            const size = computeSceneSize(scene, skyboxSize);
-            skyboxSize = size.skyboxSize;
-            rootPosition = size.rootPosition;
-        }
-        const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
-        renderables.push(buildHdrSkyboxRenderable(scene, textures, skyboxSize / 2, rootPosition, primaryColor));
-    }
-    if (!source.useCubemapSkybox || !source.skipGround) {
-        const { computeSceneSize } = await import("../material/pbr/scene-size.js");
-        const { groundSize, skyboxSize, rootPosition } = computeSceneSize(scene, source.skyboxSize);
-        if (!source.useCubemapSkybox) {
-            const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
-            renderables.push(buildSolidSkyboxRenderable(scene, textures, skyboxSize / 2, rootPosition, primaryColor));
-        }
-        if (!source.skipGround) {
-            const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
-            renderables.push(await buildGroundRenderable(engine, groundSize, rootPosition, primaryColor));
-        }
-    }
-    return renderables;
 }
 
 async function reloadEnvironmentTextures(

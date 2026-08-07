@@ -63,22 +63,14 @@ function attachRecoveryCapture(engine: EngineContext): void {
             mesh._cpuGpuIndices = gpuIndices;
             mesh._cpuIndexFormat = indexFormat;
         },
-        e(scene: SceneContext, url: string, brdfUrl: string, hasBackgrounds: boolean): void {
+        e(scene: SceneContext, url: string, brdfUrl: string): void {
             if (state._meshCaptureRefs) {
-                scene._envRecoverySource = { kind: "env", url, brdfUrl, hasBackgrounds };
+                scene._envRecoverySource = { kind: "env", url, brdfUrl };
             }
         },
-        h(
-            scene: SceneContext,
-            url: string,
-            faceSize: number,
-            useCubemapSkybox: boolean,
-            skipGround: boolean,
-            skyboxSize: number | undefined,
-            skyboxPosition: [number, number, number] | undefined
-        ): void {
+        h(scene: SceneContext, url: string, faceSize: number): void {
             if (state._meshCaptureRefs) {
-                scene._envRecoverySource = { kind: "hdr", url, faceSize, useCubemapSkybox, skipGround, skyboxSize, skyboxPosition };
+                scene._envRecoverySource = { kind: "hdr", url, faceSize };
             }
         },
     };

@@ -62,6 +62,7 @@ test("Scene 164 — device-lost recovery reproduces the pre-loss image", async (
     expect(state.environmentRebuilt).toBe("true");
     expect(state.fallbackRebuilt).toBe("true");
     expect(state.shadowRebuilt).toBe("true");
+    expect(state.backgroundsRebuilt).toBe("true");
 
     const afterShot = await canvas.screenshot();
     const mad = screenshotMad(beforeShot, afterShot);
