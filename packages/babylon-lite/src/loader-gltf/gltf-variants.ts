@@ -13,7 +13,7 @@ import type { GltfFeature, GltfMaterialFeatureRunner } from "./gltf-feature.js";
 import type { MaterialVariantData, VariantMeshEntry } from "./material-variants.js";
 import type { EngineContext } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
-import { uploadTex, type GenerateMipmapsFn, type TextureWrapFn, identityTexWrap } from "./gltf-pbr-builder.js";
+import { uploadTex, type GenerateMipmapsFn, type TextureWrapFn, identityTexWrap, needsGltfEmissive } from "./gltf-pbr-builder.js";
 import { buildDefaultPbrTexturesExt, assemblePbrPropsExt } from "./gltf-pbr-builder-ext.js";
 
 /**
@@ -71,7 +71,14 @@ export async function loadVariantMaterials(
             p = (async () => {
                 const tex = buildDefaultPbrTexturesExt(engine, gltfMat, sampler, generateMipmaps, getCachedTex, wrapTex);
                 const layers = await runMatExts(gltfMat, exts, extCtx);
-                return assemblePbrPropsExt(gltfMat, tex, layers);
+                const props = assemblePbrPropsExt(gltfMat, tex, layers);
+                // Emissive is opt-in — see the matching gate in load-gltf.ts.
+                if (!props._emissiveColor && needsGltfEmissive(gltfMat, props.emissiveTexture)) {
+                    const { setPbrEmissive } = await import("../material/pbr/set-emissive.js");
+                    const ef = gltfMat._emissiveFactor;
+                    setPbrEmissive(props, [ef[0], ef[1], ef[2]]);
+                }
+                return props;
             })();
             pbrCache.set(gltfMat, p);
         }

@@ -10,7 +10,6 @@ import { cloneTexture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import { setPbrUvTransform } from "../material/pbr/set-uv-transform.js";
-import { setPbrEmissive } from "../material/pbr/set-emissive.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import type { TextureWrapFn, GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 import { uploadBaseColorFactorTexture, uploadOrmFactorTexture, uploadTex } from "./gltf-pbr-builder.js";
@@ -132,12 +131,9 @@ export function buildDefaultPbrTexturesExt(
     return { baseColorTexture, ormTexture, normalTexture, emissiveTexture, occlusionTexture };
 }
 
-/** Slow-path assembly: adds occlusionTexCoord and occlusionTexture props. */
+/** Slow-path assembly: adds occlusionTexCoord and occlusionTexture props.
+ *  Emissive is applied by the caller — see `needsGltfEmissive` in gltf-pbr-builder.ts. */
 export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, extLayers: Partial<PbrMaterialProps> | undefined): PbrMaterialProps {
-    const ef = mat._emissiveFactor;
-    // See gltf-pbr-builder.ts: emissiveFactor [1,1,1] is a no-op only with an emissive texture;
-    // with no texture it is a real full-white emissive that must be applied (Material_03).
-    const defaultFactor = (ef[0] === 0 && ef[1] === 0 && ef[2] === 0) || (!!tex.emissiveTexture && ef[0] === 1 && ef[1] === 1 && ef[2] === 1);
     // Precompute UV-transform presence so the renderer doesn't scan 5 textures
     // per mesh. Any wrapped texture with `_hasTx=true` (set by gltf-ext-uv-transform)
     // flips this once at build time; omitted entirely on fast path.
@@ -186,12 +182,6 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
     // `_hasUvTx`, which the ext's own `detect` turns into PBR2_HAS_UV_TRANSFORM.
     if (hasAnyUvTx) {
         setPbrUvTransform(props);
-    }
-    // Same for emissive. KHR_materials_emissive_strength arrives via `extLayers` and already
-    // called the setter with the strength-scaled value, so it wins over the raw factor here
-    // (matching the previous spread ordering).
-    if (!defaultFactor && !props._emissiveColor) {
-        setPbrEmissive(props, [ef[0], ef[1], ef[2]]);
     }
     return props;
 }

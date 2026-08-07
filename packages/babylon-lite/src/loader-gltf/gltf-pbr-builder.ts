@@ -8,7 +8,6 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
-import { setPbrEmissive } from "../material/pbr/set-emissive.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import { mipLevelCount } from "../texture/mip-count.js";
 import { linearToSrgbByte } from "../math/color.js";
@@ -73,9 +72,31 @@ export function uploadOrmFactorTexture(engine: EngineContext, roughness: number,
     return uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(roughness), clamp(metallic), 255]));
 }
 
+/** True when a glTF material's `emissiveFactor` describes a real emissive that has to be
+ *  applied via `setPbrEmissive`.
+ *
+ *  Deliberately a standalone predicate rather than logic inside the assemble functions:
+ *  `setPbrEmissive` statically imports the emissive fragment, so any *static* import of it
+ *  from this always-loaded module bundles that fragment into every glTF scene, emissive or
+ *  not. (It did — 74 scenes carried ~513 B of emissive fragment for ~9 real users.) Callers
+ *  own the conditional `import("../material/pbr/set-emissive.js")`, mirroring how alpha-test
+ *  and the dielectric extensions are gated.
+ *
+ *  `emissiveFactor` multiplies the emissive texture, so [1,1,1] is a no-op WHEN a texture is
+ *  present. With no emissive texture, [1,1,1] is a real full-white emissive that must be
+ *  applied (the glTF default is [0,0,0]) — otherwise the surface renders unlit/dark
+ *  (Material_03). Callers must additionally skip when `props._emissiveColor` is already set:
+ *  KHR_materials_emissive_strength arrives via `extLayers` having already called the setter
+ *  with the strength-scaled value, and that takes precedence over the raw factor. */
+export function needsGltfEmissive(mat: GltfMaterialData, emissiveTexture: Texture2D | undefined): boolean {
+    const ef = mat._emissiveFactor;
+    return !((ef[0] === 0 && ef[1] === 0 && ef[2] === 0) || (!!emissiveTexture && ef[0] === 1 && ef[1] === 1 && ef[2] === 1));
+}
+
 /** Assemble a PbrMaterialProps from parsed glTF material data + already-uploaded
  *  textures + per-ext fragment overrides. Fast-path: no wrapTex, no occlusionOnUv2,
- *  no occlusionTexture. Slow-path additions live in gltf-pbr-builder-ext.ts. */
+ *  no occlusionTexture. Slow-path additions live in gltf-pbr-builder-ext.ts.
+ *  Emissive is applied by the caller — see `needsGltfEmissive`. */
 export function assemblePbrProps(
     mat: GltfMaterialData,
     baseColorTexture: Texture2D,
@@ -84,11 +105,6 @@ export function assemblePbrProps(
     emissiveTexture: Texture2D | undefined,
     extLayers: Partial<PbrMaterialProps> | undefined
 ): PbrMaterialProps {
-    const ef = mat._emissiveFactor;
-    // emissiveFactor multiplies the emissive texture, so [1,1,1] is a no-op WHEN a texture is
-    // present. With no emissive texture, [1,1,1] is a real full-white emissive that must be applied
-    // (the glTF default is [0,0,0]) — otherwise the surface renders unlit/dark (Material_03).
-    const defaultFactor = (ef[0] === 0 && ef[1] === 0 && ef[2] === 0) || (!!emissiveTexture && ef[0] === 1 && ef[1] === 1 && ef[2] === 1);
     const props = {
         baseColorTexture,
         normalTexture,
@@ -107,12 +123,6 @@ export function assemblePbrProps(
         _buildGroup: getPbrGroupBuilder(),
         _uboVersion: 0,
     } as PbrMaterialProps;
-    // Routed through the setter so the emissive ext is registered. KHR_materials_emissive_strength
-    // arrives via `extLayers` and already called the setter with the strength-scaled value, so it
-    // takes precedence over the raw factor here (matching the previous spread ordering).
-    if (!defaultFactor && !props._emissiveColor) {
-        setPbrEmissive(props, [ef[0], ef[1], ef[2]]);
-    }
     return props;
 }
 

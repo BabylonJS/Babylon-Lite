@@ -21,7 +21,7 @@ import type { GltfImageCache, GltfMaterialData, GltfMatExtCtx } from "./gltf-mat
 import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
 import type { DecodedPrimitive, GltfFeature, GltfLoadCtx } from "./gltf-feature.js";
 import type { TextureWrapFn } from "./gltf-pbr-builder.js";
-import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, uploadTex } from "./gltf-pbr-builder.js";
+import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, needsGltfEmissive, uploadTex } from "./gltf-pbr-builder.js";
 import type * as GltfColorNormalize from "./gltf-color-normalize.js";
 import type * as GltfFeatureRegistry from "./gltf-feature-registry.js";
 import type * as GltfPbrBuilderExt from "./gltf-pbr-builder-ext.js";
@@ -619,6 +619,15 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                         ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
                         : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
                     props = assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
+                }
+                // Emissive is opt-in: `setPbrEmissive` statically pulls in the emissive fragment, so
+                // this import must stay conditional or every glTF scene pays for it. Applied here
+                // rather than inside the assemble functions so both the fast and slow paths share
+                // one gate. See `needsGltfEmissive` for the [1,1,1] and emissive-strength rules.
+                if (!props._emissiveColor && needsGltfEmissive(mat, props.emissiveTexture)) {
+                    const { setPbrEmissive } = await import("../material/pbr/set-emissive.js");
+                    const ef = mat._emissiveFactor;
+                    setPbrEmissive(props, [ef[0], ef[1], ef[2]]);
                 }
                 // Alpha-test (MASK) is opt-in: the fragment + feature-bit detection bundle only via
                 // this conditional import, so glTF assets with no MASK materials pay nothing.
