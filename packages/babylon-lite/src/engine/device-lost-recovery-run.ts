@@ -40,9 +40,7 @@ export async function runDeviceLostRecovery(engine: EngineContext, state: Device
 
     // Reapply any installed adapter options (e.g. `xrCompatible` from `enableXrCompatibleAdapter`)
     // so a recovered adapter keeps the XR-compatibility the original engine was created with.
-    const adapter = await runRecoveryStep("requesting a replacement adapter", () =>
-        navigator.gpu.requestAdapter({ powerPreference: "high-performance", ..._getAdapterOptions() })
-    );
+    const adapter = await runRecoveryStep("requesting a replacement adapter", () => navigator.gpu.requestAdapter({ powerPreference: "high-performance", ..._getAdapterOptions() }));
     if (!adapter) {
         throw new Error("WebGPU adapter not available during device recovery");
     }
