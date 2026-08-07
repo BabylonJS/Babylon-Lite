@@ -29,6 +29,10 @@ const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-in
 const BUNDLE_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/manifest.json");
 const MASTER_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/master-manifest.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+/** Scenes whose glTF contains a negative-determinant (mirrored) node — see the winding assertion
+ *  at the end of the per-scene test. 260 is a triangle-strip scene, not a mirrored one. */
+const MIRRORED_NODE_IDS = new Set([257, 266, 269, 280]);
+
 const SCENES = allScenes.filter((s) => {
     // Scene 114 opts out because WebGPU's optional "primitive-index" feature
     // changes which picking chunks the browser fetches across machines.
@@ -226,6 +230,21 @@ for (const scene of SCENES) {
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));
             expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
+        // A scene containing a mirrored (negative-determinant) glTF node must keep the reversed
+        // winding in the bytes it actually fetches. This is a TREE-SHAKING regression guard, and it
+        // has to live here rather than in a parity spec: the winding was once installed by importing
+        // a module purely for its side effect, and a bundler drops such an import because nothing
+        // reads a binding from it. Source builds therefore looked correct while every bundled build
+        // silently rendered mirrored meshes with the un-mirrored winding — which is precisely the
+        // failure this scene set exists to catch, and precisely the one a source-page parity test
+        // cannot see. "cw" is a GPUFrontFace value, so it survives minification verbatim.
+        if (MIRRORED_NODE_IDS.has(scene.id)) {
+            const hasReversedWinding = jsPayloads.some(({ body }) => body.includes('"cw"'));
+            expect(hasReversedWinding, `${scene.slug} contains a mirrored glTF node, so its fetched bundle MUST retain the reversed winding ("cw"); it was tree-shaken away`).toBe(
+                true
+            );
         }
     });
 }

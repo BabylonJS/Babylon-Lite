@@ -2453,5 +2453,16 @@
         "tags": ["lines", "procedural", "update", "thin-instances", "alpha"],
         "skipPerf": true,
         "compatParity": true
+    },
+    {
+        "id": 280,
+        "slug": "scene280-mirrored-doublesided-winding",
+        "name": "Scene 280 — Mirrored Double-Sided Winding",
+        "maxMad": 0.15,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 78.7,
+        "description": "Two double-sided quads under an IBL, one under a negative-scale node so its net world determinant is positive and its triangle winding reversed. A mirrored mesh needs its pipeline frontFace flipped ccw->cw: WebGPU derives front_facing from frontFace, and the double-sided shader flips the shading normal when a fragment is not front-facing, so the wrong winding inverts the outward normal on the visible side and the quad renders black. Regression for BUNDLED builds specifically — the winding used to be installed through a bare side-effect import that the scene bundler tree-shakes away, so only a bundled scene reproduces it.",
+        "tags": ["gltf", "transform", "pbr"],
+        "skipPerf": true
     }
 ]
