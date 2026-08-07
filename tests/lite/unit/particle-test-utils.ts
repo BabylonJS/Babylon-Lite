@@ -22,9 +22,14 @@ export interface ParticleSnapshot {
     cellIndex?: number;
 }
 
-export async function buildNodeParticleGraph(source: unknown, options: BuildNodeParticleOptions = {}, scene = {} as SceneContext): Promise<ParticleSystem> {
+export async function buildNodeParticleGraph(
+    source: unknown,
+    options: BuildNodeParticleOptions = {},
+    scene = {} as SceneContext,
+    engine = {} as EngineContext
+): Promise<ParticleSystem> {
     const graph = parseNodeParticleSource(source);
-    const set = await buildNodeParticleSet({} as EngineContext, scene, graph, options);
+    const set = await buildNodeParticleSet(engine, scene, graph, options);
     return set.systems[0]!;
 }
 

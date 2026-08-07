@@ -3,7 +3,7 @@ import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera
 import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../../packages/babylon-lite/src/math/_matrix-allocator";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import { createParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
-import { particleTextureSourceBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/texture-source-block";
+import { flowMapTextureSourceBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/flow-map-texture-source-block";
 import { updateFlowMapBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-flow-map-block";
 import type { NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { loadNpeTextureContent } from "../../../packages/babylon-lite/src/particle/node/npe-texture-content";
@@ -158,10 +158,8 @@ describe("NPE UpdateFlowMapBlock", () => {
 
     it("builds registry and texture wiring through a parsed graph", async () => {
         const data = new Uint8ClampedArray([255, 128, 128, 255]);
-        vi.stubGlobal(
-            "fetch",
-            vi.fn(async () => ({ ok: true, blob: async () => ({}) }))
-        );
+        const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => ({}) }));
+        vi.stubGlobal("fetch", fetchMock);
         vi.stubGlobal(
             "createImageBitmap",
             vi.fn(async () => ({ width: 1, height: 1, close: vi.fn() }))
@@ -183,7 +181,7 @@ describe("NPE UpdateFlowMapBlock", () => {
                         capacity: 2,
                         inputs: [
                             { name: "particle", targetBlockId: 3, targetConnectionName: "output" },
-                            { name: "texture", targetBlockId: 5, targetConnectionName: "texture" },
+                            { name: "texture", targetBlockId: 2, targetConnectionName: "texture" },
                         ],
                     },
                     {
@@ -199,16 +197,18 @@ describe("NPE UpdateFlowMapBlock", () => {
                     {
                         customType: "BABYLON.ParticleTextureSourceBlock",
                         id: 2,
+                        url: "billboard.png",
                         textureDataUrl: "data:image/png;base64,AA==",
                         invertY: false,
                         inputs: [],
                     },
-                    { customType: "BABYLON.ParticleTextureSourceBlock", id: 5, url: "", invertY: true, inputs: [] },
                 ],
             },
             {},
-            scene
+            scene,
+            { _device: {} } as never
         );
+        expect(fetchMock).toHaveBeenCalledTimes(2);
         const animationStep = vi.fn();
         scene._beforeRender.unshift(animationStep);
         await Promise.all(scene._deferredBuilders.splice(0).map((builder) => builder()));
@@ -274,7 +274,7 @@ describe("NPE UpdateFlowMapBlock", () => {
             },
         } as unknown as NpeBuildContext;
 
-        particleTextureSourceBlock.build(block, ctx);
+        flowMapTextureSourceBlock.build(block, ctx);
 
         expect(output?.(0)).toMatchObject({ url: "data:image/png;base64,AA==", invertY: true });
     });
@@ -295,7 +295,7 @@ describe("NPE UpdateFlowMapBlock", () => {
             },
         } as unknown as NpeBuildContext;
 
-        particleTextureSourceBlock.build(block, ctx);
+        flowMapTextureSourceBlock.build(block, ctx);
 
         expect(output?.(0).url).toBe("");
     });

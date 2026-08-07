@@ -7,6 +7,7 @@ import type { ParticleBuffer } from "../../particle-buffer.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 import { loadNpeTextureContent } from "../npe-texture-content.js";
 import type { NpeTextureContent, NpeTextureValue } from "../npe-value.js";
+import { flowMapTextureSourceBlock } from "./flow-map-texture-source-block.js";
 
 function isTextureValue(value: unknown): value is NpeTextureValue {
     return typeof value === "object" && value !== null && "url" in value;
@@ -30,6 +31,9 @@ function applyFlowMapToParticle(map: NpeTextureContent, matrix: Mat4, scaledStre
 
 /** `UpdateFlowMapBlock` — update particle direction from a projected RGBA flow field. */
 export const updateFlowMapBlock: NpeBlockEvaluator = {
+    dependencyEvaluator(inputName) {
+        return inputName === "flowMap" ? flowMapTextureSourceBlock : undefined;
+    },
     build(block, ctx) {
         const system = ctx.state.system!;
         const buffer = ctx.state.buffer!;

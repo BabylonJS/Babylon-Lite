@@ -452,8 +452,8 @@ For each root:
 - `isLocal` is true only when `systemBlock.serialized.isLocal === true`.
 - `options.emitterWorldMatrix` has precedence over `options.emitter`. The matrix reference is retained, and its indices 12, 13, and 14 are copied into a fresh emitter `Vec3`.
 - Without a matrix, the emitter option or `{ x: 0, y: 0, z: 0 }` is copied into the emitter value and a translation matrix.
-- `scene` and `textureBaseUrl` are carried in `NpeBuildState`. The target block id of the root's `texture` input is stored as `billboardTextureBlockId`; this lets multiple texture-source blocks coexist without a flow-map source replacing the rendered billboard texture.
-- Each root gets its own output map and built-id set.
+- `scene` and `textureBaseUrl` are carried in `NpeBuildState`.
+- Each root gets its own output map and built-key set. Ordinary evaluation uses the block id as its key; a dependency evaluator uses the parsed block object, so one source can be evaluated once in each role without assumptions about numeric id ranges.
 - Build promises are accumulated for the whole set and awaited together after all roots have been traversed.
 
 `CreateParticleBlock` does not create the system. `SystemBlock` does not set capacity or locality; the builder consumes those serialized fields before DFS.
@@ -462,14 +462,14 @@ For each root:
 
 Only blocks reachable by following input connections from a root are built. Detached blocks load no evaluator and allocate no columns.
 
-The asynchronous `buildBlock(id)` algorithm is exact:
+The asynchronous `buildBlock(id, evaluatorOverride?)` algorithm is exact:
 
-1. Return when `id` is already in `built`.
-2. Add `id` to `built` before map lookup.
-3. Return when the map has no block for `id`.
+1. Return when the map has no block for `id`.
+2. Select `id` as the build key for ordinary evaluation or the parsed block object when an evaluator override is supplied; return when that key is already in `built`.
+3. Add the key to `built` before traversing dependencies.
 4. Traverse every connected input named exactly `particle`, in serialized input order.
-5. Traverse every other connected input, in serialized input order.
-6. Select and dynamically import one evaluator.
+5. Use the evaluator override when supplied; otherwise select and dynamically import one evaluator.
+6. Traverse every other connected input in serialized input order, passing any evaluator returned by `evaluator.dependencyEvaluator(input.name)`.
 7. Run `evaluator.build(block, ctx)`.
 
 Marking before recursion terminates cycles. A cycle can still fail when an evaluator asks for an output that has not been installed.
@@ -480,7 +480,7 @@ The output map key is `${blockId}:${connectionName}`. Getter outputs are:
 
 - `output`: `ParticleInputBlock`, `ParticleRandomBlock`, `ParticleMathBlock`, `ParticleLerpBlock`, `ParticleGradientBlock`, `ParticleGradientValueBlock`, `ParticleConditionBlock`, `ParticleFloatToIntBlock`, and `ParticleVectorLengthBlock`.
 - `color`, `xyz`, `xy`, `zw`, `x`, `y`, `z`, and `w`: `ParticleConverterBlock`.
-- `texture`: `ParticleTextureSourceBlock`.
+- `texture`: the flow-map dependency evaluator for `ParticleTextureSourceBlock`.
 
 `SystemBlock`, `CreateParticleBlock`, all six shape classes, `SetupSpriteSheetBlock`, `BasicSpriteUpdateBlock`, and all seven update classes install no getter output. Their `particle` connections control reachability and ordering only. Update blocks do not publish flow outputs.
 
@@ -523,7 +523,7 @@ Variant selection uses serialized data and connection identity:
 
 ### 7.5 Asynchronous texture work
 
-Texture evaluators add promises to the shared build-promise array. The builder traverses every root, then awaits `Promise.all(buildPromises)`, and returns the set. It does not run a texture-resolution pass or call a `_resolveTexture` hook. The billboard texture source schedules its GPU upload, while UpdateFlowMap schedules CPU decoding of its connected source. Both must settle before the set is returned.
+Texture evaluators add promises to the shared build-promise array. The builder traverses every root, then awaits `Promise.all(buildPromises)`, and returns the set. It does not run a texture-resolution pass. The ordinary billboard texture evaluator schedules its GPU upload, while the flow-map dependency evaluator publishes a CPU-readable value and UpdateFlowMap schedules its decoding. Both must settle before the set is returned.
 
 ## 8. Values and sources
 
@@ -906,13 +906,11 @@ The block installs scalar `output`: `abs(value)` for a scalar, Euclidean length 
 
 ### 9.20 ParticleTextureSourceBlock
 
-The raw source is a nonempty string `serialized.textureDataUrl` when present, otherwise string `serialized.url`, otherwise the empty string. Explicit schemes are accepted only for `http`, `https`, `data`, and `blob`; an unsupported scheme produces an empty resolved URL. A source is absolute when it has an accepted scheme, starts with `//`, or starts with `/`. When a nonempty source is relative and `textureBaseUrl` exists, `new URL(rawUrl, base).href` resolves it.
+The ordinary evaluator retains billboard-only behavior. It reads string `serialized.url` or the empty string, treats HTTP(S), protocol-relative, and root-relative URLs as absolute, and resolves any other nonempty source against `textureBaseUrl` when supplied. It schedules `loadTexture2D` with `{ invertY: !(serialized.invertY !== false) }`, stores the result on `system.texture`, and catches load failures.
 
-`serialized.invertY` defaults to true by testing `!== false`. The block installs `texture`, returning one `NpeTextureValue` containing the resolved URL and block invert-Y value.
+`UpdateFlowMapBlock.dependencyEvaluator("flowMap")` selects a separate evaluator from the same lazy flow-map chunk. That evaluator gives `textureDataUrl` precedence over `url`, accepts only explicit `http`, `https`, `data`, and `blob` schemes, resolves relative URLs against `textureBaseUrl`, and installs `texture` as an `NpeTextureValue`. It performs no GPU upload.
 
-When the block id equals `NpeBuildState.billboardTextureBlockId`, it also schedules the GPU load. The texture loader receives the opposite value, `{ invertY: !blockInvertY }`. Other loader options retain `loadTexture2D` defaults: mipmaps enabled, repeat addressing on U and V, linear minification and magnification, non-sRGB storage, and no alpha premultiplication. The asynchronous result is stored on `system.texture`. Any rejection is caught and leaves the current texture unchanged, normally `null`.
-
-Other texture sources do not load a GPU texture merely by being built. A CPU consumer such as UpdateFlowMap uses the output value and its own lazy decoder. A single source may feed both the system texture and a CPU consumer; the GPU load and shared CPU decode then both occur without either texture role replacing the other.
+The ordinary and dependency roles use distinct built keys. A single serialized source can therefore feed both the system texture and a flow-map input: ordinary evaluation uploads the billboard texture once, dependency evaluation publishes the CPU value once, and neither role replaces the other.
 
 ### 9.21 SetupSpriteSheetBlock
 
@@ -1208,12 +1206,12 @@ Current tracked measurements are:
 
 | Scene | Runtime raw | Runtime gzip | Ignored graph payload raw |   Ceiling |
 | ----- | ----------: | -----------: | ------------------------: | --------: |
-| 262   |   `40.2 KB` |    `24.3 KB` |                 `28.5 KB` | `44.1 KB` |
-| 263   |   `42.3 KB` |    `24.9 KB` |                 `27.5 KB` | `44.1 KB` |
-| 264   |   `40.4 KB` |    `26.1 KB` |                 `34.4 KB` | `44.1 KB` |
-| 276   |   `44.5 KB` |    `25.4 KB` |                 `27.1 KB` | `45.0 KB` |
-| 277   |   `42.2 KB` |    `25.5 KB` |                 `29.8 KB` | `45.0 KB` |
-| 280   |   `43.1 KB` |    `26.3 KB` |                 `31.0 KB` | `45.0 KB` |
+| 262   |   `39.9 KB` |    `24.2 KB` |                 `28.5 KB` | `44.1 KB` |
+| 263   |   `42.0 KB` |    `24.7 KB` |                 `27.5 KB` | `44.1 KB` |
+| 264   |   `40.2 KB` |    `26.0 KB` |                 `34.4 KB` | `44.1 KB` |
+| 276   |   `44.2 KB` |    `25.3 KB` |                 `27.1 KB` | `45.0 KB` |
+| 277   |   `41.9 KB` |    `25.4 KB` |                 `29.8 KB` | `45.0 KB` |
+| 280   |   `43.2 KB` |    `26.4 KB` |                 `31.0 KB` | `45.0 KB` |
 
 Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, and 280 as sprite users because particles render through billboard sprite modules.
 
@@ -1268,6 +1266,7 @@ packages/babylon-lite/src/particle/node/blocks/cone-shape-local-block.ts
 packages/babylon-lite/src/particle/node/blocks/create-particle-block.ts
 packages/babylon-lite/src/particle/node/blocks/cylinder-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/cylinder-shape-local-block.ts
+packages/babylon-lite/src/particle/node/blocks/flow-map-texture-source-block.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-local-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-condition-block.ts

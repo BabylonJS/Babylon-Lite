@@ -64,11 +64,17 @@ describe("Particle bundle feature isolation", () => {
                 .map((module) => module.id ?? "")
                 .filter(
                     (id) =>
-                        /particle\/node\/(npe-registry-(extra-remaining|extra-values|local-shapes)|npe-(local-position|texture-content)|blocks\/(system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|update-(attractor|flow-map)-block|(box|point|sphere|cone|cylinder|mesh)-shape-local))|math\/mat4-invert/.test(
+                        /particle\/node\/(npe-registry-(extra-remaining|extra-values|local-shapes)|npe-(local-position|texture-content)|blocks\/(flow-map-texture-source-block|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|update-(attractor|flow-map)-block|(box|point|sphere|cone|cylinder|mesh)-shape-local))|math\/mat4-invert/.test(
                             id
                         ) &&
                         !(sceneId === 277 && (id.includes("npe-registry-extra-remaining") || id.includes("update-attractor-block"))) &&
-                        !(sceneId === 280 && (id.includes("npe-registry-extra-remaining") || id.includes("update-flow-map-block") || id.includes("npe-texture-content")))
+                        !(
+                            sceneId === 280 &&
+                            (id.includes("npe-registry-extra-remaining") ||
+                                id.includes("update-flow-map-block") ||
+                                id.includes("flow-map-texture-source-block") ||
+                                id.includes("npe-texture-content"))
+                        )
                 );
             expect(moduleOffenders, `scene${sceneId} folds unused optional particle features into runtime chunks`).toEqual([]);
         }
