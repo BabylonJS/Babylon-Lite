@@ -1,4 +1,4 @@
-// Scene 280 — Mirrored Double-Sided Winding (bundled-build regression).
+// Scene 168 — Mirrored Double-Sided Winding (bundled-build regression).
 //
 // Two identical double-sided quads under an IBL: one with a plain transform, one under a
 // negative-scale node. The negative scale makes the mirrored quad's net world determinant

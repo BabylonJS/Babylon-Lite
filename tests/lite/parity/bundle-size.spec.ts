@@ -31,7 +31,7 @@ const MASTER_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/mast
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
 /** Scenes whose glTF contains a negative-determinant (mirrored) node — see the winding assertion
  *  at the end of the per-scene test. 260 is a triangle-strip scene, not a mirrored one. */
-const MIRRORED_NODE_IDS = new Set([257, 266, 269, 280]);
+const MIRRORED_NODE_IDS = new Set([168, 257, 266, 269]);
 
 const SCENES = allScenes.filter((s) => {
     // Scene 114 opts out because WebGPU's optional "primitive-index" feature

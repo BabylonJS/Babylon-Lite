@@ -1,4 +1,4 @@
-// BJS reference for scene 280 — two double-sided quads, one under a negative-scale node.
+// BJS reference for Scene 168 — two double-sided quads, one under a negative-scale node.
 //
 // Babylon.js handles the mirrored node by flipping the material's sideOrientation, so both quads
 // shade identically. That is what makes this a useful golden: a build that fails to reverse the

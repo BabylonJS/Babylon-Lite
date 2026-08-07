@@ -1,5 +1,5 @@
 /**
- * Scene 280 — Mirrored Double-Sided Winding Parity Test.
+ * Scene 168 — Mirrored Double-Sided Winding Parity Test.
  *
  * Two identical double-sided quads under an IBL, one of them under a negative-scale node so its
  * net world determinant is positive and its triangle winding reversed relative to the loader's
@@ -27,19 +27,19 @@ import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(280);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene280-mirrored-doublesided-winding");
+const sceneConfig = getSceneConfig(168);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene168-mirrored-doublesided-winding");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 280 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 168 skipped via skipParity in scene-config.json");
 
-test("Scene 280 — mirrored double-sided winding matches Babylon.js reference", async ({ page }, testInfo) => {
+test("Scene 168 — mirrored double-sided winding matches Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
 
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 280, timeout: 120_000 });
+    await captureGolden(browser, { sceneId: 168, timeout: 120_000 });
 
-    await page.goto("/scene280.html");
+    await page.goto("/scene168.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 
