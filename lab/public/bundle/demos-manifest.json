@@ -54,5 +54,9 @@
   "racer": {
     "rawKB": 200.6,
     "gzipKB": 77
+  },
+  "screen-space-effects": {
+    "rawKB": 126.3,
+    "gzipKB": 44.4
   }
 }

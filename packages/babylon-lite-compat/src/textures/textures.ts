@@ -481,7 +481,10 @@ export class DynamicTexture extends BaseTexture {
  * rather than as a standalone GPU texture object. This compat `CubeTexture`
  * therefore acts as a lightweight handle that records the environment URL; the
  * actual GPU work happens when it is assigned to `scene.environmentTexture` and
- * the engine starts (see `Scene` env handling).
+ * the engine starts (see `Scene` env handling). It still extends
+ * {@link BaseTexture} to match the Babylon.js class hierarchy, so it can appear
+ * in `BaseTexture[]` surfaces such as `Material.getActiveTextures()`; because the
+ * environment has no standalone Lite handle, `getInternalTexture()` stays `null`.
  */
 export class CubeTexture extends BaseTexture {
     /** Source URL of the (prefiltered) environment. */

@@ -63,7 +63,7 @@ describe("CSM refit gate", () => {
         expect(gate.isDynamic(caster)).toBe(true);
     });
 
-    it("forces a refit after angular drift or the configured drift interval", () => {
+    it("forces a refit after angular drift or the configured wall-time interval", () => {
         const caster = { worldMatrixVersion: 1 };
         const angleGate = createCsmRefitGate<MutableCaster>({ refitAngle: 0.1, refitMaxIntervalMs: 0, demoteQuietFrames: 100 });
         angleGate.syncCasters([caster]);
@@ -114,6 +114,31 @@ describe("CSM refit gate", () => {
                 -1,
                 0,
                 10,
+                false,
+                false,
+                () => undefined,
+                () => undefined
+            ).refit
+        ).toBe(true);
+
+        expect(
+            intervalGate.update(
+                0.02,
+                -1,
+                0,
+                19,
+                false,
+                false,
+                () => undefined,
+                () => undefined
+            ).refit
+        ).toBe(false);
+        expect(
+            intervalGate.update(
+                0.02,
+                -1,
+                0,
+                20,
                 false,
                 false,
                 () => undefined,
