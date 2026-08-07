@@ -1,5 +1,5 @@
 {
-  "rawKB": 79.3,
+  "rawKB": 79.2,
   "gzipKB": 33.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,12 +8,12 @@
     "scene20-cubemap-skybox-material-B495OxWx.js",
     "scene20-emissive-fragment-B_pIHOBu.js",
     "scene20-ibl-fragment-CeRrvT96.js",
-    "scene20-pbr-renderable-CwSiZmYB.js",
+    "scene20-pbr-renderable-Byc5QHpF.js",
     "scene20-rgbd-decode-ChiiPMbr.js",
     "scene20-scene-uniforms-FTYH6Ct0.js",
     "scene20-singlelight-hemispheric-wgsl-C-TDyaB0.js",
     "scene20-wgsl-helpers-BgB2AJrF.js",
     "scene20.js"
   ],
-  "rawBytes": 81157
+  "rawBytes": 81150
 }

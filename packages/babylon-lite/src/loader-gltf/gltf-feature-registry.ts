@@ -27,6 +27,8 @@ type Loader = () => Promise<{ default: GltfFeature }>;
 type Trigger = string | ((json: any) => boolean);
 
 const M = "KHR_materials_";
+/** Shared with the primitive-topology trigger below, which must exclude these primitives. */
+const GS = "KHR_gaussian_splatting";
 
 const _features: [Trigger, Loader][] = [
     // Pre-parse features (buffer-level): order matters — meshopt decompresses
@@ -58,11 +60,16 @@ const _features: [Trigger, Loader][] = [
     // Non-triangle primitive topology (POINTS/LINES/LINE_STRIP/TRIANGLE_STRIP) or a
     // negative-determinant node (negative scale / mirrored matrix): both need the lazy primitive
     // feature (topology threading + winding reversal). Triangle-list positive-winding never triggers.
-    [(j) => hasNegDetNode(j) || anyPrimitive(j, (p) => p.mode !== undefined && p.mode !== 4), () => import("./gltf-feature-primitive.js")],
+    //
+    // Gaussian-splatting primitives are POINTS-mode by definition, but the GS feature consumes them
+    // into a GaussianSplattingMesh with its own pipeline, so they never reach the PBR pipeline that
+    // reads the primitive state — loading the feature for them fetches a chunk nothing then reads.
+    // A GS asset that ALSO carries a genuinely exotic primitive, or a mirrored node, still triggers.
+    [(j) => hasNegDetNode(j) || anyPrimitive(j, (p) => p.mode !== undefined && p.mode !== 4 && !p.extensions?.[GS]), () => import("./gltf-feature-primitive.js")],
     // Per-asset features
     [hasGltfExtras, () => import("./gltf-feature-extras.js")],
     ["KHR_lights_punctual", () => import("./gltf-feature-lights-punctual.js")],
-    ["KHR_gaussian_splatting", () => import("./gltf-feature-gaussian-splatting.js")],
+    [GS, () => import("./gltf-feature-gaussian-splatting.js")],
     ["EXT_lights_image_based", () => import("./gltf-ext-lights-image-based.js")],
     [(j) => !!j.animations?.length, () => import("./gltf-feature-animations.js")],
     // Non-Float32 / normalized animation sampler accessors (e.g. Animation_SamplerType normalized
@@ -96,14 +103,10 @@ export async function runGltfMaterialFeatures(mat: GltfMaterialData, features: G
 
 function hasGltfExtras(json: any): boolean {
     const hasExtras = (item: any): boolean => item?.extras !== undefined;
-    return (
-        hasExtras(json.asset) ||
-        !!json.nodes?.some(hasExtras) ||
-        !!json.materials?.some(hasExtras) ||
-        !!json.animations?.some(hasExtras) ||
-        !!json.meshes?.some(hasExtras) ||
-        anyPrimitive(json, hasExtras)
-    );
+    // One flattened scan rather than a chain of `?.some()` per collection: this predicate rides in a
+    // chunk almost every glTF scene fetches, and the chain costs ~34 more bytes there. `flat()`
+    // leaves a missing collection as a single `undefined` element, which `hasExtras` reads as false.
+    return [json.asset, json.nodes, json.materials, json.animations, json.meshes].flat().some(hasExtras) || anyPrimitive(json, hasExtras);
 }
 
 /** True if any animation sampler reads a non-Float32 input/output accessor (normalized BYTE/SHORT

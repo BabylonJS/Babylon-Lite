@@ -47,22 +47,11 @@ export function _installPbrFallbackResolver(resolve: (engine: EngineContext) => 
     _pbrFallbackResolver = resolve;
 }
 
-/** Primitive-state resolver, installed only by the glTF primitive feature (non-triangle topology
- *  or negative-winding meshes). Module-local with a single exported setter: when no such mesh is in
- *  the bundle the setter tree-shakes, the bundler proves this is always null, and the
- *  `_primitiveResolver ? … : { topology: "triangle-list", … }` ternary below folds to the plain
- *  triangle-list default — every triangle-list PBR scene (e.g. BoomBox) stays byte-identical. */
-let _primitiveResolver: ((meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState) | null = null;
-/** @internal Install the primitive-state resolver (called by the glTF primitive feature). */
-export function _installPbrPrimitiveResolver(resolve: (meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState): void {
-    _primitiveResolver = resolve;
-}
-
 /** Reverse-winding hook, installed only by the WebXR module. Flips a pipeline's `frontFace`
  *  (ccw↔cw) for reverse-winding targets. Module-local with a single exported setter: non-XR
  *  bundles never call the setter, so the bundler proves this is always null, the
- *  `_reverseWindingHook && sig._reverseWinding ? … : primitive` guard below folds to the plain
- *  `primitive`, and every non-XR scene stays byte-identical. */
+ *  `_reverseWindingHook && sig._reverseWinding ? … : primitive` guard below folds to the
+ *  plain `ComposedShader._prim` path, and every non-XR scene stays byte-identical. */
 let _reverseWindingHook: ((primitive: GPUPrimitiveState) => GPUPrimitiveState) | null = null;
 /** @internal Install the reverse-winding frontFace-flip hook (called by the WebXR module). */
 export function _installPbrReverseWindingHook(hook: (primitive: GPUPrimitiveState) => GPUPrimitiveState): void {
@@ -164,7 +153,7 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
     }
 
     const device = engine._device;
-    const { _features: features, _features2: features2, _composed: composed, _meshFeatures: meshFeatures } = bindings;
+    const { _features: features, _features2: features2, _composed: composed } = bindings;
     const esmShadowOutput = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0;
     const hasAlpha = !esmShadowOutput && (features & PBR_HAS_ALPHA_BLEND) !== 0;
     const hasDoubleSided = (features & PBR_HAS_DOUBLE_SIDED) !== 0;
@@ -214,17 +203,13 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
         // target's apparent winding is reversed. When the WebXR module installs the hook for a reverse-winding
         // target it flips frontFace (composing with any per-mesh mirrored winding) to keep front faces visible
         // and double-sided front_facing normals correct. In non-XR bundles the hook is provably null, so this
-        // whole ternary collapses to its else-branch — byte-identical to the plain resolver expression.
+        // whole ternary collapses to its else-branch — byte-identical to master's plain `_prim` expression.
+        // `topology` and `frontFace` remain omitted from the ordinary state so WebGPU supplies its defaults;
+        // non-default topology, strip index format, or mirrored winding arrives through `composed._prim`.
         primitive:
             _reverseWindingHook && sig._reverseWinding
-                ? _reverseWindingHook(
-                      _primitiveResolver
-                          ? _primitiveResolver(meshFeatures, hasDoubleSided)
-                          : { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" }
-                  )
-                : _primitiveResolver
-                  ? _primitiveResolver(meshFeatures, hasDoubleSided)
-                  : { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },
+                ? _reverseWindingHook({ cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", ...composed._prim })
+                : { cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", ...composed._prim },
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;

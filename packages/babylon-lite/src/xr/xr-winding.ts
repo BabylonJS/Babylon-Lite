@@ -4,7 +4,7 @@ import { _installReverseWindingKeyHook } from "../engine/render-target.js";
 import { _installReverseWindingSig } from "../frame-graph/render-task.js";
 
 /** Flip a pipeline's `frontFace` (ccw↔cw), composing with any per-mesh mirrored winding already
- *  chosen by the primitive resolver. XR eye targets render the scene's right-handed view/projection
+ *  carried by the composed shader's primitive state. XR eye targets render the scene's right-handed view/projection
  *  matrices verbatim through Lite's left-handed rasterizer; that handedness flip inverts apparent
  *  triangle winding, so forward pipelines targeting an eye RT flip `frontFace` (not the cull face,
  *  which would leave `@builtin(front_facing)` — and thus double-sided shading normals — evaluated
