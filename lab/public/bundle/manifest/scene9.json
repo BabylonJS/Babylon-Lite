@@ -5,13 +5,13 @@
   "runtimeChunks": [
     "scene9-generate-mipmaps-xw5BdfZd.js",
     "scene9-normal-map-fragment-EnSQYVZ8.js",
-    "scene9-point-light-ESYN5_k0.js",
-    "scene9-standard-renderable-bPKOb5Yt.js",
+    "scene9-point-light-DVgbysEy.js",
+    "scene9-standard-renderable-3vbHBG0q.js",
     "scene9-std-ambient-fragment-BT8qGSob.js",
     "scene9-std-opacity-fragment-Dwz7NrjB.js",
     "scene9-std-reflection-fragment-Cb2Nq9Do.js",
     "scene9-std-specular-fragment-lgpgl8DR.js",
     "scene9.js"
   ],
-  "rawBytes": 61964
+  "rawBytes": 61985
 }

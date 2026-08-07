@@ -1,6 +1,6 @@
 import {
     addToScene,
-    createDefaultCamera,
+    createArcRotateCamera,
     createEngine,
     createPlane,
     createSceneContext,
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
 
     addPanel(engine, scene, -1.65, false);
     addPanel(engine, scene, 1.65, true);
-    createDefaultCamera(scene);
+    scene.camera = createArcRotateCamera(0, Math.PI / 2, 1, { x: 0, y: 0, z: 0 });
 
     await registerScene(scene);
     await startEngine(engine);

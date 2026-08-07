@@ -185,13 +185,27 @@ export interface PbrMaterialProps extends Material {
      *  values steepen the falloff (saturating closer to the model silhouette), giving
      *  crisper visible edges. Mathematically: `alpha = saturate((1 - shadowFactor) * falloff) * opacity`. */
     shadowOnlyFalloff?: number;
-    /** @internal True when any of the material's textures carries `_hasTx=true`
-     *  (KHR_texture_transform). Stamped once by the glTF loader's slow path
-     *  so the renderer doesn't re-scan 5 textures per mesh. */
+    /** @internal True when UV-transform support is enabled. Stamped by the glTF loader
+     *  and by `enableMaterialUvTransform` for hand-built materials. */
     _hasUvTx?: boolean;
     /** Optional stencil-test state baked into the main-pass pipeline. Lets this material write the stencil buffer
      *  where it draws (mask) or discard where another material wrote it. Default none. See `StencilState`. */
     stencil?: StencilState;
+}
+
+/** Opt a PBR material into the per-texture UV transform machinery ahead of need.
+ *
+ *  Call this before the first build for hand-created materials that use or animate
+ *  `uScale`/`vScale`/`uAng`/`uOffset`/`vOffset`. Pair later mutations with
+ *  `markMaterialUboDirty`. glTF materials are enabled automatically by the loader.
+ *
+ *  Returns `true` when the material has not been built yet, so the flag simply rides the first
+ *  build. Returns `false` when the material's feature set was already compiled: the flag is set,
+ *  but applying it needs `rebuildMaterial(scene, material)` — the designed path for post-build
+ *  feature changes — or nothing visible happens. */
+export function enableMaterialUvTransform(material: PbrMaterialProps): boolean {
+    material._hasUvTx = true;
+    return (material as { _renderFeatures?: unknown })._renderFeatures === undefined;
 }
 
 /** @internal Compute PBR material-only feature bits. Mesh/pass bits are added per renderable. */
@@ -228,7 +242,7 @@ export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: 
             features2 |= d.f2;
         }
     }
-    if ((mat as { _hasUvTx?: boolean })._hasUvTx) {
+    if (mat._hasUvTx) {
         features2 |= PBR2_HAS_UV_TRANSFORM;
     }
     // Per-channel UV set selection (glTF texCoord). `_uv2Mask` is precomputed once at glTF build

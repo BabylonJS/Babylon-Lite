@@ -47,15 +47,6 @@ export class ClusteredLightContainer {
 }
 
 // ─── Particles ───────────────────────────────────────────────────────
-export class ParticleSystem {
-    public constructor() {
-        unsupported(
-            "ParticleSystem",
-            "Babylon Lite backs serialized Node Particle Editor graphs via `NodeParticleSystemSet` (`Parse`/`ParseFromSnippetAsync` → `buildAsync` → `start`), not the imperative classic `ParticleSystem` construction API (emitters, over-lifetime gradients, `minEmitBox`)."
-        );
-    }
-}
-
 export class GPUParticleSystem {
     public constructor() {
         unsupported(
@@ -88,12 +79,6 @@ export class GlowLayer {
 }
 
 // ─── Mesh-attached renderers / projectors ────────────────────────────
-export class LinesMesh {
-    public constructor() {
-        unsupported("LinesMesh", "Line meshes are not implemented in Babylon Lite.");
-    }
-}
-
 export class GreasedLineMesh {
     public constructor() {
         unsupported("GreasedLineMesh", "Greased-line meshes are not implemented in Babylon Lite.");

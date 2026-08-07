@@ -20,6 +20,7 @@ export type { NullEngineOptions } from "./engine/null-engine.js";
 export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings } from "./engine/gpu-task-timing.js";
 export type { RenderTaskGpuTiming, RenderTaskGpuTimings, RenderTaskGpuTimingStatus } from "./engine/gpu-task-timing.js";
 export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./engine/surface.js";
+export { enableSurfaceResizeObserver } from "./engine/enable-surface-resize-observer.js";
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
 export { captureScreenshot } from "./engine/screenshot.js";
 export type { Screenshot } from "./engine/screenshot.js";
@@ -221,6 +222,8 @@ export {
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
 export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
+export { createLineSystemData, createLineSystem, createLines, updateLineSystem } from "./mesh/create-line-system.js";
+export type { LineSystemData, LineSystemDataOptions, LineSystemOptions, LinesOptions, LineSystemUpdateOptions } from "./mesh/create-line-system.js";
 export { getMeshGeometry } from "./mesh/get-mesh-geometry.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
@@ -285,11 +288,14 @@ export {
     setShaderMatrix,
 } from "./material/shader/shader-material.js";
 export { enableShaderUniformRangeUpdates } from "./material/shader/shader-uniform-range.js";
+export { enableShaderMaterialUniformCaching } from "./material/shader/enable-shader-material-uniform-caching.js";
 export { createShaderNoColorMaterialView } from "./material/shader/no-color-view.js";
 export { createShaderNormalMaterialView } from "./material/shader/normal-view.js";
 export type { ShaderNormalViewConfig } from "./material/shader/normal-view.js";
 export { createGridMaterial } from "./material/grid/grid-material.js";
 export type { GridMaterialOptions, GridVec3 } from "./material/grid/grid-material.js";
+export { createLineMaterial, setLineMaterialColor } from "./material/line/line-material.js";
+export type { LineMaterial, LineMaterialOptions } from "./material/line/line-material.js";
 export { createPbrNoColorMaterialView } from "./material/pbr/no-color-view.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
 export { loadNodeBlockEmitterWithGeometry } from "./material/node/node-geometry-block-loader.js";
@@ -299,6 +305,7 @@ export { createMaterialView } from "./material/material-view.js";
 export { getMaterialFamily } from "./material/material-family.js";
 export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
+export { enableMaterialUvTransform } from "./material/pbr/pbr-material.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
 export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
@@ -357,6 +364,8 @@ export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-sh
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
 export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
+export { enableCsmStaticCache } from "./shadow/enable-csm-static-cache.js";
+export { createCsmRefitGate } from "./shadow/csm-refit-gate.js";
 export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.js";
 export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
 export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
@@ -467,6 +476,7 @@ export {
     setThinInstanceLodPartner,
     clearThinInstanceLodPartner,
 } from "./mesh/thin-instance.js";
+export { enableThinInstanceWorldBounds } from "./mesh/enable-thin-instance-world-bounds.js";
 export {
     addHierarchyInstance,
     createHierarchyInstancePool,
@@ -530,6 +540,8 @@ export type { EsmDirectionalShadowGeneratorConfig } from "./shadow/esm-direction
 export type { PcfSpotlightShadowGeneratorConfig } from "./shadow/pcf-spotlight-shadow-generator.js";
 export type { PcfDirectionalShadowGeneratorConfig } from "./shadow/pcf-directional-shadow-generator.js";
 export type { CsmDirectionalShadowGeneratorConfig } from "./shadow/csm-directional-shadow-generator.js";
+export type { CsmStaticCacheOptions } from "./shadow/enable-csm-static-cache.js";
+export type { CsmRefitCaster, CsmRefitDecision, CsmRefitGate, CsmRefitGateOptions } from "./shadow/csm-refit-gate.js";
 export type { AnimationController } from "./skeleton/skeleton-updater.js";
 export type { AnimationGroup, TargetedAnimation } from "./animation/animation-group.js";
 export type { AnimationManager, AnimationManagerOptions } from "./animation/animation-manager.js";

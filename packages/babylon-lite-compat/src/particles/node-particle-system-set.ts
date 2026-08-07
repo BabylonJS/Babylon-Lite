@@ -17,16 +17,16 @@
  * stops emission via `stopParticleSystem`.
  *
  * The graph-authoring surface (programmatic blocks, `serialize`, `editAsync`,
- * `getBlockByName`) and the per-system imperative BJS `ParticleSystem` API
- * (`system.animate` / `updateSpeed` / `particleTexture`) are **not** backed: Lite
- * consumes a serialized graph and exposes a fused struct-of-arrays runtime with no
- * BJS-shaped per-system object, so those members throw `LiteCompatError`.
+ * `getBlockByName`) is **not** backed: Lite consumes a serialized graph and
+ * exposes no block-construction API. The per-system runtime handles
+ * (`ParticleSystemSet.systems[i]`) are backed — see {@link ParticleSystem}.
  */
 
 import { parseNodeParticleSetFromSnippet, registerNodeParticleSet, stopParticleSystem } from "babylon-lite";
 import type { NodeParticleSet as LiteNodeParticleSet } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
+import { ParticleSystem } from "./particle-system.js";
 import { unsupported } from "../error.js";
 
 /**
@@ -42,35 +42,69 @@ export class ParticleSystemSet {
     public _scene: Scene | null = null;
 
     private _started = false;
+    /** @internal Cached per-system wrappers (stable identity across `systems` reads). */
+    private _systems: ParticleSystem[] | null = null;
 
     public getClassName(): string {
         return "ParticleSystemSet";
     }
 
     /**
-     * Babylon.js `ParticleSystemSet.systems` — the array of per-system
-     * `ParticleSystem` handles. Not backed: Lite's node-particle runtime is a fused
-     * struct-of-arrays simulation with no per-system BJS `ParticleSystem` object to
-     * expose. Drive the set as a whole via {@link start} instead.
+     * Babylon.js `ParticleSystemSet.systems` — the per-system {@link ParticleSystem}
+     * handles. Each wraps one Lite `NodeParticleSet.systems[i]`, exposing the
+     * runtime subset Lite backs (`start` / `animate` / `stop` / `updateSpeed` /
+     * `particleTexture`). An empty (directly-constructed) set has no systems.
      */
-    public get systems(): never {
-        return unsupported(
-            "ParticleSystemSet.systems",
-            "Babylon Lite's node-particle runtime is a fused struct-of-arrays simulation and exposes no per-system BJS ParticleSystem handle. Start/stop the whole set via `set.start()` / `set.dispose()`."
-        );
+    public get systems(): ParticleSystem[] {
+        if (!this._lite || !this._scene) {
+            return [];
+        }
+        if (!this._systems) {
+            const scene = this._scene;
+            this._systems = this._lite.systems.map((s) => {
+                const system = ParticleSystem._fromLite(s, scene);
+                // Wrappers materialized after set-level registration must not build a
+                // second billboard for a system Lite already renders.
+                if (this._started) {
+                    system._releaseBillboardToSet();
+                }
+                return system;
+            });
+        }
+        return this._systems;
     }
 
     /**
      * Babylon.js `ParticleSystemSet.start()` — begin all systems. Forwards to Lite
      * `registerNodeParticleSet`, which renders each system as a camera-facing
      * billboard and advances it once per frame. Idempotent.
+     *
+     * Per-system wrapper state (`systems[i].particleTexture`) is pushed onto the
+     * backing Lite systems first, so the standard
+     * `set.systems[i].particleTexture = texture; set.start()` sequence renders with
+     * the assigned texture rather than the graph's. Registration is deferred to
+     * engine start (`scene._deferAdd`, which runs after the scene's pending texture
+     * loads settle) because a compat `Texture` resolves its GPU handle
+     * asynchronously and Lite's billboard build needs it.
      */
     public start(): void {
         if (this._started || !this._lite || !this._scene) {
             return;
         }
         this._started = true;
-        registerNodeParticleSet(this._scene._lite, this._lite, { autoStart: true });
+        const scene = this._scene;
+        const lite = this._lite;
+        // Claim billboard rendering synchronously so an already-scheduled per-system
+        // build (from `systems[i].start()`) is skipped when the deferred adds flush.
+        for (const system of this._systems ?? []) {
+            system._releaseBillboardToSet();
+        }
+        scene._deferAdd(() => {
+            for (const system of this._systems ?? []) {
+                system._bindTexture();
+            }
+            registerNodeParticleSet(scene._lite, lite, { autoStart: true });
+        });
     }
 
     /**

@@ -4,9 +4,9 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene216-pbr-fog-wgsl-BuLKZvgv.js",
-    "scene216-pbr-renderable-DFIFpTaO.js",
+    "scene216-pbr-renderable-DWowxT0w.js",
     "scene216-singlelight-hemispheric-wgsl-D6t-GAaw.js",
     "scene216.js"
   ],
-  "rawBytes": 55575
+  "rawBytes": 55596
 }

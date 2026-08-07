@@ -39,6 +39,13 @@ export interface VatBakeOptions {
      *  item, a muzzle, an FX socket). Bone index = position in the skeleton's joint list = the bone's row
      *  block in the baked texture. See {@link VatBakeResult.boneOrigins}. */
     readonly captureBoneOrigins?: readonly number[];
+    /** Bone indices whose complete posed SKINNING MATRIX should be captured per baked frame — the rigid
+     *  attachment case, where the attached geometry must inherit the bone's rotation and scale, not only its
+     *  origin (a saddle, a socketed mesh, a plate rigidly weighted to one joint). Bone index = position in
+     *  the skeleton's joint list = the bone's row block in the baked texture. Captured during the same
+     *  CPU-only evaluation that fills the texture, so no clip has to be re-seeked afterwards. See
+     *  {@link VatBakeResult.boneMatrices}. */
+    readonly captureBoneMatrices?: readonly number[];
 }
 
 /** One mesh in a batched VAT bake, with optional per-mesh capture extras. */
@@ -60,6 +67,13 @@ export interface VatBakeResult {
      *  Lets a caller attach geometry to a moving joint (a carried prop, a socketed effect) without a live
      *  skeleton. */
     readonly boneOrigins?: Record<number, Float32Array>;
+    /** Present only when `captureBoneMatrices` was passed: bone index → that bone's skinning matrix per baked
+     *  frame, as `frameCount * 16` column-major floats (frame `row` at offset `row * 16`, matching the texture
+     *  rows / `clips[].fromRow`). Each matrix is the exact 16 floats the baked texture holds for that bone on
+     *  that row, so a consumer can attach rigid geometry to a joint — `instance · mesh.world · boneMatrix · p`
+     *  — and stay in lockstep with what the VAT vertex path renders. A requested index outside the skeleton's
+     *  bone range is absent from the record. */
+    readonly boneMatrices?: Record<number, Float32Array>;
     /** @internal Shared ownership record used when byte-identical sibling bakes reuse one texture. */
     readonly _textureResource: { readonly texture: GPUTexture; _refCount?: number };
 }
@@ -112,7 +126,7 @@ function bindingOf(group: AnimationGroup, mesh: Mesh): SkeletonBinding | undefin
  * @param opts   - Optional extras to capture during the bake (e.g. per-frame bone origins).
  */
 export function bakeVat(engine: EngineContext, mesh: Mesh, groups: AnimationGroup[], opts?: VatBakeOptions): VatBakeResult {
-    return bakeVatMany(engine, [{ mesh, captureBoneOrigins: opts?.captureBoneOrigins }], groups)[0]!;
+    return bakeVatMany(engine, [{ mesh, captureBoneOrigins: opts?.captureBoneOrigins, captureBoneMatrices: opts?.captureBoneMatrices }], groups)[0]!;
 }
 
 interface VatBakeState {
@@ -123,6 +137,7 @@ interface VatBakeState {
     readonly data: Float32Array;
     readonly boneOrigins?: Record<number, Float32Array>;
     readonly restOrigins?: Map<number, [number, number, number]>;
+    readonly boneMatrices?: Record<number, Float32Array>;
 }
 
 interface UniqueVatTexture {
@@ -169,6 +184,15 @@ export function bakeVatMany(engine: EngineContext, targets: readonly VatBakeTarg
                 boneOrigins[bone] = new Float32Array(frameCount * 3);
             }
         }
+        const captureMatrices = target.captureBoneMatrices;
+        const boneMatrices: Record<number, Float32Array> | undefined = captureMatrices ? {} : undefined;
+        if (captureMatrices && boneMatrices) {
+            for (const bone of captureMatrices) {
+                if (bone >= 0 && bone < boneCount) {
+                    boneMatrices[bone] = new Float32Array(frameCount * 16);
+                }
+            }
+        }
         return {
             target,
             bindings,
@@ -177,6 +201,7 @@ export function bakeVatMany(engine: EngineContext, targets: readonly VatBakeTarg
             data: new Float32Array(frameCount * boneCount * 16),
             boneOrigins,
             restOrigins: captureBones && bindings[0] ? computeRestOrigins(captureBones, bindings[0].inverseBindMatrices, boneCount) : undefined,
+            boneMatrices,
         };
     });
 
@@ -199,6 +224,15 @@ export function bakeVatMany(engine: EngineContext, targets: readonly VatBakeTarg
                         const destination = state.boneOrigins[bone];
                         if (origin && destination && bone < state.boneCount) {
                             transformPointInto(destination, row * 3, matrices, bone * 16, origin[0], origin[1], origin[2]);
+                        }
+                    }
+                }
+                const captureMatrices = state.target.captureBoneMatrices;
+                if (captureMatrices && state.boneMatrices) {
+                    for (const bone of captureMatrices) {
+                        const destination = state.boneMatrices[bone];
+                        if (destination) {
+                            destination.set(matrices.subarray(bone * 16, bone * 16 + 16), row * 16);
                         }
                     }
                 }
@@ -230,7 +264,8 @@ export function bakeVatMany(engine: EngineContext, targets: readonly VatBakeTarg
             clips: { ...clips },
             _textureResource: shared.resource,
         };
-        return state.boneOrigins ? { ...result, boneOrigins: state.boneOrigins } : result;
+        const withOrigins = state.boneOrigins ? { ...result, boneOrigins: state.boneOrigins } : result;
+        return state.boneMatrices ? { ...withOrigins, boneMatrices: state.boneMatrices } : withOrigins;
     });
 }
 
