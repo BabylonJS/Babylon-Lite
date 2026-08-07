@@ -25,6 +25,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene.js";
+import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import type { XrInputManager } from "./xr-input.js";
 import type { XrFeatureSpec } from "./xr-feature.js";
 import { createMeshFromData, createTorus, updateMeshPositions } from "../mesh/mesh-factories.js";
@@ -34,6 +35,7 @@ import { removeFromScene } from "../scene/scene-remove.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
 import { pickWithRay } from "../picking/ray-pick.js";
+import { markMaterialUboDirty } from "../material/material-dirty.js";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -47,6 +49,18 @@ export interface XrTeleportationOptions {
     /** Predicate selecting teleportable floor meshes (alternative to {@link floorMeshes}).
      *  When neither is given, any surface whose world normal points roughly up is floor. */
     floorPredicate?: (mesh: Mesh) => boolean;
+    /** Meshes that BLOCK the teleport ray (e.g. walls): aiming so the arc lands on one shows
+     *  the arc in {@link blockedColor} and refuses to teleport, even if the surface would
+     *  otherwise read as floor. Explicit blockers win over the floor test. Combine with
+     *  {@link blockerPredicate} / {@link blockAllPickableMeshes}. */
+    pickBlockerMeshes?: readonly Mesh[];
+    /** Predicate selecting blocker meshes (in addition to {@link pickBlockerMeshes}). */
+    blockerPredicate?: (mesh: Mesh) => boolean;
+    /** Treat every pickable mesh that isn't floor as a blocker, so you can't teleport through
+     *  or past solid geometry. Default `false`. */
+    blockAllPickableMeshes?: boolean;
+    /** Arc tint while the aim is blocked. Default red `[1, 0.25, 0.25]` (Babylon blocked-ray red). */
+    blockedColor?: readonly [number, number, number];
     /** Reticle + arc tint while aiming at valid floor. Default Babylon teleport blue. */
     color?: readonly [number, number, number];
     /** Max horizontal reach of the aim arc in metres. Default `20`. */
@@ -72,6 +86,8 @@ export interface XrTeleportationOptions {
 
 /** @internal Default reticle/arc colour (Babylon teleport blue). */
 const DEFAULT_COLOR: [number, number, number] = [0.3, 0.6, 1];
+/** @internal Default blocked-arc colour (Babylon blocked-ray red). */
+const DEFAULT_BLOCKED_COLOR: [number, number, number] = [1, 0.25, 0.25];
 /** @internal Reticle ring diameter in metres before orienting flat on the floor. */
 const RETICLE_DIAMETER = 0.4;
 /** @internal Half-width (metres) of the ribbon arc's cross-section. */
@@ -104,6 +120,10 @@ const HEADING_FREEZE = 0.35;
 interface TeleportUnit {
     /** Parabolic aim arc ribbon (shown while the thumbstick is pushed forward). */
     arc: Mesh;
+    /** Arc material, so its emissive colour can switch to the blocked tint without a rebuild. */
+    arcMat: StandardMaterialProps;
+    /** Last blocked-state pushed to the arc material, to avoid redundant UBO writes. */
+    arcBlocked: boolean;
     /** Flat ring reticle on the floor (shown only on a valid floor hit). */
     reticle: Mesh;
     /** Flat arrow previewing the post-teleport heading (shown with the reticle). */
@@ -132,9 +152,12 @@ export interface XrTeleportation {
     /** @internal */
     _options: Required<
         Pick<XrTeleportationOptions, "maxLength" | "parabolic" | "parabolaSpeed" | "gravity" | "rotateToDirection" | "snapTurn" | "rotationAngle" | "thumbstickThreshold">
-    > & { color: [number, number, number] };
+    > & { color: [number, number, number]; blockedColor: [number, number, number]; blockAllPickableMeshes: boolean };
     /** @internal Floor test derived from `floorMeshes` / `floorPredicate` / normal fallback. */
     _isFloor: (mesh: Mesh, normalWorld: [number, number, number] | null) => boolean;
+    /** @internal Explicit blocker test derived from `pickBlockerMeshes` / `blockerPredicate`.
+     *  (The `blockAllPickableMeshes` catch-all is applied separately so it never overrides floor.) */
+    _isBlocker: (mesh: Mesh) => boolean;
     /** @internal Height (m) of the floor the viewer currently stands on; updated per teleport
      *  so multi-level floors preserve eye height. */
     _floorY: number;
@@ -156,8 +179,18 @@ function makeFloorTest(options: XrTeleportationOptions): (mesh: Mesh, normalWorl
     return (_mesh, n) => n !== null && n[1] >= FLOOR_NORMAL_MIN_Y;
 }
 
+/** @internal Build the explicit-blocker test from `pickBlockerMeshes` + `blockerPredicate`. */
+function makeBlockerTest(options: XrTeleportationOptions): (mesh: Mesh) => boolean {
+    const set = options.pickBlockerMeshes ? new Set(options.pickBlockerMeshes) : null;
+    const pred = options.blockerPredicate;
+    if (!set && !pred) {
+        return () => false;
+    }
+    return (mesh) => (set !== null && set.has(mesh)) || (pred !== undefined && pred(mesh));
+}
+
 /** @internal Unlit material in the teleport tint (reads clearly against any scene). */
-function tintMaterial(color: readonly [number, number, number], alpha: number, twoSided: boolean): Mesh["material"] {
+function tintMaterial(color: readonly [number, number, number], alpha: number, twoSided: boolean): StandardMaterialProps {
     const mat = createStandardMaterial();
     // With lighting disabled the shader multiplies emissive by diffuse, so diffuse
     // must stay white or the mesh renders black.
@@ -168,17 +201,20 @@ function tintMaterial(color: readonly [number, number, number], alpha: number, t
     if (twoSided) {
         mat.backFaceCulling = false;
     }
-    return mat as unknown as Mesh["material"];
+    return mat;
 }
 
 /** Create a teleportation manager bound to a scene. */
 export function createXrTeleportation(engine: EngineContext, scene: SceneContext, options: XrTeleportationOptions = {}): XrTeleportation {
     const color = (options.color ?? DEFAULT_COLOR) as [number, number, number];
+    const blockedColor = (options.blockedColor ?? DEFAULT_BLOCKED_COLOR) as [number, number, number];
     return {
         _engine: engine,
         _scene: scene,
         _options: {
             color: [color[0], color[1], color[2]],
+            blockedColor: [blockedColor[0], blockedColor[1], blockedColor[2]],
+            blockAllPickableMeshes: options.blockAllPickableMeshes ?? false,
             maxLength: options.maxLength ?? 20,
             parabolic: options.parabolic ?? true,
             parabolaSpeed: options.parabolaSpeed ?? 7,
@@ -189,6 +225,7 @@ export function createXrTeleportation(engine: EngineContext, scene: SceneContext
             thumbstickThreshold: options.thumbstickThreshold ?? 0.7,
         },
         _isFloor: makeFloorTest(options),
+        _isBlocker: makeBlockerTest(options),
         _floorY: 0,
         _units: new Map(),
     };
@@ -228,14 +265,15 @@ function ensureUnit(tp: XrTeleportation, source: DomXrInputSource): TeleportUnit
         arcNormals[i * 3 + 1] = 1;
     }
     const arc = createMeshFromData(engine, "xr-teleport-arc", arcVerts.slice(), arcNormals, buildArcIndices());
-    arc.material = tintMaterial(color, 0.85, true);
+    const arcMat = tintMaterial(color, 0.85, true);
+    arc.material = arcMat as unknown as Mesh["material"];
     arc.pickable = false;
     arc.receiveShadows = false;
     arc.visible = false;
 
     const reticle = createTorus(engine, { diameter: RETICLE_DIAMETER, thickness: RETICLE_DIAMETER * 0.14, tessellation: 40 });
     reticle.name = "xr-teleport-reticle";
-    reticle.material = tintMaterial(color, 1, false);
+    reticle.material = tintMaterial(color, 1, false) as unknown as Mesh["material"];
     reticle.pickable = false;
     reticle.receiveShadows = false;
     reticle.visible = false;
@@ -250,7 +288,7 @@ function ensureUnit(tp: XrTeleportation, source: DomXrInputSource): TeleportUnit
         new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
         new Uint32Array([0, 1, 2])
     );
-    indicator.material = tintMaterial(color, 1, true);
+    indicator.material = tintMaterial(color, 1, true) as unknown as Mesh["material"];
     indicator.pickable = false;
     indicator.receiveShadows = false;
     indicator.visible = false;
@@ -260,6 +298,8 @@ function ensureUnit(tp: XrTeleportation, source: DomXrInputSource): TeleportUnit
     addToScene(tp._scene, indicator);
     const unit: TeleportUnit = {
         arc,
+        arcMat,
+        arcBlocked: false,
         reticle,
         indicator,
         arcPath: new Float32Array(ARC_POINTS * 3),
@@ -528,7 +568,22 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                 updateArcRibbon(tp, unit, camPos);
                 setSubtreeVisible(unit.arc, true);
 
-                const onFloor = info.hit && tp._isFloor(info.mesh as Mesh, info.normal);
+                // Classify the arc's first hit. Explicit blockers win outright; otherwise a
+                // floor hit is teleportable; otherwise, with blockAllPickableMeshes, any other
+                // pickable surface blocks. A blocked aim tints the arc red and refuses to land.
+                const hitMesh = info.hit ? (info.mesh as Mesh | null) : null;
+                const explicitBlock = hitMesh !== null && tp._isBlocker(hitMesh);
+                const onFloor = !explicitBlock && info.hit && tp._isFloor(hitMesh as Mesh, info.normal);
+                const blocked = info.hit && !onFloor && (explicitBlock || (opts.blockAllPickableMeshes && (hitMesh as Mesh | null)?.pickable !== false));
+
+                // Recolour the arc only on a blocked-state change (UBO write must be flagged).
+                if (blocked !== unit.arcBlocked) {
+                    const c = blocked ? opts.blockedColor : opts.color;
+                    unit.arcMat.emissiveColor = [c[0], c[1], c[2]];
+                    markMaterialUboDirty(unit.arcMat);
+                    unit.arcBlocked = blocked;
+                }
+
                 if (onFloor) {
                     unit.target = info.point;
                     unit.reticle.position.set(info.point[0], info.point[1], info.point[2]);

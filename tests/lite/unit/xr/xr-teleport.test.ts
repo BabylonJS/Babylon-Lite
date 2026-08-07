@@ -129,6 +129,8 @@ function unitFor(tp: XrTeleportation, src: XrInputSource) {
                 unknown,
                 {
                     arc: ReturnType<typeof fakeMesh>;
+                    arcMat: { emissiveColor: [number, number, number] };
+                    arcBlocked: boolean;
                     reticle: ReturnType<typeof fakeMesh>;
                     indicator: ReturnType<typeof fakeMesh>;
                     arcPath: Float32Array;
@@ -199,6 +201,87 @@ describe("updateXrTeleportation — aiming", () => {
         const src2 = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
         updateXrTeleportation(tp2, makeInput([src2]), makeFrame(), makeRef("r0"));
         expect(unitFor(tp2, src2).reticle.visible).toBe(false);
+    });
+});
+
+describe("updateXrTeleportation — blocker meshes", () => {
+    const WALL = { name: "wall", pickable: true } as unknown as Mesh;
+
+    it("tints the arc red and refuses to teleport when the aim lands on a blocker", () => {
+        const tp = make({ floorMeshes: [FLOOR], pickBlockerMeshes: [WALL] });
+        // A blocker whose surface normal points up would otherwise read as floor —
+        // the explicit blocker must win.
+        floorHit([1, 0, -3], [0, 1, 0], WALL);
+        const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(), makeRef("r0"));
+
+        const u = unitFor(tp, src);
+        expect(u.arc.visible).toBe(true);
+        expect(u.reticle.visible).toBe(false);
+        expect(u.target).toBeNull();
+        expect(u.arcBlocked).toBe(true);
+        expect(u.arcMat.emissiveColor).toEqual([1, 0.25, 0.25]);
+    });
+
+    it("honours a custom blockedColor", () => {
+        const tp = make({ floorMeshes: [FLOOR], pickBlockerMeshes: [WALL], blockedColor: [0.5, 0, 0] });
+        floorHit([1, 0, -3], [0, 1, 0], WALL);
+        const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(), makeRef("r0"));
+        expect(unitFor(tp, src).arcMat.emissiveColor).toEqual([0.5, 0, 0]);
+    });
+
+    it("blocks via a predicate too", () => {
+        const tp = make({ floorMeshes: [FLOOR], blockerPredicate: (m) => (m as unknown as { name: string }).name === "wall" });
+        floorHit([1, 0, -3], [0, 1, 0], WALL);
+        const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(), makeRef("r0"));
+        expect(unitFor(tp, src).arcBlocked).toBe(true);
+        expect(unitFor(tp, src).reticle.visible).toBe(false);
+    });
+
+    it("blockAllPickableMeshes blocks any non-floor pickable surface but still allows floor", () => {
+        const tp = make({ floorMeshes: [FLOOR], blockAllPickableMeshes: true });
+        // Non-floor pickable mesh → blocked.
+        pickWithRay.mockReturnValue({
+            hit: true,
+            pickedPoint: [1, 1, -3],
+            pickedNormalWorld: [0, 1, 0],
+            distance: 3,
+            pickedMesh: { name: "prop", pickable: true } as unknown as Mesh,
+        });
+        const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(), makeRef("r0"));
+        let u = unitFor(tp, src);
+        expect(u.arcBlocked).toBe(true);
+        expect(u.target).toBeNull();
+
+        // The designated floor still teleports (floor test wins over blockAll), and the
+        // arc recolours back to blue.
+        floorHit([2, 0, -5], [0, 1, 0], FLOOR);
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(), makeRef("r0"));
+        u = unitFor(tp, src);
+        expect(u.arcBlocked).toBe(false);
+        expect(u.target).toEqual([2, 0, -5]);
+        expect(u.reticle.visible).toBe(true);
+        expect(u.arcMat.emissiveColor).toEqual([0.3, 0.6, 1]);
+    });
+
+    it("leaves decorative non-floor meshes non-blocking when no blocker config is given", () => {
+        const tp = make({ floorMeshes: [FLOOR] });
+        pickWithRay.mockReturnValue({
+            hit: true,
+            pickedPoint: [1, 1, -3],
+            pickedNormalWorld: [0, 1, 0],
+            distance: 3,
+            pickedMesh: { name: "prop", pickable: true } as unknown as Mesh,
+        });
+        const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(), makeRef("r0"));
+        const u = unitFor(tp, src);
+        expect(u.arcBlocked).toBe(false);
+        expect(u.reticle.visible).toBe(false);
+        expect(u.target).toBeNull();
     });
 });
 
