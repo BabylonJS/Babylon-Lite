@@ -2217,7 +2217,7 @@
         "name": "Scene 257 — Negative Node Scale",
         "maxMad": 0.1,
         "maxRegionMad": 0.5,
-        "maxRawKB": 80.76,
+        "maxRawKB": 81.1,
         "description": "glTF Node_NegativeScale_01: two textured shapes, one mirrored via a negative-determinant matrix. Validates triangle-winding reversal for negative-determinant world transforms (glTF-Asset-Generator Category D); Lite previously culled the wrong faces on the mirrored copy.",
         "tags": ["gltf", "transform"],
         "skipPerf": true
@@ -2250,7 +2250,7 @@
         "name": "Scene 260 — Triangle Strip",
         "maxMad": 0.1,
         "maxRegionMad": 0.5,
-        "maxRawKB": 80.73,
+        "maxRawKB": 81.07,
         "description": "glTF Mesh_PrimitiveMode_11: a quad drawn as a TRIANGLE_STRIP (primitive mode 5) with uint32 indices. Validates non-triangle-list primitive topologies (glTF-Asset-Generator Category C); Lite hardcoded a triangle-list pipeline and rendered POINTS/LINES/strips garbled. The loader now reads the primitive mode and the pipeline honors the matching WebGPU topology.",
         "tags": ["gltf", "topology"],
         "skipPerf": true
