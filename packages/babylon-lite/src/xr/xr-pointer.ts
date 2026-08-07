@@ -15,6 +15,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import type { PickingInfo } from "../picking/picking-info.js";
+import type { XrHandedness } from "./xr-support.js";
 import type { XrInputManager, XrInputSource } from "./xr-input.js";
 import type { XrFeatureSpec } from "./xr-feature.js";
 import { mat4Decompose } from "../math/mat4-decompose.js";
@@ -66,6 +67,17 @@ export interface XrPointerOptions {
     cursorSize?: number;
     /** Restrict which meshes the ray can pick (in addition to `mesh.pickable`). */
     predicate?: (mesh: Mesh) => boolean;
+    /** Draw a laser + cursor on every tracked controller at once. When `false` (default,
+     *  matching Babylon.js), only a single **active** controller shows a pointer; pressing
+     *  the trigger on another controller moves focus to it (see {@link disableSwitchOnClick}).
+     *  Babylon calls this `enablePointerSelectionOnAllControllers`. */
+    enableOnAllControllers?: boolean;
+    /** Which hand's controller should own the pointer initially / be preferred when picking
+     *  the active controller (single-active mode only). Default `"none"` → first tracked. */
+    preferredHandedness?: XrHandedness;
+    /** Disable moving pointer focus to another controller when its trigger is pressed
+     *  (single-active mode only). Default `false`. */
+    disableSwitchOnClick?: boolean;
     /** Fired when a source's ray starts hovering a mesh. */
     onHoverStart?: (mesh: Mesh, input: XrInputSource) => void;
     /** Fired when a source's ray stops hovering a mesh. */
@@ -99,10 +111,13 @@ export interface XrPointer {
     /** @internal */
     _scene: SceneContext;
     /** @internal */
-    _options: Required<Omit<XrPointerOptions, "predicate" | "onHoverStart" | "onHoverEnd" | "onSelect">> &
-        Pick<XrPointerOptions, "predicate" | "onHoverStart" | "onHoverEnd" | "onSelect">;
+    _options: Required<Omit<XrPointerOptions, "predicate" | "preferredHandedness" | "onHoverStart" | "onHoverEnd" | "onSelect">> &
+        Pick<XrPointerOptions, "predicate" | "preferredHandedness" | "onHoverStart" | "onHoverEnd" | "onSelect">;
     /** @internal Visuals per DOM input source. */
     _units: Map<DomXrInputSource, PointerUnit>;
+    /** @internal The controller that currently owns the pointer in single-active mode
+     *  (ignored when `enableOnAllControllers`). `null` until one is chosen. */
+    _activeSource: DomXrInputSource | null;
 }
 
 const DEFAULTS = {
@@ -113,6 +128,8 @@ const DEFAULTS = {
     cursorPickedColor: [0.3, 0.3, 1] as [number, number, number],
     laserThickness: 0.004,
     cursorSize: 0.03,
+    enableOnAllControllers: false,
+    disableSwitchOnClick: false,
 };
 
 /** @internal Hits closer than this (metres) are treated as "inside a mesh" and
@@ -152,12 +169,16 @@ export function createXrPointer(engine: EngineContext, scene: SceneContext, opti
             cursorPickedColor: options.cursorPickedColor ?? DEFAULTS.cursorPickedColor,
             laserThickness: options.laserThickness ?? DEFAULTS.laserThickness,
             cursorSize: options.cursorSize ?? DEFAULTS.cursorSize,
+            enableOnAllControllers: options.enableOnAllControllers ?? DEFAULTS.enableOnAllControllers,
+            disableSwitchOnClick: options.disableSwitchOnClick ?? DEFAULTS.disableSwitchOnClick,
             predicate: options.predicate,
+            preferredHandedness: options.preferredHandedness,
             onHoverStart: options.onHoverStart,
             onHoverEnd: options.onHoverEnd,
             onSelect: options.onSelect,
         },
         _units: new Map(),
+        _activeSource: null,
     };
 }
 
@@ -257,12 +278,54 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager, eyePo
     const opts = pointer._options;
     const scene = pointer._scene;
     const seen = new Set<DomXrInputSource>();
+    const singleActive = !opts.enableOnAllControllers;
 
+    // Pass 1: make sure every tracked source has visuals and is marked seen.
     for (const src of input.inputSources) {
         seen.add(src.source);
-        const unit = ensureUnit(pointer, src.source);
+        ensureUnit(pointer, src.source);
+    }
 
-        if (!src.targetRayTracked) {
+    // Pass 2 (single-active only): move focus to whichever controller just pressed its
+    // trigger, so clicking with the "other" hand hands the pointer over — like Babylon.js.
+    // Read the PREVIOUS frame's `wasSelecting` here (the render loop updates it below), so a
+    // rising edge is a fresh press. The claiming press itself must not also select a mesh.
+    let justSwitched: DomXrInputSource | null = null;
+    if (singleActive && !opts.disableSwitchOnClick) {
+        for (const src of input.inputSources) {
+            const unit = pointer._units.get(src.source)!;
+            if (src.selecting && !unit.wasSelecting && src.source !== pointer._activeSource) {
+                pointer._activeSource = src.source;
+                justSwitched = src.source;
+            }
+        }
+    }
+
+    // Pass 3 (single-active only): if there's no valid active controller yet, pick one by
+    // preferred handedness, else the first tracked source.
+    if (singleActive) {
+        const stillPresent = pointer._activeSource !== null && seen.has(pointer._activeSource);
+        if (!stillPresent) {
+            pointer._activeSource = null;
+            const pref = opts.preferredHandedness;
+            let fallback: DomXrInputSource | null = null;
+            for (const src of input.inputSources) {
+                fallback ??= src.source;
+                if (pref !== undefined && src.handedness === pref) {
+                    pointer._activeSource = src.source;
+                    break;
+                }
+            }
+            pointer._activeSource ??= fallback;
+        }
+    }
+
+    for (const src of input.inputSources) {
+        const unit = pointer._units.get(src.source)!;
+        const isActive = !singleActive || src.source === pointer._activeSource;
+
+        // Inactive controllers (single-active mode) and untracked rays show no pointer.
+        if (!isActive || !src.targetRayTracked) {
             setSubtreeVisible(unit.laser, false);
             setSubtreeVisible(unit.cursor, false);
             if (unit.hovered) {
@@ -344,8 +407,9 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager, eyePo
             unit.hovered = hitMesh;
         }
 
-        // Select (trigger) rising edge while hovering a mesh.
-        if (src.selecting && !unit.wasSelecting && hitMesh) {
+        // Select (trigger) rising edge while hovering a mesh — but the press that just
+        // claimed focus for this controller is consumed by the switch, not a selection.
+        if (src.selecting && !unit.wasSelecting && hitMesh && src.source !== justSwitched) {
             opts.onSelect?.(hitMesh, info, src);
         }
         unit.wasSelecting = src.selecting;
@@ -357,6 +421,9 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager, eyePo
             disposeUnit(pointer, unit);
             pointer._units.delete(source);
         }
+    }
+    if (pointer._activeSource !== null && !seen.has(pointer._activeSource)) {
+        pointer._activeSource = null;
     }
 }
 

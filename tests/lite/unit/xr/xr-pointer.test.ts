@@ -191,6 +191,86 @@ describe("updateXrPointer", () => {
     });
 });
 
+describe("updateXrPointer — active controller / switch-on-click", () => {
+    function handed(matrix: Float32Array, handedness: "left" | "right"): XrInputSource {
+        const s = makeSource(matrix);
+        (s as unknown as { handedness: string }).handedness = handedness;
+        return s;
+    }
+
+    it("shows a pointer on only one controller by default", () => {
+        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const pointer = createXrPointer({} as EngineContext, scene);
+        const right = handed(IDENTITY, "right");
+        const left = handed(IDENTITY, "left");
+        updateXrPointer(pointer, makeInput([right, left]));
+
+        expect(unitOf(pointer, right).laser.visible).toBe(true);
+        expect(unitOf(pointer, left).laser.visible).toBe(false);
+        expect(unitOf(pointer, left).cursor.visible).toBe(false);
+    });
+
+    it("honours preferredHandedness for the initial active controller", () => {
+        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const pointer = createXrPointer({} as EngineContext, scene, { preferredHandedness: "left" });
+        const right = handed(IDENTITY, "right");
+        const left = handed(IDENTITY, "left");
+        updateXrPointer(pointer, makeInput([right, left]));
+
+        expect(unitOf(pointer, left).laser.visible).toBe(true);
+        expect(unitOf(pointer, right).laser.visible).toBe(false);
+    });
+
+    it("moves focus to the controller whose trigger is pressed and consumes that press", () => {
+        const onSelect = vi.fn();
+        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const pointer = createXrPointer({} as EngineContext, scene, { onSelect });
+        const right = handed(IDENTITY, "right"); // first → initially active
+        const left = handed(IDENTITY, "left");
+        updateXrPointer(pointer, makeInput([right, left]));
+        expect(unitOf(pointer, right).laser.visible).toBe(true);
+
+        // Press the left (inactive) trigger: focus jumps to left, and that very press does
+        // NOT select a mesh (it only claims focus, matching Babylon.js).
+        (left as unknown as { selecting: boolean }).selecting = true;
+        updateXrPointer(pointer, makeInput([right, left]));
+        expect(unitOf(pointer, left).laser.visible).toBe(true);
+        expect(unitOf(pointer, right).laser.visible).toBe(false);
+        expect(onSelect).not.toHaveBeenCalled();
+
+        // A fresh press on the now-active left controller does select.
+        (left as unknown as { selecting: boolean }).selecting = false;
+        updateXrPointer(pointer, makeInput([right, left]));
+        (left as unknown as { selecting: boolean }).selecting = true;
+        updateXrPointer(pointer, makeInput([right, left]));
+        expect(onSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it("renders every controller when enableOnAllControllers is set", () => {
+        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const pointer = createXrPointer({} as EngineContext, scene, { enableOnAllControllers: true });
+        const right = handed(IDENTITY, "right");
+        const left = handed(IDENTITY, "left");
+        updateXrPointer(pointer, makeInput([right, left]));
+
+        expect(unitOf(pointer, right).laser.visible).toBe(true);
+        expect(unitOf(pointer, left).laser.visible).toBe(true);
+    });
+
+    it("does not switch when disableSwitchOnClick is set", () => {
+        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const pointer = createXrPointer({} as EngineContext, scene, { disableSwitchOnClick: true });
+        const right = handed(IDENTITY, "right");
+        const left = handed(IDENTITY, "left");
+        updateXrPointer(pointer, makeInput([right, left]));
+        (left as unknown as { selecting: boolean }).selecting = true;
+        updateXrPointer(pointer, makeInput([right, left]));
+
+        expect(unitOf(pointer, right).laser.visible).toBe(true);
+        expect(unitOf(pointer, left).laser.visible).toBe(false);
+    });
+});
+
 describe("pointerSelection feature", () => {
     function makeCtx(input: XrInputManager | null): XrSessionContext {
         return {
