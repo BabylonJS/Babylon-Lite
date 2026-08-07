@@ -36,7 +36,14 @@ import { setSubtreeVisible } from "../scene/visibility.js";
 type DomXrInputSource = XRInputSource;
 
 /** @internal The lazily dynamic-imported hand-mesh module surface. */
-type HandMeshModule = typeof import("./xr-hand-mesh.js");
+/** @internal The subset of the lazily dynamic-imported hand-mesh module we use.
+ *  Written as an explicit interface rather than `typeof import(...)` because api-extractor
+ *  cannot resolve a whole-module (`SourceFile`) import-type node. */
+interface HandMeshModule {
+    loadHandMesh: (engine: EngineContext, scene: SceneContext, handedness: XrHandedness, opts: HandMeshOptions) => Promise<LoadedHandMesh | null>;
+    disposeHandMesh: (scene: SceneContext, loaded: LoadedHandMesh) => void;
+    poseHandMesh: (loaded: LoadedHandMesh, hand: XRHand, frame: XRFrame, referenceSpace: XRReferenceSpace) => boolean;
+}
 
 /** Builds the mesh drawn for one hand joint. It should be a ~1 m-diameter unit mesh
  *  centred on the origin; the feature scales it per frame to the joint's real radius. */

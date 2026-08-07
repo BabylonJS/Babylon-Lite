@@ -39,8 +39,13 @@ import { setSubtreeVisible } from "../scene/visibility.js";
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
 type DomXrInputSource = XRInputSource;
 
-/** @internal The lazily dynamic-imported motion-controller module surface. */
-type MotionModule = typeof import("./xr-motion-controller.js");
+/** @internal The subset of the lazily dynamic-imported motion-controller module we use.
+ *  Written as an explicit interface rather than `typeof import(...)` because api-extractor
+ *  cannot resolve a whole-module (`SourceFile`) import-type node. */
+interface MotionModule {
+    loadMotionController: (engine: EngineContext, source: XRInputSource, handedness: XrHandedness, options?: XrMotionControllerProfileOptions) => Promise<MotionController | null>;
+    updateMotionController: (mc: MotionController, gamepad: Gamepad | null) => void;
+}
 
 /** Builds the mesh drawn for one controller. The mesh should be pre-scaled to its
  *  real-world size (metres); the feature only positions/orients it at the grip pose. */
