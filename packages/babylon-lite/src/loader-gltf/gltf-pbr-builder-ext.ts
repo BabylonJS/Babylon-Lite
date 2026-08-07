@@ -9,7 +9,6 @@ import type { Texture2D } from "../texture/texture-2d.js";
 import { cloneTexture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
-import { setPbrUvTransform } from "../material/pbr/set-uv-transform.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import type { TextureWrapFn, GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 import { uploadBaseColorFactorTexture, uploadOrmFactorTexture, uploadTex } from "./gltf-pbr-builder.js";
@@ -131,18 +130,33 @@ export function buildDefaultPbrTexturesExt(
     return { baseColorTexture, ormTexture, normalTexture, emissiveTexture, occlusionTexture };
 }
 
-/** Slow-path assembly: adds occlusionTexCoord and occlusionTexture props.
- *  Emissive is applied by the caller — see `needsGltfEmissive` in gltf-pbr-builder.ts. */
-export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, extLayers: Partial<PbrMaterialProps> | undefined): PbrMaterialProps {
-    // Precompute UV-transform presence so the renderer doesn't scan 5 textures
-    // per mesh. Any wrapped texture with `_hasTx=true` (set by gltf-ext-uv-transform)
-    // flips this once at build time; omitted entirely on fast path.
-    const hasAnyUvTx =
+/** True when any of this material's textures carries a KHR_texture_transform, and the
+ *  uv-transform ext therefore has to be registered via `setPbrUvTransform`.
+ *
+ *  Split out for the same reason as `needsGltfEmissive`: `setPbrUvTransform` statically
+ *  imports the uv-transform fragment, so a static import here bundled that fragment into
+ *  every scene that reaches this slow path — including scenes that only reach it for
+ *  occlusion-on-UV2 and use no texture transform at all (scene27/144/243 each paid 721 B).
+ *  Callers own the conditional `import("../material/pbr/set-uv-transform.js")`.
+ *
+ *  `_hasTx` is stamped on wrapped textures by gltf-ext-uv-transform, so this is only ever
+ *  true when that extension actually ran. Callers must apply it before emissive to keep
+ *  ext registration order unchanged. */
+export function needsGltfUvTransform(tex: PbrTexturesExt): boolean {
+    // Checked here rather than in the renderer so it doesn't scan 5 textures per mesh.
+    return (
         !!(tex.baseColorTexture as { _hasTx?: true })._hasTx ||
         !!(tex.normalTexture as { _hasTx?: true } | undefined)?._hasTx ||
         !!(tex.ormTexture as { _hasTx?: true })._hasTx ||
         !!(tex.emissiveTexture as { _hasTx?: true } | undefined)?._hasTx ||
-        !!(tex.occlusionTexture as { _hasTx?: true } | undefined)?._hasTx;
+        !!(tex.occlusionTexture as { _hasTx?: true } | undefined)?._hasTx
+    );
+}
+
+/** Slow-path assembly: adds occlusionTexCoord and occlusionTexture props.
+ *  UV-transform and emissive are applied by the caller — see `needsGltfUvTransform`
+ *  and `needsGltfEmissive` in gltf-pbr-builder.ts. */
+export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, extLayers: Partial<PbrMaterialProps> | undefined): PbrMaterialProps {
     // Per-channel UV1 (TEXCOORD_1) selection bitmask. Computed here on the slow path — the only
     // place a texture can carry texCoord:1 — so the always-loaded fast path just reads `_uv2Mask`.
     // Bit literals are a private contract with createPbrTemplateExt's decode (baseColor=1, orm=2,
@@ -178,11 +192,6 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         _buildGroup: getPbrGroupBuilder(),
         _uboVersion: 0,
     } as PbrMaterialProps;
-    // Routed through the setter so the uv-transform ext is registered; it also stamps
-    // `_hasUvTx`, which the ext's own `detect` turns into PBR2_HAS_UV_TRANSFORM.
-    if (hasAnyUvTx) {
-        setPbrUvTransform(props);
-    }
     return props;
 }
 

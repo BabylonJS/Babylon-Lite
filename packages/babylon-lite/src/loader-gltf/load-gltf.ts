@@ -614,6 +614,14 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                     const extMod = await _ensurePbrExt();
                     const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, samplerFor);
                     props = extMod.assemblePbrPropsExt(mat, tex, extLayers);
+                    // UV-transform is opt-in for the same reason as emissive below: the setter
+                    // statically imports its fragment, so scenes that reach this slow path only for
+                    // occlusion-on-UV2 must not pay for it. Applied before emissive to keep the ext
+                    // registration order identical to when both lived inside assemblePbrPropsExt.
+                    if (extMod.needsGltfUvTransform(tex)) {
+                        const { setPbrUvTransform } = await import("../material/pbr/set-uv-transform.js");
+                        setPbrUvTransform(props);
+                    }
                 } else {
                     const tex = buildSampledPbrTextures
                         ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
