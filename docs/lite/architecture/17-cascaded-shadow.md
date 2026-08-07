@@ -148,7 +148,8 @@ overlay, become static after 120 quiet frames, and return to the dynamic set
 immediately when their world or thin-instance version changes. A refit recomputes
 the cascades and refreshes the private static depth array after the light drifts by
 `options.refitAngle`, the camera changes, caster membership changes, a static caster
-moves, or `options.refitMaxIntervalMs` expires while the light is drifting. Generators
+moves, or `options.refitMaxIntervalMs` expires. The interval remains active while the
+light is paused so GPU-clock-animated static casters continue refreshing. Generators
 that are not explicitly enabled preserve the original single-task path, allocate no
 cache texture, and do not load the cache implementation.
 

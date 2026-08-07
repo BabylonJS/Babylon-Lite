@@ -28,10 +28,9 @@ export interface CsmRefitGateOptions {
      *  The sun drifts a different float every frame in normal play, so an exact-equality light
      *  key would never hold; this epsilon is what lets the cache survive a slowly moving sun. */
     refitAngle: number;
-    /** Wall-time floor: force a refit this many ms after the previous one, but only while the
-     *  light is actually drifting. GPU-clock-animated casters (wind-swayed flora) classify as
-     *  static, so their shadow only moves at refit cadence; the floor keeps that motion alive.
-     *  0 disables the floor. */
+    /** Wall-time floor: force a refit this many ms after the previous one. GPU-clock-animated
+     *  casters (wind-swayed flora) classify as static, so their shadow only moves at refit
+     *  cadence even while the light is paused. 0 disables the floor. */
     refitMaxIntervalMs: number;
     /** Consecutive quiet frames before a dynamic caster becomes demotion-pending. Default 120. */
     demoteQuietFrames?: number;
@@ -202,7 +201,13 @@ export function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGa
                 const dot = Math.min(1, Math.max(-1, nx * refitDirX + ny * refitDirY + nz * refitDirZ));
                 angleExceeded = Math.acos(dot) > refitAngle;
             }
-            const intervalElapsed = drifted && refitMaxIntervalMs > 0 && nowMs - lastRefitMs >= refitMaxIntervalMs;
+            // NOT gated on `drifted`: GPU-clock-animated casters (wind-swayed flora, see the header
+            // note) change their cast silhouette every frame with no CPU-visible version bump, so the
+            // wall-time floor is their ONLY refresh. Gating it on light drift froze their cached shadow
+            // at the last refit's wind phase whenever the sun was paused — the first camera move then
+            // snapped every canopy shadow at once (measured: roof 14 luma dark at rest, truth restored
+            // to 0.01 luma by this line alone; cost is the floor's own designed cadence).
+            const intervalElapsed = refitMaxIntervalMs > 0 && nowMs - lastRefitMs >= refitMaxIntervalMs;
             // Demotions normally ride refits caused by something else, but a fully frozen world
             // (paused sun, still camera) never refits again, so its pending demotions would park
             // forever and the overlay would keep redrawing every quiet caster each churn frame.
