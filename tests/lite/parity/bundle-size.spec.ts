@@ -29,6 +29,12 @@ const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-in
 const BUNDLE_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/manifest.json");
 const MASTER_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/master-manifest.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+/** Scenes whose glTF contains a negative-determinant (mirrored) node — see the primitive-state
+ *  assertions at the end of the per-scene test. */
+const MIRRORED_NODE_IDS = new Set([168, 257, 266, 269]);
+/** Scenes whose glTF draws a non-triangle-list topology, keyed to the value they must retain. */
+const EXOTIC_TOPOLOGY_SCENES = new Map([[260, "triangle-strip"]]);
+
 const SCENES = allScenes.filter((s) => {
     // Scene 114 opts out because WebGPU's optional "primitive-index" feature
     // changes which picking chunks the browser fetches across machines.
@@ -226,6 +232,30 @@ for (const scene of SCENES) {
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));
             expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
+        // A scene containing a mirrored (negative-determinant) glTF node must keep the reversed
+        // winding in the bytes it actually fetches, and a scene drawing a non-triangle topology must
+        // keep that topology. These are TREE-SHAKING regression guards, and they have to live here
+        // rather than in a parity spec: both were once installed by importing a module purely for
+        // its side effect, and a bundler drops such an import because nothing reads a binding from
+        // it. Source builds therefore looked correct while every BUNDLED build rendered these scenes
+        // wrong — scene257's mirrored crate black and inside-out, scene260's triangle strip as a
+        // single triangle instead of a quad. A parity spec loads the source page and cannot see it.
+        // Both values are WebGPU enum strings, so they survive minification verbatim.
+        if (MIRRORED_NODE_IDS.has(scene.id)) {
+            const hasReversedWinding = jsPayloads.some(({ body }) => body.includes('"cw"'));
+            expect(hasReversedWinding, `${scene.slug} contains a mirrored glTF node, so its fetched bundle MUST retain the reversed winding ("cw"); it was tree-shaken away`).toBe(
+                true
+            );
+        }
+        const topology = EXOTIC_TOPOLOGY_SCENES.get(scene.id);
+        if (topology) {
+            const hasTopology = jsPayloads.some(({ body }) => body.includes(`"${topology}"`));
+            expect(
+                hasTopology,
+                `${scene.slug} draws a ${topology}, so its fetched bundle MUST retain that topology; it was tree-shaken away and the mesh renders as a triangle list`
+            ).toBe(true);
         }
     });
 }

@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `fe4f1729c8a61f7f44c6d0e3805ad74120e7b53e`
-- **Last sync date:** 2026-08-01
+- **Last synced BJS commit:** `b15e177d5b7871248a2fccdbca0896cd609e8721`
+- **Last sync date:** 2026-08-07
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the

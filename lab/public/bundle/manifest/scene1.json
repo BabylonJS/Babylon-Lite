@@ -9,12 +9,12 @@
     "scene1-generate-mipmaps-BxsDX3Y-.js",
     "scene1-gltf-glb-parser-CDem_prv.js",
     "scene1-ibl-fragment-CeRrvT96.js",
-    "scene1-pbr-renderable-BzEsQv-D.js",
+    "scene1-pbr-renderable-OwOsTaOP.js",
     "scene1-rgbd-decode-BGE2GEn1.js",
     "scene1-scene-uniforms-FTYH6Ct0.js",
     "scene1-singlelight-hemispheric-wgsl-90xDRzhR.js",
     "scene1-wgsl-helpers-BgB2AJrF.js",
     "scene1.js"
   ],
-  "rawBytes": 90829
+  "rawBytes": 90822
 }
