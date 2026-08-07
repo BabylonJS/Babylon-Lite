@@ -102,27 +102,58 @@ rebuild — lives in `device-lost-recovery-capture.ts` and
 `enableDeviceLostSceneRecovery`. Applications that never enable recovery pull in
 none of those chunks.
 
-Backgrounds are discovered, not captured. Each background builder stamps its own
-rebuild descriptor — `[kind, size, rootPosition, url?]` — onto the `Renderable`
-it returns (`Renderable._rb`), from arguments it already receives. Recovery
-snapshots those descriptors while traversing `scene._renderables`, the same way
-material textures already recover, so the always-bundled `loadEnvironment` /
-`loadHdr` path carries no per-background recovery code at all and the residual
-cost lands only in `background-*.js`, which a scene already pays for whenever it
-builds that background.
+Backgrounds are discovered, not captured. Each background builder stamps a plain
+rebuild thunk onto the `Renderable` it returns — `Renderable._rebuild`, a
+`() => Renderable | Promise<Renderable>` closing over the arguments the builder
+already received. Recovery snapshots those thunks while traversing
+`scene._renderables` and replays them in order, the same way material textures
+already recover through `Texture2D._recoverySource`. The always-bundled
+`loadEnvironment` / `loadHdr` path therefore carries no per-background recovery
+code at all, and the residual cost lands only in `background-*.js`, which a scene
+already pays for whenever it builds that background.
+
+The thunk is deliberately opaque. An earlier revision stamped a descriptor tuple
+— `[kind, size, rootPosition, url?]` — that recovery interpreted through a
+four-arm switch over an `EnvironmentBackgroundKind`. That put a `loader-env`
+concept onto `render/`'s lowest-level interface, and the only way to avoid the
+import was to write the kind as a magic number at each builder, which hid the
+dependency from the compiler rather than removing it. A thunk deletes the enum,
+the descriptor type, the switch, and its four `await import()` calls: each
+builder is already its own module, so replay needs no dispatch. It is also more
+correct — the tuple silently dropped `enableNoise` for the ground and DDS
+skybox, which a closure captures for free — and it composes across repeated
+losses, because each rebuilt renderable stamps a fresh thunk.
+
+`_rebuild` is only for renderables that no retained structure owns. Mesh-backed
+renderables keep recovering through `scene._groups`, and must not also carry a
+thunk. That is not inertia: a group build emits several renderables at once (or
+merges its meshes into one), and re-running it also restores the group's
+`rebuildSingle` closure, its `o` output list, and its uniform updater — none of
+which a `Renderable`-returning thunk can express. `scene._groups` is live state
+that already regenerates those renderables for material swaps and runtime mesh
+adds, so recovery borrows it rather than duplicating it. Setting both mechanisms
+on one renderable would rebuild it twice and leave a duplicate in
+`scene._renderables`. Backgrounds needed a thunk precisely because they are
+orphans — not mesh-backed, pushed straight into `scene._renderables` by a loader
+that then discards the locals they were built from.
 
 Two capture-based designs were measured first and rejected. Describing
 backgrounds up front — passing the loaders' strategy inputs to one seam and
 re-deriving the rules during recovery — cost ~65 B for *every* environment-loading
 scene. Per-background capture (`engine._dlr?.g(...)` inside each builder's `if`
 block) narrowed that to ~21 B, but still only for scenes that build a background.
-Discovery removes the loader seam entirely: across the 26 affected bundle-size
-scenes the change now measures between −29 B and +12 B against the pre-feature
-baseline, net −143 B, with 14 of 25 scenes smaller than before. The descriptor is
-stamped unconditionally rather than gated on capture being enabled; a handful of
-3–4 element arrays per scene is far cheaper than the branch that would guard them.
-Discovery also lets both loaders share one rebuild path instead of each
-re-deriving its own background rules.
+Discovery removes the loader seam entirely. Against the pre-feature baseline the
+feature now measures +1,707 B across 73 scenes, of which scene164 — the recovery
+parity scene, and the only one that enables recovery — carries +1,554 B; 56
+scenes are *smaller* than before because the loader capture seam is gone. The 11
+background-building scenes pay 16–56 B each for the thunk. The thunk is stamped
+unconditionally rather than gated on capture being enabled; one closure per
+background is cheaper than the branch that would guard it. Choosing thunks over
+descriptors also lowered scene164's ceiling requirement by ~1.6 KB, since the
+recovery chunk no longer carries the switch or its dynamic imports.
+
+Property names beginning with `_` are mangled in release builds, so `_rebuild`
+costs no more than an abbreviated name would; internal fields are spelled out.
 
 Capture arguments must stay primitive. Rollup tracks the property values of
 object literals and uses them to prove branches dead. Passing an object whose

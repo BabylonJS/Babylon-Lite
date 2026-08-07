@@ -71,7 +71,7 @@
         "name": "Scene 7 — ChibiRex Animated",
         "maxMad": 0.55,
         "maxRegionMad": 0.66,
-        "maxRawKB": 106.17,
+        "maxRawKB": 106.2,
         "description": "Animated dinosaur, PBR materials, IBL environment, skeletal animation.",
         "tags": ["pbr", "gltf", "anim"]
     },
@@ -1157,7 +1157,7 @@
         "slug": "scene112-khr-texture-basisu",
         "name": "Scene 112 — KHR_texture_basisu Flight Helmet",
         "maxMad": 0.4,
-        "maxRawKB": 120.47,
+        "maxRawKB": 120.5,
         "description": "BabylonJS/Assets FlightHelmetKTX glTF model using KHR_texture_basisu KTX2 source textures and frame-graph scene-texture transmission.",
         "tags": ["pbr", "gltf", "env", "basis", "transmission"],
         "skipPerf": true,
@@ -1587,7 +1587,7 @@
         "slug": "scene164-device-lost-recovery",
         "name": "Scene 164 - Device Lost Recovery",
         "maxMad": 0.01,
-        "maxRawKB": 144.4,
+        "maxRawKB": 142.8,
         "description": "Forces WebGPU device loss on a scene that exercises every resource family the recovery pipeline must rebuild - a skinned, morphed, animated glTF plus IBL environment, PBR fallback texture, and an ESM directional shadow generator with a shadow-only receiver - then verifies the post-recovery image matches the pre-loss image and that Viewer-order teardown (disable recovery, stop engine, dispose scene, dispose engine) is clean. Lite-only: device loss has no stable-Babylon counterpart, so the comparison is pre-loss vs post-recovery within the same run.",
         "tags": ["gltf", "pbr", "environment", "shadows", "skeleton", "morph", "anim", "recovery"],
         "skipPerf": true

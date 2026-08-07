@@ -10,7 +10,6 @@ import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { createSkeleton } from "../skeleton/create-skeleton.js";
 import type { createMorphTargets } from "../morph/create-morph-targets.js";
-import type { EnvironmentBackgroundSource, EnvironmentRecoverySource } from "../loader-env/environment-recovery.js";
 import type { Renderable } from "../render/renderable.js";
 
 interface MutableSkeleton {
@@ -69,11 +68,11 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
 async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Promise<void> {
     // The environment and shadow rebuild logic each live in their own module, reached only
     // through these lazy imports so recovery-enabled scenes that use neither carry neither.
-    let environmentSource: EnvironmentRecoverySource | null = null;
     if (scene._envTextures) {
         const { rebuildSceneEnvironment } = await import("../loader-env/environment-recovery.js");
-        environmentSource = await runRecoveryStep("rebuilding environment textures", () => rebuildSceneEnvironment(engine, scene));
+        await runRecoveryStep("rebuilding environment textures", () => rebuildSceneEnvironment(engine, scene));
     }
+
     await runRecoveryStep("rebuilding material textures", () => rebuildSceneTextures(engine, scene));
     await runRecoveryStep("rebuilding meshes", () => _rebuildMeshes(engine, scene));
     if (scene._z) {
@@ -87,11 +86,11 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
         return;
     }
 
-    // Snapshot the loader-owned background descriptors before the renderable list is truncated
-    // below. Discovering them here — rather than recording them through a capture seam — keeps
-    // `loadEnvironment` / `loadHdr` free of any per-background recovery cost, and this whole
-    // module is only ever fetched on the recovery path.
-    const backgrounds = scene._renderables.filter((r): r is Renderable & { _rb: EnvironmentBackgroundSource } => !!r._rb).map((r) => r._rb);
+    // Snapshot the rebuild thunks before the renderable list is truncated below. Discovering them
+    // here — rather than recording descriptors through a capture seam — keeps the loader paths that
+    // build renderables free of any recovery cost, and this whole module is only ever fetched on
+    // the recovery path.
+    const rebuilds = scene._renderables.filter((r) => !!r._rebuild).map((r) => r._rebuild!);
 
     scene._renderables.length = scene._uniformUpdaters.length = 0;
     scene._meshDisposables.clear();
@@ -112,14 +111,27 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
             scene._uniformUpdaters.push(result.updater);
         }
     }
-    if (environmentSource && backgrounds.length > 0) {
-        const { rebuildSceneEnvironmentBackgrounds } = await import("../loader-env/environment-recovery.js");
-        scene._renderables.push(...(await runRecoveryStep("rebuilding environment backgrounds", () => rebuildSceneEnvironmentBackgrounds(scene, backgrounds))));
+    if (rebuilds.length > 0) {
+        scene._renderables.push(...(await runRecoveryStep("rebuilding renderables", () => rebuildRenderables(rebuilds))));
     }
     scene._renderables.sort((a, b) => a.order - b.order);
     scene._renderableVersion++;
     resetFrameGraphTasks(engine, scene);
     scene._frameGraph.build();
+}
+
+/**
+ * @internal Replay discovered rebuild thunks, preserving their pre-loss relative order.
+ *
+ * Sequential rather than concurrent: each thunk re-runs its builder, which allocates GPU resources
+ * on the replacement device, and the surrounding recovery steps are ordered for the same reason.
+ */
+export async function rebuildRenderables(rebuilds: readonly NonNullable<Renderable["_rebuild"]>[]): Promise<Renderable[]> {
+    const rebuilt: Renderable[] = [];
+    for (const rebuild of rebuilds) {
+        rebuilt.push(await rebuild());
+    }
+    return rebuilt;
 }
 
 async function runRecoveryStep<T>(description: string, action: () => Promise<T>): Promise<T> {

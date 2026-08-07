@@ -4,8 +4,8 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene23-anisotropy-fragment-CbNkTpSR.js",
-    "scene23-background-dds-skybox-BrIiDKND.js",
-    "scene23-background-ground-DSggBG05.js",
+    "scene23-background-dds-skybox-FRD-pQdD.js",
+    "scene23-background-ground-cMibPzRq.js",
     "scene23-cubemap-skybox-material-sjF5EPm1.js",
     "scene23-ibl-fragment-CeRrvT96.js",
     "scene23-pbr-renderable-BmRnCJ_P.js",
@@ -14,5 +14,5 @@
     "scene23-wgsl-helpers-BgB2AJrF.js",
     "scene23.js"
   ],
-  "rawBytes": 80987
+  "rawBytes": 81023
 }

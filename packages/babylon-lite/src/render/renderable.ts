@@ -82,15 +82,24 @@ export interface Renderable {
      *  the geometry-renderer path so its owning task can retire per-mesh resources
      *  on re-record/dispose. Idempotent. */
     _geometryDispose?: () => void;
-    /** @internal Device-lost rebuild descriptor for loader-owned background renderables:
-     *  `[kind, size, rootPosition, url?]`, where `kind` is an `EnvironmentBackgroundKind`
-     *  and `size` is a skybox half-size or a ground size.
+    /** @internal Rebuilds this renderable on a replacement device after device loss.
      *
-     *  Stamped by the background builders themselves, from arguments they already receive, so
-     *  recovery rediscovers backgrounds by traversing `scene._renderables` rather than through a
-     *  capture seam in the always-bundled loader path. Traversal is how material textures already
-     *  recover, and it keeps `loadEnvironment` / `loadHdr` free of any per-background recovery cost. */
-    _rb?: [number, number, [number, number, number], string?];
+     *  Stamped by whichever builder created the renderable, closing over the arguments it was
+     *  built from. Recovery restores renderables by traversing `scene._renderables` and calling
+     *  this, so it never needs to know what kind of renderable it is holding — the same way
+     *  material textures already recover through `Texture2D._recoverySource`. Keeping the thunk
+     *  here rather than a per-subsystem descriptor keeps `render/` free of any dependency on the
+     *  loaders that build renderables, and keeps those loaders free of recovery-specific code.
+     *
+     *  Only for renderables that no retained structure owns — currently the loader-built
+     *  backgrounds, which their loaders push here and then discard the values they were built
+     *  from. Renderables produced by a material group builder must NOT set this: recovery already
+     *  rebuilds them by re-running the build through `scene._groups`, which one call at a time
+     *  also restores that group's `rebuildSingle` closure, its `o` output list, and its uniform
+     *  updater — none of which a `Renderable`-returning thunk can express, and a group can emit
+     *  several renderables or merge its meshes into one. Setting both would rebuild them twice
+     *  and leave duplicates in `scene._renderables`. */
+    _rebuild?: () => Renderable | Promise<Renderable>;
     /**
      * Resolve target-specific GPU state (pipeline) and return a `DrawBinding` whose
      * `draw` closure captures that state. Called by the render pass task at build/insert

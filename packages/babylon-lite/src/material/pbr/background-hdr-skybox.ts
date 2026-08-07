@@ -70,7 +70,7 @@ export function buildHdrSkyboxRenderable(
             };
         },
     };
-    r._rb = [3 /* EnvironmentBackgroundKind.HdrSkybox */, skyHalfSize, rootPosition];
+    r._rebuild = () => buildHdrSkyboxRenderable(scene, envTextures, skyHalfSize, rootPosition, primaryColor);
     return r;
 }
 

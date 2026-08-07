@@ -109,7 +109,7 @@ export async function loadEnvironment(
     // has finished tweaking `scene.imageProcessing.*` (skybox/ground/dds materials
     // snapshot exposure/contrast at build time into their per-mesh UBO).
     // Only `url` / `brdfUrl` are captured here. Backgrounds cost nothing on this path: each
-    // builder stamps its own rebuild descriptor onto the renderable it returns (`Renderable._rb`),
+    // builder stamps its own rebuild thunk onto the renderable it returns (`Renderable._rebuild`),
     // and recovery rediscovers them by traversal.
     engine._dlr?.e(scene, url, options.brdfUrl);
     scene._deferredBuilders.push(async () => {

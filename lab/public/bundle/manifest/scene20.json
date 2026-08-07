@@ -3,8 +3,8 @@
   "gzipKB": 33.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene20-background-dds-skybox-mc_bHSLR.js",
-    "scene20-background-ground-DNfr5p6k.js",
+    "scene20-background-dds-skybox-CdInqG6W.js",
+    "scene20-background-ground-CBHIPeFs.js",
     "scene20-cubemap-skybox-material-B495OxWx.js",
     "scene20-emissive-fragment-B_pIHOBu.js",
     "scene20-ibl-fragment-CeRrvT96.js",
@@ -15,5 +15,5 @@
     "scene20-wgsl-helpers-BgB2AJrF.js",
     "scene20.js"
   ],
-  "rawBytes": 81174
+  "rawBytes": 81206
 }

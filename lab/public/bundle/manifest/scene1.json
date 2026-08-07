@@ -3,8 +3,8 @@
   "gzipKB": 37.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene1-background-dds-skybox-B4gKUkWw.js",
-    "scene1-background-ground-BeICPwhb.js",
+    "scene1-background-dds-skybox-BV0tIgFW.js",
+    "scene1-background-ground-GfAwbgRS.js",
     "scene1-cubemap-skybox-material-17JJYMx4.js",
     "scene1-generate-mipmaps-BxsDX3Y-.js",
     "scene1-gltf-glb-parser-CDem_prv.js",
@@ -16,5 +16,5 @@
     "scene1-wgsl-helpers-BgB2AJrF.js",
     "scene1.js"
   ],
-  "rawBytes": 90795
+  "rawBytes": 90829
 }
