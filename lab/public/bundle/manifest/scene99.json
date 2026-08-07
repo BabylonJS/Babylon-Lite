@@ -8,7 +8,7 @@
     "scene99-generate-mipmaps-DK0i16m1.js",
     "scene99-gltf-animation-bFbpurh9.js",
     "scene99-gltf-feature-animations-CJL9HLO6.js",
-    "scene99-gltf-feature-registry-CWu0rwVB.js",
+    "scene99-gltf-feature-registry-BF-etRzd.js",
     "scene99-gltf-feature-skeleton-CiMH1DyW.js",
     "scene99-gltf-glb-parser-BPGKZLxU.js",
     "scene99-multilight-wgsl-CZoyLoRC.js",
@@ -17,5 +17,5 @@
     "scene99-types-BVAXdTdf.js",
     "scene99.js"
   ],
-  "rawBytes": 94659
+  "rawBytes": 94651
 }

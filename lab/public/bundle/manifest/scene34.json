@@ -8,7 +8,7 @@
     "scene34-gltf-ext-node-visibility-BYF7qIxm.js",
     "scene34-gltf-feature-animation-pointer-DspRIUED.js",
     "scene34-gltf-feature-animations-BanC27Y7.js",
-    "scene34-gltf-feature-registry-BIuR1kDm.js",
+    "scene34-gltf-feature-registry-BNhWXkE8.js",
     "scene34-gltf-glb-parser-BYD_PHp7.js",
     "scene34-gltf-sampler-denorm-CQb-ijX6.js",
     "scene34-gltf-share-DzepaHuU.js",
@@ -19,5 +19,5 @@
     "scene34-visibility-CdsScivI.js",
     "scene34.js"
   ],
-  "rawBytes": 100981
+  "rawBytes": 100973
 }

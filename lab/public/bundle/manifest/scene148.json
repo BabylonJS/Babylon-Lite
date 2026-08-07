@@ -1,13 +1,13 @@
 {
   "rawKB": 110.2,
-  "rawBytes": 112889,
+  "rawBytes": 112881,
   "gzipKB": 43.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene148-directional-light-BhbwNKrb.js",
     "scene148-generate-mipmaps-DwUUAYSG.js",
     "scene148-gltf-feature-lights-punctual-B8Y3lTDv.js",
-    "scene148-gltf-feature-registry-CEOhXvqd.js",
+    "scene148-gltf-feature-registry-DKrGYcO9.js",
     "scene148-gltf-glb-parser-CMnLY3Vb.js",
     "scene148-gltf-light-pointer-state-B7kFTRxK.js",
     "scene148-pbr-geometry-view-B3elnITg.js",

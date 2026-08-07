@@ -7,7 +7,7 @@
     "scene240-generate-mipmaps-BfQh_jIW.js",
     "scene240-gltf-animation-LkFHVWmz.js",
     "scene240-gltf-feature-animations-Jdg7C0c1.js",
-    "scene240-gltf-feature-registry-B39NIU5k.js",
+    "scene240-gltf-feature-registry-u3BMRboh.js",
     "scene240-gltf-json-asset-DuqX8nB3.js",
     "scene240-gltf-multi-buffer-D9FqxLr4.js",
     "scene240-gltf-normals-DYhLwXNX.js",
@@ -17,5 +17,5 @@
     "scene240-scene-uniforms-FTYH6Ct0.js",
     "scene240.js"
   ],
-  "rawBytes": 93903
+  "rawBytes": 93895
 }

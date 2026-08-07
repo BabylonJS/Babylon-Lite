@@ -10,7 +10,7 @@
     "scene5-gltf-color-normalize-4-WGzPL2.js",
     "scene5-gltf-feature-animations-fwEjAeHj.js",
     "scene5-gltf-feature-morph-BNcyLEaQ.js",
-    "scene5-gltf-feature-registry-BRq79MvH.js",
+    "scene5-gltf-feature-registry-DRav5F1R.js",
     "scene5-gltf-feature-skeleton-CS2rGTAx.js",
     "scene5-gltf-json-asset-BHgPYtX8.js",
     "scene5-morph-fragment-Cu6n3BS0.js",
@@ -20,5 +20,5 @@
     "scene5-skeleton-fragment-CbX92pu-.js",
     "scene5.js"
   ],
-  "rawBytes": 93977
+  "rawBytes": 93969
 }

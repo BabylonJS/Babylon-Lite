@@ -1,6 +1,6 @@
 {
   "rawKB": 120.4,
-  "rawBytes": 123303,
+  "rawBytes": 123295,
   "gzipKB": 49.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene112-generate-mipmaps-pWw2s9cL.js",
     "scene112-gltf-ext-basisu-CXmOHtpR.js",
     "scene112-gltf-ext-dielectric-C6hvXXiF.js",
-    "scene112-gltf-feature-registry-DhRThfmR.js",
+    "scene112-gltf-feature-registry-Be_Yf3TD.js",
     "scene112-gltf-json-asset-By9NiiLs.js",
     "scene112-gltf-uri-6vf9MtoR.js",
     "scene112-ibl-fragment-CeRrvT96.js",

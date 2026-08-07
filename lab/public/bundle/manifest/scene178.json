@@ -1,12 +1,12 @@
 {
   "rawKB": 88.3,
-  "rawBytes": 90400,
-  "gzipKB": 36.3,
+  "rawBytes": 90387,
+  "gzipKB": 36.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene178-generate-mipmaps-DVKHAzdg.js",
     "scene178-gltf-ext-iridescence-b4LVniAM.js",
-    "scene178-gltf-feature-registry-DNH2xtLH.js",
+    "scene178-gltf-feature-registry-Cl3dCNoN.js",
     "scene178-gltf-glb-parser-DlCem_X7.js",
     "scene178-ibl-fragment-CeRrvT96.js",
     "scene178-ibl-skybox-wgsl-CFIBOHHx.js",

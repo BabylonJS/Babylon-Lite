@@ -5,7 +5,7 @@
   "runtimeChunks": [
     "scene212-generate-mipmaps-DzxxhGEP.js",
     "scene212-gltf-ext-dielectric-C6hvXXiF.js",
-    "scene212-gltf-feature-registry-DkJWkKi7.js",
+    "scene212-gltf-feature-registry-C6RZxTU8.js",
     "scene212-gltf-glb-parser-cXWoVuR8.js",
     "scene212-ibl-fragment-CeRrvT96.js",
     "scene212-ibl-skybox-wgsl-CFIBOHHx.js",
@@ -18,5 +18,5 @@
     "scene212-scene-uniforms-FTYH6Ct0.js",
     "scene212.js"
   ],
-  "rawBytes": 107172
+  "rawBytes": 107164
 }

@@ -1,13 +1,13 @@
 {
   "rawKB": 91,
-  "rawBytes": 93176,
+  "rawBytes": 93168,
   "gzipKB": 37.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene29-generate-mipmaps-C0ljVA3A.js",
     "scene29-gltf-ext-sheen-Dv23b_3T.js",
     "scene29-gltf-ext-uv-transform-tUSEOqA7.js",
-    "scene29-gltf-feature-registry-1FKufc-1.js",
+    "scene29-gltf-feature-registry-ic6SaGo3.js",
     "scene29-gltf-json-asset-9x7HYzNg.js",
     "scene29-gltf-pbr-builder-ext-0Tgp6igg.js",
     "scene29-ibl-fragment-CeRrvT96.js",
