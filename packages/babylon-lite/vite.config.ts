@@ -130,15 +130,22 @@ function emitPackageJson(): Plugin {
                 //   - @webgpu/types: the public `index.d.ts` references ambient WebGPU globals
                 //     (`GPUDevice`, `GPUTexture`, `GPUSampler`, ...). TypeScript consumers need
                 //     these types on their compile path.
+                //   - @types/webxr: the public WebXR API (`XrSessionContext`, input/hand/teleport
+                //     helpers) references ambient WebXR globals (`XRSession`, `XRFrame`, `XRView`,
+                //     `XRReferenceSpace`, `XRProjectionLayer`, `XRSubImage`, ...). These have a
+                //     shipping `@types` package (unlike the draft `XRGPUBinding`, which Lite owns
+                //     and inlines), so the rollup treats them as a consumer-provided peer.
                 // Keep this in sync with the allowlist in
                 // tests/lite/build/public-api-types.test.ts.
                 peerDependencies: {
                     "@babylonjs/havok": "^1.3.0",
                     "@webgpu/types": "^0.1.52",
+                    "@types/webxr": "^0.5.0",
                 },
                 peerDependenciesMeta: {
                     "@babylonjs/havok": { optional: true },
                     "@webgpu/types": { optional: true },
+                    "@types/webxr": { optional: true },
                 },
                 ...(provenance ? { babylonLiteRelease: provenance } : {}),
             };
