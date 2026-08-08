@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
-import { measureRenderTaskOverdrawCost } from "../../../packages/babylon-lite/src/frame-graph/overdraw-probe";
+import { measureRenderTaskOverdrawCost } from "../../../packages/babylon-lite/src/engine/gpu-task-timing";
 import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import type { DrawBinding } from "../../../packages/babylon-lite/src/render/renderable";
 
@@ -25,7 +25,7 @@ function makeBinding(name: string, z: number, drawOrders: Map<string, string[]>,
             _worldCenter: [0, 0, z],
         },
         pipeline: { label: name },
-        draw(pass): number {
+        draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder): number {
             const label = (pass as unknown as { _label: string })._label;
             drawOrders.get(label)!.push(name);
             return 1;
@@ -41,6 +41,25 @@ describe("render-task overdraw probe", () => {
         const supported = { _device: { features: new Set<GPUFeatureName>(["timestamp-query"]) } } as unknown as EngineContext;
         await expect(measureRenderTaskOverdrawCost(supported, {} as RenderTask, { repeats: 0 })).rejects.toThrow("positive integer");
         await expect(measureRenderTaskOverdrawCost(supported, {} as RenderTask, { repeats: 1.5 })).rejects.toThrow("positive integer");
+    });
+
+    it("rejects tasks whose shipped pass loads existing depth", async () => {
+        const engine = { _device: { features: new Set<GPUFeatureName>(["timestamp-query"]) } } as unknown as EngineContext;
+        const colorTarget = {
+            _descriptor: { format: "rgba8unorm", samples: 1, size: { width: 64, height: 32 } },
+        } as RenderTarget;
+        const loadedTargetTask = {
+            _config: { rt: colorTarget, depthClear: false },
+        } as unknown as RenderTask;
+        const eagerDepthTask = {
+            _config: {
+                rt: colorTarget,
+                depth: { _eager: true, _descriptor: { dFormat: "depth32float", samples: 1, size: { width: 64, height: 32 } } },
+            },
+        } as unknown as RenderTask;
+
+        await expect(measureRenderTaskOverdrawCost(engine, loadedTargetTask, { repeats: 1 })).rejects.toThrow("load existing depth");
+        await expect(measureRenderTaskOverdrawCost(engine, eagerDepthTask, { repeats: 1 })).rejects.toThrow("load existing depth");
     });
 
     it("uses the task depth clear convention, skips invisible bindings, and preserves transparent order", async () => {

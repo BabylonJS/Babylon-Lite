@@ -5,14 +5,14 @@
   "runtimeChunks": [
     "scene32-generate-mipmaps-Cr6tLrFA.js",
     "scene32-gltf-ext-unlit-1vUYfF7v.js",
-    "scene32-gltf-feature-registry-ECGTytcy.js",
-    "scene32-gltf-glb-parser-vKdiR_xQ.js",
+    "scene32-gltf-feature-registry-C8Cxh7qn.js",
+    "scene32-gltf-glb-parser-C_wh2Rk_.js",
     "scene32-ibl-fragment-CeRrvT96.js",
-    "scene32-pbr-renderable-DI4Ldj3S.js",
+    "scene32-pbr-renderable-N4F3rp3w.js",
     "scene32-rgbd-decode-BtmH8I2g.js",
     "scene32-scene-uniforms-FTYH6Ct0.js",
     "scene32-unlit-fragment-DWtvt7yQ.js",
     "scene32.js"
   ],
-  "rawBytes": 82512
+  "rawBytes": 82515
 }

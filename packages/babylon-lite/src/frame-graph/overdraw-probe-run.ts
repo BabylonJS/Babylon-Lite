@@ -84,7 +84,7 @@ export interface OverdrawCostMeasure {
  * Measure the GPU cost of `task`'s overdraw. The task must have rendered at
  * least once (bindings and scene bind group built). `repeats` defaults to 9.
  */
-export async function measureRenderTaskOverdrawCost(engine: EngineContext, task: RenderTask, options?: { repeats?: number }): Promise<OverdrawCostMeasure> {
+export async function _measureRenderTaskOverdrawCost(engine: EngineContext, task: RenderTask, options?: { repeats?: number }): Promise<OverdrawCostMeasure> {
     const device = engine._device;
     if (!device.features.has("timestamp-query")) {
         throw new Error("overdraw probe: this device has no timestamp-query feature");
@@ -94,6 +94,11 @@ export async function measureRenderTaskOverdrawCost(engine: EngineContext, task:
         throw new RangeError("overdraw probe: repeats must be a positive integer");
     }
     const rt = task._config.rt;
+    const depthTarget = task._config.depth ?? rt;
+    const loadsExistingDepth = task._config.depth ? task._config.depth._eager === true : task._config.depthClear === false;
+    if (loadsExistingDepth) {
+        throw new Error("overdraw probe: tasks that load existing depth cannot be measured with a fresh-depth replay");
+    }
     const width = rt._width;
     const height = rt._height;
     if (!width || !height) {
@@ -164,7 +169,7 @@ export async function measureRenderTaskOverdrawCost(engine: EngineContext, task:
         usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
     const hasStencil = depthFormat === "depth24plus-stencil8" || depthFormat === "depth32float-stencil8";
-    const depthClearValue = (task._config.depth ?? rt)._descriptor._depthClearValue ?? 0;
+    const depthClearValue = depthTarget._descriptor._depthClearValue ?? 0;
 
     // 6 timestamps per repeat: A, B, and C begin/end pairs.
     const querySet = device.createQuerySet({ type: "timestamp", count: repeats * 6 });
