@@ -1,17 +1,17 @@
 {
-  "rawKB": 78.6,
-  "rawBytes": 80524,
-  "gzipKB": 33.1,
+  "rawKB": 77.6,
+  "rawBytes": 79513,
+  "gzipKB": 32.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene168-generate-mipmaps-DCFNCFGq.js",
+    "scene168-generate-mipmaps-C5tAKBqd.js",
     "scene168-gltf-feature-primitive-gztN_j6d.js",
-    "scene168-gltf-feature-registry-DSuzkTRi.js",
+    "scene168-gltf-feature-registry-BH7A8rd1.js",
     "scene168-gltf-json-asset-C9jusQfp.js",
     "scene168-gltf-share-CwhuMQ_f.js",
     "scene168-ibl-fragment-CeRrvT96.js",
-    "scene168-pbr-renderable-DC9eb3bV.js",
-    "scene168-rgbd-decode-Fh0cGlRA.js",
+    "scene168-pbr-renderable-7B2SFKUN.js",
+    "scene168-rgbd-decode-7H7v1rD-.js",
     "scene168-scene-uniforms-FTYH6Ct0.js",
     "scene168.js"
   ]

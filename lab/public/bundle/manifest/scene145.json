@@ -1,14 +1,13 @@
 {
-  "rawKB": 89.6,
-  "gzipKB": 36.6,
+  "rawKB": 89.4,
+  "gzipKB": 36.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene145-bake-local-matrix-67U-IT8C.js",
-    "scene145-cube-texture-B4ynCovS.js",
+    "scene145-cube-texture-eFLBfdf5.js",
     "scene145-generate-mipmaps-TrG6m0Ig.js",
     "scene145-geometry-view-DgWgaCNH.js",
     "scene145-mesh-features-CoWix6zs.js",
-    "scene145-mip-count-CdXF1U-X.js",
     "scene145-parse-camera-Byc7EJin.js",
     "scene145-point-light-D99eDKes.js",
     "scene145-scene-uniforms-Ha63NnVx.js",
@@ -22,5 +21,5 @@
     "scene145-std-specular-fragment-DwjAhaXY.js",
     "scene145.js"
   ],
-  "rawBytes": 91759
+  "rawBytes": 91571
 }

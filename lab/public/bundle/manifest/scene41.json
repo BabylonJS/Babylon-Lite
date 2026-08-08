@@ -1,17 +1,17 @@
 {
-  "rawKB": 92.6,
-  "rawBytes": 94822,
+  "rawKB": 93,
+  "rawBytes": 95188,
   "gzipKB": 37.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene41-generate-mipmaps-CwF4YsJB.js",
+    "scene41-generate-mipmaps-DpyniJP_.js",
     "scene41-gltf-ext-spec-gloss-D60sFZYX.js",
-    "scene41-gltf-feature-registry-7FEL2AJf.js",
+    "scene41-gltf-feature-registry-DjYn-2e5.js",
     "scene41-gltf-glb-parser-CsphxcD_.js",
     "scene41-gltf-sampler-desc-BaZGySA_.js",
     "scene41-mesh-features-Dda6QcW-.js",
-    "scene41-point-light-CiLiDGeg.js",
-    "scene41-standard-renderable-D52DjuE5.js",
+    "scene41-point-light-Dre0q3W4.js",
+    "scene41-standard-renderable-D5Pu0mii.js",
     "scene41.js"
   ]
 }
