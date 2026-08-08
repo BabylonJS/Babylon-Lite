@@ -79,10 +79,125 @@ export class GlowLayer {
 }
 
 // ─── Mesh-attached renderers / projectors ────────────────────────────
+// ─── GreasedLine (thick-line ribbon subsystem) ───────────────────────
+// Greased lines render polylines as camera-facing ribbons/tubes driven by a
+// dedicated plugin material (per-point widths, color/width distribution tables,
+// dashing, ribbon face/direction modes). Babylon Lite renders only 1px hardware
+// line-lists (see `MeshBuilder.CreateLines` / `CreateDashedLines`) and has no
+// thick-line ribbon geometry generator or plugin-material subsystem to back it,
+// so the whole family is a `❌ Not supported` throwing stub.
+const GREASED_LINE_REASON =
+    "Greased (thick) lines are a ribbon/tube geometry + dedicated plugin-material subsystem (per-point widths, color/width distribution tables, dashing, camera-facing ribbon modes). Babylon Lite renders only 1px hardware line-lists (MeshBuilder.CreateLines / CreateDashedLines) and has no thick-line ribbon pipeline or plugin material to back it.";
+
+export class GreasedLineBaseMesh {
+    public constructor() {
+        unsupported("GreasedLineBaseMesh", GREASED_LINE_REASON);
+    }
+}
+
 export class GreasedLineMesh {
     public constructor() {
-        unsupported("GreasedLineMesh", "Greased-line meshes are not implemented in Babylon Lite.");
+        unsupported("GreasedLineMesh", GREASED_LINE_REASON);
     }
+}
+
+export class GreasedLineRibbonMesh {
+    public constructor() {
+        unsupported("GreasedLineRibbonMesh", GREASED_LINE_REASON);
+    }
+}
+
+export class GreasedLinePluginMaterial {
+    public constructor() {
+        unsupported("GreasedLinePluginMaterial", GREASED_LINE_REASON);
+    }
+}
+
+export class MaterialGreasedLineDefines {
+    public constructor() {
+        unsupported("MaterialGreasedLineDefines", GREASED_LINE_REASON);
+    }
+}
+
+export class GreasedLineMaterialDefaults {
+    public constructor() {
+        unsupported("GreasedLineMaterialDefaults", GREASED_LINE_REASON);
+    }
+}
+
+export function RegisterGreasedLinePluginMaterial(): never {
+    return unsupported("RegisterGreasedLinePluginMaterial", GREASED_LINE_REASON);
+}
+
+export class GreasedLineSimpleMaterial {
+    public constructor() {
+        unsupported("GreasedLineSimpleMaterial", GREASED_LINE_REASON);
+    }
+}
+
+export class GreasedLineTools {
+    public constructor() {
+        unsupported("GreasedLineTools", GREASED_LINE_REASON);
+    }
+}
+
+export function CreateGreasedLine(): never {
+    return unsupported("CreateGreasedLine", GREASED_LINE_REASON);
+}
+
+export function CreateGreasedLineMaterial(): never {
+    return unsupported("CreateGreasedLineMaterial", GREASED_LINE_REASON);
+}
+
+export function GetPointsCount(): never {
+    return unsupported("GetPointsCount", GREASED_LINE_REASON);
+}
+
+export function CompleteGreasedLineWidthTable(): never {
+    return unsupported("CompleteGreasedLineWidthTable", GREASED_LINE_REASON);
+}
+
+export function CompleteGreasedLineColorTable(): never {
+    return unsupported("CompleteGreasedLineColorTable", GREASED_LINE_REASON);
+}
+
+// GreasedLine enums are pure numeric parity shape (no feature logic), mirrored
+// from BJS so ported code that references the members resolves.
+export enum GreasedLineMeshColorDistribution {
+    COLOR_DISTRIBUTION_NONE = 0,
+    COLOR_DISTRIBUTION_REPEAT = 1,
+    COLOR_DISTRIBUTION_EVEN = 2,
+    COLOR_DISTRIBUTION_START = 3,
+    COLOR_DISTRIBUTION_END = 4,
+    COLOR_DISTRIBUTION_START_END = 5,
+}
+
+export enum GreasedLineMeshWidthDistribution {
+    WIDTH_DISTRIBUTION_NONE = 0,
+    WIDTH_DISTRIBUTION_REPEAT = 1,
+    WIDTH_DISTRIBUTION_EVEN = 2,
+    WIDTH_DISTRIBUTION_START = 3,
+    WIDTH_DISTRIBUTION_END = 4,
+    WIDTH_DISTRIBUTION_START_END = 5,
+}
+
+export enum GreasedLineRibbonPointsMode {
+    POINTS_MODE_POINTS = 0,
+    POINTS_MODE_PATHS = 1,
+}
+
+export enum GreasedLineRibbonFacesMode {
+    FACES_MODE_SINGLE_SIDED = 0,
+    FACES_MODE_SINGLE_SIDED_NO_BACKFACE_CULLING = 1,
+    FACES_MODE_DOUBLE_SIDED = 2,
+}
+
+export enum GreasedLineRibbonAutoDirectionMode {
+    AUTO_DIRECTIONS_FROM_FIRST_SEGMENT = 0,
+    AUTO_DIRECTIONS_FROM_ALL_SEGMENTS = 1,
+    AUTO_DIRECTIONS_ENHANCED = 2,
+    AUTO_DIRECTIONS_FACE_TO = 3,
+    AUTO_DIRECTIONS_NONE = 99,
 }
 
 export class EdgesRenderer {

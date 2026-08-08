@@ -37,6 +37,7 @@ import {
     createGroundFromHeightMap,
     computeAabb,
     createLineSystem,
+    createDashedLines,
     updateLineSystem,
     createLineMaterial,
     setLineMaterialColor,
@@ -1268,6 +1269,15 @@ interface LinesBuilderOptions {
     useVertexAlpha?: boolean;
     material?: unknown;
 }
+interface DashedLinesBuilderOptions {
+    points: Vector3[];
+    dashSize?: number;
+    gapSize?: number;
+    dashNb?: number;
+    updatable?: boolean;
+    instance?: LinesMesh | null;
+    useVertexAlpha?: boolean;
+}
 
 function engineOf(scene: Scene): EngineContext {
     return scene.getEngine()._lite;
@@ -1466,8 +1476,29 @@ export const MeshBuilder = {
     },
 
     // ── Known but unsupported (not present in Babylon Lite) ────────────────
-    CreateDashedLines(): never {
-        return unsupported("MeshBuilder.CreateDashedLines", "Dashed line meshes are not implemented in Babylon Lite.");
+    CreateDashedLines(name: string, options: DashedLinesBuilderOptions, scene?: Scene | null): LinesMesh {
+        if (options.instance) {
+            // The visible dash count depends on the polyline length and dash spacing, so
+            // regenerating a dashed mesh can change its line/point topology. Lite's
+            // in-place `updateLineSystem` refuses a topology change, so a stable-identity
+            // dashed instance update is not structurally backable — rebuild instead.
+            return unsupported(
+                "MeshBuilder.CreateDashedLines(instance)",
+                "In-place dashed-line updates are not supported: regenerating dashes can change the line-list topology, which Lite's fixed-topology updateLineSystem rejects. Create a fresh dashed mesh instead."
+            );
+        }
+        if (!scene) {
+            throw new Error("MeshBuilder.CreateDashedLines requires a scene");
+        }
+        const lite = createDashedLines(engineOf(scene), {
+            name,
+            points: options.points,
+            ...(options.dashSize !== undefined ? { dashSize: options.dashSize } : {}),
+            ...(options.gapSize !== undefined ? { gapSize: options.gapSize } : {}),
+            ...(options.dashNb !== undefined ? { dashNb: options.dashNb } : {}),
+            useVertexAlpha: options.useVertexAlpha,
+        });
+        return addPrimitive(new LinesMesh(name, lite, scene, false, options.useVertexAlpha ?? true), scene) as LinesMesh;
     },
 
     CreateDecal(): never {
@@ -1541,6 +1572,11 @@ export function CreateLines(name: string, options: LinesBuilderOptions, scene?: 
 /** Babylon.js `CreateLineSystem(name, options, scene)` (linesBuilder). */
 export function CreateLineSystem(name: string, options: LineSystemBuilderOptions, scene?: Scene | null): LinesMesh {
     return MeshBuilder.CreateLineSystem(name, options, scene);
+}
+
+/** Babylon.js `CreateDashedLines(name, options, scene)` (linesBuilder). */
+export function CreateDashedLines(name: string, options: DashedLinesBuilderOptions, scene?: Scene | null): LinesMesh {
+    return MeshBuilder.CreateDashedLines(name, options, scene);
 }
 
 /** Babylon.js `CreateTiledBox(name, options, scene)` (tiledBoxBuilder) — throwing stub (see `MeshBuilder.CreateTiledBox`). */
