@@ -5,6 +5,7 @@ import { Material, StandardMaterial, PBRMaterial, PBRMetallicRoughnessMaterial, 
 import { NodeMaterial } from "../src/materials/node-material";
 import { Color3 } from "../src/math/color";
 import type { Scene } from "../src/scene/scene";
+import { CubeTexture } from "../src/textures/textures";
 import type { BaseTexture } from "../src/textures/textures";
 
 /** Minimal stand-in for a resolved compat texture (only `_lite` is read by the setters). */
@@ -267,5 +268,17 @@ describe("Material.getActiveTextures", () => {
         const scene = { ...fakeScene(), environmentTexture: reflection } as unknown as Scene;
         const mat = new PBRMaterial("cat", scene);
         expect(mat.getActiveTextures()).toEqual([reflection]);
+    });
+
+    // Regression guard: `CubeTexture`/`HDRCubeTexture` must stay `BaseTexture`
+    // subclasses so a real environment handle lands in the `BaseTexture[]` list
+    // without an unchecked cast (this test fails to compile otherwise).
+    it("enumerates a real CubeTexture environment handle without casting", () => {
+        const mat = new PBRMaterial("cat", fakeScene());
+        const reflection = new CubeTexture("https://h/env.env");
+        mat.reflectionTexture = reflection;
+        const active: BaseTexture[] = mat.getActiveTextures();
+        expect(active).toEqual([reflection]);
+        expect(active[0]!.getInternalTexture()).toBeNull();
     });
 });

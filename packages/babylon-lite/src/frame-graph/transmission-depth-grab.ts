@@ -104,7 +104,6 @@ function recordDepthGrab(engine: EngineContext, depth: TransmissionDepthGrabStat
     pass.end();
 }
 
-// Module-level side-effect install (see the pbr-primitive-resolver pattern): importing this module wires the
-// depth-grab builder + per-frame recorder into the shared transmission seam. Keeps `transmission.ts` free of these
-// bytes until a task actually enables grabDepth.
+// Importing this lazy feature wires the depth-grab builder + per-frame recorder into the shared
+// transmission seam, keeping these bytes out until a task enables grabDepth.
 _installDepthGrab({ create: createDepthGrab, record: recordDepthGrab });

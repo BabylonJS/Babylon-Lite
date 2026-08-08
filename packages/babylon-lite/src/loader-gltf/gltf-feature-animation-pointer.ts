@@ -58,7 +58,7 @@ const _UV_TX_POINTER_RE = /^\/materials\/(\d+)\/.*\/KHR_texture_transform\/(?:of
 // present, so a node-only scene (scene34) loads none of them.
 let _matExtMod: typeof import("./animation-pointer-ext.js") | null = null;
 let _baseColorMod: typeof import("./animation-pointer-basecolor.js") | null = null;
-let _uvTransformMod: typeof import("../material/pbr/set-uv-transform.js") | null = null;
+let _uvTransformMod: typeof import("../material/pbr/enable-material-uv-transform.js") | null = null;
 function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | undefined)[] {
     if (meshes === _matMapKey) {
         return _matMap;
@@ -128,7 +128,7 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
                 // things (scene34 node visibility, scene242 emissive) never pull the
                 // UV-transform shader fragment in.
                 if (uvTransformAnimated.has(matIdx)) {
-                    _uvTransformMod!.setPbrUvTransform(pm as Partial<PbrMaterialProps>);
+                    _uvTransformMod!.enableMaterialUvTransform(pm as Partial<PbrMaterialProps>);
                 }
                 map[matIdx] = pm;
             }
@@ -215,7 +215,7 @@ const feature: GltfFeature = {
         // Same detection materialMap uses to populate `uvTransformAnimated`, so the setter
         // is present whenever that set is non-empty.
         if (hasUvTransformPointer) {
-            _uvTransformMod = await import("../material/pbr/set-uv-transform.js");
+            _uvTransformMod = await import("../material/pbr/enable-material-uv-transform.js");
         }
     },
     // Animated baseColorFactor on untextured materials needs a white 1×1 fallback so the

@@ -102,7 +102,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasSomeThinInstances = false;
     let hasCullingTI = false;
     // Only gates the shared `pbr-template-ext` lazy import below (alongside vertex-color
-    // and uv2); the uv-transform *ext* is registered by `setPbrUvTransform`, not by a scan.
+    // and uv2); the uv-transform *ext* is registered by `enableMaterialUvTransform`, not by a scan.
     let hasAnyUvTransform = false;
     let hasAnyUv2 = false;
     let hasAnyVertexColor = false;
@@ -293,7 +293,13 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const receiveShadows = !shadowOutput && mesh.receiveShadows && hasSomeShadows;
         const lightMode: PbrLightMode = lightCount === 0 ? 0 : lightCount === 1 && !receiveShadows ? 1 : 2;
         const singleLightType = lightMode === 1 ? getPackedSingleLightType(s.lights, lr - 1) : "";
-        const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
+        // The lazy glTF primitive feature's bits (topology index, uint32-strip flag, load-time mirror
+        // bit) are folded in HERE rather than inside `_computeMeshFeatures`, because they exist only
+        // to key the composed shader variant and the Standard path has no equivalent — reading them
+        // there cost every Standard-only scene ~11 bytes for a value that is always zero in it.
+        // `_computeMeshFeatures` is evaluated first, so `enableMirroredMeshes` has already reconciled
+        // the mirror bit against the live world matrix by the time it is read.
+        const meshFeatures = _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
         const esmShadowDepthCode = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0 ? (mat as PbrMaterialProps & { readonly _esmShadowDepthCode: string })._esmShadowDepthCode : "";
 
         // Genuine GPU interleaving. Tight meshes have `_vbLayout` undefined → vbKey ""
@@ -304,6 +310,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const uv2Mask = (mat as { _uv2Mask?: number })._uv2Mask ?? 0;
 
         const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey, uv2Mask);
+        // Non-triangle topology rides on the composed variant (see ComposedShader._prim). The
+        // composition key folds in meshFeatures, whose topology bits this mirrors, so this is only
+        // ever written with the same value for a given variant.
+        (composed as { _prim?: GPUPrimitiveState })._prim = (mesh as Mesh & { _primitive?: GPUPrimitiveState })._primitive;
         const bindings = getOrCreatePbrBindings(
             engine,
             features,

@@ -71,6 +71,37 @@ interface ShaderMaterialRenderState extends ShaderMaterial {
 }
 
 /** @internal */
+export type ShaderSystemUniformWriter = (
+    data: Float32Array,
+    spec: UboSpec,
+    material: ShaderMaterial,
+    mesh: Mesh,
+    camera: Camera | null,
+    targetWidth: number,
+    targetHeight: number
+) => void;
+
+/** @internal */
+export type ShaderCustomUniformWriter = (
+    engine: EngineContext,
+    material: ShaderMaterial,
+    spec: UboSpec,
+    data: ArrayBuffer,
+    ubo: GPUBuffer,
+    bytes: Uint8Array<ArrayBuffer>,
+    uniformBatch?: UniformCopyBatch
+) => void;
+
+let systemUniformWriter: ShaderSystemUniformWriter = writeSystemUniforms;
+let customUniformWriter: ShaderCustomUniformWriter = writeCustomUniforms;
+
+/** @internal Install the optional cached ShaderMaterial uniform writers. */
+export function _installShaderUniformWriters(systemWriter: ShaderSystemUniformWriter, customWriter: ShaderCustomUniformWriter): void {
+    systemUniformWriter = systemWriter;
+    customUniformWriter = customWriter;
+}
+
+/** @internal */
 export type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
 export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh[], getUniformBatch?: UniformBatchFactory): MeshGroupBuildResult {
@@ -159,7 +190,7 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
     const engine = scene.surface.engine;
     const systemUBO = createEmptyUniformBuffer(engine, systemSpec._totalBytes, "shader-system-ubo");
     const systemData = new F32(systemSpec._totalBytes / 4);
-    writeSystemUniforms(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
+    systemUniformWriter(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
     engine._device.queue.writeBuffer(systemUBO, 0, systemData);
     const packet: ShaderPacket = {
         mesh,
@@ -313,7 +344,7 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         packet._lastAspect !== aspect ||
         packet._lastAlphaCutoff !== alphaCutoff
     ) {
-        writeSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
+        systemUniformWriter(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
         if (uniformBatch) {
             uniformBatch.queue(packet.systemUBO, packet.systemData);
         } else {
@@ -385,22 +416,34 @@ function updateCustomUbo(engine: EngineContext, material: ShaderMaterial, unifor
         return;
     }
     const bytes = state._shaderCustomBytes ?? (state._shaderCustomBytes = new U8(customData));
+    customUniformWriter(engine, material, customSpec, customData, customUbo, bytes, uniformBatch);
+    state._shaderCustomVersion = material._uniformVersion;
+}
+
+function writeCustomUniforms(
+    engine: EngineContext,
+    material: ShaderMaterial,
+    spec: UboSpec,
+    data: ArrayBuffer,
+    ubo: GPUBuffer,
+    bytes: Uint8Array<ArrayBuffer>,
+    uniformBatch?: UniformCopyBatch
+): void {
     bytes.fill(0);
     for (const [name, slot] of material._uniformValues) {
         if (_isShaderSystemUniform(name)) {
             continue;
         }
-        const offset = customSpec._offsets.get(name);
+        const offset = spec._offsets.get(name);
         if (offset !== undefined) {
-            writeTypedValue(customData, offset, slot.decl.type, slot.value);
+            writeTypedValue(data, offset, slot.decl.type, slot.value);
         }
     }
     if (uniformBatch) {
-        uniformBatch.queue(customUbo, bytes);
+        uniformBatch.queue(ubo, bytes);
     } else {
-        engine._device.queue.writeBuffer(customUbo, 0, bytes);
+        engine._device.queue.writeBuffer(ubo, 0, bytes);
     }
-    state._shaderCustomVersion = material._uniformVersion;
 }
 
 function writeTypedValue(data: ArrayBuffer, offset: number, type: ShaderUniformType, value: Float32Array): void {

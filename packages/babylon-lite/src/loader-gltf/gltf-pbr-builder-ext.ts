@@ -148,7 +148,7 @@ function needsGltfUvTransform(tex: PbrTexturesExt): boolean {
 /** Registers the uv-transform ext on `props` when any texture carries a
  *  KHR_texture_transform.
  *
- *  `setPbrUvTransform` statically imports the uv-transform fragment, so the import has to
+ *  `enableMaterialUvTransform` statically imports the uv-transform fragment, so the import has to
  *  stay conditional or every scene reaching this slow path pays for it — including scenes
  *  that only reach it for occlusion-on-UV2 (scene27/144/243 each paid 721 B).
  *
@@ -162,8 +162,8 @@ export async function applyGltfUvTransform(props: PbrMaterialProps, tex: PbrText
     if (!needsGltfUvTransform(tex)) {
         return;
     }
-    const { setPbrUvTransform } = await import("../material/pbr/set-uv-transform.js");
-    setPbrUvTransform(props);
+    const { enableMaterialUvTransform } = await import("../material/pbr/enable-material-uv-transform.js");
+    enableMaterialUvTransform(props);
 }
 
 /** Slow-path assembly: adds occlusionTexCoord and occlusionTexture props.

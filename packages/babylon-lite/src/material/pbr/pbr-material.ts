@@ -192,9 +192,11 @@ export interface PbrMaterialProps extends Material {
      *  edges. Default 1.0. Higher values steepen the falloff (crisper visible edges).
      *  `alpha = saturate((1 - shadowFactor) * falloff) * opacity`. */
     _shadowOnlyFalloff?: number;
-    /** @internal True when any of the material's textures carries `_hasTx=true`
-     *  (KHR_texture_transform). Stamped once by the glTF loader's slow path
-     *  so the renderer doesn't re-scan 5 textures per mesh. */
+    /** @internal True when UV-transform support is enabled. Stamped by the glTF loader
+     *  and by `enableMaterialUvTransform` for hand-built materials. The
+     *  `PBR2_HAS_UV_TRANSFORM` bit is contributed by the uv-transform ext's own `detect`,
+     *  which only runs once that ext has been registered — so this flag alone is inert
+     *  unless it was set through `enableMaterialUvTransform`. */
     _hasUvTx?: boolean;
     /** Optional stencil-test state baked into the main-pass pipeline. Lets this material write the stencil buffer
      *  where it draws (mask) or discard where another material wrote it. Default none. See `StencilState`. */

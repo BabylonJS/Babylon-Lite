@@ -42,8 +42,6 @@ export interface CsmConfig {
     /** @internal */
     _stabilizeCascades: boolean;
     /** @internal */
-    _depthClamp: boolean;
-    /** @internal */
     _shadowMaxZ: number | null;
     /** @internal */
     _bias: number;
@@ -307,19 +305,12 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
         return 0;
     }
 
-    const cascades = _computeCsmCascades(state._scene, camera, sg._light as DirectionalLight, cfg, casterMeshes);
+    const cascades = _computeCsmCascades(state._scene, camera, sg._light as DirectionalLight, cfg, state._casterMeshes);
 
     _writeCsmUbo(state._uboData, cascades, cfg);
     sg._version++;
     engine._device.queue.writeBuffer(sg._shadowUBO, 0, state._uboData as Float32Array<ArrayBuffer>);
 
-    // Notify custom receivers (e.g. a ShaderMaterial that mirrors the cascade transforms into
-    // its own uniforms) with this frame's freshly-computed receiver UBO. This fires inside the
-    // shadow task — after the transforms are finalized but before the shadow map and main pass
-    // render — so such receivers stay in lock-step with the depth map. Syncing from a
-    // `onBeforeRender` callback instead would read the previous frame's transforms (a one-frame
-    // lag that makes those shadows swim while the camera moves). The built-in standard/PBR/node
-    // receivers don't need this: they bind `sg._shadowUBO` directly.
     const receiverCbs = sg._onReceiverData;
     if (receiverCbs) {
         for (let i = 0; i < receiverCbs.length; i++) {
@@ -344,7 +335,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
 
 // ─── CSM math (isolated to this module) ─────────────────────────────
 
-interface CsmCascades {
+export interface CsmCascades {
     /** @internal Unbiased receiver transform per cascade (col-major). */
     _transforms: Float32Array[];
     /** @internal Same as _transforms, used for the caster camera before bias. */
@@ -401,12 +392,12 @@ function orthoOffCenterLH(l: number, r: number, b: number, t: number, n: number,
  *  auxiliary surface created via `createSurface` has its own swapchain size). Fitting
  *  cascades to the canvas would use a frustum the scene never draws. `getEffectiveAspectRatio`
  *  additionally folds in the camera's normalized viewport, matching `_writePassSceneUBO`. */
-function csmCameraAspect(scene: SceneContext, camera: Camera): number {
+export function csmCameraAspect(scene: SceneContext, camera: Camera): number {
     const rt = scene.surface.scRT;
     return getEffectiveAspectRatio(camera, rt._width, rt._height);
 }
 
-function _computeCsmCascades(scene: SceneContext, camera: Camera, light: DirectionalLight, cfg: CsmConfig, casterMeshes: readonly Mesh[]): CsmCascades {
+export function _computeCsmCascades(scene: SceneContext, camera: Camera, light: DirectionalLight, cfg: CsmConfig, casterMeshes: readonly Mesh[]): CsmCascades {
     const near = camera.nearPlane;
     const far = camera.farPlane;
     const cameraRange = far - near;
@@ -766,7 +757,7 @@ function _thinInstanceWorldAabb(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"
     return aabb;
 }
 
-function _writeCsmUbo(out: Float32Array, cascades: CsmCascades, cfg: CsmConfig): void {
+export function _writeCsmUbo(out: Float32Array, cascades: CsmCascades, cfg: CsmConfig): void {
     out.fill(0);
     const n = cascades._transforms.length;
     for (let i = 0; i < n; i++) {
@@ -793,7 +784,7 @@ export function csmWorldBiasClipOffset(worldSpaceBias: number, near: number, far
     return worldSpaceBias / range;
 }
 
-function _biasViewProjection(viewProj: Float32Array, clipOffset: number): Float32Array {
+export function _biasViewProjection(viewProj: Float32Array, clipOffset: number): Float32Array {
     const biased = new Float32Array(viewProj);
     for (let col = 0; col < 4; col++) {
         const z = 2 + col * 4;

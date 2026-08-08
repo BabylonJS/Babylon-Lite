@@ -89,9 +89,13 @@ export interface GltfMeshData {
 }
 
 /** Build one tightly-packed glTF mesh, optionally reusing a prior instance's
- * immutable CPU/GPU geometry. Instance state and world-space bounds stay unique. */
+ * immutable CPU/GPU geometry. Instance state and object-local bounds stay unique. */
 function buildTightGltfMesh(engine: EngineContext, meshData: GltfMeshData, material: PbrMaterialProps, name: string, source?: Mesh): Mesh {
-    const [boundMin, boundMax] = computeAabb(meshData._positions!, meshData._worldMatrix);
+    // Object-local box (see `Mesh.boundMin`): do NOT bake `_worldMatrix` in. This mesh is attached as a child
+    // of its glTF node by `buildNodeHierarchy`, so its own `worldMatrix` already reproduces that node's world
+    // transform — baking it here too would make every reader that composes `worldMatrix × bounds` (shadow fit,
+    // thin-instance cull, physics) transform the box a second time.
+    const [boundMin, boundMax] = computeAabb(meshData._positions!);
     const indices = meshData._indices;
     const uint32 = indices instanceof U32;
     const gpu: MeshGPU = source

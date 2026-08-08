@@ -10,6 +10,7 @@ import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { createSkeleton } from "../skeleton/create-skeleton.js";
 import type { createMorphTargets } from "../morph/create-morph-targets.js";
+import type { Renderable } from "../render/renderable.js";
 
 interface MutableSkeleton {
     boneTexture: GPUTexture;
@@ -47,6 +48,9 @@ interface RecoverableRenderTask {
  */
 export async function rebuildRegisteredScenes(engine: EngineContext): Promise<void> {
     clearSceneBGLCache();
+    // Engine-scoped and lazily recreated by the PBR fallback resolver, so it must be cleared once
+    // per recovery. Clearing it per scene would orphan the fallback each later scene rebuilt.
+    engine._pbrFallbackTex = undefined;
     for (const surface of engine.surfaces) {
         for (const ctx of surface._renderingContexts) {
             if (ctx._kind !== "scene") {
@@ -62,11 +66,31 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
 }
 
 async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Promise<void> {
-    await rebuildSceneTextures(engine, scene);
-    await _rebuildMeshes(engine, scene);
+    // The environment and shadow rebuild logic each live in their own module, reached only
+    // through these lazy imports so recovery-enabled scenes that use neither carry neither.
+    if (scene._envTextures) {
+        const { rebuildSceneEnvironment } = await import("../loader-env/environment-recovery.js");
+        await runRecoveryStep("rebuilding environment textures", () => rebuildSceneEnvironment(engine, scene));
+    }
+
+    await runRecoveryStep("rebuilding material textures", () => rebuildSceneTextures(engine, scene));
+    await runRecoveryStep("rebuilding meshes", () => _rebuildMeshes(engine, scene));
     if (scene._z) {
         return;
     }
+    if (scene.shadowGenerators.length > 0 || scene.lights.some((light) => light.shadowGenerator)) {
+        const { rebuildSceneShadowGenerators } = await import("../shadow/shadow-recovery.js");
+        await runRecoveryStep("rebuilding shadows", () => rebuildSceneShadowGenerators(engine, scene));
+    }
+    if (scene._z) {
+        return;
+    }
+
+    // Snapshot the rebuild thunks before the renderable list is truncated below. Discovering them
+    // here — rather than recording descriptors through a capture seam — keeps the loader paths that
+    // build renderables free of any recovery cost, and this whole module is only ever fetched on
+    // the recovery path.
+    const rebuilds = scene._renderables.filter((r) => !!r._rebuild).map((r) => r._rebuild!);
 
     scene._renderables.length = scene._uniformUpdaters.length = 0;
     scene._meshDisposables.clear();
@@ -76,7 +100,7 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
     }
 
     for (const [build, meshes] of scene._groups) {
-        const result = await build(scene, meshes);
+        const result = await runRecoveryStep("rebuilding material groups", () => build(scene, meshes));
         if (scene._z) {
             return;
         }
@@ -87,10 +111,36 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
             scene._uniformUpdaters.push(result.updater);
         }
     }
+    if (rebuilds.length > 0) {
+        scene._renderables.push(...(await runRecoveryStep("rebuilding renderables", () => rebuildRenderables(rebuilds))));
+    }
     scene._renderables.sort((a, b) => a.order - b.order);
     scene._renderableVersion++;
     resetFrameGraphTasks(engine, scene);
     scene._frameGraph.build();
+}
+
+/**
+ * @internal Replay discovered rebuild thunks, preserving their pre-loss relative order.
+ *
+ * Sequential rather than concurrent: each thunk re-runs its builder, which allocates GPU resources
+ * on the replacement device, and the surrounding recovery steps are ordered for the same reason.
+ */
+export async function rebuildRenderables(rebuilds: readonly NonNullable<Renderable["_rebuild"]>[]): Promise<Renderable[]> {
+    const rebuilt: Renderable[] = [];
+    for (const rebuild of rebuilds) {
+        rebuilt.push(await rebuild());
+    }
+    return rebuilt;
+}
+
+async function runRecoveryStep<T>(description: string, action: () => Promise<T>): Promise<T> {
+    try {
+        return await action();
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Device-lost Scene recovery failed while ${description}: ${message}`, { cause: error });
+    }
 }
 
 function resetFrameGraphTasks(engine: EngineContext, scene: SceneContext): void {
@@ -182,11 +232,7 @@ function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
 async function rebuildSceneTextures(engine: EngineContext, scene: SceneContext): Promise<void> {
     const seen = new Set<Texture2D>();
     const visited = new WeakSet<object>();
-    const promises: Promise<void>[] = [];
-    // The per-kind texture rebuild logic lives in its own module, reached only
-    // through this lazy import on the recovery path so this rebuild chunk carries
-    // none of it statically.
-    const { rebuildTexture2D } = await import("../texture/texture-recovery.js");
+    const textures: Texture2D[] = [];
     const visit = (value: unknown): void => {
         if (!value || typeof value !== "object") {
             return;
@@ -196,7 +242,7 @@ async function rebuildSceneTextures(engine: EngineContext, scene: SceneContext):
             const tex = obj as unknown as Texture2D;
             if (!seen.has(tex)) {
                 seen.add(tex);
-                promises.push(rebuildTexture2D(engine, tex));
+                textures.push(tex);
             }
             return;
         }
@@ -211,5 +257,11 @@ async function rebuildSceneTextures(engine: EngineContext, scene: SceneContext):
     for (const mesh of scene.meshes) {
         visit(mesh.material);
     }
-    await Promise.all(promises);
+    if (textures.length === 0) {
+        return;
+    }
+    // The per-kind texture rebuild logic lives in its own module, reached only
+    // when the scene actually owns material textures.
+    const { rebuildTexture2D } = await import("../texture/texture-recovery.js");
+    await Promise.all(textures.map((texture) => rebuildTexture2D(engine, texture)));
 }

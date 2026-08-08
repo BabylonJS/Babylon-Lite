@@ -1,24 +1,24 @@
 {
   "rawKB": 65.4,
-  "gzipKB": 29.4,
+  "gzipKB": 29.5,
   "ignoredRawKB": 7,
   "runtimeChunks": [
-    "scene81-_math-factory-DhoX_cdf.js",
-    "scene81-add-block-C8HoHm9j.js",
-    "scene81-biplanar-block-D1dLODYV.js",
+    "scene81-_math-factory-DpYBEX-W.js",
+    "scene81-add-block-tCn8tFwT.js",
+    "scene81-biplanar-block-Dlr2CTyK.js",
     "scene81-fragment-output-CfRmfbPv.js",
-    "scene81-input-block-r1KfV84O.js",
-    "scene81-node-registry-Cxx5IkKm.js",
-    "scene81-node-registry-extra-procedural-BeumkwKD.js",
-    "scene81-node-renderable-j3OWGsDK.js",
+    "scene81-input-block-BeaYCfyz.js",
+    "scene81-node-registry-CWQNpdFZ.js",
+    "scene81-node-registry-extra-procedural-XsagvzNp.js",
+    "scene81-node-renderable-B6e1pA-v.js",
     "scene81-panner-block-fcbonbH6.js",
     "scene81-rotate2d-block-PoTUVgvt.js",
     "scene81-scale-block-6qtIvFiz.js",
     "scene81-texture-block-BqMd_NnH.js",
-    "scene81-transform-block-B3oJm6jT.js",
-    "scene81-triplanar-block-BsmOH9oT.js",
+    "scene81-transform-block-u5uP27fX.js",
+    "scene81-triplanar-block-Drzjh4p5.js",
     "scene81-vertex-output-C7G5u6Y0.js",
     "scene81.js"
   ],
-  "rawBytes": 66984
+  "rawBytes": 66997
 }

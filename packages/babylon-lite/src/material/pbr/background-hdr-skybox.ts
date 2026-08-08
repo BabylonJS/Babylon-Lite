@@ -70,6 +70,7 @@ export function buildHdrSkyboxRenderable(
             };
         },
     };
+    r._rebuild = () => buildHdrSkyboxRenderable(scene, envTextures, skyHalfSize, rootPosition, primaryColor);
     return r;
 }
 

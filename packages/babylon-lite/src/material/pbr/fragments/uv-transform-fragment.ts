@@ -1,4 +1,4 @@
-/** UV-transform PbrExt. Pulled in only by `setPbrUvTransform`, so non-UV-transform
+/** UV-transform PbrExt. Pulled in only by `enableMaterialUvTransform`, so non-UV-transform
  *  bundles pay zero bytes. Contributes the `PBR2_HAS_UV_TRANSFORM` feature bit from
  *  its own `detect`. Template-only ext — no fragment or bindings, just a material-UBO
  *  slice. */

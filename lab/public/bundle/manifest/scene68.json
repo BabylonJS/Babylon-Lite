@@ -1,21 +1,21 @@
 {
-  "rawKB": 89.8,
-  "gzipKB": 35.6,
+  "rawKB": 90.2,
+  "gzipKB": 35.8,
   "ignoredRawKB": 11.4,
   "runtimeChunks": [
-    "scene68-_math-factory-BeBEFbRS.js",
+    "scene68-_math-factory-BEeB5u-F.js",
     "scene68-clearcoat-block-BPLkmxQ1.js",
     "scene68-fragment-output-CfRmfbPv.js",
-    "scene68-input-block-9hvWAyN5.js",
-    "scene68-node-env-D5_yFfa0.js",
-    "scene68-node-registry-nVPvVJbv.js",
-    "scene68-node-renderable-CbhMfbhs.js",
+    "scene68-input-block-BiePR_5E.js",
+    "scene68-node-env-Cme30hlL.js",
+    "scene68-node-registry-B0JtTTZg.js",
+    "scene68-node-renderable-C8Sku3sK.js",
     "scene68-pbr-metallic-roughness-block-full-DOZEBkmU.js",
     "scene68-reflection-block-CIXuH-z0.js",
     "scene68-rgbd-decode-RAE7xZR8.js",
-    "scene68-transform-block-DB_xSvh7.js",
+    "scene68-transform-block-AnNe3a5e.js",
     "scene68-vertex-output-C7G5u6Y0.js",
     "scene68.js"
   ],
-  "rawBytes": 91939
+  "rawBytes": 92314
 }

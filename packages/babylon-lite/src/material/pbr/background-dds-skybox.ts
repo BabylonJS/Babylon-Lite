@@ -71,6 +71,7 @@ export async function buildDdsSkyboxRenderable(
             };
         },
     };
+    r._rebuild = () => buildDdsSkyboxRenderable(scene, skyHalfSize, rootPosition, primaryColor, skyboxTextureUrl, enableNoise);
     return r;
 }
 
