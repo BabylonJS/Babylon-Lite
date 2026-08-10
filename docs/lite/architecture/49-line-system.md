@@ -1,10 +1,10 @@
 # Module: Line System
 
-> Package paths: `packages/babylon-lite/src/mesh/create-line-system.ts`, `packages/babylon-lite/src/material/line/`
+> Package paths: `packages/babylon-lite/src/mesh/create-line-system.ts`, `packages/babylon-lite/src/mesh/create-dashed-lines.ts`, `packages/babylon-lite/src/material/line/`
 
 ## Purpose
 
-Provide a public, tree-shakable equivalent of Babylon.js `CreateLines` and `CreateLineSystem`.
+Provide a public, tree-shakable equivalent of Babylon.js `CreateLines`, `CreateLineSystem`, and `CreateDashedLines`.
 A line system concatenates several independent polylines into one indexed `Mesh`, renders the
 indices as a WebGPU `line-list`, and optionally carries one RGBA color per point.
 
@@ -73,17 +73,38 @@ export interface LinesOptions {
 
 export interface LineSystemUpdateOptions extends LineSystemDataOptions {}
 
+export interface DashedLinesOptions {
+    readonly name?: string;
+    readonly points: readonly Vec3[];
+    readonly dashSize?: number;
+    readonly gapSize?: number;
+    readonly dashNb?: number;
+    readonly color?: Color4;
+    readonly useVertexAlpha?: boolean;
+    readonly material?: LineMaterial;
+}
+
+export interface DashedLinesUpdateOptions {
+    readonly points: readonly Vec3[];
+}
+
 export function createLineSystemData(options: LineSystemDataOptions): LineSystemData;
 export function createLineMaterial(options?: LineMaterialOptions): LineMaterial;
 export function setLineMaterialColor(material: LineMaterial, color: Color4): void;
 export function createLineSystem(engine: EngineContext, options: LineSystemOptions): Mesh;
 export function createLines(engine: EngineContext, options: LinesOptions): Mesh;
 export function updateLineSystem(engine: EngineContext, mesh: Mesh, options: LineSystemUpdateOptions): void;
+export function createDashedLines(engine: EngineContext, options: DashedLinesOptions): Mesh;
+export function updateDashedLines(engine: EngineContext, mesh: Mesh, options: DashedLinesUpdateOptions): void;
 ```
 
 Defaults:
 
 - `name`: `"lineSystem"` (`"lines"` for `createLines`)
+- dashed-line `name`: `"dashedLines"`
+- `dashSize`: `3`
+- `gapSize`: `1`
+- `dashNb`: `200`
 - `color`: opaque white
 - `useVertexColor`: inferred from `colors` by `createLineSystem`
 - `useVertexAlpha`: `true`, matching Babylon.js `LinesMesh`
@@ -124,6 +145,19 @@ connectivity while keeping the same total vertex count.
 (`2 = line-list`). This makes procedural and loaded line primitives share the same mesh state
 representation even though their materials use different render paths.
 
+### Dashed-line generation and updates
+
+`createDashedLines` measures the complete input polyline, divides that length into `dashNb` steps,
+and emits one independent two-point line for every complete step on each source segment. The visible
+portion of each step is `dashSize / (dashSize + gapSize)`. Source-segment boundaries restart the
+step phase, matching Babylon.js.
+
+The mesh retains its creation-time dash/gap ratio in `Mesh._dashedLineOptions`; its actual emitted
+dash count is already retained by `Mesh._linePointCounts`. `updateDashedLines` recomputes spacing
+from the new total length and the existing dash count, caps writes at that fixed capacity, and fills
+any unused tail with degenerate segments at the final point. The mesh identity, vertex/index counts,
+and GPU buffers therefore remain stable.
+
 ### Validation
 
 Creation throws before GPU allocation when:
@@ -141,6 +175,10 @@ Update throws before any GPU write when:
 - the mesh was not created by `createLineSystem`;
 - colors are supplied for a mesh without a color buffer;
 - color dimensions are invalid.
+
+Dashed-line creation additionally requires at least two points and at least one generated dash.
+Dashed-line updates require a mesh created by `createDashedLines`; degenerate replacement points are
+valid and collapse every retained dash onto the final point.
 
 Omitting `colors` during an update preserves an existing color buffer. A mesh created without
 colors cannot gain them without creating/resizing a new line system.
@@ -259,26 +297,29 @@ unlit and do not sample textures.
 6. `registerScene` builds the ordinary ShaderMaterial renderable.
 7. `updateLineSystem` validates topology, updates position/color buffers in place, refreshes retained
    CPU arrays, recomputes bounds, and refreshes device-loss recovery data.
-8. Ordinary scene/mesh disposal releases all GPU resources.
+8. `createDashedLines` builds ordinary two-point line-system rows and retains its creation-time
+   dash/gap ratio; `updateDashedLines` regenerates exactly the existing row count.
+9. Ordinary scene/mesh disposal releases all GPU resources.
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js                                          | Babylon Lite                                                   |
-| --------------------------------------------------- | -------------------------------------------------------------- |
-| `CreateLineSystemVertexData`                        | `createLineSystemData`                                         |
-| `MeshBuilder.CreateLineSystem` / `CreateLineSystem` | `createLineSystem`                                             |
-| `MeshBuilder.CreateLines` / `CreateLines`           | `createLines`                                                  |
-| `LinesMesh` geometry                                | ordinary `Mesh` with `_topology = 2`                           |
-| `LinesMesh` default color shader                    | `LineMaterial`                                                 |
-| `LinesMesh.color` + `.alpha`                        | `setLineMaterialColor`                                         |
-| `options.instance` update                           | `updateLineSystem(engine, mesh, options)`                      |
-| `useVertexAlpha`                                    | `LineMaterial.useVertexAlpha`                                  |
-| line thin instances                                 | existing `setThinInstances` with a thin-instance line material |
+| Babylon.js                                            | Babylon Lite                                                   |
+| ----------------------------------------------------- | -------------------------------------------------------------- |
+| `CreateLineSystemVertexData`                          | `createLineSystemData`                                         |
+| `MeshBuilder.CreateLineSystem` / `CreateLineSystem`   | `createLineSystem`                                             |
+| `MeshBuilder.CreateLines` / `CreateLines`             | `createLines`                                                  |
+| `MeshBuilder.CreateDashedLines` / `CreateDashedLines` | `createDashedLines`                                            |
+| `LinesMesh` geometry                                  | ordinary `Mesh` with `_topology = 2`                           |
+| `LinesMesh` default color shader                      | `LineMaterial`                                                 |
+| `LinesMesh.color` + `.alpha`                          | `setLineMaterialColor`                                         |
+| `options.instance` update                             | `updateLineSystem(engine, mesh, options)`                      |
+| dashed `options.instance` update                      | `updateDashedLines(engine, mesh, options)`                     |
+| `useVertexAlpha`                                      | `LineMaterial.useVertexAlpha`                                  |
+| line thin instances                                   | existing `setThinInstances` with a thin-instance line material |
 
 Initial limitations:
 
 - one-pixel hardware lines only;
-- no dashed-line generator;
 - no segment-distance picking / `intersectionThreshold`;
 - updates cannot change line count, point counts, or color-buffer presence;
 - triangle-specific shadow, geometry, and detailed-picking passes are not enabled for line systems.
@@ -304,6 +345,9 @@ Unit tests:
 - update positions/colors without replacing GPU buffers;
 - reject changed line topology before GPU mutation;
 - preserve colors when an update omits them;
+- generate BJS-spaced dashed segments with default and explicit dash/gap/count values;
+- update dashed positions without changing the retained dash topology;
+- collapse unused dashed update slots onto the final point;
 - verify ShaderMaterial pipeline cache separation between triangle and line topologies.
 
 Visual parity scenes:
@@ -322,16 +366,18 @@ Bundle checks:
 ## File Manifest
 
 - `packages/babylon-lite/src/mesh/create-line-system.ts`: geometry creation and updates.
+- `packages/babylon-lite/src/mesh/create-dashed-lines.ts`: dashed geometry creation and fixed-topology updates.
 - `packages/babylon-lite/src/material/line/line-material.ts`: line shader/material.
 - `packages/babylon-lite/src/material/shader/shader-material.ts`: internal topology state.
 - `packages/babylon-lite/src/material/shader/shader-pipeline.ts`: topology-aware pipeline creation.
 - `packages/babylon-lite/src/material/shader/shader-pipeline-cache.ts`: topology cache key.
 - `packages/babylon-lite/src/mesh/mesh.ts`: internal topology and line-count state.
 - `packages/babylon-lite/src/index.ts`: public exports.
-- `packages/babylon-lite-compat/src/meshes/meshes.ts`: `LinesMesh`, `CreateLines`, and `CreateLineSystem` wrappers.
+- `packages/babylon-lite-compat/src/meshes/meshes.ts`: `LinesMesh`, `CreateLines`, `CreateLineSystem`, and `CreateDashedLines` wrappers.
 - `packages/babylon-lite-compat/COMPAT-STATUS.md`: compatibility status.
 - `lab/lite/src/bjs/scene278.ts`, `lab/lite/src/lite/scene278.ts`: static parity scene.
 - `lab/lite/src/bjs/scene279.ts`, `lab/lite/src/lite/scene279.ts`: update + thin-instance parity scene.
 - `tests/lite/unit/create-line-system.test.ts`: unit coverage.
+- `tests/lite/unit/create-dashed-lines.test.ts`: dashed creation and update coverage.
 - `tests/lite/parity/scenes/scene278-line-system.spec.ts`: static visual parity.
 - `tests/lite/parity/scenes/scene279-line-system-update-instances.spec.ts`: dynamic/instance visual parity.
