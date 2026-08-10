@@ -79,10 +79,237 @@ export class GlowLayer {
 }
 
 // ─── Mesh-attached renderers / projectors ────────────────────────────
-export class GreasedLineMesh {
-    public constructor() {
-        unsupported("GreasedLineMesh", "Greased-line meshes are not implemented in Babylon Lite.");
+// ─── GreasedLine (thick-line ribbon subsystem) ───────────────────────
+// Greased lines render polylines as camera-facing ribbons/tubes driven by a
+// dedicated plugin material (per-point widths, color/width distribution tables,
+// dashing, ribbon face/direction modes). Babylon Lite renders only 1px hardware
+// line-lists (see `MeshBuilder.CreateLines` / `CreateDashedLines`) and has no
+// thick-line ribbon geometry generator or plugin-material subsystem to back it,
+// so the whole family is a `❌ Not supported` throwing stub.
+const GREASED_LINE_REASON =
+    "Greased (thick) lines are a ribbon/tube geometry + dedicated plugin-material subsystem (per-point widths, color/width distribution tables, dashing, camera-facing ribbon modes). Babylon Lite renders only 1px hardware line-lists (MeshBuilder.CreateLines / CreateDashedLines) and has no thick-line ribbon pipeline or plugin material to back it.";
+
+export class GreasedLineBaseMesh {
+    public constructor(..._args: unknown[]) {
+        unsupported("GreasedLineBaseMesh", GREASED_LINE_REASON);
     }
+}
+
+export class GreasedLineMesh {
+    public constructor(..._args: unknown[]) {
+        unsupported("GreasedLineMesh", GREASED_LINE_REASON);
+    }
+}
+
+export class GreasedLineRibbonMesh {
+    public constructor(..._args: unknown[]) {
+        unsupported("GreasedLineRibbonMesh", GREASED_LINE_REASON);
+    }
+}
+
+export class GreasedLinePluginMaterial {
+    public constructor(..._args: unknown[]) {
+        unsupported("GreasedLinePluginMaterial", GREASED_LINE_REASON);
+    }
+}
+
+export class MaterialGreasedLineDefines {
+    public constructor(..._args: unknown[]) {
+        unsupported("MaterialGreasedLineDefines", GREASED_LINE_REASON);
+    }
+}
+
+export class GreasedLineMaterialDefaults {
+    public constructor(..._args: unknown[]) {
+        unsupported("GreasedLineMaterialDefaults", GREASED_LINE_REASON);
+    }
+
+    public static get DEFAULT_COLOR(): never {
+        return unsupported("GreasedLineMaterialDefaults.DEFAULT_COLOR", GREASED_LINE_REASON);
+    }
+
+    public static get DEFAULT_WIDTH_ATTENUATED(): never {
+        return unsupported("GreasedLineMaterialDefaults.DEFAULT_WIDTH_ATTENUATED", GREASED_LINE_REASON);
+    }
+
+    public static get DEFAULT_WIDTH(): never {
+        return unsupported("GreasedLineMaterialDefaults.DEFAULT_WIDTH", GREASED_LINE_REASON);
+    }
+
+    public static get EmptyColorsTexture(): never {
+        return unsupported("GreasedLineMaterialDefaults.EmptyColorsTexture", GREASED_LINE_REASON);
+    }
+}
+
+export function RegisterGreasedLinePluginMaterial(..._args: unknown[]): never {
+    return unsupported("RegisterGreasedLinePluginMaterial", GREASED_LINE_REASON);
+}
+
+export class GreasedLineSimpleMaterial {
+    public constructor(..._args: unknown[]) {
+        unsupported("GreasedLineSimpleMaterial", GREASED_LINE_REASON);
+    }
+}
+
+export class GreasedLineTools {
+    public constructor(..._args: unknown[]) {
+        unsupported("GreasedLineTools", GREASED_LINE_REASON);
+    }
+
+    public static ConvertPoints(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.ConvertPoints", GREASED_LINE_REASON);
+    }
+
+    public static OmitZeroLengthPredicate(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.OmitZeroLengthPredicate", GREASED_LINE_REASON);
+    }
+
+    public static OmitDuplicatesPredicate(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.OmitDuplicatesPredicate", GREASED_LINE_REASON);
+    }
+
+    public static MeshesToLines(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.MeshesToLines", GREASED_LINE_REASON);
+    }
+
+    public static ToVector3Array(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.ToVector3Array", GREASED_LINE_REASON);
+    }
+
+    public static ToNumberArray(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.ToNumberArray", GREASED_LINE_REASON);
+    }
+
+    public static GetPointsCountInfo(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetPointsCountInfo", GREASED_LINE_REASON);
+    }
+
+    public static GetLineLength(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetLineLength", GREASED_LINE_REASON);
+    }
+
+    public static GetLineLengthArray(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetLineLengthArray", GREASED_LINE_REASON);
+    }
+
+    public static SegmentizeSegmentByCount(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.SegmentizeSegmentByCount", GREASED_LINE_REASON);
+    }
+
+    public static SegmentizeLineBySegmentLength(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.SegmentizeLineBySegmentLength", GREASED_LINE_REASON);
+    }
+
+    public static SegmentizeLineBySegmentCount(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.SegmentizeLineBySegmentCount", GREASED_LINE_REASON);
+    }
+
+    public static GetLineSegments(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetLineSegments", GREASED_LINE_REASON);
+    }
+
+    public static GetMinMaxSegmentLength(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetMinMaxSegmentLength", GREASED_LINE_REASON);
+    }
+
+    public static GetPositionOnLineByVisibility(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetPositionOnLineByVisibility", GREASED_LINE_REASON);
+    }
+
+    public static GetCircleLinePoints(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetCircleLinePoints", GREASED_LINE_REASON);
+    }
+
+    public static GetBezierLinePoints(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetBezierLinePoints", GREASED_LINE_REASON);
+    }
+
+    public static GetArrowCap(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetArrowCap", GREASED_LINE_REASON);
+    }
+
+    public static GetPointsFromText(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetPointsFromText", GREASED_LINE_REASON);
+    }
+
+    public static Color3toRGBAUint8(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.Color3toRGBAUint8", GREASED_LINE_REASON);
+    }
+
+    public static CreateColorsTexture(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.CreateColorsTexture", GREASED_LINE_REASON);
+    }
+
+    public static PrepareEmptyColorsTexture(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.PrepareEmptyColorsTexture", GREASED_LINE_REASON);
+    }
+
+    public static DisposeEmptyColorsTexture(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.DisposeEmptyColorsTexture", GREASED_LINE_REASON);
+    }
+
+    public static BooleanToNumber(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.BooleanToNumber", GREASED_LINE_REASON);
+    }
+}
+
+export function CreateGreasedLine(..._args: unknown[]): never {
+    return unsupported("CreateGreasedLine", GREASED_LINE_REASON);
+}
+
+export function CreateGreasedLineMaterial(..._args: unknown[]): never {
+    return unsupported("CreateGreasedLineMaterial", GREASED_LINE_REASON);
+}
+
+export function GetPointsCount(..._args: unknown[]): never {
+    return unsupported("GetPointsCount", GREASED_LINE_REASON);
+}
+
+export function CompleteGreasedLineWidthTable(..._args: unknown[]): never {
+    return unsupported("CompleteGreasedLineWidthTable", GREASED_LINE_REASON);
+}
+
+export function CompleteGreasedLineColorTable(..._args: unknown[]): never {
+    return unsupported("CompleteGreasedLineColorTable", GREASED_LINE_REASON);
+}
+
+// GreasedLine enums are pure numeric parity shape (no feature logic), mirrored
+// from BJS so ported code that references the members resolves.
+export enum GreasedLineMeshColorDistribution {
+    COLOR_DISTRIBUTION_NONE = 0,
+    COLOR_DISTRIBUTION_REPEAT = 1,
+    COLOR_DISTRIBUTION_EVEN = 2,
+    COLOR_DISTRIBUTION_START = 3,
+    COLOR_DISTRIBUTION_END = 4,
+    COLOR_DISTRIBUTION_START_END = 5,
+}
+
+export enum GreasedLineMeshWidthDistribution {
+    WIDTH_DISTRIBUTION_NONE = 0,
+    WIDTH_DISTRIBUTION_REPEAT = 1,
+    WIDTH_DISTRIBUTION_EVEN = 2,
+    WIDTH_DISTRIBUTION_START = 3,
+    WIDTH_DISTRIBUTION_END = 4,
+    WIDTH_DISTRIBUTION_START_END = 5,
+}
+
+export enum GreasedLineRibbonPointsMode {
+    POINTS_MODE_POINTS = 0,
+    POINTS_MODE_PATHS = 1,
+}
+
+export enum GreasedLineRibbonFacesMode {
+    FACES_MODE_SINGLE_SIDED = 0,
+    FACES_MODE_SINGLE_SIDED_NO_BACKFACE_CULLING = 1,
+    FACES_MODE_DOUBLE_SIDED = 2,
+}
+
+export enum GreasedLineRibbonAutoDirectionMode {
+    AUTO_DIRECTIONS_FROM_FIRST_SEGMENT = 0,
+    AUTO_DIRECTIONS_FROM_ALL_SEGMENTS = 1,
+    AUTO_DIRECTIONS_ENHANCED = 2,
+    AUTO_DIRECTIONS_FACE_TO = 3,
+    AUTO_DIRECTIONS_NONE = 99,
 }
 
 export class EdgesRenderer {

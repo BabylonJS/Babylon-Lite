@@ -1,14 +1,15 @@
 {
-  "rawKB": 74.5,
-  "gzipKB": 30.6,
+  "rawKB": 76.3,
+  "gzipKB": 31.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene116-pbr-renderable-D6tfWvic.js",
+    "scene116-pbr-renderable-D4bKKbwD.js",
     "scene116-shader-composer-qxmZVcOJ.js",
-    "scene116-singlelight-hemispheric-wgsl-o8JYeTfp.js",
-    "scene116-standard-renderable-VKcQwe9T.js",
-    "scene116-std-emissive-fragment-CPOdesNh.js",
+    "scene116-singlelight-hemispheric-wgsl-CjLhvUZR.js",
+    "scene116-standard-renderable-CMUBOthC.js",
+    "scene116-std-emissive-fragment-TbOeshxb.js",
+    "scene116-unlit-fragment-DWtvt7yQ.js",
     "scene116.js"
   ],
-  "rawBytes": 76297
+  "rawBytes": 78098
 }
