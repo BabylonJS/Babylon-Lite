@@ -17,8 +17,8 @@ export {
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
 export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
 export type { NullEngineOptions } from "./engine/null-engine.js";
-export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings } from "./engine/gpu-task-timing.js";
-export type { RenderTaskGpuTiming, RenderTaskGpuTimings, RenderTaskGpuTimingStatus } from "./engine/gpu-task-timing.js";
+export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings, measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";
+export type { RenderTaskGpuTiming, RenderTaskGpuTimings, RenderTaskGpuTimingStatus, OverdrawCostMeasure } from "./engine/gpu-task-timing.js";
 export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./engine/surface.js";
 export { enableSurfaceResizeObserver } from "./engine/enable-surface-resize-observer.js";
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
