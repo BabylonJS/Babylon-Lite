@@ -1,4 +1,5 @@
 const CONTENT_HASH_SUFFIX = /-[A-Za-z0-9_-]{8}(?=\.js$)/;
+export const RAW_BYTE_DRIFT_TOLERANCE = 10;
 
 /** Remove Vite's content hash while preserving the scene-prefixed logical chunk name. */
 export function logicalRuntimeChunkName(file: string): string {
@@ -24,4 +25,16 @@ export function diffRuntimeChunks(committed: string[] | undefined, built: string
         parts.push(`+${added.join(", +")}`);
     }
     return parts.join("  ");
+}
+
+/** Gzip output varies by zlib build; only movement beyond one rounded KB is actionable. */
+export function diffGzipSize(committedKB: number | undefined, builtKB: number | undefined): string | null {
+    const committed = Math.round(committedKB ?? 0);
+    const built = Math.round(builtKB ?? 0);
+    return Math.abs(built - committed) <= 1 ? null : `committed gzip=${committed}KB → rebuilt gzip=${built}KB`;
+}
+
+/** Ignore tiny minifier allocation shifts; absolute ceiling checks still use exact rebuilt bytes. */
+export function rawByteDriftExceedsTolerance(committed: number, built: number): boolean {
+    return Math.abs(built - committed) > RAW_BYTE_DRIFT_TOLERANCE;
 }
