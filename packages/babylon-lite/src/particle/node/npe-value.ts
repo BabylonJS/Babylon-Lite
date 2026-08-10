@@ -25,15 +25,12 @@ export interface NpeTextureValue {
 /** Scalar, vector, or colour value used by arithmetic particle blocks. */
 export type NpeValue = number | Vec3 | Color4 | Vec2;
 
-/** Any value that can flow along a node-particle connection. */
-export type NpeGraphValue = NpeValue | NpeTextureValue;
-
 /**
  * Reads a value for particle `i`. Scalars return a number; vectors and colours return a REUSED scratch
  * object (never a fresh allocation), so consumers must copy the result immediately. This keeps the value
  * graph allocation-free without giving up its generality.
  */
-export type NpeGetter<T extends NpeGraphValue = NpeValue> = (i: number) => T;
+export type NpeGetter = (i: number) => NpeValue;
 
 /** Reads a scalar value for particle `i`. */
 export type ScalarGetter = (i: number) => number;

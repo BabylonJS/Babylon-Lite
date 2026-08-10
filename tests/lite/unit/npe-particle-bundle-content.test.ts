@@ -14,7 +14,7 @@ const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
 const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280];
 const UNUSED_FEATURE_CHUNK =
-    /registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|direction|angle)-block|npe-texture-content|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
+    /registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|direction|angle)-block|npe-(flow-map-runtime|texture-content)|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 
 describe("Particle bundle feature isolation", () => {
     it("canonical particle scenes do not fetch unused optional features", () => {
@@ -27,7 +27,7 @@ describe("Particle bundle feature isolation", () => {
                     UNUSED_FEATURE_CHUNK.test(chunk) &&
                     !(sceneId === 263 && chunk.includes("registry-extra-emitters")) &&
                     !(sceneId === 277 && (chunk.includes("registry-extra-remaining") || chunk.includes("update-attractor-block"))) &&
-                    !(sceneId === 280 && (chunk.includes("registry-extra-remaining") || chunk.includes("update-flow-map-block") || chunk.includes("npe-texture-content")))
+                    !(sceneId === 280 && chunk.includes("npe-flow-map-runtime"))
             );
             expect(offenders, `scene${sceneId} fetches unused particle feature chunks`).toEqual([]);
             if (sceneId === 277) {
@@ -42,12 +42,8 @@ describe("Particle bundle feature isolation", () => {
             }
             if (sceneId === 280) {
                 expect(
-                    chunks.some((chunk) => chunk.includes("update-flow-map-block")),
-                    "scene280 must fetch the flow-map evaluator"
-                ).toBe(true);
-                expect(
-                    chunks.some((chunk) => chunk.includes("registry-extra-remaining")),
-                    "scene280 must fetch the remaining optional registry"
+                    chunks.some((chunk) => chunk.includes("npe-flow-map-runtime")),
+                    "scene280 must fetch the specialized flow-map runtime"
                 ).toBe(true);
             }
 
@@ -64,13 +60,13 @@ describe("Particle bundle feature isolation", () => {
                 .map((module) => module.id ?? "")
                 .filter(
                     (id) =>
-                        /particle\/node\/(npe-registry-(extra-remaining|extra-values|local-shapes)|npe-(local-position|texture-content)|blocks\/(flow-map-texture-source-block|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|update-(attractor|flow-map)-block|(box|point|sphere|cone|cylinder|mesh)-shape-local))|math\/mat4-invert/.test(
+                        /particle\/node\/(npe-(flow-map-runtime|local-position|texture-content)|npe-registry-(extra-remaining|extra-values|local-shapes)|blocks\/(flow-map-texture-source-block|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|update-(attractor|flow-map)-block|(box|point|sphere|cone|cylinder|mesh)-shape-local))|math\/mat4-invert/.test(
                             id
                         ) &&
                         !(sceneId === 277 && (id.includes("npe-registry-extra-remaining") || id.includes("update-attractor-block"))) &&
                         !(
                             sceneId === 280 &&
-                            (id.includes("npe-registry-extra-remaining") ||
+                            (id.includes("npe-flow-map-runtime") ||
                                 id.includes("update-flow-map-block") ||
                                 id.includes("flow-map-texture-source-block") ||
                                 id.includes("npe-texture-content"))

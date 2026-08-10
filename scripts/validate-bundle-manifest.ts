@@ -16,10 +16,10 @@
  * its output varies with the zlib build, so an exact check would fail spuriously
  * across environments.
  *
- * It also compares each scene's `runtimeChunks` set. Chunk filenames carry a
- * content hash, so they change whenever a PR alters code that actually lands in
- * that scene's bundle (its own scene code or a shared module it imports). This
- * catches content-only changes that leave the rounded KB sizes unchanged.
+ * It also compares each scene's logical `runtimeChunks` set after removing
+ * Vite's content hashes. Added or removed runtime features remain visible, while
+ * content-hash-only churn does not force unrelated manifest rewrites. Exact
+ * `rawBytes` still catches every runtime-size movement.
  *
  * Exit code 1 (with a helpful message) when the committed manifest is stale.
  *
@@ -28,6 +28,7 @@
 import { execFileSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
+import { diffRuntimeChunks } from "./bundle-manifest-chunks.js";
 
 const MANIFEST_DIR_REL_PATH = "lab/public/bundle/manifest";
 // Legacy single-file path, kept to validate against pre-migration HEAD commits.
@@ -67,28 +68,6 @@ function diffRawSize(committed: ManifestEntry, built: ManifestEntry): string | n
     const committedRaw = roundToWholeKB(committed.rawKB);
     const builtRaw = roundToWholeKB(built.rawKB);
     return committedRaw === builtRaw ? null : `committed raw=${committedRaw}KB → rebuilt raw=${builtRaw}KB`;
-}
-
-/** Compare two chunk lists as order-independent sets. Returns null when equal. */
-function diffRuntimeChunks(committed: string[] | undefined, built: string[] | undefined): string | null {
-    const committedSet = new Set(committed ?? []);
-    const builtSet = new Set(built ?? []);
-
-    const added = [...builtSet].filter((c) => !committedSet.has(c)).sort();
-    const removed = [...committedSet].filter((c) => !builtSet.has(c)).sort();
-
-    if (added.length === 0 && removed.length === 0) {
-        return null;
-    }
-
-    const parts: string[] = [];
-    if (removed.length > 0) {
-        parts.push(`-${removed.join(", -")}`);
-    }
-    if (added.length > 0) {
-        parts.push(`+${added.join(", +")}`);
-    }
-    return parts.join("  ");
 }
 
 function parseJson<T>(text: string, source: string): T {

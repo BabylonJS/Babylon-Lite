@@ -9,7 +9,7 @@
     "scene246-generate-mipmaps-BdMtDSMF.js",
     "scene246-gltf-animation-BqGKkbc9.js",
     "scene246-gltf-feature-animations-BmazRllz.js",
-    "scene246-gltf-feature-registry-Cfs7PR8S.js",
+    "scene246-gltf-feature-registry-DuKb5TJq.js",
     "scene246-gltf-feature-skeleton-CUfBm54-.js",
     "scene246-gltf-interleave-VAnEJzZI.js",
     "scene246-gltf-json-asset-sb4blOb0.js",
@@ -17,10 +17,10 @@
     "scene246-gltf-normals-DYhLwXNX.js",
     "scene246-gltf-strided-attribute-R3NdoKEL.js",
     "scene246-ibl-fragment-CeRrvT96.js",
-    "scene246-pbr-renderable-DmdTwlo-.js",
+    "scene246-pbr-renderable-B14W7lKf.js",
     "scene246-rgbd-decode-C8g2iZPi.js",
     "scene246-scene-uniforms-FTYH6Ct0.js",
-    "scene246-skeleton-fragment-_h0IY8wm.js",
+    "scene246-skeleton-fragment-DX5iFf30.js",
     "scene246.js"
   ]
 }
