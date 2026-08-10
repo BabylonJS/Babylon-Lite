@@ -251,6 +251,10 @@ stages:
                   env:
                       SKIP_BJS: "true"
 
+                - publish: lab/public/bundle/manifest
+                  artifact: bundle-manifests
+                  displayName: "Publish generated bundle manifests"
+
                 # Enforce that any PR which moves per-scene bundle sizes also
                 # commits the regenerated per-scene manifest files. The build step
                 # above rewrites the working-tree per-scene manifest with fresh
