@@ -200,8 +200,8 @@ export {
 export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
 export { createLineSystemData, createLineSystem, createLines, updateLineSystem } from "./mesh/create-line-system.js";
 export type { LineSystemData, LineSystemDataOptions, LineSystemOptions, LinesOptions, LineSystemUpdateOptions } from "./mesh/create-line-system.js";
-export { createDashedLines } from "./mesh/create-dashed-lines.js";
-export type { DashedLinesOptions } from "./mesh/create-dashed-lines.js";
+export { createDashedLines, updateDashedLines } from "./mesh/create-dashed-lines.js";
+export type { DashedLinesOptions, DashedLinesUpdateOptions } from "./mesh/create-dashed-lines.js";
 export { getMeshGeometry } from "./mesh/get-mesh-geometry.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";

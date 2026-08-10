@@ -123,6 +123,22 @@ export class GreasedLineMaterialDefaults {
     public constructor() {
         unsupported("GreasedLineMaterialDefaults", GREASED_LINE_REASON);
     }
+
+    public static get DEFAULT_COLOR(): never {
+        return unsupported("GreasedLineMaterialDefaults.DEFAULT_COLOR", GREASED_LINE_REASON);
+    }
+
+    public static get DEFAULT_WIDTH_ATTENUATED(): never {
+        return unsupported("GreasedLineMaterialDefaults.DEFAULT_WIDTH_ATTENUATED", GREASED_LINE_REASON);
+    }
+
+    public static get DEFAULT_WIDTH(): never {
+        return unsupported("GreasedLineMaterialDefaults.DEFAULT_WIDTH", GREASED_LINE_REASON);
+    }
+
+    public static get EmptyColorsTexture(): never {
+        return unsupported("GreasedLineMaterialDefaults.EmptyColorsTexture", GREASED_LINE_REASON);
+    }
 }
 
 export function RegisterGreasedLinePluginMaterial(): never {
@@ -138,6 +154,102 @@ export class GreasedLineSimpleMaterial {
 export class GreasedLineTools {
     public constructor() {
         unsupported("GreasedLineTools", GREASED_LINE_REASON);
+    }
+
+    public static ConvertPoints(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.ConvertPoints", GREASED_LINE_REASON);
+    }
+
+    public static OmitZeroLengthPredicate(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.OmitZeroLengthPredicate", GREASED_LINE_REASON);
+    }
+
+    public static OmitDuplicatesPredicate(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.OmitDuplicatesPredicate", GREASED_LINE_REASON);
+    }
+
+    public static MeshesToLines(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.MeshesToLines", GREASED_LINE_REASON);
+    }
+
+    public static ToVector3Array(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.ToVector3Array", GREASED_LINE_REASON);
+    }
+
+    public static ToNumberArray(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.ToNumberArray", GREASED_LINE_REASON);
+    }
+
+    public static GetPointsCountInfo(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetPointsCountInfo", GREASED_LINE_REASON);
+    }
+
+    public static GetLineLength(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetLineLength", GREASED_LINE_REASON);
+    }
+
+    public static GetLineLengthArray(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetLineLengthArray", GREASED_LINE_REASON);
+    }
+
+    public static SegmentizeSegmentByCount(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.SegmentizeSegmentByCount", GREASED_LINE_REASON);
+    }
+
+    public static SegmentizeLineBySegmentLength(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.SegmentizeLineBySegmentLength", GREASED_LINE_REASON);
+    }
+
+    public static SegmentizeLineBySegmentCount(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.SegmentizeLineBySegmentCount", GREASED_LINE_REASON);
+    }
+
+    public static GetLineSegments(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetLineSegments", GREASED_LINE_REASON);
+    }
+
+    public static GetMinMaxSegmentLength(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetMinMaxSegmentLength", GREASED_LINE_REASON);
+    }
+
+    public static GetPositionOnLineByVisibility(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetPositionOnLineByVisibility", GREASED_LINE_REASON);
+    }
+
+    public static GetCircleLinePoints(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetCircleLinePoints", GREASED_LINE_REASON);
+    }
+
+    public static GetBezierLinePoints(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetBezierLinePoints", GREASED_LINE_REASON);
+    }
+
+    public static GetArrowCap(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetArrowCap", GREASED_LINE_REASON);
+    }
+
+    public static GetPointsFromText(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.GetPointsFromText", GREASED_LINE_REASON);
+    }
+
+    public static Color3toRGBAUint8(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.Color3toRGBAUint8", GREASED_LINE_REASON);
+    }
+
+    public static CreateColorsTexture(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.CreateColorsTexture", GREASED_LINE_REASON);
+    }
+
+    public static PrepareEmptyColorsTexture(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.PrepareEmptyColorsTexture", GREASED_LINE_REASON);
+    }
+
+    public static DisposeEmptyColorsTexture(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.DisposeEmptyColorsTexture", GREASED_LINE_REASON);
+    }
+
+    public static BooleanToNumber(..._args: unknown[]): never {
+        return unsupported("GreasedLineTools.BooleanToNumber", GREASED_LINE_REASON);
     }
 }
 

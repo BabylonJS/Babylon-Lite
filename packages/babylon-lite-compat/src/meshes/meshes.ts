@@ -38,6 +38,7 @@ import {
     computeAabb,
     createLineSystem,
     createDashedLines,
+    updateDashedLines,
     updateLineSystem,
     createLineMaterial,
     setLineMaterialColor,
@@ -1277,6 +1278,7 @@ interface DashedLinesBuilderOptions {
     updatable?: boolean;
     instance?: LinesMesh | null;
     useVertexAlpha?: boolean;
+    material?: unknown;
 }
 
 function engineOf(scene: Scene): EngineContext {
@@ -1478,14 +1480,15 @@ export const MeshBuilder = {
     // ── Known but unsupported (not present in Babylon Lite) ────────────────
     CreateDashedLines(name: string, options: DashedLinesBuilderOptions, scene?: Scene | null): LinesMesh {
         if (options.instance) {
-            // The visible dash count depends on the polyline length and dash spacing, so
-            // regenerating a dashed mesh can change its line/point topology. Lite's
-            // in-place `updateLineSystem` refuses a topology change, so a stable-identity
-            // dashed instance update is not structurally backable — rebuild instead.
-            return unsupported(
-                "MeshBuilder.CreateDashedLines(instance)",
-                "In-place dashed-line updates are not supported: regenerating dashes can change the line-list topology, which Lite's fixed-topology updateLineSystem rejects. Create a fresh dashed mesh instead."
-            );
+            const instanceScene = options.instance.getScene() ?? scene;
+            if (!instanceScene) {
+                throw new Error("MeshBuilder.CreateDashedLines requires the instance to belong to a scene");
+            }
+            updateDashedLines(engineOf(instanceScene), options.instance._lite, { points: options.points });
+            return options.instance;
+        }
+        if (options.material) {
+            return unsupported("MeshBuilder.CreateDashedLines.material", "Custom line materials are not implemented in Babylon Lite compatibility mode.");
         }
         if (!scene) {
             throw new Error("MeshBuilder.CreateDashedLines requires a scene");

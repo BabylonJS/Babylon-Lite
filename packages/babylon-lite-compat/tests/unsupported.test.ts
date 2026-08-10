@@ -157,6 +157,13 @@ describe("GreasedLine builder/tool function stubs throw on call", () => {
         expect(GreasedLineMeshColorDistribution.COLOR_DISTRIBUTION_START_END).toBe(5);
         expect(GreasedLineRibbonAutoDirectionMode.AUTO_DIRECTIONS_NONE).toBe(99);
     });
+
+    it("throws LiteCompatError from static GreasedLine utility surfaces", () => {
+        expect(() => GreasedLineTools.MeshesToLines([])).toThrow(LiteCompatError);
+        expect(() => GreasedLineTools.MeshesToLines([])).toThrow(/GreasedLineTools\.MeshesToLines/);
+        expect(() => GreasedLineMaterialDefaults.DEFAULT_WIDTH).toThrow(LiteCompatError);
+        expect(() => GreasedLineMaterialDefaults.DEFAULT_WIDTH).toThrow(/GreasedLineMaterialDefaults\.DEFAULT_WIDTH/);
+    });
 });
 
 describe("SceneSerializer", () => {

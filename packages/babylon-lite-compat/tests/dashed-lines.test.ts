@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { NullEngine } from "../src/engine/engine";
+import { LiteCompatError } from "../src/error";
 import { Vector3 } from "../src/math/vector";
 import { CreateDashedLines, LinesMesh, MeshBuilder } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
@@ -58,9 +59,31 @@ describe("MeshBuilder.CreateDashedLines compatibility", () => {
         expect(mesh).toBeInstanceOf(LinesMesh);
     });
 
-    it("throws for in-place instance updates (fixed-topology Lite limitation)", () => {
+    it("updates instances in place while preserving the creation-time dash topology", () => {
         const { scene } = createScene();
         const mesh = MeshBuilder.CreateDashedLines("dashes", { points: [new Vector3(0, 0, 0), new Vector3(5, 0, 0)], dashNb: 5 }, scene);
-        expect(() => MeshBuilder.CreateDashedLines("dashes", { points: [new Vector3(0, 0, 0), new Vector3(6, 0, 0)], instance: mesh }, scene)).toThrow();
+        const updated = MeshBuilder.CreateDashedLines(
+            "dashes",
+            { points: [new Vector3(0, 0, 0), new Vector3(10, 0, 0)], dashSize: 99, gapSize: 99, dashNb: 99, instance: mesh },
+            scene
+        );
+
+        expect(updated).toBe(mesh);
+        expect(mesh._lite._cpuPositions).toHaveLength(5 * 2 * 3);
+        expect(Array.from(mesh._lite._cpuPositions!.slice(0, 12))).toEqual([0, 0, 0, 1.5, 0, 0, 2, 0, 0, 3.5, 0, 0]);
+    });
+
+    it("pads unused instance dash slots at the final point", () => {
+        const { scene } = createScene();
+        const mesh = MeshBuilder.CreateDashedLines("dashes", { points: [new Vector3(0, 0, 0), new Vector3(10, 0, 0)], dashNb: 5 }, scene);
+
+        MeshBuilder.CreateDashedLines("dashes", { points: [new Vector3(2, 3, 4), new Vector3(2, 3, 4)], instance: mesh }, scene);
+
+        expect(Array.from(mesh._lite._cpuPositions!)).toEqual(Array.from({ length: 10 }, () => [2, 3, 4]).flat());
+    });
+
+    it("fails loudly when a custom material is requested", () => {
+        const { scene } = createScene();
+        expect(() => MeshBuilder.CreateDashedLines("dashes", { points: [new Vector3(0, 0, 0), new Vector3(5, 0, 0)], material: {} }, scene)).toThrow(LiteCompatError);
     });
 });
