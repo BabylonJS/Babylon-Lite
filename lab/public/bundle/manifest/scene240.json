@@ -7,15 +7,15 @@
     "scene240-generate-mipmaps-BfQh_jIW.js",
     "scene240-gltf-animation-LkFHVWmz.js",
     "scene240-gltf-feature-animations-Jdg7C0c1.js",
-    "scene240-gltf-feature-registry-De380FA3.js",
-    "scene240-gltf-json-asset-BlwWcxht.js",
-    "scene240-gltf-multi-buffer-BcaX8US-.js",
+    "scene240-gltf-feature-registry-CXQ8CVEk.js",
+    "scene240-gltf-json-asset-B5gfg7nE.js",
+    "scene240-gltf-multi-buffer-381WrroF.js",
     "scene240-gltf-normals-DYhLwXNX.js",
     "scene240-ibl-fragment-CeRrvT96.js",
-    "scene240-pbr-renderable-CD4bZBFE.js",
+    "scene240-pbr-renderable-OpGz5ZJB.js",
     "scene240-rgbd-decode-CuZL2LZR.js",
     "scene240-scene-uniforms-FTYH6Ct0.js",
     "scene240.js"
   ],
-  "rawBytes": 93889
+  "rawBytes": 93891
 }

@@ -5,9 +5,9 @@
   "runtimeChunks": [
     "scene226-generate-mipmaps-DTe1WJ-G.js",
     "scene226-gltf-feature-gaussian-splatting-Bu07HqUK.js",
-    "scene226-gltf-feature-registry-BvaDDBg_.js",
-    "scene226-gltf-glb-parser-BfTArCum.js",
+    "scene226-gltf-feature-registry-CIBB26RF.js",
+    "scene226-gltf-glb-parser-BEhTac_I.js",
     "scene226.js"
   ],
-  "rawBytes": 61300
+  "rawBytes": 61303
 }
