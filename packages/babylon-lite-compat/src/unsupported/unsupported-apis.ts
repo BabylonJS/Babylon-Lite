@@ -90,37 +90,37 @@ const GREASED_LINE_REASON =
     "Greased (thick) lines are a ribbon/tube geometry + dedicated plugin-material subsystem (per-point widths, color/width distribution tables, dashing, camera-facing ribbon modes). Babylon Lite renders only 1px hardware line-lists (MeshBuilder.CreateLines / CreateDashedLines) and has no thick-line ribbon pipeline or plugin material to back it.";
 
 export class GreasedLineBaseMesh {
-    public constructor() {
+    public constructor(..._args: unknown[]) {
         unsupported("GreasedLineBaseMesh", GREASED_LINE_REASON);
     }
 }
 
 export class GreasedLineMesh {
-    public constructor() {
+    public constructor(..._args: unknown[]) {
         unsupported("GreasedLineMesh", GREASED_LINE_REASON);
     }
 }
 
 export class GreasedLineRibbonMesh {
-    public constructor() {
+    public constructor(..._args: unknown[]) {
         unsupported("GreasedLineRibbonMesh", GREASED_LINE_REASON);
     }
 }
 
 export class GreasedLinePluginMaterial {
-    public constructor() {
+    public constructor(..._args: unknown[]) {
         unsupported("GreasedLinePluginMaterial", GREASED_LINE_REASON);
     }
 }
 
 export class MaterialGreasedLineDefines {
-    public constructor() {
+    public constructor(..._args: unknown[]) {
         unsupported("MaterialGreasedLineDefines", GREASED_LINE_REASON);
     }
 }
 
 export class GreasedLineMaterialDefaults {
-    public constructor() {
+    public constructor(..._args: unknown[]) {
         unsupported("GreasedLineMaterialDefaults", GREASED_LINE_REASON);
     }
 
@@ -141,18 +141,18 @@ export class GreasedLineMaterialDefaults {
     }
 }
 
-export function RegisterGreasedLinePluginMaterial(): never {
+export function RegisterGreasedLinePluginMaterial(..._args: unknown[]): never {
     return unsupported("RegisterGreasedLinePluginMaterial", GREASED_LINE_REASON);
 }
 
 export class GreasedLineSimpleMaterial {
-    public constructor() {
+    public constructor(..._args: unknown[]) {
         unsupported("GreasedLineSimpleMaterial", GREASED_LINE_REASON);
     }
 }
 
 export class GreasedLineTools {
-    public constructor() {
+    public constructor(..._args: unknown[]) {
         unsupported("GreasedLineTools", GREASED_LINE_REASON);
     }
 
@@ -253,23 +253,23 @@ export class GreasedLineTools {
     }
 }
 
-export function CreateGreasedLine(): never {
+export function CreateGreasedLine(..._args: unknown[]): never {
     return unsupported("CreateGreasedLine", GREASED_LINE_REASON);
 }
 
-export function CreateGreasedLineMaterial(): never {
+export function CreateGreasedLineMaterial(..._args: unknown[]): never {
     return unsupported("CreateGreasedLineMaterial", GREASED_LINE_REASON);
 }
 
-export function GetPointsCount(): never {
+export function GetPointsCount(..._args: unknown[]): never {
     return unsupported("GetPointsCount", GREASED_LINE_REASON);
 }
 
-export function CompleteGreasedLineWidthTable(): never {
+export function CompleteGreasedLineWidthTable(..._args: unknown[]): never {
     return unsupported("CompleteGreasedLineWidthTable", GREASED_LINE_REASON);
 }
 
-export function CompleteGreasedLineColorTable(): never {
+export function CompleteGreasedLineColorTable(..._args: unknown[]): never {
     return unsupported("CompleteGreasedLineColorTable", GREASED_LINE_REASON);
 }
 

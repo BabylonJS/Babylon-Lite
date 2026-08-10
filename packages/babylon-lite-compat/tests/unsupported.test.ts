@@ -164,6 +164,13 @@ describe("GreasedLine builder/tool function stubs throw on call", () => {
         expect(() => GreasedLineMaterialDefaults.DEFAULT_WIDTH).toThrow(LiteCompatError);
         expect(() => GreasedLineMaterialDefaults.DEFAULT_WIDTH).toThrow(/GreasedLineMaterialDefaults\.DEFAULT_WIDTH/);
     });
+
+    it("accepts BJS-shaped GreasedLine arguments before throwing", () => {
+        expect(() => new GreasedLineMesh("line", {}, {})).toThrow(LiteCompatError);
+        expect(() => CreateGreasedLine("line", {}, {}, {})).toThrow(LiteCompatError);
+        expect(() => CreateGreasedLineMaterial("material", {}, {})).toThrow(LiteCompatError);
+        expect(() => GetPointsCount([])).toThrow(LiteCompatError);
+    });
 });
 
 describe("SceneSerializer", () => {
