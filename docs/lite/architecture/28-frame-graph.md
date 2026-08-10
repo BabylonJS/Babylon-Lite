@@ -35,6 +35,8 @@ export type { RenderPassExecuteFunc } from "./frame-graph/pass.js";
 
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
 export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export type { OverdrawCostMeasure } from "./engine/gpu-task-timing.js";
+export { measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 
@@ -286,7 +288,7 @@ export interface RenderTaskConfig {
 | `clrColor`     | Clear color. The object may be mutated between frames.                                                                                                                                                                                                    |
 | `clr`          | Defaults to clear. Set `false` to use color `loadOp: "load"` for overlays or multi-scene composition.                                                                                                                                                     |
 | `depthClear`   | Controls rt-owned depth independently. Defaults to clear; set `false` to load existing depth. Ignored for external `depth` targets, which retain their eager/task-managed ownership policy.                                                               |
-| `sharedRt`     | Marks `rt`/`rst` as owned by another, earlier task. This task uses the live views without rebuilding or disposing them.                                                                                                                                  |
+| `sharedRt`     | Marks `rt`/`rst` as owned by another, earlier task. This task uses the live views without rebuilding or disposing them.                                                                                                                                   |
 | `cam`          | Optional per-pass camera. Defaults to `scene.camera`.                                                                                                                                                                                                     |
 | `cs`           | Canvas-sized aspect flag. When true, scene UBO aspect uses canvas dimensions instead of RTT dimensions. This is useful for RTTs that are later sampled as a material texture but should preserve canvas aspect.                                           |
 | `transmission` | Optional scene-texture transmission settings. `copyCount: 0` refreshes before every transmissive draw; otherwise the default is one refresh. `generateMipmaps` defaults to `true`; set `false` to allocate only mip 0 and skip refraction mip generation. |
@@ -407,6 +409,30 @@ Before opening the pass each frame, the `RenderPass` before-execute hook install
 
 Then the task iterates `_passes` calling `_execute()`. Each `RenderPass._execute()` patches the swapchain view + clearColor + loadOp, calls `beginRenderPass`, runs `executePassBody(task, enc)` (the closure captured at record time), and ends the pass.
 
+### On-Demand Overdraw Cost Probe
+
+```typescript
+export interface OverdrawCostMeasure {
+    width: number;
+    height: number;
+    sampleCount: number;
+    bindings: number;
+    msAsIs: number;
+    msVisibleOnly: number;
+    overdrawMs: number;
+    ratio: number;
+    msFrontToBack: number;
+    sortGainMs: number;
+    repeats: number;
+}
+
+export function measureRenderTaskOverdrawCost(engine: EngineContext, task: RenderTask, options?: { repeats?: number }): Promise<OverdrawCostMeasure>;
+```
+
+`measureRenderTaskOverdrawCost()` is an explicit, diagnostic-only probe for a previously rendered task. It replays the task's current visible bindings into transient attachments matching the task's color, depth, sample count, viewport, and scene bind group. Each repeat records three timestamped passes: shipped order with fresh depth, the same bindings against the first pass's final depth, and opaque/direct bindings sorted front-to-back while preserving transparent order. The returned medians estimate the current hidden-fragment shading budget and the portion recoverable by a per-draw sort.
+
+The probe requires the optional WebGPU `timestamp-query` feature, a color target with a real depth aspect, populated draw bindings, and a positive integer repeat count. It rejects overlay tasks configured with `depthClear: false` and tasks using eager external depth because their shipped pass loads pre-existing depth that a transient fresh-depth replay cannot reproduce. It does not refresh binding state and intentionally waits for GPU readback, so callers run it only after the task has rendered and never in a production frame loop. The module has no state or import-time side effects; the heavy diagnostic implementation is dynamic-imported only when the public function is called, so unused scenes retain no probe runtime code.
+
 ## Per-Pass Scene UBO
 
 Each `RenderTask` owns:
@@ -521,6 +547,7 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | `src/frame-graph/frame-graph.ts`           | Ordered task list and two-phase build/execute/dispose lifecycle                              |
 | `src/frame-graph/frame-graph-actions.ts`   | Public task-insertion + `addRenderPass` actions                                              |
 | `src/frame-graph/render-task.ts`           | Render task, per-pass scene UBO, target binding, draw buckets, per-pass-encoder body         |
+| `src/frame-graph/overdraw-probe-run.ts`    | Timestamp-query replay implementation loaded only by the public GPU timing diagnostics probe |
 | `src/frame-graph/image-processing-task.ts` | Reusable fullscreen image-processing task for swapchain output                               |
 | `src/frame-graph/shadow-task.ts`           | Internal adapter task that schedules existing shadow generators through `Task.execute()`     |
 | `src/engine/render-target.ts`              | Render target descriptors, allocation, disposal, target signatures                           |
