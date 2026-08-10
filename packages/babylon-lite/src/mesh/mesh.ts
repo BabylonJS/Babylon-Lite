@@ -180,6 +180,8 @@ export interface Mesh extends SceneNode {
     _topology?: number;
     /** @internal Per-polyline point counts retained by createLineSystem for stable-topology updates. */
     _linePointCounts?: Uint32Array;
+    /** @internal Creation-time dash/gap ratio retained by createDashedLines for stable-topology updates. */
+    _dashedLineOptions?: readonly [dashSize: number, gapSize: number];
     /** @internal Highest CSM cascade this mesh casts into; undefined means all cascades. */
     _shadowMaxCascade?: number;
     /** @internal */

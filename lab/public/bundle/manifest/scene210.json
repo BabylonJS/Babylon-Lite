@@ -1,16 +1,16 @@
 {
   "rawKB": 77.2,
-  "rawBytes": 79024,
+  "rawBytes": 79019,
   "gzipKB": 32.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene210-generate-mipmaps-Blv5VTUw.js",
-    "scene210-gltf-feature-registry-CdlcKN5P.js",
+    "scene210-gltf-feature-registry-PWWDdZwT.js",
     "scene210-gltf-feature-xmp-S8Tl-XNQ.js",
     "scene210-gltf-glb-parser-BfhvRuT9.js",
     "scene210-gltf-interleave-C3so5jJB.js",
     "scene210-gltf-normals-DYhLwXNX.js",
-    "scene210-pbr-renderable-B9AuOs00.js",
+    "scene210-pbr-renderable-BprkFvg1.js",
     "scene210-singlelight-hemispheric-wgsl-9sNVHX0R.js",
     "scene210.js"
   ]
