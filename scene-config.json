@@ -71,7 +71,7 @@
         "name": "Scene 7 — ChibiRex Animated",
         "maxMad": 0.55,
         "maxRegionMad": 0.66,
-        "maxRawKB": 106.15,
+        "maxRawKB": 106.2,
         "description": "Animated dinosaur, PBR materials, IBL environment, skeletal animation.",
         "tags": ["pbr", "gltf", "anim"]
     },
@@ -1157,7 +1157,7 @@
         "slug": "scene112-khr-texture-basisu",
         "name": "Scene 112 — KHR_texture_basisu Flight Helmet",
         "maxMad": 0.4,
-        "maxRawKB": 120.44,
+        "maxRawKB": 120.5,
         "description": "BabylonJS/Assets FlightHelmetKTX glTF model using KHR_texture_basisu KTX2 source textures and frame-graph scene-texture transmission.",
         "tags": ["pbr", "gltf", "env", "basis", "transmission"],
         "skipPerf": true,
@@ -1587,7 +1587,7 @@
         "slug": "scene164-device-lost-recovery",
         "name": "Scene 164 - Device Lost Recovery",
         "maxMad": 0.01,
-        "maxRawKB": 142.5,
+        "maxRawKB": 142.8,
         "description": "Forces WebGPU device loss on a scene that exercises every resource family the recovery pipeline must rebuild - a skinned, morphed, animated glTF plus IBL environment, PBR fallback texture, and an ESM directional shadow generator with a shadow-only receiver - then verifies the post-recovery image matches the pre-loss image and that Viewer-order teardown (disable recovery, stop engine, dispose scene, dispose engine) is clean. Lite-only: device loss has no stable-Babylon counterpart, so the comparison is pre-loss vs post-recovery within the same run.",
         "tags": ["gltf", "pbr", "environment", "shadows", "skeleton", "morph", "anim", "recovery"],
         "skipPerf": true
@@ -1600,6 +1600,17 @@
         "maxRawKB": 44.55,
         "description": "Custom WGSL ShaderMaterial rendered with thin instances + per-instance color: an 8×8×8 grid of unit cubes with a deterministic color ramp, fixed arc-rotate camera. Validates the auto-injected world0..3/instanceColor vertex attributes and the GPU-culling indirect-draw path.",
         "tags": ["shader", "instances", "procedural"],
+        "skipPerf": true
+    },
+    {
+        "id": 168,
+        "slug": "scene168-mirrored-doublesided-winding",
+        "name": "Scene 168 — Mirrored Double-Sided Winding",
+        "maxMad": 0.45,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 78.7,
+        "description": "Two double-sided quads under an IBL, one under a negative-scale node so its net world determinant is positive and its triangle winding reversed. A mirrored mesh needs its pipeline frontFace flipped ccw->cw: WebGPU derives front_facing from frontFace, and the double-sided shader flips the shading normal when a fragment is not front-facing, so the wrong winding inverts the outward normal on the visible side and the quad loses its lighting. Regression for BUNDLED builds specifically — the winding used to be installed through a bare side-effect import that the scene bundler tree-shakes away, so only a bundled scene reproduces it. maxMad is 0.45 because Lite and BJS grade this IBL slightly differently (0.27 local / 0.29 on the CI browser, with 100% of pixels within 5); reversing the winding takes it to 1.27 with within-5 down to 91%, so the threshold still separates the two by a wide margin.",
+        "tags": ["gltf", "transform", "pbr"],
         "skipPerf": true
     },
     {
@@ -2206,7 +2217,7 @@
         "name": "Scene 257 — Negative Node Scale",
         "maxMad": 0.1,
         "maxRegionMad": 0.5,
-        "maxRawKB": 80.76,
+        "maxRawKB": 81.1,
         "description": "glTF Node_NegativeScale_01: two textured shapes, one mirrored via a negative-determinant matrix. Validates triangle-winding reversal for negative-determinant world transforms (glTF-Asset-Generator Category D); Lite previously culled the wrong faces on the mirrored copy.",
         "tags": ["gltf", "transform"],
         "skipPerf": true
@@ -2239,7 +2250,7 @@
         "name": "Scene 260 — Triangle Strip",
         "maxMad": 0.1,
         "maxRegionMad": 0.5,
-        "maxRawKB": 80.73,
+        "maxRawKB": 81.07,
         "description": "glTF Mesh_PrimitiveMode_11: a quad drawn as a TRIANGLE_STRIP (primitive mode 5) with uint32 indices. Validates non-triangle-list primitive topologies (glTF-Asset-Generator Category C); Lite hardcoded a triangle-list pipeline and rendered POINTS/LINES/strips garbled. The loader now reads the primitive mode and the pipeline honors the matching WebGPU topology.",
         "tags": ["gltf", "topology"],
         "skipPerf": true

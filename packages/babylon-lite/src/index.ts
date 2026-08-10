@@ -17,8 +17,8 @@ export {
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
 export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
 export type { NullEngineOptions } from "./engine/null-engine.js";
-export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings } from "./engine/gpu-task-timing.js";
-export type { RenderTaskGpuTiming, RenderTaskGpuTimings, RenderTaskGpuTimingStatus } from "./engine/gpu-task-timing.js";
+export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings, measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";
+export type { RenderTaskGpuTiming, RenderTaskGpuTimings, RenderTaskGpuTimingStatus, OverdrawCostMeasure } from "./engine/gpu-task-timing.js";
 export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./engine/surface.js";
 export { enableSurfaceResizeObserver } from "./engine/enable-surface-resize-observer.js";
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
@@ -124,6 +124,10 @@ export { createDepthOfFieldPostProcessTask, DepthOfFieldBlurLevel } from "./post
 export type { DepthOfFieldPostProcessTask, DepthOfFieldPostProcessTaskConfig } from "./post-process/depth-of-field.js";
 export { createTaaPostProcessTask } from "./post-process/taa.js";
 export type { TaaPostProcessTask, TaaPostProcessTaskConfig } from "./post-process/taa.js";
+export { createScreenSpaceContactShadowsPostProcessTask } from "./post-process/screen-space-contact-shadows.js";
+export type { ScreenSpaceContactShadowsPostProcessTask, ScreenSpaceContactShadowsPostProcessTaskConfig } from "./post-process/screen-space-contact-shadows.js";
+export { createScreenSpaceGlobalIlluminationPostProcessTask } from "./post-process/screen-space-global-illumination.js";
+export type { ScreenSpaceGlobalIlluminationPostProcessTask, ScreenSpaceGlobalIlluminationPostProcessTaskConfig } from "./post-process/screen-space-global-illumination.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";

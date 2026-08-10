@@ -5,7 +5,7 @@ import type { ShadowGenerator } from "./shadow-generator.js";
 export interface CsmStaticCacheOptions {
     /** Accumulated sun-rotation angle (radians) since the last cascade refit that forces the next one. */
     refitAngle: number;
-    /** Force a refit after this much wall time while the light is drifting. Default 0 (no interval floor). */
+    /** Force a refit after this much wall time, including while the light is paused. Default 0 (no interval floor). */
     refitMaxIntervalMs?: number;
 }
 

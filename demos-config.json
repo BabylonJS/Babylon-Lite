@@ -1,5 +1,12 @@
 [
     {
+        "slug": "screen-space-effects",
+        "name": "Screen-Space Effects",
+        "description": "Interactive contact shadows and one-bounce screen-space global illumination running as composable Babylon Lite frame-graph tasks. Toggle each effect independently while the camera moves to inspect temporal reprojection, disocclusion handling, and colored light bleed.",
+        "tags": ["effect", "lighting", "showcase"],
+        "mobile": false
+    },
+    {
         "slug": "offscreen",
         "name": "Offscreen (Worker)",
         "description": "Side-by-side proof that Lite renders identically on the main thread (left, regular canvas) and inside a Web Worker via OffscreenCanvas (right). A button runs heavy synchronous work on the main thread: the left canvas freezes while the worker-driven right canvas keeps spinning at full speed. Reproduction of the Babylon.js Offscreen demo.",

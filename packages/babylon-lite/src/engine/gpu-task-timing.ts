@@ -1,4 +1,8 @@
 import type { EngineContext } from "./engine.js";
+import type { RenderTask } from "../frame-graph/render-task.js";
+import type { OverdrawCostMeasure } from "../frame-graph/overdraw-probe-run.js";
+
+export type { OverdrawCostMeasure };
 
 /** Availability / lifecycle state for per-frame-graph-task GPU timings. */
 export type RenderTaskGpuTimingStatus = "unsupported" | "disabled" | "pending" | "available" | "error";
@@ -104,6 +108,18 @@ export async function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabl
         }
     });
     return getRenderTaskGpuTimings(engine);
+}
+
+/**
+ * Measure the GPU cost of `task`'s overdraw. The task must have rendered at
+ * least once (bindings and scene bind group built). `repeats` defaults to 9.
+ *
+ * The diagnostic implementation is loaded only when the probe is called, so
+ * scenes that do not opt in retain no probe runtime code.
+ */
+export async function measureRenderTaskOverdrawCost(engine: EngineContext, task: RenderTask, options?: { repeats?: number }): Promise<OverdrawCostMeasure> {
+    const { _measureRenderTaskOverdrawCost } = await import("../frame-graph/overdraw-probe-run.js");
+    return _measureRenderTaskOverdrawCost(engine, task, options);
 }
 
 /** @internal */
