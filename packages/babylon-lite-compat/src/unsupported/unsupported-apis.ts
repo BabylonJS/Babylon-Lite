@@ -416,6 +416,64 @@ export function UninstallHtmlInCanvasPolyfill(): never {
     return unsupported("UninstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
 }
 
+// ─── Gaussian Splatting LOD streaming ────────────────────────────────
+// BJS `@babylonjs/loaders` SPLAT exposes a Gaussian-Splatting LOD *streaming*
+// subsystem (`GaussianSplattingStream` + `AddGaussianSplattingStreamPart[Async]`,
+// with `IGaussianSplattingStreamingPart` / `IGaussianSplattingStreamOptions` /
+// `ISOGLODMetadata` describing a compound mesh assembled from streamed parts).
+// It layers SOG-octree LOD residency management (download/residency controllers,
+// a block allocator) on top of a GPU work-buffer decode pipeline that decodes
+// SH / rotation / scale into shared render-target atlases via dedicated
+// GLSL+WGSL shaders. Babylon Lite loads a *whole* splat cloud eagerly
+// (`loadSplat` / `loadSOG` / `loadSPZ`, wrapped by the compat `GaussianSplattingMesh`)
+// and has no streaming/LOD residency subsystem or work-buffer decode pipeline to
+// back it. Adding one is a whole GPU subsystem with open design questions
+// (residency policy, LOD scheduling, atlas layout) — not a small, mechanical,
+// objective Lite addition — so these throw (structural blocker; move 3).
+
+/** Babylon.js `GaussianSplattingStreamDebugLodSource` — LOD debug source selector (shape-only stub for type parity). */
+export type GaussianSplattingStreamDebugLodSource = "optimal" | "current";
+
+/** Babylon.js `IGaussianSplattingStreamOptions` — GS LOD stream options (shape-only stub for type parity). */
+export interface IGaussianSplattingStreamOptions {
+    [key: string]: unknown;
+}
+
+/** Babylon.js `ISOGLODMetadata` — SOG LOD octree metadata (shape-only stub for type parity). */
+export interface ISOGLODMetadata {
+    [key: string]: unknown;
+}
+
+/** Babylon.js `IGaussianSplattingStreamingPart` — a streamed part of a GS compound mesh (shape-only stub for type parity). */
+export interface IGaussianSplattingStreamingPart {
+    [key: string]: unknown;
+}
+
+export class GaussianSplattingStream {
+    public constructor() {
+        unsupported(
+            "GaussianSplattingStream",
+            "Gaussian-Splatting LOD streaming is a whole GPU subsystem (SOG-octree LOD residency + work-buffer decode into render-target atlases) with no Babylon Lite equivalent. Load the full cloud with `GaussianSplattingMesh` / `loadSplat` instead."
+        );
+    }
+}
+
+/** Babylon.js `AddGaussianSplattingStreamPart` — appends a streamed LOD part to a GS compound mesh. */
+export function AddGaussianSplattingStreamPart(..._args: unknown[]): never {
+    return unsupported(
+        "AddGaussianSplattingStreamPart",
+        "Gaussian-Splatting LOD streaming (compound mesh + streamed parts) is not backed by Babylon Lite, which loads a whole splat cloud eagerly via `GaussianSplattingMesh`."
+    );
+}
+
+/** Babylon.js `AddGaussianSplattingStreamPartAsync` — async variant of {@link AddGaussianSplattingStreamPart}. */
+export function AddGaussianSplattingStreamPartAsync(..._args: unknown[]): never {
+    return unsupported(
+        "AddGaussianSplattingStreamPartAsync",
+        "Gaussian-Splatting LOD streaming (compound mesh + streamed parts) is not backed by Babylon Lite, which loads a whole splat cloud eagerly via `GaussianSplattingMesh`."
+    );
+}
+
 // ─── Audio ───────────────────────────────────────────────────────────
 export class Sound {
     public constructor() {

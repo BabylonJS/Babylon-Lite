@@ -281,6 +281,9 @@ export {
     IsHtmlInCanvasSupportedNatively,
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
+    GaussianSplattingStream,
+    AddGaussianSplattingStreamPart,
+    AddGaussianSplattingStreamPartAsync,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -301,6 +304,10 @@ export type {
     IHtmlRaycastInteractionManagerOptions,
     IHtmlInCanvasPolyfillModule,
     IInstallHtmlInCanvasPolyfillOptions,
+    GaussianSplattingStreamDebugLodSource,
+    IGaussianSplattingStreamOptions,
+    ISOGLODMetadata,
+    IGaussianSplattingStreamingPart,
 } from "./unsupported/unsupported-apis.js";
 export {
     Skeleton,
