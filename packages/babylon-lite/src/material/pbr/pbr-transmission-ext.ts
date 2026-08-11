@@ -23,8 +23,9 @@ let _dispersionSampleWgsl: string | undefined;
 
 /** @internal Supply the per-RGB chromatic-dispersion sample WGSL. Called by
  *  `setPbrDispersion` so the 3-ray code chunk is bundled solely by dispersion scenes
- *  and never weighs on other transmission scenes. The string is injected into the
- *  refraction fragment (no shared module mutation). */
+ *  and never weighs on other transmission scenes. The string is read when
+ *  `registerPbrTransmission` builds the refraction ext, so — per the documented
+ *  contract on `setPbrDispersion` — it must be set before the first build. */
 export function _setDispersionSampleWgsl(wgsl: string): void {
     _dispersionSampleWgsl = wgsl;
 }

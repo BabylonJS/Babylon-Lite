@@ -830,6 +830,12 @@ export class PBRMaterial extends PushMaterial {
         const dst = target._lite;
         // Route each sub-feature through its setter so the clone's copy also registers the
         // corresponding extension (the clone may outlive the source's registration path).
+        // Emissive is included because it lives on the `_`-prefixed backing field, which
+        // `copyLiteMaterialData` deliberately skips — without this the clone silently loses
+        // its emissive colour (and its ext registration).
+        if (src._emissiveColor) {
+            setPbrEmissive(dst, [...src._emissiveColor]);
+        }
         if (src._clearCoat) {
             setPbrClearCoat(dst, { ...src._clearCoat });
         }

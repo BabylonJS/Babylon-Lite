@@ -120,6 +120,23 @@ describe("Material.clone", () => {
         expect(mat.clearCoat.intensity).toBeCloseTo(0.4);
     });
 
+    // Emissive lives on the opt-in `_emissiveColor` backing field, which the generic
+    // data copy skips (it ignores `_`-prefixed keys), so the clone has to restore it
+    // explicitly through the setter — otherwise the clone renders non-emissive.
+    it("PBRMaterial.clone carries emissive colour without aliasing the source", () => {
+        const mat = new PBRMaterial("src");
+        mat.emissiveColor = new Color3(0.3, 0.6, 0.9);
+
+        const clone = mat.clone("clone");
+
+        expect(clone.emissiveColor.r).toBeCloseTo(0.3);
+        expect(clone.emissiveColor.g).toBeCloseTo(0.6);
+        expect(clone.emissiveColor.b).toBeCloseTo(0.9);
+        expect(clone._lite._emissiveColor).not.toBe(mat._lite._emissiveColor);
+        clone.emissiveColor = new Color3(1, 1, 1);
+        expect(mat.emissiveColor.r).toBeCloseTo(0.3);
+    });
+
     it("PBRMetallicRoughnessMaterial.clone returns the correct subclass", () => {
         const mat = new PBRMetallicRoughnessMaterial("src");
         mat.baseColor = new Color3(1, 0, 0);

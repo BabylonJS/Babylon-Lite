@@ -199,8 +199,8 @@ function writeRefractionUBO(data: Float32Array, mat: PbrMaterialProps, offsets: 
 
 /** Build the PBR refraction/transmission extension. When the scene contains a
  *  dispersive material, `dispersionSampleWgsl` carries the per-RGB 3-ray sample
- *  WGSL (dynamically imported, scene-isolated); otherwise it is undefined and the
- *  lean single-ray refraction path is emitted. */
+ *  WGSL (dynamically imported, and captured here at registration time); otherwise
+ *  it is undefined and the lean single-ray refraction path is emitted. */
 export function makeRefractionRttExt(dispersionSampleWgsl?: string): PbrExt {
     return {
         id: "refraction",

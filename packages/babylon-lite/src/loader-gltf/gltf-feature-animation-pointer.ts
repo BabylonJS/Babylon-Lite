@@ -25,6 +25,7 @@ import type { PointerMaterial } from "./animation-pointer.js";
 import { resolveAnimationPointer } from "./animation-pointer.js";
 import { _installPointerHandlers } from "./gltf-animation.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import type * as UvTransformMod from "../material/pbr/enable-material-uv-transform.js";
 
 // Node TRS/weights pointer targets map 1:1 onto the standard glTF channel paths.
 const NODE_TRS_PATH: Record<string, TargetPath> = {
@@ -57,11 +58,15 @@ const _UV_TX_POINTER_RE = /^\/materials\/(\d+)\/.*\/KHR_texture_transform\/(?:of
 // Populated in preParse from the lazily-imported sub-modules, so materialMap + applyMaterial
 // can delegate without re-importing. Each sub-module is fetched only when its pointer is
 // present, so a node-only scene (scene34) loads none of them.
-// The ext seeder is bound in preParse to the asset it scanned, so materialMap cannot seed
-// with another asset's targets or without the setters that seeding depends on.
-let _seedExtMaterials: ExtMaterialSeeder | null = null;
+// The ext seeder is bound in preParse to the asset it scanned, so it must be looked up by
+// that asset rather than held in a single slot: this feature is a module singleton, so two
+// loads in one runtime would otherwise let one asset's seeder run against another's material
+// map. Keyed weakly on the glTF json so the entry dies with the asset, and never deleted on
+// use — the `_matMap` memo below is single-slot, so an interleaved load can evict it and
+// force a rebuild that has to re-seed (seeding is idempotent).
+let _seeders: WeakMap<object, ExtMaterialSeeder> | null = null;
 let _baseColorMod: typeof import("./animation-pointer-basecolor.js") | null = null;
-let _uvTransformMod: typeof import("../material/pbr/enable-material-uv-transform.js") | null = null;
+let _uvTransformMod: typeof UvTransformMod | null = null;
 function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | undefined)[] {
     if (meshes === _matMapKey) {
         return _matMap;
@@ -139,7 +144,9 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
     }
     // Material factor / extension seeding (transmission, IOR, volume, occlusion strength)
     // lives in the lazy module loaded by preParse only when such a pointer is present.
-    _seedExtMaterials?.(map);
+    // Looked up by this asset's json so an unrelated load in the same runtime can neither
+    // seed this map with its own targets nor suppress this asset's seeding.
+    _seeders?.get(json)?.(map);
     _matMap = map;
     return map;
 }
@@ -215,7 +222,8 @@ const feature: GltfFeature = {
         if (hasMatExtPointer) {
             // The module owns its pointer regexes, so it scans the asset itself and hands
             // back a seeder already bound to the targets and opt-in setters it needs.
-            _seedExtMaterials = await (await import("./animation-pointer-ext.js")).prepareExtMaterials(json);
+            const seeder = await (await import("./animation-pointer-ext.js")).prepareExtMaterials(json);
+            (_seeders ??= new WeakMap()).set(json, seeder);
         }
         // Same detection materialMap uses to populate `uvTransformAnimated`, so the setter
         // is present whenever that set is non-empty.
