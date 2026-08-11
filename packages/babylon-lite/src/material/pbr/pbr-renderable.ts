@@ -338,7 +338,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _writeMaterialData(matInitData, mat, materialSpec);
         const materialUBO = createUniformBuffer(engine, matInitData);
 
-        const needsTaskRefraction = !!mat.transmissive && (features2 & PBR2_HAS_REFRACTION) !== 0;
+        const needsTaskRefraction = !!mat._transmissive && (features2 & PBR2_HAS_REFRACTION) !== 0;
         const materialBindGroupStatic = needsTaskRefraction ? null : createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh);
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.

@@ -68,7 +68,7 @@ const _extHandlers: [RegExp, PointerFactory][] = [
             return {
                 arity: 1,
                 writer: (out, off) => {
-                    mat.transmissive = true;
+                    mat._transmissive = true;
                     refr.intensity = out[off]!;
                     bump(mat);
                 },
@@ -231,7 +231,7 @@ export function seedExtMaterials(json: any, map: (PointerMaterial | undefined)[]
             (pm as { _occlStrengthAnimated?: boolean })._occlStrengthAnimated = true;
         }
         if (transmissionAnimated.has(matIdx)) {
-            pm.transmissive = true;
+            pm._transmissive = true;
             pm._subsurface ??= {};
             pm._subsurface.refraction ??= {
                 intensity: def?.extensions?.KHR_materials_transmission?.transmissionFactor ?? 0,

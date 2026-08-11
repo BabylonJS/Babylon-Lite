@@ -75,8 +75,11 @@ export interface PbrMaterialProps extends Material {
     alpha?: number;
     /** Enable alpha blending (glTF alphaMode "BLEND"). Enables radianceOverAlpha + specularOverAlpha. */
     alphaBlend?: boolean;
-    /** Alpha test cutoff (glTF alphaMode "MASK"). Fragments with base alpha * material alpha below this value are discarded. */
-    alphaCutOff?: number;
+    /** @internal Alpha test cutoff (glTF alphaMode "MASK"). Fragments with base alpha * material alpha
+     *  below this value are discarded. Set it via {@link setPbrAlphaCutoff}, which also registers the
+     *  alpha-test extension — assigning this field directly would leave the ext unregistered and
+     *  silently render no alpha test (and suppress alpha blending). */
+    _alphaCutOff?: number;
     /** Scale factor for environment/IBL contribution. Default 1.0. */
     environmentIntensity?: number;
     /** Scale factor for direct light contribution. Default 1.0. */
@@ -156,9 +159,11 @@ export interface PbrMaterialProps extends Material {
      *  which registers the extension. Presence of nested sub-features (translucency, scattering)
      *  enables them — no isEnabled booleans needed. Tree-shakable — only bundled when used. */
     _subsurface?: SubSurfaceProps;
-    /** True transmissive surface: render task provides a scene-color refraction texture
-     *  just before this material draws. Set by KHR_materials_transmission. */
-    transmissive?: boolean;
+    /** @internal True transmissive surface: render task provides a scene-color refraction texture
+     *  just before this material draws. Set via {@link setPbrTransmission}, which also registers the
+     *  scene-level transmission hook — assigning this field directly would leave the hook
+     *  unregistered and silently render no refraction. Set by KHR_materials_transmission. */
+    _transmissive?: boolean;
     /** @internal When true, the material samples the environment cubemap using the view
      *  direction (camera→fragment) instead of the reflected view direction. Set via
      *  {@link setPbrSkybox}, which registers the extension. Tree-shakable — only bundled when
@@ -208,7 +213,7 @@ export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: 
     let features =
         (mat.emissiveTexture ? PBR_HAS_EMISSIVE : 0) |
         (mat.normalTexture ? PBR_HAS_NORMAL_MAP : 0) |
-        (mat.alphaBlend === true || ((mat.alphaCutOff ?? 0) <= 0 && mat.alpha! < 1) ? PBR_HAS_ALPHA_BLEND : 0) |
+        (mat.alphaBlend === true || ((mat._alphaCutOff ?? 0) <= 0 && mat.alpha! < 1) ? PBR_HAS_ALPHA_BLEND : 0) |
         (mat.specGlossTexture ? PBR_HAS_SPEC_GLOSS : 0) |
         (mat.doubleSided ? PBR_HAS_DOUBLE_SIDED : 0);
     if ((mat.occlusionStrength ?? 1.0) > 0) {

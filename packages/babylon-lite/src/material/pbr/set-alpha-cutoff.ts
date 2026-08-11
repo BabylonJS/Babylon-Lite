@@ -3,7 +3,7 @@
  *  Statically imports the alpha-test fragment's `pbrExt` (WGSL discard slot + feature-bit
  *  detection); it bundles only when an app imports `setPbrAlphaCutoff` or when the glTF
  *  loader hits a `MASK`-mode material and dynamically imports this module. No always-loaded
- *  `alphaCutOff` scan, hardcoded detect term, or fragment import specifier remains in the
+ *  `_alphaCutOff` scan, hardcoded detect term, or fragment import specifier remains in the
  *  renderable's shared PBR chunk. */
 
 import type { PbrMaterialProps } from "./pbr-material.js";
@@ -14,6 +14,6 @@ import { _registerPbrExt } from "./pbr-flags.js";
  *  below `alphaCutOff` are discarded. Registers the alpha-test extension globally
  *  (idempotent). Call before the scene is first built. */
 export function setPbrAlphaCutoff(mat: Partial<PbrMaterialProps>, alphaCutOff: number): void {
-    mat.alphaCutOff = alphaCutOff;
+    mat._alphaCutOff = alphaCutOff;
     _registerPbrExt(pbrExt);
 }

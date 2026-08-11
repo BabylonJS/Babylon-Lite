@@ -20,7 +20,7 @@ import { _registerPbrSceneHook } from "./pbr-flags.js";
  *  {@link setPbrSubsurface} for thickness/tint (volume absorption) and
  *  `setPbrDispersion` for chromatic dispersion. */
 export function setPbrTransmission(mat: Partial<PbrMaterialProps>, refraction: RefractionProps): void {
-    mat.transmissive = true;
+    mat._transmissive = true;
     (mat._subsurface ??= {}).refraction = refraction;
     _registerPbrSceneHook(registerPbrTransmission);
 }

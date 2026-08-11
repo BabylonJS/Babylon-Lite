@@ -37,7 +37,7 @@ export function registerPbrTransmission(scene: SceneContext, engine: EngineConte
     let hasTransmissionRefraction = false;
     for (let i = 0; i < meshes.length && !hasTransmissionRefraction; i++) {
         const mat = meshes[i]!.material as PbrMaterialProps | null;
-        hasTransmissionRefraction = !!mat?.transmissive && (mat._subsurface?.refraction?.intensity ?? 0) > 0;
+        hasTransmissionRefraction = !!mat?._transmissive && (mat._subsurface?.refraction?.intensity ?? 0) > 0;
     }
     if (!hasTransmissionRefraction) {
         return;

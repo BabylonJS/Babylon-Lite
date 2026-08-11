@@ -25,7 +25,7 @@ describe("PBR transmission and alpha feature detection", () => {
 
     it("marks transmission refraction maps when a transmission texture is present", () => {
         const detected = refractionRttExt.detect?.({
-            transmissive: true,
+            _transmissive: true,
             _subsurface: {
                 refraction: {
                     intensity: 1,

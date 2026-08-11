@@ -48,7 +48,8 @@ export interface PointerMaterial {
     normalTextureScale?: number;
     /** Runtime glTF occlusionTexture.strength (applied by the lazy reflectance ext). */
     occlusionStrength?: number;
-    transmissive?: boolean;
+    /** @internal Runtime true-transmissive flag (KHR_materials_transmission). */
+    _transmissive?: boolean;
     /** @internal Runtime subsurface sub-object (transmission / volume / diffuse-transmission). */
     _subsurface?: {
         refraction?: { intensity?: number; indexOfRefraction?: number; useThicknessAsDepth?: boolean };

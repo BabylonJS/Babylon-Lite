@@ -210,7 +210,7 @@ export function makeRefractionRttExt(dispersionSampleWgsl?: string): PbrExt {
             const ss = m._subsurface as SubSurfaceProps | undefined;
             const refr = ss?.refraction;
             const linearImageProcessing = m._linearImageProcessing ? PBR2_LINEAR_IMAGE_PROCESSING : 0;
-            const intensity = m.transmissive ? (refr?.intensity ?? 0) : 0;
+            const intensity = m._transmissive ? (refr?.intensity ?? 0) : 0;
             if (intensity <= 0) {
                 return { f: 0, f2: linearImageProcessing };
             }
