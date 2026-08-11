@@ -450,7 +450,7 @@ export interface IGaussianSplattingStreamingPart {
 }
 
 export class GaussianSplattingStream {
-    public constructor() {
+    public constructor(..._args: unknown[]) {
         unsupported(
             "GaussianSplattingStream",
             "Gaussian-Splatting LOD streaming is a whole GPU subsystem (SOG-octree LOD residency + work-buffer decode into render-target atlases) with no Babylon Lite equivalent. Load the full cloud with `GaussianSplattingMesh` / `loadSplat` instead."
