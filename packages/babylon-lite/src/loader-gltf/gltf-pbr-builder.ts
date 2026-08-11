@@ -93,6 +93,34 @@ export function needsGltfEmissive(mat: GltfMaterialData, emissiveTexture: Textur
     return !((ef[0] === 0 && ef[1] === 0 && ef[2] === 0) || (!!emissiveTexture && ef[0] === 1 && ef[1] === 1 && ef[2] === 1));
 }
 
+/** Apply every opt-in PBR feature that is decided purely from glTF material data, after
+ *  the props have been assembled.
+ *
+ *  Each `setPbr*` statically imports its shader fragment, so these imports must stay
+ *  conditional or every glTF scene pays for features its assets never use. Both the
+ *  fast path and the slow path, and both the core loader and the variants loader, route
+ *  through here so a gate cannot be added to one call site and forgotten at another —
+ *  which is exactly how the variants path lost MASK alpha-discard.
+ *
+ *  This lives in the always-loaded shared module rather than the slow-path ext module
+ *  because a MASK or emissive material can arrive on either path; hoisting it into
+ *  `gltf-pbr-builder-ext.ts` would drag that chunk onto fast-path scenes. UV-transform
+ *  is the opposite case — slow-path only — so its gate stays in `applyGltfUvTransform`. */
+export async function applyGltfOptInPbrFeatures(props: PbrMaterialProps, mat: GltfMaterialData): Promise<void> {
+    // See `needsGltfEmissive` for the [1,1,1] and emissive-strength rules. A caller that
+    // already set `_emissiveColor` came through KHR_materials_emissive_strength, which
+    // takes precedence over the raw factor.
+    if (!props._emissiveColor && needsGltfEmissive(mat, props.emissiveTexture)) {
+        const { setPbrEmissive } = await import("../material/pbr/set-emissive.js");
+        const ef = mat._emissiveFactor;
+        setPbrEmissive(props, [ef[0], ef[1], ef[2]]);
+    }
+    if (mat._alphaMode === "MASK") {
+        const { setPbrAlphaCutoff } = await import("../material/pbr/set-alpha-cutoff.js");
+        setPbrAlphaCutoff(props, mat._alphaCutoff);
+    }
+}
+
 /** Assemble a PbrMaterialProps from parsed glTF material data + already-uploaded
  *  textures + per-ext fragment overrides. Fast-path: no wrapTex, no occlusionOnUv2,
  *  no occlusionTexture. Slow-path additions live in gltf-pbr-builder-ext.ts.

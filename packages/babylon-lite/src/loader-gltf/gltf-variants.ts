@@ -13,7 +13,7 @@ import type { GltfFeature, GltfMaterialFeatureRunner } from "./gltf-feature.js";
 import type { MaterialVariantData, VariantMeshEntry } from "./material-variants.js";
 import type { EngineContext } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
-import { uploadTex, type GenerateMipmapsFn, type TextureWrapFn, identityTexWrap, needsGltfEmissive } from "./gltf-pbr-builder.js";
+import { uploadTex, type GenerateMipmapsFn, type TextureWrapFn, identityTexWrap, applyGltfOptInPbrFeatures } from "./gltf-pbr-builder.js";
 import { buildDefaultPbrTexturesExt, assemblePbrPropsExt, applyGltfUvTransform } from "./gltf-pbr-builder-ext.js";
 
 /**
@@ -76,12 +76,9 @@ export async function loadVariantMaterials(
                 // Order matters: uv-transform registers its ext first, as it did when both lived
                 // inside assemblePbrPropsExt.
                 await applyGltfUvTransform(props, tex);
-                // Emissive is opt-in — see the matching gate in load-gltf.ts.
-                if (!props._emissiveColor && needsGltfEmissive(gltfMat, props.emissiveTexture)) {
-                    const { setPbrEmissive } = await import("../material/pbr/set-emissive.js");
-                    const ef = gltfMat._emissiveFactor;
-                    setPbrEmissive(props, [ef[0], ef[1], ef[2]]);
-                }
+                // Opt-in PBR features decided from the glTF material data — shared with
+                // load-gltf.ts so a variant material can't silently lose one.
+                await applyGltfOptInPbrFeatures(props, gltfMat);
                 return props;
             })();
             pbrCache.set(gltfMat, p);

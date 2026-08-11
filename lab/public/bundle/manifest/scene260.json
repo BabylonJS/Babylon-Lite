@@ -6,14 +6,14 @@
     "scene260-flat-normal-wgsl-Cm9mM4tC.js",
     "scene260-generate-mipmaps-BarYjjyB.js",
     "scene260-gltf-feature-primitive-BZTmheNJ.js",
-    "scene260-gltf-feature-registry-BtFJEIJA.js",
+    "scene260-gltf-feature-registry-DqQ4_JIp.js",
     "scene260-gltf-json-asset-CS_Oo-pQ.js",
     "scene260-gltf-normals-DYhLwXNX.js",
     "scene260-ibl-fragment-CeRrvT96.js",
-    "scene260-pbr-renderable-BiA5oA1S.js",
-    "scene260-rgbd-decode-CsvtL-uD.js",
+    "scene260-pbr-renderable-DxBJdgU6.js",
+    "scene260-rgbd-decode-BHKCP5vu.js",
     "scene260-scene-uniforms-FTYH6Ct0.js",
     "scene260.js"
   ],
-  "rawBytes": 81925
+  "rawBytes": 81954
 }

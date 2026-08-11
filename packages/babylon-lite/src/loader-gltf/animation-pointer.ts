@@ -42,8 +42,6 @@ export interface PointerMaterial {
     _metallicF0Factor?: number;
     /** @internal Runtime grazing specular/F90 weight (KHR_materials_specular). */
     _specularWeight?: number;
-    /** @internal Runtime material needs the reflectance extension shader path. */
-    _hasReflExt?: boolean;
     /** Runtime glTF normalTexture.scale (drives the lazy normal-scale shader mod). */
     normalTextureScale?: number;
     /** Runtime glTF occlusionTexture.strength (applied by the lazy reflectance ext). */

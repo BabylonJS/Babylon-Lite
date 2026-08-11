@@ -17,6 +17,7 @@
 
 import "./gltf-sampler-denorm.js";
 import type { GltfFeature } from "./gltf-feature.js";
+import type { ExtMaterialSeeder } from "./animation-pointer-ext.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { AnimationChannel, TargetPath } from "../animation/types.js";
 import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS } from "../animation/types.js";
@@ -56,7 +57,9 @@ const _UV_TX_POINTER_RE = /^\/materials\/(\d+)\/.*\/KHR_texture_transform\/(?:of
 // Populated in preParse from the lazily-imported sub-modules, so materialMap + applyMaterial
 // can delegate without re-importing. Each sub-module is fetched only when its pointer is
 // present, so a node-only scene (scene34) loads none of them.
-let _matExtMod: typeof import("./animation-pointer-ext.js") | null = null;
+// The ext seeder is bound in preParse to the asset it scanned, so materialMap cannot seed
+// with another asset's targets or without the setters that seeding depends on.
+let _seedExtMaterials: ExtMaterialSeeder | null = null;
 let _baseColorMod: typeof import("./animation-pointer-basecolor.js") | null = null;
 let _uvTransformMod: typeof import("../material/pbr/enable-material-uv-transform.js") | null = null;
 function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | undefined)[] {
@@ -136,7 +139,7 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
     }
     // Material factor / extension seeding (transmission, IOR, volume, occlusion strength)
     // lives in the lazy module loaded by preParse only when such a pointer is present.
-    _matExtMod?.seedExtMaterials(json, map);
+    _seedExtMaterials?.(map);
     _matMap = map;
     return map;
 }
@@ -210,7 +213,9 @@ const feature: GltfFeature = {
             await import("./animation-pointer-lights.js");
         }
         if (hasMatExtPointer) {
-            _matExtMod = await import("./animation-pointer-ext.js");
+            // The module owns its pointer regexes, so it scans the asset itself and hands
+            // back a seeder already bound to the targets and opt-in setters it needs.
+            _seedExtMaterials = await (await import("./animation-pointer-ext.js")).prepareExtMaterials(json);
         }
         // Same detection materialMap uses to populate `uvTransformAnimated`, so the setter
         // is present whenever that set is non-empty.

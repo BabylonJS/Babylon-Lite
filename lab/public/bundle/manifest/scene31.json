@@ -4,15 +4,15 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene31-generate-mipmaps-D_9pM4qD.js",
-    "scene31-gltf-ext-emissive-strength-B9O7zVoc.js",
-    "scene31-gltf-feature-registry-BaOuBP47.js",
+    "scene31-gltf-ext-emissive-strength-BUdCZP6c.js",
+    "scene31-gltf-feature-registry-Bvymsto0.js",
     "scene31-gltf-glb-parser-BCMV87GB.js",
     "scene31-ibl-fragment-CeRrvT96.js",
-    "scene31-pbr-renderable-bnKqg6_j.js",
-    "scene31-rgbd-decode-CrczUmgT.js",
+    "scene31-pbr-renderable-B9koCIi2.js",
+    "scene31-rgbd-decode-CT6Q-rdi.js",
     "scene31-scene-uniforms-FTYH6Ct0.js",
-    "scene31-set-emissive-BdJiZPNn.js",
+    "scene31-set-emissive-Cf9S270u.js",
     "scene31.js"
   ],
-  "rawBytes": 81710
+  "rawBytes": 81739
 }
