@@ -466,6 +466,8 @@ async function extractAllMeshes(
             // TEXCOORD_0/_1 may be FLOAT or a normalized UNSIGNED_BYTE/SHORT accessor; the vertex
             // pipeline binds UVs as float32x2, so integer UVs are denormalized to [0,1] (reusing the
             // lazily-imported color/UV normalizer). Float UVs (the common case) pass through untouched.
+            // (KHR_mesh_quantization's UNNORMALIZED integer TEXCOORD never reaches here — it's
+            // rewritten to FLOAT upstream by gltf-ext-quantization.ts's preParse.)
             const uvs = uvData
                 ? uvData._data instanceof F32
                     ? (uvData._data as Float32Array)
