@@ -4,10 +4,10 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene19-ibl-fragment-CeRrvT96.js",
-    "scene19-pbr-renderable-Cwm82WMJ.js",
+    "scene19-pbr-renderable-DLkl8fh8.js",
     "scene19-rgbd-decode-XDDjKoQj.js",
     "scene19-singlelight-hemispheric-wgsl-COpGvwi0.js",
     "scene19.js"
   ],
-  "rawBytes": 70807
+  "rawBytes": 70788
 }

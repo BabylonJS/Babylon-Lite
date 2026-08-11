@@ -1,15 +1,15 @@
 {
-  "rawKB": 89.4,
+  "rawKB": 89.3,
   "gzipKB": 36.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene26-generate-mipmaps-z7-ZrEcW.js",
     "scene26-gltf-glb-parser-wSKiR_h9.js",
     "scene26-ibl-fragment-CeRrvT96.js",
-    "scene26-pbr-renderable-CBcGbH3P.js",
+    "scene26-pbr-renderable-68goA79_.js",
     "scene26-rgbd-decode-CutGcORe.js",
     "scene26-singlelight-point-wgsl-CEx08etv.js",
     "scene26.js"
   ],
-  "rawBytes": 91507
+  "rawBytes": 91488
 }

@@ -6,14 +6,14 @@
     "scene37-enable-material-uv-transform-hGytsjpq.js",
     "scene37-generate-mipmaps-B7x_4x7w.js",
     "scene37-gltf-color-normalize-4-WGzPL2.js",
-    "scene37-gltf-ext-dielectric-BGPweJ93.js",
+    "scene37-gltf-ext-dielectric-Dyc3H9-e.js",
     "scene37-gltf-ext-sheen-DKI9-hqc.js",
     "scene37-gltf-ext-uv-transform-hVTzf5Q9.js",
-    "scene37-gltf-feature-registry-Bq1C4zSV.js",
+    "scene37-gltf-feature-registry-CfJONpGc.js",
     "scene37-gltf-glb-parser-CvB-hyvt.js",
     "scene37-gltf-pbr-builder-ext-BKvT_-Y0.js",
     "scene37-ibl-fragment-CeRrvT96.js",
-    "scene37-pbr-renderable-ngNVlj5Z.js",
+    "scene37-pbr-renderable-CAtLyRmS.js",
     "scene37-pbr-template-ext-CiHpOV5G.js",
     "scene37-rgbd-decode-I1ifYmaa.js",
     "scene37-scene-uniforms-FTYH6Ct0.js",
@@ -21,5 +21,5 @@
     "scene37-texture-2d-DQo3n8D6.js",
     "scene37.js"
   ],
-  "rawBytes": 99424
+  "rawBytes": 99405
 }

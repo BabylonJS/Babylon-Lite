@@ -7,12 +7,12 @@
     "scene13-generate-mipmaps-0uLG1Tgv.js",
     "scene13-gltf-glb-parser-ChV1RcmM.js",
     "scene13-ibl-fragment-CeRrvT96.js",
-    "scene13-pbr-renderable-DFP6A6f7.js",
+    "scene13-pbr-renderable-Koky7SJR.js",
     "scene13-rgbd-decode-DmoBTNau.js",
     "scene13-scene-uniforms-FTYH6Ct0.js",
     "scene13-singlelight-hemispheric-wgsl-DvE34nqp.js",
     "scene13-wgsl-helpers-BgB2AJrF.js",
     "scene13.js"
   ],
-  "rawBytes": 85432
+  "rawBytes": 85413
 }

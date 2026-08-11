@@ -15,7 +15,7 @@
     "scene141-node-registry-9Kug3TNH.js",
     "scene141-node-renderable-D8rfGj6f.js",
     "scene141-node-shadow-nPkqfPG_.js",
-    "scene141-pbr-renderable-lASVlIXa.js",
+    "scene141-pbr-renderable--rdvu_kB.js",
     "scene141-pbr-shadow-fragment-DHDAZ1HL.js",
     "scene141-shader-composer-Ch_3RxLD.js",
     "scene141-shadow-fragment-core-Dbe1xNkt.js",
@@ -26,5 +26,5 @@
     "scene141-vertex-output-C7G5u6Y0.js",
     "scene141.js"
   ],
-  "rawBytes": 123443
+  "rawBytes": 123424
 }
