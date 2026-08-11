@@ -40,6 +40,9 @@ import {
     IsHtmlInCanvasSupportedNatively,
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
+    GaussianSplattingStream,
+    AddGaussianSplattingStreamPart,
+    AddGaussianSplattingStreamPartAsync,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -170,6 +173,21 @@ describe("GreasedLine builder/tool function stubs throw on call", () => {
         expect(() => CreateGreasedLine("line", {}, {}, {})).toThrow(LiteCompatError);
         expect(() => CreateGreasedLineMaterial("material", {}, {})).toThrow(LiteCompatError);
         expect(() => GetPointsCount([])).toThrow(LiteCompatError);
+    });
+});
+
+describe("Gaussian Splatting LOD streaming stubs throw", () => {
+    it("GaussianSplattingStream throws on construction", () => {
+        expect(() => new GaussianSplattingStream()).toThrow(LiteCompatError);
+        expect(() => new GaussianSplattingStream()).toThrow(/GaussianSplattingStream/);
+    });
+
+    it.each([
+        ["AddGaussianSplattingStreamPart", () => AddGaussianSplattingStreamPart()],
+        ["AddGaussianSplattingStreamPartAsync", () => AddGaussianSplattingStreamPartAsync()],
+    ] as Array<[string, () => unknown]>)("%s throws LiteCompatError naming the API", (name, call) => {
+        expect(call).toThrow(LiteCompatError);
+        expect(call).toThrow(new RegExp(name));
     });
 });
 
