@@ -25,6 +25,27 @@ const liteMocks = vi.hoisted(() => ({
     createTexture3DFromPixels: vi.fn(),
     createDynamicTexture: vi.fn(),
     updateDynamicTexture: vi.fn(),
+    // The opt-in PBR feature setters compat routes through instead of writing the backing
+    // fields directly (the setter is what registers the feature's shader ext). They must
+    // apply the same field write here, since the material paths under test read it back.
+    setPbrEmissive: vi.fn((mat: Record<string, unknown>, color: unknown) => {
+        mat._emissiveColor = color;
+    }),
+    setPbrClearCoat: vi.fn((mat: Record<string, unknown>, clearCoat: unknown) => {
+        mat._clearCoat = clearCoat;
+    }),
+    setPbrSheen: vi.fn((mat: Record<string, unknown>, sheen: unknown) => {
+        mat._sheen = sheen;
+    }),
+    setPbrAnisotropy: vi.fn((mat: Record<string, unknown>, anisotropy: unknown) => {
+        mat._anisotropy = anisotropy;
+    }),
+    setPbrIridescence: vi.fn((mat: Record<string, unknown>, iridescence: unknown) => {
+        mat._iridescence = iridescence;
+    }),
+    setPbrGammaAlbedo: vi.fn((mat: Record<string, unknown>) => {
+        mat._gammaAlbedo = true;
+    }),
 }));
 
 vi.mock("babylon-lite", () => liteMocks);
