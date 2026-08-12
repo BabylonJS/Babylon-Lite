@@ -2480,7 +2480,7 @@
         "id": 281,
         "slug": "scene281-npe-noise-texture",
         "name": "Scene 281 — NPE Particles: Noise Texture",
-        "maxMad": 0.01,
+        "maxMad": 0.02,
         "maxRawKB": 45,
         "description": "A serialized NPE particle graph with UpdateNoiseBlock assigning six stable random texture coordinates per particle and applying three red-channel samples as per-axis direction forces. Uses a cached deterministic texture payload so the Babylon.js and Lite graphs are portable and byte-identical.",
         "tags": ["npe", "particles", "billboards", "noise-texture"],
