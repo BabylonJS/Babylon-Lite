@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
 import { animateParticleSystem, createParticleSystem, startParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
+import { createParticleBillboard } from "../../../packages/babylon-lite/src/particle/particle-billboard";
 import { killParticle, spawnParticle } from "../../../packages/babylon-lite/src/particle/particle-buffer";
 import { updateNoiseBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-noise-block";
 import { buildNodeParticleSetWithNoiseTextures } from "../../../packages/babylon-lite/src/particle/node/npe-noise";
@@ -189,16 +190,13 @@ describe("NPE UpdateNoiseBlock", () => {
         }
     });
 
-    it("builds UpdateNoiseBlock and its CPU texture dependency from a parsed graph", async () => {
-        const data = new Uint8ClampedArray(4 * 4 * 4);
-        data[(2 + 2 * 4) * 4] = 255;
-        vi.stubGlobal(
-            "fetch",
-            vi.fn(async () => ({ ok: true, blob: async () => ({}) }))
-        );
+    it("builds one embedded texture for ordinary rendering and CPU noise updates", async () => {
+        const data = new Uint8ClampedArray([255, 0, 0, 255]);
+        const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => ({}) }));
+        vi.stubGlobal("fetch", fetchMock);
         vi.stubGlobal(
             "createImageBitmap",
-            vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() }))
+            vi.fn(async () => ({ width: 1, height: 1, close: vi.fn() }))
         );
         vi.stubGlobal(
             "OffscreenCanvas",
@@ -206,9 +204,25 @@ describe("NPE UpdateNoiseBlock", () => {
                 this.getContext = () => ({ drawImage: vi.fn(), getImageData: () => ({ data }) });
             })
         );
+        const gpuTexture = { createView: vi.fn(() => ({})), destroy: vi.fn() };
+        const engine = {
+            _device: {
+                createTexture: vi.fn(() => gpuTexture),
+                createSampler: vi.fn(() => ({})),
+                queue: { copyExternalImageToTexture: vi.fn() },
+            },
+        } as never;
         const graph = parseNodeParticleSource({
             blocks: [
-                { customType: "BABYLON.SystemBlock", id: 5, capacity: 1, inputs: [{ name: "particle", targetBlockId: 3, targetConnectionName: "output" }] },
+                {
+                    customType: "BABYLON.SystemBlock",
+                    id: 5,
+                    capacity: 1,
+                    inputs: [
+                        { name: "particle", targetBlockId: 3, targetConnectionName: "output" },
+                        { name: "texture", targetBlockId: 2, targetConnectionName: "texture" },
+                    ],
+                },
                 {
                     customType: "BABYLON.UpdateNoiseBlock",
                     id: 3,
@@ -219,12 +233,15 @@ describe("NPE UpdateNoiseBlock", () => {
                     ],
                 },
                 { customType: "BABYLON.CreateParticleBlock", id: 1, inputs: [] },
-                { customType: "BABYLON.ParticleTextureSourceBlock", id: 2, textureDataUrl: "data:image/png;base64,AA==", invertY: false, inputs: [] },
+                { customType: "BABYLON.ParticleTextureSourceBlock", id: 2, url: "", textureDataUrl: "data:image/png;base64,AA==", invertY: false, inputs: [] },
                 { customType: "BABYLON.ParticleInputBlock", id: 4, type: 8, valueType: "BABYLON.Vector3", value: [2, 3, 4], inputs: [] },
             ],
         });
-        const set = await buildNodeParticleSetWithNoiseTextures({} as never, {} as never, graph);
+        const set = await buildNodeParticleSetWithNoiseTextures(engine, {} as never, graph);
         const system = set.systems[0]!;
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(system.texture).toMatchObject({ width: 1, height: 1 });
+        expect(() => createParticleBillboard(system)).not.toThrow();
         vi.spyOn(Math, "random").mockReturnValue(0);
         system._scaledStep = 0.5;
 
