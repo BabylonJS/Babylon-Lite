@@ -337,6 +337,26 @@ export class Scene extends AbstractScene {
         this._pendingMorphBuilds.length = 0;
     }
 
+    /** @internal Clustered light containers to register on the Lite scene at engine start. */
+    private readonly _pendingClusteredContainers: Array<{ _build(): void }> = [];
+
+    /** @internal Register a compat `ClusteredLightContainer` to be wired into the scene at engine start. */
+    public _registerClusteredLightContainer(container: { _build(): void }): void {
+        this._pendingClusteredContainers.push(container);
+    }
+
+    /**
+     * @internal Register all clustered light containers on the Lite scene. Called by
+     * the engine after meshes/materials are settled (clustered wiring reads the
+     * scene's materials) and before `registerScene`.
+     */
+    public _buildClusteredContainers(): void {
+        for (const container of this._pendingClusteredContainers) {
+            container._build();
+        }
+        this._pendingClusteredContainers.length = 0;
+    }
+
     /** @internal Whether any shadow generator is present (engine uses shadow-aware registration). */
     public _hasShadows(): boolean {
         return this._shadowGenerators.length > 0;
