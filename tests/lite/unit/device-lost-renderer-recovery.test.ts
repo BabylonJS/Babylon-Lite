@@ -12,6 +12,7 @@ import { rebuildRegisteredSpriteRenderers } from "../../../packages/babylon-lite
 import type { GlyphCurves } from "../../../packages/babylon-lite/src/text/glyph-storage";
 import { createGlyphStorage } from "../../../packages/babylon-lite/src/text/glyph-storage";
 import { createTextData } from "../../../packages/babylon-lite/src/text/text-data";
+import { updateTextData } from "../../../packages/babylon-lite/src/text/text-data";
 import { createTextLayer, createTextRenderer, registerTextRenderer } from "../../../packages/babylon-lite/src/text/text-renderer";
 import { rebuildRegisteredTextRenderers } from "../../../packages/babylon-lite/src/text/text-recovery";
 
@@ -234,5 +235,34 @@ describe("TextRenderer device-lost recovery", () => {
         expect(layer.coverageGamma).toBe(2);
         expect(renderer._clear).toBe(false);
         expect(other.touched).toBe(false);
+    });
+
+    it("leaves the per-draw-group bind-group cache consistent when the group list shrank before recovery", async () => {
+        const engine = makeEngine(makeDevice());
+        const storage = createGlyphStorage(
+            new Map([
+                ["a", new Map([[1, glyph()]])],
+                ["b", new Map([[1, glyph()]])],
+            ])
+        );
+        const runA = { curveSet: "a", glyphs: [{ glyphId: 1, x: 0, y: 0 }], pixelsPerFontUnit: 1 };
+        const runB = { curveSet: "b", glyphs: [{ glyphId: 1, x: 8, y: 0 }], pixelsPerFontUnit: 1 };
+        const data = createTextData(storage, [runA, runB]);
+        const layer = createTextLayer(data);
+        const renderer = createTextRenderer(engine, { layers: [layer] });
+        registerTextRenderer(renderer);
+        renderer._update();
+
+        expect(renderer._layerGpu.get(layer)!.bindGroupCache.map((e) => e.curveSetId)).toEqual(["a", "b"]);
+
+        // Drop a curve set *before* recovery runs, so the rebuild — not a later `_update()` —
+        // is what has to reconcile the cache with the shorter group list. Truncation in
+        // `uploadLayer` only shrinks a cache that is longer than the group list, so an entry
+        // the rebuild failed to discard would never be trimmed back out.
+        updateTextData(data, { update: "reset", runs: [runB] });
+        engine._device = makeDevice().device;
+        await rebuildRegisteredTextRenderers(engine);
+
+        expect(renderer._layerGpu.get(layer)!.bindGroupCache.map((e) => e.curveSetId)).toEqual(["b"]);
     });
 });

@@ -126,23 +126,22 @@ function expectBindGroupsMatchGroups(rr: TextRenderer, layer: TextLayer): void {
     const lg = layerGpu(rr, layer);
     const groups = layer.data._groups;
 
-    // The three per-group arrays are parallel: same length, written and truncated together.
-    expect(lg.bindGroups.length).toBe(groups.length);
-    expect(lg.bindGroupAtlasVersions.length).toBe(groups.length);
-    expect(lg.bindGroupCurveSetIds.length).toBe(groups.length);
+    // One entry per draw group — the cache is truncated with the group list.
+    expect(lg.bindGroupCache.length).toBe(groups.length);
 
     for (let i = 0; i < groups.length; i++) {
         const g = groups[i]!;
         const gpu = g.curveSet.atlas.gpu;
         expect(gpu).not.toBeNull();
 
-        const bg = lg.bindGroups[i] as unknown as MockBindGroup;
+        const entry = lg.bindGroupCache[i]!;
+        const bg = entry.bindGroup as unknown as MockBindGroup;
         const curveView = bg.__entries.find((e) => e.binding === 1)!.resource as MockTextureView;
         const bandView = bg.__entries.find((e) => e.binding === 2)!.resource as MockTextureView;
 
         expect(curveView.__texture).toBe(gpu!.curveTex);
         expect(bandView.__texture).toBe(gpu!.bandTex);
-        expect(lg.bindGroupCurveSetIds[i]).toBe(g.curveSetId);
+        expect(entry.curveSetId).toBe(g.curveSetId);
     }
 }
 
@@ -202,7 +201,7 @@ describe("text renderer bind-group cache", () => {
         const rr = createTextRenderer(surface, { layers: [layer] });
 
         rr._update();
-        expect(layerGpu(rr, layer).bindGroups.length).toBe(2);
+        expect(layerGpu(rr, layer).bindGroupCache.length).toBe(2);
 
         updateTextData(data, { update: "reset", runs: [run("g", 10)] });
         rr._update();

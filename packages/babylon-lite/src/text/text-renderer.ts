@@ -119,6 +119,15 @@ export interface TextRenderer extends RenderingContext {
     _visibleBundles: GPURenderBundle[];
 }
 
+/** @internal One cached bind group plus the inputs it was built from. Bundling the three
+ *  together makes the cache self-describing: an entry can never disagree with its own
+ *  invalidation keys, and there is a single array to write, truncate, and clear. */
+interface BindGroupCacheEntry {
+    bindGroup: GPUBindGroup;
+    atlasVersion: number;
+    curveSetId: CurveSetId;
+}
+
 /** @internal Per-layer GPU resources owned by the renderer. */
 interface LayerGpu {
     layer: TextLayer;
@@ -126,14 +135,12 @@ interface LayerGpu {
     instanceBuf: GPUBuffer;
     instanceCap: number;
     pipeline: GPURenderPipeline | null;
-    /** Per-draw-group bind groups; rebuilt when atlas grows. Indexed by draw-group index,
-     *  which is NOT stable: `data._groups` is spliced when a group empties and rebuilt in
-     *  map-insertion order by `applyReset`. `bindGroupCurveSetIds` records which curve set
-     *  each cached entry was built for so a reordered group cannot inherit another curve
-     *  set's atlas textures. */
-    bindGroups: GPUBindGroup[];
-    bindGroupAtlasVersions: number[];
-    bindGroupCurveSetIds: CurveSetId[];
+    /** Per-draw-group bind groups; rebuilt when the atlas grows or the curve set at an index
+     *  changes. Indexed by draw-group index, which is NOT stable: `data._groups` is spliced
+     *  when a group empties and rebuilt in map-insertion order by `applyReset`. Each entry
+     *  therefore carries the curve set it was built for, so a reordered group cannot inherit
+     *  another curve set's atlas textures. */
+    bindGroupCache: BindGroupCacheEntry[];
     uploadedDataVersion: number;
     uploadedViewportW: number;
     uploadedViewportH: number;
@@ -196,9 +203,7 @@ function ensureLayerGpu(rr: TextRenderer, layer: TextLayer): LayerGpu {
         }),
         instanceCap: cap,
         pipeline: null,
-        bindGroups: [],
-        bindGroupAtlasVersions: [],
-        bindGroupCurveSetIds: [],
+        bindGroupCache: [],
         uploadedDataVersion: -1,
         uploadedViewportW: 0,
         uploadedViewportH: 0,
@@ -241,29 +246,27 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
     for (let i = 0; i < data._groups.length; i++) {
         const g = data._groups[i]!;
         const { rebuilt, gpu: atlasGpu } = ensureSharedAtlasGpu(device, g.curveSet.atlas);
-        const current = lg.bindGroups[i];
-        const currentVer = lg.bindGroupAtlasVersions[i] ?? -1;
-        const currentCurveSetId = lg.bindGroupCurveSetIds[i];
-        if (!current || rebuilt || currentVer !== atlasGpu.uploadedVersion || currentCurveSetId !== g.curveSetId) {
-            lg.bindGroups[i] = device.createBindGroup({
-                label: "text-renderer-bg0-" + g.curveSetId,
-                layout: bindGroupLayout,
-                entries: [
-                    { binding: 0, resource: { buffer: lg.textU } },
-                    { binding: 1, resource: atlasGpu.curveTex.createView() },
-                    { binding: 2, resource: atlasGpu.bandTex.createView() },
-                ],
-            });
-            lg.bindGroupAtlasVersions[i] = atlasGpu.uploadedVersion;
-            lg.bindGroupCurveSetIds[i] = g.curveSetId;
+        const cached = lg.bindGroupCache[i];
+        if (!cached || rebuilt || cached.atlasVersion !== atlasGpu.uploadedVersion || cached.curveSetId !== g.curveSetId) {
+            lg.bindGroupCache[i] = {
+                bindGroup: device.createBindGroup({
+                    label: "text-renderer-bg0-" + g.curveSetId,
+                    layout: bindGroupLayout,
+                    entries: [
+                        { binding: 0, resource: { buffer: lg.textU } },
+                        { binding: 1, resource: atlasGpu.curveTex.createView() },
+                        { binding: 2, resource: atlasGpu.bandTex.createView() },
+                    ],
+                }),
+                atlasVersion: atlasGpu.uploadedVersion,
+                curveSetId: g.curveSetId,
+            };
             // Bundle baked the old bind group; force a re-record.
             lg.renderBundle = null;
         }
     }
-    if (lg.bindGroups.length > data._groups.length) {
-        lg.bindGroups.length = data._groups.length;
-        lg.bindGroupAtlasVersions.length = data._groups.length;
-        lg.bindGroupCurveSetIds.length = data._groups.length;
+    if (lg.bindGroupCache.length > data._groups.length) {
+        lg.bindGroupCache.length = data._groups.length;
         lg.renderBundle = null;
     }
 
@@ -382,9 +385,7 @@ function textRendererUpdate(rr: TextRenderer): void {
         if (lg.pipeline !== pipeline) {
             lg.pipeline = pipeline;
             // Pipeline change → bind groups must be rebuilt against new bindGroupLayout.
-            lg.bindGroups.length = 0;
-            lg.bindGroupAtlasVersions.length = 0;
-            lg.bindGroupCurveSetIds.length = 0;
+            lg.bindGroupCache.length = 0;
             // Bundle baked the old pipeline; force a re-record.
             lg.renderBundle = null;
         }
@@ -451,7 +452,7 @@ function textRendererRecord(rr: TextRenderer): number {
             let groupDraws = 0;
             for (let i = 0; i < data._groups.length; i++) {
                 const g = data._groups[i]!;
-                const bg = lg.bindGroups[i];
+                const bg = lg.bindGroupCache[i]?.bindGroup;
                 if (g.slotCount === 0 || !bg) {
                     continue;
                 }
