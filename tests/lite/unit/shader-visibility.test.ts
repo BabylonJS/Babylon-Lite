@@ -9,15 +9,6 @@ import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { setSubtreeVisible } from "../../../packages/babylon-lite/src/scene/visibility";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUColorWrite"> & {
-    GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
-    GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
-    GPUColorWrite?: { ALL: number };
-};
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
-gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUShaderStage;
-gpuGlobals.GPUColorWrite ??= { ALL: 0xf } as unknown as GPUColorWrite;
-
 function createFixture(): {
     engine: EngineContext;
     scene: SceneContext;
