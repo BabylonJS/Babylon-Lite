@@ -158,11 +158,15 @@ export class ClusteredLightContainer extends Light {
         this._childLights.push(point);
         this._liteLights.push(liteLight);
         // Exclude the light from the ordinary per-mesh light path (Babylon.js
-        // removes it from scene.lights when it joins a cluster).
-        const scene = this._scene;
-        if (scene) {
-            scene._unregisterNode(point);
-            removeFromScene(scene._lite, point._lite);
+        // removes it from scene.lights when it joins a cluster). The detach targets
+        // the light's OWN scene, never the container's: a light built against a
+        // different scene (or none at all) must not touch this container's scene
+        // bookkeeping, since `removeFromScene` also disposes the light's shadow
+        // generator against the scene it is handed.
+        const lightScene = point.getScene();
+        if (lightScene) {
+            lightScene._unregisterNode(point);
+            removeFromScene(lightScene._lite, point._lite);
         }
         this._markDirty();
     }
@@ -184,11 +188,13 @@ export class ClusteredLightContainer extends Light {
             pool.splice(j, 1);
         }
         light._clusteredContainer = null;
-        // Return the light to the ordinary per-mesh light path.
-        const scene = this._scene;
-        if (scene) {
-            scene._registerLight(light as PointLight);
-            addToScene(scene._lite, (light as PointLight)._lite);
+        // Return the light to the ordinary per-mesh light path of its own scene —
+        // the mirror of the detach performed by {@link addLight}.
+        const point = light as PointLight;
+        const lightScene = point.getScene();
+        if (lightScene) {
+            lightScene._registerLight(point);
+            addToScene(lightScene._lite, point._lite);
         }
         this._markDirty();
         return index;
@@ -197,17 +203,20 @@ export class ClusteredLightContainer extends Light {
     /**
      * @internal Register the container on the Lite scene, wiring its clustered
      * lights into the scene's PBR materials. Deferred to engine start so meshes and
-     * materials are settled; skipped on the device-less `NullEngine`.
+     * materials are settled; skipped on the device-less `NullEngine` and after
+     * disposal. `_built` only flips once registration actually happened, so a skipped
+     * build leaves the container re-buildable and keeps {@link _markDirty} from
+     * touching GPU state that was never created.
      */
     public _build(): void {
-        if (this._built) {
+        if (this._built || this.isDisposed()) {
             return;
         }
-        this._built = true;
         const scene = this._scene;
         if (!scene || scene.getEngine()._headless) {
             return;
         }
+        this._built = true;
         addClusteredLightContainer(scene._lite, this._container);
     }
 
@@ -239,6 +248,9 @@ export class ClusteredLightContainer extends Light {
     }
 
     public override dispose(): void {
+        // Drop the pending build registration so a container disposed before engine
+        // start is neither retained by the scene nor wired into it later.
+        this._scene?._unregisterClusteredLightContainer(this);
         // Babylon Lite owns the clustered GPU state via the scene and disposes it on
         // scene disposal; the base `Light.dispose` only detaches a shadow generator
         // (a harmless no-op here) before running Node cleanup.

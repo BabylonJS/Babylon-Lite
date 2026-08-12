@@ -338,23 +338,36 @@ export class Scene extends AbstractScene {
     }
 
     /** @internal Clustered light containers to register on the Lite scene at engine start. */
-    private readonly _pendingClusteredContainers: Array<{ _build(): void }> = [];
+    private readonly _pendingClusteredContainers: Array<{ _build(): void; isDisposed(): boolean }> = [];
 
     /** @internal Register a compat `ClusteredLightContainer` to be wired into the scene at engine start. */
-    public _registerClusteredLightContainer(container: { _build(): void }): void {
+    public _registerClusteredLightContainer(container: { _build(): void; isDisposed(): boolean }): void {
         this._pendingClusteredContainers.push(container);
+    }
+
+    /** @internal Drop a container from the pending list (it was disposed before engine start). */
+    public _unregisterClusteredLightContainer(container: { _build(): void; isDisposed(): boolean }): void {
+        const i = this._pendingClusteredContainers.indexOf(container);
+        if (i !== -1) {
+            this._pendingClusteredContainers.splice(i, 1);
+        }
     }
 
     /**
      * @internal Register all clustered light containers on the Lite scene. Called by
      * the engine after meshes/materials are settled (clustered wiring reads the
-     * scene's materials) and before `registerScene`.
+     * scene's materials) and before `registerScene`. Containers disposed before this
+     * point are skipped — registering one would build GPU state for an object the
+     * caller has already thrown away. The list is drained up front so a container
+     * disposed while another builds cannot perturb the iteration.
      */
     public _buildClusteredContainers(): void {
-        for (const container of this._pendingClusteredContainers) {
-            container._build();
+        const containers = this._pendingClusteredContainers.splice(0);
+        for (const container of containers) {
+            if (!container.isDisposed()) {
+                container._build();
+            }
         }
-        this._pendingClusteredContainers.length = 0;
     }
 
     /** @internal Whether any shadow generator is present (engine uses shadow-aware registration). */
