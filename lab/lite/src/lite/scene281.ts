@@ -22,7 +22,9 @@ const STEPS = 240;
 
 async function main(): Promise<void> {
     const initStart = performance.now();
-    const live = new URLSearchParams(window.location.search).has("live");
+    const params = new URLSearchParams(window.location.search);
+    const live = params.has("live");
+    const noise = params.get("noise") !== "off";
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
@@ -34,7 +36,13 @@ async function main(): Promise<void> {
     scene.camera = camera;
     attachControl(camera, canvas, scene);
 
-    const graph = parseNodeParticleSource(createScene281NpeJson());
+    const graph = parseNodeParticleSource(
+        createScene281NpeJson({
+            noise,
+            noiseStrength: live ? [6, 2, 6] : undefined,
+            deterministicEmitter: live,
+        })
+    );
     const set = await buildNodeParticleSetWithNoiseTextures(engine, scene, graph, {
         emitter: { x: 0, y: 0, z: 0 },
         textureBaseUrl: "https://playground.babylonjs.com/",

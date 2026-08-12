@@ -1,8 +1,8 @@
 {
-  "rawKB": 41.2,
-  "rawBytes": 42148,
-  "gzipKB": 26.2,
-  "ignoredRawKB": 31.9,
+  "rawKB": 41.3,
+  "rawBytes": 42300,
+  "gzipKB": 26.4,
+  "ignoredRawKB": 32.1,
   "runtimeChunks": [
     "scene281-billboard-renderable-q605fpJS.js",
     "scene281-box-shape-block-Fgfp5Ix2.js",

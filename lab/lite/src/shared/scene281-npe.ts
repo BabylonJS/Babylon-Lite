@@ -27,8 +27,14 @@ function setBlockValue(blocks: MutableBlock[], name: string, value: number | num
     blocks.find((block) => block.name === name)!.value = value;
 }
 
+export interface Scene281NpeOptions {
+    noise?: boolean;
+    noiseStrength?: readonly [number, number, number];
+    deterministicEmitter?: boolean;
+}
+
 /** Scene 281 - NPE UpdateNoiseBlock with a portable cached texture payload. */
-export function createScene281NpeJson(): unknown {
+export function createScene281NpeJson(options: Scene281NpeOptions = {}): unknown {
     const graph = structuredClone(SCENE262_NPE_JSON) as unknown as { blocks: MutableBlock[] };
     const system = graph.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;
     const particle = system.inputs.find((input) => input.name === "particle")!;
@@ -39,67 +45,69 @@ export function createScene281NpeJson(): unknown {
     const noiseTextureId = noiseId + 1;
     const strengthId = noiseId + 2;
 
-    graph.blocks.push(
-        {
-            customType: "BABYLON.UpdateNoiseBlock",
-            id: noiseId,
-            name: "Noise Update",
-            visibleOnFrame: false,
-            inputs: [
-                {
-                    name: "particle",
-                    inputName: "particle",
-                    targetBlockId: previousBlockId,
-                    targetConnectionName: previousConnectionName,
-                },
-                {
-                    name: "noiseTexture",
-                    inputName: "noiseTexture",
-                    targetBlockId: noiseTextureId,
-                    targetConnectionName: "texture",
-                },
-                {
-                    name: "strength",
-                    inputName: "strength",
-                    targetBlockId: strengthId,
-                    targetConnectionName: "output",
-                },
-            ],
-            outputs: [{ name: "output" }],
-        },
-        {
-            customType: "BABYLON.ParticleTextureSourceBlock",
-            id: noiseTextureId,
-            name: "Noise Texture",
-            visibleOnFrame: false,
-            inputs: [],
-            outputs: [{ name: "texture" }],
-            url: "",
-            textureDataUrl: NOISE_DATA_URL,
-            serializedCachedData: true,
-            invertY: false,
-        },
-        {
-            customType: "BABYLON.ParticleInputBlock",
-            id: strengthId,
-            name: "Noise Strength",
-            visibleOnFrame: false,
-            inputs: [],
-            outputs: [{ name: "output" }],
-            type: 8,
-            valueType: "BABYLON.Vector3",
-            value: [1.5, 0.5, 1.5],
-            contextualValue: 0,
-            systemSource: 0,
-            min: 0,
-            max: 0,
-            groupInInspector: "",
-            displayInInspector: true,
-        }
-    );
+    if (options.noise !== false) {
+        graph.blocks.push(
+            {
+                customType: "BABYLON.UpdateNoiseBlock",
+                id: noiseId,
+                name: "Noise Update",
+                visibleOnFrame: false,
+                inputs: [
+                    {
+                        name: "particle",
+                        inputName: "particle",
+                        targetBlockId: previousBlockId,
+                        targetConnectionName: previousConnectionName,
+                    },
+                    {
+                        name: "noiseTexture",
+                        inputName: "noiseTexture",
+                        targetBlockId: noiseTextureId,
+                        targetConnectionName: "texture",
+                    },
+                    {
+                        name: "strength",
+                        inputName: "strength",
+                        targetBlockId: strengthId,
+                        targetConnectionName: "output",
+                    },
+                ],
+                outputs: [{ name: "output" }],
+            },
+            {
+                customType: "BABYLON.ParticleTextureSourceBlock",
+                id: noiseTextureId,
+                name: "Noise Texture",
+                visibleOnFrame: false,
+                inputs: [],
+                outputs: [{ name: "texture" }],
+                url: "",
+                textureDataUrl: NOISE_DATA_URL,
+                serializedCachedData: true,
+                invertY: false,
+            },
+            {
+                customType: "BABYLON.ParticleInputBlock",
+                id: strengthId,
+                name: "Noise Strength",
+                visibleOnFrame: false,
+                inputs: [],
+                outputs: [{ name: "output" }],
+                type: 8,
+                valueType: "BABYLON.Vector3",
+                value: [...(options.noiseStrength ?? [1.5, 0.5, 1.5])],
+                contextualValue: 0,
+                systemSource: 0,
+                min: 0,
+                max: 0,
+                groupInInspector: "",
+                displayInInspector: true,
+            }
+        );
 
-    particle.targetBlockId = noiseId;
-    particle.targetConnectionName = "output";
+        particle.targetBlockId = noiseId;
+        particle.targetConnectionName = "output";
+    }
     emitRate.value = 30;
     system.capacity = 128;
     setBlockValue(graph.blocks, "Min Emit Power", 1);
@@ -110,7 +118,8 @@ export function createScene281NpeJson(): unknown {
     setBlockValue(graph.blocks, "Max size", 0.5);
     setBlockValue(graph.blocks, "Direction 1", [0, 2, 0]);
     setBlockValue(graph.blocks, "Direction 2", [0, 2, 0]);
-    setBlockValue(graph.blocks, "Min Emit Box", [-0.1, -0.1, -0.1]);
-    setBlockValue(graph.blocks, "Max Emit Box", [0.1, 0.1, 0.1]);
+    const emitBox = options.deterministicEmitter ? [0, 0, 0] : null;
+    setBlockValue(graph.blocks, "Min Emit Box", emitBox ?? [-0.1, -0.1, -0.1]);
+    setBlockValue(graph.blocks, "Max Emit Box", emitBox ?? [0.1, 0.1, 0.1]);
     return graph;
 }

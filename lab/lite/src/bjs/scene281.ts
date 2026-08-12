@@ -19,7 +19,9 @@ const STEPS = 240;
 
 (async function () {
     const initStart = performance.now();
-    const live = new URLSearchParams(window.location.search).has("live");
+    const params = new URLSearchParams(window.location.search);
+    const live = params.has("live");
+    const noise = params.get("noise") !== "off";
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
@@ -31,7 +33,13 @@ const STEPS = 240;
     camera.minZ = 0.1;
     camera.maxZ = 100;
 
-    const set = NodeParticleSystemSet.Parse(createScene281NpeJson());
+    const set = NodeParticleSystemSet.Parse(
+        createScene281NpeJson({
+            noise,
+            noiseStrength: live ? [6, 2, 6] : undefined,
+            deterministicEmitter: live,
+        })
+    );
     const noiseData = new Uint8ClampedArray(8 * 8 * 4);
     for (let i = 0; i < 64; i++) {
         const value = Math.floor(((((Math.sin(i * 12.9898 + 78.233) * 43758.5453) % 1) + 1) % 1) * 256);
@@ -47,9 +55,11 @@ const STEPS = 240;
     };
     readableNoiseTexture.clone = () => noiseTexture;
     readableNoiseTexture.getContent = () => Promise.resolve(noiseData);
-    const noiseTextureBlock = set.attachedBlocks.find((block) => block.name === "Noise Texture") as ParticleTextureSourceBlock;
-    noiseTextureBlock.sourceTexture = noiseTexture;
-    noiseTextureBlock.extractTextureContentAsync = async () => ({ width: 8, height: 8, data: noiseData });
+    if (noise) {
+        const noiseTextureBlock = set.attachedBlocks.find((block) => block.name === "Noise Texture") as ParticleTextureSourceBlock;
+        noiseTextureBlock.sourceTexture = noiseTexture;
+        noiseTextureBlock.extractTextureContentAsync = async () => ({ width: 8, height: 8, data: noiseData });
+    }
     const built = await set.buildAsync(scene);
     const system = built.systems[0] as ParticleSystem;
     system.particleTexture = new Texture("https://playground.babylonjs.com/textures/flare.png", scene);
