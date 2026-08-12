@@ -2157,6 +2157,16 @@
         "skipPerf": true
     },
     {
+        "id": 250,
+        "slug": "scene250-virtual-city",
+        "name": "Scene 250 — VirtualCity",
+        "maxMad": 6.1,
+        "maxRawKB": 92.5,
+        "description": "VirtualCity.gltf — cx20 gltf-test parity. Exercises the glTF `camera` node property via the `_gltf_camera` loader feature: cx20's compat matrix flags Babylon Lite with ':warning: embedded camera' for this model because loadGltf used to silently drop all 14 embedded glTF cameras. Scene selects the imported camera named camera6 (an animated flying-vehicle chase camera) as scene.camera, frozen at seekTime=5.0.",
+        "tags": ["gltf", "camera", "animation"],
+        "skipPerf": true
+    },
+    {
         "id": 251,
         "slug": "scene251-animation-mask",
         "name": "Scene 251 — Animation Mask (Xbot walk, frozen legs)",
