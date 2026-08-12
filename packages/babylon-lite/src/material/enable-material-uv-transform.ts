@@ -1,4 +1,5 @@
 import type { PbrMaterialProps } from "./pbr/pbr-material.js";
+import { enableMaterialUvTransform as enablePbrMaterialUvTransform } from "./pbr/enable-material-uv-transform.js";
 import type { StandardMaterialProps } from "./standard/standard-material.js";
 
 /** Opt a PBR or Standard material into per-texture UV transforms ahead of need.
@@ -12,7 +13,10 @@ import type { StandardMaterialProps } from "./standard/standard-material.js";
  * Returns `true` before the material's first build. Returns `false` after its
  * feature set was compiled, when applying the opt-in requires `rebuildMaterial`. */
 export function enableMaterialUvTransform(material: PbrMaterialProps | StandardMaterialProps): boolean {
-    if (!material._hasUvTx && material._buildGroup._materialFamily === "standard") {
+    if (material._buildGroup._materialFamily === "pbr") {
+        return enablePbrMaterialUvTransform(material as PbrMaterialProps);
+    }
+    if (!material._hasUvTx) {
         const builder = material._buildGroup;
         const preload = import("./standard/fragments/std-uv-transform-fragment.js").then((module) => module.registerStdUvTransformExt());
         const pending = builder._preload ? Promise.all([builder._preload, preload]).then(() => {}) : preload;

@@ -13,8 +13,8 @@ import type { GltfFeature, GltfMaterialFeatureRunner } from "./gltf-feature.js";
 import type { MaterialVariantData, VariantMeshEntry } from "./material-variants.js";
 import type { EngineContext } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
-import { uploadTex, type GenerateMipmapsFn, type TextureWrapFn, identityTexWrap } from "./gltf-pbr-builder.js";
-import { buildDefaultPbrTexturesExt, assemblePbrPropsExt } from "./gltf-pbr-builder-ext.js";
+import { uploadTex, type GenerateMipmapsFn, type TextureWrapFn, identityTexWrap, applyGltfOptInPbrFeatures } from "./gltf-pbr-builder.js";
+import { buildDefaultPbrTexturesExt, assemblePbrPropsExt, applyGltfUvTransform } from "./gltf-pbr-builder-ext.js";
 
 /**
  * Self-contained variant material loader.
@@ -71,7 +71,15 @@ export async function loadVariantMaterials(
             p = (async () => {
                 const tex = buildDefaultPbrTexturesExt(engine, gltfMat, sampler, generateMipmaps, getCachedTex, wrapTex);
                 const layers = await runMatExts(gltfMat, exts, extCtx);
-                return assemblePbrPropsExt(gltfMat, tex, layers);
+                const props = assemblePbrPropsExt(gltfMat, tex, layers);
+                // UV-transform and emissive are opt-in — see the matching gates in load-gltf.ts.
+                // Order matters: uv-transform registers its ext first, as it did when both lived
+                // inside assemblePbrPropsExt.
+                await applyGltfUvTransform(props, tex);
+                // Opt-in PBR features decided from the glTF material data — shared with
+                // load-gltf.ts so a variant material can't silently lose one.
+                await applyGltfOptInPbrFeatures(props, gltfMat);
+                return props;
             })();
             pbrCache.set(gltfMat, p);
         }

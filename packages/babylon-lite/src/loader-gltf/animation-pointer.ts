@@ -33,26 +33,29 @@ export interface PointerMaterial {
      *  is sampled from the ORM texture with its own transform. */
     occlusionTexture?: PointerUvTexture;
     specGlossTexture?: PointerUvTexture;
-    /** Runtime emissive (linear RGB) = emissiveFactor × emissiveStrength. */
-    emissiveColor?: [number, number, number];
+    /** @internal Runtime emissive (linear RGB) = emissiveFactor × emissiveStrength. */
+    _emissiveColor?: [number, number, number];
     /** Runtime base-color factor (linear RGBA). */
     baseColorFactor?: [number, number, number, number];
     roughnessFactor?: number;
-    metallicF0Factor?: number;
-    specularWeight?: number;
-    /** @internal Runtime material needs the reflectance extension shader path. */
-    _hasReflExt?: boolean;
+    /** @internal Runtime dielectric F0 scale (KHR_materials_ior / _specular). */
+    _metallicF0Factor?: number;
+    /** @internal Runtime grazing specular/F90 weight (KHR_materials_specular). */
+    _specularWeight?: number;
     /** Runtime glTF normalTexture.scale (drives the lazy normal-scale shader mod). */
     normalTextureScale?: number;
     /** Runtime glTF occlusionTexture.strength (applied by the lazy reflectance ext). */
     occlusionStrength?: number;
-    transmissive?: boolean;
-    subsurface?: {
+    /** @internal Runtime true-transmissive flag (KHR_materials_transmission). */
+    _transmissive?: boolean;
+    /** @internal Runtime subsurface sub-object (transmission / volume / diffuse-transmission). */
+    _subsurface?: {
         refraction?: { intensity?: number; indexOfRefraction?: number; useThicknessAsDepth?: boolean };
         thickness?: { min?: number; max?: number; useGlTFChannel?: boolean };
         tint?: { color?: [number, number, number]; atDistance?: number };
     };
-    iridescence?: {
+    /** @internal Runtime iridescence sub-object (KHR_materials_iridescence). */
+    _iridescence?: {
         isEnabled?: boolean;
         intensity?: number;
         indexOfRefraction?: number;
@@ -65,17 +68,17 @@ export interface PointerMaterial {
     _animEmissiveStrength?: number;
 }
 
-/** Recompute emissiveColor = factor × strength after either input animates, then
+/** Recompute the emissive color = factor × strength after either input animates, then
  *  flag the material UBO for re-upload. */
 function applyEmissive(mat: PointerMaterial): void {
-    if (!mat.emissiveColor) {
+    if (!mat._emissiveColor) {
         return;
     }
     const f = mat._animEmissiveFactor ?? [0, 0, 0];
     const s = mat._animEmissiveStrength ?? 1;
-    mat.emissiveColor[0] = f[0]! * s;
-    mat.emissiveColor[1] = f[1]! * s;
-    mat.emissiveColor[2] = f[2]! * s;
+    mat._emissiveColor[0] = f[0]! * s;
+    mat._emissiveColor[1] = f[1]! * s;
+    mat._emissiveColor[2] = f[2]! * s;
     mat._uboVersion++;
 }
 
@@ -111,45 +114,45 @@ const TX_SLOT: Record<string, keyof PointerMaterial> = {
  *  shader ignores). */
 function resolveExtTexture(mat: PointerMaterial, ext: string, field: string): PointerUvTexture | undefined {
     const m = mat as unknown as {
-        iridescence?: Record<string, unknown>;
-        sheen?: Record<string, unknown>;
-        clearCoat?: Record<string, unknown>;
-        anisotropy?: Record<string, unknown>;
-        reflectanceTexture?: PointerUvTexture;
-        metallicReflectanceTexture?: PointerUvTexture;
-        subsurface?: { translucency?: Record<string, unknown>; refraction?: Record<string, unknown>; thickness?: Record<string, unknown> };
+        _iridescence?: Record<string, unknown>;
+        _sheen?: Record<string, unknown>;
+        _clearCoat?: Record<string, unknown>;
+        _anisotropy?: Record<string, unknown>;
+        _reflectanceTexture?: PointerUvTexture;
+        _metallicReflectanceTexture?: PointerUvTexture;
+        _subsurface?: { translucency?: Record<string, unknown>; refraction?: Record<string, unknown>; thickness?: Record<string, unknown> };
     };
     switch (`${ext}/${field}`) {
         case "KHR_materials_iridescence/iridescenceTexture":
-            return privateTexture(m.iridescence, "texture");
+            return privateTexture(m._iridescence, "texture");
         case "KHR_materials_iridescence/iridescenceThicknessTexture":
-            return privateTexture(m.iridescence, "thicknessTexture");
+            return privateTexture(m._iridescence, "thicknessTexture");
         case "KHR_materials_anisotropy/anisotropyTexture":
-            return privateTexture(m.anisotropy, "texture");
+            return privateTexture(m._anisotropy, "texture");
         case "KHR_materials_sheen/sheenColorTexture":
-            return privateTexture(m.sheen, "texture");
+            return privateTexture(m._sheen, "texture");
         case "KHR_materials_sheen/sheenRoughnessTexture":
             // Drive the separate roughness texture when present; otherwise roughness shares
             // the colour texture (.a), so fall back to animating that single sheen texture.
-            return privateTexture(m.sheen, (m.sheen as { roughnessTexture?: unknown })?.roughnessTexture ? "roughnessTexture" : "texture");
+            return privateTexture(m._sheen, (m._sheen as { roughnessTexture?: unknown })?.roughnessTexture ? "roughnessTexture" : "texture");
         case "KHR_materials_clearcoat/clearcoatTexture":
-            return privateTexture(m.clearCoat, "texture");
+            return privateTexture(m._clearCoat, "texture");
         case "KHR_materials_clearcoat/clearcoatRoughnessTexture":
-            return privateTexture(m.clearCoat, "roughnessTexture");
+            return privateTexture(m._clearCoat, "roughnessTexture");
         case "KHR_materials_clearcoat/clearcoatNormalTexture":
-            return privateTexture(m.clearCoat, "bumpTexture");
+            return privateTexture(m._clearCoat, "bumpTexture");
         case "KHR_materials_specular/specularTexture":
-            return privateTexture(m as unknown as Record<string, unknown>, "metallicReflectanceTexture");
+            return privateTexture(m as unknown as Record<string, unknown>, "_metallicReflectanceTexture");
         case "KHR_materials_specular/specularColorTexture":
-            return privateTexture(m as unknown as Record<string, unknown>, "reflectanceTexture");
+            return privateTexture(m as unknown as Record<string, unknown>, "_reflectanceTexture");
         case "KHR_materials_diffuse_transmission/diffuseTransmissionColorTexture":
-            return privateTexture(m.subsurface?.translucency, "colorTexture");
+            return privateTexture(m._subsurface?.translucency, "colorTexture");
         case "KHR_materials_diffuse_transmission/diffuseTransmissionTexture":
-            return privateTexture(m.subsurface?.translucency, "intensityTexture");
+            return privateTexture(m._subsurface?.translucency, "intensityTexture");
         case "KHR_materials_transmission/transmissionTexture":
-            return privateTexture(m.subsurface?.refraction, "texture");
+            return privateTexture(m._subsurface?.refraction, "texture");
         case "KHR_materials_volume/thicknessTexture":
-            return privateTexture(m.subsurface?.thickness, "texture");
+            return privateTexture(m._subsurface?.thickness, "texture");
         default:
             return undefined;
     }
@@ -165,7 +168,7 @@ function resolveExtTexture(mat: PointerMaterial, ext: string, field: string): Po
  *  become independent. Idempotent via `_animPriv` so multiple channels
  *  (offset/scale/rotation) on the same slot reuse one private wrapper.
  *  @param parent - The object holding the texture slot (the material, or an extension
- *  sub-object such as `material.sheen`).
+ *  sub-object such as `material._sheen`).
  *  @param key - The slot field name on `parent`. */
 function privateTexture(parent: Record<string, unknown> | undefined, key: string): PointerUvTexture | undefined {
     const cur = parent?.[key] as (PointerUvTexture & { _animPriv?: true }) | undefined;
@@ -267,13 +270,13 @@ const _registry: [RegExp, PointerFactory][] = [
         },
     ],
     // /materials/{m}/emissiveFactor — vec3. Recombined with emissiveStrength into
-    // the runtime emissiveColor. Requires the material to carry an emissive slot
+    // the runtime emissive color. Requires the material to carry an emissive slot
     // (non-zero load-time emissiveFactor) so the UBO field exists.
     [
         /^\/materials\/(\d+)\/emissiveFactor$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
-            if (!mat?.emissiveColor) {
+            if (!mat?._emissiveColor) {
                 return null;
             }
             return {
@@ -291,7 +294,7 @@ const _registry: [RegExp, PointerFactory][] = [
         /^\/materials\/(\d+)\/extensions\/KHR_materials_emissive_strength\/emissiveStrength$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
-            if (!mat?.emissiveColor) {
+            if (!mat?._emissiveColor) {
                 return null;
             }
             return {

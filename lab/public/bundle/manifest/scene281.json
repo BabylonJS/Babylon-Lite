@@ -1,7 +1,7 @@
 {
-  "rawKB": 47.4,
-  "rawBytes": 48513,
-  "gzipKB": 19.7,
+  "rawKB": 48.2,
+  "rawBytes": 49335,
+  "gzipKB": 20,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene281-standard-renderable-E3_duMIt.js",

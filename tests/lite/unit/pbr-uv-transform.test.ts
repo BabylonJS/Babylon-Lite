@@ -1,10 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
-import { enableMaterialUvTransform } from "../../../packages/babylon-lite/src/material/enable-material-uv-transform";
+import { PBR2_HAS_UV_TRANSFORM } from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits";
 import type { PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
-import type { StandardMaterialProps } from "../../../packages/babylon-lite/src/material/standard/standard-material";
+import { bumpStdExt } from "../../../packages/babylon-lite/src/material/standard/fragments/normal-map-fragment";
+import { stdAmbientExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-ambient-fragment";
+import { stdEmissiveExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-emissive-fragment";
+import { stdLightmapExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-lightmap-fragment";
+import { stdOpacityExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-opacity-fragment";
+import { stdSpecularExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-specular-fragment";
+import { stdUvTransformExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-uv-transform-fragment";
 import {
     HAS_AMBIENT_TEXTURE,
     HAS_BUMP_TEXTURE,
@@ -16,17 +22,16 @@ import {
     LIGHTMAP_FLIP_V,
 } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import { composeStandardGeometryShader } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-output-shader";
+import type { StandardMaterialProps } from "../../../packages/babylon-lite/src/material/standard/standard-material";
 import { composeStandardShader } from "../../../packages/babylon-lite/src/material/standard/standard-pipeline";
-import { bumpStdExt } from "../../../packages/babylon-lite/src/material/standard/fragments/normal-map-fragment";
-import { stdAmbientExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-ambient-fragment";
-import { stdEmissiveExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-emissive-fragment";
-import { stdLightmapExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-lightmap-fragment";
-import { stdOpacityExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-opacity-fragment";
-import { stdUvTransformExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-uv-transform-fragment";
-import { stdSpecularExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-specular-fragment";
 
-describe("material UV transform detection", () => {
-    it("opts a hand-built material into UV transforms before build", () => {
+describe("PBR UV transform detection", () => {
+    beforeEach(() => {
+        vi.resetModules();
+    });
+
+    it("opts a hand-built material into UV transforms before build", async () => {
+        const { enableMaterialUvTransform } = await import("../../../packages/babylon-lite/src/material/enable-material-uv-transform");
         const material = { _buildGroup: { _materialFamily: "pbr" } } as PbrMaterialProps;
         expect(enableMaterialUvTransform(material)).toBe(true);
         expect(material._hasUvTx).toBe(true);
@@ -35,7 +40,21 @@ describe("material UV transform detection", () => {
         expect(enableMaterialUvTransform(material)).toBe(false);
     });
 
+    it("contributes PBR2_HAS_UV_TRANSFORM only once the opt-in registers the ext", async () => {
+        const { _computePbrMaterialFeatures } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
+        const bare = { _hasUvTx: true } as PbrMaterialProps;
+        expect(_computePbrMaterialFeatures(bare).features2 & PBR2_HAS_UV_TRANSFORM).toBe(0);
+
+        const { enableMaterialUvTransform } = await import("../../../packages/babylon-lite/src/material/enable-material-uv-transform");
+        const optedIn = { _buildGroup: { _materialFamily: "pbr" } } as PbrMaterialProps;
+        enableMaterialUvTransform(optedIn);
+        expect(_computePbrMaterialFeatures(optedIn).features2 & PBR2_HAS_UV_TRANSFORM).toBe(PBR2_HAS_UV_TRANSFORM);
+    });
+});
+
+describe("StandardMaterial UV transform detection", () => {
     it("queues the StandardMaterial extension preload", async () => {
+        const { enableMaterialUvTransform } = await import("../../../packages/babylon-lite/src/material/enable-material-uv-transform");
         const previous = Promise.resolve();
         const builder = { _materialFamily: "standard" as const, _preload: previous };
         const material = { _buildGroup: builder } as StandardMaterialProps;
