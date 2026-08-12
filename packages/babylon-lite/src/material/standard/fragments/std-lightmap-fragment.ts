@@ -9,11 +9,10 @@ import type { StdExt } from "../standard-flags.js";
 import { HAS_LIGHTMAP_TEXTURE, LIGHTMAP_USES_UV2, LIGHTMAP_SHADOWMAP, LIGHTMAP_FLIP_V } from "../standard-flags.js";
 
 const STAGE_FRAGMENT = 0x2;
-const STD_HAS_UV_TRANSFORM = 1 << 23;
 
-export function createStdLightmapFragment(usesUV2: boolean, shadowmap: boolean, flipV: boolean, transformed = false): ShaderFragment {
+export function createStdLightmapFragment(usesUV2: boolean, shadowmap: boolean, flipV: boolean): ShaderFragment {
     const baseUv = usesUV2 ? "input.vv" : "input.vu";
-    const uv = transformed ? "input.vl" : flipV ? `vec2<f32>(${baseUv}.x, 1.0 - ${baseUv}.y)` : baseUv;
+    const uv = flipV ? `vec2<f32>(${baseUv}.x, 1.0 - ${baseUv}.y)` : baseUv;
     const lm = `textureSample(lT, lS, ${uv}).rgb * mat.lmLvl`;
     const apply = shadowmap ? `color.rgb * (${lm})` : `color.rgb + ${lm}`;
     return {
@@ -32,13 +31,7 @@ export const stdLightmapExt: StdExt = {
     _id: "std-lightmap",
     _phase: "mesh",
     _feature: HAS_LIGHTMAP_TEXTURE,
-    _frag: (features) =>
-        createStdLightmapFragment(
-            (features & LIGHTMAP_USES_UV2) !== 0,
-            (features & LIGHTMAP_SHADOWMAP) !== 0,
-            (features & LIGHTMAP_FLIP_V) !== 0,
-            (features & STD_HAS_UV_TRANSFORM) !== 0
-        ),
+    _frag: (features) => createStdLightmapFragment((features & LIGHTMAP_USES_UV2) !== 0, (features & LIGHTMAP_SHADOWMAP) !== 0, (features & LIGHTMAP_FLIP_V) !== 0),
     _bind(mat, entries, b) {
         const tex = mat.lightmapTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });

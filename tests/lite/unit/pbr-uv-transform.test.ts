@@ -5,9 +5,23 @@ import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-gr
 import { enableMaterialUvTransform } from "../../../packages/babylon-lite/src/material/enable-material-uv-transform";
 import type { PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import type { StandardMaterialProps } from "../../../packages/babylon-lite/src/material/standard/standard-material";
-import { HAS_DIFFUSE_TEXTURE, HAS_SPECULAR_TEXTURE } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
+import {
+    HAS_AMBIENT_TEXTURE,
+    HAS_BUMP_TEXTURE,
+    HAS_DIFFUSE_TEXTURE,
+    HAS_EMISSIVE_TEXTURE,
+    HAS_LIGHTMAP_TEXTURE,
+    HAS_OPACITY_TEXTURE,
+    HAS_SPECULAR_TEXTURE,
+    LIGHTMAP_FLIP_V,
+} from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import { composeStandardGeometryShader } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-output-shader";
 import { composeStandardShader } from "../../../packages/babylon-lite/src/material/standard/standard-pipeline";
+import { bumpStdExt } from "../../../packages/babylon-lite/src/material/standard/fragments/normal-map-fragment";
+import { stdAmbientExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-ambient-fragment";
+import { stdEmissiveExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-emissive-fragment";
+import { stdLightmapExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-lightmap-fragment";
+import { stdOpacityExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-opacity-fragment";
 import { stdUvTransformExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-uv-transform-fragment";
 import { stdSpecularExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-specular-fragment";
 
@@ -56,6 +70,27 @@ describe("material UV transform detection", () => {
 
         const geometry = composeStandardGeometryShader(features, 0, fragments, [GeometryTextureType.REFLECTIVITY]);
         expect(geometry._fragmentWGSL).toContain("textureSample(sT, sS, input.vs)");
+    });
+
+    it("post-composes independent UVs for every optional Standard texture channel", () => {
+        const features =
+            HAS_BUMP_TEXTURE | HAS_EMISSIVE_TEXTURE | HAS_SPECULAR_TEXTURE | HAS_AMBIENT_TEXTURE | HAS_LIGHTMAP_TEXTURE | LIGHTMAP_FLIP_V | HAS_OPACITY_TEXTURE | (1 << 23);
+        const fragments = [
+            stdUvTransformExt._frag(features),
+            bumpStdExt._frag(features),
+            stdAmbientExt._frag(features),
+            stdEmissiveExt._frag(features),
+            stdLightmapExt._frag(features),
+            stdOpacityExt._frag(features),
+            stdSpecularExt._frag(features),
+        ];
+        const shader = composeStandardShader(features, 0, fragments);
+        expect(shader._fragmentWGSL).toContain("perturbNormal(input.vn, input.vp, input.vb, mat.bs)");
+        expect(shader._fragmentWGSL).toContain("textureSample(eT, eS, input.ve)");
+        expect(shader._fragmentWGSL).toContain("textureSample(sT, sS, input.vs)");
+        expect(shader._fragmentWGSL).toContain("textureSample(aT, aS, input.va)");
+        expect(shader._fragmentWGSL).toContain("textureSample(lT, lS, input.vl)");
+        expect(shader._fragmentWGSL).toContain("textureSample(oT, oS, input.vo)");
     });
 
     it("applies invertY after texture rotation and preserves the lightmap flip sentinel", () => {

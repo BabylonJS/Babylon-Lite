@@ -6,10 +6,9 @@ import type { StdExt } from "../standard-flags.js";
 import { HAS_AMBIENT_TEXTURE, AMBIENT_USES_UV2 } from "../standard-flags.js";
 
 const STAGE_FRAGMENT = 0x2;
-const STD_HAS_UV_TRANSFORM = 1 << 23;
 
-export function createStdAmbientFragment(usesUV2: boolean, transformed = false): ShaderFragment {
-    const uv = transformed ? "input.va" : usesUV2 ? "input.vv" : "input.vu";
+export function createStdAmbientFragment(usesUV2: boolean): ShaderFragment {
+    const uv = usesUV2 ? "input.vv" : "input.vu";
     return {
         _id: "std-ambient",
         _bindings: [
@@ -26,7 +25,7 @@ export const stdAmbientExt: StdExt = {
     _id: "std-ambient",
     _phase: "mesh",
     _feature: HAS_AMBIENT_TEXTURE,
-    _frag: (features) => createStdAmbientFragment((features & AMBIENT_USES_UV2) !== 0, (features & STD_HAS_UV_TRANSFORM) !== 0),
+    _frag: (features) => createStdAmbientFragment((features & AMBIENT_USES_UV2) !== 0),
     _bind(mat, entries, b) {
         const tex = mat.ambientTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });

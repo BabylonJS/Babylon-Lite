@@ -14,13 +14,12 @@ import { HAS_BUMP_TEXTURE } from "../standard-flags.js";
 import { WGSL_PERTURB_NORMAL } from "../../../shader/wgsl-helpers.js";
 
 const STAGE_FRAGMENT = 0x2;
-const STD_HAS_UV_TRANSFORM = 1 << 23;
 
 /**
  * Create a bump/normal map fragment for Standard material.
  * @param bumpLevel - The bump level (1.0 = default). bumpScale = 1/bumpLevel.
  */
-export function createNormalMapFragment(uv = "input.vu"): ShaderFragment {
+export function createNormalMapFragment(): ShaderFragment {
     return {
         _id: "normal-map",
 
@@ -32,7 +31,7 @@ export function createNormalMapFragment(uv = "input.vu"): ShaderFragment {
         _helperFunctions: WGSL_PERTURB_NORMAL,
 
         _fragmentSlots: {
-            AC: `normalW = perturbNormal(input.vn, input.vp, ${uv}, mat.bs);`,
+            AC: `normalW = perturbNormal(input.vn, input.vp, input.vu, mat.bs);`,
         },
     };
 }
@@ -41,7 +40,7 @@ export const bumpStdExt: StdExt = {
     _id: "normal-map",
     _phase: "mesh",
     _feature: HAS_BUMP_TEXTURE,
-    _frag: (features) => createNormalMapFragment((features & STD_HAS_UV_TRANSFORM) !== 0 ? "input.vb" : "input.vu"),
+    _frag: createNormalMapFragment,
     _bind(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number {
         const tex = mat.bumpTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });

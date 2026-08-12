@@ -415,8 +415,8 @@ function _ensureViewResources(
     const frags: ShaderFragment[] = [];
     const usedExts: { _ext: (typeof sortedExts)[number] }[] = [];
     const vertexBufferBinders: NonNullable<StdExt["_bindVertexBuffers"]>[] = [];
-    // Keep morph first: composeStandardShader uses the first fragment's patch
-    // to switch the placeholder morph bindings to storage buffers.
+    // Keep morph first; an active UV-transform extension is the second
+    // post-composer. composeStandardShader applies those two reserved slots.
     if ((meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0) {
         const morphFragment = standardContext?._morphFragment;
         if (!morphFragment) {

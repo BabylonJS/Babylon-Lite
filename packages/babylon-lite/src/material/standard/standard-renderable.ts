@@ -143,8 +143,8 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const sortedExts = _getStdExtsSorted();
         // Build per-feature fragment list (deduped via pipeline cache).
         const frags: ShaderFragment[] = [];
-        // Keep morph first: composeStandardShader uses the first fragment's patch
-        // to switch the placeholder morph bindings to storage buffers.
+        // Keep morph first; an active UV-transform extension is the second
+        // post-composer. composeStandardShader applies those two reserved slots.
         if (meshFeatures & MSH_HAS_MORPH_TARGETS && morphFragment) {
             frags.push(morphFragment());
         }

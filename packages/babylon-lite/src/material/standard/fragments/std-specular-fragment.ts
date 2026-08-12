@@ -6,10 +6,9 @@ import type { StdExt } from "../standard-flags.js";
 import { HAS_SPECULAR_TEXTURE, SPECULAR_USES_UV2 } from "../standard-flags.js";
 
 const STAGE_FRAGMENT = 0x2;
-const STD_HAS_UV_TRANSFORM = 1 << 23;
 
-export function createStdSpecularFragment(usesUV2: boolean, transformed = false): ShaderFragment {
-    const uv = transformed ? "input.vs" : usesUV2 ? "input.vv" : "input.vu";
+export function createStdSpecularFragment(usesUV2: boolean): ShaderFragment {
+    const uv = usesUV2 ? "input.vv" : "input.vu";
     return {
         _id: "std-specular",
         _bindings: [
@@ -26,7 +25,7 @@ export const stdSpecularExt: StdExt = {
     _id: "std-specular",
     _phase: "mesh",
     _feature: HAS_SPECULAR_TEXTURE,
-    _frag: (features) => createStdSpecularFragment((features & SPECULAR_USES_UV2) !== 0, (features & STD_HAS_UV_TRANSFORM) !== 0),
+    _frag: (features) => createStdSpecularFragment((features & SPECULAR_USES_UV2) !== 0),
     _bind(mat, entries, b) {
         const tex = mat.specularTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });

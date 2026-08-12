@@ -6,13 +6,11 @@ import type { StdExt } from "../standard-flags.js";
 import { HAS_OPACITY_TEXTURE, OPACITY_FROM_RGB } from "../standard-flags.js";
 
 const STAGE_FRAGMENT = 0x2;
-const STD_HAS_UV_TRANSFORM = 1 << 23;
 
-export function createStdOpacityFragment(fromRGB: boolean, transformed = false): ShaderFragment {
-    const uv = transformed ? "input.vo" : "input.vu";
+export function createStdOpacityFragment(fromRGB: boolean): ShaderFragment {
     const opacityCalc = fromRGB
-        ? `{ let opSample = textureSample(oT, oS, ${uv}); alpha *= dot(opSample.rgb, vec3<f32>(0.3, 0.59, 0.11)) * mat.opLvl; }`
-        : `alpha *= textureSample(oT, oS, ${uv}).a * mat.opLvl;`;
+        ? `{ let opSample = textureSample(oT, oS, input.vu); alpha *= dot(opSample.rgb, vec3<f32>(0.3, 0.59, 0.11)) * mat.opLvl; }`
+        : `alpha *= textureSample(oT, oS, input.vu).a * mat.opLvl;`;
     return {
         _id: "std-opacity",
         _bindings: [
@@ -29,7 +27,7 @@ export const stdOpacityExt: StdExt = {
     _id: "std-opacity",
     _phase: "mesh",
     _feature: HAS_OPACITY_TEXTURE,
-    _frag: (features) => createStdOpacityFragment((features & OPACITY_FROM_RGB) !== 0, (features & STD_HAS_UV_TRANSFORM) !== 0),
+    _frag: (features) => createStdOpacityFragment((features & OPACITY_FROM_RGB) !== 0),
     _bind(mat, entries, b) {
         const tex = mat.opacityTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
