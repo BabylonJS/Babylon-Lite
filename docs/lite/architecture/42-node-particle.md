@@ -1224,11 +1224,11 @@ All seven Lite scenes seed after build, synchronize one billboard, register the 
 | 276 `scene276-npe-animations`    | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30       | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
 | 277 `scene277-npe-attractor`     | UpdateAttractor after position integration, attractor `(0,2,0)`, strength `8` | alpha `-pi/2`, beta `1.2`, radius `5`, target `(0,0.8,0)`  | `0.01`      | `45.0 KB`   |
 | 280 `scene280-npe-flow-map`      | UpdateFlowMap after integration, flipped repel map, strength `15`, size `0.6` | alpha `pi/2`, beta `pi/2`, radius `9`, target `(-5,0,0)`   | `0.01`      | `45.0 KB`   |
-| 281 `scene281-npe-noise-texture` | UpdateNoise after integration, cached 8x8 noise, strength `(1.5,0.5,1.5)`     | alpha `-pi/2`, beta `1.2`, radius `9`, target `(0,1,0)`    | `0.02`      | `45.0 KB`   |
+| 281 `scene281-npe-noise-texture` | UpdateNoise after integration, cached 8x8 noise, strength `(1.5,0.5,1.5)`     | alpha `-pi/2`, beta `1.2`, radius `11`, target `(0,1,0)`   | `0.01`      | `45.0 KB`   |
 
 Each camera uses near plane `0.1` and far plane `100`. Each scene sets both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start.
 
-Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, 280, and 281 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json`: scenes 262, 263, 264, 276, 277, and 280 use `MAD <= 0.01`, while scene 281 uses `MAD <= 0.02`. Scene 281's additive soft-sprite edges measured `0.01126085` on BrowserStack in two byte-identical attempts. The diff was localized to the soft sprite footprints, no channel difference exceeded 5, and the same-GPU local comparison remains `0.000`. The `0.02` ceiling accommodates that cross-GPU edge rounding without allowing a larger rendering mismatch.
+Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, 280, and 281 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all seven scenes.
 
 ### 13.4 Bundle manifests and conditional content
 

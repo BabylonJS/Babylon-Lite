@@ -29,7 +29,7 @@ const STEPS = 240;
     const scene = new Scene(engine);
     scene.clearColor = new Color4(0, 0, 0, 1);
 
-    const camera = new ArcRotateCamera("cam", -Math.PI / 2, 1.2, 9, new Vector3(0, 1, 0), scene);
+    const camera = new ArcRotateCamera("cam", -Math.PI / 2, 1.2, 11, new Vector3(0, 1, 0), scene);
     camera.minZ = 0.1;
     camera.maxZ = 100;
 
