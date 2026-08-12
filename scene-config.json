@@ -2212,6 +2212,16 @@
         "skipPerf": true
     },
     {
+        "id": 256,
+        "slug": "scene256-normal-tangent-test",
+        "name": "Scene 256 — NormalTangentTest",
+        "maxMad": 0.02,
+        "maxRawKB": 77.6,
+        "description": "NormalTangentTest.gltf — cx20 gltf-test / Khronos glTF-Sample-Assets. A single mesh/material grid comparing real bump geometry against flat normal-mapped cells; the mesh has a normal map but no TANGENT accessor. Validates runtime tangent-basis generation (screen-space cotangent frame) for glTF primitives that omit TANGENT, and correct OpenGL-convention (right-handed) normal-map Y decoding on a double-sided material.",
+        "tags": ["gltf", "pbr", "normal-map", "tangent"],
+        "skipPerf": true
+    },
+    {
         "id": 257,
         "slug": "scene257-negative-node-scale",
         "name": "Scene 257 — Negative Node Scale",
