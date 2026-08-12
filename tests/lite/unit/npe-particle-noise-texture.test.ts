@@ -51,6 +51,7 @@ async function attachNoiseWithGetters(sourceGetter: NpeGetter, strengthGetter?: 
 }
 
 afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
 });
 
