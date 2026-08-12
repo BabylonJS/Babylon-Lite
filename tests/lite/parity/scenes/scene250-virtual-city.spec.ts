@@ -4,7 +4,7 @@
  * cx20's compat matrix (https://github.com/cx20/gltf-test#format-tests) flags the
  * Babylon Lite column for this model with ":warning: embedded camera": Lite's
  * loadGltf() only ever exposed a single scene camera and never parsed the glTF
- * `camera` node property. The `_gltf_camera` loader feature closes that gap: this
+ * `camera` node property. The `_camera` loader feature closes that gap: this
  * scene selects the imported camera named `camera6` (glTF camera index 6,
  * node 116 — an animated
  * flying-vehicle chase camera) as `scene.camera`, so parity actually exercises the

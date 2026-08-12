@@ -24,7 +24,7 @@ import type { TextureWrapFn } from "./gltf-pbr-builder.js";
 import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, uploadTex } from "./gltf-pbr-builder.js";
 import type * as GltfColorNormalize from "./gltf-color-normalize.js";
 import type * as GltfFeatureRegistry from "./gltf-feature-registry.js";
-import { _appendEnabledGltfFeatures, _hasEnabledGltfFeature } from "./gltf-feature-hooks.js";
+import { _appendEnabledGltfFeatures } from "./gltf-feature-hooks.js";
 import type * as GltfPbrBuilderExt from "./gltf-pbr-builder-ext.js";
 
 /** Dynamically-imported interleave module — loaded only when an asset actually
@@ -289,7 +289,6 @@ async function fetchGltfAsset(source: string | ArrayBuffer | Blob): Promise<{ js
  *  bundle for plain metallic-roughness assets. */
 function assetUsesGltfFeatures(json: any) {
     return (
-        _hasEnabledGltfFeature(json) ||
         json.extensionsUsed?.length ||
         json.animations?.length ||
         // "extras" (per-item metadata) or "sparse" (sparse accessor) anywhere in the asset means a

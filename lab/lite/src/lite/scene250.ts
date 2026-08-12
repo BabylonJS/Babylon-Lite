@@ -1,6 +1,6 @@
 // Scene 250 — VirtualCity (cx20 gltf-test parity)
 //
-// Exercises the glTF `camera` node property (the `_gltf_camera` loader feature):
+// Exercises the glTF `camera` node property (the `_camera` loader feature):
 // cx20's compat matrix (https://github.com/cx20/gltf-test) flags Babylon Lite with
 // ":warning: embedded camera" for this model because, before that feature, loadGltf
 // silently dropped all 14 of VirtualCity's embedded glTF cameras. This scene selects

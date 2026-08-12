@@ -1,5 +1,5 @@
 /**
- * glTF `camera` node property (`_gltf_camera` feature) — perspective/orthographic mapping,
+ * glTF `camera` node property (`_camera` feature) — perspective/orthographic mapping,
  * node-hierarchy parenting, and the two RH→LH/scale corrections.
  *
  * Root-cause background (see gltf-feature-camera.ts):
@@ -15,15 +15,14 @@
  *    exactly this reason — the "cancels a uniformly-scaled ancestor" test below is the
  *    regression guard for that fix.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import feature, { enableGltfCameras } from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature-camera.js";
-import type { GltfLoadCtx } from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature.js";
+import type { GltfFeature, GltfLoadCtx } from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature.js";
 import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node.js";
 import { mat4Determinant3 } from "../../../packages/babylon-lite/src/math/mat4-determinant3.js";
 import { buildParentMap } from "../../../packages/babylon-lite/src/loader-gltf/gltf-parser.js";
-import { loadGltfFeatures } from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature-registry.js";
-import { _appendEnabledGltfFeatures, _hasEnabledGltfFeature } from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature-hooks.js";
+import { _appendEnabledGltfFeatures } from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature-hooks.js";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types.js";
 
 function makeCtx(json: unknown, nodeMap: (ReturnType<typeof createTransformNode> | undefined)[]): GltfLoadCtx {
@@ -35,21 +34,13 @@ function makeCtx(json: unknown, nodeMap: (ReturnType<typeof createTransformNode>
     } as unknown as GltfLoadCtx;
 }
 
-describe("_gltf_camera feature", () => {
+describe("_camera feature", () => {
     it("loads only when camera import is explicitly enabled", async () => {
         const json = { nodes: [{ camera: 0 }], cameras: [{ type: "perspective", perspective: { yfov: 1, znear: 0.1 } }] };
-        expect(_hasEnabledGltfFeature(json)).toBe(false);
         enableGltfCameras();
-        expect(_hasEnabledGltfFeature(json)).toBe(true);
-        const features = await loadGltfFeatures(json);
+        const features: GltfFeature[] = [];
         _appendEnabledGltfFeatures(json, features);
-        expect(features.some((candidate) => candidate.id === "_gltf_camera")).toBe(true);
-    });
-
-    it("returns {} when the asset declares no cameras", async () => {
-        const ctx = makeCtx({ nodes: [{}] }, [undefined]);
-        const result = await feature.applyAsset!([], createTransformNode("root"), ctx);
-        expect(result.cameras).toBeUndefined();
+        expect(features.some((candidate) => candidate.id === "_camera")).toBe(true);
     });
 
     it("maps a perspective camera's fov/near/far and inherits the source node's world position", async () => {
@@ -202,5 +193,149 @@ describe("_gltf_camera feature", () => {
         };
         const ctx = makeCtx(json, [camNode]);
         await expect(feature.applyAsset!([], root, ctx)).rejects.toThrow("uniform scale");
+    });
+
+    it.each([
+        ["classic channel", { target: { node: 0, path: "scale" } }],
+        ["KHR_animation_pointer channel", { target: { extensions: { KHR_animation_pointer: { pointer: "/nodes/0/scale" } } } }],
+    ])("skips animated scale on a camera ancestor from a %s", async (_label, channel) => {
+        const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+        const ancestor = createTransformNode("ancestor");
+        ancestor.parent = root;
+        const camNode = createTransformNode("camNode");
+        camNode.parent = ancestor;
+        const json = {
+            nodes: [{ children: [1] }, { camera: 0 }],
+            cameras: [{ type: "perspective", perspective: { yfov: 1, znear: 0.1 } }],
+            animations: [{ channels: [channel] }],
+        };
+        const ctx = {
+            ...makeCtx(json, [ancestor, camNode]),
+            _parentMap: buildParentMap(json),
+        } as unknown as GltfLoadCtx;
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        await expect(feature.applyAsset!([], root, ctx)).resolves.toEqual({});
+        expect(warn).toHaveBeenCalledWith("[babylon-lite] Skipping glTF camera", 0, "animated scale on node", 0);
+        warn.mockRestore();
+    });
+
+    it("accepts exporter-noise scale channels that stay at the ancestor's rest scale", async () => {
+        const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+        const ancestor = createTransformNode("ancestor", 0, 0, 0, 0, 0, 0, 1, 1, 1, 1);
+        ancestor.parent = root;
+        const camNode = createTransformNode("camNode");
+        camNode.parent = ancestor;
+        const json = {
+            nodes: [{ scale: [1, 1, 1], children: [1] }, { camera: 0 }],
+            cameras: [{ type: "perspective", perspective: { yfov: 1, znear: 0.1 } }],
+            animations: [{ samplers: [{ output: 0 }], channels: [{ sampler: 0, target: { node: 0, path: "scale" } }] }],
+            accessors: [{ type: "VEC3", min: [0.9999998, 0.9999998, 0.9999998], max: [1.0000001, 1.0000001, 1.0000001] }],
+        };
+        const ctx = {
+            ...makeCtx(json, [ancestor, camNode]),
+            _parentMap: buildParentMap(json),
+        } as unknown as GltfLoadCtx;
+
+        await expect(feature.applyAsset!([], root, ctx)).resolves.toMatchObject({ cameras: [{ name: "camera0" }] });
+    });
+
+    it("accepts constant nonuniform scale channels when the accumulated camera scale is uniform", async () => {
+        const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+        const ancestor = createTransformNode("ancestor", 0, 0, 0, 0, 0, 0, 1, 2, 1, 1);
+        ancestor.parent = root;
+        const camNode = createTransformNode("camNode", 0, 0, 0, 0, 0, 0, 1, 0.5, 1, 1);
+        camNode.parent = ancestor;
+        const json = {
+            nodes: [
+                { scale: [2, 1, 1], children: [1] },
+                { camera: 0, scale: [0.5, 1, 1] },
+            ],
+            cameras: [{ type: "perspective", perspective: { yfov: 1, znear: 0.1 } }],
+            animations: [{ samplers: [{ output: 0 }], channels: [{ sampler: 0, target: { node: 0, path: "scale" } }] }],
+            accessors: [{ type: "VEC3", min: [2, 1, 1], max: [2, 1, 1] }],
+        };
+        const ctx = {
+            ...makeCtx(json, [ancestor, camNode]),
+            _parentMap: buildParentMap(json),
+        } as unknown as GltfLoadCtx;
+
+        await expect(feature.applyAsset!([], root, ctx)).resolves.toMatchObject({ cameras: [{ name: "camera0" }] });
+    });
+
+    it("skips scale changes relative to very small rest scales", async () => {
+        const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+        const camNode = createTransformNode("camNode", 0, 0, 0, 0, 0, 0, 1, 1e-6, 1e-6, 1e-6);
+        camNode.parent = root;
+        const json = {
+            nodes: [{ camera: 0, scale: [1e-6, 1e-6, 1e-6] }],
+            cameras: [{ type: "perspective", perspective: { yfov: 1, znear: 0.1 } }],
+            animations: [{ samplers: [{ output: 0 }], channels: [{ sampler: 0, target: { node: 0, path: "scale" } }] }],
+            accessors: [{ type: "VEC3", min: [1e-6, 1e-6, 1e-6], max: [2e-6, 2e-6, 2e-6] }],
+        };
+        const ctx = makeCtx(json, [camNode]);
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        await expect(feature.applyAsset!([], root, ctx)).resolves.toEqual({});
+        expect(warn).toHaveBeenCalledWith("[babylon-lite] Skipping glTF camera", 0, "animated scale on node", 0);
+        warn.mockRestore();
+    });
+
+    it("skips CUBICSPLINE scale channels even when accessor bounds match the rest scale", async () => {
+        const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+        const camNode = createTransformNode("camNode");
+        camNode.parent = root;
+        const json = {
+            nodes: [{ camera: 0, scale: [1, 1, 1] }],
+            cameras: [{ type: "perspective", perspective: { yfov: 1, znear: 0.1 } }],
+            animations: [{ samplers: [{ output: 0, interpolation: "CUBICSPLINE" }], channels: [{ sampler: 0, target: { node: 0, path: "scale" } }] }],
+            accessors: [{ type: "VEC3", min: [1, 1, 1], max: [1, 1, 1] }],
+        };
+        const ctx = makeCtx(json, [camNode]);
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        await expect(feature.applyAsset!([], root, ctx)).resolves.toEqual({});
+        expect(warn).toHaveBeenCalledWith("[babylon-lite] Skipping glTF camera", 0, "animated scale on node", 0);
+        warn.mockRestore();
+    });
+
+    it("keeps valid cameras when a sibling camera has changing ancestor scale", async () => {
+        const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+        const animatedAncestor = createTransformNode("animatedAncestor");
+        animatedAncestor.parent = root;
+        const rejectedCamNode = createTransformNode("rejectedCamNode");
+        rejectedCamNode.parent = animatedAncestor;
+        const validCamNode = createTransformNode("validCamNode");
+        validCamNode.parent = root;
+        const json = {
+            nodes: [{ scale: [1, 1, 1], children: [1] }, { camera: 0 }, { camera: 1 }],
+            cameras: [
+                { type: "perspective", perspective: { yfov: 1, znear: 0.1 } },
+                { type: "perspective", perspective: { yfov: 0.8, znear: 0.2 } },
+            ],
+            animations: [{ channels: [{ target: { node: 0, path: "scale" } }] }],
+        };
+        const ctx = {
+            ...makeCtx(json, [animatedAncestor, rejectedCamNode, validCamNode]),
+            _parentMap: buildParentMap(json),
+        } as unknown as GltfLoadCtx;
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        const result = await feature.applyAsset!([], root, ctx);
+
+        expect(result.cameras).toHaveLength(1);
+        expect(result.cameras![0]!.name).toBe("camera1");
+        expect(warn).toHaveBeenCalledWith("[babylon-lite] Skipping glTF camera", 0, "animated scale on node", 0);
+        warn.mockRestore();
+    });
+
+    it("rejects malformed camera projection definitions", async () => {
+        const json = {
+            nodes: [{ camera: 0 }],
+            cameras: [{ type: "perspective", perspective: { yfov: 1, extras: {} } }],
+        };
+        const ctx = makeCtx(json, [createTransformNode("camNode")]);
+
+        await expect(feature.applyAsset!([], createTransformNode("root"), ctx)).rejects.toThrow("unsupported projection");
     });
 });

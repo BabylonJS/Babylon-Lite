@@ -1,7 +1,7 @@
 import type { GltfFeature } from "./gltf-feature.js";
 
 type FeatureGate = (json: any) => boolean;
-type EnabledFeatures = (json: any, features?: GltfFeature[]) => boolean;
+type EnabledFeatures = (json: any, features: GltfFeature[]) => void;
 
 let _enabled: EnabledFeatures | undefined;
 
@@ -9,17 +9,9 @@ let _enabled: EnabledFeatures | undefined;
 export function _registerEnabledGltfFeature(gate: FeatureGate, feature: GltfFeature): void {
     const previous = _enabled;
     _enabled = (json, features) => {
-        const active = gate(json);
-        if (active && features) {
-            features.push(feature);
-        }
-        return !!previous?.(json, features) || active;
+        previous?.(json, features);
+        gate(json) && features.push(feature);
     };
-}
-
-/** @internal Cheap core-loader gate. Folds to false when no public enabler is imported. */
-export function _hasEnabledGltfFeature(json: any): boolean {
-    return !!_enabled?.(json);
 }
 
 /** @internal Append enabled features after the registry's content-triggered features resolve. */

@@ -29,7 +29,7 @@ import type { Camera } from "../camera/camera.js";
 import { createFreeCamera } from "../camera/free-camera.js";
 import { createTransformNode } from "../scene/transform-node.js";
 import { createSceneNodeFromMatrix } from "../scene/scene-node.js";
-import { computeNodeWorldMatrix } from "./gltf-parser.js";
+import { computeNodeWorldMatrix, findParent } from "./gltf-parser.js";
 import { _registerEnabledGltfFeature } from "./gltf-feature-hooks.js";
 
 interface GltfCameraDef {
@@ -39,23 +39,35 @@ interface GltfCameraDef {
     orthographic?: { xmag: number; ymag: number; znear: number; zfar: number };
 }
 
-/** Far plane substituted when a glTF perspective camera omits `zfar` — the spec's way of
- *  requesting an "infinite" projection. Lite's perspective matrix builder wants a finite
- *  value; this is large enough for any practical scene while staying inside F32 precision. */
-const INFINITE_FAR_PLANE = 1e6;
-
-function basisLength(matrix: ArrayLike<number>, column: number): number {
-    const offset = column * 4;
-    return Math.hypot(matrix[offset]!, matrix[offset + 1]!, matrix[offset + 2]!);
+function findChangingScaleAncestor(json: any, nodeIdx: number, parentMap: Map<number, number>): number | undefined {
+    for (let ancestor = nodeIdx; ancestor >= 0; ancestor = findParent(parentMap, ancestor)) {
+        const rest = json.nodes?.[ancestor]?.scale ?? [1, 1, 1];
+        for (const animation of json.animations ?? []) {
+            for (const channel of animation.channels ?? []) {
+                const target = channel.target;
+                if (target?.path === "scale" ? target.node !== ancestor : target?.extensions?.KHR_animation_pointer?.pointer !== `/nodes/${ancestor}/scale`) {
+                    continue;
+                }
+                const sampler = animation.samplers?.[channel.sampler];
+                const accessor = json.accessors?.[sampler?.output];
+                if (
+                    sampler?.interpolation === "CUBICSPLINE" ||
+                    !accessor?.min ||
+                    !accessor.max ||
+                    [...accessor.min, ...accessor.max].some((value: number, axis: number) => Math.abs(value - rest[axis % 3]) / Math.max(0.01, Math.abs(rest[axis % 3])) > 1e-5)
+                ) {
+                    return ancestor;
+                }
+            }
+        }
+    }
+    return;
 }
 
 const feature: GltfFeature = {
-    id: "_gltf_camera",
+    id: "_camera",
     async applyAsset(_meshes, _root, ctx) {
-        const defs: GltfCameraDef[] | undefined = ctx._json.cameras;
-        if (!defs?.length) {
-            return {};
-        }
+        const defs: GltfCameraDef[] = ctx._json.cameras;
         const nodes = ctx._json.nodes ?? [];
         const cameras: Camera[] = [];
         for (let nodeIdx = 0; nodeIdx < nodes.length; nodeIdx++) {
@@ -67,39 +79,46 @@ const feature: GltfFeature = {
             if (!def) {
                 continue;
             }
+            const perspective = def.perspective;
+            const orthographic = def.orthographic;
+            const params =
+                def.type === "perspective"
+                    ? [perspective?.yfov, perspective?.znear]
+                    : def.type === "orthographic"
+                      ? [orthographic?.xmag, orthographic?.ymag, orthographic?.znear, orthographic?.zfar]
+                      : undefined;
+            if (!params?.every(Number.isFinite)) {
+                throw new Error(`glTF camera ${camIdx}: unsupported projection`);
+            }
+            const animatedScaleNode = findChangingScaleAncestor(ctx._json, nodeIdx, ctx._parentMap);
+            if (animatedScaleNode !== undefined) {
+                console.warn("[babylon-lite] Skipping glTF camera", camIdx, "animated scale on node", animatedScaleNode);
+                continue;
+            }
 
             // Rest-pose accumulated world matrix for the unreachable-node fallback below.
             const restWorld = computeNodeWorldMatrix(ctx._json, nodeIdx, ctx._parentMap, ctx._worldMatrixCache);
-            const sx = basisLength(restWorld, 0);
-            const sy = basisLength(restWorld, 1);
-            const sz = basisLength(restWorld, 2);
-            const worldScale = (sx + sy + sz) / 3;
-            if (worldScale < 1e-8 || Math.max(sx, sy, sz) - Math.min(sx, sy, sz) > worldScale * 1e-4) {
+            const scale = [0, 4, 8].map((offset) => Math.hypot(restWorld[offset]!, restWorld[offset + 1]!, restWorld[offset + 2]!));
+            const worldScale = (scale[0]! + scale[1]! + scale[2]!) / 3;
+            if (worldScale < 1e-8 || Math.max(...scale) - Math.min(...scale) > worldScale * 1e-4) {
                 throw new Error("glTF camera nodes require non-zero uniform scale");
             }
 
             const inverseScale = 1 / worldScale;
-            const fixupNode = createTransformNode(`${def.name ?? `camera${camIdx}`}_fixup`, 0, 0, 0, 0, 0, 0, 1, -inverseScale, inverseScale, inverseScale);
-            const sourceNode = ctx._nodeMap?.[nodeIdx];
-            if (sourceNode) {
-                // Live parent: node TRS animation (classic channels or KHR_animation_pointer)
-                // drives the camera every frame through the normal parent chain.
-                fixupNode.parent = sourceNode;
-            } else {
-                // Node unreachable from any scene root — bake its world transform once instead
-                // of parenting, mirroring the KHR_lights_punctual fallback for the same case.
-                fixupNode.parent = createSceneNodeFromMatrix(`camera${camIdx}_bakedNode`, restWorld);
-            }
+            const name = def.name ?? `camera${camIdx}`;
+            const fixupNode = createTransformNode(`${name}_fixup`, 0, 0, 0, 0, 0, 0, 1, -inverseScale, inverseScale, inverseScale);
+            // Unreachable nodes are baked once; reachable nodes retain live translation/rotation animation.
+            fixupNode.parent = ctx._nodeMap?.[nodeIdx] ?? createSceneNodeFromMatrix(`${name}_bakedNode`, restWorld);
 
             // glTF cameras look down their local -Z axis with +Y up. createFreeCamera's lookAt
             // builder reproduces exactly that local orientation for an eye at the origin
             // looking toward (0,0,-1) — mat4LookAtWorldLHToRef: "+Z points from eye to target".
             const cam = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 });
-            cam.name = def.name ?? `camera${camIdx}`;
+            cam.name = name;
             cam.parent = fixupNode;
 
-            if (def.type === "orthographic" && def.orthographic) {
-                const o = def.orthographic;
+            if (def.type === "orthographic") {
+                const o = orthographic!;
                 cam.nearPlane = o.znear;
                 cam.farPlane = o.zfar;
                 // Lazy: orthographic support is opt-in engine-wide (see camera/orthographic.ts),
@@ -108,11 +127,11 @@ const feature: GltfFeature = {
                 const xmag = o.xmag;
                 const ymag = o.ymag;
                 enableOrthographicCamera(cam, { halfHeight: ymag, left: -xmag, right: xmag, bottom: -ymag, top: ymag });
-            } else if (def.perspective) {
-                const p = def.perspective;
+            } else {
+                const p = perspective!;
                 cam.fov = p.yfov;
                 cam.nearPlane = p.znear;
-                cam.farPlane = p.zfar ?? INFINITE_FAR_PLANE;
+                cam.farPlane = p.zfar ?? 1e6;
             }
 
             cameras.push(cam);

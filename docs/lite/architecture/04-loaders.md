@@ -284,7 +284,7 @@ Parent lookup is done by linear scan (`findParent`): iterates all nodes checking
 ### glTF `camera` Node Property (`gltf-feature-camera.ts`)
 
 Core glTF 2.0 spec §5.20 (not an extension) — a node may reference `cameras[i]` via `node.camera`.
-Feature id `_gltf_camera`, registered only when the caller invokes `enableGltfCameras()` and then
+Feature id `_camera`, registered only when the caller invokes `enableGltfCameras()` and then
 triggered when an asset declares cameras. The generic `gltf-feature-hooks.ts` seam lets the core
 loader ask whether any explicitly enabled feature matches without knowing camera semantics; Rollup
 folds the seam away when no enabler is imported.
