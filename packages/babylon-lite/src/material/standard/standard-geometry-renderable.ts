@@ -313,11 +313,6 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             res._matData.fill(0);
             writeStdMaterialData(res._matData, source, textureLevel);
             device.queue.writeBuffer(res._matUBO, 0, res._matData.buffer, 0, 96);
-            if (res._upUBO) {
-                const uvData = new F32(4);
-                writeStandardUvTransformData(uvData, source, isStandardUvInverted(features, source));
-                device.queue.writeBuffer(res._upUBO, 0, uvData);
-            }
         }
         const ti = hasThinInstances ? mesh.thinInstances : null;
         if (ti) {
