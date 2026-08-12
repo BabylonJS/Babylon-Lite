@@ -14,7 +14,7 @@ import type { PbrTemplateExt } from "./pbr-template-ext.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
 
-type PbrGammaTemplate = typeof import("./pbr-template-gamma.js");
+type GammaBaseColorFn = (baseColorFactorRgb: string, baseColorFactorAlpha: string, vertexColorMod: string) => string;
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -133,8 +133,9 @@ export interface PbrTemplateConfig {
      *  When undefined, base template defaults to master-like behavior (no feature strings). */
     /** @internal */
     readonly _ext?: PbrTemplateExt;
-    /** @internal */
-    readonly _gammaTemplate?: PbrGammaTemplate | null;
+    /** @internal Produce the sRGB base-color decode block (only present when gamma-albedo
+     *  is registered). Sourced by the composer from the gamma extension's template hook. */
+    readonly _gammaBaseColor?: GammaBaseColorFn | null;
     /** Generate a fragment stage that runs discard/alpha-test logic and writes no color. */
     /** @internal */
     readonly _noColorOutput?: boolean;
@@ -186,7 +187,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _anisoBrdfFunctions = "",
         _anisoTBBlock = "",
         _ext,
-        _gammaTemplate,
+        _gammaBaseColor,
         _noColorOutput = false,
         _esmShadowOutput = false,
         _esmShadowDepthCode = "",
@@ -371,7 +372,7 @@ var N=N_geom;`;
     const baseColorFactorRgb = _hasBaseColorFactor ? "*material.baseColorFactor.rgb" : "";
     const baseColorFactorAlpha = _hasBaseColorFactor ? "*material.baseColorFactor.a" : "";
     const baseColorDecode = _hasGammaAlbedo
-        ? _gammaTemplate!.gammaBaseColor(baseColorFactorRgb, baseColorFactorAlpha, vertexColorMod)
+        ? _gammaBaseColor!(baseColorFactorRgb, baseColorFactorAlpha, vertexColorMod)
         : `var baseColor=baseColorSample.rgb${baseColorFactorRgb};
 var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`;
 

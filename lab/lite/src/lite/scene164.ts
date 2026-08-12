@@ -40,6 +40,7 @@ import {
     onBeforeRender,
     pauseAnimation,
     registerSceneWithShadowSupport,
+    setShadowOnly,
     setShadowTaskCasterMeshes,
     startEngine,
     stopEngine,
@@ -162,12 +163,8 @@ async function main(): Promise<void> {
     ground.receiveShadows = true;
     // Dark, high-contrast shadow on purpose: the pre/post comparison can only catch a shadow
     // recovery regression to the extent the shadow actually moves pixels.
-    ground.material = createPbrMaterial({
-        shadowOnly: true,
-        shadowOnlyColor: [0, 0, 0],
-        shadowOnlyOpacity: 0.95,
-        shadowOnlyFalloff: 1,
-    });
+    ground.material = createPbrMaterial({});
+    setShadowOnly(ground.material, { color: [0, 0, 0], opacity: 0.95, falloff: 1 });
     addToScene(scene, ground);
 
     light.shadowGenerator = createEsmDirectionalShadowGenerator(engine, light, {

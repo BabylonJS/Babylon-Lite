@@ -6,9 +6,11 @@
  * transparent); shadowed fragments output alpha proportional to the shadow
  * strength, in a caller-chosen `shadowOnlyColor` (defaults to black).
  *
- * Zero bytes in bundles for scenes that don't use shadow-only materials — the
- * module is dynamically imported by pbr-renderable only when at least one mesh
- * in the scene has `mat.shadowOnly === true`.
+ * Zero bytes in bundles for scenes that don't use shadow-only materials — this
+ * module is statically imported only by `set-shadow-only.ts` (the `setShadowOnly`
+ * opt-in setter), so it is bundled only when an app imports `setShadowOnly`. The
+ * renderable's always-loaded chunk carries no scan for `shadowOnly` and no
+ * dynamic-import specifier for this file.
  *
  * Implementation notes
  * --------------------
@@ -84,21 +86,21 @@ alpha = saturate((1.0 - so_shadowMin) * material.shadowOnlyFalloff) * material.s
 
 /** Write the shadow-only material-UBO slice. */
 export function writeShadowOnlyUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
-    if (!material.shadowOnly) {
+    if (!material._shadowOnly) {
         return;
     }
     if (offsets.has("shadowOnlyColor")) {
         const off = offsets.get("shadowOnlyColor")! / 4;
-        const tint = material.shadowOnlyColor ?? [0, 0, 0];
+        const tint = material._shadowOnlyColor ?? [0, 0, 0];
         data[off] = tint[0]!;
         data[off + 1] = tint[1]!;
         data[off + 2] = tint[2]!;
     }
     if (offsets.has("shadowOnlyOpacity")) {
-        data[offsets.get("shadowOnlyOpacity")! / 4] = material.shadowOnlyOpacity ?? 1.0;
+        data[offsets.get("shadowOnlyOpacity")! / 4] = material._shadowOnlyOpacity ?? 1.0;
     }
     if (offsets.has("shadowOnlyFalloff")) {
-        data[offsets.get("shadowOnlyFalloff")! / 4] = material.shadowOnlyFalloff ?? 1.0;
+        data[offsets.get("shadowOnlyFalloff")! / 4] = material._shadowOnlyFalloff ?? 1.0;
     }
 }
 
@@ -113,7 +115,7 @@ export const pbrExt: PbrExt = {
         // blending, and (2) the `/*FA*/` slot this fragment injects only exists in the
         // template's alpha-blend branch. The bit lives in the shared chunk already, so
         // forcing it here adds no bytes to scenes that never load this fragment.
-        return (mat as PbrMaterialProps).shadowOnly ? { f: PBR_HAS_ALPHA_BLEND, f2: PBR2_HAS_SHADOW_ONLY } : { f: 0, f2: 0 };
+        return (mat as PbrMaterialProps)._shadowOnly ? { f: PBR_HAS_ALPHA_BLEND, f2: PBR2_HAS_SHADOW_ONLY } : { f: 0, f2: 0 };
     },
     frag(ctx) {
         if (!(ctx._features2 & PBR2_HAS_SHADOW_ONLY)) {

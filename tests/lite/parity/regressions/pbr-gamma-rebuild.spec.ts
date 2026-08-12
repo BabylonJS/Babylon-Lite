@@ -9,7 +9,7 @@ test("PBR material can gain gamma albedo after first render", async ({ page }) =
     await page.setContent(`
 <canvas id="renderCanvas" width="1280" height="720"></canvas>
 <script type="module">
-import { addToScene, createArcRotateCamera, createBox, createEngine, createHemisphericLight, createPbrMaterial, createSceneContext, createSolidTexture2D, rebuildMaterial, registerScene, startEngine } from "${LITE_ENTRY}";
+import { addToScene, createArcRotateCamera, createBox, createEngine, createHemisphericLight, createPbrMaterial, createSceneContext, createSolidTexture2D, rebuildMaterial, registerScene, setPbrGammaAlbedo, startEngine } from "${LITE_ENTRY}";
 
 const canvas = document.getElementById("renderCanvas");
 window.addEventListener("error", (event) => { canvas.dataset.error = event.message; });
@@ -36,7 +36,7 @@ async function main() {
     canvas.dataset.ready = "true";
 
     material.baseColorTexture = createSolidTexture2D(engine, 0.2, 0.8, 0.2);
-    material.gammaAlbedo = true;
+    setPbrGammaAlbedo(material);
     rebuildMaterial(scene, material);
 
     for (let i = 0; i < 60; i++) {
