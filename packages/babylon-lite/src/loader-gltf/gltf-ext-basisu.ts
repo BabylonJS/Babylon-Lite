@@ -296,7 +296,7 @@ const ext: GltfFeature = {
         if (!data) {
             return null;
         }
-        const [baseColorTexture, ormTexture, normalTexture, emissiveTexture, specularTexture, specularColorTexture] = await Promise.all([
+        const [baseColorTexture, ormTexture, normalTexture, emissiveTexture, specularTexture, specularColorTexture, reflectanceMod] = await Promise.all([
             uploadBasisuTexture(data, ctx, data.baseColorTexture, true),
             uploadOrmTexture(data, ctx),
             uploadBasisuTexture(data, ctx, data.normalTexture, false),
@@ -306,6 +306,12 @@ const ext: GltfFeature = {
             // sRGB-decode on sample; the reflectance shader applies its own pow(2.2)
             // (BJS toLinearSpace parity). sRGB-format here would gamma-decode twice.
             uploadBasisuTexture(data, ctx, data.specularColorTexture, false),
+            // `prepareBasisuMaterials` strips the KTX2 specular textures out of the shared
+            // json before gltf-ext-dielectric runs, so dielectric's `needsReflectance` never
+            // sees them. Gate the opt-in setter here on the source declarations — otherwise a
+            // texture-only KHR_materials_specular asset (default factors, default IOR) uploads
+            // both maps but never registers the reflectance ext, so nothing samples them.
+            data.specularTexture || data.specularColorTexture ? import("../material/pbr/set-metallic-reflectance.js") : undefined,
         ]);
         const out: Partial<PbrMaterialProps> = {
             ...(baseColorTexture ? { baseColorTexture } : undefined),
@@ -318,10 +324,16 @@ const ext: GltfFeature = {
                 : undefined),
             ...(normalTexture ? { normalTexture, normalTextureScale: data.normalTexture?.scale ?? 1 } : undefined),
             ...(emissiveTexture ? { emissiveTexture } : undefined),
-            ...(specularTexture ? { metallicReflectanceTexture: specularTexture, useOnlyMetallicFromMetallicReflectanceTexture: true } : undefined),
-            ...(specularColorTexture ? { reflectanceTexture: specularColorTexture } : undefined),
         };
-        if (!out.baseColorTexture && !out.ormTexture && !out.normalTexture && !out.emissiveTexture && !out.metallicReflectanceTexture && !out.reflectanceTexture) {
+        // Routed through the setter (not written onto `out` directly) so the reflectance ext
+        // is registered — the setter is the only thing that calls `_registerPbrExt`.
+        if (reflectanceMod && (specularTexture || specularColorTexture)) {
+            reflectanceMod.setPbrMetallicReflectance(out, {
+                ...(specularTexture ? { texture: specularTexture, useOnlyMetallicFromTexture: true } : undefined),
+                ...(specularColorTexture ? { reflectanceTexture: specularColorTexture } : undefined),
+            });
+        }
+        if (!out.baseColorTexture && !out.ormTexture && !out.normalTexture && !out.emissiveTexture && !specularTexture && !specularColorTexture) {
             return null;
         }
         return out;

@@ -256,6 +256,23 @@ export { enableStandardSkeleton, enableStandardUvOffset } from "./material/stand
 export { enableStandardVertexColors } from "./material/standard/enable-standard-vertex-colors.js";
 export { enableMirroredMeshes } from "./mesh/enable-mirrored-meshes.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
+export { setShadowOnly } from "./material/pbr/set-shadow-only.js";
+export type { ShadowOnlyOptions } from "./material/pbr/set-shadow-only.js";
+export { setPbrClearCoat } from "./material/pbr/set-clearcoat.js";
+export { setPbrSheen } from "./material/pbr/set-sheen.js";
+export { setPbrIridescence } from "./material/pbr/set-iridescence.js";
+export { setPbrUnlit } from "./material/pbr/set-unlit.js";
+export { setPbrSubsurface } from "./material/pbr/set-subsurface.js";
+export { setPbrMetallicReflectance } from "./material/pbr/set-metallic-reflectance.js";
+export { setPbrAnisotropy } from "./material/pbr/set-anisotropy.js";
+export { setPbrGammaAlbedo } from "./material/pbr/set-gamma-albedo.js";
+export { setPbrSkybox } from "./material/pbr/set-skybox.js";
+export { setPbrAlphaCutoff } from "./material/pbr/set-alpha-cutoff.js";
+export { setPbrTransmission } from "./material/pbr/set-transmission.js";
+export { setPbrDispersion } from "./material/pbr/set-dispersion.js";
+export { enableMaterialUvTransform } from "./material/pbr/enable-material-uv-transform.js";
+export { setPbrEmissive } from "./material/pbr/set-emissive.js";
+export type { MetallicReflectanceOptions } from "./material/pbr/set-metallic-reflectance.js";
 export {
     createShaderMaterial,
     setShaderUniform,
@@ -283,7 +300,6 @@ export { createMaterialView } from "./material/material-view.js";
 export { getMaterialFamily } from "./material/material-family.js";
 export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
-export { enableMaterialUvTransform } from "./material/pbr/pbr-material.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
 export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";

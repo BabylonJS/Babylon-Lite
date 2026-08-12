@@ -4,6 +4,7 @@ import type { PbrMaterialProps } from "../../../packages/babylon-lite/src/materi
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { _PbrBindCtx } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
 import { _computePbrMaterialFeatures } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
+import { setPbrAlphaCutoff } from "../../../packages/babylon-lite/src/material/pbr/set-alpha-cutoff";
 import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ALPHA_TEST, PBR2_HAS_REFRACTION } from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits";
 import { makeRefractionRttExt, PBR2_HAS_REFRACTION_MAP, PBR2_HAS_VOLUME } from "../../../packages/babylon-lite/src/material/pbr/fragments/refraction-rtt-fragment";
 
@@ -13,10 +14,10 @@ const refractionMapTexture = { view: { id: "map-view" } as unknown as GPUTexture
 
 describe("PBR transmission and alpha feature detection", () => {
     it("marks glTF alpha MASK materials for alpha test without enabling blending", () => {
-        const features = _computePbrMaterialFeatures({
-            alpha: 0.75,
-            alphaCutOff: 0.5,
-        } as PbrMaterialProps);
+        const material = { alpha: 0.75 } as PbrMaterialProps;
+        setPbrAlphaCutoff(material, 0.5);
+
+        const features = _computePbrMaterialFeatures(material);
 
         expect(features.features & PBR_HAS_ALPHA_TEST).toBe(PBR_HAS_ALPHA_TEST);
         expect(features.features & PBR_HAS_ALPHA_BLEND).toBe(0);
@@ -24,14 +25,14 @@ describe("PBR transmission and alpha feature detection", () => {
 
     it("marks transmission refraction maps when a transmission texture is present", () => {
         const detected = refractionRttExt.detect?.({
-            transmissive: true,
-            subsurface: {
+            _transmissive: true,
+            _subsurface: {
                 refraction: {
                     intensity: 1,
                     texture: dummyTexture,
                 },
             },
-        } as PbrMaterialProps);
+        } as unknown as PbrMaterialProps);
 
         expect(detected!.f2 & PBR2_HAS_REFRACTION).toBe(PBR2_HAS_REFRACTION);
         expect(detected!.f2 & PBR2_HAS_REFRACTION_MAP).toBe(PBR2_HAS_REFRACTION_MAP);
@@ -72,7 +73,7 @@ describe("PBR transmission and alpha feature detection", () => {
                 _features2: PBR2_HAS_REFRACTION | PBR2_HAS_REFRACTION_MAP,
                 _meshFeatures: 0,
                 _material: {
-                    subsurface: {
+                    _subsurface: {
                         refraction: {
                             texture: refractionMapTexture,
                         },

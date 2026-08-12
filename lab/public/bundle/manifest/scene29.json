@@ -1,23 +1,22 @@
 {
-  "rawKB": 91,
-  "rawBytes": 93164,
-  "gzipKB": 37.9,
+  "rawKB": 90.2,
+  "rawBytes": 92338,
+  "gzipKB": 37.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene29-generate-mipmaps-C0ljVA3A.js",
-    "scene29-gltf-ext-sheen-Dv23b_3T.js",
+    "scene29-enable-material-uv-transform-BTWJVbLl.js",
+    "scene29-generate-mipmaps-pk0zv5sJ.js",
+    "scene29-gltf-ext-sheen-BFky6jyF.js",
     "scene29-gltf-ext-uv-transform-tUSEOqA7.js",
-    "scene29-gltf-feature-registry-YfhrQ4gk.js",
+    "scene29-gltf-feature-registry-DUXkAAOr.js",
     "scene29-gltf-json-asset-uF2N3sld.js",
-    "scene29-gltf-pbr-builder-ext-0Tgp6igg.js",
+    "scene29-gltf-pbr-builder-ext-C1uYP1hQ.js",
     "scene29-ibl-fragment-CeRrvT96.js",
-    "scene29-pbr-renderable-CWPSD6yy.js",
+    "scene29-pbr-renderable-C34OD63I.js",
     "scene29-pbr-template-ext-CiHpOV5G.js",
     "scene29-rgbd-decode-CwmTpUIN.js",
     "scene29-scene-uniforms-FTYH6Ct0.js",
-    "scene29-sheen-fragment-DxDnlG3g.js",
     "scene29-texture-2d-DQo3n8D6.js",
-    "scene29-uv-transform-fragment-B8ijWmAK.js",
     "scene29.js"
   ]
 }

@@ -130,21 +130,46 @@ export function buildDefaultPbrTexturesExt(
     return { baseColorTexture, ormTexture, normalTexture, emissiveTexture, occlusionTexture };
 }
 
-/** Slow-path assembly: adds occlusionTexCoord and occlusionTexture props. */
-export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, extLayers: Partial<PbrMaterialProps> | undefined): PbrMaterialProps {
-    const ef = mat._emissiveFactor;
-    // See gltf-pbr-builder.ts: emissiveFactor [1,1,1] is a no-op only with an emissive texture;
-    // with no texture it is a real full-white emissive that must be applied (Material_03).
-    const defaultFactor = (ef[0] === 0 && ef[1] === 0 && ef[2] === 0) || (!!tex.emissiveTexture && ef[0] === 1 && ef[1] === 1 && ef[2] === 1);
-    // Precompute UV-transform presence so the renderer doesn't scan 5 textures
-    // per mesh. Any wrapped texture with `_hasTx=true` (set by gltf-ext-uv-transform)
-    // flips this once at build time; omitted entirely on fast path.
-    const hasAnyUvTx =
+/** True when any of this material's textures carries a KHR_texture_transform.
+ *
+ *  `_hasTx` is stamped on wrapped textures by gltf-ext-uv-transform, so this is only ever
+ *  true when that extension actually ran. */
+function needsGltfUvTransform(tex: PbrTexturesExt): boolean {
+    // Checked here rather than in the renderer so it doesn't scan 5 textures per mesh.
+    return (
         !!(tex.baseColorTexture as { _hasTx?: true })._hasTx ||
         !!(tex.normalTexture as { _hasTx?: true } | undefined)?._hasTx ||
         !!(tex.ormTexture as { _hasTx?: true })._hasTx ||
         !!(tex.emissiveTexture as { _hasTx?: true } | undefined)?._hasTx ||
-        !!(tex.occlusionTexture as { _hasTx?: true } | undefined)?._hasTx;
+        !!(tex.occlusionTexture as { _hasTx?: true } | undefined)?._hasTx
+    );
+}
+
+/** Registers the uv-transform ext on `props` when any texture carries a
+ *  KHR_texture_transform.
+ *
+ *  `enableMaterialUvTransform` statically imports the uv-transform fragment, so the import has to
+ *  stay conditional or every scene reaching this slow path pays for it — including scenes
+ *  that only reach it for occlusion-on-UV2 (scene27/144/243 each paid 721 B).
+ *
+ *  The gate and the `import` live here rather than at the call sites so the dynamic-import
+ *  plumbing is emitted once, into this slow-path chunk, instead of into load-gltf.js and
+ *  gltf-variants.js. load-gltf.js is fetched by every glTF scene, so a call site there
+ *  charged ~200 B to fast-path scenes that can never reach this branch (scene41/scene47).
+ *
+ *  Must be applied before emissive to keep ext registration order unchanged. */
+export async function applyGltfUvTransform(props: PbrMaterialProps, tex: PbrTexturesExt): Promise<void> {
+    if (!needsGltfUvTransform(tex)) {
+        return;
+    }
+    const { enableMaterialUvTransform } = await import("../material/pbr/enable-material-uv-transform.js");
+    enableMaterialUvTransform(props);
+}
+
+/** Slow-path assembly: adds occlusionTexCoord and occlusionTexture props.
+ *  UV-transform and emissive are applied by the caller — see `applyGltfUvTransform`
+ *  above and `needsGltfEmissive` in gltf-pbr-builder.ts. */
+export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, extLayers: Partial<PbrMaterialProps> | undefined): PbrMaterialProps {
     // Per-channel UV1 (TEXCOORD_1) selection bitmask. Computed here on the slow path — the only
     // place a texture can carry texCoord:1 — so the always-loaded fast path just reads `_uv2Mask`.
     // Bit literals are a private contract with createPbrTemplateExt's decode (baseColor=1, orm=2,
@@ -159,7 +184,7 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         (tc1(tex.emissiveTexture) ? 8 : 0) |
         (tc1((extLayers as { specGlossTexture?: unknown } | undefined)?.specGlossTexture) ? 16 : 0) |
         (mat._occlusionTexCoord === 1 ? 32 : 0);
-    return {
+    const props = {
         baseColorTexture: tex.baseColorTexture,
         normalTexture: tex.normalTexture,
         ormTexture: tex.ormTexture,
@@ -171,17 +196,16 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         ...(tex.occlusionTexture ? { occlusionTexture: tex.occlusionTexture } : undefined),
         ...(mat._normalScale !== 1 ? { normalTextureScale: mat._normalScale } : undefined),
         ...(mat._metallicRoughnessImage ? { metallicFactor: mat._metallicFactor, roughnessFactor: mat._roughnessFactor } : undefined),
-        ...(!defaultFactor ? { emissiveColor: [ef[0], ef[1], ef[2]] as [number, number, number] } : undefined),
         enableSpecularAA: true,
         ...(mat._alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat._baseColorFactor[3] } : undefined),
-        ...(mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3], alphaCutOff: mat._alphaCutoff } : undefined),
-        ...(hasAnyUvTx ? { _hasUvTx: true } : undefined),
+        ...(mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3] } : undefined),
         ...(mat._rawMatDef?.name ? { name: mat._rawMatDef.name as string } : undefined),
         ...extLayers,
         ...(uv2Mask ? { _uv2Mask: uv2Mask } : undefined),
         _buildGroup: getPbrGroupBuilder(),
         _uboVersion: 0,
     } as PbrMaterialProps;
+    return props;
 }
 
 function isDefaultBaseColorFactor(f: readonly number[]): boolean {
