@@ -2464,5 +2464,16 @@
         "tags": ["lines", "procedural", "update", "thin-instances", "alpha"],
         "skipPerf": true,
         "compatParity": true
+    },
+    {
+        "id": 280,
+        "slug": "scene280-npe-flow-map",
+        "name": "Scene 280 — NPE Particles: Flow Map",
+        "maxMad": 0.01,
+        "maxRawKB": 45,
+        "description": "A serialized NPE particle graph with UpdateFlowMapBlock projecting particle positions into an asymmetric RGBA flow field and applying alpha-weighted direction changes. The flow setup mirrors Babylon.js visual test 'Particles - Flowmaps' (#39BW3H#0) and playground #PPC2EI#7 while using the scene 262 creation graph for a compact byte-identical Babylon/Lite fixture.",
+        "tags": ["npe", "particles", "billboards", "flow-map"],
+        "skipPerf": true,
+        "compatParity": true
     }
 ]

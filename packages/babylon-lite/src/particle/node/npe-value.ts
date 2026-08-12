@@ -7,7 +7,22 @@
  */
 import type { Vec2, Vec3, Color4 } from "../../math/types.js";
 
-/** Any value that can flow along a node-particle connection in the data-oriented runtime. */
+/** CPU-readable RGBA texture content used by texture-driven particle updates. */
+export interface NpeTextureContent {
+    readonly width: number;
+    readonly height: number;
+    readonly data: Uint8ClampedArray;
+}
+
+/** Static texture source passed between texture-valued NPE blocks. */
+export interface NpeTextureValue {
+    readonly url: string;
+    readonly invertY: boolean;
+    /** @internal Lazily populated only when a CPU texture consumer is present. */
+    _content?: Promise<NpeTextureContent | null>;
+}
+
+/** Scalar, vector, or colour value used by arithmetic particle blocks. */
 export type NpeValue = number | Vec3 | Color4 | Vec2;
 
 /**

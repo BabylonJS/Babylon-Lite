@@ -20,7 +20,7 @@ The design requirements are:
 
 ## 2. Package-root API
 
-`packages/babylon-lite/src/index.ts` exports exactly nine node-particle functions and five node-particle types.
+`packages/babylon-lite/src/index.ts` exports exactly ten node-particle functions and five node-particle types.
 
 ### 2.1 Functions
 
@@ -28,12 +28,13 @@ The design requirements are:
 function parseNodeParticleSource(source: unknown): ParticleGraph;
 
 function buildNodeParticleSet(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
+function buildNodeParticleSetWithFlowMaps(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
 
 function parseNodeParticleSetFromSnippet(engine: EngineContext, scene: SceneContext, snippetId: string, options?: ParseNodeParticleOptions): Promise<NodeParticleSet>;
 
 function startParticleSystem(system: ParticleSystem): void;
 function stopParticleSystem(system: ParticleSystem): void;
-function animateParticleSystem(system: ParticleSystem, scaledRatio: number): void;
+function animateParticleSystem(system: ParticleSystem, scaledRatio: number, camera?: Camera | null, targetWidth?: number, targetHeight?: number): void;
 
 function createParticleBillboard(system: ParticleSystem): FacingBillboardSpriteSystem;
 function syncParticleBillboard(system: ParticleSystem, billboard: FacingBillboardSpriteSystem): void;
@@ -79,7 +80,7 @@ The following symbols are implementation APIs and are not node-particle package-
 
 - Graph types: `ParticleGraph`, `ParsedParticleBlock`, and `ParsedParticleInput`.
 - Build types: `NpeBuildState`, `NpeBuildContext`, and `NpeBlockEvaluator`.
-- Value types: `NpeValue`, `NpeGetter`, `ScalarGetter`, `Vec3Getter`, `Color4Getter`, and `ParticleStep`.
+- Value types: `NpeValue`, `NpeTextureValue`, `NpeTextureContent`, `NpeGetter`, `ScalarGetter`, `Vec3Getter`, `Color4Getter`, and `ParticleStep`.
 - Storage types and functions: `ParticleColumn`, `ParticleBuffer`, `createParticleBuffer`, `column`, `spawnParticle`, and `killParticle`.
 - Runtime construction: `ParticleSpriteHandle` and `createParticleSystem`.
 - Sprite features: `SpriteSheetConfig`, `SpriteSheet`, `useSpriteSheet`, and `useRandomSpriteSheet`.
@@ -94,7 +95,8 @@ The data flow is:
 serialized value or snippet response
     -> parseNodeParticleSource
     -> ParticleGraph
-    -> buildNodeParticleSet
+     -> buildNodeParticleSet
+         or buildNodeParticleSetWithFlowMaps for UpdateFlowMapBlock graphs
     -> NodeParticleSet { systems }
     -> startParticleSystem / stopParticleSystem / animateParticleSystem
     -> createParticleBillboard + syncParticleBillboard
@@ -114,6 +116,8 @@ node/npe-parser.ts       serialized source normalization
 node/npe-types.ts        readonly TypeScript graph shapes
 node/npe-build.ts        root-reachable DFS and system construction
 node/npe-value.ts        indexed getter and step contracts
+node/npe-texture-content.ts
+                         pay-for-use CPU RGBA texture decoding
 node/npe-contextual*.ts  contextual source getters and optional columns
 node/npe-local-position.ts
                          local birth seeding and world-position conversion
@@ -125,6 +129,7 @@ The particle package owns no shader, material, render pipeline, bind group, or G
 
 ### 3.1 Direct dependencies outside `particle/`
 
+- Camera: `camera/camera.ts`.
 - Engine type: `engine/engine.ts`.
 - Math: `math/types.ts`, `math/random-range.ts`, `math/mat4-identity.ts`, `math/mat4-invert.ts`, `math/mat4-transform.ts`, and `math/mat4-translation.ts`.
 - Scene: `scene/scene.ts` and `scene/scene-core.ts`.
@@ -264,6 +269,7 @@ interface ParticleSystem {
     _writeColorDead?: (i: number, color: Color4) => void;
     _suppressInitialDirectionCapture?: boolean;
     _seedLocalPosition?: ParticleStep;
+    _frameSteps?: Array<(camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void>;
 }
 ```
 
@@ -295,22 +301,27 @@ Optional internal fields are absent until a feature installs them.
 
 Starting a stopped system resets simulated time and permits emission while retaining all live particles and fractional emission carry.
 
-### 5.3 One animation call
+### 5.3 Feature-owned frame preparation
 
-`animateParticleSystem(system, scaledRatio)` returns immediately when `_started` is false. Otherwise it performs these operations in this exact order:
+The base particle system has no camera or target-size preparation API. Camera-dependent optional features own their preparation behind their enabler. UpdateFlowMap appends a scene callback that snapshots the current view-projection matrix after camera-control callbacks and before live particle simulation. Manual simulation can use the build-time snapshot when the camera is static, or invoke the registered scene callback after changing the camera or target size.
 
-1. Compute `scaledUpdateSpeed = updateSpeed * scaledRatio` and assign it to `_scaledUpdateSpeed`.
-2. Evaluate `_emitRateGetter()` when present; otherwise read `emitRate`. A connected getter observes the current `_actualFrame` before this call advances it.
-3. Compute `emission = emitRate * scaledUpdateSpeed` and `newParticles = emission >> 0`.
-4. Add `emission - newParticles` to `_newPartsExcess`. Only when `_newPartsExcess > 1.0`, take `extra = _newPartsExcess >> 0`, add `extra` to `newParticles`, and subtract `extra` from `_newPartsExcess`. Equality with `1.0` does not release a particle.
-5. If `_stopped` was already true, set `newParticles = 0`. The rate getter and fractional-carry calculation have already run.
-6. If `_stopped` was false, add `scaledUpdateSpeed` to `_actualFrame`. When `targetStopDuration` is truthy and `_actualFrame >= targetStopDuration`, call `stopParticleSystem`. The `newParticles` count computed for this call is retained, so the threshold call still creates its computed cohort.
-7. Update all particles that were live at the start of the update loop.
-8. Create up to `newParticles`, subject to capacity.
+### 5.4 One animation call
+
+`animateParticleSystem(system, scaledRatio)` performs these operations in this exact order:
+
+1. Return when `_started` is false.
+2. Compute `scaledUpdateSpeed = updateSpeed * scaledRatio` and assign it to `_scaledUpdateSpeed`.
+3. Evaluate `_emitRateGetter()` when present; otherwise read `emitRate`. A connected getter observes the current `_actualFrame` before this call advances it.
+4. Compute `emission = emitRate * scaledUpdateSpeed` and `newParticles = emission >> 0`.
+5. Add `emission - newParticles` to `_newPartsExcess`. Only when `_newPartsExcess > 1.0`, take `extra = _newPartsExcess >> 0`, add `extra` to `newParticles`, and subtract `extra` from `_newPartsExcess`. Equality with `1.0` does not release a particle.
+6. If `_stopped` was already true, set `newParticles = 0`. The rate getter and fractional-carry calculation have already run.
+7. If `_stopped` was false, add `scaledUpdateSpeed` to `_actualFrame`. When `targetStopDuration` is truthy and `_actualFrame >= targetStopDuration`, call `stopParticleSystem`. The `newParticles` count computed for this call is retained, so the threshold call still creates its computed cohort.
+8. Update all particles that were live at the start of the update loop.
+9. Create up to `newParticles`, subject to capacity.
 
 The `>> 0` operations use JavaScript signed 32-bit conversion. Rates, ratios, and speeds are not clamped or validated.
 
-### 5.4 Existing-particle update and death
+### 5.5 Existing-particle update and death
 
 For each dense slot, in ascending slot order:
 
@@ -331,7 +342,7 @@ For each dense slot, in ascending slot order:
 
 Update steps run once on the death boundary before the slot is recycled. `_scaledStep` contains the lifetime-clamped per-particle step. `_scaledUpdateSpeed` retains the full call-wide value, including while a dying particle is evaluated.
 
-### 5.5 Creation
+### 5.6 Creation
 
 For every requested birth, `spawnParticle` is called. A `-1` result stops the creation loop, so no creation getter and no creation random draw runs for that birth or any remaining requested birth.
 
@@ -348,7 +359,7 @@ Successful births run non-null slots in this fixed order:
 
 This order is independent of graph traversal and is part of the random-consumption contract. Sprite birth initialization is attached to `createColorDead` and runs after its captured color-dead step.
 
-### 5.6 Determinism requirements
+### 5.7 Determinism requirements
 
 - Shape emitters use `randomRange(min, max)`. It returns `min` without calling `Math.random()` when `min === max`; otherwise it returns `Math.random() * (max - min) + min`.
 - `ParticleRandomBlock` always consumes a draw per output component, including equal bounds.
@@ -439,7 +450,7 @@ For each root:
 - `options.emitterWorldMatrix` has precedence over `options.emitter`. The matrix reference is retained, and its indices 12, 13, and 14 are copied into a fresh emitter `Vec3`.
 - Without a matrix, the emitter option or `{ x: 0, y: 0, z: 0 }` is copied into the emitter value and a translation matrix.
 - `scene` and `textureBaseUrl` are carried in `NpeBuildState`.
-- Each root gets its own output map and built-id set.
+- Each standard-builder root gets its own output map and block-id set. The flow-map builder is dynamically imported only by `buildNodeParticleSetWithFlowMaps`; its specialized walk additionally keys dependency overrides by parsed block object, allowing one texture source to be evaluated once for billboard upload and once for CPU flow-map decoding.
 - Build promises are accumulated for the whole set and awaited together after all roots have been traversed.
 
 `CreateParticleBlock` does not create the system. `SystemBlock` does not set capacity or locality; the builder consumes those serialized fields before DFS.
@@ -448,15 +459,16 @@ For each root:
 
 Only blocks reachable by following input connections from a root are built. Detached blocks load no evaluator and allocate no columns.
 
-The asynchronous `buildBlock(id)` algorithm is exact:
+The standard asynchronous `buildBlock(id)` algorithm is exact:
 
-1. Return when `id` is already in `built`.
-2. Add `id` to `built` before map lookup.
-3. Return when the map has no block for `id`.
-4. Traverse every connected input named exactly `particle`, in serialized input order.
-5. Traverse every other connected input, in serialized input order.
-6. Select and dynamically import one evaluator.
-7. Run `evaluator.build(block, ctx)`.
+1. Return when `id` is already in `built`, then add it before recursion.
+2. Return when the map has no block for `id`.
+3. Traverse every connected input named exactly `particle`, in serialized input order.
+4. Traverse every other connected input in serialized input order.
+5. Select and dynamically import one evaluator.
+6. Run `evaluator.build(block, ctx)`.
+
+The flow-map builder mirrors this walk in its dynamically loaded feature module. It directly selects `UpdateFlowMapBlock` and overrides only its connected `flowMap` source with `flowMapTextureSourceBlock`; every other block follows the standard registry. The ordinary builder and every shared registry remain byte-identical for scenes that do not call the flow-map builder.
 
 Marking before recursion terminates cycles. A cycle can still fail when an evaluator asks for an output that has not been installed.
 
@@ -466,8 +478,9 @@ The output map key is `${blockId}:${connectionName}`. Getter outputs are:
 
 - `output`: `ParticleInputBlock`, `ParticleRandomBlock`, `ParticleMathBlock`, `ParticleLerpBlock`, `ParticleGradientBlock`, `ParticleGradientValueBlock`, `ParticleConditionBlock`, `ParticleFloatToIntBlock`, and `ParticleVectorLengthBlock`.
 - `color`, `xyz`, `xy`, `zw`, `x`, `y`, `z`, and `w`: `ParticleConverterBlock`.
+- `texture`: `flowMapTextureSourceBlock`, reachable only through the flow-map builder's dependency override.
 
-`SystemBlock`, `CreateParticleBlock`, all six shape classes, `ParticleTextureSourceBlock`, `SetupSpriteSheetBlock`, `BasicSpriteUpdateBlock`, and all five update classes install no getter output. Their `particle` connections control reachability and ordering only. Update blocks do not publish flow outputs.
+`SystemBlock`, `CreateParticleBlock`, all six shape classes, `SetupSpriteSheetBlock`, `BasicSpriteUpdateBlock`, and all seven update classes install no getter output. Their `particle` connections control reachability and ordering only. Update blocks do not publish flow outputs.
 
 ### 7.3 Input resolution and literals
 
@@ -493,7 +506,7 @@ Evaluators are not preloaded. Selection and dynamic import occur when DFS reache
 - `npe-registry.ts` handles System, Create, Box, UpdatePosition, UpdateColor, TextureSource, Input, compact Math, Lerp, Converter, and ordinary Random.
 - Shape names that miss the Box arm route to `npe-registry-extra-emitters.ts`, which handles Point, Sphere, Cone, Cylinder, and Mesh.
 - `npe-registry-extra.ts` handles UpdateSize, Gradient, GradientValue, SetupSpriteSheet, and BasicSpriteUpdate.
-- Its remaining route sends names beginning with `Particle` to `npe-registry-extra-values.ts` for Condition, FloatToInt, and VectorLength. Other names go to `npe-registry-extra-basic.ts` for UpdateDirection and UpdateAngle.
+- Its remaining route handles UpdateAttractor, sends other names beginning with `Particle` to `npe-registry-extra-values.ts` for Condition, FloatToInt, and VectorLength, and sends remaining names to `npe-registry-extra-basic.ts` for UpdateDirection and UpdateAngle. UpdateFlowMap is owned by the dynamically loaded flow-map builder and is absent from shared registries.
 - `npe-registry-local-shapes.ts` selects separate local implementations for all six shape classes when `state.isLocal` is true.
 - `npe-registry-variants.ts` selects extra contextual Input, source `0x18` Input, alias-safe Math, typed OncePerParticle Random, dynamic-emit-rate System, and random-start SetupSpriteSheet evaluators.
 - Scalar OncePerParticle Random imports its evaluator directly from the builder.
@@ -508,7 +521,7 @@ Variant selection uses serialized data and connection identity:
 
 ### 7.5 Asynchronous texture work
 
-Texture evaluators add promises to the shared build-promise array. The builder traverses every root, then awaits `Promise.all(buildPromises)`, and returns the set. It does not run a texture-resolution pass or call a `_resolveTexture` hook.
+Texture evaluators add promises to the build-promise array. A builder traverses every root, then awaits `Promise.all(buildPromises)`, and returns the set. It does not run a texture-resolution pass. The ordinary billboard texture evaluator schedules its GPU upload. The specialized flow-map builder separately publishes a CPU-readable value for a connected flow source, and UpdateFlowMap schedules its decoding. Both settle before the flow-map set is returned.
 
 ## 8. Values and sources
 
@@ -521,6 +534,24 @@ type ParticleStep = (i: number) => void;
 ```
 
 Scalar getters return a number. Vector and color getters generally fill one value captured by the getter and return that same value on every call. Consumers copy components before invoking another volatile getter.
+
+The flow-map feature internally carries one build-local texture value through its dependency override (cast across the scalar/vector getter contract and consumed only by `UpdateFlowMapBlock`):
+
+```ts
+interface NpeTextureContent {
+    readonly width: number;
+    readonly height: number;
+    readonly data: Uint8ClampedArray;
+}
+
+interface NpeTextureValue {
+    readonly url: string;
+    readonly invertY: boolean;
+    _content?: Promise<NpeTextureContent | null>;
+}
+```
+
+`_content` is absent unless a CPU texture consumer requests it. The first request stores the decode promise on the value, so multiple consumers of the same source share one fetch and decode within that system build.
 
 ### 8.2 Contextual particle sources
 
@@ -595,7 +626,7 @@ Contextual source has precedence over system source, and system source has prece
 
 ## 9. Supported blocks
 
-Exactly 27 block class names are supported:
+Exactly 28 block class names are supported:
 
 ```text
 SystemBlock                         CreateParticleBlock
@@ -611,7 +642,7 @@ ParticleTextureSourceBlock          SetupSpriteSheetBlock
 BasicSpriteUpdateBlock              UpdatePositionBlock
 UpdateColorBlock                    UpdateDirectionBlock
 UpdateAngleBlock                    UpdateSizeBlock
-UpdateAttractorBlock
+UpdateAttractorBlock                UpdateFlowMapBlock
 ```
 
 Local shape modules and serialized variants retain their class name from this list.
@@ -872,11 +903,11 @@ The block installs scalar `output`: `abs(value)` for a scalar, Euclidean length 
 
 ### 9.20 ParticleTextureSourceBlock
 
-`serialized.url` defaults to the empty string. A URL is considered absolute when it matches `^(https?:)?//` or starts with `/`. When a nonempty URL is relative and `textureBaseUrl` exists, `new URL(rawUrl, base).href` resolves it. An empty URL schedules no work.
+The ordinary evaluator retains billboard-only behavior. It reads string `serialized.url` or the empty string, treats HTTP(S), protocol-relative, and root-relative URLs as absolute, and resolves any other nonempty source against `textureBaseUrl` when supplied. It schedules `loadTexture2D` with `{ invertY: !(serialized.invertY !== false) }`, stores the result on `system.texture`, and catches load failures.
 
-`serialized.invertY` defaults to true by testing `!== false`. The texture loader receives the opposite value, `{ invertY: !blockInvertY }`. Other loader options retain `loadTexture2D` defaults: mipmaps enabled, repeat addressing on U and V, linear minification and magnification, non-sRGB storage, and no alpha premultiplication.
+`buildNodeParticleSetWithFlowMaps` dynamically imports a feature-specialized builder. When that builder reaches `UpdateFlowMapBlock.flowMap`, it selects a separate texture evaluator from the same lazy flow-map chunk. That evaluator gives `textureDataUrl` precedence over `url`, accepts only explicit `http`, `https`, `data`, and `blob` schemes, resolves relative URLs against `textureBaseUrl`, and installs `texture` as an `NpeTextureValue`. It performs no GPU upload.
 
-The asynchronous load stores the resulting `Texture2D` on `system.texture`. Any rejection is caught and leaves the current texture value unchanged, normally `null`. The block installs no output getter.
+The ordinary and dependency roles use distinct built keys in the specialized builder. A single serialized source can therefore feed both the system texture and a flow-map input: ordinary evaluation uploads the billboard texture once, dependency evaluation publishes the CPU value once, and neither role replaces the other.
 
 ### 9.21 SetupSpriteSheetBlock
 
@@ -931,23 +962,54 @@ This is equivalent to adding `normalize(offset) * strength / (lengthSquared + 1)
 
 The block observes position and direction as left by earlier `updateSteps`, and later steps observe its direction change. It does not update position itself. Serialized local systems use the same evaluator; there is no local/world attractor variant.
 
-### 9.24 UpdatePositionBlock
+### 9.24 UpdateFlowMapBlock
+
+Inputs are `particle`, `flowMap`, and `strength`; `strength` defaults to `1`. The block allocates no particle columns and appends one direction-only update step. `flowMap` accepts the `texture` output of a `ParticleTextureSourceBlock`. An absent or non-texture value leaves the update step installed with no loaded map, so it has no effect.
+
+During build, the first CPU request for a texture value calls `loadNpeTextureContent`. It fetches the resolved URL and rejects a non-OK response, decodes an `ImageBitmap` with `premultiplyAlpha: "none"` and `colorSpaceConversion: "none"`, and draws it into an `OffscreenCanvas` when available or an HTML canvas otherwise. For `invertY === true`, the canvas transform vertically flips the bitmap before `getImageData`; false preserves source row order. The resulting `{ width, height, data: Uint8ClampedArray }` promise is cached on the texture value. The evaluator catches decode failures and retains a null map, making every update a no-op.
+
+During build, the block derives the camera view-projection matrix with the effective viewport aspect, copies all 16 components into an evaluator-owned matrix from `allocateMat4()`, and appends that preparation callback to `scene._beforeRender`. Its storage therefore follows the process-wide F32/F64 matrix policy and never aliases camera-owned matrix storage. A missing camera marks the prepared matrix unavailable. Canvas width and height are normalized independently to finite positive values before aspect calculation.
+
+For each particle update, a missing prepared matrix or map returns immediately without evaluating strength. Otherwise the evaluator transforms the current particle position through the prepared matrix including perspective divide and samples nearest-neighbor RGBA data:
+
+```text
+screen = transformCoordinates(position, viewProjection)
+u = screen.x * 0.5 + 0.5
+v = 1 - (screen.y * 0.5 + 0.5)
+x = floor(u * width)
+y = floor(v * height)
+
+if x or y is outside the texture:
+    return
+
+index = (y * width + x) * 4
+alphaStrength = strength * scaledStep * data[index + 3] / 255
+direction.x += (data[index]     / 255 * 2 - 1) * alphaStrength
+direction.y += (data[index + 1] / 255 * 2 - 1) * alphaStrength
+direction.z += (data[index + 2] / 255 * 2 - 1) * alphaStrength
+```
+
+`strength` is evaluated for every particle after the map and prepared-matrix checks and before the bounds check. `scaledStep` is the particle's lifetime-clamped `system._scaledStep`. RGB byte value `127.5` is neutral; integer bytes therefore have no exact zero except through alpha or strength. Alpha zero produces no force. Coordinates at `screen.x === 1` or `screen.y === -1` map to the exclusive upper edge and are rejected.
+
+The block uses one reused screen-position scratch and allocates nothing per particle. It observes position and direction from earlier update steps; later steps observe its direction change. It does not integrate position. Local systems use the same evaluator and current stored position; there is no separate local flow-map variant. Camera controls append their update callback before flow-map build; flow preparation appends next; live particle registration appends simulation last, producing controls → matrix preparation → simulation even when the set is built after scene registration.
+
+### 9.25 UpdatePositionBlock
 
 When `position` is connected, append an update step that evaluates a Vec3 and writes base position xyz. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.25 UpdateColorBlock
+### 9.26 UpdateColorBlock
 
 When `color` is connected, request the standard RGBA columns and append an update step that evaluates Color4 and writes all components. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.26 UpdateDirectionBlock
+### 9.27 UpdateDirectionBlock
 
 When `direction` is connected, append an update step that evaluates Vec3 and writes base direction xyz. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.27 UpdateAngleBlock
+### 9.28 UpdateAngleBlock
 
 When `angle` is connected, request the standard angle column and append an update step that writes the scalar result. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.28 UpdateSizeBlock
+### 9.29 UpdateSizeBlock
 
 When `size` is connected, request the standard size column and append an update step that writes the scalar result. With an unconnected input, append nothing. No output getter is installed.
 
@@ -1008,7 +1070,7 @@ Only simulation is allocation-free by structure. Particle rendering uses the all
 1. Creates the particle billboard.
 2. Adds the facing billboard system to the scene.
 3. Calls `startParticleSystem` when auto-start is true.
-4. Registers one `onBeforeRender` callback.
+4. Appends one internal callback to `scene._beforeRender`.
 
 Each callback computes:
 
@@ -1018,7 +1080,7 @@ animateParticleSystem(system, ratio);
 syncParticleBillboard(system, billboard);
 ```
 
-There is no synchronization during registration; the first registered callback performs the first live animation and upload. `onBeforeRender` inserts each callback at the front of the scene callback array, so callbacks for a multi-system set execute in reverse system-registration order when the scene processes that array in order.
+There is no synchronization during registration; the first registered callback performs the first live animation and upload. Internal callbacks append, so camera controls and feature preparation registered before the set run first, and callbacks for a multi-system set preserve system-registration order.
 
 The registration function returns `void`, exposes no billboard, and supplies no callback-unregister handle. With auto-start false, the callback is still registered; animation is a no-op until the system is started, while synchronization still runs every frame.
 
@@ -1050,7 +1112,8 @@ Additional behavior is observable:
 - Detached unsupported blocks are ignored because they are unreachable.
 - Dynamic-import failures for reachable evaluator or registry modules propagate from the asynchronous build.
 - Missing mesh positions or indices silently leave the system without mesh creation slots. Malformed or empty arrays can produce `undefined`, `NaN`, out-of-range access, or native errors during creation.
-- Texture fetch, decode, and upload failures are caught inside `ParticleTextureSourceBlock`; build resolves with `texture` unchanged. Rendering then fails at billboard creation when no other texture was assigned.
+- Billboard texture fetch, decode, and upload failures are caught inside `ParticleTextureSourceBlock`; build resolves with `texture` unchanged. Rendering then fails at billboard creation when no other texture was assigned.
+- Flow-map fetch or CPU decode failures are caught inside `UpdateFlowMapBlock`; build resolves and the block applies no force.
 - Invalid relative URL resolution can throw synchronously from `new URL`.
 - Invalid JSON, malformed snippet payloads, invalid typed-array lengths, and wrong runtime value shapes use native JavaScript errors or typed-array coercion.
 - Capacity exhaustion drops all creation requests from the first failed spawn through the rest of that animation call. Emission carry and simulated time are not restored.
@@ -1060,12 +1123,12 @@ Additional behavior is observable:
 
 ## 12. Current limitations
 
-- Only the 27 classes in section 9 are accepted. Other NPE classes follow the registry errors in section 11.
+- Only the 28 classes in section 9 are accepted. Other NPE classes follow the registry errors in section 11.
 - Simulation is CPU-only.
 - Rendering is always camera-facing. Serialized `billBoardMode` and `isBillboardBased` do not affect runtime state.
 - Blend modes 3 and 4, plus unknown values, render with the additive descriptor used by mode 2.
 - System source 4 and every system source outside 1, 2, and 3 are unsupported.
-- Custom emitter functions, sub-emitter triggers, inherited emitter velocity, flow-map updates, and noise updates have no supported block evaluator.
+- Custom emitter functions, sub-emitter triggers, inherited emitter velocity, and noise updates have no supported block evaluator.
 - Emit power scales the created direction; exactly zero clears it. No inherited velocity term is added.
 - Mesh emission reads only `cachedVertexData`; mesh `worldSpace` is ignored, and mesh data is not structurally validated.
 - A renderable particle system needs a successfully loaded or manually assigned texture. There is no untextured billboard fallback.
@@ -1098,6 +1161,7 @@ The current unit categories are:
 - Emitters: Point, Box, Sphere, directed Sphere, Hemisphere, Cone, directed Cone, Cylinder, directed Cylinder, Mesh, rotated Cylinder, all six transformed local shapes, mesh vertex color, mesh InitialDirection, shared volatile bounds, and local source build/read guards.
 - Value correctness: shared-scratch Math, Lerp/Gradient endpoints, Random min/max aliasing, lock modes, Uint32 id edge cases, and capacity-bounded OncePerParticle caches.
 - Attractors: softened inverse-square attraction, negative-strength repulsion, defaults, coincident-point handling, lifetime-clamped step scaling, and lazy evaluator isolation.
+- Flow maps: projected nearest-neighbor sampling including non-zero row stride, vertical screen mapping, RGBA force decoding, alpha and bounds handling, per-particle strength evaluation, lifetime-clamped step scaling, allocator-selected F32/F64 matrix snapshots, and lazy texture/evaluator isolation.
 - Feature isolation: runtime chunk manifests and, when bundle-info exists, fetched module contents.
 - Path ownership: the `particle/soa` source directory and `particle-soa*.test.ts` unit-test names must not exist. TypeScript compilation validates all source and test imports.
 
@@ -1117,7 +1181,7 @@ Use conversion for graph extraction. The oracle's direct parse path does not pre
 
 ### 13.3 Visual scenes
 
-All five Lite scenes seed after build, run 200 ratio-1 steps, synchronize one billboard, register the frozen scene, and use a black clear color.
+All six Lite scenes seed after build, synchronize one billboard, register the frozen scene, and use a black clear color. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 280 runs 300 ratio-1 steps while passing its camera and canvas dimensions to each animation call. Its Babylon reference calls `scene.updateTransformMatrix(true)` before those manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render.
 
 | Scene                          | Coverage                                                                      | Camera                                                     | MAD ceiling | Raw ceiling |
 | ------------------------------ | ----------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------- | ----------- |
@@ -1126,10 +1190,11 @@ All five Lite scenes seed after build, run 200 ratio-1 steps, synchronize one bi
 | 264 `scene264-npe-change-size` | Gradient, GradientValue, UpdateSize                                           | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01`      | `44.1 KB`   |
 | 276 `scene276-npe-animations`  | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30       | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
 | 277 `scene277-npe-attractor`   | UpdateAttractor after position integration, attractor `(0,2,0)`, strength `8` | alpha `-pi/2`, beta `1.2`, radius `5`, target `(0,0.8,0)`  | `0.01`      | `45.0 KB`   |
+| 280 `scene280-npe-flow-map`    | UpdateFlowMap after integration, flipped repel map, strength `15`, size `0.6` | alpha `pi/2`, beta `pi/2`, radius `9`, target `(-5,0,0)`   | `0.01`      | `45.0 KB`   |
 
 Each camera uses near plane `0.1` and far plane `100`. Each scene sets both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start.
 
-Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, and 277 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all five scenes.
+Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, and 280 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all six scenes.
 
 ### 13.4 Bundle manifests and conditional content
 
@@ -1137,15 +1202,16 @@ Current tracked measurements are:
 
 | Scene | Runtime raw | Runtime gzip | Ignored graph payload raw |   Ceiling |
 | ----- | ----------: | -----------: | ------------------------: | --------: |
-| 262   |   `39.7 KB` |    `24.1 KB` |                 `28.5 KB` | `44.1 KB` |
-| 263   |   `41.8 KB` |    `24.7 KB` |                 `27.5 KB` | `44.1 KB` |
-| 264   |   `40.0 KB` |    `25.9 KB` |                 `34.4 KB` | `44.1 KB` |
-| 276   |   `44.0 KB` |    `25.2 KB` |                 `27.1 KB` | `45.0 KB` |
-| 277   |   `41.6 KB` |    `25.2 KB` |                 `29.8 KB` | `45.0 KB` |
+| 262   |   `39.9 KB` |    `24.2 KB` |                 `28.5 KB` | `44.1 KB` |
+| 263   |   `42.0 KB` |    `24.7 KB` |                 `27.5 KB` | `44.1 KB` |
+| 264   |   `40.2 KB` |    `26.0 KB` |                 `34.4 KB` | `44.1 KB` |
+| 276   |   `44.2 KB` |    `25.3 KB` |                 `27.1 KB` | `45.0 KB` |
+| 277   |   `41.9 KB` |    `25.4 KB` |                 `29.8 KB` | `45.0 KB` |
+| 280   |   `43.2 KB` |    `26.4 KB` |                 `31.0 KB` | `45.0 KB` |
 
-Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, and 277 as sprite users because particles render through billboard sprite modules.
+Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, and 280 as sprite users because particles render through billboard sprite modules.
 
-The particle bundle-content test always requires a nonempty runtime chunk list for each of the five scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/direction/angle update, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, and scene 277 must fetch `update-attractor-block`.
+The particle bundle-content test always requires a nonempty runtime chunk list for each of the six scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/direction/angle update, CPU texture decode, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, and only scene 280 may fetch `npe-flow-map-runtime`, which contains the flow evaluator, CPU texture decoder, and specialized builder.
 
 When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, and `math/mat4-invert.ts`. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
 
@@ -1162,11 +1228,13 @@ packages/babylon-lite/src/particle/sprite-columns-random.ts
 packages/babylon-lite/src/particle/sprite-columns.ts
 ```
 
-### 14.2 Node infrastructure and registries: 17 files
+### 14.2 Node infrastructure and registries: 20 files
 
 ```text
 packages/babylon-lite/src/particle/node/node-particle.ts
 packages/babylon-lite/src/particle/node/npe-build.ts
+packages/babylon-lite/src/particle/node/npe-flow-map-runtime.ts
+packages/babylon-lite/src/particle/node/npe-flow-map.ts
 packages/babylon-lite/src/particle/node/npe-contextual-extra.ts
 packages/babylon-lite/src/particle/node/npe-contextual.ts
 packages/babylon-lite/src/particle/node/npe-local-position.ts
@@ -1180,11 +1248,12 @@ packages/babylon-lite/src/particle/node/npe-registry-local-shapes.ts
 packages/babylon-lite/src/particle/node/npe-registry-variants.ts
 packages/babylon-lite/src/particle/node/npe-registry.ts
 packages/babylon-lite/src/particle/node/npe-snippet.ts
+packages/babylon-lite/src/particle/node/npe-texture-content.ts
 packages/babylon-lite/src/particle/node/npe-types.ts
 packages/babylon-lite/src/particle/node/npe-value.ts
 ```
 
-### 14.3 Block evaluators and helpers: 42 files
+### 14.3 Block evaluators and helpers: 44 files
 
 ```text
 packages/babylon-lite/src/particle/node/blocks/basic-sprite-update-block.ts
@@ -1195,6 +1264,7 @@ packages/babylon-lite/src/particle/node/blocks/cone-shape-local-block.ts
 packages/babylon-lite/src/particle/node/blocks/create-particle-block.ts
 packages/babylon-lite/src/particle/node/blocks/cylinder-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/cylinder-shape-local-block.ts
+packages/babylon-lite/src/particle/node/blocks/flow-map-texture-source-block.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-local-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-condition-block.ts
@@ -1227,6 +1297,7 @@ packages/babylon-lite/src/particle/node/blocks/update-angle-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-attractor-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-color-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-direction-block.ts
+packages/babylon-lite/src/particle/node/blocks/update-flow-map-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-position-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-size-block.ts
 ```
@@ -1236,6 +1307,7 @@ packages/babylon-lite/src/particle/node/blocks/update-size-block.ts
 These files are imported directly by particle source files or define the package-root exports:
 
 ```text
+packages/babylon-lite/src/camera/camera.ts
 packages/babylon-lite/src/engine/engine.ts
 packages/babylon-lite/src/math/mat4-identity.ts
 packages/babylon-lite/src/math/mat4-invert.ts
@@ -1264,20 +1336,25 @@ lab/lite/src/lite/scene263.ts
 lab/lite/src/lite/scene264.ts
 lab/lite/src/lite/scene276.ts
 lab/lite/src/lite/scene277.ts
+lab/lite/src/lite/scene280.ts
 lab/lite/src/shared/scene262-npe.ts
 lab/lite/src/shared/scene263-npe.ts
 lab/lite/src/shared/scene264-npe.ts
 lab/lite/src/shared/scene276-npe.ts
 lab/lite/src/shared/scene277-npe.ts
+lab/lite/src/shared/scene280-npe.ts
 lab/public/bundle/manifest/scene262.json
 lab/public/bundle/manifest/scene263.json
 lab/public/bundle/manifest/scene264.json
 lab/public/bundle/manifest/scene276.json
 lab/public/bundle/manifest/scene277.json
+lab/public/bundle/manifest/scene280.json
 tests/lite/parity/scenes/scene262-npe-size.spec.ts
 tests/lite/parity/scenes/scene263-npe-sphere.spec.ts
 tests/lite/parity/scenes/scene264-npe-change-size.spec.ts
 tests/lite/parity/scenes/scene276-npe-animations.spec.ts
 tests/lite/parity/scenes/scene277-npe-attractor.spec.ts
+tests/lite/parity/scenes/scene280-npe-flow-map.spec.ts
+tests/lite/unit/npe-particle-flow-map.test.ts
 tests/lite/unit/npe-particle-bundle-content.test.ts
 ```
