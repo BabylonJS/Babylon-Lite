@@ -26,6 +26,7 @@ import {
     createTorus,
     markMaterialUboDirty,
     registerScene,
+    setPbrUnlit,
     startEngine,
 } from "babylon-lite";
 
@@ -82,8 +83,8 @@ async function main(): Promise<void> {
         roughnessFactor: 0.7,
         directIntensity: 1.0,
         environmentIntensity: 0.0,
-        unlit: true,
     });
+    setPbrUnlit(pbrMaterial);
     pbrMesh.material = pbrMaterial;
     addToScene(scene, pbrMesh);
     const pbrDepthView = createPbrNoColorMaterialView(pbrMaterial);

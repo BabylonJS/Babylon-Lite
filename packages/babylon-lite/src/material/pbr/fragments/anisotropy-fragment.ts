@@ -9,6 +9,7 @@
 import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
+import { PBR_HAS_ANISOTROPY } from "../pbr-flag-bits.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -108,16 +109,40 @@ let anisoA = anisoSq * anisoSq * anisoSq * anisoSq;
 anisoBentNormal = normalize(mix(anisoBentNormal, N, anisoA));
 let R_raw = reflect(-V, anisoBentNormal);`;
 
+/** @internal Anisotropy composer template hooks. Carried on the registered `pbrExt`
+ *  object so the always-loaded composer can weave the anisotropic BRDF / tangent-frame
+ *  WGSL into the main PBR template WITHOUT a static import of this lazy module — the
+ *  strings travel with the ext object, which only exists once anisotropy is registered
+ *  (via {@link setPbrAnisotropy} or the glTF KHR_materials_anisotropy handler). */
+export interface AnisoTemplateHooks {
+    /** @internal Anisotropic BRDF helper functions (top-of-shader). */
+    readonly _anisoBrdf: string;
+    /** @internal Tangent/bitangent computation block for the given normal/texture mode. */
+    readonly _anisoTB: (hasNormal: boolean, hasTexture: boolean) => string;
+    /** @internal IBL bent-normal computation. */
+    readonly _anisoBentNormal: string;
+    /** @internal features2 bit set when an anisotropyTexture is present. */
+    readonly _anisoTexBit: number;
+}
+
 /** Anisotropy extension. Writes its material-UBO slice (anisotropyParams, and when an
  *  anisotropyTexture is present, anisotropyUVm/anisotropyUVt) and — only for the textured
  *  case — contributes the texture binding + UV-transform UBO fields via `frag()`. The
- *  anisotropic BRDF / tangent-frame WGSL is injected through the template strings above. */
-export const pbrExt: PbrExt = {
+ *  anisotropic BRDF / tangent-frame WGSL is injected through the template strings above,
+ *  carried on this object via {@link AnisoTemplateHooks}. */
+export const pbrExt: PbrExt & AnisoTemplateHooks = {
     id: "anisotropy",
     phase: "fragment",
+    _anisoBrdf: ANISO_BRDF_FUNCTIONS,
+    _anisoTB: makeAnisotropyTBBlock,
+    _anisoBentNormal: ANISO_BENT_NORMAL,
+    _anisoTexBit: PBR2_HAS_ANISO_TEX,
     detect(mat) {
-        const aniso = (mat as PbrMaterialProps).anisotropy;
-        return { f: 0, f2: aniso?.isEnabled && aniso.texture ? PBR2_HAS_ANISO_TEX : 0 };
+        const aniso = (mat as PbrMaterialProps)._anisotropy;
+        if (!aniso?.isEnabled) {
+            return { f: 0, f2: 0 };
+        }
+        return { f: PBR_HAS_ANISOTROPY, f2: aniso.texture ? PBR2_HAS_ANISO_TEX : 0 };
     },
     frag(ctx) {
         if ((ctx._features2 & PBR2_HAS_ANISO_TEX) === 0) {
@@ -135,7 +160,7 @@ export const pbrExt: PbrExt = {
         return frag;
     },
     writeUbo(data: Float32Array, material: unknown, offsets: ReadonlyMap<string, number>): void {
-        const aniso = (material as PbrMaterialProps).anisotropy;
+        const aniso = (material as PbrMaterialProps)._anisotropy;
         if (!aniso?.isEnabled || !offsets.has("anisotropyParams")) {
             return;
         }
@@ -176,7 +201,7 @@ export const pbrExt: PbrExt = {
         data[ti + 3] = 0;
     },
     bind(ctx, entries, b) {
-        const aniso = (ctx._material as PbrMaterialProps).anisotropy;
+        const aniso = (ctx._material as PbrMaterialProps)._anisotropy;
         if ((ctx._features2 & PBR2_HAS_ANISO_TEX) === 0 || !aniso?.texture) {
             return b;
         }
@@ -185,7 +210,7 @@ export const pbrExt: PbrExt = {
         return b;
     },
     textures(mat, out) {
-        const aniso = (mat as PbrMaterialProps).anisotropy;
+        const aniso = (mat as PbrMaterialProps)._anisotropy;
         if (aniso?.texture) {
             out.push(aniso.texture);
         }
