@@ -11,6 +11,7 @@ import type { SurfaceContext } from "../engine/surface.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
+import type { CurveSetId } from "./glyph-storage.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
 import { getOrCreateTextPipeline } from "./_gpu/text-pipeline.js";
 
@@ -125,9 +126,14 @@ interface LayerGpu {
     instanceBuf: GPUBuffer;
     instanceCap: number;
     pipeline: GPURenderPipeline | null;
-    /** Per-draw-group bind groups; rebuilt when atlas grows. */
+    /** Per-draw-group bind groups; rebuilt when atlas grows. Indexed by draw-group index,
+     *  which is NOT stable: `data._groups` is spliced when a group empties and rebuilt in
+     *  map-insertion order by `applyReset`. `bindGroupCurveSetIds` records which curve set
+     *  each cached entry was built for so a reordered group cannot inherit another curve
+     *  set's atlas textures. */
     bindGroups: GPUBindGroup[];
     bindGroupAtlasVersions: number[];
+    bindGroupCurveSetIds: CurveSetId[];
     uploadedDataVersion: number;
     uploadedViewportW: number;
     uploadedViewportH: number;
@@ -192,6 +198,7 @@ function ensureLayerGpu(rr: TextRenderer, layer: TextLayer): LayerGpu {
         pipeline: null,
         bindGroups: [],
         bindGroupAtlasVersions: [],
+        bindGroupCurveSetIds: [],
         uploadedDataVersion: -1,
         uploadedViewportW: 0,
         uploadedViewportH: 0,
@@ -236,7 +243,8 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
         const { rebuilt, gpu: atlasGpu } = ensureSharedAtlasGpu(device, g.curveSet.atlas);
         const current = lg.bindGroups[i];
         const currentVer = lg.bindGroupAtlasVersions[i] ?? -1;
-        if (!current || rebuilt || currentVer !== atlasGpu.uploadedVersion) {
+        const currentCurveSetId = lg.bindGroupCurveSetIds[i];
+        if (!current || rebuilt || currentVer !== atlasGpu.uploadedVersion || currentCurveSetId !== g.curveSetId) {
             lg.bindGroups[i] = device.createBindGroup({
                 label: "text-renderer-bg0-" + g.curveSetId,
                 layout: bindGroupLayout,
@@ -247,6 +255,7 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
                 ],
             });
             lg.bindGroupAtlasVersions[i] = atlasGpu.uploadedVersion;
+            lg.bindGroupCurveSetIds[i] = g.curveSetId;
             // Bundle baked the old bind group; force a re-record.
             lg.renderBundle = null;
         }
@@ -254,6 +263,7 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
     if (lg.bindGroups.length > data._groups.length) {
         lg.bindGroups.length = data._groups.length;
         lg.bindGroupAtlasVersions.length = data._groups.length;
+        lg.bindGroupCurveSetIds.length = data._groups.length;
         lg.renderBundle = null;
     }
 
@@ -374,6 +384,7 @@ function textRendererUpdate(rr: TextRenderer): void {
             // Pipeline change → bind groups must be rebuilt against new bindGroupLayout.
             lg.bindGroups.length = 0;
             lg.bindGroupAtlasVersions.length = 0;
+            lg.bindGroupCurveSetIds.length = 0;
             // Bundle baked the old pipeline; force a re-record.
             lg.renderBundle = null;
         }
