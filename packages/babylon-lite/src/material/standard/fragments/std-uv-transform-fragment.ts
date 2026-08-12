@@ -34,7 +34,16 @@ const CHANNELS = [
     ["o", HAS_OPACITY_TEXTURE, 0, "opacityTexture", null],
 ] as const;
 
-function writeChannel(data: Float32Array, channel: number, texture: Texture2D | null, material: StandardMaterialProps, usesUv2: boolean, legacyFlipV: boolean): void {
+function writeChannel(
+    data: Float32Array,
+    channel: number,
+    texture: Texture2D | null,
+    material: StandardMaterialProps,
+    materialOffsetX: number,
+    materialOffsetY: number,
+    usesUv2: boolean,
+    legacyFlipV: boolean
+): void {
     const offset = channel * FLOATS_PER_CHANNEL;
     const sx = texture?.uScale ?? 1;
     const sy = texture?.vScale ?? 1;
@@ -46,11 +55,10 @@ function writeChannel(data: Float32Array, channel: number, texture: Texture2D | 
     const m10 = -s * sx;
     const m11 = c * sy;
 
-    const materialOffset = material.uvOffset ?? [0, 0];
     const baseScaleX = usesUv2 ? 1 : material.uvScale[0];
     const baseScaleY = usesUv2 ? 1 : material.uvScale[1];
-    const baseOffsetX = usesUv2 ? 0 : materialOffset[0];
-    const baseOffsetY = usesUv2 ? 0 : materialOffset[1];
+    const baseOffsetX = usesUv2 ? 0 : materialOffsetX;
+    const baseOffsetY = usesUv2 ? 0 : materialOffsetY;
 
     data[offset] = m00 * baseScaleX;
     data[offset + 1] = m01 * baseScaleY;
@@ -68,10 +76,21 @@ function writeChannel(data: Float32Array, channel: number, texture: Texture2D | 
 }
 
 function writeUvTransformData(data: Float32Array, material: StandardMaterialProps): void {
+    const materialOffsetX = material.uvOffset?.[0] ?? 0;
+    const materialOffsetY = material.uvOffset?.[1] ?? 0;
     for (let i = 0; i < CHANNELS.length; i++) {
         const [, , , textureKey, coordIndexKey] = CHANNELS[i]!;
         const texture = material[textureKey];
-        writeChannel(data, i, texture, material, coordIndexKey !== null && material[coordIndexKey] === 1, textureKey === "lightmapTexture" && texture?.uAng === Math.PI);
+        writeChannel(
+            data,
+            i,
+            texture,
+            material,
+            materialOffsetX,
+            materialOffsetY,
+            coordIndexKey !== null && material[coordIndexKey] === 1,
+            textureKey === "lightmapTexture" && texture?.uAng === Math.PI
+        );
     }
 }
 
@@ -118,7 +137,7 @@ export const stdUvTransformExt: StdExt = {
     _frag: createStdUvTransformFragment,
     _bind(material, entries, binding, _mesh, engine) {
         if (!engine) {
-            throw new Error("Standard UV transform binding context is missing");
+            throw new Error("Standard UV transform _bind requires the engine argument from the Standard bind-group builder");
         }
         const data = new Float32Array(FLOATS_PER_CHANNEL * CHANNEL_COUNT);
         writeUvTransformData(data, material);

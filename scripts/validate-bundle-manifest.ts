@@ -11,15 +11,15 @@
  * This script is meant to run in CI AFTER `pnpm build:bundle-scenes`, which
  * overwrites the working-tree per-scene files with freshly measured sizes. It
  * compares those freshly built files against the versions committed at `git
- * HEAD`. Raw size is compared exactly, in bytes (`rawBytes`), because `rawKB` is
- * rounded to 0.1 KB and hides sub-50-byte drift. gzip stays rounded to whole KB:
- * its output varies with the zlib build, so an exact check would fail spuriously
- * across environments.
+ * HEAD`. Raw size uses `rawBytes` with a 10-byte freshness tolerance for global
+ * minifier-allocation shifts; the subsequent bundle ceiling test still checks
+ * every freshly built scene's exact bytes. gzip permits one rounded KB because
+ * its output varies with the zlib build.
  *
- * It also compares each scene's `runtimeChunks` set. Chunk filenames carry a
- * content hash, so they change whenever a PR alters code that actually lands in
- * that scene's bundle (its own scene code or a shared module it imports). This
- * catches content-only changes that leave the rounded KB sizes unchanged.
+ * It also compares each scene's logical `runtimeChunks` set after removing
+ * Vite's content hashes. Added or removed runtime features remain visible, while
+ * content-hash-only churn does not force unrelated manifest rewrites. Exact
+ * `rawBytes` still catches every runtime-size movement.
  *
  * Exit code 1 (with a helpful message) when the committed manifest is stale.
  *
@@ -28,6 +28,7 @@
 import { execFileSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
+import { diffGzipSize, diffRuntimeChunks, rawByteDriftExceedsTolerance } from "./bundle-manifest-chunks.js";
 
 const MANIFEST_DIR_REL_PATH = "lab/public/bundle/manifest";
 // Legacy single-file path, kept to validate against pre-migration HEAD commits.
@@ -46,19 +47,17 @@ function roundToWholeKB(kb: number | undefined): number {
     return Math.round(kb ?? 0);
 }
 
-/** Compare raw size as exactly as both sides allow.
+/** Compare raw size as precisely as both sides allow.
  *
- *  `rawBytes` is exact and deterministic (a sum of fetched file lengths), so when both
- *  sides carry it they are compared byte-for-byte: `rawKB` alone is rounded to 0.1 KB and
- *  hides sub-50-byte drift, which is precisely how a stale manifest slipped through on a
- *  zero-headroom scene. Entries committed before `rawBytes` existed fall back to the old
- *  whole-KB comparison rather than failing spuriously.
+ *  `rawBytes` is deterministic (a sum of fetched file lengths), but adding an unused root
+ *  export can shift minifier identifier allocation by a few bytes in unrelated scenes.
+ *  Ignore at most 10 bytes here; the exact freshly built value still feeds the absolute
+ *  ceiling test. Entries committed before `rawBytes` existed fall back to whole KB.
  *
- *  gzip is deliberately NOT compared exactly: its output varies with the zlib build, so an
- *  exact check would fail across environments. It stays rounded to whole KB. */
+ *  gzip is deliberately NOT compared exactly: its output varies with the zlib build. */
 function diffRawSize(committed: ManifestEntry, built: ManifestEntry): string | null {
     if (committed.rawBytes != null && built.rawBytes != null) {
-        if (committed.rawBytes !== built.rawBytes) {
+        if (rawByteDriftExceedsTolerance(committed.rawBytes, built.rawBytes)) {
             const delta = built.rawBytes - committed.rawBytes;
             return `committed raw=${committed.rawBytes}B → rebuilt raw=${built.rawBytes}B (${delta > 0 ? "+" : ""}${delta} bytes)`;
         }
@@ -67,28 +66,6 @@ function diffRawSize(committed: ManifestEntry, built: ManifestEntry): string | n
     const committedRaw = roundToWholeKB(committed.rawKB);
     const builtRaw = roundToWholeKB(built.rawKB);
     return committedRaw === builtRaw ? null : `committed raw=${committedRaw}KB → rebuilt raw=${builtRaw}KB`;
-}
-
-/** Compare two chunk lists as order-independent sets. Returns null when equal. */
-function diffRuntimeChunks(committed: string[] | undefined, built: string[] | undefined): string | null {
-    const committedSet = new Set(committed ?? []);
-    const builtSet = new Set(built ?? []);
-
-    const added = [...builtSet].filter((c) => !committedSet.has(c)).sort();
-    const removed = [...committedSet].filter((c) => !builtSet.has(c)).sort();
-
-    if (added.length === 0 && removed.length === 0) {
-        return null;
-    }
-
-    const parts: string[] = [];
-    if (removed.length > 0) {
-        parts.push(`-${removed.join(", -")}`);
-    }
-    if (added.length > 0) {
-        parts.push(`+${added.join(", +")}`);
-    }
-    return parts.join("  ");
 }
 
 function parseJson<T>(text: string, source: string): T {
@@ -198,10 +175,9 @@ function main(): void {
             mismatches.push(`  ${key}: ${rawDiff}`);
         }
 
-        const builtGzip = roundToWholeKB(builtEntry.gzipKB);
-        const committedGzip = roundToWholeKB(committedEntry.gzipKB);
-        if (builtGzip !== committedGzip) {
-            mismatches.push(`  ${key}: committed gzip=${committedGzip}KB → rebuilt gzip=${builtGzip}KB`);
+        const gzipDiff = diffGzipSize(committedEntry.gzipKB, builtEntry.gzipKB);
+        if (gzipDiff !== null) {
+            mismatches.push(`  ${key}: ${gzipDiff}`);
         }
 
         const chunkDiff = diffRuntimeChunks(committedEntry.runtimeChunks, builtEntry.runtimeChunks);
@@ -223,7 +199,7 @@ function main(): void {
                 `(that needs a working SwiftShader WebGPU stack — fine on Linux/CI, unreliable on Windows. If it\n` +
                 `cannot run, restore those files to their committed values: they are CI-authored.)\n` +
                 `\n` +
-                `Differences (committed vs rebuilt; raw compared exactly in bytes, gzip rounded to whole KB):\n` +
+                `Differences (committed vs rebuilt; raw tolerance 10 bytes, gzip tolerance 1 rounded KB):\n` +
                 mismatches.join("\n")
         );
         process.exit(1);

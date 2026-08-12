@@ -1,60 +1,72 @@
-// Scene 280: opt-in per-texture UV transform on a hand-built StandardMaterial.
+// Scene 280: Node Particle Editor - Update Flow Map.
 
 import {
-    addToScene,
+    addFacingBillboardSystem,
+    animateParticleSystem,
+    attachControl,
+    buildNodeParticleSetWithFlowMaps,
     createArcRotateCamera,
     createEngine,
-    createPlane,
+    createParticleBillboard,
     createSceneContext,
-    createStandardMaterial,
-    createTexture2DFromPixels,
-    enableMaterialUvTransform,
+    parseNodeParticleSource,
     registerScene,
     startEngine,
+    startParticleSystem,
+    syncParticleBillboard,
 } from "babylon-lite";
-import { buildTexturePixels, TEXTURE_SIZE, UV_OFFSET, UV_ROTATION, UV_SCALE } from "../shared/scene280-standard-uv-transform.js";
+import { createScene280NpeJson } from "../shared/scene280-npe.js";
+
+const STEPS = 300;
 
 async function main(): Promise<void> {
+    const initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
-    scene.clearColor = { r: 0.035, g: 0.045, b: 0.07, a: 1 };
-    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 4, { x: 0, y: 0, z: 0 });
+    scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    const texture = createTexture2DFromPixels(engine, buildTexturePixels(), TEXTURE_SIZE, TEXTURE_SIZE, {
-        addressModeU: "repeat",
-        addressModeV: "repeat",
-        minFilter: "nearest",
-        magFilter: "nearest",
+    const camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 9, { x: -5, y: 0, z: 0 });
+    camera.nearPlane = 0.1;
+    camera.farPlane = 100;
+    scene.camera = camera;
+    attachControl(camera, canvas, scene);
+
+    const graph = parseNodeParticleSource(createScene280NpeJson());
+    const set = await buildNodeParticleSetWithFlowMaps(engine, scene, graph, {
+        emitter: { x: 0, y: 0, z: 0 },
+        textureBaseUrl: "https://playground.babylonjs.com/",
     });
-    texture.uScale = UV_SCALE[0];
-    texture.vScale = UV_SCALE[1];
-    texture.uOffset = UV_OFFSET[0];
-    texture.vOffset = UV_OFFSET[1];
-    texture.uAng = UV_ROTATION;
-    texture.invertY = true;
+    const system = set.systems[0]!;
 
-    const material = createStandardMaterial();
-    material.disableLighting = true;
-    material.diffuseColor = [1, 1, 1];
-    material.emissiveColor = [1, 1, 1];
-    material.diffuseTexture = texture;
-    enableMaterialUvTransform(material);
+    let seed = 1;
+    Math.random = () => {
+        const x = Math.sin(seed++) * 10000;
+        return x - Math.floor(x);
+    };
 
-    const plane = createPlane(engine, { width: 3, height: 3 });
-    plane.material = material;
-    addToScene(scene, plane);
+    startParticleSystem(system);
+    for (let i = 0; i < STEPS; i++) {
+        animateParticleSystem(system, 1);
+    }
+
+    const billboard = createParticleBillboard(system);
+    syncParticleBillboard(system, billboard);
+    addFacingBillboardSystem(scene, billboard);
 
     await registerScene(scene);
     await startEngine(engine);
+
     canvas.dataset.drawCalls = String(engine.drawCallCount);
+    canvas.dataset.initMs = String(performance.now() - initStart);
+    canvas.dataset.animationFrozen = "true";
     canvas.dataset.ready = "true";
 }
 
-main().catch((error: unknown) => {
+main().catch((err) => {
+    console.error(err);
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
     if (canvas) {
-        canvas.dataset.error = error instanceof Error ? error.message : String(error);
+        canvas.dataset.error = String(err instanceof Error ? err.message : err);
     }
-    console.error(error);
 });

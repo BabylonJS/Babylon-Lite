@@ -13,9 +13,17 @@ import type { StandardMaterialProps } from "./standard/standard-material.js";
  * feature set was compiled, when applying the opt-in requires `rebuildMaterial`. */
 export function enableMaterialUvTransform(material: PbrMaterialProps | StandardMaterialProps): boolean {
     if (!material._hasUvTx && material._buildGroup._materialFamily === "standard") {
+        const builder = material._buildGroup;
         const preload = import("./standard/fragments/std-uv-transform-fragment.js").then((module) => module.registerStdUvTransformExt());
+        const pending = builder._preload ? Promise.all([builder._preload, preload]).then(() => {}) : preload;
         (material as StandardMaterialProps)._uvTxExt = preload;
-        material._buildGroup._preload = preload;
+        builder._preload = pending;
+        const clear = () => {
+            if (builder._preload === pending) {
+                builder._preload = undefined;
+            }
+        };
+        void pending.then(clear, clear);
     }
     material._hasUvTx = true;
     return material._renderFeatures === undefined;

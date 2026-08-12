@@ -1,54 +1,69 @@
-// Babylon.js reference for scene 280: StandardMaterial texture scale, offset, and rotation.
+// Babylon.js reference for scene 280: the same serialized NPE flow-map graph and deterministic steps as Lite.
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
-import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
-import { Texture } from "@babylonjs/core/Materials/Textures/texture";
-import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
+import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Scene } from "@babylonjs/core/scene";
-import { buildTexturePixels, TEXTURE_SIZE, UV_OFFSET, UV_ROTATION, UV_SCALE } from "../shared/scene280-standard-uv-transform.js";
+import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
+import { NodeParticleSystemSet } from "@babylonjs/core/Particles/Node/nodeParticleSystemSet";
+import "@babylonjs/core/Particles/Node/Blocks";
+import "@babylonjs/core/Shaders/particles.vertex";
+import "@babylonjs/core/Shaders/particles.fragment";
+import { createScene280NpeJson } from "../shared/scene280-npe.js";
+
+const STEPS = 300;
 
 (async function () {
+    const initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
-    engine.displayLoadingUI = function () {};
 
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(0.035, 0.045, 0.07, 1);
-    scene.activeCamera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2, 4, Vector3.Zero(), scene);
+    scene.clearColor = new Color4(0, 0, 0, 1);
 
-    const texture = RawTexture.CreateRGBATexture(buildTexturePixels(), TEXTURE_SIZE, TEXTURE_SIZE, scene, false, true, Texture.NEAREST_SAMPLINGMODE);
-    texture.wrapU = Texture.WRAP_ADDRESSMODE;
-    texture.wrapV = Texture.WRAP_ADDRESSMODE;
-    texture.uScale = UV_SCALE[0];
-    texture.vScale = UV_SCALE[1];
-    texture.uOffset = UV_OFFSET[0];
-    texture.vOffset = UV_OFFSET[1];
-    texture.wAng = -UV_ROTATION;
-    texture.uRotationCenter = 0;
-    texture.vRotationCenter = 0;
+    const camera = new ArcRotateCamera("cam", Math.PI / 2, Math.PI / 2, 9, new Vector3(-5, 0, 0), scene);
+    camera.minZ = 0.1;
+    camera.maxZ = 100;
 
-    const material = new StandardMaterial("standard-uv-transform", scene);
-    material.disableLighting = true;
-    material.diffuseColor = Color3.White();
-    material.emissiveColor = Color3.White();
-    material.diffuseTexture = texture;
+    const set = NodeParticleSystemSet.Parse(createScene280NpeJson());
+    const built = await set.buildAsync(scene);
+    const system = built.systems[0] as ParticleSystem;
+    system.particleTexture = new Texture("https://playground.babylonjs.com/textures/flare.png", scene);
+    system.preWarmStepOffset = 1;
 
-    const plane = MeshBuilder.CreatePlane("standard-uv-transform-plane", { width: 3, height: 3 }, scene);
-    plane.material = material;
+    let seed = 1;
+    Math.random = () => {
+        const x = Math.sin(seed++) * 10000;
+        return x - Math.floor(x);
+    };
+    scene.updateTransformMatrix(true);
+    system.start();
+    for (let i = 0; i < STEPS; i++) {
+        system.animate(true);
+    }
+    system.updateSpeed = 0;
+
+    const engineWithDrawCalls = engine as unknown as { _drawCalls?: { current: number; fetchNewFrame?: () => void } };
+    scene.onBeforeRenderObservable.add(() => {
+        engineWithDrawCalls._drawCalls?.fetchNewFrame?.();
+    });
+    scene.onAfterRenderObservable.add(() => {
+        canvas.dataset.drawCalls = String(engineWithDrawCalls._drawCalls?.current ?? 0);
+    });
 
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
     await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
+    canvas.dataset.initMs = String(performance.now() - initStart);
     canvas.dataset.ready = "true";
-})().catch((error: unknown) => {
+})().catch((err) => {
+    console.error(err);
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
     if (canvas) {
-        canvas.dataset.error = error instanceof Error ? error.message : String(error);
+        canvas.dataset.error = String(err);
     }
-    console.error(error);
 });

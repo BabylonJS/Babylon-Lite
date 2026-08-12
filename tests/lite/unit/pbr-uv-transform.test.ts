@@ -22,11 +22,15 @@ describe("material UV transform detection", () => {
     });
 
     it("queues the StandardMaterial extension preload", async () => {
-        const material = { _buildGroup: { _materialFamily: "standard" } } as StandardMaterialProps;
+        const previous = Promise.resolve();
+        const builder = { _materialFamily: "standard" as const, _preload: previous };
+        const material = { _buildGroup: builder } as StandardMaterialProps;
         expect(enableMaterialUvTransform(material)).toBe(true);
         expect(material._hasUvTx).toBe(true);
-        expect(material._uvTxExt).toBe(material._buildGroup._preload);
+        expect(builder._preload).not.toBe(previous);
         await material._uvTxExt;
+        await builder._preload;
+        expect(builder._preload).toBeUndefined();
     });
 
     it("composes a transformed diffuse varying for StandardMaterial", () => {

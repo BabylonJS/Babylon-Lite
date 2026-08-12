@@ -153,6 +153,6 @@ export type MeshGroupBuilder = ((scene: SceneContext, meshes: Mesh[]) => Promise
     _rebuildSingle?: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
     /** @internal */
     _materialFamily?: "standard" | "pbr" | "node" | "shader";
-    /** @internal Pending feature preload required before this builder runs. */
+    /** @internal Pending opt-in feature preload required before this builder runs. */
     _preload?: Promise<void>;
 };
