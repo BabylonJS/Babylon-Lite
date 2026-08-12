@@ -113,19 +113,16 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
                 })
             );
         }
-        if (_stdMeshExtPreloads) {
-            for (const preload of _stdMeshExtPreloads) {
-                imports.push(preload);
-            }
+        imports.push(...(_stdMeshExtPreloads ?? []));
+        if (builder._preload) {
+            imports.push(builder._preload);
         }
         for (const [prop, load, key] of _STD_MAT_EXTS) {
             if (meshes.some((m) => !!(m.material as any)[prop])) {
                 imports.push(load().then((mod) => _registerStdExt(mod[key])));
             }
         }
-        if (imports.length > 0) {
-            await Promise.all(imports);
-        }
+        await Promise.all(imports);
 
         const renderableMod = await import("./standard-renderable.js");
         const sceneShader: StandardSceneShaderContext | null = scene.fog ? { _features: STD_SCENE_FOG, _fragments: [fogFragment!] } : null;

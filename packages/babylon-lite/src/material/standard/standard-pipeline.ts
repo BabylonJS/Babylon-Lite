@@ -327,7 +327,6 @@ export function createStandardMeshBindGroup(
 ): GPUBindGroup {
     const device = engine._device;
     const features = bindings._features;
-    const needsUV = (features & NEEDS_UV) !== 0;
     const hasDiffuseTex = (features & HAS_DIFFUSE_TEXTURE) !== 0;
     const esmShadowOutput = (features & ESM_SHADOW_OUTPUT) !== 0;
 
@@ -350,7 +349,7 @@ export function createStandardMeshBindGroup(
     }
 
     // UV params UBO (only when UVs are actually emitted).
-    if (needsUV) {
+    if (features & NEEDS_UV) {
         const uvData = new F32(4);
         writeStandardUvTransformData(uvData, material, isStandardUvInverted(features, material));
         entries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
@@ -365,10 +364,9 @@ export function createStandardMeshBindGroup(
 
     // Fragment-contributed bindings — iterate ext registry in alphabetical id order
     // to match composer's fragment sort order.
-    const sortedExts = _getStdExtsSorted();
-    for (const ext of sortedExts) {
+    for (const ext of _getStdExtsSorted()) {
         if (features & ext._feature && ext._bind) {
-            nextBinding = ext._bind(material, entries, nextBinding, mesh);
+            nextBinding = ext._bind(material, entries, nextBinding, mesh, engine);
         }
     }
 

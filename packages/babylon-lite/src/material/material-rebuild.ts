@@ -71,6 +71,13 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
     }
     const builder = material._buildGroup;
     const group = ctx._groups.get(builder);
+    const preload = (material as Material & { _uvTxExt?: Promise<void> })._uvTxExt;
+    if (preload && (ctx._built || group?.r)) {
+        return preload
+            .then(() => import("../scene/scene-runtime-mesh-build.js"))
+            .then(({ B }) => B(ctx, builder, mesh))
+            .then(() => ctx._runtimeBuilds?._e(false));
+    }
     if (mesh._runtimeThinBuild || ctx._runtimeBuilds?.w || (builder._materialFamily === "pbr" && (ctx._built || group?.r))) {
         if (!ctx._built && !group?.r) {
             return false;

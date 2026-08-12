@@ -6,8 +6,9 @@ import type { StdExt } from "../standard-flags.js";
 import { HAS_DEPTH_EMISSIVE_TEXTURE, HAS_EMISSIVE_TEXTURE } from "../standard-flags.js";
 
 const STAGE_FRAGMENT = 0x2;
+const STD_HAS_UV_TRANSFORM = 1 << 23;
 
-export function createStdEmissiveFragment(depthTexture: boolean): ShaderFragment {
+export function createStdEmissiveFragment(depthTexture: boolean, uv = "input.vu"): ShaderFragment {
     return {
         _id: "std-emissive",
         _bindings: [
@@ -19,7 +20,7 @@ export function createStdEmissiveFragment(depthTexture: boolean): ShaderFragment
             { _name: "eS", _type: { _kind: "sampler", _samplerType: depthTexture ? "sampler_non_filtering" : "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
         _fragmentSlots: {
-            AT: `emissiveContrib = mat.ec + textureSample(eT, eS, input.vu).rgb * mat.tl;`,
+            AT: `emissiveContrib = mat.ec + textureSample(eT, eS, ${uv}).rgb * mat.tl;`,
         },
     };
 }
@@ -28,7 +29,7 @@ export const stdEmissiveExt: StdExt = {
     _id: "std-emissive",
     _phase: "mesh",
     _feature: HAS_EMISSIVE_TEXTURE,
-    _frag: (features) => createStdEmissiveFragment((features & HAS_DEPTH_EMISSIVE_TEXTURE) !== 0),
+    _frag: (features) => createStdEmissiveFragment((features & HAS_DEPTH_EMISSIVE_TEXTURE) !== 0, (features & STD_HAS_UV_TRANSFORM) !== 0 ? "input.ve" : "input.vu"),
     _bind(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number {
         const tex = mat.emissiveTexture!;
         entries.push({ binding: b++, resource: tex.view });

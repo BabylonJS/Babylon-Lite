@@ -100,6 +100,10 @@ export interface StandardMaterialProps extends Material {
     uvScale: [number, number];
     /** Optional UV translation applied after scale. Missing values behave as [0, 0]. */
     uvOffset?: [number, number];
+    /** @internal True when per-texture UV transforms are enabled. */
+    _hasUvTx?: boolean;
+    /** @internal Pending lazy registration started by enableMaterialUvTransform. */
+    _uvTxExt?: Promise<void>;
     /** Back-face culling. Default true (BJS convention). False = double-sided. */
     backFaceCulling: boolean;
     /** When true, skip all lighting and output emissive * diffuse * baseColor. Default false. */

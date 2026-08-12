@@ -193,21 +193,6 @@ export interface PbrMaterialProps extends Material {
     stencil?: StencilState;
 }
 
-/** Opt a PBR material into the per-texture UV transform machinery ahead of need.
- *
- *  Call this before the first build for hand-created materials that use or animate
- *  `uScale`/`vScale`/`uAng`/`uOffset`/`vOffset`. Pair later mutations with
- *  `markMaterialUboDirty`. glTF materials are enabled automatically by the loader.
- *
- *  Returns `true` when the material has not been built yet, so the flag simply rides the first
- *  build. Returns `false` when the material's feature set was already compiled: the flag is set,
- *  but applying it needs `rebuildMaterial(scene, material)` — the designed path for post-build
- *  feature changes — or nothing visible happens. */
-export function enableMaterialUvTransform(material: PbrMaterialProps): boolean {
-    material._hasUvTx = true;
-    return (material as { _renderFeatures?: unknown })._renderFeatures === undefined;
-}
-
 /** @internal Compute PBR material-only feature bits. Mesh/pass bits are added per renderable. */
 export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: number; features2: number } {
     let features =

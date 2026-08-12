@@ -150,7 +150,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         }
         const vertexBufferBinders: NonNullable<StdExt["_bindVertexBuffers"]>[] = [];
         for (const ext of sortedExts) {
-            features |= ext._meshFeatures?.(meshFeatures) ?? 0;
+            features |= ext._meshFeatures?.(meshFeatures, mat) ?? 0;
             if (features & ext._feature) {
                 const f = ext._frag(features, meshFeatures);
                 if (f) {

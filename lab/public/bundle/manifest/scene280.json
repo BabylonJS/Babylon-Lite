@@ -1,0 +1,11 @@
+{
+  "rawKB": 46.8,
+  "rawBytes": 47922,
+  "gzipKB": 19.4,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene280-standard-renderable-DAXwlezA.js",
+    "scene280-std-uv-transform-fragment-C9MUAno8.js",
+    "scene280.js"
+  ]
+}

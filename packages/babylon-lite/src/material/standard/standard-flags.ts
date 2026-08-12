@@ -1,6 +1,7 @@
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { Mesh } from "../../mesh/mesh.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 
 // ─── Feature Flags ──────────────────────────────────────────────────
@@ -30,8 +31,8 @@ export const GEOMETRY_OUTPUT = 1 << 21;
 export const LIGHTMAP_SHADOWMAP = 1 << 15;
 /** Lightmap UVs are V-flipped (BJS Texture.uAng === π → uv'=(u, 1-v)). */
 export const LIGHTMAP_FLIP_V = 1 << 22;
-// Bit 23 is free (was `HAS_VERTEX_COLOR`; vertex colour is now keyed off the mesh
-// bit `MSH_HAS_VERTEX_COLOR` + the `_stdVertexColorFragment` seam, master #430).
+// Bit 23 is reserved by STD_HAS_UV_TRANSFORM in the lazy
+// fragments/std-uv-transform-fragment.ts module.
 /** RGBA vertex color drives alpha (Babylon `VERTEXALPHA`). Set only when the mesh
  *  carries vertex colour AND explicitly opts in via `mesh.hasVertexAlpha`. Gates the
  *  vertex-colour fragment's `alpha *= vColor.a` + vertex-alpha alpha-test; without it
@@ -64,11 +65,11 @@ export interface StdExt {
     /** @internal Feature bit this ext gates on. */
     readonly _feature: number;
     /** @internal Effective Standard feature bits contributed by one mesh. */
-    _meshFeatures?(meshFeatures: number): number;
+    _meshFeatures?(meshFeatures: number, material?: StandardMaterialProps): number;
     /** @internal */
     _frag(features: number, meshFeatures?: number, shadowLights?: ShadowLightSlotLite[]): ShaderFragment;
     /** @internal Push group-1 bind entries starting at binding `b`; return new b. */
-    _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number, mesh?: Mesh): number;
+    _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number, mesh?: Mesh, engine?: EngineContext): number;
     /** @internal Bind feature-owned vertex buffers and return the next slot. */
     _bindVertexBuffers?(mesh: Mesh, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number): number;
     /** @internal Enumerate textures for acquire/release. */

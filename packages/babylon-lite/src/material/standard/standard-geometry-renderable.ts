@@ -159,7 +159,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     let features = view._renderFeatures.features;
     const sortedExts = _getStdExtsSorted();
     for (const ext of sortedExts) {
-        features |= ext._meshFeatures?.(meshFeatures) ?? 0;
+        features |= ext._meshFeatures?.(meshFeatures, source) ?? 0;
     }
     const sceneFeatures = standardContext?._sceneShader?._features ?? 0;
     // Vertex colour is enabled through the canonical `enableStandardVertexColors()`
@@ -313,6 +313,11 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             res._matData.fill(0);
             writeStdMaterialData(res._matData, source, textureLevel);
             device.queue.writeBuffer(res._matUBO, 0, res._matData.buffer, 0, 96);
+            if (res._upUBO) {
+                const uvData = new F32(4);
+                writeStandardUvTransformData(uvData, source, isStandardUvInverted(features, source));
+                device.queue.writeBuffer(res._upUBO, 0, uvData);
+            }
         }
         const ti = hasThinInstances ? mesh.thinInstances : null;
         if (ti) {
@@ -552,7 +557,7 @@ function _createGeometryMeshBindGroup(
     }
     for (const used of res._extFragments) {
         if (used._ext._bind) {
-            nextBinding = used._ext._bind(source, entries, nextBinding, mesh);
+            nextBinding = used._ext._bind(source, entries, nextBinding, mesh, engine);
         }
     }
     // Geometry-params `gp` UBO is contributed by the geometry composer as the

@@ -2464,5 +2464,15 @@
         "tags": ["lines", "procedural", "update", "thin-instances", "alpha"],
         "skipPerf": true,
         "compatParity": true
+    },
+    {
+        "id": 280,
+        "slug": "scene280-standard-material-uv-transform",
+        "name": "Scene 280 — Standard Material UV Transform",
+        "maxMad": 0.1,
+        "maxRawKB": 55,
+        "description": "A hand-built StandardMaterial opts into enableMaterialUvTransform and applies independent texture scale, offset, and rotation to an asymmetric repeating texture.",
+        "tags": ["standard", "textures", "uv-transform", "procedural"],
+        "skipPerf": true
     }
 ]

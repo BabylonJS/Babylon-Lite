@@ -283,7 +283,7 @@ export { createMaterialView } from "./material/material-view.js";
 export { getMaterialFamily } from "./material/material-family.js";
 export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
-export { enableMaterialUvTransform } from "./material/pbr/pbr-material.js";
+export { enableMaterialUvTransform } from "./material/enable-material-uv-transform.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
 export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
