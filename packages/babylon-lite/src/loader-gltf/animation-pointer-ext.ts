@@ -7,6 +7,81 @@
  *  visibility / base-color / UV transforms / lights never pay for it. On import it
  *  appends its handlers to the shared resolver registry. */
 import { _appendPointerHandlers, type PointerFactory, type PointerMaterial } from "./animation-pointer.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import type { setPbrMetallicReflectance } from "../material/pbr/set-metallic-reflectance.js";
+
+/** Seeds load-time material state for one asset's material-extension pointers. Returned by
+ *  {@link prepareExtMaterials}, which is the only way to obtain one — so the async setup it
+ *  depends on is a data dependency rather than a call-order convention. `map` is indexed by
+ *  glTF material index. */
+export type ExtMaterialSeeder = (map: (PointerMaterial | undefined)[]) => void;
+
+interface AnimatedExtTargets {
+    occlusionStrength: Set<number>;
+    transmission: Set<number>;
+    ior: Set<number>;
+    volumeThickness: Set<number>;
+    volumeTint: Set<number>;
+}
+
+/** Scan the asset's pointer channels for the material-extension families this module seeds. */
+function animatedTargets(json: any): AnimatedExtTargets {
+    const occlusionStrength = new Set<number>();
+    const transmission = new Set<number>();
+    const ior = new Set<number>();
+    const volumeThickness = new Set<number>();
+    const volumeTint = new Set<number>();
+    for (const anim of json.animations ?? []) {
+        for (const ch of anim.channels ?? []) {
+            const ptr = ch.target?.extensions?.KHR_animation_pointer?.pointer as string | undefined;
+            if (!ptr) {
+                continue;
+            }
+            const os = /^\/materials\/(\d+)\/occlusionTexture\/strength$/.exec(ptr);
+            if (os) {
+                occlusionStrength.add(+os[1]!);
+            }
+            const tr = /^\/materials\/(\d+)\/extensions\/KHR_materials_transmission\/transmissionFactor$/.exec(ptr);
+            if (tr) {
+                transmission.add(+tr[1]!);
+            }
+            const io = /^\/materials\/(\d+)\/extensions\/KHR_materials_ior\/ior$/.exec(ptr);
+            if (io) {
+                ior.add(+io[1]!);
+            }
+            const vt = /^\/materials\/(\d+)\/extensions\/KHR_materials_volume\/thicknessFactor$/.exec(ptr);
+            if (vt) {
+                volumeThickness.add(+vt[1]!);
+            }
+            const vc = /^\/materials\/(\d+)\/extensions\/KHR_materials_volume\/(attenuationColor|attenuationDistance)$/.exec(ptr);
+            if (vc) {
+                volumeTint.add(+vc[1]!);
+            }
+        }
+    }
+    return { occlusionStrength, transmission, ior, volumeThickness, volumeTint };
+}
+
+/** Scan one asset's material-extension pointers, fetch the opt-in setters its seeding needs,
+ *  and return the seeder bound to both. Awaited by the feature's `preParse`; the returned
+ *  function is then called synchronously from `materialMap`.
+ *
+ *  `setPbrMetallicReflectance` statically imports the reflectance fragment, so it is fetched
+ *  only for assets that animate occlusion strength or IOR — the two seeding paths that must
+ *  force-activate the reflectance ext even at its default values. An asset animating only
+ *  transmission or volume pays nothing for it. */
+export async function prepareExtMaterials(json: any): Promise<ExtMaterialSeeder> {
+    const animated = animatedTargets(json);
+    const needsReflectance = animated.occlusionStrength.size > 0 || animated.ior.size > 0;
+    const setReflectance = needsReflectance ? (await import("../material/pbr/set-metallic-reflectance.js")).setPbrMetallicReflectance : null;
+    return (map) => seedExtMaterials(json, map, animated, setReflectance);
+}
+
+/** `PointerMaterial` is the loader's structural view of the same PBR material object; its
+ *  texture fields are the loader's wrapped handles, so bridge to the setter's props type. */
+function asPbrProps(m: PointerMaterial): Partial<PbrMaterialProps> {
+    return m as unknown as Partial<PbrMaterialProps>;
+}
 
 function iorToF0Factor(ior: number): number {
     return ((ior - 1) / (ior + 1)) ** 2 / 0.04;
@@ -61,14 +136,14 @@ const _extHandlers: [RegExp, PointerFactory][] = [
         /^\/materials\/(\d+)\/extensions\/KHR_materials_transmission\/transmissionFactor$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
-            const refr = mat?.subsurface?.refraction;
+            const refr = mat?._subsurface?.refraction;
             if (!mat || !refr) {
                 return null;
             }
             return {
                 arity: 1,
                 writer: (out, off) => {
-                    mat.transmissive = true;
+                    mat._transmissive = true;
                     refr.intensity = out[off]!;
                     bump(mat);
                 },
@@ -87,12 +162,11 @@ const _extHandlers: [RegExp, PointerFactory][] = [
                 arity: 1,
                 writer: (out, off) => {
                     const ior = out[off]!;
-                    if (mat.subsurface?.refraction) {
-                        mat.subsurface.refraction.indexOfRefraction = ior;
+                    if (mat._subsurface?.refraction) {
+                        mat._subsurface.refraction.indexOfRefraction = ior;
                     }
-                    mat.metallicF0Factor = iorToF0Factor(ior);
-                    mat.specularWeight = 1.0;
-                    mat._hasReflExt = true;
+                    mat._metallicF0Factor = iorToF0Factor(ior);
+                    mat._specularWeight = 1.0;
                     bump(mat);
                 },
             };
@@ -103,13 +177,13 @@ const _extHandlers: [RegExp, PointerFactory][] = [
         /^\/materials\/(\d+)\/extensions\/KHR_materials_volume\/(thicknessFactor|attenuationDistance|attenuationColor)$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
-            if (!mat?.subsurface) {
+            if (!mat?._subsurface) {
                 return null;
             }
             return {
                 arity: m[2] === "attenuationColor" ? 3 : 1,
                 writer: (out, off) => {
-                    const ss = mat.subsurface!;
+                    const ss = mat._subsurface!;
                     if (m[2] === "thicknessFactor") {
                         ss.thickness ??= { min: 0, max: 0, useGlTFChannel: true };
                         ss.thickness.max = out[off]!;
@@ -134,7 +208,7 @@ const _extHandlers: [RegExp, PointerFactory][] = [
         /^\/materials\/(\d+)\/extensions\/KHR_materials_iridescence\/(iridescenceFactor|iridescenceIor|iridescenceThicknessMaximum)$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
-            const iri = mat?.iridescence;
+            const iri = mat?._iridescence;
             if (!mat || !iri) {
                 return null;
             }
@@ -156,8 +230,8 @@ const _extHandlers: [RegExp, PointerFactory][] = [
     ],
     // /materials/{m}/occlusionTexture/strength — scalar ambient-occlusion strength.
     // The occlusion mix (mix(1, orm.r, strength)) is supplied by the lazy reflectance
-    // ext, which the animation feature activates via `_hasReflExt`; this writer only
-    // updates the `occlusionStrength` UBO slot that ext owns — zero core shader cost.
+    // ext, which the seeding path below registers; this writer only updates the
+    // `occlusionStrength` UBO slot that ext owns — zero core shader cost.
     [
         /^\/materials\/(\d+)\/occlusionTexture\/strength$/,
         (m, ctx) => {
@@ -182,81 +256,51 @@ _appendPointerHandlers(_extHandlers);
  *  something to drive. A material whose transmission / IOR / volume / occlusion-strength
  *  is animated from its default (e.g. transmissionFactor 0, occlusionStrength 1) would
  *  otherwise compile without the relevant shader path, so the animation would write a
- *  value nothing samples. Called by the feature's materialMap once this module is loaded;
- *  `map` is indexed by glTF material index. */
-export function seedExtMaterials(json: any, map: (PointerMaterial | undefined)[]): void {
-    const occlusionStrengthAnimated = new Set<number>();
-    const transmissionAnimated = new Set<number>();
-    const iorAnimated = new Set<number>();
-    const volumeThicknessAnimated = new Set<number>();
-    const volumeTintAnimated = new Set<number>();
-    for (const anim of json.animations ?? []) {
-        for (const ch of anim.channels ?? []) {
-            const ptr = ch.target?.extensions?.KHR_animation_pointer?.pointer as string | undefined;
-            const os = ptr && /^\/materials\/(\d+)\/occlusionTexture\/strength$/.exec(ptr);
-            if (os) {
-                occlusionStrengthAnimated.add(+os[1]!);
-            }
-            const tr = ptr && /^\/materials\/(\d+)\/extensions\/KHR_materials_transmission\/transmissionFactor$/.exec(ptr);
-            if (tr) {
-                transmissionAnimated.add(+tr[1]!);
-            }
-            const ior = ptr && /^\/materials\/(\d+)\/extensions\/KHR_materials_ior\/ior$/.exec(ptr);
-            if (ior) {
-                iorAnimated.add(+ior[1]!);
-            }
-            const vt = ptr && /^\/materials\/(\d+)\/extensions\/KHR_materials_volume\/thicknessFactor$/.exec(ptr);
-            if (vt) {
-                volumeThicknessAnimated.add(+vt[1]!);
-            }
-            const vc = ptr && /^\/materials\/(\d+)\/extensions\/KHR_materials_volume\/(attenuationColor|attenuationDistance)$/.exec(ptr);
-            if (vc) {
-                volumeTintAnimated.add(+vc[1]!);
-            }
-        }
-    }
+ *  value nothing samples. Reached only through the seeder {@link prepareExtMaterials}
+ *  returns, so `animated` and `setReflectance` always match the asset being seeded. */
+function seedExtMaterials(json: any, map: (PointerMaterial | undefined)[], animated: AnimatedExtTargets, setReflectance: typeof setPbrMetallicReflectance | null): void {
     for (let matIdx = 0; matIdx < map.length; matIdx++) {
         const pm = map[matIdx];
         if (!pm) {
             continue;
         }
         const def = json.materials?.[matIdx];
-        // An animated occlusionTexture.strength is applied through the lazy reflectance
-        // ext (mix(1, orm.r, strength)). Route the material to it via `_hasReflExt` and
-        // force activation even though the load-time strength may still be its default 1.0
+        // An animated occlusionTexture.strength is applied through the reflectance ext
+        // (mix(1, orm.r, strength)). Register that ext with no factor overrides so it
+        // activates even though the load-time strength may still be its default 1.0
         // (the ext's default-factor F0 path is identical to the base template).
-        if (occlusionStrengthAnimated.has(matIdx)) {
+        if (animated.occlusionStrength.has(matIdx)) {
             pm.occlusionStrength = def?.occlusionTexture?.strength ?? 1;
-            pm._hasReflExt = true;
+            setReflectance?.(asPbrProps(pm), {});
             (pm as { _occlStrengthAnimated?: boolean })._occlStrengthAnimated = true;
         }
-        if (transmissionAnimated.has(matIdx)) {
-            pm.transmissive = true;
-            pm.subsurface ??= {};
-            pm.subsurface.refraction ??= {
+        if (animated.transmission.has(matIdx)) {
+            pm._transmissive = true;
+            pm._subsurface ??= {};
+            pm._subsurface.refraction ??= {
                 intensity: def?.extensions?.KHR_materials_transmission?.transmissionFactor ?? 0,
                 indexOfRefraction: def?.extensions?.KHR_materials_ior?.ior ?? 1.5,
             };
         }
-        if (iorAnimated.has(matIdx)) {
-            pm.subsurface ??= {};
-            pm.subsurface.refraction ??= { intensity: 0, indexOfRefraction: def?.extensions?.KHR_materials_ior?.ior ?? 1.5 };
+        if (animated.ior.has(matIdx)) {
+            pm._subsurface ??= {};
+            pm._subsurface.refraction ??= { intensity: 0, indexOfRefraction: def?.extensions?.KHR_materials_ior?.ior ?? 1.5 };
             const ior = def?.extensions?.KHR_materials_ior?.ior ?? 1.5;
-            pm.metallicF0Factor = iorToF0Factor(ior);
-            pm.specularWeight = 1.0;
-            pm._hasReflExt = true;
+            // Registers the reflectance ext even at the default IOR 1.5, since the pointer
+            // writer can animate it away from the default at any time.
+            setReflectance?.(asPbrProps(pm), { f0Factor: iorToF0Factor(ior), specularWeight: 1.0 });
         }
-        if (volumeThicknessAnimated.has(matIdx) || volumeTintAnimated.has(matIdx)) {
-            pm.subsurface ??= {};
+        if (animated.volumeThickness.has(matIdx) || animated.volumeTint.has(matIdx)) {
+            pm._subsurface ??= {};
             const eVol = def?.extensions?.KHR_materials_volume;
-            if (volumeThicknessAnimated.has(matIdx)) {
-                pm.subsurface.thickness ??= { min: 0, max: eVol?.thicknessFactor ?? 0, useGlTFChannel: true };
-                if (pm.subsurface.refraction) {
-                    pm.subsurface.refraction.useThicknessAsDepth = true;
+            if (animated.volumeThickness.has(matIdx)) {
+                pm._subsurface.thickness ??= { min: 0, max: eVol?.thicknessFactor ?? 0, useGlTFChannel: true };
+                if (pm._subsurface.refraction) {
+                    pm._subsurface.refraction.useThicknessAsDepth = true;
                 }
             }
-            if (volumeTintAnimated.has(matIdx)) {
-                pm.subsurface.tint ??= { color: eVol?.attenuationColor ?? [1, 1, 1], atDistance: eVol?.attenuationDistance ?? 1 };
+            if (animated.volumeTint.has(matIdx)) {
+                pm._subsurface.tint ??= { color: eVol?.attenuationColor ?? [1, 1, 1], atDistance: eVol?.attenuationDistance ?? 1 };
             }
         }
     }

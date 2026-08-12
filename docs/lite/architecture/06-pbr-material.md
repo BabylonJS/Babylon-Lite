@@ -165,7 +165,8 @@ export interface PbrMaterialProps extends Material {
     specGlossTexture?: Texture2D;
     metallicReflectanceTexture?: Texture2D;
     reflectanceTexture?: Texture2D;
-    emissiveColor?: [number, number, number];
+    /** @internal Set via `setPbrEmissive()` — direct assignment skips extension registration. */
+    _emissiveColor?: [number, number, number];
     doubleSided?: boolean;
     alpha?: number;
     alphaBlend?: boolean;

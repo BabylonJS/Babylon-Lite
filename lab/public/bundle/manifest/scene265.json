@@ -1,18 +1,18 @@
 {
-  "rawKB": 80.9,
-  "gzipKB": 34,
+  "rawKB": 79.9,
+  "gzipKB": 33.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene265-generate-mipmaps-JrMA50q2.js",
-    "scene265-gltf-ext-lights-image-based-B8LYG6l6.js",
-    "scene265-gltf-feature-registry-BuXrnlt9.js",
+    "scene265-generate-mipmaps-zBAwuYpC.js",
+    "scene265-gltf-ext-lights-image-based-DsLGLsWs.js",
+    "scene265-gltf-feature-registry-aGMEAIo5.js",
     "scene265-gltf-json-asset-CHJIr6cm.js",
     "scene265-gltf-uri-6vf9MtoR.js",
-    "scene265-ibl-cubemap-upload-DubDFVEU.js",
-    "scene265-ibl-env-assembly-Bx2KZYsS.js",
+    "scene265-ibl-cubemap-upload-BRUkb56Z.js",
+    "scene265-ibl-env-assembly-DKvjbANU.js",
     "scene265-ibl-fragment-CeRrvT96.js",
-    "scene265-pbr-renderable-CeSXJgKC.js",
+    "scene265-pbr-renderable-CG2kv_am.js",
     "scene265.js"
   ],
-  "rawBytes": 82798
+  "rawBytes": 81788
 }

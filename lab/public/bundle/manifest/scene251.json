@@ -1,19 +1,19 @@
 {
-  "rawKB": 90,
-  "rawBytes": 92122,
-  "gzipKB": 37.3,
+  "rawKB": 89,
+  "rawBytes": 91127,
+  "gzipKB": 36.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene251-create-skeleton-TRK-jHlK.js",
-    "scene251-generate-mipmaps-v13WAvu6.js",
-    "scene251-gltf-animation-BztG_tcZ.js",
-    "scene251-gltf-feature-animations-CfzE0B2k.js",
-    "scene251-gltf-feature-registry-BsMyGU-V.js",
-    "scene251-gltf-feature-skeleton-Bu_AND2E.js",
+    "scene251-create-skeleton-D26JBCyr.js",
+    "scene251-generate-mipmaps-DM6xPrc6.js",
+    "scene251-gltf-animation-J3XsS0sU.js",
+    "scene251-gltf-feature-animations-CW3Ivbvn.js",
+    "scene251-gltf-feature-registry-Bz-O0t5T.js",
+    "scene251-gltf-feature-skeleton-DHMrDEJX.js",
     "scene251-gltf-glb-parser-DAAhogfL.js",
-    "scene251-multilight-wgsl-BTjKzv_v.js",
-    "scene251-pbr-renderable-DgtMqz1j.js",
-    "scene251-skeleton-fragment-NoDuQEDH.js",
+    "scene251-multilight-wgsl-aa41SHmp.js",
+    "scene251-pbr-renderable-DCzgAwWV.js",
+    "scene251-skeleton-fragment-C1veQatR.js",
     "scene251.js"
   ]
 }

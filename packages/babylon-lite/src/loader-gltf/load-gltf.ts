@@ -21,7 +21,7 @@ import type { GltfImageCache, GltfMaterialData, GltfMatExtCtx } from "./gltf-mat
 import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
 import type { DecodedPrimitive, GltfFeature, GltfLoadCtx } from "./gltf-feature.js";
 import type { TextureWrapFn } from "./gltf-pbr-builder.js";
-import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, uploadTex } from "./gltf-pbr-builder.js";
+import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, applyGltfOptInPbrFeatures, uploadTex } from "./gltf-pbr-builder.js";
 import type * as GltfColorNormalize from "./gltf-color-normalize.js";
 import type * as GltfFeatureRegistry from "./gltf-feature-registry.js";
 import type * as GltfPbrBuilderExt from "./gltf-pbr-builder-ext.js";
@@ -615,15 +615,26 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
         if (!cached) {
             cached = (async () => {
                 const extLayers = matExts.length ? await ctx._runMatExts!(mat, matExts, extCtx) : undefined;
+                let props: PbrMaterialProps;
                 if (_needsPbrExt) {
                     const extMod = await _ensurePbrExt();
                     const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, samplerFor);
-                    return extMod.assemblePbrPropsExt(mat, tex, extLayers);
+                    props = extMod.assemblePbrPropsExt(mat, tex, extLayers);
+                    // UV-transform is opt-in; the gate and its conditional import live in the ext
+                    // module so the import plumbing is not emitted into this file, which every
+                    // glTF scene loads. Applied before emissive to keep the ext registration
+                    // order identical to when both lived inside assemblePbrPropsExt.
+                    await extMod.applyGltfUvTransform(props, tex);
+                } else {
+                    const tex = buildSampledPbrTextures
+                        ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
+                        : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
+                    props = assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
                 }
-                const tex = buildSampledPbrTextures
-                    ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
-                    : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
-                return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
+                // Opt-in PBR features decided from the glTF material data (emissive,
+                // alpha-test). Shared with the variants loader so the gates can't drift.
+                await applyGltfOptInPbrFeatures(props, mat);
+                return props;
             })();
             builtMaterialCache.set(mat, cached);
         }

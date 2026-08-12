@@ -1,4 +1,3 @@
-import { onBeforeRender } from "../scene/scene-core.js";
 import { addFacingBillboardSystem } from "../sprite/billboard-scene.js";
 import { animateParticleSystem, startParticleSystem } from "./particle-system.js";
 import { createParticleBillboard, syncParticleBillboard } from "./particle-billboard.js";
@@ -30,7 +29,7 @@ export function registerNodeParticleSet(scene: SceneContext, set: NodeParticleSe
             startParticleSystem(system);
         }
 
-        onBeforeRender(scene, (deltaMs) => {
+        scene._beforeRender.push((deltaMs) => {
             const ratio = deltaMs > 0 ? deltaMs / FRAME_MS : 1;
             animateParticleSystem(system, ratio);
             syncParticleBillboard(system, billboard);

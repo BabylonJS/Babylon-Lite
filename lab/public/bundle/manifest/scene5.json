@@ -1,24 +1,24 @@
 {
-  "rawKB": 91.8,
-  "gzipKB": 39,
+  "rawKB": 90.8,
+  "gzipKB": 38.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene5-create-morph-targets-CxWjyKmd.js",
-    "scene5-create-skeleton-D5MJHl_O.js",
-    "scene5-generate-mipmaps-Bb2P8Dlu.js",
-    "scene5-gltf-animation-jFjBxpr7.js",
+    "scene5-create-skeleton-sD3MTCNq.js",
+    "scene5-generate-mipmaps-CI2_hWq2.js",
+    "scene5-gltf-animation-BnjVqVDg.js",
     "scene5-gltf-color-normalize-4-WGzPL2.js",
-    "scene5-gltf-feature-animations-fwEjAeHj.js",
+    "scene5-gltf-feature-animations-3BBtjtfi.js",
     "scene5-gltf-feature-morph-BNcyLEaQ.js",
-    "scene5-gltf-feature-registry-DU0_44Y-.js",
-    "scene5-gltf-feature-skeleton-CS2rGTAx.js",
+    "scene5-gltf-feature-registry-DMfJXje5.js",
+    "scene5-gltf-feature-skeleton-C00HZEqw.js",
     "scene5-gltf-json-asset-D-9sDjjl.js",
-    "scene5-morph-fragment-Ci-AX4XR.js",
-    "scene5-pbr-renderable-DqVPdXKn.js",
+    "scene5-morph-fragment-BgB-C7vl.js",
+    "scene5-pbr-renderable-DPySoyDa.js",
     "scene5-pbr-template-ext-CiHpOV5G.js",
-    "scene5-singlelight-hemispheric-wgsl-a_zJjBYS.js",
-    "scene5-skeleton-fragment-CIdO5NmU.js",
+    "scene5-singlelight-hemispheric-wgsl-CTDPnX2T.js",
+    "scene5-skeleton-fragment-827LtRj2.js",
     "scene5.js"
   ],
-  "rawBytes": 93970
+  "rawBytes": 92962
 }
