@@ -19,6 +19,7 @@ const STEPS = 240;
 
 (async function () {
     const initStart = performance.now();
+    const live = new URLSearchParams(window.location.search).has("live");
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
@@ -60,10 +61,12 @@ const STEPS = 240;
         return value - Math.floor(value);
     };
     system.start();
-    for (let i = 0; i < STEPS; i++) {
-        system.animate(true);
+    if (!live) {
+        for (let i = 0; i < STEPS; i++) {
+            system.animate(true);
+        }
+        system.updateSpeed = 0;
     }
-    system.updateSpeed = 0;
 
     const engineWithDrawCalls = engine as unknown as { _drawCalls?: { current: number; fetchNewFrame?: () => void } };
     scene.onBeforeRenderObservable.add(() => {
@@ -78,6 +81,9 @@ const STEPS = 240;
     window.addEventListener("resize", () => engine.resize());
     await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     canvas.dataset.initMs = String(performance.now() - initStart);
+    if (!live) {
+        canvas.dataset.animationFrozen = "true";
+    }
     canvas.dataset.ready = "true";
 })().catch((err) => {
     console.error(err);

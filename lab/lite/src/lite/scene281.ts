@@ -10,6 +10,7 @@ import {
     createParticleBillboard,
     createSceneContext,
     parseNodeParticleSource,
+    registerNodeParticleSet,
     registerScene,
     startEngine,
     startParticleSystem,
@@ -21,6 +22,7 @@ const STEPS = 240;
 
 async function main(): Promise<void> {
     const initStart = performance.now();
+    const live = new URLSearchParams(window.location.search).has("live");
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
@@ -44,21 +46,27 @@ async function main(): Promise<void> {
         const value = Math.sin(seed++) * 10000;
         return value - Math.floor(value);
     };
-    startParticleSystem(system);
-    for (let i = 0; i < STEPS; i++) {
-        animateParticleSystem(system, 1);
-    }
+    if (live) {
+        registerNodeParticleSet(scene, set);
+    } else {
+        startParticleSystem(system);
+        for (let i = 0; i < STEPS; i++) {
+            animateParticleSystem(system, 1);
+        }
 
-    const billboard = createParticleBillboard(system);
-    syncParticleBillboard(system, billboard);
-    addFacingBillboardSystem(scene, billboard);
+        const billboard = createParticleBillboard(system);
+        syncParticleBillboard(system, billboard);
+        addFacingBillboardSystem(scene, billboard);
+    }
 
     await registerScene(scene);
     await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - initStart);
-    canvas.dataset.animationFrozen = "true";
+    if (!live) {
+        canvas.dataset.animationFrozen = "true";
+    }
     canvas.dataset.ready = "true";
 }
 
