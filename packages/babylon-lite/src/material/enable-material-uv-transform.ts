@@ -12,10 +12,13 @@ import type { StandardMaterialProps } from "./standard/standard-material.js";
  *
  * Returns `true` before the material's first build. Returns `false` after its
  * feature set was compiled, when applying the opt-in requires `rebuildMaterial`. */
-export function enableMaterialUvTransform(material: PbrMaterialProps | StandardMaterialProps): boolean {
-    if (material._buildGroup._materialFamily === "pbr") {
-        return enablePbrMaterialUvTransform(material as PbrMaterialProps);
+export function enableMaterialUvTransform(material: Partial<PbrMaterialProps>): boolean;
+export function enableMaterialUvTransform(material: StandardMaterialProps): boolean;
+export function enableMaterialUvTransform(material: Partial<PbrMaterialProps> | StandardMaterialProps): boolean {
+    if (material._buildGroup?._materialFamily !== "standard") {
+        return enablePbrMaterialUvTransform(material as Partial<PbrMaterialProps>);
     }
+    material = material as StandardMaterialProps;
     if (!material._hasUvTx) {
         const builder = material._buildGroup;
         const preload = import("./standard/fragments/std-uv-transform-fragment.js").then((module) => module.registerStdUvTransformExt());
