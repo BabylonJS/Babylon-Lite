@@ -12,6 +12,8 @@ const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 test.skip(!!sceneConfig.skipParity, "Scene 256 skipped via skipParity in scene-config.json");
 
 test("Scene 256 — NormalTangentTest matches Babylon.js reference", async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 256, timeout: 90_000 });
 
