@@ -164,7 +164,7 @@ interface UniqueVatTexture {
 
 function positiveInteger(value: unknown, field: string): number {
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
-        throw new Error(`createVatBakeResult: ${field} must be a positive integer.`);
+        throw new Error(`VAT prepared payload: ${field} must be a positive integer.`);
     }
     return value;
 }
@@ -180,16 +180,16 @@ function validatePreparedCapture(
         return undefined;
     }
     if (typeof capture !== "object" || Array.isArray(capture)) {
-        throw new Error(`createVatBakeResult: ${field} must be a record.`);
+        throw new Error(`VAT prepared payload: ${field} must be a record.`);
     }
     const validated: Record<number, Float32Array> = {};
     for (const [key, values] of Object.entries(capture)) {
         const bone = Number(key);
         if (!Number.isSafeInteger(bone) || bone < 0 || bone >= boneCount || String(bone) !== key) {
-            throw new Error(`createVatBakeResult: ${field} contains invalid bone index "${key}".`);
+            throw new Error(`VAT prepared payload: ${field} contains invalid bone index "${key}".`);
         }
         if (!(values instanceof Float32Array) || values.length !== frameCount * valuesPerFrame) {
-            throw new Error(`createVatBakeResult: ${field}[${key}] has an invalid length.`);
+            throw new Error(`VAT prepared payload: ${field}[${key}] has an invalid length.`);
         }
         validated[bone] = values;
     }
@@ -231,10 +231,10 @@ export function createVatBakeResults(engine: EngineContext, prepared: readonly P
         const boneCount = positiveInteger(source?.boneCount, "boneCount");
         const frameCount = positiveInteger(source?.frameCount, "frameCount");
         if (!(source?.data instanceof Float32Array) || source.data.length !== boneCount * frameCount * 16) {
-            throw new Error("createVatBakeResult: data length must equal boneCount * frameCount * 16.");
+            throw new Error("VAT prepared payload: data length must equal boneCount * frameCount * 16.");
         }
         if (!source.clips || typeof source.clips !== "object" || Array.isArray(source.clips)) {
-            throw new Error("createVatBakeResult: clips must be a record.");
+            throw new Error("VAT prepared payload: clips must be a record.");
         }
         const clips: Record<string, VatClip> = {};
         for (const [name, clip] of Object.entries(source.clips)) {
@@ -249,7 +249,7 @@ export function createVatBakeResults(engine: EngineContext, prepared: readonly P
                 !Number.isFinite(clip.fps) ||
                 clip.fps <= 0
             ) {
-                throw new Error(`createVatBakeResult: clip "${name}" is invalid.`);
+                throw new Error(`VAT prepared payload: clip "${name}" is invalid.`);
             }
             clips[name] = { fromRow: clip.fromRow, frameCount: clip.frameCount, fps: clip.fps };
         }
@@ -314,15 +314,15 @@ export function prepareVatMany(targets: readonly VatBakeTarget[], groups: readon
     const states: VatBakeState[] = targets.map((target) => {
         const skeleton = target.mesh.skeleton;
         if (!skeleton) {
-            throw new Error(`bakeVatMany: mesh "${target.mesh.name}" has no skeleton to bake.`);
+            throw new Error(`VAT preparation: mesh "${target.mesh.name}" has no skeleton to bake.`);
         }
         const bindings = groups.map((group) => {
             const binding = bindingOf(group, target.mesh);
             if (!binding) {
-                throw new Error(`bakeVatMany: mesh "${target.mesh.name}" has no skeleton binding for clip "${group.name}".`);
+                throw new Error(`VAT preparation: mesh "${target.mesh.name}" has no skeleton binding for clip "${group.name}".`);
             }
             if (binding.boneCount !== skeleton.boneCount) {
-                throw new Error(`bakeVatMany: mesh "${target.mesh.name}" has inconsistent bone counts.`);
+                throw new Error(`VAT preparation: mesh "${target.mesh.name}" has inconsistent bone counts.`);
             }
             return binding;
         });
