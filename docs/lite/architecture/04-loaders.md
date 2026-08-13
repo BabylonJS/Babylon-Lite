@@ -381,6 +381,35 @@ lets normalized/quantized attribute formats upload natively. Both are dynamic fe
 modules, so non-meshopt scenes pay zero runtime bytes. Validated by Scene 211
 (`BrainStem` glTF-Meshopt-EXT, skinned + animated).
 
+**Unnormalized quantized `TEXCOORD_n`/`POSITION` (Scene 220, `Duck` `glTF-Quantized`).**
+`KHR_mesh_quantization` allows `TEXCOORD_n` (VEC2) and `POSITION` (VEC3) to be
+**unnormalized** unsigned-integer accessors (no `normalized: true`) — per the extension
+spec, an unnormalized integer `2` means the literal value `2.0`, not `2/65535`; the asset
+then rescales it back to real units via a node TRS (`POSITION`) or a `KHR_texture_transform`
+on the material (`TEXCOORD_n`; gltfpack's standard quantized-UV output). The core loader's
+tight/interleave UV and vertex paths always assume an unsigned-int source means "divide by
+255/65535", so this class of accessor must never reach them unconverted.
+
+The fix lives entirely inside `gltf-ext-quantization.ts`'s `preParse` rewrite (not the core
+UV/color decoders): the trigger predicate was widened from "unsigned non-normalized integer,
+NOT VEC4, AND strided" to "unsigned non-normalized integer VEC2/VEC3, tight OR strided" —
+per the extension's attribute table, unnormalized unsigned-int storage is only valid for
+those two shapes, so SCALAR (indices) and VEC4 (`JOINTS_n`) stay correctly excluded
+regardless. This is what catches the quantized Duck's TEXCOORD_0: a **tight**
+`UNSIGNED_SHORT` VEC2 accessor (`byteStride` equal to its own tight size) that the old
+stride-gated predicate let through unconverted. Because the rewrite happens in `preParse`
+— before any accessor is read — every unnormalized integer TEXCOORD/POSITION is already
+FLOAT by the time `load-gltf.ts`, `gltf-color-normalize.ts`, `gltf-interleave.ts`, and
+`gltf-uv-denorm.ts` see it, so none of those core/shared modules need to know about
+`normalized` at all: they keep their original "integer ⇒ normalized" assumption, which is
+now always true for whatever integer data reaches them. This keeps the fix's entire byte
+footprint inside the already dynamic-imported `KHR_mesh_quantization` feature — zero
+bytes added to any module fetched by scenes that don't use the extension. Validated by
+Scene 220 (`Duck` `glTF-Quantized`, non-normalized `UNSIGNED_SHORT` VEC2 `TEXCOORD_0`
+combined with `KHR_texture_transform`) and by `gltf-ext-quantization.test.ts`, which
+exercises the `preParse` hook directly for the tight-unnormalized, strided-unnormalized,
+still-normalized, SCALAR-index, and VEC4-joints cases.
+
 ### `KHR_xmp_json_ld` Metadata (`gltf-feature-xmp.ts`)
 
 Pure metadata with no render effect: the feature's `applyAsset` hook surfaces the

@@ -1957,6 +1957,16 @@
         "compatParity": true
     },
     {
+        "id": 220,
+        "slug": "scene220-duck-quantized",
+        "name": "Scene 220 — Duck (glTF-Quantized)",
+        "maxMad": 0.05,
+        "maxRawKB": 87.5,
+        "description": "Duck.gltf (glTF-Quantized) — cx20 gltf-test. KHR_mesh_quantization (quantized POSITION/NORMAL) + KHR_texture_transform (unnormalized quantized TEXCOORD_0 rescaled by the material's UV transform).",
+        "tags": ["gltf", "quantization"],
+        "skipPerf": true
+    },
+    {
         "id": 221,
         "slug": "scene221-pointer-drags",
         "skipParity": true,
