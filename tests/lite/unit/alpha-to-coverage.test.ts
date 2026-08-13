@@ -272,15 +272,20 @@ describe("WebGPU alpha-to-coverage", () => {
         const blended = getOrCreateTextPipeline(engine, "rgba8unorm", 1, "depth24plus", true, text).pipeline;
 
         expect(fragmentStage(enabled).module).toBe(fragmentStage(blended).module);
-        expect(fragmentStage(enabled).constants).toEqual({ a2c: 1 });
+        expect(fragmentStage(enabled).constants).toEqual({ 0: 1 });
         expect(fragmentStage(blended).constants).toBeUndefined();
+
+        // The key must stay numeric. An unquoted identifier key is property-mangled by Closure
+        // ADVANCED while the WGSL string keeps `a2c`, so a name-keyed constant would break
+        // pipeline creation for A2C consumers built with it.
+        expect(Object.keys(fragmentStage(enabled).constants!)).toEqual(["0"]);
 
         // Exactly one fragment module is ever compiled, and the source actually handed to
         // createShaderModule — not merely the file on disk — declares the override that the
-        // A2C pipeline specialises.
+        // A2C pipeline specialises, under the numeric id the descriptor keys it by.
         const fragmentSources = createShaderModule.mock.calls.map((call) => call[0].code).filter((code) => code.includes("@location(0) vec4<f32>"));
         expect(fragmentSources).toHaveLength(1);
-        expect(fragmentSources[0]).toMatch(/override\s+a2c\s*:\s*bool/);
+        expect(fragmentSources[0]).toMatch(/@id\(0\)\s+override\s+a2c\s*:\s*bool/);
     });
 
     it("combines multisampled depth-writing Sprite2D A2C with the selected blend mode", () => {

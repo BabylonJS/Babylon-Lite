@@ -154,7 +154,7 @@ The per-owner API is intentional: WebGPU alpha-to-coverage is pipeline state, wh
 - `material/standard/standard-renderable.ts` — resolves per-material A2C state for pipeline selection.
 - `material/shader/shader-pipeline.ts` — Shader cache-key and descriptor seam.
 - `text/_gpu/text-pipeline.ts` — premultiplied-alpha normal variant and replacement-color A2C variant, selected via the `a2c` pipeline-overridable constant.
-- `text/shaders/slug.frag.wgsl` — shared Slug fragment shader; the `a2c` override switches its output between premultiplied RGB and straight alpha (coverage in alpha only).
+- `text/shaders/slug.frag.wgsl` — shared Slug fragment shader; the `a2c` override switches its output between premultiplied RGB and straight alpha (coverage in alpha only). Declared `@id(0)` so the pipeline keys it by number, which survives JS property mangling.
 - `text/text-renderable.ts` — supplies the scene text pipeline owner.
 - `sprite/sprite-pipeline.ts` — depth-hosted Sprite2D cache-key, blend, and descriptor seam.
 - `sprite/billboard-pipeline.ts` — cutout billboard shader/cache/descriptor seam.

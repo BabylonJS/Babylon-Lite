@@ -13,10 +13,15 @@ struct TextU {
 @group(0) @binding(0) var<uniform> textU: TextU;
 
 // Pipeline-overridable: when true, output straight (non-premultiplied) alpha so the
-// hardware can derive sample coverage from alpha alone. Set via `constants: { a2c: 1 }`
+// hardware can derive sample coverage from alpha alone. Set via `constants: { 0: 1 }`
 // on the alpha-to-coverage pipeline; the default keeps the premultiplied output the
 // blended pipeline expects. One shader module serves both.
-override a2c: bool = false;
+//
+// The explicit `@id(0)` keys that override by number rather than by name. This WGSL is
+// an opaque string to JS minifiers, so an unquoted `a2c` key on the WebGPU side would be
+// property-mangled by Closure ADVANCED while this text kept `a2c`, and pipeline creation
+// would then fail for A2C consumers. Numeric keys cannot be mangled.
+@id(0) override a2c: bool = false;
 
 struct FIn {
   @location(0) vTexcoord: vec2<f32>,
