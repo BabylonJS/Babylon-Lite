@@ -1,10 +1,10 @@
 {
-  "rawKB": 50.1,
-  "gzipKB": 20.3,
+  "rawKB": 48.3,
+  "gzipKB": 19.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene40-standard-renderable-D0fliXXH.js",
+    "scene40-standard-renderable-CZamRcVs.js",
     "scene40.js"
   ],
-  "rawBytes": 51320
+  "rawBytes": 49503
 }

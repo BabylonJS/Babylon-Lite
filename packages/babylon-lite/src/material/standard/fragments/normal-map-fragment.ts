@@ -40,16 +40,17 @@ export const bumpStdExt: StdExt = {
     _id: "normal-map",
     _phase: "mesh",
     _feature: HAS_BUMP_TEXTURE,
+    _detect: (mat: StandardMaterialProps): number => (mat._bumpTexture ? HAS_BUMP_TEXTURE : 0),
     _frag: createNormalMapFragment,
     _bind(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number {
-        const tex = mat.bumpTexture!;
+        const tex = mat._bumpTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
     _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
-        if (mat.bumpTexture) {
-            out.push(mat.bumpTexture);
+        if (mat._bumpTexture) {
+            out.push(mat._bumpTexture);
         }
     },
 };

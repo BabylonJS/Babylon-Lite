@@ -240,7 +240,48 @@ enableStandardVertexColors();
 await registerScene(scene);
 ```
 
-### 10. Mirrored (Negatively Scaled) Meshes Are Opt-In
+### 10. StandardMaterial Optional Textures Are Opt-In
+
+Only `diffuseTexture` is built into `StandardMaterialProps`. The other eight texture slots live behind `setStandardXTexture()` functions so scenes that don't use them retain none of the corresponding shader code. Assigning the backing property directly is a compile error — the fields are `@internal` (underscore-prefixed) precisely because a direct write would skip extension registration and silently render nothing.
+
+```typescript
+// ❌ Babylon.js
+const mat = new StandardMaterial("mat", scene);
+mat.bumpTexture = new Texture("normal.png", scene);
+mat.emissiveTexture = new Texture("glow.png", scene);
+
+// ✅ Babylon Lite
+import { createStandardMaterial, setStandardBumpTexture, setStandardEmissiveTexture } from "@babylonjs/lite";
+
+const mat = createStandardMaterial();
+setStandardBumpTexture(mat, await loadTexture2D(engine, "normal.png"));
+setStandardEmissiveTexture(mat, await loadTexture2D(engine, "glow.png"));
+```
+
+| Babylon.js property        | Babylon Lite setter                                   |
+| -------------------------- | ----------------------------------------------------- |
+| `material.bumpTexture`     | `setStandardBumpTexture(mat, tex)`                    |
+| `material.emissiveTexture` | `setStandardEmissiveTexture(mat, tex)`                |
+| `material.specularTexture` | `setStandardSpecularTexture(mat, tex)`                |
+| `material.ambientTexture`  | `setStandardAmbientTexture(mat, tex)`                 |
+| `material.lightmapTexture` | `setStandardLightmapTexture(mat, tex)`                |
+| `material.opacityTexture`  | `setStandardOpacityTexture(mat, tex)`                 |
+| `material.reflectionTexture` (2D)   | `setStandardReflectionTexture(mat, tex)`     |
+| `material.reflectionTexture` (cube) | `setStandardReflectionCubeTexture(mat, cube)` |
+
+Companion scalars (`bumpLevel`, `lightmapCoordIndex`, `opacityFromRGB`, `reflectionLevel`, …) remain plain assignable properties and may be set in any order relative to the setter — feature detection runs when the renderable is built, not when the setter is called. Setting a texture *after* the material has already been built still requires `rebuildMaterial()`, exactly as before.
+
+Cube reflection takes a `CubeTexture`, which only `loadCubeTexture()` produces:
+
+```typescript
+import { loadCubeTexture, setStandardReflectionCubeTexture } from "@babylonjs/lite";
+
+setStandardReflectionCubeTexture(mat, await loadCubeTexture(engine, "textures/skybox", ".jpg"));
+```
+
+`.babylon` files loaded through `loadBabylon()` wire all of these up automatically — the loader imports only the setters a given file actually needs.
+
+### 11. Mirrored (Negatively Scaled) Meshes Are Opt-In
 
 Babylon flips `sideOrientation` automatically whenever a mesh's world-matrix determinant turns
 negative. Lite's glTF loader already reverses winding for negative-scale nodes it finds at load
@@ -269,7 +310,7 @@ installed process-wide on the first call, so in a multi-scene app the other scen
 rendering mirrored meshes inside-out, but they will not track a mirroring that changes after their
 renderables are built unless you call it for them too.
 
-### 11. Removing & Disposing Entities
+### 12. Removing & Disposing Entities
 
 BJS uses `mesh.dispose()` on individual objects. Lite uses `removeFromScene()` which removes the mesh from the scene and destroys all its GPU resources (buffers, textures, skeleton data).
 

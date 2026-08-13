@@ -19,10 +19,13 @@ export function enableMaterialUvTransform(material: Partial<PbrMaterialProps> | 
     if (material._buildGroup?._materialFamily !== "standard") {
         return enablePbrMaterialUvTransform(material as Partial<PbrMaterialProps>);
     }
-    material = material as StandardMaterialProps;
-    if (!material._hasUvTx) {
-        material._uvTxExt = _preloadStdMeshExt(() => import("./standard/fragments/std-uv-transform-fragment.js"), "stdUvTransformExt");
+    // A typed local rather than reassigning `material`: StandardMaterialProps is
+    // structurally assignable to Partial<PbrMaterialProps> (its optional texture
+    // fields are opt-in), so assignment narrowing would leave the union intact.
+    const std = material as StandardMaterialProps;
+    if (!std._hasUvTx) {
+        std._uvTxExt = _preloadStdMeshExt(() => import("./standard/fragments/std-uv-transform-fragment.js"), "stdUvTransformExt");
     }
-    material._hasUvTx = true;
-    return material._renderFeatures === undefined;
+    std._hasUvTx = true;
+    return std._renderFeatures === undefined;
 }

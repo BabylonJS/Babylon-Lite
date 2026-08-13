@@ -20,11 +20,12 @@ export const stdCubeReflectionExt: StdExt = {
     _id: "std-cube-reflection",
     _phase: "mesh",
     _feature: HAS_CUBE_REFLECTION,
+    _detect: (mat): number => (mat._reflectionCubeTexture ? HAS_CUBE_REFLECTION : 0),
     _frag: createStdCubeReflectionFragment,
     _bind(mat, entries, b) {
-        const cube = mat.reflectionCubeTexture!;
-        entries.push({ binding: b++, resource: cube.view });
-        entries.push({ binding: b++, resource: cube.sampler });
+        const cube = mat._reflectionCubeTexture!;
+        entries.push({ binding: b++, resource: cube._view });
+        entries.push({ binding: b++, resource: cube._sampler });
         return b;
     },
     // Cube textures are tracked separately; no Texture2D[] contribution.

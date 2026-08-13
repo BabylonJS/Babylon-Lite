@@ -64,6 +64,12 @@ export interface StdExt {
     readonly _phase: StdExtPhase;
     /** @internal Feature bit this ext gates on. */
     readonly _feature: number;
+    /** @internal Contribute material feature bits for `mat` (including this ext's own
+     *  sub-bits, e.g. UV-set or mode selectors). Returns 0 when the material does not
+     *  use the feature. Only registered exts are consulted, so an opt-in setter is the
+     *  sole way these bits can ever be set — which is what keeps the detection code
+     *  (and the fragment it gates) out of the always-loaded core. */
+    _detect?(mat: StandardMaterialProps): number;
     /** @internal Effective Standard feature bits contributed by one mesh. */
     _meshFeatures?(meshFeatures: number, material?: StandardMaterialProps): number;
     /** @internal */

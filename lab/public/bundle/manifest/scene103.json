@@ -1,12 +1,12 @@
 {
-  "rawKB": 62.9,
-  "gzipKB": 25.2,
+  "rawKB": 61.1,
+  "gzipKB": 24.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene103-standard-renderable-DrGIBI_7.js",
+    "scene103-standard-renderable-7ut3e-Rf.js",
     "scene103-thin-instance-fragment-CBn2miAC.js",
-    "scene103-thin-instance-gpu-CQksuB9P.js",
+    "scene103-thin-instance-gpu-B903pqc8.js",
     "scene103.js"
   ],
-  "rawBytes": 64424
+  "rawBytes": 62585
 }

@@ -130,7 +130,7 @@ describe("StandardMaterial UV transform detection", () => {
                 uAng: 0.42,
                 invertY: true,
             },
-            lightmapTexture: { uAng: Math.PI },
+            _lightmapTexture: { uAng: Math.PI },
         } as StandardMaterialProps;
 
         stdUvTransformExt._bind!(material, [], 0, undefined, engine);
