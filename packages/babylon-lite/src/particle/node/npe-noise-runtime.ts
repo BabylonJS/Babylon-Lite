@@ -13,12 +13,5 @@ export function buildNodeParticleSetWithNoiseTexturesRuntime(
     graph: ParticleGraph,
     options: BuildNodeParticleOptions
 ): Promise<NodeParticleSet> {
-    return buildNodeParticleSetWithTextureUpdateRuntime(
-        engine,
-        scene,
-        graph,
-        options,
-        (className) => (className === "UpdateNoiseBlock" ? [updateNoiseBlock, "noiseTexture"] : undefined),
-        cpuTextureSourceBlock
-    );
+    return buildNodeParticleSetWithTextureUpdateRuntime(engine, scene, graph, options, "UpdateNoiseBlock", "noiseTexture", updateNoiseBlock, cpuTextureSourceBlock);
 }
