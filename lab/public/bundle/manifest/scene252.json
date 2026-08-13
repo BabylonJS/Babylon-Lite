@@ -1,5 +1,5 @@
 {
-  "rawKB": 49.5,
+  "rawKB": 49.4,
   "gzipKB": 20.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -7,5 +7,5 @@
     "scene252-standard-renderable-D8h8Bqs7.js",
     "scene252.js"
   ],
-  "rawBytes": 50650
+  "rawBytes": 50622
 }
