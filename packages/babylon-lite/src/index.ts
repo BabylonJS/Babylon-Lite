@@ -270,7 +270,6 @@ export { setPbrSkybox } from "./material/pbr/set-skybox.js";
 export { setPbrAlphaCutoff } from "./material/pbr/set-alpha-cutoff.js";
 export { setPbrTransmission } from "./material/pbr/set-transmission.js";
 export { setPbrDispersion } from "./material/pbr/set-dispersion.js";
-export { enableMaterialUvTransform } from "./material/pbr/enable-material-uv-transform.js";
 export { setPbrEmissive } from "./material/pbr/set-emissive.js";
 export type { MetallicReflectanceOptions } from "./material/pbr/set-metallic-reflectance.js";
 export {
@@ -300,6 +299,7 @@ export { createMaterialView } from "./material/material-view.js";
 export { getMaterialFamily } from "./material/material-family.js";
 export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
+export { enableMaterialUvTransform } from "./material/enable-material-uv-transform.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
 export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";

@@ -1,10 +1,10 @@
 {
-  "rawKB": 53.9,
+  "rawKB": 53.8,
   "gzipKB": 21.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene101-standard-renderable-D4WI_kqm.js",
     "scene101.js"
   ],
-  "rawBytes": 55157
+  "rawBytes": 55117
 }

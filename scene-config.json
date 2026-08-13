@@ -2516,5 +2516,15 @@
         "tags": ["npe", "particles", "billboards", "noise-texture"],
         "skipPerf": true,
         "compatParity": true
+    },
+    {
+        "id": 282,
+        "slug": "scene282-standard-material-uv-transform",
+        "name": "Scene 282 — Standard Material UV Transform",
+        "maxMad": 0.1,
+        "maxRawKB": 55,
+        "description": "A hand-built StandardMaterial opts into enableMaterialUvTransform and applies independent texture scale, offset, and rotation to an asymmetric repeating texture.",
+        "tags": ["standard", "textures", "uv-transform", "procedural"],
+        "skipPerf": true
     }
 ]

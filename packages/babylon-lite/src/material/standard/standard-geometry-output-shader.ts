@@ -37,6 +37,7 @@ import { HAS_SKELETON, HAS_SKELETON_8, HAS_SPECULAR_TEXTURE, MATERIAL_ALPHA_BLEN
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
+const STD_HAS_UV_TRANSFORM = 1 << 23;
 
 /** Tags whether the geometry pass needs the per-task `gp` UBO. */
 function needsGpUbo(attachments: readonly GeometryTextureType[]): boolean {
@@ -156,7 +157,7 @@ function createGeometryParamsFragment(
     const vbParts: string[] = [];
     if (needsVelocityVaryings) {
         vbParts.push(`out.vCurrentClip = scene.viewProjection * vec4<f32>(out.vp, 1.0);`);
-        if ((meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0) {
+        if (meshFeatures & MSH_HAS_THIN_INSTANCES) {
             vbParts.push(`out.vPreviousClip = out.vCurrentClip;`);
         } else {
             const localPosition = (meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 ? "morphedPos" : "position";
@@ -243,8 +244,8 @@ export function composeStandardGeometryShader(
             : extFragments;
     const base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode, sceneShader);
 
-    const hasSpecular = (features & HAS_SPECULAR_TEXTURE) !== 0;
-    const specularUv = (features & SPECULAR_USES_UV2) !== 0 ? "input.vv" : "input.vu";
+    const hasSpecular = !!(features & HAS_SPECULAR_TEXTURE);
+    const specularUv = features & STD_HAS_UV_TRANSFORM ? "input.vs" : features & SPECULAR_USES_UV2 ? "input.vv" : "input.vu";
 
     // ── Post-process the fragment WGSL ────────────────────────────────────
 

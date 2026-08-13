@@ -1,5 +1,5 @@
 {
-  "rawKB": 62.1,
+  "rawKB": 62,
   "gzipKB": 25.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -11,5 +11,5 @@
     "scene205-standard-renderable-BmvrsxXJ.js",
     "scene205.js"
   ],
-  "rawBytes": 63548
+  "rawBytes": 63525
 }
