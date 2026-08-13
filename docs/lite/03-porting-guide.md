@@ -378,17 +378,24 @@ This works for both PBR and Standard materials. Zero runtime cost when nothing c
 Call `enableMaterialTracking()` once on a material to install property setters that auto-detect changes — including in-place array mutations like `material.diffuseColor[0] = 0.5`:
 
 ```typescript
-import { enableMaterialTracking } from "@babylonjs/lite";
+import { enableMaterialTracking, setPbrAnisotropy, setPbrEmissive } from "@babylonjs/lite";
 
-const mat = createPbrMaterial({ anisotropy: { isEnabled: true, intensity: 1.0 } });
+const mat = createPbrMaterial({});
+setPbrAnisotropy(mat, { isEnabled: true, intensity: 1.0 });
+setPbrEmissive(mat, [0, 0, 0]);
 enableMaterialTracking(mat);
 
 // Now mutations auto-mark the material UBO dirty — no manual call needed:
 onBeforeRender(scene, () => {
-    mat.anisotropy!.intensity = Math.cos(a) * 0.5 + 0.5; // auto-dirty
-    mat.emissiveColor![0] = 0.5; // auto-dirty (index write)
+    mat._anisotropy!.intensity = Math.cos(a) * 0.5 + 0.5; // auto-dirty
+    mat._emissiveColor![0] = 0.5; // auto-dirty (index write)
 });
 ```
+
+Opt-in features live behind `setPbrX()` functions so unused shader code tree-shakes away; the
+properties they stamp are `@internal` (underscore-prefixed) precisely so that assigning them
+directly — which would skip extension registration and silently render nothing — is a compile
+error. Once the setter has run, in-place mutation of the stamped value is supported.
 
 `enableMaterialTracking` is fully tree-shakable — scenes that don't import it pay zero bundle cost.
 

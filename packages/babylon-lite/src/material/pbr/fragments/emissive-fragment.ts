@@ -4,7 +4,9 @@
  * Adds an emissiveColor vec3 uniform to MeshUniforms and uses it
  * in the fragment shader's emissive computation.
  *
- * Zero bytes in bundles for scenes that don't use emissive color.
+ * Pulled in only by `setPbrEmissive`, so scenes without emissive pay zero bytes.
+ * Contributes the `PBR_HAS_EMISSIVE_COLOR` feature bit from its own `detect()`,
+ * keeping that check out of the always-loaded `_computePbrMaterialFeatures`.
  */
 
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
@@ -33,18 +35,25 @@ export function createEmissiveColorFragment(hasEmissiveTexture: boolean): Shader
 
 /** Write the emissive-color material-UBO slice. */
 export function writeEmissiveUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
-    if (!material.emissiveColor || !offsets.has("emissiveColor")) {
+    if (!material._emissiveColor || !offsets.has("emissiveColor")) {
         return;
     }
     const off = offsets.get("emissiveColor")! / 4;
-    data[off] = material.emissiveColor[0]!;
-    data[off + 1] = material.emissiveColor[1]!;
-    data[off + 2] = material.emissiveColor[2]!;
+    data[off] = material._emissiveColor[0]!;
+    data[off + 1] = material._emissiveColor[1]!;
+    data[off + 2] = material._emissiveColor[2]!;
 }
 
 export const pbrExt: PbrExt = {
     id: "emissive-color",
     phase: "fragment",
+    detect(mat: unknown): { f: number; f2: number } {
+        // Contributed here rather than by the always-loaded `_computePbrMaterialFeatures`,
+        // so the base feature computation carries no emissive check. The companion
+        // PBR_HAS_EMISSIVE (emissiveTexture) bit stays there — it drives the bind-group
+        // layout, which must be known without this ext loaded.
+        return { f: (mat as PbrMaterialProps)._emissiveColor ? PBR_HAS_EMISSIVE_COLOR : 0, f2: 0 };
+    },
     frag(ctx) {
         if (!(ctx._features & PBR_HAS_EMISSIVE_COLOR)) {
             return null;

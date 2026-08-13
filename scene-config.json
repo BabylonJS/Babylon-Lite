@@ -2212,6 +2212,16 @@
         "skipPerf": true
     },
     {
+        "id": 256,
+        "slug": "scene256-normal-tangent-test",
+        "name": "Scene 256 — NormalTangentTest",
+        "maxMad": 0.02,
+        "maxRawKB": 77.6,
+        "description": "NormalTangentTest.gltf — cx20 gltf-test / Khronos glTF-Sample-Assets. A single mesh/material grid comparing real bump geometry against flat normal-mapped cells; the mesh has a normal map but no TANGENT accessor. Validates runtime tangent-basis generation (screen-space cotangent frame) for glTF primitives that omit TANGENT, and correct OpenGL-convention (right-handed) normal-map Y decoding on a double-sided material.",
+        "tags": ["gltf", "pbr", "normal-map", "tangent"],
+        "skipPerf": true
+    },
+    {
         "id": 257,
         "slug": "scene257-negative-node-scale",
         "name": "Scene 257 — Negative Node Scale",
@@ -2462,6 +2472,17 @@
         "maxRawKB": 50,
         "description": "A fixed-topology line system updated in place before rendering, then drawn through five thin-instance matrices with per-instance RGBA colors, matching Babylon.js LinesMesh update and thinInstanceSetBuffer behavior.",
         "tags": ["lines", "procedural", "update", "thin-instances", "alpha"],
+        "skipPerf": true,
+        "compatParity": true
+    },
+    {
+        "id": 280,
+        "slug": "scene280-npe-flow-map",
+        "name": "Scene 280 — NPE Particles: Flow Map",
+        "maxMad": 0.01,
+        "maxRawKB": 45,
+        "description": "A serialized NPE particle graph with UpdateFlowMapBlock projecting particle positions into an asymmetric RGBA flow field and applying alpha-weighted direction changes. The flow setup mirrors Babylon.js visual test 'Particles - Flowmaps' (#39BW3H#0) and playground #PPC2EI#7 while using the scene 262 creation graph for a compact byte-identical Babylon/Lite fixture.",
+        "tags": ["npe", "particles", "billboards", "flow-map"],
         "skipPerf": true,
         "compatParity": true
     }
