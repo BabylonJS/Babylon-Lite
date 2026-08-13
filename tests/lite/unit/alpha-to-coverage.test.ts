@@ -25,7 +25,6 @@ import { createSpritePipelineCache, getOrCreateSpritePipeline } from "../../../p
 import { clearTextPipelineCache, getOrCreateTextPipeline } from "../../../packages/babylon-lite/src/text/_gpu/text-pipeline";
 import type { TextRenderable } from "../../../packages/babylon-lite/src/text/text-renderable";
 import blendedTextFragment from "../../../packages/babylon-lite/src/text/shaders/slug.frag.wgsl?raw";
-import alphaToCoverageTextFragment from "../../../packages/babylon-lite/src/text/shaders/slug-a2c.frag.wgsl?raw";
 
 function makeEngine() {
     const createRenderPipeline = vi.fn((descriptor: GPURenderPipelineDescriptor) => descriptor as unknown as GPURenderPipeline);
@@ -105,6 +104,10 @@ function alphaToCoverageEnabled(pipeline: GPURenderPipeline): boolean | undefine
 
 function colorTarget(pipeline: GPURenderPipeline): GPUColorTargetState {
     return (pipeline as unknown as GPURenderPipelineDescriptor).fragment!.targets![0]!;
+}
+
+function fragmentStage(pipeline: GPURenderPipeline): GPUFragmentState {
+    return (pipeline as unknown as GPURenderPipelineDescriptor).fragment!;
 }
 
 function depthWriteEnabled(pipeline: GPURenderPipeline): boolean | undefined {
@@ -257,10 +260,26 @@ describe("WebGPU alpha-to-coverage", () => {
     });
 
     it("keeps blended and A2C text coverage math identical", () => {
-        const normalizedA2C = alphaToCoverageTextFragment
-            .replace("return vec4<f32>(in.vColor.rgb, in.vColor.a * coverage);", "return in.vColor * coverage;")
-            .replaceAll("\r\n", "\n");
-        expect(normalizedA2C).toBe(blendedTextFragment.replaceAll("\r\n", "\n"));
+        // Both pipelines run ONE shader module, specialised by the `a2c` pipeline-overridable
+        // constant, so the coverage math cannot drift between them. Shipping a second
+        // near-identical shader file instead would inline ~3KB of duplicate WGSL text into
+        // every consumer's bundle, including those that never enable A2C.
+        const { engine, createShaderModule } = makeEngine();
+        clearTextPipelineCache(engine);
+        const text = {} as TextRenderable;
+        setAlphaToCoverage(text, true);
+
+        const enabled = getOrCreateTextPipeline(engine, "rgba8unorm", 4, "depth24plus", true, text).pipeline;
+        const blended = getOrCreateTextPipeline(engine, "rgba8unorm", 1, "depth24plus", true, text).pipeline;
+
+        expect(fragmentStage(enabled).module).toBe(fragmentStage(blended).module);
+        expect(fragmentStage(enabled).constants).toEqual({ a2c: 1 });
+        expect(fragmentStage(blended).constants).toBeUndefined();
+
+        // Exactly one fragment module is ever compiled, and it declares the override.
+        const fragmentSources = createShaderModule.mock.calls.map((call) => call[0].code).filter((code) => code.includes("@location(0) vec4<f32>"));
+        expect(fragmentSources).toHaveLength(1);
+        expect(blendedTextFragment).toMatch(/override\s+a2c\s*:\s*bool/);
     });
 
     it("combines multisampled depth-writing Sprite2D A2C with the selected blend mode", () => {

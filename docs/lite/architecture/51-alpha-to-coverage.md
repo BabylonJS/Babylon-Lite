@@ -141,7 +141,7 @@ The per-owner API is intentional: WebGPU alpha-to-coverage is pipeline state, wh
 5. Scene 53 verifies the depth-hosted Sprite2D integration uses explicit `spriteBlendOpaque` with A2C; its hard-alpha atlas is not fractional-coverage proof.
 6. Scene 57 verifies the cutout billboard A2C pipeline on WebGPU; its binary atlas is not fractional-coverage proof.
 7. Scene 274 renders red/green overlap with A2C off and on, and is compared against the Babylon.js WebGPU golden with the standard full-image MAD gate. The two demo rows are separated so no card overlaps a card from the other row: cross-row overlap would produce identical depth values, and a depth tie resolves differently under reverse-Z `greater-equal` than under strict `LESS`, which would desynchronize the WebGPU and WebGL2 scenes for reasons unrelated to alpha-to-coverage.
-8. Scene 275 provides the fractional-coverage proof: overlapping depth-writing MSDF text runs through the dedicated Slug A2C fragment shader and asserts that partial glyph-edge samples mix front/rear colors.
+8. Scene 275 provides the fractional-coverage proof: overlapping depth-writing MSDF text runs through the Slug fragment shader specialised by the `a2c` override constant, and asserts that partial glyph-edge samples mix front/rear colors.
 9. Rebuilding existing Shader, Standard, PBR, text, and sprite scenes that do not import A2C must keep their small raw-byte movement within existing ceilings.
 
 ## File Manifest
@@ -153,8 +153,8 @@ The per-owner API is intentional: WebGPU alpha-to-coverage is pipeline state, wh
 - `material/standard/standard-pipeline.ts` — shares Standard shader resources and emits the A2C pipeline variant.
 - `material/standard/standard-renderable.ts` — resolves per-material A2C state for pipeline selection.
 - `material/shader/shader-pipeline.ts` — Shader cache-key and descriptor seam.
-- `text/_gpu/text-pipeline.ts` — premultiplied-alpha normal variant and replacement-color A2C variant.
-- `text/shaders/slug-a2c.frag.wgsl` — A2C output variant (full RGB, coverage in alpha only).
+- `text/_gpu/text-pipeline.ts` — premultiplied-alpha normal variant and replacement-color A2C variant, selected via the `a2c` pipeline-overridable constant.
+- `text/shaders/slug.frag.wgsl` — shared Slug fragment shader; the `a2c` override switches its output between premultiplied RGB and straight alpha (coverage in alpha only).
 - `text/text-renderable.ts` — supplies the scene text pipeline owner.
 - `sprite/sprite-pipeline.ts` — depth-hosted Sprite2D cache-key, blend, and descriptor seam.
 - `sprite/billboard-pipeline.ts` — cutout billboard shader/cache/descriptor seam.

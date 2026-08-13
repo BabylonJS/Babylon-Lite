@@ -2446,7 +2446,7 @@
         "slug": "scene275-msdf-text-alpha-to-coverage",
         "name": "Scene 275 — MSDF Text Alpha-to-Coverage",
         "maxMad": 0.8,
-        "maxRawKB": 42.5,
+        "maxRawKB": 39.5,
         "description": "Two overlapping MSDF text renderers write per-sample depth into a 4x MSAA target. Fractional front-glyph edge coverage leaves samples for the rear glyph, producing a visible red/green edge mix and exercising the dedicated Slug A2C fragment pipeline on GPU.",
         "tags": ["text", "msdf", "depth", "msaa", "alpha-to-coverage"],
         "skipPerf": true

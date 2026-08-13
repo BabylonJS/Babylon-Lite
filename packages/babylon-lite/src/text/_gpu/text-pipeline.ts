@@ -3,7 +3,6 @@
 import type { EngineContext } from "../../engine/engine.js";
 import vertSrc from "../shaders/slug.vert.wgsl?raw";
 import fragSrc from "../shaders/slug.frag.wgsl?raw";
-import a2cFragSrc from "../shaders/slug-a2c.frag.wgsl?raw";
 import { TEXT_INSTANCE_BYTES } from "../text-data.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
@@ -11,7 +10,6 @@ export interface TextPipelineDeviceCache {
     bindGroupLayout: GPUBindGroupLayout;
     vertModule: GPUShaderModule;
     fragModule: GPUShaderModule;
-    a2cFragModule?: GPUShaderModule;
     quadVertexBuffer: GPUBuffer;
     pipelines: Map<string, GPURenderPipeline>;
 }
@@ -79,7 +77,6 @@ export function getOrCreateTextPipeline(
         return { pipeline, cache };
     }
     const device = engine._device;
-    const fragModule = alphaToCoverage ? (cache.a2cFragModule ??= device.createShaderModule({ label: "text-a2c-frag", code: a2cFragSrc })) : cache.fragModule;
     const descriptor: GPURenderPipelineDescriptor = {
         label: "text-pipeline",
         layout: device.createPipelineLayout({ bindGroupLayouts: [cache.bindGroupLayout] }),
@@ -106,8 +103,12 @@ export function getOrCreateTextPipeline(
             ],
         },
         fragment: {
-            module: fragModule,
+            module: cache.fragModule,
             entryPoint: "main",
+            // `a2c` is a pipeline-overridable constant in slug.frag.wgsl; setting it switches the
+            // fragment to straight-alpha output. Specialising one module beats shipping a second
+            // near-identical shader, whose text every consumer would pay for even unused.
+            ...(alphaToCoverage ? { constants: { a2c: 1 } } : {}),
             targets: [
                 {
                     format,

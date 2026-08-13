@@ -12,6 +12,12 @@ struct TextU {
 };
 @group(0) @binding(0) var<uniform> textU: TextU;
 
+// Pipeline-overridable: when true, output straight (non-premultiplied) alpha so the
+// hardware can derive sample coverage from alpha alone. Set via `constants: { a2c: 1 }`
+// on the alpha-to-coverage pipeline; the default keeps the premultiplied output the
+// blended pipeline expects. One shader module serves both.
+override a2c: bool = false;
+
 struct FIn {
   @location(0) vTexcoord: vec2<f32>,
   @location(1) @interpolate(flat) vBanding: vec4<f32>,
@@ -148,5 +154,8 @@ fn main(in: FIn) -> @location(0) vec4<f32> {
   // Coverage gamma: raise edge coverage to 1/coverageGamma so anti-aliased edges composite
   // heavier (mimics gamma-space stem darkening). textU.color.x is 1 by default (no-op).
   coverage = pow(coverage, textU.color.x);
-  return in.vColor * coverage;
+  // `a2c` false → RGB is coverage-weighted (premultiplied), identical to `in.vColor * coverage`.
+  // `a2c` true  → RGB is left unweighted and coverage lives only in alpha.
+  let rgbWeight = select(coverage, 1.0, a2c);
+  return vec4<f32>(in.vColor.rgb * rgbWeight, in.vColor.a * coverage);
 }
