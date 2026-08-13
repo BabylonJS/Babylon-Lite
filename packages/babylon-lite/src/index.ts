@@ -734,6 +734,7 @@ export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
 export { registerNodeParticleSet } from "./particle/particle-scene.js";
 export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
+export { addParticleBillboardSystem } from "./particle/particle-billboard-scene.js";
 
 // ─── Text ────────────────────────────────────────────────────────────
 export type { Font } from "./text/font.js";

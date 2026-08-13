@@ -2526,5 +2526,15 @@
         "description": "A hand-built StandardMaterial opts into enableMaterialUvTransform and applies independent texture scale, offset, and rotation to an asymmetric repeating texture.",
         "tags": ["standard", "textures", "uv-transform", "procedural"],
         "skipPerf": true
+    },
+    {
+        "id": 283,
+        "slug": "scene283-npe-multiply-blend",
+        "name": "Scene 283 — NPE Particles: Multiply Blend",
+        "maxMad": 0.01,
+        "maxRawKB": 50,
+        "description": "A deterministic serialized NPE particle field using blend mode 3 over a warm destination color. Semi-transparent green radial sprites verify Babylon's Multiply fragment interpolation toward white and destination-color blend state, including unchanged fully transparent texels.",
+        "tags": ["npe", "particles", "billboards", "multiply", "blend"],
+        "skipPerf": true
     }
 ]

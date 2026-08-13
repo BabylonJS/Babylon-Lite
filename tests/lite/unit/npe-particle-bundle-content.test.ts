@@ -12,7 +12,7 @@ interface BundleInfo {
 
 const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
-const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280, 281];
+const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280, 281, 283];
 const UNUSED_FEATURE_CHUNK =
     /registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(flow-map-runtime|noise-runtime|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 
@@ -51,6 +51,12 @@ describe("Particle bundle feature isolation", () => {
                 expect(
                     chunks.some((chunk) => chunk.includes("npe-noise-runtime")),
                     "scene281 must fetch the specialized noise-texture runtime"
+                ).toBe(true);
+            }
+            if (sceneId === 283) {
+                expect(
+                    chunks.some((chunk) => chunk.includes("particle-billboard-renderable")),
+                    "scene283 must fetch the particle Multiply renderable"
                 ).toBe(true);
             }
 

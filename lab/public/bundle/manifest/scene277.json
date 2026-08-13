@@ -1,10 +1,10 @@
 {
-  "rawKB": 41.6,
-  "rawBytes": 42586,
-  "gzipKB": 25.2,
+  "rawKB": 41.7,
+  "rawBytes": 42674,
+  "gzipKB": 25.3,
   "ignoredRawKB": 29.8,
   "runtimeChunks": [
-    "scene277-billboard-renderable-BKfyWlod.js",
+    "scene277-billboard-renderable-D-18pcnr.js",
     "scene277-box-shape-block-DEm7hj_D.js",
     "scene277-create-particle-block-CiseX6ot.js",
     "scene277-generate-mipmaps-EjYPhc1Z.js",
