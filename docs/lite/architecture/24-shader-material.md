@@ -309,6 +309,9 @@ The group builder has no module-level registry and imports renderable code only 
 
 Opaque ShaderMaterials may batch multiple meshes under one renderable if they share one material instance and target pipeline. Transparent ShaderMaterials should emit one renderable per mesh so frame-graph sorting can use each mesh world center.
 
+A merged opaque renderable has no single source mesh for the frame graph to visibility-filter. Its render-bundle recording loop must therefore skip each packet whose mesh has
+`visible === false`; steady-state per-frame updates remain unchanged.
+
 ### Pipeline cache
 
 Cache scope is per material instance, not module-level. Cross-material pipeline sharing is a non-goal for phase 1 because module-level `Map` allocations violate Lite's tree-shaking guidance. A future device-owned cache may be added if profiling proves it necessary.
