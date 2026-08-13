@@ -240,6 +240,8 @@ export async function buildInterleavedPartial(
     vb._n = nrm._il;
     // A normalized UNSIGNED_BYTE/SHORT TEXCOORD_0 is materialized as a tight float32x2 [0,1] buffer
     // (never bound strided), so integer UVs don't misalign against the float32x2 vertex layout.
+    // (KHR_mesh_quantization's unnormalized integer TEXCOORD never reaches here either — it's
+    // rewritten to FLOAT upstream by gltf-ext-quantization.ts's preParse.)
     const uvIdx = attrs["TEXCOORD_0"];
     const uv: { _tight: Float32Array | null; _il?: AccessorInterleave; _count: number } =
         uvIdx !== undefined && json.accessors[uvIdx].componentType !== FLOAT

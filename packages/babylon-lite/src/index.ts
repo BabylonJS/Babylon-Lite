@@ -317,6 +317,7 @@ export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────
 export { loadGltf } from "./loader-gltf/load-gltf.js";
+export { enableGltfCameras } from "./loader-gltf/gltf-feature-camera.js";
 export type { AssetContainer } from "./asset-container.js";
 export { getContainerMeshes } from "./asset-container.js";
 export { selectVariant, getVariantNames, resetVariant } from "./loader-gltf/material-variants.js";
@@ -709,6 +710,8 @@ export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
 export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
 export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
 export { buildNodeParticleSetWithFlowMaps } from "./particle/node/npe-flow-map.js";
+export { buildNodeParticleSetWithNoiseTextures } from "./particle/node/npe-noise.js";
+export { buildNodeParticleSetWithTextureUpdates } from "./particle/node/npe-texture-updates.js";
 export type { ParticleSystem } from "./particle/particle-system.js";
 export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";

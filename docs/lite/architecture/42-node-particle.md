@@ -20,7 +20,7 @@ The design requirements are:
 
 ## 2. Package-root API
 
-`packages/babylon-lite/src/index.ts` exports exactly ten node-particle functions and five node-particle types.
+`packages/babylon-lite/src/index.ts` exports exactly twelve node-particle functions and five node-particle types.
 
 ### 2.1 Functions
 
@@ -29,6 +29,8 @@ function parseNodeParticleSource(source: unknown): ParticleGraph;
 
 function buildNodeParticleSet(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
 function buildNodeParticleSetWithFlowMaps(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
+function buildNodeParticleSetWithNoiseTextures(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
+function buildNodeParticleSetWithTextureUpdates(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
 
 function parseNodeParticleSetFromSnippet(engine: EngineContext, scene: SceneContext, snippetId: string, options?: ParseNodeParticleOptions): Promise<NodeParticleSet>;
 
@@ -97,6 +99,8 @@ serialized value or snippet response
     -> ParticleGraph
      -> buildNodeParticleSet
          or buildNodeParticleSetWithFlowMaps for UpdateFlowMapBlock graphs
+         or buildNodeParticleSetWithNoiseTextures for UpdateNoiseBlock graphs
+         or buildNodeParticleSetWithTextureUpdates for graphs containing both
     -> NodeParticleSet { systems }
     -> startParticleSystem / stopParticleSystem / animateParticleSystem
     -> createParticleBillboard + syncParticleBillboard
@@ -118,6 +122,8 @@ node/npe-build.ts        root-reachable DFS and system construction
 node/npe-value.ts        indexed getter and step contracts
 node/npe-texture-content.ts
                          pay-for-use CPU RGBA texture decoding
+node/npe-texture-update-runtime.ts
+                         shared lazy graph walk for one CPU texture update family
 node/npe-contextual*.ts  contextual source getters and optional columns
 node/npe-local-position.ts
                          local birth seeding and world-position conversion
@@ -450,7 +456,7 @@ For each root:
 - `options.emitterWorldMatrix` has precedence over `options.emitter`. The matrix reference is retained, and its indices 12, 13, and 14 are copied into a fresh emitter `Vec3`.
 - Without a matrix, the emitter option or `{ x: 0, y: 0, z: 0 }` is copied into the emitter value and a translation matrix.
 - `scene` and `textureBaseUrl` are carried in `NpeBuildState`.
-- Each standard-builder root gets its own output map and block-id set. The flow-map builder is dynamically imported only by `buildNodeParticleSetWithFlowMaps`; its specialized walk additionally keys dependency overrides by parsed block object, allowing one texture source to be evaluated once for billboard upload and once for CPU flow-map decoding.
+- Each standard-builder root gets its own output map and block-id set. The flow-map, noise-texture, and combined texture-update builders dynamically import feature runtimes only through their explicit public functions. Their shared specialized walk additionally keys dependency overrides by parsed block object, allowing one texture source to be evaluated once for billboard upload and once for CPU decoding.
 - Build promises are accumulated for the whole set and awaited together after all roots have been traversed.
 
 `CreateParticleBlock` does not create the system. `SystemBlock` does not set capacity or locality; the builder consumes those serialized fields before DFS.
@@ -468,7 +474,7 @@ The standard asynchronous `buildBlock(id)` algorithm is exact:
 5. Select and dynamically import one evaluator.
 6. Run `evaluator.build(block, ctx)`.
 
-The flow-map builder mirrors this walk in its dynamically loaded feature module. It directly selects `UpdateFlowMapBlock` and overrides only its connected `flowMap` source with `flowMapTextureSourceBlock`; every other block follows the standard registry. The ordinary builder and every shared registry remain byte-identical for scenes that do not call the flow-map builder.
+The CPU texture-update builder mirrors this walk in its dynamically loaded feature module. Each thin feature runtime supplies one class, one texture input name, its update evaluator, and `cpuTextureSourceBlock`. Flow maps select `UpdateFlowMapBlock.flowMap`; noise selects `UpdateNoiseBlock.noiseTexture`. Every other block follows the standard registry. The ordinary builder and every shared registry remain unchanged for scenes that do not call an opt-in texture-update builder.
 
 Marking before recursion terminates cycles. A cycle can still fail when an evaluator asks for an output that has not been installed.
 
@@ -478,7 +484,7 @@ The output map key is `${blockId}:${connectionName}`. Getter outputs are:
 
 - `output`: `ParticleInputBlock`, `ParticleRandomBlock`, `ParticleMathBlock`, `ParticleLerpBlock`, `ParticleGradientBlock`, `ParticleGradientValueBlock`, `ParticleConditionBlock`, `ParticleFloatToIntBlock`, and `ParticleVectorLengthBlock`.
 - `color`, `xyz`, `xy`, `zw`, `x`, `y`, `z`, and `w`: `ParticleConverterBlock`.
-- `texture`: `flowMapTextureSourceBlock`, reachable only through the flow-map builder's dependency override.
+- `texture`: `cpuTextureSourceBlock`, reachable only through a CPU texture-update builder's dependency override.
 
 `SystemBlock`, `CreateParticleBlock`, all six shape classes, `SetupSpriteSheetBlock`, `BasicSpriteUpdateBlock`, and all seven update classes install no getter output. Their `particle` connections control reachability and ordering only. Update blocks do not publish flow outputs.
 
@@ -506,7 +512,7 @@ Evaluators are not preloaded. Selection and dynamic import occur when DFS reache
 - `npe-registry.ts` handles System, Create, Box, UpdatePosition, UpdateColor, TextureSource, Input, compact Math, Lerp, Converter, and ordinary Random.
 - Shape names that miss the Box arm route to `npe-registry-extra-emitters.ts`, which handles Point, Sphere, Cone, Cylinder, and Mesh.
 - `npe-registry-extra.ts` handles UpdateSize, Gradient, GradientValue, SetupSpriteSheet, and BasicSpriteUpdate.
-- Its remaining route handles UpdateAttractor, sends other names beginning with `Particle` to `npe-registry-extra-values.ts` for Condition, FloatToInt, and VectorLength, and sends remaining names to `npe-registry-extra-basic.ts` for UpdateDirection and UpdateAngle. UpdateFlowMap is owned by the dynamically loaded flow-map builder and is absent from shared registries.
+- Its remaining route handles UpdateAttractor, sends other names beginning with `Particle` to `npe-registry-extra-values.ts` for Condition, FloatToInt, and VectorLength, and sends remaining names to `npe-registry-extra-basic.ts` for UpdateDirection and UpdateAngle. UpdateFlowMap and UpdateNoise are owned by dynamically loaded feature builders and are absent from shared registries.
 - `npe-registry-local-shapes.ts` selects separate local implementations for all six shape classes when `state.isLocal` is true.
 - `npe-registry-variants.ts` selects extra contextual Input, source `0x18` Input, alias-safe Math, typed OncePerParticle Random, dynamic-emit-rate System, and random-start SetupSpriteSheet evaluators.
 - Scalar OncePerParticle Random imports its evaluator directly from the builder.
@@ -521,7 +527,7 @@ Variant selection uses serialized data and connection identity:
 
 ### 7.5 Asynchronous texture work
 
-Texture evaluators add promises to the build-promise array. A builder traverses every root, then awaits `Promise.all(buildPromises)`, and returns the set. It does not run a texture-resolution pass. The ordinary billboard texture evaluator schedules its GPU upload. The specialized flow-map builder separately publishes a CPU-readable value for a connected flow source, and UpdateFlowMap schedules its decoding. Both settle before the flow-map set is returned.
+Texture evaluators add promises to the build-promise array. A builder traverses every root, then awaits `Promise.all(buildPromises)`, and returns the set. It does not run a texture-resolution pass. The ordinary billboard texture evaluator schedules its GPU upload. A CPU texture-update builder separately publishes a CPU-readable value for its connected source, and the update evaluator schedules decoding. Both settle before the specialized set is returned.
 
 ## 8. Values and sources
 
@@ -535,7 +541,7 @@ type ParticleStep = (i: number) => void;
 
 Scalar getters return a number. Vector and color getters generally fill one value captured by the getter and return that same value on every call. Consumers copy components before invoking another volatile getter.
 
-The flow-map feature internally carries one build-local texture value through its dependency override (cast across the scalar/vector getter contract and consumed only by `UpdateFlowMapBlock`):
+The flow-map and noise features internally carry one build-local texture value through their dependency override (cast across the scalar/vector getter contract and consumed only by the matching update block):
 
 ```ts
 interface NpeTextureContent {
@@ -626,7 +632,7 @@ Contextual source has precedence over system source, and system source has prece
 
 ## 9. Supported blocks
 
-Exactly 28 block class names are supported:
+Exactly 29 block class names are supported:
 
 ```text
 SystemBlock                         CreateParticleBlock
@@ -643,6 +649,7 @@ BasicSpriteUpdateBlock              UpdatePositionBlock
 UpdateColorBlock                    UpdateDirectionBlock
 UpdateAngleBlock                    UpdateSizeBlock
 UpdateAttractorBlock                UpdateFlowMapBlock
+UpdateNoiseBlock
 ```
 
 Local shape modules and serialized variants retain their class name from this list.
@@ -905,9 +912,9 @@ The block installs scalar `output`: `abs(value)` for a scalar, Euclidean length 
 
 The ordinary evaluator retains billboard-only behavior. It reads string `serialized.url` or the empty string, treats HTTP(S), protocol-relative, and root-relative URLs as absolute, and resolves any other nonempty source against `textureBaseUrl` when supplied. It schedules `loadTexture2D` with `{ invertY: !(serialized.invertY !== false) }`, stores the result on `system.texture`, and catches load failures.
 
-`buildNodeParticleSetWithFlowMaps` dynamically imports a feature-specialized builder. When that builder reaches `UpdateFlowMapBlock.flowMap`, it selects a separate texture evaluator from the same lazy flow-map chunk. That evaluator gives `textureDataUrl` precedence over `url`, accepts only explicit `http`, `https`, `data`, and `blob` schemes, resolves relative URLs against `textureBaseUrl`, and installs `texture` as an `NpeTextureValue`. It performs no GPU upload.
+`buildNodeParticleSetWithFlowMaps` and `buildNodeParticleSetWithNoiseTextures` dynamically import single-feature builders. `buildNodeParticleSetWithTextureUpdates` enables both families for graphs produced from classic systems that use flow and noise together. When a specialized builder reaches its CPU texture input, it selects `cpuTextureSourceBlock`. That evaluator gives `textureDataUrl` precedence over `url`, accepts only explicit `http`, `https`, `data`, and `blob` schemes, resolves relative URLs against `textureBaseUrl`, and installs `texture` as an `NpeTextureValue`. It performs no GPU upload.
 
-The ordinary and dependency roles use distinct built keys in the specialized builder. A single serialized source can therefore feed both the system texture and a flow-map input: ordinary evaluation uploads the billboard texture once, dependency evaluation publishes the CPU value once, and neither role replaces the other.
+The ordinary and dependency roles use distinct built keys in the specialized builder. A single serialized source can therefore feed both the system texture and a CPU update input: ordinary evaluation uploads the billboard texture once, dependency evaluation publishes the CPU value once, and neither role replaces the other.
 
 ### 9.21 SetupSpriteSheetBlock
 
@@ -993,23 +1000,46 @@ direction.z += (data[index + 2] / 255 * 2 - 1) * alphaStrength
 
 The block uses one reused screen-position scratch and allocates nothing per particle. It observes position and direction from earlier update steps; later steps observe its direction change. It does not integrate position. Local systems use the same evaluator and current stored position; there is no separate local flow-map variant. Camera controls append their update callback before flow-map build; flow preparation appends next; live particle registration appends simulation last, producing controls → matrix preparation → simulation even when the set is built after scene registration.
 
-### 9.25 UpdatePositionBlock
+### 9.25 UpdateNoiseBlock
+
+Inputs are `particle`, `noiseTexture`, and `strength`. Strength defaults to `{ x: 100, y: 100, z: 100 }`. The block allocates eight optional columns: two three-component Float64 coordinate sets, a Uint32 particle id, and a Uint8 validity flag. The id and validity columns regenerate all six random coordinates on the first update of each new particle id, including a recycled slot; subsequent updates reuse them.
+
+Build awaits the same static CPU texture decode used by flow maps. A missing or failed texture leaves the update step inactive and consumes no random values. Live procedural-texture frame refresh is not part of the serialized contract implemented here.
+
+For each component pair, sampling matches Babylon's `_fetchR` exactly:
+
+```text
+u = abs(u) * 0.5 + 0.5
+v = abs(v) * 0.5 + 0.5
+x = trunc((u * width) % width)
+y = trunc((v * height) % height)
+red = data[(x + y * width) * 4] / 255
+
+sampleX = red(coord1.x, coord1.y)
+sampleY = red(coord1.z, coord2.x)
+sampleZ = red(coord2.y, coord2.z)
+direction += (2 * sample - 1) * strength * scaledStep
+```
+
+Only the red channel is read; alpha and particle position do not affect noise. Strength is resolved once during build and the returned Vector3 reference is retained, matching Babylon's connection-point timing. `_scaledStep` is the lifetime-clamped update delta. The block observes direction from earlier updates and affects later updates in graph order.
+
+### 9.26 UpdatePositionBlock
 
 When `position` is connected, append an update step that evaluates a Vec3 and writes base position xyz. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.26 UpdateColorBlock
+### 9.27 UpdateColorBlock
 
 When `color` is connected, request the standard RGBA columns and append an update step that evaluates Color4 and writes all components. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.27 UpdateDirectionBlock
+### 9.28 UpdateDirectionBlock
 
 When `direction` is connected, append an update step that evaluates Vec3 and writes base direction xyz. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.28 UpdateAngleBlock
+### 9.29 UpdateAngleBlock
 
 When `angle` is connected, request the standard angle column and append an update step that writes the scalar result. With an unconnected input, append nothing. No output getter is installed.
 
-### 9.29 UpdateSizeBlock
+### 9.30 UpdateSizeBlock
 
 When `size` is connected, request the standard size column and append an update step that writes the scalar result. With an unconnected input, append nothing. No output getter is installed.
 
@@ -1114,6 +1144,7 @@ Additional behavior is observable:
 - Missing mesh positions or indices silently leave the system without mesh creation slots. Malformed or empty arrays can produce `undefined`, `NaN`, out-of-range access, or native errors during creation.
 - Billboard texture fetch, decode, and upload failures are caught inside `ParticleTextureSourceBlock`; build resolves with `texture` unchanged. Rendering then fails at billboard creation when no other texture was assigned.
 - Flow-map fetch or CPU decode failures are caught inside `UpdateFlowMapBlock`; build resolves and the block applies no force.
+- Noise-texture fetch or CPU decode failures are caught inside `UpdateNoiseBlock`; build resolves, applies no force, and consumes no coordinate RNG.
 - Invalid relative URL resolution can throw synchronously from `new URL`.
 - Invalid JSON, malformed snippet payloads, invalid typed-array lengths, and wrong runtime value shapes use native JavaScript errors or typed-array coercion.
 - Capacity exhaustion drops all creation requests from the first failed spawn through the rest of that animation call. Emission carry and simulated time are not restored.
@@ -1123,12 +1154,13 @@ Additional behavior is observable:
 
 ## 12. Current limitations
 
-- Only the 28 classes in section 9 are accepted. Other NPE classes follow the registry errors in section 11.
+- Only the 29 classes in section 9 are accepted. Other NPE classes follow the registry errors in section 11.
 - Simulation is CPU-only.
 - Rendering is always camera-facing. Serialized `billBoardMode` and `isBillboardBased` do not affect runtime state.
 - Blend modes 3 and 4, plus unknown values, render with the additive descriptor used by mode 2.
 - System source 4 and every system source outside 1, 2, and 3 are unsupported.
-- Custom emitter functions, sub-emitter triggers, inherited emitter velocity, and noise updates have no supported block evaluator.
+- Custom emitter functions, sub-emitter triggers, and inherited emitter velocity have no supported block evaluator.
+- UpdateNoise supports serialized static URL/data-URL pixels. Babylon's live `NoiseProceduralTexture` refresh is not reconstructed because `ParticleTextureSourceBlock.sourceTexture` is an in-memory object and is not serialized into NPE graph JSON.
 - Emit power scales the created direction; exactly zero clears it. No inherited velocity term is added.
 - Mesh emission reads only `cachedVertexData`; mesh `worldSpace` is ignored, and mesh data is not structurally validated.
 - A renderable particle system needs a successfully loaded or manually assigned texture. There is no untextured billboard fallback.
@@ -1162,6 +1194,7 @@ The current unit categories are:
 - Value correctness: shared-scratch Math, Lerp/Gradient endpoints, Random min/max aliasing, lock modes, Uint32 id edge cases, and capacity-bounded OncePerParticle caches.
 - Attractors: softened inverse-square attraction, negative-strength repulsion, defaults, coincident-point handling, lifetime-clamped step scaling, and lazy evaluator isolation.
 - Flow maps: projected nearest-neighbor sampling including non-zero row stride, vertical screen mapping, RGBA force decoding, alpha and bounds handling, per-particle strength evaluation, lifetime-clamped step scaling, allocator-selected F32/F64 matrix snapshots, and lazy texture/evaluator isolation.
+- Noise textures: exact three-sample red-channel addressing, six deterministic Float64 random coordinates, coordinate reuse and slot recycling, Vector3 defaults/strength, lifetime-clamped step scaling, extraction failure, parsed graph wiring including ordinary/CPU embedded-texture fan-out, Babylon multi-step state fixtures, and lazy runtime isolation.
 - Feature isolation: runtime chunk manifests and, when bundle-info exists, fetched module contents.
 - Path ownership: the `particle/soa` source directory and `particle-soa*.test.ts` unit-test names must not exist. TypeScript compilation validates all source and test imports.
 
@@ -1181,20 +1214,21 @@ Use conversion for graph extraction. The oracle's direct parse path does not pre
 
 ### 13.3 Visual scenes
 
-All six Lite scenes seed after build, synchronize one billboard, register the frozen scene, and use a black clear color. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 280 runs 300 ratio-1 steps while passing its camera and canvas dimensions to each animation call. Its Babylon reference calls `scene.updateTransformMatrix(true)` before those manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render.
+All seven Lite scenes seed after build, synchronize one billboard, register the frozen scene, and use a black clear color. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 280 runs 300 ratio-1 steps, and scene 281 runs 240. Scene 280's Babylon reference calls `scene.updateTransformMatrix(true)` before manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render.
 
-| Scene                          | Coverage                                                                      | Camera                                                     | MAD ceiling | Raw ceiling |
-| ------------------------------ | ----------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------- | ----------- |
-| 262 `scene262-npe-size`        | Basic Properties - Size, Box                                                  | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)`  | `0.01`      | `44.1 KB`   |
-| 263 `scene263-npe-sphere`      | Sphere emitter                                                                | alpha `-pi/2`, beta `1.2`, radius `14`, target origin      | `0.01`      | `44.1 KB`   |
-| 264 `scene264-npe-change-size` | Gradient, GradientValue, UpdateSize                                           | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01`      | `44.1 KB`   |
-| 276 `scene276-npe-animations`  | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30       | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
-| 277 `scene277-npe-attractor`   | UpdateAttractor after position integration, attractor `(0,2,0)`, strength `8` | alpha `-pi/2`, beta `1.2`, radius `5`, target `(0,0.8,0)`  | `0.01`      | `45.0 KB`   |
-| 280 `scene280-npe-flow-map`    | UpdateFlowMap after integration, flipped repel map, strength `15`, size `0.6` | alpha `pi/2`, beta `pi/2`, radius `9`, target `(-5,0,0)`   | `0.01`      | `45.0 KB`   |
+| Scene                            | Coverage                                                                      | Camera                                                     | MAD ceiling | Raw ceiling |
+| -------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------- | ----------- |
+| 262 `scene262-npe-size`          | Basic Properties - Size, Box                                                  | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)`  | `0.01`      | `44.1 KB`   |
+| 263 `scene263-npe-sphere`        | Sphere emitter                                                                | alpha `-pi/2`, beta `1.2`, radius `14`, target origin      | `0.01`      | `44.1 KB`   |
+| 264 `scene264-npe-change-size`   | Gradient, GradientValue, UpdateSize                                           | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01`      | `44.1 KB`   |
+| 276 `scene276-npe-animations`    | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30       | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
+| 277 `scene277-npe-attractor`     | UpdateAttractor after position integration, attractor `(0,2,0)`, strength `8` | alpha `-pi/2`, beta `1.2`, radius `5`, target `(0,0.8,0)`  | `0.01`      | `45.0 KB`   |
+| 280 `scene280-npe-flow-map`      | UpdateFlowMap after integration, flipped repel map, strength `15`, size `0.6` | alpha `pi/2`, beta `pi/2`, radius `9`, target `(-5,0,0)`   | `0.01`      | `45.0 KB`   |
+| 281 `scene281-npe-noise-texture` | UpdateNoise after integration, cached 8x8 noise, strength `(1.5,0.5,1.5)`     | alpha `-pi/2`, beta `1.2`, radius `11`, target `(0,1,0)`   | `0.01`      | `45.0 KB`   |
 
 Each camera uses near plane `0.1` and far plane `100`. Each scene sets both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start.
 
-Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, and 280 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all six scenes.
+Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, 280, and 281 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all seven scenes.
 
 ### 13.4 Bundle manifests and conditional content
 
@@ -1207,11 +1241,12 @@ Current tracked measurements are:
 | 264   |   `40.2 KB` |    `26.0 KB` |                 `34.4 KB` | `44.1 KB` |
 | 276   |   `44.2 KB` |    `25.3 KB` |                 `27.1 KB` | `45.0 KB` |
 | 277   |   `41.9 KB` |    `25.4 KB` |                 `29.8 KB` | `45.0 KB` |
-| 280   |   `43.2 KB` |    `26.4 KB` |                 `31.0 KB` | `45.0 KB` |
+| 280   |   `41.4 KB` |    `25.9 KB` |                 `31.0 KB` | `45.0 KB` |
+| 281   |   `41.3 KB` |    `26.4 KB` |                 `32.1 KB` | `45.0 KB` |
 
-Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, and 280 as sprite users because particles render through billboard sprite modules.
+Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, and 281 as sprite users because particles render through billboard sprite modules.
 
-The particle bundle-content test always requires a nonempty runtime chunk list for each of the six scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/direction/angle update, CPU texture decode, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, and only scene 280 may fetch `npe-flow-map-runtime`, which contains the flow evaluator, CPU texture decoder, and specialized builder.
+The particle bundle-content test always requires a nonempty runtime chunk list for each of the seven scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/noise/direction/angle update, CPU texture decode, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, only scene 280 may fetch `npe-flow-map-runtime`, and only scene 281 may fetch `npe-noise-runtime`. Each specialized runtime contains its evaluator, CPU texture decoder, and the shared texture-update builder after bundling.
 
 When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, and `math/mat4-invert.ts`. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
 
@@ -1228,13 +1263,15 @@ packages/babylon-lite/src/particle/sprite-columns-random.ts
 packages/babylon-lite/src/particle/sprite-columns.ts
 ```
 
-### 14.2 Node infrastructure and registries: 20 files
+### 14.2 Node infrastructure and registries: 25 files
 
 ```text
 packages/babylon-lite/src/particle/node/node-particle.ts
 packages/babylon-lite/src/particle/node/npe-build.ts
 packages/babylon-lite/src/particle/node/npe-flow-map-runtime.ts
 packages/babylon-lite/src/particle/node/npe-flow-map.ts
+packages/babylon-lite/src/particle/node/npe-noise-runtime.ts
+packages/babylon-lite/src/particle/node/npe-noise.ts
 packages/babylon-lite/src/particle/node/npe-contextual-extra.ts
 packages/babylon-lite/src/particle/node/npe-contextual.ts
 packages/babylon-lite/src/particle/node/npe-local-position.ts
@@ -1249,11 +1286,14 @@ packages/babylon-lite/src/particle/node/npe-registry-variants.ts
 packages/babylon-lite/src/particle/node/npe-registry.ts
 packages/babylon-lite/src/particle/node/npe-snippet.ts
 packages/babylon-lite/src/particle/node/npe-texture-content.ts
+packages/babylon-lite/src/particle/node/npe-texture-update-runtime.ts
+packages/babylon-lite/src/particle/node/npe-texture-updates-runtime.ts
+packages/babylon-lite/src/particle/node/npe-texture-updates.ts
 packages/babylon-lite/src/particle/node/npe-types.ts
 packages/babylon-lite/src/particle/node/npe-value.ts
 ```
 
-### 14.3 Block evaluators and helpers: 44 files
+### 14.3 Block evaluators and helpers: 45 files
 
 ```text
 packages/babylon-lite/src/particle/node/blocks/basic-sprite-update-block.ts
@@ -1264,7 +1304,7 @@ packages/babylon-lite/src/particle/node/blocks/cone-shape-local-block.ts
 packages/babylon-lite/src/particle/node/blocks/create-particle-block.ts
 packages/babylon-lite/src/particle/node/blocks/cylinder-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/cylinder-shape-local-block.ts
-packages/babylon-lite/src/particle/node/blocks/flow-map-texture-source-block.ts
+packages/babylon-lite/src/particle/node/blocks/cpu-texture-source-block.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-local-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-condition-block.ts
@@ -1298,6 +1338,7 @@ packages/babylon-lite/src/particle/node/blocks/update-attractor-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-color-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-direction-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-flow-map-block.ts
+packages/babylon-lite/src/particle/node/blocks/update-noise-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-position-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-size-block.ts
 ```
@@ -1337,24 +1378,29 @@ lab/lite/src/lite/scene264.ts
 lab/lite/src/lite/scene276.ts
 lab/lite/src/lite/scene277.ts
 lab/lite/src/lite/scene280.ts
+lab/lite/src/lite/scene281.ts
 lab/lite/src/shared/scene262-npe.ts
 lab/lite/src/shared/scene263-npe.ts
 lab/lite/src/shared/scene264-npe.ts
 lab/lite/src/shared/scene276-npe.ts
 lab/lite/src/shared/scene277-npe.ts
 lab/lite/src/shared/scene280-npe.ts
+lab/lite/src/shared/scene281-npe.ts
 lab/public/bundle/manifest/scene262.json
 lab/public/bundle/manifest/scene263.json
 lab/public/bundle/manifest/scene264.json
 lab/public/bundle/manifest/scene276.json
 lab/public/bundle/manifest/scene277.json
 lab/public/bundle/manifest/scene280.json
+lab/public/bundle/manifest/scene281.json
 tests/lite/parity/scenes/scene262-npe-size.spec.ts
 tests/lite/parity/scenes/scene263-npe-sphere.spec.ts
 tests/lite/parity/scenes/scene264-npe-change-size.spec.ts
 tests/lite/parity/scenes/scene276-npe-animations.spec.ts
 tests/lite/parity/scenes/scene277-npe-attractor.spec.ts
 tests/lite/parity/scenes/scene280-npe-flow-map.spec.ts
+tests/lite/parity/scenes/scene281-npe-noise-texture.spec.ts
 tests/lite/unit/npe-particle-flow-map.test.ts
+tests/lite/unit/npe-particle-noise-texture.test.ts
 tests/lite/unit/npe-particle-bundle-content.test.ts
 ```

@@ -1957,6 +1957,16 @@
         "compatParity": true
     },
     {
+        "id": 220,
+        "slug": "scene220-duck-quantized",
+        "name": "Scene 220 — Duck (glTF-Quantized)",
+        "maxMad": 0.05,
+        "maxRawKB": 87.5,
+        "description": "Duck.gltf (glTF-Quantized) — cx20 gltf-test. KHR_mesh_quantization (quantized POSITION/NORMAL) + KHR_texture_transform (unnormalized quantized TEXCOORD_0 rescaled by the material's UV transform).",
+        "tags": ["gltf", "quantization"],
+        "skipPerf": true
+    },
+    {
         "id": 221,
         "slug": "scene221-pointer-drags",
         "skipParity": true,
@@ -2154,6 +2164,16 @@
         "maxRawKB": 79.18,
         "description": "VertexColorAlphaClipTest.gltf — cx20 gltf-test. Vertex-color alpha with alpha-clip.",
         "tags": ["gltf"],
+        "skipPerf": true
+    },
+    {
+        "id": 250,
+        "slug": "scene250-virtual-city",
+        "name": "Scene 250 — VirtualCity",
+        "maxMad": 6.1,
+        "maxRawKB": 92.6,
+        "description": "VirtualCity.gltf — cx20 gltf-test parity. Exercises the glTF `camera` node property via the `_camera` loader feature: cx20's compat matrix flags Babylon Lite with ':warning: embedded camera' for this model because loadGltf used to silently drop all 14 embedded glTF cameras. Scene selects the imported camera named camera6 (an animated flying-vehicle chase camera) as scene.camera, frozen at seekTime=5.0.",
+        "tags": ["gltf", "camera", "animation"],
         "skipPerf": true
     },
     {
@@ -2488,8 +2508,19 @@
     },
     {
         "id": 281,
-        "slug": "scene281-standard-material-uv-transform",
-        "name": "Scene 281 — Standard Material UV Transform",
+        "slug": "scene281-npe-noise-texture",
+        "name": "Scene 281 — NPE Particles: Noise Texture",
+        "maxMad": 0.01,
+        "maxRawKB": 45,
+        "description": "A serialized NPE particle graph with UpdateNoiseBlock assigning six stable random texture coordinates per particle and applying three red-channel samples as per-axis direction forces. Uses a cached deterministic texture payload so the Babylon.js and Lite graphs are portable and byte-identical.",
+        "tags": ["npe", "particles", "billboards", "noise-texture"],
+        "skipPerf": true,
+        "compatParity": true
+    },
+    {
+        "id": 282,
+        "slug": "scene282-standard-material-uv-transform",
+        "name": "Scene 282 — Standard Material UV Transform",
         "maxMad": 0.1,
         "maxRawKB": 55,
         "description": "A hand-built StandardMaterial opts into enableMaterialUvTransform and applies independent texture scale, offset, and rotation to an asymmetric repeating texture.",

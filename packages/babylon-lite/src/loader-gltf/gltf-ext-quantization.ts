@@ -5,28 +5,41 @@
  * reader (`resolveAccessor`) only understands tightly-packed FLOAT / UBYTE /
  * USHORT / UINT data and ignores `byteStride`; quantized assets store vertex
  * attributes (and meshopt-filtered animation outputs) as normalized or signed
- * integers, sometimes padded by a `byteStride`. This feature rewrites every such
- * accessor into a freshly-appended, tightly-packed FLOAT bufferView so the rest
- * of the loader stays completely unaware of quantization. It is dynamic-imported
- * only when `extensionsUsed` lists KHR_mesh_quantization, so non-quantized scenes
- * pay nothing.
+ * integers, sometimes padded by a `byteStride`, and — per the extension spec —
+ * TEXCOORD_n/POSITION may ALSO be UNNORMALIZED integers whose raw value is the
+ * literal data (rescaled back to real units by a node transform or a
+ * KHR_texture_transform on the material; gltfpack's standard quantized-UV
+ * output). This feature rewrites every such accessor into a freshly-appended,
+ * tightly-packed FLOAT bufferView so the rest of the loader — whose UV/color
+ * decoders always normalize an unsigned integer accessor to `[0,1]` (dividing
+ * by 255/65535), never treating it as a literal numeric value — stays
+ * completely unaware of quantization. Confining the rewrite here (rather than
+ * teaching the core UV/color decoders about `normalized`) keeps the
+ * correctness fix entirely inside this dynamic-imported feature: it is
+ * imported only when `extensionsUsed` lists KHR_mesh_quantization, so
+ * non-quantized scenes pay nothing.
  *
  * Conversion rule (role-agnostic, derived from the accessor alone):
  *   - signed component types (BYTE/SHORT) → FLOAT (core would otherwise throw)
  *   - `normalized` accessors → FLOAT (core would otherwise read raw ints)
  *   - strided FLOAT accessors → tightly-packed FLOAT (core ignores byteStride)
- *   - strided unsigned non-normalized integer accessors that are NOT VEC4 →
- *     tightly-packed FLOAT (core / interleave bind them as float32 and ignore
- *     byteStride, so an over-strided UNSIGNED_SHORT/BYTE POSITION — e.g. the
- *     quantized Duck's UNSIGNED_SHORT VEC3 POSITION with byteStride 8 — is
- *     otherwise read as raw bytes and renders as corrupted geometry). VEC4 is
- *     excluded because JOINTS_0/1 are the only unsigned non-normalized VEC4
- *     vertex attribute, and the skeleton feature reads them as Uint8/Uint16 and
- *     de-strides them itself — they must never be flattened here.
- * Tight (non-strided) unsigned integer accessors are left intact: indices and
- * tight JOINTS_0/1 are already correct and the index / skeleton paths expect
- * integers. (WEIGHTS_n are FLOAT or normalized, so they are handled by the
- * FLOAT / `normalized` branches above, not here.)
+ *   - unsigned non-normalized integer VEC2/VEC3 accessors, tight OR strided →
+ *     tightly-packed FLOAT. Per the extension's attribute table, unnormalized
+ *     unsigned-int storage is only valid for POSITION (VEC3) and TEXCOORD_n
+ *     (VEC2); the core tight/interleave paths always assume unsigned-int UV
+ *     data means "divide by 65535/255", so an unnormalized one (tight OR
+ *     strided) must be rewritten here regardless of byteStride — e.g. the
+ *     quantized Duck's TIGHT UNSIGNED_SHORT VEC2 TEXCOORD_0 (no `normalized`
+ *     flag, byteStride equal to its own tight size) would otherwise sail
+ *     through unconverted and get misread as normalized, collapsing every UV
+ *     near (0,0). SCALAR (indices) and VEC4 (JOINTS_n) are always excluded:
+ *     indices must stay integer, and the skeleton feature reads JOINTS_n as
+ *     raw Uint8/Uint16 and de-strides them itself — they must never be
+ *     flattened here.
+ * Tight (non-strided) unsigned integer SCALAR/VEC4 accessors are left intact:
+ * indices and tight JOINTS_0/1 are already correct and the index / skeleton
+ * paths expect integers. (WEIGHTS_n are FLOAT or normalized, so they are
+ * handled by the FLOAT / `normalized` branches above, not here.)
  */
 
 import { U8, DV } from "../engine/typed-arrays.js";
@@ -103,17 +116,15 @@ const feature: GltfFeature = {
             }
             const componentCount = TYPE_COMPONENTS[a.type] ?? 1;
             const stride = bufferViews[a.bufferView]?.byteStride;
-            const compBytes = COMPONENT_BYTES[a.componentType];
             const signed = a.componentType === BYTE || a.componentType === SHORT;
             const stridedFloat = a.componentType === FLOAT && stride !== undefined && stride !== componentCount * 4;
-            // Over-strided unsigned non-normalized integer attributes (e.g. quantized
-            // UNSIGNED_SHORT/BYTE POSITION with a padded byteStride) are bound as
-            // float32 by the interleave/tight paths, which ignore byteStride — so
-            // de-stride them into tightly-packed FLOAT. VEC4 (JOINTS_n) is excluded.
+            // Unnormalized unsigned-int VEC2 (TEXCOORD_n) / VEC3 (POSITION) — the only shapes the
+            // extension allows for unnormalized unsigned storage — always need rewriting, tight or
+            // strided: the core loader's tight/interleave UV and vertex paths always divide unsigned
+            // integer data by 65535/255, so an unnormalized source must never reach them unconverted.
             const unsignedInt = a.componentType === UNSIGNED_BYTE || a.componentType === UNSIGNED_SHORT;
-            const stridedUnsignedInt =
-                unsignedInt && a.normalized !== true && a.type !== "VEC4" && stride !== undefined && compBytes !== undefined && stride !== componentCount * compBytes;
-            if (signed || a.normalized === true || stridedFloat || stridedUnsignedInt) {
+            const unnormalizedUnsignedPosOrUv = unsignedInt && a.normalized !== true && (a.type === "VEC2" || a.type === "VEC3");
+            if (signed || a.normalized === true || stridedFloat || unnormalizedUnsignedPosOrUv) {
                 convert.push(i);
                 appended = align4(appended + a.count * componentCount * 4);
             }

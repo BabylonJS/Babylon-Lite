@@ -1,0 +1,22 @@
+{
+  "rawKB": 86.3,
+  "rawBytes": 88353,
+  "gzipKB": 36.2,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene220-enable-material-uv-transform-CNevSfWX.js",
+    "scene220-generate-mipmaps-D8xB8CzP.js",
+    "scene220-gltf-ext-quantization-CX0La0WM.js",
+    "scene220-gltf-ext-uv-transform-DxRzc0hE.js",
+    "scene220-gltf-feature-registry-D4joFeL9.js",
+    "scene220-gltf-json-asset-Dyf7u3KT.js",
+    "scene220-gltf-pbr-builder-ext-B2Me9pw6.js",
+    "scene220-ibl-fragment-CeRrvT96.js",
+    "scene220-pbr-renderable-CXJVufID.js",
+    "scene220-pbr-template-ext-CiHpOV5G.js",
+    "scene220-rgbd-decode-CVJQT50T.js",
+    "scene220-scene-uniforms-FTYH6Ct0.js",
+    "scene220-texture-2d-DQo3n8D6.js",
+    "scene220.js"
+  ]
+}

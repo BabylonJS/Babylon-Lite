@@ -1,60 +1,87 @@
-// Scene 281: opt-in per-texture UV transform on a hand-built StandardMaterial.
+// Scene 281: Node Particle Editor - Noise Texture.
 
 import {
-    addToScene,
+    addFacingBillboardSystem,
+    animateParticleSystem,
+    attachControl,
+    buildNodeParticleSetWithNoiseTextures,
     createArcRotateCamera,
     createEngine,
-    createPlane,
+    createParticleBillboard,
     createSceneContext,
-    createStandardMaterial,
-    createTexture2DFromPixels,
-    enableMaterialUvTransform,
+    parseNodeParticleSource,
+    registerNodeParticleSet,
     registerScene,
     startEngine,
+    startParticleSystem,
+    syncParticleBillboard,
 } from "babylon-lite";
-import { buildTexturePixels, TEXTURE_SIZE, UV_OFFSET, UV_ROTATION, UV_SCALE } from "../shared/scene281-standard-uv-transform.js";
+import { createScene281NpeJson } from "../shared/scene281-npe.js";
+
+const STEPS = 240;
 
 async function main(): Promise<void> {
+    const initStart = performance.now();
+    const params = new URLSearchParams(window.location.search);
+    const live = params.has("live");
+    const noise = params.get("noise") !== "off";
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
-    scene.clearColor = { r: 0.035, g: 0.045, b: 0.07, a: 1 };
-    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 4, { x: 0, y: 0, z: 0 });
+    scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    const texture = createTexture2DFromPixels(engine, buildTexturePixels(), TEXTURE_SIZE, TEXTURE_SIZE, {
-        addressModeU: "repeat",
-        addressModeV: "repeat",
-        minFilter: "nearest",
-        magFilter: "nearest",
+    const camera = createArcRotateCamera(-Math.PI / 2, 1.2, 11, { x: 0, y: 1, z: 0 });
+    camera.nearPlane = 0.1;
+    camera.farPlane = 100;
+    scene.camera = camera;
+    attachControl(camera, canvas, scene);
+
+    const graph = parseNodeParticleSource(
+        createScene281NpeJson({
+            noise,
+            noiseStrength: live ? [6, 2, 6] : undefined,
+            deterministicEmitter: live,
+        })
+    );
+    const set = await buildNodeParticleSetWithNoiseTextures(engine, scene, graph, {
+        emitter: { x: 0, y: 0, z: 0 },
+        textureBaseUrl: "https://playground.babylonjs.com/",
     });
-    texture.uScale = UV_SCALE[0];
-    texture.vScale = UV_SCALE[1];
-    texture.uOffset = UV_OFFSET[0];
-    texture.vOffset = UV_OFFSET[1];
-    texture.uAng = UV_ROTATION;
-    texture.invertY = true;
+    const system = set.systems[0]!;
 
-    const material = createStandardMaterial();
-    material.disableLighting = true;
-    material.diffuseColor = [1, 1, 1];
-    material.emissiveColor = [1, 1, 1];
-    material.diffuseTexture = texture;
-    enableMaterialUvTransform(material);
+    let seed = 1;
+    Math.random = () => {
+        const value = Math.sin(seed++) * 10000;
+        return value - Math.floor(value);
+    };
+    if (live) {
+        registerNodeParticleSet(scene, set);
+    } else {
+        startParticleSystem(system);
+        for (let i = 0; i < STEPS; i++) {
+            animateParticleSystem(system, 1);
+        }
 
-    const plane = createPlane(engine, { width: 3, height: 3 });
-    plane.material = material;
-    addToScene(scene, plane);
+        const billboard = createParticleBillboard(system);
+        syncParticleBillboard(system, billboard);
+        addFacingBillboardSystem(scene, billboard);
+    }
 
     await registerScene(scene);
     await startEngine(engine);
+
     canvas.dataset.drawCalls = String(engine.drawCallCount);
+    canvas.dataset.initMs = String(performance.now() - initStart);
+    if (!live) {
+        canvas.dataset.animationFrozen = "true";
+    }
     canvas.dataset.ready = "true";
 }
 
-main().catch((error: unknown) => {
+main().catch((err) => {
+    console.error(err);
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
     if (canvas) {
-        canvas.dataset.error = error instanceof Error ? error.message : String(error);
+        canvas.dataset.error = String(err instanceof Error ? err.message : err);
     }
-    console.error(error);
 });

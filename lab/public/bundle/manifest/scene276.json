@@ -1,14 +1,14 @@
 {
-  "rawKB": 44,
-  "rawBytes": 45077,
-  "gzipKB": 25.2,
+  "rawKB": 44.1,
+  "rawBytes": 45159,
+  "gzipKB": 25.3,
   "ignoredRawKB": 27.1,
   "runtimeChunks": [
     "scene276-basic-sprite-update-block-D4H-t87n.js",
-    "scene276-billboard-renderable-BEcUBREE.js",
+    "scene276-billboard-renderable-c4zRSMuQ.js",
     "scene276-box-shape-block-uVrhc2_D.js",
     "scene276-create-particle-block-CiseX6ot.js",
-    "scene276-generate-mipmaps-DmvWpqXO.js",
+    "scene276-generate-mipmaps-DZ2NPu_q.js",
     "scene276-npe-contextual-DcCy6blJ.js",
     "scene276-npe-registry-extra-waeUkV4j.js",
     "scene276-particle-converter-block-CVHvXC1Y.js",
@@ -19,7 +19,7 @@
     "scene276-random-range-CfhNtuAB.js",
     "scene276-setup-sprite-sheet-block-BsQ7IFWU.js",
     "scene276-system-block-DtFNKeDy.js",
-    "scene276-texture-source-block-DUeiNpor.js",
+    "scene276-texture-source-block-L78cs0W3.js",
     "scene276-update-color-block-D3_45s5M.js",
     "scene276-update-position-block-DQ-fau8B.js",
     "scene276.js"

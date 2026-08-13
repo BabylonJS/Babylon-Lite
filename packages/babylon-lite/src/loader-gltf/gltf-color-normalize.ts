@@ -58,7 +58,12 @@ export function normalizeColorToVec4(data: ArrayBufferView, count: number, comps
  *  Mesh_PrimitiveAttribute / Buffer_Interleaved). Binding an integer source to
  *  the float32x2 layout misreads every vertex (garbage UVs → wrong texturing),
  *  so integer UVs are normalized to [0,1] here. `data` is the resolved accessor
- *  view (Float32Array | Uint8Array | Uint16Array) and `count` the vertex count. */
+ *  view (Float32Array | Uint8Array | Uint16Array) and `count` the vertex count.
+ *
+ *  KHR_mesh_quantization additionally allows UNNORMALIZED integer TEXCOORD, but
+ *  that case never reaches this function: `gltf-ext-quantization.ts`'s `preParse`
+ *  rewrites every such accessor to FLOAT before any attribute is resolved, so a
+ *  non-FLOAT source arriving here is always base-glTF normalized data. */
 export function normalizeUvToVec2(data: ArrayBufferView, count: number): Float32Array {
     const out = new Float32Array(count * 2);
     const inv = data instanceof Uint16Array ? 1 / 65535 : data instanceof Uint8Array ? 1 / 255 : 1;

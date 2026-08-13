@@ -2,17 +2,17 @@ import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(281);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene281-standard-material-uv-transform");
+const sceneConfig = getSceneConfig(282);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene282-standard-material-uv-transform");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 281 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 282 skipped via skipParity in scene-config.json");
 
-test("Scene 281 — StandardMaterial UV transform matches Babylon.js", async ({ page }, testInfo) => {
+test("Scene 282 — StandardMaterial UV transform matches Babylon.js", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 281, settleMs: 300 });
+    await captureGolden(browser, { sceneId: 282, settleMs: 300 });
 
-    await page.goto("/scene281.html");
+    await page.goto("/scene282.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(200);
 
