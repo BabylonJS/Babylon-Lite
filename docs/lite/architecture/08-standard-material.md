@@ -330,9 +330,10 @@ The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is st
 | `ambientCoordIndex`   | `0`         |
 | `lightmapLevel`       | `1`         |
 | `lightmapCoordIndex`  | `1`         |
+| `useLightmapAsShadowmap` | `false`  |
 | `opacityLevel`        | `1`         |
 | `opacityFromRGB`      | `false`     |
-| `alphaCutOff`         | `0.4`       |
+| `alphaCutOff`         | `0`         |
 | `reflectionLevel`     | `1`         |
 | `reflectionCoordMode` | `1`         |
 | `uvScale`             | `[1, 1]`    |
