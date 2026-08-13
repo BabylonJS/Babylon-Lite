@@ -320,7 +320,7 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                 const cubeName = md.reflectionTexture.name;
                 texturePromises.push(
                     import("../texture/cube-texture.js").then(({ loadCubeTexture }) =>
-                        loadCubeTexture(engine as EngineContext, baseUrl + cubeName).then(async (cube) => {
+                        loadCubeTexture(engine, baseUrl + cubeName).then(async (cube) => {
                             const { setStandardReflectionCubeTexture } = await import("../material/standard/set-std-cube-reflection.js");
                             setStandardReflectionCubeTexture(mat, cube);
                         })
