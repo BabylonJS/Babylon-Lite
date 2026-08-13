@@ -129,6 +129,14 @@ export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera;
 - `angularSensitivity = 2000`
 - `inertia = 0.9`
 
+**glTF-loader consumer**: after `enableGltfCameras()` is called, `gltf-feature-camera.ts` (see
+module 04, "glTF `camera` Node Property") builds every embedded glTF camera as a `FreeCamera` at
+`(0,0,0)` looking toward `(0,0,-1)` — glTF's own local -Z-forward/+Y-up convention — parented
+through a `fixupNode` that cancels the engine's RH→LH root mirror. Each imported camera primes its
+world transform back to unit scale so the default rigid view inverse remains exact; projection
+parameters remain in source glTF units. Zero/non-uniform or animated ancestor scale is not
+supported. The loader then exposes the result via `AssetContainer.cameras`.
+
 ### `free-camera-controls.ts`
 
 ```typescript

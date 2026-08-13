@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `6babe7cdfed68b6ec072f9d91ac2ed9cbeef6746`
-- **Last sync date:** 2026-08-11
+- **Last synced BJS commit:** `e2d1f2f87e07e8a02683d411b74c24008f3c99a2`
+- **Last sync date:** 2026-08-12
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -146,7 +146,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `light.diffuse/specular/intensity/position/direction` | ✅ Full            | lights                                   |
 | `light.setEnabled(false)`                             | ✅ Full            | lights (direct or ancestor disablement zeroes the Lite intensity and restores the logical value when effectively re-enabled) |
 | `RectAreaLight`                                       | ❌ Not supported   | not in Lite                              |
-| `ClusteredLightContainer`                             | ❌ Not supported   | throwing stub; not in Lite's public API  |
+| `ClusteredLightContainer`                             | ⚡ Partial         | [lights/clustered-light-container.ts](src/lights/clustered-light-container.ts) — wraps Lite's clustered (forward+) lighting (`createClusteredLightContainer` / `createClusteredPointLight` / `addClusteredLightContainer`). `Light` subclass; `addLight`/`removeLight`/`lights`, `horizontalTiles`/`verticalTiles`/`depthSlices`(→Lite `zSlices`), `isSupported`, `IsLightSupported`, `getTypeID` (`5`). Point lights only (Lite has no clustered spot); each added light is snapshotted at add time (later in-place mutation doesn't propagate); `maxRange` is stored for shape parity (Lite bins ranges internally). Container built into the Lite scene at engine start; skipped on the device-less `NullEngine` |
 
 ## Shadows
 

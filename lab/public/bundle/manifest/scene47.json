@@ -5,12 +5,12 @@
   "runtimeChunks": [
     "scene47-generate-mipmaps-zZeS5ng2.js",
     "scene47-gltf-ext-spec-gloss-D60sFZYX.js",
-    "scene47-gltf-feature-registry-DhJxHOu6.js",
-    "scene47-gltf-glb-parser-Cdtc9uGZ.js",
+    "scene47-gltf-feature-registry-DY_p1IgR.js",
+    "scene47-gltf-glb-parser-BPXN6Qie.js",
     "scene47-gltf-sampler-desc-CkHYNGuu.js",
-    "scene47-mesh-features-Dda6QcW-.js",
-    "scene47-standard-renderable-19GtzkGs.js",
+    "scene47-mesh-features-BGKC9iuS.js",
+    "scene47-standard-renderable-V6NdvXMZ.js",
     "scene47.js"
   ],
-  "rawBytes": 92151
+  "rawBytes": 92115
 }

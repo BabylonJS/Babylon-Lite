@@ -57,6 +57,7 @@ export {
 
 // ─── Lights ──────────────────────────────────────────────────────────
 export { Light, HemisphericLight, DirectionalLight, PointLight, SpotLight } from "./lights/lights.js";
+export { ClusteredLightContainer } from "./lights/clustered-light-container.js";
 
 // ─── Meshes ──────────────────────────────────────────────────────────
 export { Mesh, LinesMesh, AbstractMesh, TransformNode, GroundMesh, InstancedMesh, VertexData, VertexBuffer, MeshBuilder } from "./meshes/meshes.js";
@@ -244,7 +245,6 @@ export {
     ShaderMaterial,
     BackgroundMaterial,
     RectAreaLight,
-    ClusteredLightContainer,
     GPUParticleSystem,
     SolidParticleSystem,
     HighlightLayer,

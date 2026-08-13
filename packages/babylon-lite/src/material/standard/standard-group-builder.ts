@@ -25,11 +25,12 @@ let _stdMeshExtPreloads: Promise<void>[] | null = null;
 
 /** @internal Eagerly import + globally register an opt-in Standard mesh-feature ext so
  *  it is available for both the initial build and any later synchronous rebuild. */
-export function _preloadStdMeshExt(load: () => Promise<unknown>, key: string): void {
+export function _preloadStdMeshExt(load: () => Promise<unknown>, key: string): Promise<void> {
     const promise = load().then((mod) => {
         _registerStdExt((mod as Record<string, StdExt>)[key]!);
     });
     (_stdMeshExtPreloads ??= []).push(promise);
+    return promise;
 }
 
 /** Lazily-created singleton standard-material {@link MeshGroupBuilder}. Lazy-init

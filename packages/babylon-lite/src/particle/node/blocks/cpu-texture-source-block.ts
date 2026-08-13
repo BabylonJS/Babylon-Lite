@@ -1,8 +1,8 @@
 import type { NpeBlockEvaluator } from "../npe-build.js";
 import type { NpeGetter } from "../npe-value.js";
 
-/** Publish a CPU-readable texture value only when a texture source feeds a flow-map update. */
-export const flowMapTextureSourceBlock: NpeBlockEvaluator = {
+/** Publish a CPU-readable texture value only when a texture source feeds a CPU texture update. */
+export const cpuTextureSourceBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const dataUrl = typeof block.serialized.textureDataUrl === "string" ? block.serialized.textureDataUrl : "";
         const rawUrl = dataUrl || (typeof block.serialized.url === "string" ? block.serialized.url : "");

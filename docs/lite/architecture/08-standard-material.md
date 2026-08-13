@@ -5,7 +5,7 @@
 
 ## Purpose
 
-The StandardMaterial module implements a Blinn-Phong shading model with point/directional light support, optional fog (linear, exponential, exponential-squared), optional diffuse texture, optional emissive texture, optional bump/normal-map texture, optional specular texture, optional ambient/occlusion texture, optional lightmap texture, optional opacity/transparency texture, optional reflection texture (spherical and planar modes), UV2 support for select texture channels, thin instances with per-instance color, `disableLighting` mode, and optional ESM/PCF shadow receiving. Explicit opt-ins add Standard-only mesh deformation/state for skeletal skinning, RGBA vertex color, and material UV translation without retaining those feature modules in unrelated bundles. It matches the output of `BABYLON.StandardMaterial` with the corresponding defines active.
+The StandardMaterial module implements a Blinn-Phong shading model with point/directional light support, optional fog (linear, exponential, exponential-squared), optional diffuse texture, optional emissive texture, optional bump/normal-map texture, optional specular texture, optional ambient/occlusion texture, optional lightmap texture, optional opacity/transparency texture, optional reflection texture (spherical and planar modes), UV2 support for select texture channels, thin instances with per-instance color, `disableLighting` mode, and optional ESM/PCF shadow receiving. Explicit opt-ins add Standard-only mesh deformation/state for skeletal skinning and RGBA vertex color. The shared `enableMaterialUvTransform(material)` opt-in enables independent per-texture scale, offset, and rotation for Standard materials without retaining the UV-transform fragment in unrelated bundles. It matches the output of `BABYLON.StandardMaterial` with the corresponding defines active.
 
 Shaders are **dynamically composed** via the `ShaderFragment` / `ShaderComposer` system — no raw `.wgsl` files. A `ShaderTemplate` (`standard-template.ts`) provides the base WGSL with slot markers; optional `ShaderFragment` modules (in `fragments/`) inject code into those slots. Only the fragments needed for a given mesh's features are composed, minimizing bundle size per the Size Pillar. Fragment modules are **dynamically imported** at build time so unused features are tree-shaken. The old `standard-textured-material.ts` was merged into this unified system.
 
@@ -49,7 +49,7 @@ The deformation/vertex feature enablers are explicitly named exports from the ro
 ```ts
 import {
     enableStandardSkeleton,
-    enableStandardUvOffset,
+    enableMaterialUvTransform,
     enableStandardVertexColors,
 } from "@babylonjs/lite";
 ```
@@ -58,7 +58,10 @@ Call each enabler before `registerScene()` when the scene creates matching Stand
 
 - `enableStandardSkeleton()` installs a mesh predicate and lazy fragment loader. The fragment reuses the material-agnostic shared skeleton shader fragment used by PBR; skeletal geometry velocity is a second lazy chunk loaded only by a velocity pass over a matching mesh.
 - `enableStandardVertexColors()` installs RGBA vertex-color composition and draw-time color-buffer binding.
-- `enableStandardUvOffset()` enables reads of `material.uvOffset`; absent offsets always resolve to `[0, 0]`.
+- `enableMaterialUvTransform(material)` marks a hand-built Standard material for independent texture transforms. Call it before `registerScene()`, then set `uScale`, `vScale`, `uOffset`, `vOffset`, or `uAng` on any bound `Texture2D`. The Standard group builder loads `std-uv-transform-fragment.ts` only when a marked material is present.
+- `enableStandardUvOffset()` remains the lightweight shared-material translation path for `material.uvOffset`; absent offsets always resolve to `[0, 0]`.
+
+The UV-transform fragment contributes one vertex-visible uniform buffer and only the varyings required by the material's active texture channels. Its fixed channel order is diffuse, emissive, bump, specular, ambient, lightmap, opacity. Each channel stores a 2x2 matrix plus translation; the matrix applies scale and `uAng` rotation around the UV origin, then translation. UV1 channels compose the existing `material.uvScale` / optional `material.uvOffset` first, while UV2 channels preserve the existing raw-UV2 behavior. `invertY` is folded into the channel transform. Texture transform fields are sampled when the renderable is built; later changes require `rebuildMaterial`.
 
 The enablers register only scalar callbacks and lazy loaders. No module allocates a `Map`/`Set` or registers an extension at import time. If these root exports are unused, production scene bundles omit the deformation/offset chunks; a forward-only skeletal scene also does not load the geometry-velocity chunk.
 
@@ -153,6 +156,8 @@ export interface StandardMaterialProps extends Material {
     reflectionCoordMode: 1 | 2;
     uvScale: [number, number];
     uvOffset?: [number, number];
+    /** @internal True when enableMaterialUvTransform() enabled per-texture transforms. */
+    _hasUvTx?: boolean;
     backFaceCulling: boolean;
     disableLighting: boolean;
 }
@@ -218,6 +223,7 @@ The backing fields are `@internal` (underscore-prefixed) so that a direct assign
 ```typescript
 export function enableStandardSkeleton(): void;
 export function enableStandardUvOffset(): void;
+export function enableMaterialUvTransform(material: PbrMaterialProps | StandardMaterialProps): boolean;
 ```
 
 Skeletal skinning, UV translation, and RGBA vertex-color opt-ins are explicitly re-exported from the root `index.ts`. The source and emitted packages expose only the `"."` export; unused enablers and their lazy feature chunks are removed by tree-shaking.

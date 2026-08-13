@@ -3,11 +3,11 @@
   "gzipKB": 29.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene116-pbr-renderable-CXb4AyHa.js",
+    "scene116-pbr-renderable-CtjhHKkR.js",
     "scene116-shader-composer-qxmZVcOJ.js",
     "scene116-singlelight-hemispheric-wgsl-O9odcExP.js",
-    "scene116-standard-renderable-aHQOh8Y9.js",
+    "scene116-standard-renderable-CbtaIaHp.js",
     "scene116.js"
   ],
-  "rawBytes": 74361
+  "rawBytes": 74323
 }

@@ -40,12 +40,6 @@ export class RectAreaLight {
     }
 }
 
-export class ClusteredLightContainer {
-    public constructor() {
-        unsupported("ClusteredLightContainer", "Clustered lighting is not exposed by the Babylon Lite public API; the compat layer cannot wrap it.");
-    }
-}
-
 // ─── Particles ───────────────────────────────────────────────────────
 export class GPUParticleSystem {
     public constructor() {

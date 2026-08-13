@@ -5,7 +5,7 @@ import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 import { createParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import { registerNodeParticleSet } from "../../../packages/babylon-lite/src/particle/particle-scene";
-import { flowMapTextureSourceBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/flow-map-texture-source-block";
+import { cpuTextureSourceBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/cpu-texture-source-block";
 import { updateFlowMapBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/update-flow-map-block";
 import { buildNodeParticleSetWithFlowMaps } from "../../../packages/babylon-lite/src/particle/node/npe-flow-map";
 import type { NodeParticleSet, NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
@@ -360,7 +360,7 @@ describe("NPE UpdateFlowMapBlock", () => {
             },
         } as unknown as NpeBuildContext;
 
-        flowMapTextureSourceBlock.build(block, ctx);
+        cpuTextureSourceBlock.build(block, ctx);
 
         expect(output?.(0) as unknown as NpeTextureValue).toMatchObject({ url: "data:image/png;base64,AA==", invertY: true });
     });
@@ -381,7 +381,7 @@ describe("NPE UpdateFlowMapBlock", () => {
             },
         } as unknown as NpeBuildContext;
 
-        flowMapTextureSourceBlock.build(block, ctx);
+        cpuTextureSourceBlock.build(block, ctx);
 
         expect((output?.(0) as unknown as NpeTextureValue).url).toBe("");
     });

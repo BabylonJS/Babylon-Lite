@@ -237,10 +237,7 @@ function createOpaqueRenderable(
     const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
         let draws = 0;
         for (const packet of packets) {
-            if (packet._disposed) {
-                continue;
-            }
-            if (!isOverride && packet.mesh.material !== material) {
+            if (packet._disposed || packet.mesh.visible === false || (!isOverride && packet.mesh.material !== material)) {
                 continue;
             }
             drawPacket(pass, engine, material, packet);
