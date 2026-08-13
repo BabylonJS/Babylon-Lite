@@ -29,6 +29,7 @@ import {
     createPhysicsShape,
     createSceneContext,
     createStandardMaterial,
+    setStandardLightmapTexture,
     createTransformNode,
     loadGltf,
     loadTexture2D,
@@ -277,7 +278,7 @@ async function main(): Promise<void> {
                 mat.diffuseTexture = pbr.baseColorTexture;
             }
             mat.specularColor = [0, 0, 0];
-            mat.lightmapTexture = lightmap;
+            setStandardLightmapTexture(mat, lightmap);
             mat.useLightmapAsShadowmap = true;
             mat.lightmapLevel = 3.2;
             mat.lightmapCoordIndex = 1;

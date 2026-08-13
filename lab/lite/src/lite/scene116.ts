@@ -23,6 +23,7 @@ import {
     createSolidTexture2D,
     createSphere,
     createStandardMaterial,
+    setStandardEmissiveTexture,
     createTorus,
     markMaterialUboDirty,
     registerScene,
@@ -97,7 +98,7 @@ async function main(): Promise<void> {
     standardDepthDisplayMaterial.disableLighting = true;
     standardDepthDisplayMaterial.diffuseColor = [1, 1, 1];
     standardDepthDisplayMaterial.emissiveColor = [0, 0, 0];
-    standardDepthDisplayMaterial.emissiveTexture = standardDepthTexture;
+    setStandardEmissiveTexture(standardDepthDisplayMaterial, standardDepthTexture);
     standardDepthDisplay.material = standardDepthDisplayMaterial;
     addToScene(scene, standardDepthDisplay);
 
@@ -108,7 +109,7 @@ async function main(): Promise<void> {
     pbrDepthDisplayMaterial.disableLighting = true;
     pbrDepthDisplayMaterial.diffuseColor = [1, 1, 1];
     pbrDepthDisplayMaterial.emissiveColor = [0, 0, 0];
-    pbrDepthDisplayMaterial.emissiveTexture = pbrDepthTexture;
+    setStandardEmissiveTexture(pbrDepthDisplayMaterial, pbrDepthTexture);
     pbrDepthDisplay.material = pbrDepthDisplayMaterial;
     addToScene(scene, pbrDepthDisplay);
 

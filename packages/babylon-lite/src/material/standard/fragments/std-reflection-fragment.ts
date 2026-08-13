@@ -47,16 +47,17 @@ export const stdReflectionExt: StdExt = {
     _id: "std-reflection",
     _phase: "mesh",
     _feature: HAS_REFLECTION_TEXTURE,
+    _detect: (mat: StandardMaterialProps): number => (mat._reflectionTexture ? HAS_REFLECTION_TEXTURE : 0),
     _frag: createStdReflectionFragment,
     _bind(mat, entries, b) {
-        const tex = mat.reflectionTexture!;
+        const tex = mat._reflectionTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
     _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
-        if (mat.reflectionTexture) {
-            out.push(mat.reflectionTexture);
+        if (mat._reflectionTexture) {
+            out.push(mat._reflectionTexture);
         }
     },
 };

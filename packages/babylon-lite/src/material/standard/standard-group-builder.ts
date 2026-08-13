@@ -3,7 +3,7 @@ import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { _registerStdExt, STD_SCENE_FOG } from "./standard-flags.js";
 import type { StdExt } from "./standard-flags.js";
-import type { StandardMaterialProps, StandardSceneShaderContext } from "./standard-material.js";
+import type { StandardSceneShaderContext } from "./standard-material.js";
 
 // ─── Durable opt-in mesh-feature preload seam ───────────────────────
 //
@@ -31,23 +31,6 @@ export function _preloadStdMeshExt(load: () => Promise<unknown>, key: string): v
     });
     (_stdMeshExtPreloads ??= []).push(promise);
 }
-
-/** Lazy-imports the standard renderable builder and builds the pipeline. */
-// Material-property → fragment-module dispatch table. Each entry is a plain
-// extension: if any mesh's material has the named property, dynamic-import
-// the fragment module and register the named StdExt export. Keeping this as
-// a data table rather than an if-ladder keeps core size flat as extensions
-// grow.
-const _STD_MAT_EXTS: ReadonlyArray<readonly [keyof StandardMaterialProps, () => Promise<any>, string]> = [
-    ["bumpTexture", () => import("./fragments/normal-map-fragment.js"), "bumpStdExt"],
-    ["emissiveTexture", () => import("./fragments/std-emissive-fragment.js"), "stdEmissiveExt"],
-    ["specularTexture", () => import("./fragments/std-specular-fragment.js"), "stdSpecularExt"],
-    ["ambientTexture", () => import("./fragments/std-ambient-fragment.js"), "stdAmbientExt"],
-    ["lightmapTexture", () => import("./fragments/std-lightmap-fragment.js"), "stdLightmapExt"],
-    ["opacityTexture", () => import("./fragments/std-opacity-fragment.js"), "stdOpacityExt"],
-    ["reflectionTexture", () => import("./fragments/std-reflection-fragment.js"), "stdReflectionExt"],
-    ["reflectionCubeTexture", () => import("./fragments/std-cube-reflection-fragment.js"), "stdCubeReflectionExt"],
-];
 
 /** Lazily-created singleton standard-material {@link MeshGroupBuilder}. Lazy-init
  *  keeps the module free of top-level side effects so a scene that uses no standard
@@ -116,11 +99,6 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         if (_stdMeshExtPreloads) {
             for (const preload of _stdMeshExtPreloads) {
                 imports.push(preload);
-            }
-        }
-        for (const [prop, load, key] of _STD_MAT_EXTS) {
-            if (meshes.some((m) => !!(m.material as any)[prop])) {
-                imports.push(load().then((mod) => _registerStdExt(mod[key])));
             }
         }
         if (imports.length > 0) {

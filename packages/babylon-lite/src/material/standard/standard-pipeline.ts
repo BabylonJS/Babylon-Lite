@@ -399,10 +399,10 @@ export function isStandardUvInverted(features: number, material: StandardMateria
     if ((features & HAS_DIFFUSE_TEXTURE) !== 0 && material.diffuseTexture) {
         return material.diffuseTexture.invertY === true;
     }
-    if ((features & HAS_OPACITY_TEXTURE) !== 0 && material.opacityTexture) {
-        return material.opacityTexture.invertY === true;
+    if ((features & HAS_OPACITY_TEXTURE) !== 0 && material._opacityTexture) {
+        return material._opacityTexture.invertY === true;
     }
-    return (features & HAS_BUMP_TEXTURE) !== 0 && material.bumpTexture?.invertY === true;
+    return (features & HAS_BUMP_TEXTURE) !== 0 && material._bumpTexture?.invertY === true;
 }
 
 /** Write standard material properties into a pre-allocated Float32Array (24 floats). */

@@ -20,7 +20,9 @@
  * panel.innerHTML = "<h1>Hello DOM</h1><button>Click me</button>";
  *
  * const tex = createHtmlTexture(engine, panel, { autoUpdate: true });
- * const mat = createStandardMaterial(engine, { emissiveTexture: tex, disableLighting: true });
+ * const mat = createStandardMaterial();
+ * mat.disableLighting = true;
+ * setStandardEmissiveTexture(mat, tex);
  * // …assign `mat` to a plane; the texture refreshes whenever `panel` changes.
  *
  * // later:

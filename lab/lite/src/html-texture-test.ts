@@ -28,6 +28,7 @@ import {
     createGround,
     createTorusKnot,
     createStandardMaterial,
+    setStandardEmissiveTexture,
     addToScene,
     registerScene,
     onBeforeRender,
@@ -376,7 +377,7 @@ async function run(): Promise<void> {
 
         const tex = createHtmlTexture(engine, src.element, { width: TEX_W, height: TEX_H });
         const mat = createStandardMaterial();
-        mat.emissiveTexture = tex;
+        setStandardEmissiveTexture(mat, tex);
         mat.emissiveColor = [0, 0, 0];
         mat.disableLighting = true;
         mat.backFaceCulling = false;

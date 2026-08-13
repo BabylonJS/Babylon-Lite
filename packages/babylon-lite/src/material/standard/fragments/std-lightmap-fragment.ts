@@ -31,16 +31,33 @@ export const stdLightmapExt: StdExt = {
     _id: "std-lightmap",
     _phase: "mesh",
     _feature: HAS_LIGHTMAP_TEXTURE,
+    _detect(mat: StandardMaterialProps): number {
+        const tex = mat._lightmapTexture;
+        if (!tex) {
+            return 0;
+        }
+        let f = HAS_LIGHTMAP_TEXTURE;
+        if (mat.lightmapCoordIndex === 1) {
+            f |= LIGHTMAP_USES_UV2;
+        }
+        if (mat.useLightmapAsShadowmap) {
+            f |= LIGHTMAP_SHADOWMAP;
+        }
+        if (tex.uAng === Math.PI) {
+            f |= LIGHTMAP_FLIP_V;
+        }
+        return f;
+    },
     _frag: (features) => createStdLightmapFragment((features & LIGHTMAP_USES_UV2) !== 0, (features & LIGHTMAP_SHADOWMAP) !== 0, (features & LIGHTMAP_FLIP_V) !== 0),
     _bind(mat, entries, b) {
-        const tex = mat.lightmapTexture!;
+        const tex = mat._lightmapTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
     _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
-        if (mat.lightmapTexture) {
-            out.push(mat.lightmapTexture);
+        if (mat._lightmapTexture) {
+            out.push(mat._lightmapTexture);
         }
     },
 };
