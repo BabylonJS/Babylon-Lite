@@ -5,14 +5,14 @@
   "runtimeChunks": [
     "scene31-generate-mipmaps-D_9pM4qD.js",
     "scene31-gltf-ext-emissive-strength-BUdCZP6c.js",
-    "scene31-gltf-feature-registry-BUKhVOpq.js",
-    "scene31-gltf-glb-parser-BCMV87GB.js",
+    "scene31-gltf-feature-registry-n5b9zhTV.js",
+    "scene31-gltf-glb-parser-CpEYuqT4.js",
     "scene31-ibl-fragment-CeRrvT96.js",
-    "scene31-pbr-renderable-B9koCIi2.js",
+    "scene31-pbr-renderable-JpNW3NWt.js",
     "scene31-rgbd-decode-CT6Q-rdi.js",
     "scene31-scene-uniforms-FTYH6Ct0.js",
     "scene31-set-emissive-Cf9S270u.js",
     "scene31.js"
   ],
-  "rawBytes": 81739
+  "rawBytes": 81749
 }

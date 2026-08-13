@@ -1,5 +1,5 @@
 {
-  "rawKB": 67.5,
+  "rawKB": 67.6,
   "gzipKB": 27.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,5 +10,5 @@
     "scene214-std-shadow-fragment-BtsIMte5.js",
     "scene214.js"
   ],
-  "rawBytes": 69167
+  "rawBytes": 69176
 }

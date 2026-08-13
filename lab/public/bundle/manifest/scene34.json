@@ -8,16 +8,16 @@
     "scene34-gltf-ext-node-visibility-BXkWmsWt.js",
     "scene34-gltf-feature-animation-pointer-Do8Lz1xq.js",
     "scene34-gltf-feature-animations-CccZlQLQ.js",
-    "scene34-gltf-feature-registry-Bq621UpZ.js",
-    "scene34-gltf-glb-parser-DBb4ZF5q.js",
+    "scene34-gltf-feature-registry-CKQeTJ_b.js",
+    "scene34-gltf-glb-parser-GWVsAeAH.js",
     "scene34-gltf-sampler-denorm-DMc9GTYS.js",
     "scene34-gltf-share-DzepaHuU.js",
     "scene34-ibl-fragment-CeRrvT96.js",
-    "scene34-pbr-renderable-DfQr1Klx.js",
+    "scene34-pbr-renderable-CTJEWOk_.js",
     "scene34-rgbd-decode-EQ-YQ9oq.js",
     "scene34-scene-uniforms-FTYH6Ct0.js",
     "scene34-visibility-BzSlNQLc.js",
     "scene34.js"
   ],
-  "rawBytes": 100082
+  "rawBytes": 100090
 }

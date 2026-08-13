@@ -6,12 +6,12 @@
     "scene21-background-hdr-skybox-ODl0QtKs.js",
     "scene21-cubemap-skybox-material-DOHnnVZX.js",
     "scene21-generate-mipmaps-CY4WfuNc.js",
-    "scene21-gltf-glb-parser-BvqnIo7r.js",
+    "scene21-gltf-glb-parser-Dc7XytDs.js",
     "scene21-ibl-fragment-CeRrvT96.js",
-    "scene21-pbr-renderable-BpytGMzx.js",
+    "scene21-pbr-renderable-DnVegj_5.js",
     "scene21-rgbd-decode-DBnJCgXx.js",
     "scene21-scene-uniforms-FTYH6Ct0.js",
     "scene21.js"
   ],
-  "rawBytes": 87280
+  "rawBytes": 87294
 }

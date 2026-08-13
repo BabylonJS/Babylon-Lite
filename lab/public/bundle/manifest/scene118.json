@@ -1,5 +1,5 @@
 {
-  "rawKB": 75.1,
+  "rawKB": 75.2,
   "gzipKB": 30.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,5 +10,5 @@
     "scene118-standard-renderable-OTml1QUQ.js",
     "scene118.js"
   ],
-  "rawBytes": 76948
+  "rawBytes": 76963
 }

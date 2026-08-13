@@ -7,11 +7,11 @@
     "scene23-background-ground-DOmIRzXy.js",
     "scene23-cubemap-skybox-material-CMh1lpNK.js",
     "scene23-ibl-fragment-CeRrvT96.js",
-    "scene23-pbr-renderable-ErD8M8b8.js",
+    "scene23-pbr-renderable-PtW2L4QZ.js",
     "scene23-rgbd-decode-Cqa4BOrl.js",
     "scene23-scene-uniforms-FTYH6Ct0.js",
     "scene23-wgsl-helpers-BgB2AJrF.js",
     "scene23.js"
   ],
-  "rawBytes": 78484
+  "rawBytes": 78477
 }
