@@ -2,18 +2,8 @@
 // Tree-shakable: import only what you use.
 
 // ─── Core ────────────────────────────────────────────────────────────
-export {
-    createEngine,
-    startEngine,
-    stopEngine,
-    renderFrame,
-    resizeEngine,
-    setEngineSize,
-    disposeEngine,
-    setGpuTimingEnabled,
-    isGpuTimingSupported,
-    VERSION,
-} from "./engine/engine.js";
+export { createEngine, startEngine, stopEngine, renderFrame, resizeEngine, setEngineSize, disposeEngine, setGpuTimingEnabled, isGpuTimingSupported } from "./engine/engine.js";
+export { VERSION } from "./engine/version.js";
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
 export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
 export type { NullEngineOptions } from "./engine/null-engine.js";

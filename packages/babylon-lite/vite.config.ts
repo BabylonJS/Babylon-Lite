@@ -589,8 +589,8 @@ export default defineConfig(({ mode }) => {
     // `dist` pass above). `build:lib` and `build:dist` write to disjoint subdirs +
     // non-conflicting root files, so they can run in either order after a clean.
     return {
-        // Bake the resolved version into the `VERSION` export (engine.ts reads
-        // `__BL_VERSION__`). esbuild constant-folds the `typeof` guard so the
+        // Bake the resolved version into the `VERSION` export (engine/version.ts
+        // reads `__BL_VERSION__`). esbuild constant-folds the `typeof` guard so the
         // published bundle reports the npm version it ships as.
         define: {
             __BL_VERSION__: JSON.stringify(resolveReleaseVersion()),
