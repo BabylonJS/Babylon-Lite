@@ -502,6 +502,13 @@ export function startEngine(engine: EngineContext): Promise<void> {
     });
 }
 
+/** Resolve when every GPU command submitted before this call has completed.
+ *  This is a synchronization boundary for infrequent lifecycle transitions such as revealing a fully
+ *  prepared scene; frame loops should not await it during steady rendering. */
+export function waitForGpuIdle(engine: EngineContext): Promise<void> {
+    return engine._device.queue.onSubmittedWorkDone();
+}
+
 /** Stop the render loop. */
 export function stopEngine(engine: EngineContext): void {
     if (engine._animFrameId) {
