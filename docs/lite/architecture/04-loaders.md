@@ -3,6 +3,7 @@
 > Package paths:
 >
 > - `packages/babylon-lite/src/loader-gltf/load-gltf.ts` — GLB 2.0 loader
+> - `packages/babylon-lite/src/loader-gltf/gltf-feature-camera.ts` — glTF `camera` node property (core spec, not an extension)
 > - `packages/babylon-lite/src/loader-gltf/gltf-ext-basisu.ts` — glTF `KHR_texture_basisu` feature module
 > - `packages/babylon-lite/src/loader-gltf/gltf-feature-meshopt.ts` + `meshopt-decode.ts` — `EXT_meshopt_compression` feature module + decoder
 > - `packages/babylon-lite/src/loader-gltf/gltf-ext-quantization.ts` — `KHR_mesh_quantization` feature module
@@ -63,6 +64,12 @@ export interface AssetContainer {
     /** Camera parsed from the file. addToScene() sets it as scene.camera when present. */
     camera?: Camera;
 
+    /** Every camera declared by the glTF `cameras` array and referenced by a `node.camera`
+     *  index, in node-encounter order. See "glTF `camera` Node Property" below. Unlike
+     *  `camera`, addToScene() never auto-activates one of these — pick one explicitly and
+     *  assign it to `scene.camera`. */
+    cameras?: Camera[];
+
     /** KHR_materials_variants data. Use selectVariant() / getVariantNames() to interact. */
     materialVariants?: MaterialVariantData;
 
@@ -117,6 +124,9 @@ export interface GltfMaterialData {
 
 /** Load a glTF/GLB asset from a URL, ArrayBuffer, or Blob; parse it, upload to GPU. Returns an AssetContainer. */
 export async function loadGltf(engine: EngineContext, source: string | ArrayBuffer | Blob): Promise<AssetContainer>;
+
+/** Enable camera import for subsequent loadGltf calls. */
+export function enableGltfCameras(): void;
 ```
 
 > **Note**: `loadGltf` takes an `Engine` (not `SceneContext`) and returns an `AssetContainer`. The result's `entities` array contains root scene entities; glTF meshes usually hang off a root `TransformNode` hierarchy. Pass the result to `addToScene(scene, result)` — it will traverse the hierarchy, register animation ticks, and integrate everything into the scene. Meshes are the standard `Mesh` type with GPU data in the `_gpu` field and bounding box on `Mesh.boundMin`/`Mesh.boundMax`. Renderable mesh names preserve source glTF `mesh.name` when present; parent transform names still preserve glTF `node.name`.
@@ -270,6 +280,55 @@ For child nodes: `worldMatrix = parentWorldMatrix × localMatrix`.
 Local matrices are computed from glTF TRS: `mat4Compose(translation, rotation, scale)`, or directly from `node.matrix` if present.
 
 Parent lookup is done by linear scan (`findParent`): iterates all nodes checking `children` arrays.
+
+### glTF `camera` Node Property (`gltf-feature-camera.ts`)
+
+Core glTF 2.0 spec §5.20 (not an extension) — a node may reference `cameras[i]` via `node.camera`.
+Feature id `_camera`, registered only when the caller invokes `enableGltfCameras()` and then
+triggered when an asset declares cameras. The generic `gltf-feature-hooks.ts` seam lets the core
+loader ask whether any explicitly enabled feature matches without knowing camera semantics; Rollup
+folds the seam away when no enabler is imported.
+Reproduces cx20 gltf-test's `:warning: embedded camera` gap for Babylon Lite: before this feature,
+`loadGltf` silently dropped `node.camera` and exposed no way to select one of an asset's embedded
+cameras. Every camera referenced by a `node.camera` index is instantiated and returned via
+`AssetContainer.cameras` (node-encounter order), named from the glTF camera definition or
+`camera{index}` when unnamed; `AssetContainer.camera` (singular) is untouched.
+
+**Per camera, for each node with `node.camera !== undefined`:**
+
+1. **`fixupNode`** — a `TransformNode` (`createTransformNode`) inserted between the source node and
+   the camera (never mutating the shared source node — a sibling mesh on the same glTF node, if any,
+   must keep its own winding/scale):
+    - **Handedness.** The synthetic `__root__` node's `scale.x = -1` (RH→LH conversion, above) flips
+      a camera's chirality — a mirrored (negative-determinant) camera world matrix renders an
+      inside-out view. Babylon.js's own glTF loader hits the same issue and fixes it by setting
+      `scaling.x = -1` on the camera's hosting `TransformNode` (`glTFLoader.ts` `loadNodeAsync`).
+    - `fixupNode`'s scale is `(-1/s, 1/s, 1/s)`, where `s` is the accumulated static uniform
+      rest-pose scale. This cancels inherited scale while preserving live translation/rotation.
+2. **Parent.** `fixupNode.parent = nodeMap[nodeIdx]` when the node is reachable from a scene root
+   (the common case — node TRS animation, classic channels or `KHR_animation_pointer`, then drives
+   the camera every frame through the normal parent chain). Falls back to
+   `createSceneNodeFromMatrix(name, restWorld)` when unreachable, mirroring the
+   `KHR_lights_punctual` fallback for the same case.
+3. **Camera.** `createFreeCamera({0,0,0}, {0,0,-1})`, parented to `fixupNode`. glTF cameras look
+   down their local -Z axis with +Y up; `mat4LookAtWorldLHToRef`'s "+Z points from eye to target"
+   convention reproduces exactly that local orientation for an eye at the origin looking toward
+   `(0,0,-1)`. The fixup also cancels static uniform ancestor scale so the shared rigid view inverse
+   remains exact. Projection parameters stay in source glTF units, matching Babylon.js.
+   Zero/non-uniform or animated ancestor scale is rejected/unsupported rather than rendered with a
+   silently wrong view.
+4. **Projection.** `perspective.yfov → fov`, `.znear → nearPlane`, `.zfar → farPlane` (substituting a
+   large sentinel, `1e6`, when `zfar` is omitted — glTF's "infinite" convention). Orthographic
+   cameras lazy-`import()` `enableOrthographicCamera` (only when `def.type === "orthographic"`, so a
+   perspective-only asset never pays for it) and map `xmag`/`ymag` to symmetric
+   `{ left: -xmag, right: xmag, bottom: -ymag, top: ymag }` bounds.
+
+**Known limitation:** once camera loading is enabled, the feature processes every camera declared
+by the asset. An asset with an orthographic camera therefore pulls in `camera/orthographic.js` even
+if the consumer selects a different perspective camera. glTF camera-property animation
+(`KHR_animation_pointer` targeting `/cameras/{}/perspective/yfov` etc.) is not wired — only the
+hosting NODE's transform animates; the camera's own intrinsics (fov/near/far/ortho bounds) are fixed
+at load time.
 
 ### Texture Upload
 
@@ -679,6 +738,7 @@ output_L1_-1 = raw_L1_-1 × B1m
 | `KHR_xmp_json_ld`                                   | Scene 210 XmpMetadataRoundedCube (genuinely interleaved) matches Babylon.js within `maxMad: 0.2`; metadata surfaced on `AssetContainer.xmpMetadata` |
 | `EXT_meshopt_compression` + `KHR_mesh_quantization` | Scene 211 BrainStem (glTF-Meshopt-EXT) matches Babylon.js within `maxMad: 0.2`                                                                      |
 | `glTF feature bundle isolation`                     | Non-interleaved / non-meshopt / non-XMP scenes never load the corresponding dynamic chunk (verified via `coverage:scene`)                           |
+| `glTF camera node property`                         | `gltf-feature-camera.test.ts` — explicit opt-in, perspective/orthographic mapping, source naming, node-hierarchy parenting, handedness fix, inherited-scale fix, unreachable-node fallback. Scene 250 VirtualCity enables camera loading, selects `camera6`, and matches Babylon.js within `maxMad: 6.1`; would fail (badly warped or mirrored view) without the feature. |
 | **.env**                                            |                                                                                                                                                     |
 | `.env magic validation`                             | Bad magic → throws                                                                                                                                  |
 | `RGBD decode`                                       | Known RGBD values → correct linear HDR                                                                                                              |
@@ -721,6 +781,7 @@ output_L1_-1 = raw_L1_-1 × B1m
 | File                                     | Size       | Purpose                                                                  |
 | ---------------------------------------- | ---------- | ------------------------------------------------------------------------ |
 | `src/loader-gltf/load-gltf.ts`           | ~413 lines | GLB parsing, mesh extraction, texture upload, world matrix computation   |
+| `src/loader-gltf/gltf-feature-camera.ts` | ~110 lines | glTF `camera` node property — perspective/orthographic import, handedness + scale fixup |
 | `src/loader-env/load-env.ts`             | ~470 lines | .env parsing, RGBD decode, BRDF LUT upload, SH conversion                |
 | `src/loader-env/load-dds-env.ts`         | ~286 lines | DDS cubemap loader, float16 SH extraction, BRDF PNG decode orchestration |
 | `src/loader-env/env-helpers.ts`          | ~34 lines  | Shared sampler creation, EnvironmentTextures assembly                    |

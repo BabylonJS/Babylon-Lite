@@ -15,6 +15,9 @@ import type { OrthographicBounds } from "./orthographic.js";
  *  `docs/lite/architecture/36-high-precision-matrix.md`). The storage
  *  type is fixed at construction and never changes. */
 export interface Camera {
+    /** Optional source/debug name. Imported glTF cameras use the glTF camera name,
+     *  or `camera{index}` when the source definition is unnamed. */
+    name?: string;
     fov: number;
     nearPlane: number;
     farPlane: number;

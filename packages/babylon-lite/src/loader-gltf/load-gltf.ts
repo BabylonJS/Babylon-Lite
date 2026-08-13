@@ -24,6 +24,7 @@ import type { TextureWrapFn } from "./gltf-pbr-builder.js";
 import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, applyGltfOptInPbrFeatures, uploadTex } from "./gltf-pbr-builder.js";
 import type * as GltfColorNormalize from "./gltf-color-normalize.js";
 import type * as GltfFeatureRegistry from "./gltf-feature-registry.js";
+import { _appendEnabledGltfFeatures } from "./gltf-feature-hooks.js";
 import type * as GltfPbrBuilderExt from "./gltf-pbr-builder-ext.js";
 
 /** Dynamically-imported interleave module — loaded only when an asset actually
@@ -167,6 +168,7 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
     // registry. Core loader knows zero feature names.
     const featureRegistry = assetUsesGltfFeatures(json) ? await importGltfFeatureRegistry() : undefined;
     const features = featureRegistry ? await featureRegistry.loadGltfFeatures(json) : [];
+    _appendEnabledGltfFeatures(json, features);
 
     // Pre-parse hooks (EXT_meshopt_compression decompression, KHR_mesh_quantization
     // dequantization) may rewrite bufferViews/accessors and hand back a replacement
