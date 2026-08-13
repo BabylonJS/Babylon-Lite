@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `e2d1f2f87e07e8a02683d411b74c24008f3c99a2`
-- **Last sync date:** 2026-08-12
+- **Last synced BJS commit:** `538573bd012d819669e41e99346cb98e57bbf051`
+- **Last sync date:** 2026-08-13
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -235,6 +235,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | ------------------------------------------ | ------- | -------------------------------------------- |
 | `Observable`                               | ✅ Full | [misc/observable.ts](src/misc/observable.ts) |
 | `Tools` (subset)                           | ✅ Full | [misc/tools.ts](src/misc/tools.ts)           |
+| `RandomGUID` / `GUID` (`GUID.RandomId`)    | ✅ Full | [misc/guid.ts](src/misc/guid.ts) (pure RFC4122 v4 UUID helper; `Tools.RandomId` delegates to it, mirroring BJS's `GUID.RandomId = RandomGUID`) |
 | `SmartArray` / `StringDictionary` / `Tags` | ✅ Full | [misc/misc-utils.ts](src/misc/misc-utils.ts) |
 | `PerformanceMonitor`                       | ✅ Full | misc-utils                                   |
 | `ColorGradient` / `FactorGradient`         | ✅ Full | misc-utils                                   |

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { Observable } from "../src/misc/observable";
 import { Tools } from "../src/misc/tools";
+import { RandomGUID, GUID } from "../src/misc/guid";
 import { Constants } from "../src/misc/engine-constants";
 
 describe("Constants", () => {
@@ -121,5 +122,22 @@ describe("Tools", () => {
     it("clamps", () => {
         expect(Tools.Clamp(-1, 0, 1)).toBe(0);
         expect(Tools.Clamp(2, 0, 1)).toBe(1);
+    });
+});
+
+describe("GUID", () => {
+    const v4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+    it("RandomGUID generates a v4 UUID", () => {
+        expect(RandomGUID()).toMatch(v4);
+    });
+
+    it("RandomGUID yields distinct ids", () => {
+        expect(RandomGUID()).not.toBe(RandomGUID());
+    });
+
+    it("GUID.RandomId aliases RandomGUID", () => {
+        expect(GUID.RandomId).toBe(RandomGUID);
+        expect(GUID.RandomId()).toMatch(v4);
     });
 });
