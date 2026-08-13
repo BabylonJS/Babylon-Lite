@@ -51,6 +51,58 @@ async function attachNoiseWithGetters(sourceGetter: NpeGetter, strengthGetter?: 
     return system;
 }
 
+async function buildNoiseTextureFanOut(renderUrl: string) {
+    const data = new Uint8ClampedArray([255, 0, 0, 255]);
+    const fetchMock = vi.fn(async (_url: string) => ({ ok: true, blob: async () => ({}) }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+        "createImageBitmap",
+        vi.fn(async () => ({ width: 1, height: 1, close: vi.fn() }))
+    );
+    vi.stubGlobal(
+        "OffscreenCanvas",
+        vi.fn(function (this: { getContext: () => unknown }) {
+            this.getContext = () => ({ drawImage: vi.fn(), getImageData: () => ({ data }) });
+        })
+    );
+    const gpuTexture = { createView: vi.fn(() => ({})), destroy: vi.fn() };
+    const engine = {
+        _device: {
+            createTexture: vi.fn(() => gpuTexture),
+            createSampler: vi.fn(() => ({})),
+            queue: { copyExternalImageToTexture: vi.fn() },
+        },
+    } as never;
+    const textureDataUrl = "data:image/png;base64,AA==";
+    const graph = parseNodeParticleSource({
+        blocks: [
+            {
+                customType: "BABYLON.SystemBlock",
+                id: 5,
+                capacity: 1,
+                inputs: [
+                    { name: "particle", targetBlockId: 3, targetConnectionName: "output" },
+                    { name: "texture", targetBlockId: 2, targetConnectionName: "texture" },
+                ],
+            },
+            {
+                customType: "BABYLON.UpdateNoiseBlock",
+                id: 3,
+                inputs: [
+                    { name: "particle", targetBlockId: 1, targetConnectionName: "output" },
+                    { name: "noiseTexture", targetBlockId: 2, targetConnectionName: "texture" },
+                    { name: "strength", targetBlockId: 4, targetConnectionName: "output" },
+                ],
+            },
+            { customType: "BABYLON.CreateParticleBlock", id: 1, inputs: [] },
+            { customType: "BABYLON.ParticleTextureSourceBlock", id: 2, url: renderUrl, textureDataUrl, invertY: false, inputs: [] },
+            { customType: "BABYLON.ParticleInputBlock", id: 4, type: 8, valueType: "BABYLON.Vector3", value: [2, 3, 4], inputs: [] },
+        ],
+    });
+    const set = await buildNodeParticleSetWithNoiseTextures(engine, {} as never, graph);
+    return { system: set.systems[0]!, fetchMock, textureDataUrl };
+}
+
 afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -191,55 +243,10 @@ describe("NPE UpdateNoiseBlock", () => {
     });
 
     it("builds one embedded texture for ordinary rendering and CPU noise updates", async () => {
-        const data = new Uint8ClampedArray([255, 0, 0, 255]);
-        const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => ({}) }));
-        vi.stubGlobal("fetch", fetchMock);
-        vi.stubGlobal(
-            "createImageBitmap",
-            vi.fn(async () => ({ width: 1, height: 1, close: vi.fn() }))
-        );
-        vi.stubGlobal(
-            "OffscreenCanvas",
-            vi.fn(function (this: { getContext: () => unknown }) {
-                this.getContext = () => ({ drawImage: vi.fn(), getImageData: () => ({ data }) });
-            })
-        );
-        const gpuTexture = { createView: vi.fn(() => ({})), destroy: vi.fn() };
-        const engine = {
-            _device: {
-                createTexture: vi.fn(() => gpuTexture),
-                createSampler: vi.fn(() => ({})),
-                queue: { copyExternalImageToTexture: vi.fn() },
-            },
-        } as never;
-        const graph = parseNodeParticleSource({
-            blocks: [
-                {
-                    customType: "BABYLON.SystemBlock",
-                    id: 5,
-                    capacity: 1,
-                    inputs: [
-                        { name: "particle", targetBlockId: 3, targetConnectionName: "output" },
-                        { name: "texture", targetBlockId: 2, targetConnectionName: "texture" },
-                    ],
-                },
-                {
-                    customType: "BABYLON.UpdateNoiseBlock",
-                    id: 3,
-                    inputs: [
-                        { name: "particle", targetBlockId: 1, targetConnectionName: "output" },
-                        { name: "noiseTexture", targetBlockId: 2, targetConnectionName: "texture" },
-                        { name: "strength", targetBlockId: 4, targetConnectionName: "output" },
-                    ],
-                },
-                { customType: "BABYLON.CreateParticleBlock", id: 1, inputs: [] },
-                { customType: "BABYLON.ParticleTextureSourceBlock", id: 2, url: "", textureDataUrl: "data:image/png;base64,AA==", invertY: false, inputs: [] },
-                { customType: "BABYLON.ParticleInputBlock", id: 4, type: 8, valueType: "BABYLON.Vector3", value: [2, 3, 4], inputs: [] },
-            ],
-        });
-        const set = await buildNodeParticleSetWithNoiseTextures(engine, {} as never, graph);
-        const system = set.systems[0]!;
+        const { system, fetchMock, textureDataUrl } = await buildNoiseTextureFanOut("");
         expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock).toHaveBeenNthCalledWith(1, textureDataUrl);
+        expect(fetchMock).toHaveBeenNthCalledWith(2, textureDataUrl);
         expect(system.texture).toMatchObject({ width: 1, height: 1 });
         expect(() => createParticleBillboard(system)).not.toThrow();
         vi.spyOn(Math, "random").mockReturnValue(0);
@@ -250,6 +257,17 @@ describe("NPE UpdateNoiseBlock", () => {
         expect(system.buffer.dirX[0]).toBeCloseTo(1, 6);
         expect(system.buffer.dirY[0]).toBeCloseTo(1.5, 6);
         expect(system.buffer.dirZ[0]).toBeCloseTo(2, 6);
+    });
+
+    it("prefers the URL for ordinary rendering while retaining embedded CPU noise data", async () => {
+        const renderUrl = "https://example.com/particle.png";
+        const { system, fetchMock, textureDataUrl } = await buildNoiseTextureFanOut(renderUrl);
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock).toHaveBeenNthCalledWith(1, textureDataUrl);
+        expect(fetchMock).toHaveBeenNthCalledWith(2, renderUrl);
+        expect(system.texture).toMatchObject({ width: 1, height: 1 });
+        expect(() => createParticleBillboard(system)).not.toThrow();
     });
 
     it("builds combined flow-map and noise updates with one shared CPU texture", async () => {

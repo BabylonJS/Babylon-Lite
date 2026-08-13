@@ -39,6 +39,29 @@ function parseInputLiteral(input: ParsedParticleInput): NpeValue | undefined {
 }
 
 /** @internal Build an NPE set with opt-in CPU texture update evaluators. */
+export function buildNodeParticleSetWithTextureUpdateRuntime(
+    engine: EngineContext,
+    scene: SceneContext,
+    graph: ParticleGraph,
+    options: BuildNodeParticleOptions,
+    featureClassName: string,
+    featureTextureInputName: string,
+    featureEvaluator: NpeBlockEvaluator,
+    featureTextureEvaluator: NpeBlockEvaluator
+): Promise<NodeParticleSet>;
+export function buildNodeParticleSetWithTextureUpdateRuntime(
+    engine: EngineContext,
+    scene: SceneContext,
+    graph: ParticleGraph,
+    options: BuildNodeParticleOptions,
+    featureClassName: string,
+    featureTextureInputName: string,
+    featureEvaluator: NpeBlockEvaluator,
+    featureTextureEvaluator: NpeBlockEvaluator,
+    secondaryFeatureClassName: string,
+    secondaryFeatureTextureInputName: string,
+    secondaryFeatureEvaluator: NpeBlockEvaluator
+): Promise<NodeParticleSet>;
 export async function buildNodeParticleSetWithTextureUpdateRuntime(
     engine: EngineContext,
     scene: SceneContext,
