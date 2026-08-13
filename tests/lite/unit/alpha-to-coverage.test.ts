@@ -24,7 +24,6 @@ import type { Sprite2DLayer } from "../../../packages/babylon-lite/src/sprite/sp
 import { createSpritePipelineCache, getOrCreateSpritePipeline } from "../../../packages/babylon-lite/src/sprite/sprite-pipeline";
 import { clearTextPipelineCache, getOrCreateTextPipeline } from "../../../packages/babylon-lite/src/text/_gpu/text-pipeline";
 import type { TextRenderable } from "../../../packages/babylon-lite/src/text/text-renderable";
-import blendedTextFragment from "../../../packages/babylon-lite/src/text/shaders/slug.frag.wgsl?raw";
 
 function makeEngine() {
     const createRenderPipeline = vi.fn((descriptor: GPURenderPipelineDescriptor) => descriptor as unknown as GPURenderPipeline);
@@ -276,10 +275,12 @@ describe("WebGPU alpha-to-coverage", () => {
         expect(fragmentStage(enabled).constants).toEqual({ a2c: 1 });
         expect(fragmentStage(blended).constants).toBeUndefined();
 
-        // Exactly one fragment module is ever compiled, and it declares the override.
+        // Exactly one fragment module is ever compiled, and the source actually handed to
+        // createShaderModule — not merely the file on disk — declares the override that the
+        // A2C pipeline specialises.
         const fragmentSources = createShaderModule.mock.calls.map((call) => call[0].code).filter((code) => code.includes("@location(0) vec4<f32>"));
         expect(fragmentSources).toHaveLength(1);
-        expect(blendedTextFragment).toMatch(/override\s+a2c\s*:\s*bool/);
+        expect(fragmentSources[0]).toMatch(/override\s+a2c\s*:\s*bool/);
     });
 
     it("combines multisampled depth-writing Sprite2D A2C with the selected blend mode", () => {
