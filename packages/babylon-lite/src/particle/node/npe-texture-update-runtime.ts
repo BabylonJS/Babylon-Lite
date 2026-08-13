@@ -4,12 +4,11 @@ import type { Color4, Mat4, Vec2, Vec3 } from "../../math/types.js";
 import { mat4Translation } from "../../math/mat4-translation.js";
 import { mat4GetTranslationToRef } from "../../math/mat4-transform.js";
 import { createParticleSystem, type ParticleSystem } from "../particle-system.js";
+import { embeddedParticleTextureSourceBlock } from "./blocks/embedded-texture-source-block.js";
 import type { BuildNodeParticleOptions, NodeParticleSet, NpeBlockEvaluator, NpeBuildContext, NpeBuildState } from "./npe-build.js";
 import { loadNpeBlockEvaluator } from "./npe-registry.js";
 import type { ParticleGraph, ParsedParticleBlock, ParsedParticleInput } from "./npe-types.js";
 import type { NpeGetter, NpeValue } from "./npe-value.js";
-
-export type ResolveTextureUpdateFeature = (className: string) => readonly [evaluator: NpeBlockEvaluator, textureInputName: string] | undefined;
 
 function isInputConnected(input: ParsedParticleInput | undefined): input is ParsedParticleInput & { targetBlockId: number; targetConnectionName: string } {
     return input?.targetBlockId != null && input.targetConnectionName != null;
@@ -39,14 +38,42 @@ function parseInputLiteral(input: ParsedParticleInput): NpeValue | undefined {
     return undefined;
 }
 
-/** @internal Build an NPE set with one opt-in CPU texture update evaluator. */
+/** @internal Build an NPE set with opt-in CPU texture update evaluators. */
+export function buildNodeParticleSetWithTextureUpdateRuntime(
+    engine: EngineContext,
+    scene: SceneContext,
+    graph: ParticleGraph,
+    options: BuildNodeParticleOptions,
+    featureClassName: string,
+    featureTextureInputName: string,
+    featureEvaluator: NpeBlockEvaluator,
+    featureTextureEvaluator: NpeBlockEvaluator
+): Promise<NodeParticleSet>;
+export function buildNodeParticleSetWithTextureUpdateRuntime(
+    engine: EngineContext,
+    scene: SceneContext,
+    graph: ParticleGraph,
+    options: BuildNodeParticleOptions,
+    featureClassName: string,
+    featureTextureInputName: string,
+    featureEvaluator: NpeBlockEvaluator,
+    featureTextureEvaluator: NpeBlockEvaluator,
+    secondaryFeatureClassName: string,
+    secondaryFeatureTextureInputName: string,
+    secondaryFeatureEvaluator: NpeBlockEvaluator
+): Promise<NodeParticleSet>;
 export async function buildNodeParticleSetWithTextureUpdateRuntime(
     engine: EngineContext,
     scene: SceneContext,
     graph: ParticleGraph,
     options: BuildNodeParticleOptions,
-    resolveFeature: ResolveTextureUpdateFeature,
-    featureTextureEvaluator: NpeBlockEvaluator
+    featureClassName: string,
+    featureTextureInputName: string,
+    featureEvaluator: NpeBlockEvaluator,
+    featureTextureEvaluator: NpeBlockEvaluator,
+    secondaryFeatureClassName?: string,
+    secondaryFeatureTextureInputName?: string,
+    secondaryFeatureEvaluator?: NpeBlockEvaluator
 ): Promise<NodeParticleSet> {
     const systems: ParticleSystem[] = [];
     const buildPromises: Promise<void>[] = [];
@@ -141,21 +168,26 @@ export async function buildNodeParticleSetWithTextureUpdateRuntime(
                 (block.className === "ParticleMathBlock" && left?.targetBlockId === right?.targetBlockId && left?.targetConnectionName === right?.targetConnectionName) ||
                 (block.className === "SystemBlock" && isInputConnected(block.inputs.find((input) => input.name === "emitRate"))) ||
                 (block.className === "SetupSpriteSheetBlock" && block.serialized.randomStartCell === true);
-            const feature = evaluatorOverride ? undefined : resolveFeature(block.className);
+            const primaryFeature = block.className === featureClassName;
+            const featureTextureInput = primaryFeature ? featureTextureInputName : block.className === secondaryFeatureClassName ? secondaryFeatureTextureInputName : undefined;
             const evaluator =
                 evaluatorOverride ??
-                (feature
-                    ? feature[0]
-                    : scalarOnce
-                      ? (await import("./blocks/particle-random-once-block.js")).particleRandomOnceBlock
-                      : localShape
-                        ? await (await import("./npe-registry-local-shapes.js")).loadLocalShapeEvaluator(block.className)
-                        : variant
-                          ? await (await import("./npe-registry-variants.js")).loadVariantBlockEvaluator(block)
-                          : await loadNpeBlockEvaluator(block.className));
+                (featureTextureInput
+                    ? primaryFeature
+                        ? featureEvaluator
+                        : secondaryFeatureEvaluator!
+                    : block.className === "ParticleTextureSourceBlock"
+                      ? embeddedParticleTextureSourceBlock
+                      : scalarOnce
+                        ? (await import("./blocks/particle-random-once-block.js")).particleRandomOnceBlock
+                        : localShape
+                          ? await (await import("./npe-registry-local-shapes.js")).loadLocalShapeEvaluator(block.className)
+                          : variant
+                            ? await (await import("./npe-registry-variants.js")).loadVariantBlockEvaluator(block)
+                            : await loadNpeBlockEvaluator(block.className));
             for (const input of block.inputs) {
                 if (input.name !== "particle" && isInputConnected(input)) {
-                    await buildBlock(input.targetBlockId, feature && input.name === feature[1] ? featureTextureEvaluator : undefined);
+                    await buildBlock(input.targetBlockId, input.name === featureTextureInput ? featureTextureEvaluator : undefined);
                 }
             }
             evaluator.build(block, ctx);

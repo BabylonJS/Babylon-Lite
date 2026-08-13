@@ -19,12 +19,12 @@ export function buildNodeParticleSetWithTextureUpdatesRuntime(
         scene,
         graph,
         options,
-        (className) => {
-            if (className === "UpdateFlowMapBlock") {
-                return [updateFlowMapBlock, "flowMap"];
-            }
-            return className === "UpdateNoiseBlock" ? [updateNoiseBlock, "noiseTexture"] : undefined;
-        },
-        cpuTextureSourceBlock
+        "UpdateFlowMapBlock",
+        "flowMap",
+        updateFlowMapBlock,
+        cpuTextureSourceBlock,
+        "UpdateNoiseBlock",
+        "noiseTexture",
+        updateNoiseBlock
     );
 }
