@@ -4,7 +4,7 @@
 // clearcoat enabled with IOR=2.0. No direct light — only IBL from DDS env +
 // default hemispheric light from createDefaultCamera equivalent.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createSphere, createPbrMaterial, createSolidTexture2D, attachControl, loadDdsEnvironment, registerScene } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createSphere, createPbrMaterial, createSolidTexture2D, attachControl, loadDdsEnvironment, registerScene, setPbrClearCoat } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
@@ -36,16 +36,17 @@ async function main(): Promise<void> {
     // ORM: occlusion=1, roughness=1, metallic=0
     const ormTex = createSolidTexture2D(engine, 1.0, 1.0, 0.0);
 
-    sphere.material = createPbrMaterial({
+    const pbr = createPbrMaterial({
         baseColorTexture: baseColorTex,
         ormTexture: ormTex,
-        clearCoat: {
-            isEnabled: true,
-            intensity: 1.0,
-            roughness: 0.0,
-            indexOfRefraction: 2.0,
-        },
     });
+    setPbrClearCoat(pbr, {
+        isEnabled: true,
+        intensity: 1.0,
+        roughness: 0.0,
+        indexOfRefraction: 2.0,
+    });
+    sphere.material = pbr;
 
     addToScene(scene, sphere);
     await registerScene(scene);

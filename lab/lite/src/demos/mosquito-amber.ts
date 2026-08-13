@@ -10,7 +10,7 @@ import {
     createArcRotateCamera,
     createBox,
     createEngine,
-    createPbrMaterial,
+    createPbrMaterial, setPbrSkybox,
     createSceneContext,
     createSolidTexture2D,
     loadEnvironment,
@@ -95,8 +95,8 @@ async function main(): Promise<void> {
         environmentIntensity: 1.0,
         directIntensity: 0,
         doubleSided: true,
-        skyboxMode: true,
     });
+    setPbrSkybox(skybox.material);
     const syncSkybox = (): void => {
         const w = cam.worldMatrix;
         skybox.position.set(w[12]!, w[13]!, w[14]!);

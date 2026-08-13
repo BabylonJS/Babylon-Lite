@@ -41,6 +41,7 @@ import {
     setPhysicsBodyMass,
     setPhysicsBodyMotionType,
     setPhysicsTimestepMs,
+    setPbrEmissive,
     setShadowTaskCasterMeshes,
     startEngine,
 } from "babylon-lite";
@@ -166,8 +167,8 @@ async function main(): Promise<void> {
         baseColorFactor: [0.82, 0.3, 0.12, 1],
         metallicFactor: 0,
         roughnessFactor: 0.7,
-        emissiveColor: [0.12, 0.03, 0.0],
     });
+    setPbrEmissive(coreMat, [0.12, 0.03, 0.0]);
 
     // ── Build several fractured BoomBox instances scattered around the origin. The
     // first sits where the source model is; the others get random ground offsets.
