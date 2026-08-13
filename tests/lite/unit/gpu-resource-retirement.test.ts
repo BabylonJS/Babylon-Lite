@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { renderFrame, type EngineContext, type RenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { renderFrame, waitForGpuIdle, type EngineContext, type RenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { disposeGpuResourceRetirements, retireGpuResources } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
@@ -49,6 +49,17 @@ function makeThinInstances(): ThinInstanceData {
 }
 
 describe("GPU resource retirement", () => {
+    it("returns the queue fence for all work submitted before the call", () => {
+        const submittedWorkDone = Promise.resolve();
+        const onSubmittedWorkDone = vi.fn(() => submittedWorkDone);
+        const engine = {
+            _device: { queue: { onSubmittedWorkDone } },
+        } as unknown as EngineContext;
+
+        expect(waitForGpuIdle(engine)).toBe(submittedWorkDone);
+        expect(onSubmittedWorkDone).toHaveBeenCalledTimes(1);
+    });
+
     it("does not fence or destroy a replaced buffer until the next frame is submitted", async () => {
         let resolveSubmittedWork!: () => void;
         const submittedWorkDone = new Promise<void>((resolve) => {
