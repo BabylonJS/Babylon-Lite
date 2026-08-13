@@ -25,11 +25,12 @@ let _stdMeshExtPreloads: Promise<void>[] | null = null;
 
 /** @internal Eagerly import + globally register an opt-in Standard mesh-feature ext so
  *  it is available for both the initial build and any later synchronous rebuild. */
-export function _preloadStdMeshExt(load: () => Promise<unknown>, key: string): void {
+export function _preloadStdMeshExt(load: () => Promise<unknown>, key: string): Promise<void> {
     const promise = load().then((mod) => {
         _registerStdExt((mod as Record<string, StdExt>)[key]!);
     });
     (_stdMeshExtPreloads ??= []).push(promise);
+    return promise;
 }
 
 /** Lazy-imports the standard renderable builder and builds the pipeline. */
@@ -113,16 +114,19 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
                 })
             );
         }
-        imports.push(...(_stdMeshExtPreloads ?? []));
-        if (builder._preload) {
-            imports.push(builder._preload);
+        if (_stdMeshExtPreloads) {
+            for (const preload of _stdMeshExtPreloads) {
+                imports.push(preload);
+            }
         }
         for (const [prop, load, key] of _STD_MAT_EXTS) {
             if (meshes.some((m) => !!(m.material as any)[prop])) {
                 imports.push(load().then((mod) => _registerStdExt(mod[key])));
             }
         }
-        await Promise.all(imports);
+        if (imports.length > 0) {
+            await Promise.all(imports);
+        }
 
         const renderableMod = await import("./standard-renderable.js");
         const sceneShader: StandardSceneShaderContext | null = scene.fog ? { _features: STD_SCENE_FOG, _fragments: [fogFragment!] } : null;

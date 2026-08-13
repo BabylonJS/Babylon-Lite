@@ -55,15 +55,11 @@ describe("PBR UV transform detection", () => {
 describe("StandardMaterial UV transform detection", () => {
     it("queues the StandardMaterial extension preload", async () => {
         const { enableMaterialUvTransform } = await import("../../../packages/babylon-lite/src/material/enable-material-uv-transform");
-        const previous = Promise.resolve();
-        const builder = { _materialFamily: "standard" as const, _preload: previous };
+        const builder = { _materialFamily: "standard" as const };
         const material = { _buildGroup: builder } as StandardMaterialProps;
         expect(enableMaterialUvTransform(material)).toBe(true);
         expect(material._hasUvTx).toBe(true);
-        expect(builder._preload).not.toBe(previous);
         await material._uvTxExt;
-        await builder._preload;
-        expect(builder._preload).toBeUndefined();
     });
 
     it("composes a transformed diffuse varying for StandardMaterial", () => {

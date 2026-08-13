@@ -38,7 +38,7 @@ import {
     ESM_SHADOW_OUTPUT,
     _getStdExtsSorted,
 } from "./standard-flags.js";
-import { MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
+import { MSH_HAS_MORPH_TARGETS, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
@@ -96,8 +96,7 @@ export function composeStandardShader(
     sceneShader: StandardSceneShaderContext | null = null
 ): ComposedShader {
     const has = (bit: number) => !!(features & bit);
-    const [first, second] = fragments;
-    const pc = first?._pc;
+    const pc = fragments[0]?._pc;
     const template = createStandardTemplate(
         {
             _diffuse: has(HAS_DIFFUSE_TEXTURE),
@@ -107,13 +106,13 @@ export function composeStandardShader(
             _disableLighting: has(DISABLE_LIGHTING),
             _noColorOutput: has(NO_COLOR_OUTPUT),
             _esmShadowOutput: has(ESM_SHADOW_OUTPUT),
-            _hasMorph: first?._id === "morph",
+            _hasMorph: !!(_meshFeatures & MSH_HAS_MORPH_TARGETS),
         },
         esmShadowDepthCode
     );
     let composed = composeShader(template, sceneShader ? [...fragments, ...sceneShader._fragments] : fragments);
     pc && (composed = pc(composed));
-    second?._pc && (composed = second._pc(composed));
+    fragments[1]?._pc && (composed = fragments[1]._pc(composed));
     return composed;
 }
 

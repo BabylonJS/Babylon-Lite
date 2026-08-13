@@ -1,5 +1,6 @@
 import type { PbrMaterialProps } from "./pbr/pbr-material.js";
 import { enableMaterialUvTransform as enablePbrMaterialUvTransform } from "./pbr/enable-material-uv-transform.js";
+import { _preloadStdMeshExt } from "./standard/standard-group-builder.js";
 import type { StandardMaterialProps } from "./standard/standard-material.js";
 
 /** Opt a PBR or Standard material into per-texture UV transforms ahead of need.
@@ -20,17 +21,7 @@ export function enableMaterialUvTransform(material: Partial<PbrMaterialProps> | 
     }
     material = material as StandardMaterialProps;
     if (!material._hasUvTx) {
-        const builder = material._buildGroup;
-        const preload = import("./standard/fragments/std-uv-transform-fragment.js").then((module) => module.registerStdUvTransformExt());
-        const pending = builder._preload ? Promise.all([builder._preload, preload]).then(() => {}) : preload;
-        (material as StandardMaterialProps)._uvTxExt = preload;
-        builder._preload = pending;
-        const clear = () => {
-            if (builder._preload === pending) {
-                builder._preload = undefined;
-            }
-        };
-        void pending.then(clear, clear);
+        material._uvTxExt = _preloadStdMeshExt(() => import("./standard/fragments/std-uv-transform-fragment.js"), "stdUvTransformExt");
     }
     material._hasUvTx = true;
     return material._renderFeatures === undefined;
