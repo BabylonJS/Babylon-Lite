@@ -1,7 +1,7 @@
 {
-  "rawKB": 126.3,
-  "rawBytes": 129369,
-  "gzipKB": 53.1,
+  "rawKB": 124.5,
+  "rawBytes": 127516,
+  "gzipKB": 52.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene115-create-morph-targets-BxcR5t59.js",
