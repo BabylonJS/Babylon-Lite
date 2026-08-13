@@ -11,7 +11,17 @@ import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose";
 import { retain } from "../../../packages/babylon-lite/src/resource/ref-count";
 import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
-import { attachVat, bakeVatMany, setVatInstanceStorage, setVatTime } from "../../../packages/babylon-lite/src/vat/vat-baker";
+import {
+    attachVat,
+    bakeVatMany,
+    createVatBakeResult,
+    createVatBakeResults,
+    prepareVat,
+    prepareVatMany,
+    setVatInstanceStorage,
+    setVatTime,
+} from "../../../packages/babylon-lite/src/vat/vat-baker";
+import type { PreparedVatBakeResult } from "../../../packages/babylon-lite/src/vat/vat-baker";
 
 function fakeBuffer(): GPUBuffer {
     return { destroy: vi.fn() } as unknown as GPUBuffer;
@@ -279,7 +289,7 @@ describe("VAT bone-matrix capture", () => {
             const baked = bakeVatMany(engine, [target], [group])[0]!;
             expect(queue.writeTexture).toHaveBeenCalledTimes(1);
             const call = queue.writeTexture.mock.calls[0]!;
-            expect(call[2]).toEqual({ bytesPerRow: 12 * 16, rowsPerImage: baked.frameCount });
+            expect(call[2]).toEqual({ offset: 0, bytesPerRow: 12 * 16, rowsPerImage: baked.frameCount });
             return new Float32Array(call[1] as ArrayBuffer);
         };
 
@@ -294,6 +304,144 @@ describe("VAT bone-matrix capture", () => {
 
         expect(bakeVatMany(engine, [{ mesh }], [group])[0]!.boneMatrices).toBeUndefined();
         expect(Object.keys(bakeVatMany(engine, [{ mesh, captureBoneMatrices: [1, 7, -1] }], [group])[0]!.boneMatrices ?? {})).toEqual(["1"]);
+        expect(Object.keys(bakeVatMany(engine, [{ mesh, captureBoneOrigins: [1, 7, -1] }], [group])[0]!.boneOrigins ?? {})).toEqual(["1"]);
+    });
+});
+
+describe("VAT prepared payloads", () => {
+    it("round-trips CPU-prepared data and captures without allocating a texture until upload", () => {
+        const { group, skeleton } = makeChainRig();
+        const mesh = makeMesh("rig", skeleton);
+        const { engine, device, queue } = makeEngine();
+
+        const prepared = prepareVat(mesh, [group], { captureBoneOrigins: [0, 2, 7, -1], captureBoneMatrices: [0, 2, 7, -1] });
+
+        expect(device.createTexture).not.toHaveBeenCalled();
+        expect(queue.writeTexture).not.toHaveBeenCalled();
+        expect(Object.keys(prepared.boneOrigins ?? {})).toEqual(["0", "2"]);
+        expect(Object.keys(prepared.boneMatrices ?? {})).toEqual(["0", "2"]);
+
+        const baked = createVatBakeResult(engine, prepared);
+
+        expect(device.createTexture).toHaveBeenCalledTimes(1);
+        expect(queue.writeTexture).toHaveBeenCalledTimes(1);
+        expect(baked.boneCount).toBe(prepared.boneCount);
+        expect(baked.frameCount).toBe(prepared.frameCount);
+        expect(baked.clips).toEqual(prepared.clips);
+        expect(baked.boneOrigins).toEqual(prepared.boneOrigins);
+        expect(baked.boneMatrices).toEqual(prepared.boneMatrices);
+        expect("data" in baked).toBe(false);
+        expect(sameBits(new Float32Array(queue.writeTexture.mock.calls[0]![1] as ArrayBuffer), prepared.data)).toBe(true);
+    });
+
+    it("preserves a prepared view's non-zero byte offset during upload", () => {
+        const { engine, queue } = makeEngine();
+        const backing = new Float32Array(20);
+        const data = backing.subarray(4);
+        data.fill(3);
+        const prepared: PreparedVatBakeResult = {
+            boneCount: 1,
+            frameCount: 1,
+            data,
+            clips: { idle: { fromRow: 0, frameCount: 1, fps: 30 } },
+        };
+
+        createVatBakeResult(engine, prepared);
+
+        expect(queue.writeTexture).toHaveBeenCalledWith(expect.anything(), backing.buffer, { offset: data.byteOffset, bytesPerRow: 64, rowsPerImage: 1 }, { width: 4, height: 1 });
+    });
+
+    it("rejects malformed prepared payloads before allocating GPU resources", () => {
+        const { engine, device } = makeEngine();
+        const valid: PreparedVatBakeResult = {
+            boneCount: 1,
+            frameCount: 1,
+            data: new Float32Array(16),
+            clips: { idle: { fromRow: 0, frameCount: 1, fps: 30 } },
+        };
+
+        expect(() => createVatBakeResult(engine, { ...valid, boneCount: 0 })).toThrow("boneCount must be a positive integer");
+        expect(() => createVatBakeResult(engine, { ...valid, data: new Float32Array(15) })).toThrow("data length");
+        expect(() =>
+            createVatBakeResult(engine, {
+                ...valid,
+                clips: { idle: { fromRow: 1, frameCount: 1, fps: 30 } },
+            })
+        ).toThrow('clip "idle" is invalid');
+        expect(() =>
+            createVatBakeResult(engine, {
+                ...valid,
+                boneOrigins: { 0: [0, 0, 0] as unknown as Float32Array },
+            })
+        ).toThrow("boneOrigins[0] has an invalid length");
+        expect(() =>
+            createVatBakeResult(engine, {
+                ...valid,
+                boneMatrices: { 1: new Float32Array(16) },
+            })
+        ).toThrow('boneMatrices contains invalid bone index "1"');
+        expect(device.createTexture).not.toHaveBeenCalled();
+    });
+
+    it("shares equal prepared payloads and releases their texture after the last attached mesh", () => {
+        const a = makeSkeleton();
+        const b = makeSkeleton();
+        const ma = makeMesh("a", a);
+        const mb = makeMesh("b", b);
+        const { group } = makeGroup([binding(a), binding(b)], false);
+        const { engine, device, queue } = makeEngine();
+        const prepared = prepareVatMany([{ mesh: ma }, { mesh: mb }], [group]);
+
+        const baked = createVatBakeResults(engine, prepared);
+
+        expect(device.createTexture).toHaveBeenCalledTimes(1);
+        expect(queue.writeTexture).toHaveBeenCalledTimes(1);
+        expect(baked[0]!.texture).toBe(baked[1]!.texture);
+
+        attachVat(engine, ma, baked[0]!);
+        attachVat(engine, mb, baked[1]!);
+        disposeMeshGpu(ma);
+        expect(baked[0]!.texture.destroy).not.toHaveBeenCalled();
+        disposeMeshGpu(mb);
+        expect(baked[0]!.texture.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps byte-distinct prepared payloads in separate textures", () => {
+        const { engine, device, queue } = makeEngine();
+        const first: PreparedVatBakeResult = {
+            boneCount: 1,
+            frameCount: 1,
+            data: new Float32Array(16),
+            clips: {},
+        };
+        const second: PreparedVatBakeResult = { ...first, data: new Float32Array(first.data).fill(1) };
+
+        const baked = createVatBakeResults(engine, [first, second]);
+
+        expect(device.createTexture).toHaveBeenCalledTimes(2);
+        expect(queue.writeTexture).toHaveBeenCalledTimes(2);
+        expect(baked[0]!.texture).not.toBe(baked[1]!.texture);
+    });
+
+    it("destroys every allocated texture when a later prepared upload fails", () => {
+        const { engine, queue, textures } = makeEngine();
+        const first: PreparedVatBakeResult = {
+            boneCount: 1,
+            frameCount: 1,
+            data: new Float32Array(16),
+            clips: {},
+        };
+        const second: PreparedVatBakeResult = { ...first, data: new Float32Array(first.data).fill(1) };
+        queue.writeTexture
+            .mockImplementationOnce(() => undefined)
+            .mockImplementationOnce(() => {
+                throw new Error("upload failed");
+            });
+
+        expect(() => createVatBakeResults(engine, [first, second])).toThrow("upload failed");
+        expect(textures).toHaveLength(2);
+        expect(textures[0]!.destroy).toHaveBeenCalledTimes(1);
+        expect(textures[1]!.destroy).toHaveBeenCalledTimes(1);
     });
 });
 
