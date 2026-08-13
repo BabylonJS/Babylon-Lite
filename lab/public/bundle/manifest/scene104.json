@@ -1,7 +1,7 @@
 {
   "rawKB": 100.3,
-  "rawBytes": 102664,
-  "gzipKB": 39.1,
+  "rawBytes": 102678,
+  "gzipKB": 39,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene104-generate-mipmaps-t1thgq-u.js",

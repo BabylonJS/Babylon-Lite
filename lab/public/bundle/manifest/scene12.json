@@ -1,7 +1,7 @@
 {
   "rawKB": 103.1,
-  "rawBytes": 105593,
-  "gzipKB": 42.3,
+  "rawBytes": 105607,
+  "gzipKB": 42.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene12-create-skeleton-CgZg1cP9.js",

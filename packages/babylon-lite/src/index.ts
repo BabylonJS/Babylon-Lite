@@ -13,8 +13,8 @@ export {
     disposeEngine,
     setGpuTimingEnabled,
     isGpuTimingSupported,
-    VERSION,
 } from "./engine/engine.js";
+export { VERSION } from "./engine/version.js";
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
 export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
 export type { NullEngineOptions } from "./engine/null-engine.js";

@@ -1,6 +1,7 @@
 import type { EngineContext, RenderCanvas, RenderingContext } from "./engine.js";
 import type { RenderTarget } from "./render-target.js";
 import { createRenderTarget } from "./render-target.js";
+import { _ENGINE_TAG } from "./version.js";
 
 /** @internal Type guard: true for a DOM canvas (has layout + attributes). */
 export function isDomCanvas(canvas: RenderCanvas): canvas is HTMLCanvasElement {
@@ -182,6 +183,13 @@ export function _buildSurface(engine: EngineContext, canvas: RenderCanvas, optio
     const context = canvas.getContext("webgpu");
     if (!context) {
         throw new Error("WebGPU context not available");
+    }
+    // Tag the canvas so devtools, page scripts, and tests can identify a canvas Babylon Lite
+    // renders into. Tagging happens here — the single place that binds a canvas to a WebGPU
+    // context — so the engine's primary canvas and every auxiliary `createSurface` canvas are
+    // marked alike. An `OffscreenCanvas` has no attributes, hence the DOM-canvas guard.
+    if (isDomCanvas(canvas)) {
+        canvas.setAttribute("data-engine", _ENGINE_TAG);
     }
     const configureFormat = options?.format ?? navigator.gpu.getPreferredCanvasFormat();
     // sRGB swapchain: WebGPU rejects a `*-srgb` format in `configure()`, so configure the

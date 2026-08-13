@@ -130,7 +130,7 @@ The bitwise OR with 0 (`| 0`) truncates to integer.
 
 An `OffscreenCanvas` has no layout box (`clientWidth`/`clientHeight`) and no attributes, so:
 
-- `createEngine` skips the `setAttribute("data-engine", …)` tag for it (guarded by a DOM-canvas check).
+- The canvas tag (`setAttribute("data-engine", …)`) is skipped for it. That tag is applied in `_buildSurface`, guarded by a DOM-canvas check, so every DOM canvas Babylon Lite renders into — the engine's primary canvas and any auxiliary `createSurface` canvas — carries it.
 - `resizeEngine` is a **no-op** for it — the visible canvas lives on another thread.
 - The host thread (which owns the visible canvas) measures the CSS size, multiplies by `devicePixelRatio`, and posts those device-pixel dimensions to the worker, which calls `setEngineSize(engine, w, h)`. This both sets the backing store **and** fires `_resize()` hooks so canvas-sized GPU resources rebuild.
 

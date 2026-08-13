@@ -1,5 +1,5 @@
 {
-  "rawKB": 79.8,
+  "rawKB": 79.9,
   "gzipKB": 33.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -14,5 +14,5 @@
     "scene31-set-emissive-Cf9S270u.js",
     "scene31.js"
   ],
-  "rawBytes": 81759
+  "rawBytes": 81767
 }
