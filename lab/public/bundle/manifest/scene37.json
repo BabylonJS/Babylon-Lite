@@ -9,17 +9,17 @@
     "scene37-gltf-ext-dielectric-CChpFnbd.js",
     "scene37-gltf-ext-sheen-CnBn4Qsf.js",
     "scene37-gltf-ext-uv-transform-hVTzf5Q9.js",
-    "scene37-gltf-feature-registry-B3vvJ_4r.js",
+    "scene37-gltf-feature-registry-CWk02DMD.js",
     "scene37-gltf-glb-parser-wzqS5E_I.js",
     "scene37-gltf-pbr-builder-ext-D7Ettog4.js",
     "scene37-ibl-fragment-CeRrvT96.js",
     "scene37-pbr-renderable-tb7LTLNA.js",
     "scene37-pbr-template-ext-CiHpOV5G.js",
-    "scene37-rgbd-decode-Ow3m-YWC.js",
+    "scene37-rgbd-decode-B4s1lRza.js",
     "scene37-scene-uniforms-FTYH6Ct0.js",
     "scene37-set-metallic-reflectance-CcqYcGka.js",
     "scene37-texture-2d-DQo3n8D6.js",
     "scene37.js"
   ],
-  "rawBytes": 99450
+  "rawBytes": 99468
 }

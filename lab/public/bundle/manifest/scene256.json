@@ -1,6 +1,6 @@
 {
   "rawKB": 76.6,
-  "rawBytes": 78453,
+  "rawBytes": 78473,
   "gzipKB": 31.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene256-gltf-sampler-desc-OQu0nYRL.js",
     "scene256-ibl-fragment-CeRrvT96.js",
     "scene256-pbr-renderable-DcXxciI8.js",
-    "scene256-rgbd-decode-B0OJELOU.js",
+    "scene256-rgbd-decode-2Mefu5-n.js",
     "scene256-scene-uniforms-FTYH6Ct0.js",
     "scene256.js"
   ]

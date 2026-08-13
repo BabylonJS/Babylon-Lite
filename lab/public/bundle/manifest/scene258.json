@@ -1,5 +1,5 @@
 {
-  "rawKB": 82.6,
+  "rawKB": 82.7,
   "gzipKB": 35,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -12,9 +12,9 @@
     "scene258-ibl-fragment-CeRrvT96.js",
     "scene258-pbr-renderable-CEqS2INW.js",
     "scene258-pbr-template-ext-CiHpOV5G.js",
-    "scene258-rgbd-decode-BPg8jfWX.js",
+    "scene258-rgbd-decode-V_V1b_5V.js",
     "scene258-scene-uniforms-FTYH6Ct0.js",
     "scene258.js"
   ],
-  "rawBytes": 84616
+  "rawBytes": 84636
 }

@@ -10,11 +10,11 @@
     "scene1-gltf-glb-parser-D8Z0egge.js",
     "scene1-ibl-fragment-CeRrvT96.js",
     "scene1-pbr-renderable-D0rrenRO.js",
-    "scene1-rgbd-decode-BGE2GEn1.js",
+    "scene1-rgbd-decode-D__numWF.js",
     "scene1-scene-uniforms-FTYH6Ct0.js",
     "scene1-singlelight-hemispheric-wgsl-DOI5N5LI.js",
     "scene1-wgsl-helpers-BgB2AJrF.js",
     "scene1.js"
   ],
-  "rawBytes": 89858
+  "rawBytes": 89885
 }

@@ -21,7 +21,7 @@
     "scene72-perturb-normal-Bqx-TYaB.js",
     "scene72-reflection-block-CIXuH-z0.js",
     "scene72-refraction-block-CNhcdLis.js",
-    "scene72-rgbd-decode-BhH6Y65z.js",
+    "scene72-rgbd-decode-D2hkYjm_.js",
     "scene72-shadow-task-BOa2zpME.js",
     "scene72-sheen-block-DPtS9jU8.js",
     "scene72-subsurface-block-DAwWnSbB.js",
@@ -32,5 +32,5 @@
     "scene72-vertex-output-C7G5u6Y0.js",
     "scene72.js"
   ],
-  "rawBytes": 110242
+  "rawBytes": 110264
 }
