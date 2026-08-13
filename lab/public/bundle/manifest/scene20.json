@@ -7,12 +7,12 @@
     "scene20-background-ground-DbrKq7Fn.js",
     "scene20-cubemap-skybox-material-Bl4xyCqf.js",
     "scene20-ibl-fragment-CeRrvT96.js",
-    "scene20-pbr-renderable-BrfCMQ6N.js",
-    "scene20-rgbd-decode-DDgPTeFS.js",
+    "scene20-pbr-renderable-KHqa6gTH.js",
+    "scene20-rgbd-decode-T5OwlLAr.js",
     "scene20-scene-uniforms-FTYH6Ct0.js",
     "scene20-singlelight-hemispheric-wgsl-CnwvBg5-.js",
     "scene20-wgsl-helpers-BgB2AJrF.js",
     "scene20.js"
   ],
-  "rawBytes": 79321
+  "rawBytes": 79339
 }
