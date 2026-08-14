@@ -18,7 +18,7 @@ function blendForMode(mode: number): BillboardBlendMode {
 }
 
 /**
- * Create a camera-facing billboard system that renders a particle system's live columns using its texture.
+ * Convert a particle system into its generic camera-facing billboard rendering representation.
  * A graph without an animation sheet uses the texture as a single-frame atlas.
  */
 export function createParticleBillboard(system: ParticleSystem): FacingBillboardSpriteSystem {

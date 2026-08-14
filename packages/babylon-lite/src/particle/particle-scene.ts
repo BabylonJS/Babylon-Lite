@@ -23,7 +23,7 @@ export function registerNodeParticleSet(scene: SceneContext, set: NodeParticleSe
 
     for (const system of set.systems) {
         const billboard = createParticleBillboard(system);
-        (system._addBillboardSystem ?? addFacingBillboardSystem)(scene, billboard);
+        (system._registerBillboard ?? addFacingBillboardSystem)(scene, billboard);
 
         if (autoStart) {
             startParticleSystem(system);

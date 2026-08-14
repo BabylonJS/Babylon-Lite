@@ -1,6 +1,6 @@
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
-import { addParticleBillboardSystem } from "../particle-billboard-scene.js";
+import { addFacingBillboardSystemWithParticleBlend } from "../particle-billboard-scene.js";
 import { createParticleBlend } from "../particle-blend.js";
 import { buildNodeParticleSet } from "./npe-build.js";
 import type { BuildNodeParticleOptions, NodeParticleSet } from "./npe-build.js";
@@ -15,9 +15,10 @@ export async function buildNodeParticleSetWithBlendModes(
 ): Promise<NodeParticleSet> {
     const set = await buildNodeParticleSet(engine, scene, graph, options);
     for (const system of set.systems) {
-        system._particleBlend = createParticleBlend(system.blendMode);
-        if (system.blendMode === 3 || system.blendMode === 4) {
-            system._addBillboardSystem = addParticleBillboardSystem;
+        const particleBlend = createParticleBlend(system.blendMode);
+        system._particleBlend = particleBlend;
+        if (particleBlend._particlePasses) {
+            system._registerBillboard = addFacingBillboardSystemWithParticleBlend;
         }
     }
     return set;

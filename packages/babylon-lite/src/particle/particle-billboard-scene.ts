@@ -3,11 +3,11 @@ import { _addDecoratedBillboardSystem, addFacingBillboardSystem } from "../sprit
 import type { FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 import { decorateParticleBillboardRenderable } from "./particle-billboard-renderable.js";
 
-/** Add a particle billboard to a scene, including Babylon.js Multiply and MultiplyAdd rendering. */
-export function addParticleBillboardSystem(scene: SceneContext, system: FacingBillboardSpriteSystem): void {
-    if (!system.blendMode._particlePasses) {
-        addFacingBillboardSystem(scene, system);
+/** Add a facing billboard system using Babylon.js particle Multiply or MultiplyAdd rendering when requested. */
+export function addFacingBillboardSystemWithParticleBlend(scene: SceneContext, billboard: FacingBillboardSpriteSystem): void {
+    if (!billboard.blendMode._particlePasses) {
+        addFacingBillboardSystem(scene, billboard);
         return;
     }
-    _addDecoratedBillboardSystem(scene, system, decorateParticleBillboardRenderable);
+    _addDecoratedBillboardSystem(scene, billboard, decorateParticleBillboardRenderable);
 }

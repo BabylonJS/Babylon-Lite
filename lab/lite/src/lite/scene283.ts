@@ -1,7 +1,7 @@
 // Scene 283: Node Particle Editor - Multiply blend mode.
 
 import {
-    addParticleBillboardSystem,
+    addFacingBillboardSystemWithParticleBlend,
     animateParticleSystem,
     buildNodeParticleSetWithBlendModes,
     createArcRotateCamera,
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
 
         const billboard = createParticleBillboard(system);
         syncParticleBillboard(system, billboard);
-        addParticleBillboardSystem(scene, billboard);
+        addFacingBillboardSystemWithParticleBlend(scene, billboard);
     }
 
     await registerScene(scene);

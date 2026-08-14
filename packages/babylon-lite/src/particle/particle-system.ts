@@ -78,8 +78,8 @@ export interface ParticleSystem {
     _seedLocalPosition?: ParticleStep;
     /** @internal Exact particle blend descriptor installed only by the explicit blend-mode builder. */
     _particleBlend?: BillboardBlendMode;
-    /** @internal Advanced registrar installed only by the explicit blend-mode builder. */
-    _addBillboardSystem?: (scene: SceneContext, billboard: FacingBillboardSpriteSystem) => void;
+    /** @internal Optional scene registrar installed for particle blend modes requiring specialized rendering. */
+    _registerBillboard?: (scene: SceneContext, billboard: FacingBillboardSpriteSystem) => void;
 }
 
 /** Create a data-oriented particle system with an empty buffer of the given capacity. */

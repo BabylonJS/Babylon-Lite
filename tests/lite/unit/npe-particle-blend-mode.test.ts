@@ -70,7 +70,7 @@ describe("NPE particle blend modes", () => {
         const set = await buildNodeParticleSetWithBlendModes({} as EngineContext, {} as SceneContext, graph);
 
         expect(set.systems[0]!._particleBlend?._key).toBe("p4");
-        expect(set.systems[0]!._addBillboardSystem).toBeTypeOf("function");
+        expect(set.systems[0]!._registerBillboard).toBeTypeOf("function");
     });
 
     it("matches Babylon.js color and alpha blend factors", () => {

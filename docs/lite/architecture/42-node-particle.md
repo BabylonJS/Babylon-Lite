@@ -41,7 +41,7 @@ function animateParticleSystem(system: ParticleSystem, scaledRatio: number, came
 
 function createParticleBillboard(system: ParticleSystem): FacingBillboardSpriteSystem;
 function syncParticleBillboard(system: ParticleSystem, billboard: FacingBillboardSpriteSystem): void;
-function addParticleBillboardSystem(scene: SceneContext, billboard: FacingBillboardSpriteSystem): void;
+function addFacingBillboardSystemWithParticleBlend(scene: SceneContext, billboard: FacingBillboardSpriteSystem): void;
 
 function registerNodeParticleSet(scene: SceneContext, set: NodeParticleSet, options?: RegisterNodeParticleOptions): void;
 ```
@@ -107,7 +107,7 @@ serialized value or snippet response
     -> NodeParticleSet { systems }
     -> startParticleSystem / stopParticleSystem / animateParticleSystem
     -> createParticleBillboard + syncParticleBillboard
-    -> addFacingBillboardSystem (known modes 0-2), addParticleBillboardSystem, or registerNodeParticleSet
+    -> addFacingBillboardSystem, addFacingBillboardSystemWithParticleBlend, or registerNodeParticleSet
 ```
 
 The runtime layers are:
@@ -288,7 +288,7 @@ interface ParticleSystem {
     _seedLocalPosition?: ParticleStep;
     _frameSteps?: Array<(camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void>;
     _particleBlend?: BillboardBlendMode;
-    _addBillboardSystem?: (scene: SceneContext, billboard: FacingBillboardSpriteSystem) => void;
+    _registerBillboard?: (scene: SceneContext, billboard: FacingBillboardSpriteSystem) => void;
 }
 ```
 
@@ -470,7 +470,7 @@ For each root:
 - Without a matrix, the emitter option or `{ x: 0, y: 0, z: 0 }` is copied into the emitter value and a translation matrix.
 - `scene` and `textureBaseUrl` are carried in `NpeBuildState`.
 - Each standard-builder root gets its own output map and block-id set. The flow-map, noise-texture, and combined texture-update builders dynamically import feature runtimes only through their explicit public functions. Their shared specialized walk additionally keys dependency overrides by parsed block object, allowing one texture source to be evaluated once for billboard upload and once for CPU decoding.
-- `buildNodeParticleSetWithBlendModes` first runs the standard builder, then precomputes the exact Babylon.js descriptor into `_particleBlend` for every system. It additionally installs `addParticleBillboardSystem` as `_addBillboardSystem` only when the serialized blend mode is `3` or `4`. Importing this explicit builder is the enabler for exact particle blend state and advanced live rendering; ordinary builders have no runtime import edge to either optional module.
+- `buildNodeParticleSetWithBlendModes` first runs the standard builder, then precomputes the exact Babylon.js descriptor into `_particleBlend` for every system. When that descriptor carries `_particlePasses`, it installs `addFacingBillboardSystemWithParticleBlend` as the system's `_registerBillboard` callback. Importing this explicit builder is the enabler for exact particle blend state and advanced live rendering; ordinary builders have no runtime import edge to either optional module.
 - Build promises are accumulated for the whole set and awaited together after all roots have been traversed.
 
 `CreateParticleBlock` does not create the system. `SystemBlock` does not set capacity or locality; the builder consumes those serialized fields before DFS.
@@ -1063,7 +1063,7 @@ When `size` is connected, request the standard size column and append an update 
 
 ### 10.1 Billboard creation
 
-`createParticleBillboard` requires `system.texture`. A null texture throws `createParticleBillboard: the particle system has no texture`.
+`createParticleBillboard` converts a `ParticleSystem` into its generic `FacingBillboardSpriteSystem` rendering representation. It requires `system.texture`; a null texture throws `createParticleBillboard: the particle system has no texture`.
 
 It creates a row-major grid atlas over the existing texture:
 
@@ -1102,7 +1102,7 @@ return vec4f(baseColor.rgb * sourceAlpha + vec3f(1.0) * (1.0 - sourceAlpha), bas
 
 Interpolating toward white before destination-color blending makes a zero-alpha texel leave the framebuffer unchanged. The Add pass uses the stock billboard fragment (`sampled * tint * opacityMul`).
 
-`addParticleBillboardSystem(scene, billboard)` is the particle-owned scene-registration function. An ordinary descriptor delegates immediately to `addFacingBillboardSystem`. Modes `3` and `4` pass the private Multiply decorator to the generic billboard subsystem's internal decorated registrar, which continues to own pick-source and deferred-renderable registration. This module is reached automatically only from systems built with `buildNodeParticleSetWithBlendModes`; manually stepped mode-`3` or mode-`4` callers may invoke it directly.
+`addFacingBillboardSystemWithParticleBlend(scene, billboard)` registers the same generic facing-billboard representation with particle-specific Multiply or MultiplyAdd rendering. An ordinary descriptor delegates immediately to `addFacingBillboardSystem`. Descriptors with `_particlePasses` pass the private Multiply decorator to the generic billboard subsystem's internal decorated registrar, which continues to own pick-source and deferred-renderable registration. This module is reached automatically only from systems built with `buildNodeParticleSetWithBlendModes`; manually stepped advanced-blend callers may invoke it directly.
 
 The optional Multiply decorator creates a shallow pipeline-state clone that shares the caller-owned billboard's atlas and instance state but carries the internal static Multiply shader descriptor. `buildBillboardRenderable` reads instances, sorting, uploads, and draw state from the caller-owned system; its optional `pipelineSystem` supplies shader, pipeline, atlas, and bind-group state only. The caller's `_customShader` and `shaderParams` fields are not modified. A single lazily created descriptor and per-device/orientation shader-module cache are shared by every particle system, so identical systems share shader modules and pipeline-cache keys.
 
@@ -1112,7 +1112,7 @@ Mode `3` uses the resulting normal billboard renderable unchanged. Mode `4` wrap
 
 Mode `4` draws the normal Multiply binding first. The primary draw leaves its instance and index buffers bound, so the wrapper then binds only the Add pipeline and Add bind group before issuing the second indexed draw over the same instances. It restores the primary Multiply pipeline so the render task's consecutive-pipeline cache remains correct. The draw reports two GPU draw calls when particles are visible and zero when the system is hidden or empty.
 
-`registerNodeParticleSet` invokes each system's installed `_addBillboardSystem` registrar, falling back to `addFacingBillboardSystem`. Systems built with `buildNodeParticleSetWithBlendModes` therefore select all five serialized modes exactly while ordinary builders retain the stock live-registration path and Add fallback. A manually stepped/frozen set built with the explicit builder may call `createParticleBillboard`, which reads its precomputed descriptor; mode `3` or `4` must then be registered with `addParticleBillboardSystem`.
+`registerNodeParticleSet` invokes each system's installed `_registerBillboard` callback, falling back to `addFacingBillboardSystem`. Systems built with `buildNodeParticleSetWithBlendModes` therefore select all five serialized modes exactly while ordinary builders retain the stock live-registration path and Add fallback. A manually stepped/frozen set built with the explicit builder may call `createParticleBillboard`, which reads its precomputed descriptor; a descriptor with `_particlePasses` must then be registered with `addFacingBillboardSystemWithParticleBlend`.
 
 ### 10.2 Synchronization
 
@@ -1139,7 +1139,7 @@ Only simulation is allocation-free by structure. Particle rendering uses the all
 `registerNodeParticleSet(scene, set, options = {})` uses `autoStart = options.autoStart ?? true`. For each system, in `set.systems` order, it:
 
 1. Creates the particle billboard.
-2. Calls `(system._addBillboardSystem ?? addFacingBillboardSystem)(scene, billboard)`. Only the explicit blend-mode builder installs the advanced registrar, and only on modes `3` and `4`.
+2. Calls `(system._registerBillboard ?? addFacingBillboardSystem)(scene, billboard)`. Only the explicit blend-mode builder installs the particle-blend registrar, and only for descriptors carrying `_particlePasses`.
 3. Calls `startParticleSystem` when auto-start is true.
 4. Appends one internal callback to `scene._beforeRender`.
 
@@ -1303,7 +1303,7 @@ Scene 283 (`scene283-npe-multiply-blend`) is the dedicated Babylon.js/Lite oracl
 - Lifetime is fixed at `10`, size is fixed at `0.8`, and creation/dead color is fixed at `[0.3, 0.8, 0.45, 1]`.
 - Both engines create the same 32 by 32 nearest-filtered procedural RGBA texture. RGB is white; alpha has a fully opaque radial core, fades through deterministic 8-bit values, and is zero at the outer texels. This exercises the Multiply fragment's interpolation toward white from texture alpha without network or decoder differences.
 - The clear color is `[0.65, 0.45, 0.25, 1]`. Fully transparent flare texels must leave this destination unchanged, while covered texels must darken and tint it. An additive fallback therefore produces an obvious full-image difference.
-- Both engines install the deterministic sine-based random generator, start the system, and execute exactly 40 ratio-1 simulation steps. This creates 16 stationary particles. Lite builds the set through `buildNodeParticleSetWithBlendModes`, synchronizes once, and registers the billboard through `addParticleBillboardSystem`; Babylon.js then sets `updateSpeed = 0`.
+- Both engines install the deterministic sine-based random generator, start the system, and execute exactly 40 ratio-1 simulation steps. This creates 16 stationary particles. Lite builds the set through `buildNodeParticleSetWithBlendModes`, synchronizes once, and registers the facing billboard through `addFacingBillboardSystemWithParticleBlend`; Babylon.js then sets `updateSpeed = 0`.
 - The camera uses alpha `-pi/2`, beta `pi/2`, radius `4`, target origin, near plane `0.1`, and far plane `100`.
 
 The parity specification refreshes `reference/lite/scene283-npe-multiply-blend/babylon-ref-golden.png` from the Babylon.js WebGPU reference page, captures the frozen Lite canvas, and requires full-image `MAD <= 0.01`. The bundle scene must fetch the optional particle Multiply renderable and stay within its scene-configured raw-byte ceiling.

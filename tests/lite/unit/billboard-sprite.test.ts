@@ -27,7 +27,7 @@ import { SPRITE_FX_UBO_BYTES } from "../../../packages/babylon-lite/src/sprite/c
 import type { SpriteLayerFx } from "../../../packages/babylon-lite/src/sprite/custom-shader-core";
 import { _getBillboardFxHook, _registerBillboardFxHook } from "../../../packages/babylon-lite/src/sprite/sprite-fx-hook";
 import type { BillboardFxHook } from "../../../packages/babylon-lite/src/sprite/sprite-fx-hook";
-import { addParticleBillboardSystem } from "../../../packages/babylon-lite/src/particle/particle-billboard-scene";
+import { addFacingBillboardSystemWithParticleBlend } from "../../../packages/babylon-lite/src/particle/particle-billboard-scene";
 import { createParticleBlend } from "../../../packages/babylon-lite/src/particle/particle-blend";
 import { createSceneContext, disposeScene } from "../../../packages/babylon-lite/src/scene/scene";
 import { registerScene } from "../../../packages/babylon-lite/src/scene/scene-core";
@@ -564,14 +564,14 @@ describe("addFacingBillboardSystem", () => {
     });
 });
 
-describe("addParticleBillboardSystem", () => {
+describe("addFacingBillboardSystemWithParticleBlend", () => {
     it("draws Multiply with its custom shader in one pass", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
         const multiply = createParticleBlend(3);
         const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: multiply });
         addBillboardSpriteIndex(system, { position: [0, 0, 0], sizeWorld: [1, 1] });
-        addParticleBillboardSystem(scene, system);
+        addFacingBillboardSystemWithParticleBlend(scene, system);
         await registerScene(scene);
 
         expect(system._customShader).toBeUndefined();
@@ -604,7 +604,7 @@ describe("addParticleBillboardSystem", () => {
         const multiplyAdd = createParticleBlend(4);
         const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: multiplyAdd });
         addBillboardSpriteIndex(system, { position: [0, 0, 0], sizeWorld: [1, 1] });
-        addParticleBillboardSystem(scene, system);
+        addFacingBillboardSystemWithParticleBlend(scene, system);
         await registerScene(scene);
 
         const device = engine._device as unknown as {
@@ -645,8 +645,8 @@ describe("addParticleBillboardSystem", () => {
         const second = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: createParticleBlend(3) });
         addBillboardSpriteIndex(first, { position: [0, 0, 0], sizeWorld: [1, 1] });
         addBillboardSpriteIndex(second, { position: [1, 0, 0], sizeWorld: [1, 1] });
-        addParticleBillboardSystem(scene, first);
-        addParticleBillboardSystem(scene, second);
+        addFacingBillboardSystemWithParticleBlend(scene, first);
+        addFacingBillboardSystemWithParticleBlend(scene, second);
         await registerScene(scene);
 
         const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn> };
