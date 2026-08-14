@@ -2526,5 +2526,16 @@
         "description": "A hand-built StandardMaterial opts into enableMaterialUvTransform and applies independent texture scale, offset, and rotation to an asymmetric repeating texture.",
         "tags": ["standard", "textures", "uv-transform", "procedural"],
         "skipPerf": true
+    },
+    {
+        "id": 300,
+        "slug": "scene300-npe-sprite2d",
+        "name": "Scene 300 — NPE on Sprite2D",
+        "maxRawKB": 35.5,
+        "description": "An authored Node Particle Editor graph advanced to a deterministic frozen frame, then rendered through Lite's native ParticleSystem-to-Sprite2D bridge and pure-2D SpriteRenderer.",
+        "tags": ["npe", "particles", "sprite2d", "2d"],
+        "skipParity": true,
+        "skipParityReason": "Lite-native ParticleSystem-to-Sprite2D bridge; Babylon.js has no equivalent pure-2D SpriteRenderer path to use as a pixel oracle.",
+        "skipPerf": true
     }
 ]
