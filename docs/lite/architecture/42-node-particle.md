@@ -1266,7 +1266,7 @@ All eight Lite scenes seed after build, synchronize one billboard, and register 
 | 277 `scene277-npe-attractor`      | UpdateAttractor after position integration, attractor `(0,2,0)`, strength `8` | alpha `-pi/2`, beta `1.2`, radius `5`, target `(0,0.8,0)`  | `0.01`      | `45.0 KB`   |
 | 280 `scene280-npe-flow-map`       | UpdateFlowMap after integration, flipped repel map, strength `15`, size `0.6` | alpha `pi/2`, beta `pi/2`, radius `9`, target `(-5,0,0)`   | `0.01`      | `45.0 KB`   |
 | 281 `scene281-npe-noise-texture`  | UpdateNoise after integration, cached 8x8 noise, strength `(1.5,0.5,1.5)`     | alpha `-pi/2`, beta `1.2`, radius `11`, target `(0,1,0)`   | `0.01`      | `45.0 KB`   |
-| 283 `scene283-npe-multiply-blend` | Multiply blend with procedural radial alpha over a warm destination           | alpha `-pi/2`, beta `pi/2`, radius `4`, target origin      | `0.01`      | `45.0 KB`   |
+| 283 `scene283-npe-multiply-blend` | Multiply blend with procedural radial alpha over a warm destination           | alpha `-pi/2`, beta `pi/2`, radius `8`, target origin      | `0.01`      | `45.0 KB`   |
 
 Each camera uses near plane `0.1` and far plane `100`. Each scene sets both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start.
 
@@ -1299,12 +1299,12 @@ Scene 283 (`scene283-npe-multiply-blend`) is the dedicated Babylon.js/Lite oracl
 
 - `SystemBlock.blendMode = 3`, capacity `64`, update speed `0.05`, and emit rate `8`.
 - Emit power and direction are zero, so particles remain at their creation positions.
-- The emit box is `[-1, -0.55, 0]` to `[1, 0.55, 0]`.
+- The emit box is `[-2, -1.1, 0]` to `[2, 1.1, 0]`. Paired with the doubled camera radius, this preserves the field's screen-space extent while halving each sprite's projected size and reducing overlapping Multiply passes.
 - Lifetime is fixed at `10`, size is fixed at `0.8`, and creation/dead color is fixed at `[0.3, 0.8, 0.45, 1]`.
 - Both engines create the same 32 by 32 nearest-filtered procedural RGBA texture. RGB is white; alpha has a fully opaque radial core, fades through deterministic 8-bit values, and is zero at the outer texels. This exercises the Multiply fragment's interpolation toward white from texture alpha without network or decoder differences.
 - The clear color is `[0.65, 0.45, 0.25, 1]`. Fully transparent flare texels must leave this destination unchanged, while covered texels must darken and tint it. An additive fallback therefore produces an obvious full-image difference.
 - Both engines install the deterministic sine-based random generator, start the system, and execute exactly 40 ratio-1 simulation steps. This creates 16 stationary particles. Lite builds the set through `buildNodeParticleSetWithBlendModes`, synchronizes once, and registers the facing billboard through `addFacingBillboardSystemWithParticleBlend`; Babylon.js then sets `updateSpeed = 0`.
-- The camera uses alpha `-pi/2`, beta `pi/2`, radius `4`, target origin, near plane `0.1`, and far plane `100`.
+- The camera uses alpha `-pi/2`, beta `pi/2`, radius `8`, target origin, near plane `0.1`, and far plane `100`.
 
 The parity specification refreshes `reference/lite/scene283-npe-multiply-blend/babylon-ref-golden.png` from the Babylon.js WebGPU reference page, captures the frozen Lite canvas, and requires full-image `MAD <= 0.01`. The bundle scene must fetch the optional particle Multiply renderable and stay within its scene-configured raw-byte ceiling.
 

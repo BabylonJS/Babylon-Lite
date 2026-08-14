@@ -17,6 +17,7 @@ interface MutableBlock {
 }
 
 export const SCENE283_CLEAR_COLOR = [0.65, 0.45, 0.25, 1] as const;
+export const SCENE283_CAMERA_RADIUS = 8;
 export const SCENE283_STEPS = 40;
 export const SCENE283_TEXTURE_SIZE = 32;
 
@@ -65,8 +66,10 @@ export function createScene283NpeJson(options: Scene283NpeOptions = {}): unknown
     setBlockValue(graph.blocks, "Max size", 0.8);
     setBlockValue(graph.blocks, "Direction 1", live ? [0, 0.6, 0] : [0, 0, 0]);
     setBlockValue(graph.blocks, "Direction 2", live ? [0, 0.6, 0] : [0, 0, 0]);
-    setBlockValue(graph.blocks, "Min Emit Box", [-1, -0.55, 0]);
-    setBlockValue(graph.blocks, "Max Emit Box", [1, 0.55, 0]);
+    // Match the original screen-space field while halving each sprite's projected size. This keeps
+    // overlapping Multiply passes from amplifying cross-GPU blend rounding in the parity oracle.
+    setBlockValue(graph.blocks, "Min Emit Box", [-2, -1.1, 0]);
+    setBlockValue(graph.blocks, "Max Emit Box", [2, 1.1, 0]);
     setBlockValue(graph.blocks, "Min Scale", [1, 1]);
     setBlockValue(graph.blocks, "Max Scale", [1, 1]);
     setBlockValue(graph.blocks, "Color 1", [0.3, 0.8, 0.45, 1]);

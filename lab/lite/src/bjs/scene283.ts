@@ -15,6 +15,7 @@ import "@babylonjs/core/Shaders/particles.fragment";
 import {
     buildScene283TexturePixels,
     createScene283NpeJson,
+    SCENE283_CAMERA_RADIUS,
     SCENE283_CLEAR_COLOR,
     SCENE283_STEPS,
     SCENE283_TEXTURE_SIZE,
@@ -30,7 +31,7 @@ import {
     const scene = new Scene(engine);
     scene.clearColor = new Color4(...SCENE283_CLEAR_COLOR);
 
-    const camera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2, 4, Vector3.Zero(), scene);
+    const camera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2, SCENE283_CAMERA_RADIUS, Vector3.Zero(), scene);
     camera.minZ = 0.1;
     camera.maxZ = 100;
 

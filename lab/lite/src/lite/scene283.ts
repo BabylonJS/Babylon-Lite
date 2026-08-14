@@ -19,6 +19,7 @@ import {
 import {
     buildScene283TexturePixels,
     createScene283NpeJson,
+    SCENE283_CAMERA_RADIUS,
     SCENE283_CLEAR_COLOR,
     SCENE283_STEPS,
     SCENE283_TEXTURE_SIZE,
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: SCENE283_CLEAR_COLOR[0], g: SCENE283_CLEAR_COLOR[1], b: SCENE283_CLEAR_COLOR[2], a: SCENE283_CLEAR_COLOR[3] };
 
-    const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 4, { x: 0, y: 0, z: 0 });
+    const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, SCENE283_CAMERA_RADIUS, { x: 0, y: 0, z: 0 });
     camera.nearPlane = 0.1;
     camera.farPlane = 100;
     scene.camera = camera;
