@@ -1,6 +1,6 @@
 import { animateParticleSystem, startParticleSystem } from "./particle-system.js";
 import { createParticleBillboard, syncParticleBillboard } from "./particle-billboard.js";
-import { addParticleBillboardSystem } from "./particle-billboard-scene.js";
+import { addFacingBillboardSystem } from "../sprite/billboard-scene.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { NodeParticleSet } from "./node/node-particle.js";
 
@@ -22,8 +22,11 @@ export function registerNodeParticleSet(scene: SceneContext, set: NodeParticleSe
     const autoStart = options.autoStart ?? true;
 
     for (const system of set.systems) {
+        if ((system.blendMode === 3 || system.blendMode === 4) && !system._addBillboardSystem) {
+            throw new Error(`NodeParticle: blend mode ${system.blendMode} requires buildNodeParticleSetWithBlendModes`);
+        }
         const billboard = createParticleBillboard(system);
-        addParticleBillboardSystem(scene, billboard);
+        (system._addBillboardSystem ?? addFacingBillboardSystem)(scene, billboard);
 
         if (autoStart) {
             startParticleSystem(system);

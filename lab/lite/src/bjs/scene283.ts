@@ -46,7 +46,6 @@ import {
         false,
         Texture.NEAREST_SAMPLINGMODE
     );
-    system.preWarmStepOffset = 1;
 
     let seed = 1;
     Math.random = () => {

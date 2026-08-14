@@ -2532,7 +2532,7 @@
         "slug": "scene283-npe-multiply-blend",
         "name": "Scene 283 — NPE Particles: Multiply Blend",
         "maxMad": 0.01,
-        "maxRawKB": 50,
+        "maxRawKB": 45,
         "description": "A deterministic serialized NPE particle field using blend mode 3 over a warm destination color. Semi-transparent green radial sprites verify Babylon's Multiply fragment interpolation toward white and destination-color blend state, including unchanged fully transparent texels.",
         "tags": ["npe", "particles", "billboards", "multiply", "blend"],
         "skipPerf": true

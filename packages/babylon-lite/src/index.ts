@@ -727,6 +727,7 @@ export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
 export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
 export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
 export { buildNodeParticleSetWithFlowMaps } from "./particle/node/npe-flow-map.js";
+export { buildNodeParticleSetWithBlendModes } from "./particle/node/npe-blend-modes.js";
 export { buildNodeParticleSetWithNoiseTextures } from "./particle/node/npe-noise.js";
 export { buildNodeParticleSetWithTextureUpdates } from "./particle/node/npe-texture-updates.js";
 export type { ParticleSystem } from "./particle/particle-system.js";

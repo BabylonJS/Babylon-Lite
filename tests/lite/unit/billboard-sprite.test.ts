@@ -570,6 +570,9 @@ describe("addParticleBillboardSystem", () => {
         addParticleBillboardSystem(scene, system);
         await registerScene(scene);
 
+        expect(system._customShader).toBeUndefined();
+        expect(system.shaderParams).toBeUndefined();
+
         const device = engine._device as unknown as {
             createRenderPipeline: ReturnType<typeof vi.fn>;
             createShaderModule: ReturnType<typeof vi.fn>;
@@ -583,6 +586,7 @@ describe("addParticleBillboardSystem", () => {
         expect(device.createShaderModule.mock.calls.map((call) => (call[0] as GPUShaderModuleDescriptor).code)).toContainEqual(
             expect.stringContaining("baseColor.rgb * sourceAlpha + vec3f(1.0) * (1.0 - sourceAlpha)")
         );
+        expect(device.createShaderModule.mock.calls.map((call) => (call[0] as GPUShaderModuleDescriptor).code)).not.toContainEqual(expect.stringContaining("struct SpriteFx"));
 
         const pass = makeDrawPassMock();
         expect(binding.draw(pass, engine)).toBe(1);
@@ -619,6 +623,7 @@ describe("addParticleBillboardSystem", () => {
         device.queue.writeBuffer.mockClear();
         binding.update?.({ targetWidth: 512, targetHeight: 256 });
         expect(device.queue.writeBuffer.mock.calls.filter((call) => call[4] === BILLBOARD_INSTANCE_STRIDE_BYTES)).toHaveLength(1);
+        expect(device.queue.writeBuffer.mock.calls.filter((call) => call[4] === BILLBOARD_SYSTEM_UBO_BYTES)).toHaveLength(2);
 
         const pass = makeDrawPassMock();
         expect(binding.draw(pass, engine)).toBe(2);
@@ -627,6 +632,27 @@ describe("addParticleBillboardSystem", () => {
         const addPipeline = device.createRenderPipeline.mock.results[1]!.value as GPURenderPipeline;
         expect(pass.setPipeline).toHaveBeenNthCalledWith(1, addPipeline);
         expect(pass.setPipeline).toHaveBeenNthCalledWith(2, multiplyPipeline);
+    });
+
+    it("shares one Multiply pipeline across systems", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const first = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: createParticleBlend(3) });
+        const second = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: createParticleBlend(3) });
+        addBillboardSpriteIndex(first, { position: [0, 0, 0], sizeWorld: [1, 1] });
+        addBillboardSpriteIndex(second, { position: [1, 0, 0], sizeWorld: [1, 1] });
+        addParticleBillboardSystem(scene, first);
+        addParticleBillboardSystem(scene, second);
+        await registerScene(scene);
+
+        const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn> };
+        device.createRenderPipeline.mockClear();
+        const target = { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 } as const;
+        const firstBinding = scene._renderables[0]!.bind(engine, target);
+        const secondBinding = scene._renderables[1]!.bind(engine, target);
+
+        expect(device.createRenderPipeline).toHaveBeenCalledOnce();
+        expect(secondBinding.pipeline).toBe(firstBinding.pipeline);
     });
 });
 

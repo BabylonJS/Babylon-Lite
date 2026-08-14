@@ -24,7 +24,7 @@
  */
 import { SCENE_UBO_WGSL } from "../shader/scene-uniforms.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { BillboardDepthMode, BillboardOrientation, BillboardSpriteSystem } from "./billboard-sprite.js";
+import type { BillboardDepthMode, BillboardOrientation } from "./billboard-sprite.js";
 import { makeBillboardBasisWgsl } from "./billboard-pipeline.js";
 import type { CustomShaderTexture, SpriteLayerFx } from "./custom-shader-core.js";
 import {
@@ -66,7 +66,7 @@ export interface BillboardCustomShader {
     /** @internal Extra-texture + fx UBO bind-group **layout** entries, starting at `startBinding` (3). */
     readonly _layoutEntries: (startBinding: number) => GPUBindGroupLayoutEntry[];
     /** @internal Build the opaque per-system fx attachment (owns the `SpriteFx` UBO, scratch, and elapsed time). */
-    readonly _createLayerFx: (engine: EngineContext, label: string) => SpriteLayerFx;
+    readonly _createLayerFx: (engine: EngineContext, label: string) => SpriteLayerFx | null;
 }
 
 function makeCustomBillboardWgsl(orientation: BillboardOrientation, extraTextures: readonly BillboardCustomTexture[], fragment: string): string {
@@ -157,12 +157,6 @@ const BILLBOARD_FX_HOOK: BillboardFxHook = {
         fx.destroy();
     },
 };
-
-/** @internal Attach an already-created custom shader to an existing billboard system. */
-export function _attachBillboardCustomShader(system: BillboardSpriteSystem, customShader: BillboardCustomShader): void {
-    _registerBillboardFxHook(BILLBOARD_FX_HOOK);
-    BILLBOARD_FX_HOOK.initSystem(system, { customShader });
-}
 
 /**
  * Build a custom-shader descriptor to pass as `customShader` when creating a billboard system.

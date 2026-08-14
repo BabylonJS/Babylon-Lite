@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createParticleBillboard } from "../../../packages/babylon-lite/src/particle/particle-billboard";
+import { registerNodeParticleSet } from "../../../packages/babylon-lite/src/particle/particle-scene";
 import { createParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import { systemBlock } from "../../../packages/babylon-lite/src/particle/node/blocks/system-block";
 import type { NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
+import type { NodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/node-particle";
 import type { ParsedParticleBlock } from "../../../packages/babylon-lite/src/particle/node/npe-types";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { FacingBillboardSpriteSystem } from "../../../packages/babylon-lite/src/sprite/billboard-sprite";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 
@@ -71,5 +74,14 @@ describe("NPE particle blend modes", () => {
 
     it("defines MultiplyAdd as a Multiply shader pass followed by Add", () => {
         expect(createBillboardForMode(4).blendMode._descriptor).toEqual(createBillboardForMode(3).blendMode._descriptor);
+    });
+
+    it.each([3, 4])("rejects live mode %i registration without the blend-mode builder", (blendMode) => {
+        const system = createParticleSystem(1);
+        system.blendMode = blendMode;
+
+        expect(() => registerNodeParticleSet({} as SceneContext, { systems: [system] } as NodeParticleSet)).toThrow(
+            `NodeParticle: blend mode ${blendMode} requires buildNodeParticleSetWithBlendModes`
+        );
     });
 });
