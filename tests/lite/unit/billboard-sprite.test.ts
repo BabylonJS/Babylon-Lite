@@ -22,7 +22,11 @@ import { addFacingBillboardSystem, addAxisLockedBillboardSystem } from "../../..
 import { billboardBlendAdditive, billboardBlendCutout, billboardBlendPremultiplied } from "../../../packages/babylon-lite/src/sprite/billboard-blend";
 import { BILLBOARD_SYSTEM_UBO_BYTES, createBillboardPipelineCache, getOrCreateBillboardPipeline } from "../../../packages/babylon-lite/src/sprite/billboard-pipeline";
 import { createBillboardCustomShader } from "../../../packages/babylon-lite/src/sprite/billboard-custom-shader";
+import { buildBillboardRenderable } from "../../../packages/babylon-lite/src/sprite/billboard-renderable";
 import { SPRITE_FX_UBO_BYTES } from "../../../packages/babylon-lite/src/sprite/custom-shader-core";
+import type { SpriteLayerFx } from "../../../packages/babylon-lite/src/sprite/custom-shader-core";
+import { _getBillboardFxHook, _registerBillboardFxHook } from "../../../packages/babylon-lite/src/sprite/sprite-fx-hook";
+import type { BillboardFxHook } from "../../../packages/babylon-lite/src/sprite/sprite-fx-hook";
 import { addParticleBillboardSystem } from "../../../packages/babylon-lite/src/particle/particle-billboard-scene";
 import { createParticleBlend } from "../../../packages/babylon-lite/src/particle/particle-blend";
 import { createSceneContext, disposeScene } from "../../../packages/babylon-lite/src/scene/scene";
@@ -856,5 +860,40 @@ return vec4<f32>(base.rgb * (0.5 + 0.5 * sin(fx.time + fx.params.x)), base.a);`;
 
         // The shared FX UBO byte size is the same 32-byte contract as the 2D sprite path.
         expect(SPRITE_FX_UBO_BYTES).toBe(32);
+    });
+
+    it("updates FX state from the pipeline system when instance ownership is separate", () => {
+        createBillboardCustomShader({ fragment: FX_FRAGMENT });
+        const originalHook = _getBillboardFxHook()!;
+        const engine = makeMockEngine();
+        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1 });
+        const pipelineSystem = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1 });
+        addBillboardSpriteIndex(system, { position: [0, 0, 0], sizeWorld: [1, 1] });
+        const fx = { bindEntries: vi.fn(() => []), update: vi.fn(), destroy: vi.fn() } satisfies SpriteLayerFx;
+        const updateFx = vi.fn();
+        const hook: BillboardFxHook = {
+            initSystem: vi.fn(),
+            pipelineKeyPart: () => "test",
+            shaderModule: () => null,
+            layoutEntries: () => [],
+            createLayerFx: (_engine, _label, fxSystem) => {
+                expect(fxSystem).toBe(pipelineSystem);
+                return fx;
+            },
+            updateFx,
+            bindEntries: () => [],
+            disposeFx: vi.fn(),
+        };
+        _registerBillboardFxHook(hook);
+
+        try {
+            const built = buildBillboardRenderable(engine, system, pipelineSystem);
+            const binding = built.renderable.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 });
+            binding.update?.({ targetWidth: 512, targetHeight: 256 });
+            expect(updateFx).toHaveBeenCalledWith(fx, pipelineSystem, engine._currentDelta);
+            built.dispose();
+        } finally {
+            _registerBillboardFxHook(originalHook);
+        }
     });
 });

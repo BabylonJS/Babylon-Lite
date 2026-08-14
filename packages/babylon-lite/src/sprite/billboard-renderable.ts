@@ -70,7 +70,7 @@ interface BillboardRenderableInternal extends Renderable {
     _disposed: boolean;
 }
 
-/** Build instance state from `system`; `pipelineSystem` supplies shader, pipeline, atlas, and bind-group state only. */
+/** Build instance state from `system`; `pipelineSystem` supplies shader, pipeline, atlas, FX, and bind-group state only. */
 export function buildBillboardRenderable(
     engine: EngineContext,
     system: BillboardSpriteSystem,
@@ -142,7 +142,7 @@ function bindSystem(renderable: BillboardRenderableInternal, engine: EngineConte
         renderable,
         pipeline,
         update(context) {
-            uploadSystem(renderable, context);
+            uploadSystem(renderable, pipelineSystem, context);
         },
         draw(pass) {
             return drawSystem(renderable, bindGroup, pass);
@@ -150,7 +150,7 @@ function bindSystem(renderable: BillboardRenderableInternal, engine: EngineConte
     };
 }
 
-function uploadSystem(renderable: BillboardRenderableInternal, context: DrawUpdateContext): void {
+function uploadSystem(renderable: BillboardRenderableInternal, pipelineSystem: BillboardSpriteSystem, context: DrawUpdateContext): void {
     if (renderable._disposed) {
         return;
     }
@@ -167,7 +167,7 @@ function uploadSystem(renderable: BillboardRenderableInternal, context: DrawUpda
     // Match the pure-2D `SpriteRenderer` path: advance `fx.time` (and write the FX UBO) only for
     // visible, non-empty systems so time semantics stay consistent and we avoid wasted `writeBuffer` traffic.
     if (renderable._fx) {
-        _getBillboardFxHook()!.updateFx(renderable._fx, renderable._system, renderable._engine._currentDelta);
+        _getBillboardFxHook()!.updateFx(renderable._fx, pipelineSystem, renderable._engine._currentDelta);
     }
     const grown = ensureBillboardInstanceBuffer(
         renderable._engine._device,
