@@ -10,6 +10,7 @@ import {
 import { addTaskAtStart } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { addToScene, createSceneContext, disposeScene, registerScene, unregisterScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import { _installAsyncShaderPipelinePreparation } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
@@ -210,5 +211,25 @@ describe("registerScene / unregisterScene", () => {
         await registerScene(scene);
 
         expect(recorded).toBe(true);
+    });
+
+    it("awaits async shader preparation after task preloads and before frame-graph build", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const order: string[] = [];
+        const task = scene._frameGraph._tasks[0]!;
+        task._preload = async () => {
+            order.push("preload");
+        };
+        _installAsyncShaderPipelinePreparation(async () => {
+            order.push("prepare");
+        });
+        vi.spyOn(scene._frameGraph, "build").mockImplementation(() => {
+            order.push("build");
+        });
+
+        await registerScene(scene);
+
+        expect(order).toEqual(["preload", "prepare", "build"]);
     });
 });
