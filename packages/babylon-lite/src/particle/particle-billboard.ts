@@ -1,8 +1,21 @@
 import { createGridSpriteAtlas } from "../sprite/shared/sprite-atlas.js";
 import { createFacingBillboardSystem, addBillboardSpriteIndex, clearBillboardSprites } from "../sprite/billboard-sprite.js";
-import type { FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
+import { billboardBlendAdditive, billboardBlendAlpha, billboardBlendOneOne } from "../sprite/billboard-blend.js";
+import type { BillboardBlendMode, FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 import type { ParticleSystem } from "./particle-system.js";
-import { createParticleBlend } from "./particle-blend.js";
+
+const BLENDMODE_ONEONE = 0;
+const BLENDMODE_STANDARD = 1;
+
+function blendForMode(mode: number): BillboardBlendMode {
+    if (mode === BLENDMODE_STANDARD) {
+        return billboardBlendAlpha;
+    }
+    if (mode === BLENDMODE_ONEONE) {
+        return billboardBlendOneOne;
+    }
+    return billboardBlendAdditive;
+}
 
 /**
  * Create a camera-facing billboard system that renders a particle system's live columns using its texture.
@@ -19,7 +32,8 @@ export function createParticleBillboard(system: ParticleSystem): FacingBillboard
         cellWidthPx: sheet && sheet.cellWidth > 0 ? sheet.cellWidth : texture.width,
         cellHeightPx: sheet && sheet.cellHeight > 0 ? sheet.cellHeight : texture.height,
     });
-    return createFacingBillboardSystem(atlas, { capacity: system.buffer.capacity, blendMode: createParticleBlend(system.blendMode) });
+    const blendMode = system._particleBlend ?? blendForMode(system.blendMode);
+    return createFacingBillboardSystem(atlas, { capacity: system.buffer.capacity, blendMode });
 }
 
 /** Upload the current set of alive particles into the billboard instance buffer (call once per frame). */

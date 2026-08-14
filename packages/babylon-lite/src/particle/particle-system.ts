@@ -12,7 +12,7 @@ import type { ParticleStep } from "./node/npe-value.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { Color4 } from "../math/types.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import type { FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
+import type { BillboardBlendMode, FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 
 /**
  * Minimal sprite-sheet handle carried on a system whose graph uses the sprite feature (null otherwise).
@@ -76,6 +76,8 @@ export interface ParticleSystem {
     _suppressInitialDirectionCapture?: boolean;
     /** @internal Local-position source hook installed only for emitter-local graphs that read source 0x18. */
     _seedLocalPosition?: ParticleStep;
+    /** @internal Exact particle blend descriptor installed only by the explicit blend-mode builder. */
+    _particleBlend?: BillboardBlendMode;
     /** @internal Advanced registrar installed only by the explicit blend-mode builder. */
     _addBillboardSystem?: (scene: SceneContext, billboard: FacingBillboardSpriteSystem) => void;
 }

@@ -22,9 +22,6 @@ export function registerNodeParticleSet(scene: SceneContext, set: NodeParticleSe
     const autoStart = options.autoStart ?? true;
 
     for (const system of set.systems) {
-        if ((system.blendMode === 3 || system.blendMode === 4) && !system._addBillboardSystem) {
-            throw new Error(`NodeParticle: blend mode ${system.blendMode} requires buildNodeParticleSetWithBlendModes`);
-        }
         const billboard = createParticleBillboard(system);
         (system._addBillboardSystem ?? addFacingBillboardSystem)(scene, billboard);
 

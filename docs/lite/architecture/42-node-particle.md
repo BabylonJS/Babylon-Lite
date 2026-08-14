@@ -287,6 +287,7 @@ interface ParticleSystem {
     _suppressInitialDirectionCapture?: boolean;
     _seedLocalPosition?: ParticleStep;
     _frameSteps?: Array<(camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void>;
+    _particleBlend?: BillboardBlendMode;
     _addBillboardSystem?: (scene: SceneContext, billboard: FacingBillboardSpriteSystem) => void;
 }
 ```
@@ -469,7 +470,7 @@ For each root:
 - Without a matrix, the emitter option or `{ x: 0, y: 0, z: 0 }` is copied into the emitter value and a translation matrix.
 - `scene` and `textureBaseUrl` are carried in `NpeBuildState`.
 - Each standard-builder root gets its own output map and block-id set. The flow-map, noise-texture, and combined texture-update builders dynamically import feature runtimes only through their explicit public functions. Their shared specialized walk additionally keys dependency overrides by parsed block object, allowing one texture source to be evaluated once for billboard upload and once for CPU decoding.
-- `buildNodeParticleSetWithBlendModes` first runs the standard builder, then installs `addParticleBillboardSystem` as `_addBillboardSystem` only on systems whose serialized blend mode is `3` or `4`. Importing this explicit builder is the enabler for advanced live rendering; ordinary builders have no runtime import edge to the Multiply renderer.
+- `buildNodeParticleSetWithBlendModes` first runs the standard builder, then precomputes the exact Babylon.js descriptor into `_particleBlend` for every system. It additionally installs `addParticleBillboardSystem` as `_addBillboardSystem` only when the serialized blend mode is `3` or `4`. Importing this explicit builder is the enabler for exact particle blend state and advanced live rendering; ordinary builders have no runtime import edge to either optional module.
 - Build promises are accumulated for the whole set and awaited together after all roots have been traversed.
 
 `CreateParticleBlock` does not create the system. `SystemBlock` does not set capacity or locality; the builder consumes those serialized fields before DFS.
@@ -1075,7 +1076,9 @@ It creates a row-major grid atlas over the existing texture:
 
 It then creates a camera-facing billboard system with initial capacity `system.buffer.capacity` and the mapped blend descriptor. Billboard construction clamps its internal capacity to at least one and allocates `capacity * 16` Float32 instance values plus `capacity * 2` Float32 saved-size values.
 
-Particle rendering uses private particle-owned blend descriptors so its alpha-channel state can match Babylon.js without changing the public billboard descriptors. Blend mapping is:
+The plain builder retains the pre-existing billboard mapping: mode `0` uses the generic OneOne descriptor, mode `1` uses generic alpha blending, and every other number uses generic Add. This path contains one optional `_particleBlend` override but imports no exact or advanced blend module; modes `3` and `4` therefore degrade safely to Add.
+
+`buildNodeParticleSetWithBlendModes` installs private particle-owned descriptors so alpha-channel state and advanced modes match Babylon.js without changing public billboard descriptors. Its exact mapping is:
 
 | Particle `blendMode` | Passes             | Color factors                                         | Alpha factors                    |
 | -------------------- | ------------------ | ----------------------------------------------------- | -------------------------------- |
@@ -1109,7 +1112,7 @@ Mode `3` uses the resulting normal billboard renderable unchanged. Mode `4` wrap
 
 Mode `4` draws the normal Multiply binding first. The primary draw leaves its instance and index buffers bound, so the wrapper then binds only the Add pipeline and Add bind group before issuing the second indexed draw over the same instances. It restores the primary Multiply pipeline so the render task's consecutive-pipeline cache remains correct. The draw reports two GPU draw calls when particles are visible and zero when the system is hidden or empty.
 
-`registerNodeParticleSet` invokes each system's installed `_addBillboardSystem` registrar, falling back to `addFacingBillboardSystem`. Systems built with `buildNodeParticleSetWithBlendModes` therefore select all five serialized modes correctly while ordinary builders retain the stock live-registration path. A manually stepped/frozen caller whose mode is known to be `0`, `1`, or `2` may register the returned billboard with `addFacingBillboardSystem`; a manual mode-`3` or mode-`4` system must use `addParticleBillboardSystem`.
+`registerNodeParticleSet` invokes each system's installed `_addBillboardSystem` registrar, falling back to `addFacingBillboardSystem`. Systems built with `buildNodeParticleSetWithBlendModes` therefore select all five serialized modes exactly while ordinary builders retain the stock live-registration path and Add fallback. A manually stepped/frozen set built with the explicit builder may call `createParticleBillboard`, which reads its precomputed descriptor; mode `3` or `4` must then be registered with `addParticleBillboardSystem`.
 
 ### 10.2 Synchronization
 
@@ -1171,7 +1174,6 @@ The implementation preserves these explicit failures:
 - Invalid local source use: `NodeParticle: LocalPositionUpdated requires SystemBlock.isLocal`.
 - Invalid local source timing or recycled slot: `NodeParticle: LocalPositionUpdated read before local shape position creation`.
 - Sprite update without setup: `NodeParticle: BasicSpriteUpdateBlock requires SetupSpriteSheetBlock`.
-- Live registration of mode `3` or `4` without its builder: `NodeParticle: blend mode <mode> requires buildNodeParticleSetWithBlendModes`.
 - Billboard creation without texture: `createParticleBillboard: the particle system has no texture`.
 - Invalid sprite frame during sync: `resolveSpriteFrame: index <frame> out of range [0, <frameCount>)`.
 
@@ -1202,7 +1204,7 @@ Additional behavior is observable:
 - Emit power scales the created direction; exactly zero clears it. No inherited velocity term is added.
 - Mesh emission reads only `cachedVertexData`; mesh `worldSpace` is ignored, and mesh data is not structurally validated.
 - A renderable particle system needs a successfully loaded or manually assigned texture. There is no untextured billboard fallback.
-- Live registration of blend mode `3` or `4` requires a set built with `buildNodeParticleSetWithBlendModes`; the plain builder retains no advanced-rendering import and registration throws instead of pairing Multiply blend state with the stock fragment.
+- Exact particle blend factors and advanced modes require `buildNodeParticleSetWithBlendModes`. The plain builder retains its historical generic descriptors and maps modes `3`, `4`, and unknown values to Add, avoiding optional blend/rendering bytes in ordinary particle scenes.
 - Local-position integration is available only through source `0x0018` on a system whose root has `isLocal === true`.
 - Live registration provides no unregister handle and does not set `_started` false when a stopped system becomes empty.
 - The simulation structure is allocation-free per indexed step; billboard synchronization is not allocation-free.
@@ -1276,20 +1278,20 @@ Current tracked measurements are:
 
 | Scene | Runtime raw | Runtime gzip | Ignored graph payload raw |   Ceiling |
 | ----- | ----------: | -----------: | ------------------------: | --------: |
-| 262   |   `39.8 KB` |    `24.2 KB` |                 `28.5 KB` | `44.1 KB` |
-| 263   |   `41.9 KB` |    `24.7 KB` |                 `27.5 KB` | `44.1 KB` |
-| 264   |   `40.1 KB` |    `26.0 KB` |                 `34.4 KB` | `44.1 KB` |
-| 276   |   `44.1 KB` |    `25.3 KB` |                 `27.1 KB` | `45.0 KB` |
-| 277   |   `41.7 KB` |    `25.3 KB` |                 `29.8 KB` | `45.0 KB` |
-| 280   |   `41.4 KB` |    `25.9 KB` |                 `31.0 KB` | `45.0 KB` |
-| 281   |   `41.4 KB` |    `26.1 KB` |                 `32.1 KB` | `45.0 KB` |
-| 283   |   `41.1 KB` |    `24.0 KB` |                 `28.6 KB` | `45.0 KB` |
+| 262   |   `39.7 KB` |    `24.1 KB` |                 `28.5 KB` | `44.1 KB` |
+| 263   |   `41.8 KB` |    `24.7 KB` |                 `27.5 KB` | `44.1 KB` |
+| 264   |   `40.0 KB` |    `25.9 KB` |                 `34.4 KB` | `44.1 KB` |
+| 276   |   `44.0 KB` |    `25.2 KB` |                 `27.1 KB` | `45.0 KB` |
+| 277   |   `41.6 KB` |    `25.2 KB` |                 `29.8 KB` | `45.0 KB` |
+| 280   |   `41.3 KB` |    `25.8 KB` |                 `31.0 KB` | `45.0 KB` |
+| 281   |   `41.3 KB` |    `26.0 KB` |                 `32.1 KB` | `45.0 KB` |
+| 283   |   `41.4 KB` |    `24.1 KB` |                 `28.6 KB` | `45.0 KB` |
 
 Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, 281, and 283 as sprite users because particles render through billboard sprite modules.
 
 The particle bundle-content test always requires a nonempty runtime chunk list for each of the eight scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/noise/direction/angle update, CPU texture decode, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, only scene 280 may fetch `npe-flow-map-runtime`, and only scene 281 may fetch `npe-noise-runtime`. Each specialized texture runtime contains its evaluator, CPU texture decoder, and the shared texture-update builder after bundling.
 
-When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, and `math/mat4-invert.ts`. It also requires scene 283 to fetch the `particle-billboard-renderable` module, whether Rollup emits it as a named chunk or folds it into the scene entry, while rejecting that module in every ordinary particle scene. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
+When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, and `math/mat4-invert.ts`. It requires scene 283 to fetch `particle-blend`, `npe-blend-modes`, `particle-billboard-scene`, and `particle-billboard-renderable`, whether Rollup emits named chunks or folds them into the scene entry, while rejecting all four modules in every ordinary particle scene. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
 
 ### 13.5 Multiply blend parity scene
 

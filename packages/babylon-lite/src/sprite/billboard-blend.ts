@@ -63,3 +63,13 @@ export const billboardBlendAdditive: BillboardBlendDescriptor = {
     },
     _depthMode: "transparent",
 };
+
+/** Pure additive blending (`src·1 + dst`), matching the legacy particle OneOne fallback. */
+export const billboardBlendOneOne: BillboardBlendDescriptor = {
+    _key: "oneone",
+    _descriptor: {
+        color: { srcFactor: "one", dstFactor: "one", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
+    },
+    _depthMode: "transparent",
+};
