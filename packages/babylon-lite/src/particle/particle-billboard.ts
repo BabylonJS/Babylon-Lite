@@ -32,8 +32,7 @@ export function createParticleBillboard(system: ParticleSystem): FacingBillboard
         cellWidthPx: sheet && sheet.cellWidth > 0 ? sheet.cellWidth : texture.width,
         cellHeightPx: sheet && sheet.cellHeight > 0 ? sheet.cellHeight : texture.height,
     });
-    const blendMode = system._particleBlend ?? blendForMode(system.blendMode);
-    return createFacingBillboardSystem(atlas, { capacity: system.buffer.capacity, blendMode });
+    return createFacingBillboardSystem(atlas, { capacity: system.buffer.capacity, blendMode: blendForMode(system.blendMode) });
 }
 
 /** Upload the current set of alive particles into the billboard instance buffer (call once per frame). */

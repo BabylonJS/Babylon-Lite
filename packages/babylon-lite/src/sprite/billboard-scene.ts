@@ -2,15 +2,6 @@ import type { SceneContext } from "../scene/scene-core.js";
 import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { AxisLockedBillboardSpriteSystem, BillboardSpriteSystem, FacingBillboardSpriteSystem } from "./billboard-sprite.js";
 import { registerPickSource } from "../picking/pick-contributor.js";
-import type { EngineContext } from "../engine/engine.js";
-import type { buildBillboardRenderable } from "./billboard-renderable.js";
-
-/** @internal Optional feature decorator around the normal billboard renderable builder. */
-export type BillboardRenderableDecorator = (
-    engine: EngineContext,
-    system: BillboardSpriteSystem,
-    buildBase: typeof buildBillboardRenderable
-) => ReturnType<typeof buildBillboardRenderable>;
 
 function addBillboardSystem(scene: SceneContext, system: BillboardSpriteSystem): void {
     // Make this system pickable by registering a pick source (the system + a dynamic-import thunk for
@@ -21,16 +12,6 @@ function addBillboardSystem(scene: SceneContext, system: BillboardSpriteSystem):
     addDeferredSceneRenderables(scene, async (engine) => {
         const { buildBillboardRenderable } = await import("./billboard-renderable.js");
         const built = buildBillboardRenderable(engine, system);
-        return { renderables: [built.renderable], dispose: built.dispose };
-    });
-}
-
-/** @internal Register a billboard whose optional feature decorates the deferred renderable build. */
-export function _addDecoratedBillboardSystem(scene: SceneContext, system: BillboardSpriteSystem, decorate: BillboardRenderableDecorator): void {
-    scene._disposables.push(registerPickSource(scene, system, () => import("../picking/billboard-pick-pipeline.js")));
-    addDeferredSceneRenderables(scene, async (engine) => {
-        const { buildBillboardRenderable } = await import("./billboard-renderable.js");
-        const built = decorate(engine, system, buildBillboardRenderable);
         return { renderables: [built.renderable], dispose: built.dispose };
     });
 }

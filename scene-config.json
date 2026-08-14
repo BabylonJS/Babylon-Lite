@@ -2536,5 +2536,15 @@
         "description": "A deterministic serialized NPE particle field using blend mode 3 over a warm destination color. Semi-transparent green radial sprites verify Babylon's Multiply fragment interpolation toward white and destination-color blend state, including unchanged fully transparent texels.",
         "tags": ["npe", "particles", "billboards", "multiply", "blend"],
         "skipPerf": true
+    },
+    {
+        "id": 284,
+        "slug": "scene284-npe-multiply-add-blend",
+        "name": "Scene 284 — NPE Particles: MultiplyAdd Blend",
+        "maxMad": 0.01,
+        "maxRawKB": 45,
+        "description": "A sparse deterministic NPE particle field using blend mode 4 over a warm destination color. It verifies Babylon's ordered Multiply then Add passes with an isolated pixel oracle.",
+        "tags": ["npe", "particles", "billboards", "multiply-add", "blend"],
+        "skipPerf": true
     }
 ]

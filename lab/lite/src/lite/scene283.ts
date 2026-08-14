@@ -1,12 +1,10 @@
 // Scene 283: Node Particle Editor - Multiply blend mode.
 
 import {
-    addFacingBillboardSystemWithParticleBlend,
     animateParticleSystem,
     buildNodeParticleSetWithBlendModes,
     createArcRotateCamera,
     createEngine,
-    createParticleBillboard,
     createSceneContext,
     createTexture2DFromPixels,
     parseNodeParticleSource,
@@ -14,7 +12,6 @@ import {
     registerScene,
     startEngine,
     startParticleSystem,
-    syncParticleBillboard,
 } from "babylon-lite";
 import {
     buildScene283TexturePixels,
@@ -60,10 +57,8 @@ async function main(): Promise<void> {
         for (let step = 0; step < SCENE283_STEPS; step++) {
             animateParticleSystem(system, 1);
         }
-
-        const billboard = createParticleBillboard(system);
-        syncParticleBillboard(system, billboard);
-        addFacingBillboardSystemWithParticleBlend(scene, billboard);
+        system.updateSpeed = 0;
+        registerNodeParticleSet(scene, set, { autoStart: false });
     }
 
     await registerScene(scene);

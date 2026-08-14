@@ -70,16 +70,11 @@ interface BillboardRenderableInternal extends Renderable {
     _disposed: boolean;
 }
 
-/** Build instance state from `system`; `pipelineSystem` supplies shader, pipeline, atlas, FX, and bind-group state only. */
-export function buildBillboardRenderable(
-    engine: EngineContext,
-    system: BillboardSpriteSystem,
-    pipelineSystem: BillboardSpriteSystem = system
-): { renderable: Renderable; dispose: () => void } {
+export function buildBillboardRenderable(engine: EngineContext, system: BillboardSpriteSystem): { renderable: Renderable; dispose: () => void } {
     const indexBuffer = createMappedBuffer(engine, BILLBOARD_INDEX_DATA, BU.INDEX);
     const uniformBuffer = createEmptyUniformBuffer(engine, BILLBOARD_SYSTEM_UBO_BYTES, `${system._orientation}-billboard-system-ubo`);
     const instanceBuffer = createBillboardInstanceBuffer(engine._device, system, `${system._orientation}-billboard-instances`);
-    const fx = _getBillboardFxHook()?.createLayerFx(engine, `${system._orientation}-billboard-fx-ubo`, pipelineSystem) ?? null;
+    const fx = _getBillboardFxHook()?.createLayerFx(engine, `${system._orientation}-billboard-fx-ubo`, system) ?? null;
     const isTransparent = system._depthMode === "transparent";
     const renderable: BillboardRenderableInternal = {
         order: system.order,
@@ -107,7 +102,7 @@ export function buildBillboardRenderable(
         _disposed: false,
         _worldCenter: [0, 0, 0],
         bind(engine, target) {
-            return bindSystem(renderable, engine, target, pipelineSystem);
+            return bindSystem(renderable, engine, target);
         },
     };
     refreshBillboardWorldCenter(renderable);
@@ -119,7 +114,7 @@ export function buildBillboardRenderable(
     };
 }
 
-function bindSystem(renderable: BillboardRenderableInternal, engine: EngineContext, target: RenderTargetSignature, pipelineSystem: BillboardSpriteSystem): DrawBinding {
+function bindSystem(renderable: BillboardRenderableInternal, engine: EngineContext, target: RenderTargetSignature): DrawBinding {
     if (!target._depthStencilFormat) {
         throw new Error("BillboardSpriteSystem requires a depth-stencil render target.");
     }
@@ -129,20 +124,20 @@ function bindSystem(renderable: BillboardRenderableInternal, engine: EngineConte
         renderable._pipelineCache,
         target._colorFormat!,
         sampleCount,
-        pipelineSystem,
+        renderable._system,
         target._depthStencilFormat,
         getSceneBindGroupLayout(engine)
     );
     let bindGroup = renderable._bindGroups.get(pipeline);
     if (!bindGroup) {
-        bindGroup = createBillboardSystemBindGroup(engine, pipeline, pipelineSystem, renderable._uniformBuffer, renderable._fx);
+        bindGroup = createBillboardSystemBindGroup(engine, pipeline, renderable._system, renderable._uniformBuffer, renderable._fx);
         renderable._bindGroups.set(pipeline, bindGroup);
     }
     return {
         renderable,
         pipeline,
         update(context) {
-            uploadSystem(renderable, pipelineSystem, context);
+            uploadSystem(renderable, context);
         },
         draw(pass) {
             return drawSystem(renderable, bindGroup, pass);
@@ -150,7 +145,7 @@ function bindSystem(renderable: BillboardRenderableInternal, engine: EngineConte
     };
 }
 
-function uploadSystem(renderable: BillboardRenderableInternal, pipelineSystem: BillboardSpriteSystem, context: DrawUpdateContext): void {
+function uploadSystem(renderable: BillboardRenderableInternal, context: DrawUpdateContext): void {
     if (renderable._disposed) {
         return;
     }
@@ -167,7 +162,7 @@ function uploadSystem(renderable: BillboardRenderableInternal, pipelineSystem: B
     // Match the pure-2D `SpriteRenderer` path: advance `fx.time` (and write the FX UBO) only for
     // visible, non-empty systems so time semantics stay consistent and we avoid wasted `writeBuffer` traffic.
     if (renderable._fx) {
-        _getBillboardFxHook()!.updateFx(renderable._fx, pipelineSystem, renderable._engine._currentDelta);
+        _getBillboardFxHook()!.updateFx(renderable._fx, renderable._system, renderable._engine._currentDelta);
     }
     const grown = ensureBillboardInstanceBuffer(
         renderable._engine._device,

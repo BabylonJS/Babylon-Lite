@@ -23,6 +23,7 @@ export const SCENE283_TEXTURE_SIZE = 32;
 
 export interface Scene283NpeOptions {
     live?: boolean;
+    blendMode?: 3 | 4;
 }
 
 /** White radial sprite with a fully opaque core and zero-alpha outer texels. */
@@ -53,7 +54,7 @@ export function createScene283NpeJson(options: Scene283NpeOptions = {}): unknown
     const graph = structuredClone(SCENE262_NPE_JSON) as unknown as { blocks: MutableBlock[] };
     const system = graph.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!;
     system.capacity = 64;
-    system.blendMode = 3;
+    system.blendMode = options.blendMode ?? 3;
     system.updateSpeed = 0.05;
     system.inputs.find((input) => input.name === "emitRate")!.value = 8;
     graph.blocks.find((block) => block.customType === "BABYLON.ParticleTextureSourceBlock")!.url = "";

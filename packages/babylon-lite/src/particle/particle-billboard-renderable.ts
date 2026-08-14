@@ -5,7 +5,7 @@ import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { SCENE_UBO_WGSL } from "../shader/scene-uniforms.js";
 import type { BillboardCustomShader } from "../sprite/billboard-custom-shader.js";
-import type { BillboardRenderableDecorator } from "../sprite/billboard-scene.js";
+import type { buildBillboardRenderable } from "../sprite/billboard-renderable.js";
 import {
     BILLBOARD_SYSTEM_UBO_BYTES,
     buildBillboardSystemUbo,
@@ -138,12 +138,21 @@ function getMultiplyShader(): BillboardCustomShader {
     });
 }
 
-/** Decorate a billboard renderable with Babylon.js Multiply or MultiplyAdd semantics. */
-export const decorateParticleBillboardRenderable: BillboardRenderableDecorator = (engine, billboard, buildBase): { renderable: Renderable; dispose: () => void } => {
+/** @internal Attach the private static Multiply shader before the generic billboard builder runs. */
+export function attachParticleMultiplyShader(billboard: FacingBillboardSpriteSystem): void {
+    (billboard as { _customShader?: BillboardCustomShader })._customShader = getMultiplyShader();
+    billboard.shaderParams = undefined;
+}
+
+/** Build a billboard renderable with an optional second Add pass for MultiplyAdd. */
+export function buildParticleBlendBillboardRenderable(
+    engine: EngineContext,
+    billboard: FacingBillboardSpriteSystem,
+    buildBase: typeof buildBillboardRenderable
+): { renderable: Renderable; dispose: () => void } {
     const system = billboard as FacingBillboardSpriteSystem;
     const addSystem = { ...system, blendMode: createParticleBlend(2), _customShader: undefined, shaderParams: undefined } as BillboardSpriteSystem;
-    const multiplySystem = { ...system, _customShader: getMultiplyShader(), shaderParams: undefined } as FacingBillboardSpriteSystem;
-    const built = buildBase(engine, system, multiplySystem);
+    const built = buildBase(engine, system);
     if (system.blendMode._particlePasses !== 2) {
         return built;
     }
@@ -215,4 +224,4 @@ export const decorateParticleBillboardRenderable: BillboardRenderableDecorator =
             resetBillboardPipelineCache(pipelineCache);
         },
     };
-};
+}
