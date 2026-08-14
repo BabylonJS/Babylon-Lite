@@ -540,6 +540,12 @@ export async function buildScene(scene: SceneContext): Promise<void> {
     await ctx._rebuildHook?.(ctx);
 }
 
+let _prepareShaderPipelines: ((scene: SceneContext) => Promise<void>) | null = null;
+/** @internal Install the optional async ShaderMaterial preparation boundary. */
+export function _installAsyncShaderPipelinePreparation(prepare: (scene: SceneContext) => Promise<void>): void {
+    _prepareShaderPipelines = prepare;
+}
+
 /**
  * Register a scene with the engine. Builds deferred work, sorts renderables by order,
  * and adds the scene to its bound surface's render list in overlay order. The scene is
@@ -557,6 +563,9 @@ export async function registerScene(scene: SceneContext): Promise<void> {
     // Promise.all treats tasks without a preload hook as already resolved.
     // eslint-disable-next-line @typescript-eslint/await-thenable
     await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()));
+    if (_prepareShaderPipelines) {
+        await _prepareShaderPipelines(ctx);
+    }
     ctx._frameGraph.build();
     if (surface._renderingContexts[0]) {
         const overlay = await import("./swapchain-overlay.js");
@@ -582,6 +591,9 @@ export async function registerSceneWithShadowSupport(scene: SceneContext): Promi
     // Promise.all treats tasks without a preload hook as already resolved.
     // eslint-disable-next-line @typescript-eslint/await-thenable
     await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()));
+    if (_prepareShaderPipelines) {
+        await _prepareShaderPipelines(ctx);
+    }
     ctx._frameGraph.build();
     if (surface._renderingContexts[0]) {
         const overlay = await import("./swapchain-overlay.js");
