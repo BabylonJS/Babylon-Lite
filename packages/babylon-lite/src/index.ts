@@ -5,6 +5,7 @@
 export {
     createEngine,
     startEngine,
+    waitForGpuIdle,
     stopEngine,
     renderFrame,
     resizeEngine,
@@ -12,8 +13,8 @@ export {
     disposeEngine,
     setGpuTimingEnabled,
     isGpuTimingSupported,
-    VERSION,
 } from "./engine/engine.js";
+export { VERSION } from "./engine/version.js";
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
 export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
 export type { NullEngineOptions } from "./engine/null-engine.js";
@@ -254,6 +255,14 @@ export { createStandardMaterial } from "./material/standard/create-standard-mate
 export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
 export { enableStandardSkeleton, enableStandardUvOffset } from "./material/standard/enable-standard-mesh-features.js";
 export { enableStandardVertexColors } from "./material/standard/enable-standard-vertex-colors.js";
+export { setStandardBumpTexture } from "./material/standard/set-std-bump.js";
+export { setStandardEmissiveTexture } from "./material/standard/set-std-emissive.js";
+export { setStandardSpecularTexture } from "./material/standard/set-std-specular.js";
+export { setStandardAmbientTexture } from "./material/standard/set-std-ambient.js";
+export { setStandardLightmapTexture } from "./material/standard/set-std-lightmap.js";
+export { setStandardOpacityTexture } from "./material/standard/set-std-opacity.js";
+export { setStandardReflectionTexture } from "./material/standard/set-std-reflection.js";
+export { setStandardReflectionCubeTexture } from "./material/standard/set-std-cube-reflection.js";
 export { enableMirroredMeshes } from "./mesh/enable-mirrored-meshes.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { setShadowOnly } from "./material/pbr/set-shadow-only.js";
@@ -339,6 +348,8 @@ export { loadDdsEnvironment } from "./loader-env/load-dds-env.js";
 export { buildDdsSkyboxRenderable } from "./material/pbr/background-dds-skybox.js";
 export { loadHdrEnvironment } from "./loader-hdr/load-hdr.js";
 export { loadTexture2D, cloneTexture2D } from "./texture/texture-2d.js";
+export { loadCubeTexture } from "./texture/cube-texture.js";
+export type { CubeTexture } from "./texture/cube-texture.js";
 export { loadSkybox } from "./loader-skybox/load-skybox.js";
 export { loadSplat } from "./loader-splat/load-splat.js";
 export { loadSOG } from "./loader-splat/load-sog.js";
@@ -397,9 +408,9 @@ export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./ani
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
-export { bakeVat, bakeVatMany, attachVat } from "./vat/vat-baker.js";
+export { bakeVat, bakeVatMany, prepareVat, prepareVatMany, createVatBakeResult, createVatBakeResults, attachVat } from "./vat/vat-baker.js";
 export { setVatInstanceStorage, setVatTime } from "./vat/vat-baker.js";
-export type { VatBakeResult, VatBakeOptions, VatBakeTarget, VatClip, VatHandle } from "./vat/vat-baker.js";
+export type { VatBakeResult, PreparedVatBakeResult, VatBakeOptions, VatBakeTarget, VatClip, VatHandle } from "./vat/vat-baker.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
 export { normalizeVec3 } from "./math/normalize-vec3.js";

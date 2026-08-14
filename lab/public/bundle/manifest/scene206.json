@@ -1,15 +1,15 @@
 {
-  "rawKB": 62.4,
-  "gzipKB": 25.9,
+  "rawKB": 60.6,
+  "gzipKB": 25.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene206-_mat4-storage-f64-FI8ZUjRd.js",
-    "scene206-billboard-renderable-BPeoyGOC.js",
+    "scene206-billboard-renderable-DBKH7T4E.js",
     "scene206-floating-origin-B3Cmn-Fn.js",
     "scene206-pack-mat4-with-offset-BS-Lz8k7.js",
     "scene206-scene-uniforms-FTYH6Ct0.js",
-    "scene206-standard-renderable-IGLP4f9w.js",
+    "scene206-standard-renderable-B7lrMptr.js",
     "scene206.js"
   ],
-  "rawBytes": 63869
+  "rawBytes": 62061
 }

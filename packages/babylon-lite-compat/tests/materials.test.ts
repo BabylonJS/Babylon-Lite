@@ -22,16 +22,16 @@ describe("StandardMaterial texture proxies", () => {
     it("wires emissiveTexture onto the Lite material", () => {
         const mat = new StandardMaterial("dog");
         expect(mat.emissiveTexture).toBeNull();
-        expect(mat._lite.emissiveTexture).toBeNull();
+        expect(mat._lite._emissiveTexture).toBeUndefined();
 
         const tex = fakeTexture();
         mat.emissiveTexture = tex;
         expect(mat.emissiveTexture).toBe(tex);
-        expect(mat._lite.emissiveTexture).toBe(tex._lite);
+        expect(mat._lite._emissiveTexture).toBe(tex._lite);
 
         mat.emissiveTexture = null;
         expect(mat.emissiveTexture).toBeNull();
-        expect(mat._lite.emissiveTexture).toBeNull();
+        expect(mat._lite._emissiveTexture).toBeNull();
     });
 
     describe("PBRMaterial late texture binding", () => {
@@ -57,7 +57,7 @@ describe("StandardMaterial texture proxies", () => {
         mat.diffuseTexture = tex;
         mat.emissiveTexture = tex;
         expect(mat._lite.diffuseTexture).toBe(tex._lite);
-        expect(mat._lite.emissiveTexture).toBe(tex._lite);
+        expect(mat._lite._emissiveTexture).toBe(tex._lite);
     });
 });
 

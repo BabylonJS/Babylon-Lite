@@ -21,6 +21,8 @@ import {
     setPbrAnisotropy,
     setPbrIridescence,
     setPbrGammaAlbedo,
+    setStandardBumpTexture,
+    setStandardEmissiveTexture,
 } from "babylon-lite";
 import type {
     StandardMaterialProps,
@@ -309,7 +311,7 @@ export class StandardMaterial extends PushMaterial {
     }
     public set bumpTexture(texture: BaseTexture | null) {
         this._bumpTexture = texture;
-        this._lite.bumpTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        setStandardBumpTexture(this._lite, (texture?._lite as Texture2D | undefined) ?? null);
         this._watchTexture(texture);
         this._markDirty();
     }
@@ -319,7 +321,7 @@ export class StandardMaterial extends PushMaterial {
     }
     public set emissiveTexture(texture: BaseTexture | null) {
         this._emissiveTexture = texture;
-        this._lite.emissiveTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        setStandardEmissiveTexture(this._lite, (texture?._lite as Texture2D | undefined) ?? null);
         this._watchTexture(texture);
         this._markDirty();
     }
@@ -359,11 +361,11 @@ export class StandardMaterial extends PushMaterial {
         }
         const bump = this._bumpTexture as { _lite?: Texture2D } | null;
         if (bump?._lite) {
-            this._lite.bumpTexture = bump._lite;
+            setStandardBumpTexture(this._lite, bump._lite);
         }
         const emissive = this._emissiveTexture as { _lite?: Texture2D } | null;
         if (emissive?._lite) {
-            this._lite.emissiveTexture = emissive._lite;
+            setStandardEmissiveTexture(this._lite, emissive._lite);
         }
         this._markDirty();
     }

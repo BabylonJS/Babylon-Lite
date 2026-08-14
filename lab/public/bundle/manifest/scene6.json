@@ -1,5 +1,5 @@
 {
-  "rawKB": 71.6,
+  "rawKB": 71.7,
   "gzipKB": 30.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -7,11 +7,11 @@
     "scene6-background-ground-C0N9s-go.js",
     "scene6-cubemap-skybox-material-CPYydGlX.js",
     "scene6-ibl-fragment-CeRrvT96.js",
-    "scene6-pbr-renderable-BJIG0zJ4.js",
-    "scene6-rgbd-decode-A2jilSQ6.js",
+    "scene6-pbr-renderable-CgN1VfbE.js",
+    "scene6-rgbd-decode-C6cklJtT.js",
     "scene6-scene-uniforms-FTYH6Ct0.js",
     "scene6-wgsl-helpers-BgB2AJrF.js",
     "scene6.js"
   ],
-  "rawBytes": 73347
+  "rawBytes": 73371
 }

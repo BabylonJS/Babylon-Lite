@@ -22,6 +22,7 @@ import { createStandardMaterial } from "../material/standard/create-standard-mat
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import { uploadMeshToGPU, initMeshTransform } from "../mesh/mesh.js";
 import { loadTexture2D } from "../texture/texture-2d.js";
+import type { Texture2D } from "../texture/texture-2d.js";
 // ─── .babylon JSON Types ───────────────────────────────────────────
 
 interface BabylonScene {
@@ -136,8 +137,16 @@ type BabylonTexField = "diffuseTexture" | "bumpTexture" | "specularTexture" | "a
 
 interface BabylonTexSlot {
     readonly src: BabylonTexField;
-    /** Destination Texture2D field on StandardMaterialProps. */
-    readonly dst: string;
+    /** Assign the loaded texture. Diffuse writes the core field directly; every optional
+     *  feature resolves its opt-in setter, which registers the matching `StdExt`.
+     *
+     *  These stay `() => import(...)` rather than static imports on purpose: the setters
+     *  statically pull in their fragments, so importing all seven here would make every
+     *  scene that loads ANY `.babylon` asset bundle all seven Standard fragments. The
+     *  loader discovers which slots an asset actually uses at runtime, so it fetches only
+     *  those. This dispatch table is confined to the already-opt-in `.babylon` loader
+     *  chunk, so it costs nothing for scenes that never load one. */
+    readonly set: (mat: StandardMaterialProps, tex: Texture2D) => void | Promise<void>;
     /** StandardMaterialProps field receiving `t.level`, if present. */
     readonly level?: string;
     /** Coordinate-index mapping. `only1`=true → only apply when coordIndex===1. */
@@ -151,7 +160,9 @@ interface BabylonTexSlot {
 const TEX_SLOTS: readonly BabylonTexSlot[] = [
     {
         src: "diffuseTexture",
-        dst: "diffuseTexture",
+        set: (m, tex) => {
+            m.diffuseTexture = tex;
+        },
         coordIndex: { dst: "diffuseCoordIndex", only1: true },
         extra: (t, m) => {
             m.uvScale = [t.uScale ?? 1, t.vScale ?? 1];
@@ -160,13 +171,31 @@ const TEX_SLOTS: readonly BabylonTexSlot[] = [
             }
         },
     },
-    { src: "bumpTexture", dst: "bumpTexture", level: "bumpLevel" },
-    { src: "specularTexture", dst: "specularTexture", coordIndex: { dst: "specularCoordIndex", only1: true } },
-    { src: "ambientTexture", dst: "ambientTexture", level: "ambientTexLevel", coordIndex: { dst: "ambientCoordIndex", only1: true } },
-    { src: "lightmapTexture", dst: "lightmapTexture", level: "lightmapLevel", coordIndex: { dst: "lightmapCoordIndex" } },
+    {
+        src: "bumpTexture",
+        set: (m, tex) => import("../material/standard/set-std-bump.js").then(({ setStandardBumpTexture }) => setStandardBumpTexture(m, tex)),
+        level: "bumpLevel",
+    },
+    {
+        src: "specularTexture",
+        set: (m, tex) => import("../material/standard/set-std-specular.js").then(({ setStandardSpecularTexture }) => setStandardSpecularTexture(m, tex)),
+        coordIndex: { dst: "specularCoordIndex", only1: true },
+    },
+    {
+        src: "ambientTexture",
+        set: (m, tex) => import("../material/standard/set-std-ambient.js").then(({ setStandardAmbientTexture }) => setStandardAmbientTexture(m, tex)),
+        level: "ambientTexLevel",
+        coordIndex: { dst: "ambientCoordIndex", only1: true },
+    },
+    {
+        src: "lightmapTexture",
+        set: (m, tex) => import("../material/standard/set-std-lightmap.js").then(({ setStandardLightmapTexture }) => setStandardLightmapTexture(m, tex)),
+        level: "lightmapLevel",
+        coordIndex: { dst: "lightmapCoordIndex" },
+    },
     {
         src: "opacityTexture",
-        dst: "opacityTexture",
+        set: (m, tex) => import("../material/standard/set-std-opacity.js").then(({ setStandardOpacityTexture }) => setStandardOpacityTexture(m, tex)),
         level: "opacityLevel",
         extra: (t, m) => {
             if (t.getAlphaFromRGB) {
@@ -176,7 +205,7 @@ const TEX_SLOTS: readonly BabylonTexSlot[] = [
     },
     {
         src: "reflectionTexture",
-        dst: "reflectionTexture",
+        set: (m, tex) => import("../material/standard/set-std-reflection.js").then(({ setStandardReflectionTexture }) => setStandardReflectionTexture(m, tex)),
         level: "reflectionLevel",
         skipIf: (t) => t.isCube === true,
         extra: (t, m) => {
@@ -280,12 +309,7 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                     }
                     slot.extra?.(t, mat);
                     const texUrl = baseUrl + t.name;
-                    const dst = slot.dst;
-                    texturePromises.push(
-                        loadTexture2D(engine, texUrl).then((tex) => {
-                            (mat as unknown as Record<string, unknown>)[dst] = tex;
-                        })
-                    );
+                    texturePromises.push(loadTexture2D(engine, texUrl).then((tex) => slot.set(mat, tex)));
                 }
             }
 
@@ -296,8 +320,9 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                 const cubeName = md.reflectionTexture.name;
                 texturePromises.push(
                     import("../texture/cube-texture.js").then(({ loadCubeTexture }) =>
-                        loadCubeTexture(engine as EngineContext, baseUrl + cubeName).then((cube) => {
-                            mat.reflectionCubeTexture = cube;
+                        loadCubeTexture(engine, baseUrl + cubeName).then(async (cube) => {
+                            const { setStandardReflectionCubeTexture } = await import("../material/standard/set-std-cube-reflection.js");
+                            setStandardReflectionCubeTexture(mat, cube);
                         })
                     )
                 );

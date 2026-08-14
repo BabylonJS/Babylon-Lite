@@ -26,18 +26,18 @@ const CHANNEL_COUNT = 7;
 
 const CHANNELS = [
     ["d", HAS_DIFFUSE_TEXTURE, DIFFUSE_USES_UV2, "diffuseTexture", "diffuseCoordIndex"],
-    ["e", HAS_EMISSIVE_TEXTURE, 0, "emissiveTexture", null],
-    ["b", HAS_BUMP_TEXTURE, 0, "bumpTexture", null],
-    ["s", HAS_SPECULAR_TEXTURE, SPECULAR_USES_UV2, "specularTexture", "specularCoordIndex"],
-    ["a", HAS_AMBIENT_TEXTURE, AMBIENT_USES_UV2, "ambientTexture", "ambientCoordIndex"],
-    ["l", HAS_LIGHTMAP_TEXTURE, LIGHTMAP_USES_UV2, "lightmapTexture", "lightmapCoordIndex"],
-    ["o", HAS_OPACITY_TEXTURE, 0, "opacityTexture", null],
+    ["e", HAS_EMISSIVE_TEXTURE, 0, "_emissiveTexture", null],
+    ["b", HAS_BUMP_TEXTURE, 0, "_bumpTexture", null],
+    ["s", HAS_SPECULAR_TEXTURE, SPECULAR_USES_UV2, "_specularTexture", "specularCoordIndex"],
+    ["a", HAS_AMBIENT_TEXTURE, AMBIENT_USES_UV2, "_ambientTexture", "ambientCoordIndex"],
+    ["l", HAS_LIGHTMAP_TEXTURE, LIGHTMAP_USES_UV2, "_lightmapTexture", "lightmapCoordIndex"],
+    ["o", HAS_OPACITY_TEXTURE, 0, "_opacityTexture", null],
 ] as const;
 
 function writeChannel(
     data: Float32Array,
     channel: number,
-    texture: Texture2D | null,
+    texture: Texture2D | null | undefined,
     material: StandardMaterialProps,
     materialOffsetX: number,
     materialOffsetY: number,
@@ -89,7 +89,7 @@ function writeUvTransformData(data: Float32Array, material: StandardMaterialProp
             materialOffsetX,
             materialOffsetY,
             coordIndexKey !== null && material[coordIndexKey] === 1,
-            textureKey === "lightmapTexture" && texture?.uAng === Math.PI
+            textureKey === "_lightmapTexture" && texture?.uAng === Math.PI
         );
     }
 }

@@ -5,14 +5,14 @@
   "runtimeChunks": [
     "scene249-generate-mipmaps-BoA6oMlL.js",
     "scene249-gltf-color-normalize-4-WGzPL2.js",
-    "scene249-gltf-json-asset-DbDxC0KY.js",
+    "scene249-gltf-json-asset-CGcqdAH0.js",
     "scene249-ibl-fragment-CeRrvT96.js",
-    "scene249-pbr-renderable-DefIPfDT.js",
+    "scene249-pbr-renderable-C1w1-LPb.js",
     "scene249-pbr-template-ext-CiHpOV5G.js",
-    "scene249-rgbd-decode-aJFzOIzF.js",
+    "scene249-rgbd-decode-eh6-HKkF.js",
     "scene249-scene-uniforms-FTYH6Ct0.js",
     "scene249-set-alpha-cutoff-CR2NdriR.js",
     "scene249.js"
   ],
-  "rawBytes": 80146
+  "rawBytes": 80182
 }
