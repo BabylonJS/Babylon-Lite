@@ -258,6 +258,33 @@ describe("async ShaderMaterial pipeline compilation", () => {
         expect(createRenderPipeline).not.toHaveBeenCalled();
     });
 
+    it("does not apply a mesh-keyed thin recipe to an explicit override renderable", async () => {
+        const { engine, createRenderPipelineAsync } = makeEngine();
+        const material = makeMaterial();
+        const mesh = { material, thinInstances: { count: 1, matrices: new Float32Array(16) } } as unknown as Mesh;
+        const main = { mesh } as Renderable;
+        const override = { mesh } as Renderable;
+        const scene = {
+            surface: { engine },
+            _renderables: [main],
+            lights: [],
+        } as unknown as SceneContext;
+        const task = {
+            scene,
+            _renderables: [override],
+            _pendingMeshes: [],
+            _targetSignature: signature,
+            _config: { autoMirror: false },
+        } as unknown as RenderTask;
+        Object.assign(scene, { _frameGraph: { _tasks: [task] } });
+
+        enableAsyncShaderPipelineCompilation(engine);
+        _registerAsyncShaderPipelineRecipe(scene, material, mesh, "thin-instances");
+        await _prepareAsyncShaderPipelinesForScene(scene);
+
+        expect(createRenderPipelineAsync).not.toHaveBeenCalled();
+    });
+
     it("traverses shadow task, cascade, and static-cache render tasks", async () => {
         clearSceneBGLCache();
         const { engine, createRenderPipelineAsync } = makeEngine();
@@ -353,6 +380,7 @@ describe("async ShaderMaterial pipeline compilation", () => {
             lights: [],
         } as unknown as SceneContext;
         Object.assign(scene, { surface: { engine } });
+        Object.assign(task, { scene });
 
         enableAsyncShaderPipelineCompilation(engine);
         _registerAsyncShaderPipelineRecipe(scene, material, renderable);

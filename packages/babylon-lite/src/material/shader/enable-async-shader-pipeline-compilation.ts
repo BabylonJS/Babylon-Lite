@@ -23,11 +23,14 @@ interface PrepareRecipe {
 let _recipesByEngine: WeakMap<EngineContext, WeakMap<object, PrepareRecipe>> | null = null;
 
 function isRenderTask(value: unknown): value is RenderTask {
-    return typeof value === "object" && value !== null && "_renderables" in value && "_targetSignature" in value;
+    if (!value || typeof value !== "object") {
+        return false;
+    }
+    return "_renderables" in value && "_targetSignature" in value;
 }
 
 function nestedTasks(value: unknown): readonly unknown[] {
-    if (typeof value !== "object" || value === null) {
+    if (!value || typeof value !== "object") {
         return [];
     }
     const state = value as { _task?: unknown; _tasks?: readonly unknown[]; _staticTasks?: readonly unknown[] };
@@ -89,8 +92,9 @@ async function prepareScene(engine: EngineContext, scene: SceneContext, recipes:
         }
         _resolvePendingMeshes(candidate, candidate.scene);
         const renderables = candidate._renderables.length || candidate._config.autoMirror === false ? candidate._renderables : candidate.scene._renderables;
+        const sceneRenderables = renderables === candidate.scene._renderables ? null : new Set(candidate.scene._renderables);
         for (const renderable of renderables) {
-            const recipe = recipes.get(renderable) ?? (renderable.mesh && candidate.scene._renderables.includes(renderable) ? recipes.get(renderable.mesh) : undefined);
+            const recipe = recipes.get(renderable) ?? (renderable.mesh && (!sceneRenderables || sceneRenderables.has(renderable)) ? recipes.get(renderable.mesh) : undefined);
             if (recipe) {
                 const bindings = currentBindings(engine, recipe.material);
                 const resolvedLayout = resolveLayout(recipe.material, bindings, recipe.layout);
