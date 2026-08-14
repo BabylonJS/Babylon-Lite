@@ -34,6 +34,19 @@ async function readState(canvas: import("@playwright/test").Locator): Promise<Sc
     });
 }
 
+function countOrientationMarkerPixels(png: PNG, top: number, bottom: number): number {
+    let count = 0;
+    for (let y = top; y < bottom; y++) {
+        for (let x = 84; x < 108; x++) {
+            const offset = (y * png.width + x) * 4;
+            if (png.data[offset]! > 140 && png.data[offset + 1]! > 30 && png.data[offset + 2]! < 120) {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
 test("Scene 300 renders a frozen NPE system through the Sprite2D bridge", async ({ page }) => {
     test.setTimeout(90_000);
     expect(sceneConfig.skipParity).toBe(true);
@@ -85,4 +98,11 @@ test("Scene 300 renders a frozen NPE system through the Sprite2D bridge", async 
         }
     }
     expect(flarePixels).toBeGreaterThan(100);
+
+    // The isolated 64 px marker sprite is centered at (96, 96). Its atlas mark is near
+    // the cell's top edge, so a vertical texture/UV inversion moves it to the lower band.
+    const upperMarkerPixels = countOrientationMarkerPixels(png, 66, 80);
+    const lowerMarkerPixels = countOrientationMarkerPixels(png, 112, 126);
+    expect(upperMarkerPixels).toBeGreaterThan(80);
+    expect(lowerMarkerPixels).toBeLessThan(8);
 });

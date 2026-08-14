@@ -14,6 +14,7 @@ import {
 } from "../../../packages/babylon-lite/src/particle/particle-sprite-2d";
 import { createParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import type { NodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/node-particle";
+import { addSprite2D } from "../../../packages/babylon-lite/src/sprite/sprite-2d-handle";
 import { createSpriteRenderer, disposeSpriteRenderer } from "../../../packages/babylon-lite/src/sprite/sprite-renderer";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
@@ -207,6 +208,14 @@ describe("NPE Sprite2D bridge", () => {
         expect(createParticleSprite2DBridge(add).layer.blendMode._key).toBe("additive");
     });
 
+    it("falls back to additive for MULTIPLY, MULTIPLYADD, and unknown blend modes", () => {
+        for (const mode of [3, 4, -1, 99]) {
+            const system = makeSystem();
+            system.blendMode = mode;
+            expect(createParticleSprite2DBridge(system).layer.blendMode._key, `blendMode ${mode}`).toBe("additive");
+        }
+    });
+
     it("converts NPE Y-up world values into Sprite2D Y-down pixels by default", () => {
         const system = makeSystem();
         addParticle(system, {
@@ -255,6 +264,26 @@ describe("NPE Sprite2D bridge", () => {
 
         expect(bridge.layer.atlas.frames).toHaveLength(8);
         expect(Array.from(bridge.layer._instanceData.slice(4, 8))).toEqual([0.25, 0.5, 0.5, 1]);
+    });
+
+    it("propagates the atlas bounds error for an out-of-range sprite-sheet cell", () => {
+        const system = makeSystem(2);
+        const cellIndex = new Uint16Array(2);
+        system._spriteSheet = { cellWidth: 16, cellHeight: 16, cellIndex, update: () => undefined };
+        addParticle(system, { x: 0, y: 0, size: 1, scaleX: 1, scaleY: 1, angle: 0, color: [1, 1, 1, 1] });
+        cellIndex[0] = 99;
+        const bridge = createParticleSprite2DBridge(system);
+
+        expect(() => syncParticleSprite2DBridge(bridge)).toThrow(/index 99 out of range \[0, 8\)/);
+    });
+
+    it("rejects a bridge-owned layer that the Handle API has claimed", () => {
+        const system = makeSystem();
+        const bridge = createParticleSprite2DBridge(system);
+
+        addSprite2D(bridge.layer, { positionPx: [0, 0] });
+
+        expect(() => syncParticleSprite2DBridge(bridge)).toThrow(/cannot use the Sprite2D Handle API/);
     });
 
     it("replaces the complete live range and marks one dirty update per sync", () => {

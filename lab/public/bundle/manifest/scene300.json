@@ -1,7 +1,7 @@
 {
-  "rawKB": 33.3,
-  "rawBytes": 34109,
-  "gzipKB": 21.4,
+  "rawKB": 33.8,
+  "rawBytes": 34660,
+  "gzipKB": 21.6,
   "ignoredRawKB": 28.6,
   "runtimeChunks": [
     "scene300-box-shape-block-CrrR5qoK.js",
