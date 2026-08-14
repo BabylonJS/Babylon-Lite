@@ -165,11 +165,22 @@ function runValidation(): ValidationResult {
     return { passed, log: log.join("\n") };
 }
 
+/**
+ * Paths reported by `git status --porcelain`, i.e. everything the sync agent
+ * touched (tracked modifications plus untracked additions).
+ *
+ * Porcelain v1 emits `XY <path>`, where X (index) and Y (worktree) are single
+ * status characters and *either may be a space* — a worktree-only modification
+ * is ` M path`. `runGit` trims the entire captured output, which silently eats
+ * that leading space on the FIRST line only, so a fixed `slice(3)` would chop
+ * the first character off that one path (`packages/...` → `ackages/...`).
+ * Strip the status field with a pattern instead so the offset can't drift.
+ */
 function listChangedFiles(): string[] {
     const out = runGit(["status", "--porcelain"]);
     return out
         .split("\n")
-        .map((line) => line.slice(3).trim())
+        .map((line) => line.replace(/^\s*[MADRCU?!]{1,2}\s+/, "").trim())
         .filter(Boolean);
 }
 

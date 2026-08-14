@@ -166,6 +166,7 @@ export {
 // ─── Misc ────────────────────────────────────────────────────────────
 export { Observable } from "./misc/observable.js";
 export { Tools } from "./misc/tools.js";
+export { RandomGUID, GUID } from "./misc/guid.js";
 export { SmartArray, StringDictionary, Tags, PerformanceMonitor, FactorGradient, ColorGradient, Logger, PrecisionDate } from "./misc/misc-utils.js";
 export { ScenePerformancePriority, ShaderLanguage, ImageProcessingConfiguration, Constants } from "./misc/engine-constants.js";
 
