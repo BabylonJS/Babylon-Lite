@@ -2,6 +2,8 @@
 
 /**
  * Generate a pseudo-random RFC4122 v4 UUID, matching Babylon.js `RandomGUID`.
+ * Be aware `Math.random()` could cause collisions, but all except 6 of the 128 bits are
+ * randomly generated, so any two ids have a 1 in 2^122 chance of colliding.
  * @returns a pseudo random id
  */
 export function RandomGUID(): string {
@@ -13,11 +15,13 @@ export function RandomGUID(): string {
 }
 
 /**
- * Class used to manipulate GUIDs, matching Babylon.js `GUID`.
+ * Namespace-like object used to manipulate GUIDs, matching Babylon.js `GUID`.
+ * Babylon.js declares `GUID` as a `const` object literal rather than a class, so the
+ * compat layer mirrors that shape: consumers call `GUID.RandomId()` without `new`.
  */
 export const GUID = {
     /**
-     * Generate a pseudo-random RFC4122 v4 UUID.
+     * Generate a pseudo-random RFC4122 v4 UUID. Alias of {@link RandomGUID}.
      * @returns a pseudo random id
      */
     RandomId: RandomGUID,
