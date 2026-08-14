@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `538573bd012d819669e41e99346cb98e57bbf051`
-- **Last sync date:** 2026-08-13
+- **Last synced BJS commit:** `1b9b68194cb42879f5a6e60849cca366b4469555`
+- **Last sync date:** 2026-08-14
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -88,7 +88,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `engine.useLargeWorldRendering` → floating origin / `useReverseDepthBuffer`                                                                                                           | ⚡ Partial       | engine (BJS `useLargeWorldRendering` maps to Lite `useHighPrecisionMatrix` + `useFloatingOrigin`)                                                                             |
 | `engine.runRenderLoop` / `stopRenderLoop`                                                                                                                                             | ⚡ Partial       | engine (async startup; N callbacks)                                                                                                                                           |
 | `engine.resize` / `setSize` / `dispose` / `getRenderingCanvas`                                                                                                                        | ✅ Full          | engine                                                                                                                                                                        |
-| `engine.getCaps()` (compressed-format flags `astc` / `s3tc` / `etc2`)                                                                                                                 | ✅ Full          | engine (derived from the Lite WebGPU device's enabled features)                                                                                                               |
+| `engine.getCaps()` (compressed-format flags `astc` / `s3tc` / `etc2`)                                                                                                                 | ✅ Full          | engine (derived from the Lite WebGPU device's enabled features; also forwards the WebGPU `maxUniformBuffersPerShaderStage` device limit — BJS `9.21.1` — undefined for a device-less `NullEngine`)                                                               |
 | `AbstractEngine.Version` / `AbstractEngine.NpmPackage` (static)                                                                                                                        | ✅ Full          | engine (reports the underlying Babylon Lite runtime `VERSION`, wrapped as `@babylonjs/lite-compat@<version>` for `NpmPackage`)                                                 |
 | `engine.beginFrame` / `endFrame`                                                                                                                                                      | ❌ Not supported | —                                                                                                                                                                             |
 | `engine.currentSampleCount` / `getAlphaToCoverage` / `setAlphaToCoverage`                                                                    | 🔧 Needs Lite core | engine (BJS `9.17` MSAA/alpha-to-coverage engine surface; Lite manages MSAA internally and exposes no public sample-count accessor or engine-level A2C toggle — throwing stubs) |
@@ -257,6 +257,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `ShaderLanguage` (enum)                                                                                                                                                                        | ✅ Full          | [misc/engine-constants.ts](src/misc/engine-constants.ts) (BJS numeric values; `GLSL` still throws at `ShaderMaterial` construction)                                                            |
 | `NodeMaterial` (`Parse` + `getBlockByName().texture`)                                                                                                                                          | ⚡ Partial       | [materials/node-material.ts](src/materials/node-material.ts) (async NME parse, deferred to engine start after shadow build so NME shadow-receiver blocks sample the scene's shadow generators) |
 | `BackgroundMaterial`                                                                                                                                                                           | ❌ Not supported | throwing stub; use native `loadEnvironment`                                                                                                                                                    |
+| `GetSupportedSimultaneousLights` (`MaterialHelper` fn)                                                                                                                                         | ✅ Full          | [materials/material-helpers.ts](src/materials/material-helpers.ts) (BJS `9.21.1`; clamps the requested light count to the compat engine's `getCaps().maxUniformBuffersPerShaderStage` UBO budget, reserving 4 non-light vertex UBOs, never below 1 — no cap reported ⇒ unchanged) |
 
 ## Textures
 
@@ -328,6 +329,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `PostProcess` (base) + `DefaultRenderingPipeline`                  | ❌ Not supported | throwing stub; use native frame-graph tasks          |
 | `Bloom` / `Blur` / `BlackAndWhite` / `ChromaticAberration` / `DoF` | ❌ Not supported | throwing stub; effects exist as native `create*Task` |
 | `FxaaPostProcess` / `SSAO2RenderingPipeline`                       | ❌ Not supported | throwing stub; not in Lite                           |
+| `FSR1RenderingPipeline` / `ThinFSR1UpscalePostProcess` / `ThinFSR1SharpenPostProcess` | ❌ Not supported | throwing stub (BJS `9.21.1`); Lite has no `PostProcessRenderPipeline` subsystem or FSR/EASU/RCAS task to forward to |
 
 ## Probes / Layers / Rendering
 
