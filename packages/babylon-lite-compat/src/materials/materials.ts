@@ -9,7 +9,21 @@
  * material properties are intentionally omitted.
  */
 
-import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty, createSolidTexture2D, rebuildMaterial } from "babylon-lite";
+import {
+    createStandardMaterial,
+    createPbrMaterial,
+    markMaterialUboDirty,
+    createSolidTexture2D,
+    rebuildMaterial,
+    setPbrEmissive,
+    setPbrClearCoat,
+    setPbrSheen,
+    setPbrAnisotropy,
+    setPbrIridescence,
+    setPbrGammaAlbedo,
+    setStandardBumpTexture,
+    setStandardEmissiveTexture,
+} from "babylon-lite";
 import type {
     StandardMaterialProps,
     PbrMaterialProps,
@@ -297,7 +311,7 @@ export class StandardMaterial extends PushMaterial {
     }
     public set bumpTexture(texture: BaseTexture | null) {
         this._bumpTexture = texture;
-        this._lite.bumpTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        setStandardBumpTexture(this._lite, (texture?._lite as Texture2D | undefined) ?? null);
         this._watchTexture(texture);
         this._markDirty();
     }
@@ -307,7 +321,7 @@ export class StandardMaterial extends PushMaterial {
     }
     public set emissiveTexture(texture: BaseTexture | null) {
         this._emissiveTexture = texture;
-        this._lite.emissiveTexture = (texture?._lite as Texture2D | undefined) ?? null;
+        setStandardEmissiveTexture(this._lite, (texture?._lite as Texture2D | undefined) ?? null);
         this._watchTexture(texture);
         this._markDirty();
     }
@@ -347,11 +361,11 @@ export class StandardMaterial extends PushMaterial {
         }
         const bump = this._bumpTexture as { _lite?: Texture2D } | null;
         if (bump?._lite) {
-            this._lite.bumpTexture = bump._lite;
+            setStandardBumpTexture(this._lite, bump._lite);
         }
         const emissive = this._emissiveTexture as { _lite?: Texture2D } | null;
         if (emissive?._lite) {
-            this._lite.emissiveTexture = emissive._lite;
+            setStandardEmissiveTexture(this._lite, emissive._lite);
         }
         this._markDirty();
     }
@@ -639,10 +653,10 @@ export class PBRMaterial extends PushMaterial {
     }
 
     public get emissiveColor(): Color3 {
-        return readColor3(this._lite.emissiveColor);
+        return readColor3(this._lite._emissiveColor);
     }
     public set emissiveColor(value: Color3) {
-        this._lite.emissiveColor = [value.r, value.g, value.b];
+        setPbrEmissive(this._lite, [value.r, value.g, value.b]);
         this._markDirty();
     }
 
@@ -684,10 +698,11 @@ export class PBRMaterial extends PushMaterial {
      */
     public get clearCoat(): PBRClearCoatConfiguration {
         if (!this._clearCoat) {
-            if (!this._lite.clearCoat) {
-                this._lite.clearCoat = { isEnabled: false };
-            }
-            this._clearCoat = new PBRClearCoatConfiguration(this._lite.clearCoat, () => this._markDirty());
+            // Route through the setter: clearcoat feature detection only exists once
+            // `setPbrClearCoat` has registered the extension, so a direct `_clearCoat`
+            // write would leave a compat-only scene rendering without clearcoat.
+            setPbrClearCoat(this._lite, this._lite._clearCoat ?? { isEnabled: false });
+            this._clearCoat = new PBRClearCoatConfiguration(this._lite._clearCoat!, () => this._markDirty());
         }
         return this._clearCoat;
     }
@@ -697,10 +712,8 @@ export class PBRMaterial extends PushMaterial {
     /** Babylon.js `pbr.sheen` sub-configuration (Lite `SheenProps`). */
     public get sheen(): PBRSheenConfiguration {
         if (!this._sheen) {
-            if (!this._lite.sheen) {
-                this._lite.sheen = { isEnabled: false };
-            }
-            this._sheen = new PBRSheenConfiguration(this._lite.sheen, () => this._markDirty());
+            setPbrSheen(this._lite, this._lite._sheen ?? { isEnabled: false });
+            this._sheen = new PBRSheenConfiguration(this._lite._sheen!, () => this._markDirty());
         }
         return this._sheen;
     }
@@ -710,10 +723,8 @@ export class PBRMaterial extends PushMaterial {
     /** Babylon.js `pbr.anisotropy` sub-configuration (Lite `AnisotropyProps`). */
     public get anisotropy(): PBRAnisotropicConfiguration {
         if (!this._anisotropy) {
-            if (!this._lite.anisotropy) {
-                this._lite.anisotropy = { isEnabled: false };
-            }
-            this._anisotropy = new PBRAnisotropicConfiguration(this._lite.anisotropy, () => this._markDirty());
+            setPbrAnisotropy(this._lite, this._lite._anisotropy ?? { isEnabled: false });
+            this._anisotropy = new PBRAnisotropicConfiguration(this._lite._anisotropy!, () => this._markDirty());
         }
         return this._anisotropy;
     }
@@ -723,10 +734,8 @@ export class PBRMaterial extends PushMaterial {
     /** Babylon.js `pbr.iridescence` sub-configuration (Lite `IridescenceProps`). */
     public get iridescence(): PBRIridescenceConfiguration {
         if (!this._iridescence) {
-            if (!this._lite.iridescence) {
-                this._lite.iridescence = { isEnabled: false };
-            }
-            this._iridescence = new PBRIridescenceConfiguration(this._lite.iridescence, () => this._markDirty());
+            setPbrIridescence(this._lite, this._lite._iridescence ?? { isEnabled: false });
+            this._iridescence = new PBRIridescenceConfiguration(this._lite._iridescence!, () => this._markDirty());
         }
         return this._iridescence;
     }
@@ -768,7 +777,14 @@ export class PBRMaterial extends PushMaterial {
         if (albedo?._lite) {
             lite.baseColorTexture = albedo._lite;
             lite.baseColorFactor = [...this._albedoFactor];
-            lite.gammaAlbedo = albedo.gammaSpace ?? true;
+            // Route through the setter: the sRGB→linear decode hook is only registered by
+            // `setPbrGammaAlbedo`, so a direct `_gammaAlbedo` write would sample the
+            // gamma-space texture without decoding it.
+            if (albedo.gammaSpace ?? true) {
+                setPbrGammaAlbedo(lite);
+            } else {
+                lite._gammaAlbedo = false;
+            }
         }
         // Babylon Lite's PBR pipeline samples baseColorTexture/ormTexture unconditionally,
         // so a factor-only Babylon.js PBR material (colours but no maps) must be backed by
@@ -814,17 +830,25 @@ export class PBRMaterial extends PushMaterial {
         target._albedoTexture = this._albedoTexture;
         const src = this._lite;
         const dst = target._lite;
-        if (src.clearCoat) {
-            dst.clearCoat = { ...src.clearCoat };
+        // Route each sub-feature through its setter so the clone's copy also registers the
+        // corresponding extension (the clone may outlive the source's registration path).
+        // Emissive is included because it lives on the `_`-prefixed backing field, which
+        // `copyLiteMaterialData` deliberately skips — without this the clone silently loses
+        // its emissive colour (and its ext registration).
+        if (src._emissiveColor) {
+            setPbrEmissive(dst, [...src._emissiveColor]);
         }
-        if (src.sheen) {
-            dst.sheen = { ...src.sheen };
+        if (src._clearCoat) {
+            setPbrClearCoat(dst, { ...src._clearCoat });
         }
-        if (src.anisotropy) {
-            dst.anisotropy = { ...src.anisotropy };
+        if (src._sheen) {
+            setPbrSheen(dst, { ...src._sheen });
         }
-        if (src.iridescence) {
-            dst.iridescence = { ...src.iridescence };
+        if (src._anisotropy) {
+            setPbrAnisotropy(dst, { ...src._anisotropy });
+        }
+        if (src._iridescence) {
+            setPbrIridescence(dst, { ...src._iridescence });
         }
     }
 }

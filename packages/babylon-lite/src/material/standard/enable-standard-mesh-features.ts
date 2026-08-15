@@ -23,7 +23,7 @@ export function enableStandardSkeleton(): void {
     // initial group build (synchronous `_rebuildSingle`, which cannot import) is still
     // deformed. Registration is global + durable; the group builder awaits it as a
     // backstop before the first frame. See `_preloadStdMeshExt`.
-    _preloadStdMeshExt(() => import("./fragments/std-skeleton-fragment.js"), "stdSkeletonExt");
+    void _preloadStdMeshExt(() => import("./fragments/std-skeleton-fragment.js"), "stdSkeletonExt");
 }
 
 /** Resolve once the skinning ext enabled by {@link enableStandardSkeleton} (and any other

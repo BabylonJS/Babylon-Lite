@@ -57,6 +57,7 @@ export {
 
 // ─── Lights ──────────────────────────────────────────────────────────
 export { Light, HemisphericLight, DirectionalLight, PointLight, SpotLight } from "./lights/lights.js";
+export { ClusteredLightContainer } from "./lights/clustered-light-container.js";
 
 // ─── Meshes ──────────────────────────────────────────────────────────
 export { Mesh, LinesMesh, AbstractMesh, TransformNode, GroundMesh, InstancedMesh, VertexData, VertexBuffer, MeshBuilder } from "./meshes/meshes.js";
@@ -70,6 +71,7 @@ export {
     CreateDisc,
     CreateLines,
     CreateLineSystem,
+    CreateDashedLines,
     CreateTiledBox,
     CreateTiledPlane,
 } from "./meshes/meshes.js";
@@ -164,6 +166,7 @@ export {
 // ─── Misc ────────────────────────────────────────────────────────────
 export { Observable } from "./misc/observable.js";
 export { Tools } from "./misc/tools.js";
+export { RandomGUID, GUID } from "./misc/guid.js";
 export { SmartArray, StringDictionary, Tags, PerformanceMonitor, FactorGradient, ColorGradient, Logger, PrecisionDate } from "./misc/misc-utils.js";
 export { ScenePerformancePriority, ShaderLanguage, ImageProcessingConfiguration, Constants } from "./misc/engine-constants.js";
 
@@ -243,12 +246,29 @@ export {
     ShaderMaterial,
     BackgroundMaterial,
     RectAreaLight,
-    ClusteredLightContainer,
     GPUParticleSystem,
     SolidParticleSystem,
     HighlightLayer,
     GlowLayer,
     GreasedLineMesh,
+    GreasedLineBaseMesh,
+    GreasedLineRibbonMesh,
+    GreasedLinePluginMaterial,
+    MaterialGreasedLineDefines,
+    GreasedLineMaterialDefaults,
+    RegisterGreasedLinePluginMaterial,
+    GreasedLineSimpleMaterial,
+    GreasedLineTools,
+    CreateGreasedLine,
+    CreateGreasedLineMaterial,
+    GetPointsCount,
+    CompleteGreasedLineWidthTable,
+    CompleteGreasedLineColorTable,
+    GreasedLineMeshColorDistribution,
+    GreasedLineMeshWidthDistribution,
+    GreasedLineRibbonPointsMode,
+    GreasedLineRibbonFacesMode,
+    GreasedLineRibbonAutoDirectionMode,
     EdgesRenderer,
     OutlineRenderer,
     MirrorTexture,
@@ -262,6 +282,9 @@ export {
     IsHtmlInCanvasSupportedNatively,
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
+    GaussianSplattingStream,
+    AddGaussianSplattingStreamPart,
+    AddGaussianSplattingStreamPartAsync,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -282,6 +305,10 @@ export type {
     IHtmlRaycastInteractionManagerOptions,
     IHtmlInCanvasPolyfillModule,
     IInstallHtmlInCanvasPolyfillOptions,
+    GaussianSplattingStreamDebugLodSource,
+    IGaussianSplattingStreamOptions,
+    ISOGLODMetadata,
+    IGaussianSplattingStreamingPart,
 } from "./unsupported/unsupported-apis.js";
 export {
     Skeleton,

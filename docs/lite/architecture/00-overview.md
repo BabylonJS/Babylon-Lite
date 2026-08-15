@@ -558,7 +558,7 @@ interface PbrMaterialProps {
     normalTexture?: Texture2D;
     ormTexture?: Texture2D; // R=occ, G=rough, B=metal
     emissiveTexture?: Texture2D;
-    emissiveColor?: [number, number, number]; // Linear RGB emissive (no texture)
+    _emissiveColor?: [number, number, number]; // Linear RGB emissive — set via setPbrEmissive()
     specGlossTexture?: Texture2D; // KHR_materials_pbrSpecularGlossiness
     doubleSided?: boolean;
     alpha?: number; // Overall material alpha (default 1.0)
@@ -603,22 +603,23 @@ interface StandardMaterialProps {
     ambientColor: [number, number, number];
     diffuseTexture: Texture2D | null;
     diffuseCoordIndex: 0 | 1;
-    emissiveTexture: Texture2D | null;
-    bumpTexture: Texture2D | null;
+    _emissiveTexture?: Texture2D | null; // set via setStandardEmissiveTexture()
+    _bumpTexture?: Texture2D | null; // set via setStandardBumpTexture()
     bumpLevel: number;
-    specularTexture: Texture2D | null;
+    _specularTexture?: Texture2D | null; // set via setStandardSpecularTexture()
     specularCoordIndex: 0 | 1;
-    ambientTexture: Texture2D | null;
+    _ambientTexture?: Texture2D | null; // set via setStandardAmbientTexture()
     ambientTexLevel: number;
     ambientCoordIndex: 0 | 1;
-    lightmapTexture: Texture2D | null;
+    _lightmapTexture?: Texture2D | null; // set via setStandardLightmapTexture()
     lightmapLevel: number;
     lightmapCoordIndex: 0 | 1;
-    opacityTexture: Texture2D | null;
+    _opacityTexture?: Texture2D | null; // set via setStandardOpacityTexture()
     opacityLevel: number;
     opacityFromRGB: boolean;
     alphaCutOff: number;
-    reflectionTexture: Texture2D | null;
+    _reflectionTexture?: Texture2D | null; // set via setStandardReflectionTexture()
+    _reflectionCubeTexture?: CubeTexture | null; // set via setStandardReflectionCubeTexture()
     reflectionLevel: number;
     reflectionCoordMode: 1 | 2;
     uvScale: [number, number];

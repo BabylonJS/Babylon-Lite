@@ -23,6 +23,11 @@ export interface AssetContainer {
     clearColor?: GPUColorDict;
     /** Camera parsed from the file. addToScene() sets it as scene.camera when present. */
     camera?: import("./camera/camera.js").Camera;
+    /** Cameras imported after `enableGltfCameras()` is called, in node-encounter order.
+     *  Each is parented to its source node, so it inherits that node's animation and
+     *  hierarchy live. Unlike `camera`, addToScene() never auto-activates one — pick one
+     *  explicitly and assign it to `scene.camera`. */
+    cameras?: import("./camera/camera.js").Camera[];
     /** KHR_materials_variants data. Use selectVariant() / getVariantNames() to interact. */
     materialVariants?: MaterialVariantData;
     /** KHR_xmp_json_ld metadata. `packets` are the JSON-LD packets declared at the

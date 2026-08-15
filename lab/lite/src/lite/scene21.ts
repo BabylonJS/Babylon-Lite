@@ -2,7 +2,7 @@
 // Matches BJS playground: cloth mesh with PBR sheen material.
 // Static model, no animation.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, attachControl, loadEnvironment, loadGltf, createPbrMaterial, createSolidTexture2D, loadTexture2D, registerScene } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, attachControl, loadEnvironment, loadGltf, createPbrMaterial, setPbrSheen, createSolidTexture2D, loadTexture2D, registerScene } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
@@ -42,13 +42,13 @@ async function main(): Promise<void> {
     const sheenMat = createPbrMaterial({
         baseColorTexture: baseColorTex,
         ormTexture: ormTex,
-        sheen: {
-            isEnabled: true,
-            color: [1, 1, 1],
-            roughness: 0.5,
-            intensity: 1.0,
-            texture: sheenTex2D,
-        },
+    });
+    setPbrSheen(sheenMat, {
+        isEnabled: true,
+        color: [1, 1, 1],
+        roughness: 0.5,
+        intensity: 1.0,
+        texture: sheenTex2D,
     });
 
     // Apply sheen material to all meshes (matching BJS: all non-skybox meshes get mat0)

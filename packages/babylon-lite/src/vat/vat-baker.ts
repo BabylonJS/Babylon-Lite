@@ -78,6 +78,17 @@ export interface VatBakeResult {
     readonly _textureResource: { readonly texture: GPUTexture; _refCount?: number };
 }
 
+/** CPU data for a VAT baked outside the current runtime. The matrix payload uses the same layout as
+ *  {@link VatBakeResult.texture}: `frameCount` rows of `boneCount * 4` RGBA32F texels. */
+export interface PreparedVatBakeResult {
+    readonly boneCount: number;
+    readonly frameCount: number;
+    readonly data: Float32Array;
+    readonly clips: Readonly<Record<string, VatClip>>;
+    readonly boneOrigins?: Readonly<Record<number, Float32Array>>;
+    readonly boneMatrices?: Readonly<Record<number, Float32Array>>;
+}
+
 const DEFAULT_FRAME_RATE = 60;
 let _vatTime: Float32Array | null = null;
 
@@ -129,6 +140,11 @@ export function bakeVat(engine: EngineContext, mesh: Mesh, groups: AnimationGrou
     return bakeVatMany(engine, [{ mesh, captureBoneOrigins: opts?.captureBoneOrigins, captureBoneMatrices: opts?.captureBoneMatrices }], groups)[0]!;
 }
 
+/** Evaluate one skinned mesh into a CPU VAT payload without allocating or uploading a GPU texture. */
+export function prepareVat(mesh: Mesh, groups: AnimationGroup[], opts?: VatBakeOptions): PreparedVatBakeResult {
+    return prepareVatMany([{ mesh, captureBoneOrigins: opts?.captureBoneOrigins, captureBoneMatrices: opts?.captureBoneMatrices }], groups)[0]!;
+}
+
 interface VatBakeState {
     readonly target: VatBakeTarget;
     readonly bindings: readonly SkeletonBinding[];
@@ -146,11 +162,145 @@ interface UniqueVatTexture {
     readonly resource: { readonly texture: GPUTexture; _refCount?: number };
 }
 
+function positiveInteger(value: unknown, field: string): number {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+        throw new Error(`VAT prepared payload: ${field} must be a positive integer.`);
+    }
+    return value;
+}
+
+function validatePreparedCapture(
+    capture: Readonly<Record<number, Float32Array>> | undefined,
+    boneCount: number,
+    valuesPerFrame: number,
+    frameCount: number,
+    field: string
+): Record<number, Float32Array> | undefined {
+    if (!capture) {
+        return undefined;
+    }
+    if (typeof capture !== "object" || Array.isArray(capture)) {
+        throw new Error(`VAT prepared payload: ${field} must be a record.`);
+    }
+    const validated: Record<number, Float32Array> = {};
+    for (const [key, values] of Object.entries(capture)) {
+        const bone = Number(key);
+        if (!Number.isSafeInteger(bone) || bone < 0 || bone >= boneCount || String(bone) !== key) {
+            throw new Error(`VAT prepared payload: ${field} contains invalid bone index "${key}".`);
+        }
+        if (!(values instanceof Float32Array) || values.length !== frameCount * valuesPerFrame) {
+            throw new Error(`VAT prepared payload: ${field}[${key}] has an invalid length.`);
+        }
+        validated[bone] = values;
+    }
+    return validated;
+}
+
+function createVatTextureResource(engine: EngineContext, data: Float32Array, boneCount: number, frameCount: number): { readonly texture: GPUTexture; _refCount?: number } {
+    const texWidth = boneCount * 4;
+    const texture = engine._device.createTexture({
+        size: [texWidth, frameCount],
+        format: "rgba32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    try {
+        engine._device.queue.writeTexture(
+            { texture },
+            data.buffer,
+            { offset: data.byteOffset, bytesPerRow: texWidth * 16, rowsPerImage: frameCount },
+            { width: texWidth, height: frameCount }
+        );
+    } catch (error) {
+        texture.destroy();
+        throw error;
+    }
+    return { texture, _refCount: 0 };
+}
+
+/** Upload an offline-prepared VAT payload and reconstruct the result consumed by {@link attachVat}.
+ *  This performs no animation evaluation; callers are responsible for persisting and invalidating their
+ *  prepared bytes when source animation data or their bake recipe changes. */
+export function createVatBakeResult(engine: EngineContext, prepared: PreparedVatBakeResult): VatBakeResult {
+    return createVatBakeResults(engine, [prepared])[0]!;
+}
+
+/** Upload a batch of offline-prepared VAT payloads. Byte-identical sibling payloads share one texture,
+ *  matching {@link bakeVatMany}. */
+export function createVatBakeResults(engine: EngineContext, prepared: readonly PreparedVatBakeResult[]): VatBakeResult[] {
+    const validated = prepared.map((source) => {
+        const boneCount = positiveInteger(source?.boneCount, "boneCount");
+        const frameCount = positiveInteger(source?.frameCount, "frameCount");
+        if (!(source?.data instanceof Float32Array) || source.data.length !== boneCount * frameCount * 16) {
+            throw new Error("VAT prepared payload: data length must equal boneCount * frameCount * 16.");
+        }
+        if (!source.clips || typeof source.clips !== "object" || Array.isArray(source.clips)) {
+            throw new Error("VAT prepared payload: clips must be a record.");
+        }
+        const clips: Record<string, VatClip> = {};
+        for (const [name, clip] of Object.entries(source.clips)) {
+            if (
+                !name ||
+                !clip ||
+                !Number.isSafeInteger(clip.fromRow) ||
+                clip.fromRow < 0 ||
+                !Number.isSafeInteger(clip.frameCount) ||
+                clip.frameCount < 1 ||
+                clip.fromRow + clip.frameCount > frameCount ||
+                !Number.isFinite(clip.fps) ||
+                clip.fps <= 0
+            ) {
+                throw new Error(`VAT prepared payload: clip "${name}" is invalid.`);
+            }
+            clips[name] = { fromRow: clip.fromRow, frameCount: clip.frameCount, fps: clip.fps };
+        }
+        return {
+            boneCount,
+            frameCount,
+            data: source.data,
+            clips,
+            boneOrigins: validatePreparedCapture(source.boneOrigins, boneCount, 3, frameCount, "boneOrigins"),
+            boneMatrices: validatePreparedCapture(source.boneMatrices, boneCount, 16, frameCount, "boneMatrices"),
+        };
+    });
+    return uploadPreparedMany(engine, validated);
+}
+
+function uploadPreparedMany(engine: EngineContext, prepared: readonly PreparedVatBakeResult[]): VatBakeResult[] {
+    const uniqueTextures: UniqueVatTexture[] = [];
+    try {
+        return prepared.map((entry) => {
+            let shared = uniqueTextures.find(
+                (candidate) => candidate.boneCount === entry.boneCount && (candidate.data === entry.data || equalFloatBits(candidate.data, entry.data))
+            );
+            if (!shared) {
+                const resource = createVatTextureResource(engine, entry.data, entry.boneCount, entry.frameCount);
+                shared = { data: entry.data, boneCount: entry.boneCount, resource };
+                uniqueTextures.push(shared);
+            }
+            const { data: _data, ...result } = entry;
+            return Object.assign(result, {
+                texture: shared.resource.texture,
+                _textureResource: shared.resource,
+            });
+        });
+    } catch (error) {
+        for (const entry of uniqueTextures) {
+            entry.resource.texture.destroy();
+        }
+        throw error;
+    }
+}
+
 /**
  * Bake sibling skinned meshes together. Every requested frame is evaluated once, then each mesh's
  * matching skeleton binding is copied. Byte-identical payloads share one ref-counted GPU texture.
  */
 export function bakeVatMany(engine: EngineContext, targets: readonly VatBakeTarget[], groups: readonly AnimationGroup[]): VatBakeResult[] {
+    return uploadPreparedMany(engine, prepareVatMany(targets, groups));
+}
+
+/** Evaluate sibling skinned meshes together without allocating or uploading GPU textures. */
+export function prepareVatMany(targets: readonly VatBakeTarget[], groups: readonly AnimationGroup[]): PreparedVatBakeResult[] {
     if (targets.length === 0) {
         return [];
     }
@@ -164,15 +314,15 @@ export function bakeVatMany(engine: EngineContext, targets: readonly VatBakeTarg
     const states: VatBakeState[] = targets.map((target) => {
         const skeleton = target.mesh.skeleton;
         if (!skeleton) {
-            throw new Error(`bakeVatMany: mesh "${target.mesh.name}" has no skeleton to bake.`);
+            throw new Error(`VAT preparation: mesh "${target.mesh.name}" has no skeleton to bake.`);
         }
         const bindings = groups.map((group) => {
             const binding = bindingOf(group, target.mesh);
             if (!binding) {
-                throw new Error(`bakeVatMany: mesh "${target.mesh.name}" has no skeleton binding for clip "${group.name}".`);
+                throw new Error(`VAT preparation: mesh "${target.mesh.name}" has no skeleton binding for clip "${group.name}".`);
             }
             if (binding.boneCount !== skeleton.boneCount) {
-                throw new Error(`bakeVatMany: mesh "${target.mesh.name}" has inconsistent bone counts.`);
+                throw new Error(`VAT preparation: mesh "${target.mesh.name}" has inconsistent bone counts.`);
             }
             return binding;
         });
@@ -181,7 +331,9 @@ export function bakeVatMany(engine: EngineContext, targets: readonly VatBakeTarg
         const boneOrigins: Record<number, Float32Array> | undefined = captureBones ? {} : undefined;
         if (captureBones && boneOrigins) {
             for (const bone of captureBones) {
-                boneOrigins[bone] = new Float32Array(frameCount * 3);
+                if (bone >= 0 && bone < boneCount) {
+                    boneOrigins[bone] = new Float32Array(frameCount * 3);
+                }
             }
         }
         const captureMatrices = target.captureBoneMatrices;
@@ -242,27 +394,12 @@ export function bakeVatMany(engine: EngineContext, targets: readonly VatBakeTarg
         stopAnimation(group);
     }
 
-    const device = engine._device;
-    const uniqueTextures: UniqueVatTexture[] = [];
     return states.map((state) => {
-        let shared = uniqueTextures.find((candidate) => candidate.boneCount === state.boneCount && equalFloatBits(candidate.data, state.data));
-        if (!shared) {
-            const texWidth = state.boneCount * 4;
-            const texture = device.createTexture({
-                size: [texWidth, frameCount],
-                format: "rgba32float",
-                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-            });
-            device.queue.writeTexture({ texture }, state.data.buffer, { bytesPerRow: texWidth * 16, rowsPerImage: frameCount }, { width: texWidth, height: frameCount });
-            shared = { data: state.data, boneCount: state.boneCount, resource: { texture, _refCount: 0 } };
-            uniqueTextures.push(shared);
-        }
-        const result = {
-            texture: shared.resource.texture,
+        const result: PreparedVatBakeResult = {
             boneCount: state.boneCount,
             frameCount,
+            data: state.data,
             clips: { ...clips },
-            _textureResource: shared.resource,
         };
         const withOrigins = state.boneOrigins ? { ...result, boneOrigins: state.boneOrigins } : result;
         return state.boneMatrices ? { ...withOrigins, boneMatrices: state.boneMatrices } : withOrigins;

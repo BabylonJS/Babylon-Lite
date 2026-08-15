@@ -2,7 +2,12 @@
  *  [0,1] buffer. glTF UVs may be normalized UNSIGNED_BYTE/SHORT and interleaved with a byteStride;
  *  bound raw they misalign every vertex (garbage UVs → wrong texturing). Dynamically imported only
  *  when an interleaved primitive actually has a non-float UV, so float-UV interleaved meshes (the
- *  common case) never bundle this code. Mirrors the tight path's normalizeUvToVec2. */
+ *  common case) never bundle this code. Mirrors the tight path's normalizeUvToVec2.
+ *
+ *  KHR_mesh_quantization's UNNORMALIZED integer TEXCOORD never reaches this function either:
+ *  `gltf-ext-quantization.ts`'s `preParse` rewrites every such accessor to FLOAT (tight or
+ *  strided) before any attribute is resolved, so a non-FLOAT source arriving here is always
+ *  base-glTF normalized data. */
 import { F32 } from "../engine/typed-arrays.js";
 
 const FLOAT = 5126;

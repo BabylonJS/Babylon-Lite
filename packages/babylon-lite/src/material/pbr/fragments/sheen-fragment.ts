@@ -2,7 +2,7 @@
  * Sheen Fragment
  *
  * Adds a soft velvet-like sheen layer (fabric, cloth).
- * Only bundled when a scene uses PbrMaterialProps.sheen.
+ * Only bundled when a scene uses PbrMaterialProps._sheen.
  *
  * Math follows BJS PBRSheenConfiguration:
  *  - Charlie NDF (sheen distribution)
@@ -193,7 +193,7 @@ sheenRoughnessAdjusted *= textureSample(sheenRoughTexture_, sheenRoughSampler_, 
 
 /** Write the sheen material-UBO slice (sheenParams, sheenParams2, optional UV transform). */
 export function writeSheenUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
-    const sh = material.sheen as SheenProps | undefined;
+    const sh = material._sheen as SheenProps | undefined;
     if (!sh?.isEnabled || !offsets.has("sheenParams")) {
         return;
     }
@@ -251,7 +251,7 @@ export const pbrExt: PbrExt = {
     id: "sheen",
     phase: "base-tex",
     detect(mat) {
-        const sh = (mat as PbrMaterialProps).sheen as SheenProps | undefined;
+        const sh = (mat as PbrMaterialProps)._sheen as SheenProps | undefined;
         if (!sh?.isEnabled) {
             return { f: 0, f2: 0 };
         }
@@ -285,7 +285,7 @@ export const pbrExt: PbrExt = {
     },
     writeUbo: writeSheenUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {
-        const sh = (ctx._material as PbrMaterialProps).sheen as SheenProps | undefined;
+        const sh = (ctx._material as PbrMaterialProps)._sheen as SheenProps | undefined;
         if ((ctx._features & PBR_HAS_SHEEN_TEXTURE) !== 0 && sh?.texture) {
             entries.push({ binding: b++, resource: sh.texture.view });
             entries.push({ binding: b++, resource: sh.texture.sampler });
@@ -297,7 +297,7 @@ export const pbrExt: PbrExt = {
         return b;
     },
     textures(mat, out) {
-        const sh = (mat as PbrMaterialProps).sheen;
+        const sh = (mat as PbrMaterialProps)._sheen;
         if (sh?.texture) {
             out.push(sh.texture);
         }

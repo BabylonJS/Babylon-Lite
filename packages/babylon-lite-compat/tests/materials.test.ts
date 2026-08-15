@@ -22,16 +22,16 @@ describe("StandardMaterial texture proxies", () => {
     it("wires emissiveTexture onto the Lite material", () => {
         const mat = new StandardMaterial("dog");
         expect(mat.emissiveTexture).toBeNull();
-        expect(mat._lite.emissiveTexture).toBeNull();
+        expect(mat._lite._emissiveTexture).toBeUndefined();
 
         const tex = fakeTexture();
         mat.emissiveTexture = tex;
         expect(mat.emissiveTexture).toBe(tex);
-        expect(mat._lite.emissiveTexture).toBe(tex._lite);
+        expect(mat._lite._emissiveTexture).toBe(tex._lite);
 
         mat.emissiveTexture = null;
         expect(mat.emissiveTexture).toBeNull();
-        expect(mat._lite.emissiveTexture).toBeNull();
+        expect(mat._lite._emissiveTexture).toBeNull();
     });
 
     describe("PBRMaterial late texture binding", () => {
@@ -57,7 +57,7 @@ describe("StandardMaterial texture proxies", () => {
         mat.diffuseTexture = tex;
         mat.emissiveTexture = tex;
         expect(mat._lite.diffuseTexture).toBe(tex._lite);
-        expect(mat._lite.emissiveTexture).toBe(tex._lite);
+        expect(mat._lite._emissiveTexture).toBe(tex._lite);
     });
 });
 
@@ -115,9 +115,26 @@ describe("Material.clone", () => {
         expect(clone.clearCoat.isEnabled).toBe(true);
         expect(clone.clearCoat.intensity).toBeCloseTo(0.4);
         // Sub-config object is copied, not shared.
-        expect(clone._lite.clearCoat).not.toBe(mat._lite.clearCoat);
+        expect(clone._lite._clearCoat).not.toBe(mat._lite._clearCoat);
         clone.clearCoat.intensity = 0.9;
         expect(mat.clearCoat.intensity).toBeCloseTo(0.4);
+    });
+
+    // Emissive lives on the opt-in `_emissiveColor` backing field, which the generic
+    // data copy skips (it ignores `_`-prefixed keys), so the clone has to restore it
+    // explicitly through the setter — otherwise the clone renders non-emissive.
+    it("PBRMaterial.clone carries emissive colour without aliasing the source", () => {
+        const mat = new PBRMaterial("src");
+        mat.emissiveColor = new Color3(0.3, 0.6, 0.9);
+
+        const clone = mat.clone("clone");
+
+        expect(clone.emissiveColor.r).toBeCloseTo(0.3);
+        expect(clone.emissiveColor.g).toBeCloseTo(0.6);
+        expect(clone.emissiveColor.b).toBeCloseTo(0.9);
+        expect(clone._lite._emissiveColor).not.toBe(mat._lite._emissiveColor);
+        clone.emissiveColor = new Color3(1, 1, 1);
+        expect(mat.emissiveColor.r).toBeCloseTo(0.3);
     });
 
     it("PBRMetallicRoughnessMaterial.clone returns the correct subclass", () => {
@@ -247,11 +264,11 @@ describe("Material.getActiveTextures", () => {
         mat.albedoTexture = albedo;
         mat.sheen.texture = sheenTex;
         expect(mat.sheen.texture).toBe(sheenTex);
-        expect(mat._lite.sheen?.texture).toBe(sheenTex._lite);
+        expect(mat._lite._sheen?.texture).toBe(sheenTex._lite);
         expect(mat.getActiveTextures()).toEqual([albedo, sheenTex]);
 
         mat.sheen.texture = null;
-        expect(mat._lite.sheen?.texture).toBeUndefined();
+        expect(mat._lite._sheen?.texture).toBeUndefined();
         expect(mat.getActiveTextures()).toEqual([albedo]);
     });
 

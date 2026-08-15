@@ -34,8 +34,7 @@ function rebuildTextRendererGpu(renderer: TextRenderer): void {
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         });
         lg.pipeline = null;
-        lg.bindGroups.length = 0;
-        lg.bindGroupAtlasVersions.length = 0;
+        lg.bindGroupCache.length = 0;
         lg.uploadedDataVersion = -1;
         lg.uploadedViewportW = 0;
         lg.uploadedViewportH = 0;

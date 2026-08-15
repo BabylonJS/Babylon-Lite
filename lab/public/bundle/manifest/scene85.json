@@ -3,22 +3,22 @@
   "gzipKB": 26.1,
   "ignoredRawKB": 6.5,
   "runtimeChunks": [
-    "scene85-_math-factory-C7UXkZvB.js",
-    "scene85-clamp-block-Cie2cMvd.js",
+    "scene85-_math-factory-DSa70nIu.js",
+    "scene85-clamp-block-BDJ7FSqK.js",
     "scene85-color-merger-0HZ9FICW.js",
-    "scene85-dot-block-DPvDFeDO.js",
+    "scene85-dot-block-DRt7aS2R.js",
     "scene85-fragment-output-CfRmfbPv.js",
-    "scene85-input-block-BSx0Rq6M.js",
-    "scene85-matrix-blocks-BiPhvqIo.js",
-    "scene85-node-registry-CwCpqFSs.js",
-    "scene85-node-registry-extra-advanced-DCi0GM5J.js",
-    "scene85-node-registry-extra-procedural-D4VAV550.js",
-    "scene85-node-renderable-Bq-DITUU.js",
+    "scene85-input-block-C2YNQtGs.js",
+    "scene85-matrix-blocks-BmVXwHtt.js",
+    "scene85-node-registry-bCHt7KbQ.js",
+    "scene85-node-registry-extra-advanced-BsbbCQtI.js",
+    "scene85-node-registry-extra-procedural-BJuTUlIm.js",
+    "scene85-node-renderable-BEIlYils.js",
     "scene85-scale-block-6qtIvFiz.js",
-    "scene85-transform-block-yDrHCsdr.js",
+    "scene85-transform-block-BQoGmYi5.js",
     "scene85-vector-merger-YcC3xFyg.js",
     "scene85-vertex-output-C7G5u6Y0.js",
     "scene85.js"
   ],
-  "rawBytes": 60617
+  "rawBytes": 60631
 }

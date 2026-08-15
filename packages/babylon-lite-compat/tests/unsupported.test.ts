@@ -6,12 +6,26 @@ import {
     MultiMaterial,
     ShaderMaterial,
     RectAreaLight,
-    ClusteredLightContainer,
     GPUParticleSystem,
     SolidParticleSystem,
     HighlightLayer,
     GlowLayer,
     GreasedLineMesh,
+    GreasedLineBaseMesh,
+    GreasedLineRibbonMesh,
+    GreasedLinePluginMaterial,
+    MaterialGreasedLineDefines,
+    GreasedLineMaterialDefaults,
+    RegisterGreasedLinePluginMaterial,
+    GreasedLineSimpleMaterial,
+    GreasedLineTools,
+    CreateGreasedLine,
+    CreateGreasedLineMaterial,
+    GetPointsCount,
+    CompleteGreasedLineWidthTable,
+    CompleteGreasedLineColorTable,
+    GreasedLineMeshColorDistribution,
+    GreasedLineRibbonAutoDirectionMode,
     EdgesRenderer,
     OutlineRenderer,
     MirrorTexture,
@@ -25,6 +39,9 @@ import {
     IsHtmlInCanvasSupportedNatively,
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
+    GaussianSplattingStream,
+    AddGaussianSplattingStreamPart,
+    AddGaussianSplattingStreamPartAsync,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -65,13 +82,19 @@ describe("Unsupported API stubs throw on construction", () => {
         ["MultiMaterial", () => new MultiMaterial()],
         ["ShaderMaterial", () => new ShaderMaterial()],
         ["RectAreaLight", () => new RectAreaLight()],
-        ["ClusteredLightContainer", () => new ClusteredLightContainer()],
         ["ParticleSystem", () => new ParticleSystem()],
         ["GPUParticleSystem", () => new GPUParticleSystem()],
         ["SolidParticleSystem", () => new SolidParticleSystem()],
         ["HighlightLayer", () => new HighlightLayer()],
         ["GlowLayer", () => new GlowLayer()],
         ["GreasedLineMesh", () => new GreasedLineMesh()],
+        ["GreasedLineBaseMesh", () => new GreasedLineBaseMesh()],
+        ["GreasedLineRibbonMesh", () => new GreasedLineRibbonMesh()],
+        ["GreasedLinePluginMaterial", () => new GreasedLinePluginMaterial()],
+        ["MaterialGreasedLineDefines", () => new MaterialGreasedLineDefines()],
+        ["GreasedLineMaterialDefaults", () => new GreasedLineMaterialDefaults()],
+        ["GreasedLineSimpleMaterial", () => new GreasedLineSimpleMaterial()],
+        ["GreasedLineTools", () => new GreasedLineTools()],
         ["EdgesRenderer", () => new EdgesRenderer()],
         ["OutlineRenderer", () => new OutlineRenderer()],
         ["MirrorTexture", () => new MirrorTexture()],
@@ -115,6 +138,57 @@ describe("HTML-texture function stubs throw on call", () => {
     });
 });
 
+describe("GreasedLine builder/tool function stubs throw on call", () => {
+    const cases: Array<[string, () => unknown]> = [
+        ["CreateGreasedLine", () => CreateGreasedLine()],
+        ["CreateGreasedLineMaterial", () => CreateGreasedLineMaterial()],
+        ["GetPointsCount", () => GetPointsCount()],
+        ["CompleteGreasedLineWidthTable", () => CompleteGreasedLineWidthTable()],
+        ["CompleteGreasedLineColorTable", () => CompleteGreasedLineColorTable()],
+        ["RegisterGreasedLinePluginMaterial", () => RegisterGreasedLinePluginMaterial()],
+    ];
+
+    it.each(cases)("%s throws LiteCompatError naming the API", (name, call) => {
+        expect(call).toThrow(LiteCompatError);
+        expect(call).toThrow(new RegExp(name));
+    });
+
+    it("mirrors BJS GreasedLine enum values for shape parity", () => {
+        expect(GreasedLineMeshColorDistribution.COLOR_DISTRIBUTION_REPEAT).toBe(1);
+        expect(GreasedLineMeshColorDistribution.COLOR_DISTRIBUTION_START_END).toBe(5);
+        expect(GreasedLineRibbonAutoDirectionMode.AUTO_DIRECTIONS_NONE).toBe(99);
+    });
+
+    it("throws LiteCompatError from static GreasedLine utility surfaces", () => {
+        expect(() => GreasedLineTools.MeshesToLines([])).toThrow(LiteCompatError);
+        expect(() => GreasedLineTools.MeshesToLines([])).toThrow(/GreasedLineTools\.MeshesToLines/);
+        expect(() => GreasedLineMaterialDefaults.DEFAULT_WIDTH).toThrow(LiteCompatError);
+        expect(() => GreasedLineMaterialDefaults.DEFAULT_WIDTH).toThrow(/GreasedLineMaterialDefaults\.DEFAULT_WIDTH/);
+    });
+
+    it("accepts BJS-shaped GreasedLine arguments before throwing", () => {
+        expect(() => new GreasedLineMesh("line", {}, {})).toThrow(LiteCompatError);
+        expect(() => CreateGreasedLine("line", {}, {}, {})).toThrow(LiteCompatError);
+        expect(() => CreateGreasedLineMaterial("material", {}, {})).toThrow(LiteCompatError);
+        expect(() => GetPointsCount([])).toThrow(LiteCompatError);
+    });
+});
+
+describe("Gaussian Splatting LOD streaming stubs throw", () => {
+    it("GaussianSplattingStream throws on construction", () => {
+        expect(() => new GaussianSplattingStream()).toThrow(LiteCompatError);
+        expect(() => new GaussianSplattingStream()).toThrow(/GaussianSplattingStream/);
+    });
+
+    it.each([
+        ["AddGaussianSplattingStreamPart", () => AddGaussianSplattingStreamPart()],
+        ["AddGaussianSplattingStreamPartAsync", () => AddGaussianSplattingStreamPartAsync()],
+    ] as Array<[string, () => unknown]>)("%s throws LiteCompatError naming the API", (name, call) => {
+        expect(call).toThrow(LiteCompatError);
+        expect(call).toThrow(new RegExp(name));
+    });
+});
+
 describe("SceneSerializer", () => {
     it("throws on Serialize and SerializeMesh", () => {
         expect(() => SceneSerializer.Serialize()).toThrow(LiteCompatError);
@@ -123,7 +197,7 @@ describe("SceneSerializer", () => {
 });
 
 describe("MeshBuilder unsupported primitives", () => {
-    it.each(["CreateDashedLines", "CreateDecal", "CreateText", "CreateTiledBox", "CreateTiledPlane"] as const)("%s throws LiteCompatError", (method) => {
+    it.each(["CreateDecal", "CreateText", "CreateTiledBox", "CreateTiledPlane"] as const)("%s throws LiteCompatError", (method) => {
         const fn = MeshBuilder[method] as () => never;
         expect(fn).toThrow(LiteCompatError);
         expect(fn).toThrow(new RegExp(method));

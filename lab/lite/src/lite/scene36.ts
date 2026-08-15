@@ -12,6 +12,7 @@ import {
     createHemisphericLight,
     createBox,
     createStandardMaterial,
+    setStandardEmissiveTexture,
     loadBasisTexture2D,
     registerScene,
 } from "babylon-lite";
@@ -35,7 +36,7 @@ async function main(): Promise<void> {
 
     const mat = createStandardMaterial();
     mat.diffuseTexture = basisTex;
-    mat.emissiveTexture = basisTex;
+    setStandardEmissiveTexture(mat, basisTex);
 
     // Box: size 30, stretched on X to match source image aspect (768/512).
     const box = createBox(engine, 30);

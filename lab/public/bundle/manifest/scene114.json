@@ -1,17 +1,16 @@
 {
-  "rawKB": 81.5,
-  "gzipKB": 32.9,
+  "rawKB": 79.8,
+  "gzipKB": 32.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene114-deformed-geometry-Brq5fz01.js",
-    "scene114-morph-fragment-Cug6H7Y0.js",
-    "scene114-pbr-renderable-CveX-0va.js",
+    "scene114-deformed-geometry-Dvzv7yoN.js",
+    "scene114-morph-fragment-CayVhQaw.js",
+    "scene114-pbr-renderable-DPOD_M50.js",
     "scene114-pbr-template-ext-CiHpOV5G.js",
-    "scene114-picking-pipeline-2gjcXSVW.js",
-    "scene114-singlelight-hemispheric-wgsl-DV6gJrdt.js",
-    "scene114-skeleton-fragment-D_f53_Sd.js",
-    "scene114-unlit-fragment-DWtvt7yQ.js",
+    "scene114-picking-pipeline-BCr0qJyX.js",
+    "scene114-singlelight-hemispheric-wgsl-B_lCEpek.js",
+    "scene114-skeleton-fragment-B9kdPQjd.js",
     "scene114.js"
   ],
-  "rawBytes": 83454
+  "rawBytes": 81705
 }

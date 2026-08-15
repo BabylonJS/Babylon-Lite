@@ -34,6 +34,15 @@ export abstract class Light extends Node {
     /** @internal Underlying Babylon Lite light. */
     public abstract readonly _lite: LightBase;
 
+    /**
+     * @internal The {@link ClusteredLightContainer} that owns this light, if any.
+     * Babylon.js moves a light out of the normal light path when it is added to a
+     * clustered container; this back-link mirrors BJS's `light._clusteredContainer`
+     * so a light cannot be added to two containers. Typed loosely to avoid a cycle
+     * with the container module.
+     */
+    public _clusteredContainer: object | null = null;
+
     protected constructor(name: string, scene?: Scene) {
         super(name, scene);
         scene?._registerLight(this);

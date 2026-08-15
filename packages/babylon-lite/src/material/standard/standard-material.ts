@@ -7,31 +7,11 @@
  */
 
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { CubeTexture } from "../../texture/cube-texture.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { Material, StencilState } from "../material.js";
 import type { MaterialPlugin } from "../plugin/material-plugin.js";
-import {
-    AMBIENT_USES_UV2,
-    DIFFUSE_USES_UV2,
-    DISABLE_LIGHTING,
-    DOUBLE_SIDED,
-    HAS_AMBIENT_TEXTURE,
-    HAS_BUMP_TEXTURE,
-    HAS_CUBE_REFLECTION,
-    HAS_DEPTH_EMISSIVE_TEXTURE,
-    HAS_DIFFUSE_TEXTURE,
-    HAS_EMISSIVE_TEXTURE,
-    HAS_LIGHTMAP_TEXTURE,
-    HAS_OPACITY_TEXTURE,
-    HAS_REFLECTION_TEXTURE,
-    HAS_SPECULAR_TEXTURE,
-    LIGHTMAP_USES_UV2,
-    LIGHTMAP_SHADOWMAP,
-    LIGHTMAP_FLIP_V,
-    MATERIAL_ALPHA_BLEND,
-    OPACITY_FROM_RGB,
-    SPECULAR_USES_UV2,
-} from "./standard-flags.js";
+import { DIFFUSE_USES_UV2, DISABLE_LIGHTING, DOUBLE_SIDED, HAS_DIFFUSE_TEXTURE, MATERIAL_ALPHA_BLEND, _getStdExts } from "./standard-flags.js";
 
 // ─── Shared Types ────────────────────────────────────────────────────
 
@@ -54,24 +34,28 @@ export interface StandardMaterialProps extends Material {
     diffuseTexture: Texture2D | null;
     /** Diffuse texture UV channel. 0=UV1, 1=UV2. Default 0. */
     diffuseCoordIndex: 0 | 1;
-    /** Optional emissive texture. Null = solid emissive color only. */
-    emissiveTexture: Texture2D | null;
-    /** Optional bump/normal-map texture. Uses cotangent-frame (no tangent attribute needed). */
-    bumpTexture: Texture2D | null;
+    /** @internal Optional emissive texture. Set via {@link setStandardEmissiveTexture},
+     *  which registers the extension. Tree-shakable — only bundled when used. */
+    _emissiveTexture?: Texture2D | null;
+    /** @internal Optional bump/normal-map texture (cotangent-frame, no tangent attribute
+     *  needed). Set via {@link setStandardBumpTexture}, which registers the extension. */
+    _bumpTexture?: Texture2D | null;
     /** Bump perturbation strength. Default 1.0 (maps to 1/level in BJS). */
     bumpLevel: number;
-    /** Optional specular texture. Replaces specularColor; alpha modulates glossiness. */
-    specularTexture: Texture2D | null;
+    /** @internal Optional specular texture (replaces specularColor; alpha modulates
+     *  glossiness). Set via {@link setStandardSpecularTexture}. */
+    _specularTexture?: Texture2D | null;
     /** Specular texture UV channel. 0=UV1, 1=UV2. Default 0. */
     specularCoordIndex: 0 | 1;
-    /** Optional ambient/occlusion texture. Multiplies final diffuse contribution. */
-    ambientTexture: Texture2D | null;
+    /** @internal Optional ambient/occlusion texture (multiplies final diffuse
+     *  contribution). Set via {@link setStandardAmbientTexture}. */
+    _ambientTexture?: Texture2D | null;
     /** Ambient texture intensity. Default 1.0. */
     ambientTexLevel: number;
     /** Ambient texture UV channel. 0=UV1, 1=UV2. Default 0. */
     ambientCoordIndex: 0 | 1;
-    /** Optional lightmap texture. Added to final color (additive mode). */
-    lightmapTexture: Texture2D | null;
+    /** @internal Optional lightmap texture. Set via {@link setStandardLightmapTexture}. */
+    _lightmapTexture?: Texture2D | null;
     /** Lightmap intensity. Default 1.0. */
     lightmapLevel: number;
     /** Lightmap UV channel. 0=UV1, 1=UV2. Default 1 (BJS convention). */
@@ -80,18 +64,21 @@ export interface StandardMaterialProps extends Material {
      *  (`color *= lightmap * level`) instead of being added. Matches BJS
      *  StandardMaterial.useLightmapAsShadowmap. Default false. */
     useLightmapAsShadowmap: boolean;
-    /** Optional opacity texture. Multiplies alpha (.a channel). */
-    opacityTexture: Texture2D | null;
+    /** @internal Optional opacity texture (multiplies alpha). Set via
+     *  {@link setStandardOpacityTexture}. */
+    _opacityTexture?: Texture2D | null;
     /** Opacity texture intensity. Default 1.0. */
     opacityLevel: number;
     /** When true, derive opacity from RGB luminance instead of .a channel. Default false. */
     opacityFromRGB: boolean;
     /** Alpha test cutoff. Fragments with `alpha < alphaCutOff` are discarded. Default 0 (no alpha test). */
     alphaCutOff: number;
-    /** Optional reflection texture (2D spherical map). Null = no reflection. */
-    reflectionTexture: Texture2D | null;
-    /** Optional cube reflection texture. Null = no cube reflection. */
-    reflectionCubeTexture: { texture: GPUTexture; view: GPUTextureView; sampler: GPUSampler } | null;
+    /** @internal Optional reflection texture (2D spherical map). Set via
+     *  {@link setStandardReflectionTexture}. */
+    _reflectionTexture?: Texture2D | null;
+    /** @internal Optional cube reflection texture. Set via
+     *  {@link setStandardReflectionCubeTexture}. */
+    _reflectionCubeTexture?: CubeTexture | null;
     /** Reflection intensity. Default 1.0. */
     reflectionLevel: number;
     /** Reflection coordinate mode. 1=spherical, 2=planar. Default 1. */
@@ -100,13 +87,22 @@ export interface StandardMaterialProps extends Material {
     uvScale: [number, number];
     /** Optional UV translation applied after scale. Missing values behave as [0, 0]. */
     uvOffset?: [number, number];
+    /** @internal True when per-texture UV transforms are enabled. */
+    _hasUvTx?: boolean;
+    /** @internal Pending lazy registration started by enableMaterialUvTransform. */
+    _uvTxExt?: Promise<void>;
     /** Back-face culling. Default true (BJS convention). False = double-sided. */
     backFaceCulling: boolean;
     /** When true, skip all lighting and output emissive * diffuse * baseColor. Default false. */
     disableLighting: boolean;
 }
 
-/** @internal Compute Standard material-only feature bits. Mesh/pass bits are added by the renderable. */
+/** @internal Compute Standard material-only feature bits. Mesh/pass bits are added by the renderable.
+ *
+ *  Only bits for features that are ALWAYS present live here. Every optional texture
+ *  feature contributes its own bits through its registered ext's `_detect`, so both the
+ *  detection branch and the fragment it gates stay out of the always-loaded core. A
+ *  material that never opts in registers no ext, so the loop below is a no-op. */
 export function _computeStandardMaterialFeatures(m: StandardMaterialProps): number {
     let f = 0;
     if (m.diffuseTexture) {
@@ -115,59 +111,19 @@ export function _computeStandardMaterialFeatures(m: StandardMaterialProps): numb
             f |= DIFFUSE_USES_UV2;
         }
     }
-    if (m.emissiveTexture) {
-        f |= HAS_EMISSIVE_TEXTURE;
-        if (m.emissiveTexture._sampleType === "depth") {
-            f |= HAS_DEPTH_EMISSIVE_TEXTURE;
-        }
-    }
-    if (m.bumpTexture) {
-        f |= HAS_BUMP_TEXTURE;
-    }
-    if (m.specularTexture) {
-        f |= HAS_SPECULAR_TEXTURE;
-        if (m.specularCoordIndex === 1) {
-            f |= SPECULAR_USES_UV2;
-        }
-    }
-    if (m.ambientTexture) {
-        f |= HAS_AMBIENT_TEXTURE;
-        if (m.ambientCoordIndex === 1) {
-            f |= AMBIENT_USES_UV2;
-        }
-    }
-    if (m.lightmapTexture) {
-        f |= HAS_LIGHTMAP_TEXTURE;
-        if (m.lightmapCoordIndex === 1) {
-            f |= LIGHTMAP_USES_UV2;
-        }
-        if (m.useLightmapAsShadowmap) {
-            f |= LIGHTMAP_SHADOWMAP;
-        }
-        if (m.lightmapTexture.uAng === Math.PI) {
-            f |= LIGHTMAP_FLIP_V;
-        }
-    }
-    if (m.opacityTexture) {
-        f |= HAS_OPACITY_TEXTURE;
-        if (m.opacityFromRGB) {
-            f |= OPACITY_FROM_RGB;
-        }
-    }
     if (!m.backFaceCulling) {
         f |= DOUBLE_SIDED;
-    }
-    if (m.reflectionTexture) {
-        f |= HAS_REFLECTION_TEXTURE;
-    }
-    if (m.reflectionCubeTexture) {
-        f |= HAS_CUBE_REFLECTION;
     }
     if (m.disableLighting) {
         f |= DISABLE_LIGHTING;
     }
     if (m.alpha < 1) {
         f |= MATERIAL_ALPHA_BLEND;
+    }
+    for (const ext of _getStdExts().values()) {
+        if (ext._detect) {
+            f |= ext._detect(m);
+        }
     }
     return f;
 }

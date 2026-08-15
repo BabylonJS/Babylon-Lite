@@ -159,7 +159,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     let features = view._renderFeatures.features;
     const sortedExts = _getStdExtsSorted();
     for (const ext of sortedExts) {
-        features |= ext._meshFeatures?.(meshFeatures) ?? 0;
+        features |= ext._meshFeatures?.(meshFeatures, source) ?? 0;
     }
     const sceneFeatures = standardContext?._sceneShader?._features ?? 0;
     // Vertex colour is enabled through the canonical `enableStandardVertexColors()`
@@ -410,8 +410,8 @@ function _ensureViewResources(
     const frags: ShaderFragment[] = [];
     const usedExts: { _ext: (typeof sortedExts)[number] }[] = [];
     const vertexBufferBinders: NonNullable<StdExt["_bindVertexBuffers"]>[] = [];
-    // Keep morph first: composeStandardShader uses the first fragment's patch
-    // to switch the placeholder morph bindings to storage buffers.
+    // Keep morph first; an active UV-transform extension is the second
+    // post-composer. composeStandardShader applies those two reserved slots.
     if ((meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0) {
         const morphFragment = standardContext?._morphFragment;
         if (!morphFragment) {
@@ -552,7 +552,7 @@ function _createGeometryMeshBindGroup(
     }
     for (const used of res._extFragments) {
         if (used._ext._bind) {
-            nextBinding = used._ext._bind(source, entries, nextBinding, mesh);
+            nextBinding = used._ext._bind(source, entries, nextBinding, mesh, engine);
         }
     }
     // Geometry-params `gp` UBO is contributed by the geometry composer as the

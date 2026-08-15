@@ -44,9 +44,11 @@ release.
 ### Guardrails (Non-Negotiable)
 
 - **Never run the all-scene suite unless the user explicitly requests it** — do not execute `pnpm test`, full `pnpm test:parity`, or an unfiltered `pnpm build:bundle-scenes`. CI owns repository-wide scene coverage.
-- **Run focused validation before declaring success** — use the narrowest relevant unit tests, filtered scene bundles, individual parity specs, lint, and typecheck for the changed subsystem.
-- **No MAD regression in affected scenes** — every parity spec relevant to the change must pass.
-- **All focused agent-allowed tests green** — scoped bundle-size and parity checks must pass. Perf tests are user/CI-only.
+- **Run focused validation before declaring success** — use the narrowest relevant unit tests, filtered scene bundles, lint, and typecheck for the changed subsystem.
+- **Do not run visual/parity tests locally unless explicitly requested** — CI owns screenshot and MAD validation.
+- **No MAD regression in affected scenes** — the relevant CI parity checks must pass.
+- **All focused agent-allowed tests green** — scoped non-visual and bundle-size checks must pass. Perf and visual tests are user/CI-only.
 - **No bundle-size regression** — bundle size must stay within ceilings.
 - **No ceiling updates** — bundle-size test thresholds cannot be changed without explicit user approval.
+- **Do not sacrifice semantics or conventions for trivial byte savings** — never weaken naming, readability, diagnostics, correctness, or maintainability merely to save a few bundle bytes. If a correct, convention-preserving implementation misses a ceiling by only a few bytes, keep the correct design and request explicit approval before adjusting the ceiling instead of distorting the code to win the threshold.
 - **No golden reference changes** — reference screenshots are immutable unless user explicitly requests update.

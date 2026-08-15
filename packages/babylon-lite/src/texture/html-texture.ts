@@ -15,12 +15,17 @@
  *
  * @example
  * ```ts
+ * import { createHtmlTexture, disposeHtmlTexture } from "babylon-lite";
+ * import { createStandardMaterial, setStandardEmissiveTexture } from "babylon-lite";
+ *
  * const panel = document.createElement("div");
  * panel.style.cssText = "width:512px;height:512px;background:#1e293b;color:#fff;font:24px sans-serif;padding:24px";
  * panel.innerHTML = "<h1>Hello DOM</h1><button>Click me</button>";
  *
  * const tex = createHtmlTexture(engine, panel, { autoUpdate: true });
- * const mat = createStandardMaterial(engine, { emissiveTexture: tex, disableLighting: true });
+ * const mat = createStandardMaterial();
+ * mat.disableLighting = true;
+ * setStandardEmissiveTexture(mat, tex);
  * // …assign `mat` to a plane; the texture refreshes whenever `panel` changes.
  *
  * // later:

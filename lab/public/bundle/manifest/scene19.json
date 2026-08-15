@@ -1,14 +1,13 @@
 {
-  "rawKB": 70.9,
-  "gzipKB": 29.2,
+  "rawKB": 69.1,
+  "gzipKB": 28.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene19-clearcoat-fragment-CPsIQniL.js",
     "scene19-ibl-fragment-CeRrvT96.js",
-    "scene19-pbr-renderable-BLrkYgS8.js",
-    "scene19-rgbd-decode-Bhk0icKs.js",
-    "scene19-singlelight-hemispheric-wgsl-B2Zus5m2.js",
+    "scene19-pbr-renderable-DnvYFsU-.js",
+    "scene19-rgbd-decode-Lpn-x-zd.js",
+    "scene19-singlelight-hemispheric-wgsl-COpGvwi0.js",
     "scene19.js"
   ],
-  "rawBytes": 72639
+  "rawBytes": 70809
 }
