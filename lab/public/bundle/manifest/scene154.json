@@ -1,10 +1,10 @@
 {
-  "rawKB": 54.8,
-  "gzipKB": 21.8,
+  "rawKB": 53,
+  "gzipKB": 21.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene154-standard-renderable-aidb66f-.js",
+    "scene154-standard-renderable-2UmcBLGX.js",
     "scene154.js"
   ],
-  "rawBytes": 56128
+  "rawBytes": 54292
 }

@@ -216,14 +216,8 @@ function startProfileLoad(models: XrControllerModels, source: DomXrInputSource, 
                 disposeModel(models, model);
                 return;
             }
-            // The glTF loader mirrors imported models with a `-1` X scale on the synthetic
-            // `__root__` (its right-handed→left-handed conversion). The XR camera feeds WebXR's
-            // right-handed pose/projection through verbatim, so that mirror reads as a flipped
-            // controller in-headset. Neutralise it here (un-mirror the root) so the model matches
-            // the box placeholder's orientation, then enable mirrored-mesh winding so the now
-            // positive-determinant model keeps its front faces (rather than rendering inside-out).
-            const root = model.root;
-            root.scaling.set(-root.scaling.x, root.scaling.y, root.scaling.z);
+            // Keep the glTF loader's right-handed→left-handed root conversion; controller
+            // grip poses now use the same left-handed boundary conversion as scene content.
             // Loaded glTF meshes are pickable by default. The pointer ray would then hit the
             // controller model at ~0 m and collapse the laser "inside" the controller; exclude the
             // model from picking so the ray passes through to the scene.
@@ -232,6 +226,10 @@ function startProfileLoad(models: XrControllerModels, source: DomXrInputSource, 
             }
             const { enableMirroredMeshes } = await import("../mesh/enable-mirrored-meshes.js");
             await enableMirroredMeshes(models._scene);
+            if (unit.retired) {
+                disposeModel(models, model);
+                return;
+            }
             addToScene(models._scene, model.container);
             setSubtreeVisible(model.root, false);
             unit.model = model;

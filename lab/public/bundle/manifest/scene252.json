@@ -1,11 +1,11 @@
 {
-  "rawKB": 49.5,
-  "gzipKB": 20.1,
+  "rawKB": 47.6,
+  "gzipKB": 19.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene252-morph-fragment-core-PlHBOW2w.js",
-    "scene252-standard-renderable-BFXu-1wR.js",
+    "scene252-morph-fragment-core-yl0YV3um.js",
+    "scene252-standard-renderable-BT37cdHw.js",
     "scene252.js"
   ],
-  "rawBytes": 50650
+  "rawBytes": 48788
 }

@@ -59,6 +59,7 @@ function makeMockEngine(): EngineContext {
             submit: () => {
                 submitCount++;
             },
+            onSubmittedWorkDone: () => Promise.resolve(),
         },
     } as unknown as GPUDevice;
 
@@ -112,6 +113,7 @@ class FakeXrSession {
     requestedRefSpaces: XRReferenceSpaceType[] = [];
     /** Reference-space types this fake headset will grant; others reject (spec behaviour). */
     grantedRefSpaces: XRReferenceSpaceType[] = ["viewer", "local", "local-floor", "bounded-floor", "unbounded"];
+    updateRenderStateError: Error | null = null;
 
     requestAnimationFrame(cb: XRFrameRequestCallback): number {
         const id = this.nextId++;
@@ -122,6 +124,9 @@ class FakeXrSession {
         this.rafs = this.rafs.filter((r) => r.id !== id);
     }
     async updateRenderState(state: unknown): Promise<void> {
+        if (this.updateRenderStateError) {
+            throw this.updateRenderStateError;
+        }
         this.renderState = state;
     }
     async requestReferenceSpace(type: XRReferenceSpaceType): Promise<XRReferenceSpace> {
@@ -183,7 +188,7 @@ function makeFrame(pose: XRViewerPose | null): XRFrame {
 let currentSession: FakeXrSession;
 let lastSessionInit: XRSessionInit | undefined;
 
-function installXrGlobals(opts?: { sessionSupported?: boolean; grantedRefSpaces?: XRReferenceSpaceType[] }): void {
+function installXrGlobals(opts?: { sessionSupported?: boolean; grantedRefSpaces?: XRReferenceSpaceType[]; projectionLayerError?: Error; updateRenderStateError?: Error }): void {
     const g = globalThis as Record<string, unknown>;
     g.navigator = {
         xr: {
@@ -193,6 +198,7 @@ function installXrGlobals(opts?: { sessionSupported?: boolean; grantedRefSpaces?
                 if (opts?.grantedRefSpaces) {
                     currentSession.grantedRefSpaces = opts.grantedRefSpaces;
                 }
+                currentSession.updateRenderStateError = opts?.updateRenderStateError ?? null;
                 return currentSession as unknown as XRSession;
             },
             isSessionSupported: async () => opts?.sessionSupported ?? true,
@@ -205,6 +211,9 @@ function installXrGlobals(opts?: { sessionSupported?: boolean; grantedRefSpaces?
             return "rgba8unorm";
         }
         createProjectionLayer(): XRProjectionLayer {
+            if (opts?.projectionLayerError) {
+                throw opts.projectionLayerError;
+            }
             return { textureWidth: 512, textureHeight: 512 } as unknown as XRProjectionLayer;
         }
         getViewSubImage(): unknown {
@@ -274,6 +283,30 @@ describe("xr-session lifecycle", () => {
         };
         const scene = createSceneContext(makeMockEngine());
         await expect(enterXr(scene)).rejects.toThrow(/enableXrCompatibleAdapter\(\)/);
+        expect(currentSession.ended).toBe(true);
+    });
+
+    it("ends the session when projection-layer creation fails", async () => {
+        installXrGlobals({ projectionLayerError: new Error("layer boom") });
+        const scene = createSceneContext(makeMockEngine());
+
+        await expect(enterXr(scene, { input: false })).rejects.toThrow(/layer boom/);
+        expect(currentSession.ended).toBe(true);
+    });
+
+    it("ends the session when render-state initialization fails", async () => {
+        installXrGlobals({ updateRenderStateError: new Error("render state boom") });
+        const scene = createSceneContext(makeMockEngine());
+
+        await expect(enterXr(scene, { input: false })).rejects.toThrow(/render state boom/);
+        expect(currentSession.ended).toBe(true);
+    });
+
+    it("ends the session when both requested reference spaces fail", async () => {
+        installXrGlobals({ grantedRefSpaces: [] });
+        const scene = createSceneContext(makeMockEngine());
+
+        await expect(enterXr(scene, { input: false })).rejects.toThrow(/not supported/);
         expect(currentSession.ended).toBe(true);
     });
 
@@ -397,18 +430,26 @@ describe("xr-session lifecycle", () => {
 
     it("rolls back created features and ends the session when one fails to create", async () => {
         installXrGlobals();
-        const scene = createSceneContext(makeMockEngine());
+        const engine = makeMockEngine();
+        const render = vi.fn();
+        engine._renderFn = render;
+        engine._animFrameId = 7;
+        const scene = createSceneContext(engine);
         const disposeOk = vi.fn();
+        const onEnd = vi.fn();
         const good = { create: () => ({ dispose: disposeOk }) };
         const bad = {
             create: () => {
                 throw new Error("feature boom");
             },
         };
-        await expect(enterXr(scene, { input: false, features: [good, bad] })).rejects.toThrow(/feature boom/);
+        await expect(enterXr(scene, { input: false, features: [good, bad], onEnd })).rejects.toThrow(/feature boom/);
         // The successfully-created feature was disposed and the session ended.
         expect(disposeOk).toHaveBeenCalledTimes(1);
         expect(currentSession.ended).toBe(true);
+        expect(onEnd).not.toHaveBeenCalled();
+        // Feature creation happens before XR stops the canvas loop.
+        expect(engine._renderFn).toBe(render);
     });
 
     it("creates an input manager by default and disposes it on exit", async () => {
@@ -431,5 +472,76 @@ describe("xr-session lifecycle", () => {
         expect(onFrame).toHaveBeenCalledOnce();
         await exitXr(ctx);
         expect(onEnd).toHaveBeenCalledOnce();
+    });
+
+    it("continues teardown and resumes the canvas when disposers throw", async () => {
+        installXrGlobals();
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const ctx = await enterXr(scene, {
+            input: false,
+            features: [
+                {
+                    create: () => ({
+                        dispose: () => {
+                            throw new Error("dispose boom");
+                        },
+                    }),
+                },
+            ],
+            onEnd: () => {
+                throw new Error("onEnd boom");
+            },
+        });
+
+        await exitXr(ctx);
+
+        expect(ctx._ended).toBe(true);
+        expect(engine._renderFn).not.toBeNull();
+        expect(log).toHaveBeenCalledTimes(2);
+        log.mockRestore();
+    });
+
+    it("flushes pending GPU retirements after XR submission", async () => {
+        installXrGlobals();
+        const engine = makeMockEngine();
+        const retired = vi.fn();
+        const scene = createSceneContext(engine);
+        const ctx = await enterXr(scene, { input: false });
+        engine._retirements = [retired];
+
+        currentSession.drive(16, makeFrame(makeViewerPose()));
+
+        expect(engine._retirements).toBeNull();
+        await vi.waitFor(() => expect(retired).toHaveBeenCalledOnce());
+        await exitXr(ctx);
+    });
+
+    it("ends XR on device loss and resumes only after device recovery", async () => {
+        installXrGlobals();
+        const engine = makeMockEngine();
+        engine._deviceLostRecovery = {
+            _forceNextLoss: false,
+            _requiredFeatures: [],
+            _armedDevice: engine._device,
+            _registrations: [{ _kind: "scene", _recover: vi.fn() }],
+            _samplerDescriptors: new WeakMap(),
+            _captureRefs: 0,
+            _meshCaptureRefs: 0,
+        };
+        const scene = createSceneContext(engine);
+        const ctx = await enterXr(scene, { input: false });
+        const xrRecovery = engine._deviceLostRecovery._registrations.find((registration) => registration._kind === "xr-session")!;
+
+        xrRecovery._onLost!({} as GPUDeviceLostInfo);
+        await Promise.resolve();
+
+        expect(currentSession.ended).toBe(true);
+        expect(ctx._ended).toBe(true);
+        expect(engine._renderFn).toBeNull();
+
+        void xrRecovery._recover(engine);
+        expect(engine._renderFn).not.toBeNull();
     });
 });

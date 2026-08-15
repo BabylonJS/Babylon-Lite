@@ -116,12 +116,12 @@ describe("loadHandMesh", () => {
         expect(loaded!.bones.get("thumb-tip" as XRHandJoint)!.name).toBe("thumb_tip_L");
     });
 
-    it("neutralises the loader's -1 X mirror and hides the mesh until first pose", async () => {
+    it("keeps the loader's LH conversion and hides the mesh until first pose", async () => {
         const root = fakeRoot();
         loadGltf.mockResolvedValue(fakeContainer(root, { tag: "skel" }));
         getBoneByName.mockImplementation((_s: unknown, name: string) => ({ name }));
         await loadHandMesh({} as EngineContext, {} as SceneContext, "right", OPTS);
-        expect(root.scaling.x).toBe(1); // un-mirrored
+        expect(root.scaling.x).toBe(-1);
         expect(enableMirroredMeshes).toHaveBeenCalled();
         expect(addToScene).toHaveBeenCalled();
         expect(root.visible).toBe(false);
@@ -176,7 +176,7 @@ describe("poseHandMesh", () => {
                 ? (space: { name: string }) => {
                       const p = poseFor(space.name);
                       if (!p) return undefined;
-                      return { transform: { position: { x: p.x, y: p.y, z: p.z }, orientation: { x: 0, y: 0, z: 0, w: 1 } } };
+                      return { transform: { position: { x: p.x, y: p.y, z: p.z }, orientation: { x: 0.1, y: 0.2, z: 0.3, w: 0.9 } } };
                   }
                 : undefined,
         } as unknown as XRFrame;
@@ -199,7 +199,7 @@ describe("poseHandMesh", () => {
 
         expect(ok).toBe(true);
         expect(setBonePoseDeferred).toHaveBeenCalledTimes(2);
-        expect(setBonePoseDeferred).toHaveBeenCalledWith(expect.anything(), { name: "wrist_R" }, 1, 2, 3, 0, 0, 0, 1);
+        expect(setBonePoseDeferred).toHaveBeenCalledWith(expect.anything(), { name: "wrist_R" }, 1, 2, -3, 0.1, 0.2, -0.3, -0.9);
         expect(bakeSkeleton).toHaveBeenCalledTimes(1); // single bake for the whole hand
         expect((l.root as unknown as { visible: boolean }).visible).toBe(true);
         expect(l.shown).toBe(true);
@@ -240,6 +240,24 @@ describe("poseHandMesh", () => {
         );
         expect(ok).toBe(false);
         expect(bakeSkeleton).not.toHaveBeenCalled();
+    });
+
+    it("hides a previously shown mesh when every joint loses tracking", () => {
+        const bones = new Map([["wrist", { name: "wrist_R" }]]);
+        const l = loaded(bones);
+        l.shown = true;
+        (l.root as unknown as { visible: boolean }).visible = true;
+
+        const ok = poseHandMesh(
+            l,
+            hand(["wrist"]),
+            frameWith(() => null),
+            {} as XRReferenceSpace
+        );
+
+        expect(ok).toBe(false);
+        expect((l.root as unknown as { visible: boolean }).visible).toBe(false);
+        expect(l.shown).toBe(false);
     });
 });
 

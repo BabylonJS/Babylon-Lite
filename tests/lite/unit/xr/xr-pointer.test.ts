@@ -304,4 +304,20 @@ describe("pointerSelection feature", () => {
         handle.dispose!();
         expect(disposeMeshGpu).toHaveBeenCalledTimes(2); // laser + cursor
     });
+
+    it("reads the current reference space after teleportation replaces it", () => {
+        const first = { id: "first" } as unknown as XRReferenceSpace;
+        const second = { id: "second" } as unknown as XRReferenceSpace;
+        let current = first;
+        const ctx = makeCtx(makeInput([makeSource(IDENTITY)]));
+        Object.defineProperty(ctx, "referenceSpace", { get: () => current });
+        const getViewerPose = vi.fn((_referenceSpace: XRReferenceSpace) => null);
+        const handle = pointerSelection().create(ctx);
+
+        handle.update!({ getViewerPose } as unknown as XRFrame, 0);
+        current = second;
+        handle.update!({ getViewerPose } as unknown as XRFrame, 16);
+
+        expect(getViewerPose.mock.calls.map((call) => call[0])).toEqual([first, second]);
+    });
 });

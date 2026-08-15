@@ -461,13 +461,12 @@ export function pointerSelection(options: XrPointerOptions = {}): XrFeatureSpec 
                 throw new Error("pointerSelection requires XR input tracking; do not pass input:false to enterXr.");
             }
             const input = ctx.input;
-            const referenceSpace = ctx.referenceSpace;
             const pointer = createXrPointer(ctx.engine, ctx.scene, options);
             return {
                 update(frame): void {
-                    const pose = frame.getViewerPose?.(referenceSpace);
+                    const pose = frame.getViewerPose?.(ctx.referenceSpace);
                     const p = pose?.transform.position;
-                    const eye: [number, number, number] | null = p ? [p.x, p.y, p.z] : null;
+                    const eye: [number, number, number] | null = p ? [p.x, p.y, -p.z] : null;
                     updateXrPointer(pointer, input, eye);
                 },
                 dispose(): void {

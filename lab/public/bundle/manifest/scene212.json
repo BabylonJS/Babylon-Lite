@@ -5,10 +5,10 @@
   "runtimeChunks": [
     "scene212-generate-mipmaps-DJ9VLPCd.js",
     "scene212-gltf-ext-dielectric-Bn9-i3OX.js",
-    "scene212-gltf-feature-registry-MkubG7pp.js",
+    "scene212-gltf-feature-registry-ArAMGUw8.js",
     "scene212-gltf-glb-parser-DtmgUuZr.js",
     "scene212-ibl-fragment-CeRrvT96.js",
-    "scene212-pbr-renderable-D4iH-PIg.js",
+    "scene212-pbr-renderable-CjLr2J95.js",
     "scene212-pbr-transmission-ext-4LCU1I8Y.js",
     "scene212-rgbd-decode-DHbANxB7.js",
     "scene212-scene-uniforms-FTYH6Ct0.js",
@@ -17,5 +17,5 @@
     "scene212-set-transmission-CRwLLXf5.js",
     "scene212.js"
   ],
-  "rawBytes": 106427
+  "rawBytes": 106421
 }

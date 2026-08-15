@@ -1,22 +1,22 @@
 {
-  "rawKB": 86.8,
-  "rawBytes": 88846,
-  "gzipKB": 36.6,
+  "rawKB": 85.8,
+  "rawBytes": 87890,
+  "gzipKB": 36.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene247-generate-mipmaps-Ca5oZGgo.js",
+    "scene247-generate-mipmaps-BKRN3HDl.js",
     "scene247-gltf-feature-extras-VHPteGay.js",
-    "scene247-gltf-feature-gpu-instancing-D9zYQl_3.js",
-    "scene247-gltf-feature-registry-CBSZ5ST3.js",
-    "scene247-gltf-json-asset-C8fo6_LA.js",
-    "scene247-gltf-multi-buffer-CyGqCcac.js",
+    "scene247-gltf-feature-gpu-instancing-C_7-vDBV.js",
+    "scene247-gltf-feature-registry-s7--moE9.js",
+    "scene247-gltf-json-asset-pFabVu1Q.js",
+    "scene247-gltf-multi-buffer-CKBftSiK.js",
     "scene247-gltf-share-Bvf9LX1A.js",
     "scene247-ibl-fragment-CeRrvT96.js",
-    "scene247-pbr-renderable-CNPyKamc.js",
-    "scene247-rgbd-decode-BGfzKZhs.js",
+    "scene247-pbr-renderable-DWWbL5N_.js",
+    "scene247-rgbd-decode-Dy3lvotO.js",
     "scene247-scene-uniforms-FTYH6Ct0.js",
     "scene247-thin-instance-fragment-CBn2miAC.js",
-    "scene247-thin-instance-gpu-B412onI_.js",
+    "scene247-thin-instance-gpu-DOUMnSIW.js",
     "scene247.js"
   ]
 }

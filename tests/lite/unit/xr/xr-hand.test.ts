@@ -114,7 +114,7 @@ describe("updateXrHandTracking", () => {
         expect(joints.size).toBe(JOINTS.length);
         const tip = joints.get("index-finger-tip")!;
         expect(tip.visible).toBe(true);
-        expect([tip.position.x, tip.position.y, tip.position.z]).toEqual([1, 2, 3]);
+        expect([tip.position.x, tip.position.y, tip.position.z]).toEqual([1, 2, -3]);
         // World diameter = radius * 2 (jointScale defaults to 1).
         expect(tip.scaling.x).toBeCloseTo(0.02, 6);
     });

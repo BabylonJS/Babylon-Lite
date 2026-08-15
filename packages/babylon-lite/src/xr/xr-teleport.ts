@@ -361,7 +361,7 @@ function viewForward(pose: XRViewerPose): [number, number, number] | null {
         return null;
     }
     const fx = -2 * (o.x * o.z + o.w * o.y);
-    const fz = -(1 - 2 * (o.x * o.x + o.y * o.y));
+    const fz = 1 - 2 * (o.x * o.x + o.y * o.y);
     const len = Math.hypot(fx, fz) || 1;
     return [fx / len, 0, fz / len];
 }
@@ -408,7 +408,25 @@ function traceArc(
             dy = cy - py,
             dz = cz - pz;
         const len = Math.hypot(dx, dy, dz) || 1e-6;
-        const info = pickWithRay(tp._scene, { origin: [px, py, pz], direction: [dx / len, dy / len, dz / len], length: len });
+        const ray = {
+            origin: [px, py, pz] as [number, number, number],
+            direction: [dx / len, dy / len, dz / len] as [number, number, number],
+            length: len,
+        };
+        let info = pickWithRay(tp._scene, ray);
+        let ignored: Mesh[] | null = null;
+        while (info.hit && info.pickedMesh) {
+            const mesh = info.pickedMesh as Mesh;
+            if (tp._isBlocker(mesh) || tp._isFloor(mesh, info.pickedNormalWorld as [number, number, number] | null) || opts.blockAllPickableMeshes) {
+                break;
+            }
+            if (ignored?.includes(mesh)) {
+                info.hit = false;
+                break;
+            }
+            (ignored ??= []).push(mesh);
+            info = pickWithRay(tp._scene, ray, { predicate: (candidate) => !ignored!.includes(candidate) });
+        }
         if (info.hit && info.pickedPoint) {
             const hp = info.pickedPoint as [number, number, number];
             for (let j = i; j < ARC_POINTS; j++) {
@@ -481,7 +499,8 @@ function orientIndicator(indicator: Mesh, at: [number, number, number], dir: [nu
  *  current position in `ref`) to floor point `to`, preserving eye height. Returns the
  *  new reference space. */
 function teleportRef(ref: XRReferenceSpace, from: [number, number, number], to: [number, number, number], floorY: number): XRReferenceSpace {
-    const t = { x: from[0] - to[0], y: floorY - to[1], z: from[2] - to[2] };
+    // `from`/`to` are in Lite's LH world; reference-space offsets are WebXR RH.
+    const t = { x: from[0] - to[0], y: floorY - to[1], z: -(from[2] - to[2]) };
     return ref.getOffsetReferenceSpace(new XRRigidTransform(t));
 }
 
@@ -493,8 +512,9 @@ function turnRef(ref: XRReferenceSpace, v: [number, number, number], angle: numb
     const rx = v[0] * c + v[2] * s;
     const rz = -v[0] * s + v[2] * c;
     const half = angle / 2;
-    const q = { x: 0, y: Math.sin(half), z: 0, w: Math.cos(half) };
-    return ref.getOffsetReferenceSpace(new XRRigidTransform({ x: v[0] - rx, y: 0, z: v[2] - rz }, q));
+    // Convert the LH yaw/translation back to the RH offset transform WebXR expects.
+    const q = { x: 0, y: -Math.sin(half), z: 0, w: Math.cos(half) };
+    return ref.getOffsetReferenceSpace(new XRRigidTransform({ x: v[0] - rx, y: 0, z: -(v[2] - rz) }, q));
 }
 
 /**
@@ -537,7 +557,7 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                     const pose = frame.getViewerPose(ref);
                     if (pose) {
                         const p = pose.transform.position;
-                        ref = turnRef(ref, [p.x, p.y, p.z], tx > 0 ? opts.rotationAngle : -opts.rotationAngle);
+                        ref = turnRef(ref, [p.x, p.y, -p.z], tx > 0 ? opts.rotationAngle : -opts.rotationAngle);
                     }
                     unit.turnLatched = true;
                 }
@@ -564,7 +584,7 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
 
                 const info = traceArc(tp, origin, dir, unit.arcPath);
                 const pose = frame.getViewerPose(ref);
-                const camPos: [number, number, number] = pose ? [pose.transform.position.x, pose.transform.position.y, pose.transform.position.z] : origin;
+                const camPos: [number, number, number] = pose ? [pose.transform.position.x, pose.transform.position.y, -pose.transform.position.z] : origin;
                 updateArcRibbon(tp, unit, camPos);
                 setSubtreeVisible(unit.arc, true);
 
@@ -627,7 +647,7 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                 if (pose) {
                     const p = pose.transform.position;
                     const target = unit.target;
-                    ref = teleportRef(ref, [p.x, p.y, p.z], target, tp._floorY);
+                    ref = teleportRef(ref, [p.x, p.y, -p.z], target, tp._floorY);
                     tp._floorY = target[1];
                     if (opts.rotateToDirection && Math.abs(unit.landingTurn) > 1e-4) {
                         ref = turnRef(ref, target, unit.landingTurn);

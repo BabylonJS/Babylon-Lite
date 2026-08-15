@@ -12,10 +12,8 @@
  *
  * Babylon's default rig is FLAT — all 25 joint bones parent directly to the skeleton
  * root — so each WebXR joint pose maps to exactly one bone's local transform with no
- * finger-chain accumulation. The mesh is loaded in its authored right-handed space and
- * the synthetic glTF root's mirror is neutralised (as `xr-controller-models`
- * does for controller models), so bones posed from right-handed WebXR joint poses render
- * un-flipped.
+ * finger-chain accumulation. The glTF loader and the joint-pose conversion both target
+ * Lite's left-handed world, so the model uses the same coordinate space as scene content.
  */
 
 import type { EngineContext } from "../engine/engine.js";
@@ -141,11 +139,8 @@ export async function loadHandMesh(engine: EngineContext, scene: SceneContext, h
         mesh.receiveShadows = false;
     }
 
-    // The glTF loader mirrors imported models with a `-1` X scale on the synthetic root
-    // (its right-handed→left-handed conversion). We pose the bones directly from WebXR's
-    // right-handed joint poses, so neutralise that mirror (as controllerModels does) and
-    // enable mirrored-mesh winding to keep front faces correct.
-    root.scaling.set(-root.scaling.x, root.scaling.y, root.scaling.z);
+    // The glTF root performs the model's right-handed→left-handed conversion. Keep it
+    // intact and enable the ordinary mirrored-mesh path used by all imported glTF content.
     const { enableMirroredMeshes } = await import("../mesh/enable-mirrored-meshes.js");
     await enableMirroredMeshes(scene);
 
@@ -168,6 +163,10 @@ export async function loadHandMesh(engine: EngineContext, scene: SceneContext, h
 export function poseHandMesh(loaded: LoadedHandMesh, hand: XRHand, frame: XRFrame, referenceSpace: XRReferenceSpace): boolean {
     const getJointPose = frame.getJointPose;
     if (!getJointPose) {
+        if (loaded.shown) {
+            setSubtreeVisible(loaded.root, false);
+            loaded.shown = false;
+        }
         return false;
     }
     let posedAny = false;
@@ -182,7 +181,7 @@ export function poseHandMesh(loaded: LoadedHandMesh, hand: XRHand, frame: XRFram
         }
         const p = pose.transform.position;
         const o = pose.transform.orientation;
-        setBonePoseDeferred(loaded.skeleton, bone, p.x, p.y, p.z, o.x, o.y, o.z, o.w);
+        setBonePoseDeferred(loaded.skeleton, bone, p.x, p.y, -p.z, o.x, o.y, -o.z, -o.w);
         posedAny = true;
     }
     if (posedAny) {
@@ -191,6 +190,9 @@ export function poseHandMesh(loaded: LoadedHandMesh, hand: XRHand, frame: XRFram
             setSubtreeVisible(loaded.root, true);
             loaded.shown = true;
         }
+    } else if (loaded.shown) {
+        setSubtreeVisible(loaded.root, false);
+        loaded.shown = false;
     }
     return posedAny;
 }

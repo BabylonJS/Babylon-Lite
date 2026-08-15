@@ -81,16 +81,6 @@ export function _installStdPrimitiveResolver(resolve: (meshFeatures: number, has
     _stdPrimitiveResolver = resolve;
 }
 
-/** Reverse-winding hook, installed only by the WebXR module — flips a pipeline's `frontFace`
- *  (ccw↔cw) for reverse-winding targets. Module-local with a single exported setter: non-XR bundles
- *  never call it, so the bundler proves this is always null and the guard below folds to the plain
- *  `primitive`, keeping every non-XR Standard scene byte-identical. */
-let _reverseWindingHook: ((primitive: GPUPrimitiveState) => GPUPrimitiveState) | null = null;
-/** @internal Install the reverse-winding frontFace-flip hook (called by the WebXR module). */
-export function _installStdReverseWindingHook(hook: (primitive: GPUPrimitiveState) => GPUPrimitiveState): void {
-    _reverseWindingHook = hook;
-}
-
 // ─── Composer Path (Phase 1) ────────────────────────────────────────
 // Converts feature bitmask → StandardTemplateConfig → ComposedShader.
 // This produces identical WGSL to the old string-builder path but via
@@ -310,20 +300,9 @@ export function getOrCreateStandardPipeline(
               }
             : {}),
         multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
-        // XR eye targets reverse apparent winding (see the hook declaration); when installed for a
-        // reverse-winding target the hook flips frontFace to keep front faces visible. In non-XR bundles the
-        // hook is provably null, so this ternary collapses to its else-branch — byte-identical to the plain
-        // resolver expression.
-        primitive:
-            _reverseWindingHook && sig._reverseWinding
-                ? _reverseWindingHook(
-                      _stdPrimitiveResolver
-                          ? _stdPrimitiveResolver(bindings._meshFeatures, (features & DOUBLE_SIDED) !== 0)
-                          : { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" }
-                  )
-                : _stdPrimitiveResolver
-                  ? _stdPrimitiveResolver(bindings._meshFeatures, (features & DOUBLE_SIDED) !== 0)
-                  : { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
+        primitive: _stdPrimitiveResolver
+            ? _stdPrimitiveResolver(bindings._meshFeatures, (features & DOUBLE_SIDED) !== 0)
+            : { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
     });
 
     bindings._pipelines.set(key, pipeline);

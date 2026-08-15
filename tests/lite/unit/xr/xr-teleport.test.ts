@@ -283,6 +283,23 @@ describe("updateXrTeleportation — blocker meshes", () => {
         expect(u.reticle.visible).toBe(false);
         expect(u.target).toBeNull();
     });
+
+    it("continues through a decorative mesh and lands on the floor behind it", () => {
+        const prop = { name: "prop", pickable: true } as unknown as Mesh;
+        const tp = make({ floorMeshes: [FLOOR] });
+        pickWithRay.mockImplementation((_scene, _ray, options?: { predicate?: (mesh: Mesh) => boolean }) => {
+            if (!options?.predicate || options.predicate(prop)) {
+                return { hit: true, pickedPoint: [0, 1, -2], pickedNormalWorld: [0, 0, 1], distance: 2, pickedMesh: prop };
+            }
+            return { hit: true, pickedPoint: [0, 0, -4], pickedNormalWorld: [0, 1, 0], distance: 4, pickedMesh: FLOOR };
+        });
+        const src = makeSource({ gamepad: { axes: [0, 0, 0, -1] } });
+
+        updateXrTeleportation(tp, makeInput([src]), makeFrame(), makeRef("r0"));
+
+        expect(unitFor(tp, src).target).toEqual([0, 0, -4]);
+        expect(unitFor(tp, src).reticle.visible).toBe(true);
+    });
 });
 
 describe("updateXrTeleportation — parabolic arc", () => {
@@ -342,7 +359,7 @@ describe("updateXrTeleportation — landing direction", () => {
         const out = updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), ref0);
         expect(out).not.toBe(ref0);
         // The final transform constructed is the yaw turn about world +Y.
-        expect((lastTransform!.orient as { y: number }).y).toBeCloseTo(Math.sin(Math.atan2(0.5, 1) / 2), 6);
+        expect((lastTransform!.orient as { y: number }).y).toBeCloseTo(-Math.sin(Math.atan2(0.5, 1) / 2), 6);
     });
 
     it("freezes the landing heading as the stick springs back to centre", () => {
@@ -404,7 +421,7 @@ describe("updateXrTeleportation — teleport on release", () => {
 
         expect((ref0 as unknown as { getOffsetReferenceSpace: ReturnType<typeof vi.fn> }).getOffsetReferenceSpace).toHaveBeenCalledTimes(1);
         // t = viewer(0,1.5,0) − target(2,0,-5), y uses floorY(0) − target.y(0) = 0.
-        expect(lastTransform!.pos).toEqual({ x: -2, y: 0, z: 5 });
+        expect(lastTransform!.pos).toEqual({ x: -2, y: 0, z: -5 });
         // Returned space is the new offset space, not the original.
         expect(out).not.toBe(ref0);
         // Standing floor height updated so the next teleport preserves eye height.
@@ -447,7 +464,7 @@ describe("updateXrTeleportation — snap turn", () => {
         expect((ref0 as unknown as { getOffsetReferenceSpace: ReturnType<typeof vi.fn> }).getOffsetReferenceSpace).toHaveBeenCalledTimes(1);
         expect(a).not.toBe(ref0);
         // Rotation quaternion about +Y for +90°: y = sin(45°).
-        expect((lastTransform!.orient as { y: number }).y).toBeCloseTo(Math.SQRT1_2, 6);
+        expect((lastTransform!.orient as { y: number }).y).toBeCloseTo(-Math.SQRT1_2, 6);
 
         // Held: still latched → no second turn (drive the returned space, which is fresh).
         updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0), a);

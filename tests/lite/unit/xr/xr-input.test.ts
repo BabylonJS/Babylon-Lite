@@ -152,9 +152,9 @@ describe("xr-input manager", () => {
         updateXrInputPoses(mgr, frame, {} as XRReferenceSpace);
         const w = mgr.inputSources[0]!;
         expect(w.targetRayTracked).toBe(true);
-        expect(Array.from(w.targetRayMatrix)).toEqual(Array.from(rayM));
+        expect(Array.from(w.targetRayMatrix)).toEqual([2, 2, -2, 2, 2, 2, -2, 2, -2, -2, 2, -2, 2, 2, -2, 2]);
         expect(w.gripTracked).toBe(true);
-        expect(Array.from(w.gripMatrix)).toEqual(Array.from(gripM));
+        expect(Array.from(w.gripMatrix)).toEqual([7, 7, -7, 7, 7, 7, -7, 7, -7, -7, 7, -7, 7, 7, -7, 7]);
     });
 
     it("marks poses untracked when the frame returns no pose", () => {

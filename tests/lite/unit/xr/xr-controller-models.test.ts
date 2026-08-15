@@ -33,8 +33,18 @@ vi.mock("../../../../packages/babylon-lite/src/mesh/mesh-factories", () => ({ cr
 vi.mock("../../../../packages/babylon-lite/src/material/standard/create-standard-material", () => ({
     createStandardMaterial: vi.fn(() => ({ diffuseColor: [0, 0, 0] })),
 }));
-vi.mock("../../../../packages/babylon-lite/src/scene/scene-core", () => ({ addToScene: vi.fn() }));
-vi.mock("../../../../packages/babylon-lite/src/scene/scene-remove", () => ({ removeFromScene: vi.fn() }));
+const { addToScene, removeFromScene, loadMotionController, enableMirroredMeshes, getContainerMeshes } = vi.hoisted(() => ({
+    addToScene: vi.fn(),
+    removeFromScene: vi.fn(),
+    loadMotionController: vi.fn(),
+    enableMirroredMeshes: vi.fn(),
+    getContainerMeshes: vi.fn(() => []),
+}));
+vi.mock("../../../../packages/babylon-lite/src/scene/scene-core", () => ({ addToScene }));
+vi.mock("../../../../packages/babylon-lite/src/scene/scene-remove", () => ({ removeFromScene }));
+vi.mock("../../../../packages/babylon-lite/src/xr/xr-motion-controller", () => ({ loadMotionController, updateMotionController: vi.fn() }));
+vi.mock("../../../../packages/babylon-lite/src/mesh/enable-mirrored-meshes", () => ({ enableMirroredMeshes }));
+vi.mock("../../../../packages/babylon-lite/src/asset-container", () => ({ getContainerMeshes }));
 const { disposeMeshGpu } = vi.hoisted(() => ({ disposeMeshGpu: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/mesh/mesh-dispose", () => ({ disposeMeshGpu }));
 
@@ -126,6 +136,31 @@ describe("controller models", () => {
         updateXrControllerModels(models, makeInput([makeSource(gripPose(0, 0, 0))]));
         disposeXrControllerModels(models);
         expect(models._units.size).toBe(0);
+    });
+
+    it("does not attach a profile model when the source retires during the final import", async () => {
+        addToScene.mockClear();
+        removeFromScene.mockClear();
+        loadMotionController.mockReset();
+        enableMirroredMeshes.mockReset();
+        const root = fakeMesh();
+        root.scaling.x = -1;
+        const container = { tag: "controller-model" };
+        loadMotionController.mockResolvedValue({ root, container });
+        let finishMirrored!: () => void;
+        enableMirroredMeshes.mockReturnValue(new Promise<void>((resolve) => (finishMirrored = resolve)));
+        const models = createXrControllerModels(engine, scene, { profiles: true });
+        const src = makeSource(gripPose(0, 0, 0));
+
+        updateXrControllerModels(models, makeInput([src]));
+        await vi.waitFor(() => expect(models._mod).not.toBeNull());
+        updateXrControllerModels(models, makeInput([src]));
+        await vi.waitFor(() => expect(enableMirroredMeshes).toHaveBeenCalled());
+        updateXrControllerModels(models, makeInput([]));
+        finishMirrored();
+        await vi.waitFor(() => expect(removeFromScene).toHaveBeenCalledWith(scene, container));
+
+        expect(addToScene).not.toHaveBeenCalledWith(scene, container);
     });
 });
 

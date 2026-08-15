@@ -3,6 +3,7 @@ import { _cameraChangeKey } from "../camera/camera.js";
 import type { Mat4, Mat4Storage } from "../math/types.js";
 import type { XrEye } from "./xr-support.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
+import { copyXrProjectionToLeftHanded, copyXrRigidMatrixToLeftHanded } from "./xr-coordinates.js";
 
 /**
  * XrCamera — a {@link Camera} whose view and projection matrices come from an
@@ -25,21 +26,11 @@ import { allocateMat4 } from "../math/_matrix-allocator.js";
  *    inject it straight into `_projCache` and set `_projVer`/`_projAspect` so the
  *    cache returns it verbatim for the exact aspect the render task will request.
  *
- * **Handedness + depth.** WebXR reports poses and projections in a *right-handed*
- * frame; Babylon Lite's rasterizer is *left-handed* with a *reverse-Z*
- * ([near→1, far→0]) depth buffer. We feed the pose and projection through
- * **verbatim** (no handedness toggle) — this keeps the viewer pose, eye positions
- * and input/controller poses (also right-handed) mutually consistent, so the ray
- * and scene content land where WebXR places them. The only side effect of the RH
- * matrices in an LH rasterizer is inverted apparent triangle winding; that is
- * corrected once, at the target level, by flipping the front-face winding on the XR
- * eye targets (`RenderTargetSignature._reverseWinding`, set in `xr-session`, flips the
- * forward pipelines' `frontFace` ccw→cw — composing with any per-mesh mirrored winding),
- * so front faces stay visible and double-sided shading normals stay correct without
- * moving any geometry.
- *  - **Pose → world:** copied straight from `XRView.transform.matrix`. It is a
- *    proper rigid transform, so `getViewMatrix`'s transpose-inverse stays exact.
- *  - **Projection:** copied straight from `XRView.projectionMatrix`.
+ * **Handedness + depth.** WebXR reports right-handed poses/projections while Babylon
+ * Lite renders a left-handed world with a reverse-Z ([near→1, far→0]) depth buffer.
+ * The eye pose is converted with `H·T·H` and the projection with `P·H`, where
+ * `H = diag(1,1,-1,1)`. Input and hand poses use the same boundary conversion, so
+ * every material pipeline sees an ordinary left-handed scene with normal winding.
  *  - **Reverse-Z:** the WebGPU binding's `XRView.projectionMatrix` targets `z ∈ [0,1]`
  *    (near→0, far→1). Babylon Lite's pipeline expects reverse-Z (near→1, far→0), so we
  *    remap `row2 ← row3 − row2`. This is handedness-independent and specific to this engine.
@@ -95,13 +86,10 @@ export function createXrCamera(eye: XrEye): XrCamera {
  *   returns the XR projection verbatim instead of recomputing a symmetric one.
  */
 export function updateXrCameraForView(cam: XrCamera, view: XRView, rtWidth: number, rtHeight: number, viewport: NormalizedViewport): void {
-    // Eye pose (view→world) → world matrix, copied verbatim (right-handed). Bumping
-    // the version invalidates the view / view-projection caches so they recompute.
+    // Convert the right-handed eye pose into Lite's left-handed world.
     const m = view.transform.matrix;
     const w = cam._world;
-    for (let i = 0; i < 16; i++) {
-        w[i] = m[i]!;
-    }
+    copyXrRigidMatrixToLeftHanded(w, m);
     // Monotonic bump (never truncated to int32: `worldMatrixVersion` must never
     // decrease per the camera.ts contract; a plain +1 stays exact up to 2^53).
     cam._wmv = cam._wmv + 1;
@@ -111,12 +99,10 @@ export function updateXrCameraForView(cam: XrCamera, view: XRView, rtWidth: numb
     const aspect = (rtWidth / rtHeight) * (viewport.width / viewport.height);
     const p = cam._projCache;
     const pm = view.projectionMatrix;
-    for (let i = 0; i < 16; i++) {
-        p[i] = pm[i]!;
-    }
+    copyXrProjectionToLeftHanded(p, pm);
     // WebGPU-binding projection is z ∈ [0,1] (near→0, far→1); Babylon Lite is reverse-Z
     // (near→1, far→0). Remap row2 ← row3 − row2 so depth matches the reverse-Z pipeline.
-    // Handedness-independent; winding is handled by reverse culling on the XR eye target.
+    // Handedness-independent after the projection's boundary conversion above.
     p[2] = p[3]! - p[2]!;
     p[6] = p[7]! - p[6]!;
     p[10] = p[11]! - p[10]!;

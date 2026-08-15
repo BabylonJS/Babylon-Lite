@@ -38,10 +38,13 @@ function rhZeroToOnePerspective(fovy: number, aspect: number, near: number, far:
     return p;
 }
 
-/** Replicates xr-camera's projection conversion (reverse-Z remap only; the RH
- *  matrix is otherwise kept verbatim, with winding handled by reverse culling). */
+/** Replicates xr-camera's RH→LH projection conversion followed by reverse-Z. */
 function convertProjection(pm: Float32Array): Float32Array {
     const p = new Float32Array(pm);
+    p[8] = -p[8]!;
+    p[9] = -p[9]!;
+    p[10] = -p[10]!;
+    p[11] = -p[11]!;
     p[2] = p[3]! - p[2]!;
     p[6] = p[7]! - p[6]!;
     p[10] = p[11]! - p[10]!;
@@ -84,17 +87,16 @@ describe("xr-camera matrix injection", () => {
         updateXrCameraForView(cam, makeView("left", pose, fakeProjection()), rtW, rtH, viewport);
 
         const v = getViewMatrix(cam) as unknown as Mat4Storage;
-        // Pose is used verbatim (right-handed, no toggle); the view matrix is its
-        // inverse, so a +5 world Z translation becomes −5 in view space.
+        // RH pose z=+5 converts to LH world z=-5, whose inverse is view z=+5.
         expect(v[12]).toBeCloseTo(-2, 6);
         expect(v[13]).toBeCloseTo(3, 6);
-        expect(v[14]).toBeCloseTo(-5, 6);
+        expect(v[14]).toBeCloseTo(5, 6);
         expect(v[0]).toBeCloseTo(1, 6);
         expect(v[5]).toBeCloseTo(1, 6);
         expect(v[10]).toBeCloseTo(1, 6);
     });
 
-    it("stores the right-handed WebXR pose verbatim as a rigid transform", () => {
+    it("converts the right-handed WebXR pose to a left-handed rigid transform", () => {
         // Pose: 90° rotation about Y (right-handed) with a translation.
         const c = Math.cos(Math.PI / 2);
         const s = Math.sin(Math.PI / 2);
@@ -116,8 +118,9 @@ describe("xr-camera matrix injection", () => {
         // transpose-inverse remains exact.
         const det = w[0]! * (w[5]! * w[10]! - w[6]! * w[9]!) - w[4]! * (w[1]! * w[10]! - w[2]! * w[9]!) + w[8]! * (w[1]! * w[6]! - w[2]! * w[5]!);
         expect(det).toBeCloseTo(1, 5);
-        // Pose is copied verbatim (no handedness toggle): Z translation preserved.
-        expect(w[14]).toBeCloseTo(3, 6);
+        expect(w[2]).toBeCloseTo(1, 6);
+        expect(w[8]).toBeCloseTo(-1, 6);
+        expect(w[14]).toBeCloseTo(-3, 6);
     });
 
     it("injects the per-eye projection with reverse-Z conversion", () => {
@@ -132,10 +135,7 @@ describe("xr-camera matrix injection", () => {
         }
     });
 
-    it("remaps a right-handed [0,1] WebXR perspective to reverse-Z while keeping it right-handed", () => {
-        // The WebGPU-binding projection (RH, z∈[0,1]) is kept right-handed but its depth
-        // is remapped to Babylon Lite's reverse-Z (near→1, far→0). Winding is corrected by
-        // reverse culling on the XR eye target, not by converting the projection to LH.
+    it("remaps a right-handed [0,1] WebXR perspective to left-handed reverse-Z", () => {
         const fovy = 1.2;
         const near = 0.1;
         const far = 100;
@@ -149,12 +149,12 @@ describe("xr-camera matrix injection", () => {
         // X/Y scale untouched — still the WebXR values.
         expect(p[0]).toBeCloseTo(rhProj[0]!, 6);
         expect(p[5]).toBeCloseTo(rhProj[5]!, 6);
-        // Right-handed w = −z_eye preserved verbatim.
-        expect(p[11]).toBeCloseTo(-1, 6);
-        // Reverse-Z: eye-space near maps to NDC 1, far maps to NDC 0.
+        // Left-handed w = +z_eye after the handedness conversion.
+        expect(p[11]).toBeCloseTo(1, 6);
+        // Reverse-Z: positive LH eye-space near maps to NDC 1, far maps to NDC 0.
         const projectZ = (zEye: number): number => (p[10]! * zEye + p[14]!) / (p[11]! * zEye + p[15]!);
-        expect(projectZ(-near)).toBeCloseTo(1, 5);
-        expect(projectZ(-far)).toBeCloseTo(0, 5);
+        expect(projectZ(near)).toBeCloseTo(1, 5);
+        expect(projectZ(far)).toBeCloseTo(0, 5);
     });
 
     it("composes view-projection from the injected caches (proj × view)", () => {

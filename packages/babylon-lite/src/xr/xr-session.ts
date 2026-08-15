@@ -1,6 +1,9 @@
 import type { SceneContext } from "../scene/scene-core.js";
 import type { EngineContext } from "../engine/engine.js";
 import { startEngine, stopEngine } from "../engine/engine.js";
+import { flushGpuResourceRetirements } from "../engine/gpu-resource-retirement.js";
+import { _enableDeviceLostRecovery } from "../engine/device-lost-recovery.js";
+import type { DeviceLostRecoveryHandle } from "../engine/device-lost-recovery-types.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { createRenderTarget } from "../engine/render-target.js";
 import type { RenderTask } from "../frame-graph/render-task.js";
@@ -13,7 +16,6 @@ import { createXrInputManager, disposeXrInputManager, updateXrInputPoses } from 
 import type { XrFeatureSpec, XrFeatureHandle } from "./xr-feature.js";
 import type { XrSessionMode, XrReferenceSpaceType } from "./xr-support.js";
 import { isWebGpuXrSupported, isWebXrPresent } from "./xr-support.js";
-import { enableXrReverseWinding } from "./xr-winding.js";
 import type { XrGpuBinding } from "./xr-webgpu-binding.js";
 
 /** Options for {@link enterXr}. All fields optional; sensible immersive-VR defaults. */
@@ -94,6 +96,10 @@ export interface XrSessionContext {
     _lastTime: number;
     /** @internal */
     _ended: boolean;
+    /** @internal Whether XR stopped the canvas loop and cleanup must resume it. */
+    _canvasStopped: boolean;
+    /** @internal Active-device recovery integration, when recovery was already enabled. */
+    _recovery: DeviceLostRecoveryHandle | null;
     /** @internal Saved scene clear color, restored on end (AR forces alpha 0 for passthrough). */
     _savedClear?: { r: number; g: number; b: number; a: number };
 }
@@ -125,10 +131,6 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
     const engine = scene.surface.engine;
     const device = engine._device;
 
-    // Eye targets flip forward-pipeline frontFace to correct the RH-view/LH-raster handedness flip.
-    // Install the winding hooks now (idempotent); only reachable from enterXr, so non-XR bundles omit it.
-    enableXrReverseWinding();
-
     const refType = options.referenceSpaceType ?? "local-floor";
     const requiredFeatures = ["webgpu", ...(options.requiredFeatures ?? [])];
     const optionalFeatures = [...(options.optionalFeatures ?? [])];
@@ -153,93 +155,108 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
         optionalFeatures,
     });
 
-    let binding: XrGpuBinding;
+    let ctx: XrSessionContext | null = null;
     try {
-        binding = new XRGPUBinding(session, device);
-    } catch (e) {
-        // The draft binding throws InvalidStateError when the device's adapter was not
-        // requested with `xrCompatible: true`. WebGPU can't upgrade an existing device,
-        // so `enableXrCompatibleAdapter()` must have been called before `createEngine`.
-        await session.end().catch(() => {});
-        const detail = e instanceof Error ? e.message : String(e);
-        throw new Error(`Failed to construct XRGPUBinding: ${detail}. Call enableXrCompatibleAdapter() before createEngine so its GPU adapter is XR-compatible.`, { cause: e });
-    }
-    const colorFormat = options.colorFormat ?? binding.getPreferredColorFormat();
-    const depthFormat = options.depthStencilFormat === undefined ? "depth24plus" : options.depthStencilFormat;
-    const layer = binding.createProjectionLayer({
-        colorFormat,
-        depthStencilFormat: depthFormat ?? undefined,
-    });
-    await session.updateRenderState({
-        layers: [layer],
-        depthNear: options.depthNear ?? 0.02,
-        ...(options.depthFar !== undefined ? { depthFar: options.depthFar } : {}),
-    });
+        let binding: XrGpuBinding;
+        try {
+            binding = new XRGPUBinding(session, device);
+        } catch (e) {
+            // The draft binding throws InvalidStateError when the device's adapter was not
+            // requested with `xrCompatible: true`. WebGPU can't upgrade an existing device,
+            // so `enableXrCompatibleAdapter()` must have been called before `createEngine`.
+            const detail = e instanceof Error ? e.message : String(e);
+            throw new Error(`Failed to construct XRGPUBinding: ${detail}. Call enableXrCompatibleAdapter() before createEngine so its GPU adapter is XR-compatible.`, { cause: e });
+        }
+        const colorFormat = options.colorFormat ?? binding.getPreferredColorFormat();
+        const depthFormat = options.depthStencilFormat === undefined ? "depth24plus" : options.depthStencilFormat;
+        const layer = binding.createProjectionLayer({
+            colorFormat,
+            depthStencilFormat: depthFormat ?? undefined,
+        });
+        await session.updateRenderState({
+            layers: [layer],
+            depthNear: options.depthNear ?? 0.02,
+            ...(options.depthFar !== undefined ? { depthFar: options.depthFar } : {}),
+        });
 
-    let referenceSpace: XRReferenceSpace;
-    try {
-        referenceSpace = await session.requestReferenceSpace(refType);
-    } catch {
-        referenceSpace = await session.requestReferenceSpace("local");
-    }
+        let referenceSpace: XRReferenceSpace;
+        try {
+            referenceSpace = await session.requestReferenceSpace(refType);
+        } catch (e) {
+            if (refType === "local") {
+                throw e;
+            }
+            referenceSpace = await session.requestReferenceSpace("local");
+        }
 
-    // Take over the render loop: the canvas loop must not run while in XR.
-    stopEngine(engine);
+        const input = options.input === false ? null : createXrInputManager(session, options.input ?? {});
+        const activeCtx: XrSessionContext = {
+            mode,
+            session,
+            binding,
+            layer,
+            get referenceSpace() {
+                return activeCtx._referenceSpace;
+            },
+            scene,
+            engine,
+            colorFormat,
+            depthFormat,
+            get cameras() {
+                return activeCtx._units.map((u) => u.camera);
+            },
+            input,
+            _features: [],
+            _referenceSpace: referenceSpace,
+            _units: [],
+            _options: options,
+            _rafId: 0,
+            _lastTime: 0,
+            _ended: false,
+            _canvasStopped: false,
+            _recovery: null,
+        };
+        ctx = activeCtx;
 
-    const input = options.input === false ? null : createXrInputManager(session, options.input ?? {});
+        // AR passthrough: clear with alpha 0 so the real world shows through. The canvas
+        // is not rendering while in XR, so mutating the scene clear color is invisible
+        // elsewhere; the original is restored on end.
+        if (mode === "immersive-ar") {
+            const c = scene.clearColor;
+            activeCtx._savedClear = { r: c.r, g: c.g, b: c.b, a: c.a };
+            c.a = 0;
+        }
 
-    const ctx: XrSessionContext = {
-        mode,
-        session,
-        binding,
-        layer,
-        get referenceSpace() {
-            return ctx._referenceSpace;
-        },
-        scene,
-        engine,
-        colorFormat,
-        depthFormat,
-        get cameras() {
-            return ctx._units.map((u) => u.camera);
-        },
-        input,
-        _features: [],
-        _referenceSpace: referenceSpace,
-        _units: [],
-        _options: options,
-        _rafId: 0,
-        _lastTime: 0,
-        _ended: false,
-    };
-
-    // AR passthrough: clear with alpha 0 so the real world shows through. The canvas
-    // is not rendering while in XR, so mutating the scene clear color is invisible
-    // elsewhere; the original is restored on end.
-    if (mode === "immersive-ar") {
-        const c = scene.clearColor;
-        ctx._savedClear = { r: c.r, g: c.g, b: c.b, a: c.a };
-        c.a = 0;
-    }
-
-    // Instantiate features now that the session, reference space, and input exist.
-    // On failure, roll back anything already created and end the session cleanly.
-    try {
+        // Instantiate features now that the session, reference space, and input exist.
         for (const spec of options.features ?? []) {
-            ctx._features.push(spec.create(ctx));
+            activeCtx._features.push(spec.create(activeCtx));
         }
-    } catch (e) {
-        for (const f of ctx._features) {
-            f.dispose?.();
-        }
-        ctx._features.length = 0;
-        await session.end().catch(() => {});
-        throw e instanceof Error ? e : new Error(String(e));
-    }
 
-    session.addEventListener("end", () => cleanup(ctx), { once: true });
-    ctx._rafId = session.requestAnimationFrame((time, frame) => onXrFrame(ctx, time, frame));
-    return ctx;
+        session.addEventListener("end", () => cleanup(activeCtx), { once: true });
+        enableXrDeviceLostRecovery(activeCtx);
+
+        // Take over only after initialization is complete, minimizing the period in which
+        // a failure could leave the canvas loop stopped.
+        stopEngine(engine);
+        activeCtx._canvasStopped = true;
+        activeCtx._rafId = session.requestAnimationFrame((time, frame) => onXrFrame(activeCtx, time, frame));
+        return activeCtx;
+    } catch (error) {
+        const resumeCanvas = ctx?._canvasStopped ?? false;
+        if (ctx) {
+            cleanup(ctx, false, false);
+        }
+        let failure = error;
+        try {
+            await session.end();
+        } catch (endError) {
+            failure = new AggregateError([error, endError], "WebXR initialization failed and the session could not be ended.", { cause: endError });
+        }
+        if (resumeCanvas) {
+            void startEngine(engine).catch((restartError: unknown) => reportCleanupError("canvas restart after initialization failure", restartError));
+        }
+        throw failure;
+    }
 }
 
 /** End an active XR session. Safe to call repeatedly; resolves once the session has ended. */
@@ -262,11 +279,6 @@ function ensureUnit(ctx: XrSessionContext, index: number, eye: XREye): XrEyeUnit
         dFormat: ctx.depthFormat ?? undefined,
         samples: 1,
         size: { width: layer.textureWidth, height: layer.textureHeight },
-        // XR view/projection are consumed verbatim in their native right-handed form;
-        // the handedness flip vs Lite's left-handed rasterizer inverts apparent winding,
-        // so flip the forward pipelines' frontFace (ccw→cw) to keep the scene's front
-        // faces visible — and double-sided normals correct — in the headset.
-        _reverseWinding: true,
     });
     // Eager: textures are owned by the XR compositor and supplied per frame, so the
     // frame graph must neither allocate nor destroy them (disposeRenderTarget no-ops).
@@ -355,30 +367,52 @@ function onXrFrame(ctx: XrSessionContext, time: DOMHighResTimeStamp, frame: XRFr
     }
 
     eng._device.queue.submit([encoder.finish()]);
+    flushGpuResourceRetirements(eng);
     eng._currentEncoder = prevEncoder;
     eng._currentDelta = prevDelta;
 }
 
-/** @internal Tear down a session: stop the loop, dispose per-eye tasks + input, restore state, resume canvas. */
-function cleanup(ctx: XrSessionContext): void {
+/** @internal Report a teardown failure without preventing the remaining cleanup. */
+function reportCleanupError(stage: string, error: unknown): void {
+    console.error(`Babylon Lite WebXR ${stage} failed:`, error);
+}
+
+/** @internal Tear down a session, optionally resuming the canvas loop. */
+function cleanup(ctx: XrSessionContext, resumeCanvas = true, notifyEnd = true): void {
     if (ctx._ended) {
         return;
     }
     ctx._ended = true;
-    if (ctx._rafId) {
-        ctx.session.cancelAnimationFrame(ctx._rafId);
-        ctx._rafId = 0;
-    }
+
+    const attempt = (stage: string, action: () => void): void => {
+        try {
+            action();
+        } catch (error) {
+            reportCleanupError(stage, error);
+        }
+    };
+
+    attempt("frame cancellation", () => {
+        if (ctx._rafId) {
+            ctx.session.cancelAnimationFrame(ctx._rafId);
+            ctx._rafId = 0;
+        }
+    });
+    attempt("recovery detachment", () => {
+        ctx._recovery?.disable();
+        ctx._recovery = null;
+    });
+
     // Dispose features before input/tasks — they may reference the input manager or scene.
-    for (const f of ctx._features) {
-        f.dispose?.();
+    for (let i = ctx._features.length - 1; i >= 0; i--) {
+        attempt("feature disposal", () => ctx._features[i]!.dispose?.());
     }
     ctx._features.length = 0;
     if (ctx.input) {
-        disposeXrInputManager(ctx.input);
+        attempt("input disposal", () => disposeXrInputManager(ctx.input!));
     }
     for (const u of ctx._units) {
-        u.task.dispose();
+        attempt("render-task disposal", () => u.task.dispose());
     }
     ctx._units.length = 0;
     if (ctx._savedClear) {
@@ -389,7 +423,35 @@ function cleanup(ctx: XrSessionContext): void {
         c.a = ctx._savedClear.a;
         ctx._savedClear = undefined;
     }
-    ctx._options.onEnd?.();
-    // Resume the normal canvas render loop.
-    void startEngine(ctx.engine);
+    if (notifyEnd) {
+        attempt("onEnd callback", () => ctx._options.onEnd?.());
+    }
+
+    const shouldResume = resumeCanvas && ctx._canvasStopped;
+    ctx._canvasStopped = false;
+    if (shouldResume) {
+        void startEngine(ctx.engine).catch((error: unknown) => reportCleanupError("canvas restart", error));
+    }
+}
+
+/** @internal End XR before device replacement and resume the canvas after recovery. */
+function enableXrDeviceLostRecovery(ctx: XrSessionContext): void {
+    if (!ctx.engine._deviceLostRecovery?._registrations.length) {
+        return;
+    }
+    let resumeAfterRecovery = false;
+    ctx._recovery = _enableDeviceLostRecovery(ctx.engine, {
+        _kind: "xr-session",
+        _recoverOrder: Number.MAX_SAFE_INTEGER,
+        _onLost(): void {
+            resumeAfterRecovery = ctx._canvasStopped;
+            cleanup(ctx, false);
+            void ctx.session.end().catch((error: unknown) => reportCleanupError("session end after device loss", error));
+        },
+        async _recover(): Promise<void> {
+            if (resumeAfterRecovery) {
+                await startEngine(ctx.engine);
+            }
+        },
+    });
 }
