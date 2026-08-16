@@ -730,7 +730,7 @@ export { buildNodeParticleSetWithFlowMaps } from "./particle/node/npe-flow-map.j
 export { buildNodeParticleSetWithNoiseTextures } from "./particle/node/npe-noise.js";
 export { buildNodeParticleSetWithTextureUpdates } from "./particle/node/npe-texture-updates.js";
 export type { ParticleSystem } from "./particle/particle-system.js";
-export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
+export { animateParticleSystem, createParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
 export { registerNodeParticleSet } from "./particle/particle-scene.js";
 export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
