@@ -199,8 +199,8 @@ describe("orthographic projection", () => {
  * Regression coverage for the steady-state upload path.
  *
  * Per-frame consumers do not call `getProjectionMatrix` unconditionally — the forward pass's
- * scene UBO writer gates on `[camera, fog, cameraChangeKey, aspect, envRotationY, exposure,
- * contrast, envTextures]` and returns early when they all match the previous frame. The
+ * scene UBO writer gates on `[camera, fog, cameraChangeKey, aspect, exposure, contrast,
+ * envTextures]` and returns early when they all match the previous frame. The
  * camera transform does not move when a view volume changes, so clearing `_projVer` /
  * `_vpVer` alone would leave the GPU rendering the stale view-projection forever.
  *

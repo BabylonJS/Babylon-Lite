@@ -484,11 +484,44 @@ Per-light shadow info UBOs, shadow textures, and shadow samplers.
 
 The builder stores the returned `rebuildSingle` closure on `pbrGroupBuilder._rebuildSingle`. The closure is captured inside `pbr-renderable.ts`, reuses the initial per-scene caches, and rebuilds one mesh for material swaps, `rebuildMaterial()`, and per-pass `RenderTask.addMesh(mesh, { material })` overrides.
 
+## Visible Environment Skybox Opt-Ins
+
+Visible HDR and DDS skyboxes each have one canonical renderable builder:
+
+- `buildHdrSkyboxRenderable`
+- `buildDdsSkyboxRenderable`
+
+The builders patch their fragment shader from a fixed core when an optional environment feature is enabled. They never select or import alternate renderable builders.
+
+Two public scene setters provide independent opt-ins:
+
+```ts
+setEnvironmentBlur(scene: SceneContext, blur: number): void;
+setEnvironmentRotation(scene: SceneContext, rotation: number): void;
+```
+
+Each setter stores its value and one feature-owned shader patch on the scene. The canonical builders explicitly apply the rotation patch and then the blur patch when present. Configuring one scene cannot activate the feature for another scene.
+
+This deliberately does not use the generic PBR/Standard extension registry or a shared environment composer. PBR has many independently evolving material and glTF extensions, which justifies generic registration, ordering, and composition. The visible environment currently has only two closed, first-class shader controls, so explicit optional patches keep the ownership and retained bytes obvious. A generic extension model should be introduced only if the environment develops a similarly open-ended set of structural shader features.
+
+The core skybox shader has two composition slots:
+
+| Slot      | Default                   | Optional contribution                                                                                     |
+| --------- | ------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Direction | Normalized cube direction | `setEnvironmentRotation` rotates the sampling direction around Y using `scene.envRotationY`               |
+| LOD       | Mip level `0.0`           | `setEnvironmentBlur` computes a clamped fractional cubemap LOD from blur, cubemap size, scale, and offset |
+
+Blur and rotation patches are separate modules. Importing one setter does not retain the other patch. The canonical skybox builders import neither patch; they only invoke the two optional scene fields. Consumers that do not call either setter retain neither feature implementation.
+
+The first call to either setter must occur before the visible skybox is built so its shader variant includes the corresponding patch. Subsequent calls update scene-uniform data and take effect without rebuilding the skybox.
+
 ## Internal Architecture
 
 ### Scene Uniform Buffer Layout (Group 0, Binding 0)
 
 PBR uses the canonical `SceneUniforms` shared with Standard/material-independent passes. The struct is fixed-size (`SCENE_UBO_BYTES = 352`) and is declared in `packages/babylon-lite/shaders/scene-uniforms.wgsl`. It contains view/projection matrices, camera position, environment rotation, SH irradiance, image-processing fields, and fog fields.
+
+The environment rotation slot remains in this fixed layout for alignment and shader compatibility, but the base scene packer and cache key do not read it. Environment loaders and `setEnvironmentRotation` register the opt-in environment contributor that writes rotation and SH data; dynamic setter calls explicitly invalidate task-local scene-UBO caches.
 
 Light data is **not** stored in `SceneUniforms`. PBR direct lighting reads the scene-owned `LightsUniforms` UBO at group 0 binding 1 when `_hasSingleLight` or `_hasMultiLight` is enabled.
 

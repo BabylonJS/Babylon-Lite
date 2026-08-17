@@ -2,7 +2,20 @@
  *  Triggered when the root extension carries variant definitions. Per-asset
  *  hook builds variant material data shared with the material-ext driver. */
 
+import type { AssetContainer } from "../asset-container.js";
+import { collectPbrBoundTextures, type PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import { acquireTexture, releaseTexture } from "../resource/gpu-pool.js";
 import type { GltfFeature } from "./gltf-feature.js";
+import type { MaterialVariantData } from "./material-variants.js";
+
+function createVariantTextureSetup(data: MaterialVariantData): NonNullable<AssetContainer["_sceneSetup"]> {
+    const textures = [data.originals, ...Object.values(data.variants)].flat().flatMap(({ material }) => collectPbrBoundTextures(material as PbrMaterialProps));
+
+    return () => {
+        textures.forEach(acquireTexture);
+        return () => textures.forEach(releaseTexture);
+    };
+}
 
 const feature: GltfFeature = {
     id: "KHR_materials_variants",
@@ -23,7 +36,7 @@ const feature: GltfFeature = {
             ctx._runMatExts!,
             ctx._wrapTex
         );
-        return { materialVariants };
+        return { materialVariants, _sceneSetup: createVariantTextureSetup(materialVariants) };
     },
 };
 export default feature;

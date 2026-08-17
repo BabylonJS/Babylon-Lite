@@ -49,8 +49,21 @@ export async function buildDdsSkyboxRenderable(
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
     const { cubeView, sampler } = await loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL);
 
-    const fragCode = SCENE_UBO_WGSL + (enableNoise ? WGSL_DITHER : WGSL_NO_DITHER) + ddsSkyboxFragSrc;
-    const mat = createCubemapSkyboxMaterial(enableNoise ? "skybox-dds" : "skybox-dds0", SCENE_UBO_WGSL + ddsSkyboxVertSrc, fragCode);
+    let shaderKey = "";
+    let skyboxFragment = ddsSkyboxFragSrc;
+    const rotationPatch = scene._environmentRotationSkyboxPatch;
+    if (rotationPatch) {
+        shaderKey += `-${rotationPatch._id}`;
+        skyboxFragment = rotationPatch._apply("dds", skyboxFragment);
+    }
+    const blurPatch = scene._environmentBlurSkyboxPatch;
+    if (blurPatch) {
+        shaderKey += `-${blurPatch._id}`;
+        skyboxFragment = blurPatch._apply("dds", skyboxFragment);
+    }
+    const fragCode = SCENE_UBO_WGSL + (enableNoise ? WGSL_DITHER : WGSL_NO_DITHER) + skyboxFragment;
+    const label = `${enableNoise ? "skybox-dds" : "skybox-dds0"}${shaderKey}`;
+    const mat = createCubemapSkyboxMaterial(label, SCENE_UBO_WGSL + ddsSkyboxVertSrc, fragCode);
     const ubo = createDdsMeshUBO(engine, rootPosition, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
     const bindGroup = mat.createBindGroup(engine, ubo, cubeView, sampler);
 

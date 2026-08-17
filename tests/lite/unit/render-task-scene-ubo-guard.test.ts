@@ -100,7 +100,7 @@ describe("writePassSceneUBO scene-UBO change-detection guard", () => {
         expect(writeCount.n).toBe(1);
 
         // An environment loads AFTER steady state. None of the other guarded inputs
-        // (camera/fog/exposure/contrast/envRotationY) changed, so without tracking
+        // (camera/fog/exposure/contrast) changed, so without tracking
         // `_envTextures` the UBO would never be rewritten and the model would keep
         // zero irradiance. The guard must invalidate and re-pack the UBO.
         scene._envTextures = makeEnvTextures();

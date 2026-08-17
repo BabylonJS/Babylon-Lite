@@ -46,6 +46,14 @@ export interface ImageProcessingConfig {
 /** A clipping plane expressed as the coefficients `[a, b, c, d]` of `a·x + b·y + c·z + d`. */
 export type ClipPlane = readonly [number, number, number, number];
 
+/** @internal One feature-owned transformation of a visible-environment skybox shader. */
+export interface EnvironmentSkyboxShaderPatch {
+    /** @internal */
+    readonly _id: string;
+    /** @internal */
+    _apply(kind: "dds" | "hdr", fragment: string): string;
+}
+
 /** @internal Runtime mesh-build hooks installed only after a material group must widen its capabilities. */
 export interface RuntimeSceneBuildHooks {
     queue(builder: MeshGroupBuilder, mesh: Mesh): Promise<void>;
@@ -120,6 +128,18 @@ export interface SceneContext extends RenderingContext {
     /** Environment cubemap Y rotation in radians. */
     envRotationY?: number;
 
+    /** @internal Whether dynamic environment-rotation cache invalidation is installed. */
+    _environmentRotationInvalidationInstalled?: true;
+
+    /** @internal Optional visible-environment blur amount. */
+    _environmentBlur?: number;
+
+    /** @internal Visible-environment rotation shader patch installed by `setEnvironmentRotation`. */
+    _environmentRotationSkyboxPatch?: EnvironmentSkyboxShaderPatch;
+
+    /** @internal Visible-environment blur shader patch installed by `setEnvironmentBlur`. */
+    _environmentBlurSkyboxPatch?: EnvironmentSkyboxShaderPatch;
+
     /** Fixed delta time in ms for deterministic animation. 0 = use real rAF delta. */
     fixedDeltaMs: number;
 
@@ -137,7 +157,7 @@ export interface SceneContext extends RenderingContext {
     _pickSources: PickSource[];
     /** @internal Scene uniform updaters (one per shared UBO). */
     _uniformUpdaters: SceneUniformUpdater[];
-    /** @internal Opt-in feature writers for the SceneUniforms UBO (fog, clip plane, env SH).
+    /** @internal Opt-in feature writers for the SceneUniforms UBO (fog, clip plane, environment).
      *  Populated lazily via the scene-ubo-extras seam; run by the render task. */
     _sceneUboContributors?: ((data: Float32Array, scene: SceneContext) => void)[];
     /** @internal Per-frame callbacks run before rendering (animation, physics, etc.). */
@@ -396,10 +416,14 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             result._beforeRenderHook = hook;
             ctx._beforeRender.push(hook);
         }
-        // Feature-owned scene wiring (e.g. EXT_lights_image_based installs its IBL
-        // environment). Runs synchronously so the environment is registered before
-        // registerScene() builds the scene UBO / PBR renderables.
-        result._sceneSetup?.(ctx);
+        // Feature-owned scene wiring runs synchronously before registerScene() builds
+        // renderables. Paired cleanup follows either container removal or scene disposal.
+        const teardown = result._sceneSetup?.(ctx);
+        if (teardown) {
+            const cleanups = (result._sceneCleanups ??= new WeakMap());
+            cleanups.set(ctx, teardown);
+            ctx._disposables.push(teardown);
+        }
         return;
     }
     if ("_gpu" in entity && "material" in entity) {
@@ -519,12 +543,14 @@ export function disposeScene(scene: SceneContext): void {
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */
 export async function buildScene(scene: SceneContext): Promise<void> {
     const ctx = scene as SceneContext;
-    // Discard material-swap requests enqueued during scene SETUP — a mesh added, then re-materialed before boot
-    // via the mesh.material setter (e.g. scene12 assigns each row's material AFTER addToScene). The deferred
+    // Discard material-swap requests enqueued during INITIAL scene setup — a mesh added, then re-materialed before
+    // boot via the mesh.material setter (e.g. scene12 assigns each row's material AFTER addToScene). The deferred
     // builders below build every group's meshes fresh with their FINAL material, so those swaps are redundant;
-    // processing them would insert a SECOND renderable per mesh (double-draw). Only swaps enqueued DURING the
-    // drain below — an async mesh that joins an already-built group (see addToScene/group.r) — must survive.
-    ctx._materialSwapQueue.length = 0;
+    // processing them would insert a SECOND renderable per mesh (double-draw). On re-registration the queued swaps
+    // are real runtime changes and must survive so a newly introduced material group can be built below.
+    if (!ctx._built) {
+        ctx._materialSwapQueue.length = 0;
+    }
     while (ctx._deferredBuilders.length) {
         const builders = ctx._deferredBuilders.splice(0);
         // Promise.all treats synchronous void results as already resolved.

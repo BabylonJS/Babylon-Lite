@@ -21,6 +21,8 @@ export interface EnvironmentTextures {
     sphericalHarmonics: Float32Array;
     /** LOD generation scale for specular IBL sampling. Default 0.8 (matches BJS BaseTexture). */
     lodGenerationScale: number;
+    /** LOD generation offset for prefiltered cubemap sampling. Default 0. */
+    lodGenerationOffset?: number;
 }
 
 /**

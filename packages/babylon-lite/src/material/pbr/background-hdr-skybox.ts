@@ -48,7 +48,20 @@ export function buildHdrSkyboxRenderable(
     const cc = scene.clearColor;
 
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
-    const mat = createCubemapSkyboxMaterial("skybox-hdr", SCENE_UBO_WGSL + skyboxVertSrc, skyboxHdrFragSrc);
+    let shaderKey = "";
+    let skyboxFragment = skyboxHdrFragSrc;
+    const rotationPatch = scene._environmentRotationSkyboxPatch;
+    if (rotationPatch) {
+        shaderKey += `-${rotationPatch._id}`;
+        skyboxFragment = rotationPatch._apply("hdr", skyboxFragment);
+    }
+    const blurPatch = scene._environmentBlurSkyboxPatch;
+    if (blurPatch) {
+        shaderKey += `-${blurPatch._id}`;
+        skyboxFragment = blurPatch._apply("hdr", skyboxFragment);
+    }
+    const label = `skybox-hdr${shaderKey}`;
+    const mat = createCubemapSkyboxMaterial(label, SCENE_UBO_WGSL + skyboxVertSrc, SCENE_UBO_WGSL + skyboxFragment);
     const ubo = createSkyHdrMeshUBO(engine, rootPosition, primaryColor, [cc.r, cc.g, cc.b], scene.imageProcessing.exposure, scene.imageProcessing.contrast);
 
     const bindGroup = mat.createBindGroup(engine, ubo, envTextures.specularCubeView!, envTextures.cubeSampler);

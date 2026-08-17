@@ -109,6 +109,25 @@ describe("removeFromScene symmetry", () => {
         expect(scene._beforeRender).toHaveLength(0);
     });
 
+    it("runs feature scene cleanup once when its container is removed", () => {
+        const scene = fakeScene();
+        const cleanup = vi.fn();
+        const container = {
+            entities: [],
+            _sceneSetup: () => cleanup,
+        } as unknown as AssetContainer;
+
+        addToScene(scene, container);
+        expect(scene._disposables).toHaveLength(1);
+
+        removeFromScene(scene, container);
+        expect(cleanup).toHaveBeenCalledTimes(1);
+        expect(scene._disposables).toHaveLength(0);
+
+        removeFromScene(scene, container);
+        expect(cleanup).toHaveBeenCalledTimes(1);
+    });
+
     it("evicts task-local mesh bindings before destroying the mesh GPU", () => {
         const scene = fakeScene();
         let destroyed = false;

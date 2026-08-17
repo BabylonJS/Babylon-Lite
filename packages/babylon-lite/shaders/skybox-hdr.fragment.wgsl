@@ -25,8 +25,9 @@ struct FragmentInput {
 
 @fragment
 fn main(input: FragmentInput) -> @location(0) vec4<f32> {
-  let dir = normalize(input.positionUVW);
-  var color = textureSampleLevel(envCubemap, envSampler, dir, 0.0).rgb;
+  var dir = normalize(input.positionUVW);
+  /*ENV_DIRECTION*/
+  var color = textureSampleLevel(envCubemap, envSampler, dir, 0.0/*ENV_LOD*/).rgb;
 
   // Image processing: exposure → gamma → contrast (matches BJS applyImageProcessing)
   color *= mesh.exposureLinear;

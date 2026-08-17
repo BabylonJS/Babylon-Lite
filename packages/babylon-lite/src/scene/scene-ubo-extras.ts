@@ -31,20 +31,50 @@ function writeClipPlaneUbo(data: Float32Array, scene: SceneContext): void {
     }
 }
 
-/** Write the environment spherical-harmonics slice of the SceneUniforms struct
- *  (float offsets 40–75). */
-function writeEnvShUbo(data: Float32Array, scene: SceneContext): void {
+/** Write the opt-in environment slice of the SceneUniforms struct: rotation
+ *  (offset 36) and spherical harmonics (offsets 40–75). */
+function writeEnvUbo(data: Float32Array, scene: SceneContext): void {
+    data[36] = scene.envRotationY ?? 0;
     const sh = scene._envTextures?.sphericalHarmonics;
     if (sh) {
         data.set(sh, 40);
     }
 }
 
-/** Register a contributor on the scene, deduping by function reference. */
-function registerContributor(scene: SceneContext, contributor: SceneUboContributor): void {
+function installEnvironmentRotationInvalidation(scene: SceneContext): void {
+    if (scene._environmentRotationInvalidationInstalled) {
+        return;
+    }
+    scene._environmentRotationInvalidationInstalled = true;
+
+    let rotation = scene.envRotationY;
+    Object.defineProperty(scene, "envRotationY", {
+        configurable: true,
+        enumerable: true,
+        get: () => rotation,
+        set: (value: number | undefined) => {
+            if (value !== rotation) {
+                rotation = value;
+                _invalidateSceneUboCaches(scene);
+            }
+        },
+    });
+}
+
+/** @internal Register a contributor on the scene, deduping by function reference. */
+export function _registerSceneUboContributor(scene: SceneContext, contributor: SceneUboContributor): void {
     const list = (scene._sceneUboContributors ??= []);
     if (!list.includes(contributor)) {
         list.push(contributor);
+    }
+}
+
+/** @internal Force every forward render task to rewrite its scene UBO. */
+export function _invalidateSceneUboCaches(scene: SceneContext): void {
+    for (const task of scene._frameGraph._tasks) {
+        if ("_su" in task) {
+            (task as unknown as { _su: unknown[] })._su.length = 0;
+        }
     }
 }
 
@@ -59,7 +89,7 @@ function registerContributor(scene: SceneContext, contributor: SceneUboContribut
  */
 export function setFog(scene: SceneContext, config: FogConfig): void {
     scene.fog = config;
-    registerContributor(scene, writeFogUbo);
+    _registerSceneUboContributor(scene, writeFogUbo);
 }
 
 /**
@@ -73,14 +103,15 @@ export function setFog(scene: SceneContext, config: FogConfig): void {
  */
 export function setClipPlane(scene: SceneContext, plane: ClipPlane): void {
     scene.clipPlane = plane;
-    registerContributor(scene, writeClipPlaneUbo);
+    _registerSceneUboContributor(scene, writeClipPlaneUbo);
 }
 
 /**
- * Register the environment spherical-harmonics scene-uniform contributor.
+ * Register the environment rotation and spherical-harmonics scene-uniform contributor.
  * Called by the environment loaders right after assigning `scene._envTextures`.
  * @internal
  */
 export function registerEnvSceneUniforms(scene: SceneContext): void {
-    registerContributor(scene, writeEnvShUbo);
+    installEnvironmentRotationInvalidation(scene);
+    _registerSceneUboContributor(scene, writeEnvUbo);
 }
