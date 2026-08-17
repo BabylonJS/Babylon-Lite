@@ -97,7 +97,9 @@ let customUniformWriter: ShaderCustomUniformWriter = writeCustomUniforms;
 
 /** @internal The default (uncached) system-uniform writer, exported so tests can
  *  exercise the writer that actually ships rather than a stand-in. Building a
- *  real renderable needs a GPU device; this needs nothing. */
+ *  real renderable needs a GPU device; this needs nothing. Measured at zero
+ *  bundle cost — Rollup drops it from every scene, since nothing the package
+ *  entry reaches refers to it. */
 export const _defaultShaderSystemUniformWriter: ShaderSystemUniformWriter = writeSystemUniforms;
 
 /** @internal Install the optional cached ShaderMaterial uniform writers. */

@@ -373,6 +373,18 @@ If a caller requests the Babylon-style `viewProjection` string, the generated pr
 
 Lite's camera helper computes `viewProjection` as `projection * view`, and material templates currently multiply clip positions by `scene.viewProjection * worldPosition` according to existing engine conventions. ShaderMaterial must use the same convention so it matches Standard, PBR, and NodeMaterial.
 
+### Floating origin
+
+Under LWR (`35-large-world-rendering.md`) the frame the system uniforms describe is **eye-relative, not absolute**. `getViewMatrix` forces the view translation to zero on a floating-origin camera because it expects the mesh world to have already been rebased; Standard, PBR and Node renderables do that in their mesh-world pack, and ShaderMaterial does it in `_shaderWorldMatrix(mesh, camera)`, which both the default and the cached uniform writers call.
+
+Consequences a shader author sees:
+
+- `world`, `worldView` and `worldViewProjection` all carry the camera-relative translation. They derive from one rebased matrix, so they stay in a single frame.
+- `cameraPosition` is `(0, 0, 0)` — in the frame `world` is expressed in, the camera *is* the origin. This keeps the documented `scene.vEyePosition.xyz` equivalence above, which `_packSceneUniforms` already zeroes under FO. An expression like `cameraPosition - worldPos` therefore still yields the correct eye-relative vector, and now at full precision.
+- Absolute world coordinates are not recoverable from the UBO. A shader that genuinely needs them should take them as a custom uniform.
+
+With floating origin off, every value above is the plain absolute one and the path is copy-free.
+
 ## Pipeline Configuration
 
 Defaults match normal Lite mesh rendering:
