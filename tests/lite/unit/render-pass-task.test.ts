@@ -190,7 +190,7 @@ function makeComputeRenderable(id: string, pipeline: GPUComputePipeline, bindGro
                 pipeline: { id } as unknown as GPURenderPipeline,
                 _updateBatches: [batch],
                 update(): void {
-                    batch.queue({ pipeline, bindGroup, workgroupsX });
+                    batch.queue({ _pipeline: pipeline, _bindGroup: bindGroup, _x: workgroupsX });
                 },
                 draw(): number {
                     return 1;

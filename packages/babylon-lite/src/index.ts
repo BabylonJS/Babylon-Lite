@@ -277,6 +277,10 @@ export type { MeshFromStorageOptions } from "./mesh/mesh-from-storage.js";
 // Non-canonical vertex formats for a ShaderMaterial (e.g. a float32x4 position packing
 // data in .w). Opt-in: costs nothing in scenes that never declare one.
 export { setShaderAttributeFormats } from "./material/shader/shader-vb.js";
+// User-facing compute. Lite runs compute internally (mipmaps, culling, IBL); this
+// is the supported way for a caller to run their own — e.g. to produce geometry.
+export { createComputeShader, prepareComputeShader, setComputeUniform, setComputeStorageBuffer, dispatchCompute, disposeComputeShader } from "./compute/compute-shader.js";
+export type { ComputeShader, ComputeShaderOptions, ComputeUniformDecl, ComputeStorageBufferDecl } from "./compute/compute-shader.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
