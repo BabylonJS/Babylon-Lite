@@ -91,6 +91,8 @@ export function detailedWorldMatrix(baseWorld: Mat4, mesh: Mesh, thinInstanceInd
     return mat4Multiply(baseWorld, instance as unknown as Mat4);
 }
 
+let _deformedTriangle: Float32Array | null = null;
+
 function transformNormal(world: Mat4, normal: readonly [number, number, number]): [number, number, number] {
     return normalizeVec3(
         world[0]! * normal[0] + world[4]! * normal[1] + world[8]! * normal[2],
@@ -108,7 +110,13 @@ function clampTinyBarycentric(value: number): number {
     return Math.abs(value) < 1e-12 ? 0 : value;
 }
 
-/** @internal Decode exact primitive-local detail into the public mesh picking fields. */
+/** @internal Decode exact primitive-local detail into the public mesh picking fields.
+ *
+ *  `positions` and `localPoint` must share one space. The GPU pick shader interpolates the mesh's
+ *  *rest* local position across the *deformed* triangle it rasterized, so the barycentric weights
+ *  recovered from rest positions are exactly the weights of the hit on the deformed surface. The face
+ *  normal, however, is derived from the triangle's edges and therefore needs genuinely deformed
+ *  vertices — `deformTriangle` supplies those three (and only those three) when the mesh animates. */
 export function populateDetailedMeshInfo(
     info: PickingInfo,
     mesh: Mesh,
@@ -117,7 +125,8 @@ export function populateDetailedMeshInfo(
     positions: Float32Array | undefined,
     normals: Float32Array | undefined,
     world: Mat4,
-    surfaceNormalsValid: boolean
+    surfaceNormalsValid: boolean,
+    deformTriangle?: ((mesh: Mesh, i0: number, i1: number, i2: number, out: Float32Array) => boolean) | null
 ): void {
     info.faceId = faceId;
     const indices = mesh._cpuIndices;
@@ -132,15 +141,30 @@ export function populateDetailedMeshInfo(
         return;
     }
 
-    const ax = positions[i0 * 3]!;
-    const ay = positions[i0 * 3 + 1]!;
-    const az = positions[i0 * 3 + 2]!;
-    const e0x = positions[i1 * 3]! - ax;
-    const e0y = positions[i1 * 3 + 1]! - ay;
-    const e0z = positions[i1 * 3 + 2]! - az;
-    const e1x = positions[i2 * 3]! - ax;
-    const e1y = positions[i2 * 3 + 1]! - ay;
-    const e1z = positions[i2 * 3 + 2]! - az;
+    let source = positions;
+    let o0 = i0 * 3;
+    let o1 = i1 * 3;
+    let o2 = i2 * 3;
+    if (deformTriangle) {
+        const triangle = (_deformedTriangle ??= new F32(9));
+        if (!deformTriangle(mesh, i0, i1, i2, triangle)) {
+            return;
+        }
+        source = triangle;
+        o0 = 0;
+        o1 = 3;
+        o2 = 6;
+    }
+
+    const ax = source[o0]!;
+    const ay = source[o0 + 1]!;
+    const az = source[o0 + 2]!;
+    const e0x = source[o1]! - ax;
+    const e0y = source[o1 + 1]! - ay;
+    const e0z = source[o1 + 2]! - az;
+    const e1x = source[o2]! - ax;
+    const e1y = source[o2 + 1]! - ay;
+    const e1z = source[o2 + 2]! - az;
     const px = localPoint[0] - ax;
     const py = localPoint[1] - ay;
     const pz = localPoint[2] - az;

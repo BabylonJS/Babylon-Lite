@@ -22,10 +22,9 @@ let _deformScratch: Float32Array | undefined;
  * transform-then-blend). This is the primitive used to track hotspot/annotation positions on animated
  * meshes.
  *
- * Lives in its own module (rather than alongside the bulk `computeDeformedPositions`) so that the
- * GPU picker's dynamic `import()` of `deformed-geometry.js` does not drag this hotspot-only function
- * into every picking scene's bundle. It reuses the shared morph/skin primitives in
- * `deformation-math.js`, so there is no duplicated math.
+ * Lives in its own module (rather than in the picker's main chunk) so that a scene using hotspots
+ * does not drag the GPU picker in, and a picking scene does not drag this in. It reuses the shared
+ * morph/skin primitives in `deformation-math.js`, so there is no duplicated math.
  *
  * @param mesh - The mesh to query. Must have CPU position data (`_cpuPositions`).
  * @param vertexIndex - Index of the vertex within the mesh's position buffer.
@@ -77,4 +76,37 @@ export function computeDeformedPositionToRef(mesh: Mesh, vertexIndex: number, ou
     out.y = scratch[1]!;
     out.z = scratch[2]!;
     return true;
+}
+
+// Scratch vertex reused by deformTriangleToRef, allocated lazily for the same reason as _deformScratch.
+let _triangleVertex: Vec3 | undefined;
+
+function writeDeformedVertex(mesh: Mesh, vertexIndex: number, out: Float32Array, offset: number): boolean {
+    const vertex = (_triangleVertex ??= { x: 0, y: 0, z: 0 });
+    if (!computeDeformedPositionToRef(mesh, vertexIndex, vertex)) {
+        return false;
+    }
+    out[offset] = vertex.x;
+    out[offset + 1] = vertex.y;
+    out[offset + 2] = vertex.z;
+    return true;
+}
+
+/**
+ * Writes the deformed MESH-LOCAL positions of one triangle's three vertices into `out` as nine floats
+ * (vertex `i0` at offset 0, `i1` at 3, `i2` at 6).
+ *
+ * This is the detailed picker's replacement for deforming the whole position buffer: only the single
+ * triangle the GPU reported as hit needs genuine deformed coordinates (to derive its face normal), so
+ * the cost is O(1) in vertex count rather than O(V).
+ *
+ * @param mesh - The mesh to query. Must have CPU position data (`_cpuPositions`).
+ * @param i0 - First vertex index of the triangle.
+ * @param i1 - Second vertex index of the triangle.
+ * @param i2 - Third vertex index of the triangle.
+ * @param out - Destination for nine mesh-local floats, written in place (zero-allocation).
+ * @returns true on success; false if any vertex could not be resolved.
+ */
+export function deformTriangleToRef(mesh: Mesh, i0: number, i1: number, i2: number, out: Float32Array): boolean {
+    return writeDeformedVertex(mesh, i0, out, 0) && writeDeformedVertex(mesh, i1, out, 3) && writeDeformedVertex(mesh, i2, out, 6);
 }
