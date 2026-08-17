@@ -1,10 +1,10 @@
 {
-  "rawKB": 50,
+  "rawKB": 49.9,
   "gzipKB": 20,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene36-standard-renderable-Ces0peB7.js",
     "scene36.js"
   ],
-  "rawBytes": 51153
+  "rawBytes": 51141
 }
