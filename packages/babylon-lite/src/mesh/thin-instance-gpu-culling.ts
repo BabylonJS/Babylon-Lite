@@ -12,6 +12,8 @@ import { getViewProjectionMatrix } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawUpdateBatch, DrawUpdateContext } from "../render/renderable.js";
+import type { RecordedDispatch } from "../compute/compute-pass.js";
+import { recordComputeDispatches } from "../compute/compute-pass.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh, MeshGPU } from "./mesh.js";
 import type { ThinInstanceData } from "./thin-instance.js";
@@ -211,15 +213,9 @@ export interface ThinInstanceGpuCullResult {
     readonly lodArgsBuffer?: GPUBuffer;
 }
 
-interface ComputeDispatch {
-    readonly pipeline: GPUComputePipeline;
-    readonly bindGroup: GPUBindGroup;
-    readonly workgroupsX: number;
-}
-
 /** @internal Task-local batch that submits all culling work through one compute pass. */
 export interface ComputeDispatchBatch extends DrawUpdateBatch {
-    queue(dispatch: ComputeDispatch): void;
+    queue(dispatch: RecordedDispatch): void;
 }
 
 let _cachedDevice: GPUDevice | null = null;
@@ -236,7 +232,7 @@ export function getComputeDispatchBatch(signature: RenderTargetSignature): Compu
     if (batch) {
         return batch;
     }
-    const dispatches: ComputeDispatch[] = [];
+    const dispatches: RecordedDispatch[] = [];
     let count = 0;
     batch = {
         reset(): void {
@@ -246,18 +242,7 @@ export function getComputeDispatchBatch(signature: RenderTargetSignature): Compu
             if (count === 0) {
                 return;
             }
-            const pass = engine._currentEncoder.beginComputePass();
-            let lastPipeline: GPUComputePipeline | null = null;
-            for (let i = 0; i < count; i++) {
-                const dispatch = dispatches[i]!;
-                if (dispatch.pipeline !== lastPipeline) {
-                    pass.setPipeline(dispatch.pipeline);
-                    lastPipeline = dispatch.pipeline;
-                }
-                pass.setBindGroup(0, dispatch.bindGroup);
-                pass.dispatchWorkgroups(dispatch.workgroupsX);
-            }
-            pass.end();
+            recordComputeDispatches(engine._currentEncoder, dispatches, count);
         },
         destroy(): void {
             dispatches.length = 0;
@@ -396,19 +381,15 @@ export function prepareTiCull(
     const aspect = (context.targetWidth / context.targetHeight) * (v ? v.width / v.height : 1);
     writeCullParams(engine, state, mesh, gpu.indexCount, ti.count, camera, aspect, lod);
 
-    const dispatch = {
-        pipeline,
-        bindGroup: state._bindGroup,
-        workgroupsX: Math.ceil(ti.count / WORKGROUP_SIZE),
+    const dispatch: RecordedDispatch = {
+        _pipeline: pipeline,
+        _bindGroup: state._bindGroup,
+        _x: Math.ceil(ti.count / WORKGROUP_SIZE),
     };
     if (dispatchBatch) {
         dispatchBatch.queue(dispatch);
     } else {
-        const pass = engine._currentEncoder.beginComputePass();
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, state._bindGroup);
-        pass.dispatchWorkgroups(dispatch.workgroupsX);
-        pass.end();
+        recordComputeDispatches(engine._currentEncoder, [dispatch], 1);
     }
 
     state._drawBuffers = { matrixBuffer: visibleMatrixBuffer, colorBuffer: visibleColorBuffer };
