@@ -21,6 +21,27 @@ export function _installShaderStencilResolver(resolve: (stencil: StencilState) =
     _stencilResolver = resolve;
 }
 
+/** Vertex-packing support for geometry that is not tightly packed — an interleaved slab
+ *  produced on the GPU, or a caller-declared attribute format. Same idiom as the stencil
+ *  resolver above: module-local, one exported setter, installed only by
+ *  `mesh-from-storage`. Absent that factory the setter tree-shakes, the bundler proves
+ *  this is always null, and both branches below fold to the canonical expression — so a
+ *  ShaderMaterial scene that never sources geometry from a StorageBuffer stays
+ *  byte-identical. */
+export interface ShaderVbSupport {
+    /** @internal Per-attribute layouts for the material's own (mesh-independent) default. */
+    _layouts(material: ShaderMaterial): readonly GPUVertexBufferLayout[];
+    /** @internal WGSL type of one attribute, honouring `setShaderAttributeFormats`. */
+    _wgslType(material: ShaderMaterial, name: ShaderAttributeName): string;
+}
+
+let _vbSupport: ShaderVbSupport | null = null;
+
+/** @internal Install vertex-packing support (called by `mesh-from-storage`). */
+export function _installShaderVbSupport(support: ShaderVbSupport): void {
+    _vbSupport = support;
+}
+
 export interface ShaderPipelineBindings {
     readonly group1BGL: GPUBindGroupLayout;
     readonly systemSpec: UboSpec;
@@ -83,7 +104,7 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
             group1BGL,
             systemSpec,
             customSpec,
-            vertexBuffers: material.attributes.map(attributeLayout),
+            vertexBuffers: _vbSupport ? _vbSupport._layouts(material) : material.attributes.map(_attributeLayout),
             pipelines: new Map(),
             _pipelineLayout: engine._device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), group1BGL] }),
         };
@@ -253,7 +274,8 @@ function buildBindGroupLayoutEntries(
     return entries;
 }
 
-function attributeLayout(name: ShaderAttributeName, shaderLocation: number): GPUVertexBufferLayout {
+/** @internal Canonical tight layout for one attribute. */
+export function _attributeLayout(name: ShaderAttributeName, shaderLocation: number): { arrayStride: number; attributes: [GPUVertexAttribute] } {
     switch (name) {
         case "position":
         case "normal":
@@ -308,7 +330,7 @@ ${customSpec._structBody}
 `;
     for (let i = 0; i < material.attributes.length; i++) {
         const attr = material.attributes[i]!;
-        wgsl += `@location(${i}) ${attr}: ${attributeWgslType(attr)},
+        wgsl += `@location(${i}) ${attr}: ${_vbSupport ? _vbSupport._wgslType(material, attr) : _attributeWgslType(attr)},
 `;
     }
     wgsl += instanceAttrs;
@@ -327,7 +349,8 @@ function formatDefineValue(value: boolean | number): string {
     return String(value);
 }
 
-function attributeWgslType(name: ShaderAttributeName): string {
+/** @internal Canonical WGSL type for one attribute. */
+export function _attributeWgslType(name: ShaderAttributeName): string {
     switch (name) {
         case "position":
         case "normal":
