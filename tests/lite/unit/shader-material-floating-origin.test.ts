@@ -37,6 +37,7 @@ import { _defaultShaderSystemUniformWriter, _shaderWorldMatrix } from "../../../
 import { createShaderMaterial, type ShaderSystemUniformName } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { UboSpec } from "../../../packages/babylon-lite/src/shader/fragment-types";
+import { packMat4IntoF32WithOffset } from "../../../packages/babylon-lite/src/large-world/pack-mat4-with-offset";
 
 /** The numbers from the actual bug report: a 75,977 m planet approached from
  *  4,561 km down to 304 km. The disc should go from ~1.9° across to ~28°. */
@@ -229,6 +230,118 @@ describe("ShaderMaterial under floating origin", () => {
         const absolute = new Float32Array(1);
         absolute[0] = PLANET_X + DELTA;
         expect(absolute[0] - PLANET_X).not.toBe(DELTA);
+    });
+
+    describe("out-param", () => {
+        // `_shaderWorldMatrix` is exported and exercised directly (above), so its
+        // no-`out` return value aliases module-scratch state that the NEXT call
+        // overwrites. The optional `out` param lets a caller — this test file
+        // included, see the parity block below — hold two results at once.
+
+        it("writes into the caller's buffer under floating origin, leaving the module scratch untouched", () => {
+            const mesh = meshAt(PLANET_X, 0, 0);
+            const camera = cameraAt(PLANET_X - FAR_DISTANCE, true);
+            const out = new Float32Array(16);
+
+            const returned = _shaderWorldMatrix(mesh, camera, out);
+
+            expect(returned).toBe(out);
+            expect(out[12]).toBeCloseTo(FAR_DISTANCE, 0);
+            expect(out[13]).toBe(0);
+            expect(out[14]).toBe(0);
+        });
+
+        it("does not alias a previous no-out call's result", () => {
+            // The footgun the out-param removes: two back-to-back no-out calls
+            // under FO both return the SAME shared buffer, so the first result is
+            // silently overwritten by the second. Passing distinct `out` buffers
+            // keeps both results alive and independent.
+            const meshA = meshAt(PLANET_X, 0, 0);
+            const meshB = meshAt(PLANET_X, 0, 500_000);
+            const camera = cameraAt(PLANET_X - FAR_DISTANCE, true);
+            const outA = new Float32Array(16);
+            const outB = new Float32Array(16);
+
+            _shaderWorldMatrix(meshA, camera, outA);
+            _shaderWorldMatrix(meshB, camera, outB);
+
+            expect(outA[14]).toBe(0);
+            expect(outB[14]).toBeCloseTo(500_000, 0);
+            expect(outA[14]).not.toBe(outB[14]);
+        });
+
+        it("also writes into the caller's buffer when floating origin is off", () => {
+            // `out`, when given, always means "the answer is here" — it must not
+            // silently fall back to returning `mesh.worldMatrix` by reference just
+            // because there was nothing to rebase.
+            const mesh = meshAt(PLANET_X, 0, 0);
+            const camera = cameraAt(PLANET_X - FAR_DISTANCE, false);
+            const out = new Float32Array(16);
+
+            const returned = _shaderWorldMatrix(mesh, camera, out);
+
+            expect(returned).toBe(out);
+            expect(returned).not.toBe(mesh.worldMatrix);
+            expect(out[12]).toBe(PLANET_X);
+        });
+
+        it("stays copy-free when out is omitted — no-out call returns mesh.worldMatrix by reference when FO is off", () => {
+            const mesh = meshAt(PLANET_X, 0, 0);
+            const camera = cameraAt(PLANET_X - FAR_DISTANCE, false);
+
+            expect(_shaderWorldMatrix(mesh, camera)).toBe(mesh.worldMatrix);
+        });
+    });
+
+    describe("parity with the mesh-world UBO packer (packMat4IntoF32WithOffset)", () => {
+        // The bug this whole file exists for was exactly this divergence: the
+        // mesh-world packer (`standard`/`pbr`/`node` renderables, via
+        // `makePackMeshWorld`) rebased onto the camera, and the ShaderMaterial
+        // writers did not. Every test above proves ShaderMaterial is
+        // self-consistent; none of them prove it AGREES with the other packer for
+        // the same mesh. This does.
+        //
+        // Format check before asserting equality: both take a 16-float column-major
+        // mat4 (mesh.worldMatrix, F64- or F32-backed), subtract the camera's world
+        // translation from columns [12..14] in JS-number (F64) precision, and store
+        // the result as F32 — `packMat4IntoF32WithOffset`'s `mat`/`offsetX..Z`
+        // contract is byte-for-byte the same operation `_shaderWorldMatrix` performs
+        // inline. There is no legitimate layout or precision difference between the
+        // two paths for a single, non-slab matrix, so the assertion below is
+        // byte-identical equality, not a tolerance-based approximation.
+        it("produces the byte-identical world matrix the mesh-world packer would produce for the same mesh and camera", () => {
+            const mesh = meshAt(PLANET_X, 0, 321_000);
+            const camera = cameraAt(PLANET_X - NEAR_DISTANCE, true);
+
+            const shaderWorld = _shaderWorldMatrix(mesh, camera, new Float32Array(16));
+
+            const cw = camera.worldMatrix;
+            const packedWorld = new Float32Array(16);
+            packMat4IntoF32WithOffset(packedWorld, mesh.worldMatrix, 0, 0, cw[12]!, cw[13]!, cw[14]!);
+
+            expect([...shaderWorld]).toEqual([...packedWorld]);
+        });
+
+        it("FAILS this same comparison against the pre-fix behaviour (mesh.worldMatrix read raw)", () => {
+            // Documents what the parity assertion above actually guards: the
+            // pre-fix ShaderMaterial writers read `mesh.worldMatrix` raw, with no
+            // rebasing at all. That raw matrix must NOT match the mesh-world
+            // packer's camera-relative output — if it did, this whole bug would
+            // never have been visible. This is the regression the maintainer asked
+            // to be locked: re-introducing the bug (deleting the subtraction in
+            // `_shaderWorldMatrix`) must fail the assertion above, and this test
+            // is the non-vacuity check proving the comparison has teeth.
+            const mesh = meshAt(PLANET_X, 0, 321_000);
+            const camera = cameraAt(PLANET_X - NEAR_DISTANCE, true);
+
+            const preFixWorld = mesh.worldMatrix as unknown as Float32Array;
+
+            const cw = camera.worldMatrix;
+            const packedWorld = new Float32Array(16);
+            packMat4IntoF32WithOffset(packedWorld, mesh.worldMatrix, 0, 0, cw[12]!, cw[13]!, cw[14]!);
+
+            expect([...preFixWorld]).not.toEqual([...packedWorld]);
+        });
     });
 
     // The cached writer (`enableShaderMaterialUniformCaching`) is a second

@@ -564,7 +564,8 @@ function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: Sh
 /** @internal Scratch for the camera-relative mesh world matrix under floating
  *  origin. Module-scoped rather than per-packet: the writers are strictly
  *  synchronous and non-reentrant, and every read of the result completes before
- *  the next call can begin. */
+ *  the next call can begin. Only used when the caller does not supply its own
+ *  `out` destination — see `_shaderWorldMatrix`. */
 const _foWorldScratch = new F32(16);
 
 /** @internal The world matrix a ShaderMaterial's system uniforms must see.
@@ -593,22 +594,37 @@ const _foWorldScratch = new F32(16);
  *  is bit-for-bit the one `getViewMatrix` applies to the same camera: a
  *  render-target task drawing through a non-scene camera gets an untranslated
  *  view AND an absolute world, which is consistent. Returns `mesh.worldMatrix`
- *  untouched when FO is off, keeping the non-LWR path copy-free. */
-export function _shaderWorldMatrix(mesh: Mesh, camera: Camera | null): Float32Array {
+ *  untouched when FO is off and no `out` is given, keeping the non-LWR path
+ *  copy-free.
+ *
+ *  `out`: optional caller-owned destination. Omitted (the shipping renderable
+ *  writers' only call shape), the function reuses the shared module-scratch
+ *  buffer under FO and returns `mesh.worldMatrix` by reference when FO is off —
+ *  zero allocation either way, but the result aliases module state that the
+ *  NEXT call overwrites. Callers that need to hold two results at once (tests
+ *  comparing this against another packer's output, for instance) pass their
+ *  own `Float32Array(16)` and get a value that is theirs alone; the FO-off
+ *  path then copies into it too, so `out` always means "the answer is here,"
+ *  never "the answer is here, except sometimes." */
+export function _shaderWorldMatrix(mesh: Mesh, camera: Camera | null, out?: Float32Array): Float32Array {
     const world = mesh.worldMatrix as unknown as Float32Array;
     if (!camera?._useFloatingOrigin) {
-        return world;
+        if (!out) {
+            return world;
+        }
+        out.set(world);
+        return out;
     }
     const cw = camera.worldMatrix;
-    const out = _foWorldScratch;
+    const dst = out ?? _foWorldScratch;
     for (let i = 0; i < 12; i++) {
-        out[i] = world[i]!;
+        dst[i] = world[i]!;
     }
-    out[12] = world[12]! - cw[12]!;
-    out[13] = world[13]! - cw[13]!;
-    out[14] = world[14]! - cw[14]!;
-    out[15] = world[15]!;
-    return out;
+    dst[12] = world[12]! - cw[12]!;
+    dst[13] = world[13]! - cw[13]!;
+    dst[14] = world[14]! - cw[14]!;
+    dst[15] = world[15]!;
+    return dst;
 }
 
 function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: ShaderMaterial, mesh: Mesh, camera: Camera | null, targetWidth: number, targetHeight: number): void {

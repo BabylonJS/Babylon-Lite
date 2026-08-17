@@ -375,7 +375,7 @@ Lite's camera helper computes `viewProjection` as `projection * view`, and mater
 
 ### Floating origin
 
-Under LWR (`35-large-world-rendering.md`) the frame the system uniforms describe is **eye-relative, not absolute**. `getViewMatrix` forces the view translation to zero on a floating-origin camera because it expects the mesh world to have already been rebased; Standard, PBR and Node renderables do that in their mesh-world pack, and ShaderMaterial does it in `_shaderWorldMatrix(mesh, camera)`, which both the default and the cached uniform writers call.
+Under LWR (`35-large-world-rendering.md`) the frame the system uniforms describe is **eye-relative, not absolute**. `getViewMatrix` forces the view translation to zero on a floating-origin camera because it expects the mesh world to have already been rebased; Standard, PBR and Node renderables do that in their mesh-world pack, and ShaderMaterial does it in `_shaderWorldMatrix(mesh, camera, out?)`, which both the default and the cached uniform writers call.
 
 Consequences a shader author sees:
 
@@ -384,6 +384,8 @@ Consequences a shader author sees:
 - Absolute world coordinates are not recoverable from the UBO. A shader that genuinely needs them should take them as a custom uniform.
 
 With floating origin off, every value above is the plain absolute one and the path is copy-free.
+
+`_shaderWorldMatrix`'s third parameter, `out`, is optional and exists only so tests and other direct callers can supply their own destination instead of reusing the module-scoped FO scratch buffer — without it, two calls in a row alias the same array, and the second overwrites the first. The two renderable writers above never pass it, so they keep the original copy-free behaviour: the shared scratch under FO, `mesh.worldMatrix` returned by reference when FO is off. When `out` **is** given, both branches write into it (including the FO-off case, which would otherwise return `mesh.worldMatrix` unchanged) so passing `out` always means "the answer is here."
 
 ## Pipeline Configuration
 
