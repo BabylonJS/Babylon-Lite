@@ -176,6 +176,14 @@ for (const scene of SCENES) {
                 /\/(scene\/scene-core|scene\/scene-camera|scene\/scene-node|asset-container|render\/scene-helpers|sprite\/sprite-renderable|sprite\/sprite-2d-handle|sprite\/billboard-(sprite|scene|renderable|pipeline|sprite-handle))\.[jt]s$/;
             const moduleOffenders = runtimeModules.filter((id) => forbiddenModules.test(id));
             expect(moduleOffenders, `pure-2D ${scene.slug} must not load scene/* modules; found: ${moduleOffenders.join(", ")}`).toEqual([]);
+            if (scene.slug === "scene50-sprite-grid") {
+                const optionalBlendOffenders = runtimeModules.filter((id) =>
+                    /\/(particle\/(particle-sprite-2d-blend-modes|particle-blend|particle-billboard-renderable|particle-billboard-scene)|sprite\/sprite-custom-shader)\.[jt]s$/.test(
+                        id
+                    )
+                );
+                expect(optionalBlendOffenders, `scene50 must not load optional particle Sprite2D blend modules; found: ${optionalBlendOffenders.join(", ")}`).toEqual([]);
+            }
         }
 
         // Scene 52 — HUD on 3D — uses SpriteRenderer for the HUD overlay; the
@@ -199,9 +207,31 @@ for (const scene of SCENES) {
                 `scene300 MUST include sprite-renderer; loaded modules: ${runtimeModules.join(", ")}`
             ).toBe(true);
             const offenders = runtimeModules.filter((id) =>
-                /\/(particle\/(particle-billboard|particle-scene)|sprite\/(sprite-renderable|billboard-(sprite|scene|renderable|pipeline)))\.[jt]s$/.test(id)
+                /\/(particle\/(particle-sprite-2d-blend-modes|particle-blend|particle-billboard|particle-billboard-renderable|particle-billboard-scene|particle-scene)|sprite\/(sprite-custom-shader|sprite-renderable|billboard-(sprite|scene|renderable|pipeline)))\.[jt]s$/.test(
+                    id
+                )
             );
-            expect(offenders, `scene300 must not load the 3D particle or sprite rendering paths; found: ${offenders.join(", ")}`).toEqual([]);
+            expect(offenders, `scene300 must not load exact-blend, custom-shader, or 3D sprite paths; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
+        if (scene.slug === "scene301-npe-sprite2d-blend-modes") {
+            for (const required of [
+                /\/particle\/particle-sprite-2d-blend-modes\.[jt]s$/,
+                /\/particle\/particle-blend\.[jt]s$/,
+                /\/sprite\/sprite-custom-shader\.[jt]s$/,
+                /\/sprite\/sprite-renderer\.[jt]s$/,
+            ]) {
+                expect(
+                    runtimeModules.some((id) => required.test(id)),
+                    `scene301 is missing required exact Sprite2D module ${required}; loaded modules: ${runtimeModules.join(", ")}`
+                ).toBe(true);
+            }
+            const offenders = runtimeModules.filter((id) =>
+                /\/(particle\/(particle-billboard|particle-billboard-renderable|particle-billboard-scene|particle-scene)|sprite\/(sprite-renderable|billboard-(sprite|scene|renderable|pipeline)))\.[jt]s$/.test(
+                    id
+                )
+            );
+            expect(offenders, `scene301 must not load billboard or scene-rendered sprite paths; found: ${offenders.join(", ")}`).toEqual([]);
         }
 
         // Scene 53 — depth-hosted sprites — MUST load sprite-renderable.js
@@ -244,9 +274,9 @@ for (const scene of SCENES) {
         // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
         // List excludes the sprite-using scenes (50-59, the 92-98 custom-shader scenes, and the
         // 117/118 sprite-picking scenes). 60-series are NME demos with no sprites; 1-40 are core 3D.
-        // 262/263/264/276/277/280/281/283/284 are NPE billboard scenes; 300 uses the NPE Sprite2D bridge.
+        // 262/263/264/276/277/280/281/283/284 are NPE billboard scenes; 300/301 use NPE Sprite2D bridges.
         const SPRITE_USING_IDS = new Set([
-            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277, 280, 281, 283, 284, 300,
+            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301,
         ]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));

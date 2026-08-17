@@ -108,4 +108,41 @@ describe("Particle bundle feature isolation", () => {
             expect(moduleOffenders, `scene${sceneId} folds unused optional particle features into runtime chunks`).toEqual([]);
         }
     });
+
+    it("keeps exact Sprite2D particle blending isolated to scene301", () => {
+        for (const sceneId of [50, 300, 301]) {
+            const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
+            const runtimeChunks = new Set(manifest.runtimeChunks ?? []);
+            expect(runtimeChunks.size, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
+
+            const bundleInfoPath = resolve(BUNDLE_INFO_DIR, `scene${sceneId}.json`);
+            if (!existsSync(bundleInfoPath)) {
+                continue;
+            }
+            const bundleInfo = JSON.parse(readFileSync(bundleInfoPath, "utf8")) as BundleInfo;
+            const runtimeModuleIds = (bundleInfo.chunks ?? [])
+                .filter((chunk) => chunk.file && runtimeChunks.has(chunk.file))
+                .flatMap((chunk) => chunk.modules ?? [])
+                .map((module) => module.id ?? "");
+            const exactModules = runtimeModuleIds.filter((id) => /\/(particle\/(particle-sprite-2d-blend-modes|particle-blend)|sprite\/sprite-custom-shader)\.[jt]s$/.test(id));
+
+            if (sceneId === 301) {
+                expect(exactModules).toEqual(
+                    expect.arrayContaining([
+                        expect.stringContaining("particle-sprite-2d-blend-modes"),
+                        expect.stringContaining("particle-blend"),
+                        expect.stringContaining("sprite-custom-shader"),
+                    ])
+                );
+                const billboardOffenders = runtimeModuleIds.filter((id) =>
+                    /\/(particle\/(particle-billboard-renderable|particle-billboard-scene|particle-scene)|sprite\/(sprite-renderable|billboard-(sprite|scene|renderable|pipeline)))\.[jt]s$/.test(
+                        id
+                    )
+                );
+                expect(billboardOffenders, "scene301 must not fetch billboard or scene-rendered sprite modules").toEqual([]);
+            } else {
+                expect(exactModules, `scene${sceneId} must not fetch exact Sprite2D particle blend modules`).toEqual([]);
+            }
+        }
+    });
 });

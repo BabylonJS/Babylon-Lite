@@ -737,6 +737,13 @@ export { registerNodeParticleSet } from "./particle/particle-scene.js";
 export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
 export type { ParticleSprite2DBridge, ParticleSprite2DBridgeOptions, RegisterNodeParticleSet2DOptions, NodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";
 export { createParticleSprite2DBridge, syncParticleSprite2DBridge, registerNodeParticleSet2D, disposeNodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";
+export type { ParticleSprite2DBlendModesBridge, NodeParticleSet2DBlendModesBinding } from "./particle/particle-sprite-2d-blend-modes.js";
+export {
+    createParticleSprite2DBridgeWithBlendModes,
+    syncParticleSprite2DBridgeWithBlendModes,
+    registerNodeParticleSet2DWithBlendModes,
+    disposeNodeParticleSet2DBlendModesBinding,
+} from "./particle/particle-sprite-2d-blend-modes.js";
 
 // ─── Text ────────────────────────────────────────────────────────────
 export type { Font } from "./text/font.js";

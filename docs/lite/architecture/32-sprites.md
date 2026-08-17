@@ -801,9 +801,11 @@ export function isSprite2DHandleAlive(handle: Sprite2DHandle): boolean;
 
 `particle/particle-sprite-2d.ts` is an opt-in consumer of the Sprite2D foundation. It creates one centered `depth: "none"` layer per NPE particle system and renders those layers through a caller-owned `SpriteRenderer`. The particle module owns coordinate, sprite-sheet, blend, synchronization, registration, and disposal policy; the sprite module continues to own layer storage and rendering. The complete bridge contract lives in [42-node-particle.md](42-node-particle.md#104-sprite2d-bridge-creation-and-mapping).
 
+`particle/particle-sprite-2d-blend-modes.ts` is a separate particle-owned opt-in for exact NPE blend modes. It reuses ordinary `Sprite2DLayer`s and the existing custom-fragment API; mode 4 registers two equal-order layers consecutively so the renderer's stable sort preserves Multiply then Add. Generic Sprite2D does not interpret particle blend numbers, animate particle systems, or own multipass policy, and the baseline bridge does not import this advanced module. The exact API, shader formula, lifecycle, and tests live in [42-node-particle.md](42-node-particle.md#105-exact-sprite2d-blend-mode-bridge).
+
 A bridge exclusively owns its layer's complete live range. Each synchronization writes NPE columns directly into the existing 13-float pure-2D instance layout and saved-size buffer, then performs one count update and at most one dirty-range update. A bridge-owned layer cannot mix independent Index API sprites and cannot install the optional Handle API; both would violate full-range ownership. Render it through `SpriteRenderer`, not the depth-hosted scene path.
 
-The dependency remains one-way: `particle-sprite-2d.ts` imports Sprite2D modules, and no sprite module imports the bridge. Although the package root exports the bridge API, side-effect-free tree-shaking means static Sprite2D users that do not import it pay zero bridge bytes.
+The dependency remains one-way: both particle bridge modules import Sprite2D modules, and no sprite module imports either bridge. Although the package root exports both APIs, side-effect-free tree-shaking means static Sprite2D users that do not import them pay zero bridge bytes, while baseline bridge users pay no exact descriptor, custom-shader, or second-pass bytes.
 
 ### Blend modes — tree-shakable descriptors
 
