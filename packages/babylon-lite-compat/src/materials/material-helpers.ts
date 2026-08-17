@@ -31,9 +31,13 @@ export function GetSupportedSimultaneousLights(scene: Scene, maxSimultaneousLigh
         return maxSimultaneousLights;
     }
 
-    // Keep at least one light: a scene lit by a single light is far more useful than an
-    // unlit one, and matches what the device can do even with an unusually low limit.
-    const supported = Math.max(maxUniformBuffersPerShaderStage - NON_LIGHT_VERTEX_UNIFORM_BUFFER_COUNT, 1);
+    // Each light claims one more uniform buffer on top of the reserved non-light ones.
+    // Clamp to whatever budget is left, which may be zero: past the limit every pipeline
+    // creation is rejected by the validator, so a material that renders unlit is strictly
+    // better than one that returns a light count the device cannot honour. Real WebGPU
+    // devices guarantee at least 12 buffers per stage, so this floor only bites the
+    // pathological low-cap case the null path below cannot reach.
+    const supported = Math.max(maxUniformBuffersPerShaderStage - NON_LIGHT_VERTEX_UNIFORM_BUFFER_COUNT, 0);
 
     return Math.min(maxSimultaneousLights, supported);
 }
