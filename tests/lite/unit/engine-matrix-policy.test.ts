@@ -9,6 +9,7 @@ import { mat4Invert } from "../../../packages/babylon-lite/src/math/mat4-invert"
 import { mat4Multiply } from "../../../packages/babylon-lite/src/math/mat4-multiply";
 import { mat4Scale } from "../../../packages/babylon-lite/src/math/mat4-scale";
 import { mat4PerspectiveLH } from "../../../packages/babylon-lite/src/math/mat4-perspective-lh";
+import { mat4LookAtLH } from "../../../packages/babylon-lite/src/math/mat4-look-at-lh";
 import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 
 // The matrix allocator is a process-global lazy singleton (GUIDANCE pillar 4,
@@ -82,6 +83,7 @@ describe("matrix allocator (process-global singleton)", () => {
             mat4Multiply: mat4Multiply(a, a),
             mat4Scale: mat4Scale(2, 2, 2),
             mat4PerspectiveLH: mat4PerspectiveLH(1, 1, 0.5, 100),
+            mat4LookAtLH: mat4LookAtLH({ x: 0, y: 0, z: -5 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }),
         };
         // Named individually so a failure says WHICH factory bypassed it, rather
         // than just that one of them did.
