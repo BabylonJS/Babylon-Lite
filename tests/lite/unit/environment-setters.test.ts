@@ -152,11 +152,17 @@ describe("environment setters", () => {
         expect(writeCount.n).toBe(1);
         expect(task._suData[36]).toBe(0);
 
-        setEnvironmentRotation(scene, 1.5);
+        setEnvironmentRotation(scene, 0.5);
         expect(task._su).toHaveLength(0);
         expect(secondCache).toHaveLength(0);
         _writePassSceneUBO(task, engine, scene, camera);
         expect(writeCount.n).toBe(2);
+        expect(task._suData[36]).toBeCloseTo(0.5);
+
+        setEnvironmentRotation(scene, 1.5);
+        expect(task._su).toHaveLength(0);
+        _writePassSceneUBO(task, engine, scene, camera);
+        expect(writeCount.n).toBe(3);
         expect(task._suData[36]).toBeCloseTo(1.5);
     });
 

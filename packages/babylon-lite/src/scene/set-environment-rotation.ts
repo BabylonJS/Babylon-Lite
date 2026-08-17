@@ -1,6 +1,6 @@
 import { environmentRotationSkyboxPatch } from "../material/pbr/fragments/environment-rotation-fragment.js";
 import type { SceneContext } from "./scene-core.js";
-import { registerEnvSceneUniforms } from "./scene-ubo-extras.js";
+import { _invalidateSceneUboCaches, registerEnvSceneUniforms } from "./scene-ubo-extras.js";
 
 /**
  * Set environment rotation around the Y axis, in radians.
@@ -10,4 +10,5 @@ export function setEnvironmentRotation(scene: SceneContext, rotation: number): v
     registerEnvSceneUniforms(scene);
     scene.envRotationY = rotation;
     scene._environmentRotationSkyboxPatch = environmentRotationSkyboxPatch;
+    _invalidateSceneUboCaches(scene);
 }
