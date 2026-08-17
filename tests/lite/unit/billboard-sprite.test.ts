@@ -23,6 +23,8 @@ import { billboardBlendAdditive, billboardBlendCutout, billboardBlendPremultipli
 import { BILLBOARD_SYSTEM_UBO_BYTES, createBillboardPipelineCache, getOrCreateBillboardPipeline } from "../../../packages/babylon-lite/src/sprite/billboard-pipeline";
 import { createBillboardCustomShader } from "../../../packages/babylon-lite/src/sprite/billboard-custom-shader";
 import { SPRITE_FX_UBO_BYTES } from "../../../packages/babylon-lite/src/sprite/custom-shader-core";
+import { addFacingBillboardSystemWithParticleBlend } from "../../../packages/babylon-lite/src/particle/particle-billboard-scene";
+import { createParticleBlend } from "../../../packages/babylon-lite/src/particle/particle-blend";
 import { createSceneContext, disposeScene } from "../../../packages/babylon-lite/src/scene/scene";
 import { registerScene } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
@@ -112,6 +114,7 @@ function makeMockAtlas(): SpriteAtlas {
 
 function makeDrawPassMock(): GPURenderPassEncoder {
     return {
+        setPipeline: vi.fn(),
         setBindGroup: vi.fn(),
         setIndexBuffer: vi.fn(),
         setVertexBuffer: vi.fn(),
@@ -554,6 +557,102 @@ describe("addFacingBillboardSystem", () => {
         const destroySpies = device.createBuffer.mock.results.map((result) => (result.value as MockBuffer).destroy);
         disposeScene(scene);
         expect(destroySpies.filter((destroy) => destroy.mock.calls.length > 0).length).toBeGreaterThanOrEqual(3);
+    });
+});
+
+describe("addFacingBillboardSystemWithParticleBlend", () => {
+    it("draws Multiply with its custom shader in one pass", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const multiply = createParticleBlend(3);
+        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: multiply });
+        addBillboardSpriteIndex(system, { position: [0, 0, 0], sizeWorld: [1, 1] });
+        addFacingBillboardSystemWithParticleBlend(scene, system, 3);
+        await registerScene(scene);
+
+        expect(system._customShader?._key).toBe("particle-multiply");
+        expect(system.shaderParams).toBeUndefined();
+
+        const device = engine._device as unknown as {
+            createRenderPipeline: ReturnType<typeof vi.fn>;
+            createShaderModule: ReturnType<typeof vi.fn>;
+        };
+        device.createRenderPipeline.mockClear();
+        const binding = scene._renderables[0]!.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 });
+
+        expect(device.createRenderPipeline).toHaveBeenCalledOnce();
+        const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
+        expect((descriptor.fragment!.targets as GPUColorTargetState[])[0]!.blend).toEqual(multiply._descriptor);
+        expect(device.createShaderModule.mock.calls.map((call) => (call[0] as GPUShaderModuleDescriptor).code)).toContainEqual(
+            expect.stringContaining("baseColor.rgb * sourceAlpha + vec3f(1.0) * (1.0 - sourceAlpha)")
+        );
+        expect(device.createShaderModule.mock.calls.map((call) => (call[0] as GPUShaderModuleDescriptor).code)).not.toContainEqual(expect.stringContaining("struct SpriteFx"));
+
+        const pass = makeDrawPassMock();
+        expect(binding.draw(pass, engine)).toBe(1);
+        expect(pass.drawIndexed).toHaveBeenCalledOnce();
+        expect(pass.setPipeline).not.toHaveBeenCalled();
+    });
+
+    it("draws MultiplyAdd as two ordered pipelines over one instance upload", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const multiplyAdd = createParticleBlend(4);
+        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: multiplyAdd });
+        addBillboardSpriteIndex(system, { position: [0, 0, 0], sizeWorld: [1, 1] });
+        addFacingBillboardSystemWithParticleBlend(scene, system, 4);
+        await registerScene(scene);
+
+        const device = engine._device as unknown as {
+            createRenderPipeline: ReturnType<typeof vi.fn>;
+            createShaderModule: ReturnType<typeof vi.fn>;
+            queue: { writeBuffer: ReturnType<typeof vi.fn> };
+        };
+        device.createRenderPipeline.mockClear();
+        const binding = scene._renderables[0]!.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 });
+
+        expect(device.createRenderPipeline).toHaveBeenCalledTimes(2);
+        const multiplyDescriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
+        const addDescriptor = device.createRenderPipeline.mock.calls[1]![0] as GPURenderPipelineDescriptor;
+        expect((multiplyDescriptor.fragment!.targets as GPUColorTargetState[])[0]!.blend).toEqual(multiplyAdd._descriptor);
+        expect((addDescriptor.fragment!.targets as GPUColorTargetState[])[0]!.blend).toEqual(createParticleBlend(2)._descriptor);
+        const shaderCodes = device.createShaderModule.mock.calls.map((call) => (call[0] as GPUShaderModuleDescriptor).code);
+        expect(shaderCodes).toContainEqual(expect.stringContaining("baseColor.rgb * sourceAlpha + vec3f(1.0) * (1.0 - sourceAlpha)"));
+        expect(shaderCodes).toContainEqual(expect.stringContaining("return s * in.tint * billboards.opacityMul"));
+
+        device.queue.writeBuffer.mockClear();
+        binding.update?.({ targetWidth: 512, targetHeight: 256 });
+        expect(device.queue.writeBuffer.mock.calls.filter((call) => call[4] === BILLBOARD_INSTANCE_STRIDE_BYTES)).toHaveLength(1);
+        expect(device.queue.writeBuffer.mock.calls.filter((call) => call[4] === BILLBOARD_SYSTEM_UBO_BYTES)).toHaveLength(2);
+
+        const pass = makeDrawPassMock();
+        expect(binding.draw(pass, engine)).toBe(2);
+        expect(pass.drawIndexed).toHaveBeenCalledTimes(2);
+        const multiplyPipeline = device.createRenderPipeline.mock.results[0]!.value as GPURenderPipeline;
+        const addPipeline = device.createRenderPipeline.mock.results[1]!.value as GPURenderPipeline;
+        expect(pass.setPipeline).toHaveBeenNthCalledWith(1, addPipeline);
+        expect(pass.setPipeline).toHaveBeenNthCalledWith(2, multiplyPipeline);
+    });
+
+    it("shares one Multiply pipeline across systems", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const first = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: createParticleBlend(3) });
+        const second = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: createParticleBlend(3) });
+        addBillboardSpriteIndex(first, { position: [0, 0, 0], sizeWorld: [1, 1] });
+        addBillboardSpriteIndex(second, { position: [1, 0, 0], sizeWorld: [1, 1] });
+        addFacingBillboardSystemWithParticleBlend(scene, first, 3);
+        addFacingBillboardSystemWithParticleBlend(scene, second, 3);
+        await registerScene(scene);
+
+        const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn> };
+        device.createRenderPipeline.mockClear();
+        const target = { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 } as const;
+        const firstBinding = scene._renderables[0]!.bind(engine, target);
+        const secondBinding = scene._renderables[1]!.bind(engine, target);
+
+        expect(device.createRenderPipeline).toHaveBeenCalledOnce();
+        expect(secondBinding.pipeline).toBe(firstBinding.pipeline);
     });
 });
 

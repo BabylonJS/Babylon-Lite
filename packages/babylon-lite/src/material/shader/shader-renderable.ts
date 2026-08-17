@@ -150,6 +150,15 @@ export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Pro
     if (!meshes.some((m) => !!m.thinInstances)) {
         return buildPlain(scene, meshes);
     }
+    if (_asyncPipelineRegistrar) {
+        for (const mesh of meshes) {
+            if (mesh.thinInstances) {
+                const material = mesh.material as ShaderMaterial;
+                const hasColor = !!mesh.thinInstances.colors && material._tic != 0;
+                _asyncPipelineRegistrar(scene, material, mesh, hasColor ? "thin-instances-color" : "thin-instances");
+            }
+        }
+    }
     const mod = await import("./shader-thin-instance.js");
     const cull = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled) ? await import("../../mesh/thin-instance-cull-binding.js") : undefined;
     return mod.buildShaderRenderablesWithInstancing(
@@ -165,6 +174,14 @@ export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Pro
         getUniformBatch,
         cull
     );
+}
+
+export type ShaderAsyncPipelineRegistrar = (scene: SceneContext, material: ShaderMaterial, key: Renderable | Mesh, layout?: "thin-instances" | "thin-instances-color") => void;
+
+let _asyncPipelineRegistrar: ShaderAsyncPipelineRegistrar | null = null;
+/** @internal Install the optional async ShaderMaterial recipe registrar. */
+export function _installAsyncShaderPipelineRegistrar(register: ShaderAsyncPipelineRegistrar): void {
+    _asyncPipelineRegistrar = register;
 }
 
 function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean, getUniformBatch?: UniformBatchFactory): Renderable {
@@ -261,6 +278,7 @@ function createOpaqueRenderable(
             };
         },
     };
+    _asyncPipelineRegistrar?.(scene, material, r);
     return r;
 }
 
@@ -309,6 +327,7 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
             };
         },
     };
+    _asyncPipelineRegistrar?.(scene, material, r);
     return r;
 }
 

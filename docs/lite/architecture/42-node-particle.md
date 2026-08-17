@@ -20,7 +20,7 @@ The design requirements are:
 
 ## 2. Package-root API
 
-`packages/babylon-lite/src/index.ts` exports exactly sixteen node-particle functions and nine node-particle types.
+`packages/babylon-lite/src/index.ts` exports exactly eighteen node-particle functions and nine node-particle types.
 
 ### 2.1 Functions
 
@@ -28,9 +28,11 @@ The design requirements are:
 function parseNodeParticleSource(source: unknown): ParticleGraph;
 
 function buildNodeParticleSet(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
+function buildNodeParticleSetWithBlendModes(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
 function buildNodeParticleSetWithFlowMaps(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
 function buildNodeParticleSetWithNoiseTextures(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
 function buildNodeParticleSetWithTextureUpdates(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
+function enableNodeParticleBlendModes(set: NodeParticleSet): NodeParticleSet;
 
 function parseNodeParticleSetFromSnippet(engine: EngineContext, scene: SceneContext, snippetId: string, options?: ParseNodeParticleOptions): Promise<NodeParticleSet>;
 
@@ -49,7 +51,7 @@ function registerNodeParticleSet2D(renderer: SpriteRenderer, set: NodeParticleSe
 function disposeNodeParticleSet2DBinding(binding: NodeParticleSet2DBinding): void;
 ```
 
-`ParticleGraph` is returned by `parseNodeParticleSource` and accepted by the four graph-build functions above, but it is not a named node-particle type export from the package root.
+All eighteen functions listed above, including `enableNodeParticleBlendModes`, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted by the five graph-build functions above, but it is not a named node-particle type export from the package root.
 
 ### 2.2 Types
 
@@ -131,9 +133,11 @@ serialized value or snippet response
     -> parseNodeParticleSource
     -> ParticleGraph
      -> buildNodeParticleSet
+         or buildNodeParticleSetWithBlendModes for exact billboard Multiply/MultiplyAdd rendering
          or buildNodeParticleSetWithFlowMaps for UpdateFlowMapBlock graphs
          or buildNodeParticleSetWithNoiseTextures for UpdateNoiseBlock graphs
          or buildNodeParticleSetWithTextureUpdates for graphs containing both
+     -> optional enableNodeParticleBlendModes for exact billboard blending on a set from any builder
     -> NodeParticleSet { systems }
     -> startParticleSystem / stopParticleSystem / animateParticleSystem
         -> billboard target:
@@ -151,12 +155,18 @@ particle-buffer.ts       dense typed-array storage and slot lifecycle
 particle-system.ts       mutable system state and CPU simulation
 sprite-columns*.ts       optional sprite cell state and animation
 particle-billboard.ts    conversion of live columns to billboard instances
+particle-blend.ts        exact Babylon.js particle blend descriptors
+particle-billboard-scene.ts
+                         ordinary/advanced scene registration boundary
+particle-billboard-renderable.ts
+                         lazy Multiply shader and MultiplyAdd second pass
 particle-scene.ts        scene registration and per-frame callback wiring
 particle-sprite-2d.ts    packed Sprite2D bridge and renderer binding lifecycle
 
 node/npe-parser.ts       serialized source normalization
 node/npe-types.ts        readonly TypeScript graph shapes
 node/npe-build.ts        root-reachable DFS and system construction
+node/npe-blend-modes.ts  explicit Multiply/MultiplyAdd rendering enabler
 node/npe-value.ts        indexed getter and step contracts
 node/npe-texture-content.ts
                          pay-for-use CPU RGBA texture decoding
@@ -169,7 +179,11 @@ node/npe-registry*.ts    side-effect-free dynamic evaluator dispatch
 node/blocks/*.ts         supported block classes, variants, and helpers
 ```
 
-The particle package owns no shader, material, render pipeline, bind group, or GPU instance-buffer implementation. It owns particle-to-render-target mapping and live-registration behavior. `particle-billboard.ts` produces a `FacingBillboardSpriteSystem`; the billboard subsystem owns atlas interpretation, pipeline selection, GPU data, picking registration, and renderable construction. `particle-sprite-2d.ts` creates and exclusively bulk-writes a `Sprite2DLayer`; the sprite subsystem continues to own that layer's packed layout, dirty tracking, upload, pipeline, and `SpriteRenderer` draw path.
+`particle-billboard.ts` produces a `FacingBillboardSpriteSystem`; the billboard subsystem owns atlas interpretation, normal pipeline selection, GPU instance data, and base renderable construction. The particle package owns only the lazy Multiply fragment body and the MultiplyAdd wrapper around that base renderable. It does not duplicate billboard geometry or instance-buffer implementations.
+
+The private Multiply shader keeps its vertex WGSL local while reusing `makeBillboardBasisWgsl`. A shared runtime vertex helper was measured and rejected because its cross-chunk edge grew ordinary billboard bundles that do not use particle blending.
+
+`particle-sprite-2d.ts` creates and exclusively bulk-writes a `Sprite2DLayer`; the sprite subsystem continues to own that layer's packed layout, dirty tracking, upload, pipeline, and `SpriteRenderer` draw path. Outside the billboard-only exact-blend shader and wrapper above, the particle package owns particle-to-render-target mapping and live-registration policy rather than material, pipeline, bind-group, or GPU instance-buffer implementations.
 
 ### 3.1 Direct dependencies outside `particle/`
 
@@ -178,7 +192,7 @@ The particle package owns no shader, material, render pipeline, bind group, or G
 - Math: `math/types.ts`, `math/random-range.ts`, `math/mat4-identity.ts`, `math/mat4-invert.ts`, `math/mat4-transform.ts`, and `math/mat4-translation.ts`.
 - Scene: `scene/scene.ts` and `scene/scene-core.ts`.
 - Texture: `texture/texture-2d.ts`.
-- Sprite: `sprite/shared/sprite-atlas.ts`, `sprite/billboard-sprite.ts`, `sprite/billboard-blend.ts`, `sprite/billboard-scene.ts`, `sprite/sprite-2d.ts`, `sprite/sprite-blend.ts`, and `sprite/sprite-renderer.ts`.
+- Sprite: `sprite/shared/sprite-atlas.ts`, `sprite/billboard-sprite.ts`, `sprite/billboard-blend.ts`, `sprite/billboard-scene.ts`, `sprite/billboard-custom-shader.ts`, `sprite/billboard-pipeline.ts`, `sprite/billboard-renderable.ts`, `sprite/sprite-2d.ts`, `sprite/sprite-blend.ts`, and `sprite/sprite-renderer.ts`.
 
 `billboard-scene.ts` registers the billboard as a scene-owned deferred renderable and pick source. It dynamically imports `sprite/billboard-renderable.ts` when scene renderables are built and `picking/billboard-pick-pipeline.ts` when picking first needs that source.
 
@@ -316,6 +330,7 @@ interface ParticleSystem {
     _suppressInitialDirectionCapture?: boolean;
     _seedLocalPosition?: ParticleStep;
     _frameSteps?: Array<(camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void>;
+    _registerBillboard?: (scene: SceneContext, billboard: FacingBillboardSpriteSystem) => void;
 }
 ```
 
@@ -497,6 +512,8 @@ For each root:
 - Without a matrix, the emitter option or `{ x: 0, y: 0, z: 0 }` is copied into the emitter value and a translation matrix.
 - `scene` and `textureBaseUrl` are carried in `NpeBuildState`.
 - Each standard-builder root gets its own output map and block-id set. The flow-map, noise-texture, and combined texture-update builders dynamically import feature runtimes only through their explicit public functions. Their shared specialized walk additionally keys dependency overrides by parsed block object, allowing one texture source to be evaluated once for billboard upload and once for CPU decoding.
+- `enableNodeParticleBlendModes(set)` installs an `_registerBillboard` callback on every system in any already-built set and returns that same set. The callback reads the system's current mutable `blendMode` when registration occurs, applies the exact Babylon.js descriptor, attaches the private Multiply shader for modes `3` and `4`, and selects one or two passes. It composes with the flow-map, noise-texture, and combined texture-update builders without changing their evaluator walks.
+- `buildNodeParticleSetWithBlendModes` is the convenience form `enableNodeParticleBlendModes(await buildNodeParticleSet(...))`. Importing either public enabler is the opt-in boundary for exact particle blend state and advanced rendering; ordinary builders have no runtime import edge to the optional modules.
 - Build promises are accumulated for the whole set and awaited together after all roots have been traversed.
 
 `CreateParticleBlock` does not create the system. `SystemBlock` does not set capacity or locality; the builder consumes those serialized fields before DFS.
@@ -1089,7 +1106,7 @@ When `size` is connected, request the standard size column and append an update 
 
 ### 10.1 Billboard creation
 
-`createParticleBillboard` requires `system.texture`. A null texture throws `createParticleBillboard: the particle system has no texture`.
+`createParticleBillboard` converts a `ParticleSystem` into its generic `FacingBillboardSpriteSystem` rendering representation. It requires `system.texture`; a null texture throws `createParticleBillboard: the particle system has no texture`.
 
 It creates a row-major grid atlas over the existing texture:
 
@@ -1102,18 +1119,43 @@ It creates a row-major grid atlas over the existing texture:
 
 It then creates a camera-facing billboard system with initial capacity `system.buffer.capacity` and the mapped blend descriptor. Billboard construction clamps its internal capacity to at least one and allocates `capacity * 16` Float32 instance values plus `capacity * 2` Float32 saved-size values.
 
-Blend mapping is:
+The plain builder retains the pre-existing billboard mapping: mode `0` uses the generic OneOne descriptor, mode `1` uses generic alpha blending, and every other number uses generic Add. This path imports no exact or advanced blend module; modes `3` and `4` therefore degrade safely to Add.
 
-| Particle `blendMode` | Billboard descriptor     | Color factors                                         | Alpha factors                                   |
-| -------------------- | ------------------------ | ----------------------------------------------------- | ----------------------------------------------- |
-| `0`                  | `billboardBlendOneOne`   | source `one`, destination `one`                       | source `one`, destination `one`                 |
-| `1`                  | `billboardBlendAlpha`    | source `src-alpha`, destination `one-minus-src-alpha` | source `one`, destination `one-minus-src-alpha` |
-| `2`                  | `billboardBlendAdditive` | source `src-alpha`, destination `one`                 | source `one`, destination `one`                 |
-| `3`                  | `billboardBlendAdditive` | source `src-alpha`, destination `one`                 | source `one`, destination `one`                 |
-| `4`                  | `billboardBlendAdditive` | source `src-alpha`, destination `one`                 | source `one`, destination `one`                 |
-| any other number     | `billboardBlendAdditive` | source `src-alpha`, destination `one`                 | source `one`, destination `one`                 |
+`enableNodeParticleBlendModes` resolves private particle-owned descriptors from the current mutable mode at registration time, so alpha-channel state and advanced modes match Babylon.js without changing public billboard descriptors. Its exact mapping is:
 
-Every blend operation is `add`. All mappings use the transparent billboard path.
+| Particle `blendMode` | Passes             | Color factors                                         | Alpha factors                    |
+| -------------------- | ------------------ | ----------------------------------------------------- | -------------------------------- |
+| `0`                  | OneOne             | source `one`, destination `one`                       | source `zero`, destination `one` |
+| `1`                  | Standard           | source `src-alpha`, destination `one-minus-src-alpha` | source `one`, destination `one`  |
+| `2`                  | Add                | source `src-alpha`, destination `one`                 | source `zero`, destination `one` |
+| `3`                  | Multiply           | source `dst`, destination `zero`                      | source `one`, destination `one`  |
+| `4`                  | Multiply, then Add | first pass uses mode `3`; second pass uses mode `2`   | per-pass factors above           |
+| any other number     | Add                | source `src-alpha`, destination `one`                 | source `zero`, destination `one` |
+
+Every blend operation is `add`. All mappings use the transparent billboard path and disable depth writes.
+
+The Multiply pass uses a dedicated fragment variant. Given the sampled atlas texel, per-particle tint, and billboard opacity, it computes:
+
+```wgsl
+let sampled = textureSample(atlasTex, atlasSamp, in.uv);
+let baseColor = sampled * in.tint * billboards.opacityMul;
+let sourceAlpha = sampled.a * in.tint.a * billboards.opacityMul.a;
+return vec4f(baseColor.rgb * sourceAlpha + vec3f(1.0) * (1.0 - sourceAlpha), baseColor.a);
+```
+
+Interpolating toward white before destination-color blending makes a zero-alpha texel leave the framebuffer unchanged. The Add pass uses the stock billboard fragment (`sampled * tint * opacityMul`).
+
+The internal particle-blend registrar configures the freshly created facing-billboard representation in place. Modes without `_particlePasses` delegate to `addFacingBillboardSystem`. Advanced modes attach the private Multiply shader, register picking, and register a deferred particle renderable builder entirely from the opt-in particle module.
+
+The generic `buildBillboardRenderable(engine, system)` API and its ordinary scene registrar remain unchanged. The optional particle path attaches its static shader before calling that base builder. A single lazily created descriptor and per-device/orientation shader-module cache are shared by every particle system, so identical systems share shader modules and pipeline-cache keys.
+
+The private descriptor emits no `SpriteFx` UBO declaration, layout entry, allocation, or per-frame write. Its hook intentionally mirrors the public billboard-custom-shader hook instead of importing that optional feature and its core into Multiply-only bundles. The mirror remains behaviorally compatible with the last-writer-wins global hook and uses one module-level empty parameter array rather than allocating per update.
+
+Mode `3` uses the resulting normal billboard renderable unchanged. Mode `4` wraps its draw binding with one stock Add pipeline, a second bind group, and a second system uniform buffer. The two pipelines require distinct bind groups because each pipeline owns its bind-group layout. The base renderable deliberately keeps its GPU buffer private, so the optional mode-4 module owns and dirty-updates its own 32-byte copy rather than exposing GPU internals through the generic billboard contract. It remains one transparent renderable with one logical billboard system, one sorted instance upload, one instance buffer, and one index buffer.
+
+Mode `4` draws the normal Multiply binding first. The primary draw leaves its instance and index buffers bound, so the wrapper then binds only the Add pipeline and Add bind group before issuing the second indexed draw over the same instances. It restores the primary Multiply pipeline so the render task's consecutive-pipeline cache remains correct. The draw reports two GPU draw calls when particles are visible and zero when the system is hidden or empty.
+
+`registerNodeParticleSet` invokes each system's installed `_registerBillboard` callback, falling back to `addFacingBillboardSystem`. Enriched systems therefore resolve all five modes exactly from the current `system.blendMode`; ordinary builders retain the stock live-registration path and Add fallback.
 
 ### 10.2 Billboard synchronization
 
@@ -1140,7 +1182,7 @@ The billboard path uses the transient allocations above and the billboard subsys
 `registerNodeParticleSet(scene, set, options = {})` uses `autoStart = options.autoStart ?? true`. For each system, in `set.systems` order, it:
 
 1. Creates the particle billboard.
-2. Adds the facing billboard system to the scene.
+2. Calls `(system._registerBillboard ?? addFacingBillboardSystem)(scene, billboard)`. Only the explicit blend-mode builder installs the particle-blend registrar, and only for descriptors carrying `_particlePasses`.
 3. Calls `startParticleSystem` when auto-start is true.
 4. Appends one internal callback to `scene._beforeRender`.
 
@@ -1190,6 +1232,8 @@ Blend mapping is:
 | any other number     | `spriteBlendAdditive` | source `src-alpha`, destination `one`                 | source `one`, destination `one`                 |
 
 Every blend operation is `add`. Mode `0` is pure one-one additive; unlike the alpha-weighted additive fallback, source RGB is not multiplied by source alpha.
+
+`enableNodeParticleBlendModes` does not change this Sprite2D mapping. It installs only the billboard `_registerBillboard` callback; the Sprite2D bridge consumes neither the particle-owned exact blend descriptors nor the specialized Multiply/MultiplyAdd passes. Modes `3`, `4`, and unknown values therefore remain `spriteBlendAdditive` on the current Sprite2D path.
 
 ### 10.5 Sprite2D bridge synchronization
 
@@ -1265,7 +1309,8 @@ Additional behavior is observable:
 - Simulation is CPU-only.
 - Rendering is selected explicitly by the caller: camera-facing billboards or pure-2D Sprite2D. Serialized `billBoardMode` and `isBillboardBased` do not select either runtime path.
 - The Sprite2D bridge maps only NPE world XY. It ignores `posZ` and does not support XZ/YZ projection.
-- Blend modes 3 and 4, plus unknown values, render with the additive descriptor used by mode 2.
+- Exact particle blend factors and the specialized Multiply/MultiplyAdd passes are billboard-only. They require `buildNodeParticleSetWithBlendModes` or `enableNodeParticleBlendModes`; the latter can enrich a set produced by any builder.
+- The plain billboard path maps mode `0` to OneOne, mode `1` to alpha, and modes `2`, `3`, `4`, and unknown values to Add. The Sprite2D bridge independently maps mode `0` to `spriteBlendOneOne`, mode `1` to `spriteBlendAlpha`, and every other value to `spriteBlendAdditive`.
 - System source 4 and every system source outside 1, 2, and 3 are unsupported.
 - Custom emitter functions, sub-emitter triggers, and inherited emitter velocity have no supported block evaluator.
 - UpdateNoise supports serialized static URL/data-URL pixels. Babylon's live `NoiseProceduralTexture` refresh is not reconstructed because `ParticleTextureSourceBlock.sourceTexture` is an in-memory object and is not serialized into NPE graph JSON.
@@ -1323,21 +1368,23 @@ Use conversion for graph extraction. The oracle's direct parse path does not pre
 
 ### 13.3 Visual scenes
 
-All seven billboard oracle Lite scenes seed after build, synchronize one billboard, register the frozen scene, and use a black clear color. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 280 runs 300 ratio-1 steps, and scene 281 runs 240. Scene 280's Babylon reference calls `scene.updateTransformMatrix(true)` before manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render.
+All nine billboard oracle Lite scenes seed after build, synchronize one billboard, and register a frozen scene. Scenes 262 through 281 use a black clear color; scenes 283 and 284 use the warm destination color specified in section 13.5. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 280 runs 300, scene 281 runs 240, scene 283 runs 40, and scene 284 runs 20. Scene 280's Babylon reference calls `scene.updateTransformMatrix(true)` before manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render.
 
-| Scene                            | Coverage                                                                      | Camera                                                     | MAD ceiling | Raw ceiling |
-| -------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------- | ----------- |
-| 262 `scene262-npe-size`          | Basic Properties - Size, Box                                                  | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)`  | `0.01`      | `44.1 KB`   |
-| 263 `scene263-npe-sphere`        | Sphere emitter                                                                | alpha `-pi/2`, beta `1.2`, radius `14`, target origin      | `0.01`      | `44.1 KB`   |
-| 264 `scene264-npe-change-size`   | Gradient, GradientValue, UpdateSize                                           | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01`      | `44.1 KB`   |
-| 276 `scene276-npe-animations`    | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30       | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
-| 277 `scene277-npe-attractor`     | UpdateAttractor after position integration, attractor `(0,2,0)`, strength `8` | alpha `-pi/2`, beta `1.2`, radius `5`, target `(0,0.8,0)`  | `0.01`      | `45.0 KB`   |
-| 280 `scene280-npe-flow-map`      | UpdateFlowMap after integration, flipped repel map, strength `15`, size `0.6` | alpha `pi/2`, beta `pi/2`, radius `9`, target `(-5,0,0)`   | `0.01`      | `45.0 KB`   |
-| 281 `scene281-npe-noise-texture` | UpdateNoise after integration, cached 8x8 noise, strength `(1.5,0.5,1.5)`     | alpha `-pi/2`, beta `1.2`, radius `11`, target `(0,1,0)`   | `0.01`      | `45.0 KB`   |
+| Scene                                 | Coverage                                                                      | Camera                                                     | MAD ceiling | Raw ceiling |
+| ------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------- | ----------- |
+| 262 `scene262-npe-size`               | Basic Properties - Size, Box                                                  | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)`  | `0.01`      | `44.1 KB`   |
+| 263 `scene263-npe-sphere`             | Sphere emitter                                                                | alpha `-pi/2`, beta `1.2`, radius `14`, target origin      | `0.01`      | `44.1 KB`   |
+| 264 `scene264-npe-change-size`        | Gradient, GradientValue, UpdateSize                                           | alpha `-pi/2`, beta `1.2`, radius `12`, target `(0,0.7,0)` | `0.01`      | `44.1 KB`   |
+| 276 `scene276-npe-animations`         | deterministic sprite sheet, cells 0 through 9, 64 by 64 cells, speed 30       | alpha `-pi/2`, beta `1.2`, radius `4`, target `(-1,0,0)`   | `0.01`      | `45.0 KB`   |
+| 277 `scene277-npe-attractor`          | UpdateAttractor after position integration, attractor `(0,2,0)`, strength `8` | alpha `-pi/2`, beta `1.2`, radius `5`, target `(0,0.8,0)`  | `0.01`      | `45.0 KB`   |
+| 280 `scene280-npe-flow-map`           | UpdateFlowMap after integration, flipped repel map, strength `15`, size `0.6` | alpha `pi/2`, beta `pi/2`, radius `9`, target `(-5,0,0)`   | `0.01`      | `45.0 KB`   |
+| 281 `scene281-npe-noise-texture`      | UpdateNoise after integration, cached 8x8 noise, strength `(1.5,0.5,1.5)`     | alpha `-pi/2`, beta `1.2`, radius `11`, target `(0,1,0)`   | `0.01`      | `45.0 KB`   |
+| 283 `scene283-npe-multiply-blend`     | Multiply blend with procedural radial alpha over a warm destination           | alpha `-pi/2`, beta `pi/2`, radius `12`, target origin     | `0.01`      | `45.0 KB`   |
+| 284 `scene284-npe-multiply-add-blend` | MultiplyAdd blend with a sparse procedural radial-alpha field                 | alpha `-pi/2`, beta `pi/2`, radius `12`, target origin     | `0.01`      | `45.0 KB`   |
 
 Each camera uses near plane `0.1` and far plane `100`. Each scene sets both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start.
 
-Each parity specification waits for `canvas.dataset.ready === "true"`, waits 500 ms, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, 280, and 281 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all seven scenes.
+Each parity specification waits for its deterministic ready/frozen flag, allows a short GPU settle, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, 280, 281, 283, and 284 invoke the shared golden-capture helper before opening the Lite page; specification 276 reads its committed golden directly. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all nine scenes.
 
 Scene 300 (`scene300-npe-sprite2d`) is a separate deterministic Lite-native integration fixture. It advances an authored NPE graph for 200 seeded ratio-1 steps, freezes simulation, registers the set through `registerNodeParticleSet2D`, and keeps the renderer hook sampling the stable packed layer. `scene-config.json` marks it `skipParity: true` because Babylon.js has no equivalent pure-2D SpriteRenderer path. Its Playwright specification verifies active binding state, live sampling, equal particle/layer counts, frozen particle age, one renderer layer, draw calls, and visible flare pixels; it does not use a Babylon golden or MAD comparison. The fixture uses a two-cell 128 by 64 atlas. Deterministic slot 0 is isolated as an unrotated 64 px marker sprite centered at canvas coordinates `(96,96)` on cell 1; an upper-versus-lower marker-band assertion detects vertical texture or UV inversion. `demo-npe-sprite2d` is the interactive counterpart and mutates the bridge origin from pointer/touch input while the renderer-managed simulation remains live.
 
@@ -1347,27 +1394,59 @@ Current tracked measurements are:
 
 | Scene | Runtime raw | Runtime gzip | Ignored graph payload raw |   Ceiling |
 | ----- | ----------: | -----------: | ------------------------: | --------: |
-| 262   |   `39.9 KB` |    `24.2 KB` |                 `28.5 KB` | `44.1 KB` |
-| 263   |   `42.0 KB` |    `24.7 KB` |                 `27.5 KB` | `44.1 KB` |
-| 264   |   `40.2 KB` |    `26.0 KB` |                 `34.4 KB` | `44.1 KB` |
-| 276   |   `44.2 KB` |    `25.3 KB` |                 `27.1 KB` | `45.0 KB` |
-| 277   |   `41.9 KB` |    `25.4 KB` |                 `29.8 KB` | `45.0 KB` |
-| 280   |   `41.4 KB` |    `25.9 KB` |                 `31.0 KB` | `45.0 KB` |
-| 281   |   `41.3 KB` |    `26.4 KB` |                 `32.1 KB` | `45.0 KB` |
+| 262   |   `39.7 KB` |    `24.1 KB` |                 `28.5 KB` | `44.1 KB` |
+| 263   |   `41.8 KB` |    `24.7 KB` |                 `27.5 KB` | `44.1 KB` |
+| 264   |   `40.0 KB` |    `25.9 KB` |                 `34.4 KB` | `44.1 KB` |
+| 276   |   `44.0 KB` |    `25.2 KB` |                 `27.1 KB` | `45.0 KB` |
+| 277   |   `41.6 KB` |    `25.2 KB` |                 `29.8 KB` | `45.0 KB` |
+| 280   |   `41.3 KB` |    `25.8 KB` |                 `31.0 KB` | `45.0 KB` |
+| 281   |   `41.3 KB` |    `26.0 KB` |                 `32.1 KB` | `45.0 KB` |
+| 283   |   `41.4 KB` |    `24.1 KB` |                 `28.6 KB` | `45.0 KB` |
+| 284   |   `41.3 KB` |    `24.0 KB` |                 `28.6 KB` | `45.0 KB` |
 | 300   |   `33.8 KB` |    `21.6 KB` |                 `28.6 KB` | `35.5 KB` |
 
-Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, 281, and 300 as sprite users. Scenes 262, 263, 264, 276, 277, 280, and 281 render particles through billboard sprite modules. Scene 300 additionally requires `particle-sprite-2d.ts` and `sprite-renderer.ts` in its fetched modules and rejects the particle billboard, particle scene-registration, depth-hosted Sprite2D, and billboard rendering paths.
+Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, 281, 283, 284, and 300 as sprite users. Scenes 262 through 284 in that list render through billboard sprite modules. Scene 300 requires `particle-sprite-2d.ts` and `sprite-renderer.ts` in its fetched modules and rejects the particle billboard, particle scene-registration, depth-hosted Sprite2D, and billboard rendering paths.
 
-The particle bundle-content test always requires a nonempty runtime chunk list for each of the seven scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/noise/direction/angle update, CPU texture decode, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, only scene 280 may fetch `npe-flow-map-runtime`, and only scene 281 may fetch `npe-noise-runtime`. Each specialized runtime contains its evaluator, CPU texture decoder, and the shared texture-update builder after bundling.
+The particle bundle-content test always requires a nonempty runtime chunk list for each of the nine billboard parity scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/noise/direction/angle update, CPU texture decode, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, only scene 280 may fetch `npe-flow-map-runtime`, and only scene 281 may fetch `npe-noise-runtime`. Each specialized texture runtime contains its evaluator, CPU texture decoder, and the shared texture-update builder after bundling.
 
-When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, and `math/mat4-invert.ts`. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
+When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, and `math/mat4-invert.ts`. It requires scenes 283 and 284 to fetch `particle-blend`, `npe-blend-modes`, `particle-billboard-scene`, and `particle-billboard-renderable`, whether Rollup emits named chunks or folds them into the scene entry, while rejecting all four modules in every ordinary particle scene. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
+
+### 13.5 Multiply blend parity scene
+
+Scene 283 (`scene283-npe-multiply-blend`) is the dedicated Babylon.js/Lite oracle for particle blend mode `3`. Both engines parse the same graph derived from scene 262 with these changes:
+
+- `SystemBlock.blendMode = 3`, capacity `64`, update speed `0.05`, and emit rate `8`.
+- Emit power and direction are zero, so particles remain at their creation positions.
+- The emit box is `[-3, -1.65, 0]` to `[3, 1.65, 0]`. Paired with the tripled camera radius, this preserves the field's screen-space extent while reducing each sprite's projected size to one third and limiting overlapping Multiply passes.
+- Lifetime is fixed at `10`, size is fixed at `0.8`, and creation/dead color is fixed at `[0.3, 0.8, 0.45, 1]`.
+- Both engines create the same 32 by 32 nearest-filtered procedural RGBA texture. RGB is white; alpha has a fully opaque radial core, fades through deterministic 8-bit values, and is zero at the outer texels. This exercises the Multiply fragment's interpolation toward white from texture alpha without network or decoder differences.
+- The clear color is `[0.65, 0.45, 0.25, 1]`. Fully transparent flare texels must leave this destination unchanged, while covered texels must darken and tint it. An additive fallback therefore produces an obvious full-image difference.
+- Both engines install the deterministic sine-based random generator, start the system, and execute exactly 40 ratio-1 simulation steps. This creates 16 stationary particles. Lite builds the set through `buildNodeParticleSetWithBlendModes`; both engines then set `updateSpeed = 0`, and Lite registers the enriched set through `registerNodeParticleSet(..., { autoStart: false })`.
+- The camera uses alpha `-pi/2`, beta `pi/2`, radius `12`, target origin, near plane `0.1`, and far plane `100`.
+
+The parity specification refreshes `reference/lite/scene283-npe-multiply-blend/babylon-ref-golden.png` from the Babylon.js WebGPU reference page, captures the frozen Lite canvas, and requires full-image `MAD <= 0.01`. The bundle scene must fetch the optional particle Multiply renderable and stay within its scene-configured raw-byte ceiling.
+
+Appending `?live` to either scene-283 page selects a non-parity inspection mode. Both engines parse the same live graph variant: emit power is fixed at `1`, direction is fixed at `[0, 0.6, 0]`, and all other blend, texture, lifetime, size, color, and emitter-box settings remain unchanged. The seeded generator is installed before start, but neither engine pre-steps or freezes the system. Babylon.js leaves its native particle system running; Lite's explicit blend-mode builder has installed the advanced registrar, so `registerNodeParticleSet` advances, synchronizes, and renders the system from the scene's frame delta. Both pages set `data-ready="true"` after their first rendered frame but omit `data-animation-frozen`, so they remain visibly animated for side-by-side local inspection.
+
+### 13.6 MultiplyAdd blend parity scene
+
+Scene 284 (`scene284-npe-multiply-add-blend`) is the isolated Babylon.js/Lite oracle for particle blend mode `4`. It reuses scene 283's procedural texture, warm clear color, camera, emitter box, fixed lifetime/size/color, and zero-motion graph, with these differences:
+
+- `SystemBlock.blendMode = 4` selects Multiply followed by Add.
+- Both engines execute exactly 20 ratio-1 simulation steps, creating eight stationary particles. The sparse field contains one overlap pair, enough to verify ordered two-pass composition without accumulating the cross-GPU blend variance of a dense field.
+- Lite builds with `buildNodeParticleSet`, applies `enableNodeParticleBlendModes(set)`, mutates no evaluator state, and registers through `registerNodeParticleSet(..., { autoStart: false })`. This proves the enabler composes with an independently produced set.
+- The parity specification refreshes `reference/lite/scene284-npe-multiply-add-blend/babylon-ref-golden.png`, captures Lite, and requires full-image `MAD <= 0.01`. Initial local MAD is `0.00044`.
+- The production bundle must fetch all four optional blend modules and stay within `45.0 KB` raw.
 
 ## 14. Exact file manifest
 
-### 14.1 Particle root: 7 files
+### 14.1 Particle root: 10 files
 
 ```text
 packages/babylon-lite/src/particle/particle-billboard.ts
+packages/babylon-lite/src/particle/particle-billboard-renderable.ts
+packages/babylon-lite/src/particle/particle-billboard-scene.ts
+packages/babylon-lite/src/particle/particle-blend.ts
 packages/babylon-lite/src/particle/particle-buffer.ts
 packages/babylon-lite/src/particle/particle-scene.ts
 packages/babylon-lite/src/particle/particle-sprite-2d.ts
@@ -1376,10 +1455,11 @@ packages/babylon-lite/src/particle/sprite-columns-random.ts
 packages/babylon-lite/src/particle/sprite-columns.ts
 ```
 
-### 14.2 Node infrastructure and registries: 25 files
+### 14.2 Node infrastructure and registries: 26 files
 
 ```text
 packages/babylon-lite/src/particle/node/node-particle.ts
+packages/babylon-lite/src/particle/node/npe-blend-modes.ts
 packages/babylon-lite/src/particle/node/npe-build.ts
 packages/babylon-lite/src/particle/node/npe-flow-map-runtime.ts
 packages/babylon-lite/src/particle/node/npe-flow-map.ts
@@ -1497,6 +1577,8 @@ lab/lite/src/lite/scene276.ts
 lab/lite/src/lite/scene277.ts
 lab/lite/src/lite/scene280.ts
 lab/lite/src/lite/scene281.ts
+lab/lite/src/lite/scene283.ts
+lab/lite/src/lite/scene284.ts
 lab/lite/src/lite/scene300.ts
 lab/lite/src/shared/scene262-npe.ts
 lab/lite/src/shared/scene263-npe.ts
@@ -1505,6 +1587,8 @@ lab/lite/src/shared/scene276-npe.ts
 lab/lite/src/shared/scene277-npe.ts
 lab/lite/src/shared/scene280-npe.ts
 lab/lite/src/shared/scene281-npe.ts
+lab/lite/src/shared/scene283-npe-multiply-blend.ts
+lab/lite/src/shared/scene284-npe-multiply-add-blend.ts
 lab/lite/src/shared/npe-sprite2d-fixture.ts
 lab/public/bundle/demos-manifest.json
 lab/public/bundle/manifest/scene262.json
@@ -1514,6 +1598,8 @@ lab/public/bundle/manifest/scene276.json
 lab/public/bundle/manifest/scene277.json
 lab/public/bundle/manifest/scene280.json
 lab/public/bundle/manifest/scene281.json
+lab/public/bundle/manifest/scene283.json
+lab/public/bundle/manifest/scene284.json
 lab/public/bundle/manifest/scene300.json
 tests/lite/parity/scenes/scene262-npe-size.spec.ts
 tests/lite/parity/scenes/scene263-npe-sphere.spec.ts
@@ -1522,6 +1608,8 @@ tests/lite/parity/scenes/scene276-npe-animations.spec.ts
 tests/lite/parity/scenes/scene277-npe-attractor.spec.ts
 tests/lite/parity/scenes/scene280-npe-flow-map.spec.ts
 tests/lite/parity/scenes/scene281-npe-noise-texture.spec.ts
+tests/lite/parity/scenes/scene283-npe-multiply-blend.spec.ts
+tests/lite/parity/scenes/scene284-npe-multiply-add-blend.spec.ts
 tests/lite/parity/scenes/scene300-npe-sprite2d.spec.ts
 tests/lite/parity/bundle-size.spec.ts
 tests/lite/unit/npe-particle-flow-map.test.ts
