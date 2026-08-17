@@ -64,10 +64,11 @@ export const spriteBlendAdditive: SpriteBlendDescriptor = {
 };
 
 /**
- * Pure additive blending (`src * 1 + dst`), matching Babylon.js
- * `BLENDMODE_ONEONE` / `ALPHA_ONEONE`. Unlike {@link spriteBlendAdditive}, source
- * RGB is not weighted by alpha. This is useful for particle textures that encode
- * their falloff directly in RGB.
+ * Pure additive color blending (`src * 1 + dst`) whose color factors match Babylon.js
+ * `BLENDMODE_ONEONE` / `ALPHA_ONEONE`. This generic descriptor uses `one` / `one`
+ * alpha factors; exact particle OneOne instead uses `zero` / `one`. Unlike
+ * {@link spriteBlendAdditive}, source RGB is not weighted by alpha. This is useful
+ * for particle textures that encode their falloff directly in RGB.
  */
 export const spriteBlendOneOne: SpriteBlendDescriptor = {
     _key: "oneone",

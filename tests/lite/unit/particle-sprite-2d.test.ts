@@ -27,13 +27,20 @@ function mockBuffer() {
     };
 }
 
-function mockEngine(): EngineContext {
+function mockEngine(failPipelineAt = 0): EngineContext {
+    let pipelineCount = 0;
     const device = {
         createBuffer: vi.fn(mockBuffer),
         createShaderModule: vi.fn(() => ({})),
         createBindGroupLayout: vi.fn(() => ({})),
         createPipelineLayout: vi.fn(() => ({})),
-        createRenderPipeline: vi.fn(() => ({ getBindGroupLayout: vi.fn(() => ({})) })),
+        createRenderPipeline: vi.fn(() => {
+            pipelineCount++;
+            if (pipelineCount === failPipelineAt) {
+                throw new Error("pipeline failure");
+            }
+            return { getBindGroupLayout: vi.fn(() => ({})) };
+        }),
         createBindGroup: vi.fn(() => ({})),
         queue: { writeBuffer: vi.fn() },
     } as unknown as GPUDevice;
@@ -161,6 +168,34 @@ describe("NPE Sprite2D bridge", () => {
         expect(renderer._beforeUpdate).toEqual([]);
         expect(renderer._disposeCallbacks).toEqual([]);
         expect(valid._started).toBe(false);
+        disposeSpriteRenderer(renderer);
+    });
+
+    it("rolls back a layer inserted immediately before pipeline creation fails", () => {
+        const renderer = createSpriteRenderer(mockEngine(1), { layers: [] });
+        const system = makeSystem();
+
+        expect(() => registerNodeParticleSet2D(renderer, makeSet(system))).toThrow(/pipeline failure/);
+        expect(renderer.layers).toEqual([]);
+        expect(renderer._beforeUpdate).toEqual([]);
+        expect(renderer._disposeCallbacks).toEqual([]);
+        expect(system._started).toBe(false);
+        disposeSpriteRenderer(renderer);
+    });
+
+    it("rolls back a fully attached layer and the inserted second layer when its pipeline fails", () => {
+        const renderer = createSpriteRenderer(mockEngine(2), { layers: [] });
+        const first = makeSystem();
+        const second = makeSystem();
+        first.blendMode = 0;
+        second.blendMode = 1;
+
+        expect(() => registerNodeParticleSet2D(renderer, makeSet(first, second))).toThrow(/pipeline failure/);
+        expect(renderer.layers).toEqual([]);
+        expect(renderer._beforeUpdate).toEqual([]);
+        expect(renderer._disposeCallbacks).toEqual([]);
+        expect(first._started).toBe(false);
+        expect(second._started).toBe(false);
         disposeSpriteRenderer(renderer);
     });
 

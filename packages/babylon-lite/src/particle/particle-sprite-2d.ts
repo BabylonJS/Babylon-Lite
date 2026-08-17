@@ -208,8 +208,10 @@ export function registerNodeParticleSet2D(renderer: SpriteRenderer, set: NodePar
     let attached = 0;
     try {
         for (const bridge of bridges) {
-            addSpriteRendererLayer(renderer, bridge.layer);
+            // The layer is inserted before its pipeline is compiled, so include
+            // the current attempt in rollback before calling the add helper.
             attached++;
+            addSpriteRendererLayer(renderer, bridge.layer);
         }
     } catch (error) {
         while (attached > 0) {

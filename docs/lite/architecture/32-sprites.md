@@ -848,7 +848,7 @@ export const billboardBlendCutout: BillboardBlendDescriptor; // alpha-test, dept
 export const billboardBlendAdditive: BillboardBlendDescriptor; // transparent, no depth write
 ```
 
-Sprite2D supports `opaque`, `alpha`, `premultiplied`, `additive`, `one-one`, and `multiply` descriptors. `spriteBlendAdditive` uses color factors `src-alpha` / `one`, so source RGB is weighted by source alpha before it is added to the destination. `spriteBlendOneOne` uses `one` / `one` for both color and alpha, so source RGB is added without alpha weighting; this matches Babylon.js `BLENDMODE_ONEONE` / `ALPHA_ONEONE`. Every operation in both additive descriptors is `add`.
+Sprite2D supports `opaque`, `alpha`, `premultiplied`, `additive`, `one-one`, and `multiply` descriptors. `spriteBlendAdditive` uses color factors `src-alpha` / `one`, so source RGB is weighted by source alpha before it is added to the destination. `spriteBlendOneOne` uses `one` / `one` for both color and alpha, so source RGB is added without alpha weighting. Its color factors match Babylon.js `BLENDMODE_ONEONE` / `ALPHA_ONEONE`, but its generic Sprite2D alpha factors are `one` / `one`; exact particle OneOne instead uses `zero` / `one`. Every operation in both additive descriptors is `add`.
 
 Billboards support `alpha`, `premultiplied`, `cutout`, and `additive` publicly — `multiply` is intentionally not offered for billboards. The shared `blend-descriptors.ts` holds the two common states
 (`_ALPHA_BLEND_STATE`, `_PREMULTIPLIED_BLEND_STATE`) so alpha/premultiplied don't duplicate
