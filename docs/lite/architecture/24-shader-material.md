@@ -380,7 +380,7 @@ Under LWR (`35-large-world-rendering.md`) the frame the system uniforms describe
 Consequences a shader author sees:
 
 - `world`, `worldView` and `worldViewProjection` all carry the camera-relative translation. They derive from one rebased matrix, so they stay in a single frame.
-- `cameraPosition` is `(0, 0, 0)` — in the frame `world` is expressed in, the camera *is* the origin. This keeps the documented `scene.vEyePosition.xyz` equivalence above, which `_packSceneUniforms` already zeroes under FO. An expression like `cameraPosition - worldPos` therefore still yields the correct eye-relative vector, and now at full precision.
+- `cameraPosition` is `(0, 0, 0)` — in the frame `world` is expressed in, the camera *is* the origin. This keeps the documented `scene.vEyePosition.xyz` equivalence above, which `_packSceneUniforms` already zeroes under FO. An expression like `cameraPosition - worldPos` therefore still yields the correct eye-relative vector, and now at full precision. **This is a breaking change** for any custom shader that read `cameraPosition` as an absolute world-space position while `useFloatingOrigin` was enabled — see the release notes for the migration path.
 - Absolute world coordinates are not recoverable from the UBO. A shader that genuinely needs them should take them as a custom uniform.
 
 With floating origin off, every value above is the plain absolute one and the path is copy-free.
