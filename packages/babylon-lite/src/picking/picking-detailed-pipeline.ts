@@ -2,7 +2,7 @@ import { SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { createSingleUniformBGL } from "../shader/bgl-helpers.js";
 import type { PickDiscardRule } from "./gpu-picker.js";
-import { getPickingEmptyBGL, getPickingSceneBGL } from "./picking-scene-bgl.js";
+import { getPickingSceneBGL } from "./picking-scene-bgl.js";
 import type { PickingVertexProjection } from "./picking-advanced-pipeline.js";
 import type { PickingVertexProjectionShader } from "./picking-advanced-shader.js";
 
@@ -115,15 +115,11 @@ function create(
     const device = engine._device;
     const module = device.createShaderModule({ label: `${label}-shader`, code: shader(rule, projection?.shader ?? null) });
     const bgl1 = meshBGL(engine);
-    const bindGroupLayouts = projection
-        ? [getPickingSceneBGL(engine), bgl1, discardBGL ?? getPickingEmptyBGL(engine), projection.regularBGL]
-        : discardBGL
-          ? [getPickingSceneBGL(engine), bgl1, discardBGL]
-          : [getPickingSceneBGL(engine), bgl1];
+    const base = discardBGL ? [getPickingSceneBGL(engine), bgl1, discardBGL] : [getPickingSceneBGL(engine), bgl1];
     return device.createRenderPipeline({
         label: `${label}-pipeline`,
-        layout: device.createPipelineLayout({ bindGroupLayouts }),
-        vertex: { module, entryPoint: "vs", buffers: [POSITION, ...(projection?.vertexBuffers ?? [])] },
+        layout: device.createPipelineLayout({ bindGroupLayouts: projection?._layouts?.(engine, base) ?? base }),
+        vertex: { module, entryPoint: "vs", buffers: projection?._buffers ?? [POSITION] },
         fragment: { module, entryPoint: "fs", targets: [{ format: "rgba8unorm" }, { format: "r32float" }, { format: "rgba32uint" }] },
         depthStencil: { format: "depth24plus", depthCompare: "greater", depthWriteEnabled: true },
         primitive: { topology: "triangle-list", cullMode: "none" },

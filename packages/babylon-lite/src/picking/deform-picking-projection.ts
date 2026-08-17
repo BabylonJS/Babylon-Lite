@@ -16,6 +16,16 @@ import type { PickingVertexProjection } from "./picking-advanced-pipeline.js";
 
 let _device: GPUDevice | null = null;
 let _projections: Map<string, PickingVertexProjection> | null = null;
+let _emptyBGL: GPUBindGroupLayout | null = null;
+
+/** Position layout, restated so the simple and detailed pick pipelines keep theirs untouched. */
+const POSITION: GPUVertexBufferLayout = { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] };
+
+/** Empty group(2) filler. Bind group layouts must be contiguous from 0, so a pick pipeline that puts
+ *  this projection at group(3) needs a placeholder whenever no discard rule supplies group(2). */
+function emptyBGL(engine: EngineContext): GPUBindGroupLayout {
+    return (_emptyBGL ??= engine._device.createBindGroupLayout({ label: "picking-deform-empty-bgl", entries: [] }));
+}
 
 /** Morph storage-buffer layout. Restated here rather than imported from `morph-fragment-core.ts`:
  *  that module belongs to the material chunk, and importing one string from it splits it into a
@@ -130,6 +140,8 @@ function createProjection(engine: EngineContext, skeleton: boolean, has8Bones: b
         vertexBuffers: skinLayouts(skeleton, has8Bones),
         regularBGL: bgl,
         thinBGL: bgl,
+        _layouts: (e, base) => [...base.slice(0, 2), base[2] ?? emptyBGL(e), bgl],
+        _buffers: [POSITION, ...skinLayouts(skeleton, has8Bones)],
     };
 }
 
@@ -137,6 +149,7 @@ function projectionFor(engine: EngineContext, skeleton: boolean, has8Bones: bool
     if (_device !== engine._device) {
         _device = engine._device;
         _projections = null;
+        _emptyBGL = null;
     }
     const key = `${skeleton ? (has8Bones ? 8 : 4) : 0}-${morph ? 1 : 0}`;
     const projections = (_projections ??= new Map());
