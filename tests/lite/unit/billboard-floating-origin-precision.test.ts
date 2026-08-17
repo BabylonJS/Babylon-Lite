@@ -17,10 +17,21 @@
  * These cases pin the mesh path's behaviour and the billboard path's side by
  * side at the same magnitude and the same delta, so the gap is a measured
  * number rather than an argument.
+ *
+ * The fix adds `_anchor`, an F64 shadow that `writeInstance` also consults
+ * when a patch omits `position` (e.g. a color-only update), so a per-frame
+ * tween on a stationary far sprite can't fall back to the already-quantized
+ * `_instanceData` row and re-round the anchor down. The last case below pins
+ * that carry-forward path directly.
  */
 import { describe, it, expect } from "vitest";
 
-import { createFacingBillboardSystem, addBillboardSpriteIndex, BILLBOARD_INSTANCE_FLOATS_PER_SPRITE } from "../../../packages/babylon-lite/src/sprite/billboard-sprite";
+import {
+    createFacingBillboardSystem,
+    addBillboardSpriteIndex,
+    updateBillboardSpriteIndex,
+    BILLBOARD_INSTANCE_FLOATS_PER_SPRITE,
+} from "../../../packages/babylon-lite/src/sprite/billboard-sprite";
 import { createBillboardInstanceSortScratch, uploadBillboardInstances } from "../../../packages/babylon-lite/src/sprite/billboard-pipeline";
 import { packMat4IntoF32WithOffset } from "../../../packages/babylon-lite/src/large-world/pack-mat4-with-offset";
 import { allocateMat4, _setHpmAllocator, _resetMatrixAllocatorForTests } from "../../../packages/babylon-lite/src/math/_matrix-allocator";
@@ -97,6 +108,33 @@ describe("billboard anchors under floating origin", () => {
         // a quarter of a sprite.
         const first = uploadAnchor([FAR, 0, 0], FAR, 0, 0);
         const second = uploadAnchor([FAR + DELTA, 0, 0], FAR, 0, 0);
+        expect(second[0]).not.toBe(first[0]);
+    });
+
+    it("a position-omitting update carries the anchor forward from `_anchor`, not from the quantized `_instanceData` row", () => {
+        // `writeInstance` resolves a missing `position` on an update by reading
+        // `system._anchor` (F64, exact). The regression this guards against is a
+        // fallback to `prev` instead — a view onto the F32 `_instanceData` row,
+        // which for this sprite already reads back as plain FAR because DELTA is
+        // sub-ULP: `Math.fround(FAR + DELTA) === FAR`. That fallback would silently
+        // overwrite the F64 anchor with the rounded value on the very first update
+        // that doesn't touch position, permanently losing the delta from then on —
+        // exactly the per-frame case of a color/alpha tween on a far sprite that
+        // never moves. One color-only update must not be able to do that.
+        const system = createFacingBillboardSystem(atlas(), { capacity: 2 });
+        addBillboardSpriteIndex(system, { position: [FAR, 0, 0], sizeWorld: [1, 1] });
+        addBillboardSpriteIndex(system, { position: [FAR + DELTA, 0, 0], sizeWorld: [1, 1] });
+
+        // Per-frame alpha/color tween on the far sprite — no `position` in the patch.
+        updateBillboardSpriteIndex(system, 1, { color: [1, 0, 0, 0.5] });
+
+        const { device, uploaded } = captureUpload();
+        uploadBillboardInstances(device, system, {} as GPUBuffer, -1, FAR, 0, 0, createBillboardInstanceSortScratch());
+        const stride = BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
+        const first = uploaded().subarray(0, stride);
+        const second = uploaded().subarray(stride, stride * 2);
+
+        expect(second[0]).toBe(Math.fround(DELTA));
         expect(second[0]).not.toBe(first[0]);
     });
 });
