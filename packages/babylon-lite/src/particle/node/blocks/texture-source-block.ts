@@ -9,21 +9,19 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
  */
 export const particleTextureSourceBlock: NpeBlockEvaluator = {
     build(block, ctx) {
-        const rawUrl = typeof block.serialized.url === "string" ? block.serialized.url : "";
-        const base = ctx.state.textureBaseUrl;
-        const isAbsolute = /^(https?:)?\/\//.test(rawUrl) || rawUrl.startsWith("/");
-        const url = rawUrl && base && !isAbsolute ? new URL(rawUrl, base).href : rawUrl;
+        const { url: serializedUrl, textureDataUrl, invertY } = block.serialized;
+        const rawUrl = (typeof serializedUrl === "string" && serializedUrl) || (typeof textureDataUrl === "string" && textureDataUrl) || "";
+        const state = ctx.state;
+        const base = state.textureBaseUrl;
+        const url = rawUrl && base && !/^(https?:)?\/\//.test(rawUrl) && !rawUrl.startsWith("/") ? new URL(rawUrl, base).href : rawUrl;
         // Babylon.js's ParticleTextureSourceBlock.invertY defaults to true; the billboard renderer samples V
         // opposite to the BJS particle shader, so upload with the opposite flip to land on the same pixels.
-        const blockInvertY = block.serialized.invertY !== false;
-        const state = ctx.state;
 
         if (url) {
             ctx.addBuildPromise(
                 (async () => {
                     try {
-                        const texture = await loadTexture2D(ctx.engine, url, { invertY: !blockInvertY });
-                        state.system!.texture = texture;
+                        state.system!.texture = await loadTexture2D(ctx.engine, url, { invertY: invertY === false });
                     } catch {
                         // Texture failures do not prevent CPU simulation; billboard creation still requires a texture.
                     }

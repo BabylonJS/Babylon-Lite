@@ -17,8 +17,7 @@ export const embeddedParticleTextureSourceBlock: NpeBlockEvaluator = {
             ctx.addBuildPromise(
                 (async () => {
                     try {
-                        const texture = await loadTexture2D(ctx.engine, url, { invertY: !blockInvertY });
-                        state.system!.texture = texture;
+                        state.system!.texture = await loadTexture2D(ctx.engine, url, { invertY: !blockInvertY });
                     } catch {
                         // Texture failures do not prevent CPU simulation; billboard creation still requires a texture.
                     }
