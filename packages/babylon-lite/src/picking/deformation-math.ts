@@ -1,15 +1,12 @@
 // Shared, zero-allocation deformation primitives (morph-target accumulation and skeletal skinning
-// for a single vertex). Kept in their own module — rather than exported from `deformed-geometry.ts`
-// — so the GPU picker's dynamic `import()` of that module does not drag these helpers into every
-// picking scene's namespace object. Both the bulk (`deformed-geometry.ts`) and single-vertex
-// (`deformed-vertex.ts`) paths import them via static named imports, so there is one implementation
-// and no duplicated math.
+// for a single vertex), consumed by `deformed-vertex.ts`.
 //
-// The primitives read and write a `Float32Array` at a caller-supplied offset. That lets the bulk
-// path — which is statically imported by detailed picking and therefore inlined into every picking
-// scene's bundle — call them straight over its position buffer with no per-vertex scratch/copy glue.
-// The single-vertex path (only pulled into hotspot/viewer bundles) absorbs the small bridging cost of
-// a length-3 scratch instead, keeping the size-sensitive bulk path as tight as a hand-inlined loop.
+// Deformation for rendering and for GPU picking both happen in shaders; these CPU primitives exist
+// only for the O(1) queries that need a mesh-local answer synchronously — hotspot tracking and the
+// single triangle the detailed picker resolves per pick.
+//
+// The primitives read and write a `Float32Array` at a caller-supplied offset, so a caller can stage
+// one vertex in a small scratch or address a larger buffer in place.
 
 import type { Mesh } from "../mesh/mesh.js";
 
@@ -26,14 +23,18 @@ type MorphState = NonNullable<Mesh["morphTargets"]>;
  * @param outOffset - Index of the vertex's x component within `out`.
  * @param componentOffset - The vertex's base index into the morph target position buffers
  *   (vertexIndex * 3). Equals `outOffset` for the bulk path; differs when `out` is a scratch.
+ * @param weightsOverride - Optional weights to use instead of the live `morph.weights`, so a caller
+ *   resolving a pick can evaluate the pose that was recorded with the draw rather than whatever the
+ *   animation has advanced to since.
  */
-export function addMorphDelta(morph: MorphState, out: Float32Array, outOffset: number, componentOffset: number): void {
+export function addMorphDelta(morph: MorphState, out: Float32Array, outOffset: number, componentOffset: number, weightsOverride?: ArrayLike<number> | null): void {
     let x = out[outOffset]!;
     let y = out[outOffset + 1]!;
     let z = out[outOffset + 2]!;
+    const activeWeights = weightsOverride ?? morph.weights;
     const targetCount = Math.min(morph.count, morph.targets.length);
     for (let t = 0; t < targetCount; t++) {
-        const weight = morph.weights[t] ?? 0;
+        const weight = activeWeights[t] ?? 0;
         if (weight === 0) {
             continue;
         }

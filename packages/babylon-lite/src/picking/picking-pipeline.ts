@@ -4,6 +4,7 @@ import type { EngineContext } from "../engine/engine.js";
 import { pickingShaderSource } from "./picking-shader.js";
 import { createSingleUniformBGL } from "../shader/bgl-helpers.js";
 import { getPickingSceneBGL } from "./picking-scene-bgl.js";
+import type { PickingVertexProjection } from "./picking-advanced-pipeline.js";
 
 let _device: GPUDevice | null = null;
 let _meshBGL: GPUBindGroupLayout | null = null;
@@ -51,21 +52,25 @@ const POSITION: GPUVertexBufferLayout = {
     attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }],
 };
 
-function pipeline(engine: EngineContext, discard: PickingDiscardPipelineOptions | null, group2: GPUBindGroupLayout | null, label: string): GPURenderPipeline {
+function pipeline(
+    engine: EngineContext,
+    discard: PickingDiscardPipelineOptions | null,
+    group2: GPUBindGroupLayout | null,
+    label: string,
+    projection: PickingVertexProjection | null
+): GPURenderPipeline {
     const device = engine._device;
     const module = device.createShaderModule({
         label: `${label}-shader`,
-        code: pickingShaderSource(discard ? { discardWgsl: discard.wgsl, storage: discard.storage } : undefined),
+        code: pickingShaderSource({ discardWgsl: discard?.wgsl, storage: discard?.storage, _vertexProjection: projection?.shader }),
     });
     const group1 = meshBGL(engine);
-    const layout = device.createPipelineLayout({
-        label: `${label}-pipeline-layout`,
-        bindGroupLayouts: group2 ? [getPickingSceneBGL(engine), group1, group2] : [getPickingSceneBGL(engine), group1],
-    });
+    const base = group2 ? [getPickingSceneBGL(engine), group1, group2] : [getPickingSceneBGL(engine), group1];
+    const layout = device.createPipelineLayout({ label: `${label}-pipeline-layout`, bindGroupLayouts: projection?._layouts?.(engine, base) ?? base });
     return device.createRenderPipeline({
         label: `${label}-pipeline`,
         layout,
-        vertex: { module, entryPoint: "vs", buffers: [POSITION] },
+        vertex: { module, entryPoint: "vs", buffers: projection?._buffers ?? [POSITION] },
         fragment: { module, entryPoint: "fs", targets: [{ format: "rgba8unorm" }, { format: "r32float" }] },
         depthStencil: { format: "depth24plus", depthCompare: "greater", depthWriteEnabled: true },
         primitive: { topology: "triangle-list", cullMode: "none" },
@@ -73,9 +78,13 @@ function pipeline(engine: EngineContext, discard: PickingDiscardPipelineOptions 
     });
 }
 
-export function getPickingPipelineSet(engine: EngineContext, discard?: PickingDiscardPipelineOptions | null): PickingPipelineSet {
+export function getPickingPipelineSet(
+    engine: EngineContext,
+    discard?: PickingDiscardPipelineOptions | null,
+    projection: PickingVertexProjection | null = null
+): PickingPipelineSet {
     invalidate(engine);
-    const key = discard ? `discard:${discard.key}` : "default";
+    const key = `${discard ? `discard:${discard.key}` : "default"}:${projection?.key ?? "affine"}`;
     const sets = (_sets ??= new Map());
     const cached = sets.get(key);
     if (cached) {
@@ -83,7 +92,7 @@ export function getPickingPipelineSet(engine: EngineContext, discard?: PickingDi
     }
     const active = discard ?? null;
     const group2 = active?.storage?.length ? discardBGL(engine, active) : null;
-    const regularPipeline = pipeline(engine, active, group2, active ? `picking-${active.key}` : "picking");
+    const regularPipeline = pipeline(engine, active, group2, active ? `picking-${active.key}` : "picking", projection);
     const set = {
         regularPipeline,
         thinInstancePipeline: regularPipeline,
