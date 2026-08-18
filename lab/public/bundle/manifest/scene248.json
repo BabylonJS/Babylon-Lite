@@ -1,13 +1,13 @@
 {
   "rawKB": 76.6,
-  "gzipKB": 31.9,
+  "gzipKB": 32,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene248-generate-mipmaps-BRrW3GTL.js",
     "scene248-gltf-json-asset-CGO9wKdc.js",
     "scene248-gltf-sampler-desc-PTkgH6lM.js",
     "scene248-ibl-fragment-CeRrvT96.js",
-    "scene248-pbr-renderable-CChxRTXG.js",
+    "scene248-pbr-renderable-BpIUXbVN.js",
     "scene248-rgbd-decode-C48aGEhZ.js",
     "scene248-scene-uniforms-FTYH6Ct0.js",
     "scene248.js"

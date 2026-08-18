@@ -4,7 +4,7 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene19-ibl-fragment-CeRrvT96.js",
-    "scene19-pbr-renderable-DnvYFsU-.js",
+    "scene19-pbr-renderable-CcguWepr.js",
     "scene19-rgbd-decode-Lpn-x-zd.js",
     "scene19-singlelight-hemispheric-wgsl-COpGvwi0.js",
     "scene19.js"
