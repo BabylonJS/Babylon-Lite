@@ -112,11 +112,18 @@ function clampTinyBarycentric(value: number): number {
 
 /** @internal Decode exact primitive-local detail into the public mesh picking fields.
  *
- *  `positions` and `localPoint` must share one space. The GPU pick shader interpolates the mesh's
- *  *rest* local position across the *deformed* triangle it rasterized, so the barycentric weights
- *  recovered from rest positions are exactly the weights of the hit on the deformed surface. The face
- *  normal, however, is derived from the triangle's edges and therefore needs genuinely deformed
- *  vertices — `deformTriangle` supplies those three (and only those three) when the mesh animates. */
+ *  `positions` and `localPoint` are always the mesh's **rest** geometry and must share that space. The
+ *  GPU pick shader interpolates the rest local position across the *deformed* triangle it rasterized,
+ *  so the weights recovered from the rest triangle are exactly the hit's weights on the deformed
+ *  surface — barycentric coordinates are affine-invariant. Solving `localPoint` against deformed
+ *  vertices instead would mix spaces and skew `bu`/`bv`; a pure translation morph is enough to break it.
+ *
+ *  Caveat: that recovery is well-posed only for a nondegenerate rest triangle. A rest-collinear
+ *  triangle that deformation makes rasterizable has no unique rest-space solution; the `denom` guard
+ *  below leaves `bu`/`bv` unset in that case rather than returning a wrong answer.
+ *
+ *  The face normal is the exception — it comes from triangle edges, which deformation genuinely
+ *  rotates — so `deformTriangle` supplies those three (and only those three) deformed vertices. */
 export function populateDetailedMeshInfo(
     info: PickingInfo,
     mesh: Mesh,
@@ -141,30 +148,18 @@ export function populateDetailedMeshInfo(
         return;
     }
 
-    let source = positions;
-    let o0 = i0 * 3;
-    let o1 = i1 * 3;
-    let o2 = i2 * 3;
-    if (deformTriangle) {
-        const triangle = (_deformedTriangle ??= new F32(9));
-        if (!deformTriangle(mesh, i0, i1, i2, triangle)) {
-            return;
-        }
-        source = triangle;
-        o0 = 0;
-        o1 = 3;
-        o2 = 6;
-    }
-
-    const ax = source[o0]!;
-    const ay = source[o0 + 1]!;
-    const az = source[o0 + 2]!;
-    const e0x = source[o1]! - ax;
-    const e0y = source[o1 + 1]! - ay;
-    const e0z = source[o1 + 2]! - az;
-    const e1x = source[o2]! - ax;
-    const e1y = source[o2 + 1]! - ay;
-    const e1z = source[o2 + 2]! - az;
+    const o0 = i0 * 3;
+    const o1 = i1 * 3;
+    const o2 = i2 * 3;
+    const ax = positions[o0]!;
+    const ay = positions[o0 + 1]!;
+    const az = positions[o0 + 2]!;
+    const e0x = positions[o1]! - ax;
+    const e0y = positions[o1 + 1]! - ay;
+    const e0z = positions[o1 + 2]! - az;
+    const e1x = positions[o2]! - ax;
+    const e1y = positions[o2 + 1]! - ay;
+    const e1z = positions[o2 + 2]! - az;
     const px = localPoint[0] - ax;
     const py = localPoint[1] - ay;
     const pz = localPoint[2] - az;
@@ -204,7 +199,29 @@ export function populateDetailedMeshInfo(
         info.pickedNormalWorld = worldNormal;
     }
 
-    let localFaceNormal = normalizeVec3(e0y * e1z - e0z * e1y, e0z * e1x - e0x * e1z, e0x * e1y - e0y * e1x);
+    // Unlike the barycentric weights, a face normal is derived from the triangle's EDGES, which are not
+    // barycentric-invariant: deformation genuinely rotates the face. So this is the one output that needs
+    // real deformed vertices, and `deformTriangle` supplies exactly those three. If it declines (no CPU
+    // positions), fall back to the rest edges rather than dropping the field entirely.
+    let fe0x = e0x;
+    let fe0y = e0y;
+    let fe0z = e0z;
+    let fe1x = e1x;
+    let fe1y = e1y;
+    let fe1z = e1z;
+    if (deformTriangle) {
+        const triangle = (_deformedTriangle ??= new F32(9));
+        if (deformTriangle(mesh, i0, i1, i2, triangle)) {
+            fe0x = triangle[3]! - triangle[0]!;
+            fe0y = triangle[4]! - triangle[1]!;
+            fe0z = triangle[5]! - triangle[2]!;
+            fe1x = triangle[6]! - triangle[0]!;
+            fe1y = triangle[7]! - triangle[1]!;
+            fe1z = triangle[8]! - triangle[2]!;
+        }
+    }
+
+    let localFaceNormal = normalizeVec3(fe0y * fe1z - fe0z * fe1y, fe0z * fe1x - fe0x * fe1z, fe0x * fe1y - fe0y * fe1x);
     let worldFaceNormal = transformNormal(world, localFaceNormal);
     if (facesPickRay(worldFaceNormal, info)) {
         localFaceNormal = [-localFaceNormal[0], -localFaceNormal[1], -localFaceNormal[2]];

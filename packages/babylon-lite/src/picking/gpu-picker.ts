@@ -379,6 +379,11 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     const tempBuffers: GPUBuffer[] = [];
     const detailedPositions = detailed ? new Map<Mesh, Float32Array>() : null;
     const detailedNormals = detailed ? new Map<Mesh, Float32Array>() : null;
+    // Capture deformation poses now, while the draw is still being recorded. The depth readback below
+    // resolves a frame or two later, by which point the animation tick has advanced `boneMatrices` and
+    // morph weights in place — deriving the hit triangle's face normal from those live mirrors would
+    // mix a pose-N hit with a pose-N+1 normal. Capturing is O(bones + targets), not O(V).
+    const detailedPoses = deformedVertex?.captureDeformPoses(candidates) ?? null;
     let meshRanges: import("./picking-advanced-draw.js").AdvancedMeshRange[];
     if (advancedDraw) {
         const result = advancedDraw.draw(pass, picker._sceneBG!, nextId, pickDiscard, detailed, detailedPicking, tempBuffers, detailedPositions, detailedNormals);
@@ -564,7 +569,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
         if (thinStateStable) {
             const positions = detailedPositions?.get(hitMesh);
             const world = detailedPicking!.detailedWorldMatrix(hitRange.world, hitMesh, hitThinIdx);
-            const deformTriangle = deformedVertex && (hitMesh.morphTargets || hitMesh.skeleton) ? deformedVertex.deformTriangleToRef : null;
+            const deformTriangle = deformedVertex?.deformerFor(detailedPoses, hitMesh) ?? null;
             detailedPicking!.populateDetailedMeshInfo(
                 info,
                 hitMesh,

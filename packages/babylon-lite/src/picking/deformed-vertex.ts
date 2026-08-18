@@ -2,6 +2,55 @@ import type { Vec3 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { addMorphDelta, skinVertexToRef } from "./deformation-math.js";
 
+/**
+ * An immutable copy of the animation state that drives a mesh's deformation.
+ *
+ * A GPU pick records its draw against the pose of frame N, but the depth readback only resolves a
+ * frame or two later, by which point the animation tick has advanced `skeleton.boneMatrices` and
+ * `morphTargets.weights` in place. Resolving the hit triangle against those live mirrors would derive
+ * the face normal from a different pose than the one that produced the hit. Capturing is O(bones +
+ * targets) — independent of vertex count — so the picker can hold the drawn pose without the O(V)
+ * geometry snapshot this path replaced.
+ */
+export interface DeformPose {
+    readonly boneMatrices: Float32Array | null;
+    readonly morphWeights: Float32Array | null;
+}
+
+/** Copy `mesh`'s current deformation pose, or null when the mesh does not deform. */
+export function captureDeformPose(mesh: Mesh): DeformPose | null {
+    const skeleton = mesh.skeleton;
+    const morph = mesh.morphTargets;
+    if (!skeleton && !morph) {
+        return null;
+    }
+    return {
+        boneMatrices: skeleton ? new Float32Array(skeleton.boneMatrices) : null,
+        morphWeights: morph ? Float32Array.from(morph.weights) : null,
+    };
+}
+
+/** Capture the drawn pose of every deformable pick candidate. Lives here rather than in the picker so
+ *  scenes that never deform pay nothing for it: the picker reaches this module through one
+ *  optional-chained call on a lazily imported namespace. */
+export function captureDeformPoses(candidates: readonly { readonly mesh: Mesh }[]): Map<Mesh, DeformPose> {
+    const poses = new Map<Mesh, DeformPose>();
+    for (const { mesh } of candidates) {
+        const pose = captureDeformPose(mesh);
+        if (pose) {
+            poses.set(mesh, pose);
+        }
+    }
+    return poses;
+}
+
+/** Bind `mesh`'s captured pose into the triangle deformer the detailed picker calls, or null when the
+ *  mesh did not deform and its rest triangle is already correct. */
+export function deformerFor(poses: Map<Mesh, DeformPose> | null, mesh: Mesh): ((mesh: Mesh, i0: number, i1: number, i2: number, out: Float32Array) => boolean) | null {
+    const pose = poses?.get(mesh) ?? null;
+    return pose ? (m, i0, i1, i2, out) => deformTriangleToRef(m, i0, i1, i2, out, pose) : null;
+}
+
 // Scratch reused by computeDeformedPositionToRef to keep it zero-allocation after the first call. The
 // shared primitives operate on a Float32Array at an offset, so the single vertex is staged here at
 // offset 0 and copied out to the Vec3 result at the end. Allocated lazily so merely importing this
@@ -32,6 +81,12 @@ let _deformScratch: Float32Array | undefined;
  * @returns true on success; false if the mesh has no CPU positions or `vertexIndex` is out of range.
  */
 export function computeDeformedPositionToRef(mesh: Mesh, vertexIndex: number, out: Vec3): boolean {
+    return deformVertexToRef(mesh, vertexIndex, out, null);
+}
+
+/** Shared implementation. `pose` overrides the live animation mirrors when a caller must reproduce a
+ *  pose it captured earlier; null reads whatever the animation tick holds right now. */
+function deformVertexToRef(mesh: Mesh, vertexIndex: number, out: Vec3, pose: DeformPose | null): boolean {
     const base = mesh._cpuPositions;
     if (!base) {
         return false;
@@ -50,14 +105,14 @@ export function computeDeformedPositionToRef(mesh: Mesh, vertexIndex: number, ou
     // vertex is staged at scratch offset 0, but its deltas still come from the mesh's componentOffset.
     const morph = mesh.morphTargets;
     if (morph) {
-        addMorphDelta(morph, scratch, 0, componentOffset);
+        addMorphDelta(morph, scratch, 0, componentOffset, pose?.morphWeights);
     }
 
     // Skeletal skinning — reuse the same bone-blend math the render path uses. wCoord = 1 (position).
     const skeleton = mesh.skeleton;
     if (skeleton) {
         skinVertexToRef(
-            skeleton.boneMatrices,
+            pose?.boneMatrices ?? skeleton.boneMatrices,
             skeleton.joints,
             skeleton.weights,
             skeleton.joints1,
@@ -81,9 +136,9 @@ export function computeDeformedPositionToRef(mesh: Mesh, vertexIndex: number, ou
 // Scratch vertex reused by deformTriangleToRef, allocated lazily for the same reason as _deformScratch.
 let _triangleVertex: Vec3 | undefined;
 
-function writeDeformedVertex(mesh: Mesh, vertexIndex: number, out: Float32Array, offset: number): boolean {
+function writeDeformedVertex(mesh: Mesh, vertexIndex: number, out: Float32Array, offset: number, pose: DeformPose | null): boolean {
     const vertex = (_triangleVertex ??= { x: 0, y: 0, z: 0 });
-    if (!computeDeformedPositionToRef(mesh, vertexIndex, vertex)) {
+    if (!deformVertexToRef(mesh, vertexIndex, vertex, pose)) {
         return false;
     }
     out[offset] = vertex.x;
@@ -105,8 +160,10 @@ function writeDeformedVertex(mesh: Mesh, vertexIndex: number, out: Float32Array,
  * @param i1 - Second vertex index of the triangle.
  * @param i2 - Third vertex index of the triangle.
  * @param out - Destination for nine mesh-local floats, written in place (zero-allocation).
+ * @param pose - Deformation pose captured when the pick was recorded, so the triangle resolves against
+ *   the drawn frame rather than one the animation has advanced to. Null reads the live pose.
  * @returns true on success; false if any vertex could not be resolved.
  */
-export function deformTriangleToRef(mesh: Mesh, i0: number, i1: number, i2: number, out: Float32Array): boolean {
-    return writeDeformedVertex(mesh, i0, out, 0) && writeDeformedVertex(mesh, i1, out, 3) && writeDeformedVertex(mesh, i2, out, 6);
+export function deformTriangleToRef(mesh: Mesh, i0: number, i1: number, i2: number, out: Float32Array, pose: DeformPose | null = null): boolean {
+    return writeDeformedVertex(mesh, i0, out, 0, pose) && writeDeformedVertex(mesh, i1, out, 3, pose) && writeDeformedVertex(mesh, i2, out, 6, pose);
 }
