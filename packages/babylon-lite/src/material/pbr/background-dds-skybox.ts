@@ -44,10 +44,8 @@ export async function buildDdsSkyboxRenderable(
     const engine = scene.surface.engine;
 
     const [positionBuffer, indexBuffer] = createSkyboxBuffers(engine, skyHalfSize);
-    const [{ cubeView, sampler }, skyboxFragment] = await Promise.all([
-        loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL),
-        scene._environmentSkyboxShaderComposer?.(ddsSkyboxFragSrc, "dds") ?? ddsSkyboxFragSrc,
-    ]);
+    const { cubeView, sampler } = await loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL);
+    const skyboxFragment = (await scene._environmentSkyboxShaderComposer?.(ddsSkyboxFragSrc, "dds")) ?? ddsSkyboxFragSrc;
     const fragCode = SCENE_UBO_WGSL + (enableNoise ? WGSL_DITHER : WGSL_NO_DITHER) + skyboxFragment;
     const mat = createCubemapSkyboxMaterial(enableNoise ? "skybox-dds" : "skybox-dds0", SCENE_UBO_WGSL + ddsSkyboxVertSrc, fragCode);
     const ubo = createDdsMeshUBO(engine, rootPosition, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);

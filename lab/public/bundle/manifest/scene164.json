@@ -1,10 +1,10 @@
 {
   "rawKB": 141.7,
-  "rawBytes": 145111,
+  "rawBytes": 145108,
   "gzipKB": 59.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene164-background-hdr-skybox-C2RE5ux6.js",
+    "scene164-background-hdr-skybox-Cra3u3tL.js",
     "scene164-create-morph-targets-D45MUsUd.js",
     "scene164-create-skeleton-CRjoB86c.js",
     "scene164-cubemap-skybox-material-BqHR-ZEy.js",

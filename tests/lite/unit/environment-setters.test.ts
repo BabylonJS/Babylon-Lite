@@ -11,6 +11,7 @@ import { createSceneContext } from "../../../packages/babylon-lite/src/scene/sce
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { registerEnvSceneUniforms } from "../../../packages/babylon-lite/src/scene/scene-ubo-extras";
 import { setEnvironmentBlur, setEnvironmentRotation } from "../../../packages/babylon-lite/src";
+import { SCENE_UBO_WGSL } from "../../../packages/babylon-lite/src/shader/scene-uniforms";
 import ddsSkyboxFragment from "../../../packages/babylon-lite/shaders/skybox-dds.fragment.wgsl?raw";
 import hdrSkyboxFragment from "../../../packages/babylon-lite/shaders/skybox-hdr.fragment.wgsl?raw";
 
@@ -161,6 +162,7 @@ describe("environment setters", () => {
         const base = makeScene().scene;
         const baseDds = await applyEnvironmentSkyboxPatches(base, ddsSkyboxFragment, "dds");
         const baseHdr = await applyEnvironmentSkyboxPatches(base, hdrSkyboxFragment, "hdr");
+        expect(baseHdr).toBe(hdrSkyboxFragment);
         for (const source of [baseDds, baseHdr]) {
             expect(source).not.toContain("scene._envPad1");
             expect(source).not.toContain("scene.envRotationY");
@@ -189,6 +191,8 @@ describe("environment setters", () => {
         }
         expect(blurredDds).toContain("*0.8,0.0,");
         expect(blurredHdr).toContain("*scene.vImageInfos.z+scene._envPad2,0.0,");
+        expect(blurredDds.startsWith(SCENE_UBO_WGSL)).toBe(false);
+        expect(blurredHdr.startsWith(SCENE_UBO_WGSL)).toBe(true);
 
         const configured = makeScene().scene;
         setEnvironmentBlur(configured, 0.8);

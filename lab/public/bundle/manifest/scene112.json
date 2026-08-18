@@ -1,10 +1,10 @@
 {
   "rawKB": 119.9,
-  "rawBytes": 122777,
+  "rawBytes": 122756,
   "gzipKB": 49.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene112-background-dds-skybox-B2z9kKtw.js",
+    "scene112-background-dds-skybox-ChNsBzLY.js",
     "scene112-background-ground-Zrnivy4g.js",
     "scene112-cubemap-skybox-material-BbnE5GsH.js",
     "scene112-generate-mipmaps-pWw2s9cL.js",

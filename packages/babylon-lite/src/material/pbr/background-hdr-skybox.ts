@@ -44,7 +44,7 @@ export async function buildHdrSkyboxRenderable(
 
     const [positionBuffer, indexBuffer] = createSkyboxBuffers(engine, skyHalfSize);
     const skyboxFragment = (await scene._environmentSkyboxShaderComposer?.(skyboxHdrFragSrc, "hdr")) ?? skyboxHdrFragSrc;
-    const mat = createCubemapSkyboxMaterial("skybox-hdr", SCENE_UBO_WGSL + skyboxVertSrc, SCENE_UBO_WGSL + skyboxFragment);
+    const mat = createCubemapSkyboxMaterial("skybox-hdr", SCENE_UBO_WGSL + skyboxVertSrc, skyboxFragment);
     const ubo = createSkyHdrMeshUBO(engine, rootPosition, primaryColor, scene.clearColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
 
     const bindGroup = mat.createBindGroup(engine, ubo, envTextures.specularCubeView!, envTextures.cubeSampler);

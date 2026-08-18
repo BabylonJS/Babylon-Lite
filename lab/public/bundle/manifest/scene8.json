@@ -1,14 +1,14 @@
 {
-  "rawKB": 72.6,
+  "rawKB": 72.7,
   "gzipKB": 29.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene8-background-hdr-skybox-D1ATXrxw.js",
+    "scene8-background-hdr-skybox-stfaA3Zp.js",
     "scene8-ibl-fragment-CeRrvT96.js",
-    "scene8-pbr-renderable-DT0eZNs2.js",
+    "scene8-pbr-renderable-DfkUSCQZ.js",
     "scene8-scene-uniforms-FTYH6Ct0.js",
     "scene8-singlelight-point-wgsl-D9ato-mj.js",
     "scene8.js"
   ],
-  "rawBytes": 74365
+  "rawBytes": 74405
 }
