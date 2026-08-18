@@ -83,12 +83,15 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const lr = writeMeshLightSelection(mesh, scene.lights);
         const affectedCount = lr > 0 ? 1 : -lr;
         hasAnyAffectedLight ||= affectedCount > 0;
-        if (affectedCount === 1 && !(mesh.receiveShadows && hasSomeShadows)) {
+        if (affectedCount === 1) {
             needsSingleLightPath = true;
             const type = getPackedSingleLightType(scene.lights, lr - 1);
             if (!singleLightTypes.includes(type)) {
                 singleLightTypes.push(type);
             }
+            // A mono-light shadow receiver uses the multi-light path in the main pass,
+            // but its no-color caster override disables receiving and falls back to single-light.
+            needsMultiLightPath ||= mesh.receiveShadows && hasSomeShadows;
         } else if (affectedCount > 0) {
             needsMultiLightPath = true;
         }
