@@ -1,11 +1,11 @@
 {
   "rawKB": 52.3,
-  "gzipKB": 20.8,
+  "gzipKB": 20.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene231-standard-renderable-BzRHTjia.js",
-    "scene231-std-skeleton-fragment-BIMTVdV3.js",
+    "scene231-std-skeleton-fragment-CKo9aq9X.js",
     "scene231.js"
   ],
-  "rawBytes": 53516
+  "rawBytes": 53527
 }
