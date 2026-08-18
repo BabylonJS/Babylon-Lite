@@ -5,10 +5,10 @@
   "runtimeChunks": [
     "scene8-background-hdr-skybox-stfaA3Zp.js",
     "scene8-ibl-fragment-CeRrvT96.js",
-    "scene8-pbr-renderable-DfkUSCQZ.js",
+    "scene8-pbr-renderable-ukdkkydm.js",
     "scene8-scene-uniforms-FTYH6Ct0.js",
     "scene8-singlelight-point-wgsl-D9ato-mj.js",
     "scene8.js"
   ],
-  "rawBytes": 74405
+  "rawBytes": 74408
 }
