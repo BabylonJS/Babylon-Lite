@@ -1,13 +1,13 @@
 {
-  "rawKB": 82.5,
-  "rawBytes": 84459,
-  "gzipKB": 34.1,
+  "rawKB": 82.6,
+  "rawBytes": 84544,
+  "gzipKB": 34.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene27-generate-mipmaps-Ddj-KA7X.js",
     "scene27-gltf-ext-dielectric-D8UPE0rE.js",
-    "scene27-gltf-feature-registry-7Caub23q.js",
-    "scene27-gltf-feature-variants-CFolz0h7.js",
+    "scene27-gltf-feature-registry-BmNL0lxW.js",
+    "scene27-gltf-feature-variants-C85h_0Ms.js",
     "scene27-gltf-glb-parser-CQXzamNe.js",
     "scene27-gltf-pbr-builder-ext-DvRrjfY4.js",
     "scene27-gltf-variants-D-mGlUCr.js",

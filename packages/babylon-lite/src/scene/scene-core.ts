@@ -422,7 +422,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
         }
         // Feature-owned scene wiring runs synchronously before registerScene() builds
         // renderables. Lazy features also own any cleanup registration they require.
-        result._sceneSetup?.(ctx);
+        result._sceneSetup?.(ctx, result);
         return;
     }
     if ("_gpu" in entity && "material" in entity) {
