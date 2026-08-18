@@ -1,14 +1,14 @@
 {
-  "rawKB": 76.6,
-  "rawBytes": 78473,
-  "gzipKB": 31.9,
+  "rawKB": 76.7,
+  "rawBytes": 78541,
+  "gzipKB": 32,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene256-generate-mipmaps-DMNTkXoW.js",
     "scene256-gltf-json-asset-7oBr8WmC.js",
     "scene256-gltf-sampler-desc-OQu0nYRL.js",
     "scene256-ibl-fragment-CeRrvT96.js",
-    "scene256-pbr-renderable-DcXxciI8.js",
+    "scene256-pbr-renderable-C4IpYUAH.js",
     "scene256-rgbd-decode-2Mefu5-n.js",
     "scene256-scene-uniforms-FTYH6Ct0.js",
     "scene256.js"

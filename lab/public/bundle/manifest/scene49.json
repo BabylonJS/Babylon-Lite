@@ -3,9 +3,9 @@
   "gzipKB": 34.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene49-scene-uniforms-CGHhMjxH.js",
-    "scene49-standard-renderable-Bn0aAe3J.js",
+    "scene49-standard-renderable-CxSJlJmO.js",
     "scene49-swapchain-overlay-ilhN4El_.js",
+    "scene49-ubo-layout-DJjxxUdh.js",
     "scene49.js"
   ],
   "rawBytes": 91047
