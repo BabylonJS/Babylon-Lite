@@ -693,8 +693,8 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
         expect(Math.abs(info.pickedNormal![2])).toBeCloseTo(1);
     });
 
-    it("uses deformed positions for morphed thin-instance picks", async () => {
-        const { engine, buffers } = makePickerEngine();
+    it("deforms morphed thin-instance picks on the GPU instead of uploading CPU positions", async () => {
+        const { engine, buffers, device } = makePickerEngine();
         const { scene, mesh } = makePickScene(engine);
         mesh._cpuPositions = new Float32Array([-1, -1, 0, 1, -1, 0, 0, 1, 0]);
         mesh.morphTargets = {
@@ -713,7 +713,8 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
 
         await pickAsync(createGpuPicker(scene), 4, 4);
 
-        expect(buffers.some(({ descriptor }) => descriptor.label === "pick-deformed-position")).toBe(true);
+        expect(buffers.some(({ descriptor }) => descriptor.label === "pick-deformed-position")).toBe(false);
+        expect(device.shaderModules.some((module) => (module.code as string).includes("morphDeltas"))).toBe(true);
     });
 
     it("suppresses thin-instance detail if instance transforms change during readback", async () => {
