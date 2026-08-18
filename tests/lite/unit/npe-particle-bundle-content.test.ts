@@ -14,24 +14,34 @@ const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
 const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280, 281, 283, 284];
 const UNUSED_FEATURE_CHUNK =
-    /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|flow-map-runtime|noise-runtime|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
+    /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|flow-map-runtime|noise-runtime|texture-update-runtime|texture-content)|(?:cpu|embedded)-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 const OPTIONAL_BLEND_MODULE = /particle\/(particle-(blend|billboard-renderable|billboard-scene)|node\/npe-blend-modes)/;
 
+function findUnusedFeatureChunks(sceneId: number, chunks: string[]): string[] {
+    return chunks.filter(
+        (chunk) =>
+            UNUSED_FEATURE_CHUNK.test(chunk) &&
+            !(sceneId === 263 && chunk.includes("registry-extra-emitters")) &&
+            !(sceneId === 277 && (chunk.includes("registry-extra-remaining") || chunk.includes("update-attractor-block"))) &&
+            !(sceneId === 280 && (chunk.includes("npe-flow-map-runtime") || chunk.includes("npe-texture-update-runtime"))) &&
+            !(sceneId === 281 && (chunk.includes("npe-noise-runtime") || chunk.includes("npe-texture-update-runtime") || chunk.includes("embedded-texture-source"))) &&
+            !((sceneId === 283 || sceneId === 284) && /particle-(blend|billboard-renderable|billboard-scene)|npe-blend-modes/.test(chunk))
+    );
+}
+
 describe("Particle bundle feature isolation", () => {
+    it("rejects named embedded-texture chunks without bundle-info except for scene281", () => {
+        const chunk = "scene262-embedded-texture-source-block-HASH.js";
+        expect(findUnusedFeatureChunks(262, [chunk])).toEqual([chunk]);
+        expect(findUnusedFeatureChunks(281, [chunk])).toEqual([]);
+    });
+
     it("canonical particle scenes do not fetch unused optional features", () => {
         for (const sceneId of CANONICAL_PARTICLE_SCENES) {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const chunks = manifest.runtimeChunks ?? [];
             expect(chunks.length, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
-            const offenders = chunks.filter(
-                (chunk) =>
-                    UNUSED_FEATURE_CHUNK.test(chunk) &&
-                    !(sceneId === 263 && chunk.includes("registry-extra-emitters")) &&
-                    !(sceneId === 277 && (chunk.includes("registry-extra-remaining") || chunk.includes("update-attractor-block"))) &&
-                    !(sceneId === 280 && (chunk.includes("npe-flow-map-runtime") || chunk.includes("npe-texture-update-runtime"))) &&
-                    !(sceneId === 281 && (chunk.includes("npe-noise-runtime") || chunk.includes("npe-texture-update-runtime"))) &&
-                    !((sceneId === 283 || sceneId === 284) && /particle-(blend|billboard-renderable|billboard-scene)|npe-blend-modes/.test(chunk))
-            );
+            const offenders = findUnusedFeatureChunks(sceneId, chunks);
             expect(offenders, `scene${sceneId} fetches unused particle feature chunks`).toEqual([]);
             if (sceneId === 277) {
                 expect(

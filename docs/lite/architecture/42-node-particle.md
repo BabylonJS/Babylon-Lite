@@ -925,9 +925,11 @@ The block installs scalar `output`: `abs(value)` for a scalar, Euclidean length 
 
 ### 9.20 ParticleTextureSourceBlock
 
-The ordinary evaluator retains billboard-only behavior. It prefers a nonempty string `serialized.url`, otherwise uses a string `serialized.textureDataUrl`, and otherwise uses the empty string. Babylon serialization clears `url` when `textureDataUrl` is set, so a serialized cached payload selects the data URL. The `serializedCachedData` flag alone has no effect because it carries no pixels.
+The ordinary evaluator retains billboard-only behavior. It prefers a nonempty string `serialized.url`, otherwise uses a string `serialized.textureDataUrl`, and otherwise uses the empty string. Babylon serialization clears `url` when `textureDataUrl` is set, so a serialized cached payload selects the data URL. If hand-authored input supplies both values as nonempty strings, Lite deliberately prefers `url`; Babylon's serializer never emits that shape. The `serializedCachedData` flag alone has no effect because it carries no pixels.
 
-The ordinary and specialized embedded evaluators treat HTTP(S), protocol-relative, and root-relative URLs as absolute and resolve any other nonempty source against `textureBaseUrl` when supplied. They schedule `loadTexture2D` with `{ invertY: serialized.invertY === false }`, store the result on `system.texture`, and catch load failures. URL-only standard graphs retain the same base texture chunk set and never fetch `embedded-texture-source-block`.
+The ordinary and specialized embedded evaluators treat HTTP(S), protocol-relative, and root-relative URLs as absolute and resolve any other nonempty source against `textureBaseUrl` when supplied. They schedule `loadTexture2D` with `{ invertY: serialized.invertY === false }`, store the result on `system.texture`, and catch load failures. An omitted `invertY` applies Lite's block class default of `true` and therefore passes loader `invertY: false`. This differs from Babylon's `_deserialize` fallback for a missing field, but Babylon's serializer always emits the field.
+
+The two semantically matching evaluators intentionally remain import-independent. Routing the specialized walk through the base registry emitted and fetched a separate `texture-source-block` chunk, growing scene 281 from 42,269 to 42,326 raw bytes; importing and delegating to the base evaluator previously grew it to 42,636 bytes. URL-only standard graphs retain the same base texture chunk set and never fetch `embedded-texture-source-block`.
 
 `buildNodeParticleSetWithFlowMaps` dynamically imports a dedicated flow-only walker. It retains the ordinary evaluator for the system texture and selects `cpuTextureSourceBlock` only for the flow-map input. Keeping this walker specialized prevents flow-only graphs from retaining multi-feature dispatch or embedded render-texture handling.
 
@@ -1231,7 +1233,7 @@ Snapshots sort live slots by particle id. The scene 262 canonical state test use
 The current unit categories are:
 
 - Buffer and lifecycle: base-only allocation, string-key column sharing, dense spawn/swap-remove, capacity, emission, integration, death clamp, and sprite-column math.
-- Build behavior: inline JSON, root reachability, detached-block isolation, two-field connection criteria, dynamic emit-rate laziness, system-time reevaluation, URL-over-data texture precedence, and default-path embedded texture upload with explicit-false and default Babylon-compatible invert-Y translation.
+- Build behavior: inline JSON, root reachability, detached-block isolation, two-field connection criteria, dynamic emit-rate laziness, system-time reevaluation, deliberate URL-over-data precedence for serializer-unreachable hand-authored input, and default-path embedded texture upload with explicit-false mapping and Lite's class default when `invertY` is omitted.
 - Canonical graph state: scenes 262, 263, 264, and 276; full Basic Properties; Size; Sphere; and deterministic/random-start sprite variants.
 - Change graphs: Size, Color, Speed, Angular Speed, multi-stop Angular Speed, Drag, Emit Rate, Lifetime, Start Size, and Speed Limit.
 - Emitters: Point, Box, Sphere, directed Sphere, Hemisphere, Cone, directed Cone, Cylinder, directed Cylinder, Mesh, rotated Cylinder, all six transformed local shapes, mesh vertex color, mesh InitialDirection, shared volatile bounds, and local source build/read guards.

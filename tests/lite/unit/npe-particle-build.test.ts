@@ -49,8 +49,14 @@ describe("NPE build reachability", () => {
 
     it.each([
         { name: "loads an embedded texture with explicit invertY false", url: "", invertY: false, expectedUrl: "embedded", expectedFlipY: true },
-        { name: "loads an embedded texture with default invertY", url: "", invertY: undefined, expectedUrl: "embedded", expectedFlipY: false },
-        { name: "prefers a serialized URL over embedded texture data", url: "https://assets.example/particle.png", invertY: undefined, expectedUrl: "url", expectedFlipY: false },
+        { name: "applies Lite's class-default invertY when the field is omitted", url: "", invertY: undefined, expectedUrl: "embedded", expectedFlipY: false },
+        {
+            name: "deliberately prefers URL for serializer-unreachable dual-source input",
+            url: "https://assets.example/particle.png",
+            invertY: undefined,
+            expectedUrl: "url",
+            expectedFlipY: false,
+        },
     ])("$name", async ({ url, invertY, expectedUrl, expectedFlipY }) => {
         const textureDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
         const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => ({}) }));

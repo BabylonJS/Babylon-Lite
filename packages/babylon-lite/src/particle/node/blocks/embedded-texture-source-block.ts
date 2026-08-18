@@ -1,7 +1,10 @@
 import { loadTexture2D } from "../../../texture/texture-2d.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
-/** Load an ordinary particle texture from its serialized URL or embedded data URL. */
+/**
+ * Load an ordinary particle texture from its serialized URL or embedded data URL.
+ * This intentionally mirrors the base evaluator without importing it: base-registry fallthrough added a fetched chunk and 57 raw bytes to scene281, while delegation added 365 bytes.
+ */
 export const embeddedParticleTextureSourceBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const serializedUrl = typeof block.serialized.url === "string" ? block.serialized.url : "";
