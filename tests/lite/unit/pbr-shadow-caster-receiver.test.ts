@@ -62,7 +62,7 @@ const shadowSignature = {
     _colorFormat: null,
     _depthStencilFormat: "depth32float",
     _sampleCount: 1,
-} as RenderTargetSignature;
+} as unknown as RenderTargetSignature;
 
 describe("PBR shadow caster-receiver shader variants", () => {
     it("declares the single-light uniform type used by the no-color shadow pass", async () => {
@@ -76,7 +76,7 @@ describe("PBR shadow caster-receiver shader variants", () => {
             _depthTexture: { createView: vi.fn(() => ({}) as GPUTextureView) },
             _depthSampler: {} as GPUSampler,
             _shadowUBO: {} as GPUBuffer,
-        } as ShadowGenerator;
+        } as unknown as ShadowGenerator;
         scene.lights.push(light);
 
         const material = createPbrMaterial();
