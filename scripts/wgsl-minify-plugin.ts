@@ -364,24 +364,16 @@ export function wgslMinifyPlugin(opts: { mangle?: boolean; templates?: boolean }
             const isEnvironmentSkybox = /skybox-(dds|hdr)\.fragment\.wgsl/.test(id);
             // Encode `/* GS_FRAGMENT_X */` comment markers as const declarations so they
             // survive miniray's comment stripping. Decoded back below.
-            const encoded = isGs
-                ? raw.replace(/\/\*(GS_FRAGMENT_\w+)\*\//g, "const _$1_:u32=0u;")
-                : isEnvironmentSkybox
-                  ? raw.replace("/*ENV_DIRECTION*/", "const _ENV_DIRECTION_:u32=0u;").replace("/*ENV_LOD*/", "+314159265.0")
-                  : raw;
+            const encoded = isGs ? raw.replace(/\/\*(GS_FRAGMENT_\w+)\*\//g, "const _$1_:u32=0u;") : raw;
             const result = minifyWgslMiniray(
                 encoded,
-                isGs
-                    ? { keepNames: ["u", "in", "finalColor"], treeShaking: false }
-                    : isEnvironmentSkybox
-                      ? { keepNames: ["dir", "envCubemap", "_ENV_DIRECTION_", "cr", "sr"], treeShaking: false }
-                      : {}
+                // Keep in sync with the skybox WGSL declarations and environment patch matchers:
+                // patches match these source names and inject `cr`/`sr` at runtime.
+                isGs ? { keepNames: ["u", "in", "finalColor"], treeShaking: false } : isEnvironmentSkybox ? { keepNames: ["dir", "envCubemap", "cr", "sr"] } : {}
             );
             let minified = typeof result === "string" ? result : result.code;
             if (isGs) {
                 minified = minified.replace(/const\s+_(GS_FRAGMENT_\w+)_\s*:\s*u32\s*=\s*0u\s*;/g, "/*$1*/");
-            } else if (isEnvironmentSkybox) {
-                minified = minified.replace(/const\s+_ENV_DIRECTION_\s*:\s*u32\s*=\s*0u\s*;/g, "/*ENV_DIRECTION*/").replace(/\+314159265(?:\.0?)?/g, "/*ENV_LOD*/");
             }
             const compact = isGs ? mangleGaussianSplattingWgsl(minified) : minified;
             return { code: `export default ${JSON.stringify(compact)}`, map: null };

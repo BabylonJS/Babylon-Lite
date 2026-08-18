@@ -17,7 +17,7 @@ import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buff
 
 const SKY_HDR_UNIFORM_SIZE = 112; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad + exposure + contrast + pad2
 
-function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer } {
+function createSkyboxBuffers(engine: EngineContext, S: number): [positionBuffer: GPUBuffer, indexBuffer: GPUBuffer] {
     // prettier-ignore
     const positions = new F32([
     -S,-S,-S,  S,-S,-S, -S, S,-S,  S, S,-S,
@@ -29,10 +29,7 @@ function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPU
     5,1,3, 7,5,3,  0,4,6, 2,0,6,
     3,2,6, 7,3,6,  0,1,5, 4,0,5,
   ]);
-    return {
-        posBuffer: createMappedBuffer(engine, positions, BU.VERTEX),
-        idxBuffer: createMappedBuffer(engine, indices, BU.INDEX),
-    };
+    return [createMappedBuffer(engine, positions, BU.VERTEX), createMappedBuffer(engine, indices, BU.INDEX)];
 }
 
 /** Build an HDR cubemap skybox as a complete Renderable (order 0). */
@@ -45,24 +42,10 @@ export async function buildHdrSkyboxRenderable(
 ): Promise<Renderable> {
     const engine = scene.surface.engine;
 
-    const cc = scene.clearColor;
-
-    const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
-    let shaderKey = "";
-    let skyboxFragment = skyboxHdrFragSrc;
-    const rotationPatch = scene._environmentRotationSkyboxPatch ? (await import("./fragments/environment-rotation-fragment.js")).environmentRotationSkyboxPatch : undefined;
-    if (rotationPatch) {
-        shaderKey += `-${rotationPatch._id}`;
-        skyboxFragment = rotationPatch._apply("hdr", skyboxFragment);
-    }
-    const blurPatch = scene._environmentBlurSkyboxPatch;
-    if (blurPatch) {
-        shaderKey += `-${blurPatch._id}`;
-        skyboxFragment = blurPatch._apply("hdr", skyboxFragment);
-    }
-    const label = `skybox-hdr${shaderKey}`;
-    const mat = createCubemapSkyboxMaterial(label, SCENE_UBO_WGSL + skyboxVertSrc, SCENE_UBO_WGSL + skyboxFragment);
-    const ubo = createSkyHdrMeshUBO(engine, rootPosition, primaryColor, [cc.r, cc.g, cc.b], scene.imageProcessing.exposure, scene.imageProcessing.contrast);
+    const [positionBuffer, indexBuffer] = createSkyboxBuffers(engine, skyHalfSize);
+    const skyboxFragment = (await scene._environmentSkyboxShaderComposer?.(skyboxHdrFragSrc, "hdr")) ?? skyboxHdrFragSrc;
+    const mat = createCubemapSkyboxMaterial("skybox-hdr", SCENE_UBO_WGSL + skyboxVertSrc, SCENE_UBO_WGSL + skyboxFragment);
+    const ubo = createSkyHdrMeshUBO(engine, rootPosition, primaryColor, scene.clearColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
 
     const bindGroup = mat.createBindGroup(engine, ubo, envTextures.specularCubeView!, envTextures.cubeSampler);
 
@@ -75,8 +58,8 @@ export async function buildHdrSkyboxRenderable(
                 pipeline: mat.getPipeline(eng as EngineContext, sig),
                 draw(pass) {
                     pass.setBindGroup(1, bindGroup);
-                    pass.setVertexBuffer(0, skyBufs.posBuffer);
-                    pass.setIndexBuffer(skyBufs.idxBuffer, "uint16");
+                    pass.setVertexBuffer(0, positionBuffer);
+                    pass.setIndexBuffer(indexBuffer, "uint16");
                     pass.drawIndexed(36);
                     return 1;
                 },
@@ -93,7 +76,7 @@ function createSkyHdrMeshUBO(
     engine: EngineContext,
     rootPosition: [number, number, number],
     primaryColor: [number, number, number],
-    skyOutputColor: [number, number, number],
+    skyOutputColor: GPUColorDict,
     exposure: number,
     contrast: number
 ): GPUBuffer {
@@ -105,9 +88,9 @@ function createSkyHdrMeshUBO(
     data[16] = primaryColor[0];
     data[17] = primaryColor[1];
     data[18] = primaryColor[2];
-    data[20] = skyOutputColor[0];
-    data[21] = skyOutputColor[1];
-    data[22] = skyOutputColor[2];
+    data[20] = skyOutputColor.r;
+    data[21] = skyOutputColor.g;
+    data[22] = skyOutputColor.b;
     data[24] = exposure; // exposureLinear
     data[25] = contrast; // contrast
     return createUniformBuffer(engine, data);

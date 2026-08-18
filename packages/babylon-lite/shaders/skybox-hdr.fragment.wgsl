@@ -25,9 +25,9 @@ struct FragmentInput {
 
 @fragment
 fn main(input: FragmentInput) -> @location(0) vec4<f32> {
+  // Environment shader patches may reassign the direction.
   var dir = normalize(input.positionUVW);
-  /*ENV_DIRECTION*/
-  var color = textureSampleLevel(envCubemap, envSampler, dir, 0.0/*ENV_LOD*/).rgb;
+  var color = textureSampleLevel(envCubemap, envSampler, dir, 0.0).rgb;
 
   // Image processing: exposure → gamma → contrast (matches BJS applyImageProcessing)
   color *= mesh.exposureLinear;

@@ -46,13 +46,20 @@ export interface ImageProcessingConfig {
 /** A clipping plane expressed as the coefficients `[a, b, c, d]` of `a·x + b·y + c·z + d`. */
 export type ClipPlane = readonly [number, number, number, number];
 
+/** @internal Visible-environment skybox source type. */
+export type EnvironmentSkyboxKind = "dds" | "hdr";
+
 /** @internal One feature-owned transformation of a visible-environment skybox shader. */
 export interface EnvironmentSkyboxShaderPatch {
     /** @internal */
-    readonly _id: string;
-    /** @internal */
-    _apply(kind: "dds" | "hdr", fragment: string): string;
+    _apply(fragment: string, kind: EnvironmentSkyboxKind): string;
 }
+
+/** @internal Lazy access to one feature-owned visible-environment shader patch. */
+export type EnvironmentSkyboxShaderPatchLoader = () => EnvironmentSkyboxShaderPatch | Promise<EnvironmentSkyboxShaderPatch>;
+
+/** @internal Scene-local composition hook installed only by environment feature setters. */
+export type EnvironmentSkyboxShaderComposer = (fragment: string, kind: EnvironmentSkyboxKind) => Promise<string>;
 
 /** @internal Runtime mesh-build hooks installed only after a material group must widen its capabilities. */
 export interface RuntimeSceneBuildHooks {
@@ -131,11 +138,11 @@ export interface SceneContext extends RenderingContext {
     /** @internal Optional visible-environment blur amount. */
     _environmentBlur?: number;
 
-    /** @internal Whether a visible-environment skybox should load and apply the rotation shader patch. */
-    _environmentRotationSkyboxPatch?: true;
+    /** @internal Feature-owned visible-environment shader patch loaders, indexed by composition order. */
+    _environmentSkyboxShaderPatchLoaders?: EnvironmentSkyboxShaderPatchLoader[];
 
-    /** @internal Visible-environment blur shader patch installed by `setEnvironmentBlur`. */
-    _environmentBlurSkyboxPatch?: EnvironmentSkyboxShaderPatch;
+    /** @internal Scene-local visible-environment shader composer installed by feature setters. */
+    _environmentSkyboxShaderComposer?: EnvironmentSkyboxShaderComposer;
 
     /** Fixed delta time in ms for deterministic animation. 0 = use real rAF delta. */
     fixedDeltaMs: number;

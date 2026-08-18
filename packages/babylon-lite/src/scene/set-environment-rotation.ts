@@ -1,5 +1,9 @@
-import type { SceneContext } from "./scene-core.js";
+import { _registerEnvironmentSkyboxShaderPatch } from "../material/pbr/environment-skybox-shader-composer.js";
+import type { EnvironmentSkyboxShaderPatchLoader, SceneContext } from "./scene-core.js";
 import { _invalidateSceneUboCaches, registerEnvSceneUniforms } from "./scene-ubo-extras.js";
+
+// Rotation also affects IBL lighting, so keep the visible-skybox patch lazy for lighting-only consumers.
+const loadRotationSkyboxPatch: EnvironmentSkyboxShaderPatchLoader = () => import("../material/pbr/fragments/environment-rotation-fragment.js");
 
 /**
  * Set environment rotation around the Y axis, in radians.
@@ -8,6 +12,6 @@ import { _invalidateSceneUboCaches, registerEnvSceneUniforms } from "./scene-ubo
 export function setEnvironmentRotation(scene: SceneContext, rotation: number): void {
     registerEnvSceneUniforms(scene);
     scene._environmentRotation = rotation;
-    scene._environmentRotationSkyboxPatch = true;
+    _registerEnvironmentSkyboxShaderPatch(scene, 0, loadRotationSkyboxPatch);
     _invalidateSceneUboCaches(scene);
 }

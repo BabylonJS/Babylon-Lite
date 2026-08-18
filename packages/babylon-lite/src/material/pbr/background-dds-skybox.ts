@@ -17,7 +17,7 @@ import ddsSkyboxFragSrc from "../../../shaders/skybox-dds.fragment.wgsl?raw";
 const SKY_DDS_UNIFORM_SIZE = 96;
 const DEFAULT_SKY_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
 
-function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer } {
+function createSkyboxBuffers(engine: EngineContext, S: number): [posBuffer: GPUBuffer, indexBuffer: GPUBuffer] {
     // prettier-ignore
     const positions = new F32([
     -S,-S,-S,  S,-S,-S, -S, S,-S,  S, S,-S,
@@ -29,10 +29,7 @@ function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPU
     5,1,3, 7,5,3,  0,4,6, 2,0,6,
     3,2,6, 7,3,6,  0,1,5, 4,0,5,
   ]);
-    return {
-        posBuffer: createMappedBuffer(engine, positions, BU.VERTEX),
-        idxBuffer: createMappedBuffer(engine, indices, BU.INDEX),
-    };
+    return [createMappedBuffer(engine, positions, BU.VERTEX), createMappedBuffer(engine, indices, BU.INDEX)];
 }
 
 /** Build a DDS cube skybox as a complete Renderable (order 0). */
@@ -46,26 +43,13 @@ export async function buildDdsSkyboxRenderable(
 ): Promise<Renderable> {
     const engine = scene.surface.engine;
 
-    const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
-    const rotationPatchPromise = scene._environmentRotationSkyboxPatch
-        ? import("./fragments/environment-rotation-fragment.js").then(({ environmentRotationSkyboxPatch }) => environmentRotationSkyboxPatch)
-        : undefined;
-    const [rotationPatch, { cubeView, sampler }] = await Promise.all([rotationPatchPromise, loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL)]);
-
-    let shaderKey = "";
-    let skyboxFragment = ddsSkyboxFragSrc;
-    if (rotationPatch) {
-        shaderKey += `-${rotationPatch._id}`;
-        skyboxFragment = rotationPatch._apply("dds", skyboxFragment);
-    }
-    const blurPatch = scene._environmentBlurSkyboxPatch;
-    if (blurPatch) {
-        shaderKey += `-${blurPatch._id}`;
-        skyboxFragment = blurPatch._apply("dds", skyboxFragment);
-    }
+    const [positionBuffer, indexBuffer] = createSkyboxBuffers(engine, skyHalfSize);
+    const [{ cubeView, sampler }, skyboxFragment] = await Promise.all([
+        loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL),
+        scene._environmentSkyboxShaderComposer?.(ddsSkyboxFragSrc, "dds") ?? ddsSkyboxFragSrc,
+    ]);
     const fragCode = SCENE_UBO_WGSL + (enableNoise ? WGSL_DITHER : WGSL_NO_DITHER) + skyboxFragment;
-    const label = `${enableNoise ? "skybox-dds" : "skybox-dds0"}${shaderKey}`;
-    const mat = createCubemapSkyboxMaterial(label, SCENE_UBO_WGSL + ddsSkyboxVertSrc, fragCode);
+    const mat = createCubemapSkyboxMaterial(enableNoise ? "skybox-dds" : "skybox-dds0", SCENE_UBO_WGSL + ddsSkyboxVertSrc, fragCode);
     const ubo = createDdsMeshUBO(engine, rootPosition, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
     const bindGroup = mat.createBindGroup(engine, ubo, cubeView, sampler);
 
@@ -78,8 +62,8 @@ export async function buildDdsSkyboxRenderable(
                 pipeline: mat.getPipeline(eng as EngineContext, sig),
                 draw(pass) {
                     pass.setBindGroup(1, bindGroup);
-                    pass.setVertexBuffer(0, skyBufs.posBuffer);
-                    pass.setIndexBuffer(skyBufs.idxBuffer, "uint16");
+                    pass.setVertexBuffer(0, positionBuffer);
+                    pass.setIndexBuffer(indexBuffer, "uint16");
                     pass.drawIndexed(36);
                     return 1;
                 },
@@ -122,7 +106,6 @@ async function loadDdsCube(engine: EngineContext, url: string): Promise<{ cubeVi
     const buf = await (await fetch(url)).arrayBuffer();
     const header = new I32(buf, 0, 32);
     const width = header[3]!;
-    const height = header[4]!;
     const mipCount = Math.max(header[7]!, 1);
 
     // DDS pixel format offset 76..107 — for rgba16float, FourCC = 'DX10'
@@ -133,11 +116,11 @@ async function loadDdsCube(engine: EngineContext, url: string): Promise<{ cubeVi
 
     const fmt: GPUTextureFormat = "rgba16float";
     const tex = device.createTexture({
-        size: [width, height, 6],
+        // DDS cubemap faces are square; the upload loop below likewise uses width for both dimensions.
+        size: [width, width, 6],
         format: fmt,
         mipLevelCount: mipCount,
         usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
-        dimension: "2d",
     });
 
     // Upload all mip levels for each face from the DDS (face-major layout).

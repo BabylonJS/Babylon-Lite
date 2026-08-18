@@ -7,7 +7,6 @@ import { _writePassSceneUBO, type RenderTask } from "../../../packages/babylon-l
 import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env";
 import { registerEnvSceneUniforms as registerGltfEnvSceneUniforms } from "../../../packages/babylon-lite/src/loader-gltf/ibl-env-assembly";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
-import { environmentRotationSkyboxPatch } from "../../../packages/babylon-lite/src/material/pbr/fragments/environment-rotation-fragment";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { registerEnvSceneUniforms } from "../../../packages/babylon-lite/src/scene/scene-ubo-extras";
@@ -87,11 +86,8 @@ function makeScene() {
     return { camera, engine, scene, task, writeCount };
 }
 
-function applyEnvironmentSkyboxPatches(scene: SceneContext, kind: "dds" | "hdr", fragment: string): string {
-    let patched = fragment;
-    patched = scene._environmentRotationSkyboxPatch ? environmentRotationSkyboxPatch._apply(kind, patched) : patched;
-    patched = scene._environmentBlurSkyboxPatch?._apply(kind, patched) ?? patched;
-    return patched;
+async function applyEnvironmentSkyboxPatches(scene: SceneContext, fragment: string, kind: "dds" | "hdr"): Promise<string> {
+    return (await scene._environmentSkyboxShaderComposer?.(fragment, kind)) ?? fragment;
 }
 
 describe("environment setters", () => {
@@ -161,31 +157,31 @@ describe("environment setters", () => {
         expect(task._suData[36]).toBeCloseTo(1.5);
     });
 
-    it("applies blur and rotation patches independently for DDS and HDR skyboxes", () => {
+    it("composes blur and rotation independently in a stable order for DDS and HDR skyboxes", async () => {
         const base = makeScene().scene;
-        const baseDds = applyEnvironmentSkyboxPatches(base, "dds", ddsSkyboxFragment);
-        const baseHdr = applyEnvironmentSkyboxPatches(base, "hdr", hdrSkyboxFragment);
+        const baseDds = await applyEnvironmentSkyboxPatches(base, ddsSkyboxFragment, "dds");
+        const baseHdr = await applyEnvironmentSkyboxPatches(base, hdrSkyboxFragment, "hdr");
         for (const source of [baseDds, baseHdr]) {
             expect(source).not.toContain("scene._envPad1");
             expect(source).not.toContain("scene.envRotationY");
-            expect(source).toContain("textureSampleLevel(envCubemap, envSampler, dir, 0.0/*ENV_LOD*/)");
+            expect(source).toContain("textureSampleLevel(envCubemap, envSampler, dir, 0.0).rgb");
         }
 
         const rotated = makeScene().scene;
         setEnvironmentRotation(rotated, 1.5);
-        expect(rotated._environmentRotationSkyboxPatch).toBeDefined();
-        expect(rotated._environmentBlurSkyboxPatch).toBeUndefined();
-        const rotatedDds = applyEnvironmentSkyboxPatches(rotated, "dds", ddsSkyboxFragment);
+        expect(rotated._environmentSkyboxShaderComposer).toBeDefined();
+        expect(rotated._environmentSkyboxShaderPatchLoaders?.filter(Boolean)).toHaveLength(1);
+        const rotatedDds = await applyEnvironmentSkyboxPatches(rotated, ddsSkyboxFragment, "dds");
         expect(rotatedDds).toContain("scene.envRotationY");
         expect(rotatedDds).toContain("let cr=cos(scene.envRotationY);let sr=sin(scene.envRotationY);");
         expect(rotatedDds).not.toContain("scene._envPad1");
 
         const blurred = makeScene().scene;
         setEnvironmentBlur(blurred, 0.35);
-        expect(blurred._environmentBlurSkyboxPatch).toBeDefined();
-        expect(blurred._environmentRotationSkyboxPatch).toBeUndefined();
-        const blurredDds = applyEnvironmentSkyboxPatches(blurred, "dds", ddsSkyboxFragment);
-        const blurredHdr = applyEnvironmentSkyboxPatches(blurred, "hdr", hdrSkyboxFragment);
+        expect(blurred._environmentSkyboxShaderComposer).toBeDefined();
+        expect(blurred._environmentSkyboxShaderPatchLoaders?.filter(Boolean)).toHaveLength(1);
+        const blurredDds = await applyEnvironmentSkyboxPatches(blurred, ddsSkyboxFragment, "dds");
+        const blurredHdr = await applyEnvironmentSkyboxPatches(blurred, hdrSkyboxFragment, "hdr");
         for (const source of [blurredDds, blurredHdr]) {
             expect(source).toContain("scene._envPad1");
             expect(source).toContain("textureNumLevels(envCubemap)");
@@ -197,7 +193,17 @@ describe("environment setters", () => {
         const configured = makeScene().scene;
         setEnvironmentBlur(configured, 0.8);
         setEnvironmentRotation(configured, 1.5);
-        for (const source of [applyEnvironmentSkyboxPatches(configured, "dds", ddsSkyboxFragment), applyEnvironmentSkyboxPatches(configured, "hdr", hdrSkyboxFragment)]) {
+        setEnvironmentBlur(configured, 0.25);
+        expect(configured._environmentSkyboxShaderPatchLoaders).toHaveLength(2);
+        const blurThenRotation = await applyEnvironmentSkyboxPatches(configured, ddsSkyboxFragment, "dds");
+
+        const reverseOrder = makeScene().scene;
+        setEnvironmentRotation(reverseOrder, 1.5);
+        setEnvironmentBlur(reverseOrder, 0.25);
+        const rotationThenBlur = await applyEnvironmentSkyboxPatches(reverseOrder, ddsSkyboxFragment, "dds");
+        expect(rotationThenBlur).toBe(blurThenRotation);
+
+        for (const source of [blurThenRotation, await applyEnvironmentSkyboxPatches(configured, hdrSkyboxFragment, "hdr")]) {
             expect(source).toContain("scene._envPad1");
             expect(source).toContain("scene.envRotationY");
         }
