@@ -1,11 +1,11 @@
 {
-  "rawKB": 104,
+  "rawKB": 103.9,
   "gzipKB": 42.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene212-generate-mipmaps-DJ9VLPCd.js",
     "scene212-gltf-ext-dielectric-DBTCqJWQ.js",
-    "scene212-gltf-feature-registry-BYGsn88B.js",
+    "scene212-gltf-feature-registry-CDvkyIs1.js",
     "scene212-gltf-glb-parser-DtmgUuZr.js",
     "scene212-ibl-fragment-CeRrvT96.js",
     "scene212-pbr-renderable-WREOnh9G.js",
@@ -17,5 +17,5 @@
     "scene212-set-transmission-Dw1XBvZL.js",
     "scene212.js"
   ],
-  "rawBytes": 106495
+  "rawBytes": 106397
 }

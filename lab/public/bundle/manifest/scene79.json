@@ -1,5 +1,5 @@
 {
-  "rawKB": 59.8,
+  "rawKB": 59.7,
   "gzipKB": 27.2,
   "ignoredRawKB": 8.1,
   "runtimeChunks": [
@@ -23,5 +23,5 @@
     "scene79-wave-block-DM-HRF6R.js",
     "scene79.js"
   ],
-  "rawBytes": 61231
+  "rawBytes": 61180
 }

@@ -1,11 +1,11 @@
 {
-  "rawKB": 76.2,
-  "rawBytes": 78068,
-  "gzipKB": 31.8,
+  "rawKB": 76.1,
+  "rawBytes": 77968,
+  "gzipKB": 31.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene210-generate-mipmaps-Bx4jC_kR.js",
-    "scene210-gltf-feature-registry-CTaQzciz.js",
+    "scene210-gltf-feature-registry-CQkGwgea.js",
     "scene210-gltf-feature-xmp-S8Tl-XNQ.js",
     "scene210-gltf-glb-parser-DyG5wwTF.js",
     "scene210-gltf-interleave-C3so5jJB.js",

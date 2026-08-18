@@ -1,12 +1,12 @@
 {
-  "rawKB": 86.4,
-  "rawBytes": 88446,
+  "rawKB": 86.3,
+  "rawBytes": 88348,
   "gzipKB": 35.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene28-generate-mipmaps-NzbR8gk9.js",
     "scene28-gltf-ext-clearcoat-DuXPBpzJ.js",
-    "scene28-gltf-feature-registry-DPckCjmL.js",
+    "scene28-gltf-feature-registry-CO6Xq0ap.js",
     "scene28-gltf-json-asset-cEem_qUj.js",
     "scene28-ibl-fragment-CeRrvT96.js",
     "scene28-pbr-renderable-CbGvF9nQ.js",

@@ -1,12 +1,13 @@
 import type { EnvironmentSkyboxShaderPatch } from "../../../scene/scene-core.js";
 
-const ROTATED_DIRECTION = `let cr=cos(scene.envRotationY);let sr=sin(scene.envRotationY);dir=vec3f(dir.x*cr+dir.z*sr,dir.y,-dir.x*sr+dir.z*cr);`;
-const BASE_DIRECTION = /var dir\s*=\s*normalize\([^;]+;/;
+const BASE_DIRECTION = /var\s+([A-Za-z_]\w*)\s*=\s*normalize\(\w+\.positionUVW\)\s*;/;
 
 /** @internal Y-rotation patch for visible environment cubemap sampling. */
 export const _apply: EnvironmentSkyboxShaderPatch["_apply"] = (fragment) => {
-    if (!BASE_DIRECTION.test(fragment)) {
+    const direction = fragment.match(BASE_DIRECTION)?.[1];
+    if (!direction) {
         throw new Error("Environment rotation: skybox direction declaration not found.");
     }
-    return fragment.replace(BASE_DIRECTION, `$&${ROTATED_DIRECTION}`);
+    const rotatedDirection = `let _erc=cos(scene.envRotationY);let _ers=sin(scene.envRotationY);${direction}=vec3f(${direction}.x*_erc+${direction}.z*_ers,${direction}.y,-${direction}.x*_ers+${direction}.z*_erc);`;
+    return fragment.replace(BASE_DIRECTION, `$&${rotatedDirection}`);
 };

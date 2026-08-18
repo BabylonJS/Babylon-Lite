@@ -1,5 +1,5 @@
 {
-  "rawKB": 70.4,
+  "rawKB": 70.3,
   "gzipKB": 27.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,8 +10,8 @@
     "scene143-set-std-opacity-D7U2ausA.js",
     "scene143-set-std-reflection-CoKN33Dl.js",
     "scene143-set-std-specular-DmiN-5T6.js",
-    "scene143-standard-renderable-B3yLqNek.js",
+    "scene143-standard-renderable-DaRryWod.js",
     "scene143.js"
   ],
-  "rawBytes": 72074
+  "rawBytes": 72021
 }

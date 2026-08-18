@@ -1,6 +1,6 @@
 {
-  "rawKB": 78.4,
-  "gzipKB": 32.8,
+  "rawKB": 78.3,
+  "gzipKB": 32.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene249-generate-mipmaps-BoA6oMlL.js",
@@ -14,5 +14,5 @@
     "scene249-set-alpha-cutoff-CR2NdriR.js",
     "scene249.js"
   ],
-  "rawBytes": 80250
+  "rawBytes": 80152
 }

@@ -1,6 +1,6 @@
 {
-  "rawKB": 76.7,
-  "gzipKB": 32,
+  "rawKB": 76.6,
+  "gzipKB": 31.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene248-generate-mipmaps-BRrW3GTL.js",
@@ -12,5 +12,5 @@
     "scene248-scene-uniforms-FTYH6Ct0.js",
     "scene248.js"
   ],
-  "rawBytes": 78539
+  "rawBytes": 78441
 }

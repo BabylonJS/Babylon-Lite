@@ -1,7 +1,7 @@
 {
-  "rawKB": 141.2,
-  "rawBytes": 144574,
-  "gzipKB": 57.4,
+  "rawKB": 141.1,
+  "rawBytes": 144476,
+  "gzipKB": 57.3,
   "ignoredRawKB": 3.3,
   "runtimeChunks": [
     "scene73-_math-factory-DR_uBNvL.js",
@@ -10,7 +10,7 @@
     "scene73-fragment-output-CfRmfbPv.js",
     "scene73-generate-mipmaps-CJGADMtK.js",
     "scene73-gltf-ext-clearcoat-BG6_0ac8.js",
-    "scene73-gltf-feature-registry-CZx5Tb9u.js",
+    "scene73-gltf-feature-registry-Bk36DUwy.js",
     "scene73-gltf-glb-parser-DS2yaUBj.js",
     "scene73-ibl-fragment-CeRrvT96.js",
     "scene73-input-block-DQjxjTRh.js",

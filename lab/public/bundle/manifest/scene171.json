@@ -1,5 +1,5 @@
 {
-  "rawKB": 92.7,
+  "rawKB": 92.6,
   "gzipKB": 38.3,
   "ignoredRawKB": 1483.8,
   "runtimeChunks": [
@@ -12,5 +12,5 @@
     "scene171-standard-renderable-CAYCUlrc.js",
     "scene171.js"
   ],
-  "rawBytes": 94961
+  "rawBytes": 94863
 }

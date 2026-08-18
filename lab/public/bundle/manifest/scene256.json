@@ -1,7 +1,7 @@
 {
-  "rawKB": 76.7,
-  "rawBytes": 78541,
-  "gzipKB": 32,
+  "rawKB": 76.6,
+  "rawBytes": 78443,
+  "gzipKB": 31.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene256-generate-mipmaps-DMNTkXoW.js",

@@ -101,6 +101,12 @@ describe("environment setter tree shaking", () => {
         const dds = readBuiltSkyboxFragment("material/pbr/background-dds-skybox.js", "ddsSkyboxFragSrc");
         const hdr = readBuiltSkyboxFragment("material/pbr/background-hdr-skybox.js", "skyboxHdrFragSrc");
 
+        expect(dds).not.toContain("var dir");
+        expect(dds).not.toContain("envCubemap");
+        expect(dds).not.toMatch(/\b_er[cs]\b/);
+        expect(hdr).not.toContain("var dir");
+        expect(hdr).not.toContain("envCubemap");
+        expect(hdr).not.toMatch(/\b_er[cs]\b/);
         expect(rotationPatch._apply(dds, "dds")).not.toBe(dds);
         expect(rotationPatch._apply(hdr, "hdr")).not.toBe(hdr);
         expect(blurPatch._apply(dds, "dds")).not.toBe(dds);

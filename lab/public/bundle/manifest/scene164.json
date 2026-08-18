@@ -1,10 +1,10 @@
 {
-  "rawKB": 141.7,
-  "rawBytes": 145111,
+  "rawKB": 141.6,
+  "rawBytes": 144991,
   "gzipKB": 59.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene164-background-hdr-skybox-Cra3u3tL.js",
+    "scene164-background-hdr-skybox-DJMA_Zf1.js",
     "scene164-create-morph-targets-D45MUsUd.js",
     "scene164-create-skeleton-CRjoB86c.js",
     "scene164-cubemap-skybox-material-BqHR-ZEy.js",
@@ -16,7 +16,7 @@
     "scene164-gltf-color-normalize-4-WGzPL2.js",
     "scene164-gltf-feature-animations-4ehmd01a.js",
     "scene164-gltf-feature-morph-BwkXb36t.js",
-    "scene164-gltf-feature-registry-CeAnNlRa.js",
+    "scene164-gltf-feature-registry-CJU0RqM6.js",
     "scene164-gltf-feature-skeleton-CBcDSOFt.js",
     "scene164-gltf-json-asset-Df4_WB9v.js",
     "scene164-ibl-fragment-CeRrvT96.js",

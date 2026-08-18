@@ -43,13 +43,12 @@ export interface AssetContainer {
     _beforeRenderHook?: (deltaMs: number) => void;
     /** Deferred scene-wiring hook contributed by a loader feature that needs the
      *  target `SceneContext` (which the loader itself never sees). `addToScene()`
-     *  invokes it once, synchronously, while processing the container. The hook
-     *  may return paired cleanup that runs when the container is removed or the
-     *  scene is disposed. Lazy features own both closures so the core loader/scene
-     *  stay feature-agnostic.
+     *  invokes it once, synchronously, while processing the container. Features
+     *  that need paired cleanup own its registration through `_sceneCleanups`.
      *  @internal */
-    _sceneSetup?: (scene: SceneContext) => void | (() => void);
-    /** @internal Active feature cleanup keyed by each scene this container was added to. */
+    _sceneSetup?: (scene: SceneContext) => void;
+    /** @internal Active feature cleanup keyed by each scene this container was added to.
+     *  A container may have at most one cleanup-owning feature; `loadGltf` does not compose these maps. */
     _sceneCleanups?: WeakMap<SceneContext, () => void>;
     /** Gaussian Splatting renderables contributed by the `KHR_gaussian_splatting`
      *  loader feature, one promise per GS primitive. The promises are populated by

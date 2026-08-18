@@ -421,13 +421,8 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             ctx._beforeRender.push(hook);
         }
         // Feature-owned scene wiring runs synchronously before registerScene() builds
-        // renderables. Paired cleanup follows either container removal or scene disposal.
-        const teardown = result._sceneSetup?.(ctx);
-        if (teardown) {
-            const cleanups = (result._sceneCleanups ??= new WeakMap());
-            cleanups.set(ctx, teardown);
-            ctx._disposables.push(teardown);
-        }
+        // renderables. Lazy features also own any cleanup registration they require.
+        result._sceneSetup?.(ctx);
         return;
     }
     if ("_gpu" in entity && "material" in entity) {

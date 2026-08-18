@@ -1,9 +1,9 @@
 {
-  "rawKB": 71.7,
-  "gzipKB": 30.3,
+  "rawKB": 71.6,
+  "gzipKB": 30.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene6-background-dds-skybox-_0EVocu9.js",
+    "scene6-background-dds-skybox-DrvCkFL0.js",
     "scene6-background-ground-C0N9s-go.js",
     "scene6-cubemap-skybox-material-e_ihMFV-.js",
     "scene6-ibl-fragment-CeRrvT96.js",
@@ -13,5 +13,5 @@
     "scene6-wgsl-helpers-BgB2AJrF.js",
     "scene6.js"
   ],
-  "rawBytes": 73398
+  "rawBytes": 73320
 }

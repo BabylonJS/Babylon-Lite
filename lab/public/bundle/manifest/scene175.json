@@ -1,5 +1,5 @@
 {
-  "rawKB": 91.9,
+  "rawKB": 91.8,
   "gzipKB": 37.9,
   "ignoredRawKB": 1483.8,
   "runtimeChunks": [
@@ -12,5 +12,5 @@
     "scene175-standard-renderable-BOy6TBnc.js",
     "scene175.js"
   ],
-  "rawBytes": 94066
+  "rawBytes": 93968
 }

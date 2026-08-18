@@ -1,9 +1,9 @@
 {
-  "rawKB": 76.7,
+  "rawKB": 76.6,
   "gzipKB": 32,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene23-background-dds-skybox-08tbzUYw.js",
+    "scene23-background-dds-skybox-C4FFpXev.js",
     "scene23-background-ground-DOmIRzXy.js",
     "scene23-cubemap-skybox-material-TcX6HdnV.js",
     "scene23-ibl-fragment-CeRrvT96.js",
@@ -13,5 +13,5 @@
     "scene23-wgsl-helpers-BgB2AJrF.js",
     "scene23.js"
   ],
-  "rawBytes": 78530
+  "rawBytes": 78451
 }

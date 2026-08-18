@@ -240,9 +240,8 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
         if (_sceneSetup) {
             const prev = container._sceneSetup;
             container._sceneSetup = (scene) => {
-                const prevCleanup = prev?.(scene);
-                const cleanup = _sceneSetup(scene);
-                return prevCleanup && cleanup ? () => (cleanup(), prevCleanup()) : (cleanup ?? prevCleanup);
+                prev?.(scene);
+                _sceneSetup(scene);
             };
         }
     }

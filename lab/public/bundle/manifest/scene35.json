@@ -1,12 +1,12 @@
 {
-  "rawKB": 83.7,
-  "rawBytes": 85688,
+  "rawKB": 83.6,
+  "rawBytes": 85595,
   "gzipKB": 34.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene35-generate-mipmaps-DcFAHPIK.js",
     "scene35-gltf-feature-gpu-instancing-CsK6xpjm.js",
-    "scene35-gltf-feature-registry-D7n_KBri.js",
+    "scene35-gltf-feature-registry-DZTPmuZn.js",
     "scene35-gltf-glb-parser-BSGlcIIS.js",
     "scene35-ibl-fragment-CeRrvT96.js",
     "scene35-pbr-renderable-6fseiBZX.js",

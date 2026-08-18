@@ -175,7 +175,7 @@ describe("environment setters", () => {
         expect(rotated._environmentSkyboxShaderPatchLoaders?.filter(Boolean)).toHaveLength(1);
         const rotatedDds = await applyEnvironmentSkyboxPatches(rotated, ddsSkyboxFragment, "dds");
         expect(rotatedDds).toContain("scene.envRotationY");
-        expect(rotatedDds).toContain("let cr=cos(scene.envRotationY);let sr=sin(scene.envRotationY);");
+        expect(rotatedDds).toContain("let _erc=cos(scene.envRotationY);let _ers=sin(scene.envRotationY);");
         expect(rotatedDds).not.toContain("scene._envPad1");
 
         const blurred = makeScene().scene;

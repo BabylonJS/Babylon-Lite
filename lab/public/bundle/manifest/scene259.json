@@ -1,6 +1,6 @@
 {
-  "rawKB": 76.8,
-  "gzipKB": 32.2,
+  "rawKB": 76.7,
+  "gzipKB": 32.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene259-flat-normal-wgsl-Cm9mM4tC.js",
@@ -14,5 +14,5 @@
     "scene259-set-emissive-5Dy2e39T.js",
     "scene259.js"
   ],
-  "rawBytes": 78686
+  "rawBytes": 78585
 }

@@ -1,5 +1,5 @@
 {
-  "rawKB": 73.3,
+  "rawKB": 73.2,
   "gzipKB": 30.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,5 +9,5 @@
     "scene179-set-alpha-cutoff-Bhag-FfM.js",
     "scene179.js"
   ],
-  "rawBytes": 75023
+  "rawBytes": 74922
 }

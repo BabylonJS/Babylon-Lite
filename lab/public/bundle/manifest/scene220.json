@@ -1,6 +1,6 @@
 {
-  "rawKB": 86.4,
-  "rawBytes": 88457,
+  "rawKB": 86.3,
+  "rawBytes": 88359,
   "gzipKB": 36.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,7 +8,7 @@
     "scene220-generate-mipmaps-D8xB8CzP.js",
     "scene220-gltf-ext-quantization-CX0La0WM.js",
     "scene220-gltf-ext-uv-transform-DxRzc0hE.js",
-    "scene220-gltf-feature-registry-DRmn2ryo.js",
+    "scene220-gltf-feature-registry-vEKeN22q.js",
     "scene220-gltf-json-asset-DK2HuKLO.js",
     "scene220-gltf-pbr-builder-ext-B2Me9pw6.js",
     "scene220-ibl-fragment-CeRrvT96.js",

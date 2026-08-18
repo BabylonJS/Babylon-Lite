@@ -1,6 +1,6 @@
 {
-  "rawKB": 89.5,
-  "gzipKB": 36.3,
+  "rawKB": 89.4,
+  "gzipKB": 36.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene26-generate-mipmaps-z7-ZrEcW.js",
@@ -11,5 +11,5 @@
     "scene26-singlelight-point-wgsl-CEx08etv.js",
     "scene26.js"
   ],
-  "rawBytes": 91599
+  "rawBytes": 91501
 }

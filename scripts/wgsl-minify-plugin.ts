@@ -361,16 +361,10 @@ export function wgslMinifyPlugin(opts: { mangle?: boolean; templates?: boolean }
             if (!match) return null;
             const raw = JSON.parse(`"${match[1]}"`);
             const isGs = id.includes("gaussian-splatting.wgsl");
-            const isEnvironmentSkybox = /skybox-(dds|hdr)\.fragment\.wgsl/.test(id);
             // Encode `/* GS_FRAGMENT_X */` comment markers as const declarations so they
             // survive miniray's comment stripping. Decoded back below.
             const encoded = isGs ? raw.replace(/\/\*(GS_FRAGMENT_\w+)\*\//g, "const _$1_:u32=0u;") : raw;
-            const result = minifyWgslMiniray(
-                encoded,
-                // Keep in sync with the skybox WGSL declarations and environment patch matchers:
-                // patches match these source names and inject `cr`/`sr` at runtime.
-                isGs ? { keepNames: ["u", "in", "finalColor"], treeShaking: false } : isEnvironmentSkybox ? { keepNames: ["dir", "envCubemap", "cr", "sr"] } : {}
-            );
+            const result = minifyWgslMiniray(encoded, isGs ? { keepNames: ["u", "in", "finalColor"], treeShaking: false } : {});
             let minified = typeof result === "string" ? result : result.code;
             if (isGs) {
                 minified = minified.replace(/const\s+_(GS_FRAGMENT_\w+)_\s*:\s*u32\s*=\s*0u\s*;/g, "/*$1*/");

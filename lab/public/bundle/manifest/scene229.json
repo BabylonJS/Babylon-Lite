@@ -1,6 +1,6 @@
 {
-  "rawKB": 67.2,
-  "gzipKB": 27.9,
+  "rawKB": 67.1,
+  "gzipKB": 27.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene229-flat-normal-wgsl-Cm9mM4tC.js",
@@ -10,5 +10,5 @@
     "scene229-pbr-renderable-BR01ioIZ.js",
     "scene229.js"
   ],
-  "rawBytes": 68778
+  "rawBytes": 68680
 }

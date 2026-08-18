@@ -1,7 +1,7 @@
 {
-  "rawKB": 93.9,
-  "rawBytes": 96155,
-  "gzipKB": 39.1,
+  "rawKB": 93.8,
+  "rawBytes": 96057,
+  "gzipKB": 39,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene218-create-skeleton-CgH3JJ_7.js",
@@ -10,7 +10,7 @@
     "scene218-gltf-ext-spec-gloss-D60sFZYX.js",
     "scene218-gltf-feature-animations-2ULizNY-.js",
     "scene218-gltf-feature-extras-VHPteGay.js",
-    "scene218-gltf-feature-registry-CNYq7CsB.js",
+    "scene218-gltf-feature-registry-DN3CvBA7.js",
     "scene218-gltf-feature-skeleton-Bfxj0q5A.js",
     "scene218-gltf-glb-parser-CZtisckY.js",
     "scene218-gltf-sampler-desc-DTA5QGlT.js",

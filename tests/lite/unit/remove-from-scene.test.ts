@@ -109,12 +109,17 @@ describe("removeFromScene symmetry", () => {
         expect(scene._beforeRender).toHaveLength(0);
     });
 
-    it("runs feature scene cleanup once when its container is removed", () => {
+    it("runs feature-owned scene cleanup once when its container is removed", () => {
         const scene = fakeScene();
         const cleanup = vi.fn();
+        const cleanups = new WeakMap<SceneContext, () => void>();
         const container = {
             entities: [],
-            _sceneSetup: () => cleanup,
+            _sceneCleanups: cleanups,
+            _sceneSetup: (target: SceneContext) => {
+                cleanups.set(target, cleanup);
+                target._disposables.push(cleanup);
+            },
         } as unknown as AssetContainer;
 
         addToScene(scene, container);

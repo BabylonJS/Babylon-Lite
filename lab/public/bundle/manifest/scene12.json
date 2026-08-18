@@ -1,6 +1,6 @@
 {
-  "rawKB": 103.5,
-  "rawBytes": 105933,
+  "rawKB": 103.4,
+  "rawBytes": 105835,
   "gzipKB": 42.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,7 +8,7 @@
     "scene12-generate-mipmaps-c8T0m1Bi.js",
     "scene12-gltf-animation-DFP5B34q.js",
     "scene12-gltf-feature-animations-3i3pzv6h.js",
-    "scene12-gltf-feature-registry-BeU9wMYV.js",
+    "scene12-gltf-feature-registry-D3JX0keF.js",
     "scene12-gltf-feature-skeleton-CLRii7bR.js",
     "scene12-gltf-glb-parser-DVLsK2kU.js",
     "scene12-ibl-fragment-CeRrvT96.js",
