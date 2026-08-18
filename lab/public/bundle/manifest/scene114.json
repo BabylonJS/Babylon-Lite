@@ -1,9 +1,9 @@
 {
-  "rawKB": 79.8,
-  "gzipKB": 32.1,
+  "rawKB": 81.9,
+  "gzipKB": 33.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene114-deformed-geometry-Dvzv7yoN.js",
+    "scene114-deform-picking-projection-DjhASFuu.js",
     "scene114-morph-fragment-CayVhQaw.js",
     "scene114-pbr-renderable-DPOD_M50.js",
     "scene114-pbr-template-ext-CiHpOV5G.js",
@@ -12,5 +12,5 @@
     "scene114-skeleton-fragment-B9kdPQjd.js",
     "scene114.js"
   ],
-  "rawBytes": 81705
+  "rawBytes": 83911
 }
