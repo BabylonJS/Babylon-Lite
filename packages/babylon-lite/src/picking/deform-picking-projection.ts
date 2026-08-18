@@ -17,6 +17,7 @@ import type { PickingVertexProjection } from "./picking-advanced-pipeline.js";
 let _device: GPUDevice | null = null;
 let _projections: Map<string, PickingVertexProjection> | null = null;
 let _emptyBGL: GPUBindGroupLayout | null = null;
+let _emptyBG: GPUBindGroup | null = null;
 
 /** Position layout, restated so the simple and detailed pick pipelines keep theirs untouched. */
 const POSITION: GPUVertexBufferLayout = { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] };
@@ -25,6 +26,13 @@ const POSITION: GPUVertexBufferLayout = { arrayStride: 12, attributes: [{ shader
  *  this projection at group(3) needs a placeholder whenever no discard rule supplies group(2). */
 function emptyBGL(engine: EngineContext): GPUBindGroupLayout {
     return (_emptyBGL ??= engine._device.createBindGroupLayout({ label: "picking-deform-empty-bgl", entries: [] }));
+}
+
+/** The matching group(2) filler bind group. Built from `emptyBGL` itself rather than from a specific
+ *  pipeline's reflected layout, so the one instance is compatible with every deform pipeline (they all
+ *  embed that same layout object) and can be cached for the device instead of rebuilt per draw. */
+function emptyBG(engine: EngineContext): GPUBindGroup {
+    return (_emptyBG ??= engine._device.createBindGroup({ label: "picking-deform-empty-bg", layout: emptyBGL(engine), entries: [] }));
 }
 
 /** Morph storage-buffer layout. Restated here rather than imported from `morph-fragment-core.ts`:
@@ -150,6 +158,7 @@ function projectionFor(engine: EngineContext, skeleton: boolean, has8Bones: bool
         _device = engine._device;
         _projections = null;
         _emptyBGL = null;
+        _emptyBG = null;
     }
     const key = `${skeleton ? (has8Bones ? 8 : 4) : 0}-${morph ? 1 : 0}`;
     const projections = (_projections ??= new Map());
@@ -178,8 +187,9 @@ export function getDeformPickingProjection(engine: EngineContext, mesh: Mesh): P
 /** Bind the bone texture, morph storage, and skin attributes for a deformed pick draw.
  *
  *  The projection always occupies group 3, so group 2 is part of the pipeline layout even when no
- *  discard rule supplies one. WebGPU requires every declared group to be bound, so an empty group is
- *  supplied here whenever the caller has not already bound a discard group. */
+ *  discard rule supplies one. An empty group declares no bindings, so leaving it unbound happens to
+ *  validate cleanly on the implementations tested; binding the cached filler anyway keeps the draw
+ *  within what the spec actually guarantees, at no per-draw allocation cost. */
 export function bindDeformPickingProjection(
     engine: EngineContext,
     pass: GPURenderPassEncoder,
@@ -199,7 +209,7 @@ export function bindDeformPickingProjection(
         entries.push({ binding: binding++, resource: { buffer: morph.deltasBuffer } }, { binding, resource: { buffer: morph.weightsBuffer } });
     }
     if (!discardGroupBound) {
-        pass.setBindGroup(2, engine._device.createBindGroup({ label: "picking-deform-empty-bg", layout: pipeline.getBindGroupLayout(2), entries: [] }));
+        pass.setBindGroup(2, emptyBG(engine));
     }
     pass.setBindGroup(3, engine._device.createBindGroup({ label: "picking-deform-bg", layout: pipeline.getBindGroupLayout(3), entries }));
     if (skeleton) {

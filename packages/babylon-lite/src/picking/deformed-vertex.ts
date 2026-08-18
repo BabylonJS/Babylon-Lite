@@ -26,7 +26,7 @@ export function captureDeformPose(mesh: Mesh): DeformPose | null {
     }
     return {
         boneMatrices: skeleton ? new Float32Array(skeleton.boneMatrices) : null,
-        morphWeights: morph ? Float32Array.from(morph.weights) : null,
+        morphWeights: morph ? new Float32Array(morph.weights) : null,
     };
 }
 
