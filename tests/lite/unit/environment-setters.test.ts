@@ -82,7 +82,7 @@ function makeScene() {
         lodGenerationScale: 0.8,
         lodGenerationOffset: 0.125,
     } as EnvironmentTextures;
-    const task = scene._frameGraph._tasks.find((candidate): candidate is RenderTask => "_su" in candidate)!;
+    const task = scene._frameGraph._tasks.find((candidate): candidate is RenderTask => candidate._sceneUboCacheKey !== undefined)!;
     writeCount.n = 0;
     return { camera, engine, scene, task, writeCount };
 }
@@ -114,14 +114,14 @@ describe("environment setters", () => {
     it("writes blur metadata and invalidates every cached render-task scene UBO", () => {
         const { camera, engine, scene, task, writeCount } = makeScene();
         const secondCache = [1];
-        scene._frameGraph._tasks.push({ _su: secondCache } as unknown as (typeof scene._frameGraph._tasks)[number]);
+        scene._frameGraph._tasks.push({ ...task, _sceneUboCacheKey: secondCache });
 
         _writePassSceneUBO(task, engine, scene, camera);
         _writePassSceneUBO(task, engine, scene, camera);
         expect(writeCount.n).toBe(1);
 
         setEnvironmentBlur(scene, 0.8);
-        expect(task._su).toHaveLength(0);
+        expect(task._sceneUboCacheKey).toHaveLength(0);
         expect(secondCache).toHaveLength(0);
 
         _writePassSceneUBO(task, engine, scene, camera);
@@ -139,7 +139,7 @@ describe("environment setters", () => {
     it("registers the rotation UBO writer and invalidates every cached render-task scene UBO", () => {
         const { camera, engine, scene, task, writeCount } = makeScene();
         const secondCache = [1];
-        scene._frameGraph._tasks.push({ _su: secondCache } as unknown as (typeof scene._frameGraph._tasks)[number]);
+        scene._frameGraph._tasks.push({ ...task, _sceneUboCacheKey: secondCache });
 
         scene._environmentRotation = 0.5;
         _writePassSceneUBO(task, engine, scene, camera);
@@ -148,14 +148,14 @@ describe("environment setters", () => {
         expect(task._suData[36]).toBe(0);
 
         setEnvironmentRotation(scene, 0.5);
-        expect(task._su).toHaveLength(0);
+        expect(task._sceneUboCacheKey).toHaveLength(0);
         expect(secondCache).toHaveLength(0);
         _writePassSceneUBO(task, engine, scene, camera);
         expect(writeCount.n).toBe(2);
         expect(task._suData[36]).toBeCloseTo(0.5);
 
         setEnvironmentRotation(scene, 1.5);
-        expect(task._su).toHaveLength(0);
+        expect(task._sceneUboCacheKey).toHaveLength(0);
         _writePassSceneUBO(task, engine, scene, camera);
         expect(writeCount.n).toBe(3);
         expect(task._suData[36]).toBeCloseTo(1.5);

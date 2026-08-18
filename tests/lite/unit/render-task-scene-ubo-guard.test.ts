@@ -86,7 +86,7 @@ describe("writePassSceneUBO scene-UBO change-detection guard", () => {
         const scene = createSceneContext(engine) as SceneContext;
         const camera = makeCamera();
         scene.camera = camera;
-        const task = scene._frameGraph._tasks.find((t): t is RenderTask => "_su" in t)!;
+        const task = scene._frameGraph._tasks.find((t): t is RenderTask => t._sceneUboCacheKey !== undefined)!;
 
         // Scene/task construction may itself issue buffer writes; isolate the guard's own writes.
         writeCount.n = 0;

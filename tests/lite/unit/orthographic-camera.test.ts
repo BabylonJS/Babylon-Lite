@@ -215,7 +215,7 @@ describe("orthographic projection — steady-state scene UBO uploads", () => {
         const scene = createSceneContext(engine) as SceneContext;
         const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
         scene.camera = camera;
-        const task = scene._frameGraph._tasks.find((t): t is RenderTask => "_su" in t)!;
+        const task = scene._frameGraph._tasks.find((t): t is RenderTask => t._sceneUboCacheKey !== undefined)!;
         writeCount.n = 0;
         const write = () => _writePassSceneUBO(task, engine, scene, camera);
         return { camera, write, writeCount };

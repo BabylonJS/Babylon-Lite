@@ -52,8 +52,8 @@ export function _registerSceneUboContributor(scene: SceneContext, contributor: S
 /** @internal Force every forward render task to rewrite its scene UBO. */
 export function _invalidateSceneUboCaches(scene: SceneContext): void {
     for (const task of scene._frameGraph._tasks) {
-        if ("_su" in task) {
-            (task as unknown as { _su: unknown[] })._su.length = 0;
+        if (task._sceneUboCacheKey) {
+            task._sceneUboCacheKey.length = 0;
         }
     }
 }

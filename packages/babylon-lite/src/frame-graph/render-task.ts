@@ -164,7 +164,7 @@ export interface RenderTask extends Task {
     /** @internal */
     _suData: Float32Array;
     /** @internal */
-    _su: unknown[];
+    _sceneUboCacheKey: unknown[];
     /** Optional transmission-enabled execute path: copies the scene texture for refraction and draws transmissive
      *  renderables. Present only when the task was configured with `transmission`. Returns the number of draw calls issued. */
     /** @internal */
@@ -242,7 +242,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _sceneBG: sceneBG,
         _lightsUBO: lightsUBO,
         _suData: new F32(SCENE_UBO_BYTES / 4),
-        _su: [],
+        _sceneUboCacheKey: [],
         _targetSignature: targetSignature,
         _updateBatches: [],
         _pendingMeshes: [],
@@ -623,7 +623,7 @@ export function _writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: 
     // it, a late env load would change none of the other guarded inputs, so the UBO would never be rewritten
     // and the model would keep zero irradiance (dark diffuse, specular-only "mirror" look).
     const envTextures = scene._envTextures;
-    const s = task._su;
+    const s = task._sceneUboCacheKey;
     if (s[0] === camera && s[1] === fog && s[2] === wv && s[3] === aspect && s[4] === img.exposure && s[5] === img.contrast && s[6] === envTextures) {
         return;
     }
