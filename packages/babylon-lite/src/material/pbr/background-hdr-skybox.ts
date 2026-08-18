@@ -36,13 +36,13 @@ function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPU
 }
 
 /** Build an HDR cubemap skybox as a complete Renderable (order 0). */
-export function buildHdrSkyboxRenderable(
+export async function buildHdrSkyboxRenderable(
     scene: SceneContext,
     envTextures: EnvironmentTextures,
     skyHalfSize: number,
     rootPosition: [number, number, number],
     primaryColor: [number, number, number]
-): Renderable {
+): Promise<Renderable> {
     const engine = scene.surface.engine;
 
     const cc = scene.clearColor;
@@ -50,7 +50,7 @@ export function buildHdrSkyboxRenderable(
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
     let shaderKey = "";
     let skyboxFragment = skyboxHdrFragSrc;
-    const rotationPatch = scene._environmentRotationSkyboxPatch;
+    const rotationPatch = scene._environmentRotationSkyboxPatch ? (await import("./fragments/environment-rotation-fragment.js")).environmentRotationSkyboxPatch : undefined;
     if (rotationPatch) {
         shaderKey += `-${rotationPatch._id}`;
         skyboxFragment = rotationPatch._apply("hdr", skyboxFragment);

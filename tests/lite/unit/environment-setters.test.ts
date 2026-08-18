@@ -7,6 +7,7 @@ import { _writePassSceneUBO, type RenderTask } from "../../../packages/babylon-l
 import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env";
 import { registerEnvSceneUniforms as registerGltfEnvSceneUniforms } from "../../../packages/babylon-lite/src/loader-gltf/ibl-env-assembly";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
+import { environmentRotationSkyboxPatch } from "../../../packages/babylon-lite/src/material/pbr/fragments/environment-rotation-fragment";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { registerEnvSceneUniforms } from "../../../packages/babylon-lite/src/scene/scene-ubo-extras";
@@ -88,7 +89,7 @@ function makeScene() {
 
 function applyEnvironmentSkyboxPatches(scene: SceneContext, kind: "dds" | "hdr", fragment: string): string {
     let patched = fragment;
-    patched = scene._environmentRotationSkyboxPatch?._apply(kind, patched) ?? patched;
+    patched = scene._environmentRotationSkyboxPatch ? environmentRotationSkyboxPatch._apply(kind, patched) : patched;
     patched = scene._environmentBlurSkyboxPatch?._apply(kind, patched) ?? patched;
     return patched;
 }
@@ -97,9 +98,9 @@ describe("environment setters", () => {
     it.each([
         ["environment loaders", registerEnvSceneUniforms],
         ["glTF image-based lights", registerGltfEnvSceneUniforms],
-    ])("registers dynamic opt-in rotation updates for %s", (_name, register) => {
+    ])("registers opt-in rotation data for %s", (_name, register) => {
         const { camera, engine, scene, task, writeCount } = makeScene();
-        scene.envRotationY = 0.75;
+        scene._environmentRotation = 0.75;
 
         register(scene);
         register(scene);
@@ -108,12 +109,6 @@ describe("environment setters", () => {
         _writePassSceneUBO(task, engine, scene, camera);
         expect(task._suData[36]).toBeCloseTo(0.75);
         expect(writeCount.n).toBe(1);
-
-        scene.envRotationY = 1.25;
-        expect(task._su).toHaveLength(0);
-        _writePassSceneUBO(task, engine, scene, camera);
-        expect(task._suData[36]).toBeCloseTo(1.25);
-        expect(writeCount.n).toBe(2);
     });
 
     it("writes blur metadata and invalidates every cached render-task scene UBO", () => {
@@ -146,7 +141,7 @@ describe("environment setters", () => {
         const secondCache = [1];
         scene._frameGraph._tasks.push({ _su: secondCache } as unknown as (typeof scene._frameGraph._tasks)[number]);
 
-        scene.envRotationY = 0.5;
+        scene._environmentRotation = 0.5;
         _writePassSceneUBO(task, engine, scene, camera);
         _writePassSceneUBO(task, engine, scene, camera);
         expect(writeCount.n).toBe(1);

@@ -15,10 +15,10 @@ describe("environment setter tree shaking", () => {
 
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
-        expect(result.code).not.toContain("scene.envRotationY");
+        expect(result.code).not.toContain("scene._environmentRotation");
     });
 
-    it("keeps blur and rotation shader code out of a non-feature environment consumer", async () => {
+    it("keeps blur shader code out of a non-feature environment consumer", async () => {
         const result = await runRollup({
             entrySource: `import { loadEnvironment } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(loadEnvironment);\n`,
             format: "es",
@@ -30,7 +30,7 @@ describe("environment setter tree shaking", () => {
         expect(result.code).toContain("/*ENV_DIRECTION*/");
         expect(result.code).toContain("/*ENV_LOD*/");
         expect(result.code).not.toContain("textureNumLevels");
-        expect(result.code).not.toContain("cos(scene.envRotationY)");
+        expect(result.code).toContain("cos(scene.envRotationY)");
     });
 
     it("retains only the blur shader patch for setEnvironmentBlur", async () => {
@@ -44,10 +44,10 @@ describe("environment setter tree shaking", () => {
         expect(result.significantWarnings).toEqual([]);
         expect(result.code).toContain("textureNumLevels");
         expect(result.code).not.toContain("cos(scene.envRotationY)");
-        expect(result.code).not.toContain("scene.envRotationY");
+        expect(result.code).not.toContain("scene._environmentRotation");
     });
 
-    it("retains only the rotation shader patch for setEnvironmentRotation", async () => {
+    it("retains rotation state without skybox code when no skybox builder is consumed", async () => {
         const result = await runRollup({
             entrySource: `import { setEnvironmentRotation } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(setEnvironmentRotation);\n`,
             format: "es",
@@ -57,8 +57,9 @@ describe("environment setter tree shaking", () => {
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
         expect(result.code).not.toContain("textureNumLevels");
-        expect(result.code).toContain("cos(scene.envRotationY)");
-        expect(result.code).toContain("scene.envRotationY");
+        expect(result.code).not.toContain("cos(scene.envRotationY)");
+        expect(result.code).not.toContain("scene.envRotationY");
+        expect(result.code).toContain("scene._environmentRotation");
     });
 
     it("retains both patches when both setters are consumed", async () => {

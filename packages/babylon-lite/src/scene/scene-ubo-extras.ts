@@ -34,31 +34,11 @@ function writeClipPlaneUbo(data: Float32Array, scene: SceneContext): void {
 /** Write the opt-in environment slice of the SceneUniforms struct: rotation
  *  (offset 36) and spherical harmonics (offsets 40–75). */
 function writeEnvUbo(data: Float32Array, scene: SceneContext): void {
-    data[36] = scene.envRotationY ?? 0;
+    data[36] = scene._environmentRotation ?? 0;
     const sh = scene._envTextures?.sphericalHarmonics;
     if (sh) {
         data.set(sh, 40);
     }
-}
-
-function installEnvironmentRotationInvalidation(scene: SceneContext): void {
-    if (scene._environmentRotationInvalidationInstalled) {
-        return;
-    }
-    scene._environmentRotationInvalidationInstalled = true;
-
-    let rotation = scene.envRotationY;
-    Object.defineProperty(scene, "envRotationY", {
-        configurable: true,
-        enumerable: true,
-        get: () => rotation,
-        set: (value: number | undefined) => {
-            if (value !== rotation) {
-                rotation = value;
-                _invalidateSceneUboCaches(scene);
-            }
-        },
-    });
 }
 
 /** @internal Register a contributor on the scene, deduping by function reference. */
@@ -112,6 +92,5 @@ export function setClipPlane(scene: SceneContext, plane: ClipPlane): void {
  * @internal
  */
 export function registerEnvSceneUniforms(scene: SceneContext): void {
-    installEnvironmentRotationInvalidation(scene);
     _registerSceneUboContributor(scene, writeEnvUbo);
 }

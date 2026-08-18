@@ -1,4 +1,23 @@
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, cloneTransformNode, attachControl, loadGltf, loadEnvironment, loadTexture2D, createPbrMaterial, setPbrMetallicReflectance, createSolidTexture2D, goToFrame, registerScene } from "babylon-lite";
+import {
+    onBeforeRender,
+    addToScene,
+    startEngine,
+    createEngine,
+    createSceneContext,
+    createArcRotateCamera,
+    createDirectionalLight,
+    cloneTransformNode,
+    attachControl,
+    loadGltf,
+    loadEnvironment,
+    loadTexture2D,
+    createPbrMaterial,
+    setPbrMetallicReflectance,
+    setEnvironmentRotation,
+    createSolidTexture2D,
+    goToFrame,
+    registerScene,
+} from "babylon-lite";
 import type { TransformNode } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 
@@ -23,7 +42,7 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
         skipGround: true,
         brdfUrl: "/brdf-lut.png",
     });
-    scene.envRotationY = 1.9;
+    setEnvironmentRotation(scene, 1.9);
 
     // Load shader ball mesh — auto-added as middle row
     const result = await loadGltf(engine, "https://assets.babylonjs.com/meshes/Demos/pbr_mr_specular/shaderBall_rotation.glb");

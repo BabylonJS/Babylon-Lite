@@ -161,35 +161,11 @@ export async function resolveImage(json: any, binChunk: DataView, imageIdx: numb
 /** Copy of scene-ubo-extras.ts `writeEnvUbo` — writes the environment rotation
  *  (offset 36) and spherical-harmonics slice (offsets 40–75). */
 function writeEnvUbo(data: Float32Array, scene: SceneContext): void {
-    data[36] = scene.envRotationY ?? 0;
+    data[36] = scene._environmentRotation ?? 0;
     const sh = scene._envTextures?.sphericalHarmonics;
     if (sh) {
         data.set(sh, 40);
     }
-}
-
-function installEnvironmentRotationInvalidation(scene: SceneContext): void {
-    if (scene._environmentRotationInvalidationInstalled) {
-        return;
-    }
-    scene._environmentRotationInvalidationInstalled = true;
-
-    let rotation = scene.envRotationY;
-    Object.defineProperty(scene, "envRotationY", {
-        configurable: true,
-        enumerable: true,
-        get: () => rotation,
-        set: (value: number | undefined) => {
-            if (value !== rotation) {
-                rotation = value;
-                for (const task of scene._frameGraph._tasks) {
-                    if ("_su" in task) {
-                        (task as unknown as { _su: unknown[] })._su.length = 0;
-                    }
-                }
-            }
-        },
-    });
 }
 
 /** Copy of scene-ubo-extras.ts `registerEnvSceneUniforms` (+ its dedup helper) —
@@ -198,7 +174,6 @@ function installEnvironmentRotationInvalidation(scene: SceneContext): void {
  *  writer is functionally identical to the shared one. Kept private so this
  *  feature does not pin scene-ubo-extras into every glTF scene's main chunk. */
 export function registerEnvSceneUniforms(scene: SceneContext): void {
-    installEnvironmentRotationInvalidation(scene);
     const list = (scene._sceneUboContributors ??= []);
     if (!list.includes(writeEnvUbo)) {
         list.push(writeEnvUbo);

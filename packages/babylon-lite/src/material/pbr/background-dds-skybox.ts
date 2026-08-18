@@ -47,11 +47,13 @@ export async function buildDdsSkyboxRenderable(
     const engine = scene.surface.engine;
 
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
-    const { cubeView, sampler } = await loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL);
+    const rotationPatchPromise = scene._environmentRotationSkyboxPatch
+        ? import("./fragments/environment-rotation-fragment.js").then(({ environmentRotationSkyboxPatch }) => environmentRotationSkyboxPatch)
+        : undefined;
+    const [rotationPatch, { cubeView, sampler }] = await Promise.all([rotationPatchPromise, loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL)]);
 
     let shaderKey = "";
     let skyboxFragment = ddsSkyboxFragSrc;
-    const rotationPatch = scene._environmentRotationSkyboxPatch;
     if (rotationPatch) {
         shaderKey += `-${rotationPatch._id}`;
         skyboxFragment = rotationPatch._apply("dds", skyboxFragment);

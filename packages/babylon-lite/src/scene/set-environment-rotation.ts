@@ -1,4 +1,3 @@
-import { environmentRotationSkyboxPatch } from "../material/pbr/fragments/environment-rotation-fragment.js";
 import type { SceneContext } from "./scene-core.js";
 import { _invalidateSceneUboCaches, registerEnvSceneUniforms } from "./scene-ubo-extras.js";
 
@@ -8,7 +7,7 @@ import { _invalidateSceneUboCaches, registerEnvSceneUniforms } from "./scene-ubo
  */
 export function setEnvironmentRotation(scene: SceneContext, rotation: number): void {
     registerEnvSceneUniforms(scene);
-    scene.envRotationY = rotation;
-    scene._environmentRotationSkyboxPatch = environmentRotationSkyboxPatch;
+    scene._environmentRotation = rotation;
+    scene._environmentRotationSkyboxPatch = true;
     _invalidateSceneUboCaches(scene);
 }

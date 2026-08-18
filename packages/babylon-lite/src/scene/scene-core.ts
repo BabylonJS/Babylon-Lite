@@ -125,17 +125,14 @@ export interface SceneContext extends RenderingContext {
     /** Background material primaryColor (linear RGB). Default from Babylon createDefaultEnvironment. */
     environmentPrimaryColor?: [number, number, number];
 
-    /** Environment cubemap Y rotation in radians. */
-    envRotationY?: number;
-
-    /** @internal Whether dynamic environment-rotation cache invalidation is installed. */
-    _environmentRotationInvalidationInstalled?: true;
+    /** @internal Environment cubemap Y rotation in radians. Set through `setEnvironmentRotation`. */
+    _environmentRotation?: number;
 
     /** @internal Optional visible-environment blur amount. */
     _environmentBlur?: number;
 
-    /** @internal Visible-environment rotation shader patch installed by `setEnvironmentRotation`. */
-    _environmentRotationSkyboxPatch?: EnvironmentSkyboxShaderPatch;
+    /** @internal Whether a visible-environment skybox should load and apply the rotation shader patch. */
+    _environmentRotationSkyboxPatch?: true;
 
     /** @internal Visible-environment blur shader patch installed by `setEnvironmentBlur`. */
     _environmentBlurSkyboxPatch?: EnvironmentSkyboxShaderPatch;

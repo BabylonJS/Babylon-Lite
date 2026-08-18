@@ -133,7 +133,7 @@ export async function loadEnvironment(
         }
         if (skyboxIsEnv) {
             const skybox = await import("../material/pbr/background-hdr-skybox.js");
-            scene._renderables.push(skybox.buildHdrSkyboxRenderable(scene, textures, skyHalfSize, rootPosition, primaryColor));
+            scene._renderables.push(await skybox.buildHdrSkyboxRenderable(scene, textures, skyHalfSize, rootPosition, primaryColor));
         }
     });
 
