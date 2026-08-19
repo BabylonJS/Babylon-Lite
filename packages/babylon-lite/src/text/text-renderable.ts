@@ -18,6 +18,7 @@ import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } fr
 import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
+import { createStyleBuffer, ensureStyleGpu } from "./_gpu/text-style-gpu.js";
 import { getOrCreateTextPipeline } from "./_gpu/text-pipeline.js";
 
 /** Initial transform and draw options for a scene-attached text renderable. */
@@ -56,6 +57,9 @@ interface TextRenderableGpu {
     textU: GPUBuffer;
     instanceBuf: GPUBuffer;
     instanceCap: number;
+    styleBuf: GPUBuffer;
+    styleCap: number;
+    uploadedStyleVersion: number;
     pipeline: GPURenderPipeline;
     uploadedDataVersion: number;
     uploadedCameraVersion: number;
@@ -128,6 +132,7 @@ function ensureGpu(r: TextRenderable, engine: EngineContext, target: RenderTarge
     if (gpu && gpu.device !== device) {
         gpu.textU.destroy();
         gpu.instanceBuf.destroy();
+        gpu.styleBuf.destroy();
         gpu = null;
     }
     if (!gpu || gpu.targetKey !== key || gpu.pipeline !== pipeline) {
@@ -142,6 +147,9 @@ function ensureGpu(r: TextRenderable, engine: EngineContext, target: RenderTarge
                     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
                 }),
                 instanceCap: cap,
+                styleBuf: createStyleBuffer(device, 8),
+                styleCap: 8,
+                uploadedStyleVersion: -1,
                 pipeline,
                 uploadedDataVersion: -1,
                 uploadedCameraVersion: -1,
@@ -205,10 +213,13 @@ function updateTextRenderable(r: TextRenderable, engine: EngineContext, gpu: Tex
     const device = engine._device;
     const data = r._data;
 
+    // Sync the style palette first: a grown buffer invalidates every group's bind group.
+    const styleRecreated = ensureStyleGpu(device, data, gpu);
+
     // Sync every group's atlas to the GPU; track which need bind-group rebuild.
     for (const g of data._groups) {
         const { rebuilt, gpu: atlasGpu } = ensureSharedAtlasGpu(device, g.curveSet.atlas);
-        if (rebuilt || !g.bindGroup || g.bindGroupVersion !== atlasGpu.uploadedVersion) {
+        if (rebuilt || styleRecreated || !g.bindGroup || g.bindGroupVersion !== atlasGpu.uploadedVersion) {
             g.bindGroup = device.createBindGroup({
                 label: "text-bg0-" + g.curveSetId,
                 layout: bindGroupLayout,
@@ -217,6 +228,7 @@ function updateTextRenderable(r: TextRenderable, engine: EngineContext, gpu: Tex
                     { binding: 1, resource: atlasGpu.curveTex.createView() },
                     { binding: 2, resource: atlasGpu.bandTex.createView() },
                     { binding: 3, resource: { buffer: atlasGpu.metaBuf } },
+                    { binding: 4, resource: { buffer: gpu.styleBuf } },
                 ],
             });
             g.bindGroupVersion = atlasGpu.uploadedVersion;
@@ -300,6 +312,7 @@ export function disposeTextRenderable(renderable: TextRenderable): void {
     if (renderable._gpu) {
         renderable._gpu.textU.destroy();
         renderable._gpu.instanceBuf.destroy();
+        renderable._gpu.styleBuf.destroy();
         renderable._gpu = null;
     }
 }

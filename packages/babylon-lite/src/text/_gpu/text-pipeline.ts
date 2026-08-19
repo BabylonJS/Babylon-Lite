@@ -48,6 +48,7 @@ function getOrCreateDeviceCache(engine: EngineContext): TextPipelineDeviceCache 
             { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
             { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
             { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+            { binding: 4, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
         ],
     });
     const vertModule = device.createShaderModule({ label: "text-vert", code: vertSrc });
@@ -104,9 +105,8 @@ export function getOrCreateTextPipeline(
                     arrayStride: TEXT_INSTANCE_BYTES,
                     stepMode: "instance",
                     attributes: [
-                        { shaderLocation: 1, offset: 0, format: "float32x3" },
-                        { shaderLocation: 2, offset: 12, format: "uint32" },
-                        { shaderLocation: 3, offset: 16, format: "float32x4" },
+                        { shaderLocation: 1, offset: 0, format: "float32x2" },
+                        { shaderLocation: 2, offset: 8, format: "uint32" },
                     ],
                 },
             ],

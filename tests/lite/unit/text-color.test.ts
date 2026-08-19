@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { GlyphCurves } from "../../../packages/babylon-lite/src/text/glyph-storage";
-import { createTextData, TEXT_INSTANCE_FLOATS } from "../../../packages/babylon-lite/src/text/text-data";
+import { createTextData, TEXT_INSTANCE_FLOATS, TEXT_STYLE_FLOATS } from "../../../packages/babylon-lite/src/text/text-data";
 import { createGlyphStorage } from "../../../packages/babylon-lite/src/text/glyph-storage";
 
 function makeGlyph(glyphId: number): GlyphCurves {
@@ -15,12 +15,14 @@ function makeGlyph(glyphId: number): GlyphCurves {
     };
 }
 
-const COLOR_OFFSET = 4;
+const PACKED_OFFSET = 2;
 
-/** Read the packed RGBA color of instance `i` from a TextData's instance buffer. */
+/** Read the effective RGBA color of instance `i`: the instance stores only a style index in the
+ *  high 16 bits of its packed word, so follow that into the TextData's style palette. */
 function instanceColor(data: ReturnType<typeof createTextData>, i: number): [number, number, number, number] {
-    const base = i * TEXT_INSTANCE_FLOATS + COLOR_OFFSET;
-    const a = data._instances;
+    const styleIdx = data._instancesU32[i * TEXT_INSTANCE_FLOATS + PACKED_OFFSET]! >>> 16;
+    const base = styleIdx * TEXT_STYLE_FLOATS;
+    const a = data._styles;
     return [a[base]!, a[base + 1]!, a[base + 2]!, a[base + 3]!];
 }
 

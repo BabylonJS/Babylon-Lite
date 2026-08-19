@@ -273,7 +273,7 @@ describe("updateTextData removeRun", () => {
 
 /** Glyph id absent from every curve set in `makeStorage()`, so it can never be packed. */
 const MISSING = 99;
-const DEAD_GLYPH_OFFSET = 3;
+const DEAD_GLYPH_OFFSET = 2;
 
 function isDead(data: ReturnType<typeof createTextData>, slot: number): boolean {
     return data._instancesU32[slot * TEXT_INSTANCE_FLOATS + DEAD_GLYPH_OFFSET] === 0xffffffff;

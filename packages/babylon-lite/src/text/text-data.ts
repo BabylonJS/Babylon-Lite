@@ -2,8 +2,8 @@
  *
  *  Each draw group owns a contiguous slot range `[slotStart, slotStart + slotCount)`
  *  in the shared instance buffer. Live and dead slots intermix within that range;
- *  dead slots carry a sentinel (`slugAnchor.w = 1`) that the vertex shader detects
- *  and turns into a degenerate off-screen triangle. `addRun` / `replaceRun` reuse
+ *  dead slots carry an all-ones packed word that the vertex shader detects and turns
+ *  into a degenerate off-screen triangle. `addRun` / `replaceRun` reuse
  *  from the group's `freeSlots` LIFO when possible; otherwise they extend the
  *  group's range (shifting later *groups* — never other runs in the same group).
  *  `removeRun` writes the sentinel into its slots and returns them to the free-list.
@@ -106,6 +106,15 @@ export interface TextData {
     _instancesU32: Uint32Array;
     /** @internal Total *capacity* used (live + dead slots across all groups). */
     _instanceCount: number;
+    /** @internal Style palette: `TEXT_STYLE_FLOATS` per entry, indexed by the high 16 bits of
+     *  an instance's packed word. Entries are owned by runs — see `RunRecord.styleStart`. */
+    _styles: Float32Array;
+    /** @internal Entries in use in `_styles` (live plus any orphaned by a run whose style
+     *  count changed). Reset to 0 by `applyReset`, which doubles as palette compaction. */
+    _styleCount: number;
+    /** @internal Monotonic version bumped whenever `_styles` content changes, so renderers can
+     *  skip the palette upload entirely when nothing moved. */
+    _styleVersion: number;
     /** @internal GlyphStorage backing this TextData. Borrowed reference — caller owns it. */
     _storage: GlyphStorage;
     /** @internal Monotonic version bumped whenever instance data changes. */
@@ -160,6 +169,12 @@ export type RunRecord = {
     /** Absolute slot indices (within `TextData._instances`) currently occupied by this run.
      *  Length === number of glyphs actually written (skipped glyphs do not occupy slots). */
     slots: number[];
+    /** First style-palette entry owned by this run. That entry holds the run default
+     *  (`defaultColor` + `invScale`); one entry per glyph carrying its own `color` follows it,
+     *  in glyph order. */
+    styleStart: number;
+    /** Palette entries reserved at `styleStart`. */
+    styleCount: number;
 };
 
 /** @internal Lazy GPU instance buffer for a TextData (single buffer covering all groups). */
@@ -170,30 +185,33 @@ export type TextDataGpu = {
     uploadedVersion: number;
 };
 
-/** Floats per instance: slugAnchor (x, y, invScale), slugGlyph (a u32 aliased into float slot 3),
- *  slugColor (rgba). Everything else the shader needs is glyph-invariant and lives in the atlas's
- *  `GlyphMetadata` storage buffer, indexed by slugGlyph, instead of being copied per instance. */
-export const TEXT_INSTANCE_FLOATS = 8;
+/** Floats per instance: the anchor (x, y) plus one packed u32 holding the glyph index in its
+ *  low 16 bits and the style index in its high 16. Everything else the shader needs is either
+ *  glyph-invariant — the atlas's `GlyphMetadata` table, indexed by the glyph half — or shared
+ *  by every glyph drawn at the same color and scale — this TextData's style palette, indexed
+ *  by the style half. Neither is copied per instance. */
+export const TEXT_INSTANCE_FLOATS = 3;
 export const TEXT_INSTANCE_BYTES = TEXT_INSTANCE_FLOATS * 4;
 
-/** Value of the glyph-index word marking a slot as dead (skipped by the vertex shader). */
+/** Floats per style-palette entry, matching the WGSL `TextStyle` struct: a `vec4<f32>` color
+ *  followed by a `vec4<f32>` of params whose `.x` carries the run's `invScale`. The rest is
+ *  reserved padding that keeps the struct naturally 16-byte aligned. */
+export const TEXT_STYLE_FLOATS = 8;
+export const TEXT_STYLE_BYTES = TEXT_STYLE_FLOATS * 4;
+
+/** Value of the packed word marking a slot as dead (skipped by the vertex shader). Both halves
+ *  are all-ones, which `MAX_PACKED_INDEX` keeps unreachable for a real (glyph, style) pair. */
 const DEAD_GLYPH = 0xffffffff;
+
+/** Largest glyph or style index representable in a packed half. `0xffff` is reserved so the
+ *  dead sentinel stays unambiguous. */
+const MAX_PACKED_INDEX = 0xfffe;
 
 const WHITE_COLOR: readonly [number, number, number, number] = [1, 1, 1, 1];
 
 // ─── Per-slot packing ──────────────────────────────────────────────────────
 
-function packGlyphAtSlot(
-    out: Float32Array,
-    outU32: Uint32Array,
-    slot: number,
-    curveSet: GlyphStorageCurveSet,
-    glyphId: number,
-    x: number,
-    y: number,
-    invScale: number,
-    color: readonly [number, number, number, number]
-): boolean {
+function packGlyphAtSlot(out: Float32Array, outU32: Uint32Array, slot: number, curveSet: GlyphStorageCurveSet, glyphId: number, x: number, y: number, styleIdx: number): boolean {
     // An atlas slot exists only for glyphs that are also in `curveSet.curves` (both maps are
     // written together and never pruned), so this single lookup doubles as the validity check.
     // It yields an index into the atlas's glyph-metadata buffer; everything glyph-invariant
@@ -202,22 +220,98 @@ function packGlyphAtSlot(
     if (!atlasSlot) {
         return false;
     }
+    const glyphIdx = atlasSlot.index;
+    // Both indices share one u32, so an out-of-range value would silently alias a different
+    // glyph or style — or the dead sentinel. Drop the glyph instead; the caller already treats
+    // a false return as an atlas miss and retires the slot.
+    if (glyphIdx > MAX_PACKED_INDEX || styleIdx > MAX_PACKED_INDEX) {
+        return false;
+    }
     const w = slot * TEXT_INSTANCE_FLOATS;
     out[w] = x;
     out[w + 1] = y;
-    out[w + 2] = invScale;
-    outU32[w + 3] = atlasSlot.index;
-    out[w + 4] = color[0];
-    out[w + 5] = color[1];
-    out[w + 6] = color[2];
-    out[w + 7] = color[3];
+    outU32[w + 2] = glyphIdx | (styleIdx << 16);
     return true;
 }
 
 function markSlotDead(out: Float32Array, outU32: Uint32Array, slot: number): void {
     const base = slot * TEXT_INSTANCE_FLOATS;
-    out.fill(0, base, base + TEXT_INSTANCE_FLOATS);
-    outU32[base + 3] = DEAD_GLYPH;
+    out[base] = 0;
+    out[base + 1] = 0;
+    outU32[base + 2] = DEAD_GLYPH;
+}
+
+// ─── Style palette ─────────────────────────────────────────────────────────
+
+function ensureStyleCapacity(data: TextData, requiredEntries: number): void {
+    const requiredFloats = requiredEntries * TEXT_STYLE_FLOATS;
+    if (data._styles.length >= requiredFloats) {
+        return;
+    }
+    let newLen = Math.max(data._styles.length * 2, TEXT_STYLE_FLOATS);
+    while (newLen < requiredFloats) {
+        newLen *= 2;
+    }
+    const grown = new Float32Array(newLen);
+    grown.set(data._styles);
+    data._styles = grown;
+}
+
+/** Palette entries a run needs: one shared default plus one per glyph carrying its own `color`.
+ *  Overrides are deliberately not deduplicated — a dedicated entry per override glyph lets the
+ *  write loop hand them out in glyph order instead of searching the palette, and even the
+ *  pathological all-override case costs less per glyph (12 B instance + 32 B entry) than the
+ *  80 B instances this format replaced. */
+function countRunStyles(run: GlyphRun): number {
+    const glyphs = run.glyphs;
+    let n = 1;
+    for (let i = 0; i < glyphs.length; i++) {
+        if (glyphs[i]!.color !== undefined) {
+            n++;
+        }
+    }
+    return n;
+}
+
+/** Reserve `count` contiguous palette entries for a run that currently owns
+ *  `[prevStart, prevStart + prevCount)`. A run whose entry count is unchanged keeps its block
+ *  and rewrites it in place, which is what an app animating a color hits every frame — so
+ *  animation never grows the palette. A run that owns the palette tail resizes in place.
+ *  Anything else takes a fresh block and orphans the old one; `applyReset` rebuilds the palette
+ *  from scratch and is the compaction path for that. */
+function reserveStyles(data: TextData, prevStart: number, prevCount: number, count: number): number {
+    if (prevCount === count) {
+        return prevStart;
+    }
+    const start = prevCount > 0 && prevStart + prevCount === data._styleCount ? prevStart : data._styleCount;
+    ensureStyleCapacity(data, start + count);
+    data._styleCount = start + count;
+    // The block moved or resized, so it now covers entries the GPU may never have been sent.
+    data._styleVersion++;
+    return start;
+}
+
+/** Write one palette entry, bumping `_styleVersion` only when the entry's contents actually
+ *  change. Comparing against the `Math.fround` of each value rather than the value itself is
+ *  what makes that check meaningful: the palette stores float32, so a double like `1 / 13.3`
+ *  never compares equal to its own stored form and every frame would look like a change. */
+function writeStyle(data: TextData, entry: number, color: readonly [number, number, number, number], invScale: number): void {
+    const w = entry * TEXT_STYLE_FLOATS;
+    const s = data._styles;
+    const r = Math.fround(color[0]);
+    const g = Math.fround(color[1]);
+    const b = Math.fround(color[2]);
+    const a = Math.fround(color[3]);
+    const iv = Math.fround(invScale);
+    if (s[w] === r && s[w + 1] === g && s[w + 2] === b && s[w + 3] === a && s[w + 4] === iv) {
+        return;
+    }
+    s[w] = r;
+    s[w + 1] = g;
+    s[w + 2] = b;
+    s[w + 3] = a;
+    s[w + 4] = iv;
+    data._styleVersion++;
 }
 
 // ─── Buffer + dirty-range helpers ──────────────────────────────────────────
@@ -421,14 +515,20 @@ function ensureGroup(data: TextData, curveSetId: CurveSetId): TextDataDrawGroup 
     return group;
 }
 
-/** Write a run's glyphs into the given (already-allocated) slots. Returns the subset of
- *  slots that actually received live glyphs (skipped glyphs leave their slot dead). When
- *  every glyph lands — the overwhelmingly common case — that subset *is* `slots`, and the
- *  caller gets the same array back rather than a freshly built copy. */
-function writeRunToSlots(data: TextData, group: TextDataDrawGroup, run: GlyphRun, slots: number[]): number[] {
+/** Write a run's glyphs into the given (already-allocated) slots, and its styles into the
+ *  palette block reserved at `styleStart`. Returns the subset of slots that actually received
+ *  live glyphs (skipped glyphs leave their slot dead). When every glyph lands — the
+ *  overwhelmingly common case — that subset *is* `slots`, and the caller gets the same array
+ *  back rather than a freshly built copy. */
+function writeRunToSlots(data: TextData, group: TextDataDrawGroup, run: GlyphRun, slots: number[], styleStart: number): number[] {
     const ratio = run.pixelsPerFontUnit;
     const invScale = ratio !== 0 ? 1 / ratio : 0;
-    const runColor = run.defaultColor ?? WHITE_COLOR;
+    // The block's first entry is the run default, which is what every glyph without its own
+    // `color` points at — so the common path costs one already-loaded local, no lookup.
+    writeStyle(data, styleStart, run.defaultColor ?? WHITE_COLOR, invScale);
+    // Overrides take the entries after the default, handed out in glyph order. `countRunStyles`
+    // sized the block by the same rule, so this can never run past it.
+    let overrideEntry = styleStart;
     // Materialized only once a glyph actually misses the atlas, seeded with the prefix that
     // did land; while it stays null, `slots` is by definition the live set.
     let liveSlots: number[] | null = null;
@@ -437,8 +537,13 @@ function writeRunToSlots(data: TextData, group: TextDataDrawGroup, run: GlyphRun
     for (let i = 0; i < run.glyphs.length; i++) {
         const pg = run.glyphs[i]!;
         const slot = slots[i]!;
-        const color = pg.color ?? runColor;
-        const ok = packGlyphAtSlot(data._instances, data._instancesU32, slot, group.curveSet, pg.glyphId, pg.x, pg.y, invScale, color);
+        let styleIdx = styleStart;
+        const color = pg.color;
+        if (color !== undefined) {
+            styleIdx = ++overrideEntry;
+            writeStyle(data, styleIdx, color, invScale);
+        }
+        const ok = packGlyphAtSlot(data._instances, data._instancesU32, slot, group.curveSet, pg.glyphId, pg.x, pg.y, styleIdx);
         if (!ok) {
             if (liveSlots === null) {
                 liveSlots = slots.slice(0, i);
@@ -501,6 +606,9 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
     const newGroups: TextDataDrawGroup[] = [];
     const newRunRecords = new Map<GlyphRun, RunRecord>();
     let writeSlot = 0;
+    // Reset is also the compaction path: dropping the palette reclaims every block orphaned by
+    // a run whose style count changed since the last reset.
+    data._styleCount = 0;
 
     for (const [curveSetId, groupRuns] of runsByCurveSet) {
         const curveSet = lookupCurveSet(storage, curveSetId, "reset");
@@ -526,9 +634,11 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
             for (let i = 0; i < run.glyphs.length; i++) {
                 slots[i] = writeSlot++;
             }
-            const live = writeRunToSlots(data, group, run, slots);
+            const styleCount = countRunStyles(run);
+            const styleStart = reserveStyles(data, 0, 0, styleCount);
+            const live = writeRunToSlots(data, group, run, slots, styleStart);
             liveInGroup += live.length;
-            newRunRecords.set(run, { run, groupIdx, slots: live });
+            newRunRecords.set(run, { run, groupIdx, slots: live, styleStart, styleCount });
         }
         group.slotCount = writeSlot - group.slotStart;
         group.liveCount = liveInGroup;
@@ -576,9 +686,11 @@ function applyAddRun(data: TextData, run: GlyphRun, insertBefore?: number): void
     const group = ensureGroup(data, run.curveSet);
     const groupIdx = data._groups.indexOf(group);
     const slots = allocateSlots(data, group, run.glyphs.length);
-    const live = writeRunToSlots(data, group, run, slots);
+    const styleCount = countRunStyles(run);
+    const styleStart = reserveStyles(data, 0, 0, styleCount);
+    const live = writeRunToSlots(data, group, run, slots, styleStart);
     group.liveCount += live.length;
-    data._runRecords.set(run, { run, groupIdx, slots: live });
+    data._runRecords.set(run, { run, groupIdx, slots: live, styleStart, styleCount });
     const at = insertBefore ?? data._runs.length;
     data._runs.splice(at, 0, run);
 }
@@ -657,16 +769,20 @@ function applyReplaceRun(data: TextData, prevRef: GlyphRun | number, newRun: Gly
             freeSlots(data, group, slots);
             slots = allocateSlots(data, group, newRun.glyphs.length);
         }
-        const live = writeRunToSlots(data, group, newRun, slots);
+        const styleCount = countRunStyles(newRun);
+        const styleStart = reserveStyles(data, rec.styleStart, rec.styleCount, styleCount);
+        const live = writeRunToSlots(data, group, newRun, slots, styleStart);
         // Absorbs both a changed glyph count and any glyph that missed the atlas.
         group.liveCount += live.length - prevSlotCount;
         if (prev === newRun) {
             // In-place glyph edits: the record and `_runs` already point at this run, so its
-            // live slot list is the only thing that can have moved.
+            // live slot list and style block are the only things that can have moved.
             rec.slots = live;
+            rec.styleStart = styleStart;
+            rec.styleCount = styleCount;
         } else {
             data._runRecords.delete(prev);
-            data._runRecords.set(newRun, { run: newRun, groupIdx: rec.groupIdx, slots: live });
+            data._runRecords.set(newRun, { run: newRun, groupIdx: rec.groupIdx, slots: live, styleStart, styleCount });
             const runIdx = resolveRunIndex(data, prevRef);
             if (runIdx >= 0) {
                 data._runs[runIdx] = newRun;
@@ -695,6 +811,9 @@ export function createTextData(storage: GlyphStorage, runs?: readonly GlyphRun[]
         _instances: instances,
         _instancesU32: new Uint32Array(instances.buffer),
         _instanceCount: 0,
+        _styles: new Float32Array(TEXT_STYLE_FLOATS),
+        _styleCount: 0,
+        _styleVersion: 1,
         _storage: storage,
         _version: 1,
         _layoutVersion: 0,
@@ -747,6 +866,7 @@ export function disposeTextData(data: TextData): void {
     }
     data._groups = [];
     data._instanceCount = 0;
+    data._styleCount = 0;
     data._runs.length = 0;
     data._runRecords.clear();
 }

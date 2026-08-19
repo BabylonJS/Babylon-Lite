@@ -13,6 +13,7 @@ import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import type { CurveSetId } from "./glyph-storage.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
+import { createStyleBuffer, ensureStyleGpu } from "./_gpu/text-style-gpu.js";
 import { getOrCreateTextPipeline } from "./_gpu/text-pipeline.js";
 
 // ─── TextLayer ────────────────────────────────────────────────────────────
@@ -134,6 +135,9 @@ interface LayerGpu {
     textU: GPUBuffer;
     instanceBuf: GPUBuffer;
     instanceCap: number;
+    styleBuf: GPUBuffer;
+    styleCap: number;
+    uploadedStyleVersion: number;
     pipeline: GPURenderPipeline | null;
     /** Per-draw-group bind groups; rebuilt when the atlas grows or the curve set at an index
      *  changes. Indexed by draw-group index, which is NOT stable: `data._groups` is spliced
@@ -202,6 +206,9 @@ function ensureLayerGpu(rr: TextRenderer, layer: TextLayer): LayerGpu {
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         }),
         instanceCap: cap,
+        styleBuf: createStyleBuffer(device, 8),
+        styleCap: 8,
+        uploadedStyleVersion: -1,
         pipeline: null,
         bindGroupCache: [],
         uploadedDataVersion: -1,
@@ -242,12 +249,15 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
     const layer = lg.layer;
     const data = layer.data;
 
+    // Style palette first: a grown buffer invalidates every cached bind group.
+    const styleRecreated = ensureStyleGpu(device, data, lg);
+
     // Atlas + bind groups per draw group.
     for (let i = 0; i < data._groups.length; i++) {
         const g = data._groups[i]!;
         const { rebuilt, gpu: atlasGpu } = ensureSharedAtlasGpu(device, g.curveSet.atlas);
         const cached = lg.bindGroupCache[i];
-        if (!cached || rebuilt || cached.atlasVersion !== atlasGpu.uploadedVersion || cached.curveSetId !== g.curveSetId) {
+        if (!cached || rebuilt || styleRecreated || cached.atlasVersion !== atlasGpu.uploadedVersion || cached.curveSetId !== g.curveSetId) {
             lg.bindGroupCache[i] = {
                 bindGroup: device.createBindGroup({
                     label: "text-renderer-bg0-" + g.curveSetId,
@@ -257,6 +267,7 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
                         { binding: 1, resource: atlasGpu.curveTex.createView() },
                         { binding: 2, resource: atlasGpu.bandTex.createView() },
                         { binding: 3, resource: { buffer: atlasGpu.metaBuf } },
+                        { binding: 4, resource: { buffer: lg.styleBuf } },
                     ],
                 }),
                 atlasVersion: atlasGpu.uploadedVersion,
@@ -324,6 +335,7 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
 function disposeLayerGpu(lg: LayerGpu): void {
     lg.textU.destroy();
     lg.instanceBuf.destroy();
+    lg.styleBuf.destroy();
 }
 
 function compareLayers(a: TextLayer, b: TextLayer): number {

@@ -3,14 +3,15 @@
 // and Babylon.js-3/packages/dev/addons/src/msdfText/shadersWGSL/slug.vertex.fx).
 // Per-vertex: corner sign (-1/+1 on each axis) — drives both the quad corner
 // expansion and the dilation normal direction.
-// Per-instance: anchor (object-space) + invScale, glyph index, color. Everything that depends
-// only on the glyph (em-space bounds, atlas location, band transform) is fetched from the
-// shared glyphMetadata table rather than duplicated into every instance.
+// Per-instance: anchor (object-space xy) plus one packed u32 — glyph index in the low 16 bits,
+// style index in the high 16. Everything that depends only on the glyph (em-space bounds, atlas
+// location, band transform) is fetched from the shared glyphMetadata table, and everything shared
+// by a run (color, inverse scale) from the styles table, rather than duplicated per instance.
 
 struct TextU {
   mvp: mat4x4<f32>,
   viewport: vec4<f32>,
-  // Whole-draw opacity in .a (rgb unused, always 1). Per-glyph color is the slugColor attribute.
+  // Whole-draw opacity in .a (rgb unused, always 1). Per-glyph color comes from the style table.
   color: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> textU: TextU;
@@ -26,11 +27,20 @@ struct GlyphMetadata {
 };
 @group(0) @binding(3) var<storage, read> glyphMetadata: array<GlyphMetadata>;
 
+// One entry per distinct (color, scale) a run draws with. A run contributes a single entry
+// unless individual glyphs override the color, so this stays tiny and is uploaded only when
+// its contents actually change.
+struct TextStyle {
+  color: vec4<f32>,
+  // params.x = invScale (font units → pixels, inverted). yzw reserved.
+  params: vec4<f32>,
+};
+@group(0) @binding(4) var<storage, read> styles: array<TextStyle>;
+
 struct VIn {
   @location(0) slugCorner: vec2<f32>,
-  @location(1) slugAnchor: vec3<f32>,
-  @location(2) slugGlyph: u32,
-  @location(3) slugColor: vec4<f32>,
+  @location(1) slugAnchor: vec2<f32>,
+  @location(2) slugPacked: u32,
 };
 
 struct VOut {
@@ -43,11 +53,11 @@ struct VOut {
 
 @vertex
 fn main(in: VIn) -> VOut {
-  // Dead-slot sentinel: the slot allocator marks freed slots with an all-ones glyph index
-  // (live slots always hold a real index). Emit a clip-space point at -2 (outside the unit
-  // cube) so all 6 vertices of the quad collapse to the same off-screen position and the
-  // rasterizer culls the resulting zero-area triangles cheaply.
-  if (in.slugGlyph == 0xffffffffu) {
+  // Dead-slot sentinel: the slot allocator marks freed slots with an all-ones packed word
+  // (live slots always hold a real index in each half). Emit a clip-space point at -2 (outside
+  // the unit cube) so all 6 vertices of the quad collapse to the same off-screen position and
+  // the rasterizer culls the resulting zero-area triangles cheaply.
+  if (in.slugPacked == 0xffffffffu) {
     var dead: VOut;
     dead.pos = vec4<f32>(-2.0, -2.0, -2.0, 1.0);
     dead.vTexcoord = vec2<f32>(0.0, 0.0);
@@ -57,16 +67,17 @@ fn main(in: VIn) -> VOut {
     return dead;
   }
 
-  let md = glyphMetadata[in.slugGlyph];
+  let md = glyphMetadata[in.slugPacked & 0xffffu];
+  let style = styles[in.slugPacked >> 16u];
 
   // Reconstruct per-vertex data from the shared corner quad + per-instance fields.
   // Reference shader had: pos (object-space xy), normal (dilation direction xy),
   // tex (em-space xy), invScale, MVP matrix.
   let isMax = vec2<f32>(step(0.0, in.slugCorner.x), step(0.0, in.slugCorner.y));
   let tex = mix(md.bounds.xy, md.bounds.zw, isMax);
-  let invScale = in.slugAnchor.z;
+  let invScale = style.params.x;
   let scale = select(0.0, 1.0 / invScale, invScale != 0.0);
-  let pos = in.slugAnchor.xy + tex * scale;
+  let pos = in.slugAnchor + tex * scale;
   let normal = in.slugCorner;
   let jac = vec4<f32>(invScale, 0.0, 0.0, invScale);
 
@@ -98,8 +109,8 @@ fn main(in: VIn) -> VOut {
   out.vTexcoord = dilatedTex;
   out.vBanding = md.band;
   out.vGlyph = md.atlas;
-  // Color comes entirely from the per-glyph instance attribute; the uniform contributes
+  // Color comes entirely from the run's style-table entry; the uniform contributes
   // only a whole-draw opacity multiply (textU.color is always (1,1,1,opacity)).
-  out.vColor = vec4<f32>(in.slugColor.rgb, in.slugColor.a * textU.color.a);
+  out.vColor = vec4<f32>(style.color.rgb, style.color.a * textU.color.a);
   return out;
 }
