@@ -101,6 +101,9 @@ export interface TextData {
     _runRecords: Map<GlyphRun, RunRecord>;
     /** @internal Pooled per-instance float buffer (TEXT_INSTANCE_FLOATS per instance). */
     _instances: Float32Array;
+    /** @internal Uint32 alias of {@link _instances} (same buffer), used for the packed glyph
+     *  index. Always reassigned together with `_instances`. */
+    _instancesU32: Uint32Array;
     /** @internal Total *capacity* used (live + dead slots across all groups). */
     _instanceCount: number;
     /** @internal GlyphStorage backing this TextData. Borrowed reference — caller owns it. */
@@ -167,9 +170,14 @@ export type TextDataGpu = {
     uploadedVersion: number;
 };
 
-/** Bytes per instance: 5 vec4 attributes (slugBounds, slugAnchor, slugAtlas, slugBand, slugColor). */
-export const TEXT_INSTANCE_FLOATS = 20;
+/** Floats per instance: slugAnchor (x, y, invScale), slugGlyph (a u32 aliased into float slot 3),
+ *  slugColor (rgba). Everything else the shader needs is glyph-invariant and lives in the atlas's
+ *  `GlyphMetadata` storage buffer, indexed by slugGlyph, instead of being copied per instance. */
+export const TEXT_INSTANCE_FLOATS = 8;
 export const TEXT_INSTANCE_BYTES = TEXT_INSTANCE_FLOATS * 4;
+
+/** Value of the glyph-index word marking a slot as dead (skipped by the vertex shader). */
+const DEAD_GLYPH = 0xffffffff;
 
 const WHITE_COLOR: readonly [number, number, number, number] = [1, 1, 1, 1];
 
@@ -177,6 +185,7 @@ const WHITE_COLOR: readonly [number, number, number, number] = [1, 1, 1, 1];
 
 function packGlyphAtSlot(
     out: Float32Array,
+    outU32: Uint32Array,
     slot: number,
     curveSet: GlyphStorageCurveSet,
     glyphId: number,
@@ -187,39 +196,28 @@ function packGlyphAtSlot(
 ): boolean {
     // An atlas slot exists only for glyphs that are also in `curveSet.curves` (both maps are
     // written together and never pruned), so this single lookup doubles as the validity check.
-    // Everything it carries beyond the anchor and colour is glyph-invariant and precomputed.
+    // It yields an index into the atlas's glyph-metadata buffer; everything glyph-invariant
+    // lives there and is never copied into the instance.
     const atlasSlot = curveSet.atlas.glyphSlots.get(glyphId);
     if (!atlasSlot) {
         return false;
     }
     const w = slot * TEXT_INSTANCE_FLOATS;
-    out[w] = atlasSlot.xMin;
-    out[w + 1] = atlasSlot.yMin;
-    out[w + 2] = atlasSlot.xMax;
-    out[w + 3] = atlasSlot.yMax;
-    out[w + 4] = x;
-    out[w + 5] = y;
-    out[w + 6] = invScale;
-    out[w + 7] = 0; // slugAnchor.w = 0 → live
-    out[w + 8] = atlasSlot.glyphLocX;
-    out[w + 9] = atlasSlot.glyphLocY;
-    out[w + 10] = atlasSlot.bandMaxX;
-    out[w + 11] = atlasSlot.bandMaxY;
-    out[w + 12] = atlasSlot.bandScaleX;
-    out[w + 13] = atlasSlot.bandScaleY;
-    out[w + 14] = atlasSlot.bandOffsetX;
-    out[w + 15] = atlasSlot.bandOffsetY;
-    out[w + 16] = color[0];
-    out[w + 17] = color[1];
-    out[w + 18] = color[2];
-    out[w + 19] = color[3];
+    out[w] = x;
+    out[w + 1] = y;
+    out[w + 2] = invScale;
+    outU32[w + 3] = atlasSlot.index;
+    out[w + 4] = color[0];
+    out[w + 5] = color[1];
+    out[w + 6] = color[2];
+    out[w + 7] = color[3];
     return true;
 }
 
-function markSlotDead(out: Float32Array, slot: number): void {
+function markSlotDead(out: Float32Array, outU32: Uint32Array, slot: number): void {
     const base = slot * TEXT_INSTANCE_FLOATS;
     out.fill(0, base, base + TEXT_INSTANCE_FLOATS);
-    out[base + 7] = 1; // sentinel
+    outU32[base + 3] = DEAD_GLYPH;
 }
 
 // ─── Buffer + dirty-range helpers ──────────────────────────────────────────
@@ -236,6 +234,7 @@ function ensureInstanceCapacity(data: TextData, requiredInstances: number): void
     const grown = new Float32Array(newLen);
     grown.set(data._instances.subarray(0, data._instanceCount * TEXT_INSTANCE_FLOATS));
     data._instances = grown;
+    data._instancesU32 = new Uint32Array(grown.buffer);
     data._dirtyStart = 0;
     data._dirtyEnd = data._instanceCount;
 }
@@ -364,7 +363,7 @@ function freeSlots(data: TextData, group: TextDataDrawGroup, slots: number[]): v
     let minSlot = Number.POSITIVE_INFINITY;
     let maxSlot = -1;
     for (const s of slots) {
-        markSlotDead(data._instances, s);
+        markSlotDead(data._instances, data._instancesU32, s);
         group.freeSlots.push(s);
         if (s < minSlot) {
             minSlot = s;
@@ -439,12 +438,12 @@ function writeRunToSlots(data: TextData, group: TextDataDrawGroup, run: GlyphRun
         const pg = run.glyphs[i]!;
         const slot = slots[i]!;
         const color = pg.color ?? runColor;
-        const ok = packGlyphAtSlot(data._instances, slot, group.curveSet, pg.glyphId, pg.x, pg.y, invScale, color);
+        const ok = packGlyphAtSlot(data._instances, data._instancesU32, slot, group.curveSet, pg.glyphId, pg.x, pg.y, invScale, color);
         if (!ok) {
             if (liveSlots === null) {
                 liveSlots = slots.slice(0, i);
             }
-            markSlotDead(data._instances, slot);
+            markSlotDead(data._instances, data._instancesU32, slot);
             group.freeSlots.push(slot);
         } else if (liveSlots !== null) {
             liveSlots.push(slot);
@@ -477,6 +476,7 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
             newLen *= 2;
         }
         data._instances = new Float32Array(newLen);
+        data._instancesU32 = new Uint32Array(data._instances.buffer);
     }
 
     // Preserve previous groups for bind-group reuse when curveSet identity matches.
@@ -686,12 +686,14 @@ function applyReplaceRun(data: TextData, prevRef: GlyphRun | number, newRun: Gly
  *  runs can be appended later via `updateTextData({ update: "addRun", … })`. */
 export function createTextData(storage: GlyphStorage, runs?: readonly GlyphRun[]): TextData {
     const runsArray: GlyphRun[] = [];
+    const instances = new Float32Array(TEXT_INSTANCE_FLOATS);
     const data = {
         runs: runsArray,
         _runs: runsArray,
         _groups: [],
         _runRecords: new Map(),
-        _instances: new Float32Array(TEXT_INSTANCE_FLOATS),
+        _instances: instances,
+        _instancesU32: new Uint32Array(instances.buffer),
         _instanceCount: 0,
         _storage: storage,
         _version: 1,

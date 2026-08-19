@@ -3,7 +3,9 @@
 // and Babylon.js-3/packages/dev/addons/src/msdfText/shadersWGSL/slug.vertex.fx).
 // Per-vertex: corner sign (-1/+1 on each axis) — drives both the quad corner
 // expansion and the dilation normal direction.
-// Per-instance: bounds (em-space), anchor (object-space) + invScale, atlas locs, band transform.
+// Per-instance: anchor (object-space) + invScale, glyph index, color. Everything that depends
+// only on the glyph (em-space bounds, atlas location, band transform) is fetched from the
+// shared glyphMetadata table rather than duplicated into every instance.
 
 struct TextU {
   mvp: mat4x4<f32>,
@@ -13,13 +15,22 @@ struct TextU {
 };
 @group(0) @binding(0) var<uniform> textU: TextU;
 
+// One entry per glyph in the curve-set's atlas, written once when the glyph is packed.
+struct GlyphMetadata {
+  // Em-space glyph bounds (xMin, yMin, xMax, yMax).
+  bounds: vec4<f32>,
+  // Band header texel location (x, y) and max band indices (x, y).
+  atlas: vec4<f32>,
+  // Em-space → band-space transform (scaleX, scaleY, offsetX, offsetY).
+  band: vec4<f32>,
+};
+@group(0) @binding(3) var<storage, read> glyphMetadata: array<GlyphMetadata>;
+
 struct VIn {
   @location(0) slugCorner: vec2<f32>,
-  @location(1) slugBounds: vec4<f32>,
-  @location(2) slugAnchor: vec4<f32>,
-  @location(3) slugAtlas: vec4<f32>,
-  @location(4) slugBand: vec4<f32>,
-  @location(5) slugColor: vec4<f32>,
+  @location(1) slugAnchor: vec3<f32>,
+  @location(2) slugGlyph: u32,
+  @location(3) slugColor: vec4<f32>,
 };
 
 struct VOut {
@@ -32,11 +43,11 @@ struct VOut {
 
 @vertex
 fn main(in: VIn) -> VOut {
-  // Dead-slot sentinel: slot allocator marks freed slots by setting slugAnchor.w = 1.0
-  // (live slots always have it as 0.0). Emit a clip-space point at -2 (outside the unit
+  // Dead-slot sentinel: the slot allocator marks freed slots with an all-ones glyph index
+  // (live slots always hold a real index). Emit a clip-space point at -2 (outside the unit
   // cube) so all 6 vertices of the quad collapse to the same off-screen position and the
   // rasterizer culls the resulting zero-area triangles cheaply.
-  if (in.slugAnchor.w > 0.5) {
+  if (in.slugGlyph == 0xffffffffu) {
     var dead: VOut;
     dead.pos = vec4<f32>(-2.0, -2.0, -2.0, 1.0);
     dead.vTexcoord = vec2<f32>(0.0, 0.0);
@@ -46,11 +57,13 @@ fn main(in: VIn) -> VOut {
     return dead;
   }
 
+  let md = glyphMetadata[in.slugGlyph];
+
   // Reconstruct per-vertex data from the shared corner quad + per-instance fields.
   // Reference shader had: pos (object-space xy), normal (dilation direction xy),
   // tex (em-space xy), invScale, MVP matrix.
   let isMax = vec2<f32>(step(0.0, in.slugCorner.x), step(0.0, in.slugCorner.y));
-  let tex = mix(in.slugBounds.xy, in.slugBounds.zw, isMax);
+  let tex = mix(md.bounds.xy, md.bounds.zw, isMax);
   let invScale = in.slugAnchor.z;
   let scale = select(0.0, 1.0 / invScale, invScale != 0.0);
   let pos = in.slugAnchor.xy + tex * scale;
@@ -83,8 +96,8 @@ fn main(in: VIn) -> VOut {
   var out: VOut;
   out.pos = mvp * vec4<f32>(dilatedPos, 0.0, 1.0);
   out.vTexcoord = dilatedTex;
-  out.vBanding = in.slugBand;
-  out.vGlyph = in.slugAtlas;
+  out.vBanding = md.band;
+  out.vGlyph = md.atlas;
   // Color comes entirely from the per-glyph instance attribute; the uniform contributes
   // only a whole-draw opacity multiply (textU.color is always (1,1,1,opacity)).
   out.vColor = vec4<f32>(in.slugColor.rgb, in.slugColor.a * textU.color.a);

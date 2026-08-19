@@ -216,6 +216,7 @@ function updateTextRenderable(r: TextRenderable, engine: EngineContext, gpu: Tex
                     { binding: 0, resource: { buffer: gpu.textU } },
                     { binding: 1, resource: atlasGpu.curveTex.createView() },
                     { binding: 2, resource: atlasGpu.bandTex.createView() },
+                    { binding: 3, resource: { buffer: atlasGpu.metaBuf } },
                 ],
             });
             g.bindGroupVersion = atlasGpu.uploadedVersion;

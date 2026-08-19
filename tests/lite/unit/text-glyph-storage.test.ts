@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { GlyphCurves } from "../../../packages/babylon-lite/src/text/glyph-storage";
 import { createTextData, disposeTextData, updateTextData } from "../../../packages/babylon-lite/src/text/text-data";
-import { createGlyphStorage, disposeGlyphStorage, updateGlyphStorage } from "../../../packages/babylon-lite/src/text/glyph-storage";
+import { createGlyphStorage, disposeGlyphStorage, GLYPH_METADATA_FLOATS, updateGlyphStorage } from "../../../packages/babylon-lite/src/text/glyph-storage";
 import type { SharedAtlas, SharedAtlasGpu } from "../../../packages/babylon-lite/src/text/glyph-storage";
 
 function makeGlyph(glyphId: number): GlyphCurves {
@@ -17,18 +17,21 @@ function makeGlyph(glyphId: number): GlyphCurves {
 }
 
 /** Install a fake GPU resource set on an atlas with spy-able destroy() calls. */
-function stubAtlasGpu(atlas: SharedAtlas): { curveDestroy: ReturnType<typeof vi.fn>; bandDestroy: ReturnType<typeof vi.fn> } {
+function stubAtlasGpu(atlas: SharedAtlas): { curveDestroy: ReturnType<typeof vi.fn>; bandDestroy: ReturnType<typeof vi.fn>; metaDestroy: ReturnType<typeof vi.fn> } {
     const curveDestroy = vi.fn();
     const bandDestroy = vi.fn();
+    const metaDestroy = vi.fn();
     atlas.gpu = {
         device: {} as GPUDevice,
         curveTex: { destroy: curveDestroy } as unknown as GPUTexture,
         bandTex: { destroy: bandDestroy } as unknown as GPUTexture,
         curveTexRows: 1,
         bandTexRows: 1,
+        metaBuf: { destroy: metaDestroy } as unknown as GPUBuffer,
+        metaCap: 1,
         uploadedVersion: 0,
     } satisfies SharedAtlasGpu;
-    return { curveDestroy, bandDestroy };
+    return { curveDestroy, bandDestroy, metaDestroy };
 }
 
 describe("glyph storage ownership", () => {
@@ -37,19 +40,21 @@ describe("glyph storage ownership", () => {
         const td = createTextData(storage, [{ curveSet: "f", glyphs: [{ glyphId: 1, x: 0, y: 0 }], pixelsPerFontUnit: 1 }]);
 
         const atlas = storage._curveSets.get("f")!.atlas;
-        const { curveDestroy, bandDestroy } = stubAtlasGpu(atlas);
+        const { curveDestroy, bandDestroy, metaDestroy } = stubAtlasGpu(atlas);
 
         disposeTextData(td);
         // Storage outlives the TextData; the atlas is untouched.
         expect(atlas.gpu).not.toBeNull();
         expect(curveDestroy).not.toHaveBeenCalled();
         expect(bandDestroy).not.toHaveBeenCalled();
+        expect(metaDestroy).not.toHaveBeenCalled();
 
         // Only disposeGlyphStorage tears down the GPU textures.
         disposeGlyphStorage(storage);
         expect(atlas.gpu).toBeNull();
         expect(curveDestroy).toHaveBeenCalledTimes(1);
         expect(bandDestroy).toHaveBeenCalledTimes(1);
+        expect(metaDestroy).toHaveBeenCalledTimes(1);
     });
 
     it("a single GlyphStorage can back multiple TextDatas; each TextData disposes independently", () => {
@@ -128,8 +133,10 @@ describe("glyph storage ownership", () => {
     it("re-registering a glyph id cannot change its packed geometry (existing outline wins)", () => {
         const storage = createGlyphStorage(new Map([["f", new Map([[1, makeGlyph(1)]])]]));
         const td = createTextData(storage, [{ curveSet: "f", glyphs: [{ glyphId: 1, x: 0, y: 0 }], pixelsPerFontUnit: 1 }]);
-        // Bounds + band transform occupy instance floats 0..3 and 12..15.
-        const original = Array.from(td._instances.subarray(0, 16));
+        // Bounds, atlas location and band transform live in the atlas's glyph metadata table,
+        // one `GLYPH_METADATA_FLOATS` entry per slot, and are what the vertex shader reads.
+        const atlas = storage._curveSets.get("f")!.atlas;
+        const original = Array.from(atlas.metaData.subarray(0, GLYPH_METADATA_FLOATS));
 
         // Re-registering id=1 with wildly different bounds is skipped by design. The atlas
         // band texels were already baked from the original bounds, so the geometry the packer
@@ -138,7 +145,7 @@ describe("glyph storage ownership", () => {
         expect(storage._curveSets.get("f")!.curves.get(1)!.bounds).toEqual({ xMin: 0, yMin: -20, xMax: 100, yMax: 100 });
 
         updateTextData(td, { update: "reset" });
-        expect(Array.from(td._instances.subarray(0, 16))).toEqual(original);
+        expect(Array.from(atlas.metaData.subarray(0, GLYPH_METADATA_FLOATS))).toEqual(original);
     });
 
     it("reset compaction (no runs, no storage) re-lays-out slots and frees dead-slot gaps", () => {

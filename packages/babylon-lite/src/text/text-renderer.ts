@@ -256,6 +256,7 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
                         { binding: 0, resource: { buffer: lg.textU } },
                         { binding: 1, resource: atlasGpu.curveTex.createView() },
                         { binding: 2, resource: atlasGpu.bandTex.createView() },
+                        { binding: 3, resource: { buffer: atlasGpu.metaBuf } },
                     ],
                 }),
                 atlasVersion: atlasGpu.uploadedVersion,

@@ -1,6 +1,7 @@
 /** Owns the curve + band rgba32float GPU textures shared across a SharedAtlas's lifetime.
  *  Lazy-init: created on first bind, recreated only when capacity grows. */
 
+import { GLYPH_METADATA_FLOATS } from "../glyph-storage.js";
 import type { SharedAtlas, SharedAtlasGpu } from "../glyph-storage.js";
 
 /** Width of the curve / band textures. Must match `TEX_WIDTH` in `glyph-storage.ts` —
@@ -12,12 +13,22 @@ const TEX_WIDTH = 4096;
 const ROW_FLOATS = TEX_WIDTH * 4;
 const BYTES_PER_ROW = ROW_FLOATS * 4;
 
+const GLYPH_METADATA_BYTES = GLYPH_METADATA_FLOATS * 4;
+
 function nextPow2Rows(rows: number): number {
     let r = 1;
     while (r < rows) {
         r <<= 1;
     }
     return r;
+}
+
+function createMetaBuffer(device: GPUDevice, slots: number): GPUBuffer {
+    return device.createBuffer({
+        label: "text-glyph-metadata",
+        size: slots * GLYPH_METADATA_BYTES,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
 }
 
 function rowsForTexels(texels: number): number {
@@ -56,10 +67,12 @@ export function ensureSharedAtlasGpu(device: GPUDevice, atlas: SharedAtlas): { r
     let gpu = atlas.gpu;
     const curveRowsNeeded = rowsForTexels(atlas.curveTexelsUsed);
     const bandRowsNeeded = rowsForTexels(atlas.bandTexelsUsed);
+    const slotsNeeded = Math.max(1, atlas.slotCount);
 
     if (gpu && gpu.device !== device) {
         gpu.curveTex.destroy();
         gpu.bandTex.destroy();
+        gpu.metaBuf.destroy();
         gpu = null;
     }
 
@@ -67,12 +80,15 @@ export function ensureSharedAtlasGpu(device: GPUDevice, atlas: SharedAtlas): { r
     if (!gpu) {
         const curveRows = nextPow2Rows(Math.max(1, curveRowsNeeded));
         const bandRows = nextPow2Rows(Math.max(1, bandRowsNeeded));
+        const metaCap = nextPow2Rows(slotsNeeded);
         gpu = {
             device,
             curveTex: createAtlasTexture(device, curveRows, "text-slug-curves"),
             bandTex: createAtlasTexture(device, bandRows, "text-slug-bands"),
             curveTexRows: curveRows,
             bandTexRows: bandRows,
+            metaBuf: createMetaBuffer(device, metaCap),
+            metaCap,
             uploadedVersion: -1,
         };
         atlas.gpu = gpu;
@@ -92,11 +108,22 @@ export function ensureSharedAtlasGpu(device: GPUDevice, atlas: SharedAtlas): { r
             gpu.uploadedVersion = -1;
             rebuilt = true;
         }
+        if (slotsNeeded > gpu.metaCap) {
+            gpu.metaBuf.destroy();
+            gpu.metaCap = nextPow2Rows(slotsNeeded);
+            gpu.metaBuf = createMetaBuffer(device, gpu.metaCap);
+            gpu.uploadedVersion = -1;
+            rebuilt = true;
+        }
     }
 
     if (gpu.uploadedVersion !== atlas.version) {
         uploadAll(device, gpu.curveTex, atlas.curveTexData, atlas.curveTexelsUsed);
         uploadAll(device, gpu.bandTex, atlas.bandTexData, atlas.bandTexelsUsed);
+        if (atlas.slotCount > 0) {
+            const meta = atlas.metaData;
+            device.queue.writeBuffer(gpu.metaBuf, 0, meta.buffer as ArrayBuffer, meta.byteOffset, atlas.slotCount * GLYPH_METADATA_BYTES);
+        }
         gpu.uploadedVersion = atlas.version;
     }
 

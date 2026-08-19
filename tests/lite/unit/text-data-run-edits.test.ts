@@ -16,7 +16,7 @@ function makeGlyph(glyphId: number): GlyphCurves {
     };
 }
 
-const ANCHOR_X_OFFSET = 4;
+const ANCHOR_X_OFFSET = 0;
 
 /** Read the packed anchor X of instance `i` — a cheap proxy for "this glyph's position was rewritten". */
 function instanceAnchorX(data: ReturnType<typeof createTextData>, i: number): number {
@@ -273,10 +273,10 @@ describe("updateTextData removeRun", () => {
 
 /** Glyph id absent from every curve set in `makeStorage()`, so it can never be packed. */
 const MISSING = 99;
-const DEAD_FLAG_OFFSET = 7;
+const DEAD_GLYPH_OFFSET = 3;
 
 function isDead(data: ReturnType<typeof createTextData>, slot: number): boolean {
-    return data._instances[slot * TEXT_INSTANCE_FLOATS + DEAD_FLAG_OFFSET] === 1;
+    return data._instancesU32[slot * TEXT_INSTANCE_FLOATS + DEAD_GLYPH_OFFSET] === 0xffffffff;
 }
 
 describe("glyphs that miss the atlas", () => {

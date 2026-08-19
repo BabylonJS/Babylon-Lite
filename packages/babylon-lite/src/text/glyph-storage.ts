@@ -91,26 +91,19 @@ export type GlyphStorageCurveSet = {
 export type AtlasSlot = {
     /** Index of the first curve texel for this glyph. */
     curveTexelStart: number;
-    /** Texel coordinates of the band header block for this glyph. */
-    glyphLocX: number;
-    glyphLocY: number;
-    /** vBandCount - 1, hBandCount - 1 (matching the fragment shader expectations). */
-    bandMaxX: number;
-    bandMaxY: number;
-    /** Glyph bounds in font units, copied from `GlyphCurves.bounds` at pack time. Slots are
-     *  append-only and never moved, so these can never go stale. */
-    xMin: number;
-    yMin: number;
-    xMax: number;
-    yMax: number;
-    /** Band-space transform derived from the bounds and band counts:
-     *  `band = pos * bandScale + bandOffset`. Precomputed here because it depends only on the
-     *  glyph, so the per-instance packer never has to re-derive it. */
-    bandScaleX: number;
-    bandScaleY: number;
-    bandOffsetX: number;
-    bandOffsetY: number;
+    /** Dense index of this glyph's entry in `SharedAtlas.metaData`, and the value the vertex
+     *  shader uses to look it up in the GPU metadata buffer. Slots are append-only and never
+     *  moved, so an index stays valid for the atlas's lifetime. */
+    index: number;
 };
+
+/** @internal Floats per glyph in `SharedAtlas.metaData`, laid out as three `vec4<f32>` to match
+ *  the shader's `GlyphMetadata`: bounds (xMin, yMin, xMax, yMax), atlas (glyphLocX, glyphLocY,
+ *  bandMaxX, bandMaxY), band (bandScaleX, bandScaleY, bandOffsetX, bandOffsetY).
+ *
+ *  All twelve depend only on the glyph, so they live here — written once when the glyph is
+ *  appended — instead of being copied into every instance that references the glyph. */
+export const GLYPH_METADATA_FLOATS = 12;
 
 /** @internal CPU + (lazy) GPU staging packed from a `GlyphStorage`'s glyph outlines.
  *  One `SharedAtlas` per curve-set; lifetime is bound to the storage. */
@@ -125,6 +118,11 @@ export type SharedAtlas = {
     bandTexelsUsed: number;
     /** Per-glyph atlas slot lookup. Slots are append-only and never moved. */
     glyphSlots: Map<number, AtlasSlot>;
+    /** Glyph-invariant shader data, `GLYPH_METADATA_FLOATS` per slot, indexed by `AtlasSlot.index`.
+     *  Uploaded verbatim as the shader's `array<GlyphMetadata>` storage buffer. */
+    metaData: Float32Array;
+    /** Number of slots appended so far; also the next `AtlasSlot.index`. */
+    slotCount: number;
     /** Monotonic version bumped whenever a new glyph is appended. */
     version: number;
     /** Lazy GPU resources (one set per SharedAtlas; recreated only on capacity grow). */
@@ -139,6 +137,10 @@ export type SharedAtlasGpu = {
     bandTex: GPUTexture;
     curveTexRows: number;
     bandTexRows: number;
+    /** Storage buffer holding `SharedAtlas.metaData`, read by the vertex shader. */
+    metaBuf: GPUBuffer;
+    /** Slots the current `metaBuf` can hold. */
+    metaCap: number;
     uploadedVersion: number;
 };
 
@@ -196,6 +198,7 @@ export function disposeGlyphStorage(storage: GlyphStorage): void {
         if (gpu) {
             gpu.curveTex.destroy();
             gpu.bandTex.destroy();
+            gpu.metaBuf.destroy();
             cs.atlas.gpu = null;
         }
     }
@@ -214,6 +217,8 @@ export function createSharedAtlas(): SharedAtlas {
         bandTexData: new Float32Array(ROW_FLOATS),
         bandTexelsUsed: 0,
         glyphSlots: new Map(),
+        metaData: new Float32Array(GLYPH_METADATA_FLOATS * 16),
+        slotCount: 0,
         version: 0,
         gpu: null,
     };
@@ -336,21 +341,30 @@ export function packAppendGlyph(atlas: SharedAtlas, glyph: GlyphCurves): AtlasSl
     const bandScaleX = widthFu > 0 ? bands.vBandCount / widthFu : 0;
     const bandScaleY = heightFu > 0 ? bands.hBandCount / heightFu : 0;
 
-    return {
-        curveTexelStart: startTexel,
-        glyphLocX,
-        glyphLocY,
-        bandMaxX: bands.vBandCount - 1,
-        bandMaxY: bands.hBandCount - 1,
-        xMin,
-        yMin,
-        xMax,
-        yMax,
-        bandScaleX,
-        bandScaleY,
-        bandOffsetX: -xMin * bandScaleX,
-        bandOffsetY: -yMin * bandScaleY,
-    };
+    // ── Glyph metadata: written once here, read by every instance that uses this glyph. ──
+    const index = atlas.slotCount++;
+    const needMetaFloats = atlas.slotCount * GLYPH_METADATA_FLOATS;
+    if (atlas.metaData.length < needMetaFloats) {
+        const grown = new Float32Array(Math.max(atlas.metaData.length * 2, needMetaFloats));
+        grown.set(atlas.metaData);
+        atlas.metaData = grown;
+    }
+    const m = index * GLYPH_METADATA_FLOATS;
+    const meta = atlas.metaData;
+    meta[m] = xMin;
+    meta[m + 1] = yMin;
+    meta[m + 2] = xMax;
+    meta[m + 3] = yMax;
+    meta[m + 4] = glyphLocX;
+    meta[m + 5] = glyphLocY;
+    meta[m + 6] = bands.vBandCount - 1;
+    meta[m + 7] = bands.hBandCount - 1;
+    meta[m + 8] = bandScaleX;
+    meta[m + 9] = bandScaleY;
+    meta[m + 10] = -xMin * bandScaleX;
+    meta[m + 11] = -yMin * bandScaleY;
+
+    return { curveTexelStart: startTexel, index };
 }
 
 // ─── Internal: spatial-band partitioning ──────────────────────────────────

@@ -15,7 +15,7 @@ function makeGlyph(glyphId: number): GlyphCurves {
     };
 }
 
-const COLOR_OFFSET = 16;
+const COLOR_OFFSET = 4;
 
 /** Read the packed RGBA color of instance `i` from a TextData's instance buffer. */
 function instanceColor(data: ReturnType<typeof createTextData>, i: number): [number, number, number, number] {
