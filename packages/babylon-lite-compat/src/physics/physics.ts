@@ -161,6 +161,8 @@ function liteShapeType(type: PhysicsShapeType): LitePhysicsShapeType {
             return LitePhysicsShapeType.MESH;
         case PhysicsShapeType.HEIGHTFIELD:
             return LitePhysicsShapeType.HEIGHTFIELD;
+        default:
+            throw new Error(`Invalid PhysicsShapeType value: ${type}`);
     }
 }
 
@@ -172,6 +174,8 @@ function liteMotionType(type: PhysicsMotionType): LitePhysicsMotionType {
             return LitePhysicsMotionType.ANIMATED;
         case PhysicsMotionType.DYNAMIC:
             return LitePhysicsMotionType.DYNAMIC;
+        default:
+            throw new Error(`Invalid PhysicsMotionType value: ${type}`);
     }
 }
 
@@ -183,6 +187,8 @@ function litePrestepType(type: PhysicsPrestepType): LitePhysicsPrestepType {
             return LitePhysicsPrestepType.TELEPORT;
         case PhysicsPrestepType.ACTION:
             return LitePhysicsPrestepType.ACTION;
+        default:
+            throw new Error(`Invalid PhysicsPrestepType value: ${type}`);
     }
 }
 
@@ -349,6 +355,8 @@ export class PhysicsBody {
                 return PhysicsMotionType.ANIMATED;
             case LitePhysicsMotionType.DYNAMIC:
                 return PhysicsMotionType.DYNAMIC;
+            default:
+                throw new Error(`Invalid Lite PhysicsMotionType value: ${this._lite.motionType}`);
         }
     }
 
@@ -380,6 +388,8 @@ export class PhysicsBody {
                 return PhysicsPrestepType.TELEPORT;
             case LitePhysicsPrestepType.ACTION:
                 return PhysicsPrestepType.ACTION;
+            default:
+                throw new Error(`Invalid Lite PhysicsPrestepType value: ${this._lite._prestepType}`);
         }
     }
     public setMassProperties(properties: PhysicsMassProperties): void {

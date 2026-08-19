@@ -193,6 +193,25 @@ describe("PhysicsEngine", () => {
             body.setPrestepType(PhysicsPrestepType.ACTION);
             expect(body.getPrestepType()).toBe(PhysicsPrestepType.ACTION);
         });
+
+        it("rejects invalid motion and prestep enum values at the Lite boundary", () => {
+            const plugin = new HavokPlugin(true, makeAggregateMockHknp());
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+            const node = {
+                _node: { position: { x: 0, y: 0, z: 0 }, rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } },
+            } as unknown as TransformNode;
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
+
+            expect(() => body.setMotionType(99 as PhysicsMotionType)).toThrow("Invalid PhysicsMotionType value: 99");
+            expect(() => body.setPrestepType(98 as PhysicsPrestepType)).toThrow("Invalid PhysicsPrestepType value: 98");
+
+            (body._lite as unknown as { motionType: number }).motionType = 97;
+            expect(() => body.getMotionType()).toThrow("Invalid Lite PhysicsMotionType value: 97");
+            (body._lite as unknown as { _prestepType: number })._prestepType = 96;
+            expect(() => body.getPrestepType()).toThrow("Invalid Lite PhysicsPrestepType value: 96");
+        });
     });
 
     describe("PhysicsAggregate", () => {
@@ -239,6 +258,15 @@ describe("PhysicsEngine", () => {
             expect(hknp.HP_Shape_Release).not.toHaveBeenCalled();
             shape.dispose();
             expect(hknp.HP_Shape_Release).toHaveBeenCalledOnce();
+        });
+
+        it("rejects an invalid shape enum value before calling Lite", () => {
+            const plugin = new HavokPlugin(true, makeAggregateMockHknp());
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+
+            expect(() => new PhysicsShape({ type: 99 as PhysicsShapeType }, scene)).toThrow("Invalid PhysicsShapeType value: 99");
         });
     });
 });
