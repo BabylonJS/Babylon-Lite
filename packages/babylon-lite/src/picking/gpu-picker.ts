@@ -276,26 +276,29 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
         }
     }
 
-    let needsDeformedGeometry = false;
+    let needsDeformation = false;
     let needsAdvancedPipeline = !!pickDiscard?.worldAdjustWgsl || !!pickDiscard?.vertexData || !!pickDiscard?.storage?.some((storage) => storage.vertex);
     let candidates: { readonly mesh: Mesh; readonly ignore: PickIgnore | null }[];
     if (ignored) {
         const prepared = (await import("./picking-ignore.js")).prepareIgnoredCandidates(scene.meshes, ignored, pickFilter, needsAdvancedPipeline);
         candidates = prepared.candidates;
-        needsDeformedGeometry = prepared.deformed;
+        needsDeformation = prepared.deformed;
         needsAdvancedPipeline = prepared.advanced;
     } else {
         candidates = [];
         for (const mesh of scene.meshes) {
             if (mesh.pickable !== false && (!pickFilter || pickFilter(mesh))) {
                 candidates.push({ mesh, ignore: null });
-                needsDeformedGeometry ||= !!(mesh.morphTargets || mesh.skeleton) && !!mesh._cpuPositions;
+                needsDeformation ||= !!(mesh.morphTargets || mesh.skeleton);
                 needsAdvancedPipeline ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?._p;
             }
         }
     }
 
-    const deformedGeometry = needsDeformedGeometry ? await import("./deformed-geometry.js") : null;
+    // The advanced draw loads its own copy of the projection module, so only the simple/detailed loop needs one here.
+    const deformProjection = needsDeformation && !needsAdvancedPipeline ? await import("./deform-picking-projection.js") : null;
+    // Only the single triangle the GPU reports as hit is deformed on the CPU, to derive its face normal.
+    const deformedVertex = needsDeformation && detailed ? await import("./deformed-vertex.js") : null;
     const detailedPicking = detailed ? await import("./detailed-picking.js") : null;
     const debug = debugLabel ? await import("./picking-debug.js") : null;
     const advancedDraw = needsAdvancedPipeline ? await (await import("./picking-advanced-draw.js")).prepareAdvancedDraw(engine, candidates) : null;
@@ -376,31 +379,25 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     const tempBuffers: GPUBuffer[] = [];
     const detailedPositions = detailed ? new Map<Mesh, Float32Array>() : null;
     const detailedNormals = detailed ? new Map<Mesh, Float32Array>() : null;
+    // Capture deformation poses now, while the draw is still being recorded. The depth readback below
+    // resolves a frame or two later, by which point the animation tick has advanced `boneMatrices` and
+    // morph weights in place — deriving the hit triangle's face normal from those live mirrors would
+    // mix a pose-N hit with a pose-N+1 normal. Capturing is O(bones + targets), not O(V).
+    const detailedPoses = deformedVertex?.captureDeformPoses(candidates) ?? null;
     let meshRanges: import("./picking-advanced-draw.js").AdvancedMeshRange[];
     if (advancedDraw) {
-        const result = advancedDraw.draw(pass, picker._sceneBG!, nextId, pickDiscard, detailed, deformedGeometry, detailedPicking, tempBuffers, detailedPositions, detailedNormals);
+        const result = advancedDraw.draw(pass, picker._sceneBG!, nextId, pickDiscard, detailed, detailedPicking, tempBuffers, detailedPositions, detailedNormals);
         nextId = result.nextId;
         meshRanges = result.ranges;
     } else {
-        const defaults = pipelineApi!.getPickingPipelineSet(engine);
-        const discarded = pickDiscard ? pipelineApi!.getPickingPipelineSet(engine, pickDiscard) : null;
         meshRanges = [];
         for (const { mesh } of candidates) {
             const gpu = mesh._gpu;
-            let position = gpu.positionBuffer;
-            let pickPositions: Float32Array | undefined;
-            if (deformedGeometry && (mesh.morphTargets || mesh.skeleton)) {
-                const positions = deformedGeometry.computeDeformedPositions(mesh);
-                if (positions) {
-                    position = createMappedBuffer(engine, positions, BU.VERTEX, "pick-deformed-position");
-                    tempBuffers.push(position);
-                    pickPositions = positions;
-                }
-            } else if (detailed) {
-                pickPositions = mesh._cpuPositions;
-            }
-            if (detailedPositions && pickPositions) {
-                detailedPositions.set(mesh, pickPositions);
+            const projection = deformProjection?.getDeformPickingProjection(engine, mesh) ?? null;
+            const defaults = pipelineApi!.getPickingPipelineSet(engine, null, projection);
+            const discarded = pickDiscard ? pipelineApi!.getPickingPipelineSet(engine, pickDiscard, projection) : null;
+            if (detailedPositions && mesh._cpuPositions) {
+                detailedPositions.set(mesh, mesh._cpuPositions);
             }
             if (detailedNormals && mesh._cpuNormals) {
                 detailedNormals.set(mesh, mesh._cpuNormals);
@@ -423,7 +420,10 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             if (discardBG) {
                 pass.setBindGroup(2, discardBG);
             }
-            pass.setVertexBuffer(0, position);
+            pass.setVertexBuffer(0, gpu.positionBuffer);
+            if (projection) {
+                deformProjection!.bindDeformPickingProjection(engine, pass, set.regularPipeline, mesh, 1, !!discardBG);
+            }
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
             pass.drawIndexed(gpu.indexCount);
             meshRanges.push({
@@ -569,7 +569,18 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
         if (thinStateStable) {
             const positions = detailedPositions?.get(hitMesh);
             const world = detailedPicking!.detailedWorldMatrix(hitRange.world, hitMesh, hitThinIdx);
-            detailedPicking!.populateDetailedMeshInfo(info, hitMesh, primitiveIndex, localPoint, positions, detailedNormals?.get(hitMesh), world, !hitRange.worldAdjusted);
+            const deformTriangle = deformedVertex?.deformerFor(detailedPoses, hitMesh) ?? null;
+            detailedPicking!.populateDetailedMeshInfo(
+                info,
+                hitMesh,
+                primitiveIndex,
+                localPoint,
+                positions,
+                detailedNormals?.get(hitMesh),
+                world,
+                !hitRange.worldAdjusted,
+                deformTriangle
+            );
         }
     }
 

@@ -1,0 +1,22 @@
+{
+  "rawKB": 37.5,
+  "rawBytes": 38424,
+  "gzipKB": 22.2,
+  "ignoredRawKB": 28.6,
+  "runtimeChunks": [
+    "scene301-box-shape-block-CYvkMlDf.js",
+    "scene301-create-particle-block-CiseX6ot.js",
+    "scene301-npe-contextual-DcCy6blJ.js",
+    "scene301-particle-converter-block-CVHvXC1Y.js",
+    "scene301-particle-input-block-BZ-HNPi-.js",
+    "scene301-particle-lerp-block-DmOawfA2.js",
+    "scene301-particle-math-compact-block-ByPuhMSa.js",
+    "scene301-particle-random-block-BMyoDxwS.js",
+    "scene301-random-range-CfhNtuAB.js",
+    "scene301-system-block-DtFNKeDy.js",
+    "scene301-texture-source-block-Cubvbe9j.js",
+    "scene301-update-color-block-D3_45s5M.js",
+    "scene301-update-position-block-DQ-fau8B.js",
+    "scene301.js"
+  ]
+}

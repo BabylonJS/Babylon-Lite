@@ -1,6 +1,6 @@
-import { addFacingBillboardSystem } from "../sprite/billboard-scene.js";
 import { animateParticleSystem, startParticleSystem } from "./particle-system.js";
 import { createParticleBillboard, syncParticleBillboard } from "./particle-billboard.js";
+import { addFacingBillboardSystem } from "../sprite/billboard-scene.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { NodeParticleSet } from "./node/node-particle.js";
 
@@ -23,7 +23,7 @@ export function registerNodeParticleSet(scene: SceneContext, set: NodeParticleSe
 
     for (const system of set.systems) {
         const billboard = createParticleBillboard(system);
-        addFacingBillboardSystem(scene, billboard);
+        (system._registerBillboard ?? addFacingBillboardSystem)(scene, billboard);
 
         if (autoStart) {
             startParticleSystem(system);

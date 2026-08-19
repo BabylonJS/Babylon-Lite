@@ -81,6 +81,18 @@ describe("WebGPUEngine scalar getters", () => {
         expect(caps.uintIndices).toBe(true);
     });
 
+    it("forwards the device's maxUniformBuffersPerShaderStage limit", () => {
+        const engine = fakeEngine({ width: 1, height: 1 }, 16) as WebGPUEngine & { _lite: unknown };
+        (engine as unknown as { _lite: unknown })._lite = { _device: { features: new Set<string>(), limits: { maxUniformBuffersPerShaderStage: 12 } } };
+        expect(engine.getCaps().maxUniformBuffersPerShaderStage).toBe(12);
+    });
+
+    it("leaves maxUniformBuffersPerShaderStage undefined for a device-less NullEngine", () => {
+        const engine = fakeEngine({ width: 1, height: 1 }, 16) as WebGPUEngine & { _lite: unknown };
+        (engine as unknown as { _lite: unknown })._lite = {};
+        expect(engine.getCaps().maxUniformBuffersPerShaderStage).toBeUndefined();
+    });
+
     it("reports all compressed caps off when there is no device (NullEngine)", () => {
         const engine = fakeEngine({ width: 1, height: 1 }, 16) as WebGPUEngine & { _lite: unknown };
         (engine as unknown as { _lite: unknown })._lite = {};

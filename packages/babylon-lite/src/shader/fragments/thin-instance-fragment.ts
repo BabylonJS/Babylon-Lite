@@ -68,6 +68,7 @@ export function createThinInstanceFragment(hasInstanceColor: boolean): ShaderFra
 
     return {
         _id: "thin-instance",
+        _alphaBlend: hasInstanceColor,
 
         _vertexAttributes: attrs,
 

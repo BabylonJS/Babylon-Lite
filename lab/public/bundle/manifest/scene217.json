@@ -4,10 +4,10 @@
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene217-multilight-wgsl-DtayYdvD.js",
-    "scene217-pbr-renderable-CFCKyrrF.js",
+    "scene217-pbr-renderable-QgLe7R6h.js",
     "scene217-shader-composer-0NykcWGK.js",
-    "scene217-standard-renderable-o3F2Rv84.js",
+    "scene217-standard-renderable-B-9UbWgT.js",
     "scene217.js"
   ],
-  "rawBytes": 76751
+  "rawBytes": 76771
 }

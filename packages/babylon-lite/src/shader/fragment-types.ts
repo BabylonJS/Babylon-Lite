@@ -128,6 +128,9 @@ export interface ShaderFragment {
     /** @internal Unique ID for dedup and dependency resolution (e.g. "clearcoat", "skeleton") */
     readonly _id: string;
 
+    /** @internal Whether this fragment supplies an alpha source that can require blending. */
+    readonly _alphaBlend?: boolean;
+
     /** @internal Fragment IDs that must be composed before this one */
     readonly _dependencies?: readonly string[];
 
