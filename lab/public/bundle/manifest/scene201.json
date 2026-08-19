@@ -1,13 +1,13 @@
 {
   "rawKB": 47.1,
+  "rawBytes": 48263,
   "gzipKB": 19.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene201-_mat4-storage-f64-BubF55_X.js",
     "scene201-floating-origin-18rYq_DG.js",
     "scene201-pack-mat4-with-offset-BS-Lz8k7.js",
-    "scene201-standard-renderable-DeYF7kYh.js",
+    "scene201-standard-renderable-Cbx3gP3C.js",
     "scene201.js"
-  ],
-  "rawBytes": 48273
+  ]
 }

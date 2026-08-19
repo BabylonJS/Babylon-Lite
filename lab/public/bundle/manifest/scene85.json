@@ -1,6 +1,7 @@
 {
   "rawKB": 59.2,
-  "gzipKB": 26,
+  "rawBytes": 60570,
+  "gzipKB": 26.1,
   "ignoredRawKB": 6.5,
   "runtimeChunks": [
     "scene85-_math-factory-DSa70nIu.js",
@@ -19,6 +20,5 @@
     "scene85-vector-merger-YcC3xFyg.js",
     "scene85-vertex-output-C7G5u6Y0.js",
     "scene85.js"
-  ],
-  "rawBytes": 60578
+  ]
 }

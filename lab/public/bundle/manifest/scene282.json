@@ -1,10 +1,10 @@
 {
   "rawKB": 46.5,
-  "rawBytes": 47614,
-  "gzipKB": 19.4,
+  "rawBytes": 47607,
+  "gzipKB": 19.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene282-standard-renderable-DSHK7cuL.js",
+    "scene282-standard-renderable-BbbmfOea.js",
     "scene282-std-uv-transform-fragment-Dg-qURAm.js",
     "scene282.js"
   ]

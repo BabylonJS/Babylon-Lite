@@ -1,6 +1,6 @@
 {
   "rawKB": 68.4,
-  "rawBytes": 70073,
+  "rawBytes": 70070,
   "gzipKB": 27.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,7 +8,7 @@
     "scene271-no-color-view-uo2J9_kI.js",
     "scene271-scene-runtime-mesh-build-w8TzegRR.js",
     "scene271-shadow-task-D-vcaBru.js",
-    "scene271-standard-renderable-DnhvSEyS.js",
+    "scene271-standard-renderable-D0Jrfsw_.js",
     "scene271-std-shadow-fragment-pwyXRo4i.js",
     "scene271.js"
   ]

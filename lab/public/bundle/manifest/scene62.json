@@ -1,6 +1,7 @@
 {
   "rawKB": 59,
-  "gzipKB": 25,
+  "rawBytes": 60448,
+  "gzipKB": 25.1,
   "ignoredRawKB": 5.3,
   "runtimeChunks": [
     "scene62-_math-factory-CzxltuHQ.js",
@@ -13,6 +14,5 @@
     "scene62-transform-block-0-LJqJSH.js",
     "scene62-vertex-output-C7G5u6Y0.js",
     "scene62.js"
-  ],
-  "rawBytes": 60462
+  ]
 }
