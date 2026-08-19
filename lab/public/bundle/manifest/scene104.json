@@ -1,11 +1,11 @@
 {
-  "rawKB": 100.3,
-  "rawBytes": 102678,
+  "rawKB": 100.2,
+  "rawBytes": 102645,
   "gzipKB": 39,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene104-generate-mipmaps-t1thgq-u.js",
-    "scene104-gltf-feature-registry-B83-RUQA.js",
+    "scene104-gltf-feature-registry-CyRAKjvj.js",
     "scene104-gltf-glb-parser-_1LcUlsn.js",
     "scene104-mesh-features-BGKC9iuS.js",
     "scene104-standard-renderable-BTjbCM4h.js",
