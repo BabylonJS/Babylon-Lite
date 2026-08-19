@@ -457,7 +457,7 @@ Each `RenderTask` owns:
 |           80 | `vFogInfos`                      |
 |           84 | `vFogColor`                      |
 
-The writer bails before touching scratch/GPU when camera, fog, aspect, environment rotation, exposure, and contrast are unchanged.
+The writer bails before touching scratch/GPU when camera, fog, aspect, exposure, contrast, and environment texture identity are unchanged. Environment rotation is written by the opt-in environment contributor; `setEnvironmentRotation` explicitly invalidates the task-local cache before a dynamic update.
 
 Offscreen targets use `targetSignature._flipY` and negate the projection row so downstream texture sampling is upright. Swapchain targets do not flip. See "Target Signature" above for the descriptor-side `flipY` override and the known overriding cases.
 

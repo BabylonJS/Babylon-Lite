@@ -1,5 +1,6 @@
 {
-  "rawKB": 97.8,
+  "rawKB": 97.7,
+  "rawBytes": 100080,
   "gzipKB": 40.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,16 +9,15 @@
     "scene34-gltf-ext-node-visibility-GovLAutL.js",
     "scene34-gltf-feature-animation-pointer-Bkk9ApqF.js",
     "scene34-gltf-feature-animations-B5fXRLWO.js",
-    "scene34-gltf-feature-registry-DFlGsM5E.js",
+    "scene34-gltf-feature-registry-3_7-2Chy.js",
     "scene34-gltf-glb-parser-GWVsAeAH.js",
     "scene34-gltf-sampler-denorm-D8yicnFy.js",
     "scene34-gltf-share-DzepaHuU.js",
     "scene34-ibl-fragment-CeRrvT96.js",
-    "scene34-pbr-renderable-VdSwgjkf.js",
+    "scene34-pbr-renderable-Co5Msoo4.js",
     "scene34-rgbd-decode-DZ3RG6mF.js",
     "scene34-scene-uniforms-FTYH6Ct0.js",
     "scene34-visibility-Bkg6RVGH.js",
     "scene34.js"
-  ],
-  "rawBytes": 100100
+  ]
 }

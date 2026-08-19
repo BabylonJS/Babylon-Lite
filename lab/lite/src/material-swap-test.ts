@@ -1,7 +1,23 @@
 /** Material swap test — creates a sphere, renders it red, swaps to green,
  *  reports colors back to the test runner via window globals. */
 
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, createSphere, createStandardMaterial, createHemisphericLight, registerScene } from "babylon-lite";
+import {
+    onBeforeRender,
+    addToScene,
+    startEngine,
+    stopEngine,
+    createEngine,
+    createSceneContext,
+    createDefaultCamera,
+    createBox,
+    createSphere,
+    createPbrMaterial,
+    createStandardMaterial,
+    createSolidTexture2D,
+    createHemisphericLight,
+    registerScene,
+    unregisterScene,
+} from "babylon-lite";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 (window as any).testResult = "pending";
@@ -28,6 +44,27 @@ async function run() {
     // Wait a few frames for red to be visible
     await new Promise((r) => setTimeout(r, 200));
     (window as any).phase = "red";
+
+    if (new URLSearchParams(location.search).has("reregister")) {
+        stopEngine(engine);
+
+        const mesh = createBox(engine, 1);
+        const material = createPbrMaterial({
+            baseColorTexture: createSolidTexture2D(engine, 0.8, 0.2, 0.2, 1),
+            ormTexture: createSolidTexture2D(engine, 1, 0.5, 0, 1),
+        });
+        mesh.material = material;
+        addToScene(scene, mesh);
+
+        unregisterScene(scene);
+        await registerScene(scene);
+        await startEngine(engine);
+
+        canvas.dataset.groupBuilt = String(Boolean(scene._groups.get(material._buildGroup)?.r));
+        canvas.dataset.meshRendered = String(scene._renderables.some((renderable) => renderable.mesh === mesh));
+        canvas.dataset.ready = "true";
+        return;
+    }
 
     // Wait for the test to take a screenshot of red, then swap to green
     await new Promise<void>((resolve) => {
@@ -61,5 +98,6 @@ async function run() {
 run().catch((e) => {
     (window as any).testResult = "error: " + e.message;
     (window as any).phase = "error";
+    canvas.dataset.error = e.message;
     canvas.dataset.ready = "true";
 });
