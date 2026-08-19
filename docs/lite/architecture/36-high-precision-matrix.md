@@ -137,6 +137,8 @@ Every mat4 → GPU buffer write goes through `packMat4IntoF32`. The exhaustive l
 
 The 6 mesh-world callsites pass `_foOffset` as the 5th argument (the scene's `_floatingOriginOffset` reference). The non-mesh callsites omit the offset and get precision-only packing (a bit-identical copy when storage is F32).
 
+**One exception:** `material/shader/shader-renderable.ts` and its cached counterpart `enable-shader-material-uniform-caching.ts` serialize ShaderMaterial's system-uniform block themselves (`data.set(world, …)` / `mat4MultiplyInto(data, …)`) rather than calling `packMat4IntoF32`. They cannot reuse it — `packMat4IntoF32WithOffset` lives in the LWR-only bundle that this module must not statically import, and pulling it in would defeat the tree-shaking gate above. The eye-relative subtraction is instead done by `_shaderWorldMatrix(mesh, camera, out?)` in `shader-renderable.ts`, using the same `large - large = small` ordering: the subtraction runs in JS number precision before the F32 store, so an F64-backed mesh matrix keeps its small remainder. Any new mat4 → GPU write outside these two files belongs in the list above, not here.
+
 ## Validation
 
 - Unit: `tests/unit/engine-matrix-policy.test.ts` covers `allocateMat4()` returning F32 by default, F64 after `_setHpmAllocator`, fresh instances per call, and `_resetMatrixAllocatorForTests` reverting. It also holds the allocation-boundary guard: each of the eight factories is asserted to honour the installed allocator (named individually, so a regression reports which one), plus a behavioural pair showing a root node keeps sub-metre precision at 4.6e6 under HPM and loses it under the F32 default.
