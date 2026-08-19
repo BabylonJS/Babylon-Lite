@@ -33,13 +33,12 @@ export const LIGHTMAP_SHADOWMAP = 1 << 15;
 export const LIGHTMAP_FLIP_V = 1 << 22;
 // Bit 23 is reserved by STD_HAS_UV_TRANSFORM in the lazy
 // fragments/std-uv-transform-fragment.ts module.
-/** RGBA mesh or thin-instance color drives alpha (Babylon `VERTEXALPHA`). Set when
- *  an RGBA color source exists and the mesh explicitly opts in via
+/** RGBA mesh vertex color drives alpha (Babylon `VERTEXALPHA`). Set only when a
+ *  vertex-colour buffer exists and the mesh explicitly opts in via
  *  `mesh.hasVertexAlpha`. Gates the vertex-colour fragment's `alpha *= vColor.a` +
- *  vertex-alpha alpha-test when that fragment is present; without it mesh vertex
- *  colour is RGB-only. Kept distinct from `MATERIAL_ALPHA_BLEND` (which a translucent
- *  `mat.alpha < 1` material also sets) so material alpha alone never consumes color
- *  alpha. */
+ *  vertex-alpha alpha-test; without it mesh vertex colour is RGB-only. Kept distinct
+ *  from `MATERIAL_ALPHA_BLEND`, which is also used by material and thin-instance
+ *  alpha, so those sources never create a redundant vertex-colour shader variant. */
 export const VERTEX_ALPHA = 1 << 24;
 /** Mesh uses skeletal skinning. Enabled through the Standard mesh-feature subpath. */
 export const HAS_SKELETON = 1 << 26;

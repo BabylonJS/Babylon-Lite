@@ -129,7 +129,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         // (Babylon `mesh.hasVertexAlpha`) layers on top when either the mesh carries a
         // vertex-colour buffer or a lazy fragment declares an RGBA alpha source. Computed
         // BEFORE the ext loop so the fragments compose with the correct alpha mode:
-        //   • VERTEX_ALPHA — the vertex-colour fragment consumes `vColor.a` when present.
+        //   • VERTEX_ALPHA — only a mesh vertex-colour fragment consumes `vColor.a`.
         //   • MATERIAL_ALPHA_BLEND — either RGBA source selects source-over blending,
         //     disables depth write, and sorts the mesh into the transparent phase.
         // RGB vertex colour is always applied regardless. `MATERIAL_ALPHA_BLEND` alone
@@ -137,10 +137,8 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const hasVertexColor = !!mesh._gpu.colorBuffer && !!_stdVertexColorFragment;
         const hasInstanceColor = !!(meshFeatures & MSH_HAS_INSTANCE_COLOR);
         const tiFrag = meshFeatures & MSH_HAS_THIN_INSTANCES && tiFragment ? tiFragment(hasInstanceColor) : null;
-        const vertexAlphaBlend = !shadowOutput && mesh.hasVertexAlpha === true && (hasVertexColor || !!tiFrag?._alphaBlend);
-        if (vertexAlphaBlend) {
-            features |= VERTEX_ALPHA | MATERIAL_ALPHA_BLEND;
-        }
+        const colorAlphaBlend = !!(!shadowOutput && mesh.hasVertexAlpha && (hasVertexColor || tiFrag?._alphaBlend));
+        features |= colorAlphaBlend ? MATERIAL_ALPHA_BLEND | (hasVertexColor ? VERTEX_ALPHA : 0) : 0;
         const sortedExts = _getStdExtsSorted();
         // Build per-feature fragment list (deduped via pipeline cache).
         const frags: ShaderFragment[] = [];
@@ -168,7 +166,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         // `color` vertex attribute therefore follows the ext (skeleton) attributes, and
         // the draw closure binds `colorBuffer` after the ext vertex-buffer binders.
         if (hasVertexColor) {
-            frags.push(_stdVertexColorFragment!((features & HAS_DIFFUSE_TEXTURE) !== 0, vertexAlphaBlend));
+            frags.push(_stdVertexColorFragment!((features & HAS_DIFFUSE_TEXTURE) !== 0, colorAlphaBlend));
         }
         let shaderKey = "";
         if (meshFeatures & MSH_RECEIVE_SHADOWS && shadowFragment) {
@@ -236,7 +234,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const needsUV = (features & NEEDS_UV) !== 0;
         const needsUV2 = (features & NEEDS_UV2) !== 0;
         const hasThinInstances = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
-        const isTransparent = !shadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || mat.alpha < 1 || vertexAlphaBlend);
+        const isTransparent = !shadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || mat.alpha < 1 || colorAlphaBlend);
 
         const boundTextures = collectStdBoundTextures(mat);
         for (const t of boundTextures) {
