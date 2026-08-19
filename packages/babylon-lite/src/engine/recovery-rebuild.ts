@@ -34,7 +34,7 @@ interface RecoverableRenderTask {
     _transparentBindings: unknown[];
     _ob: unknown[];
     _lastVersion: number;
-    _su: unknown[];
+    _sceneUboCacheKey: unknown[];
 }
 
 /**
@@ -163,7 +163,7 @@ function resetFrameGraphTasks(engine: EngineContext, scene: SceneContext): void 
         rt._transparentBindings.length = 0;
         rt._ob.length = 0;
         rt._lastVersion = -1;
-        rt._su.length = 0;
+        rt._sceneUboCacheKey.length = 0;
     }
 }
 
