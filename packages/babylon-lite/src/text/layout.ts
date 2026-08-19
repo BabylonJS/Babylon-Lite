@@ -4,7 +4,7 @@
  *  internal implementation; not exported from `src/index.ts`). Callers driving their own
  *  layout don't import this module and pay zero bytes for it. */
 
-import { UnicodeBuffer, shape } from "text-shaper";
+import { GlyphBuffer, UnicodeBuffer, shapeInto } from "text-shaper";
 import type { Font } from "./font.js";
 import type { PlacedGlyph } from "./text-data.js";
 
@@ -22,14 +22,6 @@ export type TextLayoutOptions = {
     readonly tabSize?: number;
 };
 
-interface ShapedEntry {
-    glyphId: number;
-    xAdvance: number;
-    xOffset: number;
-    yOffset: number;
-    isSpace: boolean;
-}
-
 interface LayoutGlyph {
     glyphId: number;
     /** Pixel x at line start (line-relative). */
@@ -40,6 +32,24 @@ interface LayoutGlyph {
     xOffset: number;
     yOffset: number;
 }
+
+/** Shaping scratch buffers, reused across every `layoutText` call.
+ *
+ *  `shape()` pulls from a pool inside text-shaper that is only refilled by `releaseBuffer()`
+ *  — which the package does not export — so every `shape()` call allocates a fresh
+ *  `GlyphBuffer` whose object pools start empty, then allocates one `GlyphInfo` and one
+ *  `GlyphPosition` per codepoint. Because layout shapes one paragraph per call, a block of
+ *  N paragraphs pays that N times per frame.
+ *
+ *  Holding the buffers here and driving `shapeInto` keeps the pools warm across calls, so
+ *  after the first block the shaping stage allocates nothing. Retained memory is bounded by
+ *  the longest single paragraph ever laid out. `layoutText` is synchronous and never
+ *  re-enters, so a single shared pair is safe.
+ *
+ *  Lazily initialised: a module-level `new` would be an import-time side effect and would
+ *  defeat tree-shaking for callers that drive their own layout. */
+let scratchInput: UnicodeBuffer | null = null;
+let scratchOutput: GlyphBuffer | null = null;
 
 /** @internal Default LTR + word-wrap + align layout. Returns placed glyphs, the layout scale,
  *  and the run's pixel-space bounding size. Caller wraps into a `GlyphRun` with the appropriate `curveSet`. */
@@ -61,6 +71,9 @@ export function layoutText(font: Font, text: string, fontSizePx: number, options
     const lines: LayoutGlyph[][] = [];
     const lineWidths: number[] = [];
 
+    const input = (scratchInput ??= new UnicodeBuffer());
+    const output = (scratchOutput ??= new GlyphBuffer());
+
     for (const para of paragraphs) {
         const trimmed = para.trim();
         if (trimmed.length === 0) {
@@ -69,51 +82,45 @@ export function layoutText(font: Font, text: string, fontSizePx: number, options
             continue;
         }
 
-        const buf = new UnicodeBuffer();
-        buf.addStr(trimmed);
-        const glyphBuffer = shape(rawFont, buf);
+        input.clear();
+        input.addStr(trimmed);
+        shapeInto(rawFont, input, output);
 
-        const shaped: ShapedEntry[] = [];
-        let charIdx = 0;
-        for (const { info, position } of glyphBuffer) {
-            const isSpace = charIdx < trimmed.length && trimmed.charCodeAt(charIdx) === 32;
-            shaped.push({
-                glyphId: info.glyphId,
-                xAdvance: position.xAdvance + letterSpacing,
-                xOffset: position.xOffset,
-                yOffset: position.yOffset,
-                isSpace,
-            });
-            charIdx++;
-        }
+        // Read straight off the shaped buffer — the glyphs of this paragraph are fully
+        // consumed into `lines` before the next paragraph overwrites `output`.
+        const infos = output.infos;
+        const positions = output.positions;
+        const shapedCount = infos.length;
 
         let currentLine: LayoutGlyph[] = [];
         let lineCursorX = 0;
         let i = 0;
-        while (i < shaped.length) {
+        while (i < shapedCount) {
             // Eat leading spaces (consume into current line — gets trimmed on wrap).
-            while (i < shaped.length && shaped[i]!.isSpace) {
-                const s = shaped[i]!;
-                const adv = s.xAdvance * scale;
+            // `codepoint` is the pre-shaping character and survives GSUB (substitutions
+            // rewrite `glyphId` only), so it stays aligned with the glyph even when
+            // shaping is not one glyph per character.
+            while (i < shapedCount && infos[i]!.codepoint === 32) {
+                const pos = positions[i]!;
+                const xAdvance = pos.xAdvance + letterSpacing;
                 currentLine.push({
-                    glyphId: s.glyphId,
+                    glyphId: infos[i]!.glyphId,
                     x: lineCursorX,
                     line: lines.length,
-                    xAdvance: s.xAdvance,
-                    xOffset: s.xOffset,
-                    yOffset: s.yOffset,
+                    xAdvance,
+                    xOffset: pos.xOffset,
+                    yOffset: pos.yOffset,
                 });
-                lineCursorX += adv;
+                lineCursorX += xAdvance * scale;
                 i++;
             }
-            const wordGlyphs: ShapedEntry[] = [];
+            const wordStart = i;
             let wordWidth = 0;
-            while (i < shaped.length && !shaped[i]!.isSpace) {
-                const s = shaped[i]!;
-                wordGlyphs.push(s);
-                wordWidth += s.xAdvance * scale;
+            while (i < shapedCount && infos[i]!.codepoint !== 32) {
+                wordWidth += (positions[i]!.xAdvance + letterSpacing) * scale;
                 i++;
             }
+            const wordEnd = i;
             if (lineCursorX + wordWidth > maxWidth && currentLine.length > 0) {
                 while (currentLine.length > 0 && currentLine[currentLine.length - 1]!.glyphId === spaceGid) {
                     currentLine.pop();
@@ -125,9 +132,11 @@ export function layoutText(font: Font, text: string, fontSizePx: number, options
                 currentLine = [];
                 lineCursorX = 0;
             }
-            for (const g of wordGlyphs) {
-                currentLine.push({ glyphId: g.glyphId, x: lineCursorX, line: lines.length, xAdvance: g.xAdvance, xOffset: g.xOffset, yOffset: g.yOffset });
-                lineCursorX += g.xAdvance * scale;
+            for (let w = wordStart; w < wordEnd; w++) {
+                const pos = positions[w]!;
+                const xAdvance = pos.xAdvance + letterSpacing;
+                currentLine.push({ glyphId: infos[w]!.glyphId, x: lineCursorX, line: lines.length, xAdvance, xOffset: pos.xOffset, yOffset: pos.yOffset });
+                lineCursorX += xAdvance * scale;
             }
         }
         if (currentLine.length > 0) {
