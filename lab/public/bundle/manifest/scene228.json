@@ -1,10 +1,10 @@
 {
   "rawKB": 48.9,
-  "gzipKB": 19.6,
+  "rawBytes": 50093,
+  "gzipKB": 19.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene228-standard-renderable-C_kiZuor.js",
+    "scene228-standard-renderable-Bp5rvK3U.js",
     "scene228.js"
-  ],
-  "rawBytes": 50112
+  ]
 }

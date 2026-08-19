@@ -1,7 +1,7 @@
 {
   "rawKB": 96.9,
-  "rawBytes": 99263,
-  "gzipKB": 40.4,
+  "rawBytes": 99243,
+  "gzipKB": 40.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene219-create-skeleton-4sFAPXDo.js",

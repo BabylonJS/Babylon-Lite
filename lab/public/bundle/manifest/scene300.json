@@ -1,0 +1,23 @@
+{
+  "rawKB": 33.8,
+  "rawBytes": 34693,
+  "gzipKB": 21.6,
+  "ignoredRawKB": 28.6,
+  "runtimeChunks": [
+    "scene300-box-shape-block-CrrR5qoK.js",
+    "scene300-create-particle-block-CiseX6ot.js",
+    "scene300-generate-mipmaps-CVvLorbN.js",
+    "scene300-npe-contextual-DcCy6blJ.js",
+    "scene300-particle-converter-block-CVHvXC1Y.js",
+    "scene300-particle-input-block-B5ZXfbu-.js",
+    "scene300-particle-lerp-block-DmOawfA2.js",
+    "scene300-particle-math-compact-block-ByPuhMSa.js",
+    "scene300-particle-random-block-BMyoDxwS.js",
+    "scene300-random-range-CfhNtuAB.js",
+    "scene300-system-block-DtFNKeDy.js",
+    "scene300-texture-source-block-Ds0sJKMF.js",
+    "scene300-update-color-block-D3_45s5M.js",
+    "scene300-update-position-block-DQ-fau8B.js",
+    "scene300.js"
+  ]
+}

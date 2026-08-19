@@ -66,7 +66,7 @@ export interface BillboardCustomShader {
     /** @internal Extra-texture + fx UBO bind-group **layout** entries, starting at `startBinding` (3). */
     readonly _layoutEntries: (startBinding: number) => GPUBindGroupLayoutEntry[];
     /** @internal Build the opaque per-system fx attachment (owns the `SpriteFx` UBO, scratch, and elapsed time). */
-    readonly _createLayerFx: (engine: EngineContext, label: string) => SpriteLayerFx;
+    readonly _createLayerFx: (engine: EngineContext, label: string) => SpriteLayerFx | null;
 }
 
 function makeCustomBillboardWgsl(orientation: BillboardOrientation, extraTextures: readonly BillboardCustomTexture[], fragment: string): string {

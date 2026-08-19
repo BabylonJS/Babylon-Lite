@@ -1,23 +1,23 @@
 {
   "rawKB": 93.9,
-  "rawBytes": 96143,
+  "rawBytes": 96149,
   "gzipKB": 39.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene255-create-skeleton-B2bD2bod.js",
     "scene255-flat-normal-wgsl-Cm9mM4tC.js",
     "scene255-generate-mipmaps-CJHJX19Z.js",
-    "scene255-gltf-animation-DeyXgFzg.js",
-    "scene255-gltf-feature-animations-CVUKscGF.js",
-    "scene255-gltf-feature-registry-CJ_joAN1.js",
-    "scene255-gltf-feature-skeleton-CfGoH8Jn.js",
+    "scene255-gltf-animation-DtDFxtTj.js",
+    "scene255-gltf-feature-animations-DBJheBpv.js",
+    "scene255-gltf-feature-registry-zUVj-cSH.js",
+    "scene255-gltf-feature-skeleton-CmBxYfxs.js",
     "scene255-gltf-json-asset-DNhyk2XM.js",
     "scene255-gltf-normals-DYhLwXNX.js",
     "scene255-ibl-fragment-CeRrvT96.js",
-    "scene255-pbr-renderable-CrdT8Llw.js",
+    "scene255-pbr-renderable--b3FcLj_.js",
     "scene255-rgbd-decode-MDH2X3Yy.js",
     "scene255-scene-uniforms-FTYH6Ct0.js",
-    "scene255-skeleton-fragment-C1FpGZmc.js",
+    "scene255-skeleton-fragment-jFqc_7fC.js",
     "scene255.js"
   ]
 }

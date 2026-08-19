@@ -301,7 +301,8 @@ function growCapacity(layer: Sprite2DLayer, minCapacity: number): void {
     layer._capacity = cap;
 }
 
-function setSprite2DCount(layer: Sprite2DLayer, count: number): void {
+/** @internal Set the live range for integrations that exclusively own a layer. */
+export function _setSprite2DCount(layer: Sprite2DLayer, count: number): void {
     (layer as { count: number }).count = count;
 }
 
@@ -493,7 +494,7 @@ export function addSprite2DIndex(layer: Sprite2DLayer, props: Sprite2DProps): nu
         growCapacity(layer, idx + 1);
     }
     writeInstance(layer, idx, props, null);
-    setSprite2DCount(layer, layer.count + 1);
+    _setSprite2DCount(layer, layer.count + 1);
     markDirty(layer, idx, idx + 1);
     return idx;
 }
@@ -524,7 +525,7 @@ export function removeSprite2DIndex(layer: Sprite2DLayer, index: number): void {
     // Clear the now-unused tail saved-size slot so a future re-add starts clean.
     layer._savedSize[last * SAVED_SIZE_FLOATS_PER_SPRITE] = 0;
     layer._savedSize[last * SAVED_SIZE_FLOATS_PER_SPRITE + 1] = 0;
-    setSprite2DCount(layer, last);
+    _setSprite2DCount(layer, last);
     markDirty(layer, index, index + 1);
 }
 
@@ -538,7 +539,7 @@ export function clearSprite2DLayer(layer: Sprite2DLayer): void {
         return;
     }
     layer._savedSize.fill(0, 0, count * SAVED_SIZE_FLOATS_PER_SPRITE);
-    setSprite2DCount(layer, 0);
+    _setSprite2DCount(layer, 0);
     layer._version = (layer._version + 1) | 0;
 }
 

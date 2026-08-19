@@ -628,7 +628,7 @@ export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/sh
 export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
 export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
-export { spriteBlendOpaque, spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
+export { spriteBlendOpaque, spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendOneOne, spriteBlendMultiply } from "./sprite/sprite-blend.js";
 export {
     createSprite2DLayer,
     addSprite2DIndex,
@@ -727,6 +727,7 @@ export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
 export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
 export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
 export { buildNodeParticleSetWithFlowMaps } from "./particle/node/npe-flow-map.js";
+export { buildNodeParticleSetWithBlendModes, enableNodeParticleBlendModes } from "./particle/node/npe-blend-modes.js";
 export { buildNodeParticleSetWithNoiseTextures } from "./particle/node/npe-noise.js";
 export { buildNodeParticleSetWithTextureUpdates } from "./particle/node/npe-texture-updates.js";
 export type { ParticleSystem } from "./particle/particle-system.js";
@@ -734,6 +735,15 @@ export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
 export { registerNodeParticleSet } from "./particle/particle-scene.js";
 export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
+export type { ParticleSprite2DBridge, ParticleSprite2DBridgeOptions, RegisterNodeParticleSet2DOptions, NodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";
+export { createParticleSprite2DBridge, syncParticleSprite2DBridge, registerNodeParticleSet2D, disposeNodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";
+export type { ParticleSprite2DBlendModesBridge, NodeParticleSet2DBlendModesBinding } from "./particle/particle-sprite-2d-blend-modes.js";
+export {
+    createParticleSprite2DBridgeWithBlendModes,
+    syncParticleSprite2DBridgeWithBlendModes,
+    registerNodeParticleSet2DWithBlendModes,
+    disposeNodeParticleSet2DBlendModesBinding,
+} from "./particle/particle-sprite-2d-blend-modes.js";
 
 // ─── Text ────────────────────────────────────────────────────────────
 export type { Font } from "./text/font.js";
