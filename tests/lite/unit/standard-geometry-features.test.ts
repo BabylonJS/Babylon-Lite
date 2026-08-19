@@ -126,6 +126,25 @@ describe("Standard vertex-alpha classification", () => {
         expect(rNoColor!.isTransparent).toBe(false);
         expect(rNoColor!.order).toBe(100);
     });
+
+    it("classifies opted-in thin-instance colors as transparent without a mesh vertex-colour buffer", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        const mesh = makeStdMesh();
+        mesh.hasVertexAlpha = true;
+        mesh.thinInstances = {
+            count: 1,
+            matrices: new Float32Array(16),
+            colors: new Float32Array([1, 1, 1, 0.5]),
+        } as Mesh["thinInstances"];
+
+        const { renderables } = buildStandardMeshRenderables(scene, [mesh], {
+            tiFragment: createThinInstanceFragment,
+        });
+
+        expect(renderables[0]!.isTransparent).toBe(true);
+        expect(renderables[0]!.order).toBe(200);
+    });
 });
 
 // ── Blocker 2: floating-origin correctness for current AND previous matrices ──

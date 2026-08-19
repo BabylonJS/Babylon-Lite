@@ -143,13 +143,13 @@ export interface Mesh extends SceneNode {
     thinInstances?: ThinInstanceData | null;
     /** @internal Optional feature-owned setup-time world-bounds expansion. */
     _expandWorldBounds?: (bounds: WorldAabbAcc, mesh: Mesh) => void;
-    /** Explicit opt-in that this mesh's RGBA vertex colours drive translucency
-     *  (Babylon `AbstractMesh.hasVertexAlpha`). When `true` and the mesh actually
-     *  carries a vertex-colour buffer, the Standard forward and geometry paths
-     *  treat it as alpha-blended: source-over blending, depth-write disabled, and
-     *  sorted into the transparent phase. Defaults to `false`/opaque. Set this
-     *  explicitly (or via a loader that knows the vertex-colour accessor is VEC4);
-     *  Lite never scans vertex buffers to infer it. */
+    /** Explicit opt-in that this mesh's RGBA vertex or thin-instance colours drive
+     *  translucency (Babylon `AbstractMesh.hasVertexAlpha`). When `true` and the mesh
+     *  carries either colour source, the Standard forward path treats it as
+     *  alpha-blended: source-over blending, depth-write disabled, and sorted into the
+     *  transparent phase. The geometry path applies the same behavior for vertex
+     *  colours. Defaults to `false`/opaque. Set this explicitly (or via a loader that
+     *  knows the vertex-colour accessor is VEC4); Lite never scans buffers to infer it. */
     hasVertexAlpha?: boolean;
     /** When `false`, the GPU picker skips this mesh.  Defaults to `true`
      *  (undefined behaves as pickable).  Mirrors BJS `AbstractMesh.isPickable`. */

@@ -1,5 +1,12 @@
 [
     {
+        "slug": "npe-sprite2d",
+        "name": "NPE on Sprite2D",
+        "description": "An authored Node Particle Editor graph rendered through Lite's scene-less pure-2D SpriteRenderer. The NPE simulation stays world-space while the native bridge maps its live particle columns to one allocation-free Sprite2D layer.",
+        "tags": ["2d", "effect", "showcase"],
+        "mobile": true
+    },
+    {
         "slug": "screen-space-effects",
         "name": "Screen-Space Effects",
         "description": "Interactive contact shadows and one-bounce screen-space global illumination running as composable Babylon Lite frame-graph tasks. Toggle each effect independently while the camera moves to inspect temporal reprojection, disocclusion handling, and colored light bleed.",
