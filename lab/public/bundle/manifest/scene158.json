@@ -5,15 +5,15 @@
   "runtimeChunks": [
     "scene158-create-skeleton-CBuOrujT.js",
     "scene158-generate-mipmaps-CbNpumLa.js",
-    "scene158-gltf-animation-D5_aYDcT.js",
-    "scene158-gltf-feature-animations-_6OMNyay.js",
-    "scene158-gltf-feature-registry-DJZiBzN2.js",
-    "scene158-gltf-feature-skeleton-jt9DmWLV.js",
+    "scene158-gltf-animation-CZeaB36O.js",
+    "scene158-gltf-feature-animations-DERxpLwh.js",
+    "scene158-gltf-feature-registry-CcpyDqW6.js",
+    "scene158-gltf-feature-skeleton-0SO4DYIO.js",
     "scene158-gltf-glb-parser-BF3JufGX.js",
     "scene158-multilight-wgsl-BAGnL9qr.js",
-    "scene158-pbr-renderable-A4d7kpUE.js",
-    "scene158-skeleton-fragment-YeyomMb-.js",
+    "scene158-pbr-renderable-DG7DdPoR.js",
+    "scene158-skeleton-fragment-NvMUHkam.js",
     "scene158.js"
   ],
-  "rawBytes": 97577
+  "rawBytes": 97581
 }

@@ -26,6 +26,13 @@ export interface PickingVertexProjection {
     readonly vertexBuffers: readonly GPUVertexBufferLayout[];
     readonly regularBGL: GPUBindGroupLayout;
     readonly thinBGL: GPUBindGroupLayout;
+    /** @internal Seam for the simple and detailed pick pipelines. Given their base bind group layouts
+     *  (scene, mesh, and a discard group when one exists), return the full list with room for this
+     *  projection's own group. Only the deformation projection supplies these; everything they imply
+     *  lives in that module so pipelines that never deform carry none of it. */
+    readonly _layouts?: (engine: EngineContext, base: readonly GPUBindGroupLayout[]) => GPUBindGroupLayout[];
+    /** @internal Seam counterpart to `_layouts`: the complete vertex buffer list, position included. */
+    readonly _buffers?: GPUVertexBufferLayout[];
 }
 
 export interface PickVertexDataBinding {

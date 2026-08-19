@@ -797,6 +797,16 @@ export function getSprite2DHandleIndex(handle: Sprite2DHandle): number;
 export function isSprite2DHandleAlive(handle: Sprite2DHandle): boolean;
 ```
 
+### Optional NPE → Sprite2D bridge integration
+
+`particle/particle-sprite-2d.ts` is an opt-in consumer of the Sprite2D foundation. It creates one centered `depth: "none"` layer per NPE particle system and renders those layers through a caller-owned `SpriteRenderer`. The particle module owns coordinate, sprite-sheet, blend, synchronization, registration, and disposal policy; the sprite module continues to own layer storage and rendering. The complete bridge contract lives in [42-node-particle.md](42-node-particle.md#104-sprite2d-bridge-creation-and-mapping).
+
+`particle/particle-sprite-2d-blend-modes.ts` is a separate particle-owned opt-in for exact NPE blend modes. It reuses ordinary `Sprite2DLayer`s and the existing custom-fragment API; mode 4 registers two equal-order layers consecutively so the renderer's stable sort preserves Multiply then Add. Generic Sprite2D does not interpret particle blend numbers, animate particle systems, or own multipass policy, and the baseline bridge does not import this advanced module. The exact API, shader formula, lifecycle, and tests live in [42-node-particle.md](42-node-particle.md#105-exact-sprite2d-blend-mode-bridge).
+
+A bridge exclusively owns its layer's complete live range. Each synchronization writes NPE columns directly into the existing 13-float pure-2D instance layout and saved-size buffer, then performs one count update and at most one dirty-range update. A bridge-owned layer cannot mix independent Index API sprites and cannot install the optional Handle API; both would violate full-range ownership. Render it through `SpriteRenderer`, not the depth-hosted scene path.
+
+The dependency remains one-way: both particle bridge modules import Sprite2D modules, and no sprite module imports either bridge. Although the package root exports both APIs, side-effect-free tree-shaking means static Sprite2D users that do not import them pay zero bridge bytes, while baseline bridge users pay no exact descriptor, custom-shader, or second-pass bytes.
+
 ### Blend modes — tree-shakable descriptors
 
 Blend mode is **not** a string union backed by a static lookup table. Each mode is an
@@ -823,6 +833,7 @@ export const spriteBlendOpaque: SpriteBlendDescriptor; // replacement color; no 
 export const spriteBlendAlpha: SpriteBlendDescriptor; // straight-alpha "over" (default)
 export const spriteBlendPremultiplied: SpriteBlendDescriptor; // premultiplied "over"
 export const spriteBlendAdditive: SpriteBlendDescriptor; // glows/sparks: src*alpha + dst
+export const spriteBlendOneOne: SpriteBlendDescriptor; // pure additive: src + dst
 export const spriteBlendMultiply: SpriteBlendDescriptor; // shadow/tint: result = src * dst
 
 // src/sprite/billboard-blend.ts — mirrors the above for world-space billboards.
@@ -837,9 +848,9 @@ export const billboardBlendCutout: BillboardBlendDescriptor; // alpha-test, dept
 export const billboardBlendAdditive: BillboardBlendDescriptor; // transparent, no depth write
 ```
 
-Sprites support `alpha`, `premultiplied`, `additive`, and `multiply`. Billboards support
-`alpha`, `premultiplied`, `cutout`, and `additive` — `multiply` is intentionally not offered for
-billboards. The shared `blend-descriptors.ts` holds the two common states
+Sprite2D supports `opaque`, `alpha`, `premultiplied`, `additive`, `one-one`, and `multiply` descriptors. `spriteBlendAdditive` uses color factors `src-alpha` / `one`, so source RGB is weighted by source alpha before it is added to the destination. `spriteBlendOneOne` uses `one` / `one` for both color and alpha, so source RGB is added without alpha weighting. Its color factors match Babylon.js `BLENDMODE_ONEONE` / `ALPHA_ONEONE`, but its generic Sprite2D alpha factors are `one` / `one`; exact particle OneOne instead uses `zero` / `one`. Every operation in both additive descriptors is `add`.
+
+Billboards support `alpha`, `premultiplied`, `cutout`, and `additive` publicly — `multiply` is intentionally not offered for billboards. The shared `blend-descriptors.ts` holds the two common states
 (`_ALPHA_BLEND_STATE`, `_PREMULTIPLIED_BLEND_STATE`) so alpha/premultiplied don't duplicate
 bytes.
 
@@ -2234,7 +2245,7 @@ Lazy / dynamic-imported:
 Depended on by:
 
 - `lab/lite/src/lite/scene50.ts` through `scene57.ts` — current 2D, HUD, depth-hosted, and billboard reference scenes. Custom-shader, UV-scroll, and additive/multiply blend scenes are `scene92.ts` through `scene98.ts`.
-- Future Particles module — should reuse `SpriteAtlas`, the vertexless-quad pattern, and packed-instance-buffer helpers.
+- `particle/particle-sprite-2d.ts` — the optional NPE bridge consumes `SpriteAtlas`, `Sprite2DLayer`, packed instance storage, blend descriptors, and `SpriteRenderer`; this dependency never points back from sprites to particles.
 
 NOT depended on:
 
@@ -2249,6 +2260,7 @@ NOT depended on:
 - `sprite-renderer.test.ts` — pure-2D renderer lifecycle, layer membership, pipeline cache, and depth-mode guardrails.
 - `sprite-depth-hosted-routing.test.ts` — `addDepthHostedSpriteLayer(scene, layer)` routing, depth-stencil pipeline formats, upload sizes, bind-group compatibility, and disposal.
 - `billboard-sprite.test.ts` — compact billboard instance layout, scene helper routing, transparent CPU sorting, cutout depth-write pipeline state, and axis normalization.
+- `particle-sprite-2d.test.ts` — bridge ownership, exact packed layout writes, coordinate and blend mapping, transactional renderer attachment, and disposal lifecycle.
 - `render-pass-task.test.ts` — transparent binding updates run before transparent-bucket sorting, so billboard `_worldCenter` changes affect same-frame draw order.
 - `rendering-context-registration.test.ts` — engine rendering-context registration, scene registration idempotence, disposal unregistering, and pre-registration frame-graph task recording.
 
@@ -2275,6 +2287,10 @@ Feature scenes added on the `engine/sprite-additive-customshader` branch (each w
 - **Scene 97-sprite-multiply-blend** — `spriteBlendMultiply`.
 - **Scene 98-billboard-additive-blend** — `billboardBlendAdditive`.
 
+Lite-native integration coverage:
+
+- **Scene 300-npe-sprite2d** — deterministic frozen NPE state rendered through the exclusive Sprite2D bridge and a pure-2D `SpriteRenderer`. Its Playwright specification checks bridge/binding state, live synchronization, stable frozen particle data, renderer membership, draw submission, and visible output. The scene is `skipParity` because Babylon.js has no equivalent pure-2D bridge path.
+
 ### Bundle Size Ceilings
 
 Bundle-size ratchets:
@@ -2299,7 +2315,7 @@ packages/babylon-lite/src/
       sprite-atlas.ts                            # SpriteAtlas, createGrid/loadSpriteAtlas, internal resolveSpriteFrame
 
     sprite-2d.ts                                 # createSprite2DLayer + Index API (no anchor code; foundation only)
-    sprite-blend.ts                              # spriteBlend* descriptor values (alpha/premultiplied/additive/multiply); tree-shakable
+    sprite-blend.ts                              # spriteBlend* descriptor values (alpha/premultiplied/additive/one-one/multiply); tree-shakable
     billboard-blend.ts                           # billboardBlend* descriptor values (alpha/premultiplied/cutout/additive); tree-shakable
     blend-descriptors.ts                         # Shared _ALPHA_BLEND_STATE / _PREMULTIPLIED_BLEND_STATE GPUBlendState constants
     sprite-fx-hook.ts                            # Lazy null-by-default custom-shader registry (SpriteFxHook/BillboardFxHook); keeps custom-shader bytes off the always-loaded path

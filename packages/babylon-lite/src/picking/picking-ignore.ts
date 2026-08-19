@@ -26,7 +26,7 @@ export function prepareIgnoredCandidates(
             continue;
         }
         candidates.push({ mesh, ignore: entry });
-        deformed ||= !!(mesh.morphTargets || mesh.skeleton) && !!mesh._cpuPositions;
+        deformed ||= !!(mesh.morphTargets || mesh.skeleton);
         advanced ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?._p || entry?.thinInstanceIndex !== undefined || !!entry?.thinInstanceRange;
     }
     return { candidates, deformed, advanced };

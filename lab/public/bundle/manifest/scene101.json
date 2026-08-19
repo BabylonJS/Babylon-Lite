@@ -1,10 +1,10 @@
 {
-  "rawKB": 52.1,
+  "rawKB": 52,
   "gzipKB": 21.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene101-standard-renderable-C_B8-9_m.js",
     "scene101.js"
   ],
-  "rawBytes": 53305
+  "rawBytes": 53275
 }

@@ -1,12 +1,12 @@
 {
-  "rawKB": 124.5,
-  "rawBytes": 127528,
-  "gzipKB": 52.5,
+  "rawKB": 126.7,
+  "rawBytes": 129716,
+  "gzipKB": 53.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene115-create-morph-targets-BxcR5t59.js",
     "scene115-create-skeleton-CaMQ92is.js",
-    "scene115-deformed-geometry-DBJD_w7K.js",
+    "scene115-deform-picking-projection-DOa28xiF.js",
     "scene115-generate-mipmaps-BR_Eutjw.js",
     "scene115-gltf-animation-SvTAoqpR.js",
     "scene115-gltf-color-normalize-4-WGzPL2.js",

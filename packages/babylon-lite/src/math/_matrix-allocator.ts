@@ -1,5 +1,5 @@
 import { F32 } from "../engine/typed-arrays.js";
-import type { Mat4 } from "./types.js";
+import type { Mat4, Mat4Storage } from "./types.js";
 
 /** @internal Matrix allocator with strict lazy init. Zero work happens at
  *  module load — `_allocate` starts undefined; the first call to
@@ -27,6 +27,14 @@ let _allocate: (() => Mat4) | undefined;
  *  `useHighPrecisionMatrix: true`. */
 export function allocateMat4(): Mat4 {
     return (_allocate ?? _defaultAllocate)();
+}
+
+/** Allocate a fresh zero-initialized 16-element `Mat4`, typed as `Mat4Storage` for
+ *  kernels/factories that write into it by index. Centralizes the
+ *  `allocateMat4() as unknown as Mat4Storage` cast repeated at every mat4-factory
+ *  call site. */
+export function allocateMat4Storage(): Mat4Storage {
+    return allocateMat4() as unknown as Mat4Storage;
 }
 
 /** @internal Install the HPM (F64) allocator. Called once by `createEngine`

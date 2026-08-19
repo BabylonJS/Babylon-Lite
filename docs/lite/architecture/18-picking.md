@@ -482,7 +482,8 @@ struct FsOut {
 - `../mesh/mesh.js` — `Mesh` interface (CPU geometry fields)
 - `../scene/scene.js` — `SceneContext` (for camera + mesh list)
 - `../mesh/thin-instance.js` — `ThinInstanceData` (matrix subarray)
-- `./deformed-geometry.js` — deformed positions and normals for morph/skinned detailed results
+- `./deform-picking-projection.js` — skeleton/morph vertex projection so morph/skinned picks deform on the GPU
+- `./deformed-vertex.js` — O(1) single-vertex/triangle CPU deformation for detailed face normals
 - `../material/pbr/fragments/vat-fragment.js` — material-owned VAT projection shared by visible and pick shaders
 
 ## Test Specification
@@ -502,7 +503,7 @@ the intended coverage.
 - **Async ID snapshot**: visibility/order mutation during staging-buffer mapping cannot remap the winning ID.
 - **Ignore identity**: full-mesh ignore consumes no ID; one thin-instance ignore writes the exact excluded index to the UBO.
 - **Packed thin extras**: nonzero matrix `w` payload lanes do not corrupt detailed world normals.
-- **Deformed detail**: morph/skinned picks interpolate deformed positions and deformed normals.
+- **Deformed detail**: morph/skinned picks deform in the pick vertex shader; detailed results interpolate the rest-space local position across the deformed triangle and derive the face normal from O(1) CPU-deformed triangle vertices.
 - **VAT projection**: regular/thin, texture/StorageBuffer, 4/8-bone variants reuse visible VAT
   deformation and bind group 3 without changing affine picker layouts.
 - **Ray unprojection**: `createPickingRay` at canvas center with identity VP should produce Z-forward ray.
@@ -528,7 +529,8 @@ the intended coverage.
 | `pick-contributor.ts`        | `PickContributor` seam — optional pickable entities (GS, billboards) register here |
 | `gs-picking-pipeline.ts`     | GS pick pipeline (lazy-imported by the GS pick contributor)                        |
 | `billboard-pick-pipeline.ts` | Billboard pick pipeline (lazy-imported by the billboard pick contributor)          |
-| `deformed-geometry.ts`       | Deformed CPU positions/normals matching the GPU pick geometry                      |
+| `deform-picking-projection.ts` | Lazy skeleton/morph pick projection; reuses the render path's skinning/morph WGSL          |
+| `deformed-vertex.ts`         | O(1) CPU deformation of one vertex/triangle (hotspots, detailed face normals)       |
 | `picking-pipeline.ts`        | Unified cached pipeline/layout owner for every mesh pick variant                   |
 | `picking-shader.ts`          | Unified WGSL generator for basic/detailed, regular/thin, data/adjust variants       |
 | `vat-picking-pipeline.ts`    | Lazy VAT projection layouts/bindings; reuses VAT material WGSL                     |
