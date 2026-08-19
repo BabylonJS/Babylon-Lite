@@ -1,7 +1,7 @@
 {
-  "rawKB": 61.8,
-  "rawBytes": 63322,
-  "gzipKB": 24.9,
+  "rawKB": 62,
+  "rawBytes": 63485,
+  "gzipKB": 25,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene94-billboard-renderable-bT3a3pPG.js",
