@@ -1,10 +1,10 @@
 {
-  "rawKB": 44.5,
-  "gzipKB": 17,
+  "rawKB": 44.6,
+  "gzipKB": 17.1,
   "ignoredRawKB": 682,
   "runtimeChunks": [
     "scene181-text-shaper-Bh28TKha.js",
     "scene181.js"
   ],
-  "rawBytes": 45527
+  "rawBytes": 45628
 }
