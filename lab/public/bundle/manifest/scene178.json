@@ -1,15 +1,15 @@
 {
-  "rawKB": 87.3,
-  "rawBytes": 89358,
+  "rawKB": 87.2,
+  "rawBytes": 89337,
   "gzipKB": 35.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene178-generate-mipmaps-DoiJnWl3.js",
     "scene178-gltf-ext-iridescence-WC9g8wwc.js",
-    "scene178-gltf-feature-registry-BnxjA8Xz.js",
+    "scene178-gltf-feature-registry-CLLqkpSd.js",
     "scene178-gltf-glb-parser-DLJHkRKO.js",
     "scene178-ibl-fragment-CeRrvT96.js",
-    "scene178-pbr-renderable-DhMBrs2T.js",
+    "scene178-pbr-renderable-DY_6qSty.js",
     "scene178-rgbd-decode-BjujuU4J.js",
     "scene178-scene-uniforms-FTYH6Ct0.js",
     "scene178.js"

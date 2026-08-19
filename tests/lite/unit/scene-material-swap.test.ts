@@ -46,6 +46,62 @@ describe("scene material swap", () => {
         expect(retirements).toHaveLength(1);
     });
 
+    it("keeps material-swap rebuild closures scoped to each scene", async () => {
+        type OwnedRenderable = Renderable & { engine: EngineContext };
+
+        const builder = (async (scene: SceneContext, meshes: Mesh[]) => {
+            const engine = scene.surface.engine;
+            const rebuildSingle = (_scene: SceneContext, mesh: Mesh): OwnedRenderable =>
+                ({
+                    mesh,
+                    order: 100,
+                    isTransparent: false,
+                    engine,
+                }) as OwnedRenderable;
+            builder._rebuildSingle = rebuildSingle;
+            return {
+                renderables: meshes.map((mesh) => rebuildSingle(scene, mesh)),
+                rebuildSingle,
+            };
+        }) as MeshGroupBuilder;
+
+        const createBuiltScene = async (): Promise<{ scene: SceneContext; mesh: Mesh; engine: EngineContext }> => {
+            const engine = { _retirements: [] } as unknown as EngineContext;
+            const material = { _buildGroup: builder } as Material;
+            const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
+            const scene = {
+                surface: { engine },
+                meshes: [],
+                lights: [],
+                _groups: new Map(),
+                _deferredBuilders: [],
+                _renderables: [],
+                _uniformUpdaters: [],
+                _disposables: [],
+                _meshDisposables: new Map(),
+                _meshAuxDisposables: new Map(),
+                _materialSwapQueue: [],
+                _renderableVersion: 0,
+                _materialEpoch: 0,
+                _built: false,
+            } as unknown as SceneContext;
+            addToScene(scene, mesh);
+            await buildScene(scene);
+            return { scene, mesh, engine };
+        };
+
+        const first = await createBuiltScene();
+        const second = await createBuiltScene();
+
+        first.scene._materialSwapQueue.push(first.mesh);
+        second.scene._materialSwapQueue.push(second.mesh);
+        processMaterialSwaps(first.scene);
+        processMaterialSwaps(second.scene);
+
+        expect((first.scene._renderables[0] as OwnedRenderable).engine).toBe(first.engine);
+        expect((second.scene._renderables[0] as OwnedRenderable).engine).toBe(second.engine);
+    });
+
     it("hands a queued mesh whose material group was never built to the runtime build path", async () => {
         const disposeOld = vi.fn();
         const mesh = {

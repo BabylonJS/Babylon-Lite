@@ -1,5 +1,6 @@
 {
-  "rawKB": 59.8,
+  "rawKB": 59.7,
+  "rawBytes": 61170,
   "gzipKB": 27.2,
   "ignoredRawKB": 8.1,
   "runtimeChunks": [
@@ -22,6 +23,5 @@
     "scene79-vertex-output-C7G5u6Y0.js",
     "scene79-wave-block-DM-HRF6R.js",
     "scene79.js"
-  ],
-  "rawBytes": 61219
+  ]
 }

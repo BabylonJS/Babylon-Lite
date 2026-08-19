@@ -103,7 +103,7 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
             }
             const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
             const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
-            scene._renderables.push(buildHdrSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
+            scene._renderables.push(await buildHdrSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
         }
         if (!useHdr || !skipGround) {
             const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];

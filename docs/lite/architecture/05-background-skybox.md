@@ -671,8 +671,8 @@ if fogMode > 0:
 | `shaders/skybox.vertex.wgsl`                | ~38 lines  | Local position passthrough for cubemap lookup                                                                             |
 | `shaders/skybox.fragment.wgsl`              | ~91 lines  | Outputs pre-computed clearColor from UBO                                                                                  |
 | `shaders/skybox-dds.vertex.wgsl`            | ~38 lines  | DDS skybox vertex shader (position → local direction)                                                                     |
-| `shaders/skybox-dds.fragment.wgsl`          | ~91 lines  | DDS cubemap sample + image processing                                                                                     |
-| `shaders/skybox-hdr.fragment.wgsl`          | ~91 lines  | HDR cubemap sample + image processing                                                                                     |
+| `shaders/skybox-dds.fragment.wgsl`          | ~53 lines  | DDS cubemap sample + image processing with environment direction and LOD hooks                                            |
+| `shaders/skybox-hdr.fragment.wgsl`          | ~44 lines  | HDR cubemap sample + image processing with environment direction and LOD hooks                                            |
 | `shaders/background.vertex.wgsl`            | ~48 lines  | World transform, normal, UV passthrough for ground                                                                        |
 | `shaders/background.ground.fragment.wgsl`   | ~104 lines | Diffuse texture sampling, opacity Fresnel, premultiplied alpha, image processing                                          |
 | `shaders/skybox-cubemap.vertex.wgsl`        | ~38 lines  | Object-space position for cube lookup + fog distance                                                                      |

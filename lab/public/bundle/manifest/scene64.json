@@ -1,5 +1,6 @@
 {
-  "rawKB": 55.8,
+  "rawKB": 55.7,
+  "rawBytes": 57046,
   "gzipKB": 23.3,
   "ignoredRawKB": 4.3,
   "runtimeChunks": [
@@ -12,6 +13,5 @@
     "scene64-transform-block-CqocCcmg.js",
     "scene64-vertex-output-C7G5u6Y0.js",
     "scene64.js"
-  ],
-  "rawBytes": 57097
+  ]
 }
