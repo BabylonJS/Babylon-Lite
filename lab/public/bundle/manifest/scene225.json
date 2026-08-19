@@ -1,10 +1,10 @@
 {
   "rawKB": 56.7,
-  "gzipKB": 23.2,
+  "gzipKB": 23.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene225-standard-renderable-VpE0Dovr.js",
+    "scene225-standard-renderable-B0_PdPOC.js",
     "scene225.js"
   ],
-  "rawBytes": 58094
+  "rawBytes": 58076
 }
