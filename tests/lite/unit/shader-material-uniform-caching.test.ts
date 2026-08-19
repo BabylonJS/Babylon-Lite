@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type * as ShaderRenderableModule from "../../../packages/babylon-lite/src/material/shader/shader-renderable.js";
 import type { ShaderCustomUniformWriter, ShaderSystemUniformWriter } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
 
 const installed = vi.hoisted(() => ({
@@ -11,7 +12,7 @@ const installed = vi.hoisted(() => ({
 // rebasing shared with the default writer), and a mock that dropped it would
 // leave the FO test below asserting against a stub instead of the shipping code.
 vi.mock("../../../packages/babylon-lite/src/material/shader/shader-renderable.js", async (importOriginal) => ({
-    ...(await importOriginal<typeof import("../../../packages/babylon-lite/src/material/shader/shader-renderable.js")>()),
+    ...(await importOriginal<typeof ShaderRenderableModule>()),
     _installShaderUniformWriters(system: ShaderSystemUniformWriter, custom: ShaderCustomUniformWriter) {
         installed.system = system;
         installed.custom = custom;

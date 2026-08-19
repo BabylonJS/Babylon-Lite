@@ -4,10 +4,9 @@ import { billboardBlendAdditive, billboardBlendAlpha, billboardBlendOneOne } fro
 import type { BillboardBlendMode, FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 import type { ParticleSystem } from "./particle-system.js";
 
-const BLENDMODE_ONEONE = 0; // Babylon.js BLENDMODE_ONEONE (pure additive, src·1 + dst)
-const BLENDMODE_STANDARD = 1; // Babylon.js BLENDMODE_STANDARD (alpha blend)
+const BLENDMODE_ONEONE = 0;
+const BLENDMODE_STANDARD = 1;
 
-/** Map a Babylon.js particle-system blend mode to a billboard blend descriptor. */
 function blendForMode(mode: number): BillboardBlendMode {
     if (mode === BLENDMODE_STANDARD) {
         return billboardBlendAlpha;
@@ -19,7 +18,7 @@ function blendForMode(mode: number): BillboardBlendMode {
 }
 
 /**
- * Create a camera-facing billboard system that renders a particle system's live columns using its texture.
+ * Convert a particle system into its generic camera-facing billboard rendering representation.
  * A graph without an animation sheet uses the texture as a single-frame atlas.
  */
 export function createParticleBillboard(system: ParticleSystem): FacingBillboardSpriteSystem {

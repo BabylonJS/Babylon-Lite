@@ -1,8 +1,12 @@
 /** WGSL shaders for the basic position-only GPU pick path. */
 
+import type { PickingVertexProjectionShader } from "./picking-advanced-shader.js";
+
 export interface PickingShaderOptions {
     readonly discardWgsl?: string | null;
     readonly storage?: readonly { readonly name: string; readonly type: string }[];
+    /** @internal Optional lazily loaded vertex projection composed into this variant. */
+    readonly _vertexProjection?: PickingVertexProjectionShader | null;
 }
 
 const PICK_INPUT = /* wgsl */ `
@@ -56,6 +60,7 @@ return FsOut(vec4f(r, g, b, 1.0), input.p.z);
 `;
 
 export function pickingShaderSource(opts?: PickingShaderOptions): string {
+    const projection = opts?._vertexProjection ?? null;
     return /* wgsl */ `
 ${SCENE}
 struct MeshUniforms {
@@ -66,10 +71,11 @@ pickId: u32,
 ${PICK_INPUT}
 ${storageDecls(opts)}
 ${opts?.discardWgsl ?? DEFAULT_DISCARD}
+${projection?.regularDeclarations ?? ""}
 ${FRAGMENT}
-@vertex fn vs(@location(0) position: vec3f) -> VsOut {
+@vertex fn vs(@location(0) position: vec3f${projection?.regularInputs ?? ""}) -> VsOut {
 var out: VsOut;
-let wp = (mesh.world * vec4f(position, 1.0)).xyz;
+${projection ? `${projection.regularBody}\nlet wp = projectedWorld;` : "let wp = (mesh.world * vec4f(position, 1.0)).xyz;"}
 out.p = scene.viewProjection * vec4f(wp, 1.0);
 out.pickId = mesh.pickId;
 out.worldPos = wp;
