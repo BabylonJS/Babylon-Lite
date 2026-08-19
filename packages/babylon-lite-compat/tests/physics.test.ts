@@ -3,7 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import { getPhysicsTimestepMs } from "babylon-lite";
 import type { SceneContext } from "babylon-lite";
 
-import { HavokPlugin, PhysicsAggregate, PhysicsEngine, PhysicsShape, PhysicsShapeType, PhysicsMotionType, PhysicsPrestepType, PhysicsConstraintType } from "../src/physics/physics";
+import {
+    HavokPlugin,
+    PhysicsAggregate,
+    PhysicsBody,
+    PhysicsEngine,
+    PhysicsShape,
+    PhysicsShapeType,
+    PhysicsMotionType,
+    PhysicsPrestepType,
+    PhysicsConstraintType,
+} from "../src/physics/physics";
 import type { TransformNode } from "../src/meshes/meshes";
 import type { Scene } from "../src/scene/scene";
 import { LiteCompatError } from "../src/error";
@@ -159,6 +169,32 @@ describe("PhysicsEngine", () => {
         expect(() => engine.dispose()).not.toThrow();
     });
 
+    describe("PhysicsBody", () => {
+        it("translates motion and prestep enums at the Lite boundary", () => {
+            const plugin = new HavokPlugin(true, makeAggregateMockHknp());
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+            const node = {
+                _node: { position: { x: 0, y: 0, z: 0 }, rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } },
+            } as unknown as TransformNode;
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
+
+            expect(body.getMotionType()).toBe(PhysicsMotionType.STATIC);
+            body.setMotionType(PhysicsMotionType.ANIMATED);
+            expect(body.getMotionType()).toBe(PhysicsMotionType.ANIMATED);
+            body.setMotionType(PhysicsMotionType.DYNAMIC);
+            expect(body.getMotionType()).toBe(PhysicsMotionType.DYNAMIC);
+
+            body.setPrestepType(PhysicsPrestepType.DISABLED);
+            expect(body.getPrestepType()).toBe(PhysicsPrestepType.DISABLED);
+            body.setPrestepType(PhysicsPrestepType.TELEPORT);
+            expect(body.getPrestepType()).toBe(PhysicsPrestepType.TELEPORT);
+            body.setPrestepType(PhysicsPrestepType.ACTION);
+            expect(body.getPrestepType()).toBe(PhysicsPrestepType.ACTION);
+        });
+    });
+
     describe("PhysicsAggregate", () => {
         it("forwards aggregate construction and disposal to Babylon Lite", () => {
             const plugin = new HavokPlugin(true, makeAggregateMockHknp());
@@ -189,7 +225,7 @@ describe("PhysicsEngine", () => {
             const hknp = makeAggregateMockHknp();
             const plugin = new HavokPlugin(true, hknp);
             plugin._attachToLiteScene(makeScene());
-            const physicsEngine = new PhysicsEngine(plugin);
+            const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
             const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
             const node = {
                 _node: { position: { x: 0, y: 0, z: 0 }, rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } },

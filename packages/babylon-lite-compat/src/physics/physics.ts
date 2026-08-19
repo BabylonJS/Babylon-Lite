@@ -144,11 +144,35 @@ function requirePhysicsWorld(scene: Scene | undefined): PhysicsWorld {
 }
 
 function liteShapeType(type: PhysicsShapeType): LitePhysicsShapeType {
-    return type as number as LitePhysicsShapeType;
+    switch (type) {
+        case PhysicsShapeType.SPHERE:
+            return LitePhysicsShapeType.SPHERE;
+        case PhysicsShapeType.CAPSULE:
+            return LitePhysicsShapeType.CAPSULE;
+        case PhysicsShapeType.CYLINDER:
+            return LitePhysicsShapeType.CYLINDER;
+        case PhysicsShapeType.BOX:
+            return LitePhysicsShapeType.BOX;
+        case PhysicsShapeType.CONVEX_HULL:
+            return LitePhysicsShapeType.CONVEX_HULL;
+        case PhysicsShapeType.CONTAINER:
+            return LitePhysicsShapeType.CONTAINER;
+        case PhysicsShapeType.MESH:
+            return LitePhysicsShapeType.MESH;
+        case PhysicsShapeType.HEIGHTFIELD:
+            return LitePhysicsShapeType.HEIGHTFIELD;
+    }
 }
 
 function liteMotionType(type: PhysicsMotionType): LitePhysicsMotionType {
-    return type as number as LitePhysicsMotionType;
+    switch (type) {
+        case PhysicsMotionType.STATIC:
+            return LitePhysicsMotionType.STATIC;
+        case PhysicsMotionType.ANIMATED:
+            return LitePhysicsMotionType.ANIMATED;
+        case PhysicsMotionType.DYNAMIC:
+            return LitePhysicsMotionType.DYNAMIC;
+    }
 }
 
 function litePrestepType(type: PhysicsPrestepType): LitePhysicsPrestepType {
@@ -210,7 +234,24 @@ export class PhysicsShape {
     }
 
     public get type(): PhysicsShapeType {
-        return this._lite._type as number as PhysicsShapeType;
+        switch (this._lite._type) {
+            case LitePhysicsShapeType.SPHERE:
+                return PhysicsShapeType.SPHERE;
+            case LitePhysicsShapeType.CAPSULE:
+                return PhysicsShapeType.CAPSULE;
+            case LitePhysicsShapeType.CYLINDER:
+                return PhysicsShapeType.CYLINDER;
+            case LitePhysicsShapeType.BOX:
+                return PhysicsShapeType.BOX;
+            case LitePhysicsShapeType.CONVEX_HULL:
+                return PhysicsShapeType.CONVEX_HULL;
+            case LitePhysicsShapeType.CONTAINER:
+                return PhysicsShapeType.CONTAINER;
+            case LitePhysicsShapeType.MESH:
+                return PhysicsShapeType.MESH;
+            case LitePhysicsShapeType.HEIGHTFIELD:
+                return PhysicsShapeType.HEIGHTFIELD;
+        }
     }
 
     public set filterMembershipMask(value: number) {
@@ -301,7 +342,14 @@ export class PhysicsBody {
     }
 
     public get motionType(): PhysicsMotionType {
-        return this._lite.motionType as number as PhysicsMotionType;
+        switch (this._lite.motionType) {
+            case LitePhysicsMotionType.STATIC:
+                return PhysicsMotionType.STATIC;
+            case LitePhysicsMotionType.ANIMATED:
+                return PhysicsMotionType.ANIMATED;
+            case LitePhysicsMotionType.DYNAMIC:
+                return PhysicsMotionType.DYNAMIC;
+        }
     }
 
     public set shape(value: PhysicsShape | null) {
@@ -325,7 +373,14 @@ export class PhysicsBody {
         setPhysicsBodyPrestepType(this._lite, litePrestepType(value));
     }
     public getPrestepType(): PhysicsPrestepType {
-        return this._lite._prestepType as number as PhysicsPrestepType;
+        switch (this._lite._prestepType) {
+            case LitePhysicsPrestepType.DISABLED:
+                return PhysicsPrestepType.DISABLED;
+            case LitePhysicsPrestepType.TELEPORT:
+                return PhysicsPrestepType.TELEPORT;
+            case LitePhysicsPrestepType.ACTION:
+                return PhysicsPrestepType.ACTION;
+        }
     }
     public setMassProperties(properties: PhysicsMassProperties): void {
         setPhysicsBodyMassProperties(this._world, this._lite, properties);
