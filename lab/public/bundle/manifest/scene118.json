@@ -1,14 +1,14 @@
 {
   "rawKB": 75.4,
-  "gzipKB": 31,
+  "gzipKB": 31.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene118-billboard-pick-pipeline-BcUt1z4x.js",
-    "scene118-billboard-renderable-CatgVkS8.js",
-    "scene118-picking-pipeline-BlLMmIKx.js",
+    "scene118-billboard-renderable-CQ3k2Wxj.js",
+    "scene118-picking-pipeline-D24_h2RV.js",
     "scene118-scene-uniforms-FTYH6Ct0.js",
-    "scene118-standard-renderable-OTml1QUQ.js",
+    "scene118-standard-renderable-D5Dwe85C.js",
     "scene118.js"
   ],
-  "rawBytes": 77241
+  "rawBytes": 77233
 }

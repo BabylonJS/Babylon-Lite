@@ -107,6 +107,23 @@ export function getLoaderTmpLocal(): Mat4 {
 
 Lazy-init via `allocateMat4()` means the scratch picks up whatever precision the process-global allocator was installed with. Safe to share across concurrent `loadGltf` calls because all parser paths that touch scratch are synchronous between scratch reads/writes (only `await`s are around fetch and image decode, neither touches matrix scratch). JS single-threadedness guarantees no other parse can interleave through a scratch use-site mid-computation.
 
+## Allocation boundary inventory
+
+Every `Mat4` the engine vends must come from `allocateMat4()`. A direct `new F32(16)` pins that matrix to F32 however the engine was configured, and nothing downstream can recover the lost precision. The allocating sites:
+
+- `math/mat4-compose.ts`, `mat4-from-quat.ts`, `mat4-identity.ts`, `mat4-invert.ts`, `mat4-look-at-lh.ts`, `mat4-multiply.ts`, `mat4-perspective-lh.ts`, `mat4-scale.ts` — the eight factories that return a fresh matrix
+- `scene/world-matrix-state.ts` — each node's `_ownedWorld`
+- `camera/arc-rotate.ts`, `camera/free-camera.ts`, `camera/geospatial-camera.ts` — `_localMat`, `_viewCache`, `_projCache`, `_vpCache`
+- `light/directional-light.ts`, `light/hemispheric.ts`, `light/point-light.ts`, `light/spot-light.ts` — each light's `_localMatrix`
+- `loader-gltf/_loader-scratch.ts` — the three per-load scratch matrices
+- `particle/node/blocks/update-flow-map-block.ts` — the flow-map matrix
+
+`_matrix-allocator.ts` also exports `allocateMat4Storage()`, a thin wrapper that returns `allocateMat4()` already cast to `Mat4Storage` (the index-addressable view kernels write through) — like `allocateMat4()`, it is internal-only, not re-exported from the package entry point. It centralizes the `allocateMat4() as unknown as Mat4Storage` cast, but **deliberately only at `mat4-look-at-lh.ts`**, the one call site with no existing traffic (no scene imports `mat4LookAtLH`, so the wrapper tree-shakes away with the factory itself). The `as unknown as Mat4Storage` cast is erased at compile time and costs nothing, but a real wrapper _function_ is not: routing the other seven already-hot factories through it was measured to add ~35-39 raw bytes to every scene that composes a transform (i.e. nearly all of them) — the minifier keeps the indirection as a real call rather than inlining it, so the wrapper's own definition becomes a permanent per-scene tax. `scene7` had only 141-176 B of ceiling headroom at measurement time, so that tax alone risked tripping it. The seven pre-existing sites therefore keep the direct `allocateMat4() as unknown as Mat4Storage` cast; only the new eighth site (already dead code in every current scene) uses the helper.
+
+The `*Into` / `*ToRef` kernels (`mat4ComposeInto`, `mat4MultiplyInto`, `mat4PerspectiveLHToRef`, `mat4LookAtLHToRef`, …) do not allocate — they write into storage the caller already owns and inherit its precision. Only the returning factories choose storage, which is why they are the boundary.
+
+**Root nodes make the factories load-bearing.** `createWorldMatrixState` allocates `_ownedWorld` through the allocator, but uses it only when the node has a parent. For a root, `getWorldMatrix()` returns the _local_ matrix unchanged (`_cachedWorld = local`), and that matrix came from `composeTrsLocalMatrix` → `mat4Compose` / `mat4Identity`. A factory that bypasses the allocator therefore costs every root-level object its F64 world transform under HPM — exactly the case HPM exists for — while parented nodes look correct and mask the fault.
+
 ## GPU upload boundary inventory
 
 Every mat4 → GPU buffer write goes through `packMat4IntoF32`. The exhaustive list:
@@ -124,7 +141,7 @@ The 6 mesh-world callsites pass `_foOffset` as the 5th argument (the scene's `_f
 
 ## Validation
 
-- Unit: `tests/unit/engine-matrix-policy.test.ts` covers `allocateMat4()` returning F32 by default, F64 after `_setHpmAllocator`, fresh instances per call, and `_resetMatrixAllocatorForTests` reverting.
+- Unit: `tests/unit/engine-matrix-policy.test.ts` covers `allocateMat4()` returning F32 by default, F64 after `_setHpmAllocator`, fresh instances per call, and `_resetMatrixAllocatorForTests` reverting. It also holds the allocation-boundary guard: each of the eight factories is asserted to honour the installed allocator (named individually, so a regression reports which one), plus a behavioural pair showing a root node keeps sub-metre precision at 4.6e6 under HPM and loses it under the F32 default.
 - Unit: `tests/unit/pack-mat4-into-f32.test.ts` covers F32→F32 bit-identity, F64→F32 down-cast, source/dst offsets, and the LWR offset-subtraction path.
 - Bundle: `tests/bundle-content-no-f64.test.ts` enforces F64 tree-shaking from HPM-off bundles (string-tag absence + manifest disjointness).
 - Bundle: scene-config ceilings — bundle-size tests confirm HPM-off scenes stay within their fixed ceilings; the F64 chunk only ships when reachable.
