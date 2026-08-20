@@ -50,6 +50,9 @@ export interface Task {
     /** @internal Optional scene-mutation hook for tasks that retain per-mesh bindings. */
     _removeMesh?(mesh: object): void;
 
+    /** @internal Optional change-detection key for tasks that cache scene-UBO writes. */
+    _sceneUboCacheKey?: unknown[];
+
     /** Optional fast path for built-in tasks that execute without recorded Pass objects. */
     execute?(): number;
 

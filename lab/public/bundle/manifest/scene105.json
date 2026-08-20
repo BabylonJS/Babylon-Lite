@@ -1,14 +1,14 @@
 {
   "rawKB": 100.9,
-  "rawBytes": 103340,
+  "rawBytes": 103284,
   "gzipKB": 39.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene105-generate-mipmaps-CeVWsdCc.js",
-    "scene105-gltf-feature-registry-DYWR-R6L.js",
+    "scene105-gltf-feature-registry-DWf7_bsX.js",
     "scene105-gltf-glb-parser-BQ95_5yF.js",
-    "scene105-mesh-features-BGKC9iuS.js",
-    "scene105-standard-renderable-Boy9AOAa.js",
+    "scene105-mesh-features-CimpHViS.js",
+    "scene105-standard-renderable-DWo9PGtN.js",
     "scene105.js"
   ]
 }

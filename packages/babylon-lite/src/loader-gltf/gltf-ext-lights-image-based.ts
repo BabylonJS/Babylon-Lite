@@ -86,7 +86,7 @@ function irradianceCoefficientsToPolynomial(coeffs: number[][], intensity: numbe
 
 /** Extract the Y-axis rotation angle (radians) from an image-based-light
  *  quaternion. The extension's rotations are pure Y-yaw; Lite drives environment
- *  yaw through `scene.envRotationY`. Babylon inverts the rotation for its
+ *  yaw through the scene's internal environment state. Babylon inverts the rotation for its
  *  left-handed target scene, so we negate to match its sampling direction. */
 function envYawFromQuaternion(q: [number, number, number, number]): number {
     return -2 * Math.atan2(q[1], q[3]);
@@ -148,7 +148,7 @@ const feature: GltfFeature = {
         const _sceneSetup = (scene: SceneContext): void => {
             scene._envTextures = textures;
             if (envRotationY) {
-                scene.envRotationY = envRotationY;
+                scene._environmentRotation = envRotationY;
             }
             registerEnvSceneUniforms(scene);
 

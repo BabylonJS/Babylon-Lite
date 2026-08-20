@@ -199,8 +199,8 @@ describe("orthographic projection", () => {
  * Regression coverage for the steady-state upload path.
  *
  * Per-frame consumers do not call `getProjectionMatrix` unconditionally — the forward pass's
- * scene UBO writer gates on `[camera, fog, cameraChangeKey, aspect, envRotationY, exposure,
- * contrast, envTextures]` and returns early when they all match the previous frame. The
+ * scene UBO writer gates on `[camera, fog, cameraChangeKey, aspect, exposure, contrast,
+ * envTextures]` and returns early when they all match the previous frame. The
  * camera transform does not move when a view volume changes, so clearing `_projVer` /
  * `_vpVer` alone would leave the GPU rendering the stale view-projection forever.
  *
@@ -215,7 +215,7 @@ describe("orthographic projection — steady-state scene UBO uploads", () => {
         const scene = createSceneContext(engine) as SceneContext;
         const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 30, { x: 0, y: 0, z: 0 });
         scene.camera = camera;
-        const task = scene._frameGraph._tasks.find((t): t is RenderTask => "_su" in t)!;
+        const task = scene._frameGraph._tasks.find((t): t is RenderTask => t._sceneUboCacheKey !== undefined)!;
         writeCount.n = 0;
         const write = () => _writePassSceneUBO(task, engine, scene, camera);
         return { camera, write, writeCount };

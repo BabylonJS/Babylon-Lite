@@ -1,13 +1,13 @@
 {
   "rawKB": 73.2,
+  "rawBytes": 74920,
   "gzipKB": 30.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene179-generate-mipmaps-1nfSNNVz.js",
     "scene179-gltf-json-asset-By-OtWoG.js",
-    "scene179-pbr-renderable-DtFj6-lG.js",
+    "scene179-pbr-renderable-D-RVx5e_.js",
     "scene179-set-alpha-cutoff-Bhag-FfM.js",
     "scene179.js"
-  ],
-  "rawBytes": 74966
+  ]
 }

@@ -1,5 +1,6 @@
 {
-  "rawKB": 76.8,
+  "rawKB": 76.7,
+  "rawBytes": 78583,
   "gzipKB": 32.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,11 +9,10 @@
     "scene259-gltf-json-asset-IkMxcnRa.js",
     "scene259-gltf-normals-DYhLwXNX.js",
     "scene259-ibl-fragment-CeRrvT96.js",
-    "scene259-pbr-renderable-BTS5YEuc.js",
+    "scene259-pbr-renderable-pvWxN39c.js",
     "scene259-rgbd-decode-_aP05cR0.js",
     "scene259-scene-uniforms-FTYH6Ct0.js",
     "scene259-set-emissive-5Dy2e39T.js",
     "scene259.js"
-  ],
-  "rawBytes": 78603
+  ]
 }
