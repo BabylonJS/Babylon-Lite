@@ -1,7 +1,7 @@
 {
   "rawKB": 89.4,
-  "rawBytes": 91499,
-  "gzipKB": 36.2,
+  "rawBytes": 91561,
+  "gzipKB": 36.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene26-generate-mipmaps-z7-ZrEcW.js",
