@@ -2558,6 +2558,16 @@
         "skipPerf": true
     },
     {
+        "id": 286,
+        "slug": "scene286-shadermaterial-interleaved",
+        "name": "Scene 286 — ShaderMaterial on Interleaved glTF",
+        "maxMad": 0.01,
+        "maxRawKB": 63.53,
+        "description": "glTF Buffer_Interleaved_03 drawn by a ShaderMaterial that reads POSITION (offset 0) and COLOR_0 (offset 12) out of one byteStride-28 bufferView. The ShaderMaterial path previously ignored MeshGPU._vbLayout and fetched both at their canonical tight strides, so the quad collapsed; the colour gradient fails the moment per-attribute offsets are ignored.",
+        "tags": ["gltf", "interleaved", "shader"],
+        "skipPerf": true
+    },
+    {
         "id": 300,
         "slug": "scene300-npe-sprite2d",
         "name": "Scene 300 — NPE on Sprite2D",
