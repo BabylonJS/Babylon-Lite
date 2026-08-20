@@ -180,11 +180,13 @@ describe("PBR emissive UV selection", () => {
         return composePbr(PBR_HAS_EMISSIVE | PBR_HAS_EMISSIVE_COLOR, features2, meshFeatures, 0, 0, "", "", undefined, "", uv2Mask)._fragmentWGSL;
     }
 
-    it.each([
+    const cases: Array<[label: string, features2: number, meshFeatures: number, uv2Mask: number, expected: string]> = [
         ["through its KHR_texture_transform", PBR2_HAS_UV_TRANSFORM, 0, 0, "emissiveUV"],
         ["at UV1 when its texCoord is 1", PBR2_HAS_UV2, MSH_HAS_UV2, 8, "input.uv2"],
         ["at the raw UV when it carries neither", 0, 0, 0, "input.uv"],
-    ])("samples the emissive texture %s", async (_name, features2, meshFeatures, uv2Mask, expected) => {
+    ];
+
+    it.each(cases)("samples the emissive texture %s", async (_label, features2, meshFeatures, uv2Mask, expected) => {
         const wgsl = await composeEmissive(features2, meshFeatures, uv2Mask);
         expect(wgsl).toContain(`textureSample(emissiveTexture,emissiveSampler,${expected})`);
     });

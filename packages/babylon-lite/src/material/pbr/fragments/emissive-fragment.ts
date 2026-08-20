@@ -66,7 +66,7 @@ export const pbrExt: PbrExt = {
         // contract documented in gltf-pbr-builder-ext.ts); ctx._uv2Mask is already
         // zeroed when uv2 isn't present. Derived here rather than threaded through
         // the shared composer so non-emissive scenes carry none of it.
-        const emissiveUV = ctx._features2 & PBR2_HAS_UV_TRANSFORM ? "emissiveUV" : ((ctx._uv2Mask ?? 0) & (1 << 3) ? "input.uv2" : "input.uv");
+        const emissiveUV = ctx._features2 & PBR2_HAS_UV_TRANSFORM ? "emissiveUV" : (ctx._uv2Mask ?? 0) & (1 << 3) ? "input.uv2" : "input.uv";
         return createEmissiveColorFragment((ctx._features & PBR_HAS_EMISSIVE) !== 0, emissiveUV);
     },
     writeUbo: writeEmissiveUBO as PbrExt["writeUbo"],
