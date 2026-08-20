@@ -228,21 +228,25 @@ fn postProcessVertex(@builtin(vertex_index) vertexIndex: u32) -> PostProcessVert
     let p = positions[vertexIndex];
     var out: PostProcessVertexOutput;
     out.position = vec4f(p, 0.0, 1.0);
-    out.uv = p * 0.5 + vec2f(0.5, 0.5);
+    // V is flipped: clip space is +Y up, texture space is +Y down.
+    out.uv = vec2f(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
     return out;
 }
 
 @group(0) @binding(0) var sourceSampler: sampler;
 @group(0) @binding(1) var sourceTextureSampler: texture_2d<f32>;
 
-fn readPostProcessSource(position: vec2f) -> vec4f {
-    let dims = vec2f(textureDimensions(sourceTextureSampler));
-    let uv = (floor(position) + vec2f(0.5)) / dims;
-    return textureSampleLevel(sourceTextureSampler, sourceSampler, clamp(uv, vec2f(0.0), vec2f(1.0)), 0.0);
+fn samplePostProcessSource(uv: vec2f) -> vec4f {
+    return textureSample(sourceTextureSampler, sourceSampler, uv);
 }
 
-fn samplePostProcessSource(uv: vec2f) -> vec4f {
-    return textureSampleLevel(sourceTextureSampler, sourceSampler, clamp(uv, vec2f(0.0), vec2f(1.0)), 0.0);
+// Texel-snapped read. Takes a NORMALIZED uv, like samplePostProcessSource —
+// not a pixel coordinate — and clamps to the texel centres so a snapped fetch
+// cannot bleed outside the source.
+fn readPostProcessSource(uv: vec2f) -> vec4f {
+    let dims = vec2f(textureDimensions(sourceTextureSampler));
+    let p = clamp(floor(uv * dims) + vec2f(0.5), vec2f(0.5), dims - vec2f(0.5));
+    return textureSampleLevel(sourceTextureSampler, sourceSampler, p / dims, 0);
 }
 
 // user fragmentWGSL must define:
