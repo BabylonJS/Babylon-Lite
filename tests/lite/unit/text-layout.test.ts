@@ -168,7 +168,7 @@ function layoutTextReference(font: Font, text: string, fontSizePx: number, optio
         }
     }
 
-    return { glyphs: placed, pixelsPerFontUnit: scale, width: totalWidth, height: totalHeight };
+    return { _glyphs: placed, _pixelsPerFontUnit: scale, _width: totalWidth, _height: totalHeight };
 }
 
 // ---------------------------------------------------------------------------------------
@@ -252,13 +252,13 @@ describe("layoutText shaping-buffer reuse", () => {
 
                     // Geometry-independent invariants hold in every case, including the ones
                     // where the `isSpace` fix legitimately moves a wrap point.
-                    expect(actual.pixelsPerFontUnit).toBe(expected.pixelsPerFontUnit);
-                    expect(actual.glyphs.map((g) => g.glyphId)).toEqual(expected.glyphs.map((g) => g.glyphId));
+                    expect(actual._pixelsPerFontUnit).toBe(expected._pixelsPerFontUnit);
+                    expect(actual._glyphs.map((g) => g.glyphId)).toEqual(expected._glyphs.map((g) => g.glyphId));
 
                     if (mustMatch) {
-                        expect(actual.glyphs).toEqual(expected.glyphs);
-                        expect(actual.width).toBe(expected.width);
-                        expect(actual.height).toBe(expected.height);
+                        expect(actual._glyphs).toEqual(expected._glyphs);
+                        expect(actual._width).toBe(expected._width);
+                        expect(actual._height).toBe(expected._height);
                     }
                 });
             }
@@ -294,7 +294,7 @@ describe("layoutText scratch-buffer isolation", () => {
     it("does not retain glyphs from a longer preceding layout", () => {
         layoutText(inter, GRID_TEXT, 16);
         const short = layoutText(inter, "ab", 16);
-        expect(short.glyphs).toHaveLength(2);
+        expect(short._glyphs).toHaveLength(2);
     });
 });
 
@@ -413,7 +413,7 @@ function layoutTextPerParagraph(font: Font, text: string, fontSizePx: number, op
         }
     }
 
-    return { glyphs: placed, pixelsPerFontUnit: scale, width: totalWidth, height: totalHeight };
+    return { _glyphs: placed, _pixelsPerFontUnit: scale, _width: totalWidth, _height: totalHeight };
 }
 
 /** Mirrors the batching guard in `layout.ts`, so a test can state which path it exercises. */
@@ -496,7 +496,7 @@ describe("layoutText chunked batched shaping", () => {
         const actual = layoutText(inter, text, 16);
         expect(actual).toEqual(layoutTextPerParagraph(inter, text, 16));
         // Blank paragraphs must still occupy a line, or every following line shifts up.
-        expect(actual.height).toBe(12 * 16 * 1.2);
+        expect(actual._height).toBe(12 * 16 * 1.2);
     });
 
     it("handles a paragraph longer than the codepoint cap", () => {
@@ -622,12 +622,12 @@ describe("layoutText isSpace derivation", () => {
         const reference = layoutTextReference(inter, "office ab cd", 16, { maxWidth: 40 });
 
         // Same glyphs either way — only where the lines break can differ.
-        expect(result.glyphs.map((g) => g.glyphId)).toEqual(reference.glyphs.map((g) => g.glyphId));
+        expect(result._glyphs.map((g) => g.glyphId)).toEqual(reference._glyphs.map((g) => g.glyphId));
 
         // Every line must start at a word boundary: the first glyph of each line is never a space.
         const spaceGid = inter._font.glyphId(32);
         const lineStarts = new Map<number, number>();
-        for (const g of result.glyphs) {
+        for (const g of result._glyphs) {
             if (!lineStarts.has(g.y)) {
                 lineStarts.set(g.y, g.glyphId);
             }

@@ -1,7 +1,7 @@
 {
-  "rawKB": 41.4,
-  "rawBytes": 42413,
-  "gzipKB": 16.2,
+  "rawKB": 39.3,
+  "rawBytes": 40225,
+  "gzipKB": 15.9,
   "ignoredRawKB": 682,
   "runtimeChunks": [
     "scene275-text-shaper-Bh28TKha.js",

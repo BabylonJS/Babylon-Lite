@@ -127,21 +127,21 @@ function expectBindGroupsMatchGroups(rr: TextRenderer, layer: TextLayer): void {
     const groups = layer.data._groups;
 
     // One entry per draw group — the cache is truncated with the group list.
-    expect(lg.bindGroupCache.length).toBe(groups.length);
+    expect(lg._bindGroupCache.length).toBe(groups.length);
 
     for (let i = 0; i < groups.length; i++) {
         const g = groups[i]!;
-        const gpu = g.curveSet.atlas.gpu;
+        const gpu = g._curveSet._atlas._gpu;
         expect(gpu).not.toBeNull();
 
-        const entry = lg.bindGroupCache[i]!;
-        const bg = entry.bindGroup as unknown as MockBindGroup;
+        const entry = lg._bindGroupCache[i]!;
+        const bg = entry._bindGroup as unknown as MockBindGroup;
         const curveView = bg.__entries.find((e) => e.binding === 1)!.resource as MockTextureView;
         const bandView = bg.__entries.find((e) => e.binding === 2)!.resource as MockTextureView;
 
-        expect(curveView.__texture).toBe(gpu!.curveTex);
-        expect(bandView.__texture).toBe(gpu!.bandTex);
-        expect(entry.curveSetId).toBe(g.curveSetId);
+        expect(curveView.__texture).toBe(gpu!._curveTex);
+        expect(bandView.__texture).toBe(gpu!._bandTex);
+        expect(entry._curveSetId).toBe(g._curveSetId);
     }
 }
 
@@ -155,20 +155,20 @@ describe("text renderer bind-group cache", () => {
 
         rr._update();
 
-        expect(data._groups.map((g) => g.curveSetId)).toEqual(["f", "g"]);
+        expect(data._groups.map((g) => g._curveSetId)).toEqual(["f", "g"]);
         expectBindGroupsMatchGroups(rr, layer);
 
-        const atlasF = storage._curveSets.get("f")!.atlas;
-        const atlasG = storage._curveSets.get("g")!.atlas;
+        const atlasF = storage._curveSets.get("f")!._atlas;
+        const atlasG = storage._curveSets.get("g")!._atlas;
         // Independent atlases whose version counters collide — the reason an atlas-version
         // check alone cannot detect the reorder below.
-        expect(atlasF.gpu!.uploadedVersion).toBe(atlasG.gpu!.uploadedVersion);
-        expect(atlasF.gpu!.curveTex).not.toBe(atlasG.gpu!.curveTex);
+        expect(atlasF._gpu!._uploadedVersion).toBe(atlasG._gpu!._uploadedVersion);
+        expect(atlasF._gpu!._curveTex).not.toBe(atlasG._gpu!._curveTex);
 
         // Same curve sets, same group count, reversed order → `applyReset` swaps the two
         // group objects in `_groups` without changing its length.
         updateTextData(data, { update: "reset", runs: [run("g", 10), run("f", 0)] });
-        expect(data._groups.map((g) => g.curveSetId)).toEqual(["g", "f"]);
+        expect(data._groups.map((g) => g._curveSetId)).toEqual(["g", "f"]);
 
         rr._update();
 
@@ -201,12 +201,12 @@ describe("text renderer bind-group cache", () => {
         const rr = createTextRenderer(surface, { layers: [layer] });
 
         rr._update();
-        expect(layerGpu(rr, layer).bindGroupCache.length).toBe(2);
+        expect(layerGpu(rr, layer)._bindGroupCache.length).toBe(2);
 
         updateTextData(data, { update: "reset", runs: [run("g", 10)] });
         rr._update();
 
-        expect(data._groups.map((g) => g.curveSetId)).toEqual(["g"]);
+        expect(data._groups.map((g) => g._curveSetId)).toEqual(["g"]);
         expectBindGroupsMatchGroups(rr, layer);
     });
 });

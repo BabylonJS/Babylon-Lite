@@ -93,7 +93,7 @@ describe("updateTextData replaceRun", () => {
         expect(data.runs.length).toBe(2);
         expect(data.runs[1]).toBe(target);
         expect(data._runRecords.size).toBe(2);
-        expect(data._runRecords.get(target)!.slots).toEqual([2, 3]);
+        expect(data._runRecords.get(target)!._slots).toEqual([2, 3]);
         expect(instanceAnchorX(data, 2)).toBe(77);
     });
 
@@ -111,7 +111,7 @@ describe("updateTextData replaceRun", () => {
 
         expect(data.runs.length).toBe(3);
         expect(data.runs[1]).toBe(next);
-        expect(data._runRecords.get(next)!.slots.length).toBe(3);
+        expect(data._runRecords.get(next)!._slots.length).toBe(3);
     });
 
     // A same-curve-set glyph-count change is now reslotted in place, so these guard the
@@ -133,21 +133,21 @@ describe("updateTextData replaceRun", () => {
         // Every run's slots must be live, in range, and disjoint from every other run's.
         const seen = new Set<number>();
         for (const r of data.runs) {
-            const slots = data._runRecords.get(r)!.slots;
+            const slots = data._runRecords.get(r)!._slots;
             expect(slots.length).toBe(r.glyphs.length);
             for (const s of slots) {
-                expect(s).toBeGreaterThanOrEqual(group.slotStart);
-                expect(s).toBeLessThan(group.slotStart + group.slotCount);
+                expect(s).toBeGreaterThanOrEqual(group._slotStart);
+                expect(s).toBeLessThan(group._slotStart + group._slotCount);
                 expect(seen.has(s)).toBe(false);
-                expect(group.freeSlots.includes(s)).toBe(false);
+                expect(group._freeSlots.includes(s)).toBe(false);
                 seen.add(s);
             }
         }
-        expect(group.liveCount).toBe(seen.size);
+        expect(group._liveCount).toBe(seen.size);
         expect(seen.size).toBe(2 + glyphIds.length + 2);
         // Anchor X is written per glyph, so it proves each run's slots hold *its* glyphs.
         for (const r of data.runs) {
-            const slots = data._runRecords.get(r)!.slots;
+            const slots = data._runRecords.get(r)!._slots;
             slots.forEach((s, i) => expect(instanceAnchorX(data, s)).toBe(r.glyphs[i]!.x));
         }
     });
@@ -164,7 +164,7 @@ describe("updateTextData replaceRun", () => {
 
         updateTextData(data, { update: "replaceRun", previous: data.runs[1]!, run: next });
 
-        const slots = data._runRecords.get(next)!.slots;
+        const slots = data._runRecords.get(next)!._slots;
         expect(slots).toEqual([...slots].sort((a, b) => a - b));
     });
 
@@ -174,7 +174,7 @@ describe("updateTextData replaceRun", () => {
             const len = 1 + (i % 3);
             updateTextData(data, { update: "replaceRun", previous: data.runs[i % 3]!, run: run("f", i, [1, 2, 3].slice(0, len)) });
             for (const r of data.runs) {
-                const slots = data._runRecords.get(r)!.slots;
+                const slots = data._runRecords.get(r)!._slots;
                 expect(slots).toEqual([...slots].sort((a, b) => a - b));
             }
         }
@@ -190,7 +190,7 @@ describe("updateTextData replaceRun", () => {
 
         updateTextData(data, { update: "addRun", run: added });
 
-        expect(data._runRecords.get(added)!.slots).toEqual([2, 3]);
+        expect(data._runRecords.get(added)!._slots).toEqual([2, 3]);
     });
 
     it("routes an empty replacement through the remove path so its slots are reclaimed", () => {
@@ -200,11 +200,11 @@ describe("updateTextData replaceRun", () => {
         updateTextData(data, { update: "replaceRun", previous: data.runs[1]!, run: empty });
 
         expect(data.runs[1]).toBe(empty);
-        expect(data._runRecords.get(empty)!.slots).toEqual([]);
+        expect(data._runRecords.get(empty)!._slots).toEqual([]);
         // The group is retired and immediately re-created empty by the add half, so the buffer
         // tail is compacted back to just the "f" run's two glyphs.
-        expect(data._groups.map((g) => g.curveSetId)).toEqual(["f", "g"]);
-        expect(data._groups[1]!.slotCount).toBe(0);
+        expect(data._groups.map((g) => g._curveSetId)).toEqual(["f", "g"]);
+        expect(data._groups[1]!._slotCount).toBe(0);
         expect(data._instanceCount).toBe(2);
     });
 
@@ -217,17 +217,17 @@ describe("updateTextData replaceRun", () => {
         const group = data._groups[0]!;
         const live = new Set<number>();
         for (const r of data.runs) {
-            for (const s of data._runRecords.get(r)!.slots) {
+            for (const s of data._runRecords.get(r)!._slots) {
                 expect(live.has(s)).toBe(false);
                 live.add(s);
             }
         }
-        expect(group.liveCount).toBe(live.size);
+        expect(group._liveCount).toBe(live.size);
         // Free list and live set must partition the group's slot range exactly — no slot lost,
         // none handed out twice.
-        expect(new Set(group.freeSlots).size).toBe(group.freeSlots.length);
-        expect(live.size + group.freeSlots.length).toBe(group.slotCount);
-        for (const s of group.freeSlots) {
+        expect(new Set(group._freeSlots).size).toBe(group._freeSlots.length);
+        expect(live.size + group._freeSlots.length).toBe(group._slotCount);
+        for (const s of group._freeSlots) {
             expect(live.has(s)).toBe(false);
         }
     });
@@ -241,7 +241,7 @@ describe("updateTextData replaceRun", () => {
         expect(data.runs.length).toBe(3);
         expect(data.runs[1]).toBe(next);
         expect(data._groups.length).toBe(2);
-        expect(data._groups[data._runRecords.get(next)!.groupIdx]!.curveSetId).toBe("g");
+        expect(data._groups[data._runRecords.get(next)!._groupIdx]!._curveSetId).toBe("g");
     });
 });
 
@@ -293,11 +293,11 @@ describe("glyphs that miss the atlas", () => {
         const data = createTextData(makeStorage(), [r]);
         const group = data._groups[0]!;
 
-        expect(data._runRecords.get(r)!.slots).toEqual(expectedLiveSlots);
-        expect(group.liveCount).toBe(expectedLiveSlots.length);
+        expect(data._runRecords.get(r)!._slots).toEqual(expectedLiveSlots);
+        expect(group._liveCount).toBe(expectedLiveSlots.length);
         for (let slot = 0; slot < glyphIds.length; slot++) {
             expect(isDead(data, slot)).toBe(!expectedLiveSlots.includes(slot));
-            expect(group.freeSlots.includes(slot)).toBe(!expectedLiveSlots.includes(slot));
+            expect(group._freeSlots.includes(slot)).toBe(!expectedLiveSlots.includes(slot));
         }
     });
 
@@ -306,15 +306,15 @@ describe("glyphs that miss the atlas", () => {
         const data = createTextData(makeStorage(), [r]);
         const group = data._groups[0]!;
         const recBefore = data._runRecords.get(r)!;
-        expect(recBefore.slots).toEqual([0, 1, 2]);
+        expect(recBefore._slots).toEqual([0, 1, 2]);
 
         (r.glyphs[1] as { glyphId: number }).glyphId = MISSING;
         updateTextData(data, { update: "replaceRun", previous: r, run: r });
 
         // Same-reference replace reuses the existing record rather than rehashing a new one.
         expect(data._runRecords.get(r)).toBe(recBefore);
-        expect(recBefore.slots).toEqual([0, 2]);
-        expect(group.liveCount).toBe(2);
+        expect(recBefore._slots).toEqual([0, 2]);
+        expect(group._liveCount).toBe(2);
         expect(isDead(data, 1)).toBe(true);
     });
 
@@ -327,8 +327,8 @@ describe("glyphs that miss the atlas", () => {
         (r.glyphs[1] as { glyphId: number }).glyphId = 2;
         updateTextData(data, { update: "replaceRun", previous: r, run: r });
 
-        expect(data._runRecords.get(r)!.slots).toHaveLength(3);
-        expect(data._groups[0]!.liveCount).toBe(3);
+        expect(data._runRecords.get(r)!._slots).toHaveLength(3);
+        expect(data._groups[0]!._liveCount).toBe(3);
         expect(data.runs).toEqual([r]);
     });
 });

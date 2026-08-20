@@ -8,9 +8,10 @@ import type { TextData } from "../text-data.js";
 
 /** @internal Style-palette GPU state, embedded in each renderer's per-block GPU record. */
 export interface TextStyleGpu {
-    styleBuf: GPUBuffer;
-    styleCap: number;
-    uploadedStyleVersion: number;
+    /** @internal */
+    _styleBuf: GPUBuffer;
+    /** @internal */
+    _uploadedStyleVersion: number;
 }
 
 export function createStyleBuffer(device: GPUDevice, entries: number): GPUBuffer {
@@ -28,23 +29,18 @@ export function createStyleBuffer(device: GPUDevice, entries: number): GPUBuffer
 export function ensureStyleGpu(device: GPUDevice, data: TextData, gpu: TextStyleGpu): boolean {
     const needed = Math.max(1, data._styleCount);
     let recreated = false;
-    if (needed > gpu.styleCap) {
-        gpu.styleBuf.destroy();
-        let cap = Math.max(1, gpu.styleCap);
-        while (cap < needed) {
-            cap *= 2;
-        }
-        gpu.styleBuf = createStyleBuffer(device, cap);
-        gpu.styleCap = cap;
-        gpu.uploadedStyleVersion = -1;
+    if (needed * TEXT_STYLE_BYTES > gpu._styleBuf.size) {
+        gpu._styleBuf.destroy();
+        gpu._styleBuf = createStyleBuffer(device, data._styles.byteLength / TEXT_STYLE_BYTES);
+        gpu._uploadedStyleVersion = -1;
         recreated = true;
     }
-    if (gpu.uploadedStyleVersion !== data._styleVersion) {
+    if (gpu._uploadedStyleVersion !== data._styleVersion) {
         if (data._styleCount > 0) {
             const s = data._styles;
-            device.queue.writeBuffer(gpu.styleBuf, 0, s.buffer as ArrayBuffer, s.byteOffset, data._styleCount * TEXT_STYLE_BYTES);
+            device.queue.writeBuffer(gpu._styleBuf, 0, s.buffer as ArrayBuffer, s.byteOffset, data._styleCount * TEXT_STYLE_BYTES);
         }
-        gpu.uploadedStyleVersion = data._styleVersion;
+        gpu._uploadedStyleVersion = data._styleVersion;
     }
     return recreated;
 }

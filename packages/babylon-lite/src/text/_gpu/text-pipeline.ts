@@ -6,12 +6,18 @@ import fragSrc from "../shaders/slug.frag.wgsl?raw";
 import { TEXT_INSTANCE_BYTES } from "../text-data.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
+/** @internal */
 export interface TextPipelineDeviceCache {
-    bindGroupLayout: GPUBindGroupLayout;
-    vertModule: GPUShaderModule;
-    fragModule: GPUShaderModule;
-    quadVertexBuffer: GPUBuffer;
-    pipelines: Map<string, GPURenderPipeline>;
+    /** @internal */
+    _bindGroupLayout: GPUBindGroupLayout;
+    /** @internal */
+    _vertModule: GPUShaderModule;
+    /** @internal */
+    _fragModule: GPUShaderModule;
+    /** @internal */
+    _quadVertexBuffer: GPUBuffer;
+    /** @internal */
+    _pipelines: Map<string, GPURenderPipeline>;
 }
 
 let _cache: WeakMap<GPUDevice, TextPipelineDeviceCache> | null = null;
@@ -63,7 +69,13 @@ function getOrCreateDeviceCache(engine: EngineContext): TextPipelineDeviceCache 
     new Float32Array(quadVertexBuffer.getMappedRange()).set(corners);
     quadVertexBuffer.unmap();
 
-    cache = { bindGroupLayout, vertModule, fragModule, quadVertexBuffer, pipelines: new Map() };
+    cache = {
+        _bindGroupLayout: bindGroupLayout,
+        _vertModule: vertModule,
+        _fragModule: fragModule,
+        _quadVertexBuffer: quadVertexBuffer,
+        _pipelines: new Map(),
+    };
     _cache.set(device, cache);
     return cache;
 }
@@ -79,21 +91,21 @@ export function getOrCreateTextPipeline(
     depthStencilFormat: GPUTextureFormat | null,
     depthWrite: boolean,
     owner?: object
-): { pipeline: GPURenderPipeline; cache: TextPipelineDeviceCache } {
+): { _pipeline: GPURenderPipeline; _cache: TextPipelineDeviceCache } {
     const cache = getOrCreateDeviceCache(engine);
     const alphaToCoverageResolver = _getAlphaToCoverageResolver();
     const alphaToCoverage = depthWrite && sampleCount > 1 && !!owner && !!alphaToCoverageResolver?.(owner);
     const key = pipelineKey(format, sampleCount, depthStencilFormat, depthWrite, alphaToCoverage);
-    let pipeline = cache.pipelines.get(key);
+    let pipeline = cache._pipelines.get(key);
     if (pipeline) {
-        return { pipeline, cache };
+        return { _pipeline: pipeline, _cache: cache };
     }
     const device = engine._device;
     const descriptor: GPURenderPipelineDescriptor = {
         label: "text-pipeline",
-        layout: device.createPipelineLayout({ bindGroupLayouts: [cache.bindGroupLayout] }),
+        layout: device.createPipelineLayout({ bindGroupLayouts: [cache._bindGroupLayout] }),
         vertex: {
-            module: cache.vertModule,
+            module: cache._vertModule,
             entryPoint: "main",
             buffers: [
                 {
@@ -112,7 +124,7 @@ export function getOrCreateTextPipeline(
             ],
         },
         fragment: {
-            module: cache.fragModule,
+            module: cache._fragModule,
             entryPoint: "main",
             // `a2c` is a pipeline-overridable constant in slug.frag.wgsl; setting it switches the
             // fragment to straight-alpha output. Specialising one module beats shipping a second
@@ -145,6 +157,6 @@ export function getOrCreateTextPipeline(
         };
     }
     pipeline = device.createRenderPipeline(descriptor);
-    cache.pipelines.set(key, pipeline);
-    return { pipeline, cache };
+    cache._pipelines.set(key, pipeline);
+    return { _pipeline: pipeline, _cache: cache };
 }

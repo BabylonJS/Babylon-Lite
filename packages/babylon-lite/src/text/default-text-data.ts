@@ -87,7 +87,7 @@ export function createDefaultTextData(
     const laid = layoutText(font, text, fontSizePx, options);
     const innerCurves = new Map<number, GlyphCurves>();
     const seenGlyphs = new Uint8Array(font._font.numGlyphs);
-    const ids = collectNewGlyphs(seenGlyphs, laid.glyphs);
+    const ids = collectNewGlyphs(seenGlyphs, laid._glyphs);
     if (ids) {
         extractGlyphCurves(font, ids, innerCurves);
     }
@@ -95,13 +95,13 @@ export function createDefaultTextData(
     const storage = createGlyphStorage(new Map([[curveSetId, innerCurves]]));
     const run: GlyphRun = {
         curveSet: curveSetId,
-        glyphs: laid.glyphs,
-        pixelsPerFontUnit: laid.pixelsPerFontUnit,
+        glyphs: laid._glyphs,
+        pixelsPerFontUnit: laid._pixelsPerFontUnit,
         defaultColor: textColor,
     };
     return Object.assign(createTextData(storage, [run]), {
-        width: laid.width,
-        height: laid.height,
+        width: laid._width,
+        height: laid._height,
         _font: font,
         _fontSizePx: fontSizePx,
         _options: options,
@@ -118,7 +118,7 @@ export function updateDefaultTextData(data: DefaultTextData, text: string, textC
     const laid = layoutText(data._font, text, data._fontSizePx, data._options);
     // Extract any glyph outlines this data has not offered to the storage before. Text that
     // reuses its existing repertoire — the overwhelmingly common case — does no work here.
-    const ids = collectNewGlyphs(data._seenGlyphs, laid.glyphs);
+    const ids = collectNewGlyphs(data._seenGlyphs, laid._glyphs);
     if (ids) {
         const innerCurves = new Map<number, GlyphCurves>();
         extractGlyphCurves(data._font, ids, innerCurves);
@@ -129,13 +129,13 @@ export function updateDefaultTextData(data: DefaultTextData, text: string, textC
     const previousRun = data.runs[0]!;
     const newRun: GlyphRun = {
         curveSet: data._curveSetId,
-        glyphs: laid.glyphs,
-        pixelsPerFontUnit: laid.pixelsPerFontUnit,
+        glyphs: laid._glyphs,
+        pixelsPerFontUnit: laid._pixelsPerFontUnit,
         defaultColor: textColor ?? previousRun.defaultColor,
     };
     updateTextData(data, { update: "replaceRun", previous: previousRun, run: newRun });
     // Refresh the cached width/height on the branded object.
-    Object.assign(data, { width: laid.width, height: laid.height });
+    Object.assign(data, { width: laid._width, height: laid._height });
 }
 
 /** Release the per-block GPU resources AND the underlying `GlyphStorage` owned by `data`. */

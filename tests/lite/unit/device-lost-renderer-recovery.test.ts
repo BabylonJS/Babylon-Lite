@@ -211,23 +211,23 @@ describe("TextRenderer device-lost recovery", () => {
         engine._renderingContexts.unshift(other);
         renderer._update();
 
-        const atlas = storage._curveSets.get("font")!.atlas;
-        const oldAtlasGpu = atlas.gpu!;
+        const atlas = storage._curveSets.get("font")!._atlas;
+        const oldAtlasGpu = atlas._gpu!;
         const oldLayerGpu = renderer._layerGpu.get(layer)!;
-        const oldUniform = oldLayerGpu.textU;
-        const oldInstance = oldLayerGpu.instanceBuf;
+        const oldUniform = oldLayerGpu._textU;
+        const oldInstance = oldLayerGpu._instanceBuf;
 
         const newProbe = makeDevice();
         engine._device = newProbe.device;
         await rebuildRegisteredTextRenderers(engine);
 
         const rebuiltLayerGpu = renderer._layerGpu.get(layer)!;
-        expect(rebuiltLayerGpu.textU).not.toBe(oldUniform);
-        expect(rebuiltLayerGpu.instanceBuf).not.toBe(oldInstance);
-        expect(rebuiltLayerGpu.uploadedDataVersion).toBe(data._version);
-        expect(rebuiltLayerGpu.pipeline).not.toBeNull();
-        expect(atlas.gpu).not.toBe(oldAtlasGpu);
-        expect(atlas.gpu?.device).toBe(newProbe.device);
+        expect(rebuiltLayerGpu._textU).not.toBe(oldUniform);
+        expect(rebuiltLayerGpu._instanceBuf).not.toBe(oldInstance);
+        expect(rebuiltLayerGpu._uploadedDataVersion).toBe(data._version);
+        expect(rebuiltLayerGpu._pipeline).not.toBeNull();
+        expect(atlas._gpu).not.toBe(oldAtlasGpu);
+        expect(atlas._gpu?._device).toBe(newProbe.device);
         expect(renderer.layers).toEqual([layer]);
         expect(layer.data).toBe(data);
         expect(layer.positionPx).toEqual({ x: 12, y: 24 });
@@ -253,7 +253,7 @@ describe("TextRenderer device-lost recovery", () => {
         registerTextRenderer(renderer);
         renderer._update();
 
-        expect(renderer._layerGpu.get(layer)!.bindGroupCache.map((e) => e.curveSetId)).toEqual(["a", "b"]);
+        expect(renderer._layerGpu.get(layer)!._bindGroupCache.map((e) => e._curveSetId)).toEqual(["a", "b"]);
 
         // Drop a curve set *before* recovery runs, so the rebuild — not a later `_update()` —
         // is what has to reconcile the cache with the shorter group list. Truncation in
@@ -263,6 +263,6 @@ describe("TextRenderer device-lost recovery", () => {
         engine._device = makeDevice().device;
         await rebuildRegisteredTextRenderers(engine);
 
-        expect(renderer._layerGpu.get(layer)!.bindGroupCache.map((e) => e.curveSetId)).toEqual(["b"]);
+        expect(renderer._layerGpu.get(layer)!._bindGroupCache.map((e) => e._curveSetId)).toEqual(["b"]);
     });
 });

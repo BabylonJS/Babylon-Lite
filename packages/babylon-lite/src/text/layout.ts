@@ -23,14 +23,14 @@ export type TextLayoutOptions = {
 };
 
 interface LayoutGlyph {
-    glyphId: number;
+    _glyphId: number;
     /** Pixel x at line start (line-relative). */
-    x: number;
+    _x: number;
     /** Line index — used to bake the Y after alignment. */
-    line: number;
-    xAdvance: number;
-    xOffset: number;
-    yOffset: number;
+    _line: number;
+    _xAdvance: number;
+    _xOffset: number;
+    _yOffset: number;
 }
 
 /** Shaping scratch buffers, reused across every `layoutText` call.
@@ -177,12 +177,12 @@ export function layoutText(font: Font, text: string, fontSizePx: number, options
                     const pos = positions[i]!;
                     const xAdvance = pos.xAdvance + letterSpacing;
                     currentLine.push({
-                        glyphId: infos[i]!.glyphId,
-                        x: lineCursorX,
-                        line: lines.length,
-                        xAdvance,
-                        xOffset: pos.xOffset,
-                        yOffset: pos.yOffset,
+                        _glyphId: infos[i]!.glyphId,
+                        _x: lineCursorX,
+                        _line: lines.length,
+                        _xAdvance: xAdvance,
+                        _xOffset: pos.xOffset,
+                        _yOffset: pos.yOffset,
                     });
                     lineCursorX += xAdvance * scale;
                     i++;
@@ -195,11 +195,11 @@ export function layoutText(font: Font, text: string, fontSizePx: number, options
                 }
                 const wordEnd = i;
                 if (lineCursorX + wordWidth > maxWidth && currentLine.length > 0) {
-                    while (currentLine.length > 0 && currentLine[currentLine.length - 1]!.glyphId === spaceGid) {
+                    while (currentLine.length > 0 && currentLine[currentLine.length - 1]!._glyphId === spaceGid) {
                         currentLine.pop();
                     }
                     const last = currentLine[currentLine.length - 1];
-                    const lw = last ? last.x + last.xAdvance * scale : 0;
+                    const lw = last ? last._x + last._xAdvance * scale : 0;
                     lines.push(currentLine);
                     lineWidths.push(lw);
                     currentLine = [];
@@ -208,7 +208,14 @@ export function layoutText(font: Font, text: string, fontSizePx: number, options
                 for (let w = wordStart; w < wordEnd; w++) {
                     const pos = positions[w]!;
                     const xAdvance = pos.xAdvance + letterSpacing;
-                    currentLine.push({ glyphId: infos[w]!.glyphId, x: lineCursorX, line: lines.length, xAdvance, xOffset: pos.xOffset, yOffset: pos.yOffset });
+                    currentLine.push({
+                        _glyphId: infos[w]!.glyphId,
+                        _x: lineCursorX,
+                        _line: lines.length,
+                        _xAdvance: xAdvance,
+                        _xOffset: pos.xOffset,
+                        _yOffset: pos.yOffset,
+                    });
                     lineCursorX += xAdvance * scale;
                 }
             }
@@ -241,15 +248,15 @@ export function layoutText(font: Font, text: string, fontSizePx: number, options
         const lineY = -li * lineHeightPx;
         for (const g of line) {
             placed.push({
-                glyphId: g.glyphId,
-                x: g.x + alignOffset + g.xOffset * scale,
+                glyphId: g._glyphId,
+                x: g._x + alignOffset + g._xOffset * scale,
                 // Y up in pixel space: line 0 sits at y=0, subsequent lines go negative.
                 // Pairs naturally with em-space y-up glyph bounds so 3D scenes with a
                 // Y-up camera render text upright with no extra transform.
-                y: lineY + g.yOffset * scale,
+                y: lineY + g._yOffset * scale,
             });
         }
     }
 
-    return { glyphs: placed, pixelsPerFontUnit: scale, width: totalWidth, height: totalHeight };
+    return { _glyphs: placed, _pixelsPerFontUnit: scale, _width: totalWidth, _height: totalHeight };
 }

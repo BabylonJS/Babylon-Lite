@@ -42,7 +42,7 @@ function placedIds(data: DefaultTextData): number[] {
 
 /** Ids that have an atlas slot, i.e. are actually renderable. */
 function slottedIds(data: DefaultTextData): Set<number> {
-    return new Set(data._storage._curveSets.get(data._curveSetId)!.atlas.glyphSlots.keys());
+    return new Set(data._storage._curveSets.get(data._curveSetId)!._atlas._glyphSlots.keys());
 }
 
 /** Independently compute which of `ids` carry an outline, the way the old always-extract

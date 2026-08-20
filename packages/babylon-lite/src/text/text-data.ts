@@ -107,7 +107,7 @@ export interface TextData {
     /** @internal Total *capacity* used (live + dead slots across all groups). */
     _instanceCount: number;
     /** @internal Style palette: `TEXT_STYLE_FLOATS` per entry, indexed by the high 16 bits of
-     *  an instance's packed word. Entries are owned by runs — see `RunRecord.styleStart`. */
+     *  an instance's packed word. Entries are owned by runs — see `RunRecord._styleStart`. */
     _styles: Float32Array;
     /** @internal Entries in use in `_styles` (live plus any orphaned by a run whose style
      *  count changed). Reset to 0 by `applyReset`, which doubles as palette compaction. */
@@ -127,8 +127,6 @@ export interface TextData {
     /** @internal Inclusive-exclusive dirty range of instances awaiting upload. */
     _dirtyStart: number;
     /** @internal */ _dirtyEnd: number;
-    /** @internal Lazy per-text-block GPU resources. */
-    _gpu: TextDataGpu | null;
 }
 
 /** @internal Per-curve-set draw group within a TextData. One group per unique font used by the
@@ -136,53 +134,46 @@ export interface TextData {
  *  slots intermix within that range. The vertex shader emits a degenerate quad for dead slots
  *  so they cost only a vertex-shader invocation. */
 export type TextDataDrawGroup = {
-    /** Curve-set id (matches the key inside the parent storage's `_curveSets` map). */
-    curveSetId: CurveSetId;
-    /** Cached pointer to the curve-set entry within the parent TextData's `_storage`.
+    /** @internal Curve-set id (matches the key inside the parent storage's `_curveSets` map). */
+    _curveSetId: CurveSetId;
+    /** @internal Cached pointer to the curve-set entry within the parent TextData's `_storage`.
      *  Refreshed whenever `_storage` swaps in `applyReset`; identity-compared to invalidate
-     *  the cached `bindGroup`. */
-    curveSet: GlyphStorageCurveSet;
-    /** First slot index (in instances, not bytes) owned by this group. */
-    slotStart: number;
-    /** Number of slots reserved by this group (live + dead). The draw call covers
-     *  `[slotStart, slotStart + slotCount)`. */
-    slotCount: number;
-    /** Number of *live* (non-dead) instances in this group. Tracked for stats. */
-    liveCount: number;
-    /** Indices (absolute, within `TextData._instances`) of dead slots inside this group's
+     *  the cached `_bindGroup`. */
+    _curveSet: GlyphStorageCurveSet;
+    /** @internal First slot index (in instances, not bytes) owned by this group. */
+    _slotStart: number;
+    /** @internal Number of slots reserved by this group (live + dead). The draw call covers
+     *  `[_slotStart, _slotStart + _slotCount)`. */
+    _slotCount: number;
+    /** @internal Number of *live* (non-dead) instances in this group. Tracked for stats. */
+    _liveCount: number;
+    /** @internal Indices (absolute, within `TextData._instances`) of dead slots inside this group's
      *  range, available for reuse by `addRun`/`replaceRun`. LIFO order keeps recent frees
      *  reusable first (locality). */
-    freeSlots: number[];
-    /** Lazy GPU bind group for this group's atlas (recreated on atlas-grow or first bind). */
-    bindGroup: GPUBindGroup | null;
-    /** Atlas-GPU upload version captured when `bindGroup` was last (re)built. */
-    bindGroupVersion: number;
+    _freeSlots: number[];
+    /** @internal Lazy GPU bind group for this group's atlas (recreated on atlas-grow or first bind). */
+    _bindGroup: GPUBindGroup | null;
+    /** @internal Atlas-GPU upload version captured when `_bindGroup` was last (re)built. */
+    _bindGroupVersion: number;
 };
 
 /** @internal Per-run bookkeeping. Lets us locate a run's instances inside its draw group's
  *  slot range in O(1) for add/remove/replace ops. Slots are not guaranteed to be contiguous
  *  (the allocator may have reused freed slots from anywhere in the group's range). */
 export type RunRecord = {
-    run: GlyphRun;
-    /** Index of the owning draw group in `TextData._groups`. */
-    groupIdx: number;
-    /** Absolute slot indices (within `TextData._instances`) currently occupied by this run.
+    /** @internal */
+    _run: GlyphRun;
+    /** @internal Index of the owning draw group in `TextData._groups`. */
+    _groupIdx: number;
+    /** @internal Absolute slot indices (within `TextData._instances`) currently occupied by this run.
      *  Length === number of glyphs actually written (skipped glyphs do not occupy slots). */
-    slots: number[];
-    /** First style-palette entry owned by this run. That entry holds the run default
+    _slots: number[];
+    /** @internal First style-palette entry owned by this run. That entry holds the run default
      *  (`defaultColor` + `invScale`); one entry per glyph carrying its own `color` follows it,
      *  in glyph order. */
-    styleStart: number;
-    /** Palette entries reserved at `styleStart`. */
-    styleCount: number;
-};
-
-/** @internal Lazy GPU instance buffer for a TextData (single buffer covering all groups). */
-export type TextDataGpu = {
-    device: GPUDevice;
-    instanceBuf: GPUBuffer;
-    instanceBufCapacity: number;
-    uploadedVersion: number;
+    _styleStart: number;
+    /** @internal Palette entries reserved at `_styleStart`. */
+    _styleCount: number;
 };
 
 /** Floats per instance: the anchor (x, y) plus one packed u32 holding the glyph index in its
@@ -212,15 +203,15 @@ const WHITE_COLOR: readonly [number, number, number, number] = [1, 1, 1, 1];
 // ─── Per-slot packing ──────────────────────────────────────────────────────
 
 function packGlyphAtSlot(out: Float32Array, outU32: Uint32Array, slot: number, curveSet: GlyphStorageCurveSet, glyphId: number, x: number, y: number, styleIdx: number): boolean {
-    // An atlas slot exists only for glyphs that are also in `curveSet.curves` (both maps are
+    // An atlas slot exists only for glyphs that are also in `curveSet._curves` (both maps are
     // written together and never pruned), so this single lookup doubles as the validity check.
     // It yields an index into the atlas's glyph-metadata buffer; everything glyph-invariant
     // lives there and is never copied into the instance.
-    const atlasSlot = curveSet.atlas.glyphSlots.get(glyphId);
+    const atlasSlot = curveSet._atlas._glyphSlots.get(glyphId);
     if (!atlasSlot) {
         return false;
     }
-    const glyphIdx = atlasSlot.index;
+    const glyphIdx = atlasSlot._index;
     // Both indices share one u32, so an out-of-range value would silently alias a different
     // glyph or style — or the dead sentinel. Drop the glyph instead; the caller already treats
     // a false return as an atlas miss and retires the slot.
@@ -353,9 +344,9 @@ function markDirty(data: TextData, startInstance: number, endInstance: number): 
 
 // ─── Slot allocator ────────────────────────────────────────────────────────
 
-/** Pop a slot from `group.freeSlots`, or -1 if none. */
+/** Pop a slot from `group._freeSlots`, or -1 if none. */
 function popFreeSlot(group: TextDataDrawGroup): number {
-    return group.freeSlots.length > 0 ? group.freeSlots.pop()! : -1;
+    return group._freeSlots.length > 0 ? group._freeSlots.pop()! : -1;
 }
 
 /** Shift every group `slotStart` / freeSlot / run-record slot at or after `threshold` by
@@ -363,15 +354,15 @@ function popFreeSlot(group: TextDataDrawGroup): number {
  *  in place — is skipped so its own range isn't shifted; run-record slots are always shifted. */
 function shiftSlotsAtOrAfter(data: TextData, threshold: number, delta: number, exclude?: TextDataDrawGroup): void {
     for (const g of data._groups) {
-        if (g !== exclude && g.slotStart >= threshold) {
-            g.slotStart += delta;
-            for (let i = 0; i < g.freeSlots.length; i++) {
-                g.freeSlots[i] = g.freeSlots[i]! + delta;
+        if (g !== exclude && g._slotStart >= threshold) {
+            g._slotStart += delta;
+            for (let i = 0; i < g._freeSlots.length; i++) {
+                g._freeSlots[i] = g._freeSlots[i]! + delta;
             }
         }
     }
     for (const rec of data._runRecords.values()) {
-        const slots = rec.slots;
+        const slots = rec._slots;
         for (let i = 0; i < slots.length; i++) {
             if (slots[i]! >= threshold) {
                 slots[i] = slots[i]! + delta;
@@ -386,7 +377,7 @@ function shiftSlotsAtOrAfter(data: TextData, threshold: number, delta: number, e
  *  slot. Shifts later groups' slot ranges right by `extraSlots` and rewrites any run
  *  slot indices that fall in the shifted range. Marks the shifted region dirty. */
 function growGroup(data: TextData, group: TextDataDrawGroup, extraSlots: number): number {
-    const insertAt = group.slotStart + group.slotCount;
+    const insertAt = group._slotStart + group._slotCount;
     if (extraSlots <= 0) {
         return insertAt;
     }
@@ -400,7 +391,7 @@ function growGroup(data: TextData, group: TextDataDrawGroup, extraSlots: number)
     // Shift later groups (and their runs) right to open the gap for the new slots.
     shiftSlotsAtOrAfter(data, insertAt, extraSlots, group);
     data._instanceCount += extraSlots;
-    group.slotCount += extraSlots;
+    group._slotCount += extraSlots;
     // Newly-added slots and the shifted region are dirty.
     markDirty(data, insertAt, data._instanceCount);
     return insertAt;
@@ -452,13 +443,13 @@ function ascendingSlot(a: number, b: number): number {
     return a - b;
 }
 
-/** Release `slots` back to `group.freeSlots`, marking each dead in the buffer. */
+/** Release `slots` back to `group._freeSlots`, marking each dead in the buffer. */
 function freeSlots(data: TextData, group: TextDataDrawGroup, slots: number[]): void {
     let minSlot = Number.POSITIVE_INFINITY;
     let maxSlot = -1;
     for (const s of slots) {
         markSlotDead(data._instances, data._instancesU32, s);
-        group.freeSlots.push(s);
+        group._freeSlots.push(s);
         if (s < minSlot) {
             minSlot = s;
         }
@@ -475,7 +466,7 @@ function freeSlots(data: TextData, group: TextDataDrawGroup, slots: number[]): v
 
 function findGroup(data: TextData, curveSetId: CurveSetId): TextDataDrawGroup | undefined {
     for (const g of data._groups) {
-        if (g.curveSetId === curveSetId) {
+        if (g._curveSetId === curveSetId) {
             return g;
         }
     }
@@ -493,14 +484,14 @@ function lookupCurveSet(storage: GlyphStorage, curveSetId: CurveSetId, op: strin
 /** Build a fresh draw group for `curveSetId` starting at absolute slot `slotStart`. */
 function makeDrawGroup(curveSetId: CurveSetId, curveSet: GlyphStorageCurveSet, slotStart: number): TextDataDrawGroup {
     return {
-        curveSetId,
-        curveSet,
-        slotStart,
-        slotCount: 0,
-        liveCount: 0,
-        freeSlots: [],
-        bindGroup: null,
-        bindGroupVersion: -1,
+        _curveSetId: curveSetId,
+        _curveSet: curveSet,
+        _slotStart: slotStart,
+        _slotCount: 0,
+        _liveCount: 0,
+        _freeSlots: [],
+        _bindGroup: null,
+        _bindGroupVersion: -1,
     };
 }
 
@@ -543,13 +534,13 @@ function writeRunToSlots(data: TextData, group: TextDataDrawGroup, run: GlyphRun
             styleIdx = ++overrideEntry;
             writeStyle(data, styleIdx, color, invScale);
         }
-        const ok = packGlyphAtSlot(data._instances, data._instancesU32, slot, group.curveSet, pg.glyphId, pg.x, pg.y, styleIdx);
+        const ok = packGlyphAtSlot(data._instances, data._instancesU32, slot, group._curveSet, pg.glyphId, pg.x, pg.y, styleIdx);
         if (!ok) {
             if (liveSlots === null) {
                 liveSlots = slots.slice(0, i);
             }
             markSlotDead(data._instances, data._instancesU32, slot);
-            group.freeSlots.push(slot);
+            group._freeSlots.push(slot);
         } else if (liveSlots !== null) {
             liveSlots.push(slot);
         }
@@ -587,7 +578,7 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
     // Preserve previous groups for bind-group reuse when curveSet identity matches.
     const prevGroupByCurveSet = new Map<CurveSetId, TextDataDrawGroup>();
     for (const g of data._groups) {
-        prevGroupByCurveSet.set(g.curveSetId, g);
+        prevGroupByCurveSet.set(g._curveSetId, g);
     }
 
     data._storage = storage;
@@ -617,13 +608,13 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
         const group: TextDataDrawGroup = existing ?? makeDrawGroup(curveSetId, curveSet, writeSlot);
         // Re-point cached curveSet at the (possibly new) storage's entry; invalidate
         // bind group when the underlying GlyphStorageCurveSet identity changed.
-        if (group.curveSet !== curveSet) {
-            group.curveSet = curveSet;
-            group.bindGroup = null;
-            group.bindGroupVersion = -1;
+        if (group._curveSet !== curveSet) {
+            group._curveSet = curveSet;
+            group._bindGroup = null;
+            group._bindGroupVersion = -1;
         }
-        group.slotStart = writeSlot;
-        group.freeSlots = [];
+        group._slotStart = writeSlot;
+        group._freeSlots = [];
 
         const groupIdx = newGroups.length;
         let liveInGroup = 0;
@@ -635,13 +626,15 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
                 slots[i] = writeSlot++;
             }
             const styleCount = countRunStyles(run);
-            const styleStart = reserveStyles(data, 0, 0, styleCount);
+            const styleStart = data._styleCount;
+            ensureStyleCapacity(data, styleStart + styleCount);
+            data._styleCount += styleCount;
             const live = writeRunToSlots(data, group, run, slots, styleStart);
             liveInGroup += live.length;
-            newRunRecords.set(run, { run, groupIdx, slots: live, styleStart, styleCount });
+            newRunRecords.set(run, { _run: run, _groupIdx: groupIdx, _slots: live, _styleStart: styleStart, _styleCount: styleCount });
         }
-        group.slotCount = writeSlot - group.slotStart;
-        group.liveCount = liveInGroup;
+        group._slotCount = writeSlot - group._slotStart;
+        group._liveCount = liveInGroup;
         newGroups.push(group);
     }
 
@@ -689,8 +682,8 @@ function applyAddRun(data: TextData, run: GlyphRun, insertBefore?: number): void
     const styleCount = countRunStyles(run);
     const styleStart = reserveStyles(data, 0, 0, styleCount);
     const live = writeRunToSlots(data, group, run, slots, styleStart);
-    group.liveCount += live.length;
-    data._runRecords.set(run, { run, groupIdx, slots: live, styleStart, styleCount });
+    group._liveCount += live.length;
+    data._runRecords.set(run, { _run: run, _groupIdx: groupIdx, _slots: live, _styleStart: styleStart, _styleCount: styleCount });
     const at = insertBefore ?? data._runs.length;
     data._runs.splice(at, 0, run);
 }
@@ -701,16 +694,16 @@ function applyRemoveRun(data: TextData, ref: GlyphRun | number): void {
     if (!rec) {
         throw new Error("updateTextData removeRun: GlyphRun reference is not in this TextData.");
     }
-    const group = data._groups[rec.groupIdx]!;
-    freeSlots(data, group, rec.slots);
-    group.liveCount -= rec.slots.length;
+    const group = data._groups[rec._groupIdx]!;
+    freeSlots(data, group, rec._slots);
+    group._liveCount -= rec._slots.length;
     data._runRecords.delete(run);
     const runIdx = resolveRunIndex(data, ref);
     if (runIdx >= 0) {
         data._runs.splice(runIdx, 1);
     }
     // If the group has no live instances left, drop it entirely and shrink the buffer tail.
-    if (group.liveCount === 0) {
+    if (group._liveCount === 0) {
         dropEmptyGroup(data, group);
     }
 }
@@ -722,13 +715,13 @@ function dropEmptyGroup(data: TextData, group: TextDataDrawGroup): void {
     if (idx < 0) {
         return;
     }
-    const removedStart = group.slotStart;
-    const removedCount = group.slotCount;
+    const removedStart = group._slotStart;
+    const removedCount = group._slotCount;
     data._groups.splice(idx, 1);
     // Re-index groupIdx for runs in later groups.
     for (const r of data._runRecords.values()) {
-        if (r.groupIdx > idx) {
-            r.groupIdx--;
+        if (r._groupIdx > idx) {
+            r._groupIdx--;
         }
     }
     if (removedCount > 0) {
@@ -754,14 +747,14 @@ function applyReplaceRun(data: TextData, prevRef: GlyphRun | number, newRun: Gly
     if (prev !== newRun && data._runRecords.has(newRun)) {
         throw new Error("updateTextData replaceRun: new GlyphRun reference is already in this TextData.");
     }
-    const group = data._groups[rec.groupIdx]!;
+    const group = data._groups[rec._groupIdx]!;
     // Staying in the same draw group means the run keeps its position in `_runs`, so the whole
     // edit reduces to slot bookkeeping — no list splices, and no index scan to drive them. An
     // empty new run is the one exception: it can leave the group with nothing live, and only
     // the remove path knows how to retire a group.
-    if (newRun.curveSet === group.curveSetId && newRun.glyphs.length > 0) {
-        const prevSlotCount = rec.slots.length;
-        let slots = rec.slots;
+    if (newRun.curveSet === group._curveSetId && newRun.glyphs.length > 0) {
+        const prevSlotCount = rec._slots.length;
+        let slots = rec._slots;
         if (newRun.glyphs.length !== prevSlotCount) {
             // Glyph count changed, so this run hands its slots back to the group's free list and
             // takes a fresh block. It reclaims most of them immediately — the allocator pops the
@@ -770,19 +763,19 @@ function applyReplaceRun(data: TextData, prevRef: GlyphRun | number, newRun: Gly
             slots = allocateSlots(data, group, newRun.glyphs.length);
         }
         const styleCount = countRunStyles(newRun);
-        const styleStart = reserveStyles(data, rec.styleStart, rec.styleCount, styleCount);
+        const styleStart = reserveStyles(data, rec._styleStart, rec._styleCount, styleCount);
         const live = writeRunToSlots(data, group, newRun, slots, styleStart);
         // Absorbs both a changed glyph count and any glyph that missed the atlas.
-        group.liveCount += live.length - prevSlotCount;
+        group._liveCount += live.length - prevSlotCount;
         if (prev === newRun) {
             // In-place glyph edits: the record and `_runs` already point at this run, so its
             // live slot list and style block are the only things that can have moved.
-            rec.slots = live;
-            rec.styleStart = styleStart;
-            rec.styleCount = styleCount;
+            rec._slots = live;
+            rec._styleStart = styleStart;
+            rec._styleCount = styleCount;
         } else {
             data._runRecords.delete(prev);
-            data._runRecords.set(newRun, { run: newRun, groupIdx: rec.groupIdx, slots: live, styleStart, styleCount });
+            data._runRecords.set(newRun, { _run: newRun, _groupIdx: rec._groupIdx, _slots: live, _styleStart: styleStart, _styleCount: styleCount });
             const runIdx = resolveRunIndex(data, prevRef);
             if (runIdx >= 0) {
                 data._runs[runIdx] = newRun;
@@ -819,7 +812,6 @@ export function createTextData(storage: GlyphStorage, runs?: readonly GlyphRun[]
         _layoutVersion: 0,
         _dirtyStart: 0,
         _dirtyEnd: 0,
-        _gpu: null,
     } as unknown as TextData;
     if (runs && runs.length > 0) {
         applyReset(data, runs, storage);
@@ -857,12 +849,8 @@ export function updateTextData(data: TextData, update: TextDataUpdate): void {
  *  `GlyphStorage` — caller owns its lifetime and must dispose it separately via
  *  `disposeGlyphStorage` once no `TextData` references it. */
 export function disposeTextData(data: TextData): void {
-    if (data._gpu) {
-        data._gpu.instanceBuf.destroy();
-        data._gpu = null;
-    }
     for (const g of data._groups) {
-        g.bindGroup = null;
+        g._bindGroup = null;
     }
     data._groups = [];
     data._instanceCount = 0;
