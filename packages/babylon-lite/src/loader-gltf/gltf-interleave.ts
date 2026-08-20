@@ -26,6 +26,7 @@ import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
+import { _enableShaderVb } from "../material/shader/shader-vb.js";
 import { resolveAccessor, TYPE_SIZES } from "./gltf-parser.js";
 import { computeSmoothNormals } from "./gltf-normals.js";
 import type { GltfMeshData } from "./load-gltf.js";
@@ -361,6 +362,13 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
  *  doesn't use it. */
 export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, index: number, material: PbrMaterialProps, name?: string, source?: Mesh): Mesh {
     const gpu = source?._gpu ?? buildInterleavedGpu(engine, m);
+
+    // The PBR, Standard and picking paths read `_vbLayout` unconditionally; the
+    // ShaderMaterial path learns about it only when something installs the vertex-packing
+    // support. Install it here, so a mesh whose attributes are interleaved draws correctly
+    // under a ShaderMaterial too. The cost lands in this module, which is itself only
+    // bundled when a glTF actually carries a strided bufferView.
+    _enableShaderVb();
 
     // Object-local AABB (see `Mesh.boundMin`): fold strided positions straight from the slice; tight positions
     // normally. `_worldMatrix` is deliberately NOT applied — the mesh hangs off its glTF node, whose transform
