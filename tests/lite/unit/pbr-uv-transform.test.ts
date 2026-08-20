@@ -197,6 +197,6 @@ describe("PBR independent-occlusion UV transform", () => {
     it("samples occlusion at its own transformed UV when the reflectance ext owns the slot", async () => {
         const wgsl = await composeOcclusion(PBR2_HAS_REFLECTANCE_FACTORS | PBR2_HAS_UV_TRANSFORM | PBR2_OCCL_UV_SPLIT);
         expect(wgsl).toMatch(/let occlUV\s*=/);
-        expect(wgsl).toContain("textureSample(ormTexture, ormSampler, occlUV)");
+        expect(wgsl).toContain("textureSample(ormTexture,ormSampler,occlUV)");
     });
 });

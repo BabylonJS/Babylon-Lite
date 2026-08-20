@@ -17,11 +17,6 @@ import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_
 // not in the shared flag module, for zero bundle movement on scenes that never
 // load this lazy fragment.
 const PBR2_REFL_UV_TX = 1 << 26;
-// Independent-occlusion UV transform. Defined locally, mirroring
-// uv-transform-fragment.ts and pbr-template-ext.ts, per GUIDANCE §4c′ — this ext
-// replaces the template's occlusion line, so it must reproduce every arm the
-// template's own `occlusionOverride` has, this one included.
-const PBR2_OCCL_UV_SPLIT = 1 << 28;
 
 // WebGPU shader stage constants
 const STAGE_FRAGMENT = 0x2;
@@ -98,6 +93,15 @@ export function createReflectanceFragment(
     hasUvTx: boolean = false,
     hasOcclusionSplit: boolean = false
 ): ShaderFragment {
+    // Every arm wraps the same `mix(1.0, _, occlusionStrength)`, so only the
+    // sampled expression varies. Mirrors createPbrTemplateExt's three-arm
+    // `occlusionOverride` — `occlUV` included, which this slot replaces.
+    const occlusionSample = hasOcclusionUv2
+        ? "textureSample(occlusionTexture, occlusionSampler_, input.uv2).r"
+        : hasOcclusionSplit
+          ? "textureSample(ormTexture,ormSampler,occlUV).r"
+          : "orm.r";
+
     const bindings: BindingDecl[] = [];
     if (hasMetallicReflectanceMap) {
         bindings.push(
@@ -173,11 +177,7 @@ let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surf
 
         _fragmentSlots: {
             MF: f0Code,
-            AT: hasOcclusionUv2
-                ? `let occlusion = mix(1.0, textureSample(occlusionTexture, occlusionSampler_, input.uv2).r, material.occlusionStrength);`
-                : hasOcclusionSplit
-                  ? `let occlusion = mix(1.0, textureSample(ormTexture, ormSampler, occlUV).r, material.occlusionStrength);`
-                  : `let occlusion = mix(1.0, orm.r, material.occlusionStrength);`,
+            AT: `let occlusion = mix(1.0, ${occlusionSample}, material.occlusionStrength);`,
         },
     };
 }
@@ -237,7 +237,7 @@ export const pbrExt: PbrExt = {
             // createPbrTemplateExt's `_hasOcclusionSplit`, `occlUV` included: this slot
             // replaces the template's occlusion line, so dropping the arm silently drops
             // occlusion's transform.
-            (ctx._features2 & PBR2_HAS_UV_TRANSFORM) !== 0 && (ctx._features2 & PBR2_OCCL_UV_SPLIT) !== 0
+            (ctx._features2 & PBR2_HAS_UV_TRANSFORM) !== 0 && (ctx._features2 & (1 << 28)) !== 0
         );
     },
     writeUbo: writeReflectanceUBO as PbrExt["writeUbo"],

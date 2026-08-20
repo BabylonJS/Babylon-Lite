@@ -1,6 +1,6 @@
 {
   "rawKB": 37.5,
-  "rawBytes": 38404,
+  "rawBytes": 38401,
   "gzipKB": 22.2,
   "ignoredRawKB": 28.6,
   "runtimeChunks": [
@@ -14,7 +14,7 @@
     "scene301-particle-random-block-BMyoDxwS.js",
     "scene301-random-range-CfhNtuAB.js",
     "scene301-system-block-DtFNKeDy.js",
-    "scene301-texture-source-block-Cubvbe9j.js",
+    "scene301-texture-source-block-9VJxDGtJ.js",
     "scene301-update-color-block-D3_45s5M.js",
     "scene301-update-position-block-DQ-fau8B.js",
     "scene301.js"
