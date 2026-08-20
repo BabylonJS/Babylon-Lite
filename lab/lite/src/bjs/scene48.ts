@@ -79,7 +79,7 @@ function createMaterial(scene: Scene, color: Color3, alpha = 1): StandardMateria
     hk.setTimeStep(1 / PHYSICS_FPS);
     scene.enablePhysics(new Vector3(0, -10, 0), hk);
 
-    const groundBody = new PhysicsBody(ground, PhysicsMotionType.STATIC, false, scene);
+    const groundBody = new PhysicsBody(ground, PhysicsMotionType.STATIC, scene, false);
     const groundShape = new PhysicsShapeBox(Vector3.Zero(), Quaternion.Identity(), new Vector3(40, 0.1, 40), scene);
     groundShape.material = { friction: FRICTION, restitution: RESTITUTION };
     groundBody.shape = groundShape;
@@ -91,7 +91,7 @@ function createMaterial(scene: Scene, color: Color3, alpha = 1): StandardMateria
         box.position.copyFrom(spec.position);
         box.material = createMaterial(scene, new Color3(0.3, 0.5, 0.9), 0.8);
 
-        const body = new PhysicsBody(box, PhysicsMotionType.DYNAMIC, true, scene);
+        const body = new PhysicsBody(box, PhysicsMotionType.DYNAMIC, scene, true);
         const shape = new PhysicsShapeBox(Vector3.Zero(), Quaternion.Identity(), new Vector3(1, 4, 1), scene);
         shape.material = { friction: FRICTION, restitution: RESTITUTION };
         body.shape = shape;

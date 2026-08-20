@@ -91,7 +91,7 @@ function bindBodyShape(
         child.material = material;
     }
 
-    const body = new PhysicsBody(node, PhysicsMotionType.DYNAMIC, false, scene);
+    const body = new PhysicsBody(node, PhysicsMotionType.DYNAMIC, scene, false);
     shape.material = { friction: 0.2, restitution: 0 };
     body.shape = shape;
     body.setMassProperties({ mass: 1 });
@@ -203,7 +203,7 @@ async function createSeagullRow(scene: Scene, viewer: PhysicsViewer, position: V
 
     const ground = MeshBuilder.CreateGround("ground", { width: 40, height: 40 }, scene);
     ground.material = createMaterial(scene, COLOR_GROUND);
-    const groundBody = new PhysicsBody(ground, PhysicsMotionType.STATIC, false, scene);
+    const groundBody = new PhysicsBody(ground, PhysicsMotionType.STATIC, scene, false);
     const groundShape = new PhysicsShapeBox(Vector3.Zero(), Quaternion.Identity(), new Vector3(40, 0.1, 40), scene);
     groundShape.material = { friction: 0.2, restitution: 0.3 };
     groundBody.shape = groundShape;

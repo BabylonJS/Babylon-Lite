@@ -231,7 +231,7 @@ function createGroundFromHeightMapAsync(scene: Scene): Promise<GroundMesh> {
     // Static heightfield body from the ground mesh / heightMap.png.
     const groundShape = new PhysicsShapeGroundMesh(ground, scene);
     groundShape.material = { friction: FRICTION, restitution: RESTITUTION };
-    const groundBody = new PhysicsBody(ground, PhysicsMotionType.STATIC, false, scene);
+    const groundBody = new PhysicsBody(ground, PhysicsMotionType.STATIC, scene, false);
     groundBody.shape = groundShape;
     groundBody.setMassProperties({ mass: 0 });
     viewer.showBody(groundBody);
@@ -283,7 +283,7 @@ function createGroundFromHeightMapAsync(scene: Scene): Promise<GroundMesh> {
             mesh.position.set(row2X[i]!, DROP_HEIGHT, ROW2_Z);
             shape = makePrimitiveShape(scene, entry.type);
         }
-        const body = new PhysicsBody(mesh, PhysicsMotionType.DYNAMIC, false, scene);
+        const body = new PhysicsBody(mesh, PhysicsMotionType.DYNAMIC, scene, false);
         shape.material = { friction: FRICTION, restitution: RESTITUTION };
         body.shape = shape;
         body.setMassProperties({ mass: 1 });

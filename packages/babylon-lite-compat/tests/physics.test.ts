@@ -15,6 +15,7 @@ import {
     PhysicsConstraintType,
 } from "../src/physics/physics";
 import type { TransformNode } from "../src/meshes/meshes";
+import { Vector3 } from "../src/math/vector";
 import type { Scene } from "../src/scene/scene";
 import { LiteCompatError } from "../src/error";
 
@@ -47,6 +48,7 @@ function makeAggregateMockHknp() {
         HP_Body_SetMotionType: () => undefined,
         HP_Body_SetQTransform: () => undefined,
         HP_Body_SetShape: () => undefined,
+        HP_Body_GetAngularVelocity: () => [0, [1, 2, 3]],
         HP_Body_Release: () => undefined,
         HP_World_AddBody: () => undefined,
         HP_World_RemoveBody: () => undefined,
@@ -178,7 +180,7 @@ describe("PhysicsEngine", () => {
             const node = {
                 _node: { position: { x: 0, y: 0, z: 0 }, rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } },
             } as unknown as TransformNode;
-            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, scene);
 
             expect(body.getMotionType()).toBe(PhysicsMotionType.STATIC);
             body.setMotionType(PhysicsMotionType.ANIMATED);
@@ -202,7 +204,7 @@ describe("PhysicsEngine", () => {
             const node = {
                 _node: { position: { x: 0, y: 0, z: 0 }, rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } },
             } as unknown as TransformNode;
-            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, scene);
 
             expect(() => body.setMotionType(99 as PhysicsMotionType)).toThrow("Invalid PhysicsMotionType value: 99");
             expect(() => body.setPrestepType(98 as PhysicsPrestepType)).toThrow("Invalid PhysicsPrestepType value: 98");
@@ -211,6 +213,22 @@ describe("PhysicsEngine", () => {
             expect(() => body.getMotionType()).toThrow("Invalid Lite PhysicsMotionType value: 97");
             (body._lite as unknown as { _prestepType: number })._prestepType = 96;
             expect(() => body.getPrestepType()).toThrow("Invalid Lite PhysicsPrestepType value: 96");
+        });
+
+        it("reads angular velocity through Lite", () => {
+            const plugin = new HavokPlugin(true, makeAggregateMockHknp());
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+            const node = {
+                _node: { position: { x: 0, y: 0, z: 0 }, rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } },
+            } as unknown as TransformNode;
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, scene);
+
+            expect(body.getAngularVelocity()).toEqual({ x: 1, y: 2, z: 3 });
+            const result = new Vector3();
+            body.getAngularVelocityToRef(result);
+            expect(result).toEqual({ x: 1, y: 2, z: 3 });
         });
     });
 

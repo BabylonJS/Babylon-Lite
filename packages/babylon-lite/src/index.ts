@@ -817,6 +817,7 @@ export {
     PhysicsConstraintType,
     PhysicsConstraintAxis,
 } from "./physics/havok.js";
+export { getPhysicsBodyAngularVelocity } from "./physics/havok-body-angular-velocity.js";
 export type {
     PhysicsWorld,
     PhysicsBody,

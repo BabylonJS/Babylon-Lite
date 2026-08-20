@@ -27,6 +27,7 @@ import {
     createPhysicsBody,
     createPhysicsShape,
     disposePhysics,
+    getPhysicsBodyAngularVelocity,
     getPhysicsBodyLinearVelocity,
     PhysicsMotionType as LitePhysicsMotionType,
     PhysicsPrestepType as LitePhysicsPrestepType,
@@ -314,7 +315,7 @@ export class PhysicsBody {
     public disableSync = false;
     public readonly startAsleep: boolean;
 
-    public constructor(transformNode: TransformNode, motionType: PhysicsMotionType, startsAsleep: boolean, scene: Scene) {
+    public constructor(transformNode: TransformNode, motionType: PhysicsMotionType, scene: Scene, startsAsleep = false) {
         this.transformNode = transformNode;
         this.startAsleep = startsAsleep;
         this._world = requirePhysicsWorld(scene);
@@ -407,6 +408,13 @@ export class PhysicsBody {
     }
     public setAngularVelocity(value: Vec3Like): void {
         setPhysicsBodyAngularVelocity(this._world, this._lite, value);
+    }
+    public getAngularVelocity(): Vector3 {
+        const value = getPhysicsBodyAngularVelocity(this._world, this._lite);
+        return new Vector3(value.x, value.y, value.z);
+    }
+    public getAngularVelocityToRef(result: Vector3): void {
+        result.copyFrom(this.getAngularVelocity());
     }
     public applyImpulse(impulse: Vec3Like, location: Vec3Like): void {
         applyPhysicsBodyImpulse(this._lite, impulse, location);
