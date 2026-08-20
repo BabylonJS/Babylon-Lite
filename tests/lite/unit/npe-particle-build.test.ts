@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SCENE262_NPE_JSON } from "../../../lab/lite/src/shared/scene262-npe";
 import changeEmitRateGraph from "./fixtures/change-emit-rate-npe.json";
 import changeEmitRateTruth from "./fixtures/change-emit-rate-states.json";
@@ -21,6 +21,11 @@ function systemEmitRateInput(source: MutableGraphSource): MutableGraphSource["bl
     return system.inputs.find((input) => input.name === "emitRate")!;
 }
 
+afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+});
+
 describe("NPE build reachability", () => {
     it("builds typed-array systems through the canonical inline-JSON API", async () => {
         const set = await parseNodeParticleSetFromSnippet({} as EngineContext, {} as SceneContext, "", {
@@ -40,6 +45,59 @@ describe("NPE build reachability", () => {
         const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(source));
 
         expect(set.systems[0]!.updateSpeed).toBe(0.0167);
+    });
+
+    it.each([
+        { name: "loads an embedded texture with explicit invertY false", url: "", invertY: false, expectedUrl: "embedded", expectedFlipY: true },
+        { name: "applies Lite's class-default invertY when the field is omitted", url: "", invertY: undefined, expectedUrl: "embedded", expectedFlipY: false },
+        {
+            name: "deliberately prefers URL for serializer-unreachable dual-source input",
+            url: "https://assets.example/particle.png",
+            invertY: undefined,
+            expectedUrl: "url",
+            expectedFlipY: false,
+        },
+    ])("$name", async ({ url, invertY, expectedUrl, expectedFlipY }) => {
+        const textureDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => ({}) }));
+        vi.stubGlobal("fetch", fetchMock);
+        vi.stubGlobal(
+            "createImageBitmap",
+            vi.fn(async () => ({ width: 1, height: 1, close: vi.fn() }))
+        );
+        const gpuTexture = { createView: vi.fn(() => ({})), destroy: vi.fn() };
+        const copyExternalImageToTexture = vi.fn();
+        const engine = {
+            _device: {
+                createTexture: vi.fn(() => gpuTexture),
+                createSampler: vi.fn(() => ({})),
+                queue: { copyExternalImageToTexture },
+            },
+        } as never;
+        const graph = parseNodeParticleSource({
+            blocks: [
+                {
+                    customType: "BABYLON.SystemBlock",
+                    id: 2,
+                    inputs: [{ name: "texture", targetBlockId: 1, targetConnectionName: "texture" }],
+                },
+                {
+                    customType: "BABYLON.ParticleTextureSourceBlock",
+                    id: 1,
+                    url,
+                    serializedCachedData: true,
+                    textureDataUrl,
+                    ...(invertY === undefined ? {} : { invertY }),
+                    inputs: [],
+                },
+            ],
+        });
+
+        const set = await buildNodeParticleSet(engine, {} as SceneContext, graph);
+
+        expect(fetchMock).toHaveBeenCalledWith(expectedUrl === "url" ? url : textureDataUrl);
+        expect(copyExternalImageToTexture).toHaveBeenCalledWith(expect.objectContaining({ flipY: expectedFlipY }), expect.anything(), expect.anything());
+        expect(set.systems[0]!.texture).toMatchObject({ width: 1, height: 1 });
     });
 
     it("ignores detached unsupported and OncePerParticle blocks", async () => {
