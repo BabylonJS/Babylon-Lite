@@ -157,19 +157,10 @@ export interface EngineContext extends SurfaceContext {
      *  teardown and device-lost recovery can still claim and run them synchronously. */
     _retiring?: Array<Array<() => void>> | null;
 
-    /** @internal Per-frame floating-origin offset updater. Set when the engine
-     *  was created with `useFloatingOrigin: true` (which requires
-     *  `useHighPrecisionMatrix: true`). Undefined when FO is off — scene
-     *  `_update` does `eng._updateFOOffset?.(scene)` so FO-off engines never
-     *  pull the LWR module (`large-world/floating-origin.js`) into their
-     *  bundle. The function reads `scene.camera.worldMatrix` and writes the
-     *  resulting world position into `scene._floatingOriginOffset`, bumping
-     *  `scene._floatingOriginVersion` whenever the value changes. */
-    _updateFOOffset?: (scene: import("../scene/scene-core.js").SceneContext) => void;
-
     /** @internal Per-renderable update closure wrapper. Set when the engine
      *  was created with `useFloatingOrigin: true`. Wraps a renderable's bare
-     *  `update` closure so that when `scene._floatingOriginVersion` changes,
+     *  `update` closure so that when the active camera's `worldMatrixVersion`
+     *  changes — the floating-origin offset being that camera's world position —
      *  the wrapper calls `invalidate()` (which resets the renderable's
      *  `_lastWorldVersion` to -1) before invoking the inner update — forcing
      *  the next mesh-UBO re-pack to pick up the new FO offset. Undefined when
@@ -370,9 +361,9 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
 
     // Same dynamic-import trick for the LWR runtime. When `useFloatingOrigin` is
     // false (the default) the `floating-origin.js` module is never referenced
-    // statically anywhere in the package — scene `_update` does
-    // `eng._updateFOOffset?.(scene)` which is a no-op when the field is
-    // undefined. Tree-shakers drop the module from non-LWR bundles.
+    // statically anywhere in the package: every consumer reaches it through an
+    // engine field left undefined when FO is off. Tree-shakers drop the module
+    // from non-LWR bundles.
     let _wrapRenderableForFO: EngineContext["_wrapRenderableForFO"];
     let _makePackMeshWorld: EngineContext["_makePackMeshWorld"];
     let _lightFoVersion: EngineContext["_lightFoVersion"];
