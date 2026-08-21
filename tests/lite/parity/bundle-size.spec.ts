@@ -234,6 +234,28 @@ for (const scene of SCENES) {
             expect(offenders, `scene301 must not load billboard or scene-rendered sprite paths; found: ${offenders.join(", ")}`).toEqual([]);
         }
 
+        if (scene.slug === "scene302-npe-moving-emitter") {
+            for (const required of [
+                /\/particle\/node\/npe-emitter-provider\.[jt]s$/,
+                /\/particle\/node\/npe-live-emitter\.[jt]s$/,
+                /\/particle\/particle-scene\.[jt]s$/,
+                /\/particle\/particle-billboard\.[jt]s$/,
+                /\/sprite\/billboard-scene\.[jt]s$/,
+                /\/sprite\/billboard-renderable\.[jt]s$/,
+            ]) {
+                expect(
+                    runtimeModules.some((id) => required.test(id)),
+                    `scene302 is missing required moving-emitter billboard module ${required}; loaded modules: ${runtimeModules.join(", ")}`
+                ).toBe(true);
+            }
+            const offenders = runtimeModules.filter((id) =>
+                /\/(particle\/(particle-(blend|billboard-renderable|billboard-scene|sprite-2d|sprite-2d-blend-modes)|node\/(npe-(blend-modes|flow-map-runtime|noise-runtime|texture-update-runtime|texture-content)|blocks\/(cpu-texture-source-block|update-(flow-map|noise)-block)))|sprite\/(sprite-renderer|sprite-custom-shader|sprite-renderable))\.[jt]s$/.test(
+                    id
+                )
+            );
+            expect(offenders, `scene302 must not load flow/noise, exact-blend, or Sprite2D paths; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
         // Scene 53 — depth-hosted sprites — MUST load sprite-renderable.js
         // (proves the addToScene sprite admission path is active) and MUST load
         // scene-core (it is a real 3D scene, not pure-2D).
@@ -274,9 +296,9 @@ for (const scene of SCENES) {
         // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
         // List excludes the sprite-using scenes (50-59, the 92-98 custom-shader scenes, and the
         // 117/118 sprite-picking scenes). 60-series are NME demos with no sprites; 1-40 are core 3D.
-        // 262/263/264/276/277/280/281/283/284 are NPE billboard scenes; 300/301 use NPE Sprite2D bridges.
+        // 262/263/264/276/277/280/281/283/284/302 are NPE billboard scenes; 300/301 use NPE Sprite2D bridges.
         const SPRITE_USING_IDS = new Set([
-            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301,
+            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302,
         ]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));
