@@ -12,9 +12,7 @@ export const cylinderShapeBlock: NpeBlockEvaluator = {
         const system = state.system!;
         const buffer = state.buffer!;
         const emitterWorldMatrix = state.emitterWorldMatrix;
-        const emitterX = state.emitter.x;
-        const emitterY = state.emitter.y;
-        const emitterZ = state.emitter.z;
+        const emitter = state.emitter;
         const radiusGetter = ctx.input(block, "radius", () => 1);
         const heightGetter = ctx.input(block, "height", () => 1);
         const radiusRangeGetter = ctx.input(block, "radiusRange", () => 1);
@@ -23,6 +21,9 @@ export const cylinderShapeBlock: NpeBlockEvaluator = {
         const direction2Getter = ctx.input(block, "direction2", () => ({ x: 0, y: 1, z: 0 }));
         const explicit = ctx.isConnected(block, "direction1") && ctx.isConnected(block, "direction2");
         const emitterInverseWorldMatrix = explicit ? null : (mat4Invert(emitterWorldMatrix) ?? mat4Identity());
+        if (emitterInverseWorldMatrix) {
+            (state.emitterInverseWorldMatrices ??= []).push({ source: emitterWorldMatrix, inverse: emitterInverseWorldMatrix });
+        }
         const scratch: Vec3 = { x: 0, y: 0, z: 0 };
         let birthX = 0;
         let birthY = 0;
@@ -58,9 +59,9 @@ export const cylinderShapeBlock: NpeBlockEvaluator = {
                 y = randomRange(minY, direction2.y);
                 z = randomRange(minZ, direction2.z);
             } else {
-                x = birthX - emitterX;
-                y = birthY - emitterY;
-                z = birthZ - emitterZ;
+                x = birthX - emitter.x;
+                y = birthY - emitter.y;
+                z = birthZ - emitter.z;
                 let length = Math.sqrt(x * x + y * y + z * z);
                 if (length !== 0 && length !== 1) {
                     x /= length;

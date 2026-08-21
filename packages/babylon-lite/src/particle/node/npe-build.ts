@@ -13,7 +13,7 @@ import { mat4Translation } from "../../math/mat4-translation.js";
 import { mat4GetTranslationToRef } from "../../math/mat4-transform.js";
 import type { ParticleGraph, ParsedParticleBlock, ParsedParticleInput } from "./npe-types.js";
 import type { ParticleBuffer } from "../particle-buffer.js";
-import { createParticleSystem, type ParticleSystem } from "../particle-system.js";
+import { createParticleSystem, type ParticleEmitterInverse, type ParticleSystem } from "../particle-system.js";
 import type { NpeGetter, NpeValue } from "./npe-value.js";
 import { loadNpeBlockEvaluator } from "./npe-registry.js";
 
@@ -53,6 +53,7 @@ export interface NpeBuildState {
     capacity: number;
     emitter: Vec3;
     emitterWorldMatrix: Mat4;
+    emitterInverseWorldMatrices?: ParticleEmitterInverse[];
     isLocal: boolean;
     scene: SceneContext;
     textureBaseUrl?: string;
@@ -107,7 +108,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             emitterWorldMatrix = options.emitterWorldMatrix;
             mat4GetTranslationToRef(emitterWorldMatrix, emitter);
         } else {
-            const e = options.emitter ?? { x: 0, y: 0, z: 0 };
+            const e = options.emitter ?? { ...emitter };
             emitterWorldMatrix = mat4Translation(e.x, e.y, e.z);
             emitter.x = e.x;
             emitter.y = e.y;
@@ -204,6 +205,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
 
         await buildBlock(systemId);
 
+        system._emitter = state;
         systems.push(system);
     }
 

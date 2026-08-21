@@ -10,9 +10,7 @@ export const coneShapeBlock: NpeBlockEvaluator = {
         const system = state.system!;
         const buffer = state.buffer!;
         const emitterWorldMatrix = state.emitterWorldMatrix;
-        const emitterX = state.emitter.x;
-        const emitterY = state.emitter.y;
-        const emitterZ = state.emitter.z;
+        const emitter = state.emitter;
         const emitFromSpawnPointOnly = block.serialized.emitFromSpawnPointOnly === true;
         const radiusGetter = ctx.input(block, "radius", () => 1);
         const angleGetter = ctx.input(block, "angle", () => Math.PI);
@@ -65,9 +63,9 @@ export const coneShapeBlock: NpeBlockEvaluator = {
                 y = randomRange(minY, direction2.y);
                 z = randomRange(minZ, direction2.z);
             } else {
-                x = birthX - emitterX;
-                y = birthY - emitterY;
-                z = birthZ - emitterZ;
+                x = birthX - emitter.x;
+                y = birthY - emitter.y;
+                z = birthZ - emitter.z;
                 let length = Math.sqrt(x * x + y * y + z * z);
                 if (length !== 0 && length !== 1) {
                     x /= length;

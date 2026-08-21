@@ -92,7 +92,7 @@ export async function buildNodeParticleSetWithTextureUpdateRuntime(
             emitterWorldMatrix = options.emitterWorldMatrix;
             mat4GetTranslationToRef(emitterWorldMatrix, emitter);
         } else {
-            const value = options.emitter ?? { x: 0, y: 0, z: 0 };
+            const value = options.emitter ?? { ...emitter };
             emitterWorldMatrix = mat4Translation(value.x, value.y, value.z);
             emitter.x = value.x;
             emitter.y = value.y;
@@ -194,6 +194,7 @@ export async function buildNodeParticleSetWithTextureUpdateRuntime(
         };
 
         await buildBlock(systemId);
+        system._emitter = state;
         systems.push(system);
     }
 

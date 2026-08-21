@@ -20,7 +20,7 @@ The design requirements are:
 
 ## 2. Package-root API
 
-`packages/babylon-lite/src/index.ts` exports exactly twenty-two node-particle functions and eleven node-particle types.
+`packages/babylon-lite/src/index.ts` exports exactly twenty-four node-particle functions and twelve node-particle types.
 
 ### 2.1 Functions
 
@@ -32,13 +32,21 @@ function buildNodeParticleSetWithBlendModes(engine: EngineContext, scene: SceneC
 function buildNodeParticleSetWithFlowMaps(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
 function buildNodeParticleSetWithNoiseTextures(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
 function buildNodeParticleSetWithTextureUpdates(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
+function buildNodeParticleSetWithEmitterProvider(
+    engine: EngineContext,
+    scene: SceneContext,
+    graph: ParticleGraph,
+    provider: NodeParticleEmitterProvider,
+    options?: BuildNodeParticleOptions
+): Promise<NodeParticleSet>;
 function enableNodeParticleBlendModes(set: NodeParticleSet): NodeParticleSet;
+function enableNodeParticleEmitterProvider(set: NodeParticleSet, provider: NodeParticleEmitterProvider): Promise<NodeParticleSet>;
 
 function parseNodeParticleSetFromSnippet(engine: EngineContext, scene: SceneContext, snippetId: string, options?: ParseNodeParticleOptions): Promise<NodeParticleSet>;
 
 function startParticleSystem(system: ParticleSystem): void;
 function stopParticleSystem(system: ParticleSystem): void;
-function animateParticleSystem(system: ParticleSystem, scaledRatio: number, camera?: Camera | null, targetWidth?: number, targetHeight?: number): void;
+function animateParticleSystem(system: ParticleSystem, scaledRatio: number): void;
 
 function createParticleBillboard(system: ParticleSystem): FacingBillboardSpriteSystem;
 function syncParticleBillboard(system: ParticleSystem, billboard: FacingBillboardSpriteSystem): void;
@@ -56,7 +64,7 @@ function registerNodeParticleSet2DWithBlendModes(renderer: SpriteRenderer, set: 
 function disposeNodeParticleSet2DBlendModesBinding(binding: NodeParticleSet2DBlendModesBinding): void;
 ```
 
-All twenty-two functions listed above, including `enableNodeParticleBlendModes`, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted by the five graph-build functions above, but it is not a named node-particle type export from the package root.
+All twenty-four functions listed above, including both enablers, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted by the graph-build functions above, but it is not a named node-particle type export from the package root.
 
 ### 2.2 Types
 
@@ -74,6 +82,8 @@ interface ParseNodeParticleOptions {
     emitterWorldMatrix?: Mat4;
     textureBaseUrl?: string;
 }
+
+type NodeParticleEmitterProvider = () => Mat4;
 
 interface NodeParticleSet {
     readonly systems: ParticleSystem[];
@@ -136,7 +146,7 @@ interface NodeParticleSet2DBlendModesBinding {
 }
 ```
 
-`ParticleSystem` is the ninth exported type and is specified in section 5. `ParticleSprite2DBlendModesBridge` and `NodeParticleSet2DBlendModesBinding` are the tenth and eleventh exported types. `NodeParticleSet.systems` is a mutable array behind a readonly property, and each system and its typed arrays are mutable. Both bridge families expose readonly system/layer references while keeping `pixelsPerUnit`, `originPx`, and `invertY` mutable. Both binding families expose a readonly bridge list and mutable `active` state. Every public type is pure state; behavior remains in standalone functions.
+`ParticleSystem` is specified in section 5. `NodeParticleEmitterProvider` is a pure state source: it accepts no runtime objects and returns only a matrix value. `NodeParticleSet.systems` is a mutable array behind a readonly property, and each system and its typed arrays are mutable. Both bridge families expose readonly system/layer references while keeping `pixelsPerUnit`, `originPx`, and `invertY` mutable. Both binding families expose a readonly bridge list and mutable `active` state. Every public type is pure state; behavior remains in standalone functions.
 
 ### 2.3 Internal APIs
 
@@ -165,6 +175,8 @@ serialized value or snippet response
          or buildNodeParticleSetWithNoiseTextures for UpdateNoiseBlock graphs
          or buildNodeParticleSetWithTextureUpdates for graphs containing both
      -> optional enableNodeParticleBlendModes for exact billboard blending on a set from any builder
+     -> optional enableNodeParticleEmitterProvider for a live emitter matrix on a set from any builder
+         or buildNodeParticleSetWithEmitterProvider as the default-builder convenience form
     -> NodeParticleSet { systems }
     -> startParticleSystem / stopParticleSystem / animateParticleSystem
         -> billboard target:
@@ -199,6 +211,9 @@ node/npe-parser.ts       serialized source normalization
 node/npe-types.ts        readonly TypeScript graph shapes
 node/npe-build.ts        root-reachable DFS and system construction
 node/npe-blend-modes.ts  explicit Multiply/MultiplyAdd rendering enabler
+node/npe-emitter-provider.ts
+                         thin public live-emitter enabler and convenience builder
+node/npe-live-emitter.ts dynamically loaded provider validation, copy, inverse refresh, and callback composition
 node/npe-value.ts        indexed getter and step contracts
 node/npe-texture-content.ts
                          pay-for-use CPU RGBA texture decoding
@@ -357,11 +372,13 @@ interface ParticleSystem {
     _stopped: boolean;
     _actualFrame: number;
     _emitRateGetter?: () => number;
+    _prepareFrame?: () => void;
     _spriteSheet?: ParticleSpriteHandle;
     _writeColorDead?: (i: number, color: Color4) => void;
     _suppressInitialDirectionCapture?: boolean;
     _seedLocalPosition?: ParticleStep;
-    _frameSteps?: Array<(camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void>;
+    _emitter?: ParticleEmitterState;
+    _emitterProvider?: ParticleEmitterProviderState;
     _registerBillboard?: (scene: SceneContext, billboard: FacingBillboardSpriteSystem) => void;
 }
 ```
@@ -396,21 +413,30 @@ Starting a stopped system resets simulated time and permits emission while retai
 
 ### 5.3 Feature-owned frame preparation
 
-The base particle system has no camera or target-size preparation API. Camera-dependent optional features own their preparation behind their enabler. UpdateFlowMap appends a scene callback that snapshots the current view-projection matrix after camera-control callbacks and before live particle simulation. Manual simulation can use the build-time snapshot when the camera is static, or invoke the registered scene callback after changing the camera or target size.
+`_prepareFrame` is one optional zero-argument callback. A normal static system leaves it absent. `animateParticleSystem` invokes it after the `_started` guard and before scaled-speed, dynamic emit-rate, existing-particle, or birth work. The public animation signature remains exactly `(system, scaledRatio)`; camera and target dimensions are not simulation inputs.
+
+`enableNodeParticleEmitterProvider(set, provider)` dynamically imports `npe-live-emitter.ts`, samples the provider once, mutates every system in the same set, and resolves to that identical set object. It does not replace systems, matrices, emitter vectors, inverse matrices, or the `systems` array. A provider may return a new matrix object on every sample or mutate and return the same object; every accepted sample is copied into the stable builder-owned references.
+
+The provider result must be a finite 16-element matrix. Validation copies into private scratch storage first. Every implicit-cylinder inverse is then computed into private scratch storage. Only after the complete sample and every inverse succeed does refresh commit the stable emitter matrices, translation vectors, and inverse matrices. Provider exceptions propagate unchanged; structural or finite-value errors use the explicit provider error. Either failure leaves all stable references and particle simulation state unchanged.
+
+The initial enablement sample establishes provider precedence over any static `emitterWorldMatrix` or `emitter` supplied during build. When a static matrix was supplied, that same retained matrix reference is updated in place. Calling the enabler again on a consistently enabled set samples the replacement once and updates the existing provider handle without stacking callbacks. A rejected replacement restores the previous provider, which remains active for later animation calls.
+
+All systems in one enabled set share one provider handle. Each started `animateParticleSystem(system, ratio)` call samples exactly once and commits that snapshot to every system in the set before simulating the selected system. Animating two systems therefore produces two samples, one per animation call; after the second sample all set systems expose the second snapshot. An unstarted call returns without sampling. A stopped-but-started system still samples before its drain update because `stopParticleSystem` does not clear `_started`.
 
 ### 5.4 One animation call
 
 `animateParticleSystem(system, scaledRatio)` performs these operations in this exact order:
 
 1. Return when `_started` is false.
-2. Compute `scaledUpdateSpeed = updateSpeed * scaledRatio` and assign it to `_scaledUpdateSpeed`.
-3. Evaluate `_emitRateGetter()` when present; otherwise read `emitRate`. A connected getter observes the current `_actualFrame` before this call advances it.
-4. Compute `emission = emitRate * scaledUpdateSpeed` and `newParticles = emission >> 0`.
-5. Add `emission - newParticles` to `_newPartsExcess`. Only when `_newPartsExcess > 1.0`, take `extra = _newPartsExcess >> 0`, add `extra` to `newParticles`, and subtract `extra` from `_newPartsExcess`. Equality with `1.0` does not release a particle.
-6. If `_stopped` was already true, set `newParticles = 0`. The rate getter and fractional-carry calculation have already run.
-7. If `_stopped` was false, add `scaledUpdateSpeed` to `_actualFrame`. When `targetStopDuration` is truthy and `_actualFrame >= targetStopDuration`, call `stopParticleSystem`. The `newParticles` count computed for this call is retained, so the threshold call still creates its computed cohort.
-8. Update all particles that were live at the start of the update loop.
-9. Create up to `newParticles`, subject to capacity.
+2. Invoke `_prepareFrame?.()` when present.
+3. Compute `scaledUpdateSpeed = updateSpeed * scaledRatio` and assign it to `_scaledUpdateSpeed`.
+4. Evaluate `_emitRateGetter()` when present; otherwise read `emitRate`. A connected getter observes the current `_actualFrame` before this call advances it. The numeric rate is normalized before multiplication, and emission is converted to signed Int32 with `<< 0`, which has the same `ToInt32` result as `>> 0`.
+5. Compute `emission = emitRate * scaledUpdateSpeed` and `newParticles = emission >> 0`.
+6. Add `emission - newParticles` to `_newPartsExcess`. Only when `_newPartsExcess > 1.0`, take `extra = _newPartsExcess >> 0`, add `extra` to `newParticles`, and subtract `extra` from `_newPartsExcess`. Equality with `1.0` does not release a particle.
+7. If `_stopped` was already true, set `newParticles = 0`. The rate getter and fractional-carry calculation have already run.
+8. If `_stopped` was false, add `scaledUpdateSpeed` to `_actualFrame`. When `targetStopDuration` is truthy and `_actualFrame >= targetStopDuration`, call `stopParticleSystem`. The `newParticles` count computed for this call is retained, so the threshold call still creates its computed cohort.
+9. Update all particles that were live at the start of the update loop.
+10. Create up to `newParticles`, subject to capacity.
 
 The `>> 0` operations use JavaScript signed 32-bit conversion. Rates, ratios, and speeds are not clamped or validated.
 
@@ -540,12 +566,17 @@ For each root:
 - Capacity is `systemBlock.serialized.capacity` when it is a number, otherwise `1000`.
 - `createParticleSystem(capacity)` runs before any block evaluator.
 - `isLocal` is true only when `systemBlock.serialized.isLocal === true`.
-- `options.emitterWorldMatrix` has precedence over `options.emitter`. The matrix reference is retained, and its indices 12, 13, and 14 are copied into a fresh emitter `Vec3`.
-- Without a matrix, the emitter option or `{ x: 0, y: 0, z: 0 }` is copied into the emitter value and a translation matrix.
+- `options.emitterWorldMatrix` has precedence over `options.emitter`. Ordinary build options contain no provider field, provider branch, or provider dynamic-import edge.
+- With a static matrix, the matrix reference is retained and its indices 12, 13, and 14 are copied into a fresh emitter `Vec3` exactly once, preserving the existing static contract.
+- Without a matrix, the emitter option or a copied zero vector is copied into the stable emitter value and a translation matrix.
+- After the graph walk, the newly created system receives its complete `NpeBuildState` as internal emitter build data. This is a scalar reference assignment, not live-feature behavior; every live decision remains in the lazy enabler.
+- Every implicit Cylinder evaluator computes its static inverse normally and appends one ordinary `{ source, inverse }` pair to `emitterInverseWorldMatrices`. Explicit-direction cylinders append nothing. The list supports every reachable implicit cylinder in one system; no evaluator branches on provider state or imports the live module.
 - `scene` and `textureBaseUrl` are carried in `NpeBuildState`.
+- The ordinary, flow-map, noise-texture, and combined texture-update builders retain synchronous object-literal state construction. Their specialized walks publish the same emitter build-data shape, so the post-build enabler composes with every family.
 - Each standard-builder root gets its own output map and block-id set. The flow-map, noise-texture, and combined texture-update builders dynamically import feature runtimes only through their explicit public functions. Their shared specialized walk additionally keys dependency overrides by parsed block object, allowing one texture source to be evaluated once for billboard upload and once for CPU decoding.
 - `enableNodeParticleBlendModes(set)` installs an `_registerBillboard` callback on every system in any already-built set and returns that same set. The callback reads the system's current mutable `blendMode` when registration occurs, applies the exact Babylon.js descriptor, attaches the private Multiply shader for modes `3` and `4`, and selects one or two passes. It composes with the flow-map, noise-texture, and combined texture-update builders without changing their evaluator walks.
 - `buildNodeParticleSetWithBlendModes` is the convenience form `enableNodeParticleBlendModes(await buildNodeParticleSet(...))`. Importing either public enabler is the opt-in boundary for exact particle blend state and advanced rendering; ordinary builders have no runtime import edge to the optional modules.
+- `enableNodeParticleEmitterProvider(set, provider)` is asynchronous only because its implementation is dynamically imported. It mutates and returns the same set. `buildNodeParticleSetWithEmitterProvider` is the convenience form `enableNodeParticleEmitterProvider(await buildNodeParticleSet(...), provider)` for the default builder. Sets from snippet, flow-map, noise-texture, and combined texture-update builders use the enabler directly.
 - Build promises are accumulated for the whole set and awaited together after all roots have been traversed.
 
 `CreateParticleBlock` does not create the system. `SystemBlock` does not set capacity or locality; the builder consumes those serialized fields before DFS.
@@ -692,15 +723,17 @@ For a valid read, `step = 0` when `age[i] === 0`; otherwise `step = system._scal
 
 ### 8.4 System sources and timing
 
-| Id  | Name    | Return                         |
-| --- | ------- | ------------------------------ |
-| `1` | Time    | `system._actualFrame`          |
-| `2` | Delta   | `system._scaledUpdateSpeed`    |
-| `3` | Emitter | the build-state emitter `Vec3` |
+| Id  | Name    | Return                                                                                                      |
+| --- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `1` | Time    | `system._actualFrame`                                                                                       |
+| `2` | Delta   | `system._scaledUpdateSpeed`                                                                                 |
+| `3` | Emitter | the stable build-state emitter `Vec3`, refreshed by an enabled provider before each started simulation call |
 
 Other ids throw `NodeParticle: unsupported system source <decimal id>` during build.
 
 Time has three observable phases in an animation call. A dynamic emit-rate getter sees the value before increment. Update steps and creation getters see the incremented value when the system was emitting at call entry. A call that was already stopped does not increment it.
+
+Emitter is stable by reference. Static builds retain their build-time value. Enabling a provider mutates its components before emit-rate evaluation, existing-particle updates, and births, so every contextual read in one simulation call observes the committed set snapshot.
 
 Delta is assigned before emit-rate evaluation and remains the full `updateSpeed * scaledRatio` throughout the call. DirectionScale is assigned immediately before each live particle's `updateSteps`; it can be shortened on that particle's death boundary. Outside an existing-particle update, it retains its initialized value or the value from the most recently processed particle.
 
@@ -806,6 +839,8 @@ direction = (
 
 World shape modules transform birth position and direction. Local shape modules store emitter-local direction and use `finishLocalPosition` for birth position. Sphere and Cone implicit local directions are computed from the transformed birth point and emitter translation and are therefore world-oriented values. Box, Point, explicit Sphere/Cone/Cylinder, and Mesh directions remain emitter-local. Cylinder's implicit local algorithm converts its radial vector through the inverse matrix before writing direction.
 
+All shape closures retain only stable build-state matrix, emitter, and shape-local values. After provider enablement, world-shape births use the current stable matrix, every local shape's `finishLocalPosition` uses that matrix, `LocalPositionUpdated` transforms existing local positions with it, and implicit Sphere/Cone/Cylinder direction calculations read the current stable emitter translation. Provider replacement never rebuilds evaluator closures.
+
 For Sphere, Cone, and Cylinder, explicit direction mode is selected only when both `direction1` and `direction2` satisfy the two-field connected criterion. One connected direction port does not select explicit mode.
 
 ### 9.4 BoxShapeBlock
@@ -877,7 +912,7 @@ z = sampleRadius * sin(angle)
 
 Explicit direction uses component ranges and avoids matrix inversion. The world module transforms it; the local module writes it directly.
 
-For implicit direction, the evaluator computes `mat4Invert(emitterWorldMatrix)` once during build. A determinant magnitude below `1e-10` yields `null`, and the evaluator substitutes a new identity matrix. Per birth it:
+For implicit direction, each evaluator computes `mat4Invert(emitterWorldMatrix)` during build and substitutes a new identity matrix when the determinant magnitude is below `1e-10`. It appends that inverse and its source matrix to the build state's inverse-pair list. The provider runtime refreshes every listed inverse in place before each started simulation call, again substituting identity for a singular current matrix. Per birth it:
 
 1. Forms transformed birth position minus emitter translation and conditionally normalizes it.
 2. Applies `transformNormal` with the inverse matrix into scratch.
@@ -1351,6 +1386,7 @@ The implementation preserves these explicit failures:
 - Unsupported system source: `NodeParticle: unsupported system source <decimal id>`.
 - Invalid local source use: `NodeParticle: LocalPositionUpdated requires SystemBlock.isLocal`.
 - Invalid local source timing or recycled slot: `NodeParticle: LocalPositionUpdated read before local shape position creation`.
+- Invalid live emitter provider result: `NodeParticle: emitter provider must return a finite 16-element matrix`.
 - Sprite update without setup: `NodeParticle: BasicSpriteUpdateBlock requires SetupSpriteSheetBlock`.
 - Billboard creation without texture: `createParticleBillboard: the particle system has no texture`.
 - Sprite2D bridge creation without texture: `createParticleSprite2DBridge: the particle system has no texture`.
@@ -1370,6 +1406,7 @@ Additional behavior is observable:
 - A dangling target block id is marked built and skipped. It fails only if a consumer requests its absent getter; a flow-only edge can remain silent.
 - Detached unsupported blocks are ignored because they are unreachable.
 - Dynamic-import failures for reachable evaluator or registry modules propagate from the asynchronous build.
+- Exceptions thrown by a `NodeParticleEmitterProvider` propagate unchanged from the enablement or animation call. A structurally invalid or non-finite result throws the explicit provider error before any stable matrix, translation, inverse, or simulation field is modified. A failed provider replacement also preserves the previously installed provider.
 - Missing mesh positions or indices silently leave the system without mesh creation slots. Malformed or empty arrays can produce `undefined`, `NaN`, out-of-range access, or native errors during creation.
 - Particle texture fetch, decode, and upload failures are caught inside `ParticleTextureSourceBlock`; build resolves with `texture` unchanged. Rendering then fails at billboard or Sprite2D bridge creation when no other texture was assigned.
 - `registerNodeParticleSet2D` creates and synchronizes every bridge before attachment. Creation or synchronization failure leaves renderer membership unchanged; an attachment failure removes layers already attached by that call and then propagates.
@@ -1399,7 +1436,7 @@ Additional behavior is observable:
 - A renderable particle system needs a successfully loaded or manually assigned texture. Neither render target has an untextured fallback.
 - Local-position integration is available only through source `0x0018` on a system whose root has `isLocal === true`.
 - Billboard scene registration provides no unregister handle and does not set `_started` false when a stopped system becomes empty. Sprite2D renderer registration returns an idempotently disposable binding but likewise does not stop caller-owned systems.
-- The simulation structure is allocation-free per indexed step. Billboard synchronization allocates transient values; Sprite2D bridge synchronization is allocation-free per particle and update.
+- The simulation structure is allocation-free per indexed step. Live emitter refresh copies into stable matrix/vector/inverse storage and also allocates nothing per call. Billboard synchronization allocates transient values; Sprite2D bridge synchronization is allocation-free per particle and update.
 
 ## 13. Verification contract
 
@@ -1424,6 +1461,7 @@ The current unit categories are:
 - Canonical graph state: scenes 262, 263, 264, and 276; full Basic Properties; Size; Sphere; and deterministic/random-start sprite variants.
 - Change graphs: Size, Color, Speed, Angular Speed, multi-stop Angular Speed, Drag, Emit Rate, Lifetime, Start Size, and Speed Limit.
 - Emitters: Point, Box, Sphere, directed Sphere, Hemisphere, Cone, directed Cone, Cylinder, directed Cylinder, Mesh, rotated Cylinder, all six transformed local shapes, mesh vertex color, mesh InitialDirection, shared volatile bounds, and local source build/read guards.
+- Moving emitters: translating and rotating provider snapshots, returned-matrix replacement and in-place mutation, repeated enabler replacement, static-matrix precedence, world births, all six world/local shape paths, `LocalPositionUpdated`, contextual Emitter, every implicit Cylinder inverse in one system, all builder families, inline snippet composition, unstarted and stopped-but-started calls, multi-system sampling, and provider exception/invalid-result atomicity across matrix, translation, inverse, and particle state.
 - Value correctness: shared-scratch Math, Lerp/Gradient endpoints, Random min/max aliasing, lock modes, Uint32 id edge cases, and capacity-bounded OncePerParticle caches.
 - Attractors: softened inverse-square attraction, negative-strength repulsion, defaults, coincident-point handling, lifetime-clamped step scaling, and lazy evaluator isolation.
 - Flow maps: projected nearest-neighbor sampling including non-zero row stride, vertical screen mapping, RGBA force decoding, alpha and bounds handling, per-particle strength evaluation, lifetime-clamped step scaling, allocator-selected F32/F64 matrix snapshots, and lazy texture/evaluator isolation.
@@ -1446,6 +1484,8 @@ For reproducible Babylon.js equivalence data:
 7. Record ids, position, direction, color, size, scale, angle, age, lifetime, and sprite cell when applicable.
 
 Use conversion for graph extraction. The oracle's direct parse path does not preserve every Color4 input needed by these fixtures. Babylon.js is used only as the compatibility oracle for this procedure.
+
+Moving-emitter fixtures additionally assign the oracle emitter's translation/rotation schedule immediately before each explicit animation call, force its world matrix current, and record that matrix with the resulting particle state. Lite first builds the static set, enables a provider, and replays the same schedule by returning the recorded matrix before each matching call. Fixtures include translation and rotation changes that distinguish current translation, upper-3x3 direction transforms, local-position reprojection, and inverse-dependent Cylinder direction.
 
 ### 13.3 Visual scenes
 
@@ -1501,6 +1541,10 @@ Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte acc
 
 The particle bundle-content test always requires a nonempty runtime chunk list for each of the nine billboard parity scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/noise/direction/angle update, CPU texture decode, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, only scene 280 may fetch `npe-flow-map-runtime`, and only scene 281 may fetch `npe-noise-runtime`. Each specialized texture runtime contains its evaluator, CPU texture decoder, and the shared texture-update builder after bundling.
 
+`npe-emitter-provider.ts` and `npe-live-emitter.ts` are optional content. Static scene 262 is the representative isolation guard: its runtime chunks and fetched module list contain neither module, and its filtered runtime measurement remains exactly the baseline `40,696` raw bytes with the same logical fetched chunks. The tracked scene262 manifest therefore remains unchanged. The bundle-content test pins `rawBytes === 40696` and rejects both provider modules from ordinary particle scenes.
+
+A temporary standalone Vite entry importing `buildNodeParticleSetWithEmitterProvider` measured a distinct `npe-live-emitter` chunk at `1,393 B` raw / `661 B` gzip. The temporary entry, output, and benchmark files are not retained. A Node 24 headless microbenchmark used capacity-zero started systems, `scaledRatio = 0`, a stable F32 provider matrix, 100,000 warm-up calls, and seven alternating 500,000-call rounds. Median subtraction measured approximately `18.0 ns` per generic provider refresh and `50.7 ns` for provider refresh with one implicit-cylinder inverse. These timings document local implementation cost rather than a cross-machine performance ceiling.
+
 When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, and `math/mat4-invert.ts`. It requires scenes 283 and 284 to fetch `particle-blend`, `npe-blend-modes`, `particle-billboard-scene`, and `particle-billboard-renderable`, whether Rollup emits named chunks or folds them into the scene entry, while rejecting all four modules in every ordinary particle scene. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
 
 ### 13.5 Multiply blend parity scene
@@ -1548,14 +1592,16 @@ packages/babylon-lite/src/particle/sprite-columns-random.ts
 packages/babylon-lite/src/particle/sprite-columns.ts
 ```
 
-### 14.2 Node infrastructure and registries: 26 files
+### 14.2 Node infrastructure and registries: 28 files
 
 ```text
 packages/babylon-lite/src/particle/node/node-particle.ts
 packages/babylon-lite/src/particle/node/npe-blend-modes.ts
 packages/babylon-lite/src/particle/node/npe-build.ts
+packages/babylon-lite/src/particle/node/npe-emitter-provider.ts
 packages/babylon-lite/src/particle/node/npe-flow-map-runtime.ts
 packages/babylon-lite/src/particle/node/npe-flow-map.ts
+packages/babylon-lite/src/particle/node/npe-live-emitter.ts
 packages/babylon-lite/src/particle/node/npe-noise-runtime.ts
 packages/babylon-lite/src/particle/node/npe-noise.ts
 packages/babylon-lite/src/particle/node/npe-contextual-extra.ts
@@ -1636,6 +1682,7 @@ These files are imported directly by particle source files or define the package
 ```text
 packages/babylon-lite/src/camera/camera.ts
 packages/babylon-lite/src/engine/engine.ts
+packages/babylon-lite/src/math/_matrix-allocator.ts
 packages/babylon-lite/src/math/mat4-identity.ts
 packages/babylon-lite/src/math/mat4-invert.ts
 packages/babylon-lite/src/math/mat4-transform.ts
@@ -1715,6 +1762,7 @@ tests/lite/parity/bundle-size.spec.ts
 tests/lite/unit/npe-particle-flow-map.test.ts
 tests/lite/unit/npe-particle-noise-texture.test.ts
 tests/lite/unit/npe-particle-bundle-content.test.ts
+tests/lite/unit/npe-particle-moving-emitter.test.ts
 tests/lite/unit/particle-sprite-2d.test.ts
 tests/lite/unit/particle-sprite-2d-blend-modes.test.ts
 ```
