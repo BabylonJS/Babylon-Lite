@@ -1,0 +1,9 @@
+{
+  "rawKB": 19.8,
+  "rawBytes": 20231,
+  "gzipKB": 8.5,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene303.js"
+  ]
+}
