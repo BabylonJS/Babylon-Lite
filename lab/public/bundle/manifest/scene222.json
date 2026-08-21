@@ -1,16 +1,16 @@
 {
-  "rawKB": 110.8,
-  "gzipKB": 42,
+  "rawKB": 111,
+  "rawBytes": 113677,
+  "gzipKB": 42.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene222-gpu-pool-CHlSfwGp.js",
-    "scene222-scene-uniforms-Ha63NnVx.js",
     "scene222-shader-pipeline-cache-B3SDpvaR.js",
-    "scene222-shader-renderable-N6AMHCEK.js",
-    "scene222-standard-renderable-dqAEkVoo.js",
+    "scene222-shader-renderable-D0hxLeGX.js",
+    "scene222-standard-renderable-BV7mypE8.js",
     "scene222-swapchain-overlay-ilhN4El_.js",
-    "scene222-uniform-copy-batch-D_cAb-Im.js",
+    "scene222-ubo-layout-Cs5YvLYZ.js",
+    "scene222-uniform-copy-batch-CpNHi2tt.js",
     "scene222.js"
-  ],
-  "rawBytes": 113507
+  ]
 }

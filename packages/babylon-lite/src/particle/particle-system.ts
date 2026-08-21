@@ -157,8 +157,8 @@ export function animateParticleSystem(system: ParticleSystem, scaledRatio: numbe
 
     const scaledUpdateSpeed = (system._scaledUpdateSpeed = system.updateSpeed * scaledRatio);
     const emitRate = system._emitRateGetter ? system._emitRateGetter() : system.emitRate;
-    const emission = +emitRate * scaledUpdateSpeed;
-    let newParticles = emission << 0;
+    const emission = emitRate * scaledUpdateSpeed;
+    let newParticles = emission | 0;
     system._newPartsExcess += emission - newParticles;
     if (system._newPartsExcess > 1.0) {
         const extra = system._newPartsExcess >> 0;

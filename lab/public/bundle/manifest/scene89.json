@@ -1,6 +1,7 @@
 {
-  "rawKB": 58.5,
-  "gzipKB": 26.7,
+  "rawKB": 58.4,
+  "rawBytes": 59852,
+  "gzipKB": 26.6,
   "ignoredRawKB": 7.6,
   "runtimeChunks": [
     "scene89-_math-factory-BNrw_3EP.js",
@@ -23,6 +24,5 @@
     "scene89-vector-splitter-BZSXFo7U.js",
     "scene89-vertex-output-C7G5u6Y0.js",
     "scene89.js"
-  ],
-  "rawBytes": 59903
+  ]
 }

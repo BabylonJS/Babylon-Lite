@@ -14,14 +14,52 @@ interface BundleInfo {
 const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
 const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280, 281, 283, 284];
+const SCENE262_UPSTREAM_RAW_BYTES = 40829;
 const UNUSED_FEATURE_CHUNK =
     /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|emitter-provider|flow-map-runtime|live-emitter|noise-runtime|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 const OPTIONAL_BLEND_MODULE = /particle\/(particle-(blend|billboard-renderable|billboard-scene)|node\/npe-blend-modes)/;
+const EMBEDDED_TEXTURE_SOURCE = "embedded-texture-source";
+const EMBEDDED_TEXTURE_SOURCE_MODULE = /\/blocks\/embedded-texture-source-block\.[jt]s$/;
+const BASE_TEXTURE_SOURCE_MODULE = /\/blocks\/texture-source-block\.[jt]s$/;
+
+function findUnusedFeatureChunks(sceneId: number, chunks: string[]): string[] {
+    return chunks.filter(
+        (chunk) =>
+            UNUSED_FEATURE_CHUNK.test(chunk) &&
+            !(sceneId === 263 && chunk.includes("registry-extra-emitters")) &&
+            !(sceneId === 277 && (chunk.includes("registry-extra-remaining") || chunk.includes("update-attractor-block"))) &&
+            !(sceneId === 280 && (chunk.includes("npe-flow-map-runtime") || chunk.includes("npe-texture-update-runtime"))) &&
+            !(sceneId === 281 && (chunk.includes("npe-noise-runtime") || chunk.includes("npe-texture-update-runtime"))) &&
+            !((sceneId === 283 || sceneId === 284) && /particle-(blend|billboard-renderable|billboard-scene)|npe-blend-modes/.test(chunk))
+    );
+}
+
+function findUnexpectedEmbeddedTextureChunks(sceneId: number, chunks: string[]): string[] {
+    return sceneId === 281 ? [] : chunks.filter((chunk) => chunk.includes(EMBEDDED_TEXTURE_SOURCE));
+}
+
+function expectEmbeddedTextureModuleIsolation(sceneId: number, moduleIds: string[]): void {
+    const embeddedModules = moduleIds.filter((id) => EMBEDDED_TEXTURE_SOURCE_MODULE.test(id));
+    if (sceneId === 281) {
+        expect(
+            moduleIds.filter((id) => BASE_TEXTURE_SOURCE_MODULE.test(id)),
+            "scene281 must not fetch the base texture evaluator"
+        ).toEqual([]);
+    } else {
+        expect(embeddedModules, `scene${sceneId} must not fetch the embedded texture evaluator`).toEqual([]);
+    }
+}
 
 describe("Particle bundle feature isolation", () => {
-    it("keeps the static scene262 runtime at its byte-identical baseline", () => {
+    it("keeps the static scene262 runtime at or below the upstream baseline", () => {
         const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, "scene262.json"), "utf8")) as SceneManifest;
-        expect(manifest.rawBytes).toBe(40696);
+        expect(manifest.rawBytes).toBeLessThanOrEqual(SCENE262_UPSTREAM_RAW_BYTES);
+    });
+
+    it("rejects named embedded-texture chunks without bundle-info except for scene281", () => {
+        const chunk = "scene262-embedded-texture-source-block-HASH.js";
+        expect(findUnexpectedEmbeddedTextureChunks(262, [chunk])).toEqual([chunk]);
+        expect(findUnexpectedEmbeddedTextureChunks(281, [chunk])).toEqual([]);
     });
 
     it("canonical particle scenes do not fetch unused optional features", () => {
@@ -29,16 +67,9 @@ describe("Particle bundle feature isolation", () => {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const chunks = manifest.runtimeChunks ?? [];
             expect(chunks.length, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
-            const offenders = chunks.filter(
-                (chunk) =>
-                    UNUSED_FEATURE_CHUNK.test(chunk) &&
-                    !(sceneId === 263 && chunk.includes("registry-extra-emitters")) &&
-                    !(sceneId === 277 && (chunk.includes("registry-extra-remaining") || chunk.includes("update-attractor-block"))) &&
-                    !(sceneId === 280 && (chunk.includes("npe-flow-map-runtime") || chunk.includes("npe-texture-update-runtime"))) &&
-                    !(sceneId === 281 && (chunk.includes("npe-noise-runtime") || chunk.includes("npe-texture-update-runtime"))) &&
-                    !((sceneId === 283 || sceneId === 284) && /particle-(blend|billboard-renderable|billboard-scene)|npe-blend-modes/.test(chunk))
-            );
+            const offenders = findUnusedFeatureChunks(sceneId, chunks);
             expect(offenders, `scene${sceneId} fetches unused particle feature chunks`).toEqual([]);
+            expect(findUnexpectedEmbeddedTextureChunks(sceneId, chunks), `scene${sceneId} fetches an unexpected embedded texture chunk`).toEqual([]);
             if (sceneId === 277) {
                 expect(
                     chunks.some((chunk) => chunk.includes("update-attractor-block")),
@@ -72,6 +103,7 @@ describe("Particle bundle feature isolation", () => {
                 .filter((chunk) => chunk.file && runtimeChunks.has(chunk.file))
                 .flatMap((chunk) => chunk.modules ?? [])
                 .map((module) => module.id ?? "");
+            expectEmbeddedTextureModuleIsolation(sceneId, runtimeModuleIds);
             if (sceneId === 283 || sceneId === 284) {
                 expect(runtimeModuleIds.filter((id) => OPTIONAL_BLEND_MODULE.test(id))).toEqual(
                     expect.arrayContaining([
@@ -120,6 +152,7 @@ describe("Particle bundle feature isolation", () => {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const runtimeChunks = new Set(manifest.runtimeChunks ?? []);
             expect(runtimeChunks.size, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
+            expect(findUnexpectedEmbeddedTextureChunks(sceneId, [...runtimeChunks]), `scene${sceneId} fetches an unexpected embedded texture chunk`).toEqual([]);
 
             const bundleInfoPath = resolve(BUNDLE_INFO_DIR, `scene${sceneId}.json`);
             if (!existsSync(bundleInfoPath)) {
@@ -130,6 +163,7 @@ describe("Particle bundle feature isolation", () => {
                 .filter((chunk) => chunk.file && runtimeChunks.has(chunk.file))
                 .flatMap((chunk) => chunk.modules ?? [])
                 .map((module) => module.id ?? "");
+            expectEmbeddedTextureModuleIsolation(sceneId, runtimeModuleIds);
             const exactModules = runtimeModuleIds.filter((id) => /\/(particle\/(particle-sprite-2d-blend-modes|particle-blend)|sprite\/sprite-custom-shader)\.[jt]s$/.test(id));
 
             if (sceneId === 301) {

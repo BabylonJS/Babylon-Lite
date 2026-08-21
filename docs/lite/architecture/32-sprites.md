@@ -1309,6 +1309,37 @@ system.count, 0, 0, 0)` for all active sprites.
 | 10..11          | `pivot`     | `float32x2`   | normalized [0,1] pivot                                 |
 | 12..15          | `color`     | `float32x4`   | RGBA tint stored as four float32 channels              |
 
+`position` is the only field with a CPU-side shadow beyond `_savedSize`.
+`system._anchor` holds the same three components in F64, 24 B per sprite,
+maintained in lockstep with `_instanceData` by `writeInstance`,
+`growCapacity`, `removeBillboardSpriteIndex` and `clearBillboardSprites`.
+
+It exists because floating origin cannot rescue a value that was already
+quantized. The eye-relative subtraction in `billboard-pipeline.ts` must read
+a source that still has the low bits, so it reads `_anchor`; subtracting
+from the F32 `_instanceData` afterwards would recover nothing, because the
+detail was lost one step earlier at the F32 store. The comment on that
+subtraction notes anchors "live at world scale (~5e6)", where the F32 ULP is
+0.5 m — comparable to a whole particle sprite. This mirrors the rule
+`packMat4IntoF32WithOffset` follows for meshes (`36-high-precision-matrix.md`):
+subtract in F64, store once in F32.
+
+The shadow is allocated unconditionally, not gated on `useFloatingOrigin`.
+A sprite system is created standalone and registered into a scene later, so
+`createBillboardSystem` has no engine to ask, and the anchor must already be
+F64-accurate by the time the first sprite is written — too early to gate on
+anything. Non-FO scenes therefore pay 24 B per sprite of CPU memory (against
+the existing 64 B instance record) for a value they never read. They pay no
+per-frame cost: the FO upload path already copied every instance into scratch
+each frame, because every anchor depends on the live camera offset, and the
+non-FO path keeps its partial dirty-range uploads straight from
+`_instanceData`.
+
+`_instanceData` still carries the F32 position, and picking
+(`billboard-pick-pipeline.ts`) and the bounding centre
+(`refreshBillboardWorldCenter`) both continue to read it. Both work at world
+scale, where F32 is proportionate.
+
 The current system UBO is 32 bytes:
 
 - `opacityMul` at byte offset 0: `vec4<f32>`. Straight-alpha and cutout write `(1, 1, 1, opacity)`; premultiplied writes `(opacity, opacity, opacity, opacity)` so the shader is branch-free.

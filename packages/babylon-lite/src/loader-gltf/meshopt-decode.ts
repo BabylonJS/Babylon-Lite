@@ -9,8 +9,8 @@
  * `extensionsUsed` lists EXT_meshopt_compression.
  */
 
-// Public base URL where meshopt_decoder.js is hosted. Defaults to site root.
-let meshoptBaseUrl = "/";
+// Public base URL where meshopt_decoder.js is hosted. Defaults to the Babylon CDN.
+let meshoptBaseUrl = "https://cdn.babylonjs.com/";
 
 /** Override the base URL where meshopt_decoder.js is hosted. */
 export function setMeshoptBaseUrl(url: string): void {

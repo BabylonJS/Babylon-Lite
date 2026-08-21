@@ -1,5 +1,6 @@
 {
-  "rawKB": 59.1,
+  "rawKB": 59,
+  "rawBytes": 60427,
   "gzipKB": 26.5,
   "ignoredRawKB": 6.4,
   "runtimeChunks": [
@@ -23,6 +24,5 @@
     "scene88-vector-splitter-DovjFNKl.js",
     "scene88-vertex-output-C7G5u6Y0.js",
     "scene88.js"
-  ],
-  "rawBytes": 60478
+  ]
 }

@@ -1,11 +1,11 @@
 {
   "rawKB": 64.8,
+  "rawBytes": 66377,
   "gzipKB": 24.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene223-standard-renderable-CcCZ2b3W.js",
+    "scene223-standard-renderable-BdyYiXDh.js",
     "scene223-swapchain-overlay-ilhN4El_.js",
     "scene223.js"
-  ],
-  "rawBytes": 66379
+  ]
 }

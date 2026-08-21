@@ -146,7 +146,7 @@ interface NodeParticleSet2DBlendModesBinding {
 }
 ```
 
-`ParticleSystem` is specified in section 5. `NodeParticleEmitterProvider` is a pure state source: it accepts no runtime objects and returns only a matrix value. `NodeParticleSet.systems` is a mutable array behind a readonly property, and each system and its typed arrays are mutable. Both bridge families expose readonly system/layer references while keeping `pixelsPerUnit`, `originPx`, and `invertY` mutable. Both binding families expose a readonly bridge list and mutable `active` state. Every public type is pure state; behavior remains in standalone functions.
+`ParticleSystem` is the tenth exported type and is specified in section 5. `ParticleSprite2DBlendModesBridge` and `NodeParticleSet2DBlendModesBinding` are the eleventh and twelfth exported types. `NodeParticleEmitterProvider` is a pure state source: it accepts no runtime objects and returns only a matrix value. `NodeParticleSet.systems` is a mutable array behind a readonly property, and each system and its typed arrays are mutable. Both bridge families expose readonly system/layer references while keeping `pixelsPerUnit`, `originPx`, and `invertY` mutable. Both binding families expose a readonly bridge list and mutable `active` state. Every public type is pure state; behavior remains in standalone functions.
 
 ### 2.3 Internal APIs
 
@@ -415,6 +415,8 @@ Starting a stopped system resets simulated time and permits emission while retai
 
 `_prepareFrame` is one optional zero-argument callback. A normal static system leaves it absent. `animateParticleSystem` invokes it after the `_started` guard and before scaled-speed, dynamic emit-rate, existing-particle, or birth work. The public animation signature remains exactly `(system, scaledRatio)`; camera and target dimensions are not simulation inputs.
 
+The base particle system has no camera or target-size preparation API. Camera-dependent optional features own their preparation behind their enabler. UpdateFlowMap appends a scene callback that snapshots the current view-projection matrix after camera-control callbacks and before live particle simulation. Manual simulation can use the build-time snapshot when the camera is static, or invoke the registered scene callback after changing the camera or target size.
+
 `enableNodeParticleEmitterProvider(set, provider)` dynamically imports `npe-live-emitter.ts`, samples the provider once, mutates every system in the same set, and resolves to that identical set object. It does not replace systems, matrices, emitter vectors, inverse matrices, or the `systems` array. A provider may return a new matrix object on every sample or mutate and return the same object; every accepted sample is copied into the stable builder-owned references.
 
 The provider result must be a finite 16-element matrix. Validation copies into private scratch storage first. Every implicit-cylinder inverse is then computed into private scratch storage. Only after the complete sample and every inverse succeed does refresh commit the stable emitter matrices, translation vectors, and inverse matrices. Provider exceptions propagate unchanged; structural or finite-value errors use the explicit provider error. Either failure leaves all stable references and particle simulation state unchanged.
@@ -430,15 +432,15 @@ All systems in one enabled set share one provider handle. Each started `animateP
 1. Return when `_started` is false.
 2. Invoke `_prepareFrame?.()` when present.
 3. Compute `scaledUpdateSpeed = updateSpeed * scaledRatio` and assign it to `_scaledUpdateSpeed`.
-4. Evaluate `_emitRateGetter()` when present; otherwise read `emitRate`. A connected getter observes the current `_actualFrame` before this call advances it. The numeric rate is normalized before multiplication, and emission is converted to signed Int32 with `<< 0`, which has the same `ToInt32` result as `>> 0`.
-5. Compute `emission = emitRate * scaledUpdateSpeed` and `newParticles = emission >> 0`.
+4. Evaluate `_emitRateGetter()` when present; otherwise read `emitRate`. A connected getter observes the current `_actualFrame` before this call advances it.
+5. Compute `emission = emitRate * scaledUpdateSpeed` and `newParticles = emission | 0`.
 6. Add `emission - newParticles` to `_newPartsExcess`. Only when `_newPartsExcess > 1.0`, take `extra = _newPartsExcess >> 0`, add `extra` to `newParticles`, and subtract `extra` from `_newPartsExcess`. Equality with `1.0` does not release a particle.
 7. If `_stopped` was already true, set `newParticles = 0`. The rate getter and fractional-carry calculation have already run.
 8. If `_stopped` was false, add `scaledUpdateSpeed` to `_actualFrame`. When `targetStopDuration` is truthy and `_actualFrame >= targetStopDuration`, call `stopParticleSystem`. The `newParticles` count computed for this call is retained, so the threshold call still creates its computed cohort.
 9. Update all particles that were live at the start of the update loop.
 10. Create up to `newParticles`, subject to capacity.
 
-The `>> 0` operations use JavaScript signed 32-bit conversion. Rates, ratios, and speeds are not clamped or validated.
+The `| 0` and `>> 0` operations use JavaScript signed 32-bit conversion. Rates, ratios, and speeds are not clamped or validated.
 
 ### 5.5 Existing-particle update and death
 
@@ -573,7 +575,7 @@ For each root:
 - Every implicit Cylinder evaluator computes its static inverse normally and appends one ordinary `{ source, inverse }` pair to `emitterInverseWorldMatrices`. Explicit-direction cylinders append nothing. The list supports every reachable implicit cylinder in one system; no evaluator branches on provider state or imports the live module.
 - `scene` and `textureBaseUrl` are carried in `NpeBuildState`.
 - The ordinary, flow-map, noise-texture, and combined texture-update builders retain synchronous object-literal state construction. Their specialized walks publish the same emitter build-data shape, so the post-build enabler composes with every family.
-- Each standard-builder root gets its own output map and block-id set. The flow-map, noise-texture, and combined texture-update builders dynamically import feature runtimes only through their explicit public functions. Their shared specialized walk additionally keys dependency overrides by parsed block object, allowing one texture source to be evaluated once for billboard upload and once for CPU decoding.
+- Each standard-builder root gets its own output map and block-id set. Every standard `ParticleTextureSourceBlock` stays on the base registry; its existing evaluator prefers a nonempty string `url` and otherwise accepts a string `textureDataUrl`, without importing an optional evaluator. The flow-map, noise-texture, and combined texture-update builders dynamically import feature runtimes only through their explicit public functions. Their shared specialized walk additionally keys dependency overrides by parsed block object, allowing one texture source to be evaluated once for billboard upload and once for CPU decoding.
 - `enableNodeParticleBlendModes(set)` installs an `_registerBillboard` callback on every system in any already-built set and returns that same set. The callback reads the system's current mutable `blendMode` when registration occurs, applies the exact Babylon.js descriptor, attaches the private Multiply shader for modes `3` and `4`, and selects one or two passes. It composes with the flow-map, noise-texture, and combined texture-update builders without changing their evaluator walks.
 - `buildNodeParticleSetWithBlendModes` is the convenience form `enableNodeParticleBlendModes(await buildNodeParticleSet(...))`. Importing either public enabler is the opt-in boundary for exact particle blend state and advanced rendering; ordinary builders have no runtime import edge to the optional modules.
 - `enableNodeParticleEmitterProvider(set, provider)` is asynchronous only because its implementation is dynamically imported. It mutates and returns the same set. `buildNodeParticleSetWithEmitterProvider` is the convenience form `enableNodeParticleEmitterProvider(await buildNodeParticleSet(...), provider)` for the default builder. Sets from snippet, flow-map, noise-texture, and combined texture-update builders use the enabler directly.
@@ -1034,9 +1036,13 @@ The block installs scalar `output`: `abs(value)` for a scalar, Euclidean length 
 
 ### 9.20 ParticleTextureSourceBlock
 
-The ordinary evaluator retains GPU-upload-only behavior. It reads string `serialized.url` or the empty string, treats HTTP(S), protocol-relative, and root-relative URLs as absolute, and resolves any other nonempty source against `textureBaseUrl` when supplied. It schedules `loadTexture2D` with `{ invertY: !(serialized.invertY !== false) }`, stores the result on `system.texture`, and catches load failures.
+The ordinary evaluator retains GPU-upload-only behavior. It prefers a nonempty string `serialized.url`, otherwise uses a string `serialized.textureDataUrl`, and otherwise uses the empty string. Babylon serialization clears `url` when `textureDataUrl` is set, so a serialized cached payload selects the data URL. If hand-authored input supplies both values as nonempty strings, Lite deliberately prefers `url`; Babylon's serializer never emits that shape. The `serializedCachedData` flag alone has no effect because it carries no pixels.
 
-`buildNodeParticleSetWithFlowMaps` dynamically imports a dedicated flow-only walker. It retains the ordinary URL-only evaluator for the system texture and selects `cpuTextureSourceBlock` only for the flow-map input. Keeping this walker specialized prevents flow-only graphs from retaining multi-feature dispatch or embedded render-texture handling.
+The ordinary and specialized embedded evaluators treat HTTP(S), protocol-relative, and root-relative URLs as absolute and resolve any other nonempty source against `textureBaseUrl` when supplied. They schedule `loadTexture2D` with `{ invertY: serialized.invertY === false }`, store the result on `system.texture`, and catch load failures. An omitted `invertY` applies Lite's block class default of `true` and therefore passes loader `invertY: false`. This differs from Babylon's `_deserialize` fallback for a missing field, but Babylon's serializer always emits the field.
+
+The two semantically matching evaluators intentionally remain import-independent so the specialized walk does not emit or fetch the base `texture-source-block` evaluator. URL-only standard graphs retain the base texture chunk set and never fetch `embedded-texture-source-block`; only the noise-capable specialized path may fetch that evaluator.
+
+`buildNodeParticleSetWithFlowMaps` dynamically imports a dedicated flow-only walker. It retains the ordinary evaluator for the system texture and selects `cpuTextureSourceBlock` only for the flow-map input. Keeping this walker specialized prevents flow-only graphs from retaining multi-feature dispatch or embedded render-texture handling.
 
 `buildNodeParticleSetWithNoiseTextures` dynamically imports the texture-update walker with noise enabled. `buildNodeParticleSetWithTextureUpdates` uses the same walker with both flow and noise enabled for graphs produced from classic systems that use both updates. In these noise-capable builders, ordinary texture-source evaluation uses `embeddedParticleTextureSourceBlock`, which prefers `url` and falls back to `textureDataUrl`; CPU texture inputs use `cpuTextureSourceBlock`. The CPU evaluator gives `textureDataUrl` precedence over `url`, accepts only explicit `http`, `https`, `data`, and `blob` schemes, resolves relative URLs against `textureBaseUrl`, and installs `texture` as an `NpeTextureValue`. It performs no GPU upload.
 
@@ -1386,6 +1392,7 @@ The implementation preserves these explicit failures:
 - Unsupported system source: `NodeParticle: unsupported system source <decimal id>`.
 - Invalid local source use: `NodeParticle: LocalPositionUpdated requires SystemBlock.isLocal`.
 - Invalid local source timing or recycled slot: `NodeParticle: LocalPositionUpdated read before local shape position creation`.
+- Invalid live emitter target set: `NodeParticle: emitter provider requires a set produced by a node-particle builder`.
 - Invalid live emitter provider result: `NodeParticle: emitter provider must return a finite 16-element matrix`.
 - Sprite update without setup: `NodeParticle: BasicSpriteUpdateBlock requires SetupSpriteSheetBlock`.
 - Billboard creation without texture: `createParticleBillboard: the particle system has no texture`.
@@ -1430,7 +1437,7 @@ Additional behavior is observable:
 - The plain billboard path maps mode `0` to OneOne, mode `1` to alpha, and modes `2`, `3`, `4`, and unknown values to Add. The baseline Sprite2D bridge independently maps mode `0` to `spriteBlendOneOne`, mode `1` to `spriteBlendAlpha`, and every other value to `spriteBlendAdditive`. These fallback contracts remain intentionally unchanged for callers that do not opt in.
 - System source 4 and every system source outside 1, 2, and 3 are unsupported.
 - Custom emitter functions, sub-emitter triggers, and inherited emitter velocity have no supported block evaluator.
-- UpdateNoise supports serialized static URL/data-URL pixels. Babylon's live `NoiseProceduralTexture` refresh is not reconstructed because `ParticleTextureSourceBlock.sourceTexture` is an in-memory object and is not serialized into NPE graph JSON.
+- ParticleTextureSource supports serialized static URL/data-URL pixels. Babylon's live `sourceTexture`, including `NoiseProceduralTexture` refresh, is not reconstructed because it is an in-memory object and is not serialized into NPE graph JSON.
 - Emit power scales the created direction; exactly zero clears it. No inherited velocity term is added.
 - Mesh emission reads only `cachedVertexData`; mesh `worldSpace` is ignored, and mesh data is not structurally validated.
 - A renderable particle system needs a successfully loaded or manually assigned texture. Neither render target has an untextured fallback.
@@ -1457,7 +1464,7 @@ Snapshots sort live slots by particle id. The scene 262 canonical state test use
 The current unit categories are:
 
 - Buffer and lifecycle: base-only allocation, string-key column sharing, dense spawn/swap-remove, capacity, emission, integration, death clamp, and sprite-column math.
-- Build behavior: inline JSON, root reachability, detached-block isolation, two-field connection criteria, dynamic emit-rate laziness, and system-time reevaluation.
+- Build behavior: inline JSON, root reachability, detached-block isolation, two-field connection criteria, dynamic emit-rate laziness, system-time reevaluation, deliberate URL-over-data precedence for serializer-unreachable hand-authored input, and default-path embedded texture upload with explicit-false mapping and Lite's class default when `invertY` is omitted.
 - Canonical graph state: scenes 262, 263, 264, and 276; full Basic Properties; Size; Sphere; and deterministic/random-start sprite variants.
 - Change graphs: Size, Color, Speed, Angular Speed, multi-stop Angular Speed, Drag, Emit Rate, Lifetime, Start Size, and Speed Limit.
 - Emitters: Point, Box, Sphere, directed Sphere, Hemisphere, Cone, directed Cone, Cylinder, directed Cylinder, Mesh, rotated Cylinder, all six transformed local shapes, mesh vertex color, mesh InitialDirection, shared volatile bounds, and local source build/read guards.
@@ -1525,7 +1532,7 @@ Current tracked measurements are:
 
 | Scene | Runtime raw | Runtime gzip | Ignored graph payload raw |   Ceiling |
 | ----- | ----------: | -----------: | ------------------------: | --------: |
-| 262   |   `39.7 KB` |    `24.1 KB` |                 `28.5 KB` | `44.1 KB` |
+| 262   |   `39.9 KB` |    `24.2 KB` |                 `28.5 KB` | `44.1 KB` |
 | 263   |   `41.8 KB` |    `24.7 KB` |                 `27.5 KB` | `44.1 KB` |
 | 264   |   `40.0 KB` |    `25.9 KB` |                 `34.4 KB` | `44.1 KB` |
 | 276   |   `44.0 KB` |    `25.2 KB` |                 `27.1 KB` | `45.0 KB` |
@@ -1539,13 +1546,15 @@ Current tracked measurements are:
 
 Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, and 301 as sprite users. Scenes 262 through 284 in that list render through billboard sprite modules. Scene 300 requires `particle-sprite-2d.ts` and `sprite-renderer.ts` while rejecting the exact Sprite2D module, custom-shader path, particle billboard, particle scene-registration, depth-hosted Sprite2D, and billboard rendering paths. Scene 301 requires `particle-sprite-2d-blend-modes.ts`, `particle-blend.ts`, `sprite-custom-shader.ts`, and `sprite-renderer.ts` while rejecting `particle-billboard-renderable.ts`, `particle-billboard-scene.ts`, and the scene-rendered sprite path. Representative unrelated Sprite2D scene 50 also rejects every particle exact-blend and custom-shader module. Scene 50 and Scene 300 must remain byte-identical to their pre-feature logical modules; their tracked manifests are not regenerated unless a measured runtime change proves otherwise.
 
-The particle bundle-content test always requires a nonempty runtime chunk list for each of the nine billboard parity scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/noise/direction/angle update, CPU texture decode, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, only scene 280 may fetch `npe-flow-map-runtime`, and only scene 281 may fetch `npe-noise-runtime`. Each specialized texture runtime contains its evaluator, CPU texture decoder, and the shared texture-update builder after bundling.
+The particle bundle-content test always requires a nonempty runtime chunk list for each of the nine billboard parity scenes. It rejects fetched chunks matching unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/noise/direction/angle update, CPU or embedded texture source, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, and optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, only scene 280 may fetch `npe-flow-map-runtime`, and only scene 281 may fetch `npe-noise-runtime` and `embedded-texture-source-block`. Each specialized texture runtime contains its evaluator, CPU texture decoder, and the shared texture-update builder after bundling.
 
-`npe-emitter-provider.ts` and `npe-live-emitter.ts` are optional content. Static scene 262 is the representative isolation guard: its runtime chunks and fetched module list contain neither module, and its filtered runtime measurement remains exactly the baseline `40,696` raw bytes with the same logical fetched chunks. The tracked scene262 manifest therefore remains unchanged. The bundle-content test pins `rawBytes === 40696` and rejects both provider modules from ordinary particle scenes.
+When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, `embedded-texture-source-block` outside scene 281, and `math/mat4-invert.ts`. It requires scenes 283 and 284 to fetch `particle-blend`, `npe-blend-modes`, `particle-billboard-scene`, and `particle-billboard-renderable`, whether Rollup emits named chunks or folds them into the scene entry, while rejecting all four modules in every ordinary particle scene. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
+
+`npe-emitter-provider.ts` and `npe-live-emitter.ts` are optional content. Static scene 262 is the representative isolation guard: its runtime chunks and fetched module list contain neither module. The bundle-content test rejects both provider modules from ordinary particle scenes and requires the tracked scene262 `rawBytes` to remain at or below the current upstream baseline of `40,829`. Filtered bundle builds and the authoritative Bundle Size job measure actual output; this manifest assertion is a regression guard, not an exact generated-output pin.
 
 A temporary standalone Vite entry importing `buildNodeParticleSetWithEmitterProvider` measured a distinct `npe-live-emitter` chunk at `1,393 B` raw / `661 B` gzip. The temporary entry, output, and benchmark files are not retained. A Node 24 headless microbenchmark used capacity-zero started systems, `scaledRatio = 0`, a stable F32 provider matrix, 100,000 warm-up calls, and seven alternating 500,000-call rounds. Median subtraction measured approximately `18.0 ns` per generic provider refresh and `50.7 ns` for provider refresh with one implicit-cylinder inverse. These timings document local implementation cost rather than a cross-machine performance ceiling.
 
-When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, and `math/mat4-invert.ts`. It requires scenes 283 and 284 to fetch `particle-blend`, `npe-blend-modes`, `particle-billboard-scene`, and `particle-billboard-renderable`, whether Rollup emits named chunks or folds them into the scene entry, while rejecting all four modules in every ordinary particle scene. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
+At module level, scene 281 reciprocally rejects `texture-source-block`, ensuring its specialized path never fetches the base texture evaluator. The Sprite2D loop for scenes 50, 300, and 301 applies the same embedded-texture isolation at both levels: it rejects named `embedded-texture-source` runtime chunks and, when bundle-info exists, fetched `embedded-texture-source-block` modules.
 
 ### 13.5 Multiply blend parity scene
 

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove";
 import { addToScene } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
+import { _registerAssetContainerSceneCleanup } from "../../../packages/babylon-lite/src/loader-gltf/gltf-scene-cleanup";
 import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import { ObservableVec3 } from "../../../packages/babylon-lite/src/math/observable-vec3";
 import { ObservableQuat } from "../../../packages/babylon-lite/src/math/observable-quat";
@@ -107,6 +108,32 @@ describe("removeFromScene symmetry", () => {
         // safe to call twice
         removeFromScene(scene, container);
         expect(scene._beforeRender).toHaveLength(0);
+    });
+
+    it("runs every feature-owned scene cleanup once when its container is removed", () => {
+        const scene = fakeScene();
+        const firstCleanup = vi.fn();
+        const secondCleanup = vi.fn();
+        const container = {
+            entities: [],
+            _sceneSetup: (target: SceneContext, owner: AssetContainer) => {
+                _registerAssetContainerSceneCleanup(owner, target, firstCleanup);
+                _registerAssetContainerSceneCleanup(owner, target, secondCleanup);
+            },
+        } as unknown as AssetContainer;
+
+        addToScene(scene, container);
+        expect(scene._disposables).toHaveLength(1);
+        expect(scene._disposables[0]).toBe(container._sceneCleanups?.get(scene));
+
+        removeFromScene(scene, container);
+        expect(firstCleanup).toHaveBeenCalledTimes(1);
+        expect(secondCleanup).toHaveBeenCalledTimes(1);
+        expect(scene._disposables).toHaveLength(0);
+
+        removeFromScene(scene, container);
+        expect(firstCleanup).toHaveBeenCalledTimes(1);
+        expect(secondCleanup).toHaveBeenCalledTimes(1);
     });
 
     it("evicts task-local mesh bindings before destroying the mesh GPU", () => {

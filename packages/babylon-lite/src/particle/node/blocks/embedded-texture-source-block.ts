@@ -1,7 +1,10 @@
 import { loadTexture2D } from "../../../texture/texture-2d.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 
-/** Load an ordinary particle texture from its serialized URL or embedded data URL. */
+/**
+ * Load an ordinary particle texture from its serialized URL or embedded data URL.
+ * This intentionally mirrors the base evaluator without importing it so specialized runtimes do not pull in or fetch that evaluator.
+ */
 export const embeddedParticleTextureSourceBlock: NpeBlockEvaluator = {
     build(block, ctx) {
         const serializedUrl = typeof block.serialized.url === "string" ? block.serialized.url : "";
@@ -17,8 +20,7 @@ export const embeddedParticleTextureSourceBlock: NpeBlockEvaluator = {
             ctx.addBuildPromise(
                 (async () => {
                     try {
-                        const texture = await loadTexture2D(ctx.engine, url, { invertY: !blockInvertY });
-                        state.system!.texture = texture;
+                        state.system!.texture = await loadTexture2D(ctx.engine, url, { invertY: !blockInvertY });
                     } catch {
                         // Texture failures do not prevent CPU simulation; billboard creation still requires a texture.
                     }

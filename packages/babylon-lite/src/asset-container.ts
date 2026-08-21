@@ -43,12 +43,12 @@ export interface AssetContainer {
     _beforeRenderHook?: (deltaMs: number) => void;
     /** Deferred scene-wiring hook contributed by a loader feature that needs the
      *  target `SceneContext` (which the loader itself never sees). `addToScene()`
-     *  invokes it once, synchronously, while processing the container. Used by
-     *  `EXT_lights_image_based` to install its image-based-light environment
-     *  (spherical harmonics + specular cubemap) onto the scene. Lazy features own
-     *  the closure so the core loader/scene stay feature-agnostic.
+     *  invokes it once, synchronously, while processing the container. Features
+     *  that need paired cleanup append it to `_sceneCleanups`.
      *  @internal */
-    _sceneSetup?: (scene: SceneContext) => void;
+    _sceneSetup?: (scene: SceneContext, container: AssetContainer) => void;
+    /** @internal Active feature cleanups keyed by each scene this container was added to. */
+    _sceneCleanups?: WeakMap<SceneContext, () => void>;
     /** Gaussian Splatting renderables contributed by the `KHR_gaussian_splatting`
      *  loader feature, one promise per GS primitive. The promises are populated by
      *  `_sceneSetup` (i.e. during `addToScene`); each resolves to the attached
