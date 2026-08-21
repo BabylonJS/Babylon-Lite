@@ -60,19 +60,13 @@ export function enableNodeParticleEmitterProviderRuntime(set: NodeParticleSet, p
         return system._emitter;
     });
     const nextMatrix = allocateMat4();
-    const inverseScratch = states.map((state) => state.emitterInverseWorldMatrices?.map(() => allocateMat4()) ?? []);
+    const inverseScratch = states.some((state) => (state.emitterInverseWorldMatrices?.length ?? 0) > 0) ? allocateMat4() : undefined;
     const providerState = {
         provider,
         refresh: (): void => {
             sampleProvider(providerState.provider, nextMatrix);
-            for (let stateIndex = 0; stateIndex < states.length; stateIndex++) {
-                const state = states[stateIndex]!;
-                const inverses = state.emitterInverseWorldMatrices;
-                if (inverses) {
-                    for (let inverseIndex = 0; inverseIndex < inverses.length; inverseIndex++) {
-                        mat4InvertToRefOrIdentity(nextMatrix, inverseScratch[stateIndex]![inverseIndex]!);
-                    }
-                }
+            if (inverseScratch) {
+                mat4InvertToRefOrIdentity(nextMatrix, inverseScratch);
             }
 
             for (let stateIndex = 0; stateIndex < states.length; stateIndex++) {
@@ -80,9 +74,9 @@ export function enableNodeParticleEmitterProviderRuntime(set: NodeParticleSet, p
                 copyMatrix(nextMatrix, state.emitterWorldMatrix);
                 mat4GetTranslationToRef(nextMatrix, state.emitter);
                 const inverses = state.emitterInverseWorldMatrices;
-                if (inverses) {
+                if (inverses && inverseScratch) {
                     for (let inverseIndex = 0; inverseIndex < inverses.length; inverseIndex++) {
-                        copyMatrix(inverseScratch[stateIndex]![inverseIndex]!, inverses[inverseIndex]!.inverse);
+                        copyMatrix(inverseScratch, inverses[inverseIndex]!.inverse);
                     }
                 }
             }
