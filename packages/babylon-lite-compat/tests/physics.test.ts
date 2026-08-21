@@ -226,9 +226,11 @@ describe("PhysicsEngine", () => {
             const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
 
             expect(body.getAngularVelocity()).toEqual({ x: 1, y: 2, z: 3 });
+            const allocatingGetter = vi.spyOn(body, "getAngularVelocity");
             const result = new Vector3();
             body.getAngularVelocityToRef(result);
             expect(result).toEqual({ x: 1, y: 2, z: 3 });
+            expect(allocatingGetter).not.toHaveBeenCalled();
         });
     });
 

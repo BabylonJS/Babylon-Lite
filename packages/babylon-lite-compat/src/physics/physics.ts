@@ -414,7 +414,8 @@ export class PhysicsBody {
         return new Vector3(value.x, value.y, value.z);
     }
     public getAngularVelocityToRef(result: Vector3): void {
-        result.copyFrom(this.getAngularVelocity());
+        const value = getPhysicsBodyAngularVelocity(this._world, this._lite);
+        result.set(value.x, value.y, value.z);
     }
     public applyImpulse(impulse: Vec3Like, location: Vec3Like): void {
         applyPhysicsBodyImpulse(this._lite, impulse, location);
