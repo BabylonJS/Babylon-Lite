@@ -1,9 +1,7 @@
-import type { Mat4 } from "./types.js";
-import type { Mat4Storage } from "./types.js";
-import { allocateMat4 } from "./_matrix-allocator.js";
+import type { Mat4, Mat4Storage } from "./types.js";
 
-/** Compute inverse of a Mat4. Returns null if singular. */
-export function mat4Invert(input: Mat4): Mat4 | null {
+/** Write the inverse into an existing matrix, or identity when the input is singular. */
+export function mat4InvertToRefOrIdentity(input: Mat4, result: Mat4): void {
     const m = input as unknown as Mat4Storage;
     const a00 = m[0]!,
         a01 = m[1]!,
@@ -36,12 +34,19 @@ export function mat4Invert(input: Mat4): Mat4 | null {
     const b11 = a22 * a33 - a23 * a32;
 
     let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+    const out = result as unknown as Mat4Storage;
     if (Math.abs(det) < 1e-10) {
-        return null;
+        for (let index = 0; index < 16; index++) {
+            out[index] = 0;
+        }
+        out[0] = 1;
+        out[5] = 1;
+        out[10] = 1;
+        out[15] = 1;
+        return;
     }
     det = 1 / det;
 
-    const out = allocateMat4() as unknown as Mat4Storage;
     out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
     out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
     out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
@@ -58,5 +63,4 @@ export function mat4Invert(input: Mat4): Mat4 | null {
     out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
     out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
     out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
-    return out as unknown as Mat4;
 }

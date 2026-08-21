@@ -1,5 +1,5 @@
 import { allocateMat4 } from "../../math/_matrix-allocator.js";
-import { mat4InvertToRefOrIdentity } from "../../math/mat4-invert.js";
+import { mat4InvertToRefOrIdentity } from "../../math/mat4-invert-to-ref.js";
 import { mat4GetTranslationToRef } from "../../math/mat4-transform.js";
 import type { Mat4, Mat4Storage } from "../../math/types.js";
 import type { NodeParticleSet } from "./npe-build.js";
