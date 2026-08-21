@@ -1567,7 +1567,7 @@
         "slug": "scene162-shader-material-defines",
         "name": "Scene 162 - ShaderMaterial Defines",
         "maxMad": 0.02,
-        "maxRawKB": 39.4,
+        "maxRawKB": 39.40,
         "description": "WGSL ShaderMaterial emits defines as const pipeline variants.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -1577,7 +1577,7 @@
         "slug": "scene163-shader-material-alpha",
         "name": "Scene 163 - ShaderMaterial Alpha",
         "maxMad": 0.02,
-        "maxRawKB": 39.1,
+        "maxRawKB": 39.10,
         "description": "WGSL ShaderMaterial uses alpha blending and explicit shader-side discard for alpha testing.",
         "tags": ["shader", "alpha", "procedural"],
         "skipPerf": true
@@ -1597,7 +1597,7 @@
         "slug": "scene165-shader-material-thin-instances",
         "name": "Scene 165 - ShaderMaterial Thin Instances",
         "maxMad": 0.01,
-        "maxRawKB": 44.8,
+        "maxRawKB": 44.80,
         "description": "Custom WGSL ShaderMaterial rendered with thin instances + per-instance color: an 8×8×8 grid of unit cubes with a deterministic color ramp, fixed arc-rotate camera. Validates the auto-injected world0..3/instanceColor vertex attributes and the GPU-culling indirect-draw path.",
         "tags": ["shader", "instances", "procedural"],
         "skipPerf": true

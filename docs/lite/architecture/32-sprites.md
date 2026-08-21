@@ -817,7 +817,7 @@ on `depth: "test"` or `"test-write"` therefore throws before allocating state.
 // src/sprite/sprite-2d-y-sort.ts — optional Index API extension.
 import type { Sprite2DLayer } from "./sprite-2d.js";
 
-/** Options used only by the first enable call for a layer. */
+/** Options validated on every enable call and applied when creating Y-sort state. */
 export interface Sprite2DYSortOptions {
     /** Bias assigned to existing and newly inserted sprites until individually changed. Default 0. */
     defaultBias?: number;
@@ -864,10 +864,10 @@ export interface Sprite2DYSortState {
     _dirtyMax: number;
 }
 
-/** Enable stable ascending Y-sort. Idempotent: later calls return the installed state unchanged. */
+/** Enable stable ascending Y-sort. Valid repeated calls return the installed state unchanged. */
 export function enableSprite2DYSort(layer: Sprite2DLayer, options?: Sprite2DYSortOptions): Sprite2DYSortState;
 
-/** Disable Y-sort, release the layer's state reference, and force one canonical-order re-upload. */
+/** Disable Y-sort, release its state, and mark canonical logical order for upload. */
 export function disableSprite2DYSort(layer: Sprite2DLayer): boolean;
 
 /** Set the finite ordering bias for one current logical Index API slot. */
@@ -880,11 +880,14 @@ import type { Sprite2DHandle } from "./sprite-2d-handle.js";
 export function setSprite2DYSortHandleBias(handle: Sprite2DHandle, bias: number): void;
 ```
 
-`defaultBias` and every setter bias must be finite; `NaN`, positive/negative
-infinity, and out-of-range indices throw without changing state. The handle
-setter uses `getSprite2DHandleIndex`, so a removed handle throws with the same
-stable-handle error as other handle mutations. Keeping the handle companion in
-its own module means Index-only Y-sort users do not import handle maps.
+`defaultBias` is validated on every enable call, including calls made while
+state is already installed. Every setter bias must also be finite; `NaN`,
+positive/negative infinity, and out-of-range indices throw without changing
+state. A valid repeated enable is idempotent and returns the installed state;
+its original `defaultBias` remains first-options-wins. The handle setter uses
+`getSprite2DHandleIndex`, so a removed handle throws with the same stable-handle
+error as other handle mutations. Keeping the handle companion in its own module
+means Index-only Y-sort users do not import handle maps.
 
 The draw key is ascending `(positionPx.y + bias, insertionSerial)` under the
 module's +Y-down layer-space convention: smaller Y is uploaded first, larger Y
@@ -928,6 +931,15 @@ Mutation behavior is exact:
 6. Clear zeroes the former active metadata and count-dependent permutation
    state, preserving allocated capacity and the next insertion serial.
 
+Disabling marks the returned state `enabled: false`, removes the layer's state
+attachment so its arrays can be released, and dirties the full live range. While
+the layer remains disabled, its next upload therefore restores canonical
+logical order. Re-enabling does not resume the old state: it creates fresh
+arrays, assigns every active sprite the new `defaultBias`, assigns insertion
+serials `0..count - 1` in current logical order, and sets the next serial to
+`count`. Thus disable/re-enable deliberately resets per-sprite bias overrides
+and serial history, while valid repeated enables preserve both unchanged.
+
 When order is dirty, a bottom-up stable merge sort fills `_permutation` by key
 then serial, rebuilds `_inversePermutation`, packs every active record into
 `_packedInstances`, and performs one full `queue.writeBuffer`. When order is
@@ -941,9 +953,9 @@ ordinary operation grows storage only with layer capacity.
 The sorted staging path is inside shared `uploadSpriteInstances`, so both
 renderer resource growth and device recovery remain automatic. A newly created
 GPU instance buffer passes `uploadedVersion === -1`, which always causes a full
-repack and sorted upload from CPU state. Disabling removes the layer attachment,
-bumps a full canonical dirty range, and the same helper restores ordinary
-logical-order upload on the next update.
+repack and sorted upload from CPU state. The disabled path's full canonical dirty
+range lets the same helper restore ordinary logical-order upload without a
+special upload API.
 
 `pickSprite2D` asks the optional hook for current draw order before traversing a
 layer. The hook sorts the CPU permutation if a same-frame Y/bias mutation made
@@ -2181,8 +2193,10 @@ Y-sort state is CPU-only and layer-owned, not renderer-owned. Renderer disposal
 therefore does not disable or destroy it: the same layer can be attached to a new
 renderer and its next `uploadedVersion === -1` sync rebuilds the sorted GPU
 representation. `disableSprite2DYSort(layer)` drops the attachment and forces a
-canonical-order upload when callers want to release the arrays before dropping
-the layer.
+canonical-order upload while disabled when callers want to release the arrays
+before dropping the layer. A later enable creates new state with new-default
+biases and insertion serials restarted from zero; it never revives released
+state.
 
 ---
 

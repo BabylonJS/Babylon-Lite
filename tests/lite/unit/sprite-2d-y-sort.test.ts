@@ -183,6 +183,35 @@ describe("Sprite2D Y-sort", () => {
         expect(() => setSprite2DYSortBias(layer, 0, -Infinity)).toThrow(/finite/);
     });
 
+    it("validates repeated enable options without replacing or mutating installed state", () => {
+        const layer = createSprite2DLayer(makeMockAtlas());
+        addTaggedSprite(layer, 10, 1);
+        const state = enableSprite2DYSort(layer, { defaultBias: 5 });
+        const stateBefore = {
+            defaultBias: state.defaultBias,
+            enabled: state.enabled,
+            nextSerial: state._nextSerial,
+            biases: Array.from(state._biases.slice(0, layer.count)),
+            serials: Array.from(state._serials.slice(0, layer.count)),
+        };
+
+        for (const defaultBias of [NaN, Infinity, -Infinity]) {
+            expect(() => enableSprite2DYSort(layer, { defaultBias })).toThrow(/finite/);
+            expect(layer._ySortState).toBe(state);
+            expect({
+                defaultBias: state.defaultBias,
+                enabled: state.enabled,
+                nextSerial: state._nextSerial,
+                biases: Array.from(state._biases.slice(0, layer.count)),
+                serials: Array.from(state._serials.slice(0, layer.count)),
+            }).toEqual(stateBefore);
+        }
+
+        expect(enableSprite2DYSort(layer, { defaultBias: 99 })).toBe(state);
+        expect(state.defaultBias).toBe(5);
+        expect(Array.from(state._biases.slice(0, layer.count))).toEqual([5]);
+    });
+
     it("keeps layer draw order authoritative while using Y-order within the top layer", () => {
         const lower = createSprite2DLayer(makeMockAtlas(), { order: 0 });
         addTaggedSprite(lower, 500, 1);
@@ -196,7 +225,7 @@ describe("Sprite2D Y-sort", () => {
         expect(hit?.spriteIndex).toBe(upperTop);
     });
 
-    it("rebuilds sorted staging for a recovered buffer and restores canonical upload when disabled", () => {
+    it("rebuilds sorted staging, restores canonical upload when disabled, and creates fresh state when re-enabled", () => {
         const layer = createSprite2DLayer(makeMockAtlas());
         addTaggedSprite(layer, 30, 3);
         addTaggedSprite(layer, 10, 1);
@@ -208,12 +237,25 @@ describe("Sprite2D Y-sort", () => {
         const sortedVersion = uploadSpriteInstances(recoveredDevice.device, layer, {} as GPUBuffer, -1);
 
         expect(uploadedTags(recoveredDevice.uploads[0]!, layer._instanceFloatsPerSprite)).toEqual([1, 2, 3]);
+        const transient = addTaggedSprite(layer, 40, 4);
+        removeSprite2DIndex(layer, transient);
+        setSprite2DYSortBias(layer, 0, 50);
+        expect(state._nextSerial).toBe(4);
         expect(disableSprite2DYSort(layer)).toBe(true);
         expect(state.enabled).toBe(false);
         expect(disableSprite2DYSort(layer)).toBe(false);
         const canonicalDevice = makeUploadDevice();
         uploadSpriteInstances(canonicalDevice.device, layer, {} as GPUBuffer, sortedVersion);
         expect(uploadedTags(canonicalDevice.uploads[0]!, layer._instanceFloatsPerSprite)).toEqual([3, 1, 2]);
+
+        const reenabled = enableSprite2DYSort(layer, { defaultBias: -5 });
+        expect(reenabled).not.toBe(state);
+        expect(layer._ySortState).toBe(reenabled);
+        expect(reenabled.enabled).toBe(true);
+        expect(reenabled.defaultBias).toBe(-5);
+        expect(Array.from(reenabled._biases.slice(0, layer.count))).toEqual([-5, -5, -5]);
+        expect(Array.from(reenabled._serials.slice(0, layer.count))).toEqual([0, 1, 2]);
+        expect(reenabled._nextSerial).toBe(3);
     });
 
     it("keeps ordinary layer uploads canonical after the optional hook is globally registered", () => {

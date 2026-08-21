@@ -5,7 +5,7 @@ import { _markSprite2DDirty } from "./sprite-2d.js";
 import type { Sprite2DYSortHook } from "./sprite-2d-y-sort-hook.js";
 import { _registerSprite2DYSortHook } from "./sprite-2d-y-sort-hook.js";
 
-/** Options used when enabling Y-sort on a layer for the first time. */
+/** Options validated on every enable call and applied when creating Y-sort state. */
 export interface Sprite2DYSortOptions {
     /** Bias assigned to existing and newly inserted sprites until individually changed. Defaults to `0`. */
     defaultBias?: number;
@@ -320,9 +320,12 @@ function getHook(): Sprite2DYSortHook {
  * The draw key is `positionPx.y + bias` in +Y-down layer space. Smaller keys draw first;
  * larger keys draw later and composite on top. Equal keys use a persistent insertion serial.
  * Canonical instance storage, logical indices, and stable handle mappings are never reordered.
+ * Valid repeated calls return the installed state unchanged; `defaultBias` is validated on every
+ * call but is used only when creating state. Re-enabling after disable creates fresh state, resets
+ * active biases to the new default, and assigns insertion serials from zero in logical order.
  *
  * @param layer - A `depth: "none"` layer to sort.
- * @param options - First-enable defaults. Later calls are idempotent and return existing state.
+ * @param options - Validated state-creation defaults.
  * @returns Layer-owned CPU sort state.
  * @throws If the layer is depth-hosted or `defaultBias` is not finite.
  */
@@ -330,13 +333,13 @@ export function enableSprite2DYSort(layer: Sprite2DLayer, options: Sprite2DYSort
     if (layer.depth !== "none") {
         throw new Error('enableSprite2DYSort: only depth: "none" layers are supported.');
     }
-    const existing = getState(layer);
-    if (existing) {
-        return existing;
-    }
     const defaultBias = options.defaultBias ?? 0;
     if (!Number.isFinite(defaultBias)) {
         throw new Error("enableSprite2DYSort: defaultBias must be finite.");
+    }
+    const existing = getState(layer);
+    if (existing) {
+        return existing;
     }
     const capacity = layer._capacity;
     const state: Sprite2DYSortState = {
@@ -371,7 +374,8 @@ export function enableSprite2DYSort(layer: Sprite2DLayer, options: Sprite2DYSort
 }
 
 /**
- * Disable Y-sort and force the next upload to restore canonical logical order.
+ * Disable Y-sort, release its layer-owned state, and mark canonical logical order for upload.
+ * A later enable creates fresh state rather than resuming biases or insertion serials.
  * @param layer - Layer to disable.
  * @returns `true` when installed state was removed; otherwise `false`.
  */
