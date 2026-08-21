@@ -97,7 +97,7 @@ interface Group {
         const capsule = MeshBuilder.CreateCapsule("capsule", { height: 2, radius: 0.5 }, scene);
         capsule.material = makeMaterial(scene, new Color3(0.2, 0.4, 0.9));
         capsule.position.set(1, yOffset, 0);
-        const body = new PhysicsBody(capsule, PhysicsMotionType.ANIMATED, scene, false);
+        const body = new PhysicsBody(capsule, PhysicsMotionType.ANIMATED, false, scene);
         body.shape = new PhysicsShapeCapsule(new Vector3(0, -0.5, 0), new Vector3(0, 0.5, 0), 0.5, scene);
         body.disablePreStep = false;
 

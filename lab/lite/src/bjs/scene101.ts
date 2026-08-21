@@ -89,7 +89,7 @@ function readCaptureAfterFrames(): number | null {
     const triggerShape = new PhysicsShapeSphere(new Vector3(0, 0, 0), 2, scene);
     triggerShape.isTrigger = true;
     const triggerTransform = new TransformNode("trigger", scene);
-    const triggerBody = new PhysicsBody(triggerTransform, PhysicsMotionType.STATIC, scene, false);
+    const triggerBody = new PhysicsBody(triggerTransform, PhysicsMotionType.STATIC, false, scene);
     triggerBody.shape = triggerShape;
 
     // The ball enters the trigger on the way down and exits on the way up after bouncing.

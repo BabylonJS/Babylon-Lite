@@ -180,7 +180,7 @@ describe("PhysicsEngine", () => {
             const node = {
                 _node: { position: { x: 0, y: 0, z: 0 }, rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } },
             } as unknown as TransformNode;
-            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, scene);
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
 
             expect(body.getMotionType()).toBe(PhysicsMotionType.STATIC);
             body.setMotionType(PhysicsMotionType.ANIMATED);
@@ -204,7 +204,7 @@ describe("PhysicsEngine", () => {
             const node = {
                 _node: { position: { x: 0, y: 0, z: 0 }, rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } },
             } as unknown as TransformNode;
-            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, scene);
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
 
             expect(() => body.setMotionType(99 as PhysicsMotionType)).toThrow("Invalid PhysicsMotionType value: 99");
             expect(() => body.setPrestepType(98 as PhysicsPrestepType)).toThrow("Invalid PhysicsPrestepType value: 98");
@@ -223,7 +223,7 @@ describe("PhysicsEngine", () => {
             const node = {
                 _node: { position: { x: 0, y: 0, z: 0 }, rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } },
             } as unknown as TransformNode;
-            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, scene);
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
 
             expect(body.getAngularVelocity()).toEqual({ x: 1, y: 2, z: 3 });
             const result = new Vector3();

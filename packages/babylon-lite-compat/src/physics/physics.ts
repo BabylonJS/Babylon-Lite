@@ -315,7 +315,7 @@ export class PhysicsBody {
     public disableSync = false;
     public readonly startAsleep: boolean;
 
-    public constructor(transformNode: TransformNode, motionType: PhysicsMotionType, scene: Scene, startsAsleep = false) {
+    public constructor(transformNode: TransformNode, motionType: PhysicsMotionType, startsAsleep: boolean, scene: Scene) {
         this.transformNode = transformNode;
         this.startAsleep = startsAsleep;
         this._world = requirePhysicsWorld(scene);
