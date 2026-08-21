@@ -359,11 +359,12 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         _setHpmAllocator(allocateF64Mat4);
     }
 
-    // Same dynamic-import trick for the LWR runtime. When `useFloatingOrigin` is
-    // false (the default) the `floating-origin.js` module is never referenced
-    // statically anywhere in the package: every consumer reaches it through an
-    // engine field left undefined when FO is off. Tree-shakers drop the module
-    // from non-LWR bundles.
+    // Same dynamic-import trick for the LWR runtime. Every consumer of the FO
+    // runtime reaches it through an engine field left undefined when FO is off,
+    // so nothing here imports `floating-origin.js` statically. The module's only
+    // static edge is the package root re-exporting `getFloatingOriginOffset`,
+    // which tree-shakes away when a scene never imports it — so non-LWR bundles
+    // drop the module either way.
     let _wrapRenderableForFO: EngineContext["_wrapRenderableForFO"];
     let _makePackMeshWorld: EngineContext["_makePackMeshWorld"];
     let _lightFoVersion: EngineContext["_lightFoVersion"];

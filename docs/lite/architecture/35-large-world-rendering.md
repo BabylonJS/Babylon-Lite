@@ -56,7 +56,7 @@ if (useFO) {
 }
 ```
 
-Each reference is stored on the engine (`engine._wrapRenderableForFO`, `_makePackMeshWorld`, `_lightFoVersion`, `_applyLightFoOffset`). Consumers reach them through optional chaining with a non-FO fallback, e.g. `engine._makePackMeshWorld?.(scene) ?? packMat4IntoF32`. Non-LWR engines leave every field undefined, so the LWR module is never referenced statically anywhere in the package. Tree-shakers drop it entirely from non-LWR bundles. Validated by `tests/parity/bundle-size.spec.ts` ceilings.
+Each reference is stored on the engine (`engine._wrapRenderableForFO`, `_makePackMeshWorld`, `_lightFoVersion`, `_applyLightFoOffset`). Consumers reach them through optional chaining with a non-FO fallback, e.g. `engine._makePackMeshWorld?.(scene) ?? packMat4IntoF32`. Non-LWR engines leave every field undefined, so no consumer of the FO runtime imports the module statically. Tree-shakers drop it entirely from non-LWR bundles. Validated by `tests/parity/bundle-size.spec.ts` ceilings.
 
 ### Reading the offset (`getFloatingOriginOffset`)
 
@@ -123,7 +123,9 @@ None. LWR adds no fields to `SceneContext`: the offset is the active camera's wo
 
 ## Tree-shaking proof
 
-Non-LWR bundles do not statically reference `large-world/floating-origin.js`. Every mention is a property access on an engine field left undefined when FO is off (`engine._wrapRenderableForFO?.(...)`, `engine._makePackMeshWorld?.(...)`), never a module import. `createEngine`'s `await import(...)` lives inside `if (useFO)`, which the bundler proves unreachable when `useFloatingOrigin` is never set true in any reachable scene. Verified by bundle-size ceilings.
+The module has exactly one static edge in the source tree: `index.ts` re-exports `getFloatingOriginOffset` from it. That edge is tree-shakeable — a scene that never imports the accessor drops it — and it carries only the accessor, not the FO runtime.
+
+Everything else is reached dynamically. Consumers of the runtime go through engine fields left undefined when FO is off (`engine._wrapRenderableForFO?.(...)`, `engine._makePackMeshWorld?.(...)`), which are property accesses rather than module imports, and `createEngine`'s `await import(...)` lives inside `if (useFO)`, which the bundler proves unreachable when `useFloatingOrigin` is never set true in any reachable scene. So a non-LWR bundle contains neither the accessor nor the runtime. Verified by bundle-size ceilings.
 
 ## Files / size
 
