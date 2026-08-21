@@ -236,7 +236,7 @@ The private Multiply shader keeps its vertex WGSL local while reusing `makeBillb
 
 - Camera: `camera/camera.ts`.
 - Engine type: `engine/engine.ts`.
-- Math: `math/types.ts`, `math/random-range.ts`, `math/mat4-identity.ts`, `math/mat4-invert.ts`, `math/mat4-transform.ts`, and `math/mat4-translation.ts`.
+- Math: `math/types.ts`, `math/random-range.ts`, `math/mat4-identity.ts`, `math/mat4-invert.ts`, `math/mat4-invert-to-ref.ts`, `math/mat4-transform.ts`, and `math/mat4-translation.ts`.
 - Scene: `scene/scene.ts` and `scene/scene-core.ts`.
 - Texture: `texture/texture-2d.ts`.
 - Sprite: `sprite/shared/sprite-atlas.ts`, `sprite/billboard-sprite.ts`, `sprite/billboard-blend.ts`, `sprite/billboard-scene.ts`, `sprite/billboard-custom-shader.ts`, `sprite/billboard-pipeline.ts`, `sprite/billboard-renderable.ts`, `sprite/sprite-2d.ts`, `sprite/sprite-blend.ts`, `sprite/sprite-custom-shader.ts`, and `sprite/sprite-renderer.ts`.
@@ -1709,6 +1709,7 @@ packages/babylon-lite/src/engine/engine.ts
 packages/babylon-lite/src/math/_matrix-allocator.ts
 packages/babylon-lite/src/math/mat4-identity.ts
 packages/babylon-lite/src/math/mat4-invert.ts
+packages/babylon-lite/src/math/mat4-invert-to-ref.ts
 packages/babylon-lite/src/math/mat4-transform.ts
 packages/babylon-lite/src/math/mat4-translation.ts
 packages/babylon-lite/src/math/random-range.ts

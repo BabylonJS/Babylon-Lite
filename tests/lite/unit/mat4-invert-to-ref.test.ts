@@ -28,4 +28,21 @@ describe("mat4InvertToRefOrIdentity", () => {
 
         expect(Array.from(result)).toEqual([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
     });
+
+    it("uses the same near-singular determinant threshold as mat4Invert", () => {
+        const belowThreshold = new Float64Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 9e-11]) as unknown as Mat4;
+        const belowResult = new Float32Array(16).fill(7) as unknown as Mat4;
+
+        expect(mat4Invert(belowThreshold)).toBeNull();
+        mat4InvertToRefOrIdentity(belowThreshold, belowResult);
+        expect(Array.from(belowResult)).toEqual([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+
+        const aboveThreshold = new Float64Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1.1e-10]) as unknown as Mat4;
+        const expected = mat4Invert(aboveThreshold);
+        const aboveResult = new Float32Array(16) as unknown as Mat4;
+
+        expect(expected).not.toBeNull();
+        mat4InvertToRefOrIdentity(aboveThreshold, aboveResult);
+        expect(Array.from(aboveResult)).toEqual(Array.from(expected!));
+    });
 });

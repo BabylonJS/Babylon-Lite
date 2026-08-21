@@ -249,11 +249,11 @@ for (const scene of SCENES) {
                 ).toBe(true);
             }
             const offenders = runtimeModules.filter((id) =>
-                /\/(particle\/(particle-(blend|billboard-renderable|billboard-scene|sprite-2d|sprite-2d-blend-modes)|node\/(npe-(blend-modes|flow-map-runtime|noise-runtime|texture-update-runtime|texture-content)|blocks\/(cpu-texture-source-block|update-(flow-map|noise)-block)))|sprite\/(sprite-renderer|sprite-custom-shader|sprite-renderable))\.[jt]s$/.test(
+                /\/(math\/mat4-invert|particle\/(particle-(blend|billboard-renderable|billboard-scene|sprite-2d|sprite-2d-blend-modes)|node\/(npe-(blend-modes|flow-map-runtime|noise-runtime|texture-update-runtime|texture-content)|blocks\/(cpu-texture-source-block|update-(flow-map|noise)-block)))|sprite\/(sprite-renderer|sprite-custom-shader|sprite-renderable))\.[jt]s$/.test(
                     id
                 )
             );
-            expect(offenders, `scene302 must not load flow/noise, exact-blend, or Sprite2D paths; found: ${offenders.join(", ")}`).toEqual([]);
+            expect(offenders, `scene302 must not load ordinary inversion, flow/noise, exact-blend, or Sprite2D paths; found: ${offenders.join(", ")}`).toEqual([]);
         }
 
         // Scene 53 — depth-hosted sprites — MUST load sprite-renderable.js
