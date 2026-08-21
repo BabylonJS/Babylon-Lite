@@ -132,6 +132,37 @@ describe("Sprite2D Y-sort", () => {
         expect(uploadedTags(uploads[2]!, layer._instanceFloatsPerSprite)).toEqual([31, 10, 20]);
     });
 
+    it("stabilizes NaN Y keys and keeps later non-Y edits on the partial upload path", () => {
+        const layer = createSprite2DLayer(makeMockAtlas(), { capacity: 3 });
+        addTaggedSprite(layer, 10, 10);
+        const nanSprite = addTaggedSprite(layer, NaN, 20);
+        addTaggedSprite(layer, 30, 30);
+        const state = enableSprite2DYSort(layer);
+        const { device, uploads } = makeUploadDevice();
+        const uploadedVersion = uploadSpriteInstances(device, layer, {} as GPUBuffer, -1);
+        const permutation = Array.from(state._permutation.slice(0, layer.count));
+
+        expect(Number.isNaN(state._keys[nanSprite])).toBe(true);
+        expect(state._sortDirty).toBe(false);
+        expect(state._fullUpload).toBe(false);
+
+        setSprite2DYSortBias(layer, nanSprite, 1);
+        expect(state._biases[nanSprite]).toBe(1);
+        expect(state._sortDirty).toBe(false);
+        expect(state._fullUpload).toBe(false);
+
+        updateSprite2DIndex(layer, nanSprite, { color: [21, 0, 0, 1] });
+        expect(state._sortDirty).toBe(false);
+        expect(state._fullUpload).toBe(false);
+        uploadSpriteInstances(device, layer, {} as GPUBuffer, uploadedVersion);
+
+        expect(uploads).toHaveLength(2);
+        expect(uploads[1]!.offsetBytes).toBe(state._inversePermutation[nanSprite]! * layer._instanceStrideBytes);
+        expect(uploads[1]!.data.byteLength).toBe(layer._instanceStrideBytes);
+        expect(uploadedTags(uploads[1]!, layer._instanceFloatsPerSprite)).toEqual([21]);
+        expect(Array.from(state._permutation.slice(0, layer.count))).toEqual(permutation);
+    });
+
     it("grows metadata with layer capacity and clear preserves the monotonic serial", () => {
         const layer = createSprite2DLayer(makeMockAtlas(), { capacity: 1 });
         addTaggedSprite(layer, 30, 1);
@@ -243,6 +274,8 @@ describe("Sprite2D Y-sort", () => {
         expect(state._nextSerial).toBe(4);
         expect(disableSprite2DYSort(layer)).toBe(true);
         expect(state.enabled).toBe(false);
+        expect(layer._ySortState).toBeUndefined();
+        expect("_ySortState" in layer).toBe(true);
         expect(disableSprite2DYSort(layer)).toBe(false);
         const canonicalDevice = makeUploadDevice();
         uploadSpriteInstances(canonicalDevice.device, layer, {} as GPUBuffer, sortedVersion);

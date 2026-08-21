@@ -188,7 +188,7 @@ function observeDirty(layer: Sprite2DLayer, lo: number, hi: number): void {
     const end = Math.min(hi, layer.count);
     for (let index = Math.max(0, lo); index < end; index++) {
         const key = keyAt(layer, state, index);
-        if (key !== state._keys[index]) {
+        if (!Object.is(key, state._keys[index])) {
             state._keys[index] = key;
             state._sortDirty = true;
             state._fullUpload = true;
@@ -385,7 +385,7 @@ export function disableSprite2DYSort(layer: Sprite2DLayer): boolean {
         return false;
     }
     (state as { enabled: boolean }).enabled = false;
-    delete layer._ySortState;
+    layer._ySortState = undefined;
     _markSprite2DDirty(layer, 0, layer.count);
     return true;
 }
@@ -412,7 +412,7 @@ export function setSprite2DYSortBias(layer: Sprite2DLayer, index: number, bias: 
     }
     state._biases[index] = bias;
     const key = keyAt(layer, state, index);
-    if (key !== state._keys[index]) {
+    if (!Object.is(key, state._keys[index])) {
         state._keys[index] = key;
         state._sortDirty = true;
         state._fullUpload = true;
