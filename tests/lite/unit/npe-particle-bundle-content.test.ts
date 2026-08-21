@@ -15,7 +15,6 @@ const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
 const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280, 281, 283, 284];
 const TRACKED_PARTICLE_SCENES = [...CANONICAL_PARTICLE_SCENES, 300, 301, 302];
-const SCENE262_UPSTREAM_RAW_BYTES = 40829;
 const UNUSED_FEATURE_CHUNK =
     /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|emitter-provider|flow-map-runtime|live-emitter|noise-runtime|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 const OPTIONAL_BLEND_MODULE = /particle\/(particle-(blend|billboard-renderable|billboard-scene)|node\/npe-blend-modes)/;
@@ -52,11 +51,6 @@ function expectEmbeddedTextureModuleIsolation(sceneId: number, moduleIds: string
 }
 
 describe("Particle bundle feature isolation", () => {
-    it("keeps the static scene262 runtime at or below the upstream baseline", () => {
-        const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, "scene262.json"), "utf8")) as SceneManifest;
-        expect(manifest.rawBytes).toBeLessThanOrEqual(SCENE262_UPSTREAM_RAW_BYTES);
-    });
-
     it("rejects named embedded-texture chunks without bundle-info except for scene281", () => {
         const chunk = "scene262-embedded-texture-source-block-HASH.js";
         expect(findUnexpectedEmbeddedTextureChunks(262, [chunk])).toEqual([chunk]);

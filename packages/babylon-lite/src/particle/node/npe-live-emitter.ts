@@ -5,6 +5,8 @@ import type { Mat4, Mat4Storage } from "../../math/types.js";
 import type { NodeParticleSet } from "./npe-build.js";
 
 const INVALID_PROVIDER_RESULT = "NodeParticle: emitter provider must return a finite 16-element matrix";
+const EMPTY_SET = "NodeParticle: emitter provider requires a non-empty built set";
+const INCONSISTENT_SET = "NodeParticle: emitter provider requires consistently enabled systems";
 
 function copyMatrix(source: Mat4, target: Mat4): void {
     const output = target as unknown as Mat4Storage;
@@ -30,8 +32,16 @@ function sampleProvider(provider: () => Mat4, target: Mat4): void {
 
 /** @internal Dynamically loaded implementation for the public emitter-provider enabler. */
 export function enableNodeParticleEmitterProviderRuntime(set: NodeParticleSet, provider: () => Mat4): NodeParticleSet {
+    if (set.systems.length === 0) {
+        throw new Error(EMPTY_SET);
+    }
+
     const installed = set.systems[0]?._emitterProvider;
-    if (installed && set.systems.every((system) => system._emitterProvider === installed)) {
+    if (!set.systems.every((system) => system._emitterProvider === installed)) {
+        throw new Error(INCONSISTENT_SET);
+    }
+
+    if (installed) {
         const previousProvider = installed.provider;
         installed.provider = provider;
         try {
@@ -60,8 +70,7 @@ export function enableNodeParticleEmitterProviderRuntime(set: NodeParticleSet, p
                 const inverses = state.emitterInverseWorldMatrices;
                 if (inverses) {
                     for (let inverseIndex = 0; inverseIndex < inverses.length; inverseIndex++) {
-                        const pair = inverses[inverseIndex]!;
-                        mat4InvertToRefOrIdentity(pair.source === state.emitterWorldMatrix ? nextMatrix : pair.source, inverseScratch[stateIndex]![inverseIndex]!);
+                        mat4InvertToRefOrIdentity(nextMatrix, inverseScratch[stateIndex]![inverseIndex]!);
                     }
                 }
             }

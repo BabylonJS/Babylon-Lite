@@ -14,9 +14,8 @@ import type { Color4, Mat4, Vec3 } from "../math/types.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 
-/** @internal Matrix pair retained by an emitter shape whose runtime data includes an inverse transform. */
+/** @internal Matrix retained by an emitter shape whose runtime data includes an inverse transform. */
 export interface ParticleEmitterInverse {
-    readonly source: Mat4;
     readonly inverse: Mat4;
 }
 
@@ -155,10 +154,11 @@ export function animateParticleSystem(system: ParticleSystem, scaledRatio: numbe
 
     system._prepareFrame?.();
 
-    const scaledUpdateSpeed = (system._scaledUpdateSpeed = system.updateSpeed * scaledRatio);
+    const scaledUpdateSpeed = system.updateSpeed * scaledRatio;
+    system._scaledUpdateSpeed = scaledUpdateSpeed;
     const emitRate = system._emitRateGetter ? system._emitRateGetter() : system.emitRate;
     const emission = emitRate * scaledUpdateSpeed;
-    let newParticles = emission | 0;
+    let newParticles = emission >> 0;
     system._newPartsExcess += emission - newParticles;
     if (system._newPartsExcess > 1.0) {
         const extra = system._newPartsExcess >> 0;

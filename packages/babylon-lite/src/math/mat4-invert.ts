@@ -61,8 +61,7 @@ function invert(input: Mat4, result?: Mat4): Mat4 | null {
     return output;
 }
 
-/** Write the inverse of a Mat4 into an existing matrix. Returns false if singular. */
-export function mat4InvertToRef(input: Mat4, result: Mat4): boolean {
+function mat4InvertToRef(input: Mat4, result: Mat4): boolean {
     return invert(input, result) !== null;
 }
 

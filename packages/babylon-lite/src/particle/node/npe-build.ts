@@ -108,7 +108,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             emitterWorldMatrix = options.emitterWorldMatrix;
             mat4GetTranslationToRef(emitterWorldMatrix, emitter);
         } else {
-            const e = options.emitter ?? { ...emitter };
+            const e = options.emitter ?? { x: 0, y: 0, z: 0 };
             emitterWorldMatrix = mat4Translation(e.x, e.y, e.z);
             emitter.x = e.x;
             emitter.y = e.y;

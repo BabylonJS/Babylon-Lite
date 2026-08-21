@@ -22,7 +22,7 @@ export const cylinderShapeBlock: NpeBlockEvaluator = {
         const explicit = ctx.isConnected(block, "direction1") && ctx.isConnected(block, "direction2");
         const emitterInverseWorldMatrix = explicit ? null : (mat4Invert(emitterWorldMatrix) ?? mat4Identity());
         if (emitterInverseWorldMatrix) {
-            (state.emitterInverseWorldMatrices ??= []).push({ source: emitterWorldMatrix, inverse: emitterInverseWorldMatrix });
+            (state.emitterInverseWorldMatrices ??= []).push({ inverse: emitterInverseWorldMatrix });
         }
         const scratch: Vec3 = { x: 0, y: 0, z: 0 };
         let birthX = 0;
