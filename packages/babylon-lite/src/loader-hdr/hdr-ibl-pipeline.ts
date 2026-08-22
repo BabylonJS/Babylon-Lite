@@ -15,6 +15,9 @@ import equirectToCubeWGSL from "../../shaders/hdr-equirect-to-cube.compute.wgsl?
 import prefilterCubeWGSL from "../../shaders/hdr-prefilter-cube.compute.wgsl?raw";
 import brdfLutWGSL from "../../shaders/hdr-brdf-lut.compute.wgsl?raw";
 
+/** Babylon.js' default mapping from GGX alpha to prefiltered cubemap LOD. */
+export const HDR_LOD_GENERATION_SCALE = 0.8;
+
 export function equirectToCubemapGPU(engine: EngineContext, hdr: HdrImage, faceSize: number): GPUTexture {
     const device = engine._device;
     // Upload equirect as a 2D texture
