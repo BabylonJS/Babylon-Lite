@@ -57,7 +57,8 @@ export function equirectToCubemapGPU(engine: EngineContext, hdr: HdrImage, faceS
         layout: pipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: equirectTex.createView() },
-            { binding: 1, resource: cubeTex.createView({ dimension: "2d-array", arrayLayerCount: 6 }) },
+            // A six-layer 2D texture defaults to a 2D-array view spanning all layers.
+            { binding: 1, resource: cubeTex.createView() },
             { binding: 2, resource: { buffer: paramBuf } },
         ],
     });
@@ -113,11 +114,8 @@ export function prefilterCubemapGPU(engine: EngineContext, srcCube: GPUTexture, 
         device.queue.writeBuffer(paramsBuffer, 0, new U32([faceSize, mip, mipCount, faceSize]));
 
         const dstView = dstCube.createView({
-            dimension: "2d-array",
             baseMipLevel: mip,
             mipLevelCount: 1,
-            baseArrayLayer: 0,
-            arrayLayerCount: 6,
         });
 
         const bindGroup = device.createBindGroup({

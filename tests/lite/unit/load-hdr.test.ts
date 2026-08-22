@@ -23,8 +23,8 @@ vi.mock("../../../packages/babylon-lite/src/loader-hdr/hdr-parser.js", () => ({
     computeSHFromEquirect: mocks.computeSHFromEquirect,
 }));
 
-vi.mock("../../../packages/babylon-lite/src/loader-hdr/hdr-ibl-pipeline.js", () => ({
-    HDR_LOD_GENERATION_SCALE: 0.8,
+vi.mock("../../../packages/babylon-lite/src/loader-hdr/hdr-ibl-pipeline.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../../../packages/babylon-lite/src/loader-hdr/hdr-ibl-pipeline.js")>()),
     equirectToCubemapGPU: mocks.equirectToCubemapGPU,
     prefilterCubemapGPU: mocks.prefilterCubemapGPU,
     generateBrdfLut: mocks.generateBrdfLut,
