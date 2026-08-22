@@ -1,6 +1,6 @@
 {
   "rawKB": 80,
-  "rawBytes": 81904,
+  "rawBytes": 81879,
   "gzipKB": 33.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene266-gltf-glb-parser-CO3_6yfe.js",
     "scene266-gltf-share-DSamW0Bp.js",
     "scene266-ibl-fragment-CeRrvT96.js",
-    "scene266-pbr-renderable-CfvROlb5.js",
+    "scene266-pbr-renderable-BX6eHRyM.js",
     "scene266-rgbd-decode-DLfAEt3i.js",
     "scene266-scene-uniforms-FTYH6Ct0.js",
     "scene266.js"

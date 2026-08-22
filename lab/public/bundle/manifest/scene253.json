@@ -1,6 +1,6 @@
 {
   "rawKB": 154.2,
-  "rawBytes": 157938,
+  "rawBytes": 157920,
   "gzipKB": 65.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -34,9 +34,9 @@
     "scene253-ibl-fragment-CeRrvT96.js",
     "scene253-light-base-C5_jD90k.js",
     "scene253-light-matrix-BpE3lP6k.js",
-    "scene253-morph-fragment-D3xP1-ph.js",
+    "scene253-morph-fragment-ojyvSKxm.js",
     "scene253-multilight-wgsl-D0YLlCy0.js",
-    "scene253-pbr-renderable-Jw4O3lPf.js",
+    "scene253-pbr-renderable-7e-RZN5H.js",
     "scene253-pbr-template-ext-OsNBfpQr.js",
     "scene253-pbr-transmission-ext-D12ZbE3f.js",
     "scene253-rgbd-decode-D9zQgDCe.js",
@@ -45,7 +45,7 @@
     "scene253-set-emissive-jVa3rvoE.js",
     "scene253-set-metallic-reflectance-CLrOHTsg.js",
     "scene253-set-transmission-BqJ_nlYM.js",
-    "scene253-skeleton-fragment-CP5Fseps.js",
+    "scene253-skeleton-fragment-CaNdfkzZ.js",
     "scene253-spot-light-DCIamdvL.js",
     "scene253-texture-2d-DQo3n8D6.js",
     "scene253-visibility-D8FFAXaG.js",

@@ -1,6 +1,6 @@
 {
-  "rawKB": 103.5,
-  "rawBytes": 105950,
+  "rawKB": 103.4,
+  "rawBytes": 105931,
   "gzipKB": 42.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -14,7 +14,7 @@
     "scene33-ibl-fragment-CeRrvT96.js",
     "scene33-light-base-B_sgTGmw.js",
     "scene33-multilight-wgsl-DrIeZxrx.js",
-    "scene33-pbr-renderable-CGzy4Z_q.js",
+    "scene33-pbr-renderable-B8Fsk7W4.js",
     "scene33-pbr-transmission-ext-BwcbjaZ5.js",
     "scene33-point-light-CMl-t6kt.js",
     "scene33-rgbd-decode-DPxD_8qK.js",
