@@ -1,6 +1,6 @@
 {
-  "rawKB": 87.7,
-  "rawBytes": 89765,
+  "rawKB": 87.6,
+  "rawBytes": 89751,
   "gzipKB": 37.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,7 +10,7 @@
     "scene11-gltf-ext-spec-gloss-D60sFZYX.js",
     "scene11-gltf-feature-animations-B0FeGexo.js",
     "scene11-gltf-feature-extras-VHPteGay.js",
-    "scene11-gltf-feature-registry-DN0zyMOL.js",
+    "scene11-gltf-feature-registry-YCgPbpCt.js",
     "scene11-gltf-feature-skeleton--Q0_O42u.js",
     "scene11-gltf-glb-parser-DsZTGKOE.js",
     "scene11-gltf-sampler-desc-BhDLgho4.js",
