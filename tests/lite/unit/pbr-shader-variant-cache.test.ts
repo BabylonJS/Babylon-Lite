@@ -125,4 +125,20 @@ describe("PBR shader variant caches", () => {
         expect(fragments.some((code) => code.includes("material.materialAlpha < -1.0"))).toBe(true);
         expect(fragments.some((code) => code.includes("material.materialAlpha < -2.0"))).toBe(true);
     });
+
+    it("normalizes a missing material-plugin index to zero", async () => {
+        const { engine } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const materialWithoutIndex = createPbrMaterial();
+        const materialWithZeroIndex = createPbrMaterial();
+        materialWithZeroIndex._pi = 0;
+        const meshes = [makeMesh(materialWithoutIndex), makeMesh(materialWithZeroIndex)];
+        scene._groups.set(materialWithoutIndex._buildGroup, meshes);
+
+        const result = await buildPbrRenderables(scene, meshes, undefined);
+        const pipelineWithoutIndex = result.renderables[0]!.bind(engine, signature).pipeline;
+        const pipelineWithZeroIndex = result.renderables[1]!.bind(engine, signature).pipeline;
+
+        expect(pipelineWithZeroIndex).toBe(pipelineWithoutIndex);
+    });
 });

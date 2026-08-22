@@ -238,9 +238,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // imports it). When tone mapping is enabled but no algorithm was chosen, fall back to the default
     // StandardToneMapping — the single source of the standard exponential WGSL (pbr-template no longer
     // bakes its own copy).
-    const toneMapping = (scene.imageProcessing.toneMappingEnabled && (scene.imageProcessing.toneMapping ?? StandardToneMapping)) as ToneMapping | undefined;
-    const _toneMappingHelpers = toneMapping?.helpersWGSL;
-    const _toneMappingCall = toneMapping?.callWGSL;
+    const toneMapping: ToneMapping | undefined = scene.imageProcessing.toneMappingEnabled ? (scene.imageProcessing.toneMapping ?? StandardToneMapping) : undefined;
 
     // Fog WGSL is dynamically imported only when the scene has fog, so non-fog PBR scenes
     // bundle zero fog bytes (a static import would defeat tree-shaking — see pbr-fog-wgsl.ts).
@@ -257,8 +255,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _getSingleLightBlock,
         _multiLightWGSL,
         _multiLightLoop,
-        _toneMappingHelpers,
-        _toneMappingCall,
+        _tm: toneMapping,
         _fogHelper,
         _fogBlock,
         _createPbrTemplateExt,
@@ -306,8 +303,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const vbLayout = mesh._gpu._vbLayout;
         const vbKey = mesh._gpu._vbKey ?? "";
         const uv2Mask = (mat as { _uv2Mask?: number })._uv2Mask ?? 0;
+        const pluginIndex = mat._pi ?? 0;
 
-        const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey, uv2Mask, mat._pi);
+        const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey, uv2Mask, pluginIndex);
         // Non-triangle topology rides on the composed variant (see ComposedShader._prim). The
         // composition key folds in meshFeatures, whose topology bits this mirrors, so this is only
         // ever written with the same value for a given variant.
@@ -319,7 +317,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             meshFeatures,
             sceneFeatures,
             composed,
-            `${lightMode}${singleLightType}${vbKey}:${uv2Mask}:${toneMapping?.id}:${mat._pi}`,
+            `${lightMode}:${singleLightType}${vbKey}:${uv2Mask}:${toneMapping?.id ?? 0}:${pluginIndex}`,
             mat.stencil ?? null
         );
 
