@@ -115,6 +115,18 @@ describe("PBR template + fragments integration", () => {
         expect(result._materialUboSpec!._offsets.has("sheenParams")).toBe(true);
     });
 
+    it("emits no lights binding in the depth-only (_noColorOutput) shadow-caster variant", () => {
+        for (const light of [{ _hasSingleLight: true }, { _hasMultiLight: true }]) {
+            const caster = composeShader(createPbrTemplate({ ...defaultPbrConfig, ...light, _noColorOutput: true }), []);
+            expect(caster._fragmentWGSL).not.toContain("lightsUniforms");
+            // The colour variant with the same light mode still declares it, together with the struct.
+            const structWgsl = "struct lightsUniforms { x: f32 };";
+            const lit = composeShader(createPbrTemplate({ ...defaultPbrConfig, ...light, _multiLightWGSL: structWgsl, _singleLightWGSL: structWgsl }), []);
+            expect(lit._fragmentWGSL).toContain("var<uniform> lights: lightsUniforms;");
+            expect(lit._fragmentWGSL).toContain("struct lightsUniforms");
+        }
+    });
+
     it("composes PBR + shadow-only (BC color/alpha override + FA final-alpha override)", () => {
         // The FA slot only exists in the template's alpha-blend branch, so shadow-only
         // requires _hasAlphaBlend (which its detect() forces via PBR_HAS_ALPHA_BLEND).

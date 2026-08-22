@@ -470,9 +470,14 @@ return vec4<f32>(color,finalAlpha);`
     const doubleSidedGeomFlip = _flatGeometricNormal ? "" : " N_geom = -N_geom;";
     const doubleSidedFlip = _hasDoubleSided ? `if (!frontFacing) { N = -N;${doubleSidedGeomFlip} }` : "";
 
-    const lightDecls = _hasMultiLight ? _multiLightWGSL : _hasSingleLight ? _singleLightWGSL : "";
-    const lightBindingDecl = _hasSingleLight || _hasMultiLight ? `@group(0) @binding(1) var<uniform> lights: lightsUniforms;` : "";
-    const meshLightIndexHelper = _hasSingleLight || _hasMultiLight ? meshLightIndexWGSL("mesh") : "";
+    // Depth-only casters read no light data. Keeping declarations and binding together also
+    // prevents a binding from referencing lightsUniforms when no light block defines it.
+    const lightBlock =
+        (_hasSingleLight || _hasMultiLight) && !_noColorOutput
+            ? `${_hasMultiLight ? _multiLightWGSL : _singleLightWGSL}
+@group(0) @binding(1) var<uniform> lights: lightsUniforms;
+${meshLightIndexWGSL("mesh")}`
+            : "";
 
     const anisoBrdfBlock = _hasAnisotropy ? _anisoBrdfFunctions : "";
 
@@ -492,9 +497,7 @@ ${BRDF_FUNCTIONS}
 ${toneMappingHelpersBlock}
 ${fogHelper}
 ${anisoBrdfBlock}
-${lightDecls}
-${lightBindingDecl}
-${meshLightIndexHelper}
+${lightBlock}
 ${fragmentHelpers}
 ${doubleSidedEntry}
 ${fragmentPrelude}/*SV*/
