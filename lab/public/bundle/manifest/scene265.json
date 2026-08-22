@@ -1,6 +1,6 @@
 {
   "rawKB": 79.8,
-  "rawBytes": 81753,
+  "rawBytes": 81743,
   "gzipKB": 33.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -12,7 +12,7 @@
     "scene265-ibl-cubemap-upload-crDKRWY7.js",
     "scene265-ibl-env-assembly-BRQarDLx.js",
     "scene265-ibl-fragment-CeRrvT96.js",
-    "scene265-pbr-renderable-FoZSKeLC.js",
+    "scene265-pbr-renderable-CDsq7Sd1.js",
     "scene265.js"
   ]
 }

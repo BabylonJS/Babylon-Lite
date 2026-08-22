@@ -1,6 +1,6 @@
 {
   "rawKB": 95.2,
-  "rawBytes": 97532,
+  "rawBytes": 97531,
   "gzipKB": 39,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -12,8 +12,8 @@
     "scene158-gltf-feature-skeleton-0SO4DYIO.js",
     "scene158-gltf-glb-parser-BF3JufGX.js",
     "scene158-multilight-wgsl-BAGnL9qr.js",
-    "scene158-pbr-renderable-mztpGRjo.js",
-    "scene158-skeleton-fragment-PdUWg7W-.js",
+    "scene158-pbr-renderable-_E3uahKo.js",
+    "scene158-skeleton-fragment-CXonm2eI.js",
     "scene158.js"
   ]
 }

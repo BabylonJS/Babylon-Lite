@@ -1,6 +1,6 @@
 {
   "rawKB": 97.7,
-  "rawBytes": 100080,
+  "rawBytes": 100070,
   "gzipKB": 40.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -14,7 +14,7 @@
     "scene34-gltf-sampler-denorm-D8yicnFy.js",
     "scene34-gltf-share-DzepaHuU.js",
     "scene34-ibl-fragment-CeRrvT96.js",
-    "scene34-pbr-renderable-NptiivLT.js",
+    "scene34-pbr-renderable-BXe4LtAt.js",
     "scene34-rgbd-decode-DZ3RG6mF.js",
     "scene34-scene-uniforms-FTYH6Ct0.js",
     "scene34-visibility-Bkg6RVGH.js",

@@ -1,6 +1,6 @@
 {
   "rawKB": 77.5,
-  "rawBytes": 79330,
+  "rawBytes": 79323,
   "gzipKB": 32.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,7 +8,7 @@
     "scene20-background-ground-DbrKq7Fn.js",
     "scene20-cubemap-skybox-material-DQDgZFxu.js",
     "scene20-ibl-fragment-CeRrvT96.js",
-    "scene20-pbr-renderable-fKnYilsR.js",
+    "scene20-pbr-renderable-Buyvy_oH.js",
     "scene20-rgbd-decode-T5OwlLAr.js",
     "scene20-scene-uniforms-FTYH6Ct0.js",
     "scene20-singlelight-hemispheric-wgsl-CnwvBg5-.js",

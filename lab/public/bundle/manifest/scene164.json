@@ -1,6 +1,6 @@
 {
   "rawKB": 141.6,
-  "rawBytes": 144991,
+  "rawBytes": 144982,
   "gzipKB": 59.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -23,7 +23,7 @@
     "scene164-material-view-Dua1bl7W.js",
     "scene164-morph-fragment-D-kH-2py.js",
     "scene164-multilight-wgsl-6pNnpYYU.js",
-    "scene164-pbr-renderable-BnxHiWUY.js",
+    "scene164-pbr-renderable-CDW3jlKi.js",
     "scene164-pbr-shadow-fragment-CJjH71OI.js",
     "scene164-pbr-template-ext-OsNBfpQr.js",
     "scene164-recovery-rebuild-BzS-8gWB.js",

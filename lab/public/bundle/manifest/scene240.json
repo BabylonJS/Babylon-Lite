@@ -1,6 +1,6 @@
 {
   "rawKB": 90.7,
-  "rawBytes": 92861,
+  "rawBytes": 92857,
   "gzipKB": 38.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -13,7 +13,7 @@
     "scene240-gltf-multi-buffer-CN3tLpRP.js",
     "scene240-gltf-normals-DYhLwXNX.js",
     "scene240-ibl-fragment-CeRrvT96.js",
-    "scene240-pbr-renderable-r6-D51b6.js",
+    "scene240-pbr-renderable-BLr7VKWm.js",
     "scene240-rgbd-decode-DQ7B_j46.js",
     "scene240-scene-uniforms-FTYH6Ct0.js",
     "scene240.js"

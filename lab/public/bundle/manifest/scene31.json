@@ -1,6 +1,6 @@
 {
   "rawKB": 79.9,
-  "rawBytes": 81800,
+  "rawBytes": 81785,
   "gzipKB": 33.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene31-gltf-feature-registry-pZA_7AWR.js",
     "scene31-gltf-glb-parser-CpEYuqT4.js",
     "scene31-ibl-fragment-CeRrvT96.js",
-    "scene31-pbr-renderable-BMlTYV_M.js",
+    "scene31-pbr-renderable-Cfnpkd5_.js",
     "scene31-rgbd-decode-BNysFlHl.js",
     "scene31-scene-uniforms-FTYH6Ct0.js",
     "scene31-set-emissive-TSHF14bU.js",

@@ -1,6 +1,6 @@
 {
-  "rawKB": 97.2,
-  "rawBytes": 99487,
+  "rawKB": 97.1,
+  "rawBytes": 99472,
   "gzipKB": 40.2,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -14,7 +14,7 @@
     "scene37-gltf-glb-parser-wzqS5E_I.js",
     "scene37-gltf-pbr-builder-ext-D7Ettog4.js",
     "scene37-ibl-fragment-CeRrvT96.js",
-    "scene37-pbr-renderable-CR90FlcL.js",
+    "scene37-pbr-renderable-fjdRiK0y.js",
     "scene37-pbr-template-ext-OsNBfpQr.js",
     "scene37-rgbd-decode-B4s1lRza.js",
     "scene37-scene-uniforms-FTYH6Ct0.js",
