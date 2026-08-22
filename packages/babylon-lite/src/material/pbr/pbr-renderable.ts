@@ -34,7 +34,7 @@ import {
 } from "./pbr-flags.js";
 import type { PbrExt } from "./pbr-flags.js";
 import { createPbrComposer } from "./pbr-compose.js";
-import { StandardToneMapping } from "./tone-mapping.js";
+import { StandardToneMapping, type ToneMapping } from "./tone-mapping.js";
 import { _computePbrMaterialFeatures } from "./pbr-material.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import type { ThinInstanceData } from "../../mesh/thin-instance.js";
@@ -238,14 +238,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // imports it). When tone mapping is enabled but no algorithm was chosen, fall back to the default
     // StandardToneMapping — the single source of the standard exponential WGSL (pbr-template no longer
     // bakes its own copy).
-    let _toneMappingHelpers = "";
-    let _toneMappingCall = "";
-    const hasTonemap = scene.imageProcessing.toneMappingEnabled;
-    if (hasTonemap) {
-        const toneMapping = scene.imageProcessing.toneMapping ?? StandardToneMapping;
-        _toneMappingHelpers = toneMapping.helpersWGSL;
-        _toneMappingCall = toneMapping.callWGSL;
-    }
+    const toneMapping = (scene.imageProcessing.toneMappingEnabled && (scene.imageProcessing.toneMapping ?? StandardToneMapping)) as ToneMapping | undefined;
+    const _toneMappingHelpers = toneMapping?.helpersWGSL;
+    const _toneMappingCall = toneMapping?.callWGSL;
 
     // Fog WGSL is dynamically imported only when the scene has fog, so non-fog PBR scenes
     // bundle zero fog bytes (a static import would defeat tree-shaking — see pbr-fog-wgsl.ts).
@@ -273,7 +268,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _createThinInstanceFragment,
     });
 
-    const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (hasTonemap ? PBR_HAS_TONEMAP : 0) | (scene.fog ? PBR_HAS_FOG : 0);
+    const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (toneMapping ? PBR_HAS_TONEMAP : 0) | (scene.fog ? PBR_HAS_FOG : 0);
     // Shadow bind group cache — within one scene build, all receiving meshes share the
     // same shadowLights array, so a BG keyed by shadowBGL alone is correct.
     const shadowBGCache = new Map<GPUBindGroupLayout, GPUBindGroup>();
@@ -312,7 +307,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const vbKey = mesh._gpu._vbKey ?? "";
         const uv2Mask = (mat as { _uv2Mask?: number })._uv2Mask ?? 0;
 
-        const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey, uv2Mask);
+        const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey, uv2Mask, mat._pi);
         // Non-triangle topology rides on the composed variant (see ComposedShader._prim). The
         // composition key folds in meshFeatures, whose topology bits this mirrors, so this is only
         // ever written with the same value for a given variant.
@@ -324,7 +319,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             meshFeatures,
             sceneFeatures,
             composed,
-            `${lightMode}:${singleLightType}${vbKey}:${uv2Mask}`,
+            `${lightMode}${singleLightType}${vbKey}:${uv2Mask}:${toneMapping?.id}:${mat._pi}`,
             mat.stencil ?? null
         );
 

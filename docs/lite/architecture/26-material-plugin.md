@@ -146,20 +146,18 @@ material.plugins ──► enableMaterialPlugins(scene) ──► {pbr,std}-plug
 
 A single bridge extension handles all plugins on a material. Each distinct plugin
 **signature** (name + priority + isEnabled + defines + custom code + uniforms +
-samplers of every attached plugin) is assigned a small **index** (1..127). That
-index is encoded into the host material's feature bits (PBR: `features2` bits
-24..31; Standard: `features` bits 24..30, which are unused by the native flag
-sets). Because both families' compose / pipeline caches key on the feature
-integers, encoding the signature index there is what makes the cache rebuild on
-any plugin change — including enabling/disabling (a disabled plugin contributes
-no shader code but still produces a distinct index, hence a distinct key).
+samplers of every attached plugin) is assigned a small **index**. PBR stores that
+index separately on `Material._pi`, so it cannot collide with native `features2`
+bits; Standard stores it in `features` bits 24..30. Both families include the
+index in their compose/pipeline cache keys, so any plugin change — including
+enabling/disabling — produces a distinct shader variant.
 
 ### PBR (`pbr-plugin-bridge.ts`)
 
 A `PbrExt { id: "plugin", phase: "fragment" }` registered via `_registerPbrExt`:
 
-- `detect(mat)` → `{ f: 0, f2: index(mat.plugins) << 24 }` (lazy index assignment).
-- `frag(ctx)` → fragment for `(ctx._features2 >>> 24) & 0xff`.
+- `detect(mat)` lazily assigns `mat._pi` and contributes no native feature bits.
+- `frag(ctx)` resolves the fragment for `ctx._pi`.
 - `writeUbo(data, mat, offsets)` → plugin UBO slices into the **material UBO**
   (PBR template has `_baseMaterialUboFields`, so fragment `_uboFields` target it;
   WGSL access is `material.<field>`).
@@ -198,8 +196,8 @@ write loop, no gated import). WGSL access to a Standard plugin uniform is
 
 ## Pipeline Configuration / Cache Keying
 
-- PBR compose cache key: `features:features2:meshFeatures:sceneFeatures:lightMode:…`
-  → plugin index in `features2` differentiates variants.
+- PBR compose and binding cache keys include `Material._pi`, which differentiates
+  plugin variants without consuming native feature bits.
 - PBR pipeline + bindings also include `_fragmentKey` (sorted fragment ids); the
   plugin fragment id is `plugin-<index>`, matched back to the ext in
   `createPbrMeshBindGroup` via `fid.startsWith("plugin-")`.
@@ -226,7 +224,7 @@ and grayscale is a linear reduction, the result stays pixel-identical.
 2. `enableMaterialPlugins` registers the PBR + Standard plugin exts into the global
    registries (Standard additionally pre-bakes feature bits for its materials and
    builds any self-managed plugin UBOs).
-3. Per mesh: detect (PBR) / pre-baked features (Standard) carry the signature index
+3. Per mesh: detect (PBR) / pre-baked features (Standard) assign the signature index
    → compose builds WGSL with the plugin fragment → pipeline/bind groups created →
    UBO + textures bound.
 4. **Toggle:** set `plugin.isEnabled`, then (because `_renderFeatures` is cached)
