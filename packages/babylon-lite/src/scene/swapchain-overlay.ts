@@ -26,14 +26,17 @@ export function configureSwapchainOverlayScene(surface: SurfaceContext, overlay:
     if (!base?._frameGraph) {
         return;
     }
-    const baseTask = getDefaultSwapchainTask(base as SceneContext, surface);
     const overlayTask = getDefaultSwapchainTask(overlay, surface);
-    if (!baseTask || !overlayTask) {
+    if (!overlayTask) {
         return;
     }
 
     // Load (don't clear) the swapchain so the overlay composites onto the base scene.
     overlayTask._config.clr = false;
+    const baseTask = getDefaultSwapchainTask(base as SceneContext, surface);
+    if (!baseTask) {
+        return;
+    }
     overlay._beforeRender.unshift(() => {
         if (surface.msaaSamples > 1) {
             // MSAA: both scenes resolve into the swapchain. To composite, the overlay must

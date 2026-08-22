@@ -1,7 +1,7 @@
 {
   "rawKB": 58.4,
   "rawBytes": 59852,
-  "gzipKB": 26.6,
+  "gzipKB": 26.7,
   "ignoredRawKB": 7.6,
   "runtimeChunks": [
     "scene89-_math-factory-BNrw_3EP.js",
