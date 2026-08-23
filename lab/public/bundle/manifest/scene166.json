@@ -1,0 +1,13 @@
+{
+  "rawKB": 75.3,
+  "rawBytes": 77080,
+  "gzipKB": 30.8,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene166-generate-mipmaps-DVwa0wJl.js",
+    "scene166-gltf-json-asset-Dv-5qcqo.js",
+    "scene166-pbr-renderable-Bo_FyEVW.js",
+    "scene166-set-alpha-cutoff-CMOoRtZb.js",
+    "scene166.js"
+  ]
+}

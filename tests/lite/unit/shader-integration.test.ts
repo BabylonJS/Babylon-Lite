@@ -6,6 +6,7 @@ import { describe, it, expect, vi } from "vitest";
 import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer";
 import type { ShaderFragment } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import { createPbrTemplate } from "../../../packages/babylon-lite/src/material/pbr/pbr-template";
+import { CLUSTERED_LIGHT_STRUCTS, _clusteredPointLightBlock, _clusteredSpotLightBlock } from "../../../packages/babylon-lite/src/material/pbr/fragments/clustered-light-wgsl";
 import { createStandardTemplate } from "../../../packages/babylon-lite/src/material/standard/standard-template";
 import { createEmissiveColorFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/emissive-fragment";
 import { createClearcoatFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/clearcoat-fragment";
@@ -70,6 +71,32 @@ describe("PBR template + fragments integration", () => {
         expect(result._fragmentWGSL).toContain("fresnelSchlick");
         expect(result._meshUboSpec._totalBytes).toBe(144); // world matrix + per-mesh light-selection data
         expect(result._materialUboSpec).toBeDefined();
+    });
+
+    it("composes distinct point-only and spot clustered-light paths", () => {
+        const createClusteredFragment = (hasSpots: boolean): ShaderFragment => {
+            const block = hasSpots ? _clusteredSpotLightBlock() : _clusteredPointLightBlock();
+            return {
+                _id: hasSpots ? "clustered-spots" : "clustered-points",
+                _bindings: [
+                    { _name: "clusteredLightParams", _type: { _kind: "uniform-buffer" }, _visibility: 2 },
+                    { _name: "clusteredLights", _type: { _kind: "texture", _textureType: "texture_2d<f32>", _sampleType: "unfilterable-float" }, _visibility: 2 },
+                    { _name: "clusteredCells", _type: { _kind: "texture", _textureType: "texture_2d<u32>" }, _visibility: 2 },
+                    { _name: "clusteredIndices", _type: { _kind: "texture", _textureType: "texture_2d<u32>" }, _visibility: 2 },
+                ],
+                _helperFunctions: CLUSTERED_LIGHT_STRUCTS,
+                _fragmentSlots: { AD: block, BL: block },
+            };
+        };
+        const pointShader = composeShader(createPbrTemplate({ ...defaultPbrConfig }), [createClusteredFragment(false)])._fragmentWGSL;
+        const spotShader = composeShader(createPbrTemplate({ ...defaultPbrConfig }), [createClusteredFragment(true)])._fragmentWGSL;
+
+        expect(pointShader).toContain("let lightTexel=li*2u;");
+        expect(pointShader).not.toContain("dirCone");
+        expect(spotShader).toContain("let lightTexel=li*3u;");
+        expect(spotShader).toContain("textureLoad(clusteredLights,clusteredTexel(lightTexel+2u),0)");
+        expect(spotShader).toContain("let cd=dot(-dirCone.xyz,Lc);");
+        expect(spotShader).toContain("rangeAtt*=coneAtt*coneAtt;");
     });
 
     it("composes PBR + emissive color", () => {

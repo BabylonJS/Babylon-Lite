@@ -3,9 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import {
+    addClusteredLightContainer,
     buildClusteredLightGpuState,
     createClusteredLightContainer,
     createClusteredPointLight,
+    createClusteredSpotLight,
     markClusteredLightContainerDirty,
 } from "../../../packages/babylon-lite/src/light/clustered";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
@@ -52,6 +54,43 @@ function setup() {
 }
 
 describe("clustered light uploads", () => {
+    it("preserves directly populated point-light containers", () => {
+        const { engine, scene } = setup();
+        const container = createClusteredLightContainer();
+        container.pointLights.push({ position: [0, 1, 5], diffuse: [1, 1, 1], range: 4, intensity: 2 });
+        const sceneContext = {
+            ...scene,
+            surface: { engine },
+            meshes: [],
+            _disposables: [],
+        } as unknown as SceneContext;
+
+        addClusteredLightContainer(sceneContext, container);
+
+        expect(sceneContext._clusteredLightUpdater).toBeTypeOf("function");
+    });
+
+    it("creates spot lights with defaults and tracks them separately", () => {
+        const container = createClusteredLightContainer();
+        const light = createClusteredSpotLight(container, {
+            position: [1, 2, 3],
+            direction: [0, -1, 0],
+            diffuse: [0.25, 0.5, 0.75],
+        });
+
+        expect(light).toEqual({
+            position: [1, 2, 3],
+            direction: [0, -1, 0],
+            diffuse: [0.25, 0.5, 0.75],
+            range: 1,
+            intensity: 1,
+            angle: Math.PI / 2,
+        });
+        expect(container.pointLights).toEqual([]);
+        expect(container.spotLights).toEqual([light]);
+        expect(container._version).toBe(1);
+    });
+
     it("compacts inactive lights and uploads only the addressed texture region", () => {
         const { engine, scene, writeBuffer, writeTexture } = setup();
         const container = createClusteredLightContainer();
@@ -83,6 +122,60 @@ describe("clustered light uploads", () => {
         expect(writeBuffer).not.toHaveBeenCalled();
         expect(writeTexture).toHaveBeenCalledTimes(1);
         expect(writeTexture.mock.calls[0]![3]).toEqual({ width: 2, height: 1 });
+    });
+
+    it("packs mixed point and spot data using the widened layout", () => {
+        const { engine, scene, writeTexture } = setup();
+        const container = createClusteredLightContainer();
+        createClusteredPointLight(container, { position: [1, 2, 3], diffuse: [0.1, 0.2, 0.3], range: 4, intensity: 5 });
+        createClusteredSpotLight(container, {
+            position: [6, 7, 8],
+            direction: [0, 3, 4],
+            diffuse: [0.4, 0.5, 0.6],
+            range: 9,
+            intensity: 10,
+            angle: Math.PI / 3,
+        });
+
+        const state = buildClusteredLightGpuState(engine, scene, container);
+
+        expect(state._hasSpots).toBe(true);
+        const upload = writeTexture.mock.calls.find((call) => (call[3] as GPUExtent3DDict).width === 6);
+        expect(upload).toBeDefined();
+        const data = Array.from(new Float32Array(upload![1] as ArrayBuffer).slice(0, 24));
+        expect(data.slice(0, 12)).toEqual([1, 2, 3, 4, expect.closeTo(0.1), expect.closeTo(0.2), expect.closeTo(0.3), 5, 0, 0, 0, -1]);
+        expect(data.slice(12, 20)).toEqual([6, 7, 8, 9, expect.closeTo(0.4), 0.5, expect.closeTo(0.6), 10]);
+        expect(data.slice(20, 24)).toEqual([0, expect.closeTo(0.6), expect.closeTo(0.8), expect.closeTo(Math.cos(Math.PI / 6))]);
+    });
+
+    it.each([
+        ["position", (light: ReturnType<typeof createClusteredSpotLight>) => (light.position[0] += 1), true],
+        ["range", (light: ReturnType<typeof createClusteredSpotLight>) => (light.range += 1), true],
+        ["diffuse", (light: ReturnType<typeof createClusteredSpotLight>) => (light.diffuse[0] = 0.5), false],
+        ["intensity", (light: ReturnType<typeof createClusteredSpotLight>) => (light.intensity += 1), false],
+        ["direction", (light: ReturnType<typeof createClusteredSpotLight>) => (light.direction[1] = 1), false],
+        ["angle", (light: ReturnType<typeof createClusteredSpotLight>) => (light.angle = Math.PI / 3), false],
+    ])("tracks spot %s changes as %s updates", (_property, mutate, topologyChanged) => {
+        const { engine, scene, activeCamera, writeBuffer, writeTexture } = setup();
+        const container = createClusteredLightContainer();
+        const light = createClusteredSpotLight(container, {
+            position: [0, 1, 5],
+            direction: [0, -1, 0],
+            diffuse: [1, 1, 1],
+            range: 4,
+            intensity: 2,
+        });
+        const state = buildClusteredLightGpuState(engine, scene, container);
+        writeBuffer.mockClear();
+        writeTexture.mockClear();
+
+        mutate(light);
+        markClusteredLightContainerDirty(container);
+        state.refresh(activeCamera, 1024, 800);
+
+        expect(writeBuffer.mock.calls.length > 0).toBe(topologyChanged);
+        expect(writeTexture).toHaveBeenCalledTimes(topologyChanged ? 3 : 1);
+        expect(writeTexture.mock.calls.at(-1)![3]).toEqual({ width: 3, height: 1 });
     });
 
     it("rebuilds topology and light count when lights are removed directly", () => {
