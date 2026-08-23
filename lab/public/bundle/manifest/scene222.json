@@ -1,6 +1,6 @@
 {
   "rawKB": 111,
-  "rawBytes": 113689,
+  "rawBytes": 113672,
   "gzipKB": 42.1,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -8,7 +8,7 @@
     "scene222-shader-pipeline-cache-B3SDpvaR.js",
     "scene222-shader-renderable-D0hxLeGX.js",
     "scene222-standard-renderable-BV7mypE8.js",
-    "scene222-swapchain-overlay-t4SF9f-I.js",
+    "scene222-swapchain-overlay-Bl3wkNan.js",
     "scene222-ubo-layout-Cs5YvLYZ.js",
     "scene222-uniform-copy-batch-CpNHi2tt.js",
     "scene222.js"

@@ -1,6 +1,6 @@
 {
   "rawKB": 141.1,
-  "rawBytes": 144489,
+  "rawBytes": 144472,
   "gzipKB": 57.3,
   "ignoredRawKB": 3.3,
   "runtimeChunks": [
@@ -21,7 +21,7 @@
     "scene73-perturb-normal-Bqx-TYaB.js",
     "scene73-reflection-block-CIXuH-z0.js",
     "scene73-rgbd-decode-Cmzc8eiD.js",
-    "scene73-swapchain-overlay-t4SF9f-I.js",
+    "scene73-swapchain-overlay-Bl3wkNan.js",
     "scene73-texture-block-BqMd_NnH.js",
     "scene73-transform-block-DXJZnsHm.js",
     "scene73-vertex-output-C7G5u6Y0.js",
