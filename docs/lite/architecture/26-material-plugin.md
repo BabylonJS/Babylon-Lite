@@ -196,8 +196,8 @@ write loop, no gated import). WGSL access to a Standard plugin uniform is
 
 ## Pipeline Configuration / Cache Keying
 
-- PBR compose and binding cache keys include `Material._pi`, which differentiates
-  plugin variants without consuming native feature bits.
+- PBR compose, binding, and geometry-output cache keys include `Material._pi`,
+  which differentiates plugin variants without consuming native feature bits.
 - PBR pipeline + bindings also include `_fragmentKey` (sorted fragment ids); the
   plugin fragment id is `plugin-<index>`, matched back to the ext in
   `createPbrMeshBindGroup` via `fid.startsWith("plugin-")`.

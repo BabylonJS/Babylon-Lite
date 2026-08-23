@@ -2,8 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
+import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import type { MaterialPlugin } from "../../../packages/babylon-lite/src/material/plugin/material-plugin";
 import { enableMaterialPlugins } from "../../../packages/babylon-lite/src/material/plugin/enable-material-plugins";
+import { buildPbrGeometryRenderable } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-renderable";
+import { createPbrGeometryMaterialView } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-view";
 import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import { clearPbrPipelineCache } from "../../../packages/babylon-lite/src/material/pbr/pbr-pipeline";
 import { buildPbrRenderables } from "../../../packages/babylon-lite/src/material/pbr/pbr-renderable";
@@ -140,5 +143,38 @@ describe("PBR shader variant caches", () => {
         const pipelineWithZeroIndex = result.renderables[1]!.bind(engine, signature).pipeline;
 
         expect(pipelineWithZeroIndex).toBe(pipelineWithoutIndex);
+    });
+
+    it("threads material-plugin variants through geometry-output composition and caches", async () => {
+        const { engine, createShaderModule } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const plugin = (name: string, marker: string): MaterialPlugin => ({
+            name,
+            getCustomCode: (shaderType) => (shaderType === "fragment" ? { CUSTOM_FRAGMENT_UPDATE_ALPHA: marker } : null),
+        });
+        const pluginA = plugin("geometry-a", "if(material.materialAlpha < -3.0){discard;}");
+        const pluginB = plugin("geometry-b", "if(material.materialAlpha < -4.0){discard;}");
+        const materialA = createPbrMaterial({ plugins: [pluginA] });
+        const materialB = createPbrMaterial({ plugins: [pluginB] });
+        const mesh = makeMesh(materialA);
+        scene._groups.set(materialA._buildGroup, [mesh, makeMesh(materialB)]);
+        enableMaterialPlugins(scene);
+        await buildPbrRenderables(scene, scene._groups.get(materialA._buildGroup)!, undefined);
+
+        const view = createPbrGeometryMaterialView(materialA, {
+            attachments: [GeometryTextureType.WORLD_NORMAL],
+            emitColor: false,
+        });
+        const pipelineA = buildPbrGeometryRenderable(scene, mesh, view).bind(engine, signature).pipeline;
+
+        materialA.plugins = [pluginB];
+        materialA._pi = materialB._pi;
+        const pipelineB = buildPbrGeometryRenderable(scene, mesh, view).bind(engine, signature).pipeline;
+
+        expect(pipelineB).not.toBe(pipelineA);
+        expect((view._geometry as Map<string, unknown>).size).toBe(2);
+        const geometryFragments = fragmentSources(createShaderModule).filter((code) => code.includes("struct FragmentOutput"));
+        expect(geometryFragments.some((code) => code.includes("material.materialAlpha < -3.0"))).toBe(true);
+        expect(geometryFragments.some((code) => code.includes("material.materialAlpha < -4.0"))).toBe(true);
     });
 });
