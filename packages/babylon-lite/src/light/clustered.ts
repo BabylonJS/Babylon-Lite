@@ -1,12 +1,15 @@
 import { F32, U32 } from "../engine/typed-arrays.js";
-import { TU } from "../engine/gpu-flags.js";
+import { SS, TU } from "../engine/gpu-flags.js";
 import { getProjectionMatrix, getViewMatrix, getEffectiveAspectRatio, _cameraChangeKey, type Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
+import type { PbrExt } from "../material/pbr/pbr-flags.js";
+import { _registerPbrExt } from "../material/pbr/pbr-flags.js";
+import { CLUSTERED_LIGHT_STRUCTS, _clusteredPointLightBlock } from "../material/pbr/fragments/clustered-light-wgsl.js";
 import { _enableClusteredSpotSupport } from "./clustered-spot-support.js";
-import { _enableClusteredPointSupport } from "./clustered-point-support.js";
 
+const PBR2_HAS_CLUSTERED_LIGHTS = 1 << 17;
 const MAX_DATA_TEXTURE_WIDTH = 8192;
 const CLUSTER_BATCH_SIZE = 32;
 const EMPTY_SLICE_FIRST = 0xffffffff;
@@ -134,9 +137,6 @@ export function createClusteredLightContainer(options?: ClusteredLightContainerO
  * it in place and call {@link markClusteredLightContainerDirty} to animate it.
  */
 export function createClusteredPointLight(container: ClusteredLightContainer, options: ClusteredPointLightOptions): ClusteredPointLight {
-    if (container.pointLights.length === 0) {
-        _enableClusteredPointSupport();
-    }
     const light: ClusteredPointLight = {
         position: options.position,
         diffuse: options.diffuse,
@@ -192,10 +192,8 @@ export function markClusteredLightContainerDirty(container: ClusteredLightContai
  */
 export function addClusteredLightContainer(scene: SceneContext, container: ClusteredLightContainer): void {
     const ctx = scene as SceneContext;
-    if (container.pointLights.length > 0 && !container._spotSupport) {
-        _enableClusteredPointSupport();
-    }
     ctx._clusteredLightContainer = container;
+    _registerPbrExt(clusteredPointPbrExt);
     const state = buildClusteredLightGpuState(ctx.surface.engine, ctx, container);
     ctx._clusteredLightUpdater = (camera, targetWidth, targetHeight) => state.refresh(camera, targetWidth, targetHeight);
     ctx._disposables.push(() => state.dispose());
@@ -207,6 +205,43 @@ export function addClusteredLightContainer(scene: SceneContext, container: Clust
         }
     }
 }
+
+const clusteredPointPbrExt: PbrExt = {
+    id: "clustered-lights",
+    phase: "fragment",
+    detect(mat: unknown) {
+        const state = (mat as { _clusteredLightState?: ClusteredLightGpuState })._clusteredLightState;
+        return state && !state._hasSpots ? { f: 0, f2: PBR2_HAS_CLUSTERED_LIGHTS } : { f: 0, f2: 0 };
+    },
+    frag(ctx) {
+        if ((ctx._features2 & PBR2_HAS_CLUSTERED_LIGHTS) === 0) {
+            return null;
+        }
+        const block = _clusteredPointLightBlock();
+        return {
+            _id: "clustered-lights",
+            _bindings: [
+                { _name: "clusteredLightParams", _type: { _kind: "uniform-buffer" }, _visibility: SS.FRAGMENT },
+                { _name: "clusteredLights", _type: { _kind: "texture", _textureType: "texture_2d<f32>", _sampleType: "unfilterable-float" }, _visibility: SS.FRAGMENT },
+                { _name: "clusteredCells", _type: { _kind: "texture", _textureType: "texture_2d<u32>" }, _visibility: SS.FRAGMENT },
+                { _name: "clusteredIndices", _type: { _kind: "texture", _textureType: "texture_2d<u32>" }, _visibility: SS.FRAGMENT },
+            ],
+            _helperFunctions: CLUSTERED_LIGHT_STRUCTS,
+            _fragmentSlots: { AD: block, BL: block },
+        };
+    },
+    bind(ctx, entries, b) {
+        const state = (ctx._material as { _clusteredLightState?: ClusteredLightGpuState })._clusteredLightState;
+        if (!state) {
+            return b;
+        }
+        entries.push({ binding: b++, resource: { buffer: state.paramsBuffer } });
+        entries.push({ binding: b++, resource: state.lightsView });
+        entries.push({ binding: b++, resource: state.cellsView });
+        entries.push({ binding: b++, resource: state.indicesView });
+        return b;
+    },
+};
 
 /** @internal Per-state spot hooks. Kept behind createClusteredSpotLight so point-only
  * bundles do not retain cone snapshot, packing or shader-generation code. */
@@ -248,9 +283,11 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
     const tileCountY = Math.max(1, container.verticalTiles | 0);
     const zSlices = Math.max(1, container.zSlices | 0);
     const maxDataTextureWidth = Math.max(1, Math.min(MAX_DATA_TEXTURE_WIDTH, engine._device.limits.maxTextureDimension2D));
-    const spotSupport = container._spotSupport?._create(container.spotLights.length);
-    const pointCount = container.pointLights.length;
-    const spotCount = spotSupport ? container.spotLights.length : 0;
+    const initialPoints = container.pointLights;
+    const initialSpots = container.spotLights;
+    const spotSupport = container._spotSupport?._create(initialSpots.length);
+    const pointCount = initialPoints.length;
+    const spotCount = spotSupport ? initialSpots.length : 0;
     const totalLights = pointCount + spotCount;
     // Both the light capacity and the data layout are baked here: a point-only container
     // keeps the narrow 2-texel stride so it pays nothing for spot support.
@@ -306,14 +343,18 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
             // projection the frame never uses puts them in the wrong tiles. It is also part of
             // the dirty key below, since a viewport change moves it with everything else equal.
             const aspect = getEffectiveAspectRatio(activeCamera, safeWidth, safeHeight);
-            const liveCount = container.pointLights.length + (spotSupport ? container.spotLights.length : 0);
+            const cameraVersion = _cameraChangeKey(activeCamera);
+            const pointLights = container.pointLights;
+            const spotLights = container.spotLights;
+            const containerVersion = container._version;
+            const liveCount = pointLights.length + (spotSupport ? spotLights.length : 0);
             if (
                 activeCamera === lastCamera &&
-                _cameraChangeKey(activeCamera) === lastCameraVersion &&
+                cameraVersion === lastCameraVersion &&
                 safeWidth === lastTargetWidth &&
                 safeHeight === lastTargetHeight &&
                 aspect === lastAspect &&
-                container._version === lastContainerVersion &&
+                containerVersion === lastContainerVersion &&
                 liveCount === lastLightCount
             ) {
                 return;
@@ -323,22 +364,22 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
             }
             let topologyDirty =
                 activeCamera !== lastCamera ||
-                _cameraChangeKey(activeCamera) !== lastCameraVersion ||
+                cameraVersion !== lastCameraVersion ||
                 safeWidth !== lastTargetWidth ||
                 safeHeight !== lastTargetHeight ||
                 aspect !== lastAspect ||
                 liveCount !== lastLightCount;
             let lightDataDirty = topologyDirty;
-            if (container._version !== lastContainerVersion || liveCount !== lastLightCount) {
+            if (containerVersion !== lastContainerVersion || liveCount !== lastLightCount) {
                 let index = 0;
-                for (let i = 0; i < container.pointLights.length; i++) {
-                    const flags = snapshotLight(lightSnapshot, index++, container.pointLights[i]!);
+                for (let i = 0; i < pointLights.length; i++) {
+                    const flags = snapshotLight(lightSnapshot, index++, pointLights[i]!);
                     topologyDirty ||= (flags & 1) !== 0;
                     lightDataDirty ||= (flags & 2) !== 0;
                 }
                 if (spotSupport) {
-                    for (let i = 0; i < container.spotLights.length; i++) {
-                        const spot = container.spotLights[i]!;
+                    for (let i = 0; i < spotLights.length; i++) {
+                        const spot = spotLights[i]!;
                         const flags = snapshotLight(lightSnapshot, index++, spot);
                         const coneChanged = spotSupport._coneChanged(i, spot);
                         topologyDirty ||= (flags & 1) !== 0;
@@ -347,7 +388,7 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
                 }
             }
             if (!topologyDirty && !lightDataDirty) {
-                lastContainerVersion = container._version;
+                lastContainerVersion = containerVersion;
                 return;
             }
 
@@ -362,12 +403,12 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
                 const logFarNear = Math.log(farZ / nearZ);
                 const sliceScale = zSlices / logFarNear;
                 const sliceBias = -(zSlices * Math.log(nearZ)) / logFarNear;
-                for (const light of container.pointLights) {
+                for (const light of pointLights) {
                     if (light.range > 0 && light.intensity > 0) {
                         activeLights.push({ light, depth: viewZ(light.position, view) });
                     }
                 }
-                spotSupport?._collect(activeLights, container.spotLights, view);
+                spotSupport?._collect(activeLights, spotLights, view);
                 activeLights.sort((a, b) => a.depth - b.depth);
                 const activeBatchCount = Math.max(1, Math.ceil(activeLights.length / CLUSTER_BATCH_SIZE));
                 const activeMaskTexels = tileCountX * tileCountY * activeBatchCount;
@@ -398,13 +439,9 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
                 for (let i = 0; i < activeLights.length; i++) {
                     const { light, _spot } = activeLights[i]!;
                     const off = i * lightStride * 4;
-                    lightData[off] = light.position[0];
-                    lightData[off + 1] = light.position[1];
-                    lightData[off + 2] = light.position[2];
+                    lightData.set(light.position, off);
                     lightData[off + 3] = light.range;
-                    lightData[off + 4] = light.diffuse[0];
-                    lightData[off + 5] = light.diffuse[1];
-                    lightData[off + 6] = light.diffuse[2];
+                    lightData.set(light.diffuse, off + 4);
                     lightData[off + 7] = light.intensity;
                     spotSupport?._write(lightData, off, _spot);
                 }
@@ -413,11 +450,11 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
                 }
             }
             lastCamera = activeCamera;
-            lastCameraVersion = _cameraChangeKey(activeCamera);
+            lastCameraVersion = cameraVersion;
             lastTargetWidth = safeWidth;
             lastTargetHeight = safeHeight;
             lastAspect = aspect;
-            lastContainerVersion = container._version;
+            lastContainerVersion = containerVersion;
             lastLightCount = liveCount;
         },
         dispose() {
@@ -441,28 +478,20 @@ function textureElementCount(texels: number, components: number, dataTextureWidt
  *  bit 1 = shading only (colour / intensity, which just re-upload the light texture). */
 function snapshotLight(snapshot: Float32Array, index: number, light: ClusteredPointLight): number {
     const off = index * 8;
+    const position = light.position;
+    const diffuse = light.diffuse;
     const wasActive = snapshot[off + 3]! > 0 && snapshot[off + 7]! > 0;
     const isActive = light.range > 0 && light.intensity > 0;
     let flags = 0;
-    if (
-        snapshot[off] !== light.position[0] ||
-        snapshot[off + 1] !== light.position[1] ||
-        snapshot[off + 2] !== light.position[2] ||
-        snapshot[off + 3] !== light.range ||
-        wasActive !== isActive
-    ) {
+    if (snapshot[off] !== position[0] || snapshot[off + 1] !== position[1] || snapshot[off + 2] !== position[2] || snapshot[off + 3] !== light.range || wasActive !== isActive) {
         flags |= 1;
     }
-    if (snapshot[off + 4] !== light.diffuse[0] || snapshot[off + 5] !== light.diffuse[1] || snapshot[off + 6] !== light.diffuse[2] || snapshot[off + 7] !== light.intensity) {
+    if (snapshot[off + 4] !== diffuse[0] || snapshot[off + 5] !== diffuse[1] || snapshot[off + 6] !== diffuse[2] || snapshot[off + 7] !== light.intensity) {
         flags |= 2;
     }
-    snapshot[off] = light.position[0];
-    snapshot[off + 1] = light.position[1];
-    snapshot[off + 2] = light.position[2];
+    snapshot.set(position, off);
     snapshot[off + 3] = light.range;
-    snapshot[off + 4] = light.diffuse[0];
-    snapshot[off + 5] = light.diffuse[1];
-    snapshot[off + 6] = light.diffuse[2];
+    snapshot.set(diffuse, off + 4);
     snapshot[off + 7] = light.intensity;
     return flags;
 }

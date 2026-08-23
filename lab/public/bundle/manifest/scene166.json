@@ -1,7 +1,7 @@
 {
-  "rawKB": 75.3,
-  "rawBytes": 77080,
-  "gzipKB": 30.8,
+  "rawKB": 75,
+  "rawBytes": 76788,
+  "gzipKB": 30.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene166-generate-mipmaps-DVwa0wJl.js",

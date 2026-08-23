@@ -1,7 +1,7 @@
 {
-  "rawKB": 73.5,
-  "rawBytes": 75265,
-  "gzipKB": 30.4,
+  "rawKB": 73.2,
+  "rawBytes": 74909,
+  "gzipKB": 30.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene179-generate-mipmaps-1nfSNNVz.js",
