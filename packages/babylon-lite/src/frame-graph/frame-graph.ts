@@ -60,10 +60,9 @@ export function createFrameGraph(_engine: EngineContext): FrameGraph {
             // Phase 2 — initialize. Runs after every task has finished recording
             // so passes can safely reference resources allocated by other tasks
             // (e.g. RTTs whose textures are wired up by a later task's `record`).
-            for (let i = 0; i < fg._tasks.length; i++) {
-                const passes = fg._tasks[i]!._passes;
-                for (let j = 0; j < passes.length; j++) {
-                    passes[j]!._initialize();
+            for (const task of fg._tasks) {
+                for (const pass of task._passes) {
+                    pass._initialize();
                 }
             }
         },

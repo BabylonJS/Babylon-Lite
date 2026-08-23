@@ -203,6 +203,9 @@ function isFrameGraph(value: unknown): value is FrameGraph {
 function executeTimedFrameGraph(timer: GpuTaskTimer, graph: FrameGraph): number {
     let drawCalls = 0;
     for (const task of graph._tasks) {
+        if (task.executionEnabled === false) {
+            continue;
+        }
         drawCalls += gpuTaskTimerExecute(timer, task);
     }
     return drawCalls;

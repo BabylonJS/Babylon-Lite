@@ -47,9 +47,6 @@ export interface RenderTargetDescriptor {
     _depthCompare?: GPUCompareFunction;
     /** MSAA sample count: `1` = single-sample (no multisampling), `4` = 4x MSAA. */
     samples: number;
-    /** Add `COPY_DST` usage to the color texture so encoder texture copies may write it. Copy tasks
-     *  fall back to a shader blit when this capability is absent. */
-    copyDestination?: boolean;
     /** A `SurfaceContext` to size to that surface's swapchain (re-resolved each
      *  `buildRenderTarget`), or explicit `{ width, height }` in device pixels. Pass a
      *  surface for canvas-sized RTs; the RT then tracks that specific surface in
@@ -120,15 +117,13 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
     rt._height = height;
 
     const device = engine._device;
-    const allocColor = !!desc.format;
-
-    if (allocColor) {
+    if (desc.format) {
         rt._colorTexture = device.createTexture({
             label: desc.lbl,
             size: { width, height },
-            format: desc.format!,
+            format: desc.format,
             sampleCount: desc.samples,
-            usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC | (desc.copyDestination ? TU.COPY_DST : 0),
+            usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC | TU.COPY_DST,
         });
         rt._colorView = rt._colorTexture.createView();
     }

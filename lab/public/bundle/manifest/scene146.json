@@ -1,7 +1,7 @@
 {
-  "rawKB": 109.5,
-  "rawBytes": 112131,
-  "gzipKB": 45.4,
+  "rawKB": 109.7,
+  "rawBytes": 112292,
+  "gzipKB": 45.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene146-background-ground-Cf6l-bpW.js",

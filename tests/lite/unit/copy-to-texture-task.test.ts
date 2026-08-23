@@ -188,7 +188,7 @@ describe("CopyToTextureTask", () => {
         expect(capture.draws).toBe(1);
     });
 
-    it("auto-builds an opted-in target with COPY_DST and uses the encoder-copy path", () => {
+    it("auto-builds the target with COPY_DST and uses the encoder-copy path", () => {
         const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
         const engine = makeMockEngine(capture);
         const scene = createSceneContext(engine) as SceneContext;
@@ -197,7 +197,6 @@ describe("CopyToTextureTask", () => {
             lbl: "copy-destination",
             format: "rgba8unorm",
             samples: 1,
-            copyDestination: true,
             size: { width: 64, height: 32 },
         });
         buildColor(source, engine);
@@ -221,7 +220,6 @@ describe("CopyToTextureTask", () => {
             lbl: "owned-copy-destination",
             format: "rgba8unorm",
             samples: 1,
-            copyDestination: true,
             size: { width: 64, height: 32 },
         });
         buildColor(source, engine);
@@ -303,7 +301,7 @@ describe("CopyToTextureTask", () => {
         expect(pipeline.multisample?.count ?? 1).toBe(1);
     });
 
-    it("uses the encoder-copy fast path when source and target are both MSAA with matching sampleCount", () => {
+    it("falls back to the blit path when source and target are both MSAA", () => {
         const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
         const engine = makeMockEngine(capture);
         const scene = createSceneContext(engine) as SceneContext;
@@ -316,11 +314,10 @@ describe("CopyToTextureTask", () => {
         task.record();
         const drawCount = task.execute!();
 
-        expect(drawCount).toBe(0);
-        expect(capture.copies).toHaveLength(1);
-        expect(capture.copies[0]!.source.texture).toBe(source._colorTexture);
-        expect(capture.copies[0]!.target.texture).toBe(target._colorTexture);
-        expect(capture.pipelines).toHaveLength(0);
+        expect(drawCount).toBe(1);
+        expect(capture.copies).toHaveLength(0);
+        expect(capture.draws).toBe(1);
+        expect(capture.pipelines.at(-1)!.multisample?.count).toBe(4);
     });
 
     it("falls back to the blit path with a single-sample source and MSAA target", () => {

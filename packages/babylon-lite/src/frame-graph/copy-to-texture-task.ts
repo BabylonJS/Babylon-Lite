@@ -8,7 +8,7 @@
  *
  *   - Fast path: `GPUCommandEncoder.copyTextureToTexture`. Requires:
  *       * No viewport.
- *       * Source and target have the same format and same sampleCount.
+ *       * Source and target have the same format and are single-sampled.
  *       * Source mip(`lodLevel`) dimensions match the target's mip-0 dimensions.
  *       * Target is not the engine scRT (its color texture is re-acquired
  *         per frame, so a copy-destination handle captured at build time would go stale).
@@ -363,7 +363,7 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     }
     const srcSamples = srcDesc.samples ?? 1;
     const dstSamples = dstDesc.samples ?? 1;
-    if (srcSamples !== dstSamples) {
+    if (srcSamples !== 1 || dstSamples !== 1) {
         return false;
     }
     const lod = task.lodLevel;
