@@ -13,6 +13,7 @@
  *       * Target is not the engine scRT (its color texture is re-acquired
  *         per frame, so a copy-destination handle captured at build time would go stale).
  *       * Target owns a color GPU texture (offscreen / MSAA-color).
+ *       * Source and target textures declare `COPY_SRC` and `COPY_DST` respectively.
  *
  *   - Blit path: a full-screen triangle samples the source texture and writes
  *     it into the target. Lod level is applied with `textureSampleLevel`;
@@ -38,11 +39,11 @@
  * target or resolve target).
  */
 
-import { SS } from "../engine/gpu-flags.js";
+import { SS, TU } from "../engine/gpu-flags.js";
 import type { NormalizedViewport } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
-import { buildRenderTarget } from "../engine/render-target.js";
+import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { getBilinearSampler, getTrilinearSampler } from "../resource/samplers.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
@@ -55,6 +56,9 @@ export interface CopyToTextureTaskConfig {
      *  is set, in which case the task does a resolve-only operation and writes
      *  directly into `resolveTexture`. */
     targetTexture?: RenderTarget;
+    /** When true, this task owns `targetTexture`: it rebuilds the target on every frame-graph build (including
+     *  canvas resize) and disposes it with the task. Leave false for externally owned or eager targets. */
+    ownsTargetTexture?: boolean;
     /** Viewport applied to the target before the blit. When undefined (default),
      *  the whole target is overwritten and the encoder-copy fast path becomes
      *  available. When set, the blit path is used. */
@@ -84,6 +88,7 @@ export interface CopyToTextureTask extends Task {
     readonly name: string;
     sourceTexture: RenderTarget;
     targetTexture: RenderTarget | undefined;
+    ownsTargetTexture: boolean;
     resolveTexture: RenderTarget | undefined;
     viewport: NormalizedViewport | null | undefined;
     lodLevel: number;
@@ -203,6 +208,7 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
         _passes: [],
         sourceTexture: config.sourceTexture,
         targetTexture: config.targetTexture,
+        ownsTargetTexture: config.ownsTargetTexture === true,
         resolveTexture: config.resolveTexture,
         viewport: config.viewport,
         lodLevel: config.lodLevel ?? 0,
@@ -229,8 +235,12 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
             // (e.g. an SS staging texture between an MSAA resolve and the final swap blit)
             // from requiring the caller to pre-build them.
             const needsBuild = (rt: RenderTarget) => !rt._colorTexture;
-            if (task.targetTexture && needsBuild(task.targetTexture)) {
-                buildRenderTarget(task.targetTexture, eng);
+            if (task.targetTexture) {
+                if (task.ownsTargetTexture) {
+                    buildRenderTarget(task.targetTexture, eng);
+                } else if (needsBuild(task.targetTexture)) {
+                    buildRenderTarget(task.targetTexture, eng);
+                }
             }
             if (task.resolveTexture && needsBuild(task.resolveTexture)) {
                 buildRenderTarget(task.resolveTexture, eng);
@@ -283,6 +293,9 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
         },
         dispose(): void {
             task._passes.length = 0;
+            if (task.ownsTargetTexture) {
+                disposeRenderTarget(task.targetTexture);
+            }
             task._fast = null;
             task._blit = null;
             task._resolve = null;
@@ -336,6 +349,9 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     }
     const sourceTexture = source._colorTexture;
     if (!sourceTexture) {
+        return false;
+    }
+    if ((sourceTexture.usage & TU.COPY_SRC) === 0 || (targetTexture.usage & TU.COPY_DST) === 0) {
         return false;
     }
     const srcDesc = source._descriptor;

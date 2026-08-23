@@ -71,6 +71,9 @@ export function createFrameGraph(_engine: EngineContext): FrameGraph {
         execute(): number {
             let drawCalls = 0;
             for (const task of fg._tasks) {
+                if (task.executionEnabled === false) {
+                    continue;
+                }
                 if (task.execute) {
                     drawCalls += task.execute();
                 } else {

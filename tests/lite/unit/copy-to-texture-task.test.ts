@@ -57,6 +57,7 @@ function makeMockEngine(capture: BeginPassCapture): EngineContext {
                 format: d.format,
                 sampleCount: d.sampleCount ?? 1,
                 mipLevelCount: d.mipLevelCount ?? 1,
+                usage: d.usage,
                 createView: () => ({}) as GPUTextureView,
                 destroy: () => undefined,
             }) as unknown as GPUTexture,
@@ -112,13 +113,13 @@ function makeOffscreenRT(format: GPUTextureFormat, width: number, height: number
     });
 }
 
-function buildColor(rt: ReturnType<typeof makeOffscreenRT>, engine: EngineContext, mipLevelCount = 1): void {
+function buildColor(rt: ReturnType<typeof makeOffscreenRT>, engine: EngineContext, mipLevelCount = 1, copyDestination = true, copySource = true): void {
     const tex = engine._device.createTexture({
         size: { width: (rt._descriptor.size as { width: number }).width, height: (rt._descriptor.size as { height: number }).height },
         format: rt._descriptor.format!,
         sampleCount: rt._descriptor.samples,
         mipLevelCount,
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | (copySource ? GPUTextureUsage.COPY_SRC : 0) | (copyDestination ? GPUTextureUsage.COPY_DST : 0),
     });
     rt._colorTexture = tex;
     rt._colorView = tex.createView();
@@ -149,6 +150,91 @@ describe("CopyToTextureTask", () => {
         expect(capture.copies[0]!.size).toEqual({ width: 64, height: 32 });
         expect(capture.descriptors).toHaveLength(0);
         expect(capture.draws).toBe(0);
+    });
+
+    it("falls back to the blit path when the target was not created as a copy destination", () => {
+        const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
+        const engine = makeMockEngine(capture);
+        const scene = createSceneContext(engine) as SceneContext;
+        const source = makeOffscreenRT("rgba8unorm", 64, 32);
+        const target = makeOffscreenRT("rgba8unorm", 64, 32);
+        buildColor(source, engine);
+        buildColor(target, engine, 1, false);
+
+        const task = createCopyToTextureTask({ sourceTexture: source, targetTexture: target }, engine, scene);
+        task.record();
+        const drawCount = task.execute!();
+
+        expect(drawCount).toBe(1);
+        expect(capture.copies).toHaveLength(0);
+        expect(capture.draws).toBe(1);
+    });
+
+    it("falls back to the blit path when the source was not created as a copy source", () => {
+        const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
+        const engine = makeMockEngine(capture);
+        const scene = createSceneContext(engine) as SceneContext;
+        const source = makeOffscreenRT("rgba8unorm", 64, 32);
+        const target = makeOffscreenRT("rgba8unorm", 64, 32);
+        buildColor(source, engine, 1, true, false);
+        buildColor(target, engine);
+
+        const task = createCopyToTextureTask({ sourceTexture: source, targetTexture: target }, engine, scene);
+        task.record();
+        const drawCount = task.execute!();
+
+        expect(drawCount).toBe(1);
+        expect(capture.copies).toHaveLength(0);
+        expect(capture.draws).toBe(1);
+    });
+
+    it("auto-builds an opted-in target with COPY_DST and uses the encoder-copy path", () => {
+        const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
+        const engine = makeMockEngine(capture);
+        const scene = createSceneContext(engine) as SceneContext;
+        const source = makeOffscreenRT("rgba8unorm", 64, 32);
+        const target = createRenderTarget({
+            lbl: "copy-destination",
+            format: "rgba8unorm",
+            samples: 1,
+            copyDestination: true,
+            size: { width: 64, height: 32 },
+        });
+        buildColor(source, engine);
+
+        const task = createCopyToTextureTask({ sourceTexture: source, targetTexture: target }, engine, scene);
+        task.record();
+        const drawCount = task.execute!();
+
+        expect(target._colorTexture!.usage & GPUTextureUsage.COPY_DST).toBe(GPUTextureUsage.COPY_DST);
+        expect(drawCount).toBe(0);
+        expect(capture.copies).toHaveLength(1);
+        expect(capture.draws).toBe(0);
+    });
+
+    it("rebuilds and disposes an owned target across the frame-graph lifecycle", () => {
+        const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
+        const engine = makeMockEngine(capture);
+        const scene = createSceneContext(engine) as SceneContext;
+        const source = makeOffscreenRT("rgba8unorm", 64, 32);
+        const target = createRenderTarget({
+            lbl: "owned-copy-destination",
+            format: "rgba8unorm",
+            samples: 1,
+            copyDestination: true,
+            size: { width: 64, height: 32 },
+        });
+        buildColor(source, engine);
+
+        const task = createCopyToTextureTask({ sourceTexture: source, targetTexture: target, ownsTargetTexture: true }, engine, scene);
+        task.record();
+        const firstTexture = target._colorTexture;
+        task.record();
+
+        expect(target._colorTexture).not.toBe(firstTexture);
+        task.dispose();
+        expect(target._colorTexture).toBeNull();
+        expect(target._colorView).toBeNull();
     });
 
     it("falls back to the blit path when a viewport is supplied", () => {
