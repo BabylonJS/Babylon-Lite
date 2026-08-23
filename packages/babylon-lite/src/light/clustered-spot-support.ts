@@ -5,16 +5,16 @@ import { _registerPbrExt } from "../material/pbr/pbr-flags.js";
 import { CLUSTERED_LIGHT_STRUCTS, _clusteredSpotLightBlock } from "../material/pbr/fragments/clustered-light-wgsl.js";
 import type { ClusteredLightContainer, ClusteredLightGpuState, _ClusteredSpotGpuSupport, _ClusteredSpotSupport } from "./clustered.js";
 
-const PBR2_HAS_CLUSTERED_SPOTS = 1 << 18;
+const PBR_HAS_CLUSTERED_SPOTS = 1 << 14;
 
 const clusteredSpotPbrExt: PbrExt = {
     id: "clustered-spot-lights",
     phase: "fragment",
     detect(mat: unknown) {
-        return (mat as { _clusteredLightState?: ClusteredLightGpuState })._clusteredLightState?._hasSpots ? { f: 0, f2: PBR2_HAS_CLUSTERED_SPOTS } : { f: 0, f2: 0 };
+        return (mat as { _clusteredLightState?: ClusteredLightGpuState })._clusteredLightState?._hasSpots ? { f: PBR_HAS_CLUSTERED_SPOTS, f2: 0 } : { f: 0, f2: 0 };
     },
     frag(ctx) {
-        if ((ctx._features2 & PBR2_HAS_CLUSTERED_SPOTS) === 0) {
+        if ((ctx._features & PBR_HAS_CLUSTERED_SPOTS) === 0) {
             return null;
         }
         const block = _clusteredSpotLightBlock();
@@ -95,7 +95,7 @@ const spotSupport: _ClusteredSpotSupport = {
                 data[offset + 8] = dx * inv;
                 data[offset + 9] = dy * inv;
                 data[offset + 10] = dz * inv;
-                data[offset + 11] = Math.cos(spot.angle * 0.5);
+                data[offset + 11] = Math.cos(Math.min(Math.max(spot.angle, 0), Math.PI) * 0.5);
             },
             _markState(state) {
                 state._hasSpots = true;

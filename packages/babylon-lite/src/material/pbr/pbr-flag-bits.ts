@@ -14,6 +14,7 @@ export const PBR_HAS_COTANGENT_NORMAL = 1 << 9;
 export const PBR_HAS_METALLIC_REFLECTANCE_MAP = 1 << 10;
 export const PBR_HAS_REFLECTANCE_MAP = 1 << 11;
 export const PBR_HAS_USE_ALPHA_ONLY_MR = 1 << 12;
+// 1<<13 and 1<<14 are clustered-light extension-local.
 export const PBR_HAS_OCCLUSION = 1 << 15;
 export const PBR_HAS_SPECULAR_AA = 1 << 17;
 export const PBR_HAS_CLEARCOAT = 1 << 20;

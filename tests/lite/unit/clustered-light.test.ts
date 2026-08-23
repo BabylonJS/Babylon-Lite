@@ -13,6 +13,8 @@ import {
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import { enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { _getPbrExts } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
+import { pbrExt as iridescencePbrExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/iridescence-fragment";
 
 function identity(): Mat4 {
     return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) as unknown as Mat4;
@@ -146,6 +148,64 @@ describe("clustered light uploads", () => {
         expect(data.slice(0, 12)).toEqual([1, 2, 3, 4, expect.closeTo(0.1), expect.closeTo(0.2), expect.closeTo(0.3), 5, 0, 0, 0, -1]);
         expect(data.slice(12, 20)).toEqual([6, 7, 8, 9, expect.closeTo(0.4), 0.5, expect.closeTo(0.6), 10]);
         expect(data.slice(20, 24)).toEqual([0, expect.closeTo(0.6), expect.closeTo(0.8), expect.closeTo(Math.cos(Math.PI / 6))]);
+    });
+
+    it("clamps wide spot cones without overlapping the point sentinel", () => {
+        const { engine, scene, writeTexture } = setup();
+        const container = createClusteredLightContainer();
+        createClusteredSpotLight(container, {
+            position: [0, 1, 5],
+            direction: [0, -1, 0],
+            diffuse: [1, 1, 1],
+            angle: Math.PI * 1.5,
+        });
+
+        buildClusteredLightGpuState(engine, scene, container);
+
+        const upload = writeTexture.mock.calls.find((call) => (call[3] as GPUExtent3DDict).width === 3);
+        const data = new Float32Array(upload![1] as ArrayBuffer);
+        expect(data[11]).toBeCloseTo(0);
+        expect(data[11]).toBeGreaterThanOrEqual(0);
+    });
+
+    it("keeps clustered point, spot and iridescence feature gates independent", () => {
+        const { engine, scene } = setup();
+        const container = createClusteredLightContainer();
+        createClusteredSpotLight(container, { position: [0, 1, 5], direction: [0, -1, 0], diffuse: [1, 1, 1] });
+        addClusteredLightContainer(
+            {
+                ...scene,
+                surface: { engine },
+                meshes: [],
+                _disposables: [],
+            } as unknown as SceneContext,
+            container
+        );
+        const pointExt = _getPbrExts().get("clustered-lights")!;
+        const spotExt = _getPbrExts().get("clustered-spot-lights")!;
+        const extensions = [pointExt, spotExt, iridescencePbrExt];
+        const activeFragments = (material: unknown) => {
+            let features = 0;
+            let features2 = 0;
+            for (const ext of extensions) {
+                const detected = ext.detect!(material);
+                features |= detected.f;
+                features2 |= detected.f2;
+            }
+            const context = {
+                _features: features,
+                _features2: features2,
+                _meshFeatures: 0,
+                _hasIbl: false,
+                _hasAnyNormal: false,
+                _hasSpecularAA: false,
+            };
+            return extensions.filter((ext) => ext.frag?.(context)).map((ext) => ext.id);
+        };
+
+        expect(activeFragments({ _clusteredLightState: {} })).toEqual(["clustered-lights"]);
+        expect(activeFragments({ _clusteredLightState: { _hasSpots: true } })).toEqual(["clustered-spot-lights"]);
+        expect(activeFragments({ _iridescence: { isEnabled: true } })).toEqual(["iridescence"]);
     });
 
     it.each([

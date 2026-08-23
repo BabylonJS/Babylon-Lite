@@ -9,7 +9,7 @@ import { _registerPbrExt } from "../material/pbr/pbr-flags.js";
 import { CLUSTERED_LIGHT_STRUCTS, _clusteredPointLightBlock } from "../material/pbr/fragments/clustered-light-wgsl.js";
 import { _enableClusteredSpotSupport } from "./clustered-spot-support.js";
 
-const PBR2_HAS_CLUSTERED_LIGHTS = 1 << 17;
+const PBR_HAS_CLUSTERED_LIGHTS = 1 << 13;
 const MAX_DATA_TEXTURE_WIDTH = 8192;
 const CLUSTER_BATCH_SIZE = 32;
 const EMPTY_SLICE_FIRST = 0xffffffff;
@@ -39,7 +39,7 @@ export interface ClusteredPointLight {
 export interface ClusteredSpotLight extends ClusteredPointLight {
     /** World-space direction the cone points along; normalised on upload. */
     direction: [number, number, number];
-    /** Full cone angle in radians. */
+    /** Full cone angle in radians, clamped to `[0, Math.PI]` on upload. */
     angle: number;
 }
 
@@ -53,7 +53,7 @@ export interface ClusteredLightContainer {
     readonly kind: "clusteredLightContainer";
     /** The point lights managed by this container. */
     pointLights: ClusteredPointLight[];
-    /** The spot lights managed by this container. */
+    /** The spot lights managed by this container. Add them with {@link createClusteredSpotLight}. */
     spotLights: ClusteredSpotLight[];
     /** Number of cluster tiles across the screen horizontally. */
     horizontalTiles: number;
@@ -83,7 +83,7 @@ export interface ClusteredPointLightOptions {
 export interface ClusteredSpotLightOptions extends ClusteredPointLightOptions {
     /** World-space direction the cone points along. */
     direction: [number, number, number];
-    /** Full cone angle in radians. Default `Math.PI / 2`. */
+    /** Full cone angle in radians, clamped to `[0, Math.PI]` on upload. Default `Math.PI / 2`. */
     angle?: number;
 }
 
@@ -211,10 +211,10 @@ const clusteredPointPbrExt: PbrExt = {
     phase: "fragment",
     detect(mat: unknown) {
         const state = (mat as { _clusteredLightState?: ClusteredLightGpuState })._clusteredLightState;
-        return state && !state._hasSpots ? { f: 0, f2: PBR2_HAS_CLUSTERED_LIGHTS } : { f: 0, f2: 0 };
+        return state && !state._hasSpots ? { f: PBR_HAS_CLUSTERED_LIGHTS, f2: 0 } : { f: 0, f2: 0 };
     },
     frag(ctx) {
-        if ((ctx._features2 & PBR2_HAS_CLUSTERED_LIGHTS) === 0) {
+        if ((ctx._features & PBR_HAS_CLUSTERED_LIGHTS) === 0) {
             return null;
         }
         const block = _clusteredPointLightBlock();
