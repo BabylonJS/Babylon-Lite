@@ -5,13 +5,12 @@ import type { SceneContext } from "./scene-core.js";
 /** Find a scene's default render task that targets the surface swapchain — either
  *  directly (`rt === scRT`, single-sample) or via an MSAA resolve
  *  (`rst === scRT`, MSAA). */
-function getDefaultSwapchainTask(scene: SceneContext, surface: SurfaceContext): RenderTask | null {
+function getDefaultSwapchainTask(scene: SceneContext, surface: SurfaceContext): RenderTask | undefined {
     for (const task of scene._frameGraph._tasks as Array<Partial<RenderTask> | undefined>) {
         if (task?._config && task._colorAttachment && (task._config.rt === surface.scRT || task._config.rst === surface.scRT)) {
             return task as RenderTask;
         }
     }
-    return null;
 }
 
 /** @internal Configure a later scene to preserve pixels already rendered into the same
@@ -22,25 +21,26 @@ export function configureSwapchainOverlayScene(surface: SurfaceContext, overlay:
         return;
     }
     const overlayTask = getDefaultSwapchainTask(overlay, surface);
-    if (overlayTask) {
+    if (!overlayTask) {
+        return;
+    }
+    if (surface.msaaSamples === 1) {
         // Load (don't clear) the swapchain so the overlay composites onto the base scene.
         overlayTask._config.clr = false;
-        const baseTask = getDefaultSwapchainTask(baseScene as SceneContext, surface);
-        if (baseTask) {
-            overlay._beforeRender.unshift(() => {
-                if (surface.msaaSamples > 1) {
-                    // MSAA: both scenes resolve into the swapchain. To composite, the overlay must
-                    // render into the SAME MSAA colour texture the base scene rendered into (it holds
-                    // the base pixels), then resolve to the swap. The base's MSAA colour view is its
-                    // task's `rt._colorView` (its `rst` is the swap). executePass leaves an offscreen
-                    // att.view untouched (only the scRT is re-read per frame), so this
-                    // override survives to execute; the overlay still resolves via its own `rst`.
-                    const view = baseTask._config.rt._colorView;
-                    if (view) {
-                        overlayTask._colorAttachment.view = view;
-                    }
-                }
-            });
-        }
+        return;
     }
+    const enabled = overlayTask.enabled;
+    overlayTask._config.clr = true;
+    overlayTask.enabled = false;
+    overlay._beforeRender.unshift(() => {
+        const baseTask = getDefaultSwapchainTask(baseScene as SceneContext, surface);
+        const view = baseTask?._config.rst === surface.scRT && baseTask._config.rt._colorView;
+        overlayTask.enabled = view ? enabled : false;
+        overlayTask._config.clr = !view;
+        if (view) {
+            // Both scenes must use the base task's MSAA colour texture before the overlay
+            // can load its pixels and resolve the composited result into the swapchain.
+            overlayTask._colorAttachment.view = view;
+        }
+    });
 }

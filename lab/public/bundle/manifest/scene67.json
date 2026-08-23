@@ -1,7 +1,7 @@
 {
   "rawKB": 75.6,
-  "rawBytes": 77424,
-  "gzipKB": 32.1,
+  "rawBytes": 77419,
+  "gzipKB": 32,
   "ignoredRawKB": 9.6,
   "runtimeChunks": [
     "scene67-_math-factory-CuVnME8g.js",
