@@ -54,7 +54,7 @@ async function main(): Promise<void> {
     // Only the `level` meshes carry TEXCOORD_1 (the `Cube*` props do not), so the UV2 lightmap
     // goes on their materials alone — same split as scene104.
     for (const mesh of scene.meshes) {
-        if (mesh.name !== "level") {
+        if (mesh.name !== "level" && !mesh.name.startsWith("level_primitive")) {
             continue;
         }
         const mat = mesh.material as PbrMaterialProps | undefined;

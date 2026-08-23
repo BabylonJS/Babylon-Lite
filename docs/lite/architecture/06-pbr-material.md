@@ -369,6 +369,17 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
 - **Fragment slots**:
     - `AT` — sets `emissive` from `mesh.emissiveColor`, optionally multiplied by emissive texture sample
 
+### `lightmap-fragment.ts` — Baked Lightmap (opt-in)
+
+- **Public API**: call `await enablePbrLightmap()` before `registerScene()`, then assign the texture with `setPbrLightmap(material, texture, options)`.
+- **Tree shaking**: the enable call dynamically imports and registers the fragment. The always-loaded PBR renderable never scans for lightmaps, so scenes that do not opt in retain no lightmap implementation.
+- **Feature variants**: reserved local bits encode lightmap presence, UV2, shadowmap composition, gamma decode, and effective V flip. These bits participate in the normal PBR shader cache key without colliding with shared material or lighting flags.
+- **UV selection**: `setPbrLightmap()` owns bit 64 of `_uv2Mask`; this reuses the existing TEXCOORD_1 attribute/varying path while preserving all other channel claims.
+- **UBO and bindings**: contributes `lmLvl`, `lmTexture`, and `lmSampler`.
+- **Composition**: the `NI` slot adds the decoded sample by default or multiplies the lit result while preserving emissive for `useLightmapAsShadowmap`. Dependencies keep it after unlit, sheen, and refraction final-color reconstruction.
+- **Orientation**: the V-flip variant is `texture.invertY XOR (texture.uAng === Math.PI)`, matching the Standard texture path for upload-flipped and codec-decoded textures.
+- **Coverage**: `pbr-lightmap.test.ts` covers feature detection, UV fallback, composition order, UBO/bindings, and texture enumeration; Scene 167 covers UV1/UV2, additive/shadowmap, gamma decode, and V-flip parity.
+
 ### `morph-fragment.ts` — Morph Targets
 
 - **Factory**: `createMorphFragment(): ShaderFragment`
@@ -473,6 +484,7 @@ Binding 0 is always the mesh UBO (VERTEX+FRAGMENT). Subsequent bindings are assi
 - BRDF LUT + sampler + IBL cubemap + sampler — if `PBR_HAS_ENV`
 - Reflectance maps + samplers — if reflectance extension
 - Sheen texture + sampler — if `PBR_HAS_SHEEN_TEXTURE`
+- Lightmap texture + sampler — if the opt-in PBR lightmap extension is active
 
 **Group 2 — Shadow** (only when `MSH_RECEIVE_SHADOWS`):
 
@@ -738,6 +750,8 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 | `src/material/pbr/fragments/sheen-fragment.ts`       | ~115 lines | Sheen layer fragment (Charlie NDF, Ashikhmin visibility, direct + IBL sheen)                                                                    |
 | `src/material/pbr/fragments/reflectance-fragment.ts` | ~79 lines  | Metallic reflectance extension fragment (F0 computation, reflectance maps)                                                                      |
 | `src/material/pbr/fragments/emissive-fragment.ts`    | ~29 lines  | Emissive color uniform fragment                                                                                                                 |
+| `src/material/pbr/fragments/lightmap-fragment.ts`    | ~140 lines | Opt-in baked lightmap fragment (UV1/UV2, additive/shadowmap, gamma decode, effective V flip)                                                    |
+| `src/material/pbr/enable-pbr-lightmap.ts`            | ~70 lines  | Published `enablePbrLightmap()` / `setPbrLightmap()` opt-in seam                                                                                |
 | `src/material/pbr/fragments/morph-fragment.ts`       | ~48 lines  | Morph target vertex animation fragment                                                                                                          |
 | `src/material/pbr/fragments/skeleton-fragment.ts`    | ~71 lines  | Skeletal animation fragment (4-bone or 8-bone)                                                                                                  |
 | `src/material/pbr/fragments/pbr-shadow-fragment.ts`  | ~143 lines | PBR shadow receiving fragment (ESM + PCF, per-light)                                                                                            |

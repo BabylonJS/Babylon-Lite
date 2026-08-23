@@ -19,7 +19,7 @@ import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
-import { PBR2_HAS_UV2 } from "../pbr-flag-bits.js";
+import { PBR2_HAS_REFRACTION, PBR2_HAS_UV2, PBR_HAS_SHEEN } from "../pbr-flag-bits.js";
 import { MSH_HAS_UV2 } from "../../mesh-features.js";
 
 const STAGE_FRAGMENT = 0x2;
@@ -45,17 +45,27 @@ const PBR2_HAS_UNLIT = 1 << 8;
  * @param flipV - Sample at `(u, 1 - v)` (BJS `Texture.uAng === π`).
  * @param afterUnlit - Order this fragment after the unlit fragment and add emissive
  * after the lightmap, matching Babylon.js final composition.
+ * @param finalColorDependencies - Active fragments that reconstruct final color and
+ * must complete before the lightmap is composed.
  */
-export function createLightmapFragment(usesUV2: boolean, shadowmap: boolean, gamma: boolean, flipV: boolean, afterUnlit = false): ShaderFragment {
+export function createLightmapFragment(
+    usesUV2: boolean,
+    shadowmap: boolean,
+    gamma: boolean,
+    flipV: boolean,
+    afterUnlit = false,
+    finalColorDependencies: readonly string[] = []
+): ShaderFragment {
     const baseUv = usesUV2 ? `input.uv2` : `input.uv`;
     const uv = flipV ? `vec2<f32>(${baseUv}.x,1.0-${baseUv}.y)` : baseUv;
     const raw = `textureSample(lmTexture,lmSampler,${uv}).rgb`;
     const lm = `${gamma ? `pow(${raw},vec3<f32>(2.2))` : raw}*material.lmLvl`;
     const blend = shadowmap ? (afterUnlit ? `color=color*(${lm})+emissive;` : `color=(color-emissive)*(${lm})+emissive;`) : afterUnlit ? `color+=${lm}+emissive;` : `color+=${lm};`;
+    const dependencies = afterUnlit ? [...finalColorDependencies, "unlit"] : finalColorDependencies;
     return {
         _id: "lightmap",
 
-        _dependencies: afterUnlit ? ["unlit"] : undefined,
+        _dependencies: dependencies.length > 0 ? dependencies : undefined,
 
         _uboFields: [{ _name: "lmLvl", _type: "f32" }],
 
@@ -100,7 +110,7 @@ export const pbrExt: PbrExt = {
         if (m.gammaLightmap) {
             f |= PBR_LIGHTMAP_GAMMA;
         }
-        if (m.lightmapTexture.uAng === Math.PI) {
+        if (!!m.lightmapTexture.invertY !== (m.lightmapTexture.uAng === Math.PI)) {
             f |= PBR_LIGHTMAP_FLIP_V;
         }
         return { f, f2 };
@@ -114,7 +124,8 @@ export const pbrExt: PbrExt = {
             (ctx._features & PBR_LIGHTMAP_SHADOWMAP) !== 0,
             (ctx._features & PBR_LIGHTMAP_GAMMA) !== 0,
             (ctx._features & PBR_LIGHTMAP_FLIP_V) !== 0,
-            (ctx._features2 & PBR2_HAS_UNLIT) !== 0
+            (ctx._features2 & PBR2_HAS_UNLIT) !== 0,
+            [...((ctx._features & PBR_HAS_SHEEN) !== 0 ? ["sheen"] : []), ...((ctx._features2 & PBR2_HAS_REFRACTION) !== 0 ? ["refraction"] : [])]
         );
     },
     writeUbo: writeLightmapUBO as PbrExt["writeUbo"],

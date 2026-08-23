@@ -54,7 +54,8 @@ export function enablePbrLightmap(): Promise<void> {
  * also records the material's TEXCOORD_1 claim, which is what drives the uv2 vertex
  * attribute and varying.
  * @param material - Target PBR material.
- * @param texture - The baked lightmap. `texture.uAng === Math.PI` flips V, matching BJS.
+ * @param texture - The baked lightmap. Effective V orientation combines `texture.invertY`
+ * with the Babylon.js `texture.uAng === Math.PI` convention.
  * @param options - Blend/decode options.
  */
 export function setPbrLightmap(material: PbrMaterialProps, texture: Texture2D, options?: PbrLightmapOptions): void {

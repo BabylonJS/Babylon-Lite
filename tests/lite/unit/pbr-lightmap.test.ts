@@ -8,12 +8,17 @@ import { MSH_HAS_UV2 } from "../../../packages/babylon-lite/src/material/mesh-fe
 import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer";
 import { createPbrTemplate, type PbrTemplateConfig } from "../../../packages/babylon-lite/src/material/pbr/pbr-template";
 import { createUnlitFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/unlit-fragment";
+import { createIblFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/ibl-fragment";
+import { createSheenFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/sheen-fragment";
+import { makeRefractionRttExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/refraction-rtt-fragment";
 
 const PBR_HAS_LIGHTMAP = 1 << 13;
 const PBR_LIGHTMAP_UV2 = 1 << 14;
 const PBR_LIGHTMAP_SHADOWMAP = 1 << 16;
 const PBR_LIGHTMAP_GAMMA = 1 << 18;
 const PBR_LIGHTMAP_FLIP_V = 1 << 19;
+const PBR_HAS_SHEEN = 1 << 22;
+const PBR2_HAS_REFRACTION = 1 << 4;
 const PBR2_HAS_UNLIT = 1 << 8;
 
 const defaultPbrConfig: PbrTemplateConfig = {
@@ -69,6 +74,15 @@ describe("PBR lightmap extension", () => {
         expect(detected.f2).toBe(PBR2_HAS_UV2);
     });
 
+    it("combines codec orientation with the Babylon.js lightmap rotation sentinel", () => {
+        const codecTexture = { ...texture, invertY: true };
+        const noRotation = pbrExt.detect!({ lightmapTexture: { ...codecTexture, uAng: 0 } } satisfies Partial<PbrMaterialProps>);
+        const rotated = pbrExt.detect!({ lightmapTexture: codecTexture } satisfies Partial<PbrMaterialProps>);
+
+        expect(noRotation.f & PBR_LIGHTMAP_FLIP_V).toBe(PBR_LIGHTMAP_FLIP_V);
+        expect(rotated.f & PBR_LIGHTMAP_FLIP_V).toBe(0);
+    });
+
     it("falls back to UV0 when the mesh has no UV2 buffer", () => {
         const fragment = pbrExt.frag!({
             _features: PBR_HAS_LIGHTMAP | PBR_LIGHTMAP_UV2,
@@ -122,6 +136,34 @@ describe("PBR lightmap extension", () => {
             _hasSpecularAA: false,
         })!;
         expect(fragment._dependencies).toEqual(["unlit"]);
+    });
+
+    it("orders lightmap after IBL final-color reconstruction", () => {
+        const ctx = {
+            _features: PBR_HAS_LIGHTMAP | PBR_HAS_SHEEN,
+            _features2: PBR2_HAS_REFRACTION,
+            _meshFeatures: 0,
+            _hasIbl: true,
+            _hasAnyNormal: false,
+            _hasSpecularAA: false,
+        };
+        const lightmap = pbrExt.frag!(ctx)!;
+        const refraction = makeRefractionRttExt().frag!(ctx)!;
+        const composed = composeShader(createPbrTemplate({ ...defaultPbrConfig, _hasIbl: true }), [
+            lightmap,
+            createIblFragment(false),
+            createSheenFragment(false, true),
+            refraction,
+        ]);
+        const refractionIndex = composed._fragmentWGSL.indexOf("color=finalIrradiance*ro");
+        const sheenIndex = composed._fragmentWGSL.indexOf("color = finalIrradiance");
+        const lightmapIndex = composed._fragmentWGSL.indexOf("color+=textureSample(lmTexture,lmSampler,input.uv).rgb*material.lmLvl;");
+
+        expect(lightmap._dependencies).toEqual(["sheen", "refraction"]);
+        expect(refractionIndex).toBeGreaterThanOrEqual(0);
+        expect(sheenIndex).toBeGreaterThanOrEqual(0);
+        expect(lightmapIndex).toBeGreaterThan(refractionIndex);
+        expect(lightmapIndex).toBeGreaterThan(sheenIndex);
     });
 
     it("writes level, binds the texture pair, and enumerates the resource", () => {
