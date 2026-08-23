@@ -376,7 +376,7 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
 - **Feature variants**: reserved local bits encode lightmap presence, UV2, shadowmap composition, gamma decode, and effective V flip. These bits participate in the normal PBR shader cache key without colliding with shared material or lighting flags.
 - **UV selection**: `setPbrLightmap()` owns bit 64 of `_uv2Mask`; this reuses the existing TEXCOORD_1 attribute/varying path while preserving all other channel claims.
 - **UBO and bindings**: contributes `lmLvl`, `lmTexture`, and `lmSampler`.
-- **Composition**: the `NI` slot adds the decoded sample by default or multiplies the lit result while preserving emissive for `useLightmapAsShadowmap`. Dependencies keep it after unlit, sheen, and refraction final-color reconstruction.
+- **Composition**: the `NI` slot adds the decoded sample by default or multiplies the lit result while preserving emissive for `useLightmapAsShadowmap`. Dependencies keep it after unlit, sheen, refraction, and subsurface final-color reconstruction.
 - **Orientation**: the V-flip variant is `texture.invertY XOR (texture.uAng === Math.PI)`, matching the Standard texture path for upload-flipped and codec-decoded textures.
 - **Coverage**: `pbr-lightmap.test.ts` covers feature detection, UV fallback, composition order, UBO/bindings, and texture enumeration; Scene 167 covers UV1/UV2, additive/shadowmap, gamma decode, and V-flip parity.
 

@@ -11,6 +11,7 @@ import { createUnlitFragment } from "../../../packages/babylon-lite/src/material
 import { createIblFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/ibl-fragment";
 import { createSheenFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/sheen-fragment";
 import { makeRefractionRttExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/refraction-rtt-fragment";
+import { createSubsurfaceFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/subsurface-fragment";
 
 const PBR_HAS_LIGHTMAP = 1 << 13;
 const PBR_LIGHTMAP_UV2 = 1 << 14;
@@ -18,6 +19,7 @@ const PBR_LIGHTMAP_SHADOWMAP = 1 << 16;
 const PBR_LIGHTMAP_GAMMA = 1 << 18;
 const PBR_LIGHTMAP_FLIP_V = 1 << 19;
 const PBR_HAS_SHEEN = 1 << 22;
+const PBR_HAS_SUBSURFACE = 1 << 27;
 const PBR2_HAS_REFRACTION = 1 << 4;
 const PBR2_HAS_UNLIT = 1 << 8;
 
@@ -164,6 +166,24 @@ describe("PBR lightmap extension", () => {
         expect(sheenIndex).toBeGreaterThanOrEqual(0);
         expect(lightmapIndex).toBeGreaterThan(refractionIndex);
         expect(lightmapIndex).toBeGreaterThan(sheenIndex);
+    });
+
+    it("orders shadow lightmaps after non-IBL subsurface translucency", () => {
+        const lightmap = pbrExt.frag!({
+            _features: PBR_HAS_LIGHTMAP | PBR_LIGHTMAP_SHADOWMAP | PBR_HAS_SUBSURFACE,
+            _features2: 0,
+            _meshFeatures: 0,
+            _hasIbl: false,
+            _hasAnyNormal: false,
+            _hasSpecularAA: false,
+        })!;
+        const composed = composeShader(createPbrTemplate(defaultPbrConfig), [lightmap, createSubsurfaceFragment(false, false, false, false, false, false)]);
+        const subsurfaceIndex = composed._fragmentWGSL.indexOf("color += translucencyDirect;");
+        const lightmapIndex = composed._fragmentWGSL.indexOf("color=(color-emissive)*(textureSample(lmTexture,lmSampler,input.uv).rgb*material.lmLvl)+emissive;");
+
+        expect(lightmap._dependencies).toEqual(["subsurface"]);
+        expect(subsurfaceIndex).toBeGreaterThanOrEqual(0);
+        expect(lightmapIndex).toBeGreaterThan(subsurfaceIndex);
     });
 
     it("writes level, binds the texture pair, and enumerates the resource", () => {

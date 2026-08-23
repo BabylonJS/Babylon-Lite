@@ -19,7 +19,7 @@ import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
-import { PBR2_HAS_REFRACTION, PBR2_HAS_UV2, PBR_HAS_SHEEN } from "../pbr-flag-bits.js";
+import { PBR2_HAS_REFRACTION, PBR2_HAS_UV2, PBR_HAS_SHEEN, PBR_HAS_SUBSURFACE } from "../pbr-flag-bits.js";
 import { MSH_HAS_UV2 } from "../../mesh-features.js";
 
 const STAGE_FRAGMENT = 0x2;
@@ -125,7 +125,11 @@ export const pbrExt: PbrExt = {
             (ctx._features & PBR_LIGHTMAP_GAMMA) !== 0,
             (ctx._features & PBR_LIGHTMAP_FLIP_V) !== 0,
             (ctx._features2 & PBR2_HAS_UNLIT) !== 0,
-            [...((ctx._features & PBR_HAS_SHEEN) !== 0 ? ["sheen"] : []), ...((ctx._features2 & PBR2_HAS_REFRACTION) !== 0 ? ["refraction"] : [])]
+            [
+                ...((ctx._features & PBR_HAS_SHEEN) !== 0 ? ["sheen"] : []),
+                ...((ctx._features2 & PBR2_HAS_REFRACTION) !== 0 ? ["refraction"] : []),
+                ...((ctx._features & PBR_HAS_SUBSURFACE) !== 0 ? ["subsurface"] : []),
+            ]
         );
     },
     writeUbo: writeLightmapUBO as PbrExt["writeUbo"],
