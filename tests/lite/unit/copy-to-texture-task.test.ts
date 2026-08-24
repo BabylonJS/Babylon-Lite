@@ -235,6 +235,29 @@ describe("CopyToTextureTask", () => {
         expect(target._colorView).toBeNull();
     });
 
+    it("disposes the previous owned target when targetTexture changes before a rebuild", () => {
+        const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
+        const engine = makeMockEngine(capture);
+        const scene = createSceneContext(engine) as SceneContext;
+        const source = makeOffscreenRT("rgba8unorm", 64, 32);
+        const firstTarget = makeOffscreenRT("rgba8unorm", 64, 32);
+        const secondTarget = makeOffscreenRT("rgba8unorm", 64, 32);
+        buildColor(source, engine);
+
+        const task = createCopyToTextureTask({ sourceTexture: source, targetTexture: firstTarget, ownsTargetTexture: true }, engine, scene);
+        task.record();
+        task.targetTexture = secondTarget;
+        task.record();
+
+        expect(firstTarget._colorTexture).toBeNull();
+        expect(firstTarget._colorView).toBeNull();
+        expect(secondTarget._colorTexture).not.toBeNull();
+
+        task.dispose();
+        expect(secondTarget._colorTexture).toBeNull();
+        expect(secondTarget._colorView).toBeNull();
+    });
+
     it("falls back to the blit path when a viewport is supplied", () => {
         const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
         const engine = makeMockEngine(capture);
@@ -356,6 +379,17 @@ describe("CopyToTextureTask", () => {
         const att = (desc.colorAttachments as GPURenderPassColorAttachment[])[0]!;
         // sampleCount=1 scRT: view re-read from scRT._colorView per frame
         expect(att.view).toBe(engine.scRT._colorView);
+    });
+
+    it("rejects the engine scRT as a source because its texture changes every frame", () => {
+        const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
+        const engine = makeMockEngine(capture);
+        const scene = createSceneContext(engine) as SceneContext;
+        const target = makeOffscreenRT("bgra8unorm", 64, 32);
+
+        const task = createCopyToTextureTask({ sourceTexture: engine.scRT, targetTexture: target }, engine, scene);
+
+        expect(() => task.record()).toThrow(/sourceTexture cannot be the engine scRT/);
     });
 
     it("exposes targetTexture as outputTexture", () => {
