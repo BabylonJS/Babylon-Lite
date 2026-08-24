@@ -27,15 +27,15 @@ const STAGE_FRAGMENT = 0x2;
 // Lightmap-local feature bits. Declared here (not in the shared pbr-flag-bits.ts)
 // per GUIDANCE §4c′ so scenes without a lightmap retain zero bytes. Reserved in
 // pbr-flag-bits.ts so no other feature claims them.
-const PBR_HAS_LIGHTMAP = 1 << 13;
-const PBR_LIGHTMAP_UV2 = 1 << 14;
 const PBR_LIGHTMAP_SHADOWMAP = 1 << 16;
 const PBR_LIGHTMAP_GAMMA = 1 << 18;
 const PBR_LIGHTMAP_FLIP_V = 1 << 19;
+const PBR_HAS_LIGHTMAP = 1 << 24;
+const PBR2_LIGHTMAP_UV2 = 536870912; // 1 << 29
 
 // unlit-fragment.ts's own local bit, re-declared (not imported) so neither module
 // pulls the other into a bundle that only uses one of them.
-const PBR2_HAS_UNLIT = 1 << 8;
+const PBR2_HAS_UNLIT = 256; // 1 << 8
 
 /**
  * Create the lightmap fragment.
@@ -101,8 +101,7 @@ export const pbrExt: PbrExt = {
         let f2 = 0;
         if ((m.lightmapCoordIndex ?? 1) === 1) {
             // Reuse the shared UV2 plumbing (vertex attribute + varying + vertex-buffer slot).
-            f |= PBR_LIGHTMAP_UV2;
-            f2 |= PBR2_HAS_UV2;
+            f2 |= PBR2_HAS_UV2 | PBR2_LIGHTMAP_UV2;
         }
         if (m.useLightmapAsShadowmap) {
             f |= PBR_LIGHTMAP_SHADOWMAP;
@@ -120,7 +119,7 @@ export const pbrExt: PbrExt = {
             return null;
         }
         return createLightmapFragment(
-            (ctx._features & PBR_LIGHTMAP_UV2) !== 0 && (ctx._meshFeatures & MSH_HAS_UV2) !== 0,
+            (ctx._features2 & PBR2_LIGHTMAP_UV2) !== 0 && (ctx._meshFeatures & MSH_HAS_UV2) !== 0,
             (ctx._features & PBR_LIGHTMAP_SHADOWMAP) !== 0,
             (ctx._features & PBR_LIGHTMAP_GAMMA) !== 0,
             (ctx._features & PBR_LIGHTMAP_FLIP_V) !== 0,

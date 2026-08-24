@@ -56,12 +56,15 @@ pbr-renderable.ts:
 | `PBR_HAS_METALLIC_REFLECTANCE_MAP` | `1 << 10` | Has metallic reflectance map  | Reflectance texture sampling                         |
 | `PBR_HAS_REFLECTANCE_MAP`          | `1 << 11` | Has reflectance map           | Reflectance map sampling                             |
 | `PBR_HAS_USE_ALPHA_ONLY_MR`        | `1 << 12` | Use alpha-only from MR map    | Alpha-only metallic reflectance                      |
+| Clustered point gate (local)       | `1 << 13` | Clustered point-light state   | Point-only clustered fragment and cache variant      |
+| Clustered spot gate (local)        | `1 << 14` | Clustered spot-light state    | Spot-capable clustered fragment and cache variant    |
 | `PBR_HAS_OCCLUSION`                | `1 << 15` | Has occlusion strength        | ORM/separate occlusion with strength factor          |
 | `PBR_HAS_SPECULAR_AA`              | `1 << 17` | Specular anti-aliasing        | Geometric AA roughness adjustment                    |
 | `PBR_HAS_CLEARCOAT`                | `1 << 20` | Clearcoat layer enabled       | Clearcoat BRDF + energy conservation                 |
 | `PBR_HAS_EMISSIVE_COLOR`           | `1 << 21` | Non-zero emissive uniform     | Emissive color uniform contribution                  |
 | `PBR_HAS_SHEEN`                    | `1 << 22` | Sheen layer enabled           | Sheen BRDF (Charlie NDF + Ashikhmin visibility)      |
 | `PBR_HAS_SHEEN_TEXTURE`            | `1 << 23` | Sheen has texture             | Sheen texture sampling                               |
+| Lightmap gate (local)              | `1 << 24` | Opt-in lightmap texture       | Lightmap fragment and cache variant                  |
 | `PBR_HAS_GAMMA_ALBEDO`             | `1 << 25` | Base color in gamma space     | Gamma-to-linear decode                               |
 | `PBR_HAS_ANISOTROPY`               | `1 << 26` | Anisotropy enabled            | Anisotropic specular BRDF                            |
 | `PBR_HAS_SUBSURFACE`               | `1 << 27` | Subsurface enabled            | Translucency / scattering / volume feature root      |
@@ -71,7 +74,7 @@ pbr-renderable.ts:
 
 Mesh/pass feature bits live in `mesh-features.ts` (`MSH_HAS_SKELETON`, `MSH_HAS_MORPH_TARGETS`, `MSH_HAS_THIN_INSTANCES`, `MSH_HAS_INSTANCE_COLOR`, `MSH_HAS_VERTEX_COLOR`, `MSH_HAS_UV2`, `MSH_RECEIVE_SHADOWS`). Do not duplicate a mesh feature as `PBR_HAS_*` or `PBR2_HAS_*`; the mesh flag takes precedence.
 
-Extended `features2` bits carry overflow and pass-specific features, including clearcoat texture bits, transmission/volume, unlit, UV transform, occlusion-on-UV2 material intent (`PBR2_HAS_UV2` gated by `MSH_HAS_UV2`), linear image processing for refraction, and `PBR2_NO_COLOR_OUTPUT` for no-color material views.
+Extended `features2` bits carry overflow and pass-specific features, including clearcoat texture bits, transmission/volume, unlit, UV transform, occlusion-on-UV2 material intent (`PBR2_HAS_UV2` gated by `MSH_HAS_UV2`), linear image processing for refraction, and `PBR2_NO_COLOR_OUTPUT` for no-color material views. Extension-local bit 29 selects UV2 specifically for lightmaps (alongside shared `PBR2_HAS_UV2`); the sheen roughness-texture selector moves to bit 31 to keep the gates independent.
 
 Light type bits are also shifted into the feature mask via `getLightTypeFeatureBits()` (hemispheric=1, directional=2, point=3).
 
@@ -373,7 +376,7 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
 
 - **Public API**: call `await enablePbrLightmap()` before `registerScene()`, then assign the texture with `setPbrLightmap(material, texture, options)`.
 - **Tree shaking**: the enable call dynamically imports and registers the fragment. The always-loaded PBR renderable never scans for lightmaps, so scenes that do not opt in retain no lightmap implementation.
-- **Feature variants**: reserved local bits encode lightmap presence, UV2, shadowmap composition, gamma decode, and effective V flip. These bits participate in the normal PBR shader cache key without colliding with shared material or lighting flags.
+- **Feature variants**: primary bit 24 gates lightmap presence, extended bit 29 selects lightmap UV2, and primary bits 16/18/19 select shadowmap composition, gamma decode, and effective V flip. Clustered point/spot lighting retains primary bits 13/14. The lightmap-local bits participate in the normal PBR shader cache key without overlapping those lighting gates.
 - **UV selection**: `setPbrLightmap()` owns bit 64 of `_uv2Mask`; this reuses the existing TEXCOORD_1 attribute/varying path while preserving all other channel claims.
 - **UBO and bindings**: contributes `lmLvl`, `lmTexture`, and `lmSampler`.
 - **Composition**: the `NI` slot adds the decoded sample by default or multiplies the lit result while preserving emissive for `useLightmapAsShadowmap`. Dependencies keep it after unlit, sheen, refraction, and subsurface final-color reconstruction.
