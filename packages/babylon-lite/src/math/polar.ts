@@ -6,9 +6,6 @@ export interface PolarCoordinates {
     theta: number;
 }
 
-/** Component-wise operation supported by {@link combinePolarToRef}. */
-export type PolarBinaryOperation = "add" | "subtract" | "multiply" | "divide";
-
 /** Writes the polar representation of `vector` into `result`. */
 export function polarFromVec2ToRef<T extends PolarCoordinates>(vector: Vec2, result: T): T {
     result.radius = Math.hypot(vector.x, vector.y);
@@ -23,26 +20,31 @@ export function polarToVec2ToRef<T extends Vec2>(polar: PolarCoordinates, result
     return result;
 }
 
-/** Applies a component-wise operation to two polar-coordinate values. */
-export function combinePolarToRef<T extends PolarCoordinates>(left: PolarCoordinates, right: PolarCoordinates, operation: PolarBinaryOperation, result: T): T {
-    switch (operation) {
-        case "add":
-            result.radius = left.radius + right.radius;
-            result.theta = left.theta + right.theta;
-            break;
-        case "subtract":
-            result.radius = left.radius - right.radius;
-            result.theta = left.theta - right.theta;
-            break;
-        case "multiply":
-            result.radius = left.radius * right.radius;
-            result.theta = left.theta * right.theta;
-            break;
-        case "divide":
-            result.radius = left.radius / right.radius;
-            result.theta = left.theta / right.theta;
-            break;
-    }
+/** Adds two polar-coordinate values component-wise. */
+export function addPolarToRef<T extends PolarCoordinates>(left: PolarCoordinates, right: PolarCoordinates, result: T): T {
+    result.radius = left.radius + right.radius;
+    result.theta = left.theta + right.theta;
+    return result;
+}
+
+/** Subtracts two polar-coordinate values component-wise. */
+export function subtractPolarToRef<T extends PolarCoordinates>(left: PolarCoordinates, right: PolarCoordinates, result: T): T {
+    result.radius = left.radius - right.radius;
+    result.theta = left.theta - right.theta;
+    return result;
+}
+
+/** Multiplies two polar-coordinate values component-wise. */
+export function multiplyPolarToRef<T extends PolarCoordinates>(left: PolarCoordinates, right: PolarCoordinates, result: T): T {
+    result.radius = left.radius * right.radius;
+    result.theta = left.theta * right.theta;
+    return result;
+}
+
+/** Divides two polar-coordinate values component-wise. */
+export function dividePolarToRef<T extends PolarCoordinates>(left: PolarCoordinates, right: PolarCoordinates, result: T): T {
+    result.radius = left.radius / right.radius;
+    result.theta = left.theta / right.theta;
     return result;
 }
 

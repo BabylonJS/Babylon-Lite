@@ -1,4 +1,4 @@
-import { combinePolarToRef, polarFromVec2ToRef, polarToVec2ToRef, scalePolarToRef } from "babylon-lite";
+import { addPolarToRef, dividePolarToRef, multiplyPolarToRef, polarFromVec2ToRef, polarToVec2ToRef, scalePolarToRef, subtractPolarToRef } from "babylon-lite";
 
 import { Vector2 } from "./vector.js";
 
@@ -22,7 +22,7 @@ export class Polar {
     }
 
     public addToRef(polar: Polar, ref: Polar): Polar {
-        return combinePolarToRef(this, polar, "add", ref);
+        return addPolarToRef(this, polar, ref);
     }
 
     public add(polar: Polar): Polar {
@@ -39,7 +39,7 @@ export class Polar {
     }
 
     public subtractToRef(polar: Polar, ref: Polar): Polar {
-        return combinePolarToRef(this, polar, "subtract", ref);
+        return subtractPolarToRef(this, polar, ref);
     }
 
     public subtract(polar: Polar): Polar {
@@ -60,7 +60,7 @@ export class Polar {
     }
 
     public multiplyToRef(polar: Polar, ref: Polar): Polar {
-        return combinePolarToRef(this, polar, "multiply", ref);
+        return multiplyPolarToRef(this, polar, ref);
     }
 
     public multiply(polar: Polar): Polar {
@@ -73,7 +73,7 @@ export class Polar {
     }
 
     public divideToRef(polar: Polar, ref: Polar): Polar {
-        return combinePolarToRef(this, polar, "divide", ref);
+        return dividePolarToRef(this, polar, ref);
     }
 
     public divide(polar: Polar): Polar {
