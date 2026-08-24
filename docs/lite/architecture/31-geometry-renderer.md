@@ -91,15 +91,19 @@ export function createGeometryRendererTask(scene: SceneContext, config: Geometry
 export interface CopyToTextureTaskConfig {
     name?: string;
     sourceTexture: RenderTarget;
-    targetTexture: RenderTarget;
+    targetTexture?: RenderTarget;
+    ownsTargetTexture?: boolean;
     viewport?: NormalizedViewport | null;
     lodLevel?: number;
+    resolveTexture?: RenderTarget;
 }
 
 export interface CopyToTextureTask extends Task {
     readonly name: string;
     sourceTexture: RenderTarget;
-    targetTexture: RenderTarget;
+    targetTexture: RenderTarget | undefined;
+    ownsTargetTexture: boolean;
+    resolveTexture: RenderTarget | undefined;
     viewport: NormalizedViewport | null | undefined;
     lodLevel: number;
     readonly outputTexture: RenderTarget;
@@ -354,16 +358,23 @@ Used in Scene 145's impostor strip to display geometry attachments. Two
 execution paths chosen in `record()`:
 
 - **Fast path** — `GPUCommandEncoder.copyTextureToTexture`. Eligible when
-  there is no viewport, source and target share format and sample count, the
-  source mip dimensions match the target's mip-0 dimensions, the target is
-  not the swapchain, and the target owns a color GPU texture. WebGPU allows
-  `copyTextureToTexture` for non-zero `lodLevel` and for MSAA → MSAA copies
-  when both textures have the same sample count.
+  there is no viewport, source and target are single-sampled and share a
+  format, the source mip dimensions match the target's mip-0 dimensions, the
+  target is not the swapchain, and the source/target textures were created
+  with `COPY_SRC`/`COPY_DST`. Frame-graph render targets carry both copy usages
+  by default; external/eager textures without the required usage fall back to
+  the blit path.
 
 - **Blit path** — full-screen triangle samples the source. MSAA sources
   resolve per-sample with `textureLoad`. Lod level is applied via
   `textureSampleLevel`. The Y axis is flipped when the source and target
   have different `flipY` orientations.
+
+When `ownsTargetTexture` is true, the task rebuilds its target during every
+frame-graph build, disposes a previously owned target when `targetTexture`
+changes, and disposes the current target with the task. `sourceTexture` cannot
+be the engine `scRT`, whose GPU texture changes every frame. Resolve-only and
+blit-plus-resolve modes use `resolveTexture` for hardware MSAA resolve.
 
 The color attachment's `loadOp` is `"load"` when a viewport is set (so
 pixels outside the viewport are preserved — required for impostor strips
