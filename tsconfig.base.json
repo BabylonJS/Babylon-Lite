@@ -3,6 +3,7 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "moduleDetection": "auto",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -17,6 +18,6 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "types": ["@webgpu/types"]
+    "types": ["@webgpu/types", "webxr"]
   }
 }
