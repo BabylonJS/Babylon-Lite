@@ -1,5 +1,6 @@
 {
-  "rawKB": 59.4,
+  "rawKB": 59.3,
+  "rawBytes": 60769,
   "gzipKB": 24.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -7,9 +8,8 @@
     "scene18-material-view-Dua1bl7W.js",
     "scene18-no-color-view-CRPii_cG.js",
     "scene18-shadow-task-DBjgn2Mv.js",
-    "scene18-standard-renderable-Cw3mZWgy.js",
+    "scene18-standard-renderable-KRJq6_Js.js",
     "scene18-std-shadow-fragment-pwyXRo4i.js",
     "scene18.js"
-  ],
-  "rawBytes": 60834
+  ]
 }

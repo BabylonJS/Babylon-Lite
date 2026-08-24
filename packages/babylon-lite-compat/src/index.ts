@@ -142,6 +142,7 @@ export { SpriteManager, Sprite, SpriteRenderer, ThinSprite } from "./sprites/spr
 export { ShadowGenerator, CascadedShadowGenerator } from "./shadows/shadow-generator.js";
 export { NodeMaterial } from "./materials/node-material.js";
 export { GridMaterial } from "./materials/grid-material.js";
+export { GetSupportedSimultaneousLights } from "./materials/material-helpers.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { Animation, AnimationGroup, AnimationTypes, AnimationLoopModes, AnimationKeyInterpolation, Animatable } from "./animations/animation.js";
@@ -328,6 +329,9 @@ export {
     DefaultRenderingPipeline,
     FxaaPostProcess,
     SSAO2RenderingPipeline,
+    FSR1RenderingPipeline,
+    ThinFSR1UpscalePostProcess,
+    ThinFSR1SharpenPostProcess,
     ParticleHelper,
     PointsCloudSystem,
     PhysicsAggregate,

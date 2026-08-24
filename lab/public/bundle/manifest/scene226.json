@@ -1,13 +1,13 @@
 {
   "rawKB": 60.2,
+  "rawBytes": 61617,
   "gzipKB": 25,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene226-generate-mipmaps-D39AWl5s.js",
     "scene226-gltf-feature-gaussian-splatting-JkM3fizy.js",
-    "scene226-gltf-feature-registry-RTu6xPdZ.js",
+    "scene226-gltf-feature-registry-63CprYxg.js",
     "scene226-gltf-glb-parser-tLbYXo5H.js",
     "scene226.js"
-  ],
-  "rawBytes": 61682
+  ]
 }

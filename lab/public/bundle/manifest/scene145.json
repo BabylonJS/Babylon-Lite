@@ -1,25 +1,25 @@
 {
-  "rawKB": 89.1,
+  "rawKB": 89,
+  "rawBytes": 91137,
   "gzipKB": 36.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene145-bake-local-matrix-67U-IT8C.js",
     "scene145-cube-texture-DCt3jknC.js",
     "scene145-generate-mipmaps-TrG6m0Ig.js",
-    "scene145-geometry-view-MTBrekVG.js",
+    "scene145-geometry-view-BobTtldk.js",
     "scene145-mesh-features-CoWix6zs.js",
     "scene145-parse-camera-DwEATQZ5.js",
     "scene145-point-light-DQ31wmYJ.js",
-    "scene145-scene-uniforms-Ha63NnVx.js",
     "scene145-set-std-ambient-CAdUSg5Q.js",
     "scene145-set-std-cube-reflection-B64iASiD.js",
     "scene145-set-std-opacity-DjSDbHZY.js",
     "scene145-set-std-specular-DT-6YUtN.js",
-    "scene145-shader-composer-CGiJlNNH.js",
+    "scene145-shader-composer-BLINGJZD.js",
     "scene145-standard-material-BTyYCxsP.js",
-    "scene145-standard-pipeline-IDe7Y5pI.js",
-    "scene145-standard-renderable-CwTWRG97.js",
+    "scene145-standard-pipeline-CypyHg-i.js",
+    "scene145-standard-renderable-CAvV0iog.js",
+    "scene145-ubo-layout-Cs5YvLYZ.js",
     "scene145.js"
-  ],
-  "rawBytes": 91214
+  ]
 }

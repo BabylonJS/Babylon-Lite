@@ -36,9 +36,6 @@ export interface SceneContext {
     /** Background material primaryColor (linear RGB). */
     environmentPrimaryColor?: [number, number, number];
 
-    /** Environment cubemap Y rotation in radians. */
-    envRotationY?: number;
-
     /** Fixed timestep for animation ticks (ms, 0 = use real rAF delta). */
     fixedDeltaMs: number;
 
@@ -67,6 +64,9 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
  *  resources is released, the ones it last owned are destroyed, and the mesh is retired for good
  *  (re-adding it throws). See "Mesh GPU Lifetime". */
 export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void;
+
+/** Set environment rotation around the Y axis, in radians. */
+export function setEnvironmentRotation(scene: SceneContext, rotation: number): void;
 
 /** Register a callback to run before each rendered frame. */
 export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => void): void;

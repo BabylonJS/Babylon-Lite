@@ -64,6 +64,21 @@ export const spriteBlendAdditive: SpriteBlendDescriptor = {
 };
 
 /**
+ * Pure additive color blending (`src * 1 + dst`) whose color factors match Babylon.js
+ * `BLENDMODE_ONEONE` / `ALPHA_ONEONE`. This generic descriptor uses `one` / `one`
+ * alpha factors; exact particle OneOne instead uses `zero` / `one`. Unlike
+ * {@link spriteBlendAdditive}, source RGB is not weighted by alpha. This is useful
+ * for particle textures that encode their falloff directly in RGB.
+ */
+export const spriteBlendOneOne: SpriteBlendDescriptor = {
+    _key: "oneone",
+    _descriptor: {
+        color: { srcFactor: "one", dstFactor: "one", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
+    },
+};
+
+/**
  * Multiply blending. The framebuffer is multiplied by the sprite's RGB (`result = src * dst`),
  * so the sprite darkens / tints what is behind it — ideal for soft shadow blobs, dirt / grime
  * decals, ambient-occlusion stamps, and coloured "gel" overlays that modulate the scene colour.

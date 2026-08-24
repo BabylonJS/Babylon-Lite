@@ -184,7 +184,7 @@ export abstract class AbstractEngine {
      * WebGPU baseline. A headless `NullEngine` has no device, so all flags are off.
      */
     public getCaps(): Record<string, unknown> {
-        const device = (this._lite as { _device?: { features?: { has(name: string): boolean } } } | undefined)?._device;
+        const device = (this._lite as { _device?: { features?: { has(name: string): boolean }; limits?: { maxUniformBuffersPerShaderStage?: number } } } | undefined)?._device;
         const has = (name: string): boolean => !!device?.features?.has(name);
         return {
             astc: has("texture-compression-astc"),
@@ -201,6 +201,12 @@ export abstract class AbstractEngine {
             textureHalfFloat: true,
             textureFloatLinearFiltering: true,
             maxTextureSize: 8192,
+            // Maximum uniform buffers bindable to a single shader stage. BJS reports this
+            // only for engines that enforce it as a hard limit (WebGPU); Babylon Lite is
+            // WebGPU-only, so it forwards the device's reported limit, and leaves it
+            // undefined for a device-less NullEngine — matching BJS's "left undefined
+            // elsewhere" contract.
+            maxUniformBuffersPerShaderStage: device?.limits?.maxUniformBuffersPerShaderStage,
             instancedArrays: true,
             uintIndices: true,
         };

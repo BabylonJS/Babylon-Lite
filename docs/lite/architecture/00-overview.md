@@ -307,6 +307,7 @@ createEngine(canvas: HTMLCanvasElement): Promise<Engine>
 createSceneContext(engine: Engine): SceneContext
 createDefaultCamera(scene: SceneContext): ArcRotateCamera
 removeFromScene(scene: SceneContext, entity: Mesh | ...): void
+setEnvironmentRotation(scene: SceneContext, rotation: number): void
 
 // Camera — pure data; controls can register per-frame updates on a scene
 createArcRotateCamera(alpha: number, beta: number, radius: number, target: Vec3): ArcRotateCamera
@@ -449,7 +450,6 @@ interface SceneContext {
     shadowGenerators: ShadowGenerator[];
     imageProcessing: ImageProcessingConfig;
     environmentPrimaryColor?: [number, number, number];
-    envRotationY?: number; // Environment cubemap Y rotation in radians
     fixedDeltaMs: number; // Fixed delta for deterministic animation (0 = real time)
 
     // Internal renderable lists

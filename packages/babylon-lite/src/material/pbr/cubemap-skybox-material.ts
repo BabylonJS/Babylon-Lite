@@ -15,7 +15,7 @@ export interface CubemapSkyboxMaterial {
 }
 
 /** Module-global pipeline + layout caches shared across all cubemap-skybox instances.
- *  Keyed by `${label}|${sigKey}` so HDR and DDS variants don't collide. */
+ *  Pipeline keys include final fragment code so composed variants don't collide. */
 const _cmPipelines = new Map<string, GPURenderPipeline>();
 const _cmLayouts = new Map<string, GPUBindGroupLayout>();
 let _cmCachedDevice: GPUDevice | null = null;
@@ -52,7 +52,7 @@ export function createCubemapSkyboxMaterial(label: string, vertCode: string, fra
                 _cmLayouts.clear();
                 _cmCachedDevice = device;
             }
-            const key = `${label}|${targetSignatureKey(sig)}`;
+            const key = `${fragCode}|${targetSignatureKey(sig)}`;
             const cached = _cmPipelines.get(key);
             if (cached) {
                 return cached;
