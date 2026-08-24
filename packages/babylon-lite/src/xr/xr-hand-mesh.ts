@@ -26,7 +26,7 @@ import { loadGltf } from "../loader-gltf/load-gltf.js";
 import { enableBoneControl, getBoneByName, setBoneWorldPoseDeferred, bakeSkeleton } from "../skeleton/bone-control.js";
 import { getContainerMeshes } from "../asset-container.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
-import { enableStandardSkeleton, whenStandardMeshFeaturesReady } from "../material/standard/enable-standard-mesh-features.js";
+import { _preloadStdMeshExt } from "../material/standard/standard-group-builder.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
@@ -101,12 +101,9 @@ export async function loadHandMesh(engine: EngineContext, scene: SceneContext, h
     // Bone control is opt-in and must be enabled BEFORE the glTF is parsed so the
     // loader surfaces `container.skeletons`. Idempotent + process-global.
     enableBoneControl();
-    // The hand GLB is skinned, so the Standard skinning ext must be registered or the mesh
-    // renders frozen at bind pose (invisible / at the origin) instead of tracking the joints.
-    // Enable it BEFORE the (network-bound) glTF load so its dynamic import overlaps the fetch
-    // and is almost certainly registered by the time we add the mesh below. Idempotent +
-    // process-global, same opt-in pattern as `enableBoneControl`.
-    enableStandardSkeleton();
+    // Start the Standard skinning-ext preload before the network-bound glTF load so both
+    // operations overlap. This XR-local edge keeps non-XR Standard bundles unchanged.
+    const skeletonReady = _preloadStdMeshExt(() => import("../material/standard/fragments/std-skeleton-fragment.js"), "stdSkeletonExt");
 
     const file = handedness === "right" ? opts.rightFilename : opts.leftFilename;
     const url = new URL(file, opts.baseUrl).href;
@@ -147,7 +144,7 @@ export async function loadHandMesh(engine: EngineContext, scene: SceneContext, h
     // the first frame is built through the synchronous rebuild path, which cannot import the
     // ext itself. Without this, adding the hand while controllers are already shown races the
     // ext import and the mesh renders frozen at bind pose (stuck at the origin).
-    await whenStandardMeshFeaturesReady();
+    await skeletonReady;
 
     addToScene(scene, container);
     setSubtreeVisible(root, false);

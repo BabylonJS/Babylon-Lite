@@ -113,6 +113,18 @@ describe("controller models", () => {
         expect(unitOf(models, src).mesh).toBe(first);
     });
 
+    it("does not reapply unchanged tracked visibility", () => {
+        setSubtreeVisible.mockClear();
+        const models = createXrControllerModels(engine, scene);
+        const src = makeSource(gripPose(0, 0, 0));
+
+        updateXrControllerModels(models, makeInput([src]));
+        updateXrControllerModels(models, makeInput([src]));
+
+        expect(setSubtreeVisible).toHaveBeenCalledOnce();
+        expect(setSubtreeVisible).toHaveBeenCalledWith(unitOf(models, src).mesh, true);
+    });
+
     it("hides the mesh while the grip is untracked", () => {
         setSubtreeVisible.mockClear();
         const models = createXrControllerModels(engine, scene);
@@ -185,7 +197,7 @@ describe("controller models", () => {
         expect(addToScene).not.toHaveBeenCalledWith(scene, container);
     });
 
-    it("preserves the glTF root mirror while placing a profile model at the converted grip pose", async () => {
+    it("applies the profile-model LH yaw while preserving the glTF root mirror", async () => {
         addToScene.mockClear();
         loadMotionController.mockReset();
         enableMirroredMeshes.mockReset();
@@ -204,7 +216,8 @@ describe("controller models", () => {
         await vi.waitFor(() => expect(addToScene).toHaveBeenCalledWith(scene, container));
         updateXrControllerModels(models, makeInput([src]));
 
-        const local = [-0.2, 0.1, -1] as const;
+        // glTF scale(-X) followed by the Input Profiles yawY(π).
+        const local = [0.2, 0.1, 1] as const;
         const tx = 2 * (q[1] * local[2] - q[2] * local[1]);
         const ty = 2 * (q[2] * local[0] - q[0] * local[2]);
         const tz = 2 * (q[0] * local[1] - q[1] * local[0]);

@@ -16,11 +16,10 @@ vi.mock("../../../../packages/babylon-lite/src/asset-container", () => ({ getCon
 vi.mock("../../../../packages/babylon-lite/src/material/standard/create-standard-material", () => ({
     createStandardMaterial: vi.fn(() => ({ diffuseColor: [0, 0, 0], alpha: 1 })),
 }));
-const { enableStandardSkeleton, whenStandardMeshFeaturesReady } = vi.hoisted(() => ({
-    enableStandardSkeleton: vi.fn(),
-    whenStandardMeshFeaturesReady: vi.fn(() => Promise.resolve()),
+const { preloadStandardMeshExt } = vi.hoisted(() => ({
+    preloadStandardMeshExt: vi.fn(() => Promise.resolve()),
 }));
-vi.mock("../../../../packages/babylon-lite/src/material/standard/enable-standard-mesh-features", () => ({ enableStandardSkeleton, whenStandardMeshFeaturesReady }));
+vi.mock("../../../../packages/babylon-lite/src/material/standard/standard-group-builder", () => ({ _preloadStdMeshExt: preloadStandardMeshExt }));
 const { addToScene } = vi.hoisted(() => ({ addToScene: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/scene/scene-core", () => ({ addToScene }));
 const { removeFromScene } = vi.hoisted(() => ({ removeFromScene: vi.fn() }));
@@ -83,6 +82,7 @@ beforeEach(() => {
     removeFromScene.mockClear();
     setSubtreeVisible.mockClear();
     enableMirroredMeshes.mockClear();
+    preloadStandardMeshExt.mockClear();
 });
 
 describe("loadHandMesh", () => {
@@ -95,9 +95,9 @@ describe("loadHandMesh", () => {
         const loaded = await loadHandMesh({} as EngineContext, {} as SceneContext, "right", OPTS);
 
         expect(enableBoneControl).toHaveBeenCalled();
-        // The hand GLB is skinned + gets a Standard material, so Standard skinning must
-        // be enabled or it would render frozen at bind pose.
-        expect(enableStandardSkeleton).toHaveBeenCalled();
+        // The hand GLB is skinned + gets a Standard material, so its skinning fragment
+        // must be preloaded before the late-added mesh is attached.
+        expect(preloadStandardMeshExt).toHaveBeenCalled();
         // Right-hand GLB URL resolved against the base.
         expect(loadGltf).toHaveBeenCalledWith(expect.anything(), "https://cdn.example/HandMeshes/r_hand_rhs.glb");
         expect(loaded).not.toBeNull();
@@ -132,7 +132,7 @@ describe("loadHandMesh", () => {
         loadGltf.mockResolvedValue(fakeContainer(root, { tag: "skel" }));
         getBoneByName.mockImplementation((_s: unknown, name: string) => ({ name }));
         let resolveReady!: () => void;
-        whenStandardMeshFeaturesReady.mockReturnValueOnce(new Promise<void>((r) => (resolveReady = r)));
+        preloadStandardMeshExt.mockReturnValueOnce(new Promise<void>((r) => (resolveReady = r)));
         addToScene.mockClear();
 
         const pending = loadHandMesh({} as EngineContext, {} as SceneContext, "right", OPTS);
@@ -141,7 +141,7 @@ describe("loadHandMesh", () => {
         expect(addToScene).not.toHaveBeenCalled();
         resolveReady();
         await pending;
-        expect(whenStandardMeshFeaturesReady).toHaveBeenCalled();
+        expect(preloadStandardMeshExt).toHaveBeenCalled();
         expect(addToScene).toHaveBeenCalled();
     });
 

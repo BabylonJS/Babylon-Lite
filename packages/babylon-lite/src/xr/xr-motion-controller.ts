@@ -20,6 +20,7 @@ import type { SceneNode } from "../scene/scene-node.js";
 import type { XrHandedness } from "./xr-support.js";
 import { loadGltf } from "../loader-gltf/load-gltf.js";
 import { lerpVec3 } from "../math/lerp-vec3.js";
+import { setSubtreeVisible } from "../scene/visibility.js";
 
 /** Default WebXR Input Profiles registry — the jsDelivr-hosted
  *  `@webxr-input-profiles/assets` package, the same default Babylon.js uses. */
@@ -312,7 +313,7 @@ export function updateMotionController(mc: MotionController, gamepad: Gamepad | 
     for (const r of mc._responses) {
         if (r.property === "visibility") {
             const state = buttonState(buttons[r.buttonIndex]);
-            r.valueNode.visible = r.states.includes(state);
+            setSubtreeVisible(r.valueNode, r.states.includes(state));
             continue;
         }
         let weight: number;

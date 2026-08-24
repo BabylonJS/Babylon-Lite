@@ -83,6 +83,8 @@ interface ControllerUnit {
     loadStarted: boolean;
     /** True if the source disconnected before its async load resolved. */
     retired: boolean;
+    /** Last visibility applied to {@link active}; `null` until the first tracked frame. */
+    visible: boolean | null;
 }
 
 /** A controller-model manager. Create with {@link createXrControllerModels}, drive
@@ -217,8 +219,8 @@ function startProfileLoad(models: XrControllerModels, source: DomXrInputSource, 
                 disposeModel(models, model);
                 return;
             }
-            // Keep the glTF loader's right-handed→left-handed root conversion; controller
-            // grip poses now use the same left-handed boundary conversion as scene content.
+            // Keep the glTF loader's right-handed→left-handed root conversion. The pose
+            // update below also applies the Input Profiles model's fixed LH yaw.
             // Loaded glTF meshes are pickable by default. The pointer ray would then hit the
             // controller model at ~0 m and collapse the laser "inside" the controller; exclude the
             // model from picking so the ray passes through to the scene.
@@ -235,6 +237,7 @@ function startProfileLoad(models: XrControllerModels, source: DomXrInputSource, 
             setSubtreeVisible(model.root, false);
             unit.model = model;
             unit.active = model.root;
+            unit.visible = false;
             // Retire the placeholder box now that the real model is in.
             if (unit.mesh) {
                 removeFromScene(models._scene, unit.mesh);
@@ -256,7 +259,7 @@ function ensureUnit(models: XrControllerModels, source: DomXrInputSource, handed
     const mesh = models._factory(models._engine, models._scene, handedness);
     addToScene(models._scene, mesh);
     const placeholderMat = models._loadingStyle ? (mesh.material as unknown as StandardMaterialProps) : null;
-    const unit: ControllerUnit = { handedness, mesh, model: null, placeholderMat, active: mesh, loadStarted: false, retired: false };
+    const unit: ControllerUnit = { handedness, mesh, model: null, placeholderMat, active: mesh, loadStarted: false, retired: false, visible: null };
     models._units.set(source, unit);
     return unit;
 }
@@ -277,11 +280,15 @@ function disposeUnit(models: XrControllerModels, unit: ControllerUnit): void {
 
 /** @internal Show/hide the active visual (cascading through a model subtree). */
 function setUnitVisible(unit: ControllerUnit, visible: boolean): void {
+    if (unit.visible === visible) {
+        return;
+    }
     if (unit.model) {
         setSubtreeVisible(unit.active, visible);
     } else if (unit.mesh) {
         setSubtreeVisible(unit.mesh, visible);
     }
+    unit.visible = visible;
 }
 
 /**
@@ -314,7 +321,13 @@ export function updateXrControllerModels(models: XrControllerModels, input: XrIn
         const m = src.gripMatrix as unknown as Mat4;
         const rot = mat4Decompose(m).rotation;
         unit.active.position.set(m[12]!, m[13]!, m[14]!);
-        unit.active.rotationQuaternion.set(rot.x, rot.y, rot.z, rot.w);
+        if (unit.model) {
+            // Babylon's LH profile-model path parents the glTF root under a π Y rotation.
+            // Compose gripRotation * yawY(π) without allocating a second quaternion.
+            unit.active.rotationQuaternion.set(-rot.z, rot.w, rot.x, -rot.y);
+        } else {
+            unit.active.rotationQuaternion.set(rot.x, rot.y, rot.z, rot.w);
+        }
         setUnitVisible(unit, true);
 
         // Pulse the loading ghost while the real model is still streaming in.

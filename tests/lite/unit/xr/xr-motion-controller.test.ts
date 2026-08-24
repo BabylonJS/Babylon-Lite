@@ -8,6 +8,7 @@ vi.mock("../../../../packages/babylon-lite/src/loader-gltf/load-gltf", () => ({ 
 import { loadMotionController, updateMotionController, DEFAULT_PROFILES_BASE_URL } from "../../../../packages/babylon-lite/src/xr/xr-motion-controller";
 import type { MotionController } from "../../../../packages/babylon-lite/src/xr/xr-motion-controller";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
+import { _vis } from "../../../../packages/babylon-lite/src/engine/engine";
 
 // ─── Tiny node/model doubles ────────────────────────────────────────────────
 
@@ -119,6 +120,9 @@ describe("updateMotionController — animation", () => {
         expect(valueNode.visible).toBe(true);
         updateMotionController(mc, gamepad([{ pressed: false, touched: false }]));
         expect(valueNode.visible).toBe(false);
+        const stableEpoch = _vis;
+        updateMotionController(mc, gamepad([{ pressed: false, touched: false }]));
+        expect(_vis).toBe(stableEpoch);
     });
 
     it("is a no-op when the gamepad is null", () => {

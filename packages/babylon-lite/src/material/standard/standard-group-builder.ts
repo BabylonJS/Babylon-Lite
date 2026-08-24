@@ -33,16 +33,6 @@ export function _preloadStdMeshExt(load: () => Promise<unknown>, key: string): P
     return promise;
 }
 
-/** @internal Resolve once every preloaded Standard mesh-feature ext has finished importing
- *  and been globally registered. The async group build awaits these before the first frame,
- *  but a mesh added LATER goes through the synchronous `_rebuildSingle`, which cannot import —
- *  so a skinned mesh added after the first frame (e.g. an XR hand mesh loaded once controllers
- *  are already shown) must await this before being added, or its variant is built without the
- *  skeletal ext and it renders frozen at bind pose. */
-export function _awaitStdMeshExtPreloads(): Promise<void> {
-    return _stdMeshExtPreloads ? Promise.all(_stdMeshExtPreloads).then(() => undefined) : Promise.resolve();
-}
-
 /** Lazily-created singleton standard-material {@link MeshGroupBuilder}. Lazy-init
  *  keeps the module free of top-level side effects so a scene that uses no standard
  *  material tree-shakes the builder (and its renderable graph) away. */
