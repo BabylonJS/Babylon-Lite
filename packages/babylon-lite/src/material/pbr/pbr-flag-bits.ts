@@ -14,7 +14,13 @@ export const PBR_HAS_COTANGENT_NORMAL = 1 << 9;
 export const PBR_HAS_METALLIC_REFLECTANCE_MAP = 1 << 10;
 export const PBR_HAS_REFLECTANCE_MAP = 1 << 11;
 export const PBR_HAS_USE_ALPHA_ONLY_MR = 1 << 12;
-// 1<<13 and 1<<14 are clustered-light extension-local.
+// Extension-local primary feature bits, reserved here but declared in their lazy modules:
+//   1<<13  PBR_HAS_CLUSTERED_LIGHTS
+//   1<<14  PBR_HAS_CLUSTERED_SPOTS
+//   1<<16  PBR_LIGHTMAP_SHADOWMAP
+//   1<<18  PBR_LIGHTMAP_GAMMA
+//   1<<19  PBR_LIGHTMAP_FLIP_V
+//   1<<24  PBR_HAS_LIGHTMAP
 export const PBR_HAS_OCCLUSION = 1 << 15;
 export const PBR_HAS_SPECULAR_AA = 1 << 17;
 export const PBR_HAS_CLEARCOAT = 1 << 20;
@@ -64,4 +70,5 @@ export const PBR2_ESM_SHADOW_OUTPUT = 1 << 16;
 //   1<<26  PBR2_REFL_UV_TX                      (reflectance-fragment.ts)
 //   1<<27  PBR2_HAS_ANISO_TEX                    (anisotropy-fragment.ts)
 //   1<<28  PBR2_OCCL_UV_SPLIT                   (uv-transform-fragment.ts + pbr-template-ext.ts)
+//   1<<29  PBR2_LIGHTMAP_UV2                    (lightmap-fragment.ts)
 //   1<<30  PBR2_HAS_SHADOW_ONLY                 (shadow-only-fragment.ts)
