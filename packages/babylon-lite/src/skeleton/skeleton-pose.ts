@@ -116,6 +116,9 @@ export function computeNodeWorldMatrices(
 export function writeBoneTextures(device: GPUDevice, skeletons: readonly SkeletonBinding[], worldMat: Float32Array): void {
     for (let si = 0; si < skeletons.length; si++) {
         const skel = skeletons[si]!;
+        if (skel.runtimeSkeleton?._disposed) {
+            continue;
+        }
         const boneData = skel.boneMatrices;
         for (let bi = 0; bi < skel.boneCount; bi++) {
             const jointIdx = skel.jointNodes[bi]!;
