@@ -462,6 +462,9 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
 
     for (let skeletonIndex = 0; skeletonIndex < target.skeletons.length; skeletonIndex++) {
         const skel = target.skeletons[skeletonIndex]!;
+        if (skel.runtimeSkeleton?._disposed) {
+            continue;
+        }
         const boneData = skel.boneMatrices;
         for (let bi = 0; bi < skel.boneCount; bi++) {
             const jointIdx = skel.jointNodes[bi]!;

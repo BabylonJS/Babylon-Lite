@@ -1603,6 +1603,16 @@
         "skipPerf": true
     },
     {
+        "id": 167,
+        "slug": "scene167-pbr-lightmap",
+        "name": "Scene 167 — PBR Lightmap",
+        "maxMad": 0.7,
+        "maxRawKB": 76.65,
+        "description": "PBR material lightmap channel. The levelTest.glb level keeps its glTF PBR materials and receives a baked lightmap on TEXCOORD_1 as a shadowmap (multiply, level 3.2, sRGB-decoded, uAng = π V-flip); two procedural PBR boxes receive the same texture additively on TEXCOORD_0. Covers every branch of the PBR lightmap fragment. Local Chrome reaches MAD 0.044; BrowserStack cloud Chrome is deterministically 0.642 with 97.9% of pixels within 5, so the 0.7 ceiling allows that renderer quantization while remaining strict.",
+        "tags": ["pbr", "gltf", "lightmap", "texture"],
+        "skipPerf": true
+    },
+    {
         "id": 168,
         "slug": "scene168-mirrored-doublesided-winding",
         "name": "Scene 168 — Mirrored Double-Sided Winding",
@@ -2567,6 +2577,17 @@
         "tags": ["npe", "particles", "sprite2d", "2d", "multiply", "multiply-add", "blend"],
         "skipParity": true,
         "skipParityReason": "Lite-native exact ParticleSystem-to-Sprite2D blend bridge; Babylon.js has no equivalent pure-2D SpriteRenderer path. Blend equations are established by Babylon oracle scenes 283 and 284.",
+        "skipPerf": true
+    },
+    {
+        "id": 303,
+        "slug": "scene303-sprite2d-y-sort",
+        "name": "Scene 303 — Sprite2D Y-Sort",
+        "maxRawKB": 25,
+        "description": "Three sampled overlap pairs prove Sprite2D Y-sort through visible pixels and picking: a first-inserted sprite moved live to larger Y covers a later canonical sprite, equal-Y later insertion wins the stable serial tie, and +60 bias lifts an earlier sprite above a later canonical neighbor.",
+        "tags": ["sprites", "sprite2d", "2d", "y-sort", "top-down", "isometric"],
+        "skipParity": true,
+        "skipParityReason": "Lite-native renderer Y-sort extension; Babylon.js has no equivalent pure-2D GPU-order staging API to use as a pixel oracle.",
         "skipPerf": true
     }
 ]

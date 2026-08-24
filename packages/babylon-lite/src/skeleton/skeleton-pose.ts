@@ -72,10 +72,16 @@ export function computeNodeWorldMatrices(
     topoOrder: Int32Array,
     currentTRS: Float32Array,
     localMat: Float32Array,
-    worldMat: Float32Array
+    worldMat: Float32Array,
+    worldOverrides?: ReadonlyMap<number, Mat4Storage>
 ): void {
     for (let idx = 0; idx < numNodes; idx++) {
         const nodeIdx = topoOrder[idx]!;
+        const worldOverride = worldOverrides?.get(nodeIdx);
+        if (worldOverride) {
+            worldMat.set(worldOverride, nodeIdx * 16);
+            continue;
+        }
         const node = nodes[nodeIdx]!;
         const off = nodeIdx * TRS_STRIDE;
         if (node._matrix) {
@@ -110,6 +116,9 @@ export function computeNodeWorldMatrices(
 export function writeBoneTextures(device: GPUDevice, skeletons: readonly SkeletonBinding[], worldMat: Float32Array): void {
     for (let si = 0; si < skeletons.length; si++) {
         const skel = skeletons[si]!;
+        if (skel.runtimeSkeleton?._disposed) {
+            continue;
+        }
         const boneData = skel.boneMatrices;
         for (let bi = 0; bi < skel.boneCount; bi++) {
             const jointIdx = skel.jointNodes[bi]!;
