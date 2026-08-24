@@ -158,6 +158,9 @@ export interface SkeletonData {
     /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
      *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
     _refCount?: number;
+    /** @internal True once the last owning mesh has released the GPU resources. Animation
+     *  controllers may outlive removed meshes, so they use this to skip stale uploads. */
+    _disposed?: boolean;
     /** @internal Shared ownership for skin vertex buffers reused by VAT data. */
     readonly _skinBuffers: SkinBufferData;
     /** @internal Shared node-index → bone override map, stamped by `enableBoneControl`'s
@@ -226,4 +229,6 @@ export interface MorphTargetData {
     /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
      *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
     _refCount?: number;
+    /** @internal True once the last owning mesh has released the GPU resources. */
+    _disposed?: boolean;
 }
