@@ -258,6 +258,8 @@ export class PhysicsShape {
                 return PhysicsShapeType.MESH;
             case LitePhysicsShapeType.HEIGHTFIELD:
                 return PhysicsShapeType.HEIGHTFIELD;
+            default:
+                throw new Error(`Invalid Lite PhysicsShapeType value: ${this._lite._type}`);
         }
     }
 
@@ -404,7 +406,8 @@ export class PhysicsBody {
         return new Vector3(value.x, value.y, value.z);
     }
     public getLinearVelocityToRef(result: Vector3): void {
-        result.copyFrom(this.getLinearVelocity());
+        const value = getPhysicsBodyLinearVelocity(this._world, this._lite);
+        result.set(value.x, value.y, value.z);
     }
     public setAngularVelocity(value: Vec3Like): void {
         setPhysicsBodyAngularVelocity(this._world, this._lite, value);

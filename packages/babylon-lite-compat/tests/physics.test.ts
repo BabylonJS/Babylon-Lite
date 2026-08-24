@@ -48,6 +48,7 @@ function makeAggregateMockHknp() {
         HP_Body_SetMotionType: () => undefined,
         HP_Body_SetQTransform: () => undefined,
         HP_Body_SetShape: () => undefined,
+        HP_Body_GetLinearVelocity: () => [0, [4, 5, 6]],
         HP_Body_GetAngularVelocity: () => [0, [1, 2, 3]],
         HP_Body_Release: () => undefined,
         HP_World_AddBody: () => undefined,
@@ -215,7 +216,7 @@ describe("PhysicsEngine", () => {
             expect(() => body.getPrestepType()).toThrow("Invalid Lite PhysicsPrestepType value: 96");
         });
 
-        it("reads angular velocity through Lite", () => {
+        it("reads velocities through Lite without allocating in to-ref methods", () => {
             const plugin = new HavokPlugin(true, makeAggregateMockHknp());
             plugin._attachToLiteScene(makeScene());
             const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
@@ -225,12 +226,19 @@ describe("PhysicsEngine", () => {
             } as unknown as TransformNode;
             const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
 
+            expect(body.getLinearVelocity()).toEqual({ x: 4, y: 5, z: 6 });
+            const allocatingLinearGetter = vi.spyOn(body, "getLinearVelocity");
+            const linearResult = new Vector3();
+            body.getLinearVelocityToRef(linearResult);
+            expect(linearResult).toEqual({ x: 4, y: 5, z: 6 });
+            expect(allocatingLinearGetter).not.toHaveBeenCalled();
+
             expect(body.getAngularVelocity()).toEqual({ x: 1, y: 2, z: 3 });
-            const allocatingGetter = vi.spyOn(body, "getAngularVelocity");
-            const result = new Vector3();
-            body.getAngularVelocityToRef(result);
-            expect(result).toEqual({ x: 1, y: 2, z: 3 });
-            expect(allocatingGetter).not.toHaveBeenCalled();
+            const allocatingAngularGetter = vi.spyOn(body, "getAngularVelocity");
+            const angularResult = new Vector3();
+            body.getAngularVelocityToRef(angularResult);
+            expect(angularResult).toEqual({ x: 1, y: 2, z: 3 });
+            expect(allocatingAngularGetter).not.toHaveBeenCalled();
         });
     });
 
@@ -287,6 +295,10 @@ describe("PhysicsEngine", () => {
             const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
 
             expect(() => new PhysicsShape({ type: 99 as PhysicsShapeType }, scene)).toThrow("Invalid PhysicsShapeType value: 99");
+
+            const shape = new PhysicsShape({ type: PhysicsShapeType.BOX }, scene);
+            (shape._lite as unknown as { _type: number })._type = 98;
+            expect(() => shape.type).toThrow("Invalid Lite PhysicsShapeType value: 98");
         });
     });
 });
