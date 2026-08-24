@@ -94,8 +94,8 @@ importers:
         specifier: ^7.1.1
         version: 7.1.1(rolldown@1.2.4)(rollup@4.62.0)
       terser:
-        specifier: ^5.50.0
-        version: 5.50.0
+        specifier: 5.49.0
+        version: 5.49.0
       tsx:
         specifier: ^4.23.12
         version: 4.23.12
@@ -110,10 +110,10 @@ importers:
         version: 8.67.0(eslint@10.8.1(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
       vite:
         specifier: ^6.4.3
-        version: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)
+        version: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@types/node@26.2.0)(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
+        version: 4.1.10(@types/node@26.2.0)(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0))
       webpack:
         specifier: ^5.109.2
         version: 5.109.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.26)
@@ -150,7 +150,7 @@ importers:
         version: 0.43.1
       '@vitejs/plugin-basic-ssl':
         specifier: ^2.3.0
-        version: 2.3.0(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
+        version: 2.3.0(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0))
       '@webgpu/types':
         specifier: ^0.1.71
         version: 0.1.71
@@ -165,7 +165,7 @@ importers:
         version: 6.0.3
       vite:
         specifier: ^6.4.3
-        version: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)
+        version: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0)
 
   packages/babylon-lite:
     dependencies:
@@ -199,10 +199,10 @@ importers:
         version: 6.0.3
       vite:
         specifier: ^6.4.3
-        version: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)
+        version: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0)
       vite-plugin-dts:
         specifier: ^4.5.4
-        version: 4.5.4(@types/node@26.2.0)(rollup@4.62.0)(supports-color@8.1.1)(typescript@6.0.3)(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
+        version: 4.5.4(@types/node@26.2.0)(rollup@4.62.0)(supports-color@8.1.1)(typescript@6.0.3)(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/babylon-lite-compat:
     dependencies:
@@ -227,10 +227,10 @@ importers:
         version: 6.0.3
       vite:
         specifier: ^6.4.3
-        version: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)
+        version: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0)
       vite-plugin-dts:
         specifier: ^4.5.4
-        version: 4.5.4(@types/node@26.2.0)(rollup@4.62.0)(supports-color@8.1.1)(typescript@6.0.3)(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
+        version: 4.5.4(@types/node@26.2.0)(rollup@4.62.0)(supports-color@8.1.1)(typescript@6.0.3)(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/babylon-lite-gl:
     devDependencies:
@@ -261,7 +261,7 @@ importers:
         version: 6.0.3
       vite:
         specifier: ^6.4.3
-        version: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)
+        version: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0)
 
 packages:
 
@@ -3786,6 +3786,11 @@ packages:
   teex@1.0.1:
     resolution: {integrity: sha512-eYE6iEI62Ni1H8oIa7KlDU6uQBtqr4Eajni3wX7rpfXD8ysFx8z0+dri+KWEPWpBsxXfxu58x/0jvTVT1ekOSg==}
 
+  terser@5.49.0:
+    resolution: {integrity: sha512-SNiDnXyHSrxVcIOtVbULzcTmniUiwcV7Nwdyj1twVubeTmbjoa8p69KKDpfkdoOavuM4/GRm1+ykI8qqnavHoA==}
+    engines: {node: '>=10'}
+    hasBin: true
+
   terser@5.50.0:
     resolution: {integrity: sha512-CN9BVxWhgS/hRxtUMjtC2uRWSTcSfQFHMDWma6sKKfIivCD91sM+FOPfvwoaRMqCSrUpe1nv3jDamd9eEQ4y+w==}
     engines: {node: '>=10'}
@@ -5355,9 +5360,9 @@ snapshots:
       '@typescript-eslint/types': 8.67.0
       eslint-visitor-keys: 5.0.1
 
-  '@vitejs/plugin-basic-ssl@2.3.0(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))':
+  '@vitejs/plugin-basic-ssl@2.3.0(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0))':
     dependencies:
-      vite: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)
+      vite: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0)
 
   '@vitest/expect@4.1.10':
     dependencies:
@@ -5368,13 +5373,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.1
 
-  '@vitest/mocker@4.1.10(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))':
+  '@vitest/mocker@4.1.10(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0))':
     dependencies:
       '@vitest/spy': 4.1.10
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)
+      vite: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0)
 
   '@vitest/pretty-format@4.1.10':
     dependencies:
@@ -7833,6 +7838,13 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
+  terser@5.49.0:
+    dependencies:
+      '@jridgewell/source-map': 0.3.11
+      acorn: 8.18.0
+      commander: 2.20.3
+      source-map-support: 0.5.21
+
   terser@5.50.0:
     dependencies:
       '@jridgewell/source-map': 0.3.11
@@ -7970,7 +7982,7 @@ snapshots:
 
   uuid@11.1.1: {}
 
-  vite-plugin-dts@4.5.4(@types/node@26.2.0)(rollup@4.62.0)(supports-color@8.1.1)(typescript@6.0.3)(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)):
+  vite-plugin-dts@4.5.4(@types/node@26.2.0)(rollup@4.62.0)(supports-color@8.1.1)(typescript@6.0.3)(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0)):
     dependencies:
       '@microsoft/api-extractor': 7.58.12(@types/node@26.2.0)
       '@rollup/pluginutils': 5.4.0(rollup@4.62.0)
@@ -7983,13 +7995,13 @@ snapshots:
       magic-string: 0.30.21
       typescript: 6.0.3
     optionalDependencies:
-      vite: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)
+      vite: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0)
     transitivePeerDependencies:
       - '@types/node'
       - rollup
       - supports-color
 
-  vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0):
+  vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0):
     dependencies:
       esbuild: 0.25.12
       fdir: 6.5.0(picomatch@4.0.5)
@@ -8001,14 +8013,14 @@ snapshots:
       '@types/node': 26.2.0
       fsevents: 2.3.3
       lightningcss: 1.33.0
-      terser: 5.50.0
+      terser: 5.49.0
       tsx: 4.23.12
       yaml: 2.9.0
 
-  vitest@4.1.10(@types/node@26.2.0)(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)):
+  vitest@4.1.10(@types/node@26.2.0)(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0)):
     dependencies:
       '@vitest/expect': 4.1.10
-      '@vitest/mocker': 4.1.10(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
+      '@vitest/mocker': 4.1.10(vite@6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0))
       '@vitest/pretty-format': 4.1.10
       '@vitest/runner': 4.1.10
       '@vitest/snapshot': 4.1.10
@@ -8025,7 +8037,7 @@ snapshots:
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vite: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)
+      vite: 6.4.3(@types/node@26.2.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.12)(yaml@2.9.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 26.2.0
