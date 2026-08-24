@@ -22,7 +22,7 @@
         "@recast-navigation/wasm": "0.43.1",
         "@vitejs/plugin-basic-ssl": "^2.1.0",
         "@webgpu/types": "^0.1.71",
-        "babylonjs-gltf2interface": "^9.19.0",
+        "babylonjs-gltf2interface": "latest",
         "manifold-3d": "3.5.1",
         "typescript": "^6.0.3",
         "vite": "^6.4.3"
