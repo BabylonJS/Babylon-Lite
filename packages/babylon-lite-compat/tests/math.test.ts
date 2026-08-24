@@ -242,6 +242,10 @@ describe("Matrix", () => {
         expect(matrix.maximizeInPlaceFromFloats(...([20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20] as const))).toBe(matrix);
         expect(matrix.m[0]).toBe(20);
         expect(matrix.m[15]).toBe(20);
+
+        const second = Matrix.FromArray(Array(16).fill(-1));
+        second.maximizeInPlaceFromFloats(...([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const));
+        expect(second.toArray()).toEqual(Array.from({ length: 16 }, (_, index) => index));
     });
 });
 

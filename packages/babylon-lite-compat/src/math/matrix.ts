@@ -11,6 +11,8 @@ import { maximizeMat4InPlace } from "babylon-lite";
 import { Vector3 } from "./vector.js";
 import { Quaternion } from "./quaternion.js";
 
+let matrixMaximizeValues: Float32Array | undefined;
+
 export class Matrix {
     public readonly m: Float32Array;
 
@@ -51,7 +53,24 @@ export class Matrix {
         m14: number,
         m15: number
     ): this {
-        maximizeMat4InPlace(this.m, [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15]);
+        const values = (matrixMaximizeValues ??= new Float32Array(16));
+        values[0] = m0;
+        values[1] = m1;
+        values[2] = m2;
+        values[3] = m3;
+        values[4] = m4;
+        values[5] = m5;
+        values[6] = m6;
+        values[7] = m7;
+        values[8] = m8;
+        values[9] = m9;
+        values[10] = m10;
+        values[11] = m11;
+        values[12] = m12;
+        values[13] = m13;
+        values[14] = m14;
+        values[15] = m15;
+        maximizeMat4InPlace(this.m, values);
         return this.markAsUpdated();
     }
 

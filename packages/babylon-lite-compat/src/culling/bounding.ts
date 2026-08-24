@@ -14,8 +14,8 @@ import { scaleBoundsFromCenterToRef } from "babylon-lite";
 import { Vector3 } from "../math/vector.js";
 import { Matrix } from "../math/matrix.js";
 
-const boundingSphereScaleMinimum = new Vector3();
-const boundingSphereScaleMaximum = new Vector3();
+let boundingSphereScaleMinimum: Vector3 | undefined;
+let boundingSphereScaleMaximum: Vector3 | undefined;
 
 export class BoundingSphere {
     public readonly center = new Vector3();
@@ -49,8 +49,10 @@ export class BoundingSphere {
     }
 
     public scale(factor: number): this {
-        scaleBoundsFromCenterToRef(this.minimum, this.maximum, this.center, factor, boundingSphereScaleMinimum, boundingSphereScaleMaximum);
-        this.reConstruct(boundingSphereScaleMinimum, boundingSphereScaleMaximum, this._worldMatrix);
+        const minimum = (boundingSphereScaleMinimum ??= new Vector3());
+        const maximum = (boundingSphereScaleMaximum ??= new Vector3());
+        scaleBoundsFromCenterToRef(this.minimum, this.maximum, this.center, factor, minimum, maximum);
+        this.reConstruct(minimum, maximum, this._worldMatrix);
         return this;
     }
 
