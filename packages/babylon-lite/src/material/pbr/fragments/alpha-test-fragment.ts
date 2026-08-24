@@ -5,6 +5,9 @@ import { PBR_HAS_ALPHA_TEST } from "../pbr-flag-bits.js";
 export const pbrExt: PbrExt = {
     id: "alpha-test",
     phase: "fragment",
+    detect(mat) {
+        return ((mat as PbrMaterialProps)._alphaCutOff ?? 0) > 0 ? { f: PBR_HAS_ALPHA_TEST, f2: 0 } : { f: 0, f2: 0 };
+    },
     frag(ctx) {
         return ctx._features & PBR_HAS_ALPHA_TEST
             ? {
@@ -17,7 +20,7 @@ export const pbrExt: PbrExt = {
     writeUbo(data, mat, offsets) {
         const off = offsets.get("alphaCutOff");
         if (off !== undefined) {
-            data[off / 4] = (mat as PbrMaterialProps).alphaCutOff ?? 0;
+            data[off / 4] = (mat as PbrMaterialProps)._alphaCutOff ?? 0;
         }
     },
 };

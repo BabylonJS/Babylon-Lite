@@ -25,16 +25,17 @@ export const stdAmbientExt: StdExt = {
     _id: "std-ambient",
     _phase: "mesh",
     _feature: HAS_AMBIENT_TEXTURE,
+    _detect: (mat: StandardMaterialProps): number => (mat._ambientTexture ? HAS_AMBIENT_TEXTURE | (mat.ambientCoordIndex === 1 ? AMBIENT_USES_UV2 : 0) : 0),
     _frag: (features) => createStdAmbientFragment((features & AMBIENT_USES_UV2) !== 0),
     _bind(mat, entries, b) {
-        const tex = mat.ambientTexture!;
+        const tex = mat._ambientTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
     _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
-        if (mat.ambientTexture) {
-            out.push(mat.ambientTexture);
+        if (mat._ambientTexture) {
+            out.push(mat._ambientTexture);
         }
     },
 };

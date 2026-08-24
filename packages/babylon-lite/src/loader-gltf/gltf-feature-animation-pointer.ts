@@ -17,12 +17,15 @@
 
 import "./gltf-sampler-denorm.js";
 import type { GltfFeature } from "./gltf-feature.js";
+import type { ExtMaterialSeeder } from "./animation-pointer-ext.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { AnimationChannel, TargetPath } from "../animation/types.js";
 import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS } from "../animation/types.js";
 import type { PointerMaterial } from "./animation-pointer.js";
 import { resolveAnimationPointer } from "./animation-pointer.js";
 import { _installPointerHandlers } from "./gltf-animation.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import type * as UvTransformMod from "../material/pbr/enable-material-uv-transform.js";
 
 // Node TRS/weights pointer targets map 1:1 onto the standard glTF channel paths.
 const NODE_TRS_PATH: Record<string, TargetPath> = {
@@ -48,12 +51,22 @@ const _MAT_EXT_POINTER_RE =
 // Animated baseColorFactor white-fallback pointer — handling lives in
 // animation-pointer-basecolor.ts.
 const _BASE_COLOR_POINTER_RE = /^\/materials\/\d+\/pbrMetallicRoughness\/baseColorFactor$/;
+// Animated texture-transform pointer — opts the asset into the UV-transform setter
+// (and the shader fragment it registers). Capture group 1 is the material index.
+const _UV_TX_POINTER_RE = /^\/materials\/(\d+)\/.*\/KHR_texture_transform\/(?:offset|scale|rotation)$/;
 
 // Populated in preParse from the lazily-imported sub-modules, so materialMap + applyMaterial
 // can delegate without re-importing. Each sub-module is fetched only when its pointer is
 // present, so a node-only scene (scene34) loads none of them.
-let _matExtMod: typeof import("./animation-pointer-ext.js") | null = null;
+// The ext seeder is bound in preParse to the asset it scanned, so it must be looked up by
+// that asset rather than held in a single slot: this feature is a module singleton, so two
+// loads in one runtime would otherwise let one asset's seeder run against another's material
+// map. Keyed weakly on the glTF json so the entry dies with the asset, and never deleted on
+// use — the `_matMap` memo below is single-slot, so an interleaved load can evict it and
+// force a rebuild that has to re-seed (seeding is idempotent).
+let _seeders: WeakMap<object, ExtMaterialSeeder> | null = null;
 let _baseColorMod: typeof import("./animation-pointer-basecolor.js") | null = null;
+let _uvTransformMod: typeof UvTransformMod | null = null;
 function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | undefined)[] {
     if (meshes === _matMapKey) {
         return _matMap;
@@ -81,7 +94,7 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
             if (m) {
                 baseColorAnimated.add(+m[1]!);
             }
-            const tx = ptr && /^\/materials\/(\d+)\/.*\/KHR_texture_transform\/(offset|scale|rotation)$/.exec(ptr);
+            const tx = ptr && _UV_TX_POINTER_RE.exec(ptr);
             if (tx) {
                 uvTransformAnimated.add(+tx[1]!);
             }
@@ -104,8 +117,8 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
                 const def = json.materials?.[matIdx];
                 // Seed the separated emissive factor/strength from the asset so an
                 // emissiveFactor or emissiveStrength pointer can recombine them
-                // (emissiveColor is stored pre-multiplied at load).
-                if (def && pm.emissiveColor) {
+                // (the emissive color is stored pre-multiplied at load).
+                if (def && pm._emissiveColor) {
                     const ef = def.emissiveFactor ?? [0, 0, 0];
                     pm._animEmissiveFactor = [ef[0] ?? 0, ef[1] ?? 0, ef[2] ?? 0];
                     pm._animEmissiveStrength = def.extensions?.KHR_materials_emissive_strength?.emissiveStrength ?? 1;
@@ -118,9 +131,12 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
                 }
                 // Force the per-texture UV-transform machinery when a pointer animates a
                 // texture transform that is identity at load (so the matrices exist for the
-                // animation to drive — see uvTransformAnimated above).
+                // animation to drive — see uvTransformAnimated above). The setter is loaded
+                // by preParse only when such a pointer exists, so scenes that animate other
+                // things (scene34 node visibility, scene242 emissive) never pull the
+                // UV-transform shader fragment in.
                 if (uvTransformAnimated.has(matIdx)) {
-                    (pm as { _hasUvTx?: boolean })._hasUvTx = true;
+                    _uvTransformMod!.enableMaterialUvTransform(pm as Partial<PbrMaterialProps>);
                 }
                 map[matIdx] = pm;
             }
@@ -128,7 +144,9 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
     }
     // Material factor / extension seeding (transmission, IOR, volume, occlusion strength)
     // lives in the lazy module loaded by preParse only when such a pointer is present.
-    _matExtMod?.seedExtMaterials(json, map);
+    // Looked up by this asset's json so an unrelated load in the same runtime can neither
+    // seed this map with its own targets nor suppress this asset's seeding.
+    _seeders?.get(json)?.(map);
     _matMap = map;
     return map;
 }
@@ -170,6 +188,7 @@ const feature: GltfFeature = {
         let hasLightPointer = false;
         let hasMatExtPointer = false;
         let hasBaseColorPointer = false;
+        let hasUvTransformPointer = false;
         for (const anim of json.animations ?? []) {
             for (const ch of anim.channels ?? []) {
                 const ptr = ch.target?.extensions?.KHR_animation_pointer?.pointer as string | undefined;
@@ -185,6 +204,9 @@ const feature: GltfFeature = {
                 if (_MAT_EXT_POINTER_RE.test(ptr)) {
                     hasMatExtPointer = true;
                 }
+                if (_UV_TX_POINTER_RE.test(ptr)) {
+                    hasUvTransformPointer = true;
+                }
             }
         }
         // Each pointer-writer set lives in its own module fetched only when its pointer is
@@ -198,7 +220,15 @@ const feature: GltfFeature = {
             await import("./animation-pointer-lights.js");
         }
         if (hasMatExtPointer) {
-            _matExtMod = await import("./animation-pointer-ext.js");
+            // The module owns its pointer regexes, so it scans the asset itself and hands
+            // back a seeder already bound to the targets and opt-in setters it needs.
+            const seeder = await (await import("./animation-pointer-ext.js")).prepareExtMaterials(json);
+            (_seeders ??= new WeakMap()).set(json, seeder);
+        }
+        // Same detection materialMap uses to populate `uvTransformAnimated`, so the setter
+        // is present whenever that set is non-empty.
+        if (hasUvTransformPointer) {
+            _uvTransformMod = await import("../material/pbr/enable-material-uv-transform.js");
         }
     },
     // Animated baseColorFactor on untextured materials needs a white 1×1 fallback so the

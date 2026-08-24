@@ -3,6 +3,23 @@ packages:
   - 'lab'
   - 'playground'
 
+# pnpm >= 11 reads ONLY auth/registry settings from `.npmrc`; every other setting must
+# live here (or in the global config.yaml). These two are mirrored from `.npmrc`, which
+# still serves the npm/npx-spawned Node processes in CI — keep the two files in sync.
+
+# Hoist Playwright to the root node_modules so `npx playwright` and the browser
+# binaries resolve from any workspace package.
+publicHoistPattern:
+  - '*playwright*'
+
+# Raise the V8 heap limit for every Node process pnpm spawns. The playground's
+# `vite build` (`pnpm build:playground`) peaks above the default heap on the hosted CI
+# agents and dies with `FatalProcessOutOfMemory` (exit 134). The failure is
+# nondeterministic — it landed on roughly a third of runs, including the release
+# pipeline, where it aborted the playground site deploy after the npm packages had
+# already published. 8192 matches the Babylon.js monorepo.
+nodeOptions: '--max-old-space-size=8192'
+
 # Company policy: only install dependency versions published at least 7 days
 # ago (7 * 24 * 60 = 10080 minutes). Reduces exposure to compromised releases.
 # Enforced natively by pnpm >= 10.16 during resolution.

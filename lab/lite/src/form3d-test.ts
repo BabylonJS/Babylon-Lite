@@ -33,6 +33,8 @@ import {
     createPlane,
     createGround,
     createStandardMaterial,
+    setStandardEmissiveTexture,
+    setStandardOpacityTexture,
     createDynamicTexture,
     updateDynamicTexture,
     addToScene,
@@ -165,8 +167,8 @@ function labelPlane(
     label.draw(text, opts);
     const mesh = createPlane(engine, { width: worldW, height: worldH });
     const mat = createStandardMaterial();
-    mat.emissiveTexture = label.tex;
-    mat.opacityTexture = label.tex; // per-pixel alpha → transparent background
+    setStandardEmissiveTexture(mat, label.tex);
+    setStandardOpacityTexture(mat, label.tex); // per-pixel alpha → transparent background
     mat.emissiveColor = [0, 0, 0];
     mat.alpha = 0.999; // < 1 enables source-over blending (text floats on the card)
     mat.disableLighting = true;

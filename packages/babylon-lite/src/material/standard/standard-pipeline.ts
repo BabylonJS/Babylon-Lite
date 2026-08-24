@@ -38,7 +38,7 @@ import {
     ESM_SHADOW_OUTPUT,
     _getStdExtsSorted,
 } from "./standard-flags.js";
-import { MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
+import { MSH_HAS_MORPH_TARGETS, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
@@ -95,7 +95,7 @@ export function composeStandardShader(
     esmShadowDepthCode = "",
     sceneShader: StandardSceneShaderContext | null = null
 ): ComposedShader {
-    const has = (bit: number) => (features & bit) !== 0;
+    const has = (bit: number) => !!(features & bit);
     const pc = fragments[0]?._pc;
     const template = createStandardTemplate(
         {
@@ -106,12 +106,13 @@ export function composeStandardShader(
             _disableLighting: has(DISABLE_LIGHTING),
             _noColorOutput: has(NO_COLOR_OUTPUT),
             _esmShadowOutput: has(ESM_SHADOW_OUTPUT),
-            _hasMorph: !!pc,
+            _hasMorph: !!(_meshFeatures & MSH_HAS_MORPH_TARGETS),
         },
         esmShadowDepthCode
     );
     let composed = composeShader(template, sceneShader ? [...fragments, ...sceneShader._fragments] : fragments);
     pc && (composed = pc(composed));
+    fragments[1]?._pc && (composed = fragments[1]._pc(composed));
     return composed;
 }
 
@@ -211,7 +212,7 @@ export function getOrCreateStandardBindings(
     const device = engine._device;
     const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
     let shadowBGL: GPUBindGroupLayout | null = null;
-    const hasShadow = (meshFeatures & MSH_RECEIVE_SHADOWS) !== 0;
+    const hasShadow = !!(meshFeatures & MSH_RECEIVE_SHADOWS);
     if (hasShadow && composed._shadowBGLDescriptor) {
         shadowBGL = device.createBindGroupLayout(composed._shadowBGLDescriptor);
     }
@@ -258,8 +259,8 @@ export function getOrCreateStandardPipeline(
     const vertModule = alphaToCoverageResolver
         ? (bindings._a2cVertModule ??= device.createShaderModule({ code: composed._vertexWGSL }))
         : device.createShaderModule({ code: composed._vertexWGSL });
-    const noColorOutput = (features & NO_COLOR_OUTPUT) !== 0;
-    const esmShadowOutput = (features & ESM_SHADOW_OUTPUT) !== 0;
+    const noColorOutput = !!(features & NO_COLOR_OUTPUT);
+    const esmShadowOutput = !!(features & ESM_SHADOW_OUTPUT);
     const fragModule =
         !sig._colorFormat && !noColorOutput
             ? null
@@ -267,7 +268,7 @@ export function getOrCreateStandardPipeline(
               ? (bindings._a2cFragModule ??= device.createShaderModule({ code: composed._fragmentWGSL }))
               : device.createShaderModule({ code: composed._fragmentWGSL });
 
-    const needsBlend = !esmShadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || (features & MATERIAL_ALPHA_BLEND) !== 0);
+    const needsBlend = !esmShadowOutput && (features & HAS_OPACITY_TEXTURE || features & MATERIAL_ALPHA_BLEND);
     const colorTarget: GPUColorTargetState | null = noColorOutput
         ? null
         : needsBlend
@@ -327,9 +328,8 @@ export function createStandardMeshBindGroup(
 ): GPUBindGroup {
     const device = engine._device;
     const features = bindings._features;
-    const needsUV = (features & NEEDS_UV) !== 0;
-    const hasDiffuseTex = (features & HAS_DIFFUSE_TEXTURE) !== 0;
-    const esmShadowOutput = (features & ESM_SHADOW_OUTPUT) !== 0;
+    const hasDiffuseTex = features & HAS_DIFFUSE_TEXTURE;
+    const esmShadowOutput = features & ESM_SHADOW_OUTPUT;
 
     // Sequential numbering matches composer output:
     // meshUBO(0) → morph vertex bindings → material UBO → diffuse → uv → esm → exts.
@@ -350,7 +350,7 @@ export function createStandardMeshBindGroup(
     }
 
     // UV params UBO (only when UVs are actually emitted).
-    if (needsUV) {
+    if (features & NEEDS_UV) {
         const uvData = new F32(4);
         writeStandardUvTransformData(uvData, material, isStandardUvInverted(features, material));
         entries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
@@ -365,10 +365,9 @@ export function createStandardMeshBindGroup(
 
     // Fragment-contributed bindings — iterate ext registry in alphabetical id order
     // to match composer's fragment sort order.
-    const sortedExts = _getStdExtsSorted();
-    for (const ext of sortedExts) {
+    for (const ext of _getStdExtsSorted()) {
         if (features & ext._feature && ext._bind) {
-            nextBinding = ext._bind(material, entries, nextBinding, mesh);
+            nextBinding = ext._bind(material, entries, nextBinding, mesh, engine);
         }
     }
 
@@ -396,13 +395,13 @@ export function writeStandardUvTransformData(data: Float32Array, material: Stand
 
 /** @internal Resolve the shared UV transform's source-texture orientation. */
 export function isStandardUvInverted(features: number, material: StandardMaterialProps): boolean {
-    if ((features & HAS_DIFFUSE_TEXTURE) !== 0 && material.diffuseTexture) {
+    if (features & HAS_DIFFUSE_TEXTURE && material.diffuseTexture) {
         return material.diffuseTexture.invertY === true;
     }
-    if ((features & HAS_OPACITY_TEXTURE) !== 0 && material.opacityTexture) {
-        return material.opacityTexture.invertY === true;
+    if (features & HAS_OPACITY_TEXTURE && material._opacityTexture) {
+        return material._opacityTexture.invertY === true;
     }
-    return (features & HAS_BUMP_TEXTURE) !== 0 && material.bumpTexture?.invertY === true;
+    return !!(features & HAS_BUMP_TEXTURE) && material._bumpTexture?.invertY === true;
 }
 
 /** Write standard material properties into a pre-allocated Float32Array (24 floats). */

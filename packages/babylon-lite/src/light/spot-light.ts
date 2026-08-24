@@ -91,7 +91,7 @@ export function createSpotLight(position: [number, number, number], direction: [
             if (v !== _angle) {
                 _angle = v;
                 _cosHalfAngle = Math.cos(v * 0.5);
-                lvs.bump();
+                lvs.b();
             }
         },
         configurable: true,

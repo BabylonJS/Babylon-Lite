@@ -54,5 +54,13 @@
   "racer": {
     "rawKB": 200.6,
     "gzipKB": 77
+  },
+  "screen-space-effects": {
+    "rawKB": 126.3,
+    "gzipKB": 44.4
+  },
+  "npe-sprite2d": {
+    "rawKB": 33.9,
+    "gzipKB": 21.5
   }
 }

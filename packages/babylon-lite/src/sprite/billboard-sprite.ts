@@ -4,7 +4,7 @@
  * This module is pure state + standalone index API. The optional Handle API
  * lives in `billboard-sprite-handle.ts` and installs swap-remove hooks lazily.
  */
-import { F32 } from "../engine/typed-arrays.js";
+import { F32, F64 } from "../engine/typed-arrays.js";
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
 import type { BillboardCustomShader } from "./billboard-custom-shader.js";
@@ -64,6 +64,17 @@ export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation
     _instanceData: Float32Array;
     /** @internal True size shadow, unaffected by `visible: false`. */
     _savedSize: Float32Array;
+    /**
+     * @internal F64 shadow of each sprite's world anchor, 3 per sprite.
+     *
+     * `_instanceData` is F32, so storing the anchor there and subtracting the
+     * floating-origin offset afterwards quantizes the position before the
+     * subtraction can rescue it — at a world magnitude of 1e6 the F32 ULP is
+     * 0.0625, which is a quarter of a typical particle sprite. The eye-relative
+     * subtraction is done from this array instead, in F64, so only the small
+     * result is rounded. Kept in lockstep with `_savedSize`.
+     */
+    _anchor: Float64Array;
     /** @internal Bumped on any instance edit. */
     _version: number;
     /** @internal Dirty min index inclusive. */
@@ -108,6 +119,7 @@ export interface BillboardSpriteInit {
 export const BILLBOARD_INSTANCE_FLOATS_PER_SPRITE = 16;
 export const BILLBOARD_INSTANCE_STRIDE_BYTES = BILLBOARD_INSTANCE_FLOATS_PER_SPRITE * 4;
 export const BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE = 2;
+export const BILLBOARD_ANCHOR_FLOATS_PER_SPRITE = 3;
 
 const DEFAULT_CAPACITY = 16;
 
@@ -193,6 +205,7 @@ function createBillboardSystem<TOrientation extends BillboardOrientation>(
         _instanceStrideBytes: BILLBOARD_INSTANCE_STRIDE_BYTES,
         _instanceData: instanceData,
         _savedSize: new F32(capacity * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE),
+        _anchor: new F64(capacity * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE),
         _version: 0,
         _dirtyMin: 0,
         _dirtyMax: 0,
@@ -227,6 +240,9 @@ function growCapacity(system: BillboardSpriteSystem, minCapacity: number): void 
     const nextSavedSize = new F32(capacity * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE);
     nextSavedSize.set(system._savedSize);
     system._savedSize = nextSavedSize;
+    const nextAnchor = new F64(capacity * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE);
+    nextAnchor.set(system._anchor);
+    system._anchor = nextAnchor;
     system._capacity = capacity;
 }
 
@@ -237,9 +253,13 @@ function writeInstance(system: BillboardSpriteSystem, slotIndex: number, props: 
     const isAdd = prev === null;
     const frame = props.frame !== undefined ? system.atlas.frames[resolveSpriteFrame(system.atlas, props.frame)]! : null;
 
-    const posX = props.position ? props.position[0] : prev![0]!;
-    const posY = props.position ? props.position[1] : prev![1]!;
-    const posZ = props.position ? props.position[2] : prev![2]!;
+    // Carried forward from `_anchor` rather than from `prev` (a view onto the F32
+    // `_instanceData`): an update that omits `position` must not silently round the
+    // anchor down to F32 as a side effect of touching some unrelated field.
+    const anchorBase = slotIndex * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE;
+    const posX = props.position ? props.position[0] : system._anchor[anchorBase]!;
+    const posY = props.position ? props.position[1] : system._anchor[anchorBase + 1]!;
+    const posZ = props.position ? props.position[2] : system._anchor[anchorBase + 2]!;
 
     let trueWidth: number;
     let trueHeight: number;
@@ -314,9 +334,15 @@ function writeInstance(system: BillboardSpriteSystem, slotIndex: number, props: 
     const pivotX = props.pivot ? props.pivot[0] : prev ? prev[10]! : (frame?.pivot[0] ?? 0.5);
     const pivotY = props.pivot ? props.pivot[1] : prev ? prev[11]! : (frame?.pivot[1] ?? 0.5);
 
+    // Both stores are live: `_instanceData` feeds the non-floating-origin upload
+    // (and picking, which works at world scale anyway), `_anchor` feeds the
+    // eye-relative subtraction.
     data[base + 0] = posX;
     data[base + 1] = posY;
     data[base + 2] = posZ;
+    system._anchor[anchorBase] = posX;
+    system._anchor[anchorBase + 1] = posY;
+    system._anchor[anchorBase + 2] = posZ;
     data[base + 3] = visible ? trueWidth : 0;
     data[base + 4] = visible ? trueHeight : 0;
     data[base + 5] = uvMinX;
@@ -418,9 +444,13 @@ export function removeBillboardSpriteIndex(system: BillboardSpriteSystem, index:
             last * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE,
             (last + 1) * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE
         );
+        system._anchor.copyWithin(index * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE, last * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE, (last + 1) * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE);
     }
     system._savedSize[last * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE] = 0;
     system._savedSize[last * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE + 1] = 0;
+    system._anchor[last * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE] = 0;
+    system._anchor[last * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE + 1] = 0;
+    system._anchor[last * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE + 2] = 0;
     setBillboardCount(system, last);
     markDirty(system, index, index + 1);
 }
@@ -438,6 +468,7 @@ export function clearBillboardSprites(system: BillboardSpriteSystem): void {
         return;
     }
     system._savedSize.fill(0, 0, count * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE);
+    system._anchor.fill(0, 0, count * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE);
     setBillboardCount(system, 0);
     system._version = (system._version + 1) | 0;
 }

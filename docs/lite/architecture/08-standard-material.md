@@ -5,7 +5,7 @@
 
 ## Purpose
 
-The StandardMaterial module implements a Blinn-Phong shading model with point/directional light support, optional fog (linear, exponential, exponential-squared), optional diffuse texture, optional emissive texture, optional bump/normal-map texture, optional specular texture, optional ambient/occlusion texture, optional lightmap texture, optional opacity/transparency texture, optional reflection texture (spherical and planar modes), UV2 support for select texture channels, thin instances with per-instance color, `disableLighting` mode, and optional ESM/PCF shadow receiving. Explicit opt-ins add Standard-only mesh deformation/state for skeletal skinning, RGBA vertex color, and material UV translation without retaining those feature modules in unrelated bundles. It matches the output of `BABYLON.StandardMaterial` with the corresponding defines active.
+The StandardMaterial module implements a Blinn-Phong shading model with point/directional light support, optional fog (linear, exponential, exponential-squared), optional diffuse texture, optional emissive texture, optional bump/normal-map texture, optional specular texture, optional ambient/occlusion texture, optional lightmap texture, optional opacity/transparency texture, optional reflection texture (spherical and planar modes), UV2 support for select texture channels, thin instances with per-instance color, `disableLighting` mode, and optional ESM/PCF shadow receiving. Explicit opt-ins add Standard-only mesh deformation/state for skeletal skinning and RGBA vertex color. The shared `enableMaterialUvTransform(material)` opt-in enables independent per-texture scale, offset, and rotation for Standard materials without retaining the UV-transform fragment in unrelated bundles. It matches the output of `BABYLON.StandardMaterial` with the corresponding defines active.
 
 Shaders are **dynamically composed** via the `ShaderFragment` / `ShaderComposer` system — no raw `.wgsl` files. A `ShaderTemplate` (`standard-template.ts`) provides the base WGSL with slot markers; optional `ShaderFragment` modules (in `fragments/`) inject code into those slots. Only the fragments needed for a given mesh's features are composed, minimizing bundle size per the Size Pillar. Fragment modules are **dynamically imported** at build time so unused features are tree-shaken. The old `standard-textured-material.ts` was merged into this unified system.
 
@@ -49,7 +49,7 @@ The deformation/vertex feature enablers are explicitly named exports from the ro
 ```ts
 import {
     enableStandardSkeleton,
-    enableStandardUvOffset,
+    enableMaterialUvTransform,
     enableStandardVertexColors,
 } from "@babylonjs/lite";
 ```
@@ -58,7 +58,10 @@ Call each enabler before `registerScene()` when the scene creates matching Stand
 
 - `enableStandardSkeleton()` installs a mesh predicate and lazy fragment loader. The fragment reuses the material-agnostic shared skeleton shader fragment used by PBR; skeletal geometry velocity is a second lazy chunk loaded only by a velocity pass over a matching mesh.
 - `enableStandardVertexColors()` installs RGBA vertex-color composition and draw-time color-buffer binding.
-- `enableStandardUvOffset()` enables reads of `material.uvOffset`; absent offsets always resolve to `[0, 0]`.
+- `enableMaterialUvTransform(material)` marks a hand-built Standard material for independent texture transforms. Call it before `registerScene()`, then set `uScale`, `vScale`, `uOffset`, `vOffset`, or `uAng` on any bound `Texture2D`. The Standard group builder loads `std-uv-transform-fragment.ts` only when a marked material is present.
+- `enableStandardUvOffset()` remains the lightweight shared-material translation path for `material.uvOffset`; absent offsets always resolve to `[0, 0]`.
+
+The UV-transform fragment contributes one vertex-visible uniform buffer and only the varyings required by the material's active texture channels. Its fixed channel order is diffuse, emissive, bump, specular, ambient, lightmap, opacity. Each channel stores a 2x2 matrix plus translation; the matrix applies scale and `uAng` rotation around the UV origin, then translation. UV1 channels compose the existing `material.uvScale` / optional `material.uvOffset` first, while UV2 channels preserve the existing raw-UV2 behavior. `invertY` is folded into the channel transform. Texture transform fields are sampled when the renderable is built; later changes require `rebuildMaterial`.
 
 The enablers register only scalar callbacks and lazy loaders. No module allocates a `Map`/`Set` or registers an extension at import time. If these root exports are unused, production scene bundles omit the deformation/offset chunks; a forward-only skeletal scene also does not load the geometry-velocity chunk.
 
@@ -75,22 +78,22 @@ Standard mesh vertex colors use a stricter opt-in seam because automatic color-b
 | Flag                         | Bit       | Condition                              | Shader effect                                                    |
 | ---------------------------- | --------- | -------------------------------------- | ---------------------------------------------------------------- |
 | `HAS_DIFFUSE_TEXTURE`        | `1 << 0`  | `material.diffuseTexture`              | Diffuse texture sampling                                         |
-| `HAS_EMISSIVE_TEXTURE`       | `1 << 1`  | `material.emissiveTexture`             | Emissive texture sampling                                        |
-| `HAS_BUMP_TEXTURE`           | `1 << 2`  | `material.bumpTexture`                 | Cotangent-frame normal mapping                                   |
-| `HAS_SPECULAR_TEXTURE`       | `1 << 3`  | `material.specularTexture`             | Specular texture replaces specularColor                          |
-| `HAS_AMBIENT_TEXTURE`        | `1 << 4`  | `material.ambientTexture`              | Ambient occlusion multiply                                       |
-| `HAS_LIGHTMAP_TEXTURE`       | `1 << 5`  | `material.lightmapTexture`             | Additive lightmap                                                |
-| `HAS_OPACITY_TEXTURE`        | `1 << 6`  | `material.opacityTexture`              | Alpha/opacity texture                                            |
+| `HAS_EMISSIVE_TEXTURE`       | `1 << 1`  | `material._emissiveTexture`            | Emissive texture sampling                                        |
+| `HAS_BUMP_TEXTURE`           | `1 << 2`  | `material._bumpTexture`                | Cotangent-frame normal mapping                                   |
+| `HAS_SPECULAR_TEXTURE`       | `1 << 3`  | `material._specularTexture`            | Specular texture replaces specularColor                          |
+| `HAS_AMBIENT_TEXTURE`        | `1 << 4`  | `material._ambientTexture`             | Ambient occlusion multiply                                       |
+| `HAS_LIGHTMAP_TEXTURE`       | `1 << 5`  | `material._lightmapTexture`            | Additive lightmap                                                |
+| `HAS_OPACITY_TEXTURE`        | `1 << 6`  | `material._opacityTexture`             | Alpha/opacity texture                                            |
 | `LIGHTMAP_USES_UV2`          | `1 << 7`  | Lightmap on UV2                        | UV2 attribute for lightmap                                       |
 | `AMBIENT_USES_UV2`           | `1 << 8`  | Ambient on UV2                         | UV2 attribute for ambient                                        |
 | `DOUBLE_SIDED`               | `1 << 9`  | `!material.backFaceCulling`            | `cullMode: 'none'`                                               |
 | `DIFFUSE_USES_UV2`           | `1 << 10` | Diffuse on UV2                         | UV2 attribute for diffuse                                        |
 | `SPECULAR_USES_UV2`          | `1 << 11` | Specular on UV2                        | UV2 attribute for specular                                       |
 | `OPACITY_FROM_RGB`           | `1 << 12` | `material.opacityFromRGB`              | Opacity from RGB luminance                                       |
-| `HAS_REFLECTION_TEXTURE`     | `1 << 13` | `material.reflectionTexture`           | Spherical/planar reflection                                      |
+| `HAS_REFLECTION_TEXTURE`     | `1 << 13` | `material._reflectionTexture`          | Spherical/planar reflection                                      |
 | `DISABLE_LIGHTING`           | `1 << 14` | `material.disableLighting`             | Skip light loop, emissive-only output                            |
 | `MATERIAL_ALPHA_BLEND`       | `1 << 16` | `material.alpha < 1`                   | Alpha blend pipeline state                                       |
-| `HAS_CUBE_REFLECTION`        | `1 << 17` | `material.reflectionCubeTexture`       | Cube reflection sampling                                         |
+| `HAS_CUBE_REFLECTION`        | `1 << 17` | `material._reflectionCubeTexture`      | Cube reflection sampling                                         |
 | `NO_COLOR_OUTPUT`            | `1 << 18` | No-color material view                 | Fragment stage runs discard/alpha-test logic and writes no color |
 | `HAS_DEPTH_EMISSIVE_TEXTURE` | `1 << 19` | Emissive texture has depth sample type | Depth texture emissive preview                                   |
 | `HAS_VERTEX_COLOR`           | `1 << 23` | Enabler active + mesh color buffer     | RGBA vertex color multiplies base color and alpha                |
@@ -101,7 +104,7 @@ Standard mesh vertex colors use a stricter opt-in seam because automatic color-b
 
 Thin-instance and shadow-receiver state are mesh feature bits in `material/mesh-features.ts`, separate from Standard material render features.
 
-Vertex colors use `MSH_HAS_VERTEX_COLOR` plus the installed `_stdVertexColorFragment` factory rather than a Standard material bit. Once enabled via `enableStandardVertexColors()`, every Standard mesh with `mesh._gpu.colorBuffer` receives the vertex-color shader variant and buffer binding. RGB always multiplies the base color; the alpha channel is consumed (and folded into the alpha-test) only when the mesh opts in via `mesh.hasVertexAlpha` (Babylon `VERTEXALPHA`), which also sets `VERTEX_ALPHA | MATERIAL_ALPHA_BLEND` so the mesh source-over blends and sorts into the transparent phase.
+Vertex colors use `MSH_HAS_VERTEX_COLOR` plus the installed `_stdVertexColorFragment` factory rather than a Standard material bit. Once enabled via `enableStandardVertexColors()`, every Standard mesh with `mesh._gpu.colorBuffer` receives the vertex-color shader variant and buffer binding. RGB always multiplies the base color; the alpha channel is consumed (and folded into the alpha-test) only when the mesh opts in via `mesh.hasVertexAlpha` (Babylon `VERTEXALPHA`), which also sets `VERTEX_ALPHA | MATERIAL_ALPHA_BLEND` so the mesh source-over blends and sorts into the transparent phase. The dynamically loaded thin-instance fragment declares when per-instance RGBA is present, allowing the same `hasVertexAlpha` opt-in to set `MATERIAL_ALPHA_BLEND` without requiring a mesh vertex-color buffer. It deliberately does not set `VERTEX_ALPHA`, avoiding a redundant vertex-colour shader/cache variant when no such buffer or fragment exists. Standard geometry output remains vertex-color-only because thin-instance colors do not participate in that path's alpha classification.
 
 `STD_SCENE_FOG` is a separate scene-feature bit. It is included in Standard binding/composed-shader cache keys but is never stored on a material.
 
@@ -124,26 +127,37 @@ export interface StandardMaterialProps extends Material {
     ambientColor: [number, number, number];
     diffuseTexture: Texture2D | null;
     diffuseCoordIndex: 0 | 1;
-    emissiveTexture: Texture2D | null;
-    bumpTexture: Texture2D | null;
+    /** @internal Set via `setStandardEmissiveTexture()`. */
+    _emissiveTexture?: Texture2D | null;
+    /** @internal Set via `setStandardBumpTexture()`. */
+    _bumpTexture?: Texture2D | null;
     bumpLevel: number;
-    specularTexture: Texture2D | null;
+    /** @internal Set via `setStandardSpecularTexture()`. */
+    _specularTexture?: Texture2D | null;
     specularCoordIndex: 0 | 1;
-    ambientTexture: Texture2D | null;
+    /** @internal Set via `setStandardAmbientTexture()`. */
+    _ambientTexture?: Texture2D | null;
     ambientTexLevel: number;
     ambientCoordIndex: 0 | 1;
-    lightmapTexture: Texture2D | null;
+    /** @internal Set via `setStandardLightmapTexture()`. */
+    _lightmapTexture?: Texture2D | null;
     lightmapLevel: number;
     lightmapCoordIndex: 0 | 1;
-    opacityTexture: Texture2D | null;
+    /** @internal Set via `setStandardOpacityTexture()`. */
+    _opacityTexture?: Texture2D | null;
     opacityLevel: number;
     opacityFromRGB: boolean;
     alphaCutOff: number;
-    reflectionTexture: Texture2D | null;
+    /** @internal Set via `setStandardReflectionTexture()`. */
+    _reflectionTexture?: Texture2D | null;
+    /** @internal Set via `setStandardReflectionCubeTexture()`. */
+    _reflectionCubeTexture?: CubeTexture | null;
     reflectionLevel: number;
     reflectionCoordMode: 1 | 2;
     uvScale: [number, number];
     uvOffset?: [number, number];
+    /** @internal True when enableMaterialUvTransform() enabled per-texture transforms. */
+    _hasUvTx?: boolean;
     backFaceCulling: boolean;
     disableLighting: boolean;
 }
@@ -179,13 +193,37 @@ import { enableStandardVertexColors } from "babylon-lite";
 export function enableStandardVertexColors(): void;
 ```
 
-The color buffer contract is four `f32` values per vertex. RGB always multiplies the Standard base color. Alpha is consumed only when the mesh opts in via `mesh.hasVertexAlpha` (Babylon `VERTEXALPHA`): the fragment then multiplies the running material alpha by `vColor.a`, folds `vColor.a` into the alpha-test cutoff, and the mesh source-over blends (depth-write off, transparent sort phase). Without the opt-in the vertex color is RGB-only. The same fragment participates in main-color, no-color/shadow, and Standard geometry-view shader composition.
+The color buffer contract is four `f32` values per vertex. RGB always multiplies the Standard base color. Alpha is consumed only when the mesh opts in via `mesh.hasVertexAlpha` (Babylon `VERTEXALPHA`): the fragment then multiplies the running material alpha by `vColor.a`, folds `vColor.a` into the alpha-test cutoff, and the mesh source-over blends (depth-write off, transparent sort phase). Without the opt-in the vertex color is RGB-only. The same fragment participates in main-color, no-color/shadow, and Standard geometry-view shader composition. Per-thin-instance RGBA follows the same `hasVertexAlpha` opt-in for Standard forward transparency. Its lazy fragment marks the color as an alpha source, so the forward builder selects the transparent pipeline without enabling or binding the mesh vertex-color fragment; Standard geometry-view classification remains vertex-color-only.
+
+### Optional texture setters
+
+```typescript
+export function setStandardEmissiveTexture(mat: StandardMaterialProps, texture: Texture2D | null): void;
+export function setStandardBumpTexture(mat: StandardMaterialProps, texture: Texture2D | null): void;
+export function setStandardSpecularTexture(mat: StandardMaterialProps, texture: Texture2D | null): void;
+export function setStandardAmbientTexture(mat: StandardMaterialProps, texture: Texture2D | null): void;
+export function setStandardLightmapTexture(mat: StandardMaterialProps, texture: Texture2D | null): void;
+export function setStandardOpacityTexture(mat: StandardMaterialProps, texture: Texture2D | null): void;
+export function setStandardReflectionTexture(mat: StandardMaterialProps, texture: Texture2D | null): void;
+export function setStandardReflectionCubeTexture(mat: StandardMaterialProps, texture: CubeTexture | null): void;
+```
+
+Each setter lives in its own module and does exactly two things: stamp the `@internal` backing field and register its `StdExt`. **One setter per module is load-bearing** — a shared module's static imports would pull all eight shader fragments into every consumer and defeat the whole design.
+
+Registration is synchronous and happens at call time; feature detection runs later, when the renderable is built, via the ext's `_detect(mat)`. Companion scalars (`bumpLevel`, `lightmapCoordIndex`, `opacityFromRGB`, …) can therefore be assigned in any order relative to the setter. Setting a texture after the material has already been built still requires `rebuildMaterial()`.
+
+The backing fields are `@internal` (underscore-prefixed) so that a direct assignment — which would skip registration and silently render nothing — is a compile error. **The setter is the boundary:** every write to a backing field must go through it.
+
+`_computeStandardMaterialFeatures` keeps only the always-present core bits (`HAS_DIFFUSE_TEXTURE`, `DIFFUSE_USES_UV2`, `DOUBLE_SIDED`, `DISABLE_LIGHTING`, `MATERIAL_ALPHA_BLEND`); every optional bit — including sub-bits such as `LIGHTMAP_USES_UV2`, `SPECULAR_USES_UV2`, `OPACITY_FROM_RGB`, and `HAS_DEPTH_EMISSIVE_TEXTURE` — is contributed by the owning extension's `_detect`. This mirrors `PbrExt.detect`.
+
+`loadBabylon()` maps `.babylon` texture slots to these setters through per-slot dynamic imports, so a `.babylon` scene retains only the fragments its file actually references.
 
 ### Opt-in root exports
 
 ```typescript
 export function enableStandardSkeleton(): void;
 export function enableStandardUvOffset(): void;
+export function enableMaterialUvTransform(material: PbrMaterialProps | StandardMaterialProps): boolean;
 ```
 
 Skeletal skinning, UV translation, and RGBA vertex-color opt-ins are explicitly re-exported from the root `index.ts`. The source and emitted packages expose only the `"."` export; unused enablers and their lazy feature chunks are removed by tree-shaking.
@@ -286,27 +324,23 @@ The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is st
 | `ambientColor`        | `[0, 0, 0]` |
 | `diffuseTexture`      | `null`      |
 | `diffuseCoordIndex`   | `0`         |
-| `emissiveTexture`     | `null`      |
-| `bumpTexture`         | `null`      |
 | `bumpLevel`           | `1`         |
-| `specularTexture`     | `null`      |
 | `specularCoordIndex`  | `0`         |
-| `ambientTexture`      | `null`      |
 | `ambientTexLevel`     | `1`         |
 | `ambientCoordIndex`   | `0`         |
-| `lightmapTexture`     | `null`      |
 | `lightmapLevel`       | `1`         |
 | `lightmapCoordIndex`  | `1`         |
-| `opacityTexture`      | `null`      |
+| `useLightmapAsShadowmap` | `false`  |
 | `opacityLevel`        | `1`         |
 | `opacityFromRGB`      | `false`     |
-| `alphaCutOff`         | `0.4`       |
-| `reflectionTexture`   | `null`      |
+| `alphaCutOff`         | `0`         |
 | `reflectionLevel`     | `1`         |
 | `reflectionCoordMode` | `1`         |
 | `uvScale`             | `[1, 1]`    |
 | `backFaceCulling`     | `true`      |
 | `disableLighting`     | `false`     |
+
+The eight optional texture fields have **no default** — they are absent (`undefined`) until the corresponding `setStandardXTexture()` runs. Omitting the `null` initializers is what lets a scene that never imports a setter drop the field, its extension, and its shader fragment entirely.
 
 ## Pipeline Configuration
 

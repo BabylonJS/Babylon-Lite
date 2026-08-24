@@ -57,6 +57,8 @@ export function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabled: bo
 
 /** Start the render loop for all registered rendering contexts. Resolves after the first frame renders. */
 export function startEngine(engine: EngineContext): Promise<void>;
+/** Resolve after all GPU commands submitted before this call have completed. */
+export function waitForGpuIdle(engine: EngineContext): Promise<void>;
 /** Stop the render loop. */
 export function stopEngine(engine: EngineContext): void;
 /** Resize render targets to match canvas layout size. No-op for an OffscreenCanvas. */
@@ -128,7 +130,7 @@ The bitwise OR with 0 (`| 0`) truncates to integer.
 
 An `OffscreenCanvas` has no layout box (`clientWidth`/`clientHeight`) and no attributes, so:
 
-- `createEngine` skips the `setAttribute("data-engine", …)` tag for it (guarded by a DOM-canvas check).
+- The canvas tag (`setAttribute("data-engine", …)`) is skipped for it. That tag is applied in `_buildSurface`, guarded by a DOM-canvas check, so every DOM canvas Babylon Lite renders into — the engine's primary canvas and any auxiliary `createSurface` canvas — carries it.
 - `resizeEngine` is a **no-op** for it — the visible canvas lives on another thread.
 - The host thread (which owns the visible canvas) measures the CSS size, multiplies by `devicePixelRatio`, and posts those device-pixel dimensions to the worker, which calls `setEngineSize(engine, w, h)`. This both sets the backing store **and** fires `_resize()` hooks so canvas-sized GPU resources rebuild.
 
@@ -137,6 +139,8 @@ Everything else (adapter/device acquisition, `getContext("webgpu")`, the rAF ren
 ### Render Loop
 
 `startEngine(engine)` returns a `Promise<void>` that resolves after the first frame has been rendered. Any scene registered before the call participates in the first frame; later registrations join on subsequent frames.
+
+`waitForGpuIdle(engine)` delegates to the WebGPU queue fence and resolves after all commands submitted before the call have completed. It is intended for infrequent lifecycle synchronization, not steady-state frame loops.
 
 ```
 registerScene(scene):
@@ -243,6 +247,7 @@ When enabled, the first timed task seen for a new frame encoder clears the curre
 | `engine.format`                                | `engine._textureHelper._glslang.getPreferredFormat()`                                                                                               |
 | `engine.msaaSamples` (1 or 4)                  | `engine._samples`                                                                                                                                   |
 | `registerScene(scene)` + `startEngine(engine)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
+| `waitForGpuIdle(engine)`                       | `engine._device.queue.onSubmittedWorkDone()`                                                                                                        |
 | `stopEngine(engine)`                           | `engine.stopRenderLoop()`                                                                                                                           |
 | `resizeEngine(engine)`                         | `engine.resize()`                                                                                                                                   |
 | Registered `RenderingContext`s                 | Engine render loop callbacks                                                                                                                        |
@@ -263,6 +268,7 @@ When enabled, the first timed task seen for a new frame encoder clears the curre
 | `createEngine returns valid Engine`               | Mock `navigator.gpu`, verify all interface fields are populated                                |
 | `resize only recreates targets when size changes` | Call resize with same dimensions → targets unchanged; change `clientWidth` → targets recreated |
 | `start/stop manages rAF`                          | Verify `requestAnimationFrame` called on start, `cancelAnimationFrame` on stop                 |
+| `waitForGpuIdle returns the queue fence`          | Verify `onSubmittedWorkDone()` is called once and its exact Promise is returned                |
 | `renderFrame calls scene callbacks`               | Verify pre-passes → updaters → renderables order                                               |
 | `MSAA resolve target is swap chain view`          | Inspect color attachment `resolveTarget` in render pass descriptor                             |
 | `depth format is depth24plus-stencil8`            | Verify `depthTexture.format`                                                                   |

@@ -1,6 +1,8 @@
 # Module: Device-Lost Recovery
 
 > Package paths: `packages/babylon-lite/src/engine/device-lost-*-recovery.ts`,
+> `packages/babylon-lite/src/loader-env/environment-recovery.ts`,
+> `packages/babylon-lite/src/shadow/shadow-recovery.ts`,
 > `packages/babylon-lite/src/sprite/sprite-recovery.ts`, and
 > `packages/babylon-lite/src/text/text-recovery.ts`
 
@@ -71,10 +73,125 @@ not unrelated mesh arrays.
 
 ### Scene
 
-Scene recovery retains mesh CPU geometry and texture recovery sources only
-while capture is enabled. Its loss-only module rebuilds textures, geometry,
-skeletons, morph targets, renderables, scene/light bind groups, frame-graph
-tasks, and render targets.
+Scene recovery retains mesh CPU geometry, texture recovery sources, and
+environment loader sources only while capture is enabled. Its loss-only module
+rebuilds textures, geometry, skeletons, morph targets, environment lighting,
+shadow generators, renderables, scene/light bind groups, frame-graph tasks, and
+render targets.
+
+Environment recovery supports `loadEnvironment` (`.env`) and
+`loadHdrEnvironment`. Recovery must be enabled before the environment is
+loaded so the URL/settings source is retained. It recreates the specular cube
+and BRDF LUT on the replacement device while preserving the public
+`EnvironmentTextures` object identity, and installs a single scene disposable
+that owns the replacement textures. Loader-owned skybox and ground renderables
+are recreated after material groups rebuild, for both loaders: the solid
+skybox, the ground plane, the DDS cube skybox, and the HDR skybox that reuses
+the lighting cubemap. glTF `EXT_lights_image_based` environments are not yet
+recoverable; recovery fails explicitly rather than rendering with stale device
+resources.
+
+### Loader capture seam
+
+Loaders never contain recovery semantics. `loadEnvironment` and
+`loadHdrEnvironment` each carry exactly one optional-chained `engine._dlr?.e(…)`
+/ `engine._dlr?.h(…)` call built from locals the loader already computes. All
+meaning — what a recovery source is, which cases are unsupported, and how to
+rebuild — lives in `device-lost-recovery-capture.ts` and
+`loader-env/environment-recovery.ts`, which are reachable only from
+`enableDeviceLostSceneRecovery`. Applications that never enable recovery pull in
+none of those chunks.
+
+Backgrounds are discovered, not captured. Each background builder stamps a plain
+rebuild thunk onto the `Renderable` it returns — `Renderable._rebuild`, a
+`() => Renderable | Promise<Renderable>` closing over the arguments the builder
+already received. Recovery snapshots those thunks while traversing
+`scene._renderables` and replays them in order, the same way material textures
+already recover through `Texture2D._recoverySource`. The always-bundled
+`loadEnvironment` / `loadHdr` path therefore carries no per-background recovery
+code at all, and the residual cost lands only in `background-*.js`, which a scene
+already pays for whenever it builds that background.
+
+The thunk is deliberately opaque. An earlier revision stamped a descriptor tuple
+— `[kind, size, rootPosition, url?]` — that recovery interpreted through a
+four-arm switch over an `EnvironmentBackgroundKind`. That put a `loader-env`
+concept onto `render/`'s lowest-level interface, and the only way to avoid the
+import was to write the kind as a magic number at each builder, which hid the
+dependency from the compiler rather than removing it. A thunk deletes the enum,
+the descriptor type, the switch, and its four `await import()` calls: each
+builder is already its own module, so replay needs no dispatch. It is also more
+correct — the tuple silently dropped `enableNoise` for the ground and DDS
+skybox, which a closure captures for free — and it composes across repeated
+losses, because each rebuilt renderable stamps a fresh thunk.
+
+`_rebuild` is only for renderables that no retained structure owns. Mesh-backed
+renderables keep recovering through `scene._groups`, and must not also carry a
+thunk. That is not inertia: a group build emits several renderables at once (or
+merges its meshes into one), and re-running it also restores the group's
+`rebuildSingle` closure, its `o` output list, and its uniform updater — none of
+which a `Renderable`-returning thunk can express. `scene._groups` is live state
+that already regenerates those renderables for material swaps and runtime mesh
+adds, so recovery borrows it rather than duplicating it. Setting both mechanisms
+on one renderable would rebuild it twice and leave a duplicate in
+`scene._renderables`. Backgrounds needed a thunk precisely because they are
+orphans — not mesh-backed, pushed straight into `scene._renderables` by a loader
+that then discards the locals they were built from.
+
+Two capture-based designs were measured first and rejected. Describing
+backgrounds up front — passing the loaders' strategy inputs to one seam and
+re-deriving the rules during recovery — cost ~65 B for *every* environment-loading
+scene. Per-background capture (`engine._dlr?.g(...)` inside each builder's `if`
+block) narrowed that to ~21 B, but still only for scenes that build a background.
+Discovery removes the loader seam entirely. Against the pre-feature baseline the
+feature now measures +1,707 B across 73 scenes, of which scene164 — the recovery
+parity scene, and the only one that enables recovery — carries +1,554 B; 56
+scenes are *smaller* than before because the loader capture seam is gone. The 11
+background-building scenes pay 16–56 B each for the thunk. The thunk is stamped
+unconditionally rather than gated on capture being enabled; one closure per
+background is cheaper than the branch that would guard it. Choosing thunks over
+descriptors also lowered scene164's ceiling requirement by ~1.6 KB, since the
+recovery chunk no longer carries the switch or its dynamic imports.
+
+Property names beginning with `_` are mangled in release builds, so `_rebuild`
+costs no more than an abbreviated name would; internal fields are spelled out.
+
+Capture arguments must stay primitive. Rollup tracks the property values of
+object literals and uses them to prove branches dead. Passing an object whose
+properties gate tree-shakeable code — such as `bgOptions`, whose `skipSkybox` /
+`skipGround` guard the loader's `await import()` of the background modules —
+forces Rollup to deoptimize it, because the unknown callee could mutate it. It
+then loses the known property values and retains `background-ground.js`
+(+4,968 B) and `background-solid-skybox.js` (+1,882 B) in scenes that had
+tree-shaken them. This is why the remaining seams (`_dlr.e` / `_dlr.h`) pass
+already-computed scalars.
+
+Shadow generators are recovered in place before material groups are rebuilt.
+Recovery deduplicates generators referenced by `scene.lights` and
+`scene.shadowGenerators`, disposes their nested render-task state, recreates
+their device-owned textures, samplers, uniform buffers, pipelines, and bind
+groups, and preserves the public `ShadowGenerator` identity. This currently
+supports directional ESM generators, the shadow type used by Babylon Lite
+Viewer; recovery fails explicitly for PCF or CSM instead of resuming with stale
+device resources. ESM retains only the two blur scalars it cannot reconstruct —
+`_blurKernel` and `_blurScale`, held as internal fields on the generator's
+`EsmShadowTaskResources` — and `shadow-recovery.ts` reads them from that object
+during the loss-only rebuild. `_blurScale` is retained rather than re-derived as
+`mapSize / _blurTexH.width` because `blurSize` is not integral for every scale,
+so the round trip through a texture dimension cannot recover the caller's
+original value. Every remaining option is derived from steady-state runtime
+fields: `mapSize`, `bias`, `orthoMinZ`, `orthoMaxZ`, and `forceRefreshEveryFrame`
+from the generator's `_config`, and `darkness`, `depthScale`, and
+`frustumEdgeFalloff` from its `_shadowsInfo` array.
+Rebuilding material groups afterward binds receivers and casters only to
+replacement-device resources.
+
+The shared 1x1 PBR fallback texture is cleared once per recovery, before any
+scene is rebuilt, because it is engine-scoped and the PBR fallback resolver
+recreates it lazily — clearing it per scene would orphan the texture created by
+each earlier scene. Factor-only and shadow-only PBR materials therefore recreate
+the fallback lazily on the replacement device. The environment and shadows are
+restored before PBR groups rebuild so their captured shader builders see the
+correct light and shadow state.
 
 ### SpriteRenderer
 
@@ -153,6 +270,15 @@ module-level side effects; mutable caches remain null until an explicit call.
 - Coordinator unit tests cover mixed Scene/Sprite/Text registration, skipped
   unregistered kinds, repeated registrations, safe idempotent disable, and
   shared capture lifetime.
+- Scene recovery unit tests replace the device under an ESM shadow generator
+  and assert that its textures, sampler, UBOs, hidden blur resources, and nested
+  render task are recreated while the generator identity remains stable and the
+  PBR fallback is cleared before material groups rebuild.
+- A real-loss browser scene covers environment-lit PBR, a directional ESM
+  caster, and a shadow-only receiver. It asserts replacement-device
+  environment/fallback/shadow resources, preserved environment identity, no
+  uncaptured WebGPU errors, credible non-flat output, and at least 50 rendered
+  frames after recovery.
 - Sprite unit tests replace a fake device and assert new index, instance,
   uniform, FX, pipeline/bind-group/bundle state, recovered atlas/custom/target
   textures, preserved CPU/layer state, and exact-kind enumeration.
@@ -174,6 +300,8 @@ module-level side effects; mutable caches remain null until an explicit call.
 - `engine/device-lost-sprite-recovery.ts` — public Sprite adapter.
 - `engine/device-lost-text-recovery.ts` — public Text adapter.
 - `engine/recovery-rebuild.ts` — loss-only Scene rebuild tree.
+- `loader-env/environment-recovery.ts` — loss-only environment and background rebuild.
+- `shadow/shadow-recovery.ts` — loss-only shadow-generator rebuild.
 - `sprite/sprite-recovery.ts` — loss-only Sprite enumeration and texture rebuild.
 - `text/text-recovery.ts` — loss-only Text enumeration and atlas rebuild.
 - `texture/texture-recovery.ts` — loss-only `Texture2D` reconstruction.

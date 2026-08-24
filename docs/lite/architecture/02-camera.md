@@ -129,6 +129,14 @@ export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera;
 - `angularSensitivity = 2000`
 - `inertia = 0.9`
 
+**glTF-loader consumer**: after `enableGltfCameras()` is called, `gltf-feature-camera.ts` (see
+module 04, "glTF `camera` Node Property") builds every embedded glTF camera as a `FreeCamera` at
+`(0,0,0)` looking toward `(0,0,-1)` — glTF's own local -Z-forward/+Y-up convention — parented
+through a `fixupNode` that cancels the engine's RH→LH root mirror. Each imported camera primes its
+world transform back to unit scale so the default rigid view inverse remains exact; projection
+parameters remain in source glTF units. Zero/non-uniform or animated ancestor scale is not
+supported. The loader then exposes the result via `AssetContainer.cameras`.
+
 ### `free-camera-controls.ts`
 
 ```typescript
@@ -184,7 +192,7 @@ onBeforeRender(scene, () => {
 
 Each field is an accessor that invalidates the camera's projection state on change. That matters because the projection cache is keyed on `_cameraChangeKey` + aspect ratio — neither moves when only the extents do, so without the accessor the new bounds would not be picked up until the camera moved.
 
-Invalidation goes through a dedicated projection revision, **not** merely clearing `_projVer` / `_vpVer` and **not** by marking the camera transform dirty. Clearing the matrix caches alone fixes the getters but not the frame: per-frame consumers gate their GPU uploads on a camera change key, and the forward pass's `_writePassSceneUBO` returns early while `[camera, fog, changeKey, aspect, envRotationY, exposure, contrast, envTextures]` are unchanged (ShaderMaterial, text, clustered lighting, TAA and CSM have equivalent gates). Changing a view volume moves none of those, so a steady-state scene would keep rendering the previously uploaded view-projection even though `getProjectionMatrix` returned a fresh matrix.
+Invalidation goes through a dedicated projection revision, **not** merely clearing `_projVer` / `_vpVer` and **not** by marking the camera transform dirty. Clearing the matrix caches alone fixes the getters but not the frame: per-frame consumers gate their GPU uploads on a camera change key, and the forward pass's `_writePassSceneUBO` returns early while `[camera, fog, changeKey, aspect, exposure, contrast, envTextures]` are unchanged (ShaderMaterial, text, clustered lighting, TAA and CSM have equivalent gates). Changing a view volume moves none of those, so a steady-state scene would keep rendering the previously uploaded view-projection even though `getProjectionMatrix` returned a fresh matrix.
 
 Every bounds setter therefore bumps `camera._projRev`, and projection-dependent consumers key on `_cameraChangeKey(camera)`, which sums it with the transform version (and also polls `fov` / `nearPlane` / `farPlane` — see **Projection Change Detection**):
 
@@ -194,7 +202,7 @@ camera.worldMatrixVersion + (camera._projRev ?? 0);
 
 Both terms are monotonically non-decreasing, so the sum is too and any change in either strictly increases it — it cannot alias. (Same version-summing idiom as `shadow-base.ts` and `gltf-feature-lights-punctual.ts`.)
 
-The revision is deliberately **separate from `worldMatrixVersion`** rather than folded into it. Marking the camera transform dirty would signal camera *motion*, which additionally invalidates the camera's children (the world-matrix state pushes invalidation through `_children`) and, under floating origin, makes `wrapRenderableForFO` rebase **every renderable** in the scene — a per-frame cost if `ortho.halfHeight` is animated, for a change that moved nothing in world space. Transform-only consumers (floating origin, child nodes, mesh UBOs) keep reading `worldMatrixVersion` and are correctly unaffected.
+The revision is deliberately **separate from `worldMatrixVersion`** rather than folded into it. Marking the camera transform dirty would signal camera _motion_, which additionally invalidates the camera's children (the world-matrix state pushes invalidation through `_children`) and, under floating origin, makes `wrapRenderableForFO` rebase **every renderable** in the scene — a per-frame cost if `ortho.halfHeight` is animated, for a change that moved nothing in world space. Transform-only consumers (floating origin, child nodes, mesh UBOs) keep reading `worldMatrixVersion` and are correctly unaffected.
 
 Because the fields are real own enumerable properties (defined via `Object.defineProperty`, not left optional), they also resolve as animation property paths. `resolvePropertyBinding` walks the path with `in` and writes through a plain `target[prop] = value` assignment, which lands on the setter:
 
@@ -313,7 +321,7 @@ export function _cameraChangeKey(camera: Camera): number {
 }
 ```
 
-Polling here rather than installing accessors in every camera factory keeps the projection contract in **one** place, costs nothing per camera type, and works for a hand-rolled object satisfying `Camera` — the same reasoning behind `world-matrix-state.ts` polling a foreign parent's version instead of pushing to it. Orthographic bounds are *pushed* instead (see below): that module already owns setters, so pushing is exact and costs the poll nothing.
+Polling here rather than installing accessors in every camera factory keeps the projection contract in **one** place, costs nothing per camera type, and works for a hand-rolled object satisfying `Camera` — the same reasoning behind `world-matrix-state.ts` polling a foreign parent's version instead of pushing to it. Orthographic bounds are _pushed_ instead (see below): that module already owns setters, so pushing is exact and costs the poll nothing.
 
 ### Orthographic Projection Seam (zero-cost opt-in)
 
@@ -338,10 +346,10 @@ Orthographic support is projection-level; a few features derive screen-space qua
 
 Still perspective-only, and therefore **not supported** with an orthographic camera:
 
-| Feature | Assumption |
-| --- | --- |
+| Feature            | Assumption                                                                |
+| ------------------ | ------------------------------------------------------------------------- |
 | Gaussian splatting | `1/z` splat sizing and the linear-depth decode in `gs-depth-fragments.ts` |
-| Camera gizmo | Always draws a perspective frustum wireframe (`camera-gizmo.ts`) |
+| Camera gizmo       | Always draws a perspective frustum wireframe (`camera-gizmo.ts`)          |
 
 Both enable/disable reset the projection state, as does every bounds setter — that is what lets extents change without the camera moving (the projection cache is otherwise keyed on `_cameraChangeKey` + aspect ratio).
 
@@ -597,49 +605,49 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 
 ## Test Specification
 
-| Test                                           | Description                                                    |
-| ---------------------------------------------- | -------------------------------------------------------------- |
-| **ArcRotate**                                  |                                                                |
-| `getCameraPosition at alpha=-π/2, beta=π/2`    | Camera should be at `(target.x, target.y, target.z + radius)`  |
-| `getCameraPosition at alpha=0, beta=π/2`       | Camera at `(target.x + radius, target.y, target.z)`            |
-| `getViewMatrix is valid LH lookAt`             | Multiply view × position should give NDC-like coords           |
-| `getProjectionMatrix aspect ratio`             | Verify `m[0] = tan/aspect`, `m[5] = tan`                       |
-| `getViewProjectionMatrix = proj × view`        | Compare with manual multiply                                   |
-| `beta clamping`                                | Inertia application clamps beta to `[0.01, π-0.01]`            |
-| `wheel zoom proportional`                      | Large radius → larger absolute change                          |
-| `pan shifts target via inertia`                | Accumulated panning offsets move target, radius unchanged      |
-| `pinch zoom`                                   | Two-touch events correctly scale radius directly               |
-| `inertia decay`                                | After input stops, offsets decay by `camera.inertia` per frame |
-| `cleanup removes all listeners + beforeRender` | After cleanup, events and RAF hook removed                     |
-| **FreeCamera**                                 |                                                                |
-| `initial yaw/pitch from position→target`       | Verify atan2 computation                                       |
-| `WASD movement in local space`                 | W moves along +Z local, A along −X local                       |
-| `mouse drag rotates yaw/pitch`                 | Verify angular sensitivity scaling                             |
-| `pitch clamped to ±(π/2 − 0.01)`               | Extreme pitch values clamped                                   |
-| `inertia decay on accumulators`                | Movement/rotation decay by `camera.inertia`                    |
-| `target updated from yaw/pitch`                | Target re-derived each frame from orientation                  |
-| `world-to-view matrix consistency`             | View = inverse of world matrix                                 |
-| `cleanup removes 6 listeners + beforeRender`   | All handlers detached                                          |
-| **Orthographic**                               |                                                                |
-| `view volume corners → NDC`                    | Reverse-Z depth (near→1, far→0); x/y independent of depth      |
-| `off-center volume`                            | Volume midpoint projects to NDC origin                         |
-| `aspect-derived horizontal extent`             | `halfWidth = halfHeight * aspectRatio`                         |
-| `revert to perspective`                        | No stale `m[12] / m[13] / m[15]` left in the shared cache      |
-| `re-enable re-arms the projection cache`       | Changing `halfHeight` takes effect without a camera move       |
-| `live bound mutation`                          | `ortho.halfHeight = x` invalidates proj + viewProj caches      |
-| `steady-state scene UBO re-upload`             | Bound change re-opens the real `_writePassSceneUBO` gate       |
-| `runtime enable/disable re-upload`             | Toggling after the first frame also re-opens the gate          |
-| `projection change is not camera motion`       | `_cameraChangeKey` moves; `worldMatrixVersion`/`worldMatrix` do not |
-| `no-op assignment does not re-upload`          | Writing a bound its current value skips the GPU write          |
-| `halfHeight is number-only`                    | Planes accept `null`; `halfHeight` cannot go degenerate        |
-| `null plane toggles derived/off-center`        | Assigning a number then `null` restores the derived extent     |
-| `bounds are own enumerable properties`         | Animation paths like `"ortho.halfHeight"` resolve and write    |
-| **Projection parameters**                      |                                                                |
-| `fov write rebuilds the projection`            | `m[5] = 1/tan(fov/2)` follows, camera at rest                  |
-| `near/far write rebuilds the projection`       | Reverse-Z depth terms `m[10]` / `m[14]` follow                 |
-| `propagates through the view-projection cache` | `getViewProjectionMatrix` is not stale either                  |
+| Test                                           | Description                                                                                       |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| **ArcRotate**                                  |                                                                                                   |
+| `getCameraPosition at alpha=-π/2, beta=π/2`    | Camera should be at `(target.x, target.y, target.z + radius)`                                     |
+| `getCameraPosition at alpha=0, beta=π/2`       | Camera at `(target.x + radius, target.y, target.z)`                                               |
+| `getViewMatrix is valid LH lookAt`             | Multiply view × position should give NDC-like coords                                              |
+| `getProjectionMatrix aspect ratio`             | Verify `m[0] = tan/aspect`, `m[5] = tan`                                                          |
+| `getViewProjectionMatrix = proj × view`        | Compare with manual multiply                                                                      |
+| `beta clamping`                                | Inertia application clamps beta to `[0.01, π-0.01]`                                               |
+| `wheel zoom proportional`                      | Large radius → larger absolute change                                                             |
+| `pan shifts target via inertia`                | Accumulated panning offsets move target, radius unchanged                                         |
+| `pinch zoom`                                   | Two-touch events correctly scale radius directly                                                  |
+| `inertia decay`                                | After input stops, offsets decay by `camera.inertia` per frame                                    |
+| `cleanup removes all listeners + beforeRender` | After cleanup, events and RAF hook removed                                                        |
+| **FreeCamera**                                 |                                                                                                   |
+| `initial yaw/pitch from position→target`       | Verify atan2 computation                                                                          |
+| `WASD movement in local space`                 | W moves along +Z local, A along −X local                                                          |
+| `mouse drag rotates yaw/pitch`                 | Verify angular sensitivity scaling                                                                |
+| `pitch clamped to ±(π/2 − 0.01)`               | Extreme pitch values clamped                                                                      |
+| `inertia decay on accumulators`                | Movement/rotation decay by `camera.inertia`                                                       |
+| `target updated from yaw/pitch`                | Target re-derived each frame from orientation                                                     |
+| `world-to-view matrix consistency`             | View = inverse of world matrix                                                                    |
+| `cleanup removes 6 listeners + beforeRender`   | All handlers detached                                                                             |
+| **Orthographic**                               |                                                                                                   |
+| `view volume corners → NDC`                    | Reverse-Z depth (near→1, far→0); x/y independent of depth                                         |
+| `off-center volume`                            | Volume midpoint projects to NDC origin                                                            |
+| `aspect-derived horizontal extent`             | `halfWidth = halfHeight * aspectRatio`                                                            |
+| `revert to perspective`                        | No stale `m[12] / m[13] / m[15]` left in the shared cache                                         |
+| `re-enable re-arms the projection cache`       | Changing `halfHeight` takes effect without a camera move                                          |
+| `live bound mutation`                          | `ortho.halfHeight = x` invalidates proj + viewProj caches                                         |
+| `steady-state scene UBO re-upload`             | Bound change re-opens the real `_writePassSceneUBO` gate                                          |
+| `runtime enable/disable re-upload`             | Toggling after the first frame also re-opens the gate                                             |
+| `projection change is not camera motion`       | `_cameraChangeKey` moves; `worldMatrixVersion`/`worldMatrix` do not                               |
+| `no-op assignment does not re-upload`          | Writing a bound its current value skips the GPU write                                             |
+| `halfHeight is number-only`                    | Planes accept `null`; `halfHeight` cannot go degenerate                                           |
+| `null plane toggles derived/off-center`        | Assigning a number then `null` restores the derived extent                                        |
+| `bounds are own enumerable properties`         | Animation paths like `"ortho.halfHeight"` resolve and write                                       |
+| **Projection parameters**                      |                                                                                                   |
+| `fov write rebuilds the projection`            | `m[5] = 1/tan(fov/2)` follows, camera at rest                                                     |
+| `near/far write rebuilds the projection`       | Reverse-Z depth terms `m[10]` / `m[14]` follow                                                    |
+| `propagates through the view-projection cache` | `getViewProjectionMatrix` is not stale either                                                     |
 | `steady-state scene UBO re-upload`             | Each of fov / near / far re-opens the real `_writePassSceneUBO` gate, under perspective and ortho |
-| `no-op rewrite does not re-upload`             | Rewriting a parameter with its current value skips the GPU write |
+| `no-op rewrite does not re-upload`             | Rewriting a parameter with its current value skips the GPU write                                  |
 
 ## File Manifest
 

@@ -240,6 +240,8 @@ export async function buildInterleavedPartial(
     vb._n = nrm._il;
     // A normalized UNSIGNED_BYTE/SHORT TEXCOORD_0 is materialized as a tight float32x2 [0,1] buffer
     // (never bound strided), so integer UVs don't misalign against the float32x2 vertex layout.
+    // (KHR_mesh_quantization's unnormalized integer TEXCOORD never reaches here either — it's
+    // rewritten to FLOAT upstream by gltf-ext-quantization.ts's preParse.)
     const uvIdx = attrs["TEXCOORD_0"];
     const uv: { _tight: Float32Array | null; _il?: AccessorInterleave; _count: number } =
         uvIdx !== undefined && json.accessors[uvIdx].componentType !== FLOAT
@@ -352,8 +354,10 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
 export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, index: number, material: PbrMaterialProps, name?: string, source?: Mesh): Mesh {
     const gpu = source?._gpu ?? buildInterleavedGpu(engine, m);
 
-    // AABB: fold strided positions straight from the slice; tight positions normally.
-    const [boundMin, boundMax] = m._vb!._p ? computeAabbStrided(m._vb!._p, m._worldMatrix) : computeAabb(m._positions!, m._worldMatrix);
+    // Object-local AABB (see `Mesh.boundMin`): fold strided positions straight from the slice; tight positions
+    // normally. `_worldMatrix` is deliberately NOT applied — the mesh hangs off its glTF node, whose transform
+    // `worldMatrix` already supplies, so baking it here would double-transform the box for every reader.
+    const [boundMin, boundMax] = m._vb!._p ? computeAabbStrided(m._vb!._p) : computeAabb(m._positions!);
 
     const mesh = initMeshTransform({
         name: name || `gltf_mesh_${index}`,

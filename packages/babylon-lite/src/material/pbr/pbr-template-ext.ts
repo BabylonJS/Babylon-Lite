@@ -83,7 +83,13 @@ export function createPbrTemplateExt(flags: {
     // PBR2_OCCL_UV_SPLIT is defined locally (not in shared pbr-flag-bits.ts) per GUIDANCE
     // §4c′ — it is set in uv-transform-fragment.detect and read only here, both lazy.
     const PBR2_OCCL_UV_SPLIT = 1 << 28;
-    const _hasOcclusionSplit = ((flags._features2 ?? 0) & PBR2_OCCL_UV_SPLIT) !== 0;
+    // Gated on `_hasUvTransform` as well as the bit: the split arm samples at
+    // `occlUV`, which the prelude below only declares under a UV transform, and
+    // "occlusion carries its OWN transform" is meaningless without one. The bit
+    // alone is reachable without a transform — uv-transform-fragment's `detect`
+    // sets it from `occlusionTexture` presence, independently of `_hasUvTx` —
+    // so the two guards must agree or the emitted reference has no declaration.
+    const _hasOcclusionSplit = _hasUvTransform && ((flags._features2 ?? 0) & PBR2_OCCL_UV_SPLIT) !== 0;
 
     // ── UV transform helpers ────────────────────────────────────
     const uvTransformUboFields = (name: string): UboField[] => [

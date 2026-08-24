@@ -2,7 +2,7 @@
 // Based on playground #5H0H89#5 (Georgia Tech Dragon)
 // Dragon with translucent teal PBR material, thickness map, point light, DDS environment
 
-import { addToScene, startEngine, onBeforeRender, createEngine, createSceneContext, createDefaultCamera, attachControl, createPbrMaterial, createPointLight, createSphere, createBox, createSolidTexture2D, loadDdsEnvironment, loadGltf, loadTexture2D, registerScene, AcesToneMapping } from "babylon-lite";
+import { addToScene, startEngine, onBeforeRender, createEngine, createSceneContext, createDefaultCamera, attachControl, createPbrMaterial, setPbrEmissive, setPbrSkybox, setPbrSubsurface, createPointLight, createSphere, createBox, createSolidTexture2D, loadDdsEnvironment, loadGltf, loadTexture2D, registerScene, AcesToneMapping } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -36,17 +36,17 @@ async function main(): Promise<void> {
         baseColorTexture: baseColorTex,
         ormTexture: ormTex,
         enableSpecularAA: true,
-        subsurface: {
-            translucency: {
-                intensity: 1.0,
-                color: [1, 1, 1],
-                diffusionDistance: [1, 1, 1],
-            },
-            thickness: {
-                texture: thicknessTexture,
-                min: 0,
-                max: 2.2,
-            },
+    });
+    setPbrSubsurface(dragonMaterial, {
+        translucency: {
+            intensity: 1.0,
+            color: [1, 1, 1],
+            diffusionDistance: [1, 1, 1],
+        },
+        thickness: {
+            texture: thicknessTexture,
+            min: 0,
+            max: 2.2,
         },
     });
 
@@ -63,8 +63,8 @@ async function main(): Promise<void> {
     lightSphere.material = createPbrMaterial({
         baseColorTexture: createSolidTexture2D(engine, 1, 1, 1),
         ormTexture: createSolidTexture2D(engine, 1.0, 1.0, 0.0),
-        emissiveColor: [1, 1, 1],
     });
+    setPbrEmissive(lightSphere.material, [1, 1, 1]);
     addToScene(scene, lightSphere);
 
     // Camera: use createDefaultCamera to auto-frame, then add PI to alpha
@@ -91,8 +91,8 @@ async function main(): Promise<void> {
         environmentIntensity: 1.008,
         directIntensity: 0,
         doubleSided: true,
-        skyboxMode: true,
     });
+    setPbrSkybox(skybox.material);
     const syncSkybox = (): void => {
         const w = cam.worldMatrix;
         skybox.position.set(w[12]!, w[13]!, w[14]!);

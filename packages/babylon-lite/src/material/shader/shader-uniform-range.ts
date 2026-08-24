@@ -38,6 +38,8 @@ function installRangeUpdater(material: RangeShaderMaterialState): void {
         if (dirty.size === 0) {
             dirtyVersion = material._uniformVersion;
         }
+        const slot = material._uniformValues.get(name)!;
+        slot._v = (slot._v! | 0) + 1;
         dirty.add(name);
     };
     for (const [name, slot] of material._uniformValues) {

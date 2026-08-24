@@ -109,6 +109,28 @@ export class SSAO2RenderingPipeline {
     }
 }
 
+// FSR 1 (AMD FidelityFX Super Resolution) upscale + sharpen. Babylon Lite has no
+// PostProcessRenderPipeline subsystem and ships no FSR/EASU/RCAS post-process, so
+// there is nothing to forward to — the same structural blocker as the other rendering
+// pipelines above.
+export class FSR1RenderingPipeline {
+    public constructor() {
+        unsupported("FSR1RenderingPipeline", "FSR 1 upscaling is not implemented in Babylon Lite; it has no PostProcessRenderPipeline subsystem.");
+    }
+}
+
+export class ThinFSR1UpscalePostProcess {
+    public constructor() {
+        unsupported("ThinFSR1UpscalePostProcess", "FSR 1 (EASU) upscaling is not implemented in Babylon Lite.");
+    }
+}
+
+export class ThinFSR1SharpenPostProcess {
+    public constructor() {
+        unsupported("ThinFSR1SharpenPostProcess", "FSR 1 (RCAS) sharpening is not implemented in Babylon Lite.");
+    }
+}
+
 // ─── Particles ───────────────────────────────────────────────────────
 export class ParticleHelper {
     public constructor() {

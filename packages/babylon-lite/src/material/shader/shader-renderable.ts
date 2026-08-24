@@ -71,6 +71,44 @@ interface ShaderMaterialRenderState extends ShaderMaterial {
 }
 
 /** @internal */
+export type ShaderSystemUniformWriter = (
+    data: Float32Array,
+    spec: UboSpec,
+    material: ShaderMaterial,
+    mesh: Mesh,
+    camera: Camera | null,
+    targetWidth: number,
+    targetHeight: number
+) => void;
+
+/** @internal */
+export type ShaderCustomUniformWriter = (
+    engine: EngineContext,
+    material: ShaderMaterial,
+    spec: UboSpec,
+    data: ArrayBuffer,
+    ubo: GPUBuffer,
+    bytes: Uint8Array<ArrayBuffer>,
+    uniformBatch?: UniformCopyBatch
+) => void;
+
+let systemUniformWriter: ShaderSystemUniformWriter = writeSystemUniforms;
+let customUniformWriter: ShaderCustomUniformWriter = writeCustomUniforms;
+
+/** @internal The default (uncached) system-uniform writer, exported so tests can
+ *  exercise the writer that actually ships rather than a stand-in. Building a
+ *  real renderable needs a GPU device; this needs nothing. Measured at zero
+ *  bundle cost — Rollup drops it from every scene, since nothing the package
+ *  entry reaches refers to it. */
+export const _defaultShaderSystemUniformWriter: ShaderSystemUniformWriter = writeSystemUniforms;
+
+/** @internal Install the optional cached ShaderMaterial uniform writers. */
+export function _installShaderUniformWriters(systemWriter: ShaderSystemUniformWriter, customWriter: ShaderCustomUniformWriter): void {
+    systemUniformWriter = systemWriter;
+    customUniformWriter = customWriter;
+}
+
+/** @internal */
 export type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
 export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh[], getUniformBatch?: UniformBatchFactory): MeshGroupBuildResult {
@@ -119,6 +157,15 @@ export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Pro
     if (!meshes.some((m) => !!m.thinInstances)) {
         return buildPlain(scene, meshes);
     }
+    if (_asyncPipelineRegistrar) {
+        for (const mesh of meshes) {
+            if (mesh.thinInstances) {
+                const material = mesh.material as ShaderMaterial;
+                const hasColor = !!mesh.thinInstances.colors && material._tic != 0;
+                _asyncPipelineRegistrar(scene, material, mesh, hasColor ? "thin-instances-color" : "thin-instances");
+            }
+        }
+    }
     const mod = await import("./shader-thin-instance.js");
     const cull = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled) ? await import("../../mesh/thin-instance-cull-binding.js") : undefined;
     return mod.buildShaderRenderablesWithInstancing(
@@ -134,6 +181,14 @@ export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Pro
         getUniformBatch,
         cull
     );
+}
+
+export type ShaderAsyncPipelineRegistrar = (scene: SceneContext, material: ShaderMaterial, key: Renderable | Mesh, layout?: "thin-instances" | "thin-instances-color") => void;
+
+let _asyncPipelineRegistrar: ShaderAsyncPipelineRegistrar | null = null;
+/** @internal Install the optional async ShaderMaterial recipe registrar. */
+export function _installAsyncShaderPipelineRegistrar(register: ShaderAsyncPipelineRegistrar): void {
+    _asyncPipelineRegistrar = register;
 }
 
 function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean, getUniformBatch?: UniformBatchFactory): Renderable {
@@ -159,7 +214,7 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
     const engine = scene.surface.engine;
     const systemUBO = createEmptyUniformBuffer(engine, systemSpec._totalBytes, "shader-system-ubo");
     const systemData = new F32(systemSpec._totalBytes / 4);
-    writeSystemUniforms(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
+    systemUniformWriter(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
     engine._device.queue.writeBuffer(systemUBO, 0, systemData);
     const packet: ShaderPacket = {
         mesh,
@@ -206,10 +261,7 @@ function createOpaqueRenderable(
     const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
         let draws = 0;
         for (const packet of packets) {
-            if (packet._disposed) {
-                continue;
-            }
-            if (!isOverride && packet.mesh.material !== material) {
+            if (packet._disposed || packet.mesh.visible === false || (!isOverride && packet.mesh.material !== material)) {
                 continue;
             }
             drawPacket(pass, engine, material, packet);
@@ -233,6 +285,7 @@ function createOpaqueRenderable(
             };
         },
     };
+    _asyncPipelineRegistrar?.(scene, material, r);
     return r;
 }
 
@@ -281,6 +334,7 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
             };
         },
     };
+    _asyncPipelineRegistrar?.(scene, material, r);
     return r;
 }
 
@@ -313,7 +367,7 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         packet._lastAspect !== aspect ||
         packet._lastAlphaCutoff !== alphaCutoff
     ) {
-        writeSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
+        systemUniformWriter(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
         if (uniformBatch) {
             uniformBatch.queue(packet.systemUBO, packet.systemData);
         } else {
@@ -385,22 +439,34 @@ function updateCustomUbo(engine: EngineContext, material: ShaderMaterial, unifor
         return;
     }
     const bytes = state._shaderCustomBytes ?? (state._shaderCustomBytes = new U8(customData));
+    customUniformWriter(engine, material, customSpec, customData, customUbo, bytes, uniformBatch);
+    state._shaderCustomVersion = material._uniformVersion;
+}
+
+function writeCustomUniforms(
+    engine: EngineContext,
+    material: ShaderMaterial,
+    spec: UboSpec,
+    data: ArrayBuffer,
+    ubo: GPUBuffer,
+    bytes: Uint8Array<ArrayBuffer>,
+    uniformBatch?: UniformCopyBatch
+): void {
     bytes.fill(0);
     for (const [name, slot] of material._uniformValues) {
         if (_isShaderSystemUniform(name)) {
             continue;
         }
-        const offset = customSpec._offsets.get(name);
+        const offset = spec._offsets.get(name);
         if (offset !== undefined) {
-            writeTypedValue(customData, offset, slot.decl.type, slot.value);
+            writeTypedValue(data, offset, slot.decl.type, slot.value);
         }
     }
     if (uniformBatch) {
-        uniformBatch.queue(customUbo, bytes);
+        uniformBatch.queue(ubo, bytes);
     } else {
-        engine._device.queue.writeBuffer(customUbo, 0, bytes);
+        engine._device.queue.writeBuffer(ubo, 0, bytes);
     }
-    state._shaderCustomVersion = material._uniformVersion;
 }
 
 function writeTypedValue(data: ArrayBuffer, offset: number, type: ShaderUniformType, value: Float32Array): void {
@@ -495,9 +561,75 @@ function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: Sh
     map.set(mesh, list);
 }
 
+/** @internal Scratch for the camera-relative mesh world matrix under floating
+ *  origin. Module-scoped rather than per-packet: the writers are strictly
+ *  synchronous and non-reentrant, and every read of the result completes before
+ *  the next call can begin. Only used when the caller does not supply its own
+ *  `out` destination — see `_shaderWorldMatrix`. */
+const _foWorldScratch = new F32(16);
+
+/** @internal The world matrix a ShaderMaterial's system uniforms must see.
+ *
+ *  Under floating origin `getViewMatrix` forces the view translation to zero,
+ *  so nothing downstream re-centres the scene on the camera — establishing the
+ *  eye-relative frame is the mesh-world pack's job. `standard`, `pbr` and
+ *  `node` renderables do it by resolving `engine._makePackMeshWorld` once at
+ *  construction; ShaderMaterial's writers are free functions handed only the
+ *  camera, so the same offset (the camera's own world translation, which is
+ *  exactly what `makePackMeshWorld` derives) is subtracted here.
+ *
+ *  Without this the mesh keeps its absolute world translation while the view
+ *  matrix has none, and every ShaderMaterial mesh draws as though the camera
+ *  sat at the world origin: its apparent position and size then depend only on
+ *  where it is, never on where the viewer is. A distant object never gets any
+ *  closer no matter how far you travel toward it.
+ *
+ *  Precision: when the mesh matrix is F64-backed (`useHighPrecisionMatrix`) the
+ *  `large - large = small` subtraction happens at full F64 precision, and only
+ *  the small remainder takes the F32 store — the same recovery trick as
+ *  `packMat4IntoF32WithOffset`, which cannot be reused here because it lives in
+ *  the LWR-only bundle this module must not statically import.
+ *
+ *  Keyed on `camera._useFloatingOrigin` rather than the engine flag so the test
+ *  is bit-for-bit the one `getViewMatrix` applies to the same camera: a
+ *  render-target task drawing through a non-scene camera gets an untranslated
+ *  view AND an absolute world, which is consistent. Returns `mesh.worldMatrix`
+ *  untouched when FO is off and no `out` is given, keeping the non-LWR path
+ *  copy-free.
+ *
+ *  `out`: optional caller-owned destination. Omitted (the shipping renderable
+ *  writers' only call shape), the function reuses the shared module-scratch
+ *  buffer under FO and returns `mesh.worldMatrix` by reference when FO is off —
+ *  zero allocation either way, but the result aliases module state that the
+ *  NEXT call overwrites. Callers that need to hold two results at once (tests
+ *  comparing this against another packer's output, for instance) pass their
+ *  own `Float32Array(16)` and get a value that is theirs alone; the FO-off
+ *  path then copies into it too, so `out` always means "the answer is here,"
+ *  never "the answer is here, except sometimes." */
+export function _shaderWorldMatrix(mesh: Mesh, camera: Camera | null, out?: Float32Array): Float32Array {
+    const world = mesh.worldMatrix as unknown as Float32Array;
+    if (!camera?._useFloatingOrigin) {
+        if (!out) {
+            return world;
+        }
+        out.set(world);
+        return out;
+    }
+    const cw = camera.worldMatrix;
+    const dst = out ?? _foWorldScratch;
+    for (let i = 0; i < 12; i++) {
+        dst[i] = world[i]!;
+    }
+    dst[12] = world[12]! - cw[12]!;
+    dst[13] = world[13]! - cw[13]!;
+    dst[14] = world[14]! - cw[14]!;
+    dst[15] = world[15]!;
+    return dst;
+}
+
 function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: ShaderMaterial, mesh: Mesh, camera: Camera | null, targetWidth: number, targetHeight: number): void {
     data.fill(0);
-    const world = mesh.worldMatrix as unknown as Float32Array;
+    const world = _shaderWorldMatrix(mesh, camera);
     const aspect = camera ? getEffectiveAspectRatio(camera, targetWidth, targetHeight) : 1;
     const view = camera ? (getViewMatrix(camera) as unknown as Float32Array) : null;
     const projection = camera ? (getProjectionMatrix(camera, aspect) as unknown as Float32Array) : null;
@@ -541,7 +673,12 @@ function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: Shader
                 }
                 break;
             case "cameraPosition":
-                if (camera) {
+                // Zero under floating origin, matching `_packSceneUniforms`'
+                // `vEyePosition`: `world` above is camera-relative, so in the
+                // frame the shader actually works in the camera IS the origin.
+                // Writing the absolute position here would put the eye and the
+                // geometry in two different frames.
+                if (camera && !camera._useFloatingOrigin) {
                     const wm = camera.worldMatrix as unknown as ArrayLike<number>;
                     data[f] = wm[12]!;
                     data[f + 1] = wm[13]!;

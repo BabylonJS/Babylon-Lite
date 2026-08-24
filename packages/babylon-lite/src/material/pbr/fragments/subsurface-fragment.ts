@@ -2,7 +2,7 @@
  * Subsurface Fragment
  *
  * Adds translucency — light passing through thin surfaces.
- * Only bundled when a scene uses PbrMaterialProps.subsurface.
+ * Only bundled when a scene uses PbrMaterialProps._subsurface.
  *
  * Math follows BJS PBRSubSurfaceConfiguration:
  *  - Burley transmittance BRDF: exp-based approximation
@@ -251,16 +251,16 @@ export const pbrExt: PbrExt = {
     phase: "fragment",
     detect(mat) {
         const m = mat as PbrMaterialProps;
-        const trans = m.subsurface?.translucency;
+        const trans = m._subsurface?.translucency;
         if (!trans) {
             return { f: 0, f2: 0 };
         }
         let f = PBR_HAS_SUBSURFACE;
         let f2 = 0;
-        if (m.subsurface!.thickness?.texture) {
+        if (m._subsurface!.thickness?.texture) {
             f |= PBR_HAS_THICKNESS_MAP;
         }
-        if (m.subsurface!.thickness?.useGlTFChannel) {
+        if (m._subsurface!.thickness?.useGlTFChannel) {
             f2 |= PBR2_HAS_THICKNESS_GLTF_CHANNEL;
         }
         if (trans.colorTexture) {
@@ -289,12 +289,12 @@ export const pbrExt: PbrExt = {
     },
     writeUbo(data, mat, offsets) {
         const m = mat as PbrMaterialProps;
-        if (m.subsurface?.translucency && offsets.has("subsurfaceParams")) {
-            writeSubsurfaceUBO(data, m.subsurface as SubSurfaceProps, offsets);
+        if (m._subsurface?.translucency && offsets.has("subsurfaceParams")) {
+            writeSubsurfaceUBO(data, m._subsurface as SubSurfaceProps, offsets);
         }
     },
     bind(ctx, entries, b) {
-        const ss = (ctx._material as PbrMaterialProps).subsurface;
+        const ss = (ctx._material as PbrMaterialProps)._subsurface;
         if ((ctx._features & PBR_HAS_THICKNESS_MAP) !== 0) {
             const tex = ss?.thickness?.texture as Texture2D | undefined;
             if (tex) {
@@ -319,7 +319,7 @@ export const pbrExt: PbrExt = {
         return b;
     },
     textures(mat, out) {
-        const ss = (mat as PbrMaterialProps).subsurface;
+        const ss = (mat as PbrMaterialProps)._subsurface;
         if (ss?.thickness?.texture) {
             out.push(ss.thickness.texture);
         }

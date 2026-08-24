@@ -32,13 +32,16 @@ describe("ShaderMaterial uniform updates", () => {
 
     it("does not dirty the UBO when the normalized value is unchanged", () => {
         const mat = material();
+        const slot = mat._uniformValues.get("amount")!;
 
         setShaderFloat(mat, "amount", 0.1);
         const version = mat._uniformVersion;
+        const slotVersion = slot._v;
         setShaderFloat(mat, "amount", 0.1);
 
         expect(mat._uniformVersion).toBe(version);
         expect(mat._uboVersion).toBe(version);
+        expect(slot._v).toBe(slotVersion);
     });
 
     it("compares vectors and matrices without replacing their storage", () => {
@@ -57,5 +60,7 @@ describe("ShaderMaterial uniform updates", () => {
         expect(mat._uniformValues.get("tint")!.value).toBe(tint);
         expect(mat._uniformValues.get("transform")!.value).toBe(transform);
         expect(mat._uniformVersion).toBe(version);
+        expect(mat._uniformValues.get("tint")!._v).toBe(1);
+        expect(mat._uniformValues.get("transform")!._v).toBe(1);
     });
 });

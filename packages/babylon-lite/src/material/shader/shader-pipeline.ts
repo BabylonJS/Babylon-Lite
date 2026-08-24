@@ -27,6 +27,8 @@ export interface ShaderPipelineBindings {
     readonly customSpec: UboSpec | null;
     readonly vertexBuffers: readonly GPUVertexBufferLayout[];
     readonly pipelines: Map<string, GPURenderPipeline>;
+    /** @internal Async creations in flight, allocated only by the opt-in preparer. */
+    _P?: Map<string, Promise<GPURenderPipeline>>;
     /** @internal */
     readonly _pipelineLayout: GPUPipelineLayout;
 }
@@ -195,10 +197,16 @@ export function getOrCreateShaderPipeline(
               }
             : {}),
         multisample: alphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: material.backFaceCulling ? "back" : "none", frontFace: "ccw" },
+        primitive: { topology: material._topology ?? "triangle-list", cullMode: material.backFaceCulling ? "back" : "none" },
     });
     bindings.pipelines.set(key, pipeline);
     return pipeline;
+}
+
+/** @internal Resolve only the variant suffix needed for pre-module async deduplication. */
+export function _resolveShaderPipelineVariantKey(sig: RenderTargetSignature, material: ShaderMaterial, variantKey: string): string {
+    const alphaToCoverageResolver = _getAlphaToCoverageResolver();
+    return sig._sampleCount > 1 && !!alphaToCoverageResolver?.(material) ? `${variantKey}:a2c` : variantKey;
 }
 
 function toUboField(decl: ShaderUniformDecl): UboField {

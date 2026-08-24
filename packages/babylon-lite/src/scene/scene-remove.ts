@@ -49,6 +49,17 @@ export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | 
             spliceOut(scene._beforeRender, hook);
             container._beforeRenderHook = undefined;
         }
+        const cleanups = container._sceneCleanups;
+        if (cleanups) {
+            const cleanup = cleanups.get(scene);
+            if (cleanup) {
+                spliceOut(scene._disposables, cleanup);
+                cleanups.delete(scene);
+                if (!scene._z) {
+                    cleanup();
+                }
+            }
+        }
         return;
     }
     // Mesh — carries GPU geometry + material. Owns the only heavy removal path.

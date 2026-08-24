@@ -14,7 +14,7 @@ const liteMocks = vi.hoisted(() => ({
 
 vi.mock("babylon-lite", () => liteMocks);
 
-import { resolveKtxUrl, CubeTexture, HDRCubeTexture, Texture } from "../src/textures/textures";
+import { resolveKtxUrl, BaseTexture, CubeTexture, HDRCubeTexture, Texture } from "../src/textures/textures";
 
 type Deferred<T> = {
     promise: Promise<T>;
@@ -227,7 +227,41 @@ describe("HDRCubeTexture", () => {
     });
 
     it("is distinct from the plain CubeTexture loader kind", () => {
-        expect(new CubeTexture("https://h/env.env")._envLoaderKind).toBe("cube");
-        expect(new HDRCubeTexture("https://h/room.hdr")._envLoaderKind).toBe("hdr");
+        const cube = new CubeTexture("https://h/env.env");
+        const hdr = new HDRCubeTexture("https://h/room.hdr");
+        expect(cube).toBeInstanceOf(BaseTexture);
+        expect(hdr).toBeInstanceOf(BaseTexture);
+        expect(cube._envLoaderKind).toBe("cube");
+        expect(hdr._envLoaderKind).toBe("hdr");
+    });
+});
+
+/**
+ * Babylon.js models `CubeTexture`/`HDRCubeTexture` as `BaseTexture` subclasses, and
+ * ported code relies on that (they show up in `BaseTexture[]` surfaces such as
+ * `Material.getActiveTextures()`). The compat handles keep that relationship even
+ * though the environment has no standalone Lite GPU handle of its own.
+ */
+describe("environment handles are BaseTexture subclasses", () => {
+    it("extends BaseTexture and reports the Babylon.js class name", () => {
+        const cube = new CubeTexture("https://h/env.env");
+        const hdr = new HDRCubeTexture("https://h/room.hdr");
+        expect(cube).toBeInstanceOf(BaseTexture);
+        expect(hdr).toBeInstanceOf(BaseTexture);
+        expect(cube.getClassName()).toBe("CubeTexture");
+        expect(hdr.getClassName()).toBe("HDRCubeTexture");
+    });
+
+    it("has no standalone Lite handle (the scene owns the environment upload)", () => {
+        expect(new CubeTexture("https://h/env.env").getInternalTexture()).toBeNull();
+        expect(new HDRCubeTexture("https://h/room.hdr").getInternalTexture()).toBeNull();
+    });
+
+    it("settles whenReadyAsync() alongside isReady()", async () => {
+        const cube = new CubeTexture("https://h/env.env");
+        const hdr = new HDRCubeTexture("https://h/room.hdr");
+        await Promise.all([cube.whenReadyAsync(), hdr.whenReadyAsync()]);
+        expect(cube.isReady()).toBe(true);
+        expect(hdr.isReady()).toBe(true);
     });
 });

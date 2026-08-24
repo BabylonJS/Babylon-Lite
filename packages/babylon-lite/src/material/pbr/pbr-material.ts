@@ -13,18 +13,12 @@ import { _installPbrFallbackResolver } from "./pbr-pipeline.js";
 import {
     _getPbrExts,
     PBR2_HAS_BASE_COLOR_FACTOR,
-    PBR2_HAS_UV_TRANSFORM,
     PBR2_HAS_UV2,
-    PBR_HAS_ALPHA_TEST,
     PBR_HAS_ALPHA_BLEND,
-    PBR_HAS_ANISOTROPY,
     PBR_HAS_DOUBLE_SIDED,
     PBR_HAS_EMISSIVE,
-    PBR_HAS_EMISSIVE_COLOR,
-    PBR_HAS_GAMMA_ALBEDO,
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_OCCLUSION,
-    PBR_HAS_SKYBOX,
     PBR_HAS_SPECULAR_AA,
     PBR_HAS_SPEC_GLOSS,
 } from "./pbr-flags.js";
@@ -68,9 +62,11 @@ export interface PbrMaterialProps extends Material {
     /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
     ormTexture?: Texture2D;
     emissiveTexture?: Texture2D;
-    /** Emissive color as float uniform (linear RGB). Used when no emissiveTexture.
-     *  If both set, emissiveColor multiplies emissiveTexture. */
-    emissiveColor?: [number, number, number];
+    /** @internal Emissive color as float uniform (linear RGB). Used when no emissiveTexture.
+     *  If both set, this multiplies emissiveTexture. Set it via `setPbrEmissive`, which
+     *  also registers the emissive extension — assigning this field directly would leave
+     *  the ext unregistered and silently render no emissive. */
+    _emissiveColor?: [number, number, number];
     /** KHR_materials_pbrSpecularGlossiness: RGB=specular, A=glossiness. */
     specGlossTexture?: Texture2D;
     /** Whether material is double-sided (disables back-face culling). */
@@ -79,8 +75,11 @@ export interface PbrMaterialProps extends Material {
     alpha?: number;
     /** Enable alpha blending (glTF alphaMode "BLEND"). Enables radianceOverAlpha + specularOverAlpha. */
     alphaBlend?: boolean;
-    /** Alpha test cutoff (glTF alphaMode "MASK"). Fragments with base alpha * material alpha below this value are discarded. */
-    alphaCutOff?: number;
+    /** @internal Alpha test cutoff (glTF alphaMode "MASK"). Fragments with base alpha * material alpha
+     *  below this value are discarded. Set it via {@link setPbrAlphaCutoff}, which also registers the
+     *  alpha-test extension — assigning this field directly would leave the ext unregistered and
+     *  silently render no alpha test (and suppress alpha blending). */
+    _alphaCutOff?: number;
     /** Scale factor for environment/IBL contribution. Default 1.0. */
     environmentIntensity?: number;
     /** Scale factor for direct light contribution. Default 1.0. */
@@ -111,83 +110,98 @@ export interface PbrMaterialProps extends Material {
     /** Separate occlusion texture sampled with UV2 when occlusionTexCoord=1.
      *  R channel is occlusion. When set, ORM.r is NOT used for occlusion. */
     occlusionTexture?: Texture2D;
-    /** Scales dielectric F0 (default 1.0). Maps to BJS metallicF0Factor. */
-    metallicF0Factor?: number;
-    /** Grazing specular/F90 weight (default follows metallicF0Factor for legacy callers). */
-    specularWeight?: number;
-    /** Tints dielectric reflectance (linear RGB, default [1,1,1]). Maps to BJS metallicReflectanceColor. */
-    metallicReflectanceColor?: [number, number, number];
-    /** Texture whose RGB tints reflectance and A scales F0. Maps to BJS metallicReflectanceTexture. */
-    metallicReflectanceTexture?: Texture2D;
-    /** Texture whose RGB tints reflectance only. Maps to BJS reflectanceTexture. */
-    reflectanceTexture?: Texture2D;
-    /** When true + both reflectance textures set, metallicReflectanceTexture only contributes A (F0 scalar). */
-    useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
+    /** @internal Scales dielectric F0 (default 1.0). Maps to BJS metallicF0Factor.
+     *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
+    _metallicF0Factor?: number;
+    /** @internal Grazing specular/F90 weight (default follows metallicF0Factor for legacy callers).
+     *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
+    _specularWeight?: number;
+    /** @internal Tints dielectric reflectance (linear RGB, default [1,1,1]). Maps to BJS metallicReflectanceColor.
+     *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
+    _metallicReflectanceColor?: [number, number, number];
+    /** @internal Texture whose RGB tints reflectance and A scales F0. Maps to BJS metallicReflectanceTexture.
+     *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
+    _metallicReflectanceTexture?: Texture2D;
+    /** @internal Texture whose RGB tints reflectance only. Maps to BJS reflectanceTexture.
+     *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
+    _reflectanceTexture?: Texture2D;
+    /** @internal When true + both reflectance textures set, metallicReflectanceTexture only contributes A (F0 scalar).
+     *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
+    _useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
     /** Enable specular anti-aliasing on IBL alphaG (matches BJS SPECULARAA). Default false.
      *  Set automatically by the glTF loader for materials loaded from glTF files. */
     enableSpecularAA?: boolean;
-    /** Clearcoat layer configuration. When set with isEnabled=true, adds a glossy transparent
-     *  top layer (like car paint or lacquer). Tree-shakable — only bundled when used. */
-    clearCoat?: ClearCoatProps;
-    /** Sheen layer configuration. When set with isEnabled=true, adds a soft velvet-like
-     *  sheen layer (like fabric or cloth). Tree-shakable — only bundled when used. */
-    sheen?: SheenProps;
-    /** Iridescence thin-film configuration. When set with isEnabled=true, replaces
-     *  base-layer F0 with a wavelength-dependent thin-film Fresnel blend.
-     *  Maps to BJS PBRMaterial.iridescence and KHR_materials_iridescence.
+    /** @internal Clearcoat layer configuration. Set via {@link setPbrClearCoat}, which
+     *  registers the extension so the renderer detects and renders it. Adds a glossy
+     *  transparent top layer (car paint, lacquer). Tree-shakable — only bundled when used. */
+    _clearCoat?: ClearCoatProps;
+    /** @internal Sheen layer configuration. Set via {@link setPbrSheen}, which registers
+     *  the extension. Adds a soft velvet-like sheen layer (like fabric or cloth).
      *  Tree-shakable — only bundled when used. */
-    iridescence?: IridescenceProps;
-    /** When true, the albedo texture is in sRGB/gamma space (loaded as rgba8unorm)
-     *  and the shader applies pow(baseColor, 2.2) for sRGB→linear conversion.
-     *  Matches BJS PBRMaterial's Texture.gammaSpace=true behavior.
-     *  When false (default), assumes the texture already provides linear values
-     *  (e.g. rgba8unorm-srgb format or glTF sRGB textures). */
-    gammaAlbedo?: boolean;
-    /** Anisotropy layer configuration. When set with isEnabled=true, stretches specular
-     *  highlights along a preferred direction. Tree-shakable — only bundled when used. */
-    anisotropy?: AnisotropyProps;
-    /** Subsurface configuration. Presence of nested sub-features (translucency, scattering)
+    _sheen?: SheenProps;
+    /** @internal Iridescence thin-film configuration. Set via {@link setPbrIridescence},
+     *  which registers the extension. Replaces base-layer F0 with a wavelength-dependent
+     *  thin-film Fresnel blend. Maps to BJS PBRMaterial.iridescence and
+     *  KHR_materials_iridescence. Tree-shakable — only bundled when used. */
+    _iridescence?: IridescenceProps;
+    /** @internal When true, the albedo texture is in sRGB/gamma space (loaded as rgba8unorm)
+     *  and the shader applies pow(baseColor, 2.2) for sRGB→linear conversion. Set via
+     *  {@link setPbrGammaAlbedo}, which registers the extension. Tree-shakable — only bundled
+     *  when used. Matches BJS PBRMaterial's Texture.gammaSpace=true behavior. When unset
+     *  (default), assumes the texture already provides linear values (e.g. rgba8unorm-srgb
+     *  format or glTF sRGB textures). */
+    _gammaAlbedo?: boolean;
+    /** @internal Anisotropy configuration. Set via {@link setPbrAnisotropy}, which
+     *  registers the extension. When isEnabled=true, stretches specular highlights along
+     *  a preferred direction. Tree-shakable — only bundled when used. */
+    _anisotropy?: AnisotropyProps;
+    /** @internal Subsurface configuration. Translucency is set via {@link setPbrSubsurface},
+     *  which registers the extension. Presence of nested sub-features (translucency, scattering)
      *  enables them — no isEnabled booleans needed. Tree-shakable — only bundled when used. */
-    subsurface?: SubSurfaceProps;
-    /** True transmissive surface: render task provides a scene-color refraction texture
-     *  just before this material draws. Set by KHR_materials_transmission. */
-    transmissive?: boolean;
-    /** When true, the material samples the environment cubemap using the view direction
-     *  (camera→fragment) instead of the reflected view direction. Used for PBR skybox boxes
-     *  where the mesh surrounds the camera and should display the environment directly.
-     *  Also zeroes SH irradiance — skybox is pure cubemap + BRDF only. */
-    skyboxMode?: boolean;
-    /** When true, the material is unlit — the base color is output directly,
-     *  bypassing all lighting, IBL, tonemap, and shading calculations.
-     *  Matches `KHR_materials_unlit` glTF extension. Alpha handling is preserved. */
-    unlit?: boolean;
-    /** Linear-RGB tint applied to baseColor when `unlit` is true (i.e. glTF
-     *  `baseColorFactor`). When omitted or [1,1,1], no tint is applied.
-     *  Only bundled/bound when the unlit extension is active. */
-    unlitColor?: [number, number, number];
-    /** When true, the material is a shadow-only receiver: the surface is invisible
-     *  except where a shadow is cast on it, where it appears in `shadowOnlyColor` (or
-     *  black when omitted). Mirrors BJS `BackgroundMaterial.shadowOnly`. Requires
-     *  `receiveShadows` on the mesh and at least one shadow-casting light in the scene.
-     *  Implies alpha-blended rendering. Only bundled/bound when at least one mesh in
-     *  the scene uses it. */
-    shadowOnly?: boolean;
-    /** Linear-RGB color shown where the shadow falls when `shadowOnly` is true.
-     *  Defaults to black (`[0, 0, 0]`). */
-    shadowOnlyColor?: [number, number, number];
-    /** Maximum opacity at the darkest part of the shadow (when `shadowOnly` is true).
-     *  Range [0, 1]. Default 1.0 (fully opaque at full shadow). Lower values produce
-     *  a lighter, more transparent shadow. Mirrors the `shadowLevel` parameter on BJS
+    _subsurface?: SubSurfaceProps;
+    /** @internal True transmissive surface: render task provides a scene-color refraction texture
+     *  just before this material draws. Set via {@link setPbrTransmission}, which also registers the
+     *  scene-level transmission hook — assigning this field directly would leave the hook
+     *  unregistered and silently render no refraction. Set by KHR_materials_transmission. */
+    _transmissive?: boolean;
+    /** @internal When true, the material samples the environment cubemap using the view
+     *  direction (camera→fragment) instead of the reflected view direction. Set via
+     *  {@link setPbrSkybox}, which registers the extension. Tree-shakable — only bundled when
+     *  used. Used for PBR skybox boxes where the mesh surrounds the camera and should display
+     *  the environment directly. Also zeroes SH irradiance — skybox is pure cubemap + BRDF only. */
+    _skyboxMode?: boolean;
+    /** @internal When true, the material is unlit — the base color is output directly,
+     *  bypassing all lighting, IBL, tonemap, and shading calculations. Set via
+     *  {@link setPbrUnlit}, which registers the extension. Matches `KHR_materials_unlit`
+     *  glTF extension. Alpha handling is preserved. */
+    _unlit?: boolean;
+    /** @internal Linear-RGB tint applied to baseColor when `unlit` is true (i.e. glTF
+     *  `baseColorFactor`). Set via {@link setPbrUnlit}. When omitted or [1,1,1], no tint
+     *  is applied. Only bundled/bound when the unlit extension is active. */
+    _unlitColor?: [number, number, number];
+    /** @internal Set via {@link setShadowOnly}. When true, the material is a shadow-only
+     *  receiver: the surface is invisible except where a shadow is cast on it, where it
+     *  appears in `shadowOnlyColor` (or black when omitted). Mirrors BJS
+     *  `BackgroundMaterial.shadowOnly`. Requires `receiveShadows` on the mesh and at least
+     *  one shadow-casting light. Implies alpha-blended rendering. Setting this field
+     *  directly (without `setShadowOnly`) will NOT register the shadow-only extension. */
+    _shadowOnly?: boolean;
+    /** @internal Set via {@link setShadowOnly}. Linear-RGB color shown where the shadow
+     *  falls. Defaults to black (`[0, 0, 0]`). */
+    _shadowOnlyColor?: [number, number, number];
+    /** @internal Set via {@link setShadowOnly}. Maximum opacity at the darkest part of the
+     *  shadow. Range [0, 1]. Default 1.0. Mirrors the `shadowLevel` parameter on BJS
      *  `BackgroundMaterial.shadowOnly`. */
-    shadowOnlyOpacity?: number;
-    /** Falloff sharpness for the shadow's soft edges (when `shadowOnly` is true).
-     *  Default 1.0 (the natural ESM/PCF falloff from the shadow generator). Higher
-     *  values steepen the falloff (saturating closer to the model silhouette), giving
-     *  crisper visible edges. Mathematically: `alpha = saturate((1 - shadowFactor) * falloff) * opacity`. */
-    shadowOnlyFalloff?: number;
-    /** @internal True when any of the material's textures carries `_hasTx=true`
-     *  (KHR_texture_transform). Stamped once by the glTF loader's slow path
-     *  so the renderer doesn't re-scan 5 textures per mesh. */
+    _shadowOnlyOpacity?: number;
+    /** @internal Set via {@link setShadowOnly}. Falloff sharpness for the shadow's soft
+     *  edges. Default 1.0. Higher values steepen the falloff (crisper visible edges).
+     *  `alpha = saturate((1 - shadowFactor) * falloff) * opacity`. */
+    _shadowOnlyFalloff?: number;
+    /** @internal True when UV-transform support is enabled. Stamped by the glTF loader
+     *  and by `enableMaterialUvTransform` for hand-built materials. The
+     *  `PBR2_HAS_UV_TRANSFORM` bit is contributed by the uv-transform ext's own `detect`,
+     *  which only runs once that ext has been registered — so this flag alone is inert
+     *  unless it was set through `enableMaterialUvTransform`. */
     _hasUvTx?: boolean;
     /** Optional stencil-test state baked into the main-pass pipeline. Lets this material write the stencil buffer
      *  where it draws (mask) or discard where another material wrote it. Default none. See `StencilState`. */
@@ -198,10 +212,8 @@ export interface PbrMaterialProps extends Material {
 export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: number; features2: number } {
     let features =
         (mat.emissiveTexture ? PBR_HAS_EMISSIVE : 0) |
-        (mat.emissiveColor ? PBR_HAS_EMISSIVE_COLOR : 0) |
         (mat.normalTexture ? PBR_HAS_NORMAL_MAP : 0) |
-        ((mat.alphaCutOff ?? 0) > 0 ? PBR_HAS_ALPHA_TEST : 0) |
-        (mat.alphaBlend === true || ((mat.alphaCutOff ?? 0) <= 0 && mat.alpha! < 1) ? PBR_HAS_ALPHA_BLEND : 0) |
+        (mat.alphaBlend === true || ((mat._alphaCutOff ?? 0) <= 0 && mat.alpha! < 1) ? PBR_HAS_ALPHA_BLEND : 0) |
         (mat.specGlossTexture ? PBR_HAS_SPEC_GLOSS : 0) |
         (mat.doubleSided ? PBR_HAS_DOUBLE_SIDED : 0);
     if ((mat.occlusionStrength ?? 1.0) > 0) {
@@ -209,15 +221,6 @@ export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: 
     }
     if (mat.enableSpecularAA) {
         features |= PBR_HAS_SPECULAR_AA;
-    }
-    if (mat.gammaAlbedo) {
-        features |= PBR_HAS_GAMMA_ALBEDO;
-    }
-    if (mat.anisotropy?.isEnabled) {
-        features |= PBR_HAS_ANISOTROPY;
-    }
-    if (mat.skyboxMode) {
-        features |= PBR_HAS_SKYBOX;
     }
 
     let features2 = 0;
@@ -227,9 +230,6 @@ export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: 
             features |= d.f;
             features2 |= d.f2;
         }
-    }
-    if ((mat as { _hasUvTx?: boolean })._hasUvTx) {
-        features2 |= PBR2_HAS_UV_TRANSFORM;
     }
     // Per-channel UV set selection (glTF texCoord). `_uv2Mask` is precomputed once at glTF build
     // time by the lazy slow-path loader (gltf-pbr-builder-ext) — the only place a texture can carry

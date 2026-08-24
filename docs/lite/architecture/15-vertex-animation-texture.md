@@ -15,11 +15,20 @@ Mirrors the Babylon.js `VertexAnimationBaker` / `BakedVertexAnimationManager` AP
 ### Functions (`vat/vat-baker.ts`)
 
 ```typescript
-export function bakeVat(engine: EngineContext, mesh: Mesh, groups: AnimationGroup[]): VatBakeResult;
+export function bakeVat(engine: EngineContext, mesh: Mesh, groups: AnimationGroup[], opts?: VatBakeOptions): VatBakeResult;
+export function bakeVatMany(engine: EngineContext, targets: readonly VatBakeTarget[], groups: readonly AnimationGroup[]): VatBakeResult[];
+export function prepareVat(mesh: Mesh, groups: AnimationGroup[], opts?: VatBakeOptions): PreparedVatBakeResult;
+export function prepareVatMany(targets: readonly VatBakeTarget[], groups: readonly AnimationGroup[]): PreparedVatBakeResult[];
+export function createVatBakeResult(engine: EngineContext, prepared: PreparedVatBakeResult): VatBakeResult;
+export function createVatBakeResults(engine: EngineContext, prepared: readonly PreparedVatBakeResult[]): VatBakeResult[];
 export function attachVat(engine: EngineContext, mesh: Mesh, baked: VatBakeResult, clip?: string): VatHandle;
+export function setVatInstanceStorage(engine: EngineContext, mesh: Mesh, buffer: StorageBuffer | null): void;
+export function setVatTime(engine: EngineContext, mesh: Mesh, seconds: number): void;
 ```
 
 - **`bakeVat`** — evaluates each clip in `groups` frame-by-frame (the mesh must still have its live `mesh.skeleton`), stacking the bone matrices into one `rgba32float` texture: width `boneCount*4`, height = total frame count, one animation frame per row. Returns the texture + a per-clip row map.
+- **`prepareVat` / `prepareVatMany`** — perform the same CPU evaluation without a GPU device or texture allocation, producing persistable `Float32Array` payloads for offline preparation.
+- **`createVatBakeResult` / `createVatBakeResults`** — validate and upload prepared payloads. Byte-identical batch entries share one ref-counted texture; partial upload failures destroy every texture allocated by the call.
 - **`attachVat`** — sets `mesh.vat`, NULLS `mesh.skeleton` (no more live skinning), builds the 32-byte settings UBO, self-registers the VAT `pbrExt`, and returns a `VatHandle`. `clip` selects the initial clip (defaults to the first baked clip).
 
 ### Types (`vat/vat-baker.ts`)
@@ -36,6 +45,18 @@ export interface VatBakeResult {
     readonly boneCount: number;
     readonly frameCount: number;
     readonly clips: Record<string, VatClip>; // clip name -> row range
+    readonly boneOrigins?: Record<number, Float32Array>;
+    readonly boneMatrices?: Record<number, Float32Array>;
+    /** @internal */ readonly _textureResource: { readonly texture: GPUTexture; _refCount?: number };
+}
+
+export interface PreparedVatBakeResult {
+    readonly boneCount: number;
+    readonly frameCount: number;
+    readonly data: Float32Array;
+    readonly clips: Readonly<Record<string, VatClip>>;
+    readonly boneOrigins?: Readonly<Record<number, Float32Array>>;
+    readonly boneMatrices?: Readonly<Record<number, Float32Array>>;
 }
 
 export interface VatHandle {
@@ -83,6 +104,15 @@ The per-row layout matches `skeleton/create-skeleton.ts` exactly — 4 texels pe
 - **Dimensions**: `[boneCount * 4, frameCount]` (width × height), `rgba32float`.
 - **Row r** = the bone matrices for animation frame `r` (16 floats/bone = 4 texels).
 - **Usage**: `TEXTURE_BINDING | COPY_DST`. Uploaded once via `writeTexture` (bytesPerRow = `boneCount*4*16`).
+
+### Preparation and upload
+
+`bakeVat` and `bakeVatMany` compose the two explicit phases below:
+
+1. `prepareVat` / `prepareVatMany` evaluate animation entirely on the CPU and return the matrix rows plus clip/capture metadata. They do not allocate or upload GPU resources.
+2. `createVatBakeResult` / `createVatBakeResults` validate prepared dimensions, clips, and optional capture tracks, then upload `data` with its exact typed-array byte offset. Returned `VatBakeResult` objects do not retain the CPU `data` payload.
+
+This split lets build tools persist the prepared bytes and defer GPU upload to runtime without changing the texture layout consumed by `attachVat`.
 
 ### Baking (`bakeVat`)
 
@@ -157,7 +187,7 @@ Because skinned-mesh `mesh.world` is identity (glTF loader, see `12-thin-instanc
 ## State Machine / Lifecycle
 
 1. Load + animate a skinned glTF (live skeleton present).
-2. `bakeVat(engine, mesh, groups)` → texture + clip map (one-time, ~ms/clip).
+2. Either `bakeVat(engine, mesh, groups)` directly, or `prepareVat(mesh, groups)` followed later by `createVatBakeResult(engine, prepared)`.
 3. `attachVat(engine, mesh, baked, clip?)` → `mesh.vat` set, `mesh.skeleton = null`, VAT ext registered.
 4. (optional) `setThinInstances(mesh, matrices, count)` + `handle.setInstances`/`setInstancesBlend(params)` BEFORE `registerScene` (the first call sets `instanceTexture`, selecting the instanced shader variant). Per-instance params may be re-uploaded in place later.
 5. Per frame: `handle.update(dt)` advances the shared clock; per-instance matrices/params are updated via the thin-instance/VAT setters as the simulation changes.
@@ -184,19 +214,21 @@ Because skinned-mesh `mesh.world` is identity (glTF loader, see `12-thin-instanc
 ## Test Specification
 
 - **Parity (`tests/lite/parity/scenes/scene218-vat.spec.ts`)** — scene 218 bakes the scene-11 shark and renders it through the VAT path with NO live skeleton; the golden is the BJS live-skeleton oracle frozen at the same integer frame (`?seekTime`). Asserts full-image MAD ≤ `scene-config.maxMad` (0.02). VAT(frame N) == live(frame N), so MAD ~= 0.000.
+- **Unit (`tests/lite/unit/vat-baker.test.ts`)** — covers CPU-only preparation, prepared-payload validation, non-zero typed-array upload offsets, capture round-trips, texture deduplication/ref-counting, upload-failure cleanup, and confirms uploaded results do not retain the CPU payload.
 - **Manual / lab (`lab/lite/scene219.ts`)** — 36 baked sharks thin-instanced, blending swimming↔circling across the grid and casting CSM shadows, in one draw call per pass. (Dev scene; not a parity scene — instanced VAT has no single-mesh BJS oracle.)
 - **Bundle size** — non-VAT scenes are byte-unchanged (self-registration); VAT scene bundles include only the lazily-imported `vat` chunk.
 
 ## File Manifest
 
 ```
-packages/babylon-lite/src/vat/vat-baker.ts                          # bakeVat, attachVat, VatHandle, setInstances(Blend)
+packages/babylon-lite/src/vat/vat-baker.ts                          # prepare/upload/bake APIs, attachVat, VatHandle
 packages/babylon-lite/src/material/pbr/fragments/vat-fragment.ts    # pbrExt + 2 vertex variants (non-instanced / instanced dual-clip)
 packages/babylon-lite/src/animation/types.ts                        # VatData (internal)
 packages/babylon-lite/src/material/mesh-features.ts                 # MSH_VAT (the only VAT feature bit; instanced derived from MSH_HAS_THIN_INSTANCES)
 packages/babylon-lite/src/mesh/mesh.ts                              # mesh.vat field
-packages/babylon-lite/src/index.ts                                  # exports bakeVat, attachVat, VatBakeResult, VatClip, VatHandle
+packages/babylon-lite/src/index.ts                                  # exports all public VAT preparation, upload, bake, and runtime APIs
 lab/lite/scene218.html + src/lite/scene218.ts                       # single-mesh VAT parity scene
 lab/lite/scene219.html + src/lite/scene219.ts                       # instanced + blended + shadowed crowd (dev)
 tests/lite/parity/scenes/scene218-vat.spec.ts                       # parity test
+tests/lite/unit/vat-baker.test.ts                                   # prepared-payload and runtime ownership tests
 ```

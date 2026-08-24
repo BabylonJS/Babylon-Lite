@@ -56,6 +56,16 @@ export interface EsmShadowTaskResources {
     _blurVBG: GPUBindGroup;
     /** @internal */
     _shadowUboData: Float32Array;
+    /** @internal Blur kernel width retained for loss-only shadow reconstruction. */
+    _blurKernel: number;
+    /**
+     * @internal Blur downscale factor retained for loss-only shadow reconstruction.
+     *
+     * Retained rather than re-derived as `mapSize / _blurTexH.width`: `blurSize` is
+     * `mapSize / blurScale`, which is not integral for every scale, so the round-trip through a
+     * texture dimension cannot recover the caller's original value.
+     */
+    _blurScale: number;
 }
 
 /** Configuration for a directional-light ESM shadow generator: map size, depth scale, blur kernel, darkness, and ortho projection bounds. */
@@ -103,11 +113,21 @@ function getEsmShadowTaskResourceMap(): WeakMap<ShadowGenerator, EsmShadowTaskRe
     return esmShadowTaskResources;
 }
 
-function setEsmShadowTaskResources(sg: ShadowGenerator, resources: EsmShadowTaskResources): void {
+/**
+ * @internal
+ *
+ * Intentionally NOT `_`-prefixed. `shadow-recovery.ts` reaches these through a dynamic-import
+ * namespace object, and the scene bundler's Terser property mangler (`/^_[a-z]/`, see
+ * scripts/bundle-scenes-core.ts) rewrites the namespace *property access* but not the `export`
+ * *binding*. The two desynchronize and recovery dies with "t is not a function" in minified
+ * builds only. Same hazard previously hit `_runDeviceLostRecovery`; do not re-add the underscore.
+ */
+export function setEsmShadowTaskResources(sg: ShadowGenerator, resources: EsmShadowTaskResources): void {
     getEsmShadowTaskResourceMap().set(sg, resources);
 }
 
-function getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskResources | null {
+/** @internal See {@link setEsmShadowTaskResources} for why this is not `_`-prefixed. */
+export function getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskResources | null {
     return esmShadowTaskResources?.get(sg) ?? null;
 }
 
@@ -496,6 +516,8 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         _blurHBG: blurHBG,
         _blurVBG: blurVBG,
         _shadowUboData: shadowUboData,
+        _blurKernel: blurKernel,
+        _blurScale: blurScale,
     });
     return sg;
 }

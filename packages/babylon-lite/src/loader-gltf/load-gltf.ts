@@ -21,9 +21,10 @@ import type { GltfImageCache, GltfMaterialData, GltfMatExtCtx } from "./gltf-mat
 import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
 import type { DecodedPrimitive, GltfFeature, GltfLoadCtx } from "./gltf-feature.js";
 import type { TextureWrapFn } from "./gltf-pbr-builder.js";
-import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, uploadTex } from "./gltf-pbr-builder.js";
+import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, applyGltfOptInPbrFeatures, uploadTex } from "./gltf-pbr-builder.js";
 import type * as GltfColorNormalize from "./gltf-color-normalize.js";
 import type * as GltfFeatureRegistry from "./gltf-feature-registry.js";
+import { _appendEnabledGltfFeatures } from "./gltf-feature-hooks.js";
 import type * as GltfPbrBuilderExt from "./gltf-pbr-builder-ext.js";
 
 /** Dynamically-imported interleave module — loaded only when an asset actually
@@ -89,9 +90,13 @@ export interface GltfMeshData {
 }
 
 /** Build one tightly-packed glTF mesh, optionally reusing a prior instance's
- * immutable CPU/GPU geometry. Instance state and world-space bounds stay unique. */
+ * immutable CPU/GPU geometry. Instance state and object-local bounds stay unique. */
 function buildTightGltfMesh(engine: EngineContext, meshData: GltfMeshData, material: PbrMaterialProps, name: string, source?: Mesh): Mesh {
-    const [boundMin, boundMax] = computeAabb(meshData._positions!, meshData._worldMatrix);
+    // Object-local box (see `Mesh.boundMin`): do NOT bake `_worldMatrix` in. This mesh is attached as a child
+    // of its glTF node by `buildNodeHierarchy`, so its own `worldMatrix` already reproduces that node's world
+    // transform — baking it here too would make every reader that composes `worldMatrix × bounds` (shadow fit,
+    // thin-instance cull, physics) transform the box a second time.
+    const [boundMin, boundMax] = computeAabb(meshData._positions!);
     const indices = meshData._indices;
     const uint32 = indices instanceof U32;
     const gpu: MeshGPU = source
@@ -163,6 +168,7 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
     // registry. Core loader knows zero feature names.
     const featureRegistry = assetUsesGltfFeatures(json) ? await importGltfFeatureRegistry() : undefined;
     const features = featureRegistry ? await featureRegistry.loadGltfFeatures(json) : [];
+    _appendEnabledGltfFeatures(json, features);
 
     // Pre-parse hooks (EXT_meshopt_compression decompression, KHR_mesh_quantization
     // dequantization) may rewrite bufferViews/accessors and hand back a replacement
@@ -233,9 +239,9 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
         Object.assign(container, rest);
         if (_sceneSetup) {
             const prev = container._sceneSetup;
-            container._sceneSetup = (scene) => {
-                prev?.(scene);
-                _sceneSetup(scene);
+            container._sceneSetup = (scene, target) => {
+                prev?.(scene, target);
+                _sceneSetup(scene, target);
             };
         }
     }
@@ -462,6 +468,8 @@ async function extractAllMeshes(
             // TEXCOORD_0/_1 may be FLOAT or a normalized UNSIGNED_BYTE/SHORT accessor; the vertex
             // pipeline binds UVs as float32x2, so integer UVs are denormalized to [0,1] (reusing the
             // lazily-imported color/UV normalizer). Float UVs (the common case) pass through untouched.
+            // (KHR_mesh_quantization's UNNORMALIZED integer TEXCOORD never reaches here — it's
+            // rewritten to FLOAT upstream by gltf-ext-quantization.ts's preParse.)
             const uvs = uvData
                 ? uvData._data instanceof F32
                     ? (uvData._data as Float32Array)
@@ -609,15 +617,26 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
         if (!cached) {
             cached = (async () => {
                 const extLayers = matExts.length ? await ctx._runMatExts!(mat, matExts, extCtx) : undefined;
+                let props: PbrMaterialProps;
                 if (_needsPbrExt) {
                     const extMod = await _ensurePbrExt();
                     const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, samplerFor);
-                    return extMod.assemblePbrPropsExt(mat, tex, extLayers);
+                    props = extMod.assemblePbrPropsExt(mat, tex, extLayers);
+                    // UV-transform is opt-in; the gate and its conditional import live in the ext
+                    // module so the import plumbing is not emitted into this file, which every
+                    // glTF scene loads. Applied before emissive to keep the ext registration
+                    // order identical to when both lived inside assemblePbrPropsExt.
+                    await extMod.applyGltfUvTransform(props, tex);
+                } else {
+                    const tex = buildSampledPbrTextures
+                        ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
+                        : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
+                    props = assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
                 }
-                const tex = buildSampledPbrTextures
-                    ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
-                    : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
-                return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
+                // Opt-in PBR features decided from the glTF material data (emissive,
+                // alpha-test). Shared with the variants loader so the gates can't drift.
+                await applyGltfOptInPbrFeatures(props, mat);
+                return props;
             })();
             builtMaterialCache.set(mat, cached);
         }

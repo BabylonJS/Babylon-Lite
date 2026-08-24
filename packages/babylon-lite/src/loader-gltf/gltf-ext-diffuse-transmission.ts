@@ -12,6 +12,7 @@
  *  irradiance, tinted by the transmission color. */
 import type { GltfFeature } from "./gltf-feature.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import { setPbrSubsurface } from "../material/pbr/set-subsurface.js";
 
 const ext: GltfFeature = {
     id: "KHR_materials_diffuse_transmission",
@@ -26,20 +27,23 @@ const ext: GltfFeature = {
             return null;
         }
         const cf = Array.isArray(e.diffuseTransmissionColorFactor) && e.diffuseTransmissionColorFactor.length === 3 ? e.diffuseTransmissionColorFactor : [1, 1, 1];
-        const out: Partial<PbrMaterialProps> = {
-            subsurface: {
-                translucency: {
-                    intensity,
-                    color: [cf[0], cf[1], cf[2]],
-                    ...(colorTex ? { colorTexture: colorTex } : undefined),
-                    ...(intensityTex ? { intensityTexture: intensityTex } : undefined),
-                },
-                // Thin-surface diffuse transmission has no volume: BJS sets
-                // min = max = 0 so the Burley transmittance collapses to exactly
-                // the tint color (thickness clamps to epsilon, temp → 1).
-                thickness: { min: 0, max: 0 },
+        // setPbrSubsurface writes the prop and registers the subsurface (translucency)
+        // ext (fragment statically imported by the setter). This handler is only
+        // dynamic-imported when the asset declares KHR_materials_diffuse_transmission,
+        // so the fragment stays out of the base chunk.
+        const out: Partial<PbrMaterialProps> = {};
+        setPbrSubsurface(out, {
+            translucency: {
+                intensity,
+                color: [cf[0], cf[1], cf[2]],
+                ...(colorTex ? { colorTexture: colorTex } : undefined),
+                ...(intensityTex ? { intensityTexture: intensityTex } : undefined),
             },
-        };
+            // Thin-surface diffuse transmission has no volume: BJS sets
+            // min = max = 0 so the Burley transmittance collapses to exactly
+            // the tint color (thickness clamps to epsilon, temp → 1).
+            thickness: { min: 0, max: 0 },
+        });
         return out;
     },
 };

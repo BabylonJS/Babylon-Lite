@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { SkeletonData } from "../../../packages/babylon-lite/src/animation/types";
+import type { MorphTargetData, SkeletonData } from "../../../packages/babylon-lite/src/animation/types";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { setMorphTargetWeights } from "../../../packages/babylon-lite/src/morph/create-morph-targets";
 import { updateSkeletonBoneMatrices } from "../../../packages/babylon-lite/src/skeleton/update-skeleton-bone-matrices";
 
 function setup(boneCount = 2, offset = 0): { engine: EngineContext; skeleton: SkeletonData; writeTexture: ReturnType<typeof vi.fn> } {
@@ -33,5 +34,29 @@ describe("updateSkeletonBoneMatrices", () => {
 
         expect(() => updateSkeletonBoneMatrices(engine, skeleton, new Float32Array(16))).toThrow("Invalid bone matrices");
         expect(writeTexture).not.toHaveBeenCalled();
+    });
+
+    it("rejects updates after the skeleton GPU resources are disposed", () => {
+        const { engine, skeleton, writeTexture } = setup();
+        skeleton._disposed = true;
+
+        expect(() => updateSkeletonBoneMatrices(engine, skeleton, new Float32Array(32))).toThrow("Cannot update disposed skeleton");
+        expect(writeTexture).not.toHaveBeenCalled();
+    });
+});
+
+describe("setMorphTargetWeights", () => {
+    it("rejects updates after the morph-target GPU resources are disposed", () => {
+        const writeBuffer = vi.fn();
+        const engine = { _device: { queue: { writeBuffer } } } as unknown as EngineContext;
+        const morphTargets = {
+            count: 1,
+            weights: new Float32Array(1),
+            weightsBuffer: {} as GPUBuffer,
+            _disposed: true,
+        } as MorphTargetData;
+
+        expect(() => setMorphTargetWeights(engine, morphTargets, [1])).toThrow("Cannot update disposed morph targets");
+        expect(writeBuffer).not.toHaveBeenCalled();
     });
 });
