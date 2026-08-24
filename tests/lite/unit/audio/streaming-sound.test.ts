@@ -70,7 +70,7 @@ describe("streaming-sound", () => {
         (globalThis as unknown as { Audio: typeof MockMediaElement }).Audio = FailingMediaElement;
         const engine = await makeEngine();
 
-        await expect(createStreamingSoundAsync(engine, "missing.mp3")).rejects.toBeUndefined();
+        await expect(createStreamingSoundAsync(engine, "missing.mp3")).rejects.toThrow("Failed to load streaming sound.");
 
         expect(engine._sounds.size).toBe(0);
         disposeAudioEngine(engine);

@@ -523,7 +523,7 @@ function _onMediaEnded(instance: StreamingInstance): void {
 
 function _onMediaError(instance: StreamingInstance, reason?: unknown): void {
     _setStreamingInstanceState(instance, SoundState.FailedToStart);
-    instance._rejectReady(reason);
+    instance._rejectReady(reason instanceof Error ? reason : new Error("Failed to load streaming sound.", { cause: reason }));
     _removePreloaded(instance._sound, instance);
     _instanceDispose(instance);
 }
