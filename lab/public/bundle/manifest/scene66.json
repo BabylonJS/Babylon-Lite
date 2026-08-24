@@ -1,5 +1,6 @@
 {
   "rawKB": 88,
+  "rawBytes": 90066,
   "gzipKB": 40.9,
   "ignoredRawKB": 5.5,
   "runtimeChunks": [
@@ -40,6 +41,5 @@
     "scene66-vector-splitter-CekFz65e.js",
     "scene66-vertex-output-C7G5u6Y0.js",
     "scene66.js"
-  ],
-  "rawBytes": 90063
+  ]
 }

@@ -73,6 +73,7 @@ export interface FrameGraph {
 ```typescript
 export interface Task {
     readonly name: string;
+    executionEnabled?: boolean;
     readonly engine: EngineContextInternal;
     readonly scene: SceneContextInternal;
     _passes: Pass[];
@@ -95,6 +96,8 @@ Task lifecycle:
 The `_passes` list is the per-task view of recorded passes. `FrameGraph.build()` clears it at the start of each task's record and the task is responsible for re-pushing its passes during `record()`. Today every `RenderTask` records exactly one `RenderPass`; the surface is shaped to support multi-pass tasks (e.g. shadow cascades) later without changing the `Task` interface again.
 
 `Task.execute()` is a migration escape hatch, not the final shape for new rendering work. `FrameGraph.execute()` sums the draw count returned by `task.execute()` when present; otherwise it drains the recorded passes. Per-task GPU timing is opt-in: the public timing API dynamic-imports a profiler that wraps registered `FrameGraph.execute()` functions at runtime, so non-profiling bundles do not fetch profiler code or carry a static task-timing branch here. The built-in `ShadowTask` uses this path for shadow scheduling: ESM generators expose depth/blur resources that `ShadowTask` encodes, while PCF generators are rendered through ShadowTask-owned depth-only `RenderTask`s that use Standard/PBR/Node no-color shadow material views. These PCF variants keep a void fragment stage when needed so material `discard` logic still affects the depth attachment without binding a color target.
+
+`Task.executionEnabled` is a runtime-only gate that defaults to enabled. When set to `false`, `FrameGraph.execute()` skips both the task-level `execute()` hook and every recorded pass while preserving the task's recorded state and allocated resources. Task-specific fields such as `enabled` retain their own semantics and are not interpreted as this scheduling gate.
 
 ## `Pass` and `RenderPass`
 
@@ -457,7 +460,7 @@ Each `RenderTask` owns:
 |           80 | `vFogInfos`                      |
 |           84 | `vFogColor`                      |
 
-The writer bails before touching scratch/GPU when camera, fog, aspect, environment rotation, exposure, and contrast are unchanged.
+The writer bails before touching scratch/GPU when camera, fog, aspect, exposure, contrast, and environment texture identity are unchanged. Environment rotation is written by the opt-in environment contributor; `setEnvironmentRotation` explicitly invalidates the task-local cache before a dynamic update.
 
 Offscreen targets use `targetSignature._flipY` and negate the projection row so downstream texture sampling is upright. Swapchain targets do not flip. See "Target Signature" above for the descriptor-side `flipY` override and the known overriding cases.
 

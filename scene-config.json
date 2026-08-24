@@ -122,7 +122,7 @@
         "slug": "scene12-shader-balls",
         "name": "Scene 12 — PBR Shader Balls",
         "maxMad": 0.027,
-        "maxRawKB": 103.2,
+        "maxRawKB": 103.4,
         "description": "3 shader balls with metallic reflectance textures, directional light, env rotation.",
         "tags": ["pbr", "gltf"],
         "skipPerf": true
@@ -1537,7 +1537,7 @@
         "slug": "scene159-shader-material-basic",
         "name": "Scene 159 - ShaderMaterial Basic",
         "maxMad": 0.02,
-        "maxRawKB": 39.13,
+        "maxRawKB": 39.38,
         "description": "WGSL-only Lite ShaderMaterial equivalent of the Babylon docs' simplest solid-color ShaderMaterial.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -1547,7 +1547,7 @@
         "slug": "scene160-shader-material-texture",
         "name": "Scene 160 - ShaderMaterial Texture",
         "maxMad": 0.02,
-        "maxRawKB": 41.02,
+        "maxRawKB": 41.28,
         "description": "WGSL ShaderMaterial samples a Texture2D through a declared sampler, matching the Babylon docs texture sampler pattern.",
         "tags": ["shader", "texture", "procedural"],
         "skipPerf": true
@@ -1557,7 +1557,7 @@
         "slug": "scene161-shader-material-uniform",
         "name": "Scene 161 - ShaderMaterial Uniform",
         "maxMad": 0.02,
-        "maxRawKB": 39.69,
+        "maxRawKB": 39.94,
         "description": "WGSL ShaderMaterial updates typed custom uniforms through standalone setters.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -1567,7 +1567,7 @@
         "slug": "scene162-shader-material-defines",
         "name": "Scene 162 - ShaderMaterial Defines",
         "maxMad": 0.02,
-        "maxRawKB": 39.15,
+        "maxRawKB": 39.40,
         "description": "WGSL ShaderMaterial emits defines as const pipeline variants.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -1577,7 +1577,7 @@
         "slug": "scene163-shader-material-alpha",
         "name": "Scene 163 - ShaderMaterial Alpha",
         "maxMad": 0.02,
-        "maxRawKB": 38.85,
+        "maxRawKB": 39.10,
         "description": "WGSL ShaderMaterial uses alpha blending and explicit shader-side discard for alpha testing.",
         "tags": ["shader", "alpha", "procedural"],
         "skipPerf": true
@@ -1597,9 +1597,19 @@
         "slug": "scene165-shader-material-thin-instances",
         "name": "Scene 165 - ShaderMaterial Thin Instances",
         "maxMad": 0.01,
-        "maxRawKB": 44.55,
+        "maxRawKB": 44.80,
         "description": "Custom WGSL ShaderMaterial rendered with thin instances + per-instance color: an 8×8×8 grid of unit cubes with a deterministic color ramp, fixed arc-rotate camera. Validates the auto-injected world0..3/instanceColor vertex attributes and the GPU-culling indirect-draw path.",
         "tags": ["shader", "instances", "procedural"],
+        "skipPerf": true
+    },
+    {
+        "id": 167,
+        "slug": "scene167-pbr-lightmap",
+        "name": "Scene 167 — PBR Lightmap",
+        "maxMad": 0.7,
+        "maxRawKB": 76.65,
+        "description": "PBR material lightmap channel. The levelTest.glb level keeps its glTF PBR materials and receives a baked lightmap on TEXCOORD_1 as a shadowmap (multiply, level 3.2, sRGB-decoded, uAng = π V-flip); two procedural PBR boxes receive the same texture additively on TEXCOORD_0. Covers every branch of the PBR lightmap fragment. Local Chrome reaches MAD 0.044; BrowserStack cloud Chrome is deterministically 0.642 with 97.9% of pixels within 5, so the 0.7 ceiling allows that renderer quantization while remaining strict.",
+        "tags": ["pbr", "gltf", "lightmap", "texture"],
         "skipPerf": true
     },
     {
@@ -1887,7 +1897,7 @@
         "slug": "scene213-gridmaterial",
         "name": "Scene 213 — GridMaterial",
         "maxMad": 0.01,
-        "maxRawKB": 49.27,
+        "maxRawKB": 49.52,
         "description": "Four meshes shaded by the procedural unlit GridMaterial - an opaque anti-aliased teal ground, a useMaxLine orange sphere whose object-space grid wraps the curved surface, a transparent alpha-blended cyan box (opacity 0.6), and a hard-cutoff antialias:false pink box - validated against a Babylon.js GridMaterial oracle.",
         "tags": ["materials", "grid", "procedural"],
         "skipPerf": true,
@@ -2545,6 +2555,39 @@
         "maxRawKB": 45,
         "description": "A sparse deterministic NPE particle field using blend mode 4 over a warm destination color. It verifies Babylon's ordered Multiply then Add passes with an isolated pixel oracle.",
         "tags": ["npe", "particles", "billboards", "multiply-add", "blend"],
+        "skipPerf": true
+    },
+    {
+        "id": 300,
+        "slug": "scene300-npe-sprite2d",
+        "name": "Scene 300 — NPE on Sprite2D",
+        "maxRawKB": 35.5,
+        "description": "An authored Node Particle Editor graph advanced to a deterministic frozen frame, then rendered through Lite's native ParticleSystem-to-Sprite2D bridge and pure-2D SpriteRenderer.",
+        "tags": ["npe", "particles", "sprite2d", "2d"],
+        "skipParity": true,
+        "skipParityReason": "Lite-native ParticleSystem-to-Sprite2D bridge; Babylon.js has no equivalent pure-2D SpriteRenderer path to use as a pixel oracle.",
+        "skipPerf": true
+    },
+    {
+        "id": 301,
+        "slug": "scene301-npe-sprite2d-blend-modes",
+        "name": "Scene 301 — NPE Sprite2D Blend Modes",
+        "maxRawKB": 40,
+        "description": "Deterministic Lite-native NPE particles render Multiply and MultiplyAdd side by side through the optional exact Sprite2D bridge, with programmatic pixel assertions against the established particle blend equations.",
+        "tags": ["npe", "particles", "sprite2d", "2d", "multiply", "multiply-add", "blend"],
+        "skipParity": true,
+        "skipParityReason": "Lite-native exact ParticleSystem-to-Sprite2D blend bridge; Babylon.js has no equivalent pure-2D SpriteRenderer path. Blend equations are established by Babylon oracle scenes 283 and 284.",
+        "skipPerf": true
+    },
+    {
+        "id": 303,
+        "slug": "scene303-sprite2d-y-sort",
+        "name": "Scene 303 — Sprite2D Y-Sort",
+        "maxRawKB": 25,
+        "description": "Three sampled overlap pairs prove Sprite2D Y-sort through visible pixels and picking: a first-inserted sprite moved live to larger Y covers a later canonical sprite, equal-Y later insertion wins the stable serial tie, and +60 bias lifts an earlier sprite above a later canonical neighbor.",
+        "tags": ["sprites", "sprite2d", "2d", "y-sort", "top-down", "isometric"],
+        "skipParity": true,
+        "skipParityReason": "Lite-native renderer Y-sort extension; Babylon.js has no equivalent pure-2D GPU-order staging API to use as a pixel oracle.",
         "skipPerf": true
     }
 ]

@@ -86,7 +86,7 @@ describe("writePassSceneUBO scene-UBO change-detection guard", () => {
         const scene = createSceneContext(engine) as SceneContext;
         const camera = makeCamera();
         scene.camera = camera;
-        const task = scene._frameGraph._tasks.find((t): t is RenderTask => "_su" in t)!;
+        const task = scene._frameGraph._tasks.find((t): t is RenderTask => t._sceneUboCacheKey !== undefined)!;
 
         // Scene/task construction may itself issue buffer writes; isolate the guard's own writes.
         writeCount.n = 0;
@@ -100,7 +100,7 @@ describe("writePassSceneUBO scene-UBO change-detection guard", () => {
         expect(writeCount.n).toBe(1);
 
         // An environment loads AFTER steady state. None of the other guarded inputs
-        // (camera/fog/exposure/contrast/envRotationY) changed, so without tracking
+        // (camera/fog/exposure/contrast) changed, so without tracking
         // `_envTextures` the UBO would never be rewritten and the model would keep
         // zero irradiance. The guard must invalidate and re-pack the UBO.
         scene._envTextures = makeEnvTextures();

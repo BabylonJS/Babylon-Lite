@@ -1,10 +1,10 @@
 {
-  "rawKB": 41.3,
-  "rawBytes": 42295,
-  "gzipKB": 24,
+  "rawKB": 41.4,
+  "rawBytes": 42406,
+  "gzipKB": 24.1,
   "ignoredRawKB": 28.6,
   "runtimeChunks": [
-    "scene284-billboard-renderable-BFOJWFb7.js",
+    "scene284-billboard-renderable-ClMjie5K.js",
     "scene284-box-shape-block-ohJvzjii.js",
     "scene284-create-particle-block-CiseX6ot.js",
     "scene284-npe-contextual-DcCy6blJ.js",
@@ -15,7 +15,7 @@
     "scene284-particle-random-block-BMyoDxwS.js",
     "scene284-random-range-CfhNtuAB.js",
     "scene284-system-block-DtFNKeDy.js",
-    "scene284-texture-source-block-BBaJ4S6p.js",
+    "scene284-texture-source-block-BDAB4oP5.js",
     "scene284-update-color-block-D3_45s5M.js",
     "scene284-update-position-block-DQ-fau8B.js",
     "scene284.js"

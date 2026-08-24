@@ -166,6 +166,8 @@ export interface BundleResult {
     significantWarnings: string[];
     /** Emitted bundle code (concatenated across chunks), for tree-shaking content assertions. */
     code: string;
+    /** Rollup/Vite chunks, when the selected harness exposes them. */
+    chunks?: { code: string; isEntry: boolean }[];
 }
 
 function classify(warnings: string[]): string[] {
@@ -251,6 +253,7 @@ export async function runRollup(opts: RollupOpts): Promise<BundleResult> {
     const warnings: string[] = [];
     const errors: string[] = [];
     let code = "";
+    const chunks: { code: string; isEntry: boolean }[] = [];
     try {
         const result = (await viteBuild({
             configFile: false,
@@ -266,17 +269,18 @@ export async function runRollup(opts: RollupOpts): Promise<BundleResult> {
                     onwarn: (w: { message: string }) => warnings.push(w.message),
                 },
             },
-        })) as unknown as { output: { type: string; code?: string }[] } | { output: { type: string; code?: string }[] }[];
+        })) as unknown as { output: { type: string; code?: string; isEntry?: boolean }[] } | { output: { type: string; code?: string; isEntry?: boolean }[] }[];
         const output = Array.isArray(result) ? result[0]!.output : result.output;
         for (const chunk of output) {
             if (chunk.type === "chunk" && chunk.code) {
                 code += chunk.code + "\n";
+                chunks.push({ code: chunk.code, isEntry: chunk.isEntry === true });
             }
         }
     } catch (e) {
         errors.push(e instanceof Error ? e.message : String(e));
     }
-    return { errors, warnings, significantWarnings: classify(warnings), code };
+    return { errors, warnings, significantWarnings: classify(warnings), code, chunks };
 }
 
 /** The recognisable sentinel content, for asserting "nothing but the sentinel survived" regardless

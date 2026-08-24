@@ -4,7 +4,7 @@ import { mat4MultiplyInto } from "../../math/mat4-multiply-into.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
 import type { ShaderMaterial, ShaderUniformSlot } from "./shader-material.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
-import { _installShaderUniformWriters, type ShaderCustomUniformWriter, type ShaderSystemUniformWriter } from "./shader-renderable.js";
+import { _installShaderUniformWriters, _shaderWorldMatrix, type ShaderCustomUniformWriter, type ShaderSystemUniformWriter } from "./shader-renderable.js";
 
 interface CustomWritePlan {
     readonly data: ArrayBuffer;
@@ -143,7 +143,10 @@ const writeCachedCustomUniforms: ShaderCustomUniformWriter = (engine, material, 
 
 const writeCachedSystemUniforms: ShaderSystemUniformWriter = (data, spec, material, mesh, camera, targetWidth, targetHeight) => {
     const plan = getSystemWritePlan(material, spec);
-    const world = mesh.worldMatrix as unknown as Float32Array;
+    // Same floating-origin rebasing as the default writer — see
+    // `_shaderWorldMatrix`. Enabling uniform caching must not change what is
+    // drawn, only how often it is serialized.
+    const world = _shaderWorldMatrix(mesh, camera);
     const aspect = camera ? getEffectiveAspectRatio(camera, targetWidth, targetHeight) : 1;
     const view = camera ? (getViewMatrix(camera) as unknown as Float32Array) : null;
     const projection = camera ? (getProjectionMatrix(camera, aspect) as unknown as Float32Array) : null;
@@ -170,7 +173,9 @@ const writeCachedSystemUniforms: ShaderSystemUniformWriter = (data, spec, materi
                 viewProjection ? mat4MultiplyInto(data, index, viewProjection, 0, world, 0) : data.fill(0, index, index + 16);
                 break;
             case 6:
-                if (camera) {
+                // Zero under floating origin — the eye is the origin of the
+                // frame `world` is expressed in. See the default writer.
+                if (camera && !camera._useFloatingOrigin) {
                     const cameraWorld = camera.worldMatrix as unknown as ArrayLike<number>;
                     data[index] = cameraWorld[12]!;
                     data[index + 1] = cameraWorld[13]!;

@@ -1,22 +1,22 @@
 {
-  "rawKB": 91.7,
-  "rawBytes": 93852,
+  "rawKB": 91.6,
+  "rawBytes": 93790,
   "gzipKB": 38.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene152-create-skeleton-cqJtBMnh.js",
     "scene152-generate-mipmaps-DktZgQ1Z.js",
-    "scene152-gltf-animation-DWv2XxE7.js",
+    "scene152-gltf-animation-Bj36fDl1.js",
     "scene152-gltf-ext-spec-gloss-D60sFZYX.js",
-    "scene152-gltf-feature-animations-DXTgHrz3.js",
+    "scene152-gltf-feature-animations-zbfl2GvK.js",
     "scene152-gltf-feature-extras-VHPteGay.js",
-    "scene152-gltf-feature-registry-g743DSux.js",
-    "scene152-gltf-feature-skeleton-CPz9PSxP.js",
+    "scene152-gltf-feature-registry-c-hvR65H.js",
+    "scene152-gltf-feature-skeleton-CoykC2dQ.js",
     "scene152-gltf-glb-parser-Tu2Uie3E.js",
     "scene152-gltf-sampler-desc-55i7wkXO.js",
-    "scene152-pbr-renderable-DyIx257s.js",
+    "scene152-pbr-renderable-BmzAZLPA.js",
     "scene152-singlelight-hemispheric-wgsl-BIktezEk.js",
-    "scene152-skeleton-fragment-0LLY-tgl.js",
+    "scene152-skeleton-fragment-Cotryn2s.js",
     "scene152.js"
   ]
 }

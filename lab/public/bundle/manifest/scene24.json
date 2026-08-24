@@ -1,5 +1,6 @@
 {
   "rawKB": 59,
+  "rawBytes": 60393,
   "gzipKB": 24.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -12,8 +13,7 @@
     "scene24-set-std-cube-reflection-DiQ16P1V.js",
     "scene24-set-std-opacity-C4PEqVPw.js",
     "scene24-set-std-specular-CxSXJa49.js",
-    "scene24-standard-renderable-kV-ETLaA.js",
+    "scene24-standard-renderable-ELYnPPW4.js",
     "scene24.js"
-  ],
-  "rawBytes": 60453
+  ]
 }

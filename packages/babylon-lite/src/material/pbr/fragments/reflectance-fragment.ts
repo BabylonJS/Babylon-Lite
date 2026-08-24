@@ -11,7 +11,7 @@
 import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_ALPHA_ONLY_MR, PBR2_HAS_REFLECTANCE_FACTORS } from "../pbr-flag-bits.js";
+import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_ALPHA_ONLY_MR, PBR2_HAS_REFLECTANCE_FACTORS, PBR2_HAS_UV_TRANSFORM } from "../pbr-flag-bits.js";
 
 // Reflectance-only features2 bit (reserved in pbr-flag-bits.ts). Defined here,
 // not in the shared flag module, for zero bundle movement on scenes that never
@@ -90,8 +90,18 @@ export function createReflectanceFragment(
     hasReflectanceMap: boolean,
     useAlphaOnlyMR: boolean,
     hasOcclusionUv2: boolean = false,
-    hasUvTx: boolean = false
+    hasUvTx: boolean = false,
+    hasOcclusionSplit: boolean = false
 ): ShaderFragment {
+    // Every arm wraps the same `mix(1.0, _, occlusionStrength)`, so only the
+    // sampled expression varies. Mirrors createPbrTemplateExt's three-arm
+    // `occlusionOverride` — `occlUV` included, which this slot replaces.
+    const occlusionSample = hasOcclusionUv2
+        ? "textureSample(occlusionTexture, occlusionSampler_, input.uv2).r"
+        : hasOcclusionSplit
+          ? "textureSample(ormTexture,ormSampler,occlUV).r"
+          : "orm.r";
+
     const bindings: BindingDecl[] = [];
     if (hasMetallicReflectanceMap) {
         bindings.push(
@@ -167,9 +177,7 @@ let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surf
 
         _fragmentSlots: {
             MF: f0Code,
-            AT: hasOcclusionUv2
-                ? `let occlusion = mix(1.0, textureSample(occlusionTexture, occlusionSampler_, input.uv2).r, material.occlusionStrength);`
-                : `let occlusion = mix(1.0, orm.r, material.occlusionStrength);`,
+            AT: `let occlusion = mix(1.0, ${occlusionSample}, material.occlusionStrength);`,
         },
     };
 }
@@ -224,7 +232,12 @@ export const pbrExt: PbrExt = {
             // createPbrTemplateExt's _hasOcclusionUv2 so the occlusionTexture binding it declares
             // and this sample agree. ctx._uv2Mask is already zeroed when uv2 isn't present.
             ((ctx._uv2Mask ?? 0) & (1 << 5)) !== 0,
-            (ctx._features2 & PBR2_REFL_UV_TX) !== 0
+            (ctx._features2 & PBR2_REFL_UV_TX) !== 0,
+            // Occlusion sampling the ORM texture at its own transformed UV. Must match
+            // createPbrTemplateExt's `_hasOcclusionSplit`, `occlUV` included: this slot
+            // replaces the template's occlusion line, so dropping the arm silently drops
+            // occlusion's transform.
+            (ctx._features2 & PBR2_HAS_UV_TRANSFORM) !== 0 && (ctx._features2 & (1 << 28)) !== 0
         );
     },
     writeUbo: writeReflectanceUBO as PbrExt["writeUbo"],

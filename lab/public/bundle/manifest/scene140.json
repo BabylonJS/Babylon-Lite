@@ -1,5 +1,6 @@
 {
   "rawKB": 90.6,
+  "rawBytes": 92815,
   "gzipKB": 42.3,
   "ignoredRawKB": 6.6,
   "runtimeChunks": [
@@ -40,6 +41,5 @@
     "scene140-vector-splitter-4H4kJV6y.js",
     "scene140-vertex-output-C7G5u6Y0.js",
     "scene140.js"
-  ],
-  "rawBytes": 92812
+  ]
 }

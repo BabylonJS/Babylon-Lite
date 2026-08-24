@@ -73,7 +73,8 @@ export function createPbrTemplateExt(flags: {
 }): PbrTemplateExt {
     const { _hasUvTransform, _hasVertexColor, _hasUv2, _hasAnyNormal, _hasEmissiveTexture, _hasSpecGloss } = flags;
     // Per-channel UV1 (TEXCOORD_1) selection. Bit literals mirror the gltf slow-path encode:
-    // baseColor=1, orm=2, normal=4, emissive=8, specGloss=16, occlusion=32. Only honoured when the
+    // baseColor=1, orm=2, normal=4, emissive=8, specGloss=16, occlusion=32. Bit 64 is claimed by
+    // the opt-in PBR lightmap extension only to signal that the material needs UV2. Only honoured when the
     // uv2 vertex attribute is actually present (_hasUv2); otherwise every channel falls back to
     // input.uv so the shader never references a missing uv2 varying.
     const uv2Mask = _hasUv2 ? flags._uv2Mask : 0;
@@ -83,7 +84,13 @@ export function createPbrTemplateExt(flags: {
     // PBR2_OCCL_UV_SPLIT is defined locally (not in shared pbr-flag-bits.ts) per GUIDANCE
     // §4c′ — it is set in uv-transform-fragment.detect and read only here, both lazy.
     const PBR2_OCCL_UV_SPLIT = 1 << 28;
-    const _hasOcclusionSplit = ((flags._features2 ?? 0) & PBR2_OCCL_UV_SPLIT) !== 0;
+    // Gated on `_hasUvTransform` as well as the bit: the split arm samples at
+    // `occlUV`, which the prelude below only declares under a UV transform, and
+    // "occlusion carries its OWN transform" is meaningless without one. The bit
+    // alone is reachable without a transform — uv-transform-fragment's `detect`
+    // sets it from `occlusionTexture` presence, independently of `_hasUvTx` —
+    // so the two guards must agree or the emitted reference has no declaration.
+    const _hasOcclusionSplit = _hasUvTransform && ((flags._features2 ?? 0) & PBR2_OCCL_UV_SPLIT) !== 0;
 
     // ── UV transform helpers ────────────────────────────────────
     const uvTransformUboFields = (name: string): UboField[] => [

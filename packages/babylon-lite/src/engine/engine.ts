@@ -311,6 +311,22 @@ export interface EngineOptions extends SurfaceOptions {
     useFloatingOrigin?: boolean;
 }
 
+/** Extra `requestAdapter` options contributor, installed only by the WebXR helper
+ *  `enableXrCompatibleAdapter()`. Lets an XR app request an `xrCompatible` GPU adapter without
+ *  every non-XR engine paying for the option: non-XR bundles never call the setter, the bundler
+ *  proves this is always null, and the `_adapterOptionsHook ? … : {}` spread below folds to `{}`,
+ *  so `createEngine`'s adapter request stays byte-identical. */
+let _adapterOptionsHook: (() => GPURequestAdapterOptions) | null = null;
+/** @internal Install extra `requestAdapter` options (called by `enableXrCompatibleAdapter`). */
+export function _installAdapterOptions(hook: () => GPURequestAdapterOptions): void {
+    _adapterOptionsHook = hook;
+}
+/** @internal Resolve the extra adapter options (empty when no hook is installed). Used by
+ *  device-lost recovery so a recovered adapter keeps any XR-compatibility that was requested. */
+export function _getAdapterOptions(): GPURequestAdapterOptions {
+    return _adapterOptionsHook ? _adapterOptionsHook() : {};
+}
+
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
  *  configures the canvas's WebGPU context, and returns an `EngineContext` that *is also*
  *  the primary `SurfaceContext` — i.e. the returned engine is itself the surface for the
@@ -321,7 +337,7 @@ export interface EngineOptions extends SurfaceOptions {
  *  Accepts either a DOM canvas (main thread) or an `OffscreenCanvas` (e.g. transferred
  *  to a Web Worker) — see {@link RenderCanvas}. */
 export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext> {
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance", ...(_adapterOptionsHook ? _adapterOptionsHook() : {}) });
     if (!adapter) {
         throw new Error("WebGPU adapter not available");
     }

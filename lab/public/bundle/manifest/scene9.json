@@ -1,5 +1,6 @@
 {
-  "rawKB": 60.2,
+  "rawKB": 60.1,
+  "rawBytes": 61562,
   "gzipKB": 24.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -10,8 +11,7 @@
     "scene9-set-std-opacity-CMewW_85.js",
     "scene9-set-std-reflection-B6yq1YpQ.js",
     "scene9-set-std-specular-A4Wdrq7s.js",
-    "scene9-standard-renderable-Dy7U41Eq.js",
+    "scene9-standard-renderable-BkYDASh9.js",
     "scene9.js"
-  ],
-  "rawBytes": 61619
+  ]
 }

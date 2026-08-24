@@ -1,15 +1,15 @@
 {
   "rawKB": 50.4,
+  "rawBytes": 51571,
   "gzipKB": 20.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene204-_mat4-storage-f64-7Hs0bt2y.js",
     "scene204-floating-origin-GYPpgH2l.js",
     "scene204-pack-mat4-with-offset-BS-Lz8k7.js",
-    "scene204-standard-renderable-BdeeMwpa.js",
-    "scene204-thin-instance-fragment-CBn2miAC.js",
+    "scene204-standard-renderable-d9QQtCr_.js",
+    "scene204-thin-instance-fragment-DOIWVIH8.js",
     "scene204-thin-instance-gpu-DMPHI30R.js",
     "scene204.js"
-  ],
-  "rawBytes": 51626
+  ]
 }

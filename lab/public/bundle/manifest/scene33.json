@@ -1,25 +1,25 @@
 {
   "rawKB": 103.5,
-  "rawBytes": 105981,
+  "rawBytes": 105950,
   "gzipKB": 42.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene33-generate-mipmaps-DQOEtRmF.js",
-    "scene33-gltf-ext-dielectric-BibUJHHs.js",
-    "scene33-gltf-feature-lights-punctual-C7pc6tiK.js",
-    "scene33-gltf-feature-registry-Do5x4Aub.js",
+    "scene33-gltf-ext-dielectric-DquxJzY6.js",
+    "scene33-gltf-feature-lights-punctual-DYlB3p6s.js",
+    "scene33-gltf-feature-registry-BJbGb6eB.js",
     "scene33-gltf-glb-parser-BAhrbqay.js",
     "scene33-gltf-light-pointer-state-B7kFTRxK.js",
     "scene33-gltf-sampler-desc-D-67mIj3.js",
     "scene33-ibl-fragment-CeRrvT96.js",
     "scene33-light-base-B_sgTGmw.js",
     "scene33-multilight-wgsl-DrIeZxrx.js",
-    "scene33-pbr-renderable-DZ6AQfGX.js",
-    "scene33-pbr-transmission-ext-w9PnoXS6.js",
-    "scene33-point-light-DStN9K4C.js",
+    "scene33-pbr-renderable-CGzy4Z_q.js",
+    "scene33-pbr-transmission-ext-BwcbjaZ5.js",
+    "scene33-point-light-CMl-t6kt.js",
     "scene33-rgbd-decode-DPxD_8qK.js",
     "scene33-scene-uniforms-FTYH6Ct0.js",
-    "scene33-set-transmission-DaVsGf_w.js",
+    "scene33-set-transmission-BDoc-YnF.js",
     "scene33.js"
   ]
 }

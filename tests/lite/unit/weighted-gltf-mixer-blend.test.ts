@@ -6,7 +6,7 @@
 // These tests drive the mixer through the public manager API with a one-joint skeleton
 // and read back the uploaded bone matrix.
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
 import type { AnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
@@ -228,5 +228,20 @@ describe("weighted glTF mixer — bone overrides and masks", () => {
         updateAnimationManager(manager, 500);
         // t = 0.5s → sample 3 minus reference 1 → +2 on top of the rest scale 1.
         expect(boneDiagonal(binding)).toEqual([-3, 3, 3, 1]);
+    });
+
+    it("does not upload a weighted pose after the skeleton is disposed", () => {
+        const binding = createBinding();
+        binding.runtimeSkeleton!._disposed = true;
+        const group = createGroup([createScaleClip(), [createRestNode()], [binding]], 0.5);
+        const writeTexture = vi.fn();
+        const engine = { _device: { queue: { writeTexture } } } as unknown as EngineContext;
+        const manager = createAnimationManager({ engine });
+        enableAnimationBlending(manager);
+        addAnimationGroup(manager, group);
+
+        updateAnimationManager(manager, 500);
+
+        expect(writeTexture).not.toHaveBeenCalled();
     });
 });
