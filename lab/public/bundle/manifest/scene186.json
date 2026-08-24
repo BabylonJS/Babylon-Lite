@@ -1,0 +1,18 @@
+{
+  "rawKB": 100,
+  "rawBytes": 102379,
+  "gzipKB": 37.6,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene186-generate-mipmaps-DvbfQhTF.js",
+    "scene186-ibl-fragment-CeRrvT96.js",
+    "scene186-local-cubemap-fragment-D4-6IA7n.js",
+    "scene186-pbr-renderable-gphicKyE.js",
+    "scene186-rgbd-decode-CD2GUVaS.js",
+    "scene186-scene-uniforms-FTYH6Ct0.js",
+    "scene186-shader-composer-C1omSK6Q.js",
+    "scene186-singlelight-hemispheric-wgsl-BEQy0vQr.js",
+    "scene186-ubo-layout-CaKc5tGR.js",
+    "scene186.js"
+  ]
+}

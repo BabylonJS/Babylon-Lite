@@ -125,7 +125,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const hasCotangent = has(PBR_HAS_NORMAL_MAP) && !hasMesh(MSH_HAS_TANGENTS);
         const _hasAnyNormal = hasNormal || hasCotangent;
         const _hasReflectanceExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP) || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
-        const _hasIbl = hasScene(PBR_HAS_ENV);
+        // The opt-in local-environment extension reserves bit 31, making the signed mask negative.
+        const _hasIbl = hasScene(PBR_HAS_ENV) || features < 0;
         const _hasMorph = hasMesh(MSH_HAS_MORPH_TARGETS);
         const hasShadow = hasMesh(MSH_RECEIVE_SHADOWS);
         const _hasAnisotropy = has(PBR_HAS_ANISOTROPY);
