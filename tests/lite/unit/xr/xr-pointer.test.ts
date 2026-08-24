@@ -53,6 +53,10 @@ function targetBox(z: number): Mesh {
     return { name: "target", pickable: undefined, _cpuPositions: UNIT_CUBE, worldMatrix: mat4Compose(0, 0, z, 0, 0, 0, 1, 1, 1, 1) } as unknown as Mesh;
 }
 
+function targetBoxX(x: number): Mesh {
+    return { name: "target", pickable: undefined, _cpuPositions: UNIT_CUBE, worldMatrix: mat4Compose(x, 0, 0, 0, 0, 0, 1, 1, 1, 1) } as unknown as Mesh;
+}
+
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
 function makeSource(matrix: Float32Array, tracked = true): XrInputSource {
@@ -100,7 +104,7 @@ describe("computePointerVisual", () => {
 describe("updateXrPointer", () => {
     it("shows the laser + cursor and fires hover start when the ray hits a mesh", () => {
         const onHoverStart = vi.fn();
-        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext; // in front along −Z, entry at 4
+        const scene = { meshes: [targetBox(5)] } as unknown as SceneContext; // in front along +Z, entry at 4
         const pointer = createXrPointer({} as EngineContext, scene, { onHoverStart });
         const src = makeSource(IDENTITY);
 
@@ -112,16 +116,16 @@ describe("updateXrPointer", () => {
         expect(unit.cursor.visible).toBe(true);
         expect(unit.laser.pickable).toBe(false); // must never pick itself
         expect(unit.cursor.pickable).toBe(false);
-        // Ring sits at the hit (z=-4) nudged slightly off the surface along the hit
+        // Ring sits at the hit (z=4) nudged slightly off the surface along the hit
         // normal by 0.003*refDist so it doesn't z-fight the face. With no eye position
         // supplied, refDist falls back to the controller→hit distance (4).
-        expect(unit.cursor.position.z).toBeCloseTo(-4 + 0.003 * 4, 5);
+        expect(unit.cursor.position.z).toBeCloseTo(4 - 0.003 * 4, 5);
         expect(unit.laser.scaling.z).toBeCloseTo(4, 5);
     });
 
     it("hides the cursor and fires no hover when the ray misses", () => {
         const onHoverStart = vi.fn();
-        const scene = { meshes: [targetBox(5)] } as unknown as SceneContext; // behind the −Z ray
+        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext; // behind the +Z ray
         const pointer = createXrPointer({} as EngineContext, scene, { onHoverStart });
         const src = makeSource(IDENTITY);
 
@@ -133,9 +137,23 @@ describe("updateXrPointer", () => {
         expect(unit.cursor.visible).toBe(false);
     });
 
+    it("uses the converted target ray's rotated +Z basis as forward", () => {
+        const plusZTowardPlusX = new Float32Array([0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1]);
+        const scene = { meshes: [targetBoxX(5)] } as unknown as SceneContext;
+        const pointer = createXrPointer({} as EngineContext, scene);
+        const src = makeSource(plusZTowardPlusX);
+
+        updateXrPointer(pointer, makeInput([src]));
+
+        const unit = unitOf(pointer, src);
+        expect(unit.cursor.visible).toBe(true);
+        expect(unit.cursor.position.x).toBeCloseTo(4 - 0.003 * 4, 5);
+        expect(unit.cursor.position.z).toBeCloseTo(0, 5);
+    });
+
     it("fires onSelect once on the trigger rising edge while hovering", () => {
         const onSelect = vi.fn();
-        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const scene = { meshes: [targetBox(5)] } as unknown as SceneContext;
         const pointer = createXrPointer({} as EngineContext, scene, { onSelect });
         const src = makeSource(IDENTITY);
 
@@ -153,7 +171,7 @@ describe("updateXrPointer", () => {
 
     it("fires hover end when the ray leaves the mesh", () => {
         const onHoverEnd = vi.fn();
-        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const scene = { meshes: [targetBox(5)] } as unknown as SceneContext;
         const pointer = createXrPointer({} as EngineContext, scene, { onHoverEnd });
         const src = makeSource(IDENTITY);
 
@@ -168,7 +186,7 @@ describe("updateXrPointer", () => {
 
     it("disposes visuals for a source that disconnects", () => {
         disposeMeshGpu.mockClear();
-        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const scene = { meshes: [targetBox(5)] } as unknown as SceneContext;
         const pointer = createXrPointer({} as EngineContext, scene);
         const src = makeSource(IDENTITY);
 
@@ -182,7 +200,7 @@ describe("updateXrPointer", () => {
 
     it("disposeXrPointer tears down all remaining visuals", () => {
         disposeMeshGpu.mockClear();
-        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const scene = { meshes: [targetBox(5)] } as unknown as SceneContext;
         const pointer = createXrPointer({} as EngineContext, scene);
         updateXrPointer(pointer, makeInput([makeSource(IDENTITY)]));
         disposeXrPointer(pointer);
@@ -199,7 +217,7 @@ describe("updateXrPointer — active controller / switch-on-click", () => {
     }
 
     it("shows a pointer on only one controller by default", () => {
-        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const scene = { meshes: [targetBox(5)] } as unknown as SceneContext;
         const pointer = createXrPointer({} as EngineContext, scene);
         const right = handed(IDENTITY, "right");
         const left = handed(IDENTITY, "left");
@@ -211,7 +229,7 @@ describe("updateXrPointer — active controller / switch-on-click", () => {
     });
 
     it("honours preferredHandedness for the initial active controller", () => {
-        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const scene = { meshes: [targetBox(5)] } as unknown as SceneContext;
         const pointer = createXrPointer({} as EngineContext, scene, { preferredHandedness: "left" });
         const right = handed(IDENTITY, "right");
         const left = handed(IDENTITY, "left");
@@ -223,7 +241,7 @@ describe("updateXrPointer — active controller / switch-on-click", () => {
 
     it("moves focus to the controller whose trigger is pressed and consumes that press", () => {
         const onSelect = vi.fn();
-        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const scene = { meshes: [targetBox(5)] } as unknown as SceneContext;
         const pointer = createXrPointer({} as EngineContext, scene, { onSelect });
         const right = handed(IDENTITY, "right"); // first → initially active
         const left = handed(IDENTITY, "left");
@@ -247,7 +265,7 @@ describe("updateXrPointer — active controller / switch-on-click", () => {
     });
 
     it("renders every controller when enableOnAllControllers is set", () => {
-        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const scene = { meshes: [targetBox(5)] } as unknown as SceneContext;
         const pointer = createXrPointer({} as EngineContext, scene, { enableOnAllControllers: true });
         const right = handed(IDENTITY, "right");
         const left = handed(IDENTITY, "left");
@@ -258,7 +276,7 @@ describe("updateXrPointer — active controller / switch-on-click", () => {
     });
 
     it("does not switch when disableSwitchOnClick is set", () => {
-        const scene = { meshes: [targetBox(-5)] } as unknown as SceneContext;
+        const scene = { meshes: [targetBox(5)] } as unknown as SceneContext;
         const pointer = createXrPointer({} as EngineContext, scene, { disableSwitchOnClick: true });
         const right = handed(IDENTITY, "right");
         const left = handed(IDENTITY, "left");
@@ -275,7 +293,7 @@ describe("pointerSelection feature", () => {
     function makeCtx(input: XrInputManager | null): XrSessionContext {
         return {
             engine: {} as EngineContext,
-            scene: { meshes: [targetBox(-5)] } as unknown as SceneContext,
+            scene: { meshes: [targetBox(5)] } as unknown as SceneContext,
             input,
         } as unknown as XrSessionContext;
     }

@@ -47,6 +47,14 @@ vi.mock("../../../../packages/babylon-lite/src/mesh/enable-mirrored-meshes", () 
 vi.mock("../../../../packages/babylon-lite/src/asset-container", () => ({ getContainerMeshes }));
 const { disposeMeshGpu } = vi.hoisted(() => ({ disposeMeshGpu: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/mesh/mesh-dispose", () => ({ disposeMeshGpu }));
+const { setSubtreeVisible, markMaterialUboDirty } = vi.hoisted(() => ({
+    setSubtreeVisible: vi.fn((node: { visible: boolean }, visible: boolean) => {
+        node.visible = visible;
+    }),
+    markMaterialUboDirty: vi.fn(),
+}));
+vi.mock("../../../../packages/babylon-lite/src/scene/visibility", () => ({ setSubtreeVisible }));
+vi.mock("../../../../packages/babylon-lite/src/material/material-dirty", () => ({ markMaterialUboDirty }));
 
 import { createXrControllerModels, updateXrControllerModels, disposeXrControllerModels, controllerModels } from "../../../../packages/babylon-lite/src/xr/xr-controller-models";
 import type { XrControllerModels } from "../../../../packages/babylon-lite/src/xr/xr-controller-models";
@@ -54,6 +62,8 @@ import type { XrSessionContext } from "../../../../packages/babylon-lite/src/xr/
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
 import type { XrInputManager, XrInputSource } from "../../../../packages/babylon-lite/src/xr/xr-input";
+import { createSceneNode } from "../../../../packages/babylon-lite/src/scene/scene-node";
+import { mat4Compose } from "../../../../packages/babylon-lite/src/math/mat4-compose";
 
 const engine = {} as EngineContext;
 const scene = {} as SceneContext;
@@ -104,10 +114,22 @@ describe("controller models", () => {
     });
 
     it("hides the mesh while the grip is untracked", () => {
+        setSubtreeVisible.mockClear();
         const models = createXrControllerModels(engine, scene);
         const src = makeSource(gripPose(1, 1, 1), false);
         updateXrControllerModels(models, makeInput([src]));
         expect(unitOf(models, src).mesh.visible).toBe(false);
+        expect(setSubtreeVisible).toHaveBeenCalledWith(unitOf(models, src).mesh, false);
+    });
+
+    it("dirties the loading placeholder material after pulsing it", () => {
+        markMaterialUboDirty.mockClear();
+        const models = createXrControllerModels(engine, scene, { profiles: true });
+        const src = makeSource(gripPose(0, 0, 0));
+
+        updateXrControllerModels(models, makeInput([src]));
+
+        expect(markMaterialUboDirty).toHaveBeenCalledOnce();
     });
 
     it("disposes a source's mesh when it disconnects", () => {
@@ -161,6 +183,47 @@ describe("controller models", () => {
         await vi.waitFor(() => expect(removeFromScene).toHaveBeenCalledWith(scene, container));
 
         expect(addToScene).not.toHaveBeenCalledWith(scene, container);
+    });
+
+    it("preserves the glTF root mirror while placing a profile model at the converted grip pose", async () => {
+        addToScene.mockClear();
+        loadMotionController.mockReset();
+        enableMirroredMeshes.mockReset();
+        enableMirroredMeshes.mockResolvedValue(undefined);
+        const q = [0.2, 0.3, 0.1, Math.sqrt(0.86)] as const;
+        const grip = mat4Compose(1, 2, 3, q[0], q[1], q[2], q[3], 1, 1, 1);
+        const root = createSceneNode("controller-root", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+        const container = { tag: "controller-model" };
+        loadMotionController.mockResolvedValue({ root, container });
+        const models = createXrControllerModels(engine, scene, { profiles: true });
+        const src = makeSource(new Float32Array(grip));
+
+        updateXrControllerModels(models, makeInput([src]));
+        await vi.waitFor(() => expect(models._mod).not.toBeNull());
+        updateXrControllerModels(models, makeInput([src]));
+        await vi.waitFor(() => expect(addToScene).toHaveBeenCalledWith(scene, container));
+        updateXrControllerModels(models, makeInput([src]));
+
+        const local = [-0.2, 0.1, -1] as const;
+        const tx = 2 * (q[1] * local[2] - q[2] * local[1]);
+        const ty = 2 * (q[2] * local[0] - q[0] * local[2]);
+        const tz = 2 * (q[0] * local[1] - q[1] * local[0]);
+        const expected = [
+            1 + local[0] + q[3] * tx + (q[1] * tz - q[2] * ty),
+            2 + local[1] + q[3] * ty + (q[2] * tx - q[0] * tz),
+            3 + local[2] + q[3] * tz + (q[0] * ty - q[1] * tx),
+        ];
+        const world = root.worldMatrix;
+        const actual = [
+            world[0]! * 0.2 + world[4]! * 0.1 - world[8]! + world[12]!,
+            world[1]! * 0.2 + world[5]! * 0.1 - world[9]! + world[13]!,
+            world[2]! * 0.2 + world[6]! * 0.1 - world[10]! + world[14]!,
+        ];
+
+        expect(actual[0]).toBeCloseTo(expected[0]!, 5);
+        expect(actual[1]).toBeCloseTo(expected[1]!, 5);
+        expect(actual[2]).toBeCloseTo(expected[2]!, 5);
+        expect(root.scaling.x).toBe(-1);
     });
 });
 

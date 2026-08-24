@@ -34,6 +34,7 @@ import { removeFromScene } from "../scene/scene-remove.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { getContainerMeshes } from "../asset-container.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
+import { markMaterialUboDirty } from "../material/material-dirty.js";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -279,7 +280,7 @@ function setUnitVisible(unit: ControllerUnit, visible: boolean): void {
     if (unit.model) {
         setSubtreeVisible(unit.active, visible);
     } else if (unit.mesh) {
-        unit.mesh.visible = visible;
+        setSubtreeVisible(unit.mesh, visible);
     }
 }
 
@@ -322,6 +323,7 @@ export function updateXrControllerModels(models: XrControllerModels, input: XrIn
             unit.placeholderMat.alpha = 0.25 + 0.35 * p;
             const k = 0.6 + 0.4 * p;
             unit.placeholderMat.emissiveColor = [LOADING_GLOW[0] * k, LOADING_GLOW[1] * k, LOADING_GLOW[2] * k];
+            markMaterialUboDirty(unit.placeholderMat);
         }
 
         if (unit.model && models._mod) {

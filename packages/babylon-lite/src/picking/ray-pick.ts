@@ -23,11 +23,47 @@ interface LocalAabb {
     max: [number, number, number];
 }
 
+/** @internal One mesh prepared for repeated same-frame ray tests. */
+interface RayPickCandidate {
+    mesh: Mesh;
+    aabb: LocalAabb;
+    invWorld: Mat4;
+}
+
+/** @internal Scene meshes prepared for repeated same-frame ray tests. */
+export interface RayPickSnapshot {
+    candidates: RayPickCandidate[];
+}
+
 /** Options for {@link pickWithRay}. */
 export interface RayPickOptions {
     /** Return `true` for a mesh that may be picked. Meshes with `pickable === false`
      *  are always skipped (mirrors {@link Mesh.pickable} / BJS `isPickable`). */
     predicate?: (mesh: Mesh) => boolean;
+}
+
+/**
+ * Prepare the scene's pickable meshes for repeated same-frame ray tests.
+ *
+ * @internal
+ */
+export function createRayPickSnapshot(scene: SceneContext, options?: RayPickOptions): RayPickSnapshot {
+    const candidates: RayPickCandidate[] = [];
+    const predicate = options?.predicate;
+    for (const mesh of scene.meshes) {
+        if (mesh.pickable === false || (predicate && !predicate(mesh))) {
+            continue;
+        }
+        const aabb = localAabb(mesh);
+        if (!aabb) {
+            continue;
+        }
+        const invWorld = mat4Invert(mesh.worldMatrix);
+        if (invWorld) {
+            candidates.push({ mesh, aabb, invWorld });
+        }
+    }
+    return { candidates };
 }
 
 // Local AABBs are cached by the identity of the mesh's CPU position array, so the
@@ -157,12 +193,11 @@ function rayAabb(ox: number, oy: number, oz: number, dx: number, dy: number, dz:
  * @param options - Optional predicate to restrict pickable meshes.
  * @returns A {@link PickingInfo}; `hit` is `false` when nothing is intersected.
  */
-export function pickWithRay(scene: SceneContext, ray: Ray, options?: RayPickOptions): PickingInfo {
+export function pickWithRaySnapshot(snapshot: RayPickSnapshot, ray: Ray, options?: RayPickOptions): PickingInfo {
     const info = createEmptyPickingInfo();
     info.ray = ray;
 
     const predicate = options?.predicate;
-    const meshes = scene.meshes;
     const [ox, oy, oz] = ray.origin;
     const [dx, dy, dz] = ray.direction;
 
@@ -176,22 +211,12 @@ export function pickWithRay(scene: SceneContext, ray: Ray, options?: RayPickOpti
     let bestDirSign = 0;
     let bestInvWorld: Mat4 | null = null;
 
-    for (let i = 0; i < meshes.length; i++) {
-        const mesh = meshes[i]!;
-        if (mesh.pickable === false) {
-            continue;
-        }
+    for (const candidate of snapshot.candidates) {
+        const mesh = candidate.mesh;
         if (predicate && !predicate(mesh)) {
             continue;
         }
-        const aabb = localAabb(mesh);
-        if (!aabb) {
-            continue;
-        }
-        const invWorld = mat4Invert(mesh.worldMatrix);
-        if (!invWorld) {
-            continue;
-        }
+        const { aabb, invWorld } = candidate;
         transformPoint(invWorld, ox, oy, oz, localOrigin);
         transformDir(invWorld, dx, dy, dz, localDir);
         axisOut[0] = -1;
@@ -228,4 +253,16 @@ export function pickWithRay(scene: SceneContext, ray: Ray, options?: RayPickOpti
         }
     }
     return info;
+}
+
+/**
+ * Cast a ray through the scene and return the nearest picked mesh (CPU, synchronous).
+ *
+ * @param scene   - The scene whose meshes to test.
+ * @param ray     - World-space ray (origin, unit direction, length).
+ * @param options - Optional predicate to restrict pickable meshes.
+ * @returns A {@link PickingInfo}; `hit` is `false` when nothing is intersected.
+ */
+export function pickWithRay(scene: SceneContext, ray: Ray, options?: RayPickOptions): PickingInfo {
+    return pickWithRaySnapshot(createRayPickSnapshot(scene, options), ray);
 }

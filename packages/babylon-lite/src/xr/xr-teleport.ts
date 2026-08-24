@@ -34,7 +34,7 @@ import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
-import { pickWithRay } from "../picking/ray-pick.js";
+import { createRayPickSnapshot, pickWithRaySnapshot } from "../picking/ray-pick.js";
 import { markMaterialUboDirty } from "../material/material-dirty.js";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
@@ -366,7 +366,8 @@ function viewForward(pose: XRViewerPose): [number, number, number] | null {
     return [fx / len, 0, fz / len];
 }
 
-/** @internal Rotate a horizontal vector about world +Y by `a` (matches `Ry(a)`). */
+/** @internal Apply a positive Lite LH yaw about world +Y. The native reference-space
+ *  offset uses the inverse RH transform so its reported pose turns by this direction. */
 function rotateY(v: [number, number, number], a: number): [number, number, number] {
     const c = Math.cos(a);
     const s = Math.sin(a);
@@ -384,6 +385,7 @@ function traceArc(
     const opts = tp._options;
     const speed = opts.parabolaSpeed;
     const g = opts.parabolic ? opts.gravity : 0;
+    const pickSnapshot = createRayPickSnapshot(tp._scene);
     // Total flight time so the arc's horizontal reach ≈ maxLength at the last sample.
     const maxTime = opts.maxLength / speed;
 
@@ -413,7 +415,7 @@ function traceArc(
             direction: [dx / len, dy / len, dz / len] as [number, number, number],
             length: len,
         };
-        let info = pickWithRay(tp._scene, ray);
+        let info = pickWithRaySnapshot(pickSnapshot, ray);
         let ignored: Mesh[] | null = null;
         while (info.hit && info.pickedMesh) {
             const mesh = info.pickedMesh as Mesh;
@@ -425,7 +427,7 @@ function traceArc(
                 break;
             }
             (ignored ??= []).push(mesh);
-            info = pickWithRay(tp._scene, ray, { predicate: (candidate) => !ignored!.includes(candidate) });
+            info = pickWithRaySnapshot(pickSnapshot, ray, { predicate: (candidate) => !ignored!.includes(candidate) });
         }
         if (info.hit && info.pickedPoint) {
             const hp = info.pickedPoint as [number, number, number];
@@ -509,11 +511,11 @@ function teleportRef(ref: XRReferenceSpace, from: [number, number, number], to: 
 function turnRef(ref: XRReferenceSpace, v: [number, number, number], angle: number): XRReferenceSpace {
     const c = Math.cos(angle);
     const s = Math.sin(angle);
-    const rx = v[0] * c + v[2] * s;
-    const rz = -v[0] * s + v[2] * c;
+    const rx = v[0] * c - v[2] * s;
+    const rz = v[0] * s + v[2] * c;
     const half = angle / 2;
     // Convert the LH yaw/translation back to the RH offset transform WebXR expects.
-    const q = { x: 0, y: -Math.sin(half), z: 0, w: Math.cos(half) };
+    const q = { x: 0, y: Math.sin(half), z: 0, w: Math.cos(half) };
     return ref.getOffsetReferenceSpace(new XRRigidTransform({ x: v[0] - rx, y: 0, z: -(v[2] - rz) }, q));
 }
 
@@ -573,9 +575,9 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
             if (src.targetRayTracked) {
                 const m = src.targetRayMatrix as unknown as Mat4;
                 const origin: [number, number, number] = [m[12]!, m[13]!, m[14]!];
-                let fx = -m[8]!,
-                    fy = -m[9]!,
-                    fz = -m[10]!;
+                let fx = m[8]!,
+                    fy = m[9]!,
+                    fz = m[10]!;
                 const flen = Math.hypot(fx, fy, fz) || 1;
                 fx /= flen;
                 fy /= flen;
@@ -622,9 +624,8 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                         }
                         const fwd = pose ? viewForward(pose) : null;
                         if (fwd) {
-                            // Preview arrow points where you'll face: view-forward rotated by −turn
-                            // (the reference-space offset reports the view rotated by −turn).
-                            orientIndicator(unit.indicator, info.point, rotateY(fwd, -unit.landingTurn));
+                            // Preview arrow points where the reference-space offset will turn the view.
+                            orientIndicator(unit.indicator, info.point, rotateY(fwd, unit.landingTurn));
                             setSubtreeVisible(unit.indicator, true);
                         } else {
                             setSubtreeVisible(unit.indicator, false);

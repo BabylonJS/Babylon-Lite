@@ -4,13 +4,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // per-frame pose loop, and reveal/dispose bookkeeping run for real.
 const { loadGltf } = vi.hoisted(() => ({ loadGltf: vi.fn() }));
 vi.mock("../../../../packages/babylon-lite/src/loader-gltf/load-gltf", () => ({ loadGltf }));
-const { enableBoneControl, getBoneByName, setBonePoseDeferred, bakeSkeleton } = vi.hoisted(() => ({
+const { enableBoneControl, getBoneByName, setBoneWorldPoseDeferred, bakeSkeleton } = vi.hoisted(() => ({
     enableBoneControl: vi.fn(),
     getBoneByName: vi.fn(),
-    setBonePoseDeferred: vi.fn(),
+    setBoneWorldPoseDeferred: vi.fn(),
     bakeSkeleton: vi.fn(),
 }));
-vi.mock("../../../../packages/babylon-lite/src/skeleton/bone-control", () => ({ enableBoneControl, getBoneByName, setBonePoseDeferred, bakeSkeleton }));
+vi.mock("../../../../packages/babylon-lite/src/skeleton/bone-control", () => ({ enableBoneControl, getBoneByName, setBoneWorldPoseDeferred, bakeSkeleton }));
 const { getContainerMeshes } = vi.hoisted(() => ({ getContainerMeshes: vi.fn(() => []) }));
 vi.mock("../../../../packages/babylon-lite/src/asset-container", () => ({ getContainerMeshes }));
 vi.mock("../../../../packages/babylon-lite/src/material/standard/create-standard-material", () => ({
@@ -75,7 +75,7 @@ beforeEach(() => {
     loadGltf.mockReset();
     enableBoneControl.mockClear();
     getBoneByName.mockReset();
-    setBonePoseDeferred.mockClear();
+    setBoneWorldPoseDeferred.mockClear();
     bakeSkeleton.mockClear();
     getContainerMeshes.mockReset();
     getContainerMeshes.mockReturnValue([]);
@@ -198,8 +198,8 @@ describe("poseHandMesh", () => {
         const ok = poseHandMesh(l, hand(["wrist", "thumb-tip"]), frame, {} as XRReferenceSpace);
 
         expect(ok).toBe(true);
-        expect(setBonePoseDeferred).toHaveBeenCalledTimes(2);
-        expect(setBonePoseDeferred).toHaveBeenCalledWith(expect.anything(), { name: "wrist_R" }, 1, 2, -3, 0.1, 0.2, -0.3, -0.9);
+        expect(setBoneWorldPoseDeferred).toHaveBeenCalledTimes(2);
+        expect(setBoneWorldPoseDeferred).toHaveBeenCalledWith(expect.anything(), { name: "wrist_R" }, 1, 2, -3, 0.1, 0.2, -0.3, -0.9);
         expect(bakeSkeleton).toHaveBeenCalledTimes(1); // single bake for the whole hand
         expect((l.root as unknown as { visible: boolean }).visible).toBe(true);
         expect(l.shown).toBe(true);
@@ -213,7 +213,7 @@ describe("poseHandMesh", () => {
         const frame = frameWith((name) => (name === "thumb-tip" ? null : { x: 0, y: 0, z: 0 }));
         const ok = poseHandMesh(loaded(bones), hand(["wrist", "thumb-tip"]), frame, {} as XRReferenceSpace);
         expect(ok).toBe(true);
-        expect(setBonePoseDeferred).toHaveBeenCalledTimes(1); // only the wrist
+        expect(setBoneWorldPoseDeferred).toHaveBeenCalledTimes(1); // only the wrist
         expect(bakeSkeleton).toHaveBeenCalledTimes(1);
     });
 
@@ -226,7 +226,7 @@ describe("poseHandMesh", () => {
             {} as XRReferenceSpace
         );
         expect(ok).toBe(false);
-        expect(setBonePoseDeferred).not.toHaveBeenCalled();
+        expect(setBoneWorldPoseDeferred).not.toHaveBeenCalled();
         expect(bakeSkeleton).not.toHaveBeenCalled();
     });
 

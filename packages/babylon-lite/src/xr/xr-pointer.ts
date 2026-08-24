@@ -144,7 +144,7 @@ const MIN_PICK_DISTANCE = 0.02;
  * from mesh mutation so it is unit-testable without a GPU device.
  *
  * @param origin      - Ray origin (world).
- * @param forward     - Unit ray direction (world) — the target ray's −Z axis.
+ * @param forward     - Unit ray direction (world) — the converted target ray's +Z axis.
  * @param hitDistance - Distance to the hit, or a value `< 0` / non-finite for a miss.
  * @param maxLength   - Beam length used when there is no hit.
  */
@@ -346,10 +346,10 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager, eyePo
 
         const m = src.targetRayMatrix as unknown as Mat4;
         const origin: [number, number, number] = [m[12]!, m[13]!, m[14]!];
-        // Target-ray forward is the matrix's −Z basis column (normalised for safety).
-        let fx = -m[8]!,
-            fy = -m[9]!,
-            fz = -m[10]!;
+        // The WebXR -Z target ray becomes +Z after the RH-to-LH boundary conversion.
+        let fx = m[8]!,
+            fy = m[9]!,
+            fz = m[10]!;
         const flen = Math.hypot(fx, fy, fz) || 1;
         fx /= flen;
         fy /= flen;

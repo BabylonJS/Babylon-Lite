@@ -7,13 +7,13 @@ import { mapBabylonImport, type CompatTarget } from "../packages/babylon-lite-co
 
 /**
  * On-device WebXR testing (e.g. Quest 3) requires a secure context, which for any
- * non-localhost origin means HTTPS. Set `LAB_HTTPS=1` to serve the lab over HTTPS
+ * non-localhost origin means HTTPS. Use `pnpm dev:lab:https` to serve the lab over HTTPS
  * with a self-signed cert (via @vitejs/plugin-basic-ssl) and bind to all network
  * interfaces so the headset can reach `https://<this-machine-ip>:5174` over the
  * LAN — accept the one-time cert warning in the Quest Browser. Left off by
  * default so the normal `pnpm dev:lab` flow stays plain HTTP on localhost.
  */
-const LAB_HTTPS = !!process.env.LAB_HTTPS;
+const LAB_HTTPS = process.argv.some((arg, index) => arg === "--mode=https" || (arg === "--mode" && process.argv[index + 1] === "https"));
 
 interface DemoConfigEntry {
     slug: string;

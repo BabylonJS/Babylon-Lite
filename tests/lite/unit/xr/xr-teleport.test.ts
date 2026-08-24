@@ -49,8 +49,8 @@ vi.mock("../../../../packages/babylon-lite/src/scene/visibility", () => ({
         node.visible = v;
     }),
 }));
-const { pickWithRay } = vi.hoisted(() => ({ pickWithRay: vi.fn() }));
-vi.mock("../../../../packages/babylon-lite/src/picking/ray-pick", () => ({ pickWithRay }));
+const { createRayPickSnapshot, pickWithRay } = vi.hoisted(() => ({ createRayPickSnapshot: vi.fn(() => ({})), pickWithRay: vi.fn() }));
+vi.mock("../../../../packages/babylon-lite/src/picking/ray-pick", () => ({ createRayPickSnapshot, pickWithRaySnapshot: pickWithRay }));
 
 import { createXrTeleportation, updateXrTeleportation, disposeXrTeleportation, teleportation } from "../../../../packages/babylon-lite/src/xr/xr-teleport";
 import type { XrTeleportation, XrTeleportationOptions } from "../../../../packages/babylon-lite/src/xr/xr-teleport";
@@ -89,7 +89,7 @@ function makeRefFrom(tag: string, t: unknown): XRReferenceSpace {
     } as unknown as XRReferenceSpace;
 }
 
-/** Column-major target-ray matrix: origin at (ox,oy,oz), forward = -Z (identity basis). */
+/** Column-major converted target-ray matrix: origin at (ox,oy,oz), forward = +Z. */
 function rayMatrix(ox: number, oy: number, oz: number): Float32Array {
     const m = new Float32Array(16);
     m[0] = 1;
@@ -100,6 +100,43 @@ function rayMatrix(ox: number, oy: number, oz: number): Float32Array {
     m[13] = oy;
     m[14] = oz;
     return m;
+}
+
+/** Apply the inverse native reference-space yaw to WebXR -Z, then convert the result to Lite LH. */
+function resultingForwardLh(): [number, number, number] {
+    const q = (lastTransform?.orient ?? { x: 0, y: 0, z: 0, w: 1 }) as { x: number; y: number; z: number; w: number };
+    const x = -q.x;
+    const y = -q.y;
+    const z = -q.z;
+    const w = q.w;
+    const vx = 0;
+    const vy = 0;
+    const vz = -1;
+    const tx = 2 * (y * vz - z * vy);
+    const ty = 2 * (z * vx - x * vz);
+    const tz = 2 * (x * vy - y * vx);
+    const rx = vx + w * tx + (y * tz - z * ty);
+    const ry = vy + w * ty + (z * tx - x * tz);
+    const rz = vz + w * tz + (x * ty - y * tx);
+    return [rx, ry, -rz];
+}
+
+/** Apply the inverse native offset to a viewer position, then convert it to Lite LH. */
+function resultingPositionLh(position: [number, number, number]): [number, number, number] {
+    const transform = lastTransform!;
+    const q = transform.orient as { x: number; y: number; z: number; w: number };
+    const t = transform.pos as { x: number; y: number; z: number };
+    const x = -q.x;
+    const y = -q.y;
+    const z = -q.z;
+    const w = q.w;
+    const vx = position[0] - t.x;
+    const vy = position[1] - t.y;
+    const vz = -position[2] - t.z;
+    const tx = 2 * (y * vz - z * vy);
+    const ty = 2 * (z * vx - x * vz);
+    const tz = 2 * (x * vy - y * vx);
+    return [vx + w * tx + (y * tz - z * ty), vy + w * ty + (z * tx - x * tz), -(vz + w * tz + (x * ty - y * tx))];
 }
 
 function makeSource(opts: { gamepad?: Partial<Gamepad> | null; tracked?: boolean; ray?: Float32Array; handedness?: string } = {}): XrInputSource {
@@ -157,6 +194,7 @@ function floorHit(point: [number, number, number], normal: [number, number, numb
 beforeEach(() => {
     lastTransform = null;
     pickWithRay.mockReset();
+    createRayPickSnapshot.mockClear();
     disposeMeshGpu.mockClear();
 });
 
@@ -173,6 +211,9 @@ describe("updateXrTeleportation — aiming", () => {
         expect(u.reticle.visible).toBe(true);
         expect(u.target).toEqual([2, 0, -5]);
         expect([u.reticle.position.x, u.reticle.position.y, u.reticle.position.z]).toEqual([2, 0, -5]);
+        const firstRay = pickWithRay.mock.calls[0]![1] as { direction: [number, number, number] };
+        expect(firstRay.direction[0]).toBeCloseTo(0, 6);
+        expect(firstRay.direction[2]).toBeGreaterThan(0.99);
     });
 
     it("shows the laser but hides the reticle when the aim isn't on floor", () => {
@@ -336,6 +377,7 @@ describe("updateXrTeleportation — parabolic arc", () => {
         updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), makeRef("r0"));
         // 32 arc points → 31 segments, all missing, so 31 ray picks.
         expect(pickWithRay).toHaveBeenCalledTimes(31);
+        expect(createRayPickSnapshot).toHaveBeenCalledOnce();
     });
 });
 
@@ -353,13 +395,17 @@ describe("updateXrTeleportation — landing direction", () => {
         const u = unitFor(tp, src);
         expect(u.indicator.visible).toBe(true);
         expect(u.landingTurn).toBeCloseTo(Math.atan2(0.5, 1), 6);
+        const landingTurn = u.landingTurn;
+        const previewYaw = 2 * Math.atan2(u.indicator.rotationQuaternion.y, u.indicator.rotationQuaternion.w!);
+        expect(previewYaw).toBeCloseTo(landingTurn, 6);
 
         // Release → teleport, then a turn (two offset spaces chained; the last is the turn).
         (src.source.gamepad as unknown as { axes: number[] }).axes = [0, 0, 0, 0];
         const out = updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0, IDENTITY), ref0);
         expect(out).not.toBe(ref0);
-        // The final transform constructed is the yaw turn about world +Y.
-        expect((lastTransform!.orient as { y: number }).y).toBeCloseTo(-Math.sin(Math.atan2(0.5, 1) / 2), 6);
+        const forward = resultingForwardLh();
+        expect(forward[0]).toBeCloseTo(Math.sin(landingTurn), 6);
+        expect(forward[2]).toBeCloseTo(Math.cos(landingTurn), 6);
     });
 
     it("freezes the landing heading as the stick springs back to centre", () => {
@@ -460,11 +506,18 @@ describe("updateXrTeleportation — snap turn", () => {
         const src = makeSource({ gamepad: { axes: [0, 0, 1, 0] } }); // full right
         const ref0 = makeRef("r0");
 
-        const a = updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0), ref0);
+        const viewer: [number, number, number] = [2, 1.5, 3];
+        const a = updateXrTeleportation(tp, makeInput([src]), makeFrame(viewer[0], viewer[1], -viewer[2]), ref0);
         expect((ref0 as unknown as { getOffsetReferenceSpace: ReturnType<typeof vi.fn> }).getOffsetReferenceSpace).toHaveBeenCalledTimes(1);
         expect(a).not.toBe(ref0);
-        // Rotation quaternion about +Y for +90°: y = sin(45°).
-        expect((lastTransform!.orient as { y: number }).y).toBeCloseTo(-Math.SQRT1_2, 6);
+        // World-space behavior: a right push rotates Lite +Z toward +X.
+        const forward = resultingForwardLh();
+        expect(forward[0]).toBeCloseTo(1, 6);
+        expect(forward[2]).toBeCloseTo(0, 6);
+        const position = resultingPositionLh(viewer);
+        expect(position[0]).toBeCloseTo(viewer[0], 6);
+        expect(position[1]).toBeCloseTo(viewer[1], 6);
+        expect(position[2]).toBeCloseTo(viewer[2], 6);
 
         // Held: still latched → no second turn (drive the returned space, which is fresh).
         updateXrTeleportation(tp, makeInput([src]), makeFrame(0, 1.5, 0), a);

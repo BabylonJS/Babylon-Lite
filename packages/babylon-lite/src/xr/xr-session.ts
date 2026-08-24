@@ -290,6 +290,21 @@ function ensureUnit(ctx: XrSessionContext, index: number, eye: XREye): XrEyeUnit
     return unit;
 }
 
+interface SeenXrAttachment {
+    texture: GPUTexture;
+    arrayLayer: GPUIntegerCoordinate;
+    mipLevel: GPUIntegerCoordinate;
+}
+
+/** @internal Track whether an XR compositor attachment subresource was already rendered this frame. */
+function isSharedXrAttachment(seen: SeenXrAttachment[], texture: GPUTexture, viewDesc: GPUTextureViewDescriptor): boolean {
+    const arrayLayer = viewDesc.baseArrayLayer ?? 0;
+    const mipLevel = viewDesc.baseMipLevel ?? 0;
+    const shared = seen.some((attachment) => attachment.texture === texture && attachment.arrayLayer === arrayLayer && attachment.mipLevel === mipLevel);
+    seen.push({ texture, arrayLayer, mipLevel });
+    return shared;
+}
+
 /** @internal The per-`XRFrame` render callback: one scene update, then one render task per view. */
 function onXrFrame(ctx: XrSessionContext, time: DOMHighResTimeStamp, frame: XRFrame): void {
     if (ctx._ended) {
@@ -329,6 +344,8 @@ function onXrFrame(ctx: XrSessionContext, time: DOMHighResTimeStamp, frame: XRFr
     const views = pose.views;
     const texW = ctx.layer.textureWidth;
     const texH = ctx.layer.textureHeight;
+    const seenColorAttachments: SeenXrAttachment[] = [];
+    const seenDepthAttachments: SeenXrAttachment[] = [];
     for (let i = 0; i < views.length; i++) {
         const view = views[i]!;
         const subImage = ctx.binding.getViewSubImage(ctx.layer, view);
@@ -355,9 +372,15 @@ function onXrFrame(ctx: XrSessionContext, time: DOMHighResTimeStamp, frame: XRFr
             unit.recorded = true;
         }
         unit.task._colorAttachment.view = colorView;
+        unit.task._config.clr = !isSharedXrAttachment(seenColorAttachments, subImage.colorTexture, viewDesc);
         const dsa = unit.task._renderPassDescriptor.depthStencilAttachment;
-        if (dsa && depthView) {
+        if (dsa && depthView && depthTex) {
             dsa.view = depthView;
+            const depthShared = isSharedXrAttachment(seenDepthAttachments, depthTex, viewDesc);
+            dsa.depthLoadOp = depthShared ? "load" : "clear";
+            if (dsa.stencilLoadOp !== undefined) {
+                dsa.stencilLoadOp = depthShared ? "load" : "clear";
+            }
         }
 
         const vp = subImage.viewport;

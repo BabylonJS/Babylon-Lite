@@ -11,9 +11,8 @@
  * {@link loadHandMesh}, never at module load.
  *
  * Babylon's default rig is FLAT — all 25 joint bones parent directly to the skeleton
- * root — so each WebXR joint pose maps to exactly one bone's local transform with no
- * finger-chain accumulation. The glTF loader and the joint-pose conversion both target
- * Lite's left-handed world, so the model uses the same coordinate space as scene content.
+ * root. Each joint is driven from its absolute, converted Lite world pose so the glTF
+ * root's handedness transform is not applied a second time.
  */
 
 import type { EngineContext } from "../engine/engine.js";
@@ -24,7 +23,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { Skeleton, Bone } from "../skeleton/bone-control.js";
 import type { XrHandedness } from "./xr-support.js";
 import { loadGltf } from "../loader-gltf/load-gltf.js";
-import { enableBoneControl, getBoneByName, setBonePoseDeferred, bakeSkeleton } from "../skeleton/bone-control.js";
+import { enableBoneControl, getBoneByName, setBoneWorldPoseDeferred, bakeSkeleton } from "../skeleton/bone-control.js";
 import { getContainerMeshes } from "../asset-container.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import { enableStandardSkeleton, whenStandardMeshFeaturesReady } from "../material/standard/enable-standard-mesh-features.js";
@@ -157,7 +156,7 @@ export async function loadHandMesh(engine: EngineContext, scene: SceneContext, h
 
 /**
  * Pose a loaded hand mesh's skeleton from the current frame's joint poses. Each flat-rig
- * bone's local transform is set to its joint's pose, then the skin is baked once. Returns
+ * bone receives its absolute Lite world pose, then the skin is baked once. Returns
  * `true` if at least one joint was posed (so the caller can reveal the mesh).
  */
 export function poseHandMesh(loaded: LoadedHandMesh, hand: XRHand, frame: XRFrame, referenceSpace: XRReferenceSpace): boolean {
@@ -181,7 +180,7 @@ export function poseHandMesh(loaded: LoadedHandMesh, hand: XRHand, frame: XRFram
         }
         const p = pose.transform.position;
         const o = pose.transform.orientation;
-        setBonePoseDeferred(loaded.skeleton, bone, p.x, p.y, -p.z, o.x, o.y, -o.z, -o.w);
+        setBoneWorldPoseDeferred(loaded.skeleton, bone, p.x, p.y, -p.z, o.x, o.y, -o.z, -o.w);
         posedAny = true;
     }
     if (posedAny) {

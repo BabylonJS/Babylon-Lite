@@ -12,22 +12,36 @@ gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, 
 
 let beginPassCount = 0;
 let submitCount = 0;
+interface RenderPassState {
+    colorLoadOp: GPULoadOp;
+    depthLoadOp: GPULoadOp | undefined;
+    viewport: [number, number, number, number] | null;
+}
+let renderPassStates: RenderPassState[] = [];
 
 function makeMockEngine(): EngineContext {
-    const pass = {
-        setViewport: () => undefined,
-        setScissorRect: () => undefined,
-        setBindGroup: () => undefined,
-        executeBundles: () => undefined,
-        setPipeline: () => undefined,
-        draw: () => undefined,
-        end: () => undefined,
-    } as unknown as GPURenderPassEncoder;
     const makeEncoder = (): GPUCommandEncoder =>
         ({
-            beginRenderPass: () => {
+            beginRenderPass: (descriptor: GPURenderPassDescriptor) => {
                 beginPassCount++;
-                return pass;
+                const colorAttachment = Array.from(descriptor.colorAttachments)[0]!;
+                const state: RenderPassState = {
+                    colorLoadOp: colorAttachment!.loadOp,
+                    depthLoadOp: descriptor.depthStencilAttachment?.depthLoadOp,
+                    viewport: null,
+                };
+                renderPassStates.push(state);
+                return {
+                    setViewport: (x: number, y: number, width: number, height: number) => {
+                        state.viewport = [x, y, width, height];
+                    },
+                    setScissorRect: () => undefined,
+                    setBindGroup: () => undefined,
+                    executeBundles: () => undefined,
+                    setPipeline: () => undefined,
+                    draw: () => undefined,
+                    end: () => undefined,
+                } as unknown as GPURenderPassEncoder;
             },
             copyTextureToTexture: () => undefined,
             finish: () => ({}) as GPUCommandBuffer,
@@ -188,7 +202,20 @@ function makeFrame(pose: XRViewerPose | null): XRFrame {
 let currentSession: FakeXrSession;
 let lastSessionInit: XRSessionInit | undefined;
 
-function installXrGlobals(opts?: { sessionSupported?: boolean; grantedRefSpaces?: XRReferenceSpaceType[]; projectionLayerError?: Error; updateRenderStateError?: Error }): void {
+interface TestSubImage {
+    colorTexture: GPUTexture;
+    depthStencilTexture: GPUTexture | null;
+    getViewDescriptor: () => GPUTextureViewDescriptor;
+    viewport: XRViewport;
+}
+
+function installXrGlobals(opts?: {
+    sessionSupported?: boolean;
+    grantedRefSpaces?: XRReferenceSpaceType[];
+    projectionLayerError?: Error;
+    updateRenderStateError?: Error;
+    subImageFactory?: (view: XRView) => TestSubImage;
+}): void {
     const g = globalThis as Record<string, unknown>;
     g.navigator = {
         xr: {
@@ -216,7 +243,10 @@ function installXrGlobals(opts?: { sessionSupported?: boolean; grantedRefSpaces?
             }
             return { textureWidth: 512, textureHeight: 512 } as unknown as XRProjectionLayer;
         }
-        getViewSubImage(): unknown {
+        getViewSubImage(_layer: XRProjectionLayer, view: XRView): unknown {
+            if (opts?.subImageFactory) {
+                return opts.subImageFactory(view);
+            }
             return {
                 colorTexture: { createView: () => ({}) as GPUTextureView } as unknown as GPUTexture,
                 depthStencilTexture: { createView: () => ({}) as GPUTextureView } as unknown as GPUTexture,
@@ -244,6 +274,7 @@ describe("xr-session lifecycle", () => {
     beforeEach(() => {
         beginPassCount = 0;
         submitCount = 0;
+        renderPassStates = [];
         // Stub canvas-loop globals used by start/stopEngine (never actually fires).
         g.requestAnimationFrame = () => 1;
         g.cancelAnimationFrame = () => undefined;
@@ -326,12 +357,39 @@ describe("xr-session lifecycle", () => {
         expect(ctx.cameras[0]!.eye).toBe("left");
         expect(ctx.cameras[1]!.eye).toBe("right");
         expect(beginPassCount).toBeGreaterThanOrEqual(2);
+        expect(renderPassStates.map((state) => [state.colorLoadOp, state.depthLoadOp])).toEqual([
+            ["clear", "clear"],
+            ["clear", "clear"],
+        ]);
         expect(submitCount).toBe(1);
 
         await exitXr(ctx);
         expect(currentSession.ended).toBe(true);
         // After end the loop is torn down.
         expect(ctx.cameras.length).toBe(0);
+    });
+
+    it("loads the second eye when color and depth share a projection-texture subrect", async () => {
+        const sharedColor = { createView: () => ({}) as GPUTextureView } as unknown as GPUTexture;
+        const sharedDepth = { createView: () => ({}) as GPUTextureView } as unknown as GPUTexture;
+        installXrGlobals({
+            subImageFactory: (view) => ({
+                colorTexture: sharedColor,
+                depthStencilTexture: sharedDepth,
+                getViewDescriptor: () => ({ baseArrayLayer: 0, baseMipLevel: 0 }),
+                viewport: { x: view.eye === "left" ? 0 : 256, y: 0, width: 256, height: 512 },
+            }),
+        });
+        const scene = createSceneContext(makeMockEngine());
+        const ctx = await enterXr(scene, { input: false });
+
+        currentSession.drive(16, makeFrame(makeViewerPose()));
+
+        expect(renderPassStates.map((state) => [state.colorLoadOp, state.depthLoadOp, state.viewport])).toEqual([
+            ["clear", "clear", [0, 0, 256, 512]],
+            ["load", "load", [256, 0, 256, 512]],
+        ]);
+        await exitXr(ctx);
     });
 
     it("skips rendering when no viewer pose is available but keeps the loop alive", async () => {

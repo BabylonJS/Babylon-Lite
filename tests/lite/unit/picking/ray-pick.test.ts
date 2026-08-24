@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { pickWithRay } from "../../../../packages/babylon-lite/src/picking/ray-pick";
+import { createRayPickSnapshot, pickWithRay, pickWithRaySnapshot } from "../../../../packages/babylon-lite/src/picking/ray-pick";
 import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene";
 import type { Mat4 } from "../../../../packages/babylon-lite/src/math/types";
@@ -96,5 +96,21 @@ describe("pickWithRay (CPU ray/AABB)", () => {
         const scene = makeScene([makeMesh("box", identity)]); // spans [-1,1]
         const info = pickWithRay(scene, ray([5, 0, -10], [0, 0, 1]));
         expect(info.hit).toBe(false);
+    });
+
+    it("reuses prepared bounds and inverse matrices across repeated ray tests", () => {
+        const mesh = makeMesh("box", translateZ(5));
+        let worldReads = 0;
+        Object.defineProperty(mesh, "worldMatrix", {
+            get: () => {
+                worldReads++;
+                return translateZ(5);
+            },
+        });
+
+        const snapshot = createRayPickSnapshot(makeScene([mesh]));
+        expect(pickWithRaySnapshot(snapshot, ray([0, 0, 0], [0, 0, 1])).hit).toBe(true);
+        expect(pickWithRaySnapshot(snapshot, ray([5, 0, 0], [0, 0, 1])).hit).toBe(false);
+        expect(worldReads).toBe(1);
     });
 });
