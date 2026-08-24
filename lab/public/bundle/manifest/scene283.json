@@ -1,7 +1,7 @@
 {
-  "rawKB": 41.6,
-  "rawBytes": 42559,
-  "gzipKB": 24.1,
+  "rawKB": 41.7,
+  "rawBytes": 42675,
+  "gzipKB": 24.2,
   "ignoredRawKB": 28.6,
   "runtimeChunks": [
     "scene283-billboard-renderable-D5en2VGl.js",

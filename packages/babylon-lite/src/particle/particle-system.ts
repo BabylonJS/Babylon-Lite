@@ -95,7 +95,7 @@ export interface ParticleSystem {
     _suppressInitialDirectionCapture?: boolean;
     /** @internal Local-position source hook installed only for emitter-local graphs that read source 0x18. */
     _seedLocalPosition?: ParticleStep;
-    /** @internal Emitter transform build data used by opt-in live providers. */
+    /** @internal Emitter-only transform state used by opt-in live providers. */
     _emitter?: ParticleEmitterState;
     /** @internal Live emitter provider handle installed only by the opt-in enabler. */
     _emitterProvider?: ParticleEmitterProviderState;

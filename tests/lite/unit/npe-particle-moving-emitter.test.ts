@@ -375,6 +375,17 @@ describe("NPE moving emitter transforms", () => {
         expect(system.buffer.posZ[0]).toBeCloseTo(4);
     });
 
+    it.each([
+        ["default", buildNodeParticleSet],
+        ["flow-map", buildNodeParticleSetWithFlowMaps],
+        ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
+    ] as Array<[string, NodeParticleBuilder]>)("retains only emitter state from the %s builder", async (_name, builder) => {
+        const set = await builder({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
+        const emitterState = set.systems[0]!._emitter!;
+
+        expect(Object.keys(emitterState).sort()).toEqual(["emitter", "emitterInverseWorldMatrices", "emitterWorldMatrix"]);
+    });
+
     it("builds and enables through the convenience builder", async () => {
         const set = await buildNodeParticleSetWithEmitterProvider({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()), () =>
             emitterMatrix(2, 3, 4)
@@ -469,19 +480,26 @@ describe("NPE moving emitter transforms", () => {
         expect(second._emitter!.emitter.x).toBe(3);
     });
 
-    it("refreshes every implicit-cylinder inverse retained by one system", async () => {
+    it.each([
+        ["default", buildNodeParticleSet],
+        ["flow-map", buildNodeParticleSetWithFlowMaps],
+        ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
+    ] as Array<[string, NodeParticleBuilder]>)("refreshes every implicit-cylinder inverse retained by the %s builder", async (_name, builder) => {
         const transformed = emitterMatrix(3, -2, 5, Math.PI / 3, 2, 0.5, 1.5);
-        const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(multiCylinderGraph()));
+        const set = await builder({} as EngineContext, {} as SceneContext, parseNodeParticleSource(multiCylinderGraph()));
         const system = set.systems[0]!;
-        const inversePairs = system._emitter!.emitterInverseWorldMatrices!;
-        const inverseReferences = inversePairs.map((pair) => pair.inverse);
+        const inverseStates = system._emitter!.emitterInverseWorldMatrices!;
+        const inverseReferences = inverseStates.map((state) => state.inverse);
+        const initialInverseValues = inverseReferences.map((inverse) => Array.from(inverse));
 
-        expect(inversePairs).toHaveLength(2);
+        expect(inverseStates).toHaveLength(2);
         await enableNodeParticleEmitterProvider(set, () => transformed);
 
-        expect(inversePairs[0]!.inverse).toBe(inverseReferences[0]);
-        expect(inversePairs[1]!.inverse).toBe(inverseReferences[1]);
-        expect(Array.from(inversePairs[1]!.inverse)).toEqual(Array.from(inversePairs[0]!.inverse));
+        expect(inverseStates[0]!.inverse).toBe(inverseReferences[0]);
+        expect(inverseStates[1]!.inverse).toBe(inverseReferences[1]);
+        expect(Array.from(inverseStates[0]!.inverse)).not.toEqual(initialInverseValues[0]);
+        expect(Array.from(inverseStates[1]!.inverse)).not.toEqual(initialInverseValues[1]);
+        expect(Array.from(inverseStates[1]!.inverse)).toEqual(Array.from(inverseStates[0]!.inverse));
     });
 
     it("lets an enabled provider replace the static matrix while preserving stable references", async () => {
