@@ -5,6 +5,7 @@
     "type": "module",
     "scripts": {
         "dev": "vite",
+        "dev:https": "vite --mode https",
         "build": "vite build"
     },
     "dependencies": {
@@ -19,6 +20,7 @@
         "@recast-navigation/core": "0.43.1",
         "@recast-navigation/generators": "0.43.1",
         "@recast-navigation/wasm": "0.43.1",
+        "@vitejs/plugin-basic-ssl": "^2.1.0",
         "@webgpu/types": "^0.1.71",
         "babylonjs-gltf2interface": "^9.19.0",
         "manifold-3d": "3.5.1",

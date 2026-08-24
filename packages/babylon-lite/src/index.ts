@@ -161,6 +161,34 @@ export type { GeospatialControlOptions } from "./camera/geospatial-camera-contro
 export { flyGeospatialCameraToAsync } from "./camera/geospatial-camera-fly.js";
 export type { GeospatialFlyOptions } from "./camera/geospatial-camera-fly.js";
 
+// ─── WebXR (WebGPU binding — draft) ──────────────────────────────────
+// Forward-looking support for the immersive-web WebXR/WebGPU binding. The binding
+// (XRGPUBinding) is not yet implemented by any browser; gate UI on isXrSessionSupported.
+export { enterXr, exitXr } from "./xr/xr-session.js";
+export { enableXrCompatibleAdapter } from "./xr/xr-adapter.js";
+export type { XrSessionContext, XrSessionOptions } from "./xr/xr-session.js";
+export type { XrGpuBinding, XrGpuBindingConstructor, XrGpuSubImage, XrGpuProjectionLayerInit } from "./xr/xr-webgpu-binding.js";
+export { isWebXrPresent, isWebGpuXrSupported, isXrSessionSupported } from "./xr/xr-support.js";
+export type { XrSessionMode, XrEye, XrHandedness, XrTargetRayMode, XrReferenceSpaceType } from "./xr/xr-support.js";
+export { createXrCamera, updateXrCameraForView } from "./xr/xr-camera.js";
+export type { XrCamera } from "./xr/xr-camera.js";
+export { createXrInputManager, updateXrInputPoses, disposeXrInputManager } from "./xr/xr-input.js";
+export type { XrInputManager, XrInputSource, XrInputCallbacks } from "./xr/xr-input.js";
+export { attachXrFeature } from "./xr/xr-feature.js";
+export type { XrFeatureSpec, XrFeatureHandle } from "./xr/xr-feature.js";
+export { createXrPointer, updateXrPointer, disposeXrPointer, computePointerVisual, pointerSelection } from "./xr/xr-pointer.js";
+export type { XrPointer, XrPointerOptions, PointerVisual } from "./xr/xr-pointer.js";
+export { readXrController } from "./xr/xr-controller.js";
+export type { XrControllerComponents, XrButtonState } from "./xr/xr-controller.js";
+export { createXrControllerModels, updateXrControllerModels, disposeXrControllerModels, controllerModels } from "./xr/xr-controller-models.js";
+export type { XrControllerModels, XrControllerModelOptions, XrControllerMeshFactory } from "./xr/xr-controller-models.js";
+export { createXrHandTracking, updateXrHandTracking, disposeXrHandTracking, handTracking } from "./xr/xr-hand.js";
+export type { XrHandTracking, XrHandTrackingOptions, XrHandJointMeshFactory } from "./xr/xr-hand.js";
+export { createXrTeleportation, updateXrTeleportation, disposeXrTeleportation, teleportation } from "./xr/xr-teleport.js";
+export type { XrTeleportation, XrTeleportationOptions } from "./xr/xr-teleport.js";
+export { loadMotionController, updateMotionController, DEFAULT_PROFILES_BASE_URL } from "./xr/xr-motion-controller.js";
+export type { MotionController, XrMotionControllerProfileOptions } from "./xr/xr-motion-controller.js";
+
 // ─── Lights ──────────────────────────────────────────────────────────
 export { createHemisphericLight } from "./light/hemispheric.js";
 export type { HemisphericLight } from "./light/hemispheric.js";
@@ -387,7 +415,17 @@ export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-gr
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
 // Opt-in bone control for skinned models (near-zero bundle cost unless enableBoneControl is called).
-export { enableBoneControl, getBoneByName, setBonePosition, setBoneRotationQuaternion, setBoneScaling, setBoneVisible, clearBoneOverride } from "./skeleton/bone-control.js";
+export {
+    enableBoneControl,
+    getBoneByName,
+    setBonePosition,
+    setBoneRotationQuaternion,
+    setBoneScaling,
+    setBoneVisible,
+    setBonePoseDeferred,
+    bakeSkeleton,
+    clearBoneOverride,
+} from "./skeleton/bone-control.js";
 export type { Skeleton, Bone } from "./skeleton/bone-control.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
 export { runFrameInterpolation } from "./animation/frame-interpolation.js";
@@ -591,6 +629,9 @@ export type { GpuPicker, PickDiscardRule, PickIgnore, PickOptions, PickVertexDat
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
+export { pickWithRay } from "./picking/ray-pick.js";
+export type { RayPickOptions } from "./picking/ray-pick.js";
+export type { Ray } from "./picking/ray.js";
 export { computeDeformedPositionToRef } from "./picking/deformed-vertex.js";
 
 // ─── Gizmos ──────────────────────────────────────────────────────────
