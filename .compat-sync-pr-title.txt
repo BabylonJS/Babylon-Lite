@@ -1,0 +1,1 @@
+fix(compat): sync Babylon.js 9.22.2 API updates

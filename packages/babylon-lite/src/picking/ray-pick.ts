@@ -241,6 +241,7 @@ export function pickWithRaySnapshot(snapshot: RayPickSnapshot, ray: Ray, options
         if (bestAxis >= 0 && bestInvWorld) {
             const nl = [0, 0, 0];
             nl[bestAxis] = -bestDirSign;
+            info.pickedNormal = [nl[0]!, nl[1]!, nl[2]!];
             const iw = bestInvWorld;
             let wnx = iw[0]! * nl[0]! + iw[1]! * nl[1]! + iw[2]! * nl[2]!;
             let wny = iw[4]! * nl[0]! + iw[5]! * nl[1]! + iw[6]! * nl[2]!;

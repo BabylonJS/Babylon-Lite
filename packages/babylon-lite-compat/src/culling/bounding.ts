@@ -9,8 +9,13 @@
  * the result is correct under rotation (transforming only min/max is not).
  */
 
+import { scaleBoundsFromCenterToRef } from "babylon-lite";
+
 import { Vector3 } from "../math/vector.js";
 import { Matrix } from "../math/matrix.js";
+
+const boundingSphereScaleMinimum = new Vector3();
+const boundingSphereScaleMaximum = new Vector3();
 
 export class BoundingSphere {
     public readonly center = new Vector3();
@@ -41,6 +46,12 @@ export class BoundingSphere {
 
     public getWorldMatrix(): Matrix {
         return this._worldMatrix;
+    }
+
+    public scale(factor: number): this {
+        scaleBoundsFromCenterToRef(this.minimum, this.maximum, this.center, factor, boundingSphereScaleMinimum, boundingSphereScaleMaximum);
+        this.reConstruct(boundingSphereScaleMinimum, boundingSphereScaleMaximum, this._worldMatrix);
+        return this;
     }
 
     /** @internal */

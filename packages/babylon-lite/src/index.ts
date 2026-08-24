@@ -461,6 +461,7 @@ export { setVatInstanceStorage, setVatTime } from "./vat/vat-baker.js";
 export type { VatBakeResult, PreparedVatBakeResult, VatBakeOptions, VatBakeTarget, VatClip, VatHandle } from "./vat/vat-baker.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
+export { normalizeVec2ToRef } from "./math/normalize-vec2-to-ref.js";
 export { normalizeVec3 } from "./math/normalize-vec3.js";
 export { normalizeVec3 as normalizeVec3Object } from "./math/normalize-vec3-object.js";
 export { vec3 } from "./math/vec3-ctor.js";
@@ -505,6 +506,10 @@ export { quatFromRotationMatrix } from "./math/quat-from-rotation-matrix.js";
 export { quatFromLookDirectionRH } from "./math/quat-from-look-direction-rh.js";
 export { mat4Decompose } from "./math/mat4-decompose.js";
 export type { DecomposedTransform } from "./math/mat4-decompose.js";
+export { maximizeMat4InPlace } from "./math/maximize-mat4-in-place.js";
+export { polarFromVec2ToRef, polarToVec2ToRef, combinePolarToRef, scalePolarToRef } from "./math/polar.js";
+export type { PolarCoordinates, PolarBinaryOperation } from "./math/polar.js";
+export { scaleBoundsFromCenterToRef } from "./math/scale-bounds-from-center-to-ref.js";
 export type { Vec2, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";

@@ -6,6 +6,8 @@
  * (`v' = v · M`). `multiply(other)` applies `this` first, then `other`.
  */
 
+import { maximizeMat4InPlace } from "babylon-lite";
+
 import { Vector3 } from "./vector.js";
 import { Quaternion } from "./quaternion.js";
 
@@ -24,6 +26,33 @@ export class Matrix {
     public copyFrom(source: Matrix): this {
         this.m.set(source.m);
         return this;
+    }
+
+    public maximizeInPlace(other: Matrix): this {
+        maximizeMat4InPlace(this.m, other.m);
+        return this.markAsUpdated();
+    }
+
+    public maximizeInPlaceFromFloats(
+        m0: number,
+        m1: number,
+        m2: number,
+        m3: number,
+        m4: number,
+        m5: number,
+        m6: number,
+        m7: number,
+        m8: number,
+        m9: number,
+        m10: number,
+        m11: number,
+        m12: number,
+        m13: number,
+        m14: number,
+        m15: number
+    ): this {
+        maximizeMat4InPlace(this.m, [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15]);
+        return this.markAsUpdated();
     }
 
     public clone(): Matrix {

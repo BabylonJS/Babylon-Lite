@@ -27,8 +27,9 @@ import {
     addAnimationGroup,
     enableAnimationBlending,
     updateAnimationManager,
+    pickWithRay as litePickWithRay,
 } from "babylon-lite";
-import type { SceneContext, Camera as LiteCamera, ArcRotateCamera as LiteArcRotateCamera, FreeCamera as LiteFreeCamera, AnimationManager } from "babylon-lite";
+import type { SceneContext, Camera as LiteCamera, ArcRotateCamera as LiteArcRotateCamera, FreeCamera as LiteFreeCamera, AnimationManager, Mesh as LiteMesh } from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
 import type { Plane } from "../math/plane.js";
@@ -45,6 +46,10 @@ import type { BaseTexture, CubeTexture, HDRCubeTexture } from "../textures/textu
 import type { WebGPUEngine } from "../engine/engine.js";
 import { AbstractScene } from "./abstract-scene.js";
 import { Logger } from "../misc/misc-utils.js";
+import type { Ray } from "../math/ray.js";
+import type { Vector3 } from "../math/vector.js";
+import { PickingInfo } from "../culling/picking-info.js";
+import type { TransformNode } from "../meshes/meshes.js";
 
 /** Babylon.js EnvironmentHelper default skybox/ground assets (match the Lite ports). */
 const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
@@ -813,9 +818,36 @@ export class Scene extends AbstractScene {
         );
     }
 
-    /** Synchronous ray picking — unsupported. */
-    public pickWithRay(): never {
-        return unsupported("Scene.pickWithRay", "Synchronous CPU ray-mesh intersection is not implemented in Babylon Lite.");
+    /** Synchronous CPU ray picking over Babylon Lite's scene-mesh picker. */
+    public pickWithRay(
+        ray: Ray,
+        predicate?: (mesh: TransformNode) => boolean,
+        fastCheck = false,
+        trianglePredicate?: (p0: Vector3, p1: Vector3, p2: Vector3, ray: Ray) => boolean
+    ): PickingInfo {
+        if (fastCheck || trianglePredicate) {
+            return unsupported(
+                "Scene.pickWithRay",
+                "Babylon Lite's synchronous picker returns the nearest bounding-box hit and does not expose fast-first-hit or per-triangle predicate modes."
+            );
+        }
+        const info = litePickWithRay(
+            this._lite,
+            {
+                origin: ray.origin.asArray(),
+                direction: ray.direction.asArray(),
+                length: ray.length,
+            },
+            predicate
+                ? {
+                      predicate: (mesh) => {
+                          const wrapper = this._meshWrappers.get(mesh);
+                          return wrapper ? predicate(wrapper) : false;
+                      },
+                  }
+                : undefined
+        );
+        return PickingInfo._fromLite(info, info.pickedMesh ? (this._meshWrappers.get(info.pickedMesh as LiteMesh) ?? null) : null, ray);
     }
 
     /** @internal The active Physics V2 engine, once `enablePhysics` has wired one. */
