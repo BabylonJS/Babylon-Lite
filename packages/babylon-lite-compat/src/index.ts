@@ -334,9 +334,6 @@ export {
     ThinFSR1SharpenPostProcess,
     ParticleHelper,
     PointsCloudSystem,
-    PhysicsAggregate,
-    PhysicsBody,
-    PhysicsShape,
     CannonJSPlugin,
     AmmoJSPlugin,
     RecastJSPlugin,
@@ -352,7 +349,18 @@ export {
     SceneOptimizer,
 } from "./unsupported/unsupported-extended.js";
 
-export { HavokPlugin, PhysicsEngine, PhysicsShapeType, PhysicsMotionType, PhysicsPrestepType, PhysicsConstraintType } from "./physics/physics.js";
+export {
+    HavokPlugin,
+    PhysicsEngine,
+    PhysicsAggregate,
+    PhysicsBody,
+    PhysicsShape,
+    PhysicsShapeType,
+    PhysicsMotionType,
+    PhysicsPrestepType,
+    PhysicsConstraintType,
+} from "./physics/physics.js";
+export type { PhysicsAggregateParameters, PhysicsMaterial, PhysicShapeOptions } from "./physics/physics.js";
 
 // ─── Node Particle Editor (NPE) ──────────────────────────────────────
 export { NodeParticleSystemSet, ParticleSystemSet } from "./particles/node-particle-system-set.js";

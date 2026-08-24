@@ -3,7 +3,7 @@
     "compilerOptions": {
         "outDir": "./dist",
         "rootDir": ".",
-        "types": ["@webgpu/types", "vite/client"]
+        "types": ["@webgpu/types", "webxr", "vite/client"]
     },
     "include": ["src", "scripts", "vite.config.ts", "vite.engine.config.ts"]
 }
