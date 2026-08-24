@@ -216,6 +216,7 @@ describe("TextRenderer device-lost recovery", () => {
         const oldLayerGpu = renderer._layerGpu.get(layer)!;
         const oldUniform = oldLayerGpu._textU;
         const oldInstance = oldLayerGpu._instanceBuf;
+        const oldStyle = oldLayerGpu._styleBuf;
 
         const newProbe = makeDevice();
         engine._device = newProbe.device;
@@ -224,6 +225,8 @@ describe("TextRenderer device-lost recovery", () => {
         const rebuiltLayerGpu = renderer._layerGpu.get(layer)!;
         expect(rebuiltLayerGpu._textU).not.toBe(oldUniform);
         expect(rebuiltLayerGpu._instanceBuf).not.toBe(oldInstance);
+        expect(rebuiltLayerGpu._styleBuf).not.toBe(oldStyle);
+        expect(rebuiltLayerGpu._uploadedStyleVersion).toBe(data._styleVersion);
         expect(rebuiltLayerGpu._uploadedDataVersion).toBe(data._version);
         expect(rebuiltLayerGpu._pipeline).not.toBeNull();
         expect(atlas._gpu).not.toBe(oldAtlasGpu);

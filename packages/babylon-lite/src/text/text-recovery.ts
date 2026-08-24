@@ -1,7 +1,8 @@
 import type { EngineContext } from "../engine/engine.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
+import { createStyleBuffer } from "./_gpu/text-style-gpu.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
-import { TEXT_INSTANCE_BYTES } from "./text-data.js";
+import { TEXT_INSTANCE_BYTES, TEXT_STYLE_BYTES } from "./text-data.js";
 import type { TextRenderer } from "./text-renderer.js";
 
 const TEXT_UBO_BYTES = 96;
@@ -33,6 +34,8 @@ function rebuildTextRendererGpu(renderer: TextRenderer): void {
             size: lg._instanceCap * TEXT_INSTANCE_BYTES,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         });
+        lg._styleBuf = createStyleBuffer(device, lg._styleBuf.size / TEXT_STYLE_BYTES);
+        lg._uploadedStyleVersion = -1;
         lg._pipeline = null;
         lg._bindGroupCache.length = 0;
         lg._uploadedDataVersion = -1;
