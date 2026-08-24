@@ -1,12 +1,12 @@
 {
-  "rawKB": 100,
-  "rawBytes": 102379,
-  "gzipKB": 37.6,
+  "rawKB": 96.8,
+  "rawBytes": 99121,
+  "gzipKB": 36.9,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene186-generate-mipmaps-DvbfQhTF.js",
     "scene186-ibl-fragment-CeRrvT96.js",
-    "scene186-local-cubemap-fragment-D4-6IA7n.js",
+    "scene186-local-cubemap-fragment-B4KSLXP2.js",
     "scene186-pbr-renderable-gphicKyE.js",
     "scene186-rgbd-decode-CD2GUVaS.js",
     "scene186-scene-uniforms-FTYH6Ct0.js",

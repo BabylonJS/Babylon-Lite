@@ -9,7 +9,7 @@
 import type { ComposedShader, ShaderFragment, UboField } from "../../../shader/fragment-types.js";
 import { BU } from "../../../engine/gpu-flags.js";
 import { createMappedBuffer, createUniformBuffer } from "../../../resource/gpu-buffers.js";
-import type { PbrExt, _PbrBindCtx, _PbrFragCtx } from "../pbr-flags.js";
+import type { PbrExt, _PbrBindCtx } from "../pbr-flags.js";
 import { _getPbrLocalEnvironment, type PbrLocalEnvironmentState } from "../pbr-local-cubemap-state.js";
 import {
     _PBR_LOCAL_ENVIRONMENT_DEBUG_COLOR_FLAG,
@@ -39,20 +39,6 @@ const LOCAL_SH_FIELDS = [
 ] as const;
 
 const LOCAL_SH_UBO_FIELDS: readonly UboField[] = LOCAL_SH_FIELDS.map((_name) => ({ _name, _type: "vec3<f32>" }));
-
-const IBL_HELPERS = `fn environmentHorizonOcclusion(V:vec3f,N:vec3f,geoN:vec3f)->f32{
-let R=reflect(V,N);
-let temp=saturate(1.0+1.1*dot(R,geoN));
-return temp*temp;
-}
-fn getEnergyConservationFactor(F0:vec3f,brdfY:f32)->vec3f{
-return 1.0+F0*(1.0/brdfY-1.0);
-}
-fn rotateY(v:vec3f,angle:f32)->vec3f{
-let c=cos(angle);
-let s=sin(angle);
-return vec3f(v.x*c+v.z*s,v.y,-v.x*s+v.z*c);
-}`;
 
 const SINGLE_CUBEMAP_HELPERS = `fn parallaxCorrectBoxNormal(vertexPos:vec3f,origVec:vec3f,cubeSize:vec3f,cubePos:vec3f,capturePos:vec3f)->vec3f{
 let invOrigVec=vec3f(1.0)/origVec;
@@ -87,12 +73,6 @@ const IBL_SCENE_IRRADIANCE = `let environmentIrradiance = (scene.vSphericalL00.r
   + scene.vSphericalL20.rgb * (3.0 * N_env.z * N_env.z - 1.0) + scene.vSphericalL21.rgb * (N_env.z * N_env.x)
   + scene.vSphericalL22.rgb * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity;`;
 
-const IBL_LOCAL_IRRADIANCE = `let environmentIrradiance = (material.localSphericalL00.rgb
-  + material.localSphericalL1_1.rgb * N_env.y + material.localSphericalL10.rgb * N_env.z + material.localSphericalL11.rgb * N_env.x
-  + material.localSphericalL2_2.rgb * (N_env.y * N_env.x) + material.localSphericalL2_1.rgb * (N_env.y * N_env.z)
-  + material.localSphericalL20.rgb * (3.0 * N_env.z * N_env.z - 1.0) + material.localSphericalL21.rgb * (N_env.z * N_env.x)
-  + material.localSphericalL22.rgb * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity;`;
-
 const IBL_SCENE_OR_LOCAL_IRRADIANCE = `let sceneEnvironmentIrradiance = (scene.vSphericalL00.rgb
   + scene.vSphericalL1_1.rgb * N_env.y + scene.vSphericalL10.rgb * N_env.z + scene.vSphericalL11.rgb * N_env.x
   + scene.vSphericalL2_2.rgb * (N_env.y * N_env.x) + scene.vSphericalL2_1.rgb * (N_env.y * N_env.z)
@@ -105,9 +85,8 @@ let localEnvironmentIrradiance = (material.localSphericalL00.rgb
   + material.localSphericalL22.rgb * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity;
 let environmentIrradiance=select(localEnvironmentIrradiance,sceneEnvironmentIrradiance,material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0);`;
 
-function createProbeArrayHelpers(includeIblHelpers: boolean): string {
-    return `${includeIblHelpers ? IBL_HELPERS : ""}
-struct LocalEnvironmentProbe{
+function createProbeArrayHelpers(): string {
+    return `struct LocalEnvironmentProbe{
 projectionCentreAndLayer:vec4f,
 projectionHalfSizeAndLodScale:vec4f,
 capturePositionAndLodBias:vec4f,
@@ -330,8 +309,8 @@ function patchLayeredLocalIbl(fragmentWGSL: string, composed: ComposedShader): s
             /let\s+ccEnvRadiance_ibl\s*=\s*textureSampleLevel\(\s*iblTexture\s*,\s*iblSampler\s*,\s*ccR_ibl\s*,\s*clamp\(\s*ccSpecLod_ibl\s*,\s*0\.0\s*,\s*maxLod\s*\)\s*\)\.rgb\s*\*\s*material\.environmentIntensity\s*;/g,
             () => {
                 rewrites++;
-                return `var ccEnvRadiance_ibl=textureSampleLevel(iblTexture,iblSampler,ccR_ibl,clamp(ccSpecLod_ibl,0.0,maxLod)).rgb*material.environmentIntensity;
-if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){ccEnvRadiance_ibl=sampleLocalProbeRadiance(input.worldPos,ccR_raw,ccAlphaG_ibl,scene.envRotationY,material.environmentIntensity);}`;
+                return `var ccEnvRadiance_ibl:vec3f;
+if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){ccEnvRadiance_ibl=sampleLocalProbeRadiance(input.worldPos,ccR_raw,ccAlphaG_ibl,scene.envRotationY,material.environmentIntensity);}else{ccEnvRadiance_ibl=textureSampleLevel(iblTexture,iblSampler,ccR_ibl,clamp(ccSpecLod_ibl,0.0,maxLod)).rgb*material.environmentIntensity;}`;
             }
         );
         if (rewrites !== 1) {
@@ -344,8 +323,8 @@ if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){ccEnvRadia
             /let\s+shEnvRadiance\s*=\s*textureSampleLevel\(\s*iblTexture\s*,\s*iblSampler\s*,\s*R\s*,\s*clamp\(\s*shSpecLod\s*,\s*0\.0\s*,\s*maxLod\s*\)\s*\)\.rgb\s*\*\s*material\.environmentIntensity\s*;/g,
             () => {
                 rewrites++;
-                return `var shEnvRadiance=textureSampleLevel(iblTexture,iblSampler,R,clamp(shSpecLod,0.0,maxLod)).rgb*material.environmentIntensity;
-if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){shEnvRadiance=sampleLocalProbeRadiance(input.worldPos,R_raw,shAlphaG_ibl,scene.envRotationY,material.environmentIntensity);}`;
+                return `var shEnvRadiance:vec3f;
+if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){shEnvRadiance=sampleLocalProbeRadiance(input.worldPos,R_raw,shAlphaG_ibl,scene.envRotationY,material.environmentIntensity);}else{shEnvRadiance=textureSampleLevel(iblTexture,iblSampler,R,clamp(shSpecLod,0.0,maxLod)).rgb*material.environmentIntensity;}`;
             }
         );
         if (rewrites !== 1) {
@@ -379,8 +358,8 @@ function patchSceneIbl(composed: ComposedShader): ComposedShader {
         /var\s+environmentRadiance\s*=\s*textureSampleLevel\(\s*iblTexture\s*,\s*iblSampler\s*,\s*R\s*,\s*clamp\(\s*specLod\s*,\s*0\.0\s*,\s*maxLod\s*\)\s*\)\.rgb\s*\*\s*material\.environmentIntensity\s*;/g,
         () => {
             baseRewrites++;
-            return `var environmentRadiance=textureSampleLevel(iblTexture,iblSampler,R,clamp(specLod,0.0,maxLod)).rgb*material.environmentIntensity;
-if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){environmentRadiance=sampleLocalProbeRadiance(input.worldPos,R_raw,alphaG,scene.envRotationY,material.environmentIntensity);}
+            return `var environmentRadiance:vec3f;
+if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){environmentRadiance=sampleLocalProbeRadiance(input.worldPos,R_raw,alphaG,scene.envRotationY,material.environmentIntensity);}else{environmentRadiance=textureSampleLevel(iblTexture,iblSampler,R,clamp(specLod,0.0,maxLod)).rgb*material.environmentIntensity;}
 let localProbeDebugOutput=environmentRadiance;`;
         }
     );
@@ -391,43 +370,8 @@ let localProbeDebugOutput=environmentRadiance;`;
     return patchProbeCubeArray(patchProbeGridStorage({ ...composed, _fragmentWGSL: fragmentWGSL }));
 }
 
-function patchStandaloneIbl(composed: ComposedShader): ComposedShader {
-    let fragmentWGSL = composed._fragmentWGSL.replace(/scene\.vImageInfos\.z/g, "material.localLodGenerationScale");
-    fragmentWGSL = patchLayeredLocalIbl(fragmentWGSL, composed);
-    return patchProbeCubeArray(patchProbeGridStorage({ ...composed, _fragmentWGSL: fragmentWGSL }));
-}
-
-function standaloneIblCode(reflectionCode: string, radianceCode: string, hasNormal: boolean, debugCode = ""): string {
-    const ehoLine = hasNormal ? "let eho=environmentHorizonOcclusion(-V,N,N_geom);" : "let eho=1.0;";
-    return `${reflectionCode}
-let N_env=rotateY(N,scene.envRotationY);
-let brdf=textureSample(brdfLUT,brdfSampler_,vec2f(NdotV,roughness));
-let environmentBrdf=brdf.rgb;
-let specularEnvironmentReflectance=(colorF90-colorF0)*environmentBrdf.x+colorF0*environmentBrdf.y;
-let seo=clamp((NdotVUnclamped+occlusion)*(NdotVUnclamped+occlusion)-1.0+occlusion,0.0,1.0);
-${ehoLine}
-let colorSpecularEnvReflectance=specularEnvironmentReflectance*seo*eho;
-let energyConservation=getEnergyConservationFactor(colorF0,max(environmentBrdf.y,0.001));
-${IBL_LOCAL_IRRADIANCE}
-${radianceCode}
-${debugCode}
-environmentRadiance=mix(environmentRadiance,environmentIrradiance,alphaG);
-var finalIrradiance=environmentIrradiance*surfaceAlbedo*occlusion;
-let finalSpecularScaled=directSpecular*energyConservation;
-let finalRadianceScaled=environmentRadiance*colorSpecularEnvReflectance*energyConservation;
-color=finalIrradiance+finalRadianceScaled+finalSpecularScaled+directDiffuse+emissive;`;
-}
-
-function localBindings(hasSceneIbl: boolean): NonNullable<ShaderFragment["_bindings"]> {
+function localBindings(): NonNullable<ShaderFragment["_bindings"]> {
     return [
-        ...(!hasSceneIbl
-            ? ([
-                  { _name: "brdfLUT", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
-                  { _name: "brdfSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
-                  { _name: "iblTexture", _type: { _kind: "texture", _textureType: "texture_cube<f32>" }, _visibility: STAGE_FRAGMENT },
-                  { _name: "iblSampler", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
-              ] as const)
-            : []),
         { _name: "localProbeData", _type: { _kind: "uniform-buffer" }, _visibility: STAGE_FRAGMENT },
         { _name: "localProbeGrid", _type: { _kind: "uniform-buffer" }, _visibility: STAGE_FRAGMENT },
         { _name: "localProbeTexture", _type: { _kind: "texture", _textureType: "texture_cube<f32>" }, _visibility: STAGE_FRAGMENT },
@@ -435,7 +379,7 @@ function localBindings(hasSceneIbl: boolean): NonNullable<ShaderFragment["_bindi
     ];
 }
 
-function createLocalEnvironmentFragment(ctx: _PbrFragCtx): ShaderFragment {
+function createLocalEnvironmentFragment(): ShaderFragment {
     const uboFields: UboField[] = [
         { _name: "localEnvironmentMode", _type: "f32" },
         { _name: "vReflectionPosition", _type: "vec3<f32>" },
@@ -444,37 +388,16 @@ function createLocalEnvironmentFragment(ctx: _PbrFragCtx): ShaderFragment {
         { _name: "localLodGenerationScale", _type: "f32" },
         ...LOCAL_SH_UBO_FIELDS,
     ];
-    if (ctx._hasIbl) {
-        return {
-            _id: "local-cubemap",
-            _dependencies: ["ibl"],
-            _uboFields: uboFields,
-            _bindings: localBindings(true),
-            _helperFunctions: `${SINGLE_CUBEMAP_HELPERS}\n${createProbeArrayHelpers(false)}`,
-            _fragmentSlots: {
-                BC: `if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0&&(localProbeData.params.w&${_PBR_LOCAL_ENVIRONMENT_DEBUG_COLOR_FLAG}u)!=0u){color=localProbeDebugOutput;}`,
-            },
-            _pc: patchSceneIbl,
-        };
-    }
     return {
         _id: "local-cubemap",
+        _dependencies: ["ibl"],
         _uboFields: uboFields,
-        _bindings: localBindings(false),
-        _helperFunctions: `${IBL_HELPERS}\n${SINGLE_CUBEMAP_HELPERS}\n${createProbeArrayHelpers(false)}`,
+        _bindings: localBindings(),
+        _helperFunctions: `${SINGLE_CUBEMAP_HELPERS}\n${createProbeArrayHelpers()}`,
         _fragmentSlots: {
-            AI: standaloneIblCode(
-                "let R_raw=reflect(-V,N);let R=rotateY(localSingleReflectionDirection(input.worldPos,R_raw,material.localEnvironmentMode,material.vReflectionSize,material.vReflectionPosition,material.vReflectionCapturePosition),scene.envRotationY);",
-                `let maxLod=f32(textureNumLevels(iblTexture)-1);let cubemapDim=f32(textureDimensions(iblTexture).x);var specLod=log2(cubemapDim*alphaG)*material.localLodGenerationScale;var environmentRadiance=textureSampleLevel(iblTexture,iblSampler,R,clamp(specLod,0.0,maxLod)).rgb*material.environmentIntensity;
-if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){environmentRadiance=sampleLocalProbeRadiance(input.worldPos,R_raw,alphaG,scene.envRotationY,material.environmentIntensity);}
-let localProbeDebugOutput=environmentRadiance;`,
-                ctx._hasAnyNormal,
-                ""
-            ),
             BC: `if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0&&(localProbeData.params.w&${_PBR_LOCAL_ENVIRONMENT_DEBUG_COLOR_FLAG}u)!=0u){color=localProbeDebugOutput;}`,
-            BA: "luminanceOverAlpha+=dot(finalRadianceScaled,vec3f(0.2126,0.7152,0.0722));",
         },
-        _pc: patchStandaloneIbl,
+        _pc: patchSceneIbl,
     };
 }
 
@@ -577,7 +500,7 @@ export const pbrExt: PbrExt = {
         return { f: state ? PBR_HAS_LOCAL_ENVIRONMENT : 0, f2: 0 };
     },
     frag(ctx) {
-        return (ctx._features & PBR_HAS_LOCAL_ENVIRONMENT) !== 0 ? createLocalEnvironmentFragment(ctx) : null;
+        return (ctx._features & PBR_HAS_LOCAL_ENVIRONMENT) !== 0 ? createLocalEnvironmentFragment() : null;
     },
     writeUbo(data, material, offsets) {
         const state = _getPbrLocalEnvironment(material);

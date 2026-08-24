@@ -368,7 +368,8 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
 - **Probe array**: `createPbrLocalEnvironmentProbeSet()` copies every probe into one
   `texture_cube_array<f32>`. Sources share a format and have power-of-two-related square dimensions.
   The destination uses the smallest dimension; larger sources contribute matching lower mips, so
-  no resampling pass is required.
+  no resampling pass is required. The array uses the engine's deduplicated trilinear sampler rather
+  than depending on any source environment's sampler identity.
 - **Shared probe UBO**: each probe occupies seven `vec4`s: projection centre/layer,
   projection half-size/LOD scale, capture position/LOD bias, inner influence centre/yaw cosine,
   inner half-size/yaw sine, outer influence centre, and outer half-size/packed metadata. The last

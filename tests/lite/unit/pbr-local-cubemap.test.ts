@@ -88,6 +88,7 @@ function makeProbeGridTestScene(): { scene: unknown; environment: EnvironmentTex
             maxBufferSize: 65536,
         },
         createTexture: vi.fn(() => destinationTexture),
+        createSampler: vi.fn(() => ({}) as GPUSampler),
         createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
             const mapped = new ArrayBuffer(Number(descriptor.size));
             return {
@@ -410,6 +411,15 @@ describe("PBR local cubemap projection", () => {
         expect(result._fragmentWGSL).toContain("color=localProbeDebugOutput;");
         expect(result._fragmentWGSL).toContain("sampleLocalProbeRadiance(input.worldPos,ccR_raw");
         expect(result._fragmentWGSL).toContain("sampleLocalProbeRadiance(input.worldPos,R_raw,shAlphaG_ibl");
+        expect(result._fragmentWGSL).toContain("var environmentRadiance:vec3f;");
+        expect(result._fragmentWGSL).toContain("}else{environmentRadiance=textureSampleLevel");
+        expect(result._fragmentWGSL).toContain("var ccEnvRadiance_ibl:vec3f;");
+        expect(result._fragmentWGSL).toContain("}else{ccEnvRadiance_ibl=textureSampleLevel");
+        expect(result._fragmentWGSL).toContain("var shEnvRadiance:vec3f;");
+        expect(result._fragmentWGSL).toContain("}else{shEnvRadiance=textureSampleLevel");
+        expect(result._fragmentWGSL).not.toContain("var environmentRadiance=textureSampleLevel");
+        expect(result._fragmentWGSL).not.toContain("var ccEnvRadiance_ibl=textureSampleLevel");
+        expect(result._fragmentWGSL).not.toContain("var shEnvRadiance=textureSampleLevel");
         expect(result._fragmentWGSL).toContain("let sceneEnvironmentIrradiance = (scene.vSphericalL00.rgb");
         expect(result._fragmentWGSL).toContain("let environmentIrradiance=select(localEnvironmentIrradiance,sceneEnvironmentIrradiance");
         expect(result._fragmentWGSL).toContain("var iblTexture:texture_cube<f32>");
@@ -451,6 +461,7 @@ describe("PBR local cubemap projection", () => {
             destroy: vi.fn(),
         } as unknown as GPUTexture;
         const uniformBuffer = { destroy: vi.fn() } as unknown as GPUBuffer;
+        const sharedSampler = {} as GPUSampler;
         const gridMapped = new ArrayBuffer(64 * 1024);
         const gridBuffer = {
             destroy: vi.fn(),
@@ -465,6 +476,7 @@ describe("PBR local cubemap projection", () => {
                 maxBufferSize: 65536,
             },
             createTexture: vi.fn(() => destinationTexture),
+            createSampler: vi.fn(() => sharedSampler),
             createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => (descriptor.mappedAtCreation ? gridBuffer : uniformBuffer)),
             createCommandEncoder: vi.fn(() => ({
                 copyTextureToTexture(source: GPUImageCopyTexture, destination: GPUImageCopyTexture, size: GPUExtent3DStrict) {
@@ -538,6 +550,8 @@ describe("PBR local cubemap projection", () => {
         });
 
         expect(device.createTexture).toHaveBeenCalledWith(expect.objectContaining({ size: [512, 512, 12], mipLevelCount: 10, format: "rgba16float" }));
+        expect(device.createSampler).toHaveBeenCalledWith({ magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" });
+        expect(set._sampler).toBe(sharedSampler);
         expect(copies[0]).toEqual({ sourceMip: 1, sourceLayer: 0, destinationLayer: 0, size: [512, 512, 1] });
         expect(copies.find((copy) => copy.destinationLayer === 6)).toMatchObject({ sourceMip: 0, sourceLayer: 0 });
         expect(set._uniformU32.slice(0, 4)).toEqual(new Uint32Array([2, 0, 0, 1]));

@@ -8,6 +8,7 @@
 
 import { BU, TU } from "../../engine/gpu-flags.js";
 import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { getTrilinearSampler } from "../../resource/samplers.js";
 import type { SceneContext } from "../../scene/scene.js";
 import { _registerPbrExt } from "./pbr-flags.js";
 import {
@@ -522,7 +523,7 @@ function ensureProbeSetDevice(set: PbrLocalEnvironmentProbeSet): void {
     set._gridBuffer = gridBuffer;
     set._texture = texture;
     set._textureView = textureView;
-    set._sampler = set.probes[0]!.environment.cubeSampler;
+    set._sampler = getTrilinearSampler(set._engine);
     set._device = device;
     previousUniformBuffer?.destroy();
     previousGridBuffer?.destroy();
