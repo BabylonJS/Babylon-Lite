@@ -68,7 +68,7 @@ function boneDiagonal(binding: SkeletonBinding): number[] {
  *  exercised without a glTF load. `_bake` just records that it ran. */
 function createSkeleton(overrides: Map<number, BoneOverride>, bake: () => void = (): void => {}): { skeleton: Skeleton; bone: Bone } {
     const bone: Bone = { name: JOINT_NAME, _nodeIndex: 0 };
-    return { skeleton: { bones: [bone], _byName: new Map([[JOINT_NAME, bone]]), _overrides: overrides, _bake: bake }, bone };
+    return { skeleton: { bones: [bone], _byName: new Map([[JOINT_NAME, bone]]), _overrides: overrides, _worldOverrides: new Map(), _bake: bake }, bone };
 }
 
 describe("bone visibility", () => {

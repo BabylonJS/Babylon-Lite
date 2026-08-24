@@ -17,13 +17,13 @@ import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_SHEEN, PBR_HAS_SHEEN_TEXTURE, PBR_HAS_SHEEN_ALBEDO_SCALING } from "../pbr-flag-bits.js";
 
 const STAGE_FRAGMENT = 0x2;
-const PBR2_HAS_SHEEN_UV_TX = 1 << 13;
+const PBR2_HAS_SHEEN_UV_TX = 8192; // 1 << 13
 
 // Extension-local features2 bit (defined here, not in the shared flag module, so scenes
 // without a separate sheen roughness texture carry zero bytes for it). Set when the material
 // has a KHR_materials_sheen sheenRoughnessTexture distinct from sheenColorTexture: sheen
 // roughness is then read from that texture's A channel at its own (animatable) UV transform.
-const PBR2_HAS_SHEEN_ROUGH_TEX = 1 << 29;
+const PBR2_HAS_SHEEN_ROUGH_TEX = -2147483648; // 1 << 31
 
 const SHEEN_HELPERS = `
 fn normalDistributionFunction_CharlieSheen(NdotH_sh: f32, alphaG_sh: f32) -> f32 {

@@ -429,7 +429,7 @@ playAnimation(walk);
 
 ### AnimationGroup Creation
 
-`createAnimationGroups()` creates one `AnimationGroup` per `AnimationClip`. Each group wraps an `AnimationController` (from `skeleton-updater.ts`) with a single-clip slice of the animation data. All groups auto-play by default (matching BJS behavior).
+`createAnimationGroups()` creates one `AnimationGroup` per `AnimationClip`. Each group wraps an `AnimationController` (from `skeleton-updater.ts`) with a single-clip slice of the animation data. A direct controller uploads only skeletons containing a joint targeted by that clip, or a joint below a targeted ancestor; otherwise independently playing clips from the same asset would reset one another's rigs to rest pose. All groups auto-play by default (matching BJS behavior).
 
 Manual property clips share sampler evaluation with glTF animation, but they do not masquerade as glTF `AnimationChannel`s. `createPropertyAnimationClip()` stores reusable unresolved property tracks. `createPropertyAnimationGroup()` resolves each track against the target once, builds compact property runtime tracks (`sampler`, `stride`, `quaternion`, `writer`, `mixTarget`, `mixProperty`), and wraps them in an `AnimationGroup`. The hot path remains `evaluateSampler()` plus direct property writers.
 
@@ -487,6 +487,7 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 - **PLAYING**: `group.isPlaying = true`. Each `tickAnimation()` advances time, evaluates samplers, uploads GPU data.
 - **PAUSED**: `group.isPlaying = false`. `tickAnimation()` still evaluates (ensures pose is current) but doesn't advance time.
 - **goToFrame(f)**: Sets `group.currentTime = f / group.frameRate`, evaluates the pose immediately for manual property clips (or engine-backed clips when an engine is provided), then pauses.
+- **Removed animated meshes**: `disposeMeshGpu()` marks the last-owner `SkeletonData` or `MorphTargetData` as disposed before destroying its GPU resources. Animation groups may outlive their mesh, so all controller, pose, and weighted-mixer upload paths skip disposed runtime resources. Direct skeleton/morph update APIs reject disposed targets explicitly.
 
 ## Babylon.js Equivalence Map
 
@@ -544,6 +545,8 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 15. **Manual cross-fade**: Verify manager fade jobs update group weights by elapsed duration
 16. **glTF weighted skeleton blend**: Verify Xbot walk/run weighted TRS blending matches Babylon.js reference
 17. **Additive skeleton blend**: Verify Xbot additive pose/loop layers match Babylon.js reference
+18. **Independent skeleton clips**: Verify a clip targeting one skeleton does not upload or reset another skeleton from the same asset
+19. **Disposed animated resources**: Verify a surviving animation group can continue evaluating CPU state without uploading to a destroyed bone texture or morph-weight buffer
 
 ## File Manifest
 

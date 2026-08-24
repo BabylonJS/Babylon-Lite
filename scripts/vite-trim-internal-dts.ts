@@ -78,7 +78,7 @@ export function trimInternalDts(options: TrimInternalDtsOptions): Plugin {
                                     module: "esnext",
                                     moduleResolution: "bundler",
                                     lib: ["es2022", "dom", "dom.iterable"],
-                                    types: ["@webgpu/types"],
+                                    types: ["@webgpu/types", "webxr"],
                                     strict: true,
                                     declaration: true,
                                     skipLibCheck: true,

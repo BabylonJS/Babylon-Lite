@@ -1,15 +1,15 @@
 {
   "rawKB": 41.8,
-  "rawBytes": 42847,
+  "rawBytes": 42842,
   "gzipKB": 25.4,
   "ignoredRawKB": 29.8,
   "runtimeChunks": [
-    "scene277-billboard-renderable-ByCAdMQF.js",
+    "scene277-billboard-renderable-CxGA6ZWJ.js",
     "scene277-box-shape-block-fGMhVlKP.js",
     "scene277-create-particle-block-CiseX6ot.js",
     "scene277-generate-mipmaps-mdwIMKxi.js",
     "scene277-npe-contextual-DcCy6blJ.js",
-    "scene277-npe-registry-extra-DO7Ya9HN.js",
+    "scene277-npe-registry-extra-DbfBJEWA.js",
     "scene277-npe-registry-extra-remaining-DlSunyE1.js",
     "scene277-particle-converter-block-CVHvXC1Y.js",
     "scene277-particle-input-block-BS391zaP.js",
