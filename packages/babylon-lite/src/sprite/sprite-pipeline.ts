@@ -6,6 +6,7 @@ import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
 import { _getSpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.js";
+import { _getSprite2DYSortHook } from "./sprite-2d-y-sort-hook.js";
 import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
 import { _getAlphaToCoverageResolver } from "../render/alpha-to-coverage-hook.js";
 
@@ -406,6 +407,10 @@ export function ensureSpriteInstanceBuffer(
  * edits uploads only `[_dirtyMin, min(_dirtyMax, count))`. Resets the dirty range.
  */
 export function uploadSpriteInstances(device: GPUDevice, layer: Sprite2DLayer, instanceBuffer: GPUBuffer, uploadedVersion: number): number {
+    const orderedVersion = _getSprite2DYSortHook()?.upload(device, layer, instanceBuffer, uploadedVersion);
+    if (orderedVersion !== undefined) {
+        return orderedVersion;
+    }
     if (uploadedVersion === layer._version) {
         return uploadedVersion;
     }

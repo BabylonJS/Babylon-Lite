@@ -8,6 +8,7 @@
  * applies (pivot + rotation), so it reports the sprite the GPU actually drew under the point.
  */
 import type { Sprite2DLayer } from "../sprite-2d.js";
+import { _getSprite2DYSortHook } from "../sprite-2d-y-sort-hook.js";
 
 /** Result of a successful {@link pickSprite2D} hit. */
 export interface SpritePickInfo {
@@ -42,11 +43,12 @@ const ROTATION = 8;
  * panned / zoomed / rotated layer, map the pointer into layer space first via the inverse of
  * `layer.view` (the caller owns that transform). All `layers` are assumed to share one space.
  *
- * Layers are tested in reverse array order (later layers are drawn on top, so they win), and
- * within a layer the most-recently-added sprite wins — matching GPU draw order, so the returned
- * sprite is the one visually on top at that point. Layers with `visible: false` and hidden
- * sprites (`visible: false`, stored as a zero-size quad) are skipped, exactly as the renderer
- * skips them.
+ * Layers are tested in reverse array order (later layers are drawn on top, so they win). Within
+ * an ordinary layer, sprites are tested in reverse canonical logical order (normally reverse
+ * insertion order), matching its GPU upload. Within an enabled Y-sort layer, sprites are tested
+ * from topmost to bottommost through the current stable draw permutation. Layers with
+ * `visible: false` and hidden sprites (`visible: false`, stored as a zero-size quad) are skipped,
+ * exactly as the renderer skips them.
  *
  * @param layers - Sprite layers to test, in draw order (e.g. `spriteRenderer.layers`).
  * @param xPx - Query X in layer-local pixels.
@@ -63,7 +65,9 @@ export function pickSprite2D(layers: ReadonlyArray<Sprite2DLayer>, xPx: number, 
         const stride = layer._instanceFloatsPerSprite;
         const pivotX = layer.pivot[0];
         const pivotY = layer.pivot[1];
-        for (let i = layer.count - 1; i >= 0; i--) {
+        const drawOrder = _getSprite2DYSortHook()?.drawOrder(layer);
+        for (let drawIndex = layer.count - 1; drawIndex >= 0; drawIndex--) {
+            const i = drawOrder ? drawOrder[drawIndex]! : drawIndex;
             const base = i * stride;
             const sizeX = data[base + SIZE_X]!;
             const sizeY = data[base + SIZE_Y]!;
