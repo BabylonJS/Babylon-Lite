@@ -371,7 +371,9 @@ execution paths chosen in `record()`:
   have different `flipY` orientations.
 
 When `ownsTargetTexture` is true, the task rebuilds its target during every
-frame-graph build and disposes it with the task. Resolve-only and
+frame-graph build, disposes a previously owned target when `targetTexture`
+changes, and disposes the current target with the task. `sourceTexture` cannot
+be the engine `scRT`, whose GPU texture changes every frame. Resolve-only and
 blit-plus-resolve modes use `resolveTexture` for hardware MSAA resolve.
 
 The color attachment's `loadOp` is `"load"` when a viewport is set (so

@@ -51,6 +51,7 @@ import type { Task } from "./task.js";
 /** Options used to create a copy-to-texture frame-graph task. Selects the source render target, the target or resolve target, and optional viewport / mip-level settings for blit and copy paths. */
 export interface CopyToTextureTaskConfig {
     name?: string;
+    /** Source render target. The engine swapchain render target is not supported because its GPU texture changes every frame. */
     sourceTexture: RenderTarget;
     /** Target attachment that receives the blit. Required UNLESS `resolveTexture`
      *  is set, in which case the task does a resolve-only operation and writes
@@ -121,6 +122,7 @@ interface ResolveState {
 }
 
 interface CopyToTextureTaskInternal extends CopyToTextureTask {
+    _ownedTarget: RenderTarget | null;
     _fast: FastPathState | null;
     _blit: BlitState | null;
     _resolve: ResolveState | null;
@@ -215,6 +217,7 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
         get outputTexture(): RenderTarget {
             return (this.resolveTexture ?? this.targetTexture)!;
         },
+        _ownedTarget: null,
         _fast: null,
         _blit: null,
         _resolve: null,
@@ -225,6 +228,9 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
             task._blit = null;
             task._resolve = null;
             const source = task.sourceTexture;
+            if (source === eng.scRT) {
+                throw new Error(`CopyToTextureTask "${task.name}": sourceTexture cannot be the engine scRT because its GPU texture changes every frame.`);
+            }
             if (!source._colorTexture) {
                 throw new Error(`CopyToTextureTask "${task.name}": sourceTexture has no color texture. The source must be built before this task records.`);
             }
@@ -235,9 +241,14 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
             // (e.g. an SS staging texture between an MSAA resolve and the final swap blit)
             // from requiring the caller to pre-build them.
             const needsBuild = (rt: RenderTarget) => !rt._colorTexture;
+            if (task._ownedTarget && (!task.ownsTargetTexture || task._ownedTarget !== task.targetTexture)) {
+                disposeRenderTarget(task._ownedTarget);
+                task._ownedTarget = null;
+            }
             if (task.targetTexture) {
                 if (task.ownsTargetTexture) {
                     buildRenderTarget(task.targetTexture, eng);
+                    task._ownedTarget = task.targetTexture;
                 } else if (needsBuild(task.targetTexture)) {
                     buildRenderTarget(task.targetTexture, eng);
                 }
@@ -293,9 +304,11 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
         },
         dispose(): void {
             task._passes.length = 0;
-            if (task.ownsTargetTexture) {
+            disposeRenderTarget(task._ownedTarget);
+            if (task.ownsTargetTexture && task.targetTexture !== task._ownedTarget) {
                 disposeRenderTarget(task.targetTexture);
             }
+            task._ownedTarget = null;
             task._fast = null;
             task._blit = null;
             task._resolve = null;
