@@ -2568,5 +2568,16 @@
         "skipParity": true,
         "skipParityReason": "Lite-native exact ParticleSystem-to-Sprite2D blend bridge; Babylon.js has no equivalent pure-2D SpriteRenderer path. Blend equations are established by Babylon oracle scenes 283 and 284.",
         "skipPerf": true
+    },
+    {
+        "id": 303,
+        "slug": "scene303-sprite2d-y-sort",
+        "name": "Scene 303 — Sprite2D Y-Sort",
+        "maxRawKB": 25,
+        "description": "Three sampled overlap pairs prove Sprite2D Y-sort through visible pixels and picking: a first-inserted sprite moved live to larger Y covers a later canonical sprite, equal-Y later insertion wins the stable serial tie, and +60 bias lifts an earlier sprite above a later canonical neighbor.",
+        "tags": ["sprites", "sprite2d", "2d", "y-sort", "top-down", "isometric"],
+        "skipParity": true,
+        "skipParityReason": "Lite-native renderer Y-sort extension; Babylon.js has no equivalent pure-2D GPU-order staging API to use as a pixel oracle.",
+        "skipPerf": true
     }
 ]

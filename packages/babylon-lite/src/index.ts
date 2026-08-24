@@ -648,6 +648,9 @@ export type { Sprite2DCustomShader, Sprite2DCustomShaderOptions, Sprite2DCustomT
 export { createSprite2DCustomShader } from "./sprite/sprite-custom-shader.js";
 export type { Sprite2DHandle } from "./sprite/sprite-2d-handle.js";
 export { addSprite2D, updateSprite2D, removeSprite2D, setSprite2DFrame, getSprite2DHandleIndex, isSprite2DHandleAlive } from "./sprite/sprite-2d-handle.js";
+export type { Sprite2DYSortOptions, Sprite2DYSortState } from "./sprite/sprite-2d-y-sort.js";
+export { enableSprite2DYSort, disableSprite2DYSort, setSprite2DYSortBias } from "./sprite/sprite-2d-y-sort.js";
+export { setSprite2DYSortHandleBias } from "./sprite/sprite-2d-handle-y-sort.js";
 export type { SpritePickInfo } from "./sprite/picking/pick-sprite-2d.js";
 export { pickSprite2D } from "./sprite/picking/pick-sprite-2d.js";
 export type { BillboardPickInfo } from "./sprite/picking/pick-billboard.js";
