@@ -851,6 +851,7 @@ export {
     applyPhysicsImpulse,
     setPhysicsBodyLinearVelocity,
     getPhysicsBodyLinearVelocity,
+    getPhysicsBodyAngularVelocity,
     setPhysicsBodyAngularVelocity,
     setPhysicsBodyMotionType,
     setPhysicsBodyTransform,
