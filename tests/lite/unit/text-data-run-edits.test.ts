@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GlyphCurves } from "../../../packages/babylon-lite/src/text/glyph-storage";
 import type { GlyphRun } from "../../../packages/babylon-lite/src/text/text-data";
-import { createTextData, TEXT_INSTANCE_FLOATS, updateTextData } from "../../../packages/babylon-lite/src/text/text-data";
+import { createTextData, TEXT_INSTANCE_FLOATS, TEXT_STYLE_FLOATS, updateTextData } from "../../../packages/babylon-lite/src/text/text-data";
 import { createGlyphStorage } from "../../../packages/babylon-lite/src/text/glyph-storage";
 
 function makeGlyph(glyphId: number): GlyphCurves {
@@ -16,7 +16,7 @@ function makeGlyph(glyphId: number): GlyphCurves {
     };
 }
 
-const ANCHOR_X_OFFSET = 4;
+const ANCHOR_X_OFFSET = 0;
 
 /** Read the packed anchor X of instance `i` — a cheap proxy for "this glyph's position was rewritten". */
 function instanceAnchorX(data: ReturnType<typeof createTextData>, i: number): number {
@@ -42,6 +42,14 @@ function run(curveSet: string, x: number, glyphIds: number[] = [1, 2]): GlyphRun
     return {
         curveSet,
         glyphs: glyphIds.map((glyphId, i) => ({ glyphId, x: x + i, y: 0 })),
+        pixelsPerFontUnit: 1,
+    };
+}
+
+function styledRun(x: number, withOverride: boolean): GlyphRun {
+    return {
+        curveSet: "f",
+        glyphs: [{ glyphId: 1, x, y: 0 }, withOverride ? { glyphId: 2, x: x + 1, y: 0, color: [0.25, 0.5, 0.75, 1] } : { glyphId: 2, x: x + 1, y: 0 }],
         pixelsPerFontUnit: 1,
     };
 }
@@ -93,7 +101,7 @@ describe("updateTextData replaceRun", () => {
         expect(data.runs.length).toBe(2);
         expect(data.runs[1]).toBe(target);
         expect(data._runRecords.size).toBe(2);
-        expect(data._runRecords.get(target)!.slots).toEqual([2, 3]);
+        expect(data._runRecords.get(target)!._slots).toEqual([2, 3]);
         expect(instanceAnchorX(data, 2)).toBe(77);
     });
 
@@ -111,7 +119,7 @@ describe("updateTextData replaceRun", () => {
 
         expect(data.runs.length).toBe(3);
         expect(data.runs[1]).toBe(next);
-        expect(data._runRecords.get(next)!.slots.length).toBe(3);
+        expect(data._runRecords.get(next)!._slots.length).toBe(3);
     });
 
     // A same-curve-set glyph-count change is now reslotted in place, so these guard the
@@ -133,21 +141,21 @@ describe("updateTextData replaceRun", () => {
         // Every run's slots must be live, in range, and disjoint from every other run's.
         const seen = new Set<number>();
         for (const r of data.runs) {
-            const slots = data._runRecords.get(r)!.slots;
+            const slots = data._runRecords.get(r)!._slots;
             expect(slots.length).toBe(r.glyphs.length);
             for (const s of slots) {
-                expect(s).toBeGreaterThanOrEqual(group.slotStart);
-                expect(s).toBeLessThan(group.slotStart + group.slotCount);
+                expect(s).toBeGreaterThanOrEqual(group._slotStart);
+                expect(s).toBeLessThan(group._slotStart + group._slotCount);
                 expect(seen.has(s)).toBe(false);
-                expect(group.freeSlots.includes(s)).toBe(false);
+                expect(group._freeSlots.includes(s)).toBe(false);
                 seen.add(s);
             }
         }
-        expect(group.liveCount).toBe(seen.size);
+        expect(group._liveCount).toBe(seen.size);
         expect(seen.size).toBe(2 + glyphIds.length + 2);
         // Anchor X is written per glyph, so it proves each run's slots hold *its* glyphs.
         for (const r of data.runs) {
-            const slots = data._runRecords.get(r)!.slots;
+            const slots = data._runRecords.get(r)!._slots;
             slots.forEach((s, i) => expect(instanceAnchorX(data, s)).toBe(r.glyphs[i]!.x));
         }
     });
@@ -164,7 +172,7 @@ describe("updateTextData replaceRun", () => {
 
         updateTextData(data, { update: "replaceRun", previous: data.runs[1]!, run: next });
 
-        const slots = data._runRecords.get(next)!.slots;
+        const slots = data._runRecords.get(next)!._slots;
         expect(slots).toEqual([...slots].sort((a, b) => a - b));
     });
 
@@ -174,9 +182,54 @@ describe("updateTextData replaceRun", () => {
             const len = 1 + (i % 3);
             updateTextData(data, { update: "replaceRun", previous: data.runs[i % 3]!, run: run("f", i, [1, 2, 3].slice(0, len)) });
             for (const r of data.runs) {
-                const slots = data._runRecords.get(r)!.slots;
+                const slots = data._runRecords.get(r)!._slots;
                 expect(slots).toEqual([...slots].sort((a, b) => a - b));
             }
+        }
+    });
+
+    it("reuses styles across alternating non-tail replacements", () => {
+        let first = styledRun(0, false);
+        let second = styledRun(10, false);
+        const last = run("f", 20, [3]);
+        const data = createTextData(makeStorage(), [first, second, last]);
+
+        for (let i = 0; i < 101; i++) {
+            const replaceFirst = i % 2 === 0;
+            const replacement = styledRun(replaceFirst ? 0 : 10, Math.floor(i / 2) % 2 === 0);
+            const previous = replaceFirst ? first : second;
+            updateTextData(data, { update: "replaceRun", previous, run: replacement });
+            if (replaceFirst) {
+                first = replacement;
+            } else {
+                second = replacement;
+            }
+            expect(data._styleCount).toBeLessThanOrEqual(7);
+        }
+
+        const record = data._runRecords.get(first)!;
+        const packed = data._instancesU32[record._slots[1]! * TEXT_INSTANCE_FLOATS + 2]!;
+        const styleIndex = packed >>> 16;
+        expect(Array.from(data._styles.subarray(styleIndex * TEXT_STYLE_FLOATS, styleIndex * TEXT_STYLE_FLOATS + 4))).toEqual([0.25, 0.5, 0.75, 1]);
+    });
+
+    it("compacts styles before a new allocation exceeds packed indices", () => {
+        const first = styledRun(0, false);
+        const last: GlyphRun = { ...run("f", 10, [3]), defaultColor: [0.125, 0.25, 0.5, 1] };
+        const data = createTextData(makeStorage(), [first, last]);
+        data._styleCount = 0xffff;
+
+        const replacement = styledRun(0, true);
+        updateTextData(data, { update: "replaceRun", previous: first, run: replacement });
+
+        expect(data._styleCount).toBe(3);
+        const survivingRecord = data._runRecords.get(last)!;
+        const survivingStyleIndex = data._instancesU32[survivingRecord._slots[0]! * TEXT_INSTANCE_FLOATS + 2]! >>> 16;
+        expect(survivingStyleIndex).toBe(0);
+        expect(Array.from(data._styles.subarray(0, 4))).toEqual([0.125, 0.25, 0.5, 1]);
+        const record = data._runRecords.get(replacement)!;
+        for (const slot of record._slots) {
+            expect(data._instancesU32[slot * TEXT_INSTANCE_FLOATS + 2]! >>> 16).toBeLessThan(0xffff);
         }
     });
 
@@ -190,7 +243,7 @@ describe("updateTextData replaceRun", () => {
 
         updateTextData(data, { update: "addRun", run: added });
 
-        expect(data._runRecords.get(added)!.slots).toEqual([2, 3]);
+        expect(data._runRecords.get(added)!._slots).toEqual([2, 3]);
     });
 
     it("routes an empty replacement through the remove path so its slots are reclaimed", () => {
@@ -200,11 +253,11 @@ describe("updateTextData replaceRun", () => {
         updateTextData(data, { update: "replaceRun", previous: data.runs[1]!, run: empty });
 
         expect(data.runs[1]).toBe(empty);
-        expect(data._runRecords.get(empty)!.slots).toEqual([]);
+        expect(data._runRecords.get(empty)!._slots).toEqual([]);
         // The group is retired and immediately re-created empty by the add half, so the buffer
         // tail is compacted back to just the "f" run's two glyphs.
-        expect(data._groups.map((g) => g.curveSetId)).toEqual(["f", "g"]);
-        expect(data._groups[1]!.slotCount).toBe(0);
+        expect(data._groups.map((g) => g._curveSetId)).toEqual(["f", "g"]);
+        expect(data._groups[1]!._slotCount).toBe(0);
         expect(data._instanceCount).toBe(2);
     });
 
@@ -217,17 +270,17 @@ describe("updateTextData replaceRun", () => {
         const group = data._groups[0]!;
         const live = new Set<number>();
         for (const r of data.runs) {
-            for (const s of data._runRecords.get(r)!.slots) {
+            for (const s of data._runRecords.get(r)!._slots) {
                 expect(live.has(s)).toBe(false);
                 live.add(s);
             }
         }
-        expect(group.liveCount).toBe(live.size);
+        expect(group._liveCount).toBe(live.size);
         // Free list and live set must partition the group's slot range exactly — no slot lost,
         // none handed out twice.
-        expect(new Set(group.freeSlots).size).toBe(group.freeSlots.length);
-        expect(live.size + group.freeSlots.length).toBe(group.slotCount);
-        for (const s of group.freeSlots) {
+        expect(new Set(group._freeSlots).size).toBe(group._freeSlots.length);
+        expect(live.size + group._freeSlots.length).toBe(group._slotCount);
+        for (const s of group._freeSlots) {
             expect(live.has(s)).toBe(false);
         }
     });
@@ -241,7 +294,7 @@ describe("updateTextData replaceRun", () => {
         expect(data.runs.length).toBe(3);
         expect(data.runs[1]).toBe(next);
         expect(data._groups.length).toBe(2);
-        expect(data._groups[data._runRecords.get(next)!.groupIdx]!.curveSetId).toBe("g");
+        expect(data._groups[data._runRecords.get(next)!._groupIdx]!._curveSetId).toBe("g");
     });
 });
 
@@ -269,14 +322,26 @@ describe("updateTextData removeRun", () => {
         expect(data.runs).toEqual([first, last]);
         expect(data._runRecords.has(target)).toBe(false);
     });
+
+    it("reclaims style blocks across repeated add/remove cycles", () => {
+        const base = run("f", 10, [3]);
+        const data = createTextData(makeStorage(), [base]);
+
+        for (let i = 0; i < 100; i++) {
+            const added = styledRun(0, true);
+            updateTextData(data, { update: "addRun", run: added, insertBefore: 0 });
+            updateTextData(data, { update: "removeRun", run: added });
+            expect(data._styleCount).toBe(1);
+        }
+    });
 });
 
 /** Glyph id absent from every curve set in `makeStorage()`, so it can never be packed. */
 const MISSING = 99;
-const DEAD_FLAG_OFFSET = 7;
+const DEAD_GLYPH_OFFSET = 2;
 
 function isDead(data: ReturnType<typeof createTextData>, slot: number): boolean {
-    return data._instances[slot * TEXT_INSTANCE_FLOATS + DEAD_FLAG_OFFSET] === 1;
+    return data._instancesU32[slot * TEXT_INSTANCE_FLOATS + DEAD_GLYPH_OFFSET] === 0xffffffff;
 }
 
 describe("glyphs that miss the atlas", () => {
@@ -293,11 +358,11 @@ describe("glyphs that miss the atlas", () => {
         const data = createTextData(makeStorage(), [r]);
         const group = data._groups[0]!;
 
-        expect(data._runRecords.get(r)!.slots).toEqual(expectedLiveSlots);
-        expect(group.liveCount).toBe(expectedLiveSlots.length);
+        expect(data._runRecords.get(r)!._slots).toEqual(expectedLiveSlots);
+        expect(group._liveCount).toBe(expectedLiveSlots.length);
         for (let slot = 0; slot < glyphIds.length; slot++) {
             expect(isDead(data, slot)).toBe(!expectedLiveSlots.includes(slot));
-            expect(group.freeSlots.includes(slot)).toBe(!expectedLiveSlots.includes(slot));
+            expect(group._freeSlots.includes(slot)).toBe(!expectedLiveSlots.includes(slot));
         }
     });
 
@@ -306,15 +371,15 @@ describe("glyphs that miss the atlas", () => {
         const data = createTextData(makeStorage(), [r]);
         const group = data._groups[0]!;
         const recBefore = data._runRecords.get(r)!;
-        expect(recBefore.slots).toEqual([0, 1, 2]);
+        expect(recBefore._slots).toEqual([0, 1, 2]);
 
         (r.glyphs[1] as { glyphId: number }).glyphId = MISSING;
         updateTextData(data, { update: "replaceRun", previous: r, run: r });
 
         // Same-reference replace reuses the existing record rather than rehashing a new one.
         expect(data._runRecords.get(r)).toBe(recBefore);
-        expect(recBefore.slots).toEqual([0, 2]);
-        expect(group.liveCount).toBe(2);
+        expect(recBefore._slots).toEqual([0, 2]);
+        expect(group._liveCount).toBe(2);
         expect(isDead(data, 1)).toBe(true);
     });
 
@@ -327,8 +392,8 @@ describe("glyphs that miss the atlas", () => {
         (r.glyphs[1] as { glyphId: number }).glyphId = 2;
         updateTextData(data, { update: "replaceRun", previous: r, run: r });
 
-        expect(data._runRecords.get(r)!.slots).toHaveLength(3);
-        expect(data._groups[0]!.liveCount).toBe(3);
+        expect(data._runRecords.get(r)!._slots).toHaveLength(3);
+        expect(data._groups[0]!._liveCount).toBe(3);
         expect(data.runs).toEqual([r]);
     });
 });

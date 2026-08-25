@@ -47,6 +47,14 @@ export function _installPbrFallbackResolver(resolve: (engine: EngineContext) => 
     _pbrFallbackResolver = resolve;
 }
 
+/** IBL fallback resolver installed only by `enablePbrLocalCubemap`, keeping local
+ * fallback resolution behind the opt-in feature seam. */
+let _pbrIblFallbackResolver: ((material: unknown) => _PbrBindCtx["_env"]) | null = null;
+/** @internal */
+export function _installPbrIblFallbackResolver(resolve: (material: unknown) => _PbrBindCtx["_env"]): void {
+    _pbrIblFallbackResolver = resolve;
+}
+
 interface _PbrShaderBindings {
     _features: number;
     _features2: number;
@@ -234,7 +242,7 @@ export function createPbrMeshBindGroup(
         _meshFeatures: meshFeatures,
         _material: material,
         _mesh: meshCtx ?? undefined,
-        _env: env,
+        _env: env ?? _pbrIblFallbackResolver?.(material) ?? null,
         _refractionTexture: refractionTexture,
     };
 

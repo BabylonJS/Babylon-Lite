@@ -26,9 +26,11 @@ the skill, the pipeline, the README table — reads from or updates it.
 
 It tracks three things:
 
-1. **Upstream sync markers.** `Last synced BJS commit` + `Last sync date` record
-   the `BabylonJS/Babylon.js` `master` HEAD the surface was last reconciled
-   against. These markers are **machine-read** by the skill — do not rename them.
+1. **Upstream sync markers.** `Last synced BJS commit` records the
+   `BabylonJS/Babylon.js` `master` HEAD the surface was last reconciled against,
+   `Last synced Lite commit` records the Babylon Lite commit it was reconciled
+   against, and `Last sync date` records when. All three are **machine-read** by
+   the skill — do not rename them, and rewrite all three at the end of every sync.
 2. **Lab-scene coverage.** The _Lab scene coverage_ section lists which oracle
    scenes render at pixel parity (MAD ≈ 0) through the compat layer, and the
    blocker for the rest.
@@ -48,11 +50,11 @@ It tracks three things:
 [`.github/copilot/skills/update-compat-layer.md`](../../.github/copilot/skills/update-compat-layer.md)
 is the skill that advances the layer. Every run makes progress on three fronts:
 
-| Task                                      | Goal                                                                   | Tracked in `COMPAT-STATUS.md` by                        |
-| ----------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------- |
-| **1 — Upstream diffs**                    | React to what changed in Babylon.js + Babylon Lite since the last sync | the `Last synced BJS commit` / `Last sync date` markers |
-| **2 — Lab-scene coverage** (required win) | Land **at least one** more oracle scene at MAD ≈ 0                     | the _Lab scene coverage_ section                        |
-| **3 — API parity**                        | Add/upgrade core + loaders symbols (real impl or honest stub)          | the per-area status matrix                              |
+| Task                                      | Goal                                                                   | Tracked in `COMPAT-STATUS.md` by                                                    |
+| ----------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **1 — Upstream diffs**                    | React to what changed in Babylon.js + Babylon Lite since the last sync | the `Last synced BJS commit` / `Last synced Lite commit` / `Last sync date` markers |
+| **2 — Lab-scene coverage** (required win) | Land **at least one** more oracle scene at MAD ≈ 0                     | the _Lab scene coverage_ section                                                    |
+| **3 — API parity**                        | Add/upgrade core + loaders symbols (real impl or honest stub)          | the per-area status matrix                                                          |
 
 Task 2 is the headline deliverable of every run: a run that ships zero new working
 scenes is considered incomplete.

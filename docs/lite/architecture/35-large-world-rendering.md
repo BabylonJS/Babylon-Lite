@@ -45,122 +45,110 @@ export function getFloatingOriginOffset(scene: SceneContext): Vec3;
 
 ```typescript
 if (useFO) {
-    const { updateFloatingOriginOffset } = await import("../large-world/floating-origin.js");
-    _updateFOOffset = updateFloatingOriginOffset;
+    const [{ wrapRenderableForFO, lightFoVersion, applyLightFoOffset }, { makePackMeshWorld }] = await Promise.all([
+        import("../large-world/floating-origin.js"),
+        import("../large-world/pack-mat4-with-offset.js"),
+    ]);
+    _wrapRenderableForFO = wrapRenderableForFO;
+    _makePackMeshWorld = makePackMeshWorld;
+    _lightFoVersion = lightFoVersion;
+    _applyLightFoOffset = applyLightFoOffset;
 }
 ```
 
-The function reference is stored on `engine._updateFOOffset`. Scene `_update` invokes it via optional chaining:
+Each reference is stored on the engine (`engine._wrapRenderableForFO`, `_makePackMeshWorld`, `_lightFoVersion`, `_applyLightFoOffset`). Consumers reach them through optional chaining with a non-FO fallback, e.g. `engine._makePackMeshWorld?.(scene) ?? packMat4IntoF32`. Non-LWR engines leave every field undefined, so no consumer of the FO runtime imports the module statically. Tree-shakers drop it entirely from non-LWR bundles. Validated by `tests/parity/bundle-size.spec.ts` ceilings.
+
+### Reading the offset (`getFloatingOriginOffset`)
+
+The floating-origin offset **is** the active camera's world position; there is no scene-side mirror of it. Each consumer derives it at the moment of use:
 
 ```typescript
-eng._updateFOOffset?.(ctx);
-```
-
-Non-LWR engines leave the field undefined, the call is a no-op, and the LWR module is never referenced statically anywhere in the package. Tree-shakers drop it entirely from non-LWR bundles. Validated by `tests/parity/bundle-size.spec.ts` ceilings.
-
-### Per-frame offset update (`updateFloatingOriginOffset`)
-
-Called once per frame from scene `_update`, before any render task runs. Reads the active camera's world matrix, copies its translation column into `scene._eyePosition`, and if the offset changed since last frame, copies the same into `scene._floatingOriginOffset`, bumps `scene._floatingOriginVersion`, and invalidates the camera's view-matrix caches:
-
-```typescript
-const wm = camera.worldMatrix;
-eye[0] = wm[12];
-eye[1] = wm[13];
-eye[2] = wm[14];
-if (offset[0] !== eye[0] || offset[1] !== eye[1] || offset[2] !== eye[2]) {
-    offset[0] = eye[0];
-    offset[1] = eye[1];
-    offset[2] = eye[2];
-    scene._floatingOriginVersion++;
-    camera._viewVer = -1;
-    camera._vpVer = -1;
+export function getFloatingOriginOffset(scene: SceneContext): Vec3 {
+    const cam = scene.camera;
+    if (!cam) {
+        return { x: 0, y: 0, z: 0 };
+    }
+    const w = cam.worldMatrix;
+    return { x: w[12]!, y: w[13]!, z: w[14]! };
 }
 ```
 
-The version bump is the signal renderable closures use to re-pack mesh UBOs with the new offset (see below). The view/vp cache invalidation forces `getViewMatrix` to recompute on the next access — required because the view matrix is keyed on `worldMatrixVersion` only, and the camera's `worldMatrix` does not bump when only the FO offset changes.
+An earlier design kept `scene._floatingOriginOffset` / `_floatingOriginVersion` / `_eyePosition` in sync through a per-frame `updateFloatingOriginOffset` call. That was removed as net cost without value: the mirror had to be written every frame and read through an extra indirection, to hold a value the camera already carries. Invalidation now rides the camera's own `worldMatrixVersion` (see below).
 
-### Four places the offset is subtracted
+### Four places the offset is applied
 
-1. **`getViewMatrix(camera)`** (`camera/camera.ts`): when `camera._floatingOriginOffset` is set, the offset is subtracted from the camera world position _before_ the `R_inv * -cameraPos` calculation produces the view translation. When `offset == cameraPos` (the steady-state case), the resulting view translation is mathematically zero. The view matrix uploads therefore use the precision-only `packMat4IntoF32` (no 5th argument) — a second subtraction at upload would double-bias the translation.
+1. **`getViewMatrix(camera)`** (`camera/camera.ts`): when `camera._useFloatingOrigin` is set, the camera-position components are substituted with zero (`const cx = useFO ? 0 : w[12]!`, and likewise `cy`/`cz`) before the `-(R_inv * cameraPos)` calculation produces the view translation. No offset is subtracted — the offset _is_ the camera position, so under FO the view translation is exactly zero by construction. The view matrix therefore uploads through the precision-only `packMat4IntoF32`; routing it through the offset packer would bias the translation a second time.
 
-2. **Mesh-world UBO uploads** (`material/{standard,pbr,node}-renderable.ts`): each renderable's per-frame update calls `packMat4IntoF32(meshUboData, mesh.worldMatrix, 0, 0, _foOffset)`. The packer subtracts `_foOffset` from the translation column `[12..14]` during pack. Subtraction happens in JS number precision (F64) before the implicit F32 store, recovering the small remainder at full precision.
+2. **Mesh-world UBO uploads** (`material/{standard,pbr,node}-renderable.ts`): each renderable resolves its packer once at construction with `engine._makePackMeshWorld?.(scene) ?? packMat4IntoF32`, then invokes it with the same four arguments either way — `(view, mat, offsetFloats, srcOffsetFloats)`. Under FO that resolves to `makePackMeshWorld(scene)` (`large-world/pack-mat4-with-offset.ts`), whose `packMat4IntoF32WithOffset` subtracts the camera-derived offset from the translation column `[12..14]`. The subtraction happens in JS number precision (F64) before the implicit F32 store, recovering the small remainder at full precision.
 
-3. **`vEyePosition` uniform** (`frame-graph/render-task.ts`): `writePassSceneUBO` writes `camera.worldMatrix[12..14] - scene._floatingOriginOffset[0..2]` for the eye-position uniform. Shader expressions of the form `vEyePosition - input.worldPos` now produce the eye-relative vector at full precision because both sides live in the small-magnitude frame.
+3. **`vEyePosition` uniform** (`frame-graph/scene-uniforms-pack.ts`): `_packSceneUniforms` — which `_writePassSceneUBO` calls — writes literal zeroes into `data[32..34]` when `engine.useFloatingOrigin` is set, and the raw camera world position otherwise. It performs no subtraction and does not read the offset helper. Zero is the correct eye position because mesh world translations were already rebased by (2), so shader expressions of the form `vEyePosition - input.worldPos` produce the eye-relative vector at full precision with both sides in the small-magnitude frame.
 
 4. **ShaderMaterial system uniforms** (`material/shader/shader-renderable.ts`): ShaderMaterial writes its own UBO rather than going through `packMat4IntoF32`, so it cannot inherit the subtraction from (2). `_shaderWorldMatrix(mesh, camera, out?)` performs it instead, returning a camera-relative copy of `mesh.worldMatrix` that `world`, `worldView` and `worldViewProjection` are all derived from — they must share one frame, or passes reading different uniforms tear apart. `cameraPosition` is written as zero for the same reason `vEyePosition` is in (3). Both writers share the helper, so enabling `enable-shader-material-uniform-caching.ts` changes only how often the UBO is serialized, never what it contains. `LineMaterial` is a ShaderMaterial underneath and is covered by the same path.
 
-   This one keys on `camera._useFloatingOrigin` rather than the engine flag, so the test is bit-for-bit the one `getViewMatrix` applies to the *same* camera. A render-target task drawing through a non-scene camera then gets an untranslated view **and** an absolute world, which is self-consistent.
+    This one keys on `camera._useFloatingOrigin` rather than the engine flag, so the test is bit-for-bit the one `getViewMatrix` applies to the _same_ camera. A render-target task drawing through a non-scene camera then gets an untranslated view **and** an absolute world, which is self-consistent.
 
 ### Per-renderable version tracking
 
-The mesh UBO encodes `worldMatrix - foOffset`. The UBO contents depend on **two independent inputs**: the mesh moves (bumps `mesh.worldMatrixVersion`) OR the FO offset changes (bumps `scene._floatingOriginVersion`). Each renderable closure tracks both:
+The mesh UBO encodes `worldMatrix - foOffset`. Its contents depend on **two independent inputs**: the mesh moves (bumping `mesh.worldMatrixVersion`) OR the camera moves, which moves the offset. Rather than inline a second version check into every renderable closure, the camera check lives in one wrapper applied only when FO is on:
 
 ```typescript
-let _lastWorldVersion = -1;
-let _lastFoVersion = -1;
-const _foOffset = scene._floatingOriginOffset;
-
-const update = (): void => {
-    const foVer = scene._floatingOriginVersion;
-    if (mesh.worldMatrixVersion !== _lastWorldVersion || foVer !== _lastFoVersion || s.lights.length !== _lastLightsCount) {
-        packMat4IntoF32(meshUboData, mesh.worldMatrix, 0, 0, _foOffset);
-        device.queue.writeBuffer(meshUBO, 0, meshUboData);
-        _lastWorldVersion = mesh.worldMatrixVersion;
-        _lastFoVersion = foVer;
-        // ...
-    }
-};
-```
-
-Without the version check, a camera move (which changes the FO offset but does NOT change `mesh.worldMatrixVersion`) would leave every mesh UBO holding stale `world - oldOffset` bytes — visible as a per-frame displacement of every mesh.
-
-For non-LWR engines, `scene._floatingOriginVersion` stays at 0 forever and the `foVer !== _lastFoVersion` branch is always false after the first frame — dead at runtime but bundled regardless. The cost is the price of LWR support; eliminating the dead bytes from non-LWR bundles would require two closure variants (likely a bundle regression overall).
-
-### Scene state fields
-
-```typescript
-interface SceneContextInternal {
-    /** Mutable backing for `scene.floatingOriginOffset` (the read-only
-     *  public accessor goes via `getFloatingOriginOffset`). Always
-     *  `[0, 0, 0]` on non-LWR scenes (write-skipped by the per-frame
-     *  updater when the engine has no `_updateFOOffset`). */
-    _floatingOriginOffset: [number, number, number];
-    /** Monotonic version counter bumped by `updateFloatingOriginOffset`
-     *  whenever the offset numerically changes. Renderable closures
-     *  compare against this to invalidate per-mesh UBO uploads. */
-    _floatingOriginVersion: number;
-    /** Camera world position copied each frame by
-     *  `updateFloatingOriginOffset` so consumers can read eye position
-     *  without bouncing through the camera. */
-    _eyePosition: [number, number, number];
+export function wrapRenderableForFO(inner: () => void, scene: SceneContext, invalidate: () => void): () => void {
+    let _lastCameraVersion = -1;
+    return (): void => {
+        const cv = scene.camera ? scene.camera.worldMatrixVersion : -1;
+        if (cv !== _lastCameraVersion) {
+            invalidate();
+            _lastCameraVersion = cv;
+        }
+        inner();
+    };
 }
 ```
 
-The fields exist on every scene regardless of `useFloatingOrigin` to keep the renderable closure shape uniform. For non-LWR scenes the version stays 0 and the offset stays `[0, 0, 0]`, so all subtractions are no-ops and all version comparisons are dead.
+`invalidate()` resets the renderable's `_lastWorldVersion` to -1, forcing the inner update's "worldMatrix changed" branch to fire and re-pack with the new offset. Renderables opt in with `engine._wrapRenderableForFO?.(_baseUpdate, scene, _invalidate) ?? _baseUpdate`, so non-LWR engines fall through to the bare update with no wrapper overhead and no FO version tracking bundled into the shared closure.
+
+Without this, a camera move — which changes the offset but does NOT change `mesh.worldMatrixVersion` — would leave every mesh UBO holding stale `world - oldOffset` bytes, visible as a per-frame displacement of every mesh.
+
+### Scene state
+
+LWR stores no mirror fields on `SceneContext`: the offset is the active camera's world position, read on demand, and invalidation rides that camera's `worldMatrixVersion`. Non-LWR scenes therefore carry no inert zeroed offset/version state.
+
+`scene/scene-core.ts` does retain the LWR lifecycle, and it is the only writer of it. Inside `_update`, the first frame with FO on stamps the flag `getViewMatrix` reads and drops the stale view caches:
+
+```typescript
+if (eng.useFloatingOrigin && ctx.camera && !ctx.camera._useFloatingOrigin) {
+    ctx.camera._useFloatingOrigin = true;
+    ctx.camera._viewVer = -1;
+    ctx.camera._vpVer = -1;
+}
+```
 
 ## Validation
 
-- Unit: `tests/unit/floating-origin.test.ts` covers the per-frame update — offset tracking, version bumping on change, no bump when steady, camera cache invalidation.
-- Unit: `tests/unit/floating-origin-upload.test.ts` covers the precision-recovery path — `packMat4IntoF32` with `offsetXYZ` on a mesh at world `1e6 + delta` lands `delta` in the F32 view; the no-offset control case loses `delta` to F32 quantization.
+- Unit: `tests/unit/floating-origin.test.ts` covers the offset read and the lifecycle — `getFloatingOriginOffset` returning the active camera's world position and zero when no camera is set, and `scene._update` stamping `camera._useFloatingOrigin` only when the engine has FO on.
+- Unit: `tests/unit/floating-origin-upload.test.ts` covers the zeroing and precision-recovery paths — `getViewMatrix` zeroing the view translation under `_useFloatingOrigin` (with the FO-off large-magnitude control), `packMat4IntoF32WithOffset` landing `delta` in the F32 view for a mesh at world `1e6 + delta`, and the eye-relative-zero `vEyePosition` write.
 - Unit: `tests/unit/shader-material-floating-origin.test.ts` covers subtraction site (4) behaviourally — moving the camera toward a fixed mesh must change projected depth and on-screen span in proportion to the real distance, `world`/`worldView`/`worldViewProjection` must stay in one frame, and the eye must sit at the origin under FO and at its real position without it. The FO-off cases are controls: without them a fix that merely zeroed the translation would pass.
 - Parity: `tests/parity/scenes/scene200-fo-off.spec.ts` and `scene201-fo-on.spec.ts` render the same far-from-origin scene with FO off vs FO on. The two captures MUST diverge (cross-golden MAD ≥ 5.0), proving the offset path is engaged and meaningfully shifts pixels.
 - Bundle: HPM-off bundles do not contain the LWR module; LWR-on bundle adds ~1-2 KB per scene for the FO logic.
 
 ## Tree-shaking proof
 
-Non-LWR bundles do not statically reference `large-world/floating-origin.js`. The only mention is `eng._updateFOOffset?.(scene)` in `scene-core.ts` — a property access on an undefined field, no module import. `createEngine`'s `await import(...)` lives inside `if (useFO)`, which the bundler proves unreachable when `useFloatingOrigin` is never set true in any reachable scene. Verified by bundle-size ceilings.
+The module has exactly one static edge in the source tree: `index.ts` re-exports `getFloatingOriginOffset` from it. That edge is tree-shakeable — a scene that never imports the accessor drops it — and it carries only the accessor, not the FO runtime.
+
+Everything else is reached dynamically. Consumers of the runtime go through engine fields left undefined when FO is off (`engine._wrapRenderableForFO?.(...)`, `engine._makePackMeshWorld?.(...)`), which are property accesses rather than module imports, and `createEngine`'s `await import(...)` lives inside `if (useFO)`, which the bundler proves unreachable when `useFloatingOrigin` is never set true in any reachable scene. So a non-LWR bundle contains neither the accessor nor the runtime. Verified by bundle-size ceilings.
 
 ## Files / size
 
-| File                                                                                                        | Purpose                                                                               |
-| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `large-world/floating-origin.ts` (~70 lines)                                                                | `updateFloatingOriginOffset` per-frame update + `getFloatingOriginOffset` public read |
-| `engine/engine.ts` (FO block in `createEngine`)                                                             | Dynamic-import gate, `useFO && !useHpm` validation                                    |
-| `scene/scene-core.ts` (`_eyePosition`, `_floatingOriginOffset`, `_floatingOriginVersion`, `_update` wiring) | Per-scene state + per-frame trigger                                                   |
-| `camera/camera.ts` (`_floatingOriginOffset?` field, `getViewMatrix` subtract)                               | View-matrix offset bake                                                               |
-| `material/{standard,pbr,node}-renderable.ts` (FO version tracking)                                          | Mesh UBO invalidation when offset changes                                             |
-| `frame-graph/render-task.ts` (`vEyePosition` subtract)                                                      | Scene UBO eye-position offset                                                         |
-| `math/pack-mat4-into-f32.ts` (`offsetXYZ` 5th arg)                                                          | Subtraction at the GPU pack boundary                                                  |
+| File                                                                        | Purpose                                                                         |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `large-world/floating-origin.ts` (~70 lines)                                | `getFloatingOriginOffset` public read, `wrapRenderableForFO`, light FO helpers  |
+| `engine/engine.ts` (FO block in `createEngine`)                             | Dynamic-import gate, `useFO && !useHpm` validation                              |
+| `large-world/pack-mat4-with-offset.ts`                                      | `makePackMeshWorld` — mesh-world packer subtracting the offset at the F32 store |
+| `camera/camera.ts` (`_useFloatingOrigin?` flag, `getViewMatrix` zeroing)    | View translation zeroed under FO                                                |
+| `scene/scene-core.ts` (`_update` FO block)                                  | Stamps `camera._useFloatingOrigin`, invalidates `_viewVer` / `_vpVer`           |
+| `material/{standard,pbr,node}-renderable.ts` (packer selection, FO wrapper) | Mesh UBO invalidation when the camera moves                                     |
+| `frame-graph/scene-uniforms-pack.ts` (`_packSceneUniforms`)                 | Writes `vEyePosition = (0, 0, 0)` under FO                                      |
+| `math/pack-mat4-into-f32.ts` (`packMat4IntoF32`)                            | Precision-only packer; the non-FO fallback and the view-matrix path             |
 
 ## Wired features
 
