@@ -933,6 +933,42 @@ describe("the call sites actually ask the predicates", () => {
         expect(stripped.split("\n")[4]).toContain("npx tsc --noEmit | sed");
         expect(containsPipe(stripped.split("\n")[4] ?? "")).toBe(true);
     });
+
+    it("discovers a pipeline that has steps but no pipe, which is what lets the closure check floor the collector", () => {
+        // The property that makes every other guard here able to notice a file
+        // leaving the collector, written down because until now it held by
+        // accident of ordering and nothing would have caught its removal.
+        //
+        // The walk selects on `steps:`; the collector cares about pipes. The
+        // first is strictly wider, so a file dropping out of the collector is
+        // still discovered and the closure check reports it. Verified against
+        // the real tree: excluding azure-pipelines.yml from the scanned set
+        // fires two guards by name, and excluding azure-pipelines-demos.yml --
+        // which has steps and zero pipes -- still fires the closure check.
+        //
+        // The danger is an optimisation. Narrowing the walk to files that
+        // contain a pipe would look like a tightening, would keep every count
+        // in this file identical today, and would silently make the collector
+        // unfloorable: the file whose loss matters most may be the one with no
+        // pipe to select on. A guard whose subject is chosen by the same
+        // property the collector filters on cannot floor that collector.
+        const dir = mkdtempSync(join(tmpdir(), "pipeline-wider-"));
+        try {
+            // Deliberately a single-line step. The obvious spelling --
+            // `script: |` -- puts a literal pipe character in the fixture, so a
+            // walk narrowed to pipe-bearing files still matches it and this test
+            // passes while asserting the opposite. That was the first version,
+            // and the control caught it: the closure check failed and this test
+            // stayed green, which is the wrong way round for the guard that is
+            // supposed to own this property.
+            writeFileSync(join(dir, "no-pipe.yml"), "steps:\n    - script: echo hi\n");
+
+            expect(pipelineFilesInRepo(dir)).toEqual(["no-pipe.yml"]);
+        } finally {
+            expect(dir.startsWith(tmpdir()) && dir.includes("pipeline-wider-")).toBe(true);
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
 });
 
 describe("the pipe that lives outside the YAML", () => {
