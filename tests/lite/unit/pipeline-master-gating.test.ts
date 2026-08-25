@@ -180,12 +180,31 @@ const COST_GATED_JOBS: string[] = [];
  * into a second file in the same diff, written in prose, where the person
  * reviewing decides. That is all the original comment claimed and more than it
  * delivered.
+ *
+ * The occurrence counts are returned rather than resolved here because both
+ * anchors are `indexOf` -- first match. The first version of this asserted only
+ * that the section was *findable*, and that floor is satisfied more easily as
+ * the section gets wider, not less. Measured: adding one earlier line
+ * containing "Deliberately excluded from" moves `start` backwards over the
+ * sentence that names the three jobs master runs, and gating `UnitTests` off
+ * master then goes from a named failure to silence -- the widened block
+ * "documents" it. A floor that a degrading artifact satisfies more easily is
+ * not a floor, so the caller asserts uniqueness as well as presence.
  */
-function deliberatelyExcludedFromMaster(): string {
+type ExcludedSection = { block: string; starts: number; ends: number };
+
+function deliberatelyExcludedFromMaster(): ExcludedSection {
     const doc = readFileSync(join(repoRoot, "TESTING.md"), "utf8");
+    const starts = doc.split("Deliberately excluded from").length - 1;
+    const ends = doc.split("Those jobs are gated").length - 1;
     const start = doc.indexOf("Deliberately excluded from");
     const end = doc.indexOf("Those jobs are gated", start + 1);
-    return start === -1 || end === -1 ? "" : doc.slice(start, end);
+    return { block: start === -1 || end === -1 ? "" : doc.slice(start, end), starts, ends };
+}
+
+/** A job's `displayName`, which is the string `TESTING.md` refers to it by. */
+function displayNameOf(job: PipelineJob | undefined): string | undefined {
+    return /^\s+displayName:\s*"([^"]+)"\s*$/m.exec(job?.body ?? "")?.[1];
 }
 
 /**
@@ -529,24 +548,59 @@ describe("pull-request jobs cannot run on a master build", () => {
         ).toEqual([]);
     });
 
+    it("locates TESTING.md's excluded-jobs section unambiguously", () => {
+        // Split off from the clause below because the two answer different
+        // questions -- "can this check see anything" versus "is this particular
+        // gate justified" -- and a control that can only name which *test* fired
+        // cannot tell those apart while they share one. The failures below are
+        // about the section itself, so they belong to the section.
+        const { block, starts, ends } = deliberatelyExcludedFromMaster();
+
+        expect(
+            starts,
+            `"Deliberately excluded from" appears ${starts} times in TESTING.md. The section is sliced from the *first* match, so a second one silently re-points ` +
+                `it -- and it widens rather than empties, which no floor below can see. Reword the other mention, or move this anchor to something that stays unique.`
+        ).toBe(1);
+        expect(ends, `"Those jobs are gated" appears ${ends} times in TESTING.md, so the section's end is whichever comes first. Same failure as the start anchor, same fix.`).toBe(
+            1
+        );
+
+        expect(
+            block,
+            "TESTING.md's 'Deliberately excluded from master' section could not be located, so this check would accept any cost gate at all. " +
+                "Its anchors moved -- re-point them here rather than removing this check, which is the only one a COST_GATED_JOBS entry cannot silence."
+        ).toContain("Bundle Size");
+
+        // The width check, and the only assertion here that gets *harder* to
+        // satisfy as the section grows. Presence floors all get easier, which is
+        // how the backwards-widening above survived one. A job cannot be both
+        // "master runs this after every merge" and "master deliberately stopped
+        // running this", so finding a post-merge job named in the excluded list
+        // means either the two statements really do contradict each other or the
+        // slice has swallowed prose that is not the list -- and the sentence
+        // immediately above the list happens to name all three.
+        const byName = new Map(dualContextPipelines.flatMap((file) => file.jobs).map((job) => [job.name, job]));
+        const contradictory = KNOWN_MASTER_JOBS.map((name) => displayNameOf(byName.get(name))).filter((label): label is string => label !== undefined && block.includes(label));
+
+        expect(
+            contradictory,
+            `TESTING.md's excluded-from-master list names ${contradictory.join(", ")}, which KNOWN_MASTER_JOBS says master still runs.\n` +
+                `Either the section really has grown to contradict itself, or -- far likelier -- its anchors have drifted and the slice now covers surrounding prose. ` +
+                `Check the anchors first: a section that is too wide accepts every cost gate silently, which is the one failure the presence check above cannot report.`
+        ).toEqual([]);
+    });
+
     it("makes a cost gate argue for itself where the hatch cannot reach", () => {
         // This clause never consults COST_GATED_JOBS to decide whether something
         // is acceptable -- it consults it only to find what must be justified,
         // and reads the justification from a file the constant cannot edit. That
         // asymmetry is the whole point: a hatch silences every clause phrased in
         // terms of it, so the one clause that binds has to be phrased outside.
-        const excluded = deliberatelyExcludedFromMaster();
-
-        expect(
-            excluded,
-            "TESTING.md's 'Deliberately excluded from master' section could not be located, so this clause would accept any cost gate at all. " +
-                "Its anchors moved -- re-point them here rather than removing this check, which is the only one a COST_GATED_JOBS entry cannot silence."
-        ).toContain("Bundle Size");
-
+        const { block } = deliberatelyExcludedFromMaster();
         const jobsByName = new Map(dualContextPipelines.flatMap((file) => file.jobs).map((job) => [job.name, job]));
         const undocumented = COST_GATED_JOBS.filter((name) => {
-            const label = /^\s+displayName:\s*"([^"]+)"\s*$/m.exec(jobsByName.get(name)?.body ?? "")?.[1];
-            return label === undefined || !excluded.includes(label);
+            const label = displayNameOf(jobsByName.get(name));
+            return label === undefined || !block.includes(label);
         });
 
         expect(
