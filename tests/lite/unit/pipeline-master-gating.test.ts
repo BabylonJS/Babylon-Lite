@@ -435,6 +435,16 @@ function excludedJobLabels(): string[] {
  * template from it, and the failure the clause exists for -- a template that
  * stops being reachable while still sitting on disk -- is precisely the state
  * a directory listing still reports and a shortened list would not.
+ *
+ * `isYamlFile` here is measured and left uncovered *by this file*, deliberately.
+ * Replacing it with `() => true` leaves all fifteen clauses green -- but only
+ * because `config/templates/` holds nothing but `.yml`, so no input separates
+ * the two. The predicate itself is pinned by a table in
+ * `pipeline-piped-steps-set-pipefail.test.ts`, and the only way to give this
+ * call site an arm of its own is to drop a non-YAML file into the directory,
+ * which is adding a file to the tree to be tested about. Recorded rather than
+ * faked: dead by the tree's shape, not by type -- and live the moment the
+ * directory stops being homogeneous.
  */
 function templateFilesOnDisk(): string[] {
     return readdirSync(join(repoRoot, "config", "templates"))
@@ -1072,6 +1082,20 @@ describe("pull-request jobs cannot run on a master build", () => {
         // The other direction, and the one a tree full of explanatory comments
         // makes easy to get wrong: a job that only *mentions* the dependency
         // does not have it.
+        // ...and the direction that costs more if it goes wrong. Stripping every
+        // line that merely *contains* a `#` leaves this file green: measured, 15
+        // passed. A job whose pull-request read shares a line with a trailing
+        // comment would then be classified as safe for master, which is the
+        // failure this whole file exists to prevent, arriving through the very
+        // helper added to prevent its mirror image.
+        expect(
+            readsPullRequestContext(
+                '          - job: Snapshot\n            steps:\n                - script: echo "$(System.PullRequest.PullRequestNumber)" # log which PR this is\n'
+            ),
+            "a job that reads the pull-request number on a line carrying a trailing comment is being classified as needing no pull request.\n" +
+                "Comment stripping is meant to remove lines a pipeline never executes, not lines that merely mention themselves; over-stripping ungates a job that genuinely cannot run on master."
+        ).toBe(true);
+
         expect(
             readsPullRequestContext(
                 "          - job: Lint\n            steps:\n                # System.PullRequest.PullRequestNumber is unavailable on master\n                - script: pnpm lint\n"
@@ -1494,6 +1518,20 @@ describe("pull-request jobs cannot run on a master build", () => {
         // reachable and correctly asserted, they simply had no input.
         const scalars = [
             { what: "comment-only value + deeper mapping entry", text: "steps:\n  - script: # note\n      c: 1\n", rejected: false, folded: false },
+            // The two rows that reach MAPPING_COLON's actual decision -- whether
+            // a colon makes a key -- rather than only its outcome. Every other
+            // illegal row here uses a clean `c: 1`, so loosening the rule to "a
+            // colon anywhere" left the whole table green while making the guard
+            // reject legal pipelines: script bodies are full of colons that are
+            // not keys. Verdicts from PyYAML, which folds both of these into the
+            // plain scalar ("x echo two:three"), not from what the rule predicts.
+            { what: "plain value + deeper shell line whose colon has no space after it", text: "steps:\n  - script: x\n      echo two:three\n", rejected: false, folded: true },
+            {
+                what: "plain value + deeper URL, the colon a pipeline is likeliest to contain",
+                text: "steps:\n  - script: x\n      http://example.com/y\n",
+                rejected: false,
+                folded: true,
+            },
             { what: "comment-only value + deeper bare line", text: "steps:\n  - script: # note\n      more\n", rejected: false, folded: false },
             { what: "literal block whose body looks like a mapping", text: "steps:\n  - script: |\n      c: 1\n", rejected: false, folded: false },
             { what: "a strip-chomped block scalar", text: "steps:\n  - script: |-\n      echo one\n", rejected: false, folded: false },
