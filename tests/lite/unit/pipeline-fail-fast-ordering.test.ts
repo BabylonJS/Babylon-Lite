@@ -344,7 +344,18 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         // this test reads. The clause above is what keeps this one honest.
         const body = allowanceSection();
 
-        const undocumented = CHECK_PREREQUISITES.filter(({ name }) => !body.includes(name)).map(({ name }) => name);
+        // Parsed as a list rather than searched as a substring. `includes` is
+        // satisfied by the name appearing anywhere in the section -- including
+        // in the prose that says the step runs *after* the check, which is the
+        // opposite claim.
+        const listed = [...body.matchAll(/^- `([^`]+)`/gm)].map(([, name]) => name ?? "");
+
+        expect(
+            listed.length,
+            `no \`- \\\`name\\\`\` bullets parsed out of ${ALLOWANCE_HEADING}, so both directions below compare against an empty list and agree with anything`
+        ).toBeGreaterThan(0);
+
+        const undocumented = CHECK_PREREQUISITES.filter(({ name }) => !listed.includes(name)).map(({ name }) => name);
 
         expect(
             undocumented,
@@ -369,6 +380,24 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         expect(
             unreasoned,
             `TESTING.md names these steps under ${ALLOWANCE_HEADING} but gives no reason beside them. The list is the part a reviewer reads to decide whether the exemption is justified; a bare name moves the decision back into the constant this section exists to take it out of.`
+        ).toEqual([]);
+
+        // The other direction, which had no voice at all. This clause iterated
+        // the constant and asked the document about each entry, so the document
+        // was only ever consulted about names the constant already had -- a
+        // check derived from the thing it is meant to pin.
+        //
+        // Measured: add `Install dependencies` to the list in TESTING.md and
+        // touch no code, and six tests pass. The document then tells a reviewer
+        // that installing dependencies ahead of the check is permitted, in the
+        // same section whose prose says dependency installation runs after it,
+        // and the guard grants no such thing. The reviewer-facing half of this
+        // binding was handing out exemptions nothing read.
+        const ungranted = listed.filter((name) => !CHECK_PREREQUISITES.some((entry) => entry.name === name));
+
+        expect(
+            ungranted,
+            `TESTING.md lists these steps under ${ALLOWANCE_HEADING} as permitted to run before "${PREFLIGHT_STEP}", but the ordering check does not permit them. The document is the half a reviewer reads, so a name here is an exemption whether or not the constant agrees. Either add them to CHECK_PREREQUISITES in this file, with a reason, or take them out of the list.`
         ).toEqual([]);
 
         // A step cannot be both the work the check stands in front of and a
