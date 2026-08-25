@@ -289,6 +289,20 @@ function packageScriptWork(steps: string[]): string[] {
     return steps.filter((step) => invokedScripts(step).length > 0);
 }
 
+/**
+ * Why a step would be reported as expensive, in the words the failure uses.
+ *
+ * Extracted so the table can assert the *reported* reason rather than recompute
+ * it. Measured: a first attempt pinned `COSTLY_COMMANDS.filter(...)` inside the
+ * specimen clause, which left the cost clause free to print any reason it liked
+ * — the table agreed with the derivation while the message came from somewhere
+ * else. Asserting a derivation is not asserting the report unless both read the
+ * same function.
+ */
+function expensiveReasons(step: string): string[] {
+    return COSTLY_COMMANDS.filter(({ pattern }) => pattern.test(commandText(step))).map(({ why }) => why);
+}
+
 /** Leading-whitespace width, used to compare YAML nesting levels. */
 function indentOf(line: string): number {
     return line.length - line.trimStart().length;
@@ -813,6 +827,15 @@ type StepReading = {
     prose: string[];
     packageManager: boolean;
     scripts: string[];
+    /**
+     * The `why` strings COSTLY_COMMANDS must produce for this step. Measured
+     * before it existed: replacing the cost clause's message with a fixed reason
+     * passed every arm, so a step could be reported as expensive for another
+     * entry's reason — the entry that matched was never read, only the count.
+     */
+    costly: string[];
+    /** What `stepLabel` must call this step. Nothing else in the file reads it. */
+    label_: string;
     shellBody?: string[];
     env?: string[];
 };
@@ -825,6 +848,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["Build bundle scenes"],
         packageManager: true,
         scripts: ["build:bundle-scenes"],
+        costly: ["measures every bundle scene"],
+        label_: "Build bundle scenes",
     },
     {
         // The P1 row. Loosen isCommentLine to /#/ and this command disappears.
@@ -834,6 +859,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["pnpm install"],
         packageManager: true,
         scripts: [],
+        costly: ["installs the dependency tree"],
+        label_: "- script: pnpm install --frozen-lockfile # the lockfile is pinned",
     },
     {
         // The P2 row. Tighten isCommentLine to /^#/ and this comment survives as
@@ -844,6 +871,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["checkout: self"],
         packageManager: false,
         scripts: [],
+        costly: [],
+        label_: "- checkout: self",
     },
     {
         // Pins the other end of the same decision: "strip only *indented*
@@ -854,6 +883,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["checkout: self"],
         packageManager: false,
         scripts: [],
+        costly: [],
+        label_: "- checkout: self",
     },
     {
         label: "a display name that names a package manager",
@@ -862,6 +893,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["Enable pnpm via corepack"],
         packageManager: false,
         scripts: [],
+        costly: [],
+        label_: "Enable pnpm via corepack",
     },
     {
         label: "a condition that names a package manager",
@@ -870,6 +903,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["pnpm install"],
         packageManager: false,
         scripts: [],
+        costly: [],
+        label_: "- script: echo ready",
     },
     {
         // The P8 row: drop `(?:run\s+)?` and the token becomes `run`.
@@ -879,6 +914,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["build:bundle-scenes"],
         packageManager: true,
         scripts: ["build:bundle-scenes"],
+        costly: ["measures every bundle scene"],
+        label_: "- script: pnpm run build:bundle-scenes",
     },
     {
         // The P6 row: drop the `\b` and `cpnpm` reads as `pnpm`.
@@ -888,6 +925,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["cpnpm"],
         packageManager: false,
         scripts: [],
+        costly: [],
+        label_: "- script: echo cpnpm install",
     },
     {
         // The P7 row: drop the argument and a bare mention counts as work.
@@ -897,6 +936,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["pnpm"],
         packageManager: false,
         scripts: [],
+        costly: [],
+        label_: "- script: echo pnpm",
     },
     {
         label: "a block scalar body with a comment in it",
@@ -912,6 +953,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["Install Playwright browsers"],
         packageManager: true,
         scripts: [],
+        costly: ["downloads a browser"],
+        label_: "Install Playwright browsers",
         shellBody: ["pnpm exec playwright install --with-deps", "echo done"],
         env: ["PLAYWRIGHT_TOKEN"],
     },
@@ -925,6 +968,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["Install Playwright browsers"],
         packageManager: true,
         scripts: [],
+        costly: ["downloads a browser"],
+        label_: "Install Playwright browsers",
         shellBody: [],
     },
     {
@@ -935,6 +980,8 @@ const STEP_READINGS: StepReading[] = [
         prose: ["env: production"],
         packageManager: false,
         scripts: [],
+        costly: [],
+        label_: '- script: echo "env: production"',
         env: ["TOKEN"],
     },
 ];
@@ -1010,6 +1057,13 @@ describe("the baseline pipeline validates its deploy configuration before doing 
             if (scripts.join(",") !== row.scripts.join(",")) {
                 problems.push(`"${row.label}": reads the declared scripts as [${scripts.join(" | ")}], not [${row.scripts.join(" | ")}]`);
             }
+            const costly = expensiveReasons(row.step);
+            if (costly.join(",") !== row.costly.join(",")) {
+                problems.push(`"${row.label}": would be reported as expensive because it [${costly.join(" | ")}], not [${row.costly.join(" | ")}]`);
+            }
+            if (stepLabel(row.step) !== row.label_) {
+                problems.push(`"${row.label}": a failure would call this step "${stepLabel(row.step)}", not "${row.label_}"`);
+            }
             if (row.shellBody) {
                 const body = shellBodyOf(row.step)
                     .split("\n")
@@ -1038,10 +1092,33 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         // Both directions have to be present, or the table drifts into being a
         // list of things the guard already does. The sweep that produced these
         // rows found the *negative* direction missing in every predicate here.
-        expect(STEP_READINGS.filter((r) => r.packageManager).length, "no row asserts a step IS package-manager work").toBeGreaterThan(0);
-        expect(STEP_READINGS.filter((r) => !r.packageManager).length, "no row asserts a step is NOT package-manager work").toBeGreaterThan(0);
+        //
+        // Residuals from the axis sweep, stated: replacing a failure's connective
+        // prose while keeping its numbers and quoted lines is silent, in this
+        // clause and in the nesting one. That is deliberate — pinning wording
+        // makes the table a spelling test, and the parts a reader must be able to
+        // act on are the line, the excerpt, the step's name and the reason, all
+        // of which are asserted. The checks that carry those are silent when
+        // dropped alone and only the paired arm shows they are load-bearing: they
+        // are unattacked, not dead.
+        expect(STEP_READINGS.filter((r) => r.packageManager).length, "the positive direction is missing: no row expects a step to count as package-manager work").toBeGreaterThan(
+            0
+        );
+        expect(
+            STEP_READINGS.filter((r) => !r.packageManager).length,
+            "the negative direction is missing: no row expects a step to be ignored by the package-manager rule"
+        ).toBeGreaterThan(0);
         expect(STEP_READINGS.filter((r) => r.runs.length > 0).length, "no row asserts the guard sees a command").toBeGreaterThan(0);
         expect(STEP_READINGS.filter((r) => r.scripts.length > 0).length, "no row pins a declared script name").toBeGreaterThan(0);
+        // Every COSTLY_COMMANDS entry needs a row that reports its reason, or a
+        // pair of entries can swap `why` strings and no row notices.
+        for (const { why } of COSTLY_COMMANDS) {
+            expect(STEP_READINGS.filter((r) => r.costly.includes(why)).length, `no row expects a step reported as expensive because it ${why}`).toBeGreaterThan(0);
+        }
+        expect(
+            STEP_READINGS.filter((r) => r.costly.length === 0).length,
+            "the cheap direction is missing: no row expects a step with no reason to be reported as expensive"
+        ).toBeGreaterThan(0);
         expect(problems, `the projections read a step differently than the pipeline means it:\n  ${problems.join("\n  ")}`).toEqual([]);
     });
 
@@ -1092,9 +1169,7 @@ describe("the baseline pipeline validates its deploy configuration before doing 
                 const gated = GATED_STEPS.filter((g) => withoutComments(step).includes(g)).map(
                     () => `\`${name}\` exempts "${label}", which is work "${PREFLIGHT_STEP}" exists to stand in front of`
                 );
-                const costly = COSTLY_COMMANDS.filter(({ pattern }) => pattern.test(commandText(step))).map(
-                    ({ why }) => `\`${name}\` exempts "${label}", which ${why} — the allowance is for cheap steps`
-                );
+                const costly = expensiveReasons(step).map((why) => `\`${name}\` exempts "${label}", which ${why} — the allowance is for cheap steps`);
                 return [...gated, ...costly];
             });
         });
@@ -1111,7 +1186,7 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         const preflight = stepIndex(steps, PREFLIGHT_STEP);
 
         const expensive = steps.slice(0, preflight).flatMap((step) => {
-            const named = COSTLY_COMMANDS.filter(({ pattern }) => pattern.test(commandText(step))).map(({ why }) => `a step that ${why} runs before "${PREFLIGHT_STEP}"`);
+            const named = expensiveReasons(step).map((why) => `a step that ${why} runs before "${PREFLIGHT_STEP}"`);
 
             // The named list supplies the reason; the derived set supplies the
             // floor. A step that invokes a package manager is doing the kind of
@@ -1230,10 +1305,31 @@ describe("the baseline pipeline validates its deploy configuration before doing 
             // Reaching the right line number is not the same as saying so. The
             // failure has to quote the offending line, or the number is the only
             // thing a reader gets and it is unverifiable at the point of use.
+            //
+            // Both halves of the sentence, and both derived from the subject
+            // rather than written per row. Measured: quoting the wrong FOLLOWING
+            // line passed every row, because only the flagged line was read —
+            // the message would name a real problem and point at the wrong
+            // partner. Deriving costs nothing and adds no constant, since the
+            // rule's own definition of "the next line that matters" is what the
+            // reader needs to see confirmed.
             for (const n of flags) {
-                const source = yaml.split("\n")[n - 1]?.trim() ?? "";
-                if (!messages.some((m) => m.includes(source))) {
+                const lines = yaml.split("\n");
+                const source = lines[n - 1]?.trim() ?? "";
+                const message = messages.find((m) => m.startsWith(`line ${n}:`)) ?? "";
+                if (!message.includes(source)) {
                     disagreements.push(`${label} — nothing in the failure quotes line ${n} (\`${source}\`)`);
+                }
+                const following =
+                    lines
+                        .slice(n)
+                        .find((l) => {
+                            const c = l.slice(contentColumn(l));
+                            return c.trim() !== "" && !c.startsWith("#");
+                        })
+                        ?.trim() ?? "";
+                if (following !== "" && !message.includes(following)) {
+                    disagreements.push(`${label} — the failure for line ${n} does not name the line it is followed by (\`${following}\`)`);
                 }
             }
         }
