@@ -392,7 +392,10 @@ four call sites and which therefore run on every PR. If you add a CI file
 somewhere else, add its directory to that list — and you do not have to
 remember to: the same test walks the repo for anything its clauses examine, an
 `Authorization:` header **or** a masked value, and fails naming any file its
-roots do not reach. Discovering by a narrower category than the clauses read
+roots do not reach. Test data is excluded by category — a fixture holding a
+mask is correct code, and flagging it would advise adding a test directory to
+the roots, which would make the guard scan fixtures and fail on the very mask
+it was sent to read. Discovering by a narrower category than the clauses read
 would certify part of the subject while reporting on all of it. That
 enforcement is deliberately
 a test rather than this sentence. Once a second guard ships its own root list,

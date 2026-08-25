@@ -272,6 +272,25 @@ describe("pipeline secret hygiene", () => {
 });
 
 /**
+ * Directories the credential walk does not enter.
+ *
+ * Created in passing while writing the walk and left unpinned, which is the
+ * sibling case: a collector inherits none of the scrutiny the thing it was
+ * written for received, and looks finished because it is new.
+ *
+ * `tests` is a *category* exclusion, not a convenience one. A fixture holding
+ * a masked credential is correct code -- it is test data, not CI
+ * configuration -- and flagging it would misfire while advising the reader to
+ * add a test directory to the roots list, which would then make the guard scan
+ * fixtures and fail on the mask itself. Measured before narrowing rather than
+ * predicted: zero tracked YAML under `tests/` today, so this costs nothing
+ * now and only ever excludes test data.
+ */
+export function isWalkableDir(name: string): boolean {
+    return !new Set(["node_modules", ".git", "dist", "build", "coverage", "out", ".turbo", "tests"]).has(name);
+}
+
+/**
  * Walks the repo for YAML carrying anything the clauses examine, so the
  * collector above can be compared against reality rather than against itself.
  *
@@ -284,12 +303,11 @@ describe("pipeline secret hygiene", () => {
  * subject and reports on all of it.
  */
 function allYamlCarryingACredentialShape(): string[] {
-    const skip = new Set(["node_modules", ".git", "dist", "build", "coverage", "out", ".turbo"]);
     const found: string[] = [];
 
     const walk = (dir: string): void => {
         for (const name of readdirSync(dir)) {
-            if (skip.has(name)) {
+            if (!isWalkableDir(name)) {
                 continue;
             }
             const full = join(dir, name);
@@ -309,6 +327,27 @@ function allYamlCarryingACredentialShape(): string[] {
 
     return found;
 }
+
+describe("the credential walk enters the right directories", () => {
+    // Both directions on the collector itself. A walk that silently stops
+    // entering a directory produces a smaller subject and a set of diagnostics
+    // that agree with it perfectly, so no count in this file can detect it.
+    it.each([
+        ["config", true],
+        [".github", true],
+        ["packages", true],
+        ["node_modules", false],
+        ["dist", false],
+        [".git", false],
+        // Test data is not CI configuration. A fixture carrying a mask is
+        // correct code, and flagging it would advise adding a test directory
+        // to the roots list -- which would make the guard scan fixtures and
+        // then fail on the mask it was told to go and read.
+        ["tests", false],
+    ])("isWalkableDir(%s) -> %s", (name, expected) => {
+        expect(isWalkableDir(name as string)).toBe(expected);
+    });
+});
 
 describe("the mask guard reads every file carrying anything its clauses examine", () => {
     // The sibling variable-groups guard got a closure check and this one did
