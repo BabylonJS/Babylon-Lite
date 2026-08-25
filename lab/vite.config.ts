@@ -248,9 +248,9 @@ function serveReferenceImages(): Plugin {
                         return;
                     }
                 }
-                // Serve the generated aggregate bundle manifest. The tracked source of
-                // truth is one file per scene under public/bundle/manifest/; the single
-                // aggregate manifest.json is a (gitignored) build output. On a fresh
+                // Serve the generated aggregate bundle manifest. It is built from one
+                // file per scene under public/bundle/manifest/; the single aggregate
+                // manifest.json is a (gitignored) build output. On a fresh
                 // checkout it hasn't been built yet, so synthesize it on the fly from the
                 // per-scene files so the Bundle tab is populated without a full build.
                 if (url === "/bundle/manifest.json") {
@@ -373,7 +373,7 @@ function serveReferenceImages(): Plugin {
                             return null;
                         }
                     };
-                    // Newest mtime across the tracked per-scene manifest files, used as a
+                    // Newest mtime across the per-scene manifest files, used as a
                     // fallback when the generated aggregate manifest.json isn't built yet.
                     const dirNewestMtime = (dir: string): number | null => {
                         try {

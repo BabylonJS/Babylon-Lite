@@ -72,6 +72,16 @@ describe("PBR template + fragments integration", () => {
         expect(result._materialUboSpec).toBeDefined();
     });
 
+    it("only emits derivative roughness when specular AA is enabled", () => {
+        const disabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasSpecularAA: false }), []);
+        const enabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasSpecularAA: true }), []);
+
+        expect(disabled._fragmentWGSL).toContain("var AA_factor_x=0.0;");
+        expect(disabled._fragmentWGSL).not.toContain("nDfdx_AA=dpdx(N)");
+        expect(enabled._fragmentWGSL).toContain("nDfdx_AA=dpdx(N)");
+        expect(enabled._fragmentWGSL).toContain("alphaG+=AA_factor_y");
+    });
+
     it("composes PBR + emissive color", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasTonemap: true, _hasEmissiveColor: true });
         const result = composeShader(template, [createEmissiveColorFragment(false)]);
@@ -113,6 +123,18 @@ describe("PBR template + fragments integration", () => {
         expect(result._fragmentWGSL).toContain("visibility_Ashikhmin");
         expect(result._fragmentWGSL).toContain("sheenColorFinal");
         expect(result._materialUboSpec!._offsets.has("sheenParams")).toBe(true);
+    });
+
+    it("emits no lights binding in the depth-only (_noColorOutput) shadow-caster variant", () => {
+        for (const light of [{ _hasSingleLight: true }, { _hasMultiLight: true }]) {
+            const caster = composeShader(createPbrTemplate({ ...defaultPbrConfig, ...light, _noColorOutput: true }), []);
+            expect(caster._fragmentWGSL).not.toContain("lightsUniforms");
+            // The colour variant with the same light mode still declares it, together with the struct.
+            const structWgsl = "struct lightsUniforms { x: f32 };";
+            const lit = composeShader(createPbrTemplate({ ...defaultPbrConfig, ...light, _multiLightWGSL: structWgsl, _singleLightWGSL: structWgsl }), []);
+            expect(lit._fragmentWGSL).toContain("var<uniform> lights: lightsUniforms;");
+            expect(lit._fragmentWGSL).toContain("struct lightsUniforms");
+        }
     });
 
     it("composes PBR + shadow-only (BC color/alpha override + FA final-alpha override)", () => {

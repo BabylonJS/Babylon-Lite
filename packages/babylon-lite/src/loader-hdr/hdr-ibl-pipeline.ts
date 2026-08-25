@@ -15,6 +15,9 @@ import equirectToCubeWGSL from "../../shaders/hdr-equirect-to-cube.compute.wgsl?
 import prefilterCubeWGSL from "../../shaders/hdr-prefilter-cube.compute.wgsl?raw";
 import brdfLutWGSL from "../../shaders/hdr-brdf-lut.compute.wgsl?raw";
 
+/** Babylon.js' default mapping from GGX alpha to prefiltered cubemap LOD. */
+export const HDR_LOD_GENERATION_SCALE = 0.8;
+
 export function equirectToCubemapGPU(engine: EngineContext, hdr: HdrImage, faceSize: number): GPUTexture {
     const device = engine._device;
     // Upload equirect as a 2D texture
@@ -54,7 +57,8 @@ export function equirectToCubemapGPU(engine: EngineContext, hdr: HdrImage, faceS
         layout: pipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: equirectTex.createView() },
-            { binding: 1, resource: cubeTex.createView({ dimension: "2d-array", arrayLayerCount: 6 }) },
+            // A six-layer 2D texture defaults to a 2D-array view spanning all layers.
+            { binding: 1, resource: cubeTex.createView() },
             { binding: 2, resource: { buffer: paramBuf } },
         ],
     });
@@ -110,11 +114,8 @@ export function prefilterCubemapGPU(engine: EngineContext, srcCube: GPUTexture, 
         device.queue.writeBuffer(paramsBuffer, 0, new U32([faceSize, mip, mipCount, faceSize]));
 
         const dstView = dstCube.createView({
-            dimension: "2d-array",
             baseMipLevel: mip,
             mipLevelCount: 1,
-            baseArrayLayer: 0,
-            arrayLayerCount: 6,
         });
 
         const bindGroup = device.createBindGroup({

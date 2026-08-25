@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { installWebAudioMock, uninstallWebAudioMock, installStreamingMocks, uninstallStreamingMocks, MockAudioContext, MockOfflineAudioContext } from "./web-audio-mock.js";
-import type { MockGainNode, MockMediaElement } from "./web-audio-mock.js";
+import {
+    installWebAudioMock,
+    uninstallWebAudioMock,
+    installStreamingMocks,
+    uninstallStreamingMocks,
+    MockAudioContext,
+    MockOfflineAudioContext,
+    MockMediaElement,
+} from "./web-audio-mock.js";
+import type { MockGainNode } from "./web-audio-mock.js";
 import { createAudioEngineAsync, disposeAudioEngine } from "../../../../packages/babylon-lite/src/audio/audio-engine.js";
 import { createAudioBusAsync } from "../../../../packages/babylon-lite/src/audio/audio-bus.js";
 import { SoundState } from "../../../../packages/babylon-lite/src/audio/static-sound.js";
@@ -49,6 +57,22 @@ describe("streaming-sound", () => {
         const ctx = new MockOfflineAudioContext();
         const engine = await createAudioEngineAsync({ audioContext: ctx as unknown as BaseAudioContext });
         await expect(createStreamingSoundAsync(engine, "music.mp3")).rejects.toThrow(/real-time AudioContext/);
+        disposeAudioEngine(engine);
+    });
+
+    it("releases the sound graph when initial preloading fails", async () => {
+        class FailingMediaElement extends MockMediaElement {
+            public override load(): void {
+                this.loaded = true;
+                queueMicrotask(() => this.fire("error"));
+            }
+        }
+        (globalThis as unknown as { Audio: typeof MockMediaElement }).Audio = FailingMediaElement;
+        const engine = await makeEngine();
+
+        await expect(createStreamingSoundAsync(engine, "missing.mp3")).rejects.toThrow("Failed to load streaming sound.");
+
+        expect(engine._sounds.size).toBe(0);
         disposeAudioEngine(engine);
     });
 

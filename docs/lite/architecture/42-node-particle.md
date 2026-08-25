@@ -1745,7 +1745,7 @@ packages/babylon-lite/src/index.ts
 
 The billboard subsystem owns its additional rendering, picking, GPU, and blend-descriptor dependencies. The Sprite2D subsystem owns its packed layer layout, dirty tracking, renderer, GPU upload, and blend descriptors. They are outside the particle implementation boundary; the particle package owns only conversion and registration policy.
 
-### 14.5 Scene, configuration, and manifest anchors
+### 14.5 Scene and configuration anchors
 
 ```text
 demos-config.json
@@ -1775,19 +1775,6 @@ lab/lite/src/shared/scene283-npe-multiply-blend.ts
 lab/lite/src/shared/scene284-npe-multiply-add-blend.ts
 lab/lite/src/shared/scene302-npe-moving-emitter.ts
 lab/lite/src/shared/npe-sprite2d-fixture.ts
-lab/public/bundle/demos-manifest.json
-lab/public/bundle/manifest/scene262.json
-lab/public/bundle/manifest/scene263.json
-lab/public/bundle/manifest/scene264.json
-lab/public/bundle/manifest/scene276.json
-lab/public/bundle/manifest/scene277.json
-lab/public/bundle/manifest/scene280.json
-lab/public/bundle/manifest/scene281.json
-lab/public/bundle/manifest/scene283.json
-lab/public/bundle/manifest/scene284.json
-lab/public/bundle/manifest/scene300.json
-lab/public/bundle/manifest/scene301.json
-lab/public/bundle/manifest/scene302.json
 lab/public/thumbnails/scene301.jpg
 lab/public/thumbnails/scene302.jpg
 lab/lite/bundle-scene301.html

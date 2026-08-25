@@ -177,12 +177,17 @@ export async function createStreamingSoundAsync(engine: AudioEngine, source: Str
 
     engine._sounds.add(sound);
 
-    if (sound._options.preloadCount > 0) {
-        await preloadStreamingInstancesAsync(sound, sound._options.preloadCount);
-    }
+    try {
+        if (sound._options.preloadCount > 0) {
+            await preloadStreamingInstancesAsync(sound, sound._options.preloadCount);
+        }
 
-    if (sound._options.autoplay) {
-        playStreamingSound(sound);
+        if (sound._options.autoplay) {
+            playStreamingSound(sound);
+        }
+    } catch (error) {
+        disposeStreamingSound(sound);
+        throw error;
     }
 
     return sound;
@@ -518,7 +523,8 @@ function _onMediaEnded(instance: StreamingInstance): void {
 
 function _onMediaError(instance: StreamingInstance, reason?: unknown): void {
     _setStreamingInstanceState(instance, SoundState.FailedToStart);
-    instance._rejectReady(reason);
+    instance._rejectReady(reason instanceof Error ? reason : new Error("Failed to load streaming sound.", { cause: reason }));
+    _removePreloaded(instance._sound, instance);
     _instanceDispose(instance);
 }
 
