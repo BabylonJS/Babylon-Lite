@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { GITHUB_COMMENT_TASK, SHELL_STEP_KEY, matchesAnyLine, pipelineYamlFiles, repoRoot } from "./pipeline-files";
+import { GITHUB_COMMENT_TASK, SHELL_STEP_KEY, isYamlFile, matchesAnyLine, pipelineYamlFiles, repoRoot } from "./pipeline-files";
 
 /**
  * Guards the claim this repository's post-merge validation rests on: **no job
@@ -71,8 +71,42 @@ const PR_CONTEXT_MARKERS = [/System\.PullRequest\./, GITHUB_COMMENT_TASK];
  * The specimens below are what a per-disjunct control needs and the repository
  * does not contain.
  */
+/**
+ * Comment-only lines, which a pipeline never executes.
+ *
+ * Measured: add `# System.PullRequest.PullRequestNumber is unavailable here` to
+ * the `Lint & Type Check` job and two clauses fire, demanding a job be gated
+ * off master because of a sentence explaining that it isn't. The advice
+ * attached to that failure argues for shrinking post-merge validation, which is
+ * the direction this whole file exists to resist -- and the pipeline header
+ * discusses `System.PullRequest.*` at length precisely because it is worth
+ * explaining, so the tree invites the mistake.
+ *
+ * Only whole-line comments are removed. A `#` inside a value can be quoted
+ * data, and cutting at it would be a second hand-rolled YAML rule with no
+ * parser to check it against.
+ */
+function stripCommentLines(text: string): string {
+    return text
+        .split("\n")
+        .filter((line) => !/^\s*#/.test(line))
+        .join("\n");
+}
+
+/**
+ * Whether a job depends on something only a pull-request build supplies.
+ *
+ * Reads the job's substance, not its commentary -- but where that line falls
+ * depends on the question being asked, so this is deliberately not the same
+ * exclusion the cost floor makes. `condition:` is commentary about *what a step
+ * runs*; it is substance here, because
+ * `ne(variables['System.PullRequest.PullRequestNumber'], '')` is the most
+ * explicit form the dependency takes and dropping conditions would blind this
+ * to it. `displayName` is kept for the same reason at lower stakes: ADO expands
+ * macros in it.
+ */
 function readsPullRequestContext(text: string): boolean {
-    return PR_CONTEXT_MARKERS.some((marker) => matchesAnyLine(marker, text));
+    return PR_CONTEXT_MARKERS.some((marker) => matchesAnyLine(marker, stripCommentLines(text)));
 }
 
 /**
@@ -381,7 +415,8 @@ function excludedJobLabels(): string[] {
 }
 
 /**
- * The template references this guard's marker detection currently rests on.
+ * The template references this guard's marker detection rests on, read off disk
+ * rather than listed here.
  *
  * Named rather than counted, for the reason the other floors are: a count drifts
  * and `> 0` is satisfied by one survivor. `PerfRegression` and `ParityCloud`
@@ -389,8 +424,24 @@ function excludedJobLabels(): string[] {
  * for correctness arrives through `upload-test-report.yml` -- so if the
  * reference collector stops finding these paths, the clause below is asserting
  * something about an empty set while passing.
+ *
+ * That paragraph was true of an authored list, and the list was the defect it
+ * described. Measured: replacing it with `[]` left this file at **15 passed**.
+ * The loop below iterates it, so emptying it asks nothing -- the guard written
+ * to stop a vacuous assertion was the assertion that could be made vacuous, and
+ * the comment arguing for it kept reading as a reason to trust it.
+ *
+ * `config/templates/` is not an assertion. No edit to this file removes a
+ * template from it, and the failure the clause exists for -- a template that
+ * stops being reachable while still sitting on disk -- is precisely the state
+ * a directory listing still reports and a shortened list would not.
  */
-const KNOWN_TEMPLATE_REFERENCES = ["config/templates/upload-test-report.yml", "config/templates/upload-static-site.yml"];
+function templateFilesOnDisk(): string[] {
+    return readdirSync(join(repoRoot, "config", "templates"))
+        .filter(isYamlFile)
+        .map((name) => `config/templates/${name}`)
+        .sort();
+}
 
 /** Every `- template:` path a resolved body still names, at any depth. */
 function templateReferencesIn(text: string): string[] {
@@ -1011,7 +1062,23 @@ describe("pull-request jobs cannot run on a master build", () => {
                 body: '          - job: Snapshot\n            steps:\n                - script: echo "$(System.PullRequest.PullRequestNumber)"\n',
                 marker: "variable",
             },
+            {
+                what: "a condition reading the pull-request number, which is the most explicit form the dependency takes",
+                body: "          - job: Snapshot\n            condition: ne(variables['System.PullRequest.PullRequestNumber'], '')\n            steps:\n                - script: echo hi\n",
+                marker: "variable in a condition",
+            },
         ];
+
+        // The other direction, and the one a tree full of explanatory comments
+        // makes easy to get wrong: a job that only *mentions* the dependency
+        // does not have it.
+        expect(
+            readsPullRequestContext(
+                "          - job: Lint\n            steps:\n                # System.PullRequest.PullRequestNumber is unavailable on master\n                - script: pnpm lint\n"
+            ),
+            "a job whose only pull-request reference is a comment explaining that it has none is being classified as needing a pull request.\n" +
+                "Nothing executes a comment. The clauses downstream would require it to be gated, and gating it is exactly how a deterministic job leaves post-merge validation."
+        ).toBe(false);
 
         for (const specimen of specimens) {
             expect(
@@ -1321,14 +1388,21 @@ describe("pull-request jobs cannot run on a master build", () => {
         // whoever hits it with a diagnosis and no action, and the two actions are
         // not variations of each other: one edits this constant, the other says
         // the constant is fine and the code above it is broken.
-        for (const path of KNOWN_TEMPLATE_REFERENCES) {
+        const templates = templateFilesOnDisk();
+        expect(
+            templates.length,
+            `config/templates/ holds no YAML at all, so the loop below runs zero times and this clause agrees with any pipeline.\n` +
+                `Either the templates moved -- and the two jobs whose gating claim arrives only through them are now unexamined -- or this listing is looking in the wrong place.`
+        ).toBeGreaterThan(0);
+
+        for (const path of templates) {
             expect(
                 referenced,
                 referenced.length === 0
                     ? `no dual-context job references any template at all, so this clause is checking an empty set and the readability floor below it cannot fail.\n` +
                           `The reference collector or the job splitter has stopped producing references. Fix that rather than editing KNOWN_TEMPLATE_REFERENCES -- the constant is not what broke, and shortening it here would hide the collector's failure permanently.`
                     : `templates are still being collected (${[...new Set(referenced)].join(", ")}), but no dual-context job references ${path} any more.\n` +
-                          `If that include was deliberately removed, drop ${path} from KNOWN_TEMPLATE_REFERENCES -- the constant exists to make the removal visible, not to prevent it.\n` +
+                          `If that include was deliberately removed, delete ${path} from config/templates/ as well -- this reads the directory, so an unreferenced template left on disk stays visible rather than being quietly dropped from a list.\n` +
                           `Then check the jobs that relied on it: pull-request context reaching them through that template is now gone, so a gate justified by it may no longer be justified at all.`
             ).toContain(path);
         }
