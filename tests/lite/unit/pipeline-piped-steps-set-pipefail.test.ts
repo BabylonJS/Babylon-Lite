@@ -139,10 +139,77 @@ export function enablesPipefail(script: string): boolean {
 }
 
 /**
+ * Remove quoted spans from a shell line, so only characters the shell would
+ * read as operators remain.
+ *
+ * This exists because `|` is a pipe operator *outside* quotes and an ordinary
+ * character inside them. `grep -E "foo|bar"`, `sed -E 's/(a|b)/x/'` and
+ * `awk -F'|'` all contain a `|` that the shell never interprets, and all three
+ * are ordinary CI scripting rather than exotic constructions.
+ *
+ * Backslash escapes are consumed except inside single quotes, where the shell
+ * treats a backslash literally.
+ */
+function stripQuotedSpans(line: string): string {
+    let out = "";
+    let quote: '"' | "'" | null = null;
+
+    for (let index = 0; index < line.length; index++) {
+        const char = line[index];
+
+        if (char === "\\" && quote !== "'") {
+            index++;
+            continue;
+        }
+        if (quote) {
+            if (char === quote) {
+                quote = null;
+            }
+            continue;
+        }
+        if (char === '"' || char === "'") {
+            quote = char;
+            continue;
+        }
+        out += char;
+    }
+
+    return out;
+}
+
+/**
  * True when the script's exit status can be decided by a pipeline rather than
- * by its last command. `||` is excluded because it is a boolean operator, not
- * a pipe, and comment lines are excluded so prose *about* pipes -- of which
- * this repo now has a fair amount -- does not count as one.
+ * by its last command.
+ *
+ * Three things are excluded, and the reason each is excluded differs:
+ *
+ * - Comment lines, so prose *about* pipes -- of which this repo now has a fair
+ *   amount -- does not count as one.
+ * - `||`, because it is a boolean operator rather than a pipe.
+ * - Quoted spans, because a `|` inside quotes is data, not an operator.
+ *
+ * The third arrived late and is the reason this is no longer a substring test.
+ * The original asked whether the line *contained the character* `|`, which is
+ * not the same question and answered it wrongly for six of ten shapes probed:
+ * `grep -E "foo|bar"`, `sed -E 's/(a|b)/x/'`, `awk -F'|'`, `echo "a|b"`, a
+ * progress bar in a message, and a `case` alternation were all reported as
+ * pipes. Every one is correct shell containing no pipeline at all.
+ *
+ * That direction is the expensive one. A guard that demands `set -euo pipefail`
+ * from a script that does not pipe is a false alarm on correct code, and the
+ * author who hits it -- with an error message naming their file and asserting
+ * something plainly untrue about it -- reasonably concludes the guard is broken
+ * and weakens or deletes it. The invariant then dies protecting nothing, and
+ * the loss is silent. None of those six shapes is in the tree today, so this
+ * cost exactly nothing until the day someone wrote one, which is the whole
+ * shape of the risk.
+ *
+ * Residual, stated rather than papered over: a `case` alternation (`a|b)`) is
+ * an unquoted `|` that is not a pipe, so it is still over-flagged. Recognising
+ * it needs real grammar rather than lexing, and `case` does not currently
+ * appear in any pipeline step. Unlike the six above, over-flagging it merely
+ * demands a harmless `set -euo pipefail`, so the failure is legible rather than
+ * absurd -- but it is a false positive and belongs on this list.
  */
 function containsPipe(script: string): boolean {
     return script.split("\n").some((line) => {
@@ -150,7 +217,7 @@ function containsPipe(script: string): boolean {
         if (!trimmed || trimmed.startsWith("#")) {
             return false;
         }
-        return trimmed.replace(/\|\|/g, "").includes("|");
+        return stripQuotedSpans(trimmed).replace(/\|\|/g, "").includes("|");
     });
 }
 
@@ -290,5 +357,58 @@ describe("enablesPipefail recognises pipefail however it is spelled", () => {
     it("finds the guard anywhere in a multi-line script", () => {
         expect(enablesPipefail("#!/usr/bin/env bash\nset -euo pipefail\ntsc --noEmit | sed s/x/y/")).toBe(true);
         expect(enablesPipefail("#!/usr/bin/env bash\ntsc --noEmit | sed s/x/y/")).toBe(false);
+    });
+});
+
+describe("containsPipe distinguishes a pipe from the character", () => {
+    // This table exists because it did not, and its absence was invisible for
+    // the same reason absences usually are: its partner had one.
+    //
+    // `enablesPipefail` had seventeen fixtures pinning both directions, sitting
+    // directly above a predicate with none. The guard needs *both* to be right
+    // -- one decides which scripts are subject to the rule, the other decides
+    // whether they satisfy it -- and having thoroughly pinned the second, the
+    // file read as well-tested. That is the same split-scope defect already
+    // found and fixed here at the root-list level, recurring one layer down at
+    // the predicate level, and I fixed it in the first place without checking
+    // whether it had siblings.
+    //
+    // The accept list is what a real pipeline looks like; the reject list is
+    // correct shell that merely contains the character. The reject direction is
+    // the one that was broken, and the one no fixture would have caught,
+    // because a false positive here fires on code nobody has written yet.
+    it.each([
+        // Real pipelines: exit status can be decided by a non-final command.
+        ['tsc --noEmit | sed "s/^/##vso/"', true],
+        ["pnpm build | tee build.log", true],
+        ["cat manifest.json | jq .scenes", true],
+        ["set -euo pipefail\ntsc --noEmit | sed s/x/y/", true],
+        // A quoted separator does not hide a real pipe later on the line.
+        ["awk -F'|' '{print $1}' data | head -1", true],
+        // `|&` pipes stderr too, and is still a pipeline.
+        ["pnpm build |& tee build.log", true],
+
+        // Not pipelines. Every one of these was flagged before the quote-aware
+        // rewrite, and every one is ordinary CI scripting rather than an
+        // exotic construction.
+        ['grep -E "foo|bar" report.txt', false],
+        ["sed -E 's/(a|b)/x/' input.txt", false],
+        ["awk -F'|' '{print $1}' data.csv", false],
+        ['echo "a|b"', false],
+        ['echo "progress |"', false],
+        // A boolean operator, excluded since the first version.
+        ["[ -f dist/index.js ] || exit 1", false],
+        // Prose about pipes is not a pipe -- this file is full of it.
+        ["# tsc --noEmit | sed rewrites errors into annotations", false],
+        ["", false],
+    ])("%j -> %s", (script, expected) => {
+        expect(containsPipe(script)).toBe(expected);
+    });
+
+    // The residual, pinned as-is rather than left to be rediscovered. If
+    // someone teaches the predicate real grammar, this flips and the fixture
+    // should flip with it -- deliberately, not silently.
+    it("still over-flags a case alternation, which needs grammar rather than lexing", () => {
+        expect(containsPipe('case "$1" in a|b) echo hi ;; esac')).toBe(true);
     });
 });
