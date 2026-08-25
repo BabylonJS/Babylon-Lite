@@ -332,12 +332,24 @@ describe("the hygiene guards cover every pipeline in the repo", () => {
         // would treat `some-dir/azure-pipelines.yml` as covered because the
         // root file of that name is scanned -- a false negative that hides
         // exactly the case this test exists to catch.
-        const scanned = new Set(shellScripts().map((script) => script.location.split(":")[0]));
+        //
+        // The covered set is the files the roots *contain*, not the files that
+        // happened to yield a shell script. Those were the same set while
+        // discovery keyed on shell steps, and stopped being the same the moment
+        // it also matched comment tasks: a scanned file holding only a
+        // `GitHubComment@0` task yields no script, so deriving coverage from
+        // `shellScripts()` would report a fully covered file as uncovered. That
+        // is the same category error as the one this commit fixes, inverted --
+        // proving a file was *read by one guard* is not proving it is *in
+        // scope*, and here it would have produced a false alarm rather than a
+        // silent miss.
+        const scanned = new Set(pipelineYamlFiles().map((file) => file.location));
         const unscanned = discovered.filter((file) => !scanned.has(file));
 
         expect(
             unscanned,
-            `these files carry shell steps but sit outside SCANNED_ROOTS, so every guard built on it silently ignores them. ` +
+            `these files hold something a guard in this directory reads -- a shell step or a GitHubComment@0 task -- ` +
+                `but sit outside SCANNED_ROOTS, so every guard built on it silently ignores them. ` +
                 `Add the directory to SCANNED_ROOTS in tests/lite/unit/pipeline-files.ts -- one list, shared, so no guard is left behind:\n  ${unscanned.join("\n  ")}\n`
         ).toEqual([]);
     });

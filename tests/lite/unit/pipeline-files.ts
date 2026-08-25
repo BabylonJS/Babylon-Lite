@@ -98,6 +98,41 @@ export function pipelineYamlFiles(): { path: string; location: string; root: str
 export const SHELL_STEP_KEY = /^(\s*)(?:-\s+)?(?:script|bash|run):(.*)$/i;
 
 /**
+ * The task that posts a comment on a pull request.
+ *
+ * Exported for the same reason as {@link SHELL_STEP_KEY}: the guard that reads
+ * these and the closure check that certifies its scope must agree on what the
+ * subject *is*, and the only way to guarantee that is to have one definition.
+ * Case-insensitive on the same asymmetry argument -- inert today, and the cost
+ * of being wrong is a file nobody opens rather than a file that fails loudly.
+ */
+export const GITHUB_COMMENT_TASK = /^(\s*)-\s+task:\s*GitHubComment@0\s*$/i;
+
+/**
+ * Every pattern any guard in this directory reads, and therefore the definition
+ * of "a file the guards must be able to see".
+ *
+ * A new guard reading something new belongs here. That is not tidiness: while
+ * this was a single shell-step pattern, the closure check silently certified
+ * scope for the `GitHubComment@0` guard, whose subject needs no shell step --
+ * so a file holding only an unguarded comment task was invisible to the guard
+ * *and* to the check that exists to prove nothing is invisible.
+ */
+export const SUBJECT_PATTERNS = [SHELL_STEP_KEY, GITHUB_COMMENT_TASK];
+
+/**
+ * True when any single line of `text` matches `pattern`.
+ *
+ * Rebuilds the pattern with `m` while carrying its existing flags through.
+ * Spelled once because the obvious inline form -- `new RegExp(p.source, "m")`
+ * -- silently drops the `i`, restoring case-sensitive matching at one call site
+ * while the exported constant still reads as case-insensitive.
+ */
+function matchesAnyLine(pattern: RegExp, text: string): boolean {
+    return new RegExp(pattern.source, `${pattern.flags.replace("m", "")}m`).test(text);
+}
+
+/**
  * Every YAML file in the repository carrying a shell step, found by walking the
  * tree rather than by trusting a path convention.
  *
@@ -135,6 +170,21 @@ export const SHELL_STEP_KEY = /^(\s*)(?:-\s+)?(?:script|bash|run):(.*)$/i;
  * check names the file and someone adjusts the scope. That is strictly better
  * than the alternative it replaced, where the miss is silent and the guard
  * reports success.
+ *
+ * The predicate is the *union of what the guards actually read*, not a single
+ * notion of "CI file". That distinction is the second half of the same lesson.
+ * Keyed on shell steps alone, this function certified scope for the
+ * `GitHubComment@0` guard too -- whose subject needs no shell step at all.
+ * Verified by injection: a file containing nothing but an unguarded comment
+ * task left discovery reporting 10 and all 50 tests green, while the failure
+ * message claimed to speak for "every guard built on it".
+ *
+ * A closure check that examines part of its subject and reports on all of it is
+ * worse than none, because it converts an unknown gap into a believed-closed
+ * one. So every clause predicate belongs in {@link SUBJECT_PATTERNS}, and
+ * adding a guard that reads something new means adding its pattern here -- the
+ * check and the thing it certifies are then the same code and cannot drift by
+ * category.
  */
 export function pipelineFilesInRepo(): string[] {
     const skip = new Set(["node_modules", ".git", "dist", "build", "coverage", ".vite", "lab"]);
@@ -154,7 +204,7 @@ export function pipelineFilesInRepo(): string[] {
                 continue;
             }
             const text = readFileSync(full, "utf8");
-            if (new RegExp(SHELL_STEP_KEY.source, `${SHELL_STEP_KEY.flags}m`).test(text)) {
+            if (SUBJECT_PATTERNS.some((pattern) => matchesAnyLine(pattern, text))) {
                 found.push(relative(repoRoot, full));
             }
         }

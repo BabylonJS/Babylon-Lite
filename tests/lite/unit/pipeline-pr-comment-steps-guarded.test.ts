@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
-import { pipelineYamlFiles } from "./pipeline-files";
+import { GITHUB_COMMENT_TASK, pipelineYamlFiles } from "./pipeline-files";
 
 interface CommentTask {
     location: string;
@@ -54,7 +54,7 @@ function commentTasks(): CommentTask[] {
     for (const { path, location } of files) {
         const lines = readFileSync(path, "utf8").split("\n");
         for (let i = 0; i < lines.length; i++) {
-            const start = /^(\s*)-\s+task:\s*GitHubComment@0\s*$/.exec(lines[i] ?? "");
+            const start = GITHUB_COMMENT_TASK.exec(lines[i] ?? "");
             if (!start) {
                 continue;
             }
@@ -118,5 +118,32 @@ describe("GitHubComment tasks tolerate a missing pull request", () => {
         // reason unrelated to parity, and it would quietly invalidate the
         // rationale documented for the weaker job-level gate.
         expect(offenders, `GitHubComment@0 task(s) without continueOnError: true:\n  ${offenders.join("\n  ")}`).toEqual([]);
+    });
+});
+
+describe("GITHUB_COMMENT_TASK selects the tasks this guard is shown", () => {
+    // Pinned because it is now a shared selector: this guard reads it and the
+    // closure check in pipeline-piped-steps-set-pipefail.test.ts keys discovery
+    // on it. An untested selector is the one defect no count in either file can
+    // detect, because both inventories are computed by it.
+    it.each([
+        ["    - task: GitHubComment@0", true],
+        ["- task: GitHubComment@0", true],
+        ["  - task:  GitHubComment@0  ", true],
+        // Case-insensitive, on the same asymmetry as SHELL_STEP_KEY: missing a
+        // real task is silent, matching an invalid spelling is harmless.
+        ["    - task: githubcomment@0", true],
+
+        // A different task entirely.
+        ["    - task: PublishBuildArtifacts@1", false],
+        // A different major version has a different input contract; matching it
+        // here would assert this guard had checked something it had not.
+        ["    - task: GitHubComment@1", false],
+        // Prose about the task is not the task.
+        ["    # - task: GitHubComment@0", false],
+        ["    displayName: post a GitHubComment@0", false],
+        ["", false],
+    ])("%j -> %s", (line, expected) => {
+        expect(GITHUB_COMMENT_TASK.test(line)).toBe(expected);
     });
 });
