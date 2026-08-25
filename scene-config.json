@@ -1603,6 +1603,17 @@
         "skipPerf": true
     },
     {
+        "id": 166,
+        "slug": "scene166-clustered-spot-lights",
+        "name": "Scene 166 — Clustered Sponza Spot Lights",
+        "maxMad": 0.5,
+        "maxRawKB": 76.5,
+        "description": "Khronos Sponza glTF lit by 1000 deterministic clustered SPOT lights. Companion to scene 179 (same model, camera and light field generator) that exercises the clustered cone falloff instead of the point-light-only path.",
+        "tags": ["pbr", "gltf", "clustered", "lights"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 180000
+    },
+    {
         "id": 167,
         "slug": "scene167-pbr-lightmap",
         "name": "Scene 167 — PBR Lightmap",
