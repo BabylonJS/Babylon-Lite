@@ -161,6 +161,14 @@ export const PIPELINE_ROOTS = [
  * Shared by the collector floor and the closure floor, which ask the same
  * question of different sets and would otherwise hold two copies of this list
  * -- the duplication class these guards keep finding elsewhere.
+ *
+ * Deliberately NOT derived from PIPELINE_ROOTS, which looks like the obvious
+ * simplification and destroys the guard: a floor keyed off the list it is
+ * certifying cannot watch that list shrink, because deleting an entry deletes
+ * its own check. Measured -- delete a root and this list fails by name; derive
+ * it from PIPELINE_ROOTS instead and the same deletion is silent. The fixed
+ * cardinality is what makes it work, and the growth direction it leaves open
+ * is covered by the correspondence test rather than by coupling the lists.
  */
 export const ONE_FILE_PER_ROOT = ["azure-pipelines-bundle-manifest.yml", "config/templates/upload-static-site.yml", ".github/workflows/compat-sync-trigger.yml"];
 
