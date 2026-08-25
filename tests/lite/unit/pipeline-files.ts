@@ -181,6 +181,42 @@ export function isWalkableDir(name: string): boolean {
  * unrecognised shape costs a false positive that names a line, never a silent
  * miss.
  */
+/**
+ * True when a fragment closes a quoted scalar opened with `quote`.
+ *
+ * Naive containment is wrong in the direction that matters, and both spellings
+ * are ordinary English rather than exotica. YAML escapes a single quote by
+ * doubling it, so `description: 'it''s an example:` *stays open* -- but a
+ * `.includes("'")` reads the escape as the terminator, decides the scalar
+ * closed on its first line, and hands the continuation to the guard as
+ * configuration. Verified by injection: a `run:` on the next line was collected
+ * from `.github/workflows/compat-sync-trigger.yml:55`, with a real parser
+ * confirming first that the whole thing folds into one scalar containing a
+ * plain apostrophe. Double quotes have the same hole spelled `\"`.
+ *
+ * Used for the opening line *and* for each body line, because the identical
+ * mistake at the body scan ends the region early and produces the same misread
+ * one line further down.
+ */
+function closesQuotedScalar(text: string, quote: string): boolean {
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        if (quote === '"' && char === "\\") {
+            i++;
+            continue;
+        }
+        if (char !== quote) {
+            continue;
+        }
+        if (quote === "'" && text[i + 1] === "'") {
+            i++;
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
 export function stripNonShellMultilineScalars(text: string): string {
     const lines = text.split("\n");
     const out: string[] = [];
@@ -195,7 +231,7 @@ export function stripNonShellMultilineScalars(text: string): string {
             // blank the rest of the file, it stops at the next key.
             if (line.trim() === "" || indent > bodyIndent) {
                 out.push("");
-                if (closingQuote !== null && line.includes(closingQuote)) {
+                if (closingQuote !== null && closesQuotedScalar(line, closingQuote)) {
                     bodyIndent = null;
                     closingQuote = null;
                 }
@@ -217,7 +253,7 @@ export function stripNonShellMultilineScalars(text: string): string {
         // lines, and YAML folds them into one string -- so a `run:` sitting
         // there is prose, exactly as if it were in a block scalar.
         const quoted = /^(\s*)(?:-\s+)?([A-Za-z0-9_.-]+):\s*(['"])(.*)$/.exec(line);
-        if (quoted && !isShellKey(quoted[2]) && !(quoted[4] ?? "").includes(quoted[3] ?? "")) {
+        if (quoted && !isShellKey(quoted[2]) && !closesQuotedScalar(quoted[4] ?? "", quoted[3] ?? "")) {
             bodyIndent = (quoted[1] ?? "").length;
             closingQuote = quoted[3] ?? null;
         }

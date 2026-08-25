@@ -402,6 +402,31 @@ describe("documentation is not configuration", () => {
         expect(SHELL_STEP_KEY.test(stripNonShellMultilineScalars(text).split("\n")[1] ?? "")).toBe(true);
     });
 
+    it("reads a doubled quote as YAML's escape, not as the terminator", () => {
+        // An apostrophe in ordinary English prose. Containment said the scalar
+        // closed on its first line and handed the continuation to the guard.
+        const doc = ["description: 'it''s an example of the step:", "      run: npx tsc --noEmit | sed s/x/y/'"].join("\n");
+        expect(SHELL_STEP_KEY.test(stripNonShellMultilineScalars(doc).split("\n")[1] ?? "")).toBe(false);
+    });
+
+    it("reads a backslash escape as YAML's escape in a double-quoted scalar", () => {
+        const doc = ['description: "he said \\"go\\":', '      run: npx tsc --noEmit | sed s/x/y/"'].join("\n");
+        expect(SHELL_STEP_KEY.test(stripNonShellMultilineScalars(doc).split("\n")[1] ?? "")).toBe(false);
+    });
+
+    it("does not end the body early on a doubled quote inside it", () => {
+        // The same mistake at the body scan, one line further down: the region
+        // would end on the escape and the `run:` would be read as a step.
+        const doc = ["description: 'first line", "      it''s still prose", "      run: npx tsc | sed s/x/y/'"].join("\n");
+        expect(SHELL_STEP_KEY.test(stripNonShellMultilineScalars(doc).split("\n")[2] ?? "")).toBe(false);
+    });
+
+    it("still ends the body on a genuine closing quote", () => {
+        // The inverse: over-running the close would blank real configuration.
+        const text = ["description: 'prose", "      ends here'", "    - run: npx tsc | sed s/x/y/"].join("\n");
+        expect(SHELL_STEP_KEY.test(stripNonShellMultilineScalars(text).split("\n")[2] ?? "")).toBe(true);
+    });
+
     it("stops an unterminated quote at the next key rather than blanking the file", () => {
         // The safety property. Without the dedent rule, one stray quote would
         // silence every guard for the rest of the file.
