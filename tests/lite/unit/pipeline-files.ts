@@ -3,6 +3,36 @@ import { join, relative } from "path";
 
 export const repoRoot = join(__dirname, "..", "..", "..");
 
+/*
+ * A note on how this module must be *measured*, which is not the same as how it
+ * must be read.
+ *
+ * Every predicate here is shared: `pipeline-master-gating`,
+ * `pipeline-piped-steps-set-pipefail` and `pipeline-pr-comment-steps-guarded`
+ * all consume them, and a given predicate's specimens usually live in only one
+ * of those files. `isYamlFile` is the worked example -- both directions are
+ * pinned, and both pins are in `pipeline-piped-steps-set-pipefail`.
+ *
+ * The consequence is a trap for anyone verifying a change here by mutation.
+ * Widening `isYamlFile` to accept every filename and then running only
+ * `pipeline-master-gating` reports 16/16 green, because that file's clauses
+ * never reach the specimen that owns the property. Run the whole `unit`
+ * project against the same mutation and five assertions fail by name. The
+ * mutation was always caught; the *measurement* was scoped to a file that does
+ * not do the catching, and reported "nothing guards this" when the truth was
+ * "nothing in this file guards this".
+ *
+ * So: a mutation of anything in this module is only meaningfully silent if it
+ * is silent across every suite that imports it. A single-file verdict on shared
+ * code is unsound in both directions -- it understates coverage, and it invites
+ * a fix for a gap that does not exist, which then has to be pinned by a second
+ * specimen duplicating the first.
+ *
+ * This is the same defect the module itself exists to prevent, one level up. A
+ * scope reads complete because nothing compared it to reality; here the scope
+ * is the set of tests the prober chose to run.
+ */
+
 /**
  * The directories the pipeline hygiene guards in this file's directory read --
  * `pipeline-piped-steps-set-pipefail` and `pipeline-pr-comment-steps-guarded`.
