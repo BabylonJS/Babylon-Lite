@@ -2,17 +2,14 @@ import type { ShaderFragment, UboField } from "../../../shader/fragment-types.js
 import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { getTrilinearAnisotropicSampler } from "../../../resource/trilinear-anisotropic-sampler.js";
-import {
-    PBR_HAS_THICKNESS_MAP,
-    PBR2_HAS_DISPERSION,
-    PBR2_HAS_REFRACTION,
-    PBR2_HAS_REFRACTION_MAP,
-    PBR2_HAS_THICKNESS_GLTF_CHANNEL,
-    PBR2_HAS_VOLUME,
-    PBR2_LINEAR_IMAGE_PROCESSING,
-} from "../pbr-flag-bits.js";
+import { PBR_HAS_THICKNESS_MAP, PBR2_HAS_REFRACTION } from "../pbr-flag-bits.js";
 
 type TransmissionMat = PbrMaterialProps & { _linearImageProcessing?: boolean };
+export const PBR2_HAS_VOLUME = 1 << 5;
+export const PBR2_HAS_REFRACTION_MAP = 1 << 6;
+const PBR2_HAS_THICKNESS_GLTF_CHANNEL = 1 << 7;
+const PBR2_LINEAR_IMAGE_PROCESSING = 1 << 14;
+const PBR2_HAS_DISPERSION = 1 << 20;
 const LINEAR_IMAGE_PROCESSING_SLOTS = { NI: `if(scene.vImageInfos.w>=0.0){`, BC: `}` };
 
 function makeRefractionMod(
@@ -46,7 +43,7 @@ let th=(material.thicknessParams.x+ths*material.thicknessParams.y)*ts;`
 
     // Refracted environment sample. Dispersion splits the refracted ray into
     // per-RGB index-of-refraction offsets (chromatic aberration); that 3-ray WGSL
-    // is injected from a dynamically-imported module (see refraction-dispersion-wgsl.ts)
+    // is supplied by `setPbrDispersion` (see refraction-dispersion-wgsl.ts)
     // so non-dispersion transmission scenes keep the lean single-ray path below.
     const sampleLines =
         hasDispersion && dispersionSampleWgsl
@@ -66,7 +63,7 @@ let lv=clamp(log2(f32(textureDimensions(refractionTexture).x)*ra)-4.0,0.0,f32(te
 ${sampleLines}
 ${absorptionLine}
 ${refractionLine}
-color=finalIrradiance*ro*ro+finalRadianceScaled+finalSpecularScaled+directDiffuse*ro*ro+fr+emissive;
+color=finalIrradiance*ro+finalRadianceScaled+finalSpecularScaled+directDiffuse*ro+fr+emissive;
 }`;
 }
 
@@ -158,7 +155,7 @@ function writeRefractionUvTransform(
 }
 
 function writeRefractionUBO(data: Float32Array, mat: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
-    const ss = mat.subsurface as SubSurfaceProps | undefined;
+    const ss = mat._subsurface as SubSurfaceProps | undefined;
     const refr = ss?.refraction;
     if (!refr) {
         return;
@@ -202,18 +199,18 @@ function writeRefractionUBO(data: Float32Array, mat: PbrMaterialProps, offsets: 
 
 /** Build the PBR refraction/transmission extension. When the scene contains a
  *  dispersive material, `dispersionSampleWgsl` carries the per-RGB 3-ray sample
- *  WGSL (dynamically imported, scene-isolated); otherwise it is undefined and the
- *  lean single-ray refraction path is emitted. */
+ *  WGSL (dynamically imported, and captured here at registration time); otherwise
+ *  it is undefined and the lean single-ray refraction path is emitted. */
 export function makeRefractionRttExt(dispersionSampleWgsl?: string): PbrExt {
     return {
         id: "refraction",
         phase: "fragment",
         detect(mat) {
             const m = mat as TransmissionMat;
-            const ss = m.subsurface as SubSurfaceProps | undefined;
+            const ss = m._subsurface as SubSurfaceProps | undefined;
             const refr = ss?.refraction;
             const linearImageProcessing = m._linearImageProcessing ? PBR2_LINEAR_IMAGE_PROCESSING : 0;
-            const intensity = m.transmissive ? (refr?.intensity ?? 0) : 0;
+            const intensity = m._transmissive ? (refr?.intensity ?? 0) : 0;
             if (intensity <= 0) {
                 return { f: 0, f2: linearImageProcessing };
             }
@@ -266,23 +263,23 @@ export function makeRefractionRttExt(dispersionSampleWgsl?: string): PbrExt {
             entries.push({ binding: b++, resource: texture.view });
             entries.push({ binding: b++, resource: texture.sampler });
             if ((ctx._features2 & PBR2_HAS_REFRACTION_MAP) !== 0) {
-                const map = ((ctx._material as PbrMaterialProps).subsurface?.refraction as SubSurfaceProps["refraction"] | undefined)?.texture!;
+                const map = ((ctx._material as PbrMaterialProps)._subsurface?.refraction as SubSurfaceProps["refraction"] | undefined)?.texture!;
                 entries.push({ binding: b++, resource: map.view });
                 entries.push({ binding: b++, resource: getTrilinearAnisotropicSampler(ctx._engine) });
             }
             if ((ctx._features & PBR_HAS_THICKNESS_MAP) !== 0) {
-                const thickness = (ctx._material as PbrMaterialProps).subsurface?.thickness?.texture!;
+                const thickness = (ctx._material as PbrMaterialProps)._subsurface?.thickness?.texture!;
                 entries.push({ binding: b++, resource: thickness.view });
                 entries.push({ binding: b++, resource: thickness.sampler });
             }
             return b;
         },
         textures(mat, out) {
-            const tex = (mat as PbrMaterialProps).subsurface?.refraction?.texture;
+            const tex = (mat as PbrMaterialProps)._subsurface?.refraction?.texture;
             if (tex) {
                 out.push(tex);
             }
-            const thickness = (mat as PbrMaterialProps).subsurface?.thickness?.texture;
+            const thickness = (mat as PbrMaterialProps)._subsurface?.thickness?.texture;
             if (thickness) {
                 out.push(thickness);
             }

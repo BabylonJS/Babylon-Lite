@@ -7,6 +7,8 @@ import { Quaternion } from "../src/math/quaternion";
 import { Matrix } from "../src/math/matrix";
 import { Scalar } from "../src/math/scalar";
 import { Axis, Space } from "../src/math/constants";
+import { Polar } from "../src/math/polar";
+import { Spherical } from "../src/math/spherical";
 
 describe("Vector3", () => {
     it("adds, subtracts, and scales", () => {
@@ -119,6 +121,16 @@ describe("Vector2 / Vector4", () => {
         expect(new Vector2(3, 4).length()).toBe(5);
         expect(new Vector4(1, 2, 3, 4).asArray()).toEqual([1, 2, 3, 4]);
     });
+
+    it("normalizes to a reference without changing zero or unit vectors", () => {
+        const ref = new Vector2(9, 9);
+        expect(new Vector2(3, 4).normalizeToRef(ref)).toBe(ref);
+        expect(ref.asArray()).toEqual([0.6, 0.8]);
+        expect(Vector2.Zero().normalizeToRef(ref)).toBe(ref);
+        expect(ref.asArray()).toEqual([0, 0]);
+        expect(new Vector2(0, -1).normalizeToRef(ref)).toBe(ref);
+        expect(ref.asArray()).toEqual([0, -1]);
+    });
 });
 
 describe("Color3 / Color4", () => {
@@ -185,6 +197,99 @@ describe("Matrix", () => {
         const n = Vector3.TransformNormal(new Vector3(1, 0, 0), m);
         expect(n.asArray()).toEqual([1, 0, 0]);
     });
+
+    it("decomposes a TRS matrix back into scale, rotation, and translation", () => {
+        const scale = new Vector3(2, 3, 4);
+        const rotation = Quaternion.RotationYawPitchRoll(0.5, -0.3, 0.8);
+        const translation = new Vector3(7, -2, 11);
+        const m = Matrix.Compose(scale, rotation, translation);
+
+        const outScale = new Vector3();
+        const outRot = new Quaternion();
+        const outTrans = new Vector3();
+        expect(m.decompose(outScale, outRot, outTrans)).toBe(true);
+
+        expect(outScale.x).toBeCloseTo(2, 5);
+        expect(outScale.y).toBeCloseTo(3, 5);
+        expect(outScale.z).toBeCloseTo(4, 5);
+        expect(outTrans.asArray()).toEqual([7, -2, 11]);
+        // Quaternion sign can flip; compare the rotation effect on two
+        // non-collinear basis vectors so an incorrect rotation about any axis is
+        // caught (a single basis vector misses errors about that same axis).
+        const rotOut = Matrix.Compose(new Vector3(1, 1, 1), outRot, new Vector3());
+        const rotRef = Matrix.Compose(new Vector3(1, 1, 1), rotation, new Vector3());
+        for (const basis of [new Vector3(1, 0, 0), new Vector3(0, 1, 0)]) {
+            const fromOut = Vector3.TransformNormal(basis, rotOut);
+            const fromRef = Vector3.TransformNormal(basis, rotRef);
+            expect(fromOut.x).toBeCloseTo(fromRef.x, 5);
+            expect(fromOut.y).toBeCloseTo(fromRef.y, 5);
+            expect(fromOut.z).toBeCloseTo(fromRef.z, 5);
+        }
+    });
+
+    it("returns false from decompose when a scale axis collapses to zero", () => {
+        const m = Matrix.Scaling(0, 1, 1);
+        const rot = new Quaternion(1, 2, 3, 4);
+        expect(m.decompose(undefined, rot, undefined)).toBe(false);
+        expect(rot.asArray()).toEqual([0, 0, 0, 1]);
+    });
+
+    it("maximizes every element in place", () => {
+        const matrix = Matrix.FromArray(Array.from({ length: 16 }, (_, index) => index - 8));
+        const other = Matrix.FromArray(Array.from({ length: 16 }, (_, index) => 4 - index));
+        expect(matrix.maximizeInPlace(other)).toBe(matrix);
+        expect(matrix.toArray()).toEqual(Array.from({ length: 16 }, (_, index) => Math.max(index - 8, 4 - index)));
+
+        expect(matrix.maximizeInPlaceFromFloats(...([20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20] as const))).toBe(matrix);
+        expect(matrix.m[0]).toBe(20);
+        expect(matrix.m[15]).toBe(20);
+
+        const second = Matrix.FromArray(Array(16).fill(-1));
+        second.maximizeInPlaceFromFloats(...([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const));
+        expect(second.toArray()).toEqual(Array.from({ length: 16 }, (_, index) => index));
+    });
+});
+
+describe("Polar", () => {
+    it("converts vectors with atan2 quadrant semantics", () => {
+        const polar = Polar.FromVector2(new Vector2(-1, -1));
+        expect(polar.radius).toBeCloseTo(Math.SQRT2);
+        expect(polar.theta).toBeCloseTo((-3 * Math.PI) / 4);
+        expect(polar.toVector2().x).toBeCloseTo(-1);
+        expect(polar.toVector2().y).toBeCloseTo(-1);
+    });
+
+    describe("Spherical", () => {
+        it("round-trips vectors using Babylon.js spherical conventions", () => {
+            const spherical = Spherical.FromVector3(new Vector3(-1, 2, -3));
+            const vector = spherical.toVector3();
+
+            expect(spherical.radius).toBeCloseTo(Math.sqrt(14));
+            expect(spherical.theta).toBeCloseTo(Math.acos(2 / Math.sqrt(14)));
+            expect(spherical.phi).toBeCloseTo(Math.atan2(-3, -1));
+            expect(vector.x).toBeCloseTo(-1);
+            expect(vector.y).toBeCloseTo(2);
+            expect(vector.z).toBeCloseTo(-3);
+        });
+
+        it("supports the Babylon.js component-wise value operations", () => {
+            const value = new Spherical(2, 3, 4);
+            expect(value.add(new Spherical(4, 5, 6)).asArray()).toEqual([6, 8, 10]);
+            expect(value.subtractFromFloats(1, 2, 3).asArray()).toEqual([1, 1, 1]);
+            expect(value.multiply(new Spherical(3, 4, 5)).asArray()).toEqual([6, 12, 20]);
+            expect(value.divide(new Spherical(2, 3, 4)).asArray()).toEqual([1, 1, 1]);
+            expect(value.scale(2).asArray()).toEqual([4, 6, 8]);
+        });
+    });
+
+    it("supports the Babylon.js component-wise value operations", () => {
+        const value = new Polar(2, 3);
+        expect(value.add(new Polar(4, 5)).asArray()).toEqual([6, 8]);
+        expect(value.subtractFromFloats(1, 2).asArray()).toEqual([1, 1]);
+        expect(value.multiply(new Polar(3, 4)).asArray()).toEqual([6, 12]);
+        expect(value.divide(new Polar(2, 3)).asArray()).toEqual([1, 1]);
+        expect(value.scale(2).asArray()).toEqual([4, 6]);
+    });
 });
 
 describe("Quaternion", () => {
@@ -205,6 +310,65 @@ describe("Quaternion", () => {
         expect(q.length()).toBeGreaterThan(0);
         q.normalize();
         expect(q.length()).toBeCloseTo(1, 6);
+    });
+
+    it("round-trips through a rotation matrix via FromRotationMatrix", () => {
+        const src = Quaternion.RotationYawPitchRoll(0.4, -0.6, 1.1).normalize();
+        const rotMat = Matrix.Compose(new Vector3(1, 1, 1), src, new Vector3());
+        const back = Quaternion.FromRotationMatrix(rotMat);
+        // Quaternions q and -q represent the same rotation; align signs using
+        // the full 4-component dot product (relying on `w` alone misbehaves when
+        // `w` is near 0).
+        const dot = back.x * src.x + back.y * src.y + back.z * src.z + back.w * src.w;
+        const sign = dot < 0 ? -1 : 1;
+        expect(back.x * sign).toBeCloseTo(src.x, 5);
+        expect(back.y * sign).toBeCloseTo(src.y, 5);
+        expect(back.z * sign).toBeCloseTo(src.z, 5);
+        expect(back.w * sign).toBeCloseTo(src.w, 5);
+    });
+
+    it("writes a Babylon.js-convention rotation matrix and resets translation", () => {
+        const q = Quaternion.RotationAxis(new Vector3(0, 0, 1), Math.PI / 2);
+        const result = Matrix.Translation(7, 8, 9);
+        const storage = result.m;
+        const returned = q.toRotationMatrix(result);
+
+        expect(returned).toBe(result);
+        expect(result.m).toBe(storage);
+        expect(result.m[0]).toBeCloseTo(0, 6);
+        expect(result.m[1]).toBeCloseTo(1, 6);
+        expect(result.m[4]).toBeCloseTo(-1, 6);
+        expect(result.m[5]).toBeCloseTo(0, 6);
+        expect(result.m[10]).toBeCloseTo(1, 6);
+        expect(result.m[12]).toBe(0);
+        expect(result.m[13]).toBe(0);
+        expect(result.m[14]).toBe(0);
+        expect(result.m[15]).toBe(1);
+    });
+
+    it("round-trips through toRotationMatrix and fromRotationMatrix", () => {
+        const src = Quaternion.RotationYawPitchRoll(-0.7, 0.2, 1.4).normalize();
+        const rotMat = new Matrix();
+        src.toRotationMatrix(rotMat);
+
+        const back = new Quaternion().fromRotationMatrix(rotMat);
+        const dot = back.x * src.x + back.y * src.y + back.z * src.z + back.w * src.w;
+        const sign = dot < 0 ? -1 : 1;
+        expect(back.x * sign).toBeCloseTo(src.x, 5);
+        expect(back.y * sign).toBeCloseTo(src.y, 5);
+        expect(back.z * sign).toBeCloseTo(src.z, 5);
+        expect(back.w * sign).toBeCloseTo(src.w, 5);
+    });
+
+    it("updates in place via fromRotationMatrix and FromRotationMatrixToRef", () => {
+        const src = Quaternion.RotationYawPitchRoll(-0.2, 0.9, 0.3).normalize();
+        const rotMat = Matrix.Compose(new Vector3(1, 1, 1), src, new Vector3());
+
+        const inPlace = new Quaternion(9, 9, 9, 9).fromRotationMatrix(rotMat);
+        const toRef = new Quaternion(9, 9, 9, 9);
+        const returned = Quaternion.FromRotationMatrixToRef(rotMat, toRef);
+        expect(returned).toBe(toRef);
+        expect(inPlace.asArray()).toEqual(toRef.asArray());
     });
 });
 

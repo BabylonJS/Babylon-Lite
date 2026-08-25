@@ -1,5 +1,19 @@
 [
     {
+        "slug": "npe-sprite2d",
+        "name": "NPE on Sprite2D",
+        "description": "An authored Node Particle Editor graph rendered through Lite's scene-less pure-2D SpriteRenderer. The NPE simulation stays world-space while the native bridge maps its live particle columns to one allocation-free Sprite2D layer.",
+        "tags": ["2d", "effect", "showcase"],
+        "mobile": true
+    },
+    {
+        "slug": "screen-space-effects",
+        "name": "Screen-Space Effects",
+        "description": "Interactive contact shadows and one-bounce screen-space global illumination running as composable Babylon Lite frame-graph tasks. Toggle each effect independently while the camera moves to inspect temporal reprojection, disocclusion handling, and colored light bleed.",
+        "tags": ["effect", "lighting", "showcase"],
+        "mobile": false
+    },
+    {
         "slug": "offscreen",
         "name": "Offscreen (Worker)",
         "description": "Side-by-side proof that Lite renders identically on the main thread (left, regular canvas) and inside a Web Worker via OffscreenCanvas (right). A button runs heavy synchronous work on the main thread: the left canvas freezes while the worker-driven right canvas keeps spinning at full speed. Reproduction of the Babylon.js Offscreen demo.",
@@ -60,6 +74,13 @@
         "mobile": false
     },
     {
+        "slug": "break-meshes",
+        "name": "Break Meshes",
+        "description": "Voronoi mesh fracture + physics: the Khronos BoomBox glTF is split into cell pieces via half-space clipping (ported from CedricGuillemet/64Kb5) with UV interpolation, then duplicated into eleven randomly-rotated instances scattered across the ground. Each boombox rests assembled on its own static convex-hull cells; click one to GPU-pick it and shatter just that model — its cells flip to dynamic and the picked cell is punched along the pick ray. Original surfaces keep the PBR material; the exposed interior cut faces use a separate 'fractured core' material, all lit by an HDR environment with soft shadows.",
+        "tags": ["pbr", "gltf", "physics", "showcase"],
+        "mobile": true
+    },
+    {
         "slug": "mosquito-amber",
         "name": "Mosquito in Amber",
         "description": "glTF PBR showcase: the Khronos MosquitoInAmber model (KHR_materials_transmission + ior + volume). Frame-graph scene-texture transmission renders the refractive amber.",
@@ -86,6 +107,21 @@
         "name": "Bath Day",
         "description": "Animated, stylized glTF diorama: a frog enjoying a candle-lit bath surrounded by water and plants, slowly orbiting under a studio HDR environment for PBR lighting. The Draco-compressed model's animation groups auto-play on load. \"Bath Day\" by StanSt (https://sketchfab.com/stanst), CC BY 4.0.",
         "tags": ["showcase"],
+        "mobile": true
+    },
+    {
+        "slug": "sandblox",
+        "name": "Sandblox",
+        "description": "Build-and-play sandbox for small block worlds. Drop blocks into a starter scene, reshape them with move, clone, resize, paint, and delete tools, then run your character through what you built.",
+        "tags": ["game", "sandbox", "showcase"],
+        "mobile": false
+    },
+    {
+        "slug": "racer",
+        "name": "Racer",
+        "description": "A clean-room TypeScript port of Kenney's open-source \"Starter Kit Racing\" Godot demo, rebuilt on Babylon Lite with Havok physics, selectable vehicles, lap timing, drift effects, and camera modes. Uses Kenney's included CC0 models, textures, sounds, and track art.",
+        "tags": ["game", "showcase"],
+        "fetch": "racer",
         "mobile": true
     }
 ]

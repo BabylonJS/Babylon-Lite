@@ -1,5 +1,7 @@
 # Module: Texture2D + KTX/KTX2 Loaders
+
 > Package paths:
+>
 > - `packages/babylon-lite/src/texture/texture-2d.ts` — Image-based texture loading
 > - `packages/babylon-lite/src/texture/ktx-loader.ts` — KTX1 compressed texture loading
 > - `packages/babylon-lite/src/texture/ktx2-loader.ts` — KTX2/BasisU upload for glTF `KHR_texture_basisu`
@@ -24,40 +26,36 @@ Both return the same `Texture2D` interface — callers can't tell whether they g
 
 ```typescript
 export interface Texture2D {
-  texture: GPUTexture;
-  view: GPUTextureView;
-  sampler: GPUSampler;
-  width: number;
-  height: number;
+    texture: GPUTexture;
+    view: GPUTextureView;
+    sampler: GPUSampler;
+    width: number;
+    height: number;
 }
 
 export interface Texture2DOptions {
-  /** Generate mipmaps. Default true. */
-  mipMaps?: boolean;
-  /** Address mode U. Default 'repeat'. */
-  addressModeU?: GPUAddressMode;
-  /** Address mode V. Default 'repeat'. */
-  addressModeV?: GPUAddressMode;
-  /** Min filter. Default 'linear'. */
-  minFilter?: GPUFilterMode;
-  /** Mag filter. Default 'linear'. */
-  magFilter?: GPUFilterMode;
-  /** Flip Y axis during upload. Default true (matches Babylon.js convention). */
-  invertY?: boolean;
-  /** Use sRGB format (rgba8unorm-srgb). Enables hardware sRGB→linear on sample.
-   *  Use for color/albedo textures in PBR workflows. Default false. */
-  srgb?: boolean;
+    /** Generate mipmaps. Default true. */
+    mipMaps?: boolean;
+    /** Address mode U. Default 'repeat'. */
+    addressModeU?: GPUAddressMode;
+    /** Address mode V. Default 'repeat'. */
+    addressModeV?: GPUAddressMode;
+    /** Min filter. Default 'linear'. */
+    minFilter?: GPUFilterMode;
+    /** Mag filter. Default 'linear'. */
+    magFilter?: GPUFilterMode;
+    /** Flip Y axis during upload. Default true (matches Babylon.js convention). */
+    invertY?: boolean;
+    /** Use sRGB format (rgba8unorm-srgb). Enables hardware sRGB→linear on sample.
+     *  Use for color/albedo textures in PBR workflows. Default false. */
+    srgb?: boolean;
 }
 ```
 
 ### Functions
 
 ```typescript
-export async function loadTexture2D(
-  engine: Engine,
-  url: string,
-  opts?: Texture2DOptions,
-): Promise<Texture2D>;
+export async function loadTexture2D(engine: Engine, url: string, opts?: Texture2DOptions): Promise<Texture2D>;
 
 /**
  * Load a texture with KTX compressed format auto-selection and fallback.
@@ -67,22 +65,13 @@ export async function loadTexture2D(
  *
  * Fully tree-shakable: only bundled when explicitly imported.
  */
-export async function loadKtxTexture2D(
-  engine: Engine,
-  baseUrl: string,
-  suffixes: string[],
-  opts?: Texture2DOptions,
-): Promise<Texture2D>;
+export async function loadKtxTexture2D(engine: Engine, baseUrl: string, suffixes: string[], opts?: Texture2DOptions): Promise<Texture2D>;
 
 /**
  * Internal glTF KHR_texture_basisu upload path.
  * Not exported from the public barrel; imported only by gltf-ext-basisu.ts.
  */
-export async function uploadKtx2Texture2D(
-  engine: EngineContextInternal,
-  buffer: ArrayBuffer,
-  sRGB: boolean,
-): Promise<Texture2D>;
+export async function uploadKtx2Texture2D(engine: EngineContextInternal, buffer: ArrayBuffer, sRGB: boolean): Promise<Texture2D>;
 
 /**
  * Internal KTX2 mip0 decode for ORM composition fallback.
@@ -100,29 +89,25 @@ Imports `Engine` from the engine module (to access `GPUDevice` internally), plus
 
 ### Default Option Values
 
-| Option         | Default     | Type            |
-|----------------|-------------|-----------------|
-| `mipMaps`      | `true`      | `boolean`       |
-| `addressModeU` | `'repeat'`  | `GPUAddressMode`|
-| `addressModeV` | `'repeat'`  | `GPUAddressMode`|
-| `minFilter`    | `'linear'`  | `GPUFilterMode` |
-| `magFilter`    | `'linear'`  | `GPUFilterMode` |
-| `invertY`      | `true`      | `boolean`       |
-| `srgb`         | `false`     | `boolean`       |
+| Option         | Default    | Type             |
+| -------------- | ---------- | ---------------- |
+| `mipMaps`      | `true`     | `boolean`        |
+| `addressModeU` | `'repeat'` | `GPUAddressMode` |
+| `addressModeV` | `'repeat'` | `GPUAddressMode` |
+| `minFilter`    | `'linear'` | `GPUFilterMode`  |
+| `magFilter`    | `'linear'` | `GPUFilterMode`  |
+| `invertY`      | `true`     | `boolean`        |
+| `srgb`         | `false`    | `boolean`        |
 
 ### Texture Creation Parameters
 
 ```typescript
 device.createTexture({
-  size: { width, height },           // from ImageBitmap dimensions
-  format: srgb ? 'rgba8unorm-srgb' : 'rgba8unorm',
-  mipLevelCount: mipMaps
-    ? Math.floor(Math.log2(Math.max(width, height))) + 1
-    : 1,
-  usage: GPUTextureUsage.TEXTURE_BINDING
-       | GPUTextureUsage.COPY_DST
-       | GPUTextureUsage.RENDER_ATTACHMENT,
-})
+    size: { width, height }, // from ImageBitmap dimensions
+    format: srgb ? "rgba8unorm-srgb" : "rgba8unorm",
+    mipLevelCount: mipMaps ? Math.floor(Math.log2(Math.max(width, height))) + 1 : 1,
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+});
 ```
 
 **Mip level formula:** `Math.floor(Math.log2(Math.max(width, height))) + 1`
@@ -132,42 +117,33 @@ Example: 512×256 image → `Math.floor(log2(512)) + 1 = 9 + 1 = 10` mip levels.
 ### Image Upload
 
 ```typescript
-device.queue.copyExternalImageToTexture(
-  { source: imageBitmap, flipY: invertY },
-  { texture },
-  { width, height },
-)
+device.queue.copyExternalImageToTexture({ source: imageBitmap, flipY: invertY }, { texture }, { width, height });
 ```
 
 ### Sampler Configuration
 
 ```typescript
 device.createSampler({
-  addressModeU,                             // default: 'repeat'
-  addressModeV,                             // default: 'repeat'
-  minFilter: opts.minFilter ?? 'linear',
-  magFilter: opts.magFilter ?? 'linear',
-  mipmapFilter: mipMaps ? 'linear' : 'nearest',
-  maxAnisotropy: 4,
-})
+    addressModeU, // default: 'repeat'
+    addressModeV, // default: 'repeat'
+    minFilter: opts.minFilter ?? "linear",
+    magFilter: opts.magFilter ?? "linear",
+    mipmapFilter: mipMaps ? "linear" : "nearest",
+    maxAnisotropy: 4,
+});
 ```
 
 ### Internal Mipmap Generator
 
 ```typescript
-async function generateMipmaps(
-  device: GPUDevice,
-  texture: GPUTexture,
-  _width: number,
-  _height: number,
-  mipLevelCount: number,
-): Promise<void>
+async function generateMipmaps(device: GPUDevice, texture: GPUTexture, _width: number, _height: number, mipLevelCount: number): Promise<void>;
 ```
 
 **Algorithm:**
+
 1. Create an inline WGSL shader module with:
-   - **Vertex shader:** Generates a fullscreen triangle from 3 hardcoded vertices
-   - **Fragment shader:** Samples source mip level and returns color
+    - **Vertex shader:** Generates a fullscreen triangle from 3 hardcoded vertices
+    - **Fragment shader:** Samples source mip level and returns color
 2. Create a linear sampler for downsampling
 3. Create a render pipeline
 4. For each mip level from 1 to `mipLevelCount - 1`:
@@ -205,6 +181,7 @@ async function generateMipmaps(
 This module does not create a main rendering pipeline. It only creates a temporary pipeline for mipmap generation:
 
 **Mipmap Generation Pipeline:**
+
 - Vertex: no vertex buffers (fullscreen triangle from vertex_index)
 - Fragment: samples source texture, writes to destination mip level
 - Color target: `rgba8unorm` (same as texture format)
@@ -253,18 +230,18 @@ loadTexture2D(engine, url, opts)
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite                        | Babylon.js                                                |
-|-------------------------------------|-----------------------------------------------------------|
-| `loadTexture2D(engine, url, opts)` | `new Texture(url, scene, ...options)`                     |
-| `Texture2D` interface              | `Texture` class (internal GPU texture + sampler)          |
-| `Texture2DOptions.mipMaps`         | `Texture.noMipmap` (inverted: `mipMaps = !noMipmap`)     |
-| `Texture2DOptions.addressModeU`    | `Texture.wrapU` (enum values differ)                      |
-| `Texture2DOptions.addressModeV`    | `Texture.wrapV`                                           |
-| `Texture2DOptions.invertY`         | `Texture.invertY` (default true in both)                  |
-| `maxAnisotropy: 4`                | `Texture.anisotropicFilteringLevel` (default 4)           |
-| `format: 'rgba8unorm'`            | Standard RGBA format for loaded images                     |
-| `generateMipmaps()` (render-based) | `Engine.generateMipmaps()` (may use compute or render)    |
-| No `dispose()`                     | `Texture.dispose()` for explicit cleanup                   |
+| Babylon Lite                       | Babylon.js                                             |
+| ---------------------------------- | ------------------------------------------------------ |
+| `loadTexture2D(engine, url, opts)` | `new Texture(url, scene, ...options)`                  |
+| `Texture2D` interface              | `Texture` class (internal GPU texture + sampler)       |
+| `Texture2DOptions.mipMaps`         | `Texture.noMipmap` (inverted: `mipMaps = !noMipmap`)   |
+| `Texture2DOptions.addressModeU`    | `Texture.wrapU` (enum values differ)                   |
+| `Texture2DOptions.addressModeV`    | `Texture.wrapV`                                        |
+| `Texture2DOptions.invertY`         | `Texture.invertY` (default true in both)               |
+| `maxAnisotropy: 4`                 | `Texture.anisotropicFilteringLevel` (default 4)        |
+| `format: 'rgba8unorm'`             | Standard RGBA format for loaded images                 |
+| `generateMipmaps()` (render-based) | `Engine.generateMipmaps()` (may use compute or render) |
+| No `dispose()`                     | `Texture.dispose()` for explicit cleanup               |
 
 ---
 
@@ -281,12 +258,12 @@ loadTexture2D(engine, url, opts)
 
 ### Supported Formats
 
-| Format Family | GL Hex Range | WebGPU Format | Device Feature |
-|--------------|-------------|---------------|----------------|
-| BC / S3TC / DXT | 0x83F0–0x8E8D | bc1..bc7 | `texture-compression-bc` |
-| ETC2 / EAC | 0x9270–0x9279 | etc2/eac | `texture-compression-etc2` |
-| ASTC 4×4–12×12 | 0x93B0–0x93DD | astc-NxM | `texture-compression-astc` |
-| PVRTC | — | *(not in WebGPU)* | — |
+| Format Family   | GL Hex Range  | WebGPU Format     | Device Feature             |
+| --------------- | ------------- | ----------------- | -------------------------- |
+| BC / S3TC / DXT | 0x83F0–0x8E8D | bc1..bc7          | `texture-compression-bc`   |
+| ETC2 / EAC      | 0x9270–0x9279 | etc2/eac          | `texture-compression-etc2` |
+| ASTC 4×4–12×12  | 0x93B0–0x93DD | astc-NxM          | `texture-compression-astc` |
+| PVRTC           | —             | _(not in WebGPU)_ | —                          |
 
 ### KTX1 Binary Format (64-byte header)
 
@@ -304,6 +281,7 @@ Offset  Size  Field
 ```
 
 After header + key/value metadata, mip levels are stored largest-first:
+
 - `uint32 imageSize` + `imageData[imageSize]` + padding to 4-byte alignment
 
 ### `loadKtxTexture2D` Flow
@@ -374,12 +352,12 @@ loadGltf(engine, url)
 
 ## File Manifest
 
-| File | Role |
-|------|------|
-| `src/texture/texture-2d.ts` | Image loading, GPU texture creation, mipmap generation, sampler creation |
-| `src/texture/ktx-loader.ts` | KTX1 parser, compressed texture upload, suffix selection, fallback to loadTexture2D |
-| `src/texture/ktx2-loader.ts` | Internal KTX2/BasisU decoder bridge and Texture2D upload for glTF `KHR_texture_basisu` |
+| File                                | Role                                                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `src/texture/texture-2d.ts`         | Image loading, GPU texture creation, mipmap generation, sampler creation                              |
+| `src/texture/ktx-loader.ts`         | KTX1 parser, compressed texture upload, suffix selection, fallback to loadTexture2D                   |
+| `src/texture/ktx2-loader.ts`        | Internal KTX2/BasisU decoder bridge and Texture2D upload for glTF `KHR_texture_basisu`                |
 | `src/texture/compressed-formats.ts` | GL `glInternalFormat` → `{ gpuFormat, feature, blockW, blockH, blockBytes }` lookup table (lazy-init) |
-| `src/texture/solid-texture.ts` | Procedural 1×1 solid color texture |
-| `src/texture/generate-mipmaps.ts` | GPU mipmap generation via render passes, including encoder-local recording |
-| `src/texture/mip-count.ts` | Shared biased mip-count helper used by frame-graph transmission |
+| `src/texture/solid-texture.ts`      | Procedural 1×1 solid color texture                                                                    |
+| `src/texture/generate-mipmaps.ts`   | GPU mipmap generation via render passes, including encoder-local recording                            |
+| `src/texture/mip-count.ts`          | Shared biased mip-count helper used by frame-graph transmission                                       |

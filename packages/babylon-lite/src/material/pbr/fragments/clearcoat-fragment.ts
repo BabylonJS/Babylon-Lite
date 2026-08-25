@@ -2,7 +2,7 @@
  * Clearcoat Fragment
  *
  * Adds a glossy transparent top layer (like car paint or lacquered surfaces).
- * Only bundled when a scene uses PbrMaterialProps.clearCoat.
+ * Only bundled when a scene uses PbrMaterialProps._clearCoat.
  *
  * Math follows BJS PBRClearCoatConfiguration:
  *  - F0 from IOR: ((1-ior)/(1+ior))^2
@@ -20,19 +20,13 @@
 import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, ClearCoatProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import {
-    PBR_HAS_CLEARCOAT,
-    PBR_HAS_METALLIC_REFLECTANCE_MAP,
-    PBR_HAS_REFLECTANCE_MAP,
-    PBR2_CC_INT_MAP,
-    PBR2_CC_ROUGH_MAP,
-    PBR2_CC_NORMAL_MAP,
-    PBR2_CC_F0_REMAP_OFF,
-} from "../pbr-flag-bits.js";
+import { PBR_HAS_CLEARCOAT, PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP } from "../pbr-flag-bits.js";
 
-// Clearcoat-only features2 bit (reserved in pbr-flag-bits.ts). Defined here, not
-// in the shared flag module, for zero bundle movement on scenes that never load
-// this lazy fragment.
+// Clearcoat-only features2 bits, kept out of the shared flag module.
+const PBR2_CC_INT_MAP = 1 << 0;
+const PBR2_CC_ROUGH_MAP = 1 << 1;
+const PBR2_CC_NORMAL_MAP = 1 << 2;
+const PBR2_CC_F0_REMAP_OFF = 1 << 3;
 const PBR2_CC_UV_TX = 1 << 25;
 
 const STAGE_FRAGMENT = 0x2;
@@ -262,7 +256,7 @@ export function createClearcoatFragment(features: number, features2: number, has
 
 /** Write the clearcoat material-UBO slice (ccParams + ccParams2). */
 export function writeClearcoatUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
-    const cc = material.clearCoat as ClearCoatProps | undefined;
+    const cc = material._clearCoat as ClearCoatProps | undefined;
     if (!cc?.isEnabled || !offsets.has("ccParams")) {
         return;
     }
@@ -328,7 +322,7 @@ export const pbrExt: PbrExt = {
     id: "clearcoat",
     phase: "base-tex",
     detect(mat) {
-        const cc = (mat as PbrMaterialProps).clearCoat as ClearCoatProps | undefined;
+        const cc = (mat as PbrMaterialProps)._clearCoat as ClearCoatProps | undefined;
         if (!cc?.isEnabled) {
             return { f: 0, f2: 0 };
         }
@@ -354,7 +348,7 @@ export const pbrExt: PbrExt = {
     frag: (ctx) => createClearcoatFragment(ctx._features, ctx._features2, ctx._hasIbl, ctx._hasAnyNormal, ctx._hasSpecularAA),
     writeUbo: writeClearcoatUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {
-        const cc = (ctx._material as PbrMaterialProps).clearCoat as ClearCoatProps | undefined;
+        const cc = (ctx._material as PbrMaterialProps)._clearCoat as ClearCoatProps | undefined;
         if (!cc) {
             return b;
         }
@@ -368,7 +362,7 @@ export const pbrExt: PbrExt = {
         return b;
     },
     textures(mat, t) {
-        const cc = (mat as PbrMaterialProps).clearCoat;
+        const cc = (mat as PbrMaterialProps)._clearCoat;
         if (!cc) {
             return;
         }

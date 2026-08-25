@@ -1,5 +1,7 @@
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { Mesh } from "../../mesh/mesh.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 
 // ─── Feature Flags ──────────────────────────────────────────────────
@@ -29,6 +31,24 @@ export const GEOMETRY_OUTPUT = 1 << 21;
 export const LIGHTMAP_SHADOWMAP = 1 << 15;
 /** Lightmap UVs are V-flipped (BJS Texture.uAng === π → uv'=(u, 1-v)). */
 export const LIGHTMAP_FLIP_V = 1 << 22;
+// Bit 23 is reserved by STD_HAS_UV_TRANSFORM in the lazy
+// fragments/std-uv-transform-fragment.ts module.
+/** RGBA mesh vertex color drives alpha (Babylon `VERTEXALPHA`). Set only when a
+ *  vertex-colour buffer exists and the mesh explicitly opts in via
+ *  `mesh.hasVertexAlpha`. Gates the vertex-colour fragment's `alpha *= vColor.a` +
+ *  vertex-alpha alpha-test; without it mesh vertex colour is RGB-only. Kept distinct
+ *  from `MATERIAL_ALPHA_BLEND`, which is also used by material and thin-instance
+ *  alpha, so those sources never create a redundant vertex-colour shader variant. */
+export const VERTEX_ALPHA = 1 << 24;
+/** Mesh uses skeletal skinning. Enabled through the Standard mesh-feature subpath. */
+export const HAS_SKELETON = 1 << 26;
+/** Skinned mesh has a second JOINTS/WEIGHTS set. */
+export const HAS_SKELETON_8 = 1 << 27;
+
+// ─── Standard Scene Features ───────────────────────────────────────
+
+/** Scene contributes Standard fog WGSL. Kept separate from material/mesh bits. */
+export const STD_SCENE_FOG = 1 << 0;
 
 // ─── Standard Material Extension Registry ───────────────────────────
 
@@ -44,10 +64,20 @@ export interface StdExt {
     readonly _phase: StdExtPhase;
     /** @internal Feature bit this ext gates on. */
     readonly _feature: number;
+    /** @internal Contribute material feature bits for `mat` (including this ext's own
+     *  sub-bits, e.g. UV-set or mode selectors). Returns 0 when the material does not
+     *  use the feature. Only registered exts are consulted, so an opt-in setter is the
+     *  sole way these bits can ever be set — which is what keeps the detection code
+     *  (and the fragment it gates) out of the always-loaded core. */
+    _detect?(mat: StandardMaterialProps): number;
+    /** @internal Effective Standard feature bits contributed by one mesh. */
+    _meshFeatures?(meshFeatures: number, material?: StandardMaterialProps): number;
     /** @internal */
-    _frag(features: number, shadowLights?: ShadowLightSlotLite[]): ShaderFragment;
+    _frag(features: number, meshFeatures?: number, shadowLights?: ShadowLightSlotLite[]): ShaderFragment;
     /** @internal Push group-1 bind entries starting at binding `b`; return new b. */
-    _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number;
+    _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number, mesh?: Mesh, engine?: EngineContext): number;
+    /** @internal Bind feature-owned vertex buffers and return the next slot. */
+    _bindVertexBuffers?(mesh: Mesh, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number): number;
     /** @internal Enumerate textures for acquire/release. */
     _textures?(mat: StandardMaterialProps, out: Texture2D[]): void;
 }

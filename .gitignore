@@ -1,5 +1,11 @@
 node_modules/
 
+# This is a pnpm workspace — pnpm-lock.yaml is the single source of truth.
+# npm/yarn lockfiles diverge from it (npm ignores pnpm.overrides), producing
+# misleading audit results and Dependabot noise, so keep them out of the repo.
+package-lock.json
+yarn.lock
+
 dist/
 packages/babylon-lite/build/
 *.tsbuildinfo
@@ -29,8 +35,7 @@ reference/**/final-ours.png
 reference/**/*-capture.json
 reference/**/diff*.png
 reference/**/debug-*.png
-lab/public/bundle/
-!lab/public/bundle/manifest.json
+lab/public/bundle/*
 !lab/public/bundle/demos-manifest.json
 lab/public/bundle-baseline/
 lab/bundle-baseline-scene*.html
@@ -42,17 +47,29 @@ lab/public/doom/CREDITS.txt
 .freedoom-cache/
 lab/public/librequake/
 .librequake-cache/
+.kaykit-staging/
 lab/public/minecraft/voxelpack/*.png
 lab/public/minecraft/voxelpack/License.txt
 .voxelpack-cache/
 lab/public/freeciv/
 .freeciv-cache/
 .platformer-cache/
+lab/public/racer/
+.racer-cache/
 lab/public/littlest-tokyo/*.bak
 lab/public/perf-manifest.json
 lab/public/perf-regression-manifest.json
+# Lite GL generated lab outputs (mirror the WebGPU policy above): ignore the
+# volatile bundle-build + perf manifests, but keep the deterministic bundle
+# manifest the dashboard reads. GL thumbnails are committed (stable assets).
+lab/public/gl/bundle/*
+!lab/public/gl/bundle/manifest.json
+!lab/public/gl/bundle/demos-manifest.json
+lab/public/gl/perf-manifest.json
+lab/public/gl/perf-regression-manifest.json
 test-results/
 .bundle-size-tmp/
+.bundle-asset-cache/
 .env.local
 plans/
 log/
@@ -74,6 +91,10 @@ _bjs67_defines.txt
 pages-dist/
 
 build-timeline.json
+# Compat-sync scratch file: the agent writes a one-line PR title here; the PR
+# driver (scripts/open-compat-sync-pr.ts) reads it then deletes it before
+# committing. Ignored as a safeguard so it can never land in a PR.
+.compat-sync-pr-title.txt
 # Generated TypeDoc API documentation (regenerated on demand)
 lab/public/api-docs/
 lab/public/lite/api-docs/

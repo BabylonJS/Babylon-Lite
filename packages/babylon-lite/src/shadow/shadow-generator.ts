@@ -1,3 +1,5 @@
+import type { Texture2D } from "../texture/texture-2d.js";
+
 interface ShadowGeneratorRuntimeConfig {
     _mapSize: number;
     _bias: number;
@@ -27,6 +29,8 @@ export interface ShadowGenerator {
     _depthTexture: GPUTexture;
     /** @internal Number of cascades — set by the CSM generator, undefined otherwise. */
     _csmCascadeCount?: number;
+    /** @internal Lazily-created borrowed Texture2D wrapper for custom CSM receivers. */
+    _csmReceiverTexture?: Texture2D;
     /** @internal Receiver-facing shadow map sampler. */
     _depthSampler: GPUSampler;
     /** @internal */
@@ -47,6 +51,15 @@ export interface ShadowGenerator {
     _version: number;
     /** @internal */
     _shadowTaskState?: ShadowTaskInternalState;
+    /** @internal Opt-in CSM cache state; undefined for the default path and other techniques. */
+    _csmCache?: {
+        /** @internal */
+        _refitAngle: number;
+        /** @internal */
+        _refitMaxIntervalMs: number;
+        /** @internal */
+        _loaded?: boolean;
+    };
     /** @internal Optional callbacks invoked each frame the receiver UBO is (re)written, after the
      *  GPU upload and before the shadow map / main pass render. Used by custom ShaderMaterial
      *  receivers (e.g. CSM) to mirror the fresh transforms into their own uniforms without a
@@ -54,6 +67,9 @@ export interface ShadowGenerator {
     _onReceiverData?: ((data: Float32Array) => void)[];
     /** @internal Dynamically imports and prepares the shadow-map render task for the given caster meshes. */
     _preloadShadowTask?(casterMeshes: readonly import("../mesh/mesh.js").Mesh[]): Promise<void>;
+    /** @internal Caster set whose lazily-imported material views are still loading. While set, the
+     *  generator is skipped by the shadow task so the pass cannot reach an unassigned no-colour factory. */
+    _preloadPending?: readonly import("../mesh/mesh.js").Mesh[];
     /** @internal Lazily creates (or returns the cached) shadow-task state for rendering the shadow map this frame. */
     _ensureShadowTaskState?(
         engine: import("../engine/engine.js").EngineContext,
@@ -62,4 +78,6 @@ export interface ShadowGenerator {
     ): ShadowTaskInternalState;
     /** @internal Records the shadow-map render pass for the given task state and returns the number of draw calls issued. */
     _renderShadowMap?(engine: import("../engine/engine.js").EngineContext, state: ShadowTaskInternalState): number;
+    /** @internal Replaces the innermost task hooks while preserving installed caster adapters. */
+    _replaceShadowTaskHooks?(ensure: NonNullable<ShadowGenerator["_ensureShadowTaskState"]>, render: NonNullable<ShadowGenerator["_renderShadowMap"]>): void;
 }

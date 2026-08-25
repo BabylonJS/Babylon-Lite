@@ -6,12 +6,12 @@ import { addToScene, startEngine, createEngine, createSceneContext, createDefaul
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const canvas = document.querySelector("canvas")!;
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    addToScene(scene, await loadGltf(engine, "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/SimpleInstancing/glTF-Binary/SimpleInstancing.glb"));
+    addToScene(scene, await loadGltf(engine, "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/SimpleInstancing/glTF-Binary/SimpleInstancing.glb"));
 
     await loadEnvironment(scene, "https://assets.babylonjs.com/environments/environmentSpecular.env", {
         skipSkybox: true,
@@ -25,14 +25,17 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
     await startEngine(engine);
-    canvas.dataset.drawCalls = String(engine.drawCallCount);
-    canvas.dataset.camAlpha = String(cam.alpha);
-    canvas.dataset.camBeta = String(cam.beta);
-    canvas.dataset.camRadius = String(cam.radius);
-    canvas.dataset.camTarget = `${cam.target.x},${cam.target.y},${cam.target.z}`;
-    canvas.dataset.camFov = String(cam.fov);
-    canvas.dataset.initMs = String(performance.now() - __initStart);
-    canvas.dataset.ready = "true";
+    const { x, y, z } = cam.target;
+    Object.assign(canvas.dataset, {
+        drawCalls: engine.drawCallCount,
+        camAlpha: cam.alpha,
+        camBeta: cam.beta,
+        camRadius: cam.radius,
+        camTarget: `${x},${y},${z}`,
+        camFov: cam.fov,
+        initMs: performance.now() - __initStart,
+        ready: true,
+    });
 }
 
 main().catch(console.error);

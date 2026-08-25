@@ -24,7 +24,7 @@
  * run; the rendered frame is compared against a committed VISUAL golden (`babylon-ref-golden.png`)
  * captured at the pre-contact frame.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import type { Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
@@ -80,11 +80,9 @@ test("Scene 105 — Character controller + moving platform matches Babylon.js", 
     const goldenPath = await captureGolden(browser, { sceneId: 105, queryParams: `captureFrame=${VISUAL_FRAME}`, waitFlag: "captureReady" });
 
     // ── Babylon.js reference (live DATA) at the collision frame ──
-    const bjsContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const bjsPage = await bjsContext.newPage();
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
     const bjs = await capture(bjsPage, "/babylon-ref-scene105.html", COLLISION_FRAME, "Scene 105 BJS reference (collisions)");
-    await bjsPage.close();
-    await bjsContext.close();
+    await release();
 
     // ── Lite: collision frame (data) + pre-contact frame (visual) ──
     const lite = await capture(page, "/scene105.html", COLLISION_FRAME, "Scene 105 Lite (collisions)");

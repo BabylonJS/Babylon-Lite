@@ -1,11 +1,12 @@
 # Module: High-Precision Matrix (HPM)
+
 > Package paths: `packages/babylon-lite/src/math/_matrix-allocator.ts`, `packages/babylon-lite/src/math/_mat4-storage-f64.ts`, `packages/babylon-lite/src/math/pack-mat4-into-f32.ts`
 
 ## Purpose
 
 High-Precision Matrix (HPM) is the optional Float64 backing for `Mat4`. When the engine is created with `useHighPrecisionMatrix: true`, every matrix allocation on the page returns `Float64Array(16)` instead of `Float32Array(16)`. CPU-side matrix composition (parent-chain world matrices, lookAt, inverse) is then done in F64, which preserves sub-unit precision at large coordinates (~1e5+ from origin) where F32 quantization becomes visible. The single F64→F32 down-cast happens at one explicit boundary — `packMat4IntoF32` — when the matrix is written into a GPU uniform buffer.
 
-HPM is the substrate that Large World Rendering (`35-large-world-rendering.md`) builds on: floating-origin subtracts the eye position from the world translation in F64 *before* the F32 store, recovering the small remainder at full precision.
+HPM is the substrate that Large World Rendering (`35-large-world-rendering.md`) builds on: floating-origin subtracts the eye position from the world translation in F64 _before_ the F32 store, recovering the small remainder at full precision.
 
 ## Public API Surface
 
@@ -106,6 +107,23 @@ export function getLoaderTmpLocal(): Mat4 {
 
 Lazy-init via `allocateMat4()` means the scratch picks up whatever precision the process-global allocator was installed with. Safe to share across concurrent `loadGltf` calls because all parser paths that touch scratch are synchronous between scratch reads/writes (only `await`s are around fetch and image decode, neither touches matrix scratch). JS single-threadedness guarantees no other parse can interleave through a scratch use-site mid-computation.
 
+## Allocation boundary inventory
+
+Every `Mat4` the engine vends must come from `allocateMat4()`. A direct `new F32(16)` pins that matrix to F32 however the engine was configured, and nothing downstream can recover the lost precision. The allocating sites:
+
+- `math/mat4-compose.ts`, `mat4-from-quat.ts`, `mat4-identity.ts`, `mat4-invert.ts`, `mat4-look-at-lh.ts`, `mat4-multiply.ts`, `mat4-perspective-lh.ts`, `mat4-scale.ts` — the eight factories that return a fresh matrix
+- `scene/world-matrix-state.ts` — each node's `_ownedWorld`
+- `camera/arc-rotate.ts`, `camera/free-camera.ts`, `camera/geospatial-camera.ts` — `_localMat`, `_viewCache`, `_projCache`, `_vpCache`
+- `light/directional-light.ts`, `light/hemispheric.ts`, `light/point-light.ts`, `light/spot-light.ts` — each light's `_localMatrix`
+- `loader-gltf/_loader-scratch.ts` — the three per-load scratch matrices
+- `particle/node/blocks/update-flow-map-block.ts` — the flow-map matrix
+
+`_matrix-allocator.ts` also exports `allocateMat4Storage()`, a thin wrapper that returns `allocateMat4()` already cast to `Mat4Storage` (the index-addressable view kernels write through) — like `allocateMat4()`, it is internal-only, not re-exported from the package entry point. It centralizes the `allocateMat4() as unknown as Mat4Storage` cast, but **deliberately only at `mat4-look-at-lh.ts`**, the one call site with no existing traffic (no scene imports `mat4LookAtLH`, so the wrapper tree-shakes away with the factory itself). The `as unknown as Mat4Storage` cast is erased at compile time and costs nothing, but a real wrapper _function_ is not: routing the other seven already-hot factories through it was measured to add ~35-39 raw bytes to every scene that composes a transform (i.e. nearly all of them) — the minifier keeps the indirection as a real call rather than inlining it, so the wrapper's own definition becomes a permanent per-scene tax. `scene7` had only 141-176 B of ceiling headroom at measurement time, so that tax alone risked tripping it. The seven pre-existing sites therefore keep the direct `allocateMat4() as unknown as Mat4Storage` cast; only the new eighth site (already dead code in every current scene) uses the helper.
+
+The `*Into` / `*ToRef` kernels (`mat4ComposeInto`, `mat4MultiplyInto`, `mat4PerspectiveLHToRef`, `mat4LookAtLHToRef`, …) do not allocate — they write into storage the caller already owns and inherit its precision. Only the returning factories choose storage, which is why they are the boundary.
+
+**Root nodes make the factories load-bearing.** `createWorldMatrixState` allocates `_ownedWorld` through the allocator, but uses it only when the node has a parent. For a root, `getWorldMatrix()` returns the _local_ matrix unchanged (`_cachedWorld = local`), and that matrix came from `composeTrsLocalMatrix` → `mat4Compose` / `mat4Identity`. A factory that bypasses the allocator therefore costs every root-level object its F64 world transform under HPM — exactly the case HPM exists for — while parented nodes look correct and mask the fault.
+
 ## GPU upload boundary inventory
 
 Every mat4 → GPU buffer write goes through `packMat4IntoF32`. The exhaustive list:
@@ -119,18 +137,20 @@ Every mat4 → GPU buffer write goes through `packMat4IntoF32`. The exhaustive l
 
 The 6 mesh-world callsites pass `_foOffset` as the 5th argument (the scene's `_floatingOriginOffset` reference). The non-mesh callsites omit the offset and get precision-only packing (a bit-identical copy when storage is F32).
 
+**One exception:** `material/shader/shader-renderable.ts` and its cached counterpart `enable-shader-material-uniform-caching.ts` serialize ShaderMaterial's system-uniform block themselves (`data.set(world, …)` / `mat4MultiplyInto(data, …)`) rather than calling `packMat4IntoF32`. They cannot reuse it — `packMat4IntoF32WithOffset` lives in the LWR-only bundle that this module must not statically import, and pulling it in would defeat the tree-shaking gate above. The eye-relative subtraction is instead done by `_shaderWorldMatrix(mesh, camera, out?)` in `shader-renderable.ts`, using the same `large - large = small` ordering: the subtraction runs in JS number precision before the F32 store, so an F64-backed mesh matrix keeps its small remainder. Any new mat4 → GPU write outside these two files belongs in the list above, not here.
+
 ## Validation
 
-- Unit: `tests/unit/engine-matrix-policy.test.ts` covers `allocateMat4()` returning F32 by default, F64 after `_setHpmAllocator`, fresh instances per call, and `_resetMatrixAllocatorForTests` reverting.
+- Unit: `tests/unit/engine-matrix-policy.test.ts` covers `allocateMat4()` returning F32 by default, F64 after `_setHpmAllocator`, fresh instances per call, and `_resetMatrixAllocatorForTests` reverting. It also holds the allocation-boundary guard: each of the eight factories is asserted to honour the installed allocator (named individually, so a regression reports which one), plus a behavioural pair showing a root node keeps sub-metre precision at 4.6e6 under HPM and loses it under the F32 default.
 - Unit: `tests/unit/pack-mat4-into-f32.test.ts` covers F32→F32 bit-identity, F64→F32 down-cast, source/dst offsets, and the LWR offset-subtraction path.
 - Bundle: `tests/bundle-content-no-f64.test.ts` enforces F64 tree-shaking from HPM-off bundles (string-tag absence + manifest disjointness).
 - Bundle: scene-config ceilings — bundle-size tests confirm HPM-off scenes stay within their fixed ceilings; the F64 chunk only ships when reachable.
 
 ## Files / size
 
-| File | Purpose |
-|------|---------|
-| `math/_matrix-allocator.ts` (~40 lines) | Process-global lazy-init allocator + install hook |
-| `math/_mat4-storage-f64.ts` (~25 lines) | F64 allocator function + build tag |
+| File                                     | Purpose                                            |
+| ---------------------------------------- | -------------------------------------------------- |
+| `math/_matrix-allocator.ts` (~40 lines)  | Process-global lazy-init allocator + install hook  |
+| `math/_mat4-storage-f64.ts` (~25 lines)  | F64 allocator function + build tag                 |
 | `math/pack-mat4-into-f32.ts` (~60 lines) | Single GPU upload boundary with optional FO offset |
-| `math/types.ts` (Mat4, Mat4Storage) | Opaque branded `Mat4` + raw `Mat4Storage` union |
+| `math/types.ts` (Mat4, Mat4Storage)      | Opaque branded `Mat4` + raw `Mat4Storage` union    |

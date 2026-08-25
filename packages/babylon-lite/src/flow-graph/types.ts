@@ -1,7 +1,7 @@
 // Flow-graph core data types — pure state, no classes, no attached methods.
 // A graph is plain data describing topology + config only; behaviour lives in
 // FgBlockDef records (block-def.ts) and standalone runtime functions
-// (runtime.ts). See docs/lite/architecture/42-flow-graph.md.
+// (runtime.ts). See docs/lite/architecture/51-flow-graph.md.
 
 import type { Color3, Color4, Mat4, Quat, Vec3, Vec4 } from "../math/types.js";
 import type { FgInteger } from "./custom-types/fg-integer.js";

@@ -2,7 +2,7 @@
 // flow-graph/gltf/ is quarantined here so the runtime core never changes when
 // the spec churns. Mirrored against Babylon.js commit 8f728b23ea (2026-06-24).
 // Re-sync against BJS PR #18455 ("KHR_interactivity rework") when it lands.
-// See docs/lite/architecture/42-flow-graph.md → glTF KHR_interactivity Loader.
+// See docs/lite/architecture/51-flow-graph.md → glTF KHR_interactivity Loader.
 //
 // object-model-mapping: maps glTF JSON-pointer object-model paths to the Lite
 // scene property they address + the FgType of that property. Phase 2 covers the

@@ -43,41 +43,44 @@ pbr-renderable.ts:
 
 ## Dynamic Feature Flags (`pbr-flags.ts`)
 
-| Flag | Constant | Condition | Shader effect |
-|---|---|---|---|
-| `PBR_HAS_NORMAL_MAP` | `1 << 0` | Mesh has tangent buffer | Tangent vertex attr + normal texture + TBN transform |
-| `PBR_HAS_EMISSIVE` | `1 << 1` | Material has emissive texture | Emissive texture sampling |
-| `PBR_HAS_ENV` | `1 << 2` | Environment loaded | IBL (BRDF LUT + specular cubemap + SH irradiance) |
-| `PBR_HAS_TONEMAP` | `1 << 4` | Tone mapping enabled | Exposure/contrast/gamma post-processing |
-| `PBR_HAS_ALPHA_BLEND` | `1 << 6` | Material has alpha blend | Alpha blend pipeline state |
-| `PBR_HAS_SPEC_GLOSS` | `1 << 7` | Specular-glossiness workflow | SpecGloss texture instead of ORM |
-| `PBR_HAS_DOUBLE_SIDED` | `1 << 8` | Material is double-sided | `cullMode: 'none'` + front-facing normal flip |
-| `PBR_HAS_COTANGENT_NORMAL` | `1 << 9` | Normal map without tangents | Cotangent-frame normal perturbation |
-| `PBR_HAS_METALLIC_REFLECTANCE_MAP` | `1 << 10` | Has metallic reflectance map | Reflectance texture sampling |
-| `PBR_HAS_REFLECTANCE_MAP` | `1 << 11` | Has reflectance map | Reflectance map sampling |
-| `PBR_HAS_USE_ALPHA_ONLY_MR` | `1 << 12` | Use alpha-only from MR map | Alpha-only metallic reflectance |
-| `PBR_HAS_OCCLUSION` | `1 << 15` | Has occlusion strength | ORM/separate occlusion with strength factor |
-| `PBR_HAS_SPECULAR_AA` | `1 << 17` | Specular anti-aliasing | Geometric AA roughness adjustment |
-| `PBR_HAS_CLEARCOAT` | `1 << 20` | Clearcoat layer enabled | Clearcoat BRDF + energy conservation |
-| `PBR_HAS_EMISSIVE_COLOR` | `1 << 21` | Non-zero emissive uniform | Emissive color uniform contribution |
-| `PBR_HAS_SHEEN` | `1 << 22` | Sheen layer enabled | Sheen BRDF (Charlie NDF + Ashikhmin visibility) |
-| `PBR_HAS_SHEEN_TEXTURE` | `1 << 23` | Sheen has texture | Sheen texture sampling |
-| `PBR_HAS_GAMMA_ALBEDO` | `1 << 25` | Base color in gamma space | Gamma-to-linear decode |
-| `PBR_HAS_ANISOTROPY` | `1 << 26` | Anisotropy enabled | Anisotropic specular BRDF |
-| `PBR_HAS_SUBSURFACE` | `1 << 27` | Subsurface enabled | Translucency / scattering / volume feature root |
-| `PBR_HAS_THICKNESS_MAP` | `1 << 28` | Thickness texture present | Thickness texture sampling |
-| `PBR_HAS_SKYBOX` | `1 << 29` | PBR skybox mode | Direct environment lookup |
-| `PBR_HAS_SHEEN_ALBEDO_SCALING` | `1 << 30` | Sheen albedo scaling enabled | Energy compensation for sheen |
+| Flag                               | Constant  | Condition                     | Shader effect                                        |
+| ---------------------------------- | --------- | ----------------------------- | ---------------------------------------------------- |
+| `PBR_HAS_NORMAL_MAP`               | `1 << 0`  | Mesh has tangent buffer       | Tangent vertex attr + normal texture + TBN transform |
+| `PBR_HAS_EMISSIVE`                 | `1 << 1`  | Material has emissive texture | Emissive texture sampling                            |
+| `PBR_HAS_ENV`                      | `1 << 2`  | Environment loaded            | IBL (BRDF LUT + specular cubemap + SH irradiance)    |
+| `PBR_HAS_TONEMAP`                  | `1 << 4`  | Tone mapping enabled          | Exposure/contrast/gamma post-processing              |
+| `PBR_HAS_ALPHA_BLEND`              | `1 << 6`  | Material has alpha blend      | Alpha blend pipeline state                           |
+| `PBR_HAS_SPEC_GLOSS`               | `1 << 7`  | Specular-glossiness workflow  | SpecGloss texture instead of ORM                     |
+| `PBR_HAS_DOUBLE_SIDED`             | `1 << 8`  | Material is double-sided      | `cullMode: 'none'` + front-facing normal flip        |
+| `PBR_HAS_COTANGENT_NORMAL`         | `1 << 9`  | Normal map without tangents   | Cotangent-frame normal perturbation                  |
+| `PBR_HAS_METALLIC_REFLECTANCE_MAP` | `1 << 10` | Has metallic reflectance map  | Reflectance texture sampling                         |
+| `PBR_HAS_REFLECTANCE_MAP`          | `1 << 11` | Has reflectance map           | Reflectance map sampling                             |
+| `PBR_HAS_USE_ALPHA_ONLY_MR`        | `1 << 12` | Use alpha-only from MR map    | Alpha-only metallic reflectance                      |
+| Clustered point gate (local)       | `1 << 13` | Clustered point-light state   | Point-only clustered fragment and cache variant      |
+| Clustered spot gate (local)        | `1 << 14` | Clustered spot-light state    | Spot-capable clustered fragment and cache variant    |
+| `PBR_HAS_OCCLUSION`                | `1 << 15` | Has occlusion strength        | ORM/separate occlusion with strength factor          |
+| `PBR_HAS_SPECULAR_AA`              | `1 << 17` | Specular anti-aliasing        | Geometric AA roughness adjustment                    |
+| `PBR_HAS_CLEARCOAT`                | `1 << 20` | Clearcoat layer enabled       | Clearcoat BRDF + energy conservation                 |
+| `PBR_HAS_EMISSIVE_COLOR`           | `1 << 21` | Non-zero emissive uniform     | Emissive color uniform contribution                  |
+| `PBR_HAS_SHEEN`                    | `1 << 22` | Sheen layer enabled           | Sheen BRDF (Charlie NDF + Ashikhmin visibility)      |
+| `PBR_HAS_SHEEN_TEXTURE`            | `1 << 23` | Sheen has texture             | Sheen texture sampling                               |
+| Lightmap gate (local)              | `1 << 24` | Opt-in lightmap texture       | Lightmap fragment and cache variant                  |
+| `PBR_HAS_GAMMA_ALBEDO`             | `1 << 25` | Base color in gamma space     | Gamma-to-linear decode                               |
+| `PBR_HAS_ANISOTROPY`               | `1 << 26` | Anisotropy enabled            | Anisotropic specular BRDF                            |
+| `PBR_HAS_SUBSURFACE`               | `1 << 27` | Subsurface enabled            | Translucency / scattering / volume feature root      |
+| `PBR_HAS_THICKNESS_MAP`            | `1 << 28` | Thickness texture present     | Thickness texture sampling                           |
+| `PBR_HAS_SKYBOX`                   | `1 << 29` | PBR skybox mode               | Direct environment lookup                            |
+| `PBR_HAS_SHEEN_ALBEDO_SCALING`     | `1 << 30` | Sheen albedo scaling enabled  | Energy compensation for sheen                        |
 
 Mesh/pass feature bits live in `mesh-features.ts` (`MSH_HAS_SKELETON`, `MSH_HAS_MORPH_TARGETS`, `MSH_HAS_THIN_INSTANCES`, `MSH_HAS_INSTANCE_COLOR`, `MSH_HAS_VERTEX_COLOR`, `MSH_HAS_UV2`, `MSH_RECEIVE_SHADOWS`). Do not duplicate a mesh feature as `PBR_HAS_*` or `PBR2_HAS_*`; the mesh flag takes precedence.
 
-Extended `features2` bits carry overflow and pass-specific features, including clearcoat texture bits, transmission/volume, unlit, UV transform, occlusion-on-UV2 material intent (`PBR2_HAS_UV2` gated by `MSH_HAS_UV2`), linear image processing for refraction, and `PBR2_NO_COLOR_OUTPUT` for no-color material views.
+Extended `features2` bits carry overflow and pass-specific features, including clearcoat texture bits, transmission/volume, unlit, UV transform, occlusion-on-UV2 material intent (`PBR2_HAS_UV2` gated by `MSH_HAS_UV2`), linear image processing for refraction, and `PBR2_NO_COLOR_OUTPUT` for no-color material views. Extension-local bit 29 selects UV2 specifically for lightmaps (alongside shared `PBR2_HAS_UV2`); the sheen roughness-texture selector moves to bit 31 to keep the gates independent.
 
 Light type bits are also shifted into the feature mask via `getLightTypeFeatureBits()` (hemispheric=1, directional=2, point=3).
 
 Base color + ORM textures are always present (core PBR workflow).
 
-PBR caches are two-tiered: sig-independent shader bindings are cached per the inline key string `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${shaderKey}`, then each binding caches sig-specific pipelines per `targetSignatureKey(sig)` (format, depth format, sample count, Y-flip).
+PBR caches are two-tiered: sig-independent shader bindings are cached per the inline key string `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${shaderKey}`, where `shaderKey` includes tone-mapping identity and the material-plugin index; geometry-output composition and per-view resources also include the plugin index. Each binding then caches sig-specific pipelines per `targetSignatureKey(sig)` (format, depth format, sample count, Y-flip).
 
 ## Public API Surface
 
@@ -156,42 +159,43 @@ export interface SubSurfaceProps {
 
 /** User-facing PBR material properties. */
 export interface PbrMaterialProps extends Material {
-  baseColorTexture?: Texture2D;
-  normalTexture?: Texture2D;
-  normalTextureScale?: number;
-  /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
-  ormTexture?: Texture2D;
-  emissiveTexture?: Texture2D;
-  specGlossTexture?: Texture2D;
-  metallicReflectanceTexture?: Texture2D;
-  reflectanceTexture?: Texture2D;
-  emissiveColor?: [number, number, number];
-  doubleSided?: boolean;
-  alpha?: number;
-  alphaBlend?: boolean;
-  alphaCutOff?: number;
-  environmentIntensity?: number;
-  directIntensity?: number;
-  usePhysicalLightFalloff?: boolean;
-  reflectance?: number;
-  metallicFactor?: number;
-  roughnessFactor?: number;
-  occlusionStrength?: number;
-  occlusionTexCoord?: number;
-  occlusionTexture?: Texture2D;
-  metallicF0Factor?: number;
-  metallicReflectanceColor?: [number, number, number];
-  useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
-  enableSpecularAA?: boolean;
-  gammaAlbedo?: boolean;
-  clearCoat?: ClearCoatProps;
-  sheen?: SheenProps;
-  anisotropy?: AnisotropyProps;
-  subsurface?: SubSurfaceProps;
-  transmissive?: boolean;
-  skyboxMode?: boolean;
-  unlit?: boolean;
-  unlitColor?: [number, number, number];
+    baseColorTexture?: Texture2D;
+    normalTexture?: Texture2D;
+    normalTextureScale?: number;
+    /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
+    ormTexture?: Texture2D;
+    emissiveTexture?: Texture2D;
+    specGlossTexture?: Texture2D;
+    metallicReflectanceTexture?: Texture2D;
+    reflectanceTexture?: Texture2D;
+    /** @internal Set via `setPbrEmissive()` — direct assignment skips extension registration. */
+    _emissiveColor?: [number, number, number];
+    doubleSided?: boolean;
+    alpha?: number;
+    alphaBlend?: boolean;
+    alphaCutOff?: number;
+    environmentIntensity?: number;
+    directIntensity?: number;
+    usePhysicalLightFalloff?: boolean;
+    reflectance?: number;
+    metallicFactor?: number;
+    roughnessFactor?: number;
+    occlusionStrength?: number;
+    occlusionTexCoord?: number;
+    occlusionTexture?: Texture2D;
+    metallicF0Factor?: number;
+    metallicReflectanceColor?: [number, number, number];
+    useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
+    enableSpecularAA?: boolean;
+    gammaAlbedo?: boolean;
+    clearCoat?: ClearCoatProps;
+    sheen?: SheenProps;
+    anisotropy?: AnisotropyProps;
+    subsurface?: SubSurfaceProps;
+    transmissive?: boolean;
+    skyboxMode?: boolean;
+    unlit?: boolean;
+    unlitColor?: [number, number, number];
 }
 
 /** Create a PbrMaterialProps with optional overrides. */
@@ -368,6 +372,17 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
 - **Fragment slots**:
     - `AT` — sets `emissive` from `mesh.emissiveColor`, optionally multiplied by emissive texture sample
 
+### `lightmap-fragment.ts` — Baked Lightmap (opt-in)
+
+- **Public API**: call `await enablePbrLightmap()` before `registerScene()`, then assign the texture with `setPbrLightmap(material, texture, options)`.
+- **Tree shaking**: the enable call dynamically imports and registers the fragment. The always-loaded PBR renderable never scans for lightmaps, so scenes that do not opt in retain no lightmap implementation.
+- **Feature variants**: primary bit 24 gates lightmap presence, extended bit 29 selects lightmap UV2, and primary bits 16/18/19 select shadowmap composition, gamma decode, and effective V flip. Clustered point/spot lighting retains primary bits 13/14. The lightmap-local bits participate in the normal PBR shader cache key without overlapping those lighting gates.
+- **UV selection**: `setPbrLightmap()` owns bit 64 of `_uv2Mask`; this reuses the existing TEXCOORD_1 attribute/varying path while preserving all other channel claims.
+- **UBO and bindings**: contributes `lmLvl`, `lmTexture`, and `lmSampler`.
+- **Composition**: the `NI` slot adds the decoded sample by default or multiplies the lit result while preserving emissive for `useLightmapAsShadowmap`. Dependencies keep it after unlit, sheen, refraction, and subsurface final-color reconstruction.
+- **Orientation**: the V-flip variant is `texture.invertY XOR (texture.uAng === Math.PI)`, matching the Standard texture path for upload-flipped and codec-decoded textures.
+- **Coverage**: `pbr-lightmap.test.ts` covers feature detection, UV fallback, composition order, UBO/bindings, and texture enumeration; Scene 167 covers UV1/UV2, additive/shadowmap, gamma decode, and V-flip parity.
+
 ### `morph-fragment.ts` — Morph Targets
 
 - **Factory**: `createMorphFragment(): ShaderFragment`
@@ -429,13 +444,13 @@ Base vertex buffers are defined by the template. Fragment modules add additional
 
 **Conditional (appended by template or fragments, location indices assigned by composer):**
 
-| Attribute | Source | When |
-|---|---|---|
-| Tangent (`float32x4`) | Template | `PBR_HAS_NORMAL_MAP` (tangent mode) |
-| Joints (`uint16x4`) + Weights (`float32x4`) | `skeleton-fragment` | `MSH_HAS_SKELETON` |
-| Joints1 + Weights1 | `skeleton-fragment` | `MSH_HAS_SKELETON_8` |
-| Instance matrix (4× `float32x4`) | `thin-instance-fragment` | `MSH_HAS_THIN_INSTANCES` |
-| Instance color (`float32x4`) | `thin-instance-fragment` | `MSH_HAS_INSTANCE_COLOR` |
+| Attribute                                   | Source                   | When                                |
+| ------------------------------------------- | ------------------------ | ----------------------------------- |
+| Tangent (`float32x4`)                       | Template                 | `PBR_HAS_NORMAL_MAP` (tangent mode) |
+| Joints (`uint16x4`) + Weights (`float32x4`) | `skeleton-fragment`      | `MSH_HAS_SKELETON`                  |
+| Joints1 + Weights1                          | `skeleton-fragment`      | `MSH_HAS_SKELETON_8`                |
+| Instance matrix (4× `float32x4`)            | `thin-instance-fragment` | `MSH_HAS_THIN_INSTANCES`            |
+| Instance color (`float32x4`)                | `thin-instance-fragment` | `MSH_HAS_INSTANCE_COLOR`            |
 
 ### Pipeline State
 
@@ -472,6 +487,7 @@ Binding 0 is always the mesh UBO (VERTEX+FRAGMENT). Subsequent bindings are assi
 - BRDF LUT + sampler + IBL cubemap + sampler — if `PBR_HAS_ENV`
 - Reflectance maps + samplers — if reflectance extension
 - Sheen texture + sampler — if `PBR_HAS_SHEEN_TEXTURE`
+- Lightmap texture + sampler — if the opt-in PBR lightmap extension is active
 
 **Group 2 — Shadow** (only when `MSH_RECEIVE_SHADOWS`):
 
@@ -483,11 +499,44 @@ Per-light shadow info UBOs, shadow textures, and shadow samplers.
 
 The builder stores the returned `rebuildSingle` closure on `pbrGroupBuilder._rebuildSingle`. The closure is captured inside `pbr-renderable.ts`, reuses the initial per-scene caches, and rebuilds one mesh for material swaps, `rebuildMaterial()`, and per-pass `RenderTask.addMesh(mesh, { material })` overrides.
 
+## Visible Environment Skybox Opt-Ins
+
+Visible HDR and DDS skyboxes each have one canonical renderable builder:
+
+- `buildHdrSkyboxRenderable`
+- `buildDdsSkyboxRenderable`
+
+The builders patch their fragment shader from a fixed core when an optional environment feature is enabled. They never select or import alternate renderable builders.
+
+Two public scene setters provide independent opt-ins:
+
+```ts
+setEnvironmentBlur(scene: SceneContext, blur: number): void;
+setEnvironmentRotation(scene: SceneContext, rotation: number): void;
+```
+
+Each setter registers one feature-owned patch loader in an ordered composition slot with a feature-agnostic composer stored on that scene. Rotation therefore always applies before blur regardless of setter call order. Configuring one scene cannot activate a feature for another scene.
+
+The canonical builders contain only one optional call to the scene-local composer. They do not import the composer or either feature patch, keeping non-feature skybox consumers at the canonical-builder baseline. This follows the PBR/Standard extension principle without a global registry: generic composition is retained only by consumers that import an environment feature setter.
+
+The core skybox shader has two composition slots:
+
+| Slot      | Default                   | Optional contribution                                                                                     |
+| --------- | ------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Direction | Normalized cube direction | `setEnvironmentRotation` rotates the sampling direction around Y using the `envRotationY` scene uniform   |
+| LOD       | Mip level `0.0`           | `setEnvironmentBlur` computes a clamped fractional cubemap LOD from blur, cubemap size, scale, and offset |
+
+Blur and rotation patches are separate modules. Importing one setter does not retain the other patch. The rotation registration loads its patch only when the scene-local composer first runs during visible-skybox construction, while the blur registration resolves its statically imported patch. Lighting-only consumers do not fetch the rotation patch.
+
+The first call to either setter must occur before the visible skybox is built so its shader variant includes the corresponding patch. Subsequent calls update scene-uniform data and take effect without rebuilding the skybox.
+
 ## Internal Architecture
 
 ### Scene Uniform Buffer Layout (Group 0, Binding 0)
 
 PBR uses the canonical `SceneUniforms` shared with Standard/material-independent passes. The struct is fixed-size (`SCENE_UBO_BYTES = 352`) and is declared in `packages/babylon-lite/shaders/scene-uniforms.wgsl`. It contains view/projection matrices, camera position, environment rotation, SH irradiance, image-processing fields, and fog fields.
+
+The environment rotation slot remains in this fixed layout for alignment and shader compatibility, but the base scene packer and cache key do not read it. Rotation is setter-only: `setEnvironmentRotation` owns the internal scene value, lazy skybox-patch registration, contributor registration, and task-cache invalidation. Environment loaders register the same contributor for SH data, while glTF image-based lights may initialize the internal value from asset metadata.
 
 Light data is **not** stored in `SceneUniforms`. PBR direct lighting reads the scene-owned `LightsUniforms` UBO at group 0 binding 1 when `_hasSingleLight` or `_hasMultiLight` is enabled.
 
@@ -555,19 +604,20 @@ The `rebuildSingle(scene, mesh, materialOverride?)` closure returned from `build
 **Inputs**: position (`vec3`), normal (`vec3`), uv (`vec2`), optional tangent (`vec4`), optional joints/weights, optional instance matrix.
 
 **Processing**:
+
 1. `/*VR*/` — Morph target application (if `MSH_HAS_MORPH_TARGETS`): accumulates position/normal deltas from morph texture
 2. `/*VW*/` — Skinning (if `MSH_HAS_SKELETON`): `finalWorld = mesh.world * boneInfluence`; otherwise `finalWorld = mesh.world`
 3. `worldPos = finalWorld × vec4(position, 1.0)`
 4. `clipPos = scene.viewProjection × worldPos`
 5. `worldNormal = normalize((finalWorld × vec4(normalize(normal), 0)).xyz)`
 6. If tangent normal map — compute TBN **in local space first** (critical for reflection matrices):
-   ```
-   N_local = normalize(normal)
-   T_local = normalize(tangent.xyz)
-   B_local = cross(N_local, T_local) * tangent.w
-   worldTangent = normalize((finalWorld × vec4(T_local, 0)).xyz)
-   worldBitangent = normalize((finalWorld × vec4(B_local, 0)).xyz)
-   ```
+    ```
+    N_local = normalize(normal)
+    T_local = normalize(tangent.xyz)
+    B_local = cross(N_local, T_local) * tangent.w
+    worldTangent = normalize((finalWorld × vec4(T_local, 0)).xyz)
+    worldBitangent = normalize((finalWorld × vec4(B_local, 0)).xyz)
+    ```
 7. `/*VB*/` — Shadow light-space transform (if `MSH_RECEIVE_SHADOWS`)
 
 **Outputs**: `worldPos`, `worldNormal`, [`worldTangent`, `worldBitangent`], `uv`, optional shadow varyings.
@@ -631,26 +681,26 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite | Babylon.js |
-|---|---|
-| `computePbrFeatures()` | Internal define flags in `PBRMaterial._getEffect()` |
-| `getOrCreatePbrPipeline()` | Pipeline cache in `PBRMaterial._getEffect()` |
-| `createPbrTemplate()` + `composeShader()` | GLSL shader generation from defines |
-| `ShaderFragment` composition | `#include` / `#define` preprocessor |
-| Scene UBO (group 0) | `Scene.sceneUbo` |
-| Mesh UBO (group 1, binding 0) | `Mesh._uniformBuffer` |
-| `PBR_HAS_NORMAL_MAP` | `#define BUMP` |
-| `PBR_HAS_EMISSIVE` | `#define EMISSIVE` |
-| `PBR_HAS_ENV` | `#define REFLECTION` + `#define SS_REFRACTION` |
-| `PBR_HAS_CLEARCOAT` | `#define CLEARCOAT` |
-| `PBR_HAS_SHEEN` | `#define SHEEN` |
-| `MSH_HAS_SKELETON` | `#define BONES` |
-| `MSH_HAS_MORPH_TARGETS` | `#define MORPHTARGETS` |
-| `MSH_RECEIVE_SHADOWS` | `#define SHADOW0` |
-| `PBR_HAS_SPEC_GLOSS` | `#define SPECULARGLOSSINESS` |
-| `PBR_HAS_SPECULAR_AA` | `#define SPECULARAA` |
-| `rebuildSingle` closure | `Material._markAllSubMeshesAsAllDirty()` |
-| `singlelight-wgsl.ts` / `multilight-wgsl.ts` | Direct-light setup/functions in `pbr.fragment.fx` |
+| Babylon Lite                                 | Babylon.js                                          |
+| -------------------------------------------- | --------------------------------------------------- |
+| `computePbrFeatures()`                       | Internal define flags in `PBRMaterial._getEffect()` |
+| `getOrCreatePbrPipeline()`                   | Pipeline cache in `PBRMaterial._getEffect()`        |
+| `createPbrTemplate()` + `composeShader()`    | GLSL shader generation from defines                 |
+| `ShaderFragment` composition                 | `#include` / `#define` preprocessor                 |
+| Scene UBO (group 0)                          | `Scene.sceneUbo`                                    |
+| Mesh UBO (group 1, binding 0)                | `Mesh._uniformBuffer`                               |
+| `PBR_HAS_NORMAL_MAP`                         | `#define BUMP`                                      |
+| `PBR_HAS_EMISSIVE`                           | `#define EMISSIVE`                                  |
+| `PBR_HAS_ENV`                                | `#define REFLECTION` + `#define SS_REFRACTION`      |
+| `PBR_HAS_CLEARCOAT`                          | `#define CLEARCOAT`                                 |
+| `PBR_HAS_SHEEN`                              | `#define SHEEN`                                     |
+| `MSH_HAS_SKELETON`                           | `#define BONES`                                     |
+| `MSH_HAS_MORPH_TARGETS`                      | `#define MORPHTARGETS`                              |
+| `MSH_RECEIVE_SHADOWS`                        | `#define SHADOW0`                                   |
+| `PBR_HAS_SPEC_GLOSS`                         | `#define SPECULARGLOSSINESS`                        |
+| `PBR_HAS_SPECULAR_AA`                        | `#define SPECULARAA`                                |
+| `rebuildSingle` closure                      | `Material._markAllSubMeshesAsAllDirty()`            |
+| `singlelight-wgsl.ts` / `multilight-wgsl.ts` | Direct-light setup/functions in `pbr.fragment.fx`   |
 
 ## Dependencies
 
@@ -688,22 +738,24 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 
 ## File Manifest
 
-| File | Size | Purpose |
-|---|---|---|
-| `src/material/pbr/pbr-material.ts` | ~140 lines | `PbrMaterialProps`, `ClearCoatProps`, `SheenProps` interfaces + `createPbrMaterial()` factory + `pbrGroupBuilder` + `collectPbrBoundTextures()` |
-| `src/material/pbr/pbr-flags.ts` | ~43 lines | Feature flag bit constants + PBR extension registry helpers |
-| `src/material/pbr/pbr-template.ts` | ~465 lines | `PbrTemplateConfig` + `createPbrTemplate()` — builds `ShaderTemplate` with BRDF helpers, slot markers, base UBO/bindings |
-| `src/material/pbr/pbr-pipeline.ts` | ~284 lines | `computePbrFeatures()`, `getOrCreatePbrPipeline()`, `createPbrMeshBindGroup()`, pipeline cache management |
-| `src/material/pbr/pbr-renderable.ts` | ~723 lines | `buildPbrRenderables()` — dynamic fragment import, shader composition, lights UBO setup, renderable creation, single-mesh rebuild closure |
-| `src/material/pbr/no-color-view.ts` | ~18 lines | `createPbrNoColorMaterialView()` — pass-specific no-color material view helper |
-| `src/material/pbr/fragments/singlelight-wgsl.ts` | ~75 lines | Lazy WGSL helpers for the non-looping one-light direct path |
-| `src/material/pbr/fragments/multilight-wgsl.ts` | ~120 lines | Lazy WGSL helpers: `MULTI_LIGHT_STRUCTS()`, `COMPUTE_PBR_LIGHT`, `getMultiLightLoop()` |
-| `src/material/pbr/fragments/ibl-fragment.ts` | ~86 lines | IBL environment lighting fragment (BRDF LUT, specular cubemap, SH irradiance) |
-| `src/material/pbr/fragments/clearcoat-fragment.ts` | ~122 lines | Clearcoat layer fragment (Kelemen visibility, F0 remap, direct + IBL clearcoat) |
-| `src/material/pbr/fragments/sheen-fragment.ts` | ~115 lines | Sheen layer fragment (Charlie NDF, Ashikhmin visibility, direct + IBL sheen) |
-| `src/material/pbr/fragments/reflectance-fragment.ts` | ~79 lines | Metallic reflectance extension fragment (F0 computation, reflectance maps) |
-| `src/material/pbr/fragments/emissive-fragment.ts` | ~29 lines | Emissive color uniform fragment |
-| `src/material/pbr/fragments/morph-fragment.ts` | ~48 lines | Morph target vertex animation fragment |
-| `src/material/pbr/fragments/skeleton-fragment.ts` | ~71 lines | Skeletal animation fragment (4-bone or 8-bone) |
-| `src/material/pbr/fragments/pbr-shadow-fragment.ts` | ~143 lines | PBR shadow receiving fragment (ESM + PCF, per-light) |
-| `src/shader/shader-composer.ts` | ~293 lines | `composeShader()` — topological sort, UBO merge, binding assignment, slot injection |
+| File                                                 | Size       | Purpose                                                                                                                                         |
+| ---------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/material/pbr/pbr-material.ts`                   | ~140 lines | `PbrMaterialProps`, `ClearCoatProps`, `SheenProps` interfaces + `createPbrMaterial()` factory + `pbrGroupBuilder` + `collectPbrBoundTextures()` |
+| `src/material/pbr/pbr-flags.ts`                      | ~43 lines  | Feature flag bit constants + PBR extension registry helpers                                                                                     |
+| `src/material/pbr/pbr-template.ts`                   | ~465 lines | `PbrTemplateConfig` + `createPbrTemplate()` — builds `ShaderTemplate` with BRDF helpers, slot markers, base UBO/bindings                        |
+| `src/material/pbr/pbr-pipeline.ts`                   | ~284 lines | `computePbrFeatures()`, `getOrCreatePbrPipeline()`, `createPbrMeshBindGroup()`, pipeline cache management                                       |
+| `src/material/pbr/pbr-renderable.ts`                 | ~723 lines | `buildPbrRenderables()` — dynamic fragment import, shader composition, lights UBO setup, renderable creation, single-mesh rebuild closure       |
+| `src/material/pbr/no-color-view.ts`                  | ~18 lines  | `createPbrNoColorMaterialView()` — pass-specific no-color material view helper                                                                  |
+| `src/material/pbr/fragments/singlelight-wgsl.ts`     | ~75 lines  | Lazy WGSL helpers for the non-looping one-light direct path                                                                                     |
+| `src/material/pbr/fragments/multilight-wgsl.ts`      | ~120 lines | Lazy WGSL helpers: `MULTI_LIGHT_STRUCTS()`, `COMPUTE_PBR_LIGHT`, `getMultiLightLoop()`                                                          |
+| `src/material/pbr/fragments/ibl-fragment.ts`         | ~86 lines  | IBL environment lighting fragment (BRDF LUT, specular cubemap, SH irradiance)                                                                   |
+| `src/material/pbr/fragments/clearcoat-fragment.ts`   | ~122 lines | Clearcoat layer fragment (Kelemen visibility, F0 remap, direct + IBL clearcoat)                                                                 |
+| `src/material/pbr/fragments/sheen-fragment.ts`       | ~115 lines | Sheen layer fragment (Charlie NDF, Ashikhmin visibility, direct + IBL sheen)                                                                    |
+| `src/material/pbr/fragments/reflectance-fragment.ts` | ~79 lines  | Metallic reflectance extension fragment (F0 computation, reflectance maps)                                                                      |
+| `src/material/pbr/fragments/emissive-fragment.ts`    | ~29 lines  | Emissive color uniform fragment                                                                                                                 |
+| `src/material/pbr/fragments/lightmap-fragment.ts`    | ~140 lines | Opt-in baked lightmap fragment (UV1/UV2, additive/shadowmap, gamma decode, effective V flip)                                                    |
+| `src/material/pbr/enable-pbr-lightmap.ts`            | ~70 lines  | Published `enablePbrLightmap()` / `setPbrLightmap()` opt-in seam                                                                                |
+| `src/material/pbr/fragments/morph-fragment.ts`       | ~48 lines  | Morph target vertex animation fragment                                                                                                          |
+| `src/material/pbr/fragments/skeleton-fragment.ts`    | ~71 lines  | Skeletal animation fragment (4-bone or 8-bone)                                                                                                  |
+| `src/material/pbr/fragments/pbr-shadow-fragment.ts`  | ~143 lines | PBR shadow receiving fragment (ESM + PCF, per-light)                                                                                            |
+| `src/shader/shader-composer.ts`                      | ~293 lines | `composeShader()` — topological sort, UBO merge, binding assignment, slot injection                                                             |

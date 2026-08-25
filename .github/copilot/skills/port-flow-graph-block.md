@@ -6,7 +6,7 @@ blocks are **plain-data definitions + pure functions**. This skill is the
 mechanical recipe to do that conversion correctly and to wire the block into the
 glTF `KHR_interactivity` path when applicable.
 
-> Read first: `docs/lite/architecture/42-flow-graph.md` (the subsystem design)
+> Read first: `docs/lite/architecture/51-flow-graph.md` (the subsystem design)
 > and `GUIDANCE.md` (pillars: no classes, pure-state, zero module-level side
 > effects, 100% tree-shakable). This skill assumes that architecture.
 

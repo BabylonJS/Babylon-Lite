@@ -7,7 +7,7 @@
  *    derived fields are correctly populated for both engines' pickers).
  * 3. Compares the post-drag rendered frame against the captured golden.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
 import * as fs from "fs";
 import * as path from "path";
 import type { Page } from "@playwright/test";
@@ -131,8 +131,7 @@ test("Scene 221 — Rotation gizmo camembert visible mid-drag", async ({ page },
     const browser = page.context().browser()!;
 
     if (!fs.existsSync(ROTATION_GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
-        const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-        const bjsPage = await ctx.newPage();
+        const { page: bjsPage, release } = await acquireReferencePage(browser);
         await bjsPage.goto("/babylon-ref-scene221.html");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
@@ -140,8 +139,7 @@ test("Scene 221 — Rotation gizmo camembert visible mid-drag", async ({ page },
         await performRotationMidDrag(bjsPage);
         await bjsPage.locator("canvas").screenshot({ path: ROTATION_GOLDEN_REF });
         await bjsPage.mouse.up().catch(() => undefined);
-        await bjsPage.close();
-        await ctx.close();
+        await release();
     }
 
     await page.goto("/scene221.html");
@@ -169,8 +167,7 @@ test("Scene 221 — Pointer Drags matches Babylon.js reference (post scripted dr
 
     // ── Capture golden by driving the BJS reference page through the drag set ──
     if (!fs.existsSync(GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
-        const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-        const bjsPage = await ctx.newPage();
+        const { page: bjsPage, release } = await acquireReferencePage(browser);
         await bjsPage.goto("/babylon-ref-scene221.html");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
@@ -179,8 +176,7 @@ test("Scene 221 — Pointer Drags matches Babylon.js reference (post scripted dr
         await bjsPage.waitForTimeout(200);
         fs.mkdirSync(REFERENCE_DIR, { recursive: true });
         await bjsPage.locator("canvas").screenshot({ path: GOLDEN_REF });
-        await bjsPage.close();
-        await ctx.close();
+        await release();
     }
 
     // ── Drive Lite through the same drag set and capture ──

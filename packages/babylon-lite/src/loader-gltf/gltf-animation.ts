@@ -2,10 +2,9 @@
  *  Lazy-loaded animation/skin parsing for glTF.
  *  Dynamically imported by load-gltf.ts only when a glTF contains animations or skins.
  *
- *  This module is pointer-feature agnostic: KHR_animation_pointer (and the
- *  non-Float32 sampler conversion that CubeVisibility-style assets need) are
- *  installed via the registration seam below, so scenes that don't declare
- *  the extension pay zero bytes for it.
+ *  This module is pointer-feature agnostic: KHR_animation_pointer is installed
+ *  via the registration seam below, so scenes that don't declare the extension
+ *  pay zero bytes for pointer resolution.
  */
 import { F32 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
@@ -22,8 +21,7 @@ import type { SceneNode } from "../scene/scene-node.js";
 
 /** Registration seam for KHR_animation_pointer. The pointer feature module
  *  calls `_installPointerHandlers` on side-effect import; if never called,
- *  pointer channels are skipped and non-Float32 samplers fall back to the
- *  aliasing fast path (which throws on misaligned/short accessors). */
+ *  pointer channels are skipped. */
 export type PointerChannelParser = (
     ptr: string,
     channel: any,
@@ -31,23 +29,30 @@ export type PointerChannelParser = (
     json: any,
     meshes: readonly Mesh[]
 ) => AnimationChannel | null;
-export type SamplerConverter = (src: ArrayBufferView, length: number, normalized: boolean) => Float32Array;
 let _parsePointerChannel: PointerChannelParser | null = null;
-let _convertSampler: SamplerConverter | null = null;
-export function _installPointerHandlers(parser: PointerChannelParser, converter: SamplerConverter): void {
+export function _installPointerHandlers(parser: PointerChannelParser): void {
     _parsePointerChannel = parser;
+}
+
+/** Registration seam for the non-Float32 / normalized sampler converter. Installed only by the lazy
+ *  `gltf-sampler-denorm` module — loaded when an animation sampler accessor is non-float (e.g.
+ *  glTF-Asset-Generator Animation_SamplerType normalized BYTE/SHORT rotation) or by
+ *  KHR_animation_pointer. When never installed, `toSamplerFloat32` folds to the aligned-Float32 fast
+ *  path, so plain float-sampler animations stay byte-identical. */
+export type SamplerConverter = (src: ArrayBufferView, length: number, normalized: boolean) => Float32Array;
+let _convertSampler: SamplerConverter | null = null;
+export function _installSamplerConverter(converter: SamplerConverter): void {
     _convertSampler = converter;
 }
 
-/** Convert sampler input/output to Float32Array. Default: reinterpret existing
- *  Float32 accessor as Float32Array (legacy behaviour; fast but requires
- *  aligned Float32 data). KHR_animation_pointer installs a converter that
- *  additionally handles non-Float32 / normalized accessors. */
+/** Convert a sampler input/output accessor to a tightly-packed Float32Array. Aligned Float32 sources
+ *  (the overwhelmingly common case) are reinterpreted in place for free; non-Float32 / normalized
+ *  sources are handled by the lazily-installed converter. */
 function toSamplerFloat32(src: ArrayBufferView, length: number, normalized: boolean): Float32Array {
     if (_convertSampler) {
         return _convertSampler(src, length, normalized);
     }
-    return new F32(src.buffer, src.byteOffset, length);
+    return new F32(src.buffer as ArrayBuffer, src.byteOffset, length);
 }
 
 /** Parsed skin/skeleton data. */

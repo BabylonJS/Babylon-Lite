@@ -20,21 +20,67 @@
  * returns immediately and rendering begins on a subsequent tick.
  */
 
-import { createEngine, startEngine, stopEngine, resizeEngine, setEngineSize, disposeEngine, registerScene, registerSceneWithShadowSupport, onBeforeRender } from "babylon-lite";
-import type { EngineContext, EngineOptions, RenderCanvas } from "babylon-lite";
+import {
+    createEngine,
+    startEngine,
+    stopEngine,
+    resizeEngine,
+    setEngineSize,
+    disposeEngine,
+    registerScene,
+    registerSceneWithShadowSupport,
+    enableMirroredMeshes,
+    onBeforeRender,
+    createNullEngine,
+    stepScene,
+    uploadImageToArrayLayer,
+    VERSION,
+} from "babylon-lite";
+import type { EngineContext, EngineOptions, RenderCanvas, Texture2DArray } from "babylon-lite";
 
 import { LiteCompatError, unsupported } from "../error.js";
+import { Logger } from "../misc/misc-utils.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
 
+/**
+ * Late work (utility-layer registration) is best-effort: it must never fail engine startup, and it
+ * runs from two places — folded into `_startCore` when registered before startup completes, and
+ * immediately after. Both go through this helper, so neither a rejection nor a synchronous throw
+ * can escape unattributed.
+ */
+async function runLateWork(work: () => Promise<void>): Promise<void> {
+    // `work()` is invoked inside the try so a synchronous throw is reported the same way as a
+    // rejection; a trailing `.catch` on the returned promise would never see it.
+    try {
+        await work();
+    } catch (error) {
+        Logger.Error(`Late engine work failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
 export abstract class AbstractEngine {
+    /**
+     * Babylon.js `AbstractEngine.Version` — reports the underlying Babylon Lite
+     * runtime version (the build-time-resolved `VERSION` exported by
+     * `@babylonjs/lite`), not the upstream `@babylonjs/core` release it targets.
+     */
+    public static get Version(): string {
+        return VERSION;
+    }
+
+    /** Babylon.js `AbstractEngine.NpmPackage` — the npm package + version string. */
+    public static get NpmPackage(): string {
+        return `@babylonjs/lite-compat@${this.Version}`;
+    }
+
     /** @internal The underlying Lite engine context. Populated by `initAsync()`. */
     public _lite!: EngineContext;
 
     /**
      * @internal Whether this engine has no GPU device (a {@link NullEngine}). Headless
-     * engines drive a pure-JS animation/observable loop instead of Babylon Lite's
-     * GPU render loop, so the compat `Scene` skips its Lite scene-context setup.
+     * engines build their Lite scene context with no frame-graph render task and are
+     * advanced by a pure-JS loop that steps Lite's simulation (see {@link NullEngine}).
      */
     public _headless = false;
 
@@ -43,7 +89,8 @@ export abstract class AbstractEngine {
     protected readonly _scenes: Scene[] = [];
     protected readonly _loopCallbacks: Array<() => void> = [];
     protected _initialized = false;
-    private _started = false;
+    private _startupComplete = false;
+    private _startPromise: Promise<void> | null = null;
     /** @internal Active `requestAnimationFrame` id for the scene-less loop, if any. */
     protected _rafId: number | null = null;
 
@@ -72,10 +119,9 @@ export abstract class AbstractEngine {
     private readonly _startupWork: Array<() => Promise<void>> = [];
 
     /**
-     * @internal Deferred work awaited *after* the main scenes are registered but
-     * before the engine starts — e.g. utility-layer (gizmo) registration, which
-     * must happen after its gizmos are created and after the main scene is
-     * registered (Babylon Lite's `registerUtilityLayer` ordering).
+     * @internal Deferred work awaited after the main engine renders its first frame
+     * — e.g. utility-layer registration, which must follow the main scene but must
+     * not block engine startup.
      */
     private readonly _lateWork: Array<() => Promise<void>> = [];
 
@@ -138,7 +184,7 @@ export abstract class AbstractEngine {
      * WebGPU baseline. A headless `NullEngine` has no device, so all flags are off.
      */
     public getCaps(): Record<string, unknown> {
-        const device = (this._lite as { _device?: { features?: { has(name: string): boolean } } } | undefined)?._device;
+        const device = (this._lite as { _device?: { features?: { has(name: string): boolean }; limits?: { maxUniformBuffersPerShaderStage?: number } } } | undefined)?._device;
         const has = (name: string): boolean => !!device?.features?.has(name);
         return {
             astc: has("texture-compression-astc"),
@@ -155,6 +201,12 @@ export abstract class AbstractEngine {
             textureHalfFloat: true,
             textureFloatLinearFiltering: true,
             maxTextureSize: 8192,
+            // Maximum uniform buffers bindable to a single shader stage. BJS reports this
+            // only for engines that enforce it as a hard limit (WebGPU); Babylon Lite is
+            // WebGPU-only, so it forwards the device's reported limit, and leaves it
+            // undefined for a device-less NullEngine — matching BJS's "left undefined
+            // elsewhere" contract.
+            maxUniformBuffersPerShaderStage: device?.limits?.maxUniformBuffersPerShaderStage,
             instancedArrays: true,
             uintIndices: true,
         };
@@ -232,8 +284,19 @@ export abstract class AbstractEngine {
         this._startupWork.push(work);
     }
 
-    /** @internal Register deferred work awaited after the main scenes register but before the engine starts. */
+    /** @internal Register work that must run after the main scene is rendering. */
     public _registerLateWork(work: () => Promise<void>): void {
+        // This gates on startup having completed, not on the render loop currently spinning:
+        // `_lateWork` is only ever drained by `_startCore`, so once startup is past that point
+        // queueing would strand the work forever — including after a `stopRenderLoop`, where the
+        // registering feature (e.g. a utility layer) still needs to be wired up for the next frame.
+        if (this._startupComplete) {
+            // There is no startup promise left to fold this into. Surface a rejection through the
+            // logger rather than letting it escape as an unhandled rejection, which is hard to
+            // attribute back to the registering feature.
+            void runLateWork(work);
+            return;
+        }
         this._lateWork.push(work);
     }
 
@@ -313,11 +376,51 @@ export abstract class AbstractEngine {
         return unsupported("WebGPUEngine.endFrame", "Babylon Lite's frame graph owns the frame loop; drive rendering with `runRenderLoop`.");
     }
 
-    private async _start(): Promise<void> {
-        if (this._started) {
-            return;
-        }
-        this._started = true;
+    /**
+     * Babylon.js `engine.currentSampleCount` — the MSAA sample count of the current render target.
+     * Babylon Lite manages MSAA internally and exposes no public sample-count accessor, so this
+     * needs a tree-shakeable Lite core addition before it can report a real value.
+     */
+    public get currentSampleCount(): never {
+        return unsupported("AbstractEngine.currentSampleCount", "Babylon Lite manages MSAA internally and exposes no public sample-count accessor.");
+    }
+
+    /**
+     * Babylon.js `engine.getAlphaToCoverage()` — alpha-to-coverage state. Babylon Lite does not
+     * expose an engine-level alpha-to-coverage toggle, so this is unsupported.
+     */
+    public getAlphaToCoverage(): never {
+        return unsupported("AbstractEngine.getAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
+    }
+
+    /**
+     * Babylon.js `engine.setAlphaToCoverage(enable)` — toggle alpha-to-coverage. Babylon Lite does
+     * not expose an engine-level alpha-to-coverage toggle, so this is unsupported.
+     */
+    public setAlphaToCoverage(_enable: boolean): never {
+        return unsupported("AbstractEngine.setAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
+    }
+
+    /**
+     * Babylon.js `engine.updateTextureArrayLayerFromImageSource(texture, source, layer, invertY, premultiplyAlpha)`
+     * — the engine extension that uploads a decoded image source into one layer of a 2D array
+     * texture. Forwards to Babylon Lite's `uploadImageToArrayLayer`.
+     *
+     * Babylon.js passes an `InternalTexture`; the compat layer's equivalent handle is the Lite
+     * `Texture2DArray` returned by `RawTexture2DArray.getInternalTexture()`, so ported code that
+     * goes through `UploadImageToTexture2DArrayLayer` (which is exactly what Babylon.js's helper
+     * does) works unchanged.
+     */
+    public updateTextureArrayLayerFromImageSource(texture: Texture2DArray, source: GPUCopyExternalImageSource, layer: number, invertY = false, premultiplyAlpha = false): void {
+        uploadImageToArrayLayer(this._lite, texture, layer, source, { invertY, premultiplyAlpha });
+    }
+
+    private _start(): Promise<void> {
+        this._startPromise ??= this._startCore();
+        return this._startPromise;
+    }
+
+    private async _startCore(): Promise<void> {
         // Run deferred startup work (e.g. sprite-atlas loads) first, so any
         // resources a render context needs exist before the first frame.
         if (this._startupWork.length > 0) {
@@ -333,20 +436,33 @@ export abstract class AbstractEngine {
             scene._bakeGroundUvs();
             scene._flushPendingAdds();
             scene._buildMorphTargets();
+            scene._buildClusteredContainers();
             await scene._loadPendingEnvironment();
+            // Babylon.js reverses triangle winding for negative-determinant (mirrored) world
+            // transforms so a `scaling.x = -1` mesh renders upright rather than inside-out. Enable
+            // Lite's equivalent opt-in per scene (after all assets are added, before registerScene)
+            // to match that behaviour for Standard/procedural meshes; non-mirrored meshes are
+            // unaffected, and the glTF loader's own load-time winding handling is not double-flipped.
+            await enableMirroredMeshes(scene._lite);
             if (scene._hasShadows()) {
                 await registerSceneWithShadowSupport(scene._lite);
             } else {
                 await registerScene(scene._lite);
             }
         }
-        // Late work runs after the main scenes are registered (e.g. utility-layer
-        // gizmo registration, which Babylon Lite registers after the main scene).
+        // Start the main render loop before utility-layer registration. Utility
+        // layers are overlays and can join on a subsequent frame; awaiting them
+        // here would deadlock any registration path that depends on the first frame.
+        await startEngine(this._lite);
+        this._startupComplete = true;
+        // Late work now runs after the main render loop has started.
+        // Late work is explicitly allowed to fail without taking startup with it: a rejection here
+        // would otherwise poison `_startPromise` forever and resurface as an unhandled rejection
+        // from `runRenderLoop`, which only does `void this._start()`.
         if (this._lateWork.length > 0) {
-            await Promise.all(this._lateWork.map((w) => w()));
+            await Promise.all(this._lateWork.map(runLateWork));
             this._lateWork.length = 0;
         }
-        await startEngine(this._lite);
     }
 
     private _ensureInitialized(api: string): void {
@@ -385,20 +501,26 @@ const NULL_CANVAS = { width: 0, height: 0 } as unknown as RenderCanvas;
 
 /**
  * Babylon.js's `NullEngine` — a headless engine with no GPU device, used to run
- * scene logic (animations, observables, frame timing) without rendering. Babylon
- * Lite has no headless context, so the compat `NullEngine` builds nothing on the
- * GPU: it drives a pure-JS `requestAnimationFrame` loop that advances each scene's
- * CPU animations and fires its before/after-render observables. Scenes constructed
- * against it skip the Lite scene-context build (see `Scene`'s headless branch), so
- * only the deviceless surface (CPU animations, manual 2D-canvas drawing, etc.)
- * works — there is no WebGPU rendering. Extends {@link WebGPUEngine} so it is
- * accepted everywhere a compat engine is (e.g. `new Scene(engine)`).
+ * scene logic (animations, observables, physics stepping, frame timing) without
+ * rendering. Backed by Babylon Lite's real device-less headless engine
+ * (`createNullEngine`): scenes constructed against it build a Lite scene context
+ * with **no** frame-graph render task (`defaultRenderTask: false`), so no swapchain
+ * or GPU resource is ever allocated. The compat `NullEngine` drives a pure-JS
+ * `requestAnimationFrame` loop that advances each scene by the wall-clock delta
+ * between frames via Lite's `stepScene` (which fires the scene's `onBeforeRender`
+ * callbacks — CPU animations,
+ * physics steps, user logic). Only the device-less simulation surface works; adding
+ * meshes with materials (whose deferred GPU builders need a device) is unsupported,
+ * matching Babylon.js's `NullEngine` limitations. Extends {@link WebGPUEngine} so it
+ * is accepted everywhere a compat engine is (e.g. `new Scene(engine)`).
  */
 export class NullEngine extends WebGPUEngine {
     public constructor() {
         super(NULL_CANVAS);
         this._headless = true;
-        // No GPU device to acquire — usable immediately, no `initAsync()` needed.
+        // Back the headless engine with Lite's real device-less engine context. No GPU
+        // device to acquire — usable immediately, no `initAsync()` needed.
+        this._lite = createNullEngine();
         this._initialized = true;
     }
 
@@ -408,8 +530,10 @@ export class NullEngine extends WebGPUEngine {
     }
 
     /**
-     * Drive a pure-JS frame loop: each tick advances every registered scene's CPU
-     * animations + render observables, then runs the user callback(s). No GPU work.
+     * Drive a pure-JS frame loop: each tick advances every registered scene by the
+     * wall-clock delta between frames through Lite's `stepScene` (which fires the scene's before-render
+     * callbacks: CPU animations, physics, render observables), then runs the user
+     * callback(s). No GPU work is recorded or submitted.
      */
     public override runRenderLoop(callback: () => void): void {
         this._loopCallbacks.push(callback);
@@ -423,7 +547,7 @@ export class NullEngine extends WebGPUEngine {
             const deltaMs = current - last;
             last = current;
             for (const scene of this._scenes) {
-                scene._tick(deltaMs);
+                stepScene(this._lite, scene._lite, deltaMs);
             }
             for (const cb of this._loopCallbacks) {
                 cb();

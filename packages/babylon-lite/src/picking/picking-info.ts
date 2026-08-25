@@ -1,6 +1,7 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import type { Ray } from "./ray.js";
+import type { BillboardPickInfo } from "./billboard-pick-pipeline.js";
 
 /** Result of a GPU pick operation. */
 export interface PickingInfo {
@@ -15,12 +16,19 @@ export interface PickingInfo {
      *  (when GS picking via the gs-picking-pipeline ports the BJS
      *  `GaussianSplattingGpuPickingMaterialPlugin`). */
     pickedMesh: Mesh | GaussianSplattingMesh | null;
+    /** Exact winning GPU primitive index within `pickedMesh`'s indexed draw. */
     faceId: number;
     bu: number;
     bv: number;
     subMeshId: number;
     thinInstanceIndex: number;
     ray: Ray | null;
+    /** @internal Custom vertex world adjustment can invalidate CPU-derived surface normals while
+     *  leaving the exact primitive, barycentrics, and UV interpolation valid. */
+    _normalsInvalid?: boolean;
+    /** @internal Billboard sprite hit payload, set by the billboard pick contributor when a
+     *  `BillboardSpriteSystem` sprite was the closest hit. Extracted by `pickBillboardSprite`. */
+    _spritePick?: BillboardPickInfo;
 }
 
 /** Create an empty (miss) picking result. */
@@ -40,5 +48,6 @@ export function createEmptyPickingInfo(): PickingInfo {
         subMeshId: 0,
         thinInstanceIndex: -1,
         ray: null,
+        _normalsInvalid: false,
     };
 }

@@ -1,21 +1,17 @@
 import type { Mesh } from "../mesh/mesh.js";
+import type { StorageBuffer } from "../resource/storage-buffer.js";
 import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
+import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
 import { _setHpmAllocator } from "../math/_matrix-allocator.js";
 import type { SurfaceContext, SurfaceOptions } from "./surface.js";
-import { _buildSurface, _refreshScRT, isDomCanvas, resizeSurface, setSurfaceSize } from "./surface.js";
+import { _buildSurface, _refreshScRT, resizeSurface, setSurfaceSize } from "./surface.js";
+import { _ENGINE_TAG } from "./version.js";
 import type { GpuFrameTimer } from "./gpu-timer.js";
 import type { GpuTaskTimer } from "./gpu-task-timer.js";
 import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
-
-// `__BL_VERSION__` is replaced at build time with the resolved package version
-// by the lite Vite build (see `define` in packages/babylon-lite/vite.config.ts).
-// The release pipeline resolves the published npm version *before* `pnpm build`,
-// so the published bundle reports the version it actually ships as. When the
-// source is consumed directly (lab dev server, unit tests) the define is absent,
-// so the `typeof` guard falls back to the literal dev version below.
-declare const __BL_VERSION__: string;
-/** Babylon Lite version string. */
-export const VERSION: string = /* @__PURE__ */ (() => (typeof __BL_VERSION__ !== "undefined" ? __BL_VERSION__ : "0.1.0"))();
+import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
+import type { SceneContext } from "../scene/scene-core.js";
+import { disposeGpuResourceRetirements, flushGpuResourceRetirements } from "./gpu-resource-retirement.js";
 
 // Module-scoped visibility epoch. setSubtreeVisible (scene/visibility.ts,
 // loaded only by KHR_node_visibility / KHR_animation_pointer features) bumps
@@ -115,16 +111,33 @@ export interface EngineContext extends SurfaceContext {
 
     /** @internal */
     _device: GPUDevice;
+    /** @internal Original creation options retained for optional subsystems such as recovery. */
+    _options?: EngineOptions;
+    /** @internal Live high-level storage allocations owned by this engine. */
+    _storageBuffers?: Set<StorageBuffer>;
+    /** @internal Storage-related limits retained lazily for device-loss recovery. */
+    _storageRequiredLimits?: Record<string, GPUSize64>;
+    /** @internal Installed lazily by the storage-buffer module. */
+    _rebuildStorageBuffers?: () => void;
+    /** @internal Installed lazily by the storage-buffer module. */
+    _disposeStorageBuffers?: () => void;
     /** @internal Shared 1×1 white texture used as the default baseColor / ORM for
      *  factor-only PBR materials (created via `createPbrMaterial` without textures).
      *  A white ORM yields `metallic = metallicFactor`, `roughness = roughnessFactor`,
      *  matching the glTF/Babylon.js defaults. Lazily created on first use by the
      *  fallback resolver that `createPbrMaterial` installs into the PBR pipeline, so
-     *  loader-only PBR scenes pay zero bundle bytes. Device-lost recovery rebuilds it
-     *  in place via the solid-texture recovery path. */
+     *  loader-only PBR scenes pay zero bundle bytes. Device-lost recovery clears it
+     *  before rebuilding PBR groups so the resolver recreates it on the replacement
+     *  device. */
     _pbrFallbackTex?: Texture2D;
+    /** @internal Stable cache cleanup callbacks used by scene material groups. */
+    _pbrCleanup?: () => void;
+    /** @internal */
+    _standardCleanup?: () => void;
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
+    /** @internal */
+    _deviceLostRecovery?: DeviceLostRecoveryState;
     /** @internal */
     _animFrameId: number;
     /** @internal */
@@ -138,6 +151,11 @@ export interface EngineContext extends SurfaceContext {
     _currentDelta: number;
     /** @internal */
     _cbs: GPUCommandBuffer[];
+    /** @internal GPU resource disposers waiting for the next frame command buffer to be submitted. */
+    _retirements?: Array<() => void> | null;
+    /** @internal Retirement batches whose queue fence has not resolved yet. Kept reachable so engine
+     *  teardown and device-lost recovery can still claim and run them synchronously. */
+    _retiring?: Array<Array<() => void>> | null;
 
     /** @internal Per-frame floating-origin offset updater. Set when the engine
      *  was created with `useFloatingOrigin: true` (which requires
@@ -194,6 +212,8 @@ export interface EngineContext extends SurfaceContext {
  * own their own update / record logic. Engine knows nothing of scene internals.
  */
 export interface RenderingContext {
+    /** @internal Discriminator used by opt-in device-loss recovery handlers. */
+    readonly _kind: string;
     /** @internal Draw calls produced by pre-pass work during `_update` (shadows + pre-passes). */
     _drawCallsPre: number;
     /** Clear color used when this context is the first active one in a frame. */
@@ -216,6 +236,9 @@ interface DeviceLostRecoveryCapture {
     u(tex: Texture2D, url: string, opts: Texture2DOptions): void;
     s(tex: Texture2D, r: number, g: number, b: number, a: number): void;
     b(tex: Texture2D, bitmap: ImageBitmap | null, srgb: boolean, mipMaps: boolean, fallback?: Uint8Array): void;
+    p(tex: Texture2D, data: Uint8Array, options: PixelsTexture2DOptions): void;
+    r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void;
+    w(tex: Texture2D, data: Uint8Array, x: number, y: number, width: number, height: number, dataOffset?: number, bytesPerRow?: number): void;
     m(
         mesh: Mesh,
         uv2s: Float32Array | null | undefined,
@@ -224,6 +247,8 @@ interface DeviceLostRecoveryCapture {
         gpuIndices: Uint16Array | Uint32Array,
         indexFormat: GPUIndexFormat
     ): void;
+    e(scene: SceneContext, url: string, brdfUrl: string): void;
+    h(scene: SceneContext, url: string, faceSize: number): void;
 }
 
 /** @internal Return true if `context` is already registered on `surface`. */
@@ -286,6 +311,22 @@ export interface EngineOptions extends SurfaceOptions {
     useFloatingOrigin?: boolean;
 }
 
+/** Extra `requestAdapter` options contributor, installed only by the WebXR helper
+ *  `enableXrCompatibleAdapter()`. Lets an XR app request an `xrCompatible` GPU adapter without
+ *  every non-XR engine paying for the option: non-XR bundles never call the setter, the bundler
+ *  proves this is always null, and the `_adapterOptionsHook ? … : {}` spread below folds to `{}`,
+ *  so `createEngine`'s adapter request stays byte-identical. */
+let _adapterOptionsHook: (() => GPURequestAdapterOptions) | null = null;
+/** @internal Install extra `requestAdapter` options (called by `enableXrCompatibleAdapter`). */
+export function _installAdapterOptions(hook: () => GPURequestAdapterOptions): void {
+    _adapterOptionsHook = hook;
+}
+/** @internal Resolve the extra adapter options (empty when no hook is installed). Used by
+ *  device-lost recovery so a recovered adapter keeps any XR-compatibility that was requested. */
+export function _getAdapterOptions(): GPURequestAdapterOptions {
+    return _adapterOptionsHook ? _adapterOptionsHook() : {};
+}
+
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
  *  configures the canvas's WebGPU context, and returns an `EngineContext` that *is also*
  *  the primary `SurfaceContext` — i.e. the returned engine is itself the surface for the
@@ -296,34 +337,33 @@ export interface EngineOptions extends SurfaceOptions {
  *  Accepts either a DOM canvas (main thread) or an `OffscreenCanvas` (e.g. transferred
  *  to a Web Worker) — see {@link RenderCanvas}. */
 export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext> {
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance", ...(_adapterOptionsHook ? _adapterOptionsHook() : {}) });
     if (!adapter) {
         throw new Error("WebGPU adapter not available");
     }
 
     const features: GPUFeatureName[] = [];
-    if (adapter.features.has("float32-filterable")) {
-        features.push("float32-filterable");
-    }
-    // `timestamp-query` is requested opportunistically (like the compression features above) so a later
-    // `setGpuTimingEnabled` can measure GPU frame time. Requesting an available feature is free; the timer
-    // itself ships only when `setGpuTimingEnabled` is called. Devices without it just can't enable timing.
-    for (const f of ["texture-compression-astc", "texture-compression-bc", "texture-compression-etc2", "timestamp-query"] as GPUFeatureName[]) {
+    // Optional features are requested opportunistically so their public enable functions can activate
+    // later without recreating the device. Unsupported adapters keep the corresponding feature inactive.
+    for (const f of [
+        "float32-filterable",
+        "texture-compression-astc",
+        "texture-compression-bc",
+        "texture-compression-etc2",
+        "timestamp-query",
+        "primitive-index",
+    ] as GPUFeatureName[]) {
         if (adapter.features.has(f)) {
             features.push(f);
         }
     }
     const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: options?.requiredLimits });
 
-    const versionToLog = `Babylon Lite v${VERSION}`;
     // eslint-disable-next-line no-console
-    console.log(`${versionToLog} - WebGPU engine`);
-    if (isDomCanvas(canvas)) {
-        canvas.setAttribute("data-engine", versionToLog);
-    }
+    console.log(`${_ENGINE_TAG} - WebGPU engine`);
 
-    const useHpm = options?.useHighPrecisionMatrix === true;
-    const useFO = options?.useFloatingOrigin === true;
+    const useHpm = !!options?.useHighPrecisionMatrix;
+    const useFO = !!options?.useFloatingOrigin;
     if (useFO && !useHpm) {
         throw new Error("Babylon Lite: useFloatingOrigin requires useHighPrecisionMatrix on the engine.");
     }
@@ -379,6 +419,7 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
             surfaces, // public readonly view of `_surfaces` (same underlying array)
             _surfaces: surfaces,
             _device: device,
+            _options: options,
             drawCallCount: 0,
             gpuFrameTimeMs: 0,
             useHighPrecisionMatrix: useHpm,
@@ -452,10 +493,23 @@ export function startEngine(engine: EngineContext): Promise<void> {
                 firstRafFrame = false;
                 resolve();
             }
-            engine._animFrameId = requestAnimationFrame(engine._renderFn!);
+            // `stopEngine()` may have been called from inside this frame (e.g. from an
+            // `onBeforeRender` callback), which nulls `_renderFn` and zeroes `_animFrameId`.
+            // Re-arming unconditionally would both throw on `requestAnimationFrame(null)` and
+            // resurrect the loop the caller just stopped.
+            if (engine._renderFn) {
+                engine._animFrameId = requestAnimationFrame(engine._renderFn);
+            }
         };
         engine._animFrameId = requestAnimationFrame(engine._renderFn);
     });
+}
+
+/** Resolve when every GPU command submitted before this call has completed.
+ *  This is a synchronization boundary for infrequent lifecycle transitions such as revealing a fully
+ *  prepared scene; frame loops should not await it during steady rendering. */
+export function waitForGpuIdle(engine: EngineContext): Promise<void> {
+    return engine._device.queue.onSubmittedWorkDone();
 }
 
 /** Stop the render loop. */
@@ -465,19 +519,29 @@ export function stopEngine(engine: EngineContext): void {
     }
     engine._animFrameId = 0;
     engine._renderFn = null;
+    // No further frame will submit, so retirements queued by (say) a `removeFromScene` issued right
+    // before the stop would otherwise sit pending until `disposeEngine`. Flush them behind a fence.
+    flushGpuResourceRetirements(engine);
 }
 
 /** Release all engine-owned GPU resources (device + every attached surface's swapchain
  *  context). Rendering contexts own their own GPU resources (frame graphs, render
  *  targets) and dispose them separately. */
 export function disposeEngine(engine: EngineContext): void {
+    // Drain BEFORE stopping: teardown at engine disposal must stay synchronous, because the device is
+    // destroyed below. `stopEngine` otherwise takes the retirement list for its fenced flush, which
+    // would defer the teardown past `device.destroy()` — and `onSubmittedWorkDone()` on a destroyed
+    // device never usefully resolves. Draining first leaves that flush a no-op.
+    disposeGpuResourceRetirements(engine);
     stopEngine(engine);
     const surfaces = engine._surfaces;
     for (const s of surfaces) {
         s._renderingContexts.length = 0;
+        s._ro?.disconnect();
         s._context.unconfigure();
     }
     surfaces.length = 0;
+    engine._disposeStorageBuffers?.();
     engine._device.destroy();
 }
 
@@ -492,6 +556,10 @@ export function renderFrame(engine: EngineContext, delta: number): void {
         total += surfaces[i]!._renderingContexts.length;
     }
     if (total === 0) {
+        // Nothing left to draw (e.g. the last scene was unregistered). No submit will happen this frame,
+        // so any retirement queued by that removal has to be drained behind a fence instead of waiting
+        // for a `queue.submit` that will never come.
+        flushGpuResourceRetirements(engine);
         return;
     }
 
@@ -539,6 +607,7 @@ export function renderFrame(engine: EngineContext, delta: number): void {
     engine._gpuTimerEnd?.(finalEncoder);
     engine._cbs[0] = finalEncoder.finish();
     engine._device.queue.submit(engine._cbs);
+    flushGpuResourceRetirements(engine);
     engine.drawCallCount = drawCalls;
     // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
     // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.

@@ -14,7 +14,7 @@ import {
     startEngine,
     createEngine,
     createSceneContext,
-    createDefaultCamera,
+    createArcRotateCamera,
     createHemisphericLight,
     loadGltf,
     attachControl,
@@ -40,13 +40,7 @@ function findSkinned(node: TransformNode): Mesh | null {
     return null;
 }
 
-/** Per-instance params for one instance frozen at clip-frame `frame` (fps 0 → static at that frame). */
-function frozenParams(swim: VatClip, frame: number): Float32Array {
-    return new Float32Array([swim.fromRow, swim.fromRow + swim.frameCount - 1, frame, 0]);
-}
-
 async function main(): Promise<void> {
-    const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
@@ -55,13 +49,12 @@ async function main(): Promise<void> {
     const container = await loadGltf(engine, "https://models.babylonjs.com/shark.glb");
     addToScene(scene, container);
 
-    const root = container.entities[0] as TransformNode;
-    const mesh = findSkinned(root);
-    const groups = container.animationGroups ?? [];
+    const mesh = findSkinned(container.entities[0] as TransformNode);
+    const groups = container.animationGroups;
 
     let handle: VatHandle | null = null;
     let swim: VatClip | null = null;
-    if (mesh && groups.length > 0) {
+    if (mesh && groups?.length) {
         const baked = bakeVat(engine, mesh, groups);
         handle = attachVat(engine, mesh, baked, "swimming");
         swim = baked.clips["swimming"] ?? null;
@@ -69,41 +62,34 @@ async function main(): Promise<void> {
         // ONE thin-instance at identity → the instanced VAT path runs, and finalWorld = mesh.world * skin
         // (same as scene 218). setInstances BEFORE registerScene so the instance texture exists when the
         // bind group is built.
-        const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
-        setThinInstances(mesh, identity, 1);
+        setThinInstances(mesh, new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]), 1);
         if (swim) {
             // Free-running playback: fps = the clip's fps so handle.update() advances the frame each
             // frame. (?seekTime overrides this in onBeforeRender with a frozen, fps=0 params set.)
             handle.setInstances(new Float32Array([swim.fromRow, swim.fromRow + swim.frameCount - 1, 0, swim.fps]));
         }
-        canvas.dataset.vatBones = String(baked.boneCount);
-        canvas.dataset.vatFrames = String(baked.frameCount);
     }
 
-    const cam = createDefaultCamera(scene);
-    cam.alpha = 0; // side view, matching scene 218 / scene 11
-    cam.beta = Math.PI / 2.2;
+    // Fixed framing avoids pulling the generic world-bounds camera helper into this tightly-budgeted VAT demo.
+    const cam = createArcRotateCamera(0, Math.PI / 2.2, 28.816, { x: 0, y: 2.36936, z: -0.65368 });
+    scene.camera = cam;
     attachControl(cam, canvas, scene);
     addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
     // ?seekTime freezes the instance at the exact baked frame seekTime*60, matching the BJS live oracle.
-    const params = new URLSearchParams(window.location.search);
-    const seekTimeParam = parseFloat(params.get("seekTime") || "");
-    const freezing = !isNaN(seekTimeParam) && seekTimeParam >= 0;
+    const seekTimeParam = parseFloat(new URLSearchParams(location.search).get("seekTime") || "");
+    const freezing = seekTimeParam >= 0;
     let frameCount = 0;
-    let seekDone = false;
     let last = performance.now();
     onBeforeRender(scene, () => {
         frameCount++;
-        canvas.dataset.frameCount = String(frameCount);
         const now = performance.now();
         const dt = Math.min(0.05, (now - last) / 1000);
         last = now;
         if (freezing) {
-            if (frameCount === 10 && !seekDone && handle && swim) {
-                handle.setInstances(frozenParams(swim, Math.round(seekTimeParam * 60)));
+            if (frameCount === 10 && handle && swim) {
+                handle.setInstances(new Float32Array([swim.fromRow, swim.fromRow + swim.frameCount - 1, Math.round(seekTimeParam * 60), 0]));
                 handle.update(0);
-                seekDone = true;
                 canvas.dataset.animationFrozen = "true";
             }
             return; // frozen pose — never advance the clock
@@ -113,8 +99,6 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
     await startEngine(engine);
-    canvas.dataset.drawCalls = String(engine.drawCallCount);
-    canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 }
 

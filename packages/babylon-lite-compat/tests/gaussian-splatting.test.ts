@@ -24,6 +24,15 @@ describe("GaussianSplattingMesh", () => {
         expect(gs._canPostToWorker).toBe(false);
     });
 
+    it("reports _canPostToWorker false while a Lite sort is in flight", () => {
+        const gs = new GaussianSplattingMesh("splat");
+        const state = gs as unknown as { _gs: { _orderPool: Uint32Array[] } };
+        state._gs = { _orderPool: [new Uint32Array(1)] };
+        expect(gs._canPostToWorker).toBe(false);
+        state._gs._orderPool.push(new Uint32Array(1));
+        expect(gs._canPostToWorker).toBe(true);
+    });
+
     it("buffers transforms set before load on its placeholder node", () => {
         const gs = new GaussianSplattingMesh("splat");
         gs.position.y = 1.7;
@@ -39,5 +48,14 @@ describe("GaussianSplattingMesh", () => {
         const gs = new GaussianSplattingMesh("splat");
         expect(() => gs.updateData(new ArrayBuffer(0))).not.toThrow();
         expect(() => gs.bakeCurrentTransformIntoVertices()).not.toThrow();
+    });
+
+    it("exposes a null safeOrbitCameraLimits (BJS shape parity)", () => {
+        const gs = new GaussianSplattingMesh("splat");
+        expect(gs.safeOrbitCameraLimits).toBeNull();
+        // Field is read/write for shape parity with @babylonjs/core.
+        gs.safeOrbitCameraLimits = { radiusMin: 2, elevationMinMax: [-0.5, 0.5] };
+        expect(gs.safeOrbitCameraLimits.radiusMin).toBe(2);
+        expect(gs.safeOrbitCameraLimits.elevationMinMax).toEqual([-0.5, 0.5]);
     });
 });

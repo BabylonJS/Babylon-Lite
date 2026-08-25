@@ -180,6 +180,38 @@ export class ArcRotateCamera extends Camera {
         this._lite.upperRadiusLimit = value;
     }
 
+    // These input-tuning fields delegate straight through to the underlying Lite
+    // camera so that Babylon.js-style code — which may set them either before or
+    // AFTER attachControl — takes effect. Lite's attachControl reads these live on
+    // every input event, so a post-attach write (as Babylon.js allows) is honored.
+    // Without these accessors a write would land on the wrapper instance and never
+    // reach _lite, leaving zoom/orbit/pan at the Lite defaults (e.g. wheel zoom
+    // running far too fast because a raised wheelPrecision was silently dropped).
+
+    /** Wheel-zoom sensitivity (HIGHER = slower zoom). Babylon default 3. */
+    public get wheelPrecision(): number {
+        return this._lite.wheelPrecision;
+    }
+    public set wheelPrecision(value: number) {
+        this._lite.wheelPrecision = value;
+    }
+
+    /** Mouse-drag orbit sensitivity (HIGHER = slower rotation). Babylon default 1000. */
+    public get angularSensibility(): number {
+        return this._lite.angularSensibility;
+    }
+    public set angularSensibility(value: number) {
+        this._lite.angularSensibility = value;
+    }
+
+    /** Right-drag panning sensitivity in pixels-per-unit (LOWER = faster pan). Babylon default 50. */
+    public get panningSensibility(): number {
+        return this._lite.panningSensibility;
+    }
+    public set panningSensibility(value: number) {
+        this._lite.panningSensibility = value;
+    }
+
     public attachControl(canvas: HTMLCanvasElement, _noPreventDefault?: boolean): void {
         const detach = liteAttachControl(this._lite, canvas, this._scene?._lite);
         this._setDetach(detach);

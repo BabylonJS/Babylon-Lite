@@ -11,18 +11,7 @@
 
 import { unsupported } from "../error.js";
 
-// ─── Bones / Skeletons / Morph ───────────────────────────────────────
-export class Skeleton {
-    public constructor() {
-        unsupported("Skeleton", "Skeletons are produced by the glTF loader in Babylon Lite and driven by `createAnimationController`; they are not constructed manually.");
-    }
-}
-
-export class Bone {
-    public constructor() {
-        unsupported("Bone", "Bones are produced by the glTF loader in Babylon Lite; manual bone construction is not wrapped.");
-    }
-}
+export { Skeleton, Bone } from "../bones/skeleton.js";
 
 // ─── Probes / Layers / Rendering ─────────────────────────────────────
 export class ReflectionProbe {
@@ -109,50 +98,41 @@ export class SSAO2RenderingPipeline {
     }
 }
 
-// ─── Particles ───────────────────────────────────────────────────────
-export class ParticleHelper {
+// FSR 1 (AMD FidelityFX Super Resolution) upscale + sharpen. Babylon Lite has no
+// PostProcessRenderPipeline subsystem and ships no FSR/EASU/RCAS post-process, so
+// there is nothing to forward to — the same structural blocker as the other rendering
+// pipelines above.
+export class FSR1RenderingPipeline {
     public constructor() {
-        unsupported("ParticleHelper", "Particle systems are not implemented in Babylon Lite.");
+        unsupported("FSR1RenderingPipeline", "FSR 1 upscaling is not implemented in Babylon Lite; it has no PostProcessRenderPipeline subsystem.");
     }
 }
 
-export class ParticleSystemSet {
+export class ThinFSR1UpscalePostProcess {
     public constructor() {
-        unsupported("ParticleSystemSet", "Particle systems are not implemented in Babylon Lite.");
+        unsupported("ThinFSR1UpscalePostProcess", "FSR 1 (EASU) upscaling is not implemented in Babylon Lite.");
+    }
+}
+
+export class ThinFSR1SharpenPostProcess {
+    public constructor() {
+        unsupported("ThinFSR1SharpenPostProcess", "FSR 1 (RCAS) sharpening is not implemented in Babylon Lite.");
+    }
+}
+
+// ─── Particles ───────────────────────────────────────────────────────
+export class ParticleHelper {
+    public constructor() {
+        unsupported(
+            "ParticleHelper",
+            "The imperative particle-preset helper is not backed. Babylon Lite renders serialized Node Particle Editor graphs (`NodeParticleSystemSet.ParseFromSnippetAsync` → `buildAsync`), not preset-driven imperative `ParticleSystem`s."
+        );
     }
 }
 
 export class PointsCloudSystem {
     public constructor() {
         unsupported("PointsCloudSystem", "Point-cloud systems are not implemented in Babylon Lite. For Gaussian splats use the native splat loaders.");
-    }
-}
-
-// ─── Physics ─────────────────────────────────────────────────────────
-// Babylon Lite ships a Havok-V2 subset via `createHavokWorld` /
-// `createPhysicsAggregate` etc. The Babylon.js plugin/aggregate class model is
-// not wrapped 1:1; use the native physics functions.
-export class HavokPlugin {
-    public constructor() {
-        unsupported("HavokPlugin", "Use the native `createHavokWorld` API; the Babylon.js physics-plugin object is not wrapped.");
-    }
-}
-
-export class PhysicsAggregate {
-    public constructor() {
-        unsupported("PhysicsAggregate", "Use the native `createPhysicsAggregate` API instead of the Babylon.js PhysicsAggregate class.");
-    }
-}
-
-export class PhysicsBody {
-    public constructor() {
-        unsupported("PhysicsBody", "Use the native `createPhysicsBody` API.");
-    }
-}
-
-export class PhysicsShape {
-    public constructor() {
-        unsupported("PhysicsShape", "Use the native `createPhysicsShape` API.");
     }
 }
 

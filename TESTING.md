@@ -90,9 +90,21 @@ Requires `BROWSERSTACK_USERNAME` and `BROWSERSTACK_ACCESS_KEY` (set in
 `.env.local` or as environment variables). Azure Pipelines gets these from the
 `BabylonJS-BrowserStack` variable group.
 
+The cloud parity config connects to remote Chrome **directly over CDP**
+(`wss://cdp.browserstack.com/playwright`) — it does **not** use
+`browserstack-node-sdk`. Each Playwright worker is its own BrowserStack session,
+so specs shard across `CIWORKERS` parallel cloud browsers. The local Vite dev
+server is exposed to the remote browser through a BrowserStack Local tunnel
+started by the config's `globalSetup` (`config/browserstack-local-tunnel.ts`).
+
 ```sh
 pnpm build:bundle-scenes
+
+# One session (bare invocation never over-claims capacity):
 pnpm test:parity-cloud
+
+# Shard across up to N sessions (falls back to fewer when the plan is busy):
+BSTACK_SESSIONS_REQUIRED=2 bash scripts/browserstack-wait.sh pnpm test:parity-cloud
 ```
 
 ### Golden References
@@ -208,16 +220,63 @@ PERF_WARMUP=120 PERF_FRAMES=500 pnpm test:perf-cloud
 **Location:** `tests/lite/parity/bundle-size.spec.ts`
 
 Each scene bundle must stay under `maxRawKB` defined in `scene-config.json`
-(gzip size is shown for reference but not enforced).
+(gzip size is shown for reference but not enforced). This ceiling is the gate for
+bundle-size regressions in CI.
 
 ```sh
 pnpm build:bundle-scenes
 pnpm test:bundle-size
 ```
 
+The master baseline used for the "how did this change move sizes" report is not
+tracked in git. `azure-pipelines-bundle-manifest.yml` re-measures every scene
+after each merge and publishes the aggregate manifest to a stable public URL:
+
+```
+https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json
+```
+
+`pnpm build:bundle-scenes` fetches it automatically and writes
+`lab/public/bundle/master-manifest.json`, which the bundle-size spec and the PR
+comment read. Everything under `lab/public/bundle/` is generated and gitignored,
+so there is nothing to commit and nothing to conflict on.
+
+If you need to point at a different baseline — an offline run, or comparing
+against a specific build — override the source:
+
+```sh
+BUNDLE_MASTER_MANIFEST_URL=  pnpm build:bundle-scenes          # skip the fetch entirely
+BUNDLE_MASTER_MANIFEST_FILE=/path/to/manifest.json pnpm build:bundle-scenes
+```
+
+A missing baseline is not an error: the delta report is skipped and the
+`maxRawKB` ceilings above still gate the build.
+
 ---
 
 ## BrowserStack Configuration
+
+Two jobs use BrowserStack differently:
+
+| Job             | How it connects                                  | Config                                     |
+| --------------- | ------------------------------------------------ | ------------------------------------------ |
+| Parity (Cloud)  | Direct **CDP** (no SDK), sharded across sessions | `config/playwright.parity-cloud.config.ts` |
+| Perf Regression | `browserstack-node-sdk` (SDK-managed tunnel)     | `config/browserstack.yml`                  |
+
+### Parity (CDP)
+
+| Setting           | Value                                                 |
+| ----------------- | ----------------------------------------------------- |
+| Platform          | macOS Sonoma                                          |
+| Browser           | Chrome latest                                         |
+| Parallel sessions | Up to `BSTACK_SESSIONS_REQUIRED` (CI default 2)       |
+| Local tunnel      | `browserstack-local`, started by config `globalSetup` |
+
+`scripts/browserstack-wait.sh` polls the BrowserStack plan, grabs up to the
+requested number of sessions (falling back to fewer when busy), and exports
+`CIWORKERS` so Playwright shards specs across exactly that many cloud browsers.
+
+### Perf (SDK)
 
 **Config file:** `config/browserstack.yml`
 

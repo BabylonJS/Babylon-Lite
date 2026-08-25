@@ -2,7 +2,7 @@
 // FlowGraph execution. Data edges PULL (recompute on every read); signal edges
 // PUSH (cascade through `execute`). Async work is tracked as `FgPendingTask`
 // records ticked in a cancellation-safe per-frame loop. See
-// docs/lite/architecture/42-flow-graph.md → Internal Architecture.
+// docs/lite/architecture/51-flow-graph.md → Internal Architecture.
 
 import type { FgBlockDef } from "./block-def.js";
 import type { FgContext, FgEnv, FgPendingTask, FgWiring } from "./context.js";

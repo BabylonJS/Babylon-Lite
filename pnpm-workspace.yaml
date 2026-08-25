@@ -1,3 +1,66 @@
 packages:
   - 'packages/*'
   - 'lab'
+  - 'playground'
+
+# pnpm >= 11 reads ONLY auth/registry settings from `.npmrc`; every other setting must
+# live here (or in the global config.yaml). These two are mirrored from `.npmrc`, which
+# still serves the npm/npx-spawned Node processes in CI — keep the two files in sync.
+
+# Hoist Playwright to the root node_modules so `npx playwright` and the browser
+# binaries resolve from any workspace package.
+publicHoistPattern:
+  - '*playwright*'
+
+# Raise the V8 heap limit for every Node process pnpm spawns. The playground's
+# `vite build` (`pnpm build:playground`) peaks above the default heap on the hosted CI
+# agents and dies with `FatalProcessOutOfMemory` (exit 134). The failure is
+# nondeterministic — it landed on roughly a third of runs, including the release
+# pipeline, where it aborted the playground site deploy after the npm packages had
+# already published. 8192 matches the Babylon.js monorepo.
+nodeOptions: '--max-old-space-size=8192'
+
+# Company policy: only install dependency versions published at least 7 days
+# ago (7 * 24 * 60 = 10080 minutes). Reduces exposure to compromised releases.
+# Enforced natively by pnpm >= 10.16 during resolution.
+minimumReleaseAge: 10080
+
+# Narrow, temporary exception: @babylonjs 9.19.0 ships the upstream .pure-split
+# back-compat fixes (MeshBuilder legacy statics, glTF InstancedMesh side-effect,
+# WGSL UBO include chunks) that let us drop the per-scene reference workarounds.
+# These are first-party BabylonJS packages we track closely, so we opt them out
+# of the release-age gate to adopt the fix promptly. Remove this once the pinned
+# versions are older than the age window.
+minimumReleaseAgeExclude:
+  - '@babylonjs/core'
+  - '@babylonjs/loaders'
+  - '@babylonjs/materials'
+  - '@babylonjs/addons'
+  - babylonjs-gltf2interface
+
+# pnpm >= 10 does not run dependency build scripts unless they are explicitly
+# approved here. Only these packages ship native binaries that must build.
+allowBuilds:
+  esbuild: true
+  sharp: true
+
+overrides:
+  protobufjs: '>=8.6.6'
+  fast-uri: '>=4.1.2'
+  basic-ftp: '>=5.3.1'
+  tmp: '>=0.2.7'
+  form-data: '>=4.0.6'
+  ip-address: '>=10.3.1'
+  uuid@<11.1.1: '>=11.1.1'
+  qs: '>=6.15.2'
+  js-yaml: '>=4.3.1 <5.0.0'
+  brace-expansion: '>=5.0.9'
+  picomatch: '>=4.0.4'
+  '@protobufjs/utf8': '>=1.1.1'
+  dompurify: '>=3.4.13'
+  linkify-it: '>=5.0.2'
+  postcss: '>=8.5.23'
+  sharp: '>=0.35.0'
+  '@typescript-eslint/utils': '>=8.65.0'
+  esbuild-wasm: '>=0.27.3 <0.28.0'
+  'nanoid@>=3.0.0 <3.3.18': '>=3.3.18 <4.0.0'

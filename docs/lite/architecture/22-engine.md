@@ -1,11 +1,12 @@
 # Module: Engine
+
 > Package path: `packages/babylon-lite/src/engine/engine.ts`
 
 ## Purpose
 
 The Engine module is the lowest layer of Babylon Lite. It acquires a WebGPU adapter and device, configures the swap chain on a render canvas, creates MSAA and depth/stencil render targets, and drives the per-frame render loop via `requestAnimationFrame`. All other modules depend on the Engine for GPU device access and frame orchestration.
 
-The render canvas may be either a DOM `HTMLCanvasElement` (main thread) or an `OffscreenCanvas` (e.g. one transferred to a Web Worker via `transferControlToOffscreen()`). The engine runs unchanged in both cases — see *Offscreen / Worker Rendering* below.
+The render canvas may be either a DOM `HTMLCanvasElement` (main thread) or an `OffscreenCanvas` (e.g. one transferred to a Web Worker via `transferControlToOffscreen()`). The engine runs unchanged in both cases — see _Offscreen / Worker Rendering_ below.
 
 ## Public API Surface
 
@@ -16,16 +17,16 @@ export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
 /** Handle to the WebGPU engine — public API surface.
  *  GPU internals (device, context, format) are @internal — not user-facing. */
 export interface EngineContext {
-  readonly canvas: RenderCanvas;
-  readonly msaaSamples: number;           // 1 or 4
-  readonly format: GPUTextureFormat;
+    readonly canvas: RenderCanvas;
+    readonly msaaSamples: number; // 1 or 4
+    readonly format: GPUTextureFormat;
 
-  /** GPU draw calls executed in the last rendered frame. */
-  drawCallCount: number;
+    /** GPU draw calls executed in the last rendered frame. */
+    drawCallCount: number;
 
-  /** GPU time spent on the last measured frame, in milliseconds. 0 until the first measured frame and
-   *  while GPU timing is disabled (the default). Enable with `setGpuTimingEnabled`. */
-  gpuFrameTimeMs: number;
+    /** GPU time spent on the last measured frame, in milliseconds. 0 until the first measured frame and
+     *  while GPU timing is disabled (the default). Enable with `setGpuTimingEnabled`. */
+    gpuFrameTimeMs: number;
 }
 
 /** Whether GPU frame-time measurement is available on this engine's device (the adapter offered the
@@ -37,18 +38,18 @@ export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): vo
 
 export type RenderTaskGpuTimingStatus = "unsupported" | "disabled" | "pending" | "available" | "error";
 export interface RenderTaskGpuTiming {
-  readonly index: number;
-  readonly name: string;
-  readonly durationMs: number;
+    readonly index: number;
+    readonly name: string;
+    readonly durationMs: number;
 }
 export interface RenderTaskGpuTimings {
-  readonly status: RenderTaskGpuTimingStatus;
-  readonly supported: boolean;
-  readonly enabled: boolean;
-  readonly frameIndex: number;
-  readonly tasks: readonly RenderTaskGpuTiming[];
-  readonly droppedTaskCount: number;
-  readonly error?: string;
+    readonly status: RenderTaskGpuTimingStatus;
+    readonly supported: boolean;
+    readonly enabled: boolean;
+    readonly frameIndex: number;
+    readonly tasks: readonly RenderTaskGpuTiming[];
+    readonly droppedTaskCount: number;
+    readonly error?: string;
 }
 export function isRenderTaskGpuTimingSupported(engine: EngineContext): boolean;
 export function getRenderTaskGpuTimings(engine: EngineContext): RenderTaskGpuTimings;
@@ -56,6 +57,8 @@ export function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabled: bo
 
 /** Start the render loop for all registered rendering contexts. Resolves after the first frame renders. */
 export function startEngine(engine: EngineContext): Promise<void>;
+/** Resolve after all GPU commands submitted before this call have completed. */
+export function waitForGpuIdle(engine: EngineContext): Promise<void>;
 /** Stop the render loop. */
 export function stopEngine(engine: EngineContext): void;
 /** Resize render targets to match canvas layout size. No-op for an OffscreenCanvas. */
@@ -74,15 +77,15 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
 ```typescript
 /** @internal — GPU internals accessible only to renderable/loader code. */
 interface EngineContextInternal extends EngineContext {
-  readonly device: GPUDevice;
-  readonly context: GPUCanvasContext;
-  readonly format: GPUTextureFormat;
-  readonly alphaMode: GPUCanvasAlphaMode;
-  _renderingContexts: RenderingContext[];
-  _currentEncoder: GPUCommandEncoder;
-  _swapchainView: GPUTextureView;
-  _currentDelta: number;
-  _cbs: GPUCommandBuffer[];
+    readonly device: GPUDevice;
+    readonly context: GPUCanvasContext;
+    readonly format: GPUTextureFormat;
+    readonly alphaMode: GPUCanvasAlphaMode;
+    _renderingContexts: RenderingContext[];
+    _currentEncoder: GPUCommandEncoder;
+    _swapchainView: GPUTextureView;
+    _currentDelta: number;
+    _cbs: GPUCommandBuffer[];
 }
 ```
 
@@ -127,7 +130,7 @@ The bitwise OR with 0 (`| 0`) truncates to integer.
 
 An `OffscreenCanvas` has no layout box (`clientWidth`/`clientHeight`) and no attributes, so:
 
-- `createEngine` skips the `setAttribute("data-engine", …)` tag for it (guarded by a DOM-canvas check).
+- The canvas tag (`setAttribute("data-engine", …)`) is skipped for it. That tag is applied in `_buildSurface`, guarded by a DOM-canvas check, so every DOM canvas Babylon Lite renders into — the engine's primary canvas and any auxiliary `createSurface` canvas — carries it.
 - `resizeEngine` is a **no-op** for it — the visible canvas lives on another thread.
 - The host thread (which owns the visible canvas) measures the CSS size, multiplies by `devicePixelRatio`, and posts those device-pixel dimensions to the worker, which calls `setEngineSize(engine, w, h)`. This both sets the backing store **and** fires `_resize()` hooks so canvas-sized GPU resources rebuild.
 
@@ -136,6 +139,8 @@ Everything else (adapter/device acquisition, `getContext("webgpu")`, the rAF ren
 ### Render Loop
 
 `startEngine(engine)` returns a `Promise<void>` that resolves after the first frame has been rendered. Any scene registered before the call participates in the first frame; later registrations join on subsequent frames.
+
+`waitForGpuIdle(engine)` delegates to the WebGPU queue fence and resolves after all commands submitted before the call have completed. It is intended for infrequent lifecycle synchronization, not steady-state frame loops.
 
 ```
 registerScene(scene):
@@ -168,8 +173,8 @@ Each frame consists of:
 1. **Create command encoder**: `device.createCommandEncoder({ label: "frame" })` and assign `engine._currentEncoder`.
 2. **Obtain swapchain view**: `engine.context.getCurrentTexture().createView()` and assign `engine._swapchainView`.
 3. **Update/record contexts**: For each registered `RenderingContext`, call `_update()` then `_record()`.
-   - A scene `_update()` runs before-render callbacks, material swaps, shadow maps, legacy pre-passes, and shared uniform updaters.
-   - A scene `_record()` delegates to `scene._frameGraph.execute()`.
+    - A scene `_update()` runs before-render callbacks, material swaps, shadow maps, legacy pre-passes, and shared uniform updaters.
+    - A scene `_record()` delegates to `scene._frameGraph.execute()`.
 4. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
 
 ### Deferred Builder Execution
@@ -201,10 +206,10 @@ await setRenderTaskGpuTimingEnabled(engine, true);
 // Later, after one or more rendered frames:
 const timings = getRenderTaskGpuTimings(engine);
 if (timings.status === "available") {
-  for (const task of timings.tasks) {
-    // task.name is the existing Task.name label ("shadow", "scene", "post-process", ...)
-    console.log(task.index, task.name, task.durationMs);
-  }
+    for (const task of timings.tasks) {
+        // task.name is the existing Task.name label ("shadow", "scene", "post-process", ...)
+        console.log(task.index, task.name, task.durationMs);
+    }
 }
 ```
 
@@ -235,19 +240,20 @@ When enabled, the first timed task seen for a new frame encoder clears the curre
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite                                           | Babylon.js                                                                                                                                          |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createEngine(canvas)`                                 | `new BABYLON.WebGPUEngine(canvas)` + `engine.initAsync()`                                                                                           |
-| `engine._device`                                       | `engine._device`                                                                                                                                    |
-| `engine.format`                                        | `engine._textureHelper._glslang.getPreferredFormat()`                                                                                               |
-| `engine.msaaSamples` (1 or 4)                          | `engine._samples`                                                                                                                                   |
+| Babylon Lite                                   | Babylon.js                                                                                                                                          |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createEngine(canvas)`                         | `new BABYLON.WebGPUEngine(canvas)` + `engine.initAsync()`                                                                                           |
+| `engine._device`                               | `engine._device`                                                                                                                                    |
+| `engine.format`                                | `engine._textureHelper._glslang.getPreferredFormat()`                                                                                               |
+| `engine.msaaSamples` (1 or 4)                  | `engine._samples`                                                                                                                                   |
 | `registerScene(scene)` + `startEngine(engine)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
-| `stopEngine(engine)`                                   | `engine.stopRenderLoop()`                                                                                                                           |
-| `resizeEngine(engine)`                                 | `engine.resize()`                                                                                                                                   |
-| Registered `RenderingContext`s                         | Engine render loop callbacks                                                                                                                        |
-| Scene frame graph execution                            | Scene render graph / rendering manager                                                                                                              |
-| `scene._prePasses` in `_update()`                      | `scene.onBeforeRenderObservable` + shadow pre-work                                                                                                  |
-| `scene._frameGraph.execute()`                          | Internal draw list dispatch                                                                                                                         |
+| `waitForGpuIdle(engine)`                       | `engine._device.queue.onSubmittedWorkDone()`                                                                                                        |
+| `stopEngine(engine)`                           | `engine.stopRenderLoop()`                                                                                                                           |
+| `resizeEngine(engine)`                         | `engine.resize()`                                                                                                                                   |
+| Registered `RenderingContext`s                 | Engine render loop callbacks                                                                                                                        |
+| Scene frame graph execution                    | Scene render graph / rendering manager                                                                                                              |
+| `scene._prePasses` in `_update()`              | `scene.onBeforeRenderObservable` + shadow pre-work                                                                                                  |
+| `scene._frameGraph.execute()`                  | Internal draw list dispatch                                                                                                                         |
 
 ## Dependencies
 
@@ -262,15 +268,16 @@ When enabled, the first timed task seen for a new frame encoder clears the curre
 | `createEngine returns valid Engine`               | Mock `navigator.gpu`, verify all interface fields are populated                                |
 | `resize only recreates targets when size changes` | Call resize with same dimensions → targets unchanged; change `clientWidth` → targets recreated |
 | `start/stop manages rAF`                          | Verify `requestAnimationFrame` called on start, `cancelAnimationFrame` on stop                 |
+| `waitForGpuIdle returns the queue fence`          | Verify `onSubmittedWorkDone()` is called once and its exact Promise is returned                |
 | `renderFrame calls scene callbacks`               | Verify pre-passes → updaters → renderables order                                               |
 | `MSAA resolve target is swap chain view`          | Inspect color attachment `resolveTarget` in render pass descriptor                             |
 | `depth format is depth24plus-stencil8`            | Verify `depthTexture.format`                                                                   |
 
 ## File Manifest
 
-| File                   | Size       | Purpose                                               |
-| ---------------------- | ---------- | ----------------------------------------------------- |
-| `src/engine/engine.ts` | ~150 lines | Engine interface, creation, render loop, MSAA targets |
-| `src/engine/gpu-timer.ts` | ~110 lines | Optional GPU frame-time measurement (dynamic-imported by `setGpuTimingEnabled`; zero-cost when unused) |
-| `src/engine/gpu-task-timing.ts` | ~120 lines | Thin public per-task timing API; dynamic-imports the profiler implementation only when enabled |
-| `src/engine/gpu-task-timer.ts` | ~150 lines | Optional timestamp-query implementation for per-frame-graph-task GPU timings |
+| File                            | Size       | Purpose                                                                                                |
+| ------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
+| `src/engine/engine.ts`          | ~150 lines | Engine interface, creation, render loop, MSAA targets                                                  |
+| `src/engine/gpu-timer.ts`       | ~110 lines | Optional GPU frame-time measurement (dynamic-imported by `setGpuTimingEnabled`; zero-cost when unused) |
+| `src/engine/gpu-task-timing.ts` | ~120 lines | Thin public per-task timing API; dynamic-imports the profiler implementation only when enabled         |
+| `src/engine/gpu-task-timer.ts`  | ~150 lines | Optional timestamp-query implementation for per-frame-graph-task GPU timings                           |

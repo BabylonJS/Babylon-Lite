@@ -4,8 +4,19 @@ import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
-type ReleaseType = "auto" | "patch" | "minor" | "major";
-type ResolvedReleaseType = Exclude<ReleaseType, "auto">;
+import {
+    applyBurnedVersionException,
+    BURNED_VERSION,
+    bumpVersion,
+    detectBreakingChanges,
+    maxVersion,
+    parseExplicitReleaseType,
+    parseReleaseType,
+    resolveReleaseType,
+    type ReleaseType,
+    type ResolvedReleaseType,
+} from "./release-version";
+
 type ReleaseConfig = {
     type?: unknown;
     nonce?: unknown;
@@ -19,16 +30,24 @@ type PublishPackageJson = {
     };
 };
 
-const PACKAGE_NAME = "@babylonjs/lite";
+const PACKAGE_NAME = process.env.RELEASE_PACKAGE_NAME ?? "@babylonjs/lite";
 // Resolution runs *before* `pnpm build`, so we read this package's source
 // manifest (the dist manifest does not exist yet). The build then bakes the
 // resolved version into both the bundle and the emitted dist `package.json`
 // (see packages/babylon-lite/vite.config.ts). `SOURCE_PACKAGE_NAME` is the
-// workspace-internal name; the published name is `PACKAGE_NAME`.
-const SOURCE_PACKAGE_NAME = "babylon-lite";
-const SOURCE_PACKAGE_JSON = resolve(process.cwd(), "packages/babylon-lite/package.json");
+// workspace-internal name; the published name is `PACKAGE_NAME`. All three are
+// overridable via env so sibling packages (e.g. @babylonjs/lite-gl) can reuse
+// this script from their own publish pipeline.
+const SOURCE_PACKAGE_NAME = process.env.RELEASE_SOURCE_PACKAGE_NAME ?? "babylon-lite";
+const SOURCE_PACKAGE_JSON = resolve(process.cwd(), process.env.RELEASE_SOURCE_PACKAGE_JSON ?? "packages/babylon-lite/package.json");
 const RELEASE_CONFIG_PATH = resolve(process.cwd(), process.env.RELEASE_CONFIG_PATH ?? "config/release.json");
-const RELEASE_TAG_PATTERN = "npm-lite-v*";
+const RELEASE_TAG_PATTERN = process.env.RELEASE_TAG_PATTERN ?? "npm-lite-v*";
+const RELEASE_TAG_PREFIX = RELEASE_TAG_PATTERN.replace(/\*$/, "");
+// Opt-in: also consider existing release git tags when resolving the next
+// version (see getHighestReleasedTagVersion). Off by default so the established
+// @babylonjs/lite pipeline keeps its exact prior behaviour; only pipelines that
+// set this env (currently @babylonjs/lite-gl) get tag-aware resolution.
+const RELEASE_TAG_AWARE_RESOLUTION = (process.env.RELEASE_TAG_AWARE_RESOLUTION ?? "false").toLowerCase() === "true";
 
 function run(command: string, args: string[], options: { allowFailure?: boolean } = {}): string {
     try {
@@ -43,20 +62,6 @@ function run(command: string, args: string[], options: { allowFailure?: boolean 
         }
         throw error;
     }
-}
-
-function parseReleaseType(value: string | undefined): ReleaseType {
-    if (value === "patch" || value === "minor" || value === "major" || value === "auto") {
-        return value;
-    }
-    throw new Error(`Unsupported release type '${value}'. Expected auto, patch, minor, or major.`);
-}
-
-function parseExplicitReleaseType(value: unknown): ResolvedReleaseType {
-    if (value === "patch" || value === "minor" || value === "major") {
-        return value;
-    }
-    throw new Error(`Unsupported release config type '${String(value)}'. Expected patch, minor, or major.`);
 }
 
 function readReleaseConfig(): { releaseType: ResolvedReleaseType; nonce: number } {
@@ -87,28 +92,39 @@ function resolveRequestedReleaseType(): { releaseType: ReleaseType; source: stri
     return { releaseType: parseReleaseType(process.env.RELEASE_TYPE ?? "auto"), source: "RELEASE_TYPE" };
 }
 
-function parseVersion(version: string): [number, number, number] {
-    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-    if (!match) {
-        throw new Error(`Unsupported semver version '${version}'. Expected x.y.z.`);
-    }
-    return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-function bumpVersion(version: string, releaseType: ResolvedReleaseType): string {
-    const [major, minor, patch] = parseVersion(version);
-    if (releaseType === "major") {
-        return `${major + 1}.0.0`;
-    }
-    if (releaseType === "minor") {
-        return `${major}.${minor + 1}.0`;
-    }
-    return `${major}.${minor}.${patch + 1}`;
-}
-
 function getLatestPublishedVersion(fallbackVersion: string): string {
     const publishedVersion = run("npm", ["view", PACKAGE_NAME, "version", "--registry", "https://registry.npmjs.org/"], { allowFailure: true });
     return publishedVersion || fallbackVersion;
+}
+
+// Git tags are the authoritative, push-once record of what has already been
+// released. When tag-aware resolution is enabled (RELEASE_TAG_AWARE_RESOLUTION),
+// version resolution considers them in addition to npm: if npm's reported
+// version and the tags drift out of sync — e.g. `npm view` returns empty
+// (transient registry/auth failure) so we fall back to the source manifest, or
+// an npm version was unpublished — bumping from npm alone can land on a version
+// whose tag already exists. The tag-push step then fails fatally (`git tag`
+// refuses to overwrite), wedging every subsequent run. Basing the bump on the
+// highest existing tag as well guarantees the next version is strictly greater
+// than every released tag, so the tag can never collide.
+function getHighestReleasedTagVersion(): string {
+    const tagList = run("git", ["tag", "--list", RELEASE_TAG_PATTERN], { allowFailure: true });
+    if (!tagList) {
+        return "";
+    }
+    let highest = "";
+    for (const line of tagList.split(/\r?\n/)) {
+        const tag = line.trim();
+        if (!tag.startsWith(RELEASE_TAG_PREFIX)) {
+            continue;
+        }
+        const versionPart = tag.slice(RELEASE_TAG_PREFIX.length);
+        if (!/^\d+\.\d+\.\d+$/.test(versionPart)) {
+            continue;
+        }
+        highest = maxVersion(highest, versionPart);
+    }
+    return highest;
 }
 
 function getPublishedBuildId(version: string): string {
@@ -120,7 +136,7 @@ function isVersionPublished(version: string): boolean {
 }
 
 function getPreviousReleaseTag(latestPublishedVersion: string): string {
-    const exactTag = `npm-lite-v${latestPublishedVersion}`;
+    const exactTag = `${RELEASE_TAG_PREFIX}${latestPublishedVersion}`;
     const exactTagExists = run("git", ["rev-parse", "--verify", `refs/tags/${exactTag}`], { allowFailure: true });
     if (exactTagExists) {
         return exactTag;
@@ -131,7 +147,7 @@ function getPreviousReleaseTag(latestPublishedVersion: string): string {
 function hasBreakingChanges(previousReleaseTag: string): boolean {
     const logRange = previousReleaseTag ? `${previousReleaseTag}..HEAD` : "HEAD";
     const commitMessages = run("git", ["log", "--format=%B", logRange], { allowFailure: true });
-    return /^BREAKING[ -]CHANGE:/m.test(commitMessages) || /^[a-z]+(?:\([^)]+\))?!:/m.test(commitMessages);
+    return detectBreakingChanges(commitMessages);
 }
 
 const requested = resolveRequestedReleaseType();
@@ -147,6 +163,13 @@ if (!pkg.version) {
 }
 
 const latestPublishedVersion = getLatestPublishedVersion(pkg.version);
+// Tag-aware resolution is opt-in (lite-gl only). When disabled, the base is the
+// npm-reported latest exactly as before, so @babylonjs/lite is byte-for-byte
+// unaffected. When enabled, bump from whichever is greater: npm's reported
+// latest or the highest existing release tag, keeping the next version strictly
+// ahead of every released tag so the tag-push step can never collide.
+const highestReleasedTagVersion = RELEASE_TAG_AWARE_RESOLUTION ? getHighestReleasedTagVersion() : "";
+const resolutionBaseVersion = RELEASE_TAG_AWARE_RESOLUTION ? maxVersion(latestPublishedVersion, highestReleasedTagVersion) : latestPublishedVersion;
 const currentBuildId = process.env.BUILD_BUILDID;
 const latestPublishedBuildId = getPublishedBuildId(latestPublishedVersion);
 
@@ -154,12 +177,18 @@ if (currentBuildId && latestPublishedBuildId === currentBuildId) {
     throw new Error(`Azure build ${currentBuildId} already published ${PACKAGE_NAME}@${latestPublishedVersion}. Refusing to publish another version from the same build rerun.`);
 }
 
-const previousReleaseTag = getPreviousReleaseTag(latestPublishedVersion);
+const previousReleaseTag = getPreviousReleaseTag(resolutionBaseVersion);
 const breakingChangesDetected = hasBreakingChanges(previousReleaseTag);
 
-if (breakingChangesDetected && requestedReleaseType !== "auto" && requestedReleaseType !== "major") {
+if (breakingChangesDetected && requestedReleaseType === "auto") {
     // Azure Pipelines parses `##vso[task.logissue ...]` from stdout, so use console.log (not
     // console.warn, which writes to stderr and may not be picked up as an annotation).
+    console.log(
+        `##vso[task.logissue type=warning]Breaking changes were detected since ${previousReleaseTag || "the start of history"}. ` +
+            `Auto releases never emit a major, so this is being released as a minor. ` +
+            `A major release must be requested explicitly (manual 'major' run or config/release.json type 'major').`
+    );
+} else if (breakingChangesDetected && requestedReleaseType !== "major") {
     console.log(
         `##vso[task.logissue type=warning]Breaking changes were detected since ${previousReleaseTag || "the start of history"}. ` +
             `A ${requestedReleaseType} release will hide those changes from the next auto release. ` +
@@ -167,8 +196,22 @@ if (breakingChangesDetected && requestedReleaseType !== "auto" && requestedRelea
     );
 }
 
-const resolvedReleaseType: ResolvedReleaseType = requestedReleaseType === "auto" ? (breakingChangesDetected ? "major" : "minor") : requestedReleaseType;
-const nextVersion = bumpVersion(latestPublishedVersion, resolvedReleaseType);
+// Auto never self-promotes to a major (see resolveReleaseType). A major is only
+// ever produced by an explicit 'major' request, so an accidental breaking commit
+// on master can no longer trigger a surprise major release.
+const resolvedReleaseType: ResolvedReleaseType = resolveReleaseType(requestedReleaseType);
+// ONE-TIME EXCEPTION: skip the burned 2.0.0 version (published by accident and
+// deprecated; npm forbids reusing it) so the first intentional major lands on
+// 2.0.1. See applyBurnedVersionException in scripts/release-version.ts.
+const computedVersion = bumpVersion(resolutionBaseVersion, resolvedReleaseType);
+const nextVersion = applyBurnedVersionException(computedVersion);
+
+if (nextVersion !== computedVersion) {
+    console.log(
+        `##vso[task.logissue type=warning]Version ${BURNED_VERSION} was published in error and deprecated; ` +
+            `npm forbids reusing it. Releasing ${nextVersion} instead (one-time exception).`
+    );
+}
 
 if (isVersionPublished(nextVersion)) {
     throw new Error(`${PACKAGE_NAME}@${nextVersion} is already published. Refusing to overwrite an existing npm version.`);
@@ -180,6 +223,10 @@ if (isVersionPublished(nextVersion)) {
 // provenance from `BUILD_BUILDID` / `BUILD_SOURCEVERSION`. Nothing is written here.
 console.log(`Package: ${PACKAGE_NAME}`);
 console.log(`Latest published version: ${latestPublishedVersion}`);
+if (RELEASE_TAG_AWARE_RESOLUTION) {
+    console.log(`Highest released tag version: ${highestReleasedTagVersion || "<none>"}`);
+    console.log(`Resolution base version: ${resolutionBaseVersion}`);
+}
 console.log(`Previous release tag: ${previousReleaseTag || "<none>"}`);
 console.log(`Requested release type: ${requestedReleaseType}`);
 console.log(`Release type source: ${requested.source}`);

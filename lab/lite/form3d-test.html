@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Babylon Lite — 3D Form Controls (backed by a real HTML form)</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #05070d; }
+    canvas#renderCanvas { width: 100%; height: 100%; display: block; touch-action: none; }
+
+    /* The REAL form — the source of truth the 3D controls skin. Shown so you can
+       watch native inputs update as you click the 3D widgets (and vice-versa). */
+    #realForm {
+      position: fixed; top: 18px; right: 18px; width: 250px;
+      font: 13px/1.45 'Segoe UI', system-ui, sans-serif; color: #e8ecff;
+      background: rgba(12, 16, 30, 0.82); border: 1px solid rgba(129,140,248,0.35);
+      border-radius: 14px; padding: 16px 16px 14px; box-sizing: border-box;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.55); backdrop-filter: blur(8px);
+      user-select: none;
+    }
+    #realForm h2 { margin: 0 0 4px; font-size: 14px; letter-spacing: .3px; }
+    #realForm .sub { margin: 0 0 12px; font-size: 11px; opacity: .6; }
+    #realForm .field { margin: 9px 0; display: flex; align-items: center; gap: 8px; }
+    #realForm .field.col { display: block; }
+    #realForm fieldset { border: 0; margin: 0; padding: 0; display: flex; gap: 12px; }
+    #realForm legend { padding: 0; font-size: 11px; opacity: .6; margin-bottom: 4px; }
+    #realForm label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+    #realForm select { width: 100%; margin-top: 4px; background: #0b1020; color: #e8ecff;
+      border: 1px solid rgba(255,255,255,0.18); border-radius: 8px; padding: 5px 7px; font: inherit; }
+    #realForm button { width: 100%; margin-top: 12px; padding: 8px; font: 600 13px 'Segoe UI', sans-serif;
+      color: #04121b; background: linear-gradient(120deg,#7cf7d0,#5aa0ff); border: 0; border-radius: 9px; cursor: pointer; }
+    #realForm .tag { position: absolute; top: -9px; left: 14px; font-size: 10px; letter-spacing: .5px;
+      text-transform: uppercase; background: #5aa0ff; color: #04121b; padding: 1px 7px; border-radius: 6px; font-weight: 700; }
+    #readout { margin-top: 12px; padding: 8px 9px; font: 11px/1.4 'Consolas', monospace;
+      background: rgba(0,0,0,0.35); border-radius: 8px; white-space: pre-wrap; color: #a6e3a1; min-height: 18px; }
+
+    #hint {
+      position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+      font: 14px/1.4 system-ui, sans-serif; color: #cdd6f4; background: rgba(10, 14, 25, 0.72);
+      padding: 8px 16px; border-radius: 999px; pointer-events: none; user-select: none;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5); backdrop-filter: blur(4px);
+    }
+    #hint b { color: #89b4fa; }
+  </style>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+
+  <form id="realForm" autocomplete="off">
+    <span class="tag">real &lt;form&gt;</span>
+    <h2>Create account</h2>
+    <p class="sub">The 3D controls skin these native inputs.</p>
+
+    <div class="field">
+      <input type="checkbox" id="f-notify" name="notifications" role="switch" />
+      <label for="f-notify">Email notifications</label>
+    </div>
+    <div class="field">
+      <input type="checkbox" id="f-terms" name="terms" />
+      <label for="f-terms">Accept terms</label>
+    </div>
+    <div class="field col">
+      <fieldset>
+        <legend>Team size</legend>
+        <label><input type="radio" name="size" value="S" checked /> S</label>
+        <label><input type="radio" name="size" value="M" /> M</label>
+        <label><input type="radio" name="size" value="L" /> L</label>
+      </fieldset>
+    </div>
+    <div class="field col">
+      <label for="f-plan" style="font-size:11px;opacity:.6;">Plan</label>
+      <select id="f-plan" name="plan">
+        <option value="free">Free</option>
+        <option value="pro">Pro</option>
+        <option value="team">Team</option>
+      </select>
+    </div>
+    <button type="submit">Create account</button>
+    <div id="readout"></div>
+  </form>
+
+  <div id="hint">Click the <b>3D controls</b> to fill the real form · drag to orbit · scroll to zoom</div>
+  <script type="module" src="/lite/src/form3d-test.ts"></script>
+</body>
+</html>

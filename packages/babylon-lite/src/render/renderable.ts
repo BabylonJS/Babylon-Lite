@@ -21,6 +21,13 @@ export interface DrawUpdateContext {
     readonly _camera?: Camera | null;
 }
 
+/** @internal Feature-owned work collected during binding updates and flushed before the render pass. */
+export interface DrawUpdateBatch {
+    reset(): void;
+    flush(engine: EngineContext): void;
+    destroy(): void;
+}
+
 /**
  * A per-pass draw binding produced by `Renderable.bind(engine, target)`.
  *
@@ -45,6 +52,8 @@ export interface DrawBinding {
      *  version-guarded to avoid redundant writes. Render task transparent sorting
      *  runs after these updates, so renderables may refresh `_worldCenter` here. */
     update?(context: DrawUpdateContext): void;
+    /** @internal Lazy feature batches used by this binding. */
+    readonly _updateBatches?: readonly DrawUpdateBatch[];
     /** @internal Scratch: camera-space depth for transparent sorting (per-pass). */
     _sortDistance?: number;
 }
@@ -68,6 +77,29 @@ export interface Renderable {
     _worldCenter?: [number, number, number];
     /** @internal Material reference at build time — for detecting material swaps. */
     _lastMaterial?: any;
+    /** @internal Retire this renderable's owned GPU resources (per-mesh geometry
+     *  UBOs, skeletal-velocity textures, bound-texture releases). Populated only by
+     *  the geometry-renderer path so its owning task can retire per-mesh resources
+     *  on re-record/dispose. Idempotent. */
+    _geometryDispose?: () => void;
+    /** @internal Rebuilds this renderable on a replacement device after device loss.
+     *
+     *  Stamped by whichever builder created the renderable, closing over the arguments it was
+     *  built from. Recovery restores renderables by traversing `scene._renderables` and calling
+     *  this, so it never needs to know what kind of renderable it is holding — the same way
+     *  material textures already recover through `Texture2D._recoverySource`. Keeping the thunk
+     *  here rather than a per-subsystem descriptor keeps `render/` free of any dependency on the
+     *  loaders that build renderables, and keeps those loaders free of recovery-specific code.
+     *
+     *  Only for renderables that no retained structure owns — currently the loader-built
+     *  backgrounds, which their loaders push here and then discard the values they were built
+     *  from. Renderables produced by a material group builder must NOT set this: recovery already
+     *  rebuilds them by re-running the build through `scene._groups`, which one call at a time
+     *  also restores that group's `rebuildSingle` closure, its `o` output list, and its uniform
+     *  updater — none of which a `Renderable`-returning thunk can express, and a group can emit
+     *  several renderables or merge its meshes into one. Setting both would rebuild them twice
+     *  and leave duplicates in `scene._renderables`. */
+    _rebuild?: () => Renderable | Promise<Renderable>;
     /**
      * Resolve target-specific GPU state (pipeline) and return a `DrawBinding` whose
      * `draw` closure captures that state. Called by the render pass task at build/insert
@@ -95,6 +127,8 @@ export interface SceneUniformUpdater {
 export interface MeshGroupBuildResult {
     renderables: Renderable[];
     updater?: SceneUniformUpdater;
+    /** @internal True when this build result captured gamma-albedo PBR support. */
+    _G?: boolean;
     /** Closure used to rebuild a single mesh — captures the per-scene context
      *  (composer, BG caches, lights UBO, …) so material swaps and per-pass overrides
      *  reuse the same setup. The group builder stores it on itself as
@@ -119,4 +153,6 @@ export type MeshGroupBuilder = ((scene: SceneContext, meshes: Mesh[]) => Promise
     _rebuildSingle?: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
     /** @internal */
     _materialFamily?: "standard" | "pbr" | "node" | "shader";
+    /** @internal Pending opt-in feature preload required before this builder runs. */
+    _preload?: Promise<void>;
 };

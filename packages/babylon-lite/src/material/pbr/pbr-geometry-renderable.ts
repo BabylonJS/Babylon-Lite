@@ -10,7 +10,7 @@
  *  Per-(view, mesh-feature-variant) shared state — composed shader, mesh
  *  BGL, pipeline cache — is cached on `view._geometry` keyed by the
  *  shader-relevant mesh-feature bits + (features, features2, sceneFeatures,
- *  lightMode, singleLightType). Per-mesh state (UBOs, bind group, sort
+ *  lightMode, singleLightType, pluginIndex). Per-mesh state (UBOs, bind group, sort
  *  centre) lives in the closure returned by {@link buildPbrGeometryRenderable}.
  *
  *  This module is imported only by {@link createPbrGeometryMaterialView} —
@@ -50,6 +50,7 @@ import { _setActivePbrGeometryAttachments } from "./pbr-geometry-view.js";
  *  keeps the module free of top-level side effects so an unused geometry path
  *  tree-shakes away. */
 let _pbrGeometryGroupBuilder: MeshGroupBuilder | null = null;
+
 export function getPbrGeometryGroupBuilder(): MeshGroupBuilder {
     if (_pbrGeometryGroupBuilder) {
         return _pbrGeometryGroupBuilder;
@@ -80,8 +81,8 @@ interface PbrGeometryViewResources {
     _alphaBlend: boolean;
 }
 
-function _variantKey(meshFeatures: number, lightMode: number, singleLightType: string): string {
-    return `${meshFeatures}:${lightMode}:${singleLightType}`;
+function _variantKey(meshFeatures: number, lightMode: number, singleLightType: string, pluginIndex: number): string {
+    return `${meshFeatures}:${lightMode}:${singleLightType}:${pluginIndex}`;
 }
 
 /** Build a {@link Renderable} for one mesh drawn through a PBR geometry view. */
@@ -89,7 +90,11 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const engine = scene.surface.engine;
     const device = engine._device;
 
-    const ctx = (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext;
+    const sceneState = scene as SceneContext & {
+        _pbrGeomContext?: _PbrGeometryContext;
+        _pbrMeshGeomContexts?: WeakMap<Mesh, _PbrGeometryContext>;
+    };
+    const ctx = sceneState._pbrMeshGeomContexts?.get(mesh) ?? sceneState._pbrGeomContext;
     if (!ctx) {
         throw new Error("buildPbrGeometryRenderable: scene has no PBR context. Ensure regular PBR meshes have been built before recording the geometry task.");
     }
@@ -105,13 +110,45 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const lr = writeMeshLightSelection(mesh, scene.lights);
     const lightCount = lr > 0 ? 1 : -lr;
     const hasSomeShadows = ctx._shadowLights.length > 0;
-    const receiveShadows = mesh.receiveShadows && hasSomeShadows;
+    // ── Override-camera floating-origin shadow contract ───────────────────────
+    // A geometry task can render with a `config.camera` override whose origin
+    // differs from `scene.camera` (carried on `view._camera`). Under floating
+    // origin this task packs each receiver's world translation relative to the
+    // OVERRIDE origin so its world and the task view share one coherent origin.
+    // Shadow generators, however, are SHARED with forward rendering and bake their
+    // receiver matrices eye-relative to `scene.camera`'s origin — the PCF/ESM/CSM
+    // task hooks offset the light view by `scene.camera.worldMatrix[12..14]`.
+    // Binding such a matrix against an override-relative receiver world evaluates
+    // it at the wrong origin: a mesh at the override eye packs to 0 but the shared
+    // matrix expects `O_override − O_scene`, so the shadow is displaced or dropped.
+    //
+    // A per-matrix origin rebase (`M · T(O_override − O_scene)`) fixes the
+    // single-matrix PCF/ESM receiver UBO, but NOT CSM: its cascades are FIT to
+    // `scene.camera`'s frustum, so no origin shift can make them coherent for an
+    // arbitrary override camera without regenerating the shadow the shared
+    // generator owns. Carrying that per-frame rebase machinery (task-local UBOs,
+    // CSM cascade capture) in this module — imported by EVERY PBR geometry scene,
+    // including the razor-thin depth-only scenes that receive no shadows — would
+    // also grow their guarded bundle ceilings, which this PR must preserve. So for
+    // override-camera FO tasks we DISABLE shadow receiving: meshes render correctly
+    // lit but unshadowed (preferred over displaced/missing shadows), and no current
+    // scene exercises this combination. Tasks with no override (or with floating
+    // origin inactive) keep full shadow receiving — the receiver world and shadow
+    // matrices share `scene.camera`'s origin, so they stay coherent.
+    const receiveShadows = mesh.receiveShadows && hasSomeShadows && !(view._camera && engine.useFloatingOrigin);
     const lightMode: 0 | 1 | 2 = lightCount === 0 ? 0 : lightCount === 1 && !receiveShadows ? 1 : 2;
     const singleLightType = lightMode === 1 ? _getPackedSingleLightType(scene.lights, lr - 1) : "";
-    const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
+    // Same fold as the forward pass (see pbr-renderable.ts): these bits key the composed variant, so
+    // the Standard path must not pay to read them.
+    const meshFeatures = _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
+    const pluginIndex = source._pi ?? 0;
 
-    const variantKey = _variantKey(meshFeatures, lightMode, singleLightType);
-    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, variantKey);
+    const variantKey = _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex);
+    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, pluginIndex, variantKey);
+    // The geometry pass composes its OWN variant, so it needs the mesh's exotic primitive state
+    // stamped on separately (see ComposedShader._prim). `variantKey` folds in meshFeatures, whose
+    // topology bits this mirrors, so a cached variant only ever sees one value here.
+    (res._composed as { _prim?: GPUPrimitiveState })._prim = (mesh as Mesh & { _primitive?: GPUPrimitiveState })._primitive;
 
     const features = res._features;
     const features2 = res._features2;
@@ -119,7 +156,14 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
 
     // ── Mesh UBO ───────────────────────────────────────────────────────
     const meshUboData = new F32(composed._meshUboSpec._totalBytes / 4);
-    const _packMeshWorld = engine._makePackMeshWorld?.(scene) ?? packMat4IntoF32;
+    // Floating-origin offset + invalidation key off the EFFECTIVE task camera: a
+    // geometry task can render with a `config.camera` override whose origin (and
+    // view-projection) differ from `scene.camera`. Packing world against
+    // `scene.camera` while the task view uses the override desyncs the origins.
+    // `view._camera` carries the override (a stable ref whose worldMatrix reads
+    // live); fall back to the real scene when the task uses the active camera.
+    const foScene = view._camera ? ({ camera: view._camera } as SceneContext) : scene;
+    const _packMeshWorld = engine._makePackMeshWorld?.(foScene) ?? packMat4IntoF32;
     _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
     writeMeshLightSelection(mesh, scene.lights, meshUboData);
     const meshUBO = createUniformBuffer(engine, meshUboData);
@@ -163,22 +207,28 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
 
     // ── Texture acquire/release lifecycle ──────────────────────────────
     const boundTextures = collectPbrBoundTextures(source);
-    for (const t of boundTextures) {
-        acquireTexture(t);
-    }
-    const prevDisposables = scene._meshDisposables.get(mesh) ?? [];
-    scene._meshDisposables.set(mesh, [
-        ...prevDisposables,
-        () => {
-            meshUBO.destroy();
-            materialUBO.destroy();
-        },
-        () => {
-            for (const t of boundTextures) {
-                releaseTexture(t);
-            }
-        },
-    ]);
+    boundTextures.forEach(acquireTexture);
+    // Per-mesh geometry resources are an AUX/override packet owned by the geometry
+    // TASK, not by the mesh's main material. Registering them on `_meshAuxDisposables`
+    // (NOT `_meshDisposables`) means a MAIN-material swap — which drains + rebuilds
+    // `_meshDisposables` — can no longer destroy this live geometry mesh/material UBO
+    // out from under an in-flight geometry pass. A real `removeFromScene` still frees
+    // them, and the owning task retires the SAME closure on re-record/dispose (see
+    // `retireGeometryBindings`, which also detaches it from the aux list outside any
+    // drain). Idempotent WITHOUT a guard flag: `GPUBuffer.destroy()` is a no-op when
+    // already destroyed, and clearing `boundTextures` after release makes a second call
+    // a no-op release loop — so the task-retire + scene-remove orderings never double
+    // free. MUST NOT self-remove from the aux array (the scene drains iterate it live).
+    const _disposePerMesh = (): void => {
+        meshUBO.destroy();
+        materialUBO.destroy();
+        boundTextures.forEach(releaseTexture);
+        boundTextures.length = 0;
+    };
+    const auxDisposables = scene._meshAuxDisposables;
+    const auxList = auxDisposables.get(mesh) ?? [];
+    auxList.push(_disposePerMesh);
+    auxDisposables.set(mesh, auxList);
 
     const hasNormalMap = (features & PBR_HAS_NORMAL_MAP) !== 0 && (meshFeatures & MSH_HAS_TANGENTS) !== 0;
     const hasUV2 = (features2 & PBR2_HAS_UV2) !== 0 && (meshFeatures & MSH_HAS_UV2) !== 0;
@@ -186,8 +236,10 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const hasTI = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
     const hasTIColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
     const syncThinInstanceBuffers = ctx._syncThinInstanceBuffers;
+    const syncThinInstanceForDraw = ctx._syncThinInstanceForDraw;
     const isAlphaBlend = res._alphaBlend;
     const sortCenter = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number];
+    let thinDrawArgs: GPUBuffer | null = null;
 
     let _lastWorldVersion = mesh.worldMatrixVersion;
     let _lastLightsCount = scene.lights.length;
@@ -211,11 +263,15 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
             _writePbrMaterialData(matScratch, source, materialSpec);
             device.queue.writeBuffer(materialUBO, 0, matScratch.buffer, 0, matScratch.byteLength);
         }
+        const ti = hasTI ? mesh.thinInstances : null;
+        if (ti && syncThinInstanceForDraw) {
+            thinDrawArgs = syncThinInstanceForDraw(engine, ti, hasTIColor, mesh._gpu.indexCount);
+        }
     };
     const _invalidate = (): void => {
         _lastWorldVersion = -1;
     };
-    const update = engine._wrapRenderableForFO?.(_baseUpdate, scene, _invalidate) ?? _baseUpdate;
+    const update = engine._wrapRenderableForFO?.(_baseUpdate, foScene, _invalidate) ?? _baseUpdate;
 
     const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
         if (mesh.visible === false) {
@@ -259,10 +315,10 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
             slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasTIColor);
         }
         pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-        if (ti && ti.count > 0) {
-            pass.drawIndexed(gpu.indexCount, ti.count);
+        if (ti && thinDrawArgs) {
+            pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(gpu.indexCount);
+            pass.drawIndexed(gpu.indexCount, ti?.count);
         }
         return 1;
     };
@@ -281,6 +337,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         },
     };
     r._worldCenter = sortCenter;
+    r._geometryDispose = _disposePerMesh;
     return r;
 }
 
@@ -293,6 +350,7 @@ function _ensureViewResources(
     meshFeatures: number,
     lightMode: 0 | 1 | 2,
     singleLightType: string,
+    pluginIndex: number,
     variantKey: string
 ): PbrGeometryViewResources {
     let cache = view._geometry as Map<string, PbrGeometryViewResources> | undefined;
@@ -313,6 +371,7 @@ function _ensureViewResources(
     const source = view.source as PbrMaterialProps;
     const vbLayout = (source as unknown as { _vbLayout?: import("../../mesh/mesh.js").MeshVbLayout })._vbLayout;
     const vbKey = "";
+    const uv2Mask = (source as { _uv2Mask?: number })._uv2Mask ?? 0;
 
     // Compose with the active-attachment scope set so the registered ext
     // sees the right list when contributing the geometry-params fragment.
@@ -331,7 +390,9 @@ function _ensureViewResources(
             vbLayout,
             vbKey,
             view._geometryAttachments,
-            view._emitColor
+            view._emitColor,
+            uv2Mask,
+            pluginIndex
         );
     } finally {
         _setActivePbrGeometryAttachments(prev);
@@ -411,7 +472,14 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
     const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState ? { format: fmt, blend: blendState } : { format: fmt }));
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;
-    const cullMode = hasDoubleSided ? "none" : view._reverseCulling ? "front" : "back";
+    // Match the forward pass: `topology`/`frontFace` left to their WebGPU defaults ("triangle-list",
+    // "ccw"), with anything exotic (topology, strip index format, mirrored winding) overriding
+    // through `_prim`. The variant key includes meshFeatures, so every primitive-state combination
+    // gets its own pipeline.
+    const primitive: GPUPrimitiveState = {
+        cullMode: hasDoubleSided ? "none" : view._reverseCulling ? "front" : "back",
+        ...res._composed._prim,
+    };
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,
         vertex: { module: res._vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
@@ -427,7 +495,8 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
               }
             : undefined,
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" },
+        // Match the forward pass's topology, strip index format, culling, and mirrored winding.
+        primitive,
     });
     res._pipelines.set(key, pipeline);
     return pipeline;

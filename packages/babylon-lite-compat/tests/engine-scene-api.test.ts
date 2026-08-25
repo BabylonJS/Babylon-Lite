@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { WebGPUEngine } from "../src/engine/engine";
+import { VERSION } from "babylon-lite";
+import { AbstractEngine, Engine, ThinEngine, WebGPUEngine } from "../src/engine/engine";
+import type { TransformNode } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
 
 /**
@@ -18,12 +20,18 @@ function fakeScene(): Scene {
         _cameras: unknown[];
         _lights: unknown[];
         _materials: unknown[];
-        _trackedMeshes: unknown[];
+        _meshWrappers: Map<object, unknown>;
+        _meshes: unknown[];
+        _orderedCoreMeshes: unknown[];
+        _orderedCoreMeshSet: Set<TransformNode>;
     };
     scene._cameras = [];
     scene._lights = [];
     scene._materials = [];
-    scene._trackedMeshes = [];
+    scene._meshWrappers = new Map();
+    scene._meshes = [];
+    scene._orderedCoreMeshes = [];
+    scene._orderedCoreMeshSet = new Set<TransformNode>();
     return scene;
 }
 
@@ -71,6 +79,18 @@ describe("WebGPUEngine scalar getters", () => {
         // WebGPU baseline flags are always reported.
         expect(caps.textureFloat).toBe(true);
         expect(caps.uintIndices).toBe(true);
+    });
+
+    it("forwards the device's maxUniformBuffersPerShaderStage limit", () => {
+        const engine = fakeEngine({ width: 1, height: 1 }, 16) as WebGPUEngine & { _lite: unknown };
+        (engine as unknown as { _lite: unknown })._lite = { _device: { features: new Set<string>(), limits: { maxUniformBuffersPerShaderStage: 12 } } };
+        expect(engine.getCaps().maxUniformBuffersPerShaderStage).toBe(12);
+    });
+
+    it("leaves maxUniformBuffersPerShaderStage undefined for a device-less NullEngine", () => {
+        const engine = fakeEngine({ width: 1, height: 1 }, 16) as WebGPUEngine & { _lite: unknown };
+        (engine as unknown as { _lite: unknown })._lite = {};
+        expect(engine.getCaps().maxUniformBuffersPerShaderStage).toBeUndefined();
     });
 
     it("reports all compressed caps off when there is no device (NullEngine)", () => {
@@ -126,7 +146,7 @@ describe("Scene entity registries", () => {
     it("finds tracked meshes via getMeshByName / getNodeByName", () => {
         const scene = fakeScene();
         const mesh = { name: "box" } as never;
-        (scene as unknown as { _trackedMeshes: unknown[] })._trackedMeshes.push(mesh);
+        scene._registerMesh(mesh);
         expect(scene.getMeshByName("box")).toBe(mesh);
         expect(scene.getMeshByName("missing")).toBeNull();
         expect(scene.getNodeByName("box")).toBe(mesh);
@@ -135,10 +155,63 @@ describe("Scene entity registries", () => {
     it("finds tracked meshes by id via getMeshById / getMeshByID (legacy alias)", () => {
         const scene = fakeScene();
         const mesh = { name: "dragon", id: "dragonLR" } as never;
-        (scene as unknown as { _trackedMeshes: unknown[] })._trackedMeshes.push(mesh);
+        scene._registerMesh(mesh);
         expect(scene.getMeshById("dragonLR")).toBe(mesh);
         expect(scene.getMeshByID("dragonLR")).toBe(mesh);
         expect(scene.getMeshById("missing")).toBeNull();
+    });
+
+    it("enumerates every registered mesh through scene.meshes, ordered by the core list", () => {
+        const scene = fakeScene();
+        // Two primitives (keyed by their Lite mesh) plus a loader-surfaced mesh (keyed
+        // by the wrapper itself, as Gaussian-Splatting meshes are).
+        const boxLite = { id: "boxLite" };
+        const sphereLite = { id: "sphereLite" };
+        const box = { name: "box", _lite: boxLite } as never;
+        const sphere = { name: "sphere", _lite: sphereLite } as never;
+        const splat = { name: "splat" } as never;
+        scene._registerMesh(box, boxLite);
+        scene._registerMesh(sphere, sphereLite);
+        scene._registerMesh(splat);
+        // Re-registering the same wrapper is de-duped.
+        scene._registerMesh(box, boxLite);
+        // The Lite-core-owned list drives membership + order for the two primitives;
+        // the loader-surfaced mesh (not in the core list) is appended.
+        (scene as unknown as { _lite: { meshes: object[] } })._lite = { meshes: [sphereLite, boxLite] };
+        expect(scene.meshes).toEqual([sphere, box, splat]);
+    });
+
+    it("returns a stable scene.meshes array and preserves non-core wrapper positions", () => {
+        const scene = fakeScene();
+        const rootLite = { id: "rootLite" };
+        const boxLite = { id: "boxLite" };
+        const sphereLite = { id: "sphereLite" };
+        const root = { name: "__root__", _lite: rootLite } as never;
+        const box = { name: "box", _lite: boxLite } as never;
+        const sphere = { name: "sphere", _lite: sphereLite } as never;
+        scene._registerMesh(root, rootLite);
+        scene._registerMesh(box, boxLite);
+        scene._registerMesh(sphere, sphereLite);
+        (scene as unknown as { _lite: { meshes: object[] } })._lite = { meshes: [sphereLite, boxLite] };
+
+        const meshes = scene.meshes;
+        expect(meshes).toBe(scene.meshes);
+        expect(meshes).toEqual([root, sphere, box]);
+    });
+
+    it("drops a mesh from scene.meshes and the lookups on unregister", () => {
+        const scene = fakeScene();
+        const boxLite = { id: "boxLite" };
+        const alternateKey = { id: "alternate" };
+        const box = { name: "box", _lite: boxLite } as never;
+        scene._registerMesh(box, boxLite);
+        scene._registerMesh(box, alternateKey);
+        expect(scene.meshes).toEqual([box]);
+        expect(scene.getMeshByName("box")).toBe(box);
+        scene._unregisterNode(box);
+        expect(scene.meshes).toEqual([]);
+        expect(scene.getMeshByName("box")).toBeNull();
+        expect((scene as unknown as { _meshWrappers: Map<object, unknown> })._meshWrappers.size).toBe(0);
     });
 
     it("finds cameras / lights / materials / nodes by id", () => {
@@ -165,5 +238,19 @@ describe("Scene entity registries", () => {
         expect(a.getClassName()).toBe("Scene");
         expect(a.getUniqueId()).toBe(1);
         expect(b.getUniqueId()).toBe(2);
+    });
+});
+
+describe("AbstractEngine version statics", () => {
+    it("reports the underlying Babylon Lite version", () => {
+        expect(AbstractEngine.Version).toBe(VERSION);
+        expect(AbstractEngine.NpmPackage).toBe(`@babylonjs/lite-compat@${VERSION}`);
+    });
+
+    it("inherits the version statics on every engine subclass", () => {
+        for (const Ctor of [ThinEngine, Engine, WebGPUEngine]) {
+            expect(Ctor.Version).toBe(VERSION);
+            expect(Ctor.NpmPackage).toBe(`@babylonjs/lite-compat@${VERSION}`);
+        }
     });
 });

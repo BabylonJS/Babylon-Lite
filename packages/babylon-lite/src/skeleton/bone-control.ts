@@ -17,18 +17,20 @@
  *  Standalone functions, zero methods — idiomatic Lite, fully tree-shakeable. */
 
 import { F32 } from "../engine/typed-arrays.js";
-import type { Mat4 } from "../math/types.js";
+import type { Mat4, Mat4Storage } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { NodeRest, SkeletonBinding } from "../animation/types.js";
 import type { GltfLoadCtx } from "../loader-gltf/gltf-feature.js";
 import { resolveAccessor, computeNodeWorldMatrix, findParent } from "../loader-gltf/gltf-parser.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import { mat4Identity } from "../math/mat4-identity.js";
+import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { TRS_STRIDE, T_OFF, R_OFF, S_OFF, computeTopoOrder, resetTRS, computeNodeWorldMatrices, writeBoneTextures } from "./skeleton-pose.js";
 import { _installBoneControl } from "./bone-control-hooks.js";
 
 /** @internal Per-bone local-transform override. `mask` bits: 1 = translation,
- *  2 = rotation, 4 = scale. Only the masked components are applied. */
+ *  2 = rotation, 4 = scale, 8 = hidden. Bits 1/2/4 are applied before channel
+ *  evaluation (animation wins); bit 8 is applied after it (visibility wins). */
 export interface BoneOverride {
     mask: number;
     tx: number;
@@ -64,6 +66,8 @@ export interface Skeleton {
     /** @internal node-index → override. Shared with the asset's animation
      *  controllers so any playing clip honours the overrides. */
     readonly _overrides: Map<number, BoneOverride>;
+    /** @internal node-index → absolute world matrix for externally driven rigid poses. */
+    readonly _worldOverrides: Map<number, Mat4Storage>;
     /** @internal Recompute + upload this skin's bone matrices from rest + overrides. */
     readonly _bake: () => void;
 }
@@ -119,16 +123,26 @@ export function setBoneScaling(skeleton: Skeleton, bone: Bone, x: number, y: num
 
 /** Show or hide the sub-tree driven by a bone, the Babylon.js way: hiding scales
  *  the bone to zero (collapsing it and its descendant bones to a point so the
- *  skinned triangles degenerate and disappear); showing clears the scale override
- *  so the bone returns to its animated / rest scale. */
+ *  skinned triangles degenerate and disappear).
+ *
+ *  Unlike {@link setBoneScaling}, visibility is **not** a transform override that
+ *  animation can overwrite — it is re-applied AFTER channel evaluation, so a hidden
+ *  bone stays hidden while clips play. This matters in practice because most rigs
+ *  (every Mixamo export, for instance) bake a constant scale track onto every bone,
+ *  which would otherwise restore the bone to full size on the next frame.
+ *
+ *  Showing clears only the hidden state; any explicit {@link setBoneScaling} override
+ *  is left untouched. */
 export function setBoneVisible(skeleton: Skeleton, bone: Bone, visible: boolean): void {
     if (!visible) {
-        setBoneScaling(skeleton, bone, 0, 0, 0);
+        const o = ensureOverride(skeleton, bone);
+        o.mask |= 8;
+        skeleton._bake();
         return;
     }
     const o = skeleton._overrides.get(bone._nodeIndex);
-    if (o) {
-        o.mask &= ~4;
+    if (o && o.mask & 8) {
+        o.mask &= ~8;
         if (o.mask === 0) {
             skeleton._overrides.delete(bone._nodeIndex);
         }
@@ -136,24 +150,74 @@ export function setBoneVisible(skeleton: Skeleton, bone: Bone, visible: boolean)
     }
 }
 
+/** Override a bone's local translation + rotation together **without** re-baking.
+ *  For per-frame drivers that pose many bones each frame (e.g. WebXR hand tracking):
+ *  call this for every bone, then {@link bakeSkeleton} once to recompute + upload the
+ *  skin a single time, instead of paying a full bake per {@link setBonePosition} /
+ *  {@link setBoneRotationQuaternion} call. Like those setters, each masked component is
+ *  overwritten every frame by a clip that animates the same bone. */
+export function setBonePoseDeferred(skeleton: Skeleton, bone: Bone, px: number, py: number, pz: number, rx: number, ry: number, rz: number, rw: number): void {
+    const o = ensureOverride(skeleton, bone);
+    o.tx = px;
+    o.ty = py;
+    o.tz = pz;
+    o.rx = rx;
+    o.ry = ry;
+    o.rz = rz;
+    o.rw = rw;
+    o.mask |= 3;
+}
+
+/** @internal Drive a non-animated glTF bone from an absolute Lite left-handed world pose
+ *  without re-baking. The X reflection keeps the glTF-authored joint geometry in the
+ *  same handedness convention as the loader's synthetic root. */
+export function setBoneWorldPoseDeferred(skeleton: Skeleton, bone: Bone, px: number, py: number, pz: number, rx: number, ry: number, rz: number, rw: number): void {
+    let world = skeleton._worldOverrides.get(bone._nodeIndex);
+    if (!world) {
+        world = new F32(16);
+        skeleton._worldOverrides.set(bone._nodeIndex, world);
+    }
+    mat4ComposeInto(world, 0, px, py, pz, rx, ry, rz, rw, -1, 1, 1);
+}
+
+/** Recompute a skeleton's node hierarchy from rest + overrides and upload its bone
+ *  matrices. Pair with {@link setBonePoseDeferred} (which skips baking) to apply a
+ *  batch of per-frame bone edits with a single GPU upload. */
+export function bakeSkeleton(skeleton: Skeleton): void {
+    skeleton._bake();
+}
+
 /** Remove all overrides for a bone, reverting it to animation / rest pose, then re-bake. */
 export function clearBoneOverride(skeleton: Skeleton, bone: Bone): void {
-    if (skeleton._overrides.delete(bone._nodeIndex)) {
+    const localCleared = skeleton._overrides.delete(bone._nodeIndex);
+    const worldCleared = skeleton._worldOverrides.delete(bone._nodeIndex);
+    if (localCleared || worldCleared) {
         skeleton._bake();
     }
 }
 
 // ─── Opt-in wiring ───────────────────────────────────────────────────
 
-/** Per-frame applier hook: write the masked override TRS into the working buffer
- *  (called by the animation tick after the rest reset, before channel eval). */
-function applyOverridesToTRS(overrides: ReadonlyMap<number, BoneOverride>, currentTRS: Float32Array, numNodes: number): void {
+/** Per-frame applier hook. Two phases:
+ *   • `hiddenOnly` unset — write the masked translation/rotation/scale overrides into the
+ *     working buffer after the rest reset, before channel eval (so animation wins).
+ *   • `hiddenOnly = true` — collapse hidden bones to zero scale after channel eval, so
+ *     `setBoneVisible` survives clips that animate the bone's scale. */
+function applyOverridesToTRS(overrides: ReadonlyMap<number, BoneOverride>, currentTRS: Float32Array, numNodes: number, hiddenOnly?: boolean): void {
     for (const [ni, o] of overrides) {
         if (ni < 0 || ni >= numNodes) {
             continue;
         }
         const off = ni * TRS_STRIDE;
         const m = o.mask;
+        if (hiddenOnly === true) {
+            if (m & 8) {
+                currentTRS[off + S_OFF] = 0;
+                currentTRS[off + S_OFF + 1] = 0;
+                currentTRS[off + S_OFF + 2] = 0;
+            }
+            continue;
+        }
         if (m & 1) {
             currentTRS[off + T_OFF] = o.tx;
             currentTRS[off + T_OFF + 1] = o.ty;
@@ -299,6 +363,7 @@ async function buildSkeletons(ctx: GltfLoadCtx, meshes: Mesh[], overrides: Map<n
     const currentTRS = new F32(numNodes * TRS_STRIDE);
     const localMat = new F32(numNodes * 16);
     const worldMat = new F32(numNodes * 16);
+    const worldOverrides = new Map<number, Mat4Storage>();
     const device = engine._device;
 
     // Re-bake EVERY skinned mesh of the asset on any override. The override map is
@@ -306,12 +371,21 @@ async function buildSkeletons(ctx: GltfLoadCtx, meshes: Mesh[], overrides: Map<n
     // (each with its own GPU bone texture in Lite), so we must refresh them all —
     // matching Babylon.js, where the shared skeleton updates every mesh at once.
     const allBindings: SkeletonBinding[] = groups.flatMap((g) => g.bindings);
+    // Bridge the asset-wide override map onto each shared runtime skeleton (mesh.skeleton),
+    // which the optional weighted-blend mixer also holds — so a manager-blended clip can
+    // honour bone overrides. Stamped in this opt-in chunk to keep the always-loaded animation
+    // path byte-identical for scenes that never use bone control. Every binding here has a
+    // runtime skeleton (bindings are only created for meshes that have one).
+    for (const b of allBindings) {
+        b.runtimeSkeleton!._overrides = overrides;
+    }
     const bake = (): void => {
         resetTRS(nodes, numNodes, currentTRS);
         if (overrides.size > 0) {
             applyOverridesToTRS(overrides, currentTRS, numNodes);
+            applyOverridesToTRS(overrides, currentTRS, numNodes, true);
         }
-        computeNodeWorldMatrices(nodes, numNodes, topoOrder, currentTRS, localMat, worldMat);
+        computeNodeWorldMatrices(nodes, numNodes, topoOrder, currentTRS, localMat, worldMat, worldOverrides);
         writeBoneTextures(device, allBindings, worldMat);
     };
 
@@ -325,7 +399,7 @@ async function buildSkeletons(ctx: GltfLoadCtx, meshes: Mesh[], overrides: Map<n
                 byName.set(bone.name, bone);
             }
         }
-        return { bones, _byName: byName, _overrides: overrides, _bake: bake };
+        return { bones, _byName: byName, _overrides: overrides, _worldOverrides: worldOverrides, _bake: bake };
     });
 
     return { skeletons };

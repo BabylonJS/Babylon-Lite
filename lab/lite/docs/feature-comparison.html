@@ -140,6 +140,12 @@
                             <td>Diffuse, specular, ambient, emissive</td>
                         </tr>
                         <tr>
+                            <td>Mesh Vertex Colors</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>PBR automatic; Standard via enableStandardVertexColors() opt-in (Scene 267)</td>
+                        </tr>
+                        <tr>
                             <td>Background Material</td>
                             <td>✅</td>
                             <td>✅</td>
@@ -203,7 +209,7 @@
                             <td>Lightmap Textures</td>
                             <td>✅</td>
                             <td>✅</td>
-                            <td>Standard material UV2</td>
+                            <td>Standard material UV2; PBR via opt-in <code>enablePbrLightmap()</code> + <code>setPbrLightmap()</code></td>
                         </tr>
                         <tr>
                             <td>Ambient Textures</td>
@@ -376,6 +382,12 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td>Globe-orbit camera (center/yaw/pitch/radius) with fly-to + controls (Scene 225)</td>
+                        </tr>
+                        <tr>
+                            <td>Orthographic Projection</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Any camera via enableOrthographicCamera() opt-in; live/animatable bounds, aspect-derived or off-center (Scene 268)</td>
                         </tr>
                         <tr>
                             <td>Follow Camera</td>
@@ -661,6 +673,12 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td></td>
+                        </tr>
+                        <tr>
+                            <td>Environment Skybox Blur</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Continuous fractional cubemap LOD</td>
                         </tr>
                         <tr>
                             <td>Reflection Probes</td>
@@ -1331,7 +1349,7 @@
                             <td>Device Lost Recovery</td>
                             <td>✅</td>
                             <td>✅</td>
-                            <td>Opt-in automatic WebGPU device-loss recovery (Scene 164)</td>
+                            <td>Opt-in per-kind WebGPU device-loss recovery via <code>enableDeviceLost*Recovery</code> APIs (Scene 164: Scene)</td>
                         </tr>
                         <tr>
                             <td>OffscreenCanvas / Worker Rendering</td>

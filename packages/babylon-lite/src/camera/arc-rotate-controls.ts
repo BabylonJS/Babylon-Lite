@@ -153,12 +153,48 @@ export function setCameraLimits(camera: ArcRotateCamera, limits: ArcRotateCamera
  * self-clamps in its setters, so this loop carries no limit code.
  *
  * Camera stays plain data — this function reads/writes its properties.
- * Returns a cleanup function to remove all listeners and the beforeRender hook.
+ *
+ * ### Lifecycle / cleanup (important)
+ *
+ * The returned function detaches everything this call attached: it removes the
+ * canvas DOM listeners (pointer/wheel/contextmenu/touch/gesture) and, when a `scene` was
+ * supplied, its `_beforeRender` inertia hook. It is idempotent — calling it more
+ * than once is safe (the hook is removed only if still present, and removing a
+ * DOM listener twice is a no-op).
+ *
+ * The controls are **not** automatically tied to the scene's lifetime. Passing a
+ * `scene` only enables inertia (it registers the per-frame hook); it does **not**
+ * register this cleanup for scene disposal. Because the DOM listeners live on the
+ * `canvas` rather than on the scene, {@link disposeScene} clears scene-owned state
+ * (including `_beforeRender`) but does **not** remove the canvas listeners added
+ * here. The caller owns the controls' lifetime and must detach them explicitly:
+ *
+ * ```ts
+ * const detachCameraControl = attachControl(camera, canvas, scene);
+ * // Later — detach controls yourself before/after disposing the scene:
+ * detachCameraControl();
+ * disposeScene(scene);
+ * ```
+ *
+ * To tie the controls to the scene so `disposeScene(scene)` also detaches them,
+ * register the returned cleanup with {@link onSceneDispose}:
+ *
+ * ```ts
+ * onSceneDispose(scene, attachControl(camera, canvas, scene));
+ * // Now disposeScene(scene) removes the canvas listeners too.
+ * ```
+ *
+ * @returns A cleanup function that removes all canvas listeners and the
+ * `_beforeRender` inertia hook. Safe to call multiple times.
  */
 export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext, options?: AttachControlOptions): () => void {
-    const angularSensibility = camera.angularSensibility ?? 1000; // Babylon default; HIGHER = slower orbit
-    const panningSensibility = camera.panningSensibility ?? 50; // Babylon default (pixels per unit); LOWER = faster pan
-    const wheelPrecision = camera.wheelPrecision ?? 3; // Babylon default; HIGHER = slower zoom
+    // These tuning values are read LIVE at point-of-use (not snapshotted here) so
+    // that a caller can mutate camera.angularSensibility / panningSensibility /
+    // wheelPrecision after attachControl and have it take effect immediately —
+    // matching Babylon.js, whose camera inputs read these fields on every event.
+    // The fields are always defined (the createArcRotateCamera factory seeds the
+    // Babylon defaults: angularSensibility 1000, panningSensibility 50,
+    // wheelPrecision 3), so the reads below need no ?? fallback.
 
     const ROTATION_EPSILON = 0.001;
     const RADIUS_EPSILON = 0.001;
@@ -232,11 +268,13 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         }
 
         if (isDragging) {
+            const angularSensibility = camera.angularSensibility;
             camera.inertialAlphaOffset -= dx / angularSensibility;
             camera.inertialBetaOffset -= dy / angularSensibility;
         }
 
         if (isPanning) {
+            const panningSensibility = camera.panningSensibility;
             camera.inertialPanningX += -dx / panningSensibility;
             camera.inertialPanningY += dy / panningSensibility;
         }
@@ -250,8 +288,10 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
 
     function onWheel(e: WheelEvent): void {
         e.preventDefault();
-        // Scale by current radius for logarithmic zoom feel
-        camera.inertialRadiusOffset -= (e.deltaY * camera.radius) / (wheelPrecision * 1000);
+        // Read wheelPrecision live so a caller that sets it after attachControl
+        // — as Babylon.js allows — takes effect immediately. Scale by current
+        // radius for logarithmic zoom feel.
+        camera.inertialRadiusOffset -= (e.deltaY * camera.radius) / (camera.wheelPrecision * 1000);
     }
 
     function onContextMenu(e: Event): void {

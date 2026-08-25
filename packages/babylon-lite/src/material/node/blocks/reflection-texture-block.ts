@@ -24,10 +24,6 @@ const EQUIRECTANGULAR_MODE = 7;
 const RECIPROCAL_PI2 = "0.15915494309189535";
 const RECIPROCAL_PI = "0.3183098861837907";
 
-function sanitize(name: string): string {
-    return name.replace(/[^A-Za-z0-9_]/g, "_");
-}
-
 const OUTPUTS: Record<string, { swizzle: string; type: "vec3f" | "f32" }> = {
     rgb: { swizzle: "", type: "vec3f" },
     r: { swizzle: ".x", type: "f32" },
@@ -44,7 +40,7 @@ export const emitter: BlockEmitter = {
             throw new Error(`ReflectionTextureBlock: coordinatesMode ${mode} not supported (only EQUIRECTANGULAR_MODE=7)`);
         }
 
-        const bindingName = sanitize(block.name || `reflection${block.id}`);
+        const bindingName = ctx.sanitize(block.name || `reflection${block.id}`);
         if (!state.textures.find((t) => t.name === bindingName)) {
             state.textures.push({ name: bindingName, kind: "texture2d", texture: null });
         }

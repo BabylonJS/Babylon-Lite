@@ -13,7 +13,8 @@
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR2_HAS_UNLIT } from "../pbr-flag-bits.js";
+
+const PBR2_HAS_UNLIT = 1 << 8;
 
 export function createUnlitFragment(hasIbl: boolean): ShaderFragment {
     const assign = `color = baseColor * material.unlitColor;`;
@@ -30,11 +31,11 @@ export function createUnlitFragment(hasIbl: boolean): ShaderFragment {
 
 /** Write the unlit material-UBO slice. */
 export function writeUnlitUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
-    if (!material.unlit || !offsets.has("unlitColor")) {
+    if (!material._unlit || !offsets.has("unlitColor")) {
         return;
     }
     const off = offsets.get("unlitColor")! / 4;
-    const tint = material.unlitColor ?? [1, 1, 1];
+    const tint = material._unlitColor ?? [1, 1, 1];
     data[off] = tint[0]!;
     data[off + 1] = tint[1]!;
     data[off + 2] = tint[2]!;
@@ -44,7 +45,7 @@ export const pbrExt: PbrExt = {
     id: "unlit",
     phase: "fragment",
     detect(mat) {
-        return (mat as PbrMaterialProps).unlit ? { f: 0, f2: PBR2_HAS_UNLIT } : { f: 0, f2: 0 };
+        return (mat as PbrMaterialProps)._unlit ? { f: 0, f2: PBR2_HAS_UNLIT } : { f: 0, f2: 0 };
     },
     frag(ctx) {
         if (!(ctx._features2 & PBR2_HAS_UNLIT)) {

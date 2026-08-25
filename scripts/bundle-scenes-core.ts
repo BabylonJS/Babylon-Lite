@@ -9,8 +9,9 @@
  * chunks that are never loaded (e.g. animation for a static model) are
  * correctly excluded from the manifest numbers.
  */
-import { build, type Plugin } from "vite";
+import { build, type Plugin, type Rollup } from "vite";
 import { execFileSync } from "child_process";
+import { createHash } from "crypto";
 import { resolve, dirname, join, extname } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
@@ -186,20 +187,59 @@ function resolveLiteAliasDir(): string {
 
     throw new Error(`Missing ${libIndex}.\n` + "Build the package first: `pnpm --filter babylon-lite build:lib` (or `pnpm build`).");
 }
+// Per-scene manifest files under `lab/public/bundle/manifest/` are build output,
+// not tracked source: a single aggregate `manifest.json` is generated from them
+// for runtime consumers (lab UI, bundle-size test, report script, static lab
+// site). Nothing here is committed — see `DEFAULT_MASTER_MANIFEST_URL` for where
+// the master baseline actually comes from. `MANIFEST_GIT_PATH` /
+// `MANIFEST_DIR_GIT_PATH` are the legacy tracked paths, read only as a fallback
+// for refs that predate the move to a published baseline.
 const MANIFEST_GIT_PATH = "lab/public/bundle/manifest.json";
+const MANIFEST_DIR_GIT_PATH = "lab/public/bundle/manifest";
+const MANIFEST_DIR = "manifest";
 const MANIFEST_FILE = "manifest.json";
 const MASTER_MANIFEST_FILE = "master-manifest.json";
+
+/**
+ * Where the master bundle-size baseline is published.
+ *
+ * The baseline used to be ~227 JSON files tracked in git and refreshed by PR
+ * authors. That made it the repo's dominant source of both merge conflicts (two
+ * branches rewriting the same generated files) and red CI (any merge left every
+ * other branch's copy stale). It is now measured once per master build and
+ * published as a single file to the same public storage that serves the
+ * per-build Playwright reports and lab sites, so no branch — and no bot — ever
+ * writes it.
+ *
+ * Hardcoded rather than configured because the primary readers are fork PR
+ * builds and local `pnpm build:bundle-scenes` runs, neither of which has
+ * pipeline variables. Must stay in sync with `baselineDeployPath` in
+ * `azure-pipelines-bundle-manifest.yml`.
+ */
+const DEFAULT_MASTER_MANIFEST_URL = "https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json";
 export const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
 export const LITE_BUNDLE_TARGET = "esnext";
 
 interface SceneConfigEntry {
     id: number;
     tags?: string[];
+    /** Raw bundle-size ceiling in KB. Absent for scenes that opt out of the check. */
+    maxRawKB?: number;
+    /** Scene opts out of bundle-size ceiling enforcement (mirrors bundle-size.spec.ts). */
+    skipBundleSize?: boolean;
+    /** This scene's runtime dynamic-imports branch on device capability, so its measured
+     *  chunk set differs between a developer's GPU and CI's software renderer. Only CI's
+     *  measurement is comparable to the published baseline. See `DEVICE_DEPENDENT_NOTE`. */
+    deviceDependentChunks?: boolean;
 }
 
 interface BundleManifestEntry {
     rawKB: number;
     gzipKB: number;
+    /** Exact runtime-fetched byte count. `rawKB` is this rounded to 0.1 KB for display, which
+     *  hides sub-50-byte drift — including a ceiling overflow on a zero-headroom scene. Tools
+     *  comparing sizes (the build's ceiling check, the delta report) use this. */
+    rawBytes?: number;
     ignoredRawKB?: number;
     bjsRawKB?: number;
     bjsGzipKB?: number;
@@ -241,31 +281,249 @@ function orderBundleManifest(manifest: BundleManifest): BundleManifest {
     return ordered;
 }
 
-function readMasterBundleManifest(refs = ["upstream/master", "origin/master", "master"]): { ref: string; manifest: BundleManifest } | null {
-    const errors: string[] = [];
-    for (const ref of refs) {
+/** Absolute path to a scene's per-scene manifest file. */
+function perSceneManifestPath(scene: string): string {
+    return resolve(outDir, MANIFEST_DIR, `${scene}.json`);
+}
+
+/**
+ * Read the per-scene manifest files (`manifest/<scene>.json`) into a
+ * single aggregate map. This is the source of truth seed for incremental builds.
+ */
+export function readCurrentBundleManifest(): BundleManifest {
+    const dir = resolve(outDir, MANIFEST_DIR);
+    const manifest: BundleManifest = {};
+    if (!existsSync(dir)) return manifest;
+    for (const file of readdirSync(dir)) {
+        if (!file.endsWith(".json")) continue;
+        const scene = file.slice(0, -".json".length);
         try {
-            const json = execFileSync("git", ["show", `${ref}:${MANIFEST_GIT_PATH}`], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
-            return { ref, manifest: JSON.parse(json) as BundleManifest };
-        } catch (err) {
-            errors.push(`${ref}: ${err instanceof Error ? err.message : String(err)}`);
+            manifest[scene] = JSON.parse(readFileSync(resolve(dir, file), "utf-8")) as BundleManifestEntry;
+        } catch {
+            /* skip malformed per-scene file */
         }
     }
+    return manifest;
+}
 
-    console.warn(`Could not read ${MANIFEST_GIT_PATH} from master refs; bundle delta UI will not have a master baseline. ${errors.join(" | ")}`);
+/**
+ * Atomically write JSON to `path` (sibling temp file + rename). The lab UI and
+ * concurrent readers may hold the destination open; rename never truncates it
+ * and survives transient Windows file locks (errno -4094 / EBUSY).
+ */
+function atomicWriteJson(path: string, json: string): void {
+    mkdirSync(dirname(path), { recursive: true });
+    const tmpPath = `${path}.tmp`;
+    for (let attempt = 0; ; attempt++) {
+        try {
+            writeFileSync(tmpPath, json);
+            renameSync(tmpPath, path);
+            return;
+        } catch (err) {
+            if (attempt >= 5) throw err;
+            const wait = Date.now() + 50 * (attempt + 1);
+            while (Date.now() < wait) {
+                /* brief synchronous backoff before retrying the atomic write */
+            }
+        }
+    }
+}
+
+/** Write a single scene's per-scene manifest file. */
+function writePerSceneManifest(scene: string, entry: BundleManifestEntry): void {
+    atomicWriteJson(perSceneManifestPath(scene), `${JSON.stringify(entry, null, 2)}\n`);
+}
+
+/** Write the generated (gitignored) aggregate `manifest.json` for runtime consumers. */
+function writeAggregateBundleManifest(manifest: BundleManifest): void {
+    atomicWriteJson(resolve(outDir, MANIFEST_FILE), JSON.stringify(orderBundleManifest(manifest), null, 2));
+}
+
+/**
+ * Read many git blobs in one `git cat-file --batch` call, keyed by the revision
+ * spec that produced them.
+ *
+ * The legacy tracked layout is ~230 files per ref, and spawning `git show` once
+ * per file costs ~15s per resolve — long enough to time out callers and to make
+ * every `build:bundle-scenes` run that misses the published baseline feel hung.
+ * One batched process makes the same read effectively free.
+ *
+ * `--batch` emits `<oid> SP <type> SP <size> LF <contents> LF` per request, or
+ * `<spec> SP missing LF` for one it cannot resolve, so the output is parsed as a
+ * buffer and sliced by the declared byte length rather than split on newlines.
+ */
+function readGitBlobs(specs: string[]): Map<string, string> {
+    const out = new Map<string, string>();
+    if (specs.length === 0) {
+        return out;
+    }
+
+    const stdout = execFileSync("git", ["cat-file", "--batch"], {
+        cwd: ROOT,
+        input: specs.join("\n") + "\n",
+        maxBuffer: 512 * 1024 * 1024,
+        stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let offset = 0;
+    for (const spec of specs) {
+        const newline = stdout.indexOf("\n", offset);
+        if (newline === -1) {
+            break;
+        }
+        const header = stdout.toString("utf-8", offset, newline);
+        offset = newline + 1;
+        const [, type, rawSize] = header.split(" ");
+        const size = Number(rawSize);
+        if (type === undefined || !Number.isFinite(size)) {
+            // "missing" / "ambiguous" responses carry no body to skip past.
+            continue;
+        }
+        if (type === "blob") {
+            out.set(spec, stdout.toString("utf-8", offset, offset + size));
+        }
+        offset += size + 1; // trailing LF after the contents
+    }
+    return out;
+}
+
+function readMasterBundleManifestFromRef(ref: string): BundleManifest | null {
+    // Preferred: distributed per-scene tracked files under `manifest/`.
+    try {
+        const list = execFileSync("git", ["ls-tree", "-r", "--name-only", ref, "--", MANIFEST_DIR_GIT_PATH], {
+            cwd: ROOT,
+            encoding: "utf-8",
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        const files = list
+            .split("\n")
+            .map((l) => l.trim())
+            .filter((l) => l.endsWith(".json"));
+        if (files.length > 0) {
+            const blobs = readGitBlobs(files.map((file) => `${ref}:${file}`));
+            const manifest: BundleManifest = {};
+            for (const file of files) {
+                const json = blobs.get(`${ref}:${file}`);
+                if (json === undefined) {
+                    continue;
+                }
+                const scene = file.slice(file.lastIndexOf("/") + 1, -".json".length);
+                manifest[scene] = JSON.parse(json) as BundleManifestEntry;
+            }
+            if (Object.keys(manifest).length > 0) {
+                return manifest;
+            }
+        }
+    } catch {
+        /* fall through to the legacy single-file layout */
+    }
+    // Legacy single-file fallback for pre-migration master refs.
+    try {
+        const json = execFileSync("git", ["show", `${ref}:${MANIFEST_GIT_PATH}`], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+        return JSON.parse(json) as BundleManifest;
+    } catch {
+        return null;
+    }
+}
+
+function readMasterBundleManifestFromGit(refs = ["upstream/master", "origin/master", "master"]): { source: string; manifest: BundleManifest } | null {
+    for (const ref of refs) {
+        const manifest = readMasterBundleManifestFromRef(ref);
+        if (manifest) return { source: ref, manifest };
+    }
     return null;
 }
 
-export function writeMasterBundleManifest(refs?: string[]): void {
+/** Guard against a CDN or proxy serving something that parses as JSON but isn't a manifest. */
+function isBundleManifest(value: unknown): value is BundleManifest {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const entries = Object.values(value);
+    return entries.length > 0 && entries.every((entry) => typeof entry === "object" && entry !== null && typeof (entry as BundleManifestEntry).rawKB === "number");
+}
+
+/** Read a baseline that CI (or a developer) already placed on disk. */
+function readMasterBundleManifestFromFile(path: string): BundleManifest | null {
+    try {
+        const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+        return isBundleManifest(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Fetch the published baseline. A 404 means master has not published one yet
+ * (first run after this change, or a fork with no deployment) and is not an
+ * error — the caller degrades to "no baseline", which only costs the advisory
+ * delta report.
+ */
+async function fetchMasterBundleManifest(url: string): Promise<BundleManifest | null> {
+    try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+        if (response.status === 404) {
+            console.warn(`No published bundle-size baseline at ${url} yet; skipping the master delta.`);
+            return null;
+        }
+        if (!response.ok) {
+            console.warn(`Could not fetch the bundle-size baseline from ${url}: HTTP ${response.status}.`);
+            return null;
+        }
+        const parsed: unknown = await response.json();
+        if (!isBundleManifest(parsed)) {
+            console.warn(`The response from ${url} is not a bundle-size manifest; skipping the master delta.`);
+            return null;
+        }
+        return parsed;
+    } catch (error) {
+        console.warn(`Could not fetch the bundle-size baseline from ${url}: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+}
+
+/**
+ * Resolve the master baseline, in order of preference:
+ *   1. `BUNDLE_MASTER_MANIFEST_FILE` — a baseline CI already downloaded.
+ *   2. The published baseline over HTTP (skipped when `refs` is given, i.e. when
+ *      the caller explicitly asked to compare against a specific git ref, or
+ *      when `BUNDLE_MASTER_MANIFEST_URL` is set to an empty value).
+ *   3. Git refs — the legacy tracked layout, still readable on old refs.
+ */
+export async function resolveMasterBundleManifest(refs?: string[]): Promise<{ source: string; manifest: BundleManifest } | null> {
+    const filePath = process.env.BUNDLE_MASTER_MANIFEST_FILE;
+    if (filePath) {
+        const manifest = readMasterBundleManifestFromFile(filePath);
+        if (manifest) return { source: filePath, manifest };
+        console.warn(`BUNDLE_MASTER_MANIFEST_FILE=${filePath} could not be read as a manifest; falling back to the published baseline.`);
+    }
+
+    if (!refs) {
+        // An explicitly empty BUNDLE_MASTER_MANIFEST_URL means "do not fetch" — for
+        // offline runs, and for the master build that is about to overwrite the
+        // baseline anyway. Trimmed because a YAML-supplied blank can arrive as " ".
+        const url = (process.env.BUNDLE_MASTER_MANIFEST_URL ?? DEFAULT_MASTER_MANIFEST_URL).trim();
+        if (url) {
+            const manifest = await fetchMasterBundleManifest(url);
+            if (manifest) return { source: url, manifest };
+        }
+    }
+
+    const fromGit = readMasterBundleManifestFromGit(refs);
+    if (fromGit) return fromGit;
+
+    console.warn("Could not resolve a master bundle-size baseline; the bundle delta UI and PR comment will be skipped.");
+    return null;
+}
+
+export async function writeMasterBundleManifest(refs?: string[]): Promise<void> {
     const masterManifestPath = resolve(outDir, MASTER_MANIFEST_FILE);
-    const baseline = readMasterBundleManifest(refs);
+    const baseline = await resolveMasterBundleManifest(refs);
     if (!baseline) {
         rmSync(masterManifestPath, { force: true });
         return;
     }
 
     writeFileSync(masterManifestPath, JSON.stringify(orderBundleManifest(baseline.manifest), null, 2));
-    console.log(`✓ Bundle master baseline manifest (${baseline.ref}) written to ${masterManifestPath}`);
+    console.log(`✓ Bundle master baseline manifest (${baseline.source}) written to ${masterManifestPath}`);
 }
 
 /**
@@ -749,10 +1007,32 @@ export function isLiteBundleExternal(id: string): boolean {
 function liteManualChunks(id: string): string | undefined {
     const clean = id.replace(/\\/g, "/").split("?")[0]!;
     if (/(?:^|\/)text-shaper[-/]/.test(clean)) {
-        return "text-shaper";
+        return TEXT_SHAPER_CHUNK_NAME;
     }
     return undefined;
 }
+
+/** The manual-chunk name {@link liteManualChunks} pins the `text-shaper` vendor
+ *  runtime into. Every scene imports the `babylon-lite` barrel, which re-exports the
+ *  default text APIs that pull in `text-shaper`; for the ~200 scenes that use no text,
+ *  tree-shaking empties that pinned chunk, so Rollup logs a harmless
+ *  `Generated an empty chunk: "text-shaper"` (`EMPTY_BUNDLE`) — once per scene. The
+ *  empty chunk is never referenced or loaded, so {@link liteBundleOnWarn} silences
+ *  exactly that warning while leaving every other Rollup warning intact. */
+const TEXT_SHAPER_CHUNK_NAME = "text-shaper";
+
+/** Suppress the expected empty-`text-shaper`-chunk warning (see
+ *  {@link TEXT_SHAPER_CHUNK_NAME}); forward all other Rollup warnings unchanged. */
+const liteBundleOnWarn: Rollup.WarningHandlerWithDefault = (warning, defaultHandler) => {
+    if (warning.code === "EMPTY_BUNDLE") {
+        const names = warning.names ?? [];
+        const emptyChunkNames = names.length > 0 ? names : [warning.message];
+        if (emptyChunkNames.every((entry) => entry.includes(TEXT_SHAPER_CHUNK_NAME))) {
+            return;
+        }
+    }
+    defaultHandler(warning);
+};
 
 function readLiteSceneSource(scene: string): string {
     try {
@@ -833,6 +1113,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
             rollupOptions: {
                 input: { [scene]: liteSceneEntry(scene, sourceLabDir) },
                 external: isLiteBundleExternal,
+                onwarn: liteBundleOnWarn,
                 output: {
                     format: "es",
                     entryFileNames: "[name].js",
@@ -848,12 +1129,52 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
     rmSync(sceneOutDir, { recursive: true, force: true });
 }
 
+/** Chromium flags for the measurement browser. SwiftShader under CI, or locally when the
+ *  `--software` flag is passed; otherwise the real GPU (SwiftShader is far slower, and
+ *  several heavy scenes never reach `dataset.ready` under it on Windows).
+ *  See `DEVICE_DEPENDENT_NOTE`. */
 export function measurementBrowserArgs(): string[] {
-    const swiftShaderArgs = process.env.CI
-        ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
-        : [];
+    const swiftShaderArgs =
+        process.env.CI || softwareRenderRequested()
+            ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
+            : [];
     return ["--force-color-profile=srgb", "--enable-unsafe-webgpu", ...swiftShaderArgs];
 }
+
+/** `--software` on the command line, or `BUNDLE_SOFTWARE_RENDER=1`. Only an explicit
+ *  truthy value counts, so `BUNDLE_SOFTWARE_RENDER=0` disables it as one would expect. */
+function softwareRenderRequested(): boolean {
+    const env = process.env.BUNDLE_SOFTWARE_RENDER;
+    return process.argv.includes("--software") || env === "1" || env === "true";
+}
+
+/** Why a few scenes' local numbers are not comparable to the published master baseline.
+ *
+ *  CI measures under SwiftShader; a developer machine measures on its real GPU. A few
+ *  runtime paths branch on device capability and dynamic-import different chunks as a
+ *  result — scenes 113/114/115 resolve detailed picking to `picking-detailed-pipeline` on
+ *  a real GPU and to `picking-pipeline` under SwiftShader. Their measured chunk set (and
+ *  size) therefore depends on the machine, so a local build shows a delta against the
+ *  CI-measured baseline for scenes it never touched. That delta is noise, not a
+ *  regression; the run logs this note so it is not mistaken for one.
+ *
+ *  Forcing SwiftShader for the whole build was tried and rejected: on Windows the heavy
+ *  IBL scenes never reach `dataset.ready` under it. Restricting the run to the flagged
+ *  scenes is the canonical way to reproduce CI's numbers for them:
+ *
+ *      pnpm build:bundle-manifest:device
+ *
+ *  That command needs a working SwiftShader WebGPU stack — reliable on the Linux CI image,
+ *  flaky-to-unusable on Windows, where these scenes also time out. On Windows, treat CI's
+ *  measurement as the authoritative one for these three. */
+const DEVICE_DEPENDENT_NOTE = "device-dependent chunk set — differs from the CI-measured baseline (reproduce CI with: pnpm build:bundle-manifest:device)";
+
+/** A scene with less than this much room under its ceiling is reported after a build: at
+ *  that margin the next shared-path change lands on it, and finding that out from CI costs
+ *  ~35 minutes. */
+const TIGHT_HEADROOM_BYTES = 256;
+/** Cap the tight-headroom list so a build's output stays readable; the rest are counted. */
+const TIGHT_HEADROOM_LIST_LIMIT = 10;
 
 export async function buildBundleScenes(): Promise<void> {
     const t0 = performance.now();
@@ -873,7 +1194,7 @@ export async function buildBundleScenes(): Promise<void> {
     // Do NOT wipe outDir — keep existing data live in the lab tab during the build.
     // Each scene is updated atomically (new files written, stale old chunks removed).
     mkdirSync(outDir, { recursive: true });
-    writeMasterBundleManifest();
+    await writeMasterBundleManifest();
     for (const scene of scenesToBuild) {
         ensureBundleHtmlImportMap(scene);
     }
@@ -933,9 +1254,10 @@ export async function buildBundleScenes(): Promise<void> {
             resolve: {
                 // Resolve `babylon-lite` to the built `build/lib` tree (NOT the TS source)
                 // so the measured bundle reflects exactly what a consumer of the published
-                // package gets. Using the directory (not index.js) so sub-path imports like
-                // 'babylon-lite/loader-env/load-dds-env' resolve correctly. `build:lib` must
-                // run first unless explicit source fallback is enabled for legacy baselines.
+                // package gets. Using the directory (not index.js) also preserves internal,
+                // lab-only deep imports that are intentionally absent from the public package
+                // export map. `build:lib` must run first unless explicit source fallback is
+                // enabled for legacy baselines.
                 alias: {
                     "babylon-lite": liteAliasDir,
                 },
@@ -952,7 +1274,7 @@ export async function buildBundleScenes(): Promise<void> {
                     input: { [scene]: isBjs ? bjsSceneEntry(scene) : liteSceneEntry(scene) },
                     // Exclude third-party WASM runtimes from Lite bundles so the
                     // bundle-size metric reflects only first-party Lite engine code.
-                    ...(!isBjs && { external: isLiteBundleExternal }),
+                    ...(!isBjs && { external: isLiteBundleExternal, onwarn: liteBundleOnWarn }),
                     output: {
                         format: "es",
                         entryFileNames: "[name].js",
@@ -1005,16 +1327,8 @@ export async function buildBundleScenes(): Promise<void> {
         rmSync(sceneOutDir, { recursive: true, force: true });
     }
 
-    // Load existing current manifest to check for cached BJS sizes.
-    const manifestPath = resolve(outDir, MANIFEST_FILE);
-    let existingManifest: BundleManifest = {};
-    if (existsSync(manifestPath)) {
-        try {
-            existingManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-        } catch {
-            /* start fresh */
-        }
-    }
+    // Load existing per-scene manifest files to check for cached BJS sizes.
+    const existingManifest: BundleManifest = readCurrentBundleManifest();
 
     // Only build BJS scenes whose sizes aren't already cached in the manifest
     const bjsScenesToBuild = requestedSceneNames
@@ -1076,7 +1390,59 @@ export async function buildBundleScenes(): Promise<void> {
             console.log(line);
         }
     }
+    reportCeilingHeadroom(scenesToBuild, manifest);
+    if (process.exitCode) {
+        console.error(`✘ Bundle scenes built to ${outDir}, but a ceiling was exceeded (total ${elapsed(t0)})`);
+        return;
+    }
     console.log(`✓ Bundle scenes + manifest built to ${outDir} (total ${elapsed(t0)})`);
+}
+
+/**
+ * Report each measured scene against its `scene-config.json` ceiling, in BYTES.
+ *
+ * `rawKB` is rounded to 0.1 KB, so a scene sitting exactly at its ceiling can overflow by
+ * a few bytes while the printed size still reads the same value — the overflow then only
+ * surfaces in CI's bundle-size job, ~35 minutes later.
+ * Comparing exact bytes here surfaces it immediately, and listing the tightest scenes makes
+ * a zero-margin scene visible *before* it is the thing that breaks someone else's PR.
+ */
+function reportCeilingHeadroom(scenes: readonly string[], manifest: Record<string, BundleManifestEntry>): void {
+    const over: string[] = [];
+    const tight: { scene: string; headroom: number; ceilingKB: number }[] = [];
+
+    for (const scene of scenes) {
+        const measured = manifest[scene]?.rawBytes;
+        const config = sceneConfigByName.get(scene);
+        const ceilingKB = config?.maxRawKB;
+        // Honour the same opt-out as the ceiling test in bundle-size.spec.ts.
+        if (measured == null || ceilingKB == null || config?.skipBundleSize) {
+            continue;
+        }
+        const ceilingBytes = ceilingKB * 1024;
+        // Compare before rounding: a ceiling like 92.2 KB is 94412.8 bytes, so 94413 bytes is
+        // over by 0.2 — which `Math.round` would turn into `-0` and wave through.
+        if (measured > ceilingBytes) {
+            over.push(`  ${scene}: ${(measured / 1024).toFixed(3)} KB exceeds ceiling ${ceilingKB} KB by ${Math.ceil(measured - ceilingBytes)} bytes`);
+        } else {
+            const headroom = Math.floor(ceilingBytes - measured);
+            if (headroom < TIGHT_HEADROOM_BYTES) {
+                tight.push({ scene, headroom, ceilingKB });
+            }
+        }
+    }
+
+    if (tight.length > 0) {
+        tight.sort((a, b) => a.headroom - b.headroom);
+        const shown = tight.slice(0, TIGHT_HEADROOM_LIST_LIMIT).map((t) => `  ${t.scene}: ${t.headroom} B below its ${t.ceilingKB} KB ceiling`);
+        const more = tight.length > shown.length ? `\n  … and ${tight.length - shown.length} more under ${TIGHT_HEADROOM_BYTES} B` : "";
+        console.log(`\n⚠ ${tight.length} scene(s) with little headroom — a shared-path change may push them over:\n${shown.join("\n")}${more}`);
+    }
+    if (over.length > 0) {
+        console.error(`\n✘ Bundle-size ceiling exceeded (exact bytes; scene-config.json maxRawKB):\n${over.join("\n")}`);
+        console.error(`\nRaising a ceiling requires explicit user approval — see GUIDANCE.md.`);
+        process.exitCode = 1;
+    }
 }
 
 /**
@@ -1084,45 +1450,97 @@ export async function buildBundleScenes(): Promise<void> {
  * bundle-sceneN.html, and measure only the /bundle/*.js bytes that are
  * actually fetched at runtime.
  */
+/** How many times to attempt measuring a single Lite scene before giving up. */
+const LITE_MEASURE_ATTEMPTS = 3;
+
+/** Default budget for a Lite scene to reach its `dataset.ready` signal. */
+const READY_TIMEOUT_MS_DEFAULT = 50_000;
+
+/**
+ * Per-scene overrides for the ready-timeout.
+ *
+ * A few scenes perform compute-heavy GPU work that is near-instant on real
+ * hardware but dramatically slower under CI's software WebGPU (SwiftShader).
+ * scene129 (Gaussian Splatting + GPU picking) combines a GS radix-sort compute
+ * pass with a GPU→CPU picking readback (`pickAsync` → buffer `mapAsync`), which
+ * SwiftShader executes far slower than a real adapter. It renders in ~2s on a
+ * real GPU but does not reliably reach `dataset.ready` within the 50s default
+ * under SwiftShader, so the bundle measurement flakes with the identical
+ * "did not become ready (timed out after 50s …)" error across unrelated PRs.
+ *
+ * scene164 (device-lost recovery) is slow for a related but distinct reason: it is
+ * the one scene that deliberately destroys the WebGPU device and rebuilds the whole
+ * resource graph — environment cubemap mips, BRDF LUT, every material texture, meshes,
+ * skeletons, morph targets and the ESM shadow pipelines — and only signals `ready`
+ * after rendering settled post-recovery frames. Every frame it draws re-renders a
+ * 1024² ESM shadow map (`forceRefreshEveryFrame`, required so the map tracks the
+ * pinned pose) for a skinned and morphed caster, so it draws far more expensive
+ * frames than a typical scene, which reaches `ready` after a handful. `dataset.ready`
+ * is withheld until after recovery on purpose — setting it earlier would exclude the
+ * entire recovery path from this scene's recorded size — so that work cannot be moved
+ * outside the measured window.
+ *
+ * Recording a size only once the scene renders is intentional (the render
+ * pipeline's lazy chunks load on first render), so the right fix is a larger
+ * budget for these scenes rather than measuring a truncated bundle. We grant the
+ * same 150s the parity spec already allows for scene129; a genuinely-broken
+ * scene still fails loudly, just after a longer wait.
+ */
+const READY_TIMEOUT_OVERRIDES_MS: Readonly<Record<string, number>> = {
+    scene129: 150_000,
+    scene164: 150_000,
+};
+
+function readyTimeoutForScene(scene: string): number {
+    return READY_TIMEOUT_OVERRIDES_MS[scene] ?? READY_TIMEOUT_MS_DEFAULT;
+}
+
+/**
+ * Measure a Lite scene, retrying on failure. A Lite scene that never reaches its
+ * `dataset.ready` signal (e.g. a transient failure or rate-limit fetching a large
+ * multi-file remote asset such as Sponza's ~70 files in CI) would otherwise be
+ * silently under-counted: the render pipeline's lazily-imported chunks only load
+ * once the scene renders. `measurePage(..., requireReady=true)` rejects such a
+ * measurement rather than recording a truncated size, so we retry a few times to
+ * absorb transient network flakiness before failing the build loudly.
+ */
+async function measureLiteSceneWithRetry(
+    browser: any,
+    port: number,
+    scene: string
+): Promise<{ rawKB: number; rawBytes: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= LITE_MEASURE_ATTEMPTS; attempt++) {
+        try {
+            return await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/", true, readyTimeoutForScene(scene));
+        } catch (err) {
+            lastError = err;
+            console.warn(`  ${scene}: measurement attempt ${attempt}/${LITE_MEASURE_ATTEMPTS} failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+    throw new Error(
+        `Failed to measure ${scene} after ${LITE_MEASURE_ATTEMPTS} attempts. This usually indicates a transient failure ` +
+            `(e.g. rate-limit) fetching a remote asset during measurement, which would truncate the bundle. Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`
+    );
+}
+
 async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readonly string[], pruneManifest = true): Promise<BundleManifest> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
-    const manifestPath = resolve(outDir, MANIFEST_FILE);
 
-    // Load existing manifest so we can update incrementally (UI can refresh mid-build)
-    let manifest: BundleManifest = {};
-    if (existsSync(manifestPath)) {
-        try {
-            manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-        } catch {
-            /* start fresh */
-        }
+    // Seed from any existing per-scene manifest files so subset builds preserve
+    // other scenes' entries and the live UI can refresh mid-build.
+    const manifest: BundleManifest = readCurrentBundleManifest();
+
+    // Persist a single scene's per-scene file, then refresh the generated
+    // aggregate `manifest.json` that runtime consumers (lab UI, tests) read.
+    function flushScene(scene: string): void {
+        const entry = manifest[scene];
+        if (entry) writePerSceneManifest(scene, entry);
+        writeAggregateBundleManifest(manifest);
     }
 
-    function flush(): void {
-        // The lab UI may fetch manifest.json mid-build, so a plain writeFileSync (which truncates
-        // the live file) can collide with a concurrent reader and surface as a transient Windows
-        // file-lock error (errno -4094 UNKNOWN / EBUSY). Write a sibling temp file and rename it
-        // into place — rename is atomic and never truncates the file readers hold open. Retry a few
-        // times to ride out any residual lock (e.g. AV scanning the freshly written file).
-        const json = JSON.stringify(orderBundleManifest(manifest), null, 2);
-        const tmpPath = `${manifestPath}.tmp`;
-        for (let attempt = 0; ; attempt++) {
-            try {
-                writeFileSync(tmpPath, json);
-                renameSync(tmpPath, manifestPath);
-                return;
-            } catch (err) {
-                if (attempt >= 5) {
-                    throw err;
-                }
-                const wait = Date.now() + 50 * (attempt + 1);
-                while (Date.now() < wait) {
-                    /* brief synchronous backoff before retrying the atomic write */
-                }
-            }
-        }
-    }
+    const deviceDependent = (scene: string): boolean => !!sceneConfigByName.get(scene)?.deviceDependentChunks && !process.env.CI && !softwareRenderRequested();
 
     try {
         const tBrowser = performance.now();
@@ -1130,14 +1548,15 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
         const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
         console.log(`Browser launched in ${elapsed(tBrowser)}`);
 
-        // Measure Lite scenes (write after each)
+        // Measure Lite scenes (write after each), retrying transient failures.
         for (const scene of liteScenes) {
             const tPage = performance.now();
-            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/");
-            manifest[scene] = { ...manifest[scene], rawKB, gzipKB, ignoredRawKB, runtimeChunks: chunks };
-            flush();
+            const { rawKB, rawBytes, gzipKB, ignoredRawKB, chunks } = await measureLiteSceneWithRetry(browser, port, scene);
+            manifest[scene] = { ...manifest[scene], rawKB, rawBytes, gzipKB, ignoredRawKB, runtimeChunks: chunks };
+            flushScene(scene);
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
-            console.log(`  measured ${scene}: ${rawKB} KB raw, ${gzipKB} KB gzip${ignored} (${elapsed(tPage)})`);
+            const note = deviceDependent(scene) ? ` — ${DEVICE_DEPENDENT_NOTE}` : "";
+            console.log(`  measured ${scene}: ${rawKB} KB raw, ${gzipKB} KB gzip${ignored} (${elapsed(tPage)})${note}`);
         }
 
         // Measure BJS scenes — skip if sizes already cached in manifest
@@ -1159,7 +1578,7 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
             if (manifest[liteScene]) {
                 manifest[liteScene].bjsRawKB = rawKB;
                 manifest[liteScene].bjsGzipKB = gzipKB;
-                flush();
+                flushScene(liteScene);
             }
             console.log(`  measured ${bjsScene}: ${rawKB} KB raw, ${gzipKB} KB gzip (${elapsed(tPage)})`);
         }
@@ -1174,12 +1593,136 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
         for (const scene of Object.keys(manifest)) {
             if (!currentScenes.has(scene)) {
                 delete manifest[scene];
+                rmSync(perSceneManifestPath(scene), { force: true });
             }
         }
-        flush();
+        writeAggregateBundleManifest(manifest);
     }
 
     return manifest;
+}
+
+/**
+ * On-disk cache for remote scene assets fetched during measurement.
+ *
+ * Bundle-size measurement loads each scene in a headless browser and counts the
+ * JS chunks it fetches. Many scenes pull models/textures/environments from remote
+ * hosts (assets.babylonjs.com, playground.babylonjs.com, cdn.jsdelivr.net, …).
+ * A scene's render-pipeline chunks are dynamic imports that load only once the
+ * scene renders, so any remote asset that fails to fetch would prevent the scene
+ * from rendering and truncate its measured bundle. With ~230 remote requests
+ * across ~10 hosts per run, transient failures/rate-limits are near-certain over
+ * time and make measurement non-deterministic.
+ *
+ * We intercept every non-localhost request in the measurement browser and serve
+ * it from this cache: on a miss we fetch from the origin with PER-REQUEST retry
+ * (far more robust than reloading the whole scene) and persist the bytes; on a
+ * hit we serve from disk with no network at all. This makes measurement
+ * deterministic and lets CI warm the cache once (via BUNDLE_ASSET_CACHE_DIR).
+ * If an asset is genuinely unfetchable after retries the request is aborted, the
+ * scene fails to become ready, and the caller fails loudly — bundle size is never
+ * recorded from a truncated load.
+ */
+const ASSET_CACHE_DIR = process.env.BUNDLE_ASSET_CACHE_DIR ? resolve(process.env.BUNDLE_ASSET_CACHE_DIR) : resolve(ROOT, ".bundle-asset-cache");
+const ASSET_FETCH_ATTEMPTS = 4;
+
+interface CachedAsset {
+    status: number;
+    contentType: string;
+    body: Buffer;
+}
+
+// De-dupe concurrent/repeat requests for the same URL within a single run so an
+// asset shared across scenes is fetched at most once. Cleared on failure so a
+// later scene can retry.
+const assetMemCache = new Map<string, Promise<CachedAsset>>();
+
+function assetCacheKey(url: string): string {
+    return createHash("sha256").update(url).digest("hex");
+}
+
+async function fetchAssetWithRetry(url: string): Promise<CachedAsset> {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= ASSET_FETCH_ATTEMPTS; attempt++) {
+        try {
+            const res = await fetch(url, { redirect: "follow" });
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status} ${res.statusText}`);
+            }
+            const body = Buffer.from(await res.arrayBuffer());
+            return { status: res.status, contentType: res.headers.get("content-type") ?? "application/octet-stream", body };
+        } catch (err) {
+            lastErr = err;
+            if (attempt < ASSET_FETCH_ATTEMPTS) {
+                await new Promise((r) => setTimeout(r, 250 * 2 ** (attempt - 1)));
+            }
+        }
+    }
+    throw new Error(`asset fetch failed after ${ASSET_FETCH_ATTEMPTS} attempts: ${url} — ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
+}
+
+async function getCachedAsset(url: string): Promise<CachedAsset> {
+    const inflight = assetMemCache.get(url);
+    if (inflight) {
+        return inflight;
+    }
+    const load = (async (): Promise<CachedAsset> => {
+        const key = assetCacheKey(url);
+        const bodyPath = resolve(ASSET_CACHE_DIR, key);
+        const metaPath = resolve(ASSET_CACHE_DIR, `${key}.json`);
+        if (!process.env.BUNDLE_ASSET_CACHE_DISABLE && existsSync(bodyPath) && existsSync(metaPath)) {
+            const meta = JSON.parse(readFileSync(metaPath, "utf-8")) as { status: number; contentType: string };
+            return { status: meta.status, contentType: meta.contentType, body: readFileSync(bodyPath) };
+        }
+        const asset = await fetchAssetWithRetry(url);
+        console.log(`    [asset-cache miss] fetched ${url}`);
+        mkdirSync(ASSET_CACHE_DIR, { recursive: true });
+        // Atomic write (tmp + rename) so a crash mid-write can't leave a partial body.
+        const tmpBody = `${bodyPath}.tmp${process.pid}`;
+        writeFileSync(tmpBody, asset.body);
+        renameSync(tmpBody, bodyPath);
+        writeFileSync(metaPath, JSON.stringify({ url, status: asset.status, contentType: asset.contentType }));
+        return asset;
+    })();
+    assetMemCache.set(url, load);
+    load.catch(() => assetMemCache.delete(url));
+    return load;
+}
+
+/**
+ * Route every request the measurement page makes: localhost (the bundle server)
+ * passes through untouched so JS chunks are measured normally; every remote asset
+ * is served from {@link getCachedAsset}. Aborts on unfetchable assets so the scene
+ * fails loudly rather than measuring a truncated bundle.
+ */
+async function installAssetCacheRoute(page: any, port: number): Promise<void> {
+    const localBase = `http://localhost:${port}`;
+    await page.route("**/*", async (route: any) => {
+        const url = route.request().url();
+        if (url.startsWith(localBase) || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+            await route.continue().catch(() => {});
+            return;
+        }
+        try {
+            const asset = await getCachedAsset(url);
+            await route.fulfill({
+                status: asset.status,
+                headers: {
+                    "content-type": asset.contentType,
+                    // Faithfully permissive CORS: the real hosts already allow these cross-origin
+                    // asset fetches (that's why scenes load today), so echo an allow-all header
+                    // rather than the origin's specific one.
+                    "access-control-allow-origin": "*",
+                    "cache-control": "public, max-age=31536000",
+                },
+                body: asset.body,
+            });
+        } catch {
+            // Unfetchable after retries — abort so the scene fails to render and the
+            // caller's requireReady guard turns it into a loud, non-silent failure.
+            await route.abort().catch(() => {});
+        }
+    });
 }
 
 export async function measurePage(
@@ -1187,8 +1730,10 @@ export async function measurePage(
     port: number,
     scene: string,
     htmlFile: string,
-    bundlePath: string
-): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
+    bundlePath: string,
+    requireReady = false,
+    readyTimeoutMs = READY_TIMEOUT_MS_DEFAULT
+): Promise<{ rawKB: number; rawBytes: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
     const page = await browser.newPage();
     const jsPayloads: RuntimeJsPayload[] = [];
     const chunkFiles: string[] = [];
@@ -1211,11 +1756,47 @@ export async function measurePage(
         }
     });
 
+    await installAssetCacheRoute(page, port);
     await page.goto(`http://localhost:${port}/${htmlFile}`);
+    // Resolve as soon as the scene finishes (dataset.ready) OR reports a fatal
+    // error (dataset.error), so a fast-failing scene doesn't burn the full timeout.
+    let notReadyReason: string | undefined;
     try {
-        await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 50_000 });
-    } catch {
-        // BJS pages may not reach ready state without GPU — just measure fetched JS
+        await page.waitForFunction(
+            () => {
+                const c = document.querySelector("canvas");
+                return c?.dataset.ready === "true" || c?.dataset.error != null;
+            },
+            undefined,
+            { timeout: readyTimeoutMs }
+        );
+        notReadyReason = await page.evaluate(() => {
+            const c = document.querySelector("canvas");
+            if (c?.dataset.ready === "true") return undefined;
+            return c?.dataset.error ?? "canvas reported neither ready nor error";
+        });
+    } catch (err) {
+        // Only treat a genuine Playwright timeout as "not ready"; any other error
+        // (page crash, execution context destroyed, navigation failure, …) is a
+        // real failure that must propagate instead of masquerading as a timeout.
+        if (!(err instanceof Error) || err.name !== "TimeoutError") {
+            await page.close();
+            throw err;
+        }
+        // waitForFunction timed out: the scene set neither ready nor error.
+        notReadyReason = `timed out after ${Math.round(readyTimeoutMs / 1000)}s waiting for canvas ready/error signal`;
+    }
+
+    // For Lite scenes (requireReady), a scene that never rendered would under-count
+    // its bundle: the render pipeline's lazily-imported chunks (pbr-renderable,
+    // ibl-fragment, generate-mipmaps, …) only load once the scene renders, so a
+    // failed remote-asset fetch would silently produce a truncated size. Reject the
+    // measurement so the caller can retry / fail loudly instead of recording a bogus
+    // decrease. BJS pages (requireReady=false) may legitimately never reach ready
+    // without a real GPU, so they keep the lenient "measure whatever loaded" behavior.
+    if (requireReady && notReadyReason !== undefined) {
+        await page.close();
+        throw new Error(`measurePage: scene "${scene}" did not become ready (${notReadyReason}); refusing to record a truncated bundle.`);
     }
 
     await Promise.all(responseReads);
@@ -1229,6 +1810,7 @@ export async function measurePage(
     await page.close();
     return {
         rawKB: bytesToRoundedKB(rawBytes),
+        rawBytes,
         gzipKB: bytesToRoundedKB(summary.gzipBytes),
         ignoredRawKB,
         chunks: Array.from(new Set(chunkFiles)).sort(),

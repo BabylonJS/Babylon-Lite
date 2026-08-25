@@ -9,13 +9,15 @@
  * mesh list is not reconstructed in this initial pass.
  */
 
-import { addToScene, loadGltf, loadBabylon } from "babylon-lite";
+import { addToScene, enableBoneControlForSkinnedAssets, loadGltf, loadBabylon } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, AnimationGroup } from "babylon-lite";
 
 import { unsupported } from "../error.js";
-import { collectLoadedMeshes, type LoadedMesh } from "./loaded-mesh.js";
+import { collectLoadedMeshes, type LoadedMeshRegistry } from "./loaded-mesh.js";
 import { GaussianSplattingMesh } from "../meshes/gaussian-splatting.js";
+import type { Mesh, TransformNode } from "../meshes/meshes.js";
 import type { Scene } from "../scene/scene.js";
+import { Skeleton } from "../bones/skeleton.js";
 
 /** Path portion of a URL, without any query string (`?…`) or hash fragment (`#…`). */
 function urlPath(url: string): string {
@@ -43,6 +45,13 @@ export class AssetContainer {
     /** @internal Underlying Babylon Lite asset container. */
     public readonly _lite: LiteAssetContainer;
 
+    /** @internal Canonical loaded-mesh wrappers, cached per Lite node for stable identity. */
+    private readonly _meshRegistry: LoadedMeshRegistry = new Map();
+    /** @internal The compat scene this container was added to, if any (drives scene-aware wrappers). */
+    private _scene: Scene | undefined;
+    /** @internal Canonical loaded-skeleton wrappers. */
+    private _skeletons: Skeleton[] | undefined;
+
     public constructor(lite: LiteAssetContainer) {
         this._lite = lite;
     }
@@ -51,14 +60,28 @@ export class AssetContainer {
         return this._lite.animationGroups ?? [];
     }
 
-    /** Flat list of renderable meshes (Babylon.js-shaped handles over the loaded node tree). */
-    public get meshes(): LoadedMesh[] {
-        return collectLoadedMeshes(this._lite);
+    /**
+     * Flat list of the loaded meshes as canonical, stable-identity compat `Mesh`
+     * handles (`__root__` at index 0, matching Babylon.js). Repeated reads return
+     * the same wrapper objects, and — once the container is added to a scene — the
+     * same handles `scene.meshes` exposes.
+     */
+    public get meshes(): Mesh[] {
+        return collectLoadedMeshes(this._lite, this._meshRegistry, this._scene);
+    }
+
+    public get skeletons(): Skeleton[] {
+        return (this._skeletons ??= (this._lite.skeletons ?? []).map((skeleton, index) => Skeleton._fromLite(skeleton, index)));
     }
 
     /** Add every entity, animation group, camera, and clear colour to the scene. */
     public addAllToScene(scene: Scene): void {
         addToScene(scene._lite, this._lite);
+        this._scene = scene;
+        // Build/bind the canonical wrappers now that the container belongs to a
+        // scene, so `scene.meshes` lists the loaded meshes and later
+        // `container.meshes` reads share the same scene-aware handles.
+        collectLoadedMeshes(this._lite, this._meshRegistry, scene);
         scene._surfaceLoadedCamera();
     }
 
@@ -69,9 +92,9 @@ export class AssetContainer {
 }
 
 interface ImportResult {
-    meshes: Array<LoadedMesh | GaussianSplattingMesh>;
+    meshes: TransformNode[];
     particleSystems: unknown[];
-    skeletons: unknown[];
+    skeletons: Skeleton[];
     animationGroups: AnimationGroup[];
     transformNodes: unknown[];
     lights: unknown[];
@@ -101,6 +124,9 @@ async function load(rootUrl: string, fileName: string, scene: Scene): Promise<As
     const engine = scene.getEngine()._lite;
     // Detect the format from the path (ignoring query/hash), but hand the full URL
     // to the loader so any query string is preserved.
+    if (!isBabylonUrl(url)) {
+        enableBoneControlForSkinnedAssets();
+    }
     const lite = isBabylonUrl(url) ? await loadBabylon(engine, url) : await loadGltf(engine, url);
     return new AssetContainer(lite);
 }
@@ -118,7 +144,7 @@ export const SceneLoader = {
         return {
             meshes: container.meshes,
             particleSystems: [],
-            skeletons: [],
+            skeletons: container.skeletons,
             animationGroups: container.animationGroups,
             transformNodes: [],
             lights: [],
@@ -164,7 +190,7 @@ export async function ImportMeshAsync(source: string, scene: Scene, _options?: u
     return {
         meshes: container.meshes,
         particleSystems: [],
-        skeletons: [],
+        skeletons: container.skeletons,
         animationGroups: container.animationGroups,
         transformNodes: [],
         lights: [],
@@ -193,6 +219,9 @@ async function loadFromSource(source: string, scene: Scene): Promise<AssetContai
     const engine = scene.getEngine()._lite;
     // Detect the format from the path (ignoring query/hash), but pass the full URL
     // to the loader so any query string is preserved.
+    if (!isBabylonUrl(source)) {
+        enableBoneControlForSkinnedAssets();
+    }
     const lite = isBabylonUrl(source) ? await loadBabylon(engine, source) : await loadGltf(engine, source);
     return new AssetContainer(lite);
 }

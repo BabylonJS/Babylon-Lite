@@ -12,6 +12,17 @@ export const MSH_RECEIVE_SHADOWS = 1 << 8;
 export const MSH_VAT = 1 << 9;
 /** Mesh has no NORMAL attribute → must be flat-shaded (glTF spec). */
 export const MSH_FLAT_NORMAL = 1 << 10;
+// Bits 11-15 (negative-winding + 3-bit topology index + uint32-strip flag) are owned by the lazy
+// glTF primitive feature, which pre-encodes them on the affected meshes as `_primitiveFeatures`.
+// The PBR renderables fold those in themselves — they exist only to key the composed shader variant,
+// which the Standard path has no equivalent of — so nothing here has to read them.
+
+/** Extra mesh-feature encoder installed only by runtime opt-ins such as mirrored procedural meshes. */
+let _meshFeatureExtra: ((mesh: Mesh) => number) | null = null;
+/** @internal Install an extra mesh-feature encoder. */
+export function _installMeshFeatureExtra(encode: (mesh: Mesh) => number): void {
+    _meshFeatureExtra = encode;
+}
 
 /** @internal Compute mesh/pass feature bits shared by material renderers. */
 export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number {
@@ -53,6 +64,9 @@ export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number
     }
     if (receiveShadows) {
         features |= MSH_RECEIVE_SHADOWS;
+    }
+    if (_meshFeatureExtra) {
+        features |= _meshFeatureExtra(mesh);
     }
     return features;
 }

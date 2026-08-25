@@ -19,12 +19,12 @@ targets.
 
 ```typescript
 interface StencilState {
-    readonly compare?: GPUCompareFunction;      // default "always"
-    readonly passOp?: GPUStencilOperation;      // default "keep"
-    readonly failOp?: GPUStencilOperation;      // default "keep"
+    readonly compare?: GPUCompareFunction; // default "always"
+    readonly passOp?: GPUStencilOperation; // default "keep"
+    readonly failOp?: GPUStencilOperation; // default "keep"
     readonly depthFailOp?: GPUStencilOperation; // default "keep"
-    readonly readMask?: number;                 // default 0xFF
-    readonly writeMask?: number;                // default 0xFF
+    readonly readMask?: number; // default 0xFF
+    readonly writeMask?: number; // default 0xFF
 }
 
 // Attach to a material (post-creation optional property on all three kinds):
@@ -75,13 +75,13 @@ there is no depth-stencil format mismatch.
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js | Babylon Lite |
-|---|---|
-| `material.stencil.func` / `funcMask` | `StencilState.compare` / `readMask` |
-| `material.stencil.opStencilDepthPass` | `StencilState.passOp` |
-| `material.stencil.opStencilFail` / `opDepthFail` | `StencilState.failOp` / `depthFailOp` |
-| `material.stencil.mask` | `StencilState.writeMask` |
-| always-on stencil state | opt-in `enableMaterialStencil()` (zero bundle cost when unused) |
+| Babylon.js                                       | Babylon Lite                                                    |
+| ------------------------------------------------ | --------------------------------------------------------------- |
+| `material.stencil.func` / `funcMask`             | `StencilState.compare` / `readMask`                             |
+| `material.stencil.opStencilDepthPass`            | `StencilState.passOp`                                           |
+| `material.stencil.opStencilFail` / `opDepthFail` | `StencilState.failOp` / `depthFailOp`                           |
+| `material.stencil.mask`                          | `StencilState.writeMask`                                        |
+| always-on stencil state                          | opt-in `enableMaterialStencil()` (zero bundle cost when unused) |
 
 ## Dependencies
 

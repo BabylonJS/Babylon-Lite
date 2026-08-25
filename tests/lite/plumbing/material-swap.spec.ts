@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity/parity-fixtures";
 import * as path from "path";
 import * as fs from "fs";
 import { PNG } from "pngjs";
@@ -13,6 +13,16 @@ function getCenterPixel(pngPath: string): [number, number, number] {
 }
 
 test.describe("Material Swap", () => {
+    test("re-registering builds a material family added to a built scene", async ({ page }) => {
+        await page.goto("/material-swap-test.html?reregister=1");
+
+        const canvas = page.locator("#renderCanvas");
+        await expect(canvas).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
+        await expect(canvas).not.toHaveAttribute("data-error", /./);
+        await expect(canvas).toHaveAttribute("data-group-built", "true");
+        await expect(canvas).toHaveAttribute("data-mesh-rendered", "true");
+    });
+
     test("mesh.material = newMat changes rendering on next frame", async ({ page }) => {
         await page.goto("/material-swap-test.html");
 

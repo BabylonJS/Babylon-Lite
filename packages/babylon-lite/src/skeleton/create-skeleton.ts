@@ -59,6 +59,7 @@ export function createSkeleton(
         joints1Buffer = createMappedBuffer(engine, joints132, BU.VERTEX);
         weights1Buffer = createMappedBuffer(engine, weights1, BU.VERTEX);
     }
+    const skinBuffers = { jointsBuffer, weightsBuffer, joints1Buffer, weights1Buffer };
 
     return {
         boneTexture,
@@ -72,5 +73,6 @@ export function createSkeleton(
         weights1Buffer,
         joints1: joints1 ?? null,
         weights1: weights1 ?? null,
+        _skinBuffers: skinBuffers,
     };
 }

@@ -22,6 +22,8 @@ export interface BillboardBlendDescriptor {
     readonly _premultipliedOpacity?: boolean;
     /** @internal Depth/blend pipeline path this mode selects. */
     readonly _depthMode: BillboardDepthMode;
+    /** @internal Particle-only Multiply pass count; absent on ordinary billboard descriptors. */
+    readonly _particlePasses?: 1 | 2;
 }
 
 /** Straight-alpha "over" blending (the default) for transparent billboards. */
@@ -57,6 +59,16 @@ export const billboardBlendAdditive: BillboardBlendDescriptor = {
     _key: "additive",
     _descriptor: {
         color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
+    },
+    _depthMode: "transparent",
+};
+
+/** Pure additive blending (`src·1 + dst`), matching the legacy particle OneOne fallback. */
+export const billboardBlendOneOne: BillboardBlendDescriptor = {
+    _key: "oneone",
+    _descriptor: {
+        color: { srcFactor: "one", dstFactor: "one", operation: "add" },
         alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
     },
     _depthMode: "transparent",

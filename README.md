@@ -2,13 +2,13 @@
 
 A WebGPU-exclusive, tree-shakable 3D engine that produces pixel-identical output to Babylon.js — in a fraction of the bundle size.
 
-📖 **[Documentation](docs/lite/00-welcome.md)** — Start with Welcome, then [Getting Started](docs/lite/01-getting-started.md), the [Feature Comparison](docs/lite/02-feature-comparison.md), and the [Porting Guide](docs/lite/03-porting-guide.md)
+📖 **[Documentation](docs/lite/00-welcome.md)** — Start with Welcome, then [Getting Started](docs/lite/01-getting-started.md), the [Feature Comparison](docs/lite/02-feature-comparison.md), the [Porting Guide](docs/lite/03-porting-guide.md), and [Headless (Null Engine)](docs/lite/05-headless-null-engine.md)
 
 🤝 **[Contributing](CONTRIBUTING.md)** — How to add scenes, tests, and contribute code
 
 ## Prerequisites
 
-- **Node.js** ≥ 18
+- **Node.js** ≥ 20.19 (ESLint 10 requires `^20.19 || ^22.13 || >=24`; CI runs Node 22)
 - **pnpm** ≥ 9 (`corepack enable` to activate the version pinned in `package.json`)
 - A browser with **WebGPU** support (Chrome 113+, Edge 113+, or recent Firefox and Safari)
 
@@ -21,30 +21,38 @@ pnpm install
 # 2. Install Playwright browsers (needed for parity & bundle-size tests)
 pnpm exec playwright install
 
-# 3. Start the dev server (builds bundle scenes, then launches Vite on port 5174)
-pnpm dev:lab
+# 3. Start the dev server (launches Vite on port 5174, scenes served from source)
+pnpm dev
 ```
 
 Open **http://localhost:5174** to browse the scene gallery.
 
+Scene and demo pages are served live from source, so this is the loop for engine work. The
+**Bundle** tab additionally needs the production bundles — build them with `pnpm dev:lab`
+(same server, preceded by a full bundle build) or with the tab's **Regenerate** button.
+
 ## Available Scripts
 
-| Command                    | Description                                                   |
-| -------------------------- | ------------------------------------------------------------- |
-| `pnpm dev:lab`             | Build bundle scenes + start the lab dev server                |
-| `pnpm build`               | Build the `babylon-lite` library                              |
-| `pnpm build:bundle-scenes` | Generate production bundles + `manifest.json` for the gallery |
-| `pnpm test`                | Build bundle scenes, then run parity and bundle-size tests    |
-| `pnpm test:parity`         | Run Playwright visual parity tests against golden references  |
-| `pnpm test:perf`           | Run Playwright performance benchmarks                         |
-| `pnpm test:bundle-size`    | Run bundle-size ceiling tests                                 |
-| `pnpm lint`                | Run ESLint, then type-check with `tsc --noEmit`               |
+| Command                    | Description                                                         |
+| -------------------------- | ------------------------------------------------------------------- |
+| `pnpm dev`                 | Start the lab dev server on live source (http://localhost:5174)     |
+| `pnpm dev:lab`             | Build bundle scenes + start the lab dev server                      |
+| `pnpm dev:playground`      | Start the Lite Playground dev server (http://localhost:5175)        |
+| `pnpm build:playground`    | Build the Lite Playground into `playground/dist`                    |
+| `pnpm build`               | Build the `babylon-lite` library                                    |
+| `pnpm build:bundle-scenes` | Generate production bundles + per-scene `manifest/` for the gallery |
+| `pnpm test`                | Build bundle scenes, then run parity and bundle-size tests          |
+| `pnpm test:parity`         | Run Playwright visual parity tests against golden references        |
+| `pnpm test:perf`           | Run Playwright performance benchmarks                               |
+| `pnpm test:bundle-size`    | Run bundle-size ceiling tests                                       |
+| `pnpm lint`                | Run ESLint, then type-check with `tsc --noEmit`                     |
 
 ## Project Structure
 
 ```
 packages/babylon-lite/   # The engine library
-lab/         # Scene gallery & dev playground (Vite)
+lab/         # Scene gallery & internal dev harness (Vite)
+playground/  # Lite Playground — public editor/runner app (see playground/README.md)
 tests/lite/unit/              # Vitest unit tests (pure Node.js, no GPU)
 tests/lite/plumbing/          # Playwright GPU integration tests (dispose, material-swap)
 tests/lite/parity/scenes/     # Playwright visual parity tests (pixel-diff)
@@ -129,7 +137,7 @@ rm -rf node_modules/playwright
 
 ### 404 for `/bundle/manifest.json`
 
-Run `pnpm build:bundle-scenes` (or use `pnpm dev:lab` which does this automatically).
+The dev server synthesizes this from the per-scene files in `lab/public/bundle/manifest/`, which `pnpm build:bundle-scenes` generates. The whole `lab/public/bundle/` tree is gitignored build output, so a fresh clone has none of it until you build. If this 404s, or the **bundle** pages themselves are missing or stale, run `pnpm build:bundle-scenes` (or use `pnpm dev:lab`, which does this automatically), or hit **Regenerate** in the lab's Bundle tab.
 
 ### 404 for `test-actual.png` images
 

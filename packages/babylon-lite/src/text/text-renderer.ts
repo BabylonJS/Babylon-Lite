@@ -11,6 +11,7 @@ import type { SurfaceContext } from "../engine/surface.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
+import type { CurveSetId } from "./glyph-storage.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
 import { getOrCreateTextPipeline } from "./_gpu/text-pipeline.js";
 
@@ -28,6 +29,13 @@ export interface TextLayerOptions {
     readonly order?: number;
     /** Alpha multiplier in [0, 1]. Default 1. */
     readonly opacity?: number;
+    /** Coverage gamma for anti-aliased edges. Raises per-pixel coverage to `1/coverageGamma`
+     *  before compositing, darkening/thickening anti-aliased edges to mimic the gamma-space
+     *  blending used by native text renderers (DirectWrite/CoreText "stem darkening"). Only
+     *  meaningful when rendering into an sRGB (linear-blended) surface, where correct linear
+     *  AA otherwise makes text look lighter/thinner than gamma-space rasterizers. Values \>1
+     *  thicken; 1 (default) is a no-op. Typical text values are ~1.8–2.2. */
+    readonly coverageGamma?: number;
     /** Default true. */
     readonly visible?: boolean;
 }
@@ -42,6 +50,8 @@ export interface TextLayer {
     scale: number;
     order: number;
     opacity: number;
+    /** Coverage gamma for anti-aliased edges (see `TextLayerOptions.coverageGamma`). Default 1. */
+    coverageGamma: number;
     visible: boolean;
     /** @internal Monotonic version bumped by helpers that mutate placement. */
     _version: number;
@@ -61,6 +71,7 @@ export function createTextLayer(data: TextData, options?: TextLayerOptions): Tex
         scale: options?.scale ?? 1,
         order: options?.order ?? 0,
         opacity: options?.opacity ?? 1,
+        coverageGamma: options?.coverageGamma ?? 1,
         visible: options?.visible ?? true,
         _version: 0,
     };
@@ -103,6 +114,18 @@ export interface TextRenderer extends RenderingContext {
     /** @internal */ _targetHeight: number;
     /** @internal */ _disposed: boolean;
     /** @internal */ _clear: boolean;
+    /** @internal Reused scratch array of per-layer bundles collected each `_record`,
+     *  replayed with a single `pass.executeBundles(...)`. */
+    _visibleBundles: GPURenderBundle[];
+}
+
+/** @internal One cached bind group plus the inputs it was built from. Bundling the three
+ *  together makes the cache self-describing: an entry can never disagree with its own
+ *  invalidation keys, and there is a single array to write, truncate, and clear. */
+interface BindGroupCacheEntry {
+    bindGroup: GPUBindGroup;
+    atlasVersion: number;
+    curveSetId: CurveSetId;
 }
 
 /** @internal Per-layer GPU resources owned by the renderer. */
@@ -112,15 +135,30 @@ interface LayerGpu {
     instanceBuf: GPUBuffer;
     instanceCap: number;
     pipeline: GPURenderPipeline | null;
-    /** Per-draw-group bind groups; rebuilt when atlas grows. */
-    bindGroups: GPUBindGroup[];
-    bindGroupAtlasVersions: number[];
+    /** Per-draw-group bind groups; rebuilt when the atlas grows or the curve set at an index
+     *  changes. Indexed by draw-group index, which is NOT stable: `data._groups` is spliced
+     *  when a group empties and rebuilt in map-insertion order by `applyReset`. Each entry
+     *  therefore carries the curve set it was built for, so a reordered group cannot inherit
+     *  another curve set's atlas textures. */
+    bindGroupCache: BindGroupCacheEntry[];
     uploadedDataVersion: number;
     uploadedViewportW: number;
     uploadedViewportH: number;
     /** Snapshot of (posX, posY, rot, scale, W, H) to skip mvp upload when unchanged. */
     lastMvpInputs: Float32Array;
     mvpUploaded: boolean;
+    /** Pre-recorded GPU command bundle for this layer: `setPipeline` + quad/instance vertex
+     *  buffers + per-draw-group `setBindGroup` + `draw`. Replayed via `pass.executeBundles`
+     *  for near-zero per-frame command-recording cost (mirrors the sprite renderer). The
+     *  bundle binds buffer *objects* (instance data, UBO), so freely-mutating contents
+     *  (glyph instance bytes, mvp/opacity/gamma UBO) do NOT require a rebuild. Invalidated
+     *  when the draw structure changes (`data._layoutVersion`) or a baked object reference
+     *  changes: pipeline swap, instance-buffer reallocation, or atlas-driven bind-group rebuild. */
+    renderBundle: GPURenderBundle | null;
+    /** `data._layoutVersion` the cached `renderBundle` was recorded against. */
+    bundleLayoutVersion: number;
+    /** Draw-group count baked into the cached bundle (for the metrics return value). */
+    bundleDrawCalls: number;
 }
 
 const _mvpScratch = new Float32Array(16);
@@ -165,13 +203,15 @@ function ensureLayerGpu(rr: TextRenderer, layer: TextLayer): LayerGpu {
         }),
         instanceCap: cap,
         pipeline: null,
-        bindGroups: [],
-        bindGroupAtlasVersions: [],
+        bindGroupCache: [],
         uploadedDataVersion: -1,
         uploadedViewportW: 0,
         uploadedViewportH: 0,
         lastMvpInputs: new Float32Array(6),
         mvpUploaded: false,
+        renderBundle: null,
+        bundleLayoutVersion: -1,
+        bundleDrawCalls: 0,
     };
     rr._layerGpu.set(layer, lg);
     return lg;
@@ -193,6 +233,8 @@ function ensureInstanceCapacity(device: GPUDevice, lg: LayerGpu, needed: number)
     });
     lg.instanceCap = cap;
     lg.uploadedDataVersion = -1;
+    // Bundle baked a reference to the old GPUBuffer; force a re-record.
+    lg.renderBundle = null;
 }
 
 function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGroupLayout): void {
@@ -204,24 +246,28 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
     for (let i = 0; i < data._groups.length; i++) {
         const g = data._groups[i]!;
         const { rebuilt, gpu: atlasGpu } = ensureSharedAtlasGpu(device, g.curveSet.atlas);
-        const current = lg.bindGroups[i];
-        const currentVer = lg.bindGroupAtlasVersions[i] ?? -1;
-        if (!current || rebuilt || currentVer !== atlasGpu.uploadedVersion) {
-            lg.bindGroups[i] = device.createBindGroup({
-                label: "text-renderer-bg0-" + g.curveSetId,
-                layout: bindGroupLayout,
-                entries: [
-                    { binding: 0, resource: { buffer: lg.textU } },
-                    { binding: 1, resource: atlasGpu.curveTex.createView() },
-                    { binding: 2, resource: atlasGpu.bandTex.createView() },
-                ],
-            });
-            lg.bindGroupAtlasVersions[i] = atlasGpu.uploadedVersion;
+        const cached = lg.bindGroupCache[i];
+        if (!cached || rebuilt || cached.atlasVersion !== atlasGpu.uploadedVersion || cached.curveSetId !== g.curveSetId) {
+            lg.bindGroupCache[i] = {
+                bindGroup: device.createBindGroup({
+                    label: "text-renderer-bg0-" + g.curveSetId,
+                    layout: bindGroupLayout,
+                    entries: [
+                        { binding: 0, resource: { buffer: lg.textU } },
+                        { binding: 1, resource: atlasGpu.curveTex.createView() },
+                        { binding: 2, resource: atlasGpu.bandTex.createView() },
+                    ],
+                }),
+                atlasVersion: atlasGpu.uploadedVersion,
+                curveSetId: g.curveSetId,
+            };
+            // Bundle baked the old bind group; force a re-record.
+            lg.renderBundle = null;
         }
     }
-    if (lg.bindGroups.length > data._groups.length) {
-        lg.bindGroups.length = data._groups.length;
-        lg.bindGroupAtlasVersions.length = data._groups.length;
+    if (lg.bindGroupCache.length > data._groups.length) {
+        lg.bindGroupCache.length = data._groups.length;
+        lg.renderBundle = null;
     }
 
     // Instance buffer.
@@ -266,9 +312,11 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
         lg.uploadedViewportH = H;
     }
 
-    // Color uniform carries the whole-layer opacity as alpha (RGB = white). Per-glyph/per-run
-    // color comes from the instance `slugColor` attribute and is multiplied by this in the shader.
-    const col = new Float32Array([1, 1, 1, layer.opacity]);
+    // Color uniform carries the whole-layer opacity as alpha. The R slot (otherwise unused;
+    // RGB does not tint per-glyph color) carries the coverage-gamma reciprocal applied to
+    // anti-aliased edge coverage in the fragment shader. G/B stay 1.
+    const gammaInv = layer.coverageGamma > 0 ? 1 / layer.coverageGamma : 1;
+    const col = new Float32Array([gammaInv, 1, 1, layer.opacity]);
     device.queue.writeBuffer(lg.textU, 80, col.buffer as ArrayBuffer, col.byteOffset, 16);
 }
 
@@ -298,6 +346,7 @@ export function createTextRenderer(surface: SurfaceContext, opts: TextRendererOp
         _targetHeight: canvas.height,
         _disposed: false,
         _clear: opts.clear ?? true,
+        _visibleBundles: [],
         layers,
         _layers: layers,
         clearColor: opts.clearValue ?? { r: 0, g: 0, b: 0, a: 1 },
@@ -336,8 +385,9 @@ function textRendererUpdate(rr: TextRenderer): void {
         if (lg.pipeline !== pipeline) {
             lg.pipeline = pipeline;
             // Pipeline change → bind groups must be rebuilt against new bindGroupLayout.
-            lg.bindGroups.length = 0;
-            lg.bindGroupAtlasVersions.length = 0;
+            lg.bindGroupCache.length = 0;
+            // Bundle baked the old pipeline; force a re-record.
+            lg.renderBundle = null;
         }
         uploadLayer(rr, lg, cache.bindGroupLayout);
     }
@@ -348,8 +398,10 @@ function textRendererRecord(rr: TextRenderer): number {
         return 0;
     }
     const eng = rr._surface.engine;
+    const device = eng._device;
     const encoder = eng._currentEncoder;
     const swapView = rr._surface.scRT._colorView!;
+    const format = rr._surface.format;
 
     const pass = encoder.beginRenderPass({
         colorAttachments: [
@@ -363,10 +415,11 @@ function textRendererRecord(rr: TextRenderer): number {
     });
 
     let drawCalls = 0;
-    let lastPipeline: GPURenderPipeline | null = null;
-    const { cache } = getOrCreateTextPipeline(rr._surface.engine, rr._surface.format, 1, null, false);
+    const { cache } = getOrCreateTextPipeline(rr._surface.engine, format, 1, null, false);
     const quadVertex = cache.quadVertexBuffer;
-    pass.setVertexBuffer(0, quadVertex);
+
+    const visibleBundles = rr._visibleBundles;
+    visibleBundles.length = 0;
 
     for (const layer of rr._layers) {
         if (!layer.visible) {
@@ -380,23 +433,45 @@ function textRendererRecord(rr: TextRenderer): number {
         if (data._instanceCount === 0) {
             continue;
         }
-        if (lastPipeline !== lg.pipeline) {
-            pass.setPipeline(lg.pipeline);
-            lastPipeline = lg.pipeline;
-        }
-        pass.setVertexBuffer(1, lg.instanceBuf);
-        for (let i = 0; i < data._groups.length; i++) {
-            const g = data._groups[i]!;
-            const bg = lg.bindGroups[i];
-            if (g.slotCount === 0 || !bg) {
-                continue;
+
+        // (Re)record the per-layer bundle when the draw structure changes. Only slot-range
+        // moves (group grow/shrink/reset) bump `data._layoutVersion`; content-only edits
+        // (same-length replace, add-into-free-slot, partial remove) leave it stable so the
+        // cached bundle keeps replaying. Object-reference changes (pipeline swap,
+        // instance-buffer realloc, atlas-driven bind-group rebuild) null the bundle at their
+        // source. The steady-state win is frames with no structural edits: `data._layoutVersion`
+        // is stable and the pre-baked bundle is replayed with zero per-call command recording.
+        if (lg.renderBundle == null || lg.bundleLayoutVersion !== data._layoutVersion) {
+            const be = device.createRenderBundleEncoder({
+                colorFormats: [format],
+                sampleCount: 1,
+            });
+            be.setPipeline(lg.pipeline);
+            be.setVertexBuffer(0, quadVertex);
+            be.setVertexBuffer(1, lg.instanceBuf);
+            let groupDraws = 0;
+            for (let i = 0; i < data._groups.length; i++) {
+                const g = data._groups[i]!;
+                const bg = lg.bindGroupCache[i]?.bindGroup;
+                if (g.slotCount === 0 || !bg) {
+                    continue;
+                }
+                be.setBindGroup(0, bg);
+                be.draw(6, g.slotCount, 0, g.slotStart);
+                groupDraws++;
             }
-            pass.setBindGroup(0, bg);
-            pass.draw(6, g.slotCount, 0, g.slotStart);
-            drawCalls++;
+            lg.renderBundle = be.finish();
+            lg.bundleLayoutVersion = data._layoutVersion;
+            lg.bundleDrawCalls = groupDraws;
         }
+
+        visibleBundles.push(lg.renderBundle);
+        drawCalls += lg.bundleDrawCalls;
     }
 
+    if (visibleBundles.length > 0) {
+        pass.executeBundles(visibleBundles);
+    }
     pass.end();
     return drawCalls;
 }

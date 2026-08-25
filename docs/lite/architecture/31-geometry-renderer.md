@@ -91,15 +91,19 @@ export function createGeometryRendererTask(scene: SceneContext, config: Geometry
 export interface CopyToTextureTaskConfig {
     name?: string;
     sourceTexture: RenderTarget;
-    targetTexture: RenderTarget;
+    targetTexture?: RenderTarget;
+    ownsTargetTexture?: boolean;
     viewport?: NormalizedViewport | null;
     lodLevel?: number;
+    resolveTexture?: RenderTarget;
 }
 
 export interface CopyToTextureTask extends Task {
     readonly name: string;
     sourceTexture: RenderTarget;
-    targetTexture: RenderTarget;
+    targetTexture: RenderTarget | undefined;
+    ownsTargetTexture: boolean;
+    resolveTexture: RenderTarget | undefined;
     viewport: NormalizedViewport | null | undefined;
     lodLevel: number;
     readonly outputTexture: RenderTarget;
@@ -240,17 +244,60 @@ output of `composeStandardShader` (the regular Standard composer):
    it sorts after every `std-*` ext in the composer's alphabetical topo-sort
    order, placing the binding last in the layout.
 
-The result is that **every Standard material feature flows through**: bump
-perturbation, opacity-texture alpha discard, alpha-cutout, UV transforms,
-instancing, vertex colour modulation, etc. all behave exactly as in the
-main scene render, because the same composed WGSL is used.
+The result is that **every enabled Standard material and mesh feature flows
+through**: morph targets, skeletal skinning, bump perturbation,
+opacity-texture alpha modulation, alpha-cutout, UV scale/offset transforms,
+RGBA vertex colour modulation, instancing, and thin-instance colour all use
+the same fragments as the main scene render. The Standard geometry path
+computes the same effective material feature mask from the source material
+plus the current mesh feature bits, then mirrors the regular bind-group and
+draw-buffer ordering.
 
-The lighting / fog block still runs and produces a dead `color` value that
-the WGSL compiler folds away. This is the architectural trade-off the user
-explicitly chose ("inject some shader code at the end of the fragment to
-output the data for the geometry textures") in exchange for guaranteed
-parity with the main render path — no parallel geometry-specific code to
-keep in sync with the standard shader.
+The optional Standard skeleton / vertex-color / UV-offset paths remain behind
+the published Standard mesh-feature enablers. A geometry task does not
+statically import those chunks. Skeletal previous-bone state is a separate
+dynamic chunk loaded only when the skeleton enabler, a matching Standard mesh,
+and a velocity attachment are all present.
+
+#### Standard geometry variant and cache identity
+
+`view._geometry` is keyed by every shader-relevant input:
+
+```
+meshFeatures
+sceneFeatures (including fog presence)
+attachment list (owned by the view)
+emitColor (owned by the view)
+```
+
+`meshFeatures` includes morph, skeleton, 8-bone skeleton, vertex color, UV2,
+thin instances, and instance color. The resource stored under that key owns
+the composed shader, mesh BGL, shader modules, and its per-render-target
+pipeline map. The pipeline map remains keyed by the complete MRT target
+signature. A fog and non-fog scene sharing one device cannot reuse the same
+Standard geometry color shader when `targetTexture` requests lit color.
+
+#### Standard geometry binding and draw order
+
+Group-1 resources and vertex buffers follow the composed shader exactly:
+
+1. mesh UBO (`world`, light selection, and velocity fields when requested),
+2. morph storage buffers when morphing is active,
+3. material UBO,
+4. diffuse texture/sampler,
+5. UV transform UBO,
+6. sorted Standard extension bindings (including the skeleton bone texture),
+7. geometry params UBO and previous-bone texture when velocity requires them.
+
+Vertex buffers are position, normal, UV/UV2, sorted enabled extension buffers
+(vertex color and skeleton joints/weights), then thin-instance buffers.
+Interleaved offsets come from `MeshGPU._vbLayout`, matching the regular
+Standard draw path.
+
+The per-scene fog fragment and `STD_SCENE_FOG` bit participate in Standard
+geometry composition and cache identity. Without a real-color target the
+resulting lit `color` and fog blend are dead code for the WGSL compiler; with
+`targetTexture`, the same fragment produces the forward fogged color.
 
 The per-attachment `writeGeometryInfo` gate (`wg = select(0.0, 1.0, alpha > 0.4)`)
 matches BJS `default.fragment.fx` PREPASS: combined with per-attachment
@@ -259,6 +306,12 @@ matches BJS `default.fragment.fx` PREPASS: combined with per-attachment
 toggles per-attachment alpha blend + depth-write-off when the source
 material has `alpha < 1` or `HAS_OPACITY_TEXTURE`.
 
+Vertex color is `vec4<f32>`. Its RGB multiplies `baseColor`; its alpha
+multiplies the running Standard `alpha` before both alpha-test discard and the
+geometry write gate. Omitted Standard `uvOffset` always contributes `[0, 0]`
+in both forward and geometry UV UBOs, including when UV-offset support was
+enabled globally for a different material.
+
 The `REFLECTIVITY` attachment re-samples `sT`/`sS` (the specular texture +
 sampler) to recover the glossiness alpha channel that the std-specular
 fragment drops when writing into `specularColor.rgb`.
@@ -266,9 +319,24 @@ fragment drops when writing into `specularColor.rgb`.
 ### Velocity attachment
 
 When `LINEAR_VELOCITY` is requested, the task tracks per-mesh world matrices
-across frames in a `WeakMap<Mesh, Float32Array>`. `excludeFromVelocity(mesh)`
+across frames for its existing material paths. `excludeFromVelocity(mesh)`
 and `includeInVelocity(mesh)` let callers opt single meshes out of velocity
 tracking (e.g., for known-static instances or sky / hud meshes).
+
+For Standard meshes the renderable extends `MeshUniforms` with `previousWorld`
+and a velocity-enabled scalar. Current clip position uses the fully deformed
+`out.vp`; previous clip position uses the prior local world snapshot and
+deformation state. Skeletal velocity lazily creates two `rgba32float` bone
+textures and two matching bind groups per renderable. Each update samples the
+texture written on the prior frame while `queue.writeTexture` refreshes the
+idle texture for the next frame, then swaps roles. Forward-only skeletons and
+non-skeletal geometry scenes never load this implementation.
+
+The first frame initializes previous world and both bone textures from current
+state and keeps the velocity gate disabled, producing zero motion.
+`excludeFromVelocity()` clears the per-mesh UBO gate while local previous state
+continues advancing, so re-inclusion does not require a bind-group rebuild or
+produce a stale-frame spike.
 
 ### Depth attachment
 
@@ -290,16 +358,23 @@ Used in Scene 145's impostor strip to display geometry attachments. Two
 execution paths chosen in `record()`:
 
 - **Fast path** — `GPUCommandEncoder.copyTextureToTexture`. Eligible when
-  there is no viewport, source and target share format and sample count, the
-  source mip dimensions match the target's mip-0 dimensions, the target is
-  not the swapchain, and the target owns a color GPU texture. WebGPU allows
-  `copyTextureToTexture` for non-zero `lodLevel` and for MSAA → MSAA copies
-  when both textures have the same sample count.
+  there is no viewport, source and target are single-sampled and share a
+  format, the source mip dimensions match the target's mip-0 dimensions, the
+  target is not the swapchain, and the source/target textures were created
+  with `COPY_SRC`/`COPY_DST`. Frame-graph render targets carry both copy usages
+  by default; external/eager textures without the required usage fall back to
+  the blit path.
 
 - **Blit path** — full-screen triangle samples the source. MSAA sources
   resolve per-sample with `textureLoad`. Lod level is applied via
   `textureSampleLevel`. The Y axis is flipped when the source and target
   have different `flipY` orientations.
+
+When `ownsTargetTexture` is true, the task rebuilds its target during every
+frame-graph build, disposes a previously owned target when `targetTexture`
+changes, and disposes the current target with the task. `sourceTexture` cannot
+be the engine `scRT`, whose GPU texture changes every frame. Resolve-only and
+blit-plus-resolve modes use `resolveTexture` for hardware MSAA resolve.
 
 The color attachment's `loadOp` is `"load"` when a viewport is set (so
 pixels outside the viewport are preserved — required for impostor strips
@@ -332,6 +407,20 @@ at `MAD ≈ 0.002` against the BJS golden — the MaterialView post-processing
 approach reuses the standard fragment body verbatim, so the impostor strip
 matches BJS pixel-for-pixel (no lossy material-constants approximation).
 
+## Test Specification
+
+- Minimal Standard composition excludes fog helper/blend WGSL.
+- Explicit Standard fog context includes helper/blend WGSL.
+- Fog/non-fog Standard bindings and geometry color resources remain separate
+  on one device.
+- Missing `uvOffset` writes zeros in forward and geometry UBO data.
+- Standard geometry composition with skeleton includes the shared skinning
+  helper, bone bindings, joints/weights layouts, deformed world
+  position/normal, and previous-bone velocity state.
+- Standard geometry composition with vertex color modulates albedo and alpha
+  before discard/write masking and binds the color buffer.
+- Morph/skeleton/vertex-color bits participate in the geometry resource key.
+
 ## Future extensions
 
 - **PBR support** — mirror `standard-geometry-output-shader.ts` with a
@@ -342,10 +431,11 @@ matches BJS pixel-for-pixel (no lossy material-constants approximation).
   batches into the same MRT attachments. The flag plumbing already exists
   (`GEOMETRY_OUTPUT` for Standard); the work is per-renderer pipeline
   composition.
-- **LINEAR_VELOCITY full support** — the `~geometry-params` fragment already
-  emits `vCurrentClip` / `vPreviousClip` varyings, but threading the
-  per-mesh `previousWorld` matrix through the standard mesh UBO is out of
-  scope of the current refactor (Scene 145 doesn't request it).
+- **Previous morph weights for velocity** — current Standard/PBR morph
+  positions are applied to depth/normals/current clip. A future shared
+  previous-weight buffer can extend motion vectors for independently animated
+  morph weights in the same way Standard skeleton velocity retains prior bone
+  matrices.
 
 ## Related
 

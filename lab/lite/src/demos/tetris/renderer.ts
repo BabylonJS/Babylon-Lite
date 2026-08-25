@@ -32,10 +32,11 @@ import {
     createDirectionalLight,
     createHemisphericLight,
     createMeshFromData,
-    createPbrMaterial,
+    createPbrMaterial, setPbrSkybox,
     createSolidTexture2D,
     loadTexture2D,
     onBeforeRender,
+    setPbrEmissive,
     setThinInstances,
     type EngineContext,
     type Mesh,
@@ -70,6 +71,28 @@ interface PetGeometry {
     colors: Float32Array;
 }
 
+function normalizeVertexColorsToRgba(colors: number[], vertexCount: number): Float32Array {
+    if (colors.length === 0) {
+        return new Float32Array(0);
+    }
+    if (colors.length === vertexCount * 4) {
+        return new Float32Array(colors);
+    }
+    if (colors.length === vertexCount * 3) {
+        const out = new Float32Array(vertexCount * 4);
+        for (let v = 0; v < vertexCount; v++) {
+            const src = v * 3;
+            const dst = v * 4;
+            out[dst] = colors[src]!;
+            out[dst + 1] = colors[src + 1]!;
+            out[dst + 2] = colors[src + 2]!;
+            out[dst + 3] = 1;
+        }
+        return out;
+    }
+    throw new Error(`Invalid vertex color buffer length ${colors.length} for ${vertexCount} vertices`);
+}
+
 /** Fetch the offline-baked Cube Pets geometry (see scripts/bake-tetris-pets.mjs).
  *  Each entry is a single merged mesh normalised to a unit cube, in piece-type
  *  order (I, O, T, S, Z, J, L). */
@@ -86,7 +109,7 @@ async function loadPetGeometries(url: string): Promise<PetGeometry[]> {
         normals: new Float32Array(p.normals),
         uvs: new Float32Array(p.uvs),
         indices: new Uint32Array(p.indices),
-        colors: new Float32Array(p.colors),
+        colors: normalizeVertexColorsToRgba(p.colors, p.positions.length / 3),
     }));
 }
 
@@ -159,7 +182,7 @@ async function loadGeometryFromUrl(url: string, key: string): Promise<PetGeometr
         normals: new Float32Array(p.normals),
         uvs: new Float32Array(p.uvs),
         indices: new Uint32Array(p.indices),
-        colors: new Float32Array(p.colors ?? []),
+        colors: normalizeVertexColorsToRgba(p.colors ?? [], p.positions.length / 3),
     };
 }
 
@@ -239,8 +262,8 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
         environmentIntensity: 1.0,
         directIntensity: 0,
         doubleSided: true,
-        skyboxMode: true,
     });
+    setPbrSkybox(skybox.material);
     const syncSkybox = (): void => {
         const w = camera.worldMatrix;
         skybox.position.set(w[12]!, w[13]!, w[14]!);
@@ -385,7 +408,6 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
         // just mirrors the studio backdrop onto dark bodies and worsens the
         // illusion). Mid-high roughness keeps them matte, not glassy.
         ormTexture: orm(0.62, 0.0),
-        emissiveColor: [0.05, 0.05, 0.05],
         // Hold the neutral grey studio env well below the direct lights: a strong
         // env mirror greys-out the bright vertex colours, so keeping it low lets
         // each pet's hue stay saturated and vivid (matching the arcade blocks).
@@ -397,6 +419,9 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
         // nose) are wound opposite the body, so back-face culling would drop them.
         doubleSided: true,
     });
+    // Uniform emissive lift (see the surface note above) — applied via the setter so
+    // the emissive extension gets registered.
+    setPbrEmissive(petMaterial, [0.05, 0.05, 0.05]);
 
     const MAX_INSTANCES = BOARD_COLS * BOARD_ROWS + 4;
     const GHOST_INSTANCES = 4;
@@ -454,24 +479,25 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
         [0.22, 0.34, 0.95], // J — cat (vivid blue)
         [0.13, 0.80, 0.38], // L — caterpillar (vivid green)
     ];
-    const arcadeMaterials = ARCADE_COLORS.map((rgb) =>
-        createPbrMaterial({
+    const arcadeMaterials = ARCADE_COLORS.map((rgb) => {
+        const m = createPbrMaterial({
             baseColorTexture: whiteTex,
             baseColorFactor: [rgb[0], rgb[1], rgb[2], 1],
             // Glossy plastic chip: low roughness for a crisp specular glint.
             ormTexture: orm(0.22, 0.0),
-            // A strong slice of the body colour as emissive lifts each chip off
-            // the dark stage and pushes saturated colour through the bloom pass,
-            // so the hue reads vividly instead of being greyed by the IBL.
-            emissiveColor: [rgb[0] * 0.35, rgb[1] * 0.35, rgb[2] * 0.35],
             // Keep the grey studio env from washing the colour out: lean on the
             // direct lights for brightness, not the neutral environment mirror.
             environmentIntensity: 0.45,
             directIntensity: 2.4,
             reflectance: 0.08,
             enableSpecularAA: true,
-        }),
-    );
+        });
+        // A strong slice of the body colour as emissive lifts each chip off the dark
+        // stage and pushes saturated colour through the bloom pass, so the hue reads
+        // vividly instead of being greyed by the IBL.
+        setPbrEmissive(m, [rgb[0] * 0.35, rgb[1] * 0.35, rgb[2] * 0.35]);
+        return m;
+    });
 
     interface RenderSet {
         colorMeshes: Mesh[];

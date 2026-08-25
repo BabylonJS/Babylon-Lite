@@ -61,7 +61,15 @@ export async function preloadPcfShadowTaskState(casterMeshes: readonly Mesh[]): 
     let needsNode = false;
     let needsShader = false;
     for (const mesh of casterMeshes) {
-        const family = mesh.material?._buildGroup._materialFamily;
+        // Resolve the SAME material `getNoColorView` will end up building a view for: an explicit
+        // `_shadowCasterMaterial` override casts through an alternate material, whose family can differ
+        // from the receive material's. Scanning only `mesh.material` would leave that family's factory
+        // unimported and the shadow pass would then call an undefined factory.
+        let material = mesh.material;
+        while (material?._shadowCasterMaterial) {
+            material = material._shadowCasterMaterial;
+        }
+        const family = material?._buildGroup._materialFamily;
         needsStandard ||= family === "standard";
         needsPbr ||= family === "pbr";
         needsNode ||= family === "node";
@@ -123,6 +131,7 @@ export function ensurePcfShadowTaskState(
                 rt,
                 clr: true,
                 cam: camera,
+                _skipClusteredLights: true,
             },
             engine,
             scene
@@ -205,6 +214,16 @@ export function getNoColorView(material: Material, cache: Map<Material, Material
     const cached = cache.get(material);
     if (cached) {
         return cached;
+    }
+    // Explicit caster override: this (receive) material casts its shadow through an ALTERNATE material (see
+    // Material._shadowCasterMaterial). Take the override's OWN no-colour view (recurse) so the same mesh casts
+    // with a sampler-free / alpha-clip caster instead of this material's shadow-map-aliasing view. Cache under
+    // THIS material so the lookup at the call site (keyed by the receive material) hits.
+    const override = material._shadowCasterMaterial;
+    if (override) {
+        const overrideView = getNoColorView(override, cache);
+        cache.set(material, overrideView);
+        return overrideView;
     }
     const family = material._buildGroup._materialFamily;
     let view: MaterialView;

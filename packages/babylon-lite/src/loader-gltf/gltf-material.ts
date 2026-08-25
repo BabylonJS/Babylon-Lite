@@ -59,38 +59,16 @@ export interface GltfMaterialData {
     _rawMatDef?: any;
 }
 
+export type GltfImageCache = Array<Promise<ImageBitmap> | undefined>;
+
 /** Assemble core PBR material data from a glTF material definition.
  *
  *  Per-material extension parsing/fetching is handled by load-gltf.ts using
  *  the GltfMatExt registry — this function only fills in the spec-baseline
  *  PBR properties shared by every material. */
-export async function assembleMaterial(
-    json: any,
-    binChunk: DataView,
-    materialIdx: number,
-    baseUrl: string,
-    imageCache?: Map<number, Promise<ImageBitmap>>
-): Promise<GltfMaterialData> {
-    const mat = json.materials?.[materialIdx];
-    if (!mat) {
-        return {
-            _baseColorFactor: [1, 1, 1, 1],
-            _metallicFactor: 1,
-            _roughnessFactor: 1,
-            _emissiveFactor: [0, 0, 0],
-            _baseColorImage: null,
-            _metallicRoughnessImage: null,
-            _normalImage: null,
-            _normalScale: 1,
-            _occlusionTexCoord: 0,
-            _occlusionImage: null,
-            _emissiveImage: null,
-            _doubleSided: false,
-            _alphaMode: "OPAQUE",
-            _alphaCutoff: 0.5,
-        };
-    }
-
+export async function assembleMaterial(json: any, binChunk: DataView, materialIdx: number, baseUrl: string, imageCache: GltfImageCache): Promise<GltfMaterialData> {
+    const rawMat = json.materials?.[materialIdx];
+    const mat = rawMat ?? {};
     const pbr = mat.pbrMetallicRoughness ?? {};
     const fetchImg = makeImageFetcher(json, binChunk, baseUrl, imageCache);
 
@@ -117,27 +95,19 @@ export async function assembleMaterial(
         _doubleSided: !!mat.doubleSided,
         _alphaMode: mat.alphaMode ?? "OPAQUE",
         _alphaCutoff: mat.alphaCutoff ?? 0.5,
-        _rawMatDef: mat,
+        _rawMatDef: rawMat,
     };
 }
 
 /** Build a per-load image fetcher that decodes glTF texture references via
  *  the shared image cache. Used by both core assembleMaterial and the ext
  *  driver in load-gltf.ts. */
-export function makeImageFetcher(json: any, binChunk: DataView, baseUrl: string, imageCache?: Map<number, Promise<ImageBitmap>>): (texInfo: any) => Promise<ImageBitmap | null> {
+export function makeImageFetcher(json: any, binChunk: DataView, baseUrl: string, imageCache: GltfImageCache): (texInfo: any) => Promise<ImageBitmap | null> {
     return (texInfo: any): Promise<ImageBitmap | null> => {
         if (!texInfo) {
             return Promise.resolve(null);
         }
         const imgIdx: number = getTextureImageIndex(json.textures[texInfo.index]);
-        if (imageCache) {
-            let cached = imageCache.get(imgIdx);
-            if (!cached) {
-                cached = resolveImage(json, binChunk, imgIdx, baseUrl);
-                imageCache.set(imgIdx, cached);
-            }
-            return cached;
-        }
-        return resolveImage(json, binChunk, imgIdx, baseUrl);
+        return (imageCache[imgIdx] ??= resolveImage(json, binChunk, imgIdx, baseUrl));
     };
 }

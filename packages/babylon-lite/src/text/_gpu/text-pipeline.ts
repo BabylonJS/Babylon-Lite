@@ -4,6 +4,7 @@ import type { EngineContext } from "../../engine/engine.js";
 import vertSrc from "../shaders/slug.vert.wgsl?raw";
 import fragSrc from "../shaders/slug.frag.wgsl?raw";
 import { TEXT_INSTANCE_BYTES } from "../text-data.js";
+import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
 export interface TextPipelineDeviceCache {
     bindGroupLayout: GPUBindGroupLayout;
@@ -22,6 +23,16 @@ export function clearTextPipelineCache(engine: EngineContext): void {
 
 /** Shared 4-vertex unit quad: corner signs (-1,-1), (1,-1), (1,1), (-1,1). */
 const QUAD_CORNERS = [-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1] as const;
+
+/**
+ * Pipeline-constant ID of the `a2c` override in slug.frag.wgsl, declared there as `@id(0)`.
+ *
+ * Deliberately keyed by number, not by name: the shader is an opaque string to JS minifiers,
+ * so an unquoted `{ a2c: 1 }` key would be property-mangled by Closure ADVANCED while the WGSL
+ * text kept `a2c`, and A2C pipeline creation would fail in those builds. Numeric keys survive
+ * mangling, and WebGPU requires the numeric key once `@id` is specified.
+ */
+const A2C_CONSTANT_ID = 0;
 
 function getOrCreateDeviceCache(engine: EngineContext): TextPipelineDeviceCache {
     _cache ??= new WeakMap();
@@ -55,8 +66,8 @@ function getOrCreateDeviceCache(engine: EngineContext): TextPipelineDeviceCache 
     return cache;
 }
 
-function pipelineKey(format: GPUTextureFormat, sampleCount: number, depthStencilFormat: GPUTextureFormat | null, depthWrite: boolean): string {
-    return format + ":" + sampleCount + ":" + (depthStencilFormat ?? "-") + ":" + (depthWrite ? "w" : "r");
+function pipelineKey(format: GPUTextureFormat, sampleCount: number, depthStencilFormat: GPUTextureFormat | null, depthWrite: boolean, alphaToCoverage: boolean): string {
+    return format + ":" + sampleCount + ":" + (depthStencilFormat ?? "-") + ":" + (depthWrite ? "w" : "r") + (alphaToCoverage ? ":a" : "");
 }
 
 export function getOrCreateTextPipeline(
@@ -64,10 +75,13 @@ export function getOrCreateTextPipeline(
     format: GPUTextureFormat,
     sampleCount: 1 | 4,
     depthStencilFormat: GPUTextureFormat | null,
-    depthWrite: boolean
+    depthWrite: boolean,
+    owner?: object
 ): { pipeline: GPURenderPipeline; cache: TextPipelineDeviceCache } {
     const cache = getOrCreateDeviceCache(engine);
-    const key = pipelineKey(format, sampleCount, depthStencilFormat, depthWrite);
+    const alphaToCoverageResolver = _getAlphaToCoverageResolver();
+    const alphaToCoverage = depthWrite && sampleCount > 1 && !!owner && !!alphaToCoverageResolver?.(owner);
+    const key = pipelineKey(format, sampleCount, depthStencilFormat, depthWrite, alphaToCoverage);
     let pipeline = cache.pipelines.get(key);
     if (pipeline) {
         return { pipeline, cache };
@@ -101,24 +115,28 @@ export function getOrCreateTextPipeline(
         fragment: {
             module: cache.fragModule,
             entryPoint: "main",
+            // `a2c` is a pipeline-overridable constant in slug.frag.wgsl; setting it switches the
+            // fragment to straight-alpha output. Specialising one module beats shipping a second
+            // near-identical shader, whose text every consumer would pay for even unused.
+            ...(alphaToCoverage ? { constants: { [A2C_CONSTANT_ID]: 1 } } : {}),
             targets: [
                 {
                     format,
-                    blend: {
-                        // Premultiplied-alpha blend. The Slug fragment shader outputs
-                        // `vColor * coverage` — i.e. RGB already premultiplied by coverage
-                        // (and alpha = coverage) — so the color blend must use srcFactor
-                        // `one` (NOT `src-alpha`, which would multiply by coverage a second
-                        // time and render anti-aliased edges as coverage², too dark). The
-                        // alpha channel already uses `one` for the same reason.
-                        color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-                        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-                    },
+                    ...(alphaToCoverage
+                        ? {}
+                        : {
+                              // Premultiplied-alpha blend. The ordinary Slug fragment outputs
+                              // `vColor * coverage`, so RGB is already coverage-weighted.
+                              blend: {
+                                  color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" } as GPUBlendComponent,
+                                  alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" } as GPUBlendComponent,
+                              },
+                          }),
                 },
             ],
         },
         primitive: { topology: "triangle-list", cullMode: "none", frontFace: "ccw" },
-        multisample: { count: sampleCount },
+        multisample: alphaToCoverage ? { count: sampleCount, alphaToCoverageEnabled: true } : { count: sampleCount },
     };
     if (depthStencilFormat) {
         descriptor.depthStencil = {

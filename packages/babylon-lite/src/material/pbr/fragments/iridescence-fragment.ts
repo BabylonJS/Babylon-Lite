@@ -10,16 +10,12 @@ import type { BindingDecl, ShaderFragment, UboField } from "../../../shader/frag
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { PbrExt } from "../pbr-flags.js";
 import type { IridescenceProps, PbrMaterialProps } from "../pbr-material.js";
-import {
-    PBR_HAS_METALLIC_REFLECTANCE_MAP,
-    PBR_HAS_REFLECTANCE_MAP,
-    PBR2_HAS_IRIDESCENCE,
-    PBR2_HAS_IRIDESCENCE_MAP,
-    PBR2_HAS_IRIDESCENCE_THICKNESS_MAP,
-    PBR2_HAS_REFLECTANCE_FACTORS,
-} from "../pbr-flag-bits.js";
+import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR2_HAS_REFLECTANCE_FACTORS } from "../pbr-flag-bits.js";
 
 const STAGE_FRAGMENT = 0x2;
+const PBR2_HAS_IRIDESCENCE = 1 << 17;
+const PBR2_HAS_IRIDESCENCE_MAP = 1 << 18;
+const PBR2_HAS_IRIDESCENCE_THICKNESS_MAP = 1 << 19;
 const PBR2_HAS_IRIDESCENCE_UV_TX = 1 << 20;
 const PBR2_HAS_IRIDESCENCE_THICKNESS_UV_TX = 1 << 21;
 const PBR2_HAS_IRIDESCENCE_UV2 = 1 << 22;
@@ -199,7 +195,7 @@ colorF0=mix(colorF0,iriF0,iriIntensity);
 }
 
 export function writeIridescenceUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
-    const iri = material.iridescence as IridescenceProps | undefined;
+    const iri = material._iridescence as IridescenceProps | undefined;
     if (!iri?.isEnabled || !offsets.has("iridescenceParams")) {
         return;
     }
@@ -216,7 +212,7 @@ export const pbrExt: PbrExt = {
     id: "iridescence",
     phase: "base-tex",
     detect(mat) {
-        const iri = (mat as PbrMaterialProps).iridescence;
+        const iri = (mat as PbrMaterialProps)._iridescence;
         if (!iri?.isEnabled) {
             return { f: 0, f2: 0 };
         }
@@ -244,7 +240,7 @@ export const pbrExt: PbrExt = {
     frag: (ctx) => createIridescenceFragment(ctx._features, ctx._features2, ctx._meshFeatures),
     writeUbo: writeIridescenceUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {
-        const iri = (ctx._material as PbrMaterialProps).iridescence;
+        const iri = (ctx._material as PbrMaterialProps)._iridescence;
         if (!iri) {
             return b;
         }
@@ -258,7 +254,7 @@ export const pbrExt: PbrExt = {
         return b;
     },
     textures(mat, t) {
-        const iri = (mat as PbrMaterialProps).iridescence;
+        const iri = (mat as PbrMaterialProps)._iridescence;
         if (!iri) {
             return;
         }

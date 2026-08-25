@@ -13,11 +13,15 @@
  *      the surviving chunk. The assertion: HPM-off scenes' entry +
  *      transitively loaded chunks contain ZERO occurrences of that tag.
  *
- *   2. **Manifest disjointness.** `lab/public/bundle/manifest.json` lists
- *      every chunk fetched at runtime for each scene. We verify that
- *      manifest.scene<N>.runtimeChunks contains zero files matching
- *      `_mat4-storage-f64`. This catches dynamic-import regressions that
- *      somehow embed the chunk reference into an HPM-off path.
+ *   2. **Manifest disjointness.** The per-scene manifest files
+ *      (`lab/public/bundle/manifest/<scene>.json`) list every chunk fetched
+ *      at runtime for each scene. We verify that scene<N>.runtimeChunks
+ *      contains zero files matching `_mat4-storage-f64`. This catches
+ *      dynamic-import regressions that somehow embed the chunk reference into
+ *      an HPM-off path. Those files are build output, not tracked source, so
+ *      the manifest assertions self-skip when the bundle has not been built —
+ *      the Bundle Size CI job re-runs this spec after `pnpm build:bundle-scenes`,
+ *      and local `pnpm test` builds first.
  *
  * Engine.ts uses `await import("..._mat4-storage-f64.js")` inside
  * `if (useHpm)` and installs the resulting `allocateF64Mat4` into the
@@ -38,7 +42,7 @@ import { join, resolve } from "node:path";
 const BUILD_TAG = "@@MAT4_STORAGE_F64@@";
 const F64_MODULE_HINT = /_mat4-storage-f64/;
 const BUNDLE_DIR = resolve(__dirname, "..", "..", "..", "lab", "public", "bundle");
-const MANIFEST_PATH = join(BUNDLE_DIR, "manifest.json");
+const MANIFEST_DIR = join(BUNDLE_DIR, "manifest");
 const SCENE_CONFIG_PATH = resolve(__dirname, "..", "..", "..", "scene-config.json");
 
 interface BundleManifestEntry {
@@ -47,25 +51,41 @@ interface BundleManifestEntry {
 }
 type BundleManifest = Record<string, BundleManifestEntry>;
 
+/**
+ * Reconstruct the aggregate manifest map from the per-scene files
+ * (`manifest/<scene>.json`). These are build output — see `HAS_MANIFEST` for
+ * how callers guard against them being absent.
+ */
+function loadManifest(): BundleManifest {
+    const manifest: BundleManifest = {};
+    for (const file of readdirSync(MANIFEST_DIR)) {
+        if (!file.endsWith(".json")) {
+            continue;
+        }
+        const scene = file.slice(0, -".json".length);
+        manifest[scene] = JSON.parse(readFileSync(join(MANIFEST_DIR, file), "utf-8")) as BundleManifestEntry;
+    }
+    return manifest;
+}
+
 /** HPM-off scene used as the canonical target. scene2 is the smallest /
  *  simplest non-HPM scene in the gallery (sphere + directional light). */
 const HPM_OFF_SCENE = "scene2";
 
+/** When true, `pnpm build:bundle-scenes` has produced the per-scene manifest
+ *  files this spec reads. They are build output rather than tracked source, so
+ *  in CI's Unit Tests job — which runs vitest before any build step — they are
+ *  absent and the manifest assertions self-skip. The Bundle Size CI job re-runs
+ *  this spec after the build, and local `pnpm test` builds first, so the
+ *  assertions run in full there. */
+const HAS_MANIFEST = existsSync(MANIFEST_DIR) && readdirSync(MANIFEST_DIR).some((f) => f.endsWith(".json"));
+
 /** When true, the bundle directory has been freshly built and the
  *  per-scene chunk `.js` files (including the F64 chunk for HPM-on
- *  scenes) are present. When false, only the committed `manifest.json`
- *  exists — typically when this file is run via `pnpm exec vitest run`
- *  in CI's Unit Tests job before any build step. In that case we skip
- *  the chunk-content assertions; the Bundle Size CI job re-runs them
- *  after `pnpm build:bundle-scenes`. Local `pnpm test` always runs
- *  build:bundle-scenes first, so the assertions run in full there. */
+ *  scenes) are present. Implies `HAS_MANIFEST`. */
 const HAS_BUILT_CHUNKS = existsSync(BUNDLE_DIR) && readdirSync(BUNDLE_DIR).some((f) => F64_MODULE_HINT.test(f) && f.endsWith(".js"));
 
 describe("bundle content: F64 storage tag absent from HPM-off bundles", () => {
-    it("manifest exists (run `pnpm build:bundle-scenes` first)", () => {
-        expect(existsSync(MANIFEST_PATH), `Missing bundle manifest at ${MANIFEST_PATH}. Run \`pnpm build:bundle-scenes\` first.`).toBe(true);
-    });
-
     it.skipIf(!HAS_BUILT_CHUNKS)(`F64 chunk file is emitted somewhere in lab/public/bundle/ (positive control)`, () => {
         const f64Chunks = readdirSync(BUNDLE_DIR).filter((f) => F64_MODULE_HINT.test(f) && f.endsWith(".js"));
         expect(f64Chunks.length, "Expected at least one `*_mat4-storage-f64*.js` chunk to be emitted by the build").toBeGreaterThan(0);
@@ -77,10 +97,10 @@ describe("bundle content: F64 storage tag absent from HPM-off bundles", () => {
         }
     });
 
-    it(`${HPM_OFF_SCENE}: runtime chunks do NOT reference the F64 storage module`, () => {
-        const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf-8")) as BundleManifest;
+    it.skipIf(!HAS_MANIFEST)(`${HPM_OFF_SCENE}: runtime chunks do NOT reference the F64 storage module`, () => {
+        const manifest = loadManifest();
         const entry = manifest[HPM_OFF_SCENE];
-        expect(entry, `${HPM_OFF_SCENE} missing from manifest.json`).toBeDefined();
+        expect(entry, `${HPM_OFF_SCENE} missing from per-scene manifest`).toBeDefined();
         const chunks = entry!.runtimeChunks ?? [];
         expect(chunks.length, `${HPM_OFF_SCENE} has no runtimeChunks recorded`).toBeGreaterThan(0);
         const offenders = chunks.filter((c) => F64_MODULE_HINT.test(c));
@@ -88,7 +108,7 @@ describe("bundle content: F64 storage tag absent from HPM-off bundles", () => {
     });
 
     it.skipIf(!HAS_BUILT_CHUNKS)(`${HPM_OFF_SCENE}: no runtime chunk contains the F64 build tag`, () => {
-        const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf-8")) as BundleManifest;
+        const manifest = loadManifest();
         const chunks = manifest[HPM_OFF_SCENE]?.runtimeChunks ?? [];
         const offenders: string[] = [];
         for (const chunk of chunks) {
@@ -104,7 +124,7 @@ describe("bundle content: F64 storage tag absent from HPM-off bundles", () => {
         expect(offenders, `HPM-off scene ${HPM_OFF_SCENE} chunks contain F64 build tag: ${offenders.join(", ")}`).toEqual([]);
     });
 
-    it("every other HPM-off scene also lacks the F64 chunk in its runtimeChunks", () => {
+    it.skipIf(!HAS_MANIFEST)("every other HPM-off scene also lacks the F64 chunk in its runtimeChunks", () => {
         // Defensive sweep across the whole manifest. HPM-on scenes legitimately
         // load the F64 chunk (they create the engine with
         // `useHighPrecisionMatrix: true` — e.g. the high-precision-jitter and
@@ -117,7 +137,7 @@ describe("bundle content: F64 storage tag absent from HPM-off bundles", () => {
         const HPM_ON_SLUGS = new Set<string>(
             sceneConfig.filter((s) => (s.tags ?? []).includes("hpm") && !(s.slug ?? "").includes("hpm-off") && s.id != null).map((s) => `scene${s.id}`)
         );
-        const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf-8")) as BundleManifest;
+        const manifest = loadManifest();
         const failures: string[] = [];
         for (const [sceneKey, entry] of Object.entries(manifest)) {
             if (HPM_ON_SLUGS.has(sceneKey)) {

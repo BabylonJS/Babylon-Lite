@@ -1,4 +1,5 @@
 # Module: Effect Renderer
+
 > Package path: `packages/babylon-lite/src/effect/`
 
 ## Purpose
@@ -225,16 +226,16 @@ If a custom `vertexWGSL` is supplied, it must provide an `@vertex` entry point n
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js | Babylon Lite |
-| --- | --- |
-| `EffectWrapper` | `EffectWrapper` pure-state handle |
-| `EffectRenderer.render(wrapper)` (swapchain) | `createEffectRenderer(engine, effect)` + `registerEffectRenderer` — no scene needed |
-| `EffectRenderer.render(wrapper, outputTexture)` (RTT) | `createEffectRenderTask({ effect, target: rt })` scheduled in `FrameGraph` |
-| uniform-only fullscreen pass | `createUniformEffectWrapper` + `createUniformEffectRenderTask` |
-| fullscreen quad/index buffer | vertex-index fullscreen triangle |
-| `onApplyObservable` | user calls `setEffectUniforms` / `setEffectTexture` before the pass executes |
-| current framebuffer / RTT | direct `EffectRenderer` / frame-graph `RenderTarget` task |
-| `effect.setTexture("name", texture)` | `setEffectTexture(wrapper, "name", texture2D)` |
+| Babylon.js                                            | Babylon Lite                                                                        |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `EffectWrapper`                                       | `EffectWrapper` pure-state handle                                                   |
+| `EffectRenderer.render(wrapper)` (swapchain)          | `createEffectRenderer(engine, effect)` + `registerEffectRenderer` — no scene needed |
+| `EffectRenderer.render(wrapper, outputTexture)` (RTT) | `createEffectRenderTask({ effect, target: rt })` scheduled in `FrameGraph`          |
+| uniform-only fullscreen pass                          | `createUniformEffectWrapper` + `createUniformEffectRenderTask`                      |
+| fullscreen quad/index buffer                          | vertex-index fullscreen triangle                                                    |
+| `onApplyObservable`                                   | user calls `setEffectUniforms` / `setEffectTexture` before the pass executes        |
+| current framebuffer / RTT                             | direct `EffectRenderer` / frame-graph `RenderTarget` task                           |
+| `effect.setTexture("name", texture)`                  | `setEffectTexture(wrapper, "name", texture2D)`                                      |
 
 The API intentionally does not implement Babylon.js shader-store lookup, GLSL include processing, observables, raw render-target wrappers, or WebGL compatibility.
 

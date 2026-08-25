@@ -33,5 +33,5 @@ extracts the curated sheets plus `License.txt` into this folder.
   shipped) — see `audio.ts`.
 - **Engine & gameplay.** The renderer is Babylon Lite; the physics, AI, power-up
   system, scoring and game logic are **original, clean-room** code. This is a
-  side-scrolling-platformer *homage* — it contains **no** Nintendo code or assets
+  side-scrolling-platformer _homage_ — it contains **no** Nintendo code or assets
   and is not affiliated with or endorsed by Nintendo.

@@ -1,5 +1,5 @@
 import { F32, I32, U8 } from "../engine/typed-arrays.js";
-import { tickAnimation } from "./animation-group.js";
+import { tickAnimationCore } from "./animation-group.js";
 import type { AnimationGltfMixer, AnimationGroup } from "./animation-group.js";
 import { ANIMATION_GROUP_TASK_CATEGORY, getAnimationGroupOwner, getAnimationGroups } from "./animation-group-task.js";
 import { setAnimationTaskCategoryHandler } from "./animation-manager.js";
@@ -10,6 +10,8 @@ import { evaluateSampler } from "./evaluate.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import type { Mat4Storage } from "../math/types.js";
+import { _boneApplier } from "../skeleton/bone-control-hooks.js";
+import type { BoneOverride } from "../skeleton/bone-control.js";
 
 const GLTF_CLIP = 0;
 const GLTF_NODES = 1;
@@ -28,6 +30,14 @@ const _boneTmp = new F32(16);
 interface WeightedGltfTarget {
     readonly nodes: readonly NodeRest[];
     readonly skeletons: readonly SkeletonBinding[];
+    readonly overrides: ReadonlyMap<number, unknown> | undefined;
+    /** Per-node base rotation (quaternion) captured after the rest pose + bone overrides are
+     *  written and before accumulation. It is the "original value" the partial-weight rotation
+     *  slerp in `uploadTarget` blends against, so an overridden bone keeps its override for the
+     *  unanimated remainder — matching Babylon.js, which blends a weighted animation against the
+     *  target's current value, not its rest pose. Undefined unless bone control is active, so
+     *  blend-only scenes allocate nothing and keep using the node rest rotation. */
+    readonly baseRot: Float32Array | undefined;
     readonly trs: Float32Array;
     readonly localMat: Float32Array;
     readonly worldMat: Float32Array;
@@ -129,7 +139,7 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
             continue;
         }
 
-        tickAnimation(group, deltaMs, manager.engine);
+        tickAnimationCore(group, deltaMs, manager.engine);
     }
 
     for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
@@ -155,6 +165,40 @@ function resetWeightedGltfTarget(target: WeightedGltfTarget): void {
     target.rWeight.fill(0);
     target.sWeight.fill(0);
     resetTarget(target);
+    // Apply opt-in bone overrides on top of the rest pose, BEFORE accumulation so animated
+    // components overwrite them while untouched or masked-out components keep the override —
+    // matching the single-clip controller path (skeleton-updater.ts). Routed through the same
+    // null hook, so blend bundles without bone control pay only a branch.
+    const overrides = target.overrides;
+    if (overrides !== undefined) {
+        if (overrides.size > 0) {
+            _boneApplier?.(overrides as ReadonlyMap<number, BoneOverride>, target.trs, target.nodes.length);
+        }
+        // Snapshot the post-override rotations: accumulation overwrites the rotation slot, but
+        // `uploadTarget` still needs the pre-animation value to slerp against at partial weight.
+        const baseRot = target.baseRot!;
+        const trs = target.trs;
+        for (let i = 0; i < target.nodes.length; i++) {
+            const src = i * TRS_STRIDE + R_OFF;
+            const dst = i * 4;
+            baseRot[dst] = trs[src]!;
+            baseRot[dst + 1] = trs[src + 1]!;
+            baseRot[dst + 2] = trs[src + 2]!;
+            baseRot[dst + 3] = trs[src + 3]!;
+        }
+    }
+}
+
+/** True when this channel is masked OUT for the group (mask active, node named, excluded).
+ *  One helper shared by both accumulate paths — mirrors `animationGroupMaskRetainsTarget`
+ *  (animation-group-mask.ts) inline so blend-only bundles don't pull in the mask module. */
+function channelMaskedOut(group: AnimationGroup, channelIndex: number, nodeIdx: number): boolean {
+    const mask = group.mask;
+    if (mask === undefined || mask.disabled || nodeIdx < 0) {
+        return false;
+    }
+    const name = group.targetedAnimations[channelIndex]!.targetName ?? "";
+    return (mask.names.indexOf(name) !== -1) !== (mask.mode === 0); /* Include */
 }
 
 function getTarget(scratch: WeightedGltfScratch, mixer: AnimationGltfMixer): WeightedGltfTarget {
@@ -162,9 +206,15 @@ function getTarget(scratch: WeightedGltfScratch, mixer: AnimationGltfMixer): Wei
     let target = scratch.targets.get(nodes);
     if (!target) {
         const numNodes = nodes.length;
+        const skeletons = mixer[GLTF_SKELETONS];
+        // Bone overrides ride on the shared runtime skeleton (stamped by enableBoneControl).
+        // Undefined unless bone control is active, so blend-only scenes pay nothing.
+        const overrides = skeletons.length > 0 ? skeletons[0]!.runtimeSkeleton?._overrides : undefined;
         target = {
             nodes,
-            skeletons: mixer[GLTF_SKELETONS],
+            skeletons,
+            overrides,
+            baseRot: overrides !== undefined ? new F32(numNodes * 4) : undefined,
             trs: new F32(numNodes * TRS_STRIDE),
             localMat: new F32(numNodes * 16),
             worldMat: new F32(numNodes * 16),
@@ -175,6 +225,12 @@ function getTarget(scratch: WeightedGltfScratch, mixer: AnimationGltfMixer): Wei
             active: false,
         };
         scratch.targets.set(nodes, target);
+        // The per-tick reset pass runs over `scratch.targets` BEFORE any group is accumulated,
+        // so a target created during this tick would otherwise stay zero-filled for every
+        // component no channel writes — masked-out channels and overridden-but-unanimated
+        // bones would collapse to a zero matrix on the first tick only. Seed it here so tick 1
+        // matches every subsequent tick.
+        resetWeightedGltfTarget(target);
     }
     return target;
 }
@@ -211,6 +267,9 @@ function accumulateAdditiveGroup(scratch: WeightedGltfScratch, group: AnimationG
         const ch = clip.channels[channelIndex]!;
         const sampler = clip.samplers[ch.samplerIdx]!;
         const nodeIdx = ch.nodeIdx;
+        if (channelMaskedOut(group, channelIndex, nodeIdx)) {
+            continue;
+        }
         const base = nodeIdx * TRS_STRIDE;
         switch (ch.path) {
             case PATH_TRANSLATION:
@@ -255,6 +314,9 @@ function accumulateGroup(manager: AnimationManager, scratch: WeightedGltfScratch
         const ch = clip.channels[channelIndex]!;
         const sampler = clip.samplers[ch.samplerIdx]!;
         const nodeIdx = ch.nodeIdx;
+        if (channelMaskedOut(group, channelIndex, nodeIdx)) {
+            continue;
+        }
         const base = nodeIdx * TRS_STRIDE;
         switch (ch.path) {
             case PATH_TRANSLATION:
@@ -341,12 +403,27 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
     const device = manager.engine._device;
     const { nodes, trs, localMat, worldMat } = target;
 
+    // Re-apply bone visibility AFTER accumulation, mirroring the single-clip controller
+    // path (skeleton-updater.ts): hiding must beat clips that animate the bone's scale.
+    const overrides = target.overrides;
+    if (overrides !== undefined && overrides.size > 0) {
+        _boneApplier?.(overrides as ReadonlyMap<number, BoneOverride>, trs, nodes.length, true);
+    }
+
     for (let i = 0; i < nodes.length; i++) {
         const rotationWeight = target.rWeight[i]!;
         if (rotationWeight > 0 && rotationWeight < 1) {
             const off = i * TRS_STRIDE + R_OFF;
+            // Blend the animated remainder against the pre-animation pose: the post-override
+            // base when bone control is active, otherwise the node's rest rotation.
+            const baseRot = target.baseRot;
             const node = nodes[i]!;
-            quatSlerpInto(trs, off, node.rx, node.ry, node.rz, node.rw, trs[off]!, trs[off + 1]!, trs[off + 2]!, trs[off + 3]!, rotationWeight);
+            const bo = i * 4;
+            const bx = baseRot ? baseRot[bo]! : node.rx;
+            const by = baseRot ? baseRot[bo + 1]! : node.ry;
+            const bz = baseRot ? baseRot[bo + 2]! : node.rz;
+            const bw = baseRot ? baseRot[bo + 3]! : node.rw;
+            quatSlerpInto(trs, off, bx, by, bz, bw, trs[off]!, trs[off + 1]!, trs[off + 2]!, trs[off + 3]!, rotationWeight);
         } else if (rotationWeight > 0) {
             normalizeQuaternionAt(trs, i * TRS_STRIDE + R_OFF);
         }
@@ -385,6 +462,9 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
 
     for (let skeletonIndex = 0; skeletonIndex < target.skeletons.length; skeletonIndex++) {
         const skel = target.skeletons[skeletonIndex]!;
+        if (skel.runtimeSkeleton?._disposed) {
+            continue;
+        }
         const boneData = skel.boneMatrices;
         for (let bi = 0; bi < skel.boneCount; bi++) {
             const jointIdx = skel.jointNodes[bi]!;

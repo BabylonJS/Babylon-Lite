@@ -11,6 +11,8 @@
  *  accessors stay aligned), and rewrites every `bufferView.byteOffset` to its
  *  global position in the concatenated chunk (and resets `buffer` to 0). */
 
+import { resolveBufferUri } from "./gltf-json-asset.js";
+
 export async function loadMultiBuffer(json: any, baseUrl: string): Promise<DataView> {
     const buffers: any[] = json.buffers ?? [];
     const arrays = await Promise.all(buffers.map((b) => (b?.uri ? fetch(resolveBufferUri(b.uri, baseUrl)).then((r) => r.arrayBuffer()) : Promise.resolve(new ArrayBuffer(0)))));
@@ -35,15 +37,4 @@ export async function loadMultiBuffer(json: any, baseUrl: string): Promise<DataV
     }
 
     return new DataView(out.buffer);
-}
-
-function resolveBufferUri(uri: string, baseUrl: string): string {
-    if (baseUrl) {
-        return new URL(uri, baseUrl + "x").href;
-    }
-    try {
-        return new URL(uri).href;
-    } catch {
-        throw new Error("loadGltf: relative buffer URI needs a base URL.");
-    }
 }

@@ -36,9 +36,6 @@ export interface SceneContext {
     /** Background material primaryColor (linear RGB). */
     environmentPrimaryColor?: [number, number, number];
 
-    /** Environment cubemap Y rotation in radians. */
-    envRotationY?: number;
-
     /** Fixed timestep for animation ticks (ms, 0 = use real rAF delta). */
     fixedDeltaMs: number;
 
@@ -60,7 +57,16 @@ export interface SceneContext {
 }
 
 /** Add an entity or asset container to the scene. Auto-routes by type. */
-export function addToScene(scene: SceneContext, entity: Mesh | LightBase | ShadowGenerator | TransformNode | AssetContainer): void;
+export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void;
+
+/** Remove an entity or asset container from the scene, undoing addToScene. Idempotent.
+ *  Removing a mesh from its LAST scene disposes it — every claim it holds on its shared GPU
+ *  resources is released, the ones it last owned are destroyed, and the mesh is retired for good
+ *  (re-adding it throws). See "Mesh GPU Lifetime". */
+export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void;
+
+/** Set environment rotation around the Y axis, in radians. */
+export function setEnvironmentRotation(scene: SceneContext, rotation: number): void;
 
 /** Register a callback to run before each rendered frame. */
 export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => void): void;
@@ -68,11 +74,16 @@ export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => voi
 /** Register a callback to run when `disposeScene(scene)` is called. */
 export function onSceneDispose(scene: SceneContext, cb: () => void): void;
 
-/** Build deferred GPU resources, build the frame graph, and register the scene for rendering. */
+/** Build deferred GPU resources, build the frame graph, and register the scene for rendering.
+ *  Rebuilds the scene first when its light/shadow topology changed since the initial build. */
 export function registerScene(scene: SceneContext): Promise<void>;
 
 /** Remove the scene from the engine render list without disposing scene-owned resources. */
 export function unregisterScene(scene: SceneContext): void;
+
+/** Re-run every material group builder in place so renderables pick up the current light/shadow
+ *  topology. No-op before the initial build. */
+export function rebuildSceneRenderables(scene: SceneContext): Promise<void>;
 
 /** Release all GPU resources owned by this scene. */
 export function disposeScene(scene: SceneContext): void;
@@ -191,6 +202,16 @@ The `AssetContainer` branch is checked first (via `'entities' in entity`). For `
 
 The scene never branches on material type (PBR vs standard). Materials self-describe their builder via `material._buildGroup`, and the scene groups meshes by builder identity using an internal `Map<MeshGroupBuilder, Mesh[]>`. Each unique builder is registered as a deferred builder exactly once.
 
+### Mesh GPU Lifetime — `removeFromScene` Contract
+
+A mesh's GPU resources (geometry `_gpu`, skeleton, morph targets, thin instances) are **shared and ref-counted** (`resource/ref-count.ts`): several scenes may hold the same mesh, `cloneTransformNode` shares buffers with its clone, and the glTF loader shares one geometry across nodes referencing the same primitive.
+
+- `removeFromScene(scene, mesh)` / `disposeScene(scene)` unregister the scene from the mesh (`unregisterMeshScene`). Only when the mesh leaves its **last** scene is `disposeMeshGpu(mesh)` called, which releases the mesh's claim on each shared resource. Removing a mesh from one of several scenes holding it is not a disposal — re-adding it there is fine. `disposeMeshGpu` is also public, so calling it directly disposes the mesh the same way, whether or not it ever belonged to a scene.
+- Each resource's buffers are destroyed when that release was the **last** claim on it; resources still owned by a clone or another glTF node survive.
+- **Disposal is terminal, for the mesh.** `disposeMeshGpu` marks the mesh `_disposed` and returns early on any repeat call, so the idempotent `removeFromScene` never releases a claim twice (a second release would report the surviving clone's claim as the last one and destroy buffers still in use). `addToScene` throws for a disposed mesh from then on: `Mesh "<name>" cannot be added: it was disposed when it left its last scene. Create a new mesh instead.`, and `cloneTransformNode` likewise refuses it — a clone of a disposed mesh could never release the claims cloning retains. The flag is per-mesh, not per-resource, because both failure modes are per-mesh: a sole owner would draw with destroyed handles, while a shared owner would release a second claim it no longer holds and free buffers a surviving sibling still renders with. It also covers resources destroyed independently of the shared geometry (a per-node skeleton or morph target whose geometry is shared) and stale handles left behind by device-loss recovery, which only rebuilds meshes still in a scene.
+- The guard runs before any scene state is mutated, so a rejected mesh add leaves the scene untouched. Adding a hierarchy or asset container is not transactional: entities processed before the offending mesh stay added.
+- Removing a mesh you intend to show again is therefore never valid unless another scene still holds it. Otherwise build a new mesh. To hide a mesh temporarily, prefer `mesh.visible = false` / `setSubtreeVisible` over removing it.
+
 ### Deferred Building & `_buildGroup` Pattern
 
 Materials carry a `_buildGroup: MeshGroupBuilder` function that knows how to create GPU pipelines, bind groups, and renderables for a batch of meshes sharing that material type. The flow:
@@ -203,6 +224,38 @@ Materials carry a `_buildGroup: MeshGroupBuilder` function that knows how to cre
 `buildScene(scene)` is async — deferred builders may return `Promise<void>` for GPU resource creation.
 
 This decouples scene setup from GPU resource creation, ensures all assets are loaded before pipelines are built, and keeps scene.ts entirely material-agnostic.
+
+### Runtime Adds & Removals (after `registerScene`)
+
+Deferred builders only run at boot, inside `buildScene()`. Anything added afterwards goes through the
+per-frame material-swap queue (`processMaterialSwaps`, drained from the scene's `_update` hook), which
+covers two distinct cases:
+
+- **The material's group already exists and has been built** (`group.r` is set) — the mesh's renderable
+  is rebuilt synchronously in that same frame, so there is no missing-mesh flash.
+- **The material's group has never been built** — either the mesh is the FIRST of its material family in
+  this scene, or `mesh.material` was reassigned to a family with no group at all (the material setter only
+  enqueues; it never creates a group). These are handed to the runtime build path
+  (`scene-runtime-mesh-build.ts`, dynamically imported so static scenes do not bundle it), which
+  materializes the group: PBR rebuilds the whole group via `rebuildScenePbrPipelines`, other families
+  build the single mesh and install the group's rebuild function.
+
+> **Introducing a material family at runtime is ASYNCHRONOUS.** It requires a dynamic module import plus
+> shader compilation and a full group build, so the mesh becomes visible some frames after `addToScene`
+> returns — `addToScene` itself returns `void` and offers no readiness signal. Adding at least one mesh of
+> each material family before `registerScene` keeps everything synchronous. Build failures surface through
+> the scene's before-render error hook rather than being swallowed.
+
+`removeFromScene` mirrors this asymmetry on the teardown side: scene bookkeeping (list splices, group and
+frame-graph eviction, renderable-version bump) is synchronous, but **GPU teardown is deferred** —
+per-mesh/material UBOs, texture releases and shared geometry buffers are retired via `retireGpuResources`
+and only destroyed after the next `queue.submit` has drained. This makes `removeFromScene` legal from
+inside `onBeforeRender` (destroying mid-frame hits "Destroyed texture / Buffer used in a submit") and
+preserves make-before-break for resources shared with another mesh: a rebuild re-acquires the texture
+before the deferred release lands, so its ref count never dips to zero. Because the free is deferred, the
+right to release a mesh's shared buffers is taken as a one-shot, revocable claim
+(`claimMeshGpuDisposal` / `consumeMeshGpuDisposal`), so a repeat removal, a re-add, or a `disposeScene`
+in between cannot free the same buffers twice.
 
 ### Hidden State (accessed via `(scene as any)`)
 
@@ -227,6 +280,48 @@ Algorithm:
 7. Create camera: `alpha = -π/2`, `beta = π/2`, `radius`, `target = center`.
 8. Set `minZ = radius * 0.01`, `maxZ = radius * 1000`.
 9. Assign `scene.camera = cam`.
+
+## Lifecycle: What Is Baked At Build Time
+
+`registerScene` / `registerSceneWithShadowSupport` run the deferred group builders **once**
+(`_built`); `unregisterScene` only detaches the scene from its surface's render list, so a
+re-registration re-attaches rather than re-builds. What each category costs:
+
+| Change after the initial build                                    | Takes effect                                                                                                            |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Light position / direction / colour / intensity                   | Immediately — the lights UBO is refreshed from `_lightVersion` every frame                                              |
+| **Removing** or swapping a light                                  | Data: next frame (`_lightListVersion` invalidates the UBO). Baked state: rebuilt automatically on the next registration |
+| Removing a shadow generator                                       | Rebuilt automatically on the next registration                                                                          |
+| **Adding** a light, or attaching a generator to an existing light | Data: next frame (the light count changes). Baked state: only via an explicit `rebuildSceneRenderables(scene)`          |
+| `mesh.material = …`                                               | Next frame, via the material-swap drain                                                                                 |
+
+Baked per renderable at build time: the per-mesh light **index** list, the single- vs multi-light
+shader permutation, whether the mesh receives shadows, and the shadow bind group of the generator
+attached to each light. `rebuildSceneRenderables(scene)` re-runs the group builders so all of it is
+recomputed. `removeFromScene` installs a rebuild hook that `buildScene` runs, so a **removal** is
+picked up automatically on the scene's next registration and the natural flow works:
+
+```ts
+unregisterScene(scene);
+removeFromScene(scene, oldLight); // its shadow generator goes with it — arms the rebuild
+addToScene(scene, newLight); // with its own generator
+await registerSceneWithShadowSupport(scene); // rebuilds, then re-attaches
+```
+
+A scene that only **adds** a light to an already-built scene installs no hook (keeping `addToScene`
+free of rebuild bytes for every scene that never mutates topology) — call `rebuildSceneRenderables`
+explicitly in that case.
+
+Removing a shadow generator does **not** free its GPU resources inline: receiver renderables built
+before the removal still bind them, so the teardown is queued on `_pendingTopologyRetirements` and
+drained by an all-family rebuild (after the replacement bind groups exist) or by `disposeScene`. A
+family-scoped rebuild (image processing → PBR only) deliberately never drains it.
+
+Only group-owned renderables are replaced. Feature-owned entries in `_renderables` (skybox, ground,
+HDR backdrop, Gaussian splats) are preserved: each `SceneMeshGroup` records its last build's output
+in `group.o` — a group's meshes can be merged into one combined renderable with no `mesh`
+back-reference, so ownership cannot be recovered by mesh identity. Node materials that captured
+`shadowGenerators` at parse time keep their own references and are out of scope for a topology swap.
 
 ## Babylon.js Equivalence Map
 
@@ -255,6 +350,27 @@ Algorithm:
 
 ## Test Specification
 
+| Test                                         | Description                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------- |
+| `createSceneContext returns valid defaults`  | Verify all fields match documented defaults                               |
+| `addToScene routes mesh`                     | Add Mesh → appears in `meshes`, builder registered in `_deferredBuilders` |
+| `addToScene routes light`                    | Add light → appears in `lights`                                           |
+| `addToScene routes shadow generator`         | Add ShadowGenerator → appears in `shadowGenerators` + `_prePasses`        |
+| `addToScene deduplicates builders`           | Two meshes with same `_buildGroup` → one deferred builder                 |
+| `createDefaultCamera with meshes`            | Provide meshes with known bounds, verify radius = diag\*1.5               |
+| `createDefaultCamera with no meshes`         | radius=1, center=(0,0,0)                                                  |
+| `deferred builders run at buildScene()`      | Register builder → verify called by `buildScene()`                        |
+| `buildScene() awaits async builders`         | Register async builder → verify awaited                                   |
+| `rebuildSceneRenderables no-op pre-build`    | `_built === false` → builders not re-run                                  |
+| `rebuildSceneRenderables preserves features` | Skybox/ground renderables survive; group output replaced                  |
+| `rebuildSceneRenderables regroups meshes`    | Material-swapped mesh rebuilt by its CURRENT family builder               |
+| `rebuild retires old disposers after build`  | Make-before-break ordering; `_meshAuxDisposables` untouched               |
+| `light removal marks topology dirty`         | `_lightListVersion` bumped, rebuild hook installed, teardown deferred     |
+| `addToScene rejects a disposed mesh`         | Remove a sole-owner mesh, re-add it → throws, scene left untouched        |
+| `addToScene rejects a disposed clone`        | Remove a mesh whose clone still owns the geometry, re-add it → throws     |
+| `removeFromScene stays idempotent`           | Remove a clone's source twice → the clone's geometry is never destroyed   |
+| `cloneTransformNode rejects a disposed mesh` | Clone a mesh removed from its last scene → throws instead of pinning it   |
+| `addToScene keeps multi-scene meshes`        | Remove a mesh from one of two scenes holding it → re-add succeeds         |
 | Test                                        | Description                                                               |
 | ------------------------------------------- | ------------------------------------------------------------------------- |
 | `createSceneContext returns valid defaults` | Verify all fields match documented defaults                               |
@@ -266,6 +382,13 @@ Algorithm:
 | `createDefaultCamera with no meshes`        | radius=1, center=(0,0,0)                                                  |
 | `deferred builders run at buildScene()`     | Register builder → verify called by `buildScene()`                        |
 | `buildScene() awaits async builders`        | Register async builder → verify awaited                                   |
+| `rebuildSceneRenderables no-op pre-build`   | `_built === false` → builders not re-run                                  |
+| `rebuildSceneRenderables preserves features`| Skybox/ground renderables survive; group output replaced                   |
+| `rebuildSceneRenderables regroups meshes`   | Material-swapped mesh rebuilt by its CURRENT family builder               |
+| `rebuild retires old disposers after build` | Make-before-break ordering; `_meshAuxDisposables` untouched               |
+| `light removal marks topology dirty`        | `_lightListVersion` bumped, rebuild hook installed, teardown deferred     |
+| `scene272-runtime-mesh-swap`                | Remove a textured mesh + add a clone sharing its material from `onBeforeRender` → no destroyed-resource submit, matches BJS |
+| `scene273-runtime-material-family`          | Add the first PBR mesh to a built StandardMaterial-only scene → the mesh renders instead of being silently dropped |
 
 ## File Manifest
 

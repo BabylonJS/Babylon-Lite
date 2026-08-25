@@ -21,18 +21,19 @@ import {
     createBox,
     createDefaultCamera,
     createEngine,
-    createPbrMaterial,
+    createPbrMaterial, setPbrSkybox,
     createSceneContext,
     createSolidTexture2D,
     getFrameGraph,
+    loadDdsEnvironment,
     loadGltf,
     onBeforeRender,
     registerScene,
     setCameraLimits,
     startEngine,
+    AcesToneMapping,
     type RenderTask,
 } from "babylon-lite";
-import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
 import { configureDemoDecoderBases, demoAssetUrl } from "./demo-asset-url.js";
 import { installFetchProgress } from "./loading-progress.js";
 
@@ -59,7 +60,7 @@ async function main(): Promise<void> {
     // Image processing: ACES tone mapping, exposure 1.6 (matches Scene 26).
     scene.imageProcessing.exposure = 1.6;
     scene.imageProcessing.toneMappingEnabled = true;
-    scene.imageProcessing.toneMappingType = "aces";
+    scene.imageProcessing.toneMapping = AcesToneMapping;
 
     // Draco-compressed glTF — point the decoders at the demo-local wasm/js.
     await configureDemoDecoderBases(import.meta.url);
@@ -106,8 +107,8 @@ async function main(): Promise<void> {
         environmentIntensity: 1.008,
         directIntensity: 0,
         doubleSided: true,
-        skyboxMode: true,
     });
+    setPbrSkybox(skybox.material);
     const syncSkybox = (): void => {
         const w = cam.worldMatrix;
         skybox.position.set(w[12]!, w[13]!, w[14]!);

@@ -4,7 +4,7 @@
  * Both BJS and Lite parse the SAME inline NME JSON and add one DirectionalLight
  * with identical direction. Sphere is lit via LightBlock.diffuseOutput on black.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 

@@ -1,4 +1,23 @@
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, cloneTransformNode, attachControl, loadGltf, loadEnvironment, loadTexture2D, createPbrMaterial, createSolidTexture2D, goToFrame, registerScene } from "babylon-lite";
+import {
+    onBeforeRender,
+    addToScene,
+    startEngine,
+    createEngine,
+    createSceneContext,
+    createArcRotateCamera,
+    createDirectionalLight,
+    cloneTransformNode,
+    attachControl,
+    loadGltf,
+    loadEnvironment,
+    loadTexture2D,
+    createPbrMaterial,
+    setPbrMetallicReflectance,
+    setEnvironmentRotation,
+    createSolidTexture2D,
+    goToFrame,
+    registerScene,
+} from "babylon-lite";
 import type { TransformNode } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 
@@ -23,7 +42,7 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
         skipGround: true,
         brdfUrl: "/brdf-lut.png",
     });
-    scene.envRotationY = 1.9;
+    setEnvironmentRotation(scene, 1.9);
 
     // Load shader ball mesh — auto-added as middle row
     const result = await loadGltf(engine, "https://assets.babylonjs.com/meshes/Demos/pbr_mr_specular/shaderBall_rotation.glb");
@@ -55,16 +74,19 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
     const mrcB = Math.pow(250 / 255, 2.2);
 
     function makeMat(opts: { metallicReflectanceTex?: typeof metallicReflectanceTex; reflectanceTex?: typeof reflectanceTex; useOnlyMetallic?: boolean }) {
-        return createPbrMaterial({
+        const mat = createPbrMaterial({
             baseColorTexture: baseColorTex,
             ormTexture: ormTex,
             occlusionStrength: 0.0,
-            metallicF0Factor: 0.95,
-            metallicReflectanceColor: [mrcR, mrcG, mrcB],
-            metallicReflectanceTexture: opts.metallicReflectanceTex,
-            reflectanceTexture: opts.reflectanceTex,
-            useOnlyMetallicFromMetallicReflectanceTexture: opts.useOnlyMetallic,
+            _metallicF0Factor: 0.95,
         });
+        setPbrMetallicReflectance(mat, {
+            color: [mrcR, mrcG, mrcB],
+            texture: opts.metallicReflectanceTex,
+            reflectanceTexture: opts.reflectanceTex,
+            useOnlyMetallicFromTexture: opts.useOnlyMetallic,
+        });
+        return mat;
     }
 
     const matUpper = makeMat({ metallicReflectanceTex: metallicReflectanceTex });

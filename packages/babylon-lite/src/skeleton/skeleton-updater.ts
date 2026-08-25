@@ -67,6 +67,8 @@ function computeTopoOrder(nodes: readonly { readonly parentIdx: number }[]): Int
 export interface AnimationController {
     /** Advance animation by deltaMs and update bone textures. */
     tick(deltaMs: number, engine?: EngineContext): void;
+    /** @internal Advance/evaluate without submitting bone or morph data to the GPU. */
+    _tickCpu?(deltaMs: number, engine?: EngineContext): void;
     /** Current playback time in seconds. */
     time: number;
     /** True if playing. */
@@ -132,8 +134,20 @@ export function createAnimationController(
     boneOverrides?: ReadonlyMap<number, unknown>,
     nodeNames?: readonly (string | undefined)[]
 ): AnimationController {
-    const requiresEngine = skeletons.length > 0 || morphBindings.length > 0;
     const numNodes = nodes.length;
+    const clipSkeletons = skeletons.filter((skeleton) =>
+        skeleton.jointNodes.some((jointNode) =>
+            clip.channels.some((channel) => {
+                for (let nodeIndex = jointNode; nodeIndex >= 0; nodeIndex = nodes[nodeIndex]!.parentIdx) {
+                    if (channel.path < PATH_WEIGHTS && channel.nodeIdx === nodeIndex) {
+                        return true;
+                    }
+                }
+                return false;
+            })
+        )
+    );
+    const requiresEngine = clipSkeletons.length > 0 || morphBindings.length > 0;
 
     // Plain node-TRS bindings: glTF translation/rotation/scale channels that target
     // a non-excluded node with a live scene node. These move node-animated meshes
@@ -170,7 +184,7 @@ export function createAnimationController(
     const topoOrder = computeTopoOrder(nodes);
 
     // Per-skeleton bone scratch
-    const boneScratch = skeletons.map((s) => s.boneMatrices);
+    const boneScratch = clipSkeletons.map((s) => s.boneMatrices);
 
     // Per-morph-binding scratch for weight evaluation
     const morphBindingsByNode: (MorphBinding[] | undefined)[] = [];
@@ -189,6 +203,7 @@ export function createAnimationController(
     let morphUploadF32 = pointerScratch;
 
     let cachedEngine: EngineContext | undefined;
+    let uploadGpu = true;
 
     // ── Animation mask (include/exclude targets by name) ──────────────────────────
     // `maskedNodes[i] = 1` marks node i's channels to be skipped this playback, so the
@@ -233,6 +248,15 @@ export function createAnimationController(
         loop: true,
         _setMask,
         _debugWorldMat: worldMat,
+        _tickCpu(deltaMs, engine): void {
+            const previous = uploadGpu;
+            uploadGpu = false;
+            try {
+                ctrl.tick(deltaMs, engine);
+            } finally {
+                uploadGpu = previous;
+            }
+        },
 
         tick:
             clip.duration <= 0
@@ -242,10 +266,10 @@ export function createAnimationController(
                           cachedEngine = engine;
                       }
                       const activeEngine = engine ?? cachedEngine;
-                      if (requiresEngine && !activeEngine) {
+                      if (requiresEngine && uploadGpu && !activeEngine) {
                           throw new Error("AnimationController.tick requires an EngineContext for skeleton or morph animation");
                       }
-                      const device = requiresEngine ? activeEngine!._device : null;
+                      const device = requiresEngine && uploadGpu ? activeEngine!._device : null;
 
                       if (ctrl.playing) {
                           ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
@@ -322,7 +346,9 @@ export function createAnimationController(
                                           const mb = bindings[bindingIndex]!;
                                           mb.weights.set(morphUploadF32.subarray(0, tc));
                                           // Write the weights array after the immutable header.
-                                          device!.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 16, morphUploadF32.buffer, 0, tc * 4);
+                                          if (uploadGpu && !mb.runtimeMorphTargets?._disposed) {
+                                              device!.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 16, morphUploadF32.buffer, 0, tc * 4);
+                                          }
                                       }
                                   }
                                   break;
@@ -335,6 +361,14 @@ export function createAnimationController(
                                   break;
                               }
                           }
+                      }
+
+                      // 2a. Re-apply bone visibility AFTER channel evaluation. Hiding a bone
+                      // is a visibility control, not a transform override, so it must beat the
+                      // clip — most rigs (every Mixamo export) bake a constant scale track onto
+                      // every bone, which would otherwise un-hide the bone on the next frame.
+                      if (boneOverrides !== undefined && boneOverrides.size > 0) {
+                          _boneApplier?.(boneOverrides as ReadonlyMap<number, BoneOverride>, currentTRS, numNodes, true);
                       }
 
                       // 2b. Apply plain node-TRS channels to the live scene graph so
@@ -390,8 +424,8 @@ export function createAnimationController(
                       }
 
                       // 4. Compute bone matrices and upload to GPU
-                      for (let si = 0; si < skeletons.length; si++) {
-                          const skel = skeletons[si]!;
+                      for (let si = 0; si < clipSkeletons.length; si++) {
+                          const skel = clipSkeletons[si]!;
                           const boneData = boneScratch[si]!;
 
                           for (let bi = 0; bi < skel.boneCount; bi++) {
@@ -403,13 +437,15 @@ export function createAnimationController(
                           }
 
                           // Upload to GPU
-                          const texWidth = skel.boneCount * 4;
-                          device!.queue.writeTexture(
-                              { texture: skel.runtimeSkeleton?.boneTexture ?? skel.boneTexture },
-                              boneData.buffer,
-                              { bytesPerRow: texWidth * 16 },
-                              { width: texWidth, height: 1 }
-                          );
+                          if (uploadGpu && !skel.runtimeSkeleton?._disposed) {
+                              const texWidth = skel.boneCount * 4;
+                              device!.queue.writeTexture(
+                                  { texture: skel.runtimeSkeleton?.boneTexture ?? skel.boneTexture },
+                                  boneData.buffer,
+                                  { bytesPerRow: texWidth * 16 },
+                                  { width: texWidth, height: 1 }
+                              );
+                          }
                       }
                   },
     };

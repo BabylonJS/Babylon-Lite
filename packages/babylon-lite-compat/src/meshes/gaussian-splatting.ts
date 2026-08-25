@@ -23,6 +23,18 @@ import type { Scene } from "../scene/scene.js";
 import type { Vector3 } from "../math/vector.js";
 import { liteBackedVector3 } from "../math/vector.js";
 
+/**
+ * Babylon.js `ISafeOrbitCameraLimits` — safe-orbit camera limits embedded in a Gaussian
+ * Splatting file's metadata (Adobe safe-orbit extension). Exposed on the loaded mesh via
+ * {@link GaussianSplattingMesh.safeOrbitCameraLimits} for shape parity with `@babylonjs/core`.
+ */
+export interface ISafeOrbitCameraLimits {
+    /** Minimum safe orbit radius (distance from the camera to its target), if the file specifies one. */
+    radiusMin?: number;
+    /** Safe elevation range as `[minElevation, maxElevation]` in radians, if the file specifies one. */
+    elevationMinMax?: [number, number];
+}
+
 /** Lite loader chosen by file extension (mirrors the BJS splat plugin dispatch). */
 function liteLoaderFor(url: string): (scene: import("babylon-lite").SceneContext, url: string, fragments?: readonly GsShaderFragment[]) => Promise<LiteGsMesh> {
     const lower = url.split("?")[0]!.toLowerCase();
@@ -70,6 +82,17 @@ export class GaussianSplattingMesh extends TransformNode {
     private readonly _ctorUrl: string | null;
     /** @internal Optional Lite shader-fragment plugins applied at load (scene 126). */
     private _fragments?: readonly GsShaderFragment[];
+
+    /**
+     * Babylon.js `gs.safeOrbitCameraLimits` — safe-orbit camera limits parsed from the source
+     * file's metadata (Adobe safe-orbit extension), or `null` when the file carries none.
+     *
+     * Babylon Lite's splat loaders (`loadSplat` / `loadSOG` / `loadSPZ`) do not parse the Adobe
+     * safe-orbit metadata block, so this stays `null` — matching BJS's own default for a file
+     * without the extension. Populating it from real metadata needs a (non-tree-shakeable) change
+     * to Lite's splat loaders; the field is exposed here for shape parity so ported reads resolve.
+     */
+    public safeOrbitCameraLimits: ISafeOrbitCameraLimits | null = null;
 
     public constructor(name: string, url?: string | null, scene?: Scene, _keepInRam?: boolean) {
         // A placeholder transform node carries any transforms set before the splat
@@ -182,7 +205,7 @@ export class GaussianSplattingMesh extends TransformNode {
 
     /** @internal Babylon.js's worker-throttle flag; ported scenes poll it to detect the first sort. */
     public get _canPostToWorker(): boolean {
-        return this._gs ? this._gs._canPostToWorker : false;
+        return this._gs ? this._gs._orderPool.length === 2 : false;
     }
 
     /** @internal The loaded Lite splat node, for the GPU picker's result mapping (undefined until loaded). */

@@ -35,6 +35,7 @@ import {
     setPhysicsBodyMassProperties,
     setPhysicsBodyPreStep,
     setPhysicsBodyShape,
+    worldStepSeconds,
 } from "./havok.js";
 import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
 
@@ -306,7 +307,8 @@ export class PhysicsCharacterController {
     public readonly onTriggerCollisionObservable = new CharacterCollisionObservable();
 
     private readonly _world: PhysicsWorld;
-    private readonly _shape: PhysicsShape;
+    private _shape: PhysicsShape;
+    private _shapeOptions: PhysicsCharacterControllerOptions;
     private readonly _node: TransformNode;
     private readonly _body: PhysicsBody;
     private readonly _startCollector: any;
@@ -331,6 +333,7 @@ export class PhysicsCharacterController {
 
         const r = options.capsuleRadius ?? 0.6;
         const h = options.capsuleHeight ?? 1.8;
+        this._shapeOptions = options;
         this._shape = createPhysicsShape(world, {
             type: PhysicsShapeType.CAPSULE,
             parameters: { pointA: { x: 0, y: h * 0.5 - r, z: 0 }, pointB: { x: 0, y: -h * 0.5 + r, z: 0 }, radius: r },
@@ -367,6 +370,53 @@ export class PhysicsCharacterController {
         this._node.position.set(position.x, position.y, position.z);
     }
 
+    /**
+     * The shape options used to build the collision capsule. Reflects the values passed at
+     * construction or the last call to {@link setShapeOptions}.
+     */
+    public get shapeOptions(): PhysicsCharacterControllerOptions {
+        return this._shapeOptions;
+    }
+
+    /**
+     * Set new shape options and rebuild the collision capsule accordingly.
+     *
+     * This is the supported way to change the capsule for common character features such as
+     * crouching, standing, crawling or sliding without recreating the controller (which would lose
+     * its position, velocity, support state and event subscriptions). The old Havok shape is
+     * released and replaced with a new one built from `options.capsuleHeight` / `options.capsuleRadius`.
+     *
+     * @param options - New capsule dimensions.
+     * @param preserveFootPosition - When `true` (default), the controller position is adapted so the
+     * world-space foot position (center - up * height/2) is kept fixed as the height changes; when
+     * `false`, the position is left unchanged.
+     */
+    public setShapeOptions(options: PhysicsCharacterControllerOptions, preserveFootPosition = true): void {
+        const r = options.capsuleRadius ?? 0.6;
+        const h = options.capsuleHeight ?? 1.8;
+
+        if (preserveFootPosition) {
+            // Compute the current world-space foot position (center - up * oldHeight/2) and move the
+            // center so the feet stay fixed for the new half-height: center = foot + up * newHeight/2.
+            const oldH = this._shapeOptions.capsuleHeight ?? 1.8;
+            const delta = (h - oldH) * 0.5;
+            vaddIn(this._position, vscale(this.up, delta));
+            this._node.position.set(this._position.x, this._position.y, this._position.z);
+        }
+
+        this._shapeOptions = options;
+
+        const newShape = createPhysicsShape(this._world, {
+            type: PhysicsShapeType.CAPSULE,
+            parameters: { pointA: { x: 0, y: h * 0.5 - r, z: 0 }, pointB: { x: 0, y: -h * 0.5 + r, z: 0 }, radius: r },
+        });
+
+        const oldShape = this._shape;
+        setPhysicsBodyShape(this._world, this._body, newShape);
+        this._world._hknp.HP_Shape_Release(oldShape._hkShape);
+        this._shape = newShape;
+    }
+
     /** Get the current character velocity (world space). The returned vector is owned by the controller. */
     public getVelocity(): Vec3 {
         return this._velocity;
@@ -382,7 +432,10 @@ export class PhysicsCharacterController {
      * @param displacement - Requested world-space displacement for this step.
      */
     public moveWithCollisions(displacement: Vec3): void {
-        const deltaTime = this._world._timestep;
+        // Physics step in seconds: the world's fixed step, or the scene's current per-frame delta when
+        // no fixed step is set (see `worldStepSeconds`). If that is 0 (e.g. the first frame) the guard
+        // below skips the move.
+        const deltaTime = worldStepSeconds(this._world);
         if (!deltaTime || deltaTime <= 0) {
             return;
         }

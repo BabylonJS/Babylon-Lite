@@ -1,4 +1,5 @@
 # Module: Frame-Graph Post-Process
+
 > Package paths: `packages/babylon-lite/src/frame-graph/`, `packages/babylon-lite/src/post-process/`
 
 ## Purpose
@@ -94,7 +95,11 @@ export interface ExtractHighlightsPostProcessTask extends PostProcessTask {
     exposure: number;
 }
 
-export function createExtractHighlightsPostProcessTask(config: ExtractHighlightsPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): ExtractHighlightsPostProcessTask;
+export function createExtractHighlightsPostProcessTask(
+    config: ExtractHighlightsPostProcessTaskConfig,
+    engine: EngineContext,
+    scene?: SceneContext
+): ExtractHighlightsPostProcessTask;
 
 export interface ChromaticAberrationPostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
     aberrationAmount?: number;
@@ -110,7 +115,11 @@ export interface ChromaticAberrationPostProcessTask extends PostProcessTask {
     centerPosition: { x: number; y: number };
 }
 
-export function createChromaticAberrationPostProcessTask(config: ChromaticAberrationPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): ChromaticAberrationPostProcessTask;
+export function createChromaticAberrationPostProcessTask(
+    config: ChromaticAberrationPostProcessTaskConfig,
+    engine: EngineContext,
+    scene?: SceneContext
+): ChromaticAberrationPostProcessTask;
 
 export interface BloomPostProcessTaskConfig extends PostProcessTaskSettings {
     weight?: number;
@@ -187,12 +196,12 @@ Pipeline:
 
 Bind group `0`:
 
-| Binding | Resource | Visibility |
-| --- | --- | --- |
-| `0` | source sampler (`nearest` or `linear`) | fragment |
-| `1` | source color texture (`texture_2d<f32>`) | fragment |
-| `2+` | optional extra textures (`texture_2d<f32>`) | fragment |
-| `2 + extraTextures.length` or `_shader.uniformBinding` | optional uniform buffer | fragment |
+| Binding                                                | Resource                                    | Visibility |
+| ------------------------------------------------------ | ------------------------------------------- | ---------- |
+| `0`                                                    | source sampler (`nearest` or `linear`)      | fragment   |
+| `1`                                                    | source color texture (`texture_2d<f32>`)    | fragment   |
+| `2+`                                                   | optional extra textures (`texture_2d<f32>`) | fragment   |
+| `2 + extraTextures.length` or `_shader.uniformBinding` | optional uniform buffer                     | fragment   |
 
 `alphaMode` mapping follows the existing Lite/Babylon.js numeric modes used by node-material pipelines:
 
@@ -219,21 +228,25 @@ fn postProcessVertex(@builtin(vertex_index) vertexIndex: u32) -> PostProcessVert
     let p = positions[vertexIndex];
     var out: PostProcessVertexOutput;
     out.position = vec4f(p, 0.0, 1.0);
-    out.uv = p * 0.5 + vec2f(0.5, 0.5);
+    // V is flipped: clip space is +Y up, texture space is +Y down.
+    out.uv = vec2f(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
     return out;
 }
 
 @group(0) @binding(0) var sourceSampler: sampler;
 @group(0) @binding(1) var sourceTextureSampler: texture_2d<f32>;
 
-fn readPostProcessSource(position: vec2f) -> vec4f {
-    let dims = vec2f(textureDimensions(sourceTextureSampler));
-    let uv = (floor(position) + vec2f(0.5)) / dims;
-    return textureSampleLevel(sourceTextureSampler, sourceSampler, clamp(uv, vec2f(0.0), vec2f(1.0)), 0.0);
+fn samplePostProcessSource(uv: vec2f) -> vec4f {
+    return textureSample(sourceTextureSampler, sourceSampler, uv);
 }
 
-fn samplePostProcessSource(uv: vec2f) -> vec4f {
-    return textureSampleLevel(sourceTextureSampler, sourceSampler, clamp(uv, vec2f(0.0), vec2f(1.0)), 0.0);
+// Texel-snapped read. Takes a NORMALIZED uv, like samplePostProcessSource —
+// not a pixel coordinate — and clamps to the texel centres so a snapped fetch
+// cannot bleed outside the source.
+fn readPostProcessSource(uv: vec2f) -> vec4f {
+    let dims = vec2f(textureDimensions(sourceTextureSampler));
+    let p = clamp(floor(uv * dims) + vec2f(0.5), vec2f(0.5), dims - vec2f(0.5));
+    return textureSampleLevel(sourceTextureSampler, sourceSampler, p / dims, 0);
 }
 
 // user fragmentWGSL must define:
@@ -277,22 +290,22 @@ The current concrete post-processes mirror their Babylon.js thin post-process sh
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js | Babylon Lite |
-| --- | --- |
-| `FrameGraphPostProcessTask` | `PostProcessTask` plain task record |
-| `sourceTexture` handle | `RenderTarget` source with sampled color attachment |
-| `targetTexture` handle | optional `RenderTarget` output |
-| auto-created output texture | internal `RenderTarget` copied from source descriptor |
-| `sourceSamplingMode` | `"nearest"` / `"linear"` sampler selection |
-| `alphaMode` | numeric modes `0`, `1`, `2`, `7` mapped to WebGPU blend state |
-| `viewport` | normalized viewport/scissor on the output pass |
-| `ThinPostProcess` | not present; shader config is direct WGSL |
-| `FrameGraphBlackAndWhiteTask` | `createBlackAndWhitePostProcessTask` |
-| `FrameGraphAnaglyphTask` / `ThinAnaglyphPostProcess` | `createAnaglyphPostProcessTask` |
-| `FrameGraphBlurTask` / `ThinBlurPostProcess` | `createBlurPostProcessTask` |
-| `FrameGraphExtractHighlightsTask` / `ThinExtractHighlightsPostProcess` | `createExtractHighlightsPostProcessTask` |
-| `FrameGraphChromaticAberrationTask` / `ThinChromaticAberrationPostProcess` | `createChromaticAberrationPostProcessTask` |
-| `FrameGraphBloomTask` / `BloomEffect` | `createBloomPostProcessTask` |
+| Babylon.js                                                                 | Babylon Lite                                                  |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `FrameGraphPostProcessTask`                                                | `PostProcessTask` plain task record                           |
+| `sourceTexture` handle                                                     | `RenderTarget` source with sampled color attachment           |
+| `targetTexture` handle                                                     | optional `RenderTarget` output                                |
+| auto-created output texture                                                | internal `RenderTarget` copied from source descriptor         |
+| `sourceSamplingMode`                                                       | `"nearest"` / `"linear"` sampler selection                    |
+| `alphaMode`                                                                | numeric modes `0`, `1`, `2`, `7` mapped to WebGPU blend state |
+| `viewport`                                                                 | normalized viewport/scissor on the output pass                |
+| `ThinPostProcess`                                                          | not present; shader config is direct WGSL                     |
+| `FrameGraphBlackAndWhiteTask`                                              | `createBlackAndWhitePostProcessTask`                          |
+| `FrameGraphAnaglyphTask` / `ThinAnaglyphPostProcess`                       | `createAnaglyphPostProcessTask`                               |
+| `FrameGraphBlurTask` / `ThinBlurPostProcess`                               | `createBlurPostProcessTask`                                   |
+| `FrameGraphExtractHighlightsTask` / `ThinExtractHighlightsPostProcess`     | `createExtractHighlightsPostProcessTask`                      |
+| `FrameGraphChromaticAberrationTask` / `ThinChromaticAberrationPostProcess` | `createChromaticAberrationPostProcessTask`                    |
+| `FrameGraphBloomTask` / `BloomEffect`                                      | `createBloomPostProcessTask`                                  |
 
 ## Dependencies
 

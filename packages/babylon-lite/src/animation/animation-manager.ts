@@ -47,6 +47,8 @@ export interface AnimationManager {
     _taskCategory?: string;
     /** @internal */
     _taskCategoryHandler?: AnimationTaskCategoryHandler;
+    /** @internal Optional per-manager hook run each tick before the category handler (e.g. weight fades). */
+    _preUpdate?: (manager: AnimationManager, deltaMs: number) => void;
     /** @internal */
     _rafId: number;
     /** @internal */
@@ -132,6 +134,7 @@ export function updateAnimationManager(manager: AnimationManager, deltaMs: numbe
     if (!Number.isFinite(step) || step < 0) {
         return;
     }
+    manager._preUpdate?.(manager, step);
     const handledCategory = manager._taskCategoryHandler?.(manager, step) ? manager._taskCategory : undefined;
     // Snapshot the list so a task's _update callback can remove itself or other
     // tasks (via removeAnimationTask) without shifting unvisited tasks out of the

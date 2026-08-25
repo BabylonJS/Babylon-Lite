@@ -6,13 +6,13 @@
 // Static camera (no auto-rotation) for a deterministic golden.
 
 import {
-    addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial,
+    addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial, setPbrSkybox,
     createSceneContext, createSolidTexture2D, getFrameGraph, loadEnvironment, loadGltf,
     onBeforeRender, registerScene, startEngine,
     type RenderTask,
 } from "babylon-lite";
 
-const MODEL_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/DispersionTest/glTF-Binary/DispersionTest.glb";
+const MODEL_URL = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/DispersionTest/glTF-Binary/DispersionTest.glb";
 const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
 
 // Fixed face-on camera pose (mirrored exactly in src/bjs/scene212.ts) so both
@@ -71,8 +71,8 @@ async function main(): Promise<void> {
         environmentIntensity: 1.0,
         directIntensity: 0,
         doubleSided: true,
-        skyboxMode: true,
     });
+    setPbrSkybox(skybox.material);
     const syncSkybox = (): void => {
         const w = cam.worldMatrix;
         skybox.position.set(w[12]!, w[13]!, w[14]!);
