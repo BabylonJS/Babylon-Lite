@@ -85,6 +85,12 @@ let localEnvironmentIrradiance = (material.localSphericalL00.rgb
   + material.localSphericalL22.rgb * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity;
 let environmentIrradiance=select(localEnvironmentIrradiance,sceneEnvironmentIrradiance,material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0);`;
 
+const IBL_LOCAL_IRRADIANCE = `let environmentIrradiance = (material.localSphericalL00.rgb
+  + material.localSphericalL1_1.rgb * N_env.y + material.localSphericalL10.rgb * N_env.z + material.localSphericalL11.rgb * N_env.x
+  + material.localSphericalL2_2.rgb * (N_env.y * N_env.x) + material.localSphericalL2_1.rgb * (N_env.y * N_env.z)
+  + material.localSphericalL20.rgb * (3.0 * N_env.z * N_env.z - 1.0) + material.localSphericalL21.rgb * (N_env.z * N_env.x)
+  + material.localSphericalL22.rgb * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity;`;
+
 function createProbeArrayHelpers(): string {
     return `struct LocalEnvironmentProbe{
 projectionCentreAndLayer:vec4f,
@@ -334,7 +340,7 @@ if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){shEnvRadia
     return fragmentWGSL;
 }
 
-function patchSceneIbl(composed: ComposedShader): ComposedShader {
+function patchSceneIbl(composed: ComposedShader, hasSceneEnvironment: boolean): ComposedShader {
     let fragmentWGSL = composed._fragmentWGSL;
     let reflectionRewrites = 0;
     fragmentWGSL = fragmentWGSL.replace(/let\s+R\s*=\s*rotateY\(\s*R_raw\s*,\s*scene\.envRotationY\s*\);/g, () => {
@@ -344,7 +350,7 @@ function patchSceneIbl(composed: ComposedShader): ComposedShader {
     if (reflectionRewrites !== 1) {
         throw new Error(`local cubemap _postCompose: expected to rewrite 1 reflection direction, rewrote ${reflectionRewrites}`);
     }
-    fragmentWGSL = replaceExactly(fragmentWGSL, IBL_SCENE_IRRADIANCE, IBL_SCENE_OR_LOCAL_IRRADIANCE, "local cubemap irradiance");
+    fragmentWGSL = replaceExactly(fragmentWGSL, IBL_SCENE_IRRADIANCE, hasSceneEnvironment ? IBL_SCENE_OR_LOCAL_IRRADIANCE : IBL_LOCAL_IRRADIANCE, "local cubemap irradiance");
     let lodRewrites = 0;
     fragmentWGSL = fragmentWGSL.replace(/scene\.vImageInfos\.z/g, () => {
         lodRewrites++;
@@ -379,7 +385,7 @@ function localBindings(): NonNullable<ShaderFragment["_bindings"]> {
     ];
 }
 
-function createLocalEnvironmentFragment(): ShaderFragment {
+function createLocalEnvironmentFragment(hasSceneEnvironment: boolean): ShaderFragment {
     const uboFields: UboField[] = [
         { _name: "localEnvironmentMode", _type: "f32" },
         { _name: "vReflectionPosition", _type: "vec3<f32>" },
@@ -397,7 +403,7 @@ function createLocalEnvironmentFragment(): ShaderFragment {
         _fragmentSlots: {
             BC: `if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0&&(localProbeData.params.w&${_PBR_LOCAL_ENVIRONMENT_DEBUG_COLOR_FLAG}u)!=0u){color=localProbeDebugOutput;}`,
         },
-        _pc: patchSceneIbl,
+        _pc: (composed) => patchSceneIbl(composed, hasSceneEnvironment),
     };
 }
 
@@ -448,15 +454,9 @@ function replaceEntryResource(entries: GPUBindGroupEntry[], current: GPUBindingR
 
 function bindLocalEnvironment(ctx: _PbrBindCtx, entries: GPUBindGroupEntry[], binding: number, state: PbrLocalEnvironmentState): number {
     const environment = localEnvironmentForState(state);
-    if (state.kind !== "probes" && ctx._env) {
+    if (state.kind !== "probes" && ctx._env && ctx._env !== environment) {
         replaceEntryResource(entries, ctx._env.specularCubeView, environment.specularCubeView, "cubemap");
         replaceEntryResource(entries, ctx._env.cubeSampler, environment.cubeSampler, "cubemap sampler");
-    }
-    if (!ctx._env) {
-        entries.push({ binding: binding++, resource: environment.brdfLutView });
-        entries.push({ binding: binding++, resource: environment.brdfSampler });
-        entries.push({ binding: binding++, resource: environment.specularCubeView });
-        entries.push({ binding: binding++, resource: environment.cubeSampler });
     }
     if (state.kind === "probes") {
         state.set._ensureDevice();
@@ -500,7 +500,11 @@ export const pbrExt: PbrExt = {
         return { f: state ? PBR_HAS_LOCAL_ENVIRONMENT : 0, f2: 0 };
     },
     frag(ctx) {
-        return (ctx._features & PBR_HAS_LOCAL_ENVIRONMENT) !== 0 ? createLocalEnvironmentFragment() : null;
+        return (ctx._features & PBR_HAS_LOCAL_ENVIRONMENT) !== 0 ? createLocalEnvironmentFragment(ctx._hasSceneIbl ?? false) : null;
+    },
+    iblFallback(material) {
+        const state = _getPbrLocalEnvironment(material);
+        return state ? localEnvironmentForState(state) : null;
     },
     writeUbo(data, material, offsets) {
         const state = _getPbrLocalEnvironment(material);

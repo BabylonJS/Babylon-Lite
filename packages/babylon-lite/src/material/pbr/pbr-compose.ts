@@ -201,19 +201,21 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _meshFeatures: meshFeatures,
             _uv2Mask: _hasUv2 ? uv2Mask : 0,
             _hasIbl: _hasIbl,
+            _hasSceneIbl: hasScene(PBR_HAS_ENV),
             _hasAnyNormal,
             _hasSpecularAA,
             _anisoBentNormalCode: _hasAnisotropy && _anisoHooks ? _anisoHooks._anisoBentNormal : "",
             _iblSkyboxCalc: _skyboxHooks?._skyboxCalc ?? "",
         };
-        // Registration order defines iteration order; callers register in composer-matching order.
-        let pc: ((composed: ComposedShader) => ComposedShader) | undefined;
+        const postComposers = new Map<string, (composed: ComposedShader) => ComposedShader>();
         for (const regExt of _getPbrExts().values()) {
             if (regExt.frag) {
                 const fr = regExt.frag(fragCtx);
                 if (fr) {
                     frags.push(fr);
-                    pc ||= fr._pc;
+                    if (fr._pc) {
+                        postComposers.set(fr._id, fr._pc);
+                    }
                 }
             }
         }
@@ -226,7 +228,12 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         }
 
         let composed = composeShader(template, frags);
-        pc && (composed = pc(composed));
+        for (const id of composed._fragmentKey?.split("|") ?? []) {
+            const postCompose = postComposers.get(id);
+            if (postCompose) {
+                composed = postCompose(composed);
+            }
+        }
         cache.set(ckey, composed);
         return composed;
     };

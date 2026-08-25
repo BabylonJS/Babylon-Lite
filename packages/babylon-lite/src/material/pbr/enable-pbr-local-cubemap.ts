@@ -430,6 +430,9 @@ function measureProbeTextures(probes: readonly PbrLocalEnvironmentProbe[]): Prob
     const targetSize = Math.min(...textures.map((texture) => texture.width));
     const format = textures[0]!.format;
     const sourceMipOffsets = textures.map((texture) => {
+        if ((texture.usage & TU.COPY_SRC) === 0) {
+            throw new Error("[babylon-lite] local probe cubemaps must be created with COPY_SRC usage");
+        }
         if (texture.width !== texture.height || texture.depthOrArrayLayers !== 6 || texture.format !== format) {
             throw new Error("[babylon-lite] local probe cubemaps must be square six-face textures with one shared format");
         }
@@ -541,6 +544,7 @@ export function createPbrLocalEnvironmentProbeSet(scene: SceneContext, options: 
     const engine = scene.surface.engine;
     const device = engine._device;
     const textureLayout = measureProbeTextures(probes);
+    _initializePbrLocalCubemapLimits(undefined);
     const gridLayout = measureProbeGrid(options.voxelGrid);
     validateProbeSetDeviceLimits(device, probes.length, gridLayout.byteLength);
     const grid = buildProbeGrid(probes, options.voxelGrid, gridLayout);

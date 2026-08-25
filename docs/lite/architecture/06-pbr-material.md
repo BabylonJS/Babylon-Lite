@@ -369,7 +369,9 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
   `texture_cube_array<f32>`. Sources share a format and have power-of-two-related square dimensions.
   The destination uses the smallest dimension; larger sources contribute matching lower mips, so
   no resampling pass is required. The array uses the engine's deduplicated trilinear sampler rather
-  than depending on any source environment's sampler identity.
+  than depending on any source environment's sampler identity. Source cubemaps must include
+  `COPY_SRC` usage; the built-in `.env`, DDS, and HDR environment loaders do, and unsupported custom
+  environments are rejected synchronously.
 - **Shared probe UBO**: each probe occupies seven `vec4`s: projection centre/layer,
   projection half-size/LOD scale, capture position/LOD bias, inner influence centre/yaw cosine,
   inner half-size/yaw sine, outer influence centre, and outer half-size/packed metadata. The last
@@ -392,7 +394,9 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
   weights, and points outside every outer volume sample the smallest unbounded NDF candidate.
 - **Limits**: the cube-array count is additionally limited by `maxTextureArrayLayers / 6`; the
   dense grid must fit `maxBufferSize` and `maxStorageBufferBindingSize`. Grid dimensions and byte
-  size are checked before allocating per-cell CPU arrays.
+  size are checked before allocating per-cell CPU arrays. Probe-set creation locks the current
+  `maxCandidates` before measuring the grid, so a custom value must be configured first with
+  `enablePbrLocalCubemap({ maxCandidates })`; overflowing cells always throw instead of truncating.
 - **Diagnostics**: `setPbrLocalEnvironmentProbeDebug(set, true)` preserves production influence
   calculations but replaces cubemap samples and final PBR output with weighted packed probe colors.
 - **Coverage**: Scene 186 compares per-material unprojected environments, hard finite projection,

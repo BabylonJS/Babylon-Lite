@@ -219,6 +219,24 @@ export function createPbrMeshBindGroup(
     const hasEmissive = (features & PBR_HAS_EMISSIVE) !== 0;
     const hasSpecGloss = (features & PBR_HAS_SPEC_GLOSS) !== 0;
     const esmShadowOutput = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0;
+    const sortedExts = _getPbrExtsSorted();
+    const fragIds = composed._fragmentKey ? composed._fragmentKey.split("|").filter((s) => s.length > 0) : [];
+    const activeExts: PbrExt[] = [];
+    for (const fid of fragIds) {
+        const ext = sortedExts.find((candidate) => candidate.id === fid || fid.startsWith(candidate.id + "-"));
+        if (ext && !activeExts.includes(ext)) {
+            activeExts.push(ext);
+        }
+    }
+    let bindEnvironment: _PbrBindCtx["_env"] = env;
+    if (!bindEnvironment) {
+        for (const ext of activeExts) {
+            bindEnvironment = ext.iblFallback?.(material) ?? null;
+            if (bindEnvironment) {
+                break;
+            }
+        }
+    }
 
     const entries: GPUBindGroupEntry[] = [];
     let b = 0;
@@ -234,13 +252,9 @@ export function createPbrMeshBindGroup(
         _meshFeatures: meshFeatures,
         _material: material,
         _mesh: meshCtx ?? undefined,
-        _env: env,
+        _env: bindEnvironment,
         _refractionTexture: refractionTexture,
     };
-
-    const sortedExts = _getPbrExtsSorted();
-
-    const fragIds = composed._fragmentKey ? composed._fragmentKey.split("|").filter((s) => s.length > 0) : [];
 
     entries.push({ binding: b++, resource: { buffer: meshUBO } });
     entries.push({ binding: b++, resource: { buffer: materialUBO } });
@@ -269,13 +283,10 @@ export function createPbrMeshBindGroup(
             resource: { buffer: (material as PbrMaterialProps & { readonly _esmShadowParamsUBO: GPUBuffer })._esmShadowParamsUBO },
         });
     }
-    const seenExts: PbrExt[] = [];
-    for (const fid of fragIds) {
-        const ext = sortedExts.find((e) => e.id === fid || fid.startsWith(e.id + "-"));
-        if (!ext || ext.phase === "vertex" || !ext.bind || seenExts.includes(ext)) {
+    for (const ext of activeExts) {
+        if (ext.phase === "vertex" || !ext.bind) {
             continue;
         }
-        seenExts.push(ext);
         b = ext.bind(ctx, entries, b);
     }
 

@@ -215,7 +215,7 @@ export async function loadDdsEnvironment(scene: SceneContext, url: string, optio
         size: [width, height, 6],
         format: "rgba16float",
         mipLevelCount: mipCount,
-        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.COPY_SRC,
         dimension: "2d",
     });
 

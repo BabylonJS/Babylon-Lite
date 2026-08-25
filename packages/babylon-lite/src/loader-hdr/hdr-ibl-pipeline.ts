@@ -80,7 +80,7 @@ export function prefilterCubemapGPU(engine: EngineContext, srcCube: GPUTexture, 
         size: { width: faceSize, height: faceSize, depthOrArrayLayers: 6 },
         mipLevelCount: mipCount,
         format: "rgba16float",
-        usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_DST,
+        usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_DST | TU.COPY_SRC,
     });
 
     const srcCubeView = srcCube.createView({ dimension: "cube" });
