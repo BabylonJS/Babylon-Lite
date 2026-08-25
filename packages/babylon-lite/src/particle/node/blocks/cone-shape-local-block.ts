@@ -6,12 +6,11 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
 /** Emitter-local `ConeShapeBlock`. */
 export const coneShapeLocalBlock: NpeBlockEvaluator = {
     build(block, ctx) {
-        const system = ctx.state.system!;
-        const buffer = ctx.state.buffer!;
-        const emitterWorldMatrix = ctx.state.emitterWorldMatrix;
-        const emitterX = ctx.state.emitter.x;
-        const emitterY = ctx.state.emitter.y;
-        const emitterZ = ctx.state.emitter.z;
+        const state = ctx.state;
+        const system = state.system!;
+        const buffer = state.buffer!;
+        const emitterWorldMatrix = state.emitterWorldMatrix;
+        const emitter = state.emitter;
         const emitFromSpawnPointOnly = block.serialized.emitFromSpawnPointOnly === true;
         const radiusGetter = ctx.input(block, "radius", () => 1);
         const angleGetter = ctx.input(block, "angle", () => Math.PI);
@@ -64,9 +63,9 @@ export const coneShapeLocalBlock: NpeBlockEvaluator = {
                 y = randomRange(minY, direction2.y);
                 z = randomRange(minZ, direction2.z);
             } else {
-                x = birthX - emitterX;
-                y = birthY - emitterY;
-                z = birthZ - emitterZ;
+                x = birthX - emitter.x;
+                y = birthY - emitter.y;
+                z = birthZ - emitter.z;
                 let length = Math.sqrt(x * x + y * y + z * z);
                 if (length !== 0 && length !== 1) {
                     x /= length;

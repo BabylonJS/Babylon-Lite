@@ -92,9 +92,9 @@ export async function acquireReferencePage(browser: Browser, viewport: Viewport 
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-const reuseTest = base.extend<{}, { reuseContext: BrowserContext }>({
+const reuseTest = base.extend<{}, { sharedContext: BrowserContext }>({
     // One context (one OS window) per worker, reused across every test the worker runs.
-    reuseContext: [
+    sharedContext: [
         async ({ browser }, use) => {
             const context = browser.contexts()[0] ?? (await browser.newContext({ viewport: { width: 1280, height: 720 } }));
             await use(context);
@@ -107,9 +107,9 @@ const reuseTest = base.extend<{}, { reuseContext: BrowserContext }>({
     // page.goto, which resets the document). If a test closes its page (e.g.
     // bundle-size), the next test transparently opens a fresh tab in the SAME
     // window rather than a new window.
-    page: async ({ reuseContext }, use) => {
-        const live = reuseContext.pages().find((p) => !p.isClosed());
-        const page = live ?? (await reuseContext.newPage());
+    page: async ({ sharedContext }, use) => {
+        const live = sharedContext.pages().find((p) => !p.isClosed());
+        const page = live ?? (await sharedContext.newPage());
         await use(page);
         // Intentionally left open — the next test in this worker reuses it.
     },

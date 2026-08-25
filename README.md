@@ -137,7 +137,7 @@ rm -rf node_modules/playwright
 
 ### 404 for `/bundle/manifest.json`
 
-The dev server synthesizes this from the tracked per-scene files in `lab/public/bundle/manifest/`, so it should not 404 under `pnpm dev`. If the **bundle** pages themselves are missing or stale, run `pnpm build:bundle-scenes` (or use `pnpm dev:lab`, which does this automatically), or hit **Regenerate** in the lab's Bundle tab.
+The dev server synthesizes this from the per-scene files in `lab/public/bundle/manifest/`, which `pnpm build:bundle-scenes` generates. The whole `lab/public/bundle/` tree is gitignored build output, so a fresh clone has none of it until you build. If this 404s, or the **bundle** pages themselves are missing or stale, run `pnpm build:bundle-scenes` (or use `pnpm dev:lab`, which does this automatically), or hit **Regenerate** in the lab's Bundle tab.
 
 ### 404 for `test-actual.png` images
 

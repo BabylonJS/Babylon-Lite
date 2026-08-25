@@ -2580,6 +2580,16 @@
         "skipPerf": true
     },
     {
+        "id": 302,
+        "slug": "scene302-npe-moving-emitter",
+        "name": "Scene 302 — NPE Moving Emitter",
+        "maxMad": 0.01,
+        "maxRawKB": 61.5,
+        "description": "A local-space NPE point emitter follows a looping XYZ translation and Z rotation while LocalPositionUpdated keeps existing particles attached to the current emitter transform. The live view supports inspection; seekTime deterministically freezes the same authored graph for Babylon.js parity.",
+        "tags": ["npe", "particles", "billboards", "moving-emitter", "local-space", "animation"],
+        "skipPerf": true
+    },
+    {
         "id": 303,
         "slug": "scene303-sprite2d-y-sort",
         "name": "Scene 303 — Sprite2D Y-Sort",
