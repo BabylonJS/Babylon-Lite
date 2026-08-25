@@ -188,6 +188,19 @@ const GATE_FORMS = [
 ];
 
 /**
+ * Whether a `condition:` line keeps its job off a master build.
+ *
+ * Factored out of {@link jobsIn} so the boundary table below controls the same
+ * expression the pipeline is judged by. Spelling `GATE_FORMS.some(...)` twice
+ * would let the table certify one copy while the other widened -- the two-lists
+ * failure {@link SHELL_STEP_KEYS} exists to prevent, and the reason this file
+ * already imports that constant instead of rewriting it.
+ */
+function acceptedAsGate(line: string): boolean {
+    return GATE_FORMS.some((form) => form.test(line));
+}
+
+/**
  * Named floors. Both clauses assert an *absence* -- no ungated PR-context job,
  * no gated deterministic job -- and an absence is satisfied perfectly by
  * looking at nothing. If the job splitter below stops splitting, or the trigger
@@ -722,7 +735,7 @@ function jobsIn(text: string): PipelineJob[] {
         return {
             name: start.name,
             body: withTemplatesResolved(raw.join("\n")),
-            gated: ownCondition.some((line) => GATE_FORMS.some((form) => form.test(line))),
+            gated: ownCondition.some(acceptedAsGate),
             hasOwnCondition: ownCondition.length > 0,
         };
     });
@@ -1036,6 +1049,106 @@ describe("pull-request jobs cannot run on a master build", () => {
                     `which is the state the master trigger was added to end. Remove the condition, or move the job out of the post-merge set deliberately.`
             ).toBe(false);
         }
+    });
+
+    it("pins what counts as a master gate, in both directions", () => {
+        // Everything in this file that decides whether master is safe reads
+        // `job.gated`, and `job.gated` is two regexes. Those regexes were pinned
+        // by nothing.
+        //
+        // Measured. Widen them to /Build\.SourceBranch/ and /refs\//, change
+        // nothing else, and this file stays **14 passed** -- the widening lands
+        // green. Then rewrite one job's condition to
+        // `and(succeeded(), or(true, eq(variables['Build.SourceBranch'],
+        // 'refs/heads/master')))`, which admits master, and it is **still 14
+        // passed**: the job now counts as gated, so the pull-request clause
+        // skips it and the cost floor above filters it out on `!job.gated`.
+        // Two edits, one of them in this file alone, no constant and no
+        // document touched, and `Bundle Size` runs on every merge.
+        //
+        // That same pipeline edit *without* the widening fires five clauses. So
+        // the pipeline side was never the weak half: the predicate was, and
+        // every check downstream inherited its blindness. Pinning names and
+        // identities does not help, because the field that grants the exemption
+        // is not a name.
+        //
+        // No oracle here -- there is no ADO expression evaluator to ask, unlike
+        // the YAML boundary above. The two accepted spellings are the ones this
+        // repository's own header comment and TESTING.md prescribe, and both
+        // appear in the pipeline (9 and 1 occurrences); the rejected list is
+        // authored, and it is the half that does the work.
+        // The accepted side is not written here. The pipeline header prescribes
+        // the gate spellings to contributors in indented `#     condition: ...`
+        // blocks, and those prescriptions are what a new job gets written from,
+        // so they are the artifact this predicate owes agreement to. Authoring
+        // the list instead would let both sides drift together in one edit --
+        // the capitulation shape from the clause below.
+        const prescribed = dualContextPipelines.flatMap((file) =>
+            file.text
+                .split("\n")
+                .filter((line) => /^#\s+condition:/.test(line))
+                .map((line) => line.replace(/^#\s?/, ""))
+        );
+        expect(
+            prescribed.length,
+            `no pipeline header prescribes a gate condition any more, so this clause is comparing the predicate against an empty list and would agree with anything.\n` +
+                `Either the guidance moved out of the '#     condition: ...' form this reads, or it was dropped -- and contributors now have nothing to copy.`
+        ).toBeGreaterThan(0);
+
+        const rejected = [
+            "            condition: always()",
+            "            condition: succeeded()",
+            "            condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')",
+            "            condition: and(succeeded(), or(true, eq(variables['Build.SourceBranch'], 'refs/heads/master')))",
+            "            condition: ne(variables['Build.SourceBranch'], 'refs/heads/develop')",
+            "            condition: startsWith(variables['Build.SourceBranch'], 'refs/heads/')",
+            "            condition: ne(variables['System.PullRequest.PullRequestNumber'], '')",
+        ];
+
+        const missed = prescribed.filter((line) => !acceptedAsGate(line));
+        expect(
+            missed,
+            `these conditions do keep a job off master and this predicate does not recognise them:\n  ${missed.join("\n  ")}\n` +
+                `A job written to follow this repository's own documentation would be reported as ungated, and the advice attached to that failure argues for loosening the gate.`
+        ).toEqual([]);
+
+        const admitted = rejected.filter((line) => acceptedAsGate(line));
+        expect(
+            admitted,
+            `these conditions all let a job run on master and this predicate accepts them as gates:\n  ${admitted.join("\n  ")}\n` +
+                `Every clause in this file trusts that answer, so widening it here quietly excuses the pipeline from all of them at once.`
+        ).toEqual([]);
+
+        // A "does any real condition still parse as a gate" floor stood here and
+        // was deleted rather than kept. Measured: rewrite every real gate to
+        // 'refs/heads/mainline' and six clauses fire, five of them not this one.
+        // Nothing separates it -- widen the predicate and it passes, narrow it
+        // and the set-identity clauses fire first -- so it was subsumption, not
+        // a floor, and a conjunct no input can isolate is one nobody can trust.
+        //
+        // Deliberately *not* required per-form. `refs/pull/` is prescribed by
+        // the header and used by no job, which the header says in as many words
+        // ("No job uses that today"), and a per-form version of the floor above
+        // is red on arrival for exactly that reason. The honest reading is that
+        // a form earns its place by being prescribed, not by being used: the
+        // second form exists so that the job the header tells you to write is
+        // recognised the day it is written. Per-form liveness is supplied by the
+        // prescription check instead, which does bind both.
+        const unprescribed = GATE_FORMS.filter((form) => !prescribed.some((line) => form.test(line))).map((form) => form.source);
+        expect(
+            unprescribed,
+            `these gate spellings are accepted by this predicate and prescribed by no pipeline header: ${unprescribed.join(", ")}.\n` +
+                `A form nothing documents is a widening with no author to answer for it, and it is the cheapest place to admit master.`
+        ).toEqual([]);
+
+        const deadMarkers = PR_CONTEXT_MARKERS.filter((marker) => !dualContextPipelines.some((file) => file.jobs.some((job) => matchesAnyLine(marker, job.body)))).map(
+            (marker) => marker.source
+        );
+        expect(
+            deadMarkers,
+            `these pull-request markers select no job at all: ${deadMarkers.join(", ")}.\n` +
+                `A disjunction only needs one true disjunct, so a dead marker is covered for by its neighbour and the gap only appears when the neighbour stops matching too.`
+        ).toEqual([]);
     });
 
     it("keeps master off the work it deliberately excluded", () => {
