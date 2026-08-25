@@ -781,7 +781,25 @@ describe("the walk recognises every file kind the enumeration collects", () => {
             // with the property this test owns. A fixture set needs a negative
             // per predicate, not one negative for the walk.
             writeFileSync(join(dir, "e.yml"), "  - script: echo hello\n");
-            expect(allYamlCarryingACredentialShape(dir).sort()).toEqual(["a.yaml", "b.yml", "d.sh"]);
+            // Discoverable, credential-bearing, and masked-free -- the negative
+            // for `isAuthorizationHeader`, which the comment above claimed to
+            // have covered and did not.
+            //
+            // "The content check" is one name for two independent disjuncts,
+            // and `e.yml` is a negative for their disjunction, not for either
+            // of them. Every header fixture here spells its value `******`,
+            // because that is the obvious way to write a masked header -- so
+            // each one satisfies `hasMaskedSecret` by the notation of its own
+            // subject, and dropping `isAuthorizationHeader` from the walk left
+            // this test green. A neighbour caught it, correctly, for an
+            // unrelated reason, which is the same accidental coverage the
+            // paragraph above was written about.
+            //
+            // The unmasked `Bearer` form is not a contrivance to make an arm
+            // fire: it is what these headers look like before someone masks
+            // them, which is the state this guard exists to notice.
+            writeFileSync(join(dir, "f.yml"), '  - script: curl -H "Authorization: Bearer $(DEPLOY_TOKEN)" https://x\n');
+            expect(allYamlCarryingACredentialShape(dir).sort()).toEqual(["a.yaml", "b.yml", "d.sh", "f.yml"]);
         } finally {
             // Asserted more strictly than the check needs, because a delete is
             // the one step whose failure re-running cannot undo -- an earlier
