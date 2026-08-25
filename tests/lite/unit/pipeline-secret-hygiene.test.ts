@@ -659,6 +659,26 @@ describe("the walk recognises every file kind the enumeration collects", () => {
     // enumeration stops discovering exactly the files it exists to find, and
     // then passes. Only `enumeration => walk` is asserted; the converse is
     // deliberately free, because the walk is meant to be the wider of the two.
+    it("names a floor file for every root, so a root added later cannot arrive unfloored", () => {
+        // ONE_FILE_PER_ROOT is a fixed-cardinality list checked against a set
+        // of roots that grows. Adding a fourth root leaves the floors covering
+        // three of four: that root's descent can then be lost in silence,
+        // because no named floor mentions it and every count stays healthy on
+        // the strength of the roots that still work. The comment above the list
+        // claims "one per root" -- this is that claim, in behaviour.
+        // The directory must match exactly, not by prefix: `config/templates`
+        // starts with `config/`, so a prefix test would report a `config` root
+        // as floored on the strength of a name belonging to a different root.
+        // That is this test's own failure mode, and it survived until the
+        // control ran -- a fourth root passed 67/67 before this line said
+        // `===` instead of `startsWith`.
+        const unfloored = PIPELINE_ROOTS.filter(({ label }) => !ONE_FILE_PER_ROOT.some((file) => file.slice(0, file.lastIndexOf("/") + 1).replace(/\/$/, "") === label)).map(
+            ({ label }) => label || "the repo root"
+        );
+
+        expect(unfloored, "these roots are collected but no floor names a file under them — losing their descent would be silent").toEqual([]);
+    });
+
     it.each([
         "azure-pipelines.yml",
         "azure-pipelines-demos.yaml",
