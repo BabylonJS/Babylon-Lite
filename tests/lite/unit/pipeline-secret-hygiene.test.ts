@@ -879,6 +879,44 @@ describe("the walk recognises every file kind the enumeration collects", () => {
         expect(unfloored, "these roots are collected but no floor names a file under them — losing their descent would be silent").toEqual([]);
     });
 
+    it("keeps every configured root reachable by the walk that certifies it", () => {
+        // The skip list is the cheapest way to defeat this whole file. Break a
+        // root's collector, delete its floor entry, delete the root, then add
+        // its directory to the skip list: four edits, each one resolving a real
+        // failure, ending with the directory unguarded and the suite green.
+        //
+        // Measured. That chain currently dies at `isWalkableDir(config) -> true`
+        // -- a fixture, not a floor, which is the right shape for stopping it:
+        // the only way past a fixture is to assert in plain text that `config`
+        // is not walkable, and a visibly false statement is a much harder edit
+        // to make quietly than deleting a name from a list.
+        //
+        // But that table pins today's directories. A root added under a new one
+        // has no fixture, so for it the chain would run to the end. This clause
+        // is what a future root gets instead: it is derived, so it arrives with
+        // the root rather than being remembered.
+        //
+        // It does not close the four-edit chain, and does not pretend to --
+        // deleting the root removes this check along with its subject. That
+        // collapse is the reason the isWalkableDir fixtures are separate from
+        // the roots list and must stay that way.
+        const configured = PIPELINE_ROOTS.map(({ label }) => label).filter((label) => label !== "");
+
+        expect(configured.length, "no root has a directory component, so this clause is checking nothing").toBeGreaterThan(0);
+
+        const blocked = configured.flatMap((label) =>
+            label
+                .split("/")
+                .filter((component) => component !== "" && !isWalkableDir(component))
+                .map((component) => `${label} (the walk stops at "${component}")`)
+        );
+
+        expect(
+            blocked,
+            "a configured root cannot be reached by the walk that certifies it, so the closure check silently stops covering it. Remove the directory from the skip list in isWalkableDir. Do not resolve this by deleting the root from PIPELINE_ROOTS: that turns this clause and the closure check green together, which is the exact state -- a CI directory nothing reads -- that the two of them exist to make unreachable."
+        ).toEqual([]);
+    });
+
     it.each([
         "azure-pipelines.yml",
         "azure-pipelines-demos.yaml",
@@ -1004,7 +1042,10 @@ describe("the mask guard reads every file carrying anything its clauses examine"
         // replace. These three only need revisiting when a named file stops
         // carrying a credential shape at all, which is a deliberate act.
         for (const required of ONE_FILE_PER_ROOT) {
-            expect(carrying, `the walk no longer reaches ${required}, so it is certifying a smaller subject than the guard reads`).toContain(required);
+            expect(
+                carrying,
+                `the walk no longer reaches ${required}, so it is certifying a smaller subject than the guard reads. Repair the walk. Deleting ${required} from ONE_FILE_PER_ROOT also turns this green, in one edit, and leaves the walk permanently blind to that root -- this constant is both the floor and the cheapest way to remove it.`
+            ).toContain(required);
         }
 
         const unread = carrying.filter((file) => !scanned.has(file)).sort();
