@@ -77,6 +77,13 @@ interface PipelineFile {
      * where `DEPLOY_TOKEN` is the established convention. GitHub Actions
      * workflows authenticate differently, so requiring `DEPLOY_TOKEN` of them
      * would fail on correct code.
+     *
+     * This flag is keyed on the root, but what it stands for is a property of
+     * a file's content, and the two only coincide while the exempt root holds
+     * a single file. `the deploy-token exemption is granted for its reason`
+     * below holds the exempt headers to the property the flag is shorthand
+     * for, so a workflow that authenticates some third way is not exempted by
+     * where it happens to live.
      */
     requiresDeployToken: boolean;
 }
@@ -515,6 +522,143 @@ describe("pipeline secret hygiene", () => {
             .map(({ location, number }) => `${location}:${number}`);
 
         expect(tokenless, "Authorization header in an Azure pipeline does not reference DEPLOY_TOKEN.").toEqual([]);
+    });
+});
+
+/**
+ * Whether a header's credential can be traced, through assignments in its own
+ * file, to the hosting platform's secret store.
+ *
+ * This is the *reason* the `requiresDeployToken: false` roots are exempt from
+ * the clause above, made executable. That exemption was keyed on the directory
+ * while its justification was a property of one file's content -- and the
+ * directory holds exactly one file today, so scope and reason coincide by
+ * population size rather than by construction. The second workflow to be added
+ * inherits an exemption it may not have earned, and nothing fires.
+ *
+ * Deliberately not "must say DEPLOY_TOKEN", which is the Azure convention and
+ * would reject correct Actions code. The property asserted here is the one both
+ * conventions share: a credential in a header came from the secret store, not
+ * from the file. A workflow that authenticates some third way still passes, as
+ * long as its secret is a secret.
+ *
+ * The trace is needed because the binding is rarely direct. The live case is
+ * two hops -- `AUTH` is built from `ADO_PAT`, which is `${{ secrets.ADO_PAT }}`
+ * -- so a one-level check would report the real exempt file as unbound and the
+ * guard would arrive red on a correct tree.
+ */
+export function credentialTracesToASecretStore(fileText: string, headerLine: string): boolean {
+    const identifiers = (text: string): string[] => [...text.matchAll(/\$\{?\{?\s*(?:secrets\.)?([A-Za-z_]\w*)/g)].map(([, name]) => name ?? "");
+    const mentionsSecretStore = (text: string): boolean => /\bsecrets\s*\./.test(text);
+
+    if (mentionsSecretStore(headerLine)) {
+        return true;
+    }
+
+    const lines = fileText.split("\n");
+    const pending = identifiers(headerLine);
+    const seen = new Set<string>();
+
+    // Bounded because assignments can be mutually referential; a cycle must end
+    // the search rather than hang the suite.
+    while (pending.length > 0 && seen.size < 64) {
+        const name = pending.shift() ?? "";
+        if (name === "" || seen.has(name)) {
+            continue;
+        }
+        seen.add(name);
+
+        // Both spellings of "this name gets a value": shell assignment and a
+        // YAML `env:` key. The exempt file uses one of each in the same chain.
+        const assignments = lines.filter((line) => new RegExp(`(^|\\s)${name}\\s*[:=]`).test(line)).map((line) => line.slice(line.search(/[:=]/) + 1));
+
+        if (assignments.some(mentionsSecretStore)) {
+            return true;
+        }
+        pending.push(...assignments.flatMap(identifiers));
+    }
+
+    return false;
+}
+
+describe("the deploy-token exemption is granted for its reason", () => {
+    it("binds every exempt Authorization header to the platform secret store", () => {
+        const unbound = pipelineFiles()
+            .filter(({ requiresDeployToken }) => !requiresDeployToken)
+            .flatMap((file) => {
+                const text = readFileSync(file.path, "utf8");
+                return stripDocumentationText(text)
+                    .split("\n")
+                    .map((line, index) => ({ location: file.location, line, number: index + 1, text }))
+                    .filter(({ line }) => isAuthorizationHeader(line))
+                    .filter(({ line, text: body }) => !credentialTracesToASecretStore(body, line))
+                    .map(({ location, number }) => `${location}:${number}`);
+            });
+
+        expect(
+            unbound,
+            "Authorization header in a root exempt from the DEPLOY_TOKEN convention, whose credential does not trace to the secret store. The exemption is not the directory's -- it is granted to headers that authenticate with a platform secret under a different convention. A header that authenticates some other way has not earned it."
+        ).toEqual([]);
+    });
+
+    it("has an exempt header to say that about", () => {
+        // Without this the clause above passes on zero headers, which is the
+        // state it would be in if the exempt root were emptied or the flag
+        // stopped selecting anything -- indistinguishable from compliance.
+        const exempt = pipelineLines().filter(({ requiresDeployToken, line }) => !requiresDeployToken && isAuthorizationHeader(line));
+
+        expect(
+            exempt.length,
+            "no exempt Authorization header remains, so the clause above is asserting nothing. If the last one is genuinely gone, delete the exemption and the requiresDeployToken flag with it rather than keeping a branch nothing travels."
+        ).toBeGreaterThan(0);
+    });
+
+    it("withdraws the exemption when the credential stops coming from a secret", () => {
+        // The counterfactual, which is the whole point: an exclusion that
+        // cannot be reversed by changing the thing it depends on is a name,
+        // whatever the comment beside it says. Run against the real exempt
+        // file, in memory, so it measures the convention actually in use.
+        const exempt = pipelineFiles().filter(({ requiresDeployToken }) => !requiresDeployToken);
+        expect(exempt.length, "the exempt root selects no file, so the mutation below would measure nothing").toBeGreaterThan(0);
+
+        const [file] = exempt;
+        const text = readFileSync(file?.path ?? "", "utf8");
+        const header = text.split("\n").find(isAuthorizationHeader) ?? "";
+        expect(header, "the exempt file carries no Authorization header to withdraw the exemption from").not.toBe("");
+
+        expect(credentialTracesToASecretStore(text, header), "the real exempt header does not trace to a secret, so this guard is red on a correct tree").toBe(true);
+
+        // Same file, same header, secret provenance removed.
+        expect(
+            credentialTracesToASecretStore(text.replace(/\$\{\{\s*secrets\.[^}]*\}\}/g, "'a-literal-value'"), header),
+            "the exemption survived its own justification being removed"
+        ).toBe(false);
+    });
+});
+
+describe("credential tracing accepts and rejects the right chains", () => {
+    it("follows a multi-hop chain to the secret store", () => {
+        const text = ["                  ADO_PAT: ${{ secrets.ADO_PAT }}", '                  AUTH=$(printf ":%s" "$ADO_PAT" | base64 -w0)'].join("\n");
+
+        expect(credentialTracesToASecretStore(text, '                    -H "Authorization: Basic ${AUTH}" \\')).toBe(true);
+    });
+
+    it("accepts a header that names the secret store directly", () => {
+        expect(credentialTracesToASecretStore("", '  -H "Authorization: Bearer ${{ secrets.API_TOKEN }}"')).toBe(true);
+    });
+
+    it("rejects a chain that terminates in a literal", () => {
+        const text = ['                  ADO_PAT: "hunter2"', '                  AUTH=$(printf ":%s" "$ADO_PAT" | base64 -w0)'].join("\n");
+
+        expect(credentialTracesToASecretStore(text, '                    -H "Authorization: Basic ${AUTH}" \\')).toBe(false);
+    });
+
+    it("rejects a variable the file never binds at all", () => {
+        expect(credentialTracesToASecretStore("unrelated: true\n", '  -H "Authorization: Bearer ${MYSTERY}"')).toBe(false);
+    });
+
+    it("terminates on a cycle instead of hanging the suite", () => {
+        expect(credentialTracesToASecretStore("A=$B\nB=$A\n", '  -H "Authorization: Bearer ${A}"')).toBe(false);
     });
 });
 
