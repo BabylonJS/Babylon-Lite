@@ -535,6 +535,9 @@ export class PhysicsAggregate {
 }
 
 function assertPhysicsNodeSupported(transformNode: TransformNode): void {
+    if (transformNode.physicsBody) {
+        unsupported("PhysicsBody", "Babylon Lite synchronizes one physics body per scene node; dispose the existing TransformNode.physicsBody before attaching another.");
+    }
     if (transformNode.parent || transformNode._node.parent) {
         unsupported("PhysicsBody", "Babylon Lite physics bodies currently consume local transforms, so parented TransformNodes cannot be synchronized in Babylon.js world space.");
     }

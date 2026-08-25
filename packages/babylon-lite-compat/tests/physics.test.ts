@@ -287,6 +287,22 @@ describe("PhysicsEngine", () => {
             expect(() => body.dispose()).not.toThrow();
         });
 
+        it("rejects a second body before allocation", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const scene = { getPhysicsEngine: () => new PhysicsEngine(plugin, Vector3.Zero()) } as unknown as Scene;
+            const node = makePhysicsNode(scene);
+            const firstBody = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
+            hknp.HP_Body_Create.mockClear();
+
+            expect(() => new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene)).toThrow(/one physics body per scene node/);
+            expect(() => new PhysicsAggregate(node, PhysicsShapeType.BOX, { mass: 0 }, scene)).toThrow(/one physics body per scene node/);
+            expect(hknp.HP_Body_Create).not.toHaveBeenCalled();
+            expect(hknp.HP_Shape_CreateBox).not.toHaveBeenCalled();
+            expect(node.physicsBody).toBe(firstBody);
+        });
+
         it("fails before allocation for parented nodes and thin instances", () => {
             const hknp = makeAggregateMockHknp();
             const plugin = new HavokPlugin(true, hknp);
@@ -393,6 +409,24 @@ describe("PhysicsEngine", () => {
 
             new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.CYLINDER, { mass: 0 });
             expect(hknp.HP_Shape_CreateCylinder).toHaveBeenLastCalledWith([0, 6, 0], [0, 24, 0], 4);
+        });
+
+        it("uses the widest horizontal extent for capsule and cylinder radii", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const scene = { getPhysicsEngine: () => new PhysicsEngine(plugin, Vector3.Zero()) } as unknown as Scene;
+            const bounds = {
+                boundMin: [-1, -10, -3],
+                boundMax: [1, 10, 3],
+                scaling: { x: 1, y: 1, z: 2 },
+            };
+
+            new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.CAPSULE, { mass: 0 });
+            expect(hknp.HP_Shape_CreateCapsule).toHaveBeenLastCalledWith([0, -4, 0], [0, 4, 0], 6);
+
+            new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.CYLINDER, { mass: 0 });
+            expect(hknp.HP_Shape_CreateCylinder).toHaveBeenLastCalledWith([0, -10, 0], [0, 10, 0], 6);
         });
 
         it("rejects an invalid shape enum value before calling Lite", () => {

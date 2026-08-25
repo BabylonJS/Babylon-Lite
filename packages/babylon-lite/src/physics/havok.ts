@@ -1307,14 +1307,14 @@ function _buildShapeParams(node: Mesh, type: PhysicsShapeType, options: PhysicsA
             break;
         }
         case PhysicsShapeType.CAPSULE: {
-            const radius = extents.x * 0.5;
+            const radius = Math.max(extents.x, extents.z) * 0.5;
             params.radius = options.radius ?? radius;
             params.pointA = options.pointA ?? { x: 0, y: min[1] * scaleY + radius, z: 0 };
             params.pointB = options.pointB ?? { x: 0, y: min[1] * scaleY + extents.y - radius, z: 0 };
             break;
         }
         case PhysicsShapeType.CYLINDER: {
-            params.radius = options.radius ?? extents.x * 0.5;
+            params.radius = options.radius ?? Math.max(extents.x, extents.z) * 0.5;
             params.pointA = options.pointA ?? { x: 0, y: min[1] * scaleY, z: 0 };
             params.pointB = options.pointB ?? { x: 0, y: min[1] * scaleY + extents.y, z: 0 };
             break;
