@@ -4,15 +4,15 @@
 #
 #   Job                     PR   master   Notes
 #   ─────────────────────── ──── ──────── ───────────────────────────────────────
-#   0 Release Markers       yes  no       breaking-change marker validation
-#   1 API Report            yes  no       public API diff comment + validation
-#   2 Unit Tests            yes  yes      vitest + plumbing (Playwright)
-#   3 Bundle Size           yes  no       ceiling checks + delta report
-#   4 Perf Regression       yes  no       Lite vs Stable on BrowserStack
-#   5 Parity (Cloud)        yes  no       pixel-diff on a real-WebGPU cloud browser
-#   6 Lint & Type Check     yes  yes      ESLint + TypeScript type-check
-#   7 Compat Layer          yes  yes      @babylonjs/lite-compat build + tests
-#   8 Playground Snapshot   yes  no       per-PR playground deploy + PR comment
+#   1 Release Markers       yes  no       breaking-change marker validation
+#   2 API Report            yes  no       public API diff comment + validation
+#   3 Unit Tests            yes  yes      vitest + plumbing (Playwright)
+#   4 Bundle Size           yes  no       ceiling checks + delta report
+#   5 Perf Regression       yes  no       Lite vs Stable on BrowserStack
+#   6 Parity (Cloud)        yes  no       pixel-diff on a real-WebGPU cloud browser
+#   7 Lint & Type Check     yes  yes      ESLint + TypeScript type-check
+#   8 Compat Layer          yes  yes      @babylonjs/lite-compat build + tests
+#   9 Playground Snapshot   yes  no       per-PR playground deploy + PR comment
 #
 # ── Why this also runs on master ──────────────────────────────────────────────
 #
