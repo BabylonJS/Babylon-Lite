@@ -80,7 +80,7 @@ Light type bits are also shifted into the feature mask via `getLightTypeFeatureB
 
 Base color + ORM textures are always present (core PBR workflow).
 
-PBR caches are two-tiered: sig-independent shader bindings are cached per the inline key string `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${shaderKey}`, then each binding caches sig-specific pipelines per `targetSignatureKey(sig)` (format, depth format, sample count, Y-flip).
+PBR caches are two-tiered: sig-independent shader bindings are cached per the inline key string `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${shaderKey}`, where `shaderKey` includes tone-mapping identity and the material-plugin index; geometry-output composition and per-view resources also include the plugin index. Each binding then caches sig-specific pipelines per `targetSignatureKey(sig)` (format, depth format, sample count, Y-flip).
 
 ## Public API Surface
 
