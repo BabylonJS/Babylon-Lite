@@ -188,13 +188,8 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
               }
             : {}),
         multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
-        // `topology` and `frontFace` are omitted deliberately: WebGPU already defaults them to
-        // "triangle-list" and "ccw", so naming them costs every PBR scene ~42 bytes to restate the
-        // spec. Anything unusual — a non-triangle topology, a strip's index format, or a mirrored
-        // mesh's reversed winding — arrives pre-built in `_prim` and overrides through the spread.
-        // Resolving those cases here instead costs the topology names, the winding branch and a call
-        // in scenes that never draw such a mesh, which is what pushed a dozen scenes past their
-        // bundle ceilings. See ComposedShader._prim.
+        // `topology` and `frontFace` remain omitted from the ordinary state so WebGPU supplies its defaults;
+        // non-default topology, strip index format, or mirrored winding arrives through `composed._prim`.
         primitive: { cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", ...composed._prim },
     });
     bindings._pipelines.set(key, pipeline);

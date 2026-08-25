@@ -13,6 +13,8 @@ import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
 import type { Sprite2DCustomShader } from "./sprite-custom-shader.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
+import type { Sprite2DYSortState } from "./sprite-2d-y-sort.js";
+import { _getSprite2DYSortHook } from "./sprite-2d-y-sort-hook.js";
 import type { SpriteBlendDescriptor } from "./sprite-blend.js";
 import { spriteBlendAlpha } from "./sprite-blend.js";
 
@@ -151,6 +153,8 @@ export interface Sprite2DLayer {
     _dirtyMax: number;
     /** @internal Optional hooks installed by the opt-in handle module. */
     _handleHooks?: Sprite2DIndexHandleHooks;
+    /** @internal Optional renderer-owned ordering state installed by `enableSprite2DYSort`. */
+    _ySortState?: Sprite2DYSortState;
 }
 
 /** @internal Lazy hooks used by the opt-in Handle API to track swap-removes. */
@@ -477,6 +481,7 @@ function markDirty(layer: Sprite2DLayer, lo: number, hi: number): void {
         }
     }
     layer._version = (layer._version + 1) | 0;
+    _getSprite2DYSortHook()?.dirty(layer, lo, hi);
 }
 
 /** @internal Mark a dirty sprite range + bump version. Exposed for the opt-in uvScroll module. */
@@ -495,6 +500,7 @@ export function addSprite2DIndex(layer: Sprite2DLayer, props: Sprite2DProps): nu
     }
     writeInstance(layer, idx, props, null);
     _setSprite2DCount(layer, layer.count + 1);
+    _getSprite2DYSortHook()?.add(layer, idx);
     markDirty(layer, idx, idx + 1);
     return idx;
 }
@@ -526,6 +532,7 @@ export function removeSprite2DIndex(layer: Sprite2DLayer, index: number): void {
     layer._savedSize[last * SAVED_SIZE_FLOATS_PER_SPRITE] = 0;
     layer._savedSize[last * SAVED_SIZE_FLOATS_PER_SPRITE + 1] = 0;
     _setSprite2DCount(layer, last);
+    _getSprite2DYSortHook()?.remove(layer, index, last);
     markDirty(layer, index, index + 1);
 }
 
@@ -540,6 +547,7 @@ export function clearSprite2DLayer(layer: Sprite2DLayer): void {
     }
     layer._savedSize.fill(0, 0, count * SAVED_SIZE_FLOATS_PER_SPRITE);
     _setSprite2DCount(layer, 0);
+    _getSprite2DYSortHook()?.clear(layer, count);
     layer._version = (layer._version + 1) | 0;
 }
 

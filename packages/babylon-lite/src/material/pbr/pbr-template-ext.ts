@@ -73,7 +73,8 @@ export function createPbrTemplateExt(flags: {
 }): PbrTemplateExt {
     const { _hasUvTransform, _hasVertexColor, _hasUv2, _hasAnyNormal, _hasEmissiveTexture, _hasSpecGloss } = flags;
     // Per-channel UV1 (TEXCOORD_1) selection. Bit literals mirror the gltf slow-path encode:
-    // baseColor=1, orm=2, normal=4, emissive=8, specGloss=16, occlusion=32. Only honoured when the
+    // baseColor=1, orm=2, normal=4, emissive=8, specGloss=16, occlusion=32. Bit 64 is claimed by
+    // the opt-in PBR lightmap extension only to signal that the material needs UV2. Only honoured when the
     // uv2 vertex attribute is actually present (_hasUv2); otherwise every channel falls back to
     // input.uv so the shader never references a missing uv2 varying.
     const uv2Mask = _hasUv2 ? flags._uv2Mask : 0;

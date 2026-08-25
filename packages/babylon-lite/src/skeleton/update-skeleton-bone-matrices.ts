@@ -3,6 +3,9 @@ import type { EngineContext } from "../engine/engine.js";
 
 /** Update a skeleton's CPU bone-matrix mirror and upload it to the GPU. */
 export function updateSkeletonBoneMatrices(engine: EngineContext, skeleton: SkeletonData, boneMatrices: Float32Array): void {
+    if (skeleton._disposed) {
+        throw new Error("Cannot update disposed skeleton");
+    }
     if (boneMatrices.length !== skeleton.boneMatrices.length) {
         throw new Error("Invalid bone matrices");
     }
