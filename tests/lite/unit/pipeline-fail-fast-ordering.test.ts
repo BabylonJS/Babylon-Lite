@@ -733,6 +733,80 @@ function envKeys(step: string): string[] {
 }
 
 /**
+ * The file that reads the published baseline.
+ *
+ * This is deliberately not a test artifact and not a document. It is the code
+ * PR builds and local developers actually run, and its default URL is the only
+ * statement in the tree of where the baseline is expected to be found. Every
+ * other clause in this file has the pipeline on both sides of its comparison,
+ * which is why a publish step that publishes nothing satisfied all of them.
+ */
+const readerFile = "scripts/bundle-scenes-core.ts";
+
+/** The `value:` of a pipeline-level variable, by name. */
+function pipelineVariable(name: string, source: string): string | undefined {
+    const pattern = new RegExp(`^[ \\t]*-[ \\t]*name:[ \\t]*${name}[ \\t]*\\r?\\n[ \\t]*value:[ \\t]*(.+)$`, "m");
+    return pattern.exec(source)?.[1]?.trim();
+}
+
+/**
+ * Resolve `$(name)` macros against the pipeline's own `variables:` block.
+ *
+ * An unresolved macro is left standing rather than replaced with an empty
+ * string, so the caller can tell "this variable is not declared here" from
+ * "this variable is declared as empty". The first is a typo; the second is a
+ * decision.
+ */
+function resolveMacros(text: string, source: string): string {
+    return text.replace(/\$\(([A-Za-z_][A-Za-z0-9_.]*)\)/g, (whole, name: string) => pipelineVariable(name, source) ?? whole);
+}
+
+interface PublishedBaseline {
+    /** Storage path the upload targets, with pipeline macros resolved. */
+    deployPath: string;
+    /** Archive the upload sends, by basename. */
+    uploaded: string;
+    /** Archive the script builds, by basename. */
+    built: string;
+    /** Files placed inside that archive. */
+    members: string[];
+}
+
+/** Where the publish step actually puts the baseline, read out of what it runs. */
+function publishedBaseline(step: string, source: string): PublishedBaseline {
+    const script = shellBodyOf(step);
+    // The archive token stops at `)` as well as at whitespace. The zip runs
+    // inside a `( cd … && zip … )` subshell, so with no files listed the token
+    // would otherwise be `baseline.zip)` -- which compares unequal to the
+    // uploaded name and reports a mismatched-archive failure for what is
+    // really an empty archive. Measured: the paren only reaches the token when
+    // the member list is empty, so the corpus hid it.
+    const zipped = /\bzip\s+((?:-\S+\s+)*)([^\s)]+)([^\n)]*)/.exec(script);
+    const basename = (p: string): string => p.split("/").pop() ?? "";
+
+    return {
+        deployPath: resolveMacros(/-F\s+"path=([^"]*)"/.exec(script)?.[1] ?? "", source),
+        uploaded: basename(/-F\s+"zip=@([^"]*)"/.exec(script)?.[1] ?? ""),
+        built: basename(zipped?.[2] ?? ""),
+        members: (zipped?.[3] ?? "").split(/\s+/).filter(Boolean),
+    };
+}
+
+/** The path component of the URL the reader fetches the baseline from. */
+function readerManifestPath(): string {
+    const text = readFileSync(join(repoRoot, readerFile), "utf8");
+    const url = /DEFAULT_MASTER_MANIFEST_URL\s*=\s*"([^"]+)"/.exec(text)?.[1];
+    if (!url) {
+        return "";
+    }
+    try {
+        return new URL(url).pathname;
+    } catch {
+        return "";
+    }
+}
+
+/**
  * Steps the configuration check itself depends on, and which may therefore run
  * before it.
  *
@@ -1707,5 +1781,88 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         // fails the build. There is no exemption mechanism here because there is
         // nothing to exempt; this comment is what the author of that variable
         // needs, and it is cheaper than machinery for a case that may not come.
+    });
+
+    it("publishes the baseline to the path the reader fetches it from", () => {
+        // The clause that supplies this file's missing side.
+        //
+        // Measured, and it is the whole thesis of this PR capitulating: replace
+        // the publish step's script with a single `echo` and every other clause
+        // here stays green. So does drifting `baselineDeployPath`, dropping the
+        // `-F path=` field, renaming the file inside the archive, and uploading
+        // an empty zip. Six edits, six passes, and the pipeline reproduces the
+        // incident this branch exists to fix — thirty minutes of measurement
+        // followed by no baseline at the other end.
+        //
+        // Every one of those was invisible for the same reason: the pipeline was
+        // on both sides of every comparison. `env:` blocks, step order, gate
+        // conditions and the allowance are all statements the same file makes
+        // about itself, so an edit that changes the file changes both sides at
+        // once and nothing is left to disagree.
+        //
+        // `scripts/bundle-scenes-core.ts` is the side that is not this pipeline
+        // and not a document. Both files already carry a comment telling the
+        // reader to keep them in sync with each other, and until now that was
+        // the entire enforcement mechanism. A drift on either side is a silent
+        // 404 for every PR delta report, which is the state master is in right
+        // now.
+        const source = readFileSync(join(repoRoot, pipelineFile), "utf8");
+        const steps = pipelineSteps(source);
+        const published = publishedBaseline(steps[stepIndex(steps, PUBLISH_STEP)] ?? "", source);
+        const readerPath = readerManifestPath();
+
+        // Floor every extraction -- but not for the reason this comment first
+        // gave, and the measurement is worth keeping because it corrects it.
+        //
+        // These floors are NOT what makes a blinded extraction fail. Measured
+        // by deleting each one and blinding the extraction it guards: the
+        // binding below fires anyway, every time, because an empty or malformed
+        // extraction cannot contain the reader's path either. On the detection
+        // axis all four are subsumed.
+        //
+        // They are kept because they are the sole detectors on a different
+        // axis. With the reader floor deleted and `DEFAULT_MASTER_MANIFEST_URL`
+        // renamed, the binding fires and says the pipeline "publishes
+        // /lite/bundle-baseline/manifest.json" while the reader "fetches ``" --
+        // which reads as a pipeline defect and sends the reader to this YAML,
+        // when what actually changed is a constant in a TypeScript file that
+        // this clause merely failed to find. The floor names the file and the
+        // function to re-point. A subsumed conjunct can still be the only thing
+        // that attributes the failure correctly, and attribution is what a
+        // failing CI check is for.
+        expect(
+            published.deployPath,
+            `no \`-F "path=..."\` field in "${PUBLISH_STEP}" — nothing says where the baseline is being uploaded to, so the comparison against ${readerFile} below has nothing to compare. If the upload moved to a task or a different transport, re-point \`publishedBaseline\` at it rather than letting this read an empty string.`
+        ).not.toBe("");
+        expect(
+            published.deployPath,
+            `the upload path in "${PUBLISH_STEP}" still contains an unresolved \`$(...)\` macro after substitution against the pipeline's own \`variables:\` block: "${published.deployPath}". A macro naming a variable that is not declared here resolves to nothing at runtime and publishes the baseline to the wrong place.`
+        ).not.toMatch(/\$\(/);
+        expect(
+            published.members.length,
+            `parsed no files out of the \`zip\` command in "${PUBLISH_STEP}" — the archive's contents are what the reader ends up fetching by name, so an empty list makes the comparison below vacuous`
+        ).toBeGreaterThan(0);
+        expect(
+            readerPath,
+            `could not read \`DEFAULT_MASTER_MANIFEST_URL\` as a URL from ${readerFile}. That constant is the only statement in the tree of where the baseline is expected to be, and this clause is the only thing binding it to the pipeline that writes it — if it was renamed or restructured, re-point \`readerManifestPath\`, because without it this file has the pipeline on both sides of every comparison it makes.`
+        ).not.toBe("");
+
+        // The archive that gets uploaded has to be the archive that was built.
+        // Uploading some other path is how a publish step succeeds, reports
+        // success, and leaves the baseline exactly as stale as it was.
+        expect(
+            published.uploaded,
+            `"${PUBLISH_STEP}" builds the archive \`${published.built}\` but uploads \`${published.uploaded}\`. The upload will succeed and publish the wrong bytes; a baseline that is never refreshed is indistinguishable from one that is, until a PR reports a delta against a manifest from weeks ago.`
+        ).toBe(published.built);
+
+        // The binding itself. The reader fetches one specific path; the pipeline
+        // writes a set of files under one specific prefix. The first has to be
+        // in the second.
+        const publishedPaths = published.members.map((member) => `/${published.deployPath}/${member}`);
+
+        expect(
+            publishedPaths,
+            `${readerFile} fetches the baseline from \`${readerPath}\`, but "${PUBLISH_STEP}" publishes ${publishedPaths.map((p) => `\`${p}\``).join(", ")}. These two are the write and the read of the same file and there is no mechanism keeping them together except this assertion — both files carry a comment saying "must stay in sync with" the other, and a comment has never stopped an edit. Change both, or change neither.`
+        ).toContain(readerPath);
     });
 });
