@@ -112,6 +112,28 @@ function pipelineFiles(): PipelineFile[] {
 }
 
 /** Every line of every collected file, tagged with its origin. */
+/**
+ * True when a line declares an Authorization header.
+ *
+ * This is the *subject selector* for the two header clauses, and it had no
+ * fixtures at all while its partner predicates had eighteen between them. The
+ * file read as thoroughly tested because one side of it was: pinning a
+ * predicate says nothing about the predicate that decides what it is shown.
+ *
+ * It was `/Authorization:/` -- case-sensitive, and HTTP header names are not.
+ * A hardcoded credential in a lowercase header passed every clause, byte
+ * identical to one that failed except for a single letter, and the printed
+ * subject count stayed at 10 throughout, because a selector-shaped miss is
+ * invisible to the number the selector produces.
+ *
+ * Comments are stripped so a documented example (`# Authorization: Bearer
+ * <token>`) is not read as a live header -- correct prose that the
+ * interpolation clause would otherwise reject.
+ */
+export function isAuthorizationHeader(line: string): boolean {
+    return /\bauthorization\s*:/i.test(line.replace(/(^|\s)#.*$/, ""));
+}
+
 function pipelineLines(): { location: string; line: string; number: number; requiresDeployToken: boolean }[] {
     return pipelineFiles().flatMap((file) =>
         readFileSync(file.path, "utf8")
@@ -150,6 +172,25 @@ describe("mask detection accepts and rejects the right lines", () => {
         [`WWW-Authenticate: ******"BabylonDeploymentServer"`, true],
     ])("%s -> masked=%s", (line, expected) => {
         expect(hasMaskedSecret(line as string)).toBe(expected);
+    });
+});
+
+describe("the Authorization selector accepts and rejects the right lines", () => {
+    // The clauses these feed were pinned; this was not. Both directions,
+    // including the shapes *correct* code takes -- a documented example must
+    // not be read as a live header, or the interpolation clause rejects prose.
+    it.each([
+        [`-H "Authorization: Bearer \${DEPLOY_TOKEN}"`, true],
+        [`-H "authorization: Bearer \${DEPLOY_TOKEN}"`, true],
+        [`-H "AUTHORIZATION: Bearer \${DEPLOY_TOKEN}"`, true],
+        [`-H "Authorization : Bearer \${DEPLOY_TOKEN}"`, true],
+        [`-H "Proxy-Authorization: Bearer \${DEPLOY_TOKEN}"`, true],
+        // A 401 challenge is a different header and not a credential.
+        [`WWW-Authenticate: Basic realm="BabylonDeploymentServer"`, false],
+        [`  # Authorization: Bearer <token>  -- example, not a live header`, false],
+        [`  - script: echo "no header here"`, false],
+    ])("%s -> isAuthorizationHeader=%s", (line, expected) => {
+        expect(isAuthorizationHeader(line as string)).toBe(expected);
     });
 });
 
@@ -197,7 +238,7 @@ describe("pipeline secret hygiene", () => {
     // header must actually reference the token, in either the ADO macro form
     // or the shell form used when the secret is passed through `env:`.
     it("references the deploy token in every Authorization header", () => {
-        const headers = pipelineLines().filter(({ line }) => /Authorization:/.test(line));
+        const headers = pipelineLines().filter(({ line }) => isAuthorizationHeader(line));
 
         // Print N, and where. An assertion of the form "N things, all correct"
         // is only meaningful if someone can see what N was and that the set is
@@ -246,7 +287,7 @@ function allYamlCarryingAnAuthorizationHeader(): string[] {
             const full = join(dir, name);
             if (statSync(full).isDirectory()) {
                 walk(full);
-            } else if (/\.ya?ml$/.test(name) && /^\s*[-\s]*.*Authorization\s*:/im.test(readFileSync(full, "utf8"))) {
+            } else if (/\.ya?ml$/.test(name) && readFileSync(full, "utf8").split("\n").some(isAuthorizationHeader)) {
                 found.push(relative(repoRoot, full).split(sep).join("/"));
             }
         }

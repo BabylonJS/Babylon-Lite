@@ -372,7 +372,11 @@ obvious phrasing, deliberately:
   invisible. Forms carrying a credential with no separator (`curl -u`) are a
   known gap.
 - Every `Authorization:` header must **interpolate some variable**. This is the
-  universal clause and it holds in any CI dialect. The mask passed every earlier
+  universal clause and it holds in any CI dialect. Header names are matched
+  case-insensitively, because HTTP header names are: a hardcoded credential in
+  a lowercase `authorization:` once passed every clause, differing from a
+  caught one by a single letter. Commented examples are excluded so documented
+  prose is not read as a live header. The mask passed every earlier
   check precisely because it still resembled a header.
 - Azure pipelines and their step templates must additionally reference
   `DEPLOY_TOKEN`. This one is **not** applied repo-wide: the GitHub Actions
