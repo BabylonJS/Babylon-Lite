@@ -364,6 +364,51 @@ describe("piped pipeline steps enable pipefail", () => {
         // away.
         expect(piped.length, "no piped scripts detected -- pipe detection is broken").toBeGreaterThan(0);
 
+        // The floor above is collapse-only, and collapse is not how this breaks.
+        // Measured: 8 piped scripts, from exactly two files -- 7 in
+        // azure-pipelines.yml and 1 in .github/workflows/compat-sync-trigger.yml.
+        // So losing the entire Actions root leaves 7, and `> 0` passes while the
+        // assertion below silently stops inspecting a whole class of file.
+        //
+        // A per-root floor -- the shape that fits the traversal guards -- would
+        // be wrong here, and measuring said so: config/templates contributes
+        // *zero* piped scripts, legitimately, so requiring one per root would
+        // fail on a correct tree.
+        //
+        // Naming the two files instead. Both names are the recorded premise of a
+        // scope decision: azure-pipelines.yml is the subject this guard was
+        // written for, and compat-sync-trigger.yml is the single reason
+        // .github/workflows is in SCANNED_ROOTS at all -- that root's comment
+        // justifies its inclusion by asserting this exact pipe exists, which
+        // until now was prose no test could falsify.
+        //
+        // The gap these close is narrower than "detection broke", and worth
+        // stating exactly, because the per-root floor in `collectScripts` already
+        // catches most of that. Verified by mutation: narrowing SHELL_STEP_KEYS
+        // so `run:` stops counting as shell is caught there -- the root is still
+        // listed and contributes nothing, which that floor reports by name.
+        //
+        // What it structurally cannot catch is a root *removed from
+        // SCANNED_ROOTS*, because it iterates SCANNED_ROOTS to decide what to
+        // check. Delete the entry and the check for it disappears with it. That
+        // mutation leaves 7 piped scripts, so `> 0` above passes too, and the
+        // assertion below silently stops inspecting an entire class of file.
+        // These names are outside that list, which is the only reason they can
+        // see it.
+        //
+        // Deliberately not a count. Pipes are not an invariant -- azure-pipelines.yml
+        // dropping from 7 to 1 is a legitimate refactor, and neither floor here
+        // would catch it. That is correct rather than a gap: the invariant is
+        // "every pipe sets pipefail", not "there are seven pipes".
+        const contributingFiles = new Set(piped.map((script) => script.location.split(":")[0]));
+        for (const file of ["azure-pipelines.yml", ".github/workflows/compat-sync-trigger.yml"]) {
+            expect(
+                contributingFiles.has(file),
+                `${file} contributed no piped script. It had one when this floor was written, so the first thing to rule out ` +
+                    `is that discovery or pipe detection narrowed -- not that the pipe was removed.`
+            ).toBe(true);
+        }
+
         // Anchored to a `set` command at the start of a line so a *comment*
         // mentioning `set -euo pipefail` -- of which this repo has several,
         // including in this very file -- cannot satisfy the check. Verified:
