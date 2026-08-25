@@ -750,22 +750,50 @@ describe("pull-request jobs cannot run on a master build", () => {
         ).toBe(1);
         expect(ends, `"They run in parallel" appears ${ends} times in TESTING.md, so the sentence's end is whichever comes first.`).toBe(1);
 
+        // The floor, and it is deliberately taken from the pipeline rather than
+        // from either thing being compared. The two assertions below are
+        // *equalities*, and equalities are satisfied by both sides being empty
+        // -- measured: emptying `KNOWN_MASTER_JOBS` and rewriting the sentence
+        // to name nobody is two edits in two files, passes the one-edit test,
+        // and left twelve clauses green with the post-merge job set gone
+        // entirely. Every clause about that set had become vacuously true at
+        // once, including this one.
+        //
+        // The set of ungated jobs is the only side of the correspondence that
+        // is not somebody's assertion: a constant is edited in a diff and prose
+        // is written by hand, but a job stops appearing here only when it
+        // genuinely stops running on master. So it is what the floor is taken
+        // from, and it makes the empty case cost what it should -- gating every
+        // job off master, which is the state the trigger was added to end.
+        const ungated = dualContextPipelines.flatMap((file) => file.jobs).filter((job) => !job.gated);
+        const ungatedLabels = ungated.map((job) => displayNameOf(job)).filter((label): label is string => label !== undefined);
+
+        expect(
+            ungatedLabels.length,
+            `every job in the dual-context pipeline is gated off master, so a master build runs nothing and is green for it. ` +
+                `That is precisely the gap this pipeline's master trigger exists to close.`
+        ).toBeGreaterThan(0);
+
         const byName = new Map(dualContextPipelines.flatMap((file) => file.jobs).map((job) => [job.name, job]));
         const expected = KNOWN_MASTER_JOBS.map((name) => displayNameOf(byName.get(name))).filter((label): label is string => label !== undefined);
 
         expect(
             boldNamesIn(block).sort(),
-            `TESTING.md says master re-runs ${boldNamesIn(block).join(", ")}, but KNOWN_MASTER_JOBS resolves to ${expected.join(", ")}.\n` +
+            `TESTING.md says master re-runs ${boldNamesIn(block).join(", ") || "(nobody)"}, but the pipeline leaves ${ungatedLabels.join(", ")} ungated.\n` +
                 `These have to move together. If a job is genuinely leaving post-merge validation, say so here in the same diff -- that sentence is what a reader ` +
                 `checks, and a name quietly leaving a TypeScript array is not a statement anybody reviews.`
-        ).toEqual([...expected].sort());
+        ).toEqual([...ungatedLabels].sort());
 
-        // Constant-free on purpose. The two clauses above both read
-        // KNOWN_MASTER_JOBS, so editing it moves them together; this one
-        // compares TESTING.md against itself and cannot be reached from any
-        // constant in this file. It is what catches the end state of the
-        // four-edit chain, where the document claimed a job was both re-run on
-        // every push and deliberately excluded.
+        expect([...expected].sort(), `KNOWN_MASTER_JOBS resolves to ${expected.join(", ") || "(nobody)"}, but the pipeline leaves ${ungatedLabels.join(", ")} ungated.`).toEqual(
+            [...ungatedLabels].sort()
+        );
+
+        // Constant-free on purpose. The assertions above read
+        // KNOWN_MASTER_JOBS or the pipeline, so a mutation reaching those moves
+        // them together; this one compares TESTING.md against itself and cannot
+        // be reached from any constant in this file. It is what catches the end
+        // state of the four-edit chain, where the document claimed a job was
+        // both re-run on every push and deliberately excluded.
         const alsoExcluded = boldNamesIn(block).filter((name) => deliberatelyExcludedFromMaster().block.includes(name));
 
         expect(
