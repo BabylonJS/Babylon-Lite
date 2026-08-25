@@ -363,6 +363,55 @@ describe("pull-request jobs cannot run on a master build", () => {
         }
     });
 
+    it("distinguishes a pull-request-only pipeline from a dual-context one", () => {
+        // The subject is a conjunction -- runs on master AND builds pull
+        // requests -- and the repository supplies a negative for only one half
+        // of it. Every pipeline here that builds pull requests also builds
+        // master, so `canBuildPullRequests` alone reproduces the subject exactly
+        // and `canRunOnMaster` is along for the ride.
+        //
+        // Measured: defeating `canRunOnMaster` to a constant `true` leaves the
+        // whole file green at 6 passed, while defeating `canBuildPullRequests`
+        // the same way fires four clauses. One conjunct is load-bearing and
+        // untested, with no visible gap -- an exact assertion over a conjunction
+        // is satisfied by whichever conjunct is stronger on the available
+        // specimens.
+        //
+        // The specimens are written here rather than added to the repository as
+        // real pipelines, because the missing negative is a *file this repo does
+        // not contain*: a pipeline that builds pull requests and never builds
+        // master. Adding one to make a guard testable would be inventing
+        // infrastructure to satisfy a test.
+        //
+        // It is not hypothetical. A PR-only pipeline is an ordinary thing to add
+        // -- a cheap lint pass that has no reason to run post-merge -- and if
+        // `canRunOnMaster` ever answers `true` for it, every clause here starts
+        // demanding master gates on a pipeline that cannot build master. Guards
+        // that demand pointless changes on a correct tree get deleted.
+        const specimens = [
+            {
+                what: "dual-context: master trigger and a pr trigger",
+                text: "trigger:\n  branches:\n    include:\n      - master\n\npr:\n  branches:\n    include:\n      - master\n",
+                master: true,
+                pullRequest: true,
+            },
+            { what: "pull-request only: explicitly no CI trigger", text: "trigger: none\n\npr:\n  branches:\n    include:\n      - master\n", master: false, pullRequest: true },
+            {
+                what: "pull-request only: CI trigger names other branches",
+                text: "trigger:\n  branches:\n    include:\n      - release/*\n\npr:\n  branches:\n    include:\n      - master\n",
+                master: false,
+                pullRequest: true,
+            },
+            { what: "master only: pr trigger explicitly disabled", text: "trigger:\n  branches:\n    include:\n      - master\n\npr: none\n", master: true, pullRequest: false },
+            { what: "master only: no pr trigger at all", text: "trigger:\n  branches:\n    include:\n      - master\n", master: true, pullRequest: false },
+        ];
+
+        for (const specimen of specimens) {
+            expect(canRunOnMaster(specimen.text), `${specimen.what}: canRunOnMaster should be ${specimen.master}`).toBe(specimen.master);
+            expect(canBuildPullRequests(specimen.text), `${specimen.what}: canBuildPullRequests should be ${specimen.pullRequest}`).toBe(specimen.pullRequest);
+        }
+    });
+
     it("resolves every template a dual-context job includes", () => {
         // A floor on the transform rather than on its output.
         //
