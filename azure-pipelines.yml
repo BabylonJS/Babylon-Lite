@@ -70,6 +70,34 @@
 # feature branch, which is a real workflow (queueing a parity or perf run
 # on-demand) and one this pipeline has always supported.
 #
+# Be precise about what that condition does and does not promise, because the
+# paragraph above is easy to read as more than it says: it is a *master gate*,
+# not a guarantee that a PR exists. "Not master" and "is a PR" are different
+# sets, and the gap between them is the manual queue just described — a build of
+# a feature branch is neither, and there `System.PullRequest.*` is exactly as
+# empty as it is on master. A job that cannot function at all without a PR needs
+# the positive form instead:
+#
+#     condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/pull/'))
+#
+# No job uses that today, and the reason is worth knowing before you add one:
+# every PR-context *step* already tolerates an absent PR, which is what makes
+# the weaker job-level gate survivable. All four GitHubComment@0 tasks (two
+# here, two in config/templates/) are `continueOnError: true` and are
+# additionally gated on a POST_*_COMMENT flag; `validate:release-markers` falls
+# back to scanning commit messages when PR_NUMBER is empty, and treats an
+# unexpanded `$(...)` literal as absent rather than as a PR number
+# (cleanAzureValue in scripts/validate-pr-release-markers.ts). That step-level
+# tolerance is what keeps manual queues useful. It is not a reason to skip the
+# job-level gate — it is the reason the job-level gate can afford to be the
+# weaker of the two conditions.
+#
+# The one place the distinction still bites is the Playground Snapshot deploy
+# path, `litePlayground/pr/$(System.PullRequest.PullRequestNumber)`, which on a
+# manual non-PR queue resolves to a shared `pr/` prefix instead of failing
+# loudly. That predates the master trigger and is left alone here — but if you
+# touch that job, gate it on `refs/pull/`, not on not-master.
+#
 # The `succeeded()` half is not decoration. Declaring any `condition:` on a job
 # REPLACES the implicit default of `succeeded()`. Every job here is currently
 # independent (no `dependsOn` anywhere in this file), so a bare `ne(...)` would

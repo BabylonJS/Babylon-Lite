@@ -350,10 +350,21 @@ Deliberately excluded from `master`:
 
 Those jobs are gated with
 `condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))`.
-**Any new job that reads PR context must carry the same condition** — see the
-header comment in `azure-pipelines.yml`, which also explains why the
-`succeeded()` half is required (declaring any `condition:` replaces the implicit
-default) and why the master trigger deliberately has no `paths:` filter.
+That is a _master_ gate, not a guarantee that a pull request exists: a manually
+queued build of a feature branch is neither master nor a PR, and there
+`System.PullRequest.*` is just as empty as it is on master. It is survivable
+because every PR-context _step_ tolerates an absent PR — all four
+`GitHubComment@0` tasks are `continueOnError: true` and gated on a
+`POST_*_COMMENT` flag, and `validate:release-markers` falls back to scanning
+commit messages when `PR_NUMBER` is empty.
+
+**Any new job that reads PR context must carry the same condition.** A job that
+cannot function _at all_ without a PR should use the positive form instead —
+`startsWith(variables['Build.SourceBranch'], 'refs/pull/')` — rather than
+assuming "not master" implies "is a PR". See the header comment in
+`azure-pipelines.yml`, which also explains why the `succeeded()` half is
+required (declaring any `condition:` replaces the implicit default) and why the
+master trigger deliberately has no `paths:` filter.
 
 > **Manual follow-up:** failure notifications for master runs are configured in
 > the Azure DevOps UI (Project settings → Notifications), not in YAML. A
