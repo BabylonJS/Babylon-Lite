@@ -127,6 +127,8 @@ export { createDepthOfFieldPostProcessTask, DepthOfFieldBlurLevel } from "./post
 export type { DepthOfFieldPostProcessTask, DepthOfFieldPostProcessTaskConfig } from "./post-process/depth-of-field.js";
 export { createTaaPostProcessTask } from "./post-process/taa.js";
 export type { TaaPostProcessTask, TaaPostProcessTaskConfig } from "./post-process/taa.js";
+export { createSmaaPostProcessTask } from "./post-process/smaa.js";
+export type { SmaaPostProcessTask, SmaaPostProcessTaskConfig } from "./post-process/smaa.js";
 export { createScreenSpaceContactShadowsPostProcessTask } from "./post-process/screen-space-contact-shadows.js";
 export type { ScreenSpaceContactShadowsPostProcessTask, ScreenSpaceContactShadowsPostProcessTaskConfig } from "./post-process/screen-space-contact-shadows.js";
 export { createScreenSpaceGlobalIlluminationPostProcessTask } from "./post-process/screen-space-global-illumination.js";

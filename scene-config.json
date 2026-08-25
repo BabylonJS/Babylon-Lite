@@ -1782,6 +1782,17 @@
         "skipPerf": true
     },
     {
+        "id": 187,
+        "slug": "scene187-smaa",
+        "name": "Scene 187 — SMAA",
+        "maxRawKB": 75,
+        "description": "A deterministic orthographic stress scene compares an untreated single-sample render with SMAA across thin geometry, diagonal silhouettes, alpha-cutout stripes, and high-contrast edges.",
+        "tags": ["post-process", "anti-aliasing", "smaa", "orthographic"],
+        "skipParity": true,
+        "skipParityReason": "Babylon.js has no equivalent SMAA frame-graph post-process task.",
+        "skipPerf": true
+    },
+    {
         "id": 200,
         "slug": "scene200-high-precision-jitter-hpm-off",
         "name": "Scene 200 - LWR Demo (HPM off, FO off)",

@@ -304,7 +304,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | --------------------------------------- | :--: | :-: | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Physics Engine                          |  ⚡  | ✅  | Havok Physics V2 subset (Scene 40); no Ammo.js/Cannon.js/Oimo compatibility layer                                                           |
 | Particle System                         |  —   | ✅  | CPU + GPU particles                                                                                                                         |
-| Post-Processing Pipeline                |  ⚡  | ✅  | Frame-graph post-process viewports, pipelined blur/chromatic passes, and Bloom are covered (Scenes 142-144); no built-in DOF/SSAO stack yet |
+| Post-Processing Pipeline                |  ✅  | ✅  | Frame-graph tasks include generic fullscreen passes, Bloom, depth of field, SSAO, TAA, SMAA, and final image processing/tone mapping. Scene 187 covers SMAA. |
 | GUI (2D / 3D UI)                        |  —   | ✅  |                                                                                                                                             |
 | Sprites / SpriteManager                 |  ⚡  | ✅  | 2D layers, depth-hosted sprites, facing/axis-locked/cutout billboards (Scenes 50-57); not the full BJS SpriteManager API                    |
 | Gaussian Splatting                      |  ✅  | ✅  | .ply / .splat / .sog / .spz loaders, transform baking, material plugin fragments, depth rendering, and GPU picking (Scenes 120-129)         |
@@ -314,7 +314,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | WebXR / VR / AR                         |  —   | ✅  |                                                                                                                                             |
 | Glow / Highlight Layer                  |  —   | ✅  |                                                                                                                                             |
 | Screen-Space Reflections                |  —   | ✅  |                                                                                                                                             |
-| SSAO                                    |  —   | ✅  |                                                                                                                                             |
+| SSAO                                    |  ✅  | ✅  | Frame-graph post-process task (Scene 181)                                                                                                   |
 | Lens Flare                              |  —   | ✅  |                                                                                                                                             |
 | Volumetric Light Scattering             |  —   | ✅  |                                                                                                                                             |
 | Decals                                  |  —   | ✅  |                                                                                                                                             |
