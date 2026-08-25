@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -92,18 +93,43 @@ function readsPullRequestContext(text: string): boolean {
  * resolution is what those two jobs need; the comment marker contributes
  * nothing to them and never did.
  *
- * Resolution is bounded rather than recursive-until-fixpoint: a cycle in
- * pipeline templates is an ADO error long before it is this guard's problem,
- * and an unbounded walk here would hang the test rather than report anything.
+ * Resolution follows the chain to its end rather than to a budget. The first
+ * version stopped after three hops, on the reasoning that an unbounded walk
+ * would hang on a template cycle -- true, but the budget was justified by the
+ * repository's *current* nesting rather than by anything the bound entails.
+ * Templates nest one deep today, so three looked generous. Measured with a
+ * four-hop chain ending in `$(System.PullRequest.PullRequestNumber)` on an
+ * ungated job: ten passed. Not a wrong diagnosis, no category change, nothing
+ * -- the truncated text simply contains no marker, and the job reads as
+ * deterministic.
+ *
+ * Carrying the visited set removes the budget without reintroducing the hang: a
+ * path already on the current chain is not followed again, and the set of
+ * readable paths is finite, so the walk terminates. Per-branch rather than
+ * global, so two siblings including the same template both resolve it -- a
+ * diamond is not a cycle.
+ *
+ * A cycle therefore stops silently, and that exemption is load-bearing on a
+ * fact rather than on a count: ADO rejects a template cycle when it compiles
+ * the pipeline, so a cycle cannot reach master through a build that ran. That
+ * is the distinction the depth budget failed -- "nothing external prevents
+ * this, it just has not happened yet" is not the same claim as "the platform
+ * rejects it".
+ *
+ * `root` is a parameter so the walk can be exercised against a fixture tree.
+ * Writing chain fixtures into `config/templates/` would put them inside a
+ * directory every other clause scans.
  */
-function withTemplatesResolved(text: string, depth = 3): string {
-    if (depth === 0) {
-        return text;
-    }
-
+function withTemplatesResolved(text: string, root: string = repoRoot, seen: ReadonlySet<string> = new Set()): string {
     return text.replace(/^\s*-\s*template:\s*(\S+)\s*$/gm, (line, path: string) => {
+        if (seen.has(path)) {
+            return line;
+        }
+
+        let body: string;
+
         try {
-            return line + "\n" + withTemplatesResolved(readFileSync(join(repoRoot, path), "utf8"), depth - 1);
+            body = readFileSync(join(root, path), "utf8");
         } catch {
             // A template this guard cannot read is left as its own text.
             //
@@ -120,8 +146,18 @@ function withTemplatesResolved(text: string, depth = 3): string {
             // unreadable include is caught there, by name, as its own failure
             // rather than as a downstream job that looks like it changed
             // category.
+            //
+            // Scoped to the read alone, deliberately. Wrapping the recursive
+            // call too made this catch absorb the `RangeError` from an
+            // unbounded walk, so defeating the cycle guard above produced
+            // eleven passed rather than a hang: the overflow unwound to the
+            // outermost frame and was reported as an unreadable template. That
+            // made the cycle guard untestable and this handler a catch-all
+            // wearing a specific comment.
             return line;
         }
+
+        return line + "\n" + withTemplatesResolved(body, root, new Set([...seen, path]));
     });
 }
 
@@ -445,6 +481,48 @@ describe("pull-request jobs cannot run on a master build", () => {
             `these files read pull-request context but declare no job, so there is nowhere to put a master gate:\n  ${ungatable.join("\n  ")}\n` +
                 `Do NOT add a condition here -- gate the job that includes the template, or move the step out of it.`
         ).toEqual([]);
+    });
+
+    it("follows a template chain to its end rather than to a budget", () => {
+        // Exercised against a fixture tree because the separating case is a
+        // chain deeper than the repository has: templates nest one level here,
+        // so every depth budget above one is indistinguishable from no budget
+        // on this tree. That is what hid the old bound -- its adequacy was a
+        // property of today's pipelines, not of the number.
+        //
+        // The chain is five hops with the marker only at the leaf, so a walk
+        // that stops early returns text containing no marker at all. That is
+        // the failure mode worth pinning: not a wrong answer, an absent one.
+        const dir = mkdtempSync(join(tmpdir(), "tpl-chain-"));
+
+        try {
+            const hops = ["a", "b", "c", "d"];
+            hops.forEach((hop, index) => writeFileSync(join(dir, `${hop}.yml`), `steps:\n    - template: ${hops[index + 1] ?? "leaf"}.yml\n`));
+            writeFileSync(join(dir, "leaf.yml"), 'steps:\n    - script: echo "$(System.PullRequest.PullRequestNumber)"\n');
+
+            expect(
+                readsPullRequestContext(withTemplatesResolved("steps:\n    - template: a.yml\n", dir)),
+                `pull-request context ${hops.length + 1} template hops down was not found. Template resolution is stopping short, and a job whose only PR context ` +
+                    `arrives through a chain that long reads as deterministic -- so this guard would report it as safe to run on master, silently.`
+            ).toBe(true);
+
+            // A cycle must terminate by being recognised, not by exhausting the
+            // stack. ADO rejects one at compile time so it cannot reach a real
+            // build -- but the assertion has to be able to tell the two exits
+            // apart, or it passes under both. Recognised, the line expands once
+            // and stops, leaving two mentions; overflowing, nothing expands at
+            // all and one mention survives.
+            writeFileSync(join(dir, "loop.yml"), "steps:\n    - template: loop.yml\n");
+            const cycle = withTemplatesResolved("steps:\n    - template: loop.yml\n", dir);
+
+            expect(
+                cycle.split("loop.yml").length - 1,
+                "a template cycle must stop because the walk recognises it, not because the stack ran out. " +
+                    "One mention means nothing expanded, which is what an absorbed overflow looks like -- and an overflow is not a guarantee, it is a resource limit."
+            ).toBe(2);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     it("classifies each pull-request marker on its own", () => {
