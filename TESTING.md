@@ -359,10 +359,29 @@ It was also a _second_, independent cause of the same 401 that the storage
 account produced — so fixing one of the two would have left the symptom
 unchanged and the remaining cause looking disproven.
 
-`tests/lite/unit/pipeline-secret-hygiene.test.ts` now rejects any asterisk run
-in a pipeline file, and separately requires every `Authorization:` header to
-reference `DEPLOY_TOKEN` — the mask passed the first kind of scrutiny precisely
-because it still resembled a header.
+`tests/lite/unit/pipeline-secret-hygiene.test.ts` guards this. Read what it
+actually asserts before relying on it, because each clause is narrower than the
+obvious phrasing, deliberately:
+
+- It rejects a **whole token of three or more asterisks in value position** —
+  not any asterisk run. `echo "a***b"` and `dist/**/*` are legitimate and must
+  keep passing; a guard that fails on correct code gets deleted rather than
+  debugged, and this invariant is one whose violation is invisible.
+- Every `Authorization:` header must **interpolate some variable**. This is the
+  universal clause and it holds in any CI dialect. The mask passed every earlier
+  check precisely because it still resembled a header.
+- Azure pipelines and their step templates must additionally reference
+  `DEPLOY_TOKEN`. This one is **not** applied repo-wide: the GitHub Actions
+  workflow authenticates with `Basic ${AUTH}`, which is correct, and demanding
+  `DEPLOY_TOKEN` of it would be a misfire.
+
+The subject is every `azure-pipelines*.yml`, every file under
+`config/templates/`, and every file under `.github/workflows/` — 10
+`Authorization:` headers today. The first version read the repo root alone and
+so covered 7 of them, while claiming the pipelines; the three it missed were the
+`curl` uploads in the shared templates, which `azure-pipelines.yml` includes at
+four call sites and which therefore run on every PR. If you add a CI file
+somewhere else, add its directory to that list.
 
 This list is no longer maintained by hand:
 `tests/lite/unit/pipeline-variable-groups-documented.test.ts` parses every
