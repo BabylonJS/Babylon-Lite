@@ -51,6 +51,9 @@ export class PickingInfo {
     }
 
     public getTextureCoordinates(_uvSet?: string): Vector2 | null {
-        return unsupported("PickingInfo.getTextureCoordinates", "Lite's synchronous CPU picker currently exposes AABB intersections only, so barycentric UV coordinates are unavailable.");
+        return unsupported(
+            "PickingInfo.getTextureCoordinates",
+            "Lite's synchronous CPU picker currently exposes AABB intersections only, so barycentric UV coordinates are unavailable."
+        );
     }
 }

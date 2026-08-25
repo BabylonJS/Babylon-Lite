@@ -70,7 +70,9 @@ describe("Scene.pickWithRay", () => {
         let predicateMesh: unknown;
 
         const hit = scene.pickWithRay(ray, (mesh) => {
-            predicateMesh = mesh;
+            if (mesh.name === "native") {
+                predicateMesh = mesh;
+            }
             return mesh.name === "native";
         });
 
