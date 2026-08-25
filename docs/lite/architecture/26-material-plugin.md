@@ -54,6 +54,7 @@ export interface MaterialPlugin {
     readonly name: string;
     priority?: number; // lower runs first; default 500
     isEnabled?: boolean; // default true when attached
+    dynamic?: boolean; // refresh Standard-material UBO values every frame
     defines?: Record<string, boolean | number>;
     getCustomCode?(shaderType: "vertex" | "fragment"): Partial<Record<MaterialPluginPoint, string>> | null;
     getUniforms?(): { ubo?: PluginUboField[] };
@@ -71,8 +72,8 @@ interface Material {
 
 Public exports (`index.ts`): `MaterialPlugin`, `MaterialPluginPoint`,
 `PluginUboField`, `PluginSamplerDecl`, `PluginTextureBinding` (all `export type`),
-plus the runtime function `enableMaterialPlugins(scene)` — the explicit opt-in
-entry point.
+plus the runtime functions `enableMaterialPlugins(scene)` and
+`bakeStdPluginMaterial(material, engine)`.
 
 ## Opt-in entry point — `enableMaterialPlugins(scene)`
 
@@ -101,6 +102,8 @@ standardGroupBuilder`, so PBR materials are never touched), walks `scene.meshes`
    This is required because Standard's `_computeStandardMaterialFeatures` is not
    ext-extensible, so the index must be baked in before the build reads it. PBR
    needs no walk — its `detect` hook encodes the index during feature computation.
+   Standard materials created after this walk can be registered explicitly with
+   `bakeStdPluginMaterial(material, engine)`.
 
 Because none of this lives in a shared module, removing the call (or never adding
 it) leaves every byte of the PBR/Standard core untouched.
@@ -181,10 +184,13 @@ material UBO, so the bridge:
   mesh UBO. `buildPluginFragment(plugins, idx, /*forStandard*/ true)` emits a
   dedicated `var<uniform> pluginUbo : pluginUboUniforms;` fragment binding (struct
   declared in `_helperFunctions`) instead of appending `_uboFields` to the mesh
-  UBO. The bridge builds that `GPUBuffer` once per signature at registration time
-  (uniform values are constant for a given signature) and pushes its bind entry
+  UBO. The bridge builds one `GPUBuffer` per material, so materials with the same
+  shader signature can retain different uniform values, and pushes its bind entry
   from `StdExt._bind` — **before** the texture entries, matching the binding
   declaration order — followed by `bindPluginTextures`.
+
+Standard plugins marked `dynamic: true` have their per-material UBO values
+rewritten before every frame. Static plugins retain the registration-time upload.
 
 The decisive benefit: this route touches **zero shared standard code**. The
 pre-existing `StdExt._bind` / `_textures` loops in `standard-pipeline.ts` /

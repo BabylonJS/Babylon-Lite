@@ -44,13 +44,27 @@ struct V{@builtin(position)p:vec4f};
 @vertex fn vs(@builtin(vertex_index)i:u32)->V{let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];return V(vec4f(p,0,1));}
 @fragment fn fs(@builtin(position)fc:vec4f)->@location(0)f32{
   let c=vec2<i32>(fc.xy)*2;
-  let d=vec2<i32>(textureDimensions(src))-vec2<i32>(1,1);
+  let sd=vec2<i32>(textureDimensions(src));
+  let d=sd-vec2<i32>(1,1);
   let x1=min(c.x+1,d.x); let y1=min(c.y+1,d.y);
   let a=textureLoad(src,vec2<i32>(c.x,c.y),0).r;
   let b=textureLoad(src,vec2<i32>(x1,c.y),0).r;
   let e=textureLoad(src,vec2<i32>(c.x,y1),0).r;
   let f=textureLoad(src,vec2<i32>(x1,y1),0).r;
-  return ${op}(${op}(a,b),${op}(e,f));
+  var r=${op}(${op}(a,b),${op}(e,f));
+  let dd=max(sd/vec2<i32>(2,2),vec2<i32>(1,1));
+  let extraX=(sd.x&1)==1&&i32(fc.x)==dd.x-1;
+  let extraY=(sd.y&1)==1&&i32(fc.y)==dd.y-1;
+  if(extraX){
+    let x2=min(c.x+2,d.x);
+    r=${op}(r,${op}(textureLoad(src,vec2<i32>(x2,c.y),0).r,textureLoad(src,vec2<i32>(x2,y1),0).r));
+  }
+  if(extraY){
+    let y2=min(c.y+2,d.y);
+    r=${op}(r,${op}(textureLoad(src,vec2<i32>(c.x,y2),0).r,textureLoad(src,vec2<i32>(x1,y2),0).r));
+    if(extraX){r=${op}(r,textureLoad(src,vec2<i32>(min(c.x+2,d.x),y2),0).r);}
+  }
+  return r;
 }`;
 }
 

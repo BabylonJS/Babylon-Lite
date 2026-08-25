@@ -28,10 +28,11 @@
  */
 
 import type { SceneContext } from "../../scene/scene.js";
+import { onBeforeRender } from "../../scene/scene-core.js";
 import { _registerPbrExt } from "../pbr/pbr-flags.js";
 import { _registerStdExt } from "../standard/standard-flags.js";
 import { registerPbrPlugins } from "./pbr-plugin-bridge.js";
-import { registerStdPlugins } from "./std-plugin-bridge.js";
+import { refreshStdPluginUbos, registerStdPlugins } from "./std-plugin-bridge.js";
 
 /**
  * Enable material-plugin support for `scene`.
@@ -48,5 +49,7 @@ import { registerStdPlugins } from "./std-plugin-bridge.js";
  */
 export function enableMaterialPlugins(scene: SceneContext): void {
     registerPbrPlugins(_registerPbrExt);
-    registerStdPlugins(scene.meshes, scene.surface.engine, _registerStdExt);
+    const engine = scene.surface.engine;
+    registerStdPlugins(scene.meshes, engine, _registerStdExt);
+    onBeforeRender(scene, () => refreshStdPluginUbos(engine));
 }
