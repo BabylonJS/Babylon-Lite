@@ -96,6 +96,8 @@ The cloud parity config connects to remote Chrome **directly over CDP**
 so specs shard across `CIWORKERS` parallel cloud browsers. The local Vite dev
 server is exposed to the remote browser through a BrowserStack Local tunnel
 started by the config's `globalSetup` (`config/browserstack-local-tunnel.ts`).
+Both BrowserStack Playwright configs explicitly disable tracing, including
+retry tracing, because BrowserStack connection metadata can embed credentials.
 
 ```sh
 pnpm build:bundle-scenes
@@ -491,8 +493,8 @@ Both cloud test suites (perf and parity) produce:
 - **JUnit XML** — consumed by Azure DevOps `PublishTestResults@2` and
   displayed in the pipeline's **Tests** tab with pass/fail counts, durations,
   and error messages
-- **HTML report** — interactive Playwright report with error details,
-  screenshots, and traces
+- **HTML report** — interactive Playwright report with error details and
+  screenshots; tracing is disabled for BrowserStack runs
 
 Report locations after a run:
 
@@ -508,8 +510,14 @@ pnpm exec playwright show-report test-results/parity-report
 pnpm exec playwright show-report test-results/perf-report
 ```
 
-In CI, test artifacts (including the HTML report) are uploaded as pipeline
-artifacts on every run and can be downloaded from the build summary.
+In CI, BrowserStack reports and JUnit files are sanitized and independently
+verified before publication. The fail-closed scan requires both BrowserStack
+credentials, checks raw and URL-encoded forms in every file and nested ZIP, and
+sets `ArtifactsSafe=true` only after verification succeeds. Azure test-result
+publication and failed-test CDN report uploads are gated on that variable. The
+CDN allowlist contains only `test-results/parity-report` and
+`test-results/perf-report`; raw Playwright artifact/trace directories are never
+uploaded.
 
 ---
 

@@ -316,6 +316,9 @@ stages:
             timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
+            variables:
+                ArtifactsSafe: "false"
+                ReportUploaded: "false"
             steps:
                 - checkout: self
                   fetchDepth: 0
@@ -408,23 +411,34 @@ stages:
                       BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
                       BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
 
-                - task: PublishTestResults@2
+                # Only the JUnit file and explicit HTML report allowlist may be
+                # published. Raw Playwright output/trace directories stay private.
+                - script: |
+                      set -euo pipefail
+                      npx tsx scripts/redact-secrets.ts sanitize test-results/perf-junit.xml test-results/perf-report
+                      npx tsx scripts/redact-secrets.ts verify test-results/perf-junit.xml test-results/perf-report
+                      echo "##vso[task.setvariable variable=ArtifactsSafe]true"
                   condition: always()
+                  displayName: "Sanitize and verify publishable perf artifacts"
+                  env:
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+
+                - task: PublishTestResults@2
+                  condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
                   inputs:
                       testResultsFormat: "JUnit"
-                      testResultsFiles: "**/test-results/perf-junit.xml"
+                      testResultsFiles: "test-results/perf-junit.xml"
                       mergeTestResults: true
                       testRunTitle: "Perf Regression"
+                      publishRunAttachments: false
                   continueOnError: true
-
                 - script: npx tsx scripts/report-test-results.ts test-results/perf-junit.xml
-                  condition: always()
+                  condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
                   continueOnError: true
                   displayName: "Report test results"
-
                 - template: config/templates/upload-test-report.yml
                   parameters:
-                      reportDir: $(System.DefaultWorkingDirectory)/test-results/perf-report
                       reportType: perf
 
           # ──────────────────────────────────────────────────────────────
@@ -435,6 +449,9 @@ stages:
             timeoutInMinutes: 180
             pool:
                 vmImage: "ubuntu-latest"
+            variables:
+                ArtifactsSafe: "false"
+                ReportUploaded: "false"
             steps:
                 - checkout: self
 
@@ -474,34 +491,34 @@ stages:
                       BSTACK_SESSIONS_REQUIRED: "2"
                       BSTACK_LOCAL_IDENTIFIER: "bstack-lite-parity-$(Build.BuildId)"
 
-                # Scrub BrowserStack credentials from the report/JUnit artifacts
-                # before they are published/uploaded. The CDP wsEndpoint embeds the
-                # access key and can surface in Playwright error output.
-                - script: npx tsx scripts/redact-secrets.ts test-results
+                # Only the JUnit file and explicit HTML report allowlist may be
+                # published. Raw Playwright output/trace directories stay private.
+                - script: |
+                      set -euo pipefail
+                      npx tsx scripts/redact-secrets.ts sanitize test-results/parity-junit.xml test-results/parity-report
+                      npx tsx scripts/redact-secrets.ts verify test-results/parity-junit.xml test-results/parity-report
+                      echo "##vso[task.setvariable variable=ArtifactsSafe]true"
                   condition: always()
-                  continueOnError: true
-                  displayName: "Redact secrets from test artifacts"
+                  displayName: "Sanitize and verify publishable parity artifacts"
                   env:
                       BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
                       BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
 
                 - task: PublishTestResults@2
-                  condition: always()
+                  condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
                   inputs:
                       testResultsFormat: "JUnit"
-                      testResultsFiles: "**/test-results/parity-junit.xml"
+                      testResultsFiles: "test-results/parity-junit.xml"
                       mergeTestResults: true
                       testRunTitle: "Parity (Cloud)"
+                      publishRunAttachments: false
                   continueOnError: true
-
                 - script: npx tsx scripts/report-test-results.ts test-results/parity-junit.xml
-                  condition: always()
+                  condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
                   continueOnError: true
                   displayName: "Report test results"
-
                 - template: config/templates/upload-test-report.yml
                   parameters:
-                      reportDir: $(System.DefaultWorkingDirectory)/test-results/parity-report
                       reportType: parity
 
           # ──────────────────────────────────────────────────────────────
