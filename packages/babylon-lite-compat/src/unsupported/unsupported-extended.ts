@@ -11,18 +11,7 @@
 
 import { unsupported } from "../error.js";
 
-// ─── Bones / Skeletons / Morph ───────────────────────────────────────
-export class Skeleton {
-    public constructor() {
-        unsupported("Skeleton", "Skeletons are produced by the glTF loader in Babylon Lite and driven by `createAnimationController`; they are not constructed manually.");
-    }
-}
-
-export class Bone {
-    public constructor() {
-        unsupported("Bone", "Bones are produced by the glTF loader in Babylon Lite; manual bone construction is not wrapped.");
-    }
-}
+export { Skeleton, Bone } from "../bones/skeleton.js";
 
 // ─── Probes / Layers / Rendering ─────────────────────────────────────
 export class ReflectionProbe {
@@ -144,29 +133,6 @@ export class ParticleHelper {
 export class PointsCloudSystem {
     public constructor() {
         unsupported("PointsCloudSystem", "Point-cloud systems are not implemented in Babylon Lite. For Gaussian splats use the native splat loaders.");
-    }
-}
-
-// ─── Physics ─────────────────────────────────────────────────────────
-// Babylon Lite ships a Havok-V2 subset via `createHavokWorld` /
-// `createPhysicsAggregate` etc. `HavokPlugin` is wrapped (see
-// `src/physics/physics.ts`); the aggregate/body/shape class model is not wrapped
-// 1:1 — use the native physics functions against `plugin.world`.
-export class PhysicsAggregate {
-    public constructor() {
-        unsupported("PhysicsAggregate", "Use the native `createPhysicsAggregate` API instead of the Babylon.js PhysicsAggregate class.");
-    }
-}
-
-export class PhysicsBody {
-    public constructor() {
-        unsupported("PhysicsBody", "Use the native `createPhysicsBody` API.");
-    }
-}
-
-export class PhysicsShape {
-    public constructor() {
-        unsupported("PhysicsShape", "Use the native `createPhysicsShape` API.");
     }
 }
 

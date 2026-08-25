@@ -23,6 +23,8 @@ export interface _PbrFragCtx {
     readonly _features: number;
     /** @internal */
     readonly _features2: number;
+    /** @internal Material-plugin shader variant, separate from native feature bits. */
+    readonly _pi?: number;
     /** @internal Mesh feature bits, separate from material feature bits. */
     readonly _meshFeatures: number;
     /** @internal Per-channel UV1 (TEXCOORD_1) selection bitmask (see pbr-material.ts). */

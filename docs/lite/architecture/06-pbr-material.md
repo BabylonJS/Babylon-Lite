@@ -80,7 +80,7 @@ Light type bits are also shifted into the feature mask via `getLightTypeFeatureB
 
 Base color + ORM textures are always present (core PBR workflow).
 
-PBR caches are two-tiered: sig-independent shader bindings are cached per the inline key string `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${shaderKey}`, then each binding caches sig-specific pipelines per `targetSignatureKey(sig)` (format, depth format, sample count, Y-flip).
+PBR caches are two-tiered: sig-independent shader bindings are cached per the inline key string `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${shaderKey}`, where `shaderKey` includes tone-mapping identity and the material-plugin index; geometry-output composition and per-view resources also include the plugin index. Each binding then caches sig-specific pipelines per `targetSignatureKey(sig)` (format, depth format, sample count, Y-flip).
 
 ## Public API Surface
 
@@ -814,26 +814,26 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 
 ## File Manifest
 
-| File                                                 | Size       | Purpose                                                                                                                                         |
-| ---------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/material/pbr/pbr-material.ts`                   | ~140 lines | `PbrMaterialProps`, `ClearCoatProps`, `SheenProps` interfaces + `createPbrMaterial()` factory + `pbrGroupBuilder` + `collectPbrBoundTextures()` |
-| `src/material/pbr/pbr-flags.ts`                      | ~43 lines  | Feature flag bit constants + PBR extension registry helpers                                                                                     |
-| `src/material/pbr/pbr-template.ts`                   | ~465 lines | `PbrTemplateConfig` + `createPbrTemplate()` — builds `ShaderTemplate` with BRDF helpers, slot markers, base UBO/bindings                        |
-| `src/material/pbr/pbr-pipeline.ts`                   | ~284 lines | `computePbrFeatures()`, `getOrCreatePbrPipeline()`, `createPbrMeshBindGroup()`, pipeline cache management                                       |
-| `src/material/pbr/pbr-renderable.ts`                 | ~723 lines | `buildPbrRenderables()` — dynamic fragment import, shader composition, lights UBO setup, renderable creation, single-mesh rebuild closure       |
-| `src/material/pbr/no-color-view.ts`                  | ~18 lines  | `createPbrNoColorMaterialView()` — pass-specific no-color material view helper                                                                  |
-| `src/material/pbr/fragments/singlelight-wgsl.ts`     | ~75 lines  | Lazy WGSL helpers for the non-looping one-light direct path                                                                                     |
-| `src/material/pbr/fragments/multilight-wgsl.ts`      | ~120 lines | Lazy WGSL helpers: `MULTI_LIGHT_STRUCTS()`, `COMPUTE_PBR_LIGHT`, `getMultiLightLoop()`                                                          |
-| `src/material/pbr/fragments/ibl-fragment.ts`         | ~86 lines  | IBL environment lighting fragment (BRDF LUT, specular cubemap, SH irradiance)                                                                   |
-| `src/material/pbr/fragments/local-cubemap-fragment.ts` | ~600 lines | Opt-in per-material environments, finite box/sphere projection, and fragment-weighted probe-array IBL                                          |
-| `src/material/pbr/enable-pbr-local-cubemap.ts`       | ~500 lines | Public local-environment API, validation, probe packing, cube-array creation, and voxel lookup                                                   |
-| `src/material/pbr/fragments/clearcoat-fragment.ts`   | ~122 lines | Clearcoat layer fragment (Kelemen visibility, F0 remap, direct + IBL clearcoat)                                                                 |
-| `src/material/pbr/fragments/sheen-fragment.ts`       | ~115 lines | Sheen layer fragment (Charlie NDF, Ashikhmin visibility, direct + IBL sheen)                                                                    |
-| `src/material/pbr/fragments/reflectance-fragment.ts` | ~79 lines  | Metallic reflectance extension fragment (F0 computation, reflectance maps)                                                                      |
-| `src/material/pbr/fragments/emissive-fragment.ts`    | ~29 lines  | Emissive color uniform fragment                                                                                                                 |
-| `src/material/pbr/fragments/lightmap-fragment.ts`    | ~140 lines | Opt-in baked lightmap fragment (UV1/UV2, additive/shadowmap, gamma decode, effective V flip)                                                    |
-| `src/material/pbr/enable-pbr-lightmap.ts`            | ~70 lines  | Published `enablePbrLightmap()` / `setPbrLightmap()` opt-in seam                                                                                |
-| `src/material/pbr/fragments/morph-fragment.ts`       | ~48 lines  | Morph target vertex animation fragment                                                                                                          |
-| `src/material/pbr/fragments/skeleton-fragment.ts`    | ~71 lines  | Skeletal animation fragment (4-bone or 8-bone)                                                                                                  |
-| `src/material/pbr/fragments/pbr-shadow-fragment.ts`  | ~143 lines | PBR shadow receiving fragment (ESM + PCF, per-light)                                                                                            |
-| `src/shader/shader-composer.ts`                      | ~293 lines | `composeShader()` — topological sort, UBO merge, binding assignment, slot injection                                                             |
+| File                                                   | Size       | Purpose                                                                                                                                         |
+| ------------------------------------------------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/material/pbr/pbr-material.ts`                     | ~140 lines | `PbrMaterialProps`, `ClearCoatProps`, `SheenProps` interfaces + `createPbrMaterial()` factory + `pbrGroupBuilder` + `collectPbrBoundTextures()` |
+| `src/material/pbr/pbr-flags.ts`                        | ~43 lines  | Feature flag bit constants + PBR extension registry helpers                                                                                     |
+| `src/material/pbr/pbr-template.ts`                     | ~465 lines | `PbrTemplateConfig` + `createPbrTemplate()` — builds `ShaderTemplate` with BRDF helpers, slot markers, base UBO/bindings                        |
+| `src/material/pbr/pbr-pipeline.ts`                     | ~284 lines | `computePbrFeatures()`, `getOrCreatePbrPipeline()`, `createPbrMeshBindGroup()`, pipeline cache management                                       |
+| `src/material/pbr/pbr-renderable.ts`                   | ~723 lines | `buildPbrRenderables()` — dynamic fragment import, shader composition, lights UBO setup, renderable creation, single-mesh rebuild closure       |
+| `src/material/pbr/no-color-view.ts`                    | ~18 lines  | `createPbrNoColorMaterialView()` — pass-specific no-color material view helper                                                                  |
+| `src/material/pbr/fragments/singlelight-wgsl.ts`       | ~75 lines  | Lazy WGSL helpers for the non-looping one-light direct path                                                                                     |
+| `src/material/pbr/fragments/multilight-wgsl.ts`        | ~120 lines | Lazy WGSL helpers: `MULTI_LIGHT_STRUCTS()`, `COMPUTE_PBR_LIGHT`, `getMultiLightLoop()`                                                          |
+| `src/material/pbr/fragments/ibl-fragment.ts`           | ~86 lines  | IBL environment lighting fragment (BRDF LUT, specular cubemap, SH irradiance)                                                                   |
+| `src/material/pbr/fragments/local-cubemap-fragment.ts` | ~600 lines | Opt-in per-material environments, finite box/sphere projection, and fragment-weighted probe-array IBL                                           |
+| `src/material/pbr/enable-pbr-local-cubemap.ts`         | ~500 lines | Public local-environment API, validation, probe packing, cube-array creation, and voxel lookup                                                  |
+| `src/material/pbr/fragments/clearcoat-fragment.ts`     | ~122 lines | Clearcoat layer fragment (Kelemen visibility, F0 remap, direct + IBL clearcoat)                                                                 |
+| `src/material/pbr/fragments/sheen-fragment.ts`         | ~115 lines | Sheen layer fragment (Charlie NDF, Ashikhmin visibility, direct + IBL sheen)                                                                    |
+| `src/material/pbr/fragments/reflectance-fragment.ts`   | ~79 lines  | Metallic reflectance extension fragment (F0 computation, reflectance maps)                                                                      |
+| `src/material/pbr/fragments/emissive-fragment.ts`      | ~29 lines  | Emissive color uniform fragment                                                                                                                 |
+| `src/material/pbr/fragments/lightmap-fragment.ts`      | ~140 lines | Opt-in baked lightmap fragment (UV1/UV2, additive/shadowmap, gamma decode, effective V flip)                                                    |
+| `src/material/pbr/enable-pbr-lightmap.ts`              | ~70 lines  | Published `enablePbrLightmap()` / `setPbrLightmap()` opt-in seam                                                                                |
+| `src/material/pbr/fragments/morph-fragment.ts`         | ~48 lines  | Morph target vertex animation fragment                                                                                                          |
+| `src/material/pbr/fragments/skeleton-fragment.ts`      | ~71 lines  | Skeletal animation fragment (4-bone or 8-bone)                                                                                                  |
+| `src/material/pbr/fragments/pbr-shadow-fragment.ts`    | ~143 lines | PBR shadow receiving fragment (ESM + PCF, per-light)                                                                                            |
+| `src/shader/shader-composer.ts`                        | ~293 lines | `composeShader()` — topological sort, UBO merge, binding assignment, slot injection                                                             |

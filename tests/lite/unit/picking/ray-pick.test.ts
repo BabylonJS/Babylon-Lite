@@ -64,6 +64,12 @@ describe("pickWithRay (CPU ray/AABB)", () => {
         expect(info.distance).toBeCloseTo(5, 5);
     });
 
+    it("can opt out of default pickable filtering", () => {
+        const mesh = makeMesh("box", translateZ(3), { pickable: false });
+        const info = pickWithRay(makeScene([mesh]), ray([0, 0, 0], [0, 0, 1]), { skipPickableCheck: true });
+        expect(info.pickedMesh).toBe(mesh);
+    });
+
     it("honours a predicate", () => {
         const near = makeMesh("near", translateZ(3));
         const far = makeMesh("far", translateZ(6));

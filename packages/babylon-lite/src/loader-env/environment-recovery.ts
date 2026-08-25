@@ -34,7 +34,7 @@ export async function rebuildSceneEnvironment(engine: EngineContext, scene: Scen
         const irradianceSH = parser.computeSHFromEquirect(hdr.data, hdr.width, hdr.height);
         const sourceCube = pipeline.equirectToCubemapGPU(engine, hdr, source.faceSize);
         const specularCube = pipeline.prefilterCubemapGPU(engine, sourceCube, source.faceSize, Math.floor(Math.log2(source.faceSize)) + 1);
-        replacement = assembleEnvironmentTextures(specularCube, pipeline.generateBrdfLut(engine), irradianceSH, 1.0, engine, sphericalHarmonics);
+        replacement = assembleEnvironmentTextures(specularCube, pipeline.generateBrdfLut(engine), irradianceSH, pipeline.HDR_LOD_GENERATION_SCALE, engine, sphericalHarmonics);
     }
 
     Object.assign(current, replacement);

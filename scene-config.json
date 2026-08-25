@@ -1567,7 +1567,7 @@
         "slug": "scene162-shader-material-defines",
         "name": "Scene 162 - ShaderMaterial Defines",
         "maxMad": 0.02,
-        "maxRawKB": 39.40,
+        "maxRawKB": 39.4,
         "description": "WGSL ShaderMaterial emits defines as const pipeline variants.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -1577,7 +1577,7 @@
         "slug": "scene163-shader-material-alpha",
         "name": "Scene 163 - ShaderMaterial Alpha",
         "maxMad": 0.02,
-        "maxRawKB": 39.10,
+        "maxRawKB": 39.1,
         "description": "WGSL ShaderMaterial uses alpha blending and explicit shader-side discard for alpha testing.",
         "tags": ["shader", "alpha", "procedural"],
         "skipPerf": true
@@ -1597,10 +1597,21 @@
         "slug": "scene165-shader-material-thin-instances",
         "name": "Scene 165 - ShaderMaterial Thin Instances",
         "maxMad": 0.01,
-        "maxRawKB": 44.80,
+        "maxRawKB": 44.8,
         "description": "Custom WGSL ShaderMaterial rendered with thin instances + per-instance color: an 8×8×8 grid of unit cubes with a deterministic color ramp, fixed arc-rotate camera. Validates the auto-injected world0..3/instanceColor vertex attributes and the GPU-culling indirect-draw path.",
         "tags": ["shader", "instances", "procedural"],
         "skipPerf": true
+    },
+    {
+        "id": 166,
+        "slug": "scene166-clustered-spot-lights",
+        "name": "Scene 166 — Clustered Sponza Spot Lights",
+        "maxMad": 0.5,
+        "maxRawKB": 76.5,
+        "description": "Khronos Sponza glTF lit by 1000 deterministic clustered SPOT lights. Companion to scene 179 (same model, camera and light field generator) that exercises the clustered cone falloff instead of the point-light-only path.",
+        "tags": ["pbr", "gltf", "clustered", "lights"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 180000
     },
     {
         "id": 167,
@@ -2588,6 +2599,16 @@
         "tags": ["npe", "particles", "sprite2d", "2d", "multiply", "multiply-add", "blend"],
         "skipParity": true,
         "skipParityReason": "Lite-native exact ParticleSystem-to-Sprite2D blend bridge; Babylon.js has no equivalent pure-2D SpriteRenderer path. Blend equations are established by Babylon oracle scenes 283 and 284.",
+        "skipPerf": true
+    },
+    {
+        "id": 302,
+        "slug": "scene302-npe-moving-emitter",
+        "name": "Scene 302 — NPE Moving Emitter",
+        "maxMad": 0.01,
+        "maxRawKB": 61.5,
+        "description": "A local-space NPE point emitter follows a looping XYZ translation and Z rotation while LocalPositionUpdated keeps existing particles attached to the current emitter transform. The live view supports inspection; seekTime deterministically freezes the same authored graph for Babylon.js parity.",
+        "tags": ["npe", "particles", "billboards", "moving-emitter", "local-space", "animation"],
         "skipPerf": true
     },
     {

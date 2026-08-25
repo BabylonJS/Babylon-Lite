@@ -108,6 +108,7 @@ export async function buildNodeParticleSetWithTextureUpdateRuntime(
             scene,
             textureBaseUrl: options.textureBaseUrl,
         };
+        options._setupEmitter?.(state);
         const outputs = new Map<string, NpeGetter>();
         const built = new Set<number | ParsedParticleBlock>();
         const ctx: NpeBuildContext = {

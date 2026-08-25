@@ -95,6 +95,19 @@ describe("BoundingSphere", () => {
         // component, which is √2 for this rotation (rather than using basis lengths).
         expect(sphere.radiusWorld).toBeCloseTo(Math.SQRT2, 6);
     });
+
+    it("scales non-cubic local extents around the center", () => {
+        const sphere = new BoundingSphere(new Vector3(-1, -2, -3), new Vector3(1, 2, 3));
+        expect(sphere.scale(2)).toBe(sphere);
+        expect(sphere.minimum.x).toBeCloseTo(-2, 6);
+        expect(sphere.minimum.y).toBeCloseTo(-4, 6);
+        expect(sphere.minimum.z).toBeCloseTo(-6, 6);
+        expect(sphere.maximum.x).toBeCloseTo(2, 6);
+        expect(sphere.maximum.y).toBeCloseTo(4, 6);
+        expect(sphere.maximum.z).toBeCloseTo(6, 6);
+        expect(sphere.center.asArray()).toEqual([0, 0, 0]);
+        expect(sphere.radius).toBeCloseTo(Math.sqrt(56), 6);
+    });
 });
 
 describe("BoundingInfo", () => {

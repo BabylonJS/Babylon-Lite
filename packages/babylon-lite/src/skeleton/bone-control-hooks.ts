@@ -34,6 +34,22 @@ export type BoneApplier = (overrides: ReadonlyMap<number, BoneOverride>, current
 export let _boneBuilder: BoneBuilder | null = null;
 /** @internal */
 export let _boneApplier: BoneApplier | null = null;
+let _loadBoneControlForSkinnedAssets = false;
+let _boneControlLoad: Promise<void> | null = null;
+
+/** Opt in to loading bone control only when a glTF skin is encountered. */
+export function enableBoneControlForSkinnedAssets(): void {
+    _loadBoneControlForSkinnedAssets = true;
+}
+
+/** @internal Install bone control on demand from the skin-gated loader feature. */
+export async function _ensureBoneControlForSkinnedAsset(): Promise<void> {
+    if (!_loadBoneControlForSkinnedAssets || _boneBuilder) {
+        return;
+    }
+    _boneControlLoad ??= import("./bone-control.js").then(({ enableBoneControl }) => enableBoneControl());
+    await _boneControlLoad;
+}
 
 /** @internal Install the bone-control implementation. Called by `enableBoneControl`. */
 export function _installBoneControl(builder: BoneBuilder, applier: BoneApplier): void {

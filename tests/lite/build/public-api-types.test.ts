@@ -1,5 +1,5 @@
 import { spawnSync } from "child_process";
-import { existsSync, readdirSync, readFileSync, rmSync } from "fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -123,6 +123,64 @@ describe("build/index.d.ts", () => {
         // consumers never need to install any of our build-time dependencies.
         const external = [...specifiers].filter((s) => !s.startsWith("./") && !s.startsWith("../"));
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
+    });
+
+    it("exposes only the build-time moving-emitter provider API", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toContain("withNodeParticleEmitterProvider");
+        expect(dts).toContain("withNodeParticleEmitterProvider<T extends object = BuildNodeParticleOptions>");
+        expect(dts).toContain("options?: T & BuildNodeParticleOptions): T & BuildNodeParticleOptions;");
+        expect(dts).toContain("buildNodeParticleSetWithEmitterProvider");
+        expect(dts).not.toContain("enableNodeParticleEmitterProvider");
+        expect(dts).not.toMatch(/\b_(?:capture|setup)Emitter\b|\b_emitterProvider\b|\bParticleEmitterState\b/);
+    });
+
+    it("rejects invalid emitter fields while preserving extended provider options", () => {
+        const probePath = resolve(BUILD_DIR, "public-api-types.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { withNodeParticleEmitterProvider, type NodeParticleEmitterProvider } from "./index.js";
+declare const provider: NodeParticleEmitterProvider;
+// @ts-expect-error emitter remains Vec3-only when generic extension fields are accepted
+withNodeParticleEmitterProvider(provider, { emitter: "not-a-vec3" });
+const extended = withNodeParticleEmitterProvider(provider, { snippetServer: "https://example.invalid" });
+const snippetServer: string = extended.snippetServer;
+void snippetServer;
+`
+            );
+
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
     });
 
     it("is the only declaration file in the published package", () => {
