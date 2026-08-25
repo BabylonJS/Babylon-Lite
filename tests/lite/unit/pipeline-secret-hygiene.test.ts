@@ -417,6 +417,17 @@ describe("documentation text is not read as configuration", () => {
         expect(stripDocumentationText(line)).toBe(line);
     });
 
+    it("leaves a script block scalar body intact, which is where the real shell lives", () => {
+        // The load-bearing direction. Blanking a script body hides every
+        // credential inside it and leaves the suite green -- the silent side,
+        // and the only way this strip could be worse than the bug it fixes.
+        // 41 of these bodies across the ten pipeline files, so this is the
+        // dominant shape rather than a corner: the single-line fixture above
+        // says nothing about it.
+        const body = ["    - script: |", "        set -euo pipefail", '        curl -H "Authorization: Bearer ******" https://x', "        echo done"].join("\n");
+        expect(stripDocumentationText(body)).toBe(body);
+    });
+
     it("ends the block at a dedent", () => {
         const input = ["  description: |", "    prose", "  script: curl -H 'Authorization: Bearer ******'"].join("\n");
         expect(stripDocumentationText(input).split("\n")[2]).toContain("Authorization");
