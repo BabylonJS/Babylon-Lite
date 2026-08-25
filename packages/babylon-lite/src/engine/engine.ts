@@ -1,6 +1,6 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { StorageBuffer } from "../resource/storage-buffer.js";
-import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
+import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "../texture/texture-2d.js";
 import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
 import { _setHpmAllocator } from "../math/_matrix-allocator.js";
 import type { SurfaceContext, SurfaceOptions } from "./surface.js";
@@ -233,6 +233,7 @@ export interface RenderingContext {
 
 /** @internal */
 interface DeviceLostRecoveryCapture {
+    t(tex: Texture2D, source: Texture2DRecoverySource): void;
     u(tex: Texture2D, url: string, opts: Texture2DOptions): void;
     s(tex: Texture2D, r: number, g: number, b: number, a: number): void;
     b(tex: Texture2D, bitmap: ImageBitmap | null, srgb: boolean, mipMaps: boolean, fallback?: Uint8Array): void;

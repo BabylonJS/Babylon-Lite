@@ -6,7 +6,9 @@ import type { DeviceLostRecoveryCallbacks, DeviceLostRecoveryHandle } from "./de
  * Enable best-effort WebGPU device-lost recovery for every registered TextRenderer.
  *
  * GlyphStorage already retains the CPU atlas data needed for reconstruction, so
- * this adapter adds no renderer-specific capture outside the loss path.
+ * this adapter adds no renderer-specific capture outside the loss path. Every
+ * other rendering context kind registered at loss time needs its own strategy
+ * enabled — recovery fails rather than leave one bound to the lost device.
  */
 export function enableDeviceLostTextRecovery(engine: EngineContext, options: DeviceLostRecoveryCallbacks = {}): DeviceLostRecoveryHandle {
     return _enableDeviceLostRecovery(engine, {

@@ -8,7 +8,9 @@ import { _releaseDeviceLostRecoveryCapture, _retainDeviceLostRecoveryCapture } f
  *
  * Enable this before creating or loading sprite textures so their recovery
  * sources are retained. Device reacquisition remains shared with every other
- * enabled rendering-context recovery adapter on the engine.
+ * enabled rendering-context recovery adapter on the engine, and every kind that
+ * is registered at loss time needs one — recovery fails rather than leave a
+ * rendering context bound to the lost device.
  */
 export function enableDeviceLostSpriteRecovery(engine: EngineContext, options: DeviceLostRecoveryCallbacks = {}): DeviceLostRecoveryHandle {
     return _enableDeviceLostRecovery(engine, {

@@ -2,37 +2,61 @@ import type { EngineContext } from "./engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
-import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
+import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "../texture/texture-2d.js";
+
+/** Smallest tracked-texture count worth compacting; below this, scanning costs more than it saves. */
+const TEXTURE_PRUNE_FLOOR = 64;
 
 function attachRecoveryCapture(engine: EngineContext): void {
     const state = engine._deviceLostRecovery!;
+    // Stamps `source` on `tex` and remembers `tex` so recovery can rebuild it. Recovery reaches
+    // most textures by walking a registered rendering context's object graph (scene materials,
+    // sprite layer atlases). An app is free to own a recoverable texture that no such graph
+    // currently references — a sprite atlas page whose glyphs have not been drawn yet is the
+    // canonical case — and that texture would then survive recovery still pointing at the lost
+    // device. Every stamp goes through here, so tracking is complete by construction; textures are
+    // held weakly so tracking never extends a texture's lifetime.
+    const stamp = (tex: Texture2D, source: Texture2DRecoverySource): void => {
+        tex._recoverySource = source;
+        const textures = state._textures;
+        if (textures.size >= state._texturesPruneAt) {
+            for (const ref of textures) {
+                if (!ref.deref()) {
+                    textures.delete(ref);
+                }
+            }
+            state._texturesPruneAt = Math.max(TEXTURE_PRUNE_FLOOR, textures.size * 2);
+        }
+        textures.add(new WeakRef(tex));
+    };
     engine._dlr = {
+        t: stamp,
         u(tex: Texture2D, url: string, opts: Texture2DOptions): void {
-            tex._recoverySource = { kind: "url", url, opts: { ...opts } };
+            stamp(tex, { kind: "url", url, opts: { ...opts } });
         },
         s(tex: Texture2D, r: number, g: number, b: number, a: number): void {
-            tex._recoverySource = { kind: "solid", rgba: [r, g, b, a] };
+            stamp(tex, { kind: "solid", rgba: [r, g, b, a] });
         },
         b(tex: Texture2D, bitmap: ImageBitmap | null, srgb: boolean, mipMaps: boolean, fallback?: Uint8Array): void {
-            tex._recoverySource = {
+            stamp(tex, {
                 kind: "bitmap",
                 bitmap,
                 srgb,
                 mipMaps,
                 fallback,
-            };
+            });
         },
         p(tex: Texture2D, data: Uint8Array, options: PixelsTexture2DOptions): void {
-            tex._recoverySource = {
+            stamp(tex, {
                 kind: "pixels",
                 data: data.slice(0, tex.width * tex.height * 4),
                 width: tex.width,
                 height: tex.height,
                 options: { ...options },
-            };
+            });
         },
         r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void {
-            tex._recoverySource = { kind: "render", width, height, format, samplerDesc };
+            stamp(tex, { kind: "render", width, height, format, samplerDesc });
         },
         w(tex: Texture2D, data: Uint8Array, x: number, y: number, width: number, height: number, dataOffset = 0, bytesPerRow = width * 4): void {
             const source = tex._recoverySource;

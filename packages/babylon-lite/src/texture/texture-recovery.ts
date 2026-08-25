@@ -5,6 +5,9 @@ import type { Texture2D, Texture2DOptions } from "./texture-2d.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
+/** Device each Texture2D wrapper has already been rebuilt for, so repeat passes are no-ops. */
+let _rebuiltOn: WeakMap<Texture2D, GPUDevice> | null = null;
+
 /**
  * Rebuilds a single Texture2D after a WebGPU device loss from the pure recovery
  * data stamped on `tex._recoverySource`.
@@ -22,6 +25,16 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     if (!source) {
         return;
     }
+    // A single texture is reachable from more than one recovery walk (a material texture shared
+    // with a sprite layer, a `cloneTexture2D` wrapper alongside its base) and is now also rebuilt
+    // up front from the tracked-texture set. Rebuilding twice would allocate a second GPUTexture,
+    // orphan the first and re-fetch url sources over the network, so record the device each
+    // wrapper has been rebuilt for and let later passes fall through.
+    _rebuiltOn ??= new WeakMap();
+    if (_rebuiltOn.get(tex) === engine._device) {
+        return;
+    }
+    _rebuiltOn.set(tex, engine._device);
     if (source.kind === "url") {
         const rebuilt = await rebuildUrlTexture2D(engine, source.url, source.opts);
         tex.texture = rebuilt.texture;

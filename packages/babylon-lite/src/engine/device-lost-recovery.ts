@@ -1,5 +1,6 @@
 import type { EngineContext } from "./engine.js";
 import type { DeviceLostRecoveryHandle } from "./device-lost-recovery-types.js";
+import type { Texture2D } from "../texture/texture-2d.js";
 
 /** @internal */
 export interface DeviceLostRecoveryRegistration {
@@ -37,6 +38,13 @@ export interface DeviceLostRecoveryState {
     _captureRefs: number;
     /** @internal Number of enabled context kinds retaining Scene mesh CPU geometry. */
     _meshCaptureRefs: number;
+    /** @internal Every texture that carries a recovery source, held weakly so tracking never
+     *  keeps an app texture alive. Recovery rebuilds all of these, because a recoverable texture
+     *  the app owns outside any registered rendering context's object graph is otherwise never
+     *  reached and silently keeps its dead-device `GPUTexture`. */
+    _textures: Set<WeakRef<Texture2D>>;
+    /** @internal `_textures` size that triggers compaction of entries whose texture was collected. */
+    _texturesPruneAt: number;
 }
 
 function getState(engine: EngineContext): DeviceLostRecoveryState {
@@ -48,6 +56,8 @@ function getState(engine: EngineContext): DeviceLostRecoveryState {
         _samplerDescriptors: new WeakMap(),
         _captureRefs: 0,
         _meshCaptureRefs: 0,
+        _textures: new Set(),
+        _texturesPruneAt: 64,
     });
 }
 
