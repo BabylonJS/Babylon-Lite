@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
-import { pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS } from "./pipeline-files";
+import { pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS, SHELL_STEP_KEY } from "./pipeline-files";
 
 interface ShellScript {
     location: string;
@@ -43,7 +43,14 @@ function shellScripts(): ShellScript[] {
             // `run` is the GitHub Actions spelling of the same thing. Verified
             // that no Azure file in this repo uses the key, so accepting it
             // here cannot misfire on them.
-            const key = /^(\s*)(?:-\s+)?(?:script|bash|run):(.*)$/.exec(lines[i] ?? "");
+            //
+            // Shared with the closure check rather than spelled twice: when the
+            // two had separate notions of "carries a shell step", discovery
+            // missed a whole class of file the collector would happily have
+            // read. Widening one and not the other is the same split-scope
+            // defect this file has now hit at the root level, the predicate
+            // level, and here.
+            const key = SHELL_STEP_KEY.exec(lines[i] ?? "");
             if (!key) {
                 continue;
             }
@@ -247,6 +254,23 @@ describe("piped pipeline steps enable pipefail", () => {
     // it flags any piped script, including ones where a left-hand failure is
     // harmless -- because adding `pipefail` to a script that did not need it
     // costs nothing, while missing one that did costs a silently disabled gate.
+    //
+    // Known false positive, stated rather than discovered later. GitHub Actions
+    // picks the shell two different ways: a bare `run:` gets `bash -e {0}` --
+    // errexit but *not* pipefail, which is why the invariant is live there at
+    // all -- while a step declaring `shell: bash` explicitly gets
+    // `bash --noprofile --norc -eo pipefail {0}`, where pipefail is already on.
+    // This guard reads neither, so it would demand a redundant `set -euo
+    // pipefail` from the second kind and tell its author their pipeline failure
+    // is silently discarded, which would not be true.
+    //
+    // Not fixed, because reading a step's sibling `shell:` key needs structure
+    // this line-based collector does not have, and inventing that parser is a
+    // larger risk than the misfire. Recorded because the repo has no such step
+    // today: the premise that made widening to Actions worthwhile is that
+    // `compat-sync-trigger.yml` uses a bare `run:`, which was checked rather
+    // than assumed -- and it is the kind of premise that stops holding when
+    // someone adds one word to a file this test does not appear to concern.
     it("sets pipefail in every script containing a pipe", () => {
         const piped = shellScripts().filter((script) => containsPipe(script.body));
 
@@ -313,8 +337,8 @@ describe("the hygiene guards cover every pipeline in the repo", () => {
 
         expect(
             unscanned,
-            `these files declare pipeline steps but sit outside SCANNED_ROOTS, so the guards in this file and in ` +
-                `pipeline-pr-comment-steps-guarded.test.ts silently ignore them. Add their directory to both:\n  ${unscanned.join("\n  ")}\n`
+            `these files carry shell steps but sit outside SCANNED_ROOTS, so every guard built on it silently ignores them. ` +
+                `Add the directory to SCANNED_ROOTS in tests/lite/unit/pipeline-files.ts -- one list, shared, so no guard is left behind:\n  ${unscanned.join("\n  ")}\n`
         ).toEqual([]);
     });
 });
@@ -410,5 +434,54 @@ describe("containsPipe distinguishes a pipe from the character", () => {
     // should flip with it -- deliberately, not silently.
     it("still over-flags a case alternation, which needs grammar rather than lexing", () => {
         expect(containsPipe('case "$1" in a|b) echo hi ;; esac')).toBe(true);
+    });
+});
+
+describe("SHELL_STEP_KEY selects the steps every guard is shown", () => {
+    // The selector had no fixtures until now, which is the same omission twice
+    // over: `enablesPipefail` and `containsPipe` are both thoroughly pinned,
+    // and both are downstream of this. A predicate that decides *what the
+    // guards are shown* is strictly more load-bearing than one deciding what
+    // they conclude, and it was the only one with no tests -- because it is
+    // exercised indirectly by every other assertion here, which makes it look
+    // covered.
+    //
+    // Worth stating plainly: no count in this file can detect a defect here.
+    // The floors, the per-root totals and the discovered-files number are all
+    // *computed by* this regex, so a selector that silently skips a file
+    // produces a smaller inventory and a set of diagnostics that agree with it
+    // perfectly.
+    it.each([
+        // Azure list items.
+        ["- script: echo hi", true],
+        ["  - bash: |", true],
+        ["    - script: |", true],
+        // GitHub Actions puts `run:` un-dashed after `- name:`.
+        ["      run: |", true],
+        ["        run: tsc --noEmit | sed s/x/y/", true],
+        // Capitalised. Inert today -- nothing in the repo spells it this way --
+        // and matched because missing a real one is silent while matching a
+        // broken one is harmless.
+        ["- Script: echo hi", true],
+
+        // A task is not a shell script; it has no script body to guard.
+        ["- task: PublishBuildArtifacts@1", false],
+        // `runs-on:` was the old discovery marker and must not read as a step:
+        // it would attribute a job-level key to a script that does not exist.
+        ["  runs-on: ubuntu-latest", false],
+        // The word, not the key.
+        ["  displayName: run the type check", false],
+        ["echo run: hi", false],
+        // Prose about a step is not a step -- this file is full of it.
+        ["# run: echo hi", false],
+        ["", false],
+    ])("%j -> %s", (line, expected) => {
+        expect(SHELL_STEP_KEY.test(line)).toBe(expected);
+    });
+
+    it("captures the indent, which the block-scalar reader depends on", () => {
+        const match = SHELL_STEP_KEY.exec("      run: |");
+        expect(match?.[1]).toBe("      ");
+        expect(match?.[2]?.trim()).toBe("|");
     });
 });

@@ -71,24 +71,70 @@ export function pipelineYamlFiles(): { path: string; location: string; root: str
 }
 
 /**
- * Every YAML file in the repository that declares CI steps, found by walking
- * the tree rather than by trusting a path convention.
+ * The key that introduces a shell script in a CI step, in either dialect:
+ * Azure's `- script:` / `- bash:` list items and GitHub's `run:`, which sits
+ * un-dashed on the line after `- name:`.
  *
- * The predicate matches two dialects. Azure declares steps as list items
- * (`- script:`, `- task:`, `- bash:`). GitHub Actions is *not* reliably
- * expressible that way: its steps lead with `- name:` and put `run:` on a
- * following line with no dash, so a list-item pattern misses them entirely.
- * That is how the first version of this function returned 9 files while a
- * tenth sat in `.github/workflows/` -- the discovery predicate had been fitted
- * to the conventions of the files already in scope, and so could not find the
- * one that was not. Actions files are therefore identified by `runs-on:`,
- * which every Actions job has and no Azure file in this repo contains.
+ * Exported so the collector and the closure check share one definition of the
+ * subject. When they had two, the collector read `run:` steps while discovery
+ * keyed on file *shape*, and the two sets silently diverged -- see
+ * {@link pipelineFilesInRepo}. Capture groups are indent and remainder; the
+ * regex has no `g` flag, so it holds no state and is safe to share.
  *
- * Deliberately narrow beyond that: matching a bare `script:` or `run:` at any
- * indent would pull in unrelated YAML and turn the closure check into one that
- * misfires on valid files -- the failure mode that gets a guard deleted rather
- * than fixed. Verified to select exactly the ten CI files and to reject
- * pnpm-lock.yaml, config/browserstack.yml and the issue template.
+ * Matched case-insensitively. This selects the same ten files either way today,
+ * so it changes nothing now and is deliberately inert -- but the cost of the
+ * two possible futures is wildly asymmetric. If a pipeline ever writes
+ * `Script:` and the runner accepts it, a case-sensitive selector misses the
+ * file entirely and every guard downstream reports success on a file it never
+ * opened. If the runner rejects it, that file is already broken and matching it
+ * costs nothing. There is no version of this where the narrower spelling wins,
+ * and the failure it prevents is the silent one.
+ *
+ * Anything reconstructing this regex must carry {@link SHELL_STEP_KEY.flags}
+ * through. Building `new RegExp(source, "m")` drops the `i` and quietly
+ * restores the case-sensitive behaviour at one call site while the exported
+ * constant still looks correct.
+ */
+export const SHELL_STEP_KEY = /^(\s*)(?:-\s+)?(?:script|bash|run):(.*)$/i;
+
+/**
+ * Every YAML file in the repository carrying a shell step, found by walking the
+ * tree rather than by trusting a path convention.
+ *
+ * Keyed on {@link SHELL_STEP_KEY} -- the guard's actual subject -- rather than
+ * on what a CI file looks like. That distinction is the whole point and it was
+ * learned the expensive way, twice.
+ *
+ * The first version matched Azure list items only, and returned 9 files while a
+ * tenth sat in `.github/workflows/`: Actions steps lead with `- name:` and put
+ * `run:` on a following line with no dash, so a list-item pattern cannot see
+ * them. The fix at the time was to add `runs-on:` as a second marker, which
+ * restored the count and left the real defect in place -- the predicate still
+ * described *shapes of file* rather than *files containing the thing being
+ * guarded*.
+ *
+ * The difference is not theoretical. A composite action
+ * (`.github/actions/*&#47;action.yml`) carries `run:` steps, has no `runs-on:`
+ * and no Azure list items, and so matched neither marker. Verified by
+ * injection: a composite action with an unguarded `tsc --noEmit | sed ...` step
+ * left discovery reporting 10 files and the whole suite green. An entire class
+ * of file could hold the exact defect this module exists to catch and be
+ * invisible to both the collector and the check that certifies the collector's
+ * scope.
+ *
+ * The previous comment defended the narrow predicate on the grounds that
+ * matching a bare `script:` or `run:` "would pull in unrelated YAML and turn
+ * the closure check into one that misfires on valid files." That was a
+ * prediction, and it was never measured. Measured now: across every tracked
+ * YAML file in the repo, this predicate selects exactly the ten CI files and
+ * nothing else -- `pnpm-lock.yaml`, `config/browserstack.yml` and the issue
+ * template are all rejected, as are the remaining tracked YAML files. The fear
+ * was reasonable and simply false here, and it cost a real hole to hold onto.
+ *
+ * If a future non-CI file does trip it, the failure is legible -- the closure
+ * check names the file and someone adjusts the scope. That is strictly better
+ * than the alternative it replaced, where the miss is silent and the guard
+ * reports success.
  */
 export function pipelineFilesInRepo(): string[] {
     const skip = new Set(["node_modules", ".git", "dist", "build", "coverage", ".vite", "lab"]);
@@ -108,7 +154,7 @@ export function pipelineFilesInRepo(): string[] {
                 continue;
             }
             const text = readFileSync(full, "utf8");
-            if (/^\s*-\s+(script|task|bash):/m.test(text) || /^\s*runs-on:/m.test(text)) {
+            if (new RegExp(SHELL_STEP_KEY.source, `${SHELL_STEP_KEY.flags}m`).test(text)) {
                 found.push(relative(repoRoot, full));
             }
         }
