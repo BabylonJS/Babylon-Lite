@@ -44,14 +44,11 @@
 // ── What is and is not implemented ─────────────────────────────────────────────────────────────
 // Implemented: luma edge detection with local contrast adaptation, orthogonal (horizontal and
 // vertical) pattern search that terminates at perpendicular crossings, exact coverage integration,
-// reference-style per-side bilinear neighbourhood blending, and an OPTIONAL simplified diagonal
-// path (`diagonalDetection`, off by default — see its doc for the measurements).
+// reference-style per-side bilinear neighbourhood blending, OPTIONAL canonical corner-pattern
+// attenuation, and an OPTIONAL simplified diagonal path (`diagonalDetection`, off by default — see
+// its doc for the measurements).
 //
 // NOT implemented:
-//   - Corner rounding (reference's SMAA_CORNER_ROUNDING). This is a real quality gap, not a
-//     nicety: on axis-aligned corner-heavy content, where the ideal output is the input untouched,
-//     canonical SMAA with corner detection scores 0.197 mean abs error against 0.472 here — it is
-//     what stops a corner being blended as if it were a step.
 //   - The temporal modes (SMAA T2x/S2x). For temporal supersampling use createTaaPostProcessTask
 //     alongside this.
 //   - Predication, and the stencil optimisation that skips the weight pass on non-edge pixels.
@@ -105,6 +102,12 @@ export interface SmaaPostProcessTaskConfig extends PostProcessTaskSettings {
      *  through one area lookup. Fixing it here needs the neighbouring diagonal to be suppressed in
      *  step, which is why this is off by default rather than merely tuned. */
     minDiagonalRun?: number;
+    /** Attenuate weights near axis-aligned corner patterns (default `false`).
+     *
+     *  This uses reference SMAA's 25% corner-rounding preset. It substantially reduces unwanted
+     *  blending on corner-heavy content, but adds four edge-texture reads for each horizontal or
+     *  vertical edge processed. When disabled the uniform branch performs none of those reads. */
+    cornerDetection?: boolean;
     /** Set when `sourceTexture` is an sRGB view (e.g. `bgra8unorm-srgb`).
      *
      *  Sampling an sRGB view DECODES to linear, so luma — and therefore the fixed `threshold` —
@@ -140,6 +143,8 @@ export interface SmaaPostProcessTask extends Task, PostProcessTaskSettings {
     diagonalDetection: boolean;
     /** Shortest diagonal run that counts as a 45-degree pattern. Call `updateUniforms()` after. */
     minDiagonalRun: number;
+    /** Whether axis-aligned corner-pattern attenuation is enabled. Call `updateUniforms()` after. */
+    cornerDetection: boolean;
     /** Whether the source texture is an sRGB view. Call `updateUniforms()` after changing it. */
     sourceIsSrgb: boolean;
     /** Whether blending commits to the stronger axis. Call `updateUniforms()` after changing it. */
@@ -148,7 +153,8 @@ export interface SmaaPostProcessTask extends Task, PostProcessTaskSettings {
     readonly edgesTexture: RenderTarget;
     readonly weightsTexture: RenderTarget;
     /** Re-upload the pass uniforms. Required after mutating any of `threshold`, `maxSearchSteps`,
-     *  `diagonalDetection`, `minDiagonalRun`, `sourceIsSrgb` or `dominantAxisBlend`. */
+     *  `diagonalDetection`, `minDiagonalRun`, `cornerDetection`, `sourceIsSrgb` or
+     *  `dominantAxisBlend`. */
     updateUniforms(): void;
     dispose(): void;
 }
@@ -204,7 +210,7 @@ fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
     return vec4f(edges, 0.0, 1.0);
 }`;
 
-const WEIGHT_UNIFORM_WGSL = `struct SmaaWeightParams{maxSearch:f32,diag:f32,pad1:f32,pad2:f32}
+const WEIGHT_UNIFORM_WGSL = `struct SmaaWeightParams{maxSearch:f32,diag:f32,corner:f32,pad:f32}
 @group(0) @binding(2) var<uniform> smaaWeight:SmaaWeightParams;`;
 
 // Pass 2 — blending weights.
@@ -355,6 +361,40 @@ fn smaaCoveragePair(x0:f32, len:f32, cNear:f32, cFar:f32)->vec2f{
     return smaaAccum(x0, m, h0, hm) + smaaAccum(m, x1, hm, h1);
 }
 
+// Reference SMAA's default corner preset keeps 25% of the blend at a detected corner. Only the
+// nearer end contributes; equal distances split the attenuation so pixels in the middle of a run
+// are not attenuated twice.
+fn smaaCornerAttenuation(dNear:f32, dFar:f32)->vec2f{
+    let nearest = vec2f(step(dNear, dFar), step(dFar, dNear));
+    return 0.75 * nearest / max(nearest.x + nearest.y, 1.0);
+}
+
+fn smaaHorizontalCornerFactors(lEnd:vec2f, rEnd:vec2f, ts:vec2f, d1:f32, d2:f32)->vec2f{
+    let attenuation = smaaCornerAttenuation(d1, d2);
+    let below = vec2f(
+        smaaEdgeAt(lEnd + vec2f(0.0,  ts.y)).x,
+        smaaEdgeAt(rEnd + vec2f(0.0,  ts.y)).x
+    );
+    let above = vec2f(
+        smaaEdgeAt(lEnd + vec2f(0.0, -2.0 * ts.y)).x,
+        smaaEdgeAt(rEnd + vec2f(0.0, -2.0 * ts.y)).x
+    );
+    return clamp(vec2f(1.0 - dot(attenuation, below), 1.0 - dot(attenuation, above)), vec2f(0.0), vec2f(1.0));
+}
+
+fn smaaVerticalCornerFactors(tEnd:vec2f, bEnd:vec2f, ts:vec2f, d1:f32, d2:f32)->vec2f{
+    let attenuation = smaaCornerAttenuation(d1, d2);
+    let right = vec2f(
+        smaaEdgeAt(tEnd + vec2f( ts.x, 0.0)).y,
+        smaaEdgeAt(bEnd + vec2f( ts.x, 0.0)).y
+    );
+    let left = vec2f(
+        smaaEdgeAt(tEnd + vec2f(-2.0 * ts.x, 0.0)).y,
+        smaaEdgeAt(bEnd + vec2f(-2.0 * ts.x, 0.0)).y
+    );
+    return clamp(vec2f(1.0 - dot(attenuation, right), 1.0 - dot(attenuation, left)), vec2f(0.0), vec2f(1.0));
+}
+
 fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
     let ts = 1.0 / vec2f(textureDimensions(sourceTextureSampler));
     let e = color.rg;
@@ -398,7 +438,10 @@ fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
         let rEnd = uv + vec2f( ts.x * (d2 + 1.0), 0.0);
         let cl = step(0.5, smaaEdgeAt(lEnd).x) - step(0.5, smaaEdgeAt(lEnd + vec2f(0.0, -ts.y)).x);
         let cr = step(0.5, smaaEdgeAt(rEnd).x) - step(0.5, smaaEdgeAt(rEnd + vec2f(0.0, -ts.y)).x);
-        let c = smaaCoveragePair(d1, len, cl, cr);
+        var c = smaaCoveragePair(d1, len, cl, cr);
+        if (smaaWeight.corner > 0.5) {
+            c *= smaaHorizontalCornerFactors(lEnd, rEnd, ts, d1, d2);
+        }
         w.x = c.x;
         w.y = c.y;
     }
@@ -410,7 +453,10 @@ fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
         let bEnd = uv + vec2f(0.0,  ts.y * (d2 + 1.0));
         let ct = step(0.5, smaaEdgeAt(tEnd).y) - step(0.5, smaaEdgeAt(tEnd + vec2f(-ts.x, 0.0)).y);
         let cb = step(0.5, smaaEdgeAt(bEnd).y) - step(0.5, smaaEdgeAt(bEnd + vec2f(-ts.x, 0.0)).y);
-        let c = smaaCoveragePair(d1, len, ct, cb);
+        var c = smaaCoveragePair(d1, len, ct, cb);
+        if (smaaWeight.corner > 0.5) {
+            c *= smaaVerticalCornerFactors(tEnd, bEnd, ts, d1, d2);
+        }
         w.z = c.x;
         w.w = c.y;
     }
@@ -538,6 +584,7 @@ export function createSmaaPostProcessTask(config: SmaaPostProcessTaskConfig, eng
         maxSearchSteps: clampSearchSteps(config.maxSearchSteps, 16),
         diagonalDetection: config.diagonalDetection ?? false,
         minDiagonalRun: clampDiagonalRun(config.minDiagonalRun, 4),
+        cornerDetection: config.cornerDetection ?? false,
     };
 
     // Edges hold two binary channels and weights four coverages in [0,1]: 8-bit is ample for both,
@@ -579,6 +626,7 @@ export function createSmaaPostProcessTask(config: SmaaPostProcessTaskConfig, eng
                 writeUniforms(data) {
                     data[0] = params.maxSearchSteps;
                     data[1] = params.diagonalDetection ? params.minDiagonalRun : 0;
+                    data[2] = params.cornerDetection ? 1 : 0;
                 },
             },
         },
@@ -646,6 +694,12 @@ export function createSmaaPostProcessTask(config: SmaaPostProcessTaskConfig, eng
         },
         set minDiagonalRun(value: number) {
             params.minDiagonalRun = clampDiagonalRun(value, params.minDiagonalRun);
+        },
+        get cornerDetection(): boolean {
+            return params.cornerDetection;
+        },
+        set cornerDetection(value: boolean) {
+            params.cornerDetection = value;
         },
         get sourceIsSrgb(): boolean {
             return params.sourceIsSrgb;

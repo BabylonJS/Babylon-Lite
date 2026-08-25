@@ -220,6 +220,7 @@ async function main(): Promise<void> {
     canvas.dataset.smaaMaxSearchSteps = String(smaa.maxSearchSteps);
     canvas.dataset.smaaDiagonalDetection = String(smaa.diagonalDetection);
     canvas.dataset.smaaMinDiagonalRun = String(smaa.minDiagonalRun);
+    canvas.dataset.smaaCornerDetection = String(smaa.cornerDetection);
     canvas.dataset.smaaDominantAxisBlend = String(smaa.dominantAxisBlend);
     canvas.dataset.smaaSourceIsSrgb = String(smaa.sourceIsSrgb);
     canvas.dataset.smaaDebug = String(debug);

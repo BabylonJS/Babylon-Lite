@@ -1,13 +1,14 @@
 import type { SmaaPostProcessTask } from "babylon-lite";
 
 type NumericSetting = "threshold" | "maxSearchSteps" | "minDiagonalRun";
-type BooleanSetting = "diagonalDetection" | "dominantAxisBlend" | "sourceIsSrgb";
+type BooleanSetting = "diagonalDetection" | "cornerDetection" | "dominantAxisBlend" | "sourceIsSrgb";
 
 const DEFAULTS = {
     threshold: 0.03,
     maxSearchSteps: 64,
     diagonalDetection: false,
     minDiagonalRun: 4,
+    cornerDetection: false,
     dominantAxisBlend: true,
     sourceIsSrgb: false,
 } as const;
@@ -21,6 +22,7 @@ function updateMetadata(smaa: SmaaPostProcessTask, canvas: HTMLCanvasElement): v
     canvas.dataset.smaaMaxSearchSteps = String(smaa.maxSearchSteps);
     canvas.dataset.smaaDiagonalDetection = String(smaa.diagonalDetection);
     canvas.dataset.smaaMinDiagonalRun = String(smaa.minDiagonalRun);
+    canvas.dataset.smaaCornerDetection = String(smaa.cornerDetection);
     canvas.dataset.smaaDominantAxisBlend = String(smaa.dominantAxisBlend);
     canvas.dataset.smaaSourceIsSrgb = String(smaa.sourceIsSrgb);
 }
@@ -106,6 +108,7 @@ export function attachSmaaDebugControls(smaa: SmaaPostProcessTask, canvas: HTMLC
     addRange("maxSearchSteps", "Max search steps", 1, 112, 1);
     addCheckbox("diagonalDetection", "Diagonal detection");
     addRange("minDiagonalRun", "Minimum diagonal run", 2, 32, 1);
+    addCheckbox("cornerDetection", "Corner-pattern attenuation");
     addCheckbox("dominantAxisBlend", "Dominant-axis blend");
     addCheckbox("sourceIsSrgb", "Source texture is sRGB");
 
@@ -129,7 +132,7 @@ export function attachSmaaDebugControls(smaa: SmaaPostProcessTask, canvas: HTMLC
             controls.get(key)!.value = String(smaa[key]);
             outputs.get(key)!.value = String(smaa[key]);
         }
-        for (const key of ["diagonalDetection", "dominantAxisBlend", "sourceIsSrgb"] as const) {
+        for (const key of ["diagonalDetection", "cornerDetection", "dominantAxisBlend", "sourceIsSrgb"] as const) {
             smaa[key] = DEFAULTS[key];
             controls.get(key)!.checked = smaa[key];
         }

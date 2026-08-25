@@ -24,6 +24,7 @@ describe("createSmaaPostProcessTask", () => {
         expect(task.maxSearchSteps).toBe(16);
         expect(task.diagonalDetection).toBe(false);
         expect(task.minDiagonalRun).toBe(4);
+        expect(task.cornerDetection).toBe(false);
         expect(task.dominantAxisBlend).toBe(true);
         expect(task.sourceIsSrgb).toBe(false);
         expect(task.edgesTexture._descriptor).toMatchObject({
@@ -49,6 +50,7 @@ describe("createSmaaPostProcessTask", () => {
                 maxSearchSteps: 0,
                 diagonalDetection: true,
                 minDiagonalRun: 200,
+                cornerDetection: true,
                 dominantAxisBlend: false,
                 sourceIsSrgb: true,
             },
@@ -59,6 +61,7 @@ describe("createSmaaPostProcessTask", () => {
         expect(task.maxSearchSteps).toBe(1);
         expect(task.minDiagonalRun).toBe(112);
         expect(task.diagonalDetection).toBe(true);
+        expect(task.cornerDetection).toBe(true);
         expect(task.dominantAxisBlend).toBe(false);
         expect(task.sourceIsSrgb).toBe(true);
 
@@ -66,6 +69,7 @@ describe("createSmaaPostProcessTask", () => {
         task.maxSearchSteps = 64.9;
         task.minDiagonalRun = 1;
         task.diagonalDetection = false;
+        task.cornerDetection = false;
         task.dominantAxisBlend = true;
         task.sourceIsSrgb = false;
 
@@ -73,6 +77,7 @@ describe("createSmaaPostProcessTask", () => {
         expect(task.maxSearchSteps).toBe(64);
         expect(task.minDiagonalRun).toBe(2);
         expect(task.diagonalDetection).toBe(false);
+        expect(task.cornerDetection).toBe(false);
         expect(task.dominantAxisBlend).toBe(true);
         expect(task.sourceIsSrgb).toBe(false);
 

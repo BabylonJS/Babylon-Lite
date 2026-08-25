@@ -31,6 +31,27 @@ function comparePanels(png: PNG, region: { xMin: number; xMax: number; yMin: num
     };
 }
 
+function compareImages(a: PNG, b: PNG, region: { xMin: number; xMax: number; yMin: number; yMax: number }): { mad: number; changedRatio: number } {
+    let difference = 0;
+    let changed = 0;
+    const pixelCount = (region.xMax - region.xMin) * (region.yMax - region.yMin);
+
+    for (let y = region.yMin; y < region.yMax; y++) {
+        for (let x = region.xMin; x < region.xMax; x++) {
+            const offset = (y * a.width + x) * 4;
+            const pixelDifference =
+                (Math.abs(a.data[offset]! - b.data[offset]!) + Math.abs(a.data[offset + 1]! - b.data[offset + 1]!) + Math.abs(a.data[offset + 2]! - b.data[offset + 2]!)) / 3;
+            difference += pixelDifference;
+            changed += pixelDifference >= 1 ? 1 : 0;
+        }
+    }
+
+    return {
+        mad: difference / pixelCount,
+        changedRatio: changed / pixelCount,
+    };
+}
+
 test("Scene 187 presents the same stress image without AA and through SMAA", async ({ page }) => {
     test.setTimeout(120_000);
     expect(sceneConfig.skipParity).toBe(true);
@@ -52,6 +73,7 @@ test("Scene 187 presents the same stress image without AA and through SMAA", asy
     await expect(canvas).toHaveAttribute("data-smaa-max-search-steps", "64");
     await expect(canvas).toHaveAttribute("data-smaa-diagonal-detection", "false");
     await expect(canvas).toHaveAttribute("data-smaa-min-diagonal-run", "4");
+    await expect(canvas).toHaveAttribute("data-smaa-corner-detection", "false");
     await expect(canvas).toHaveAttribute("data-smaa-dominant-axis-blend", "true");
     await expect(canvas).toHaveAttribute("data-smaa-source-is-srgb", "false");
     await expect(canvas).toHaveAttribute("data-smaa-debug", "false");
@@ -86,6 +108,15 @@ test("Scene 187 exposes live SMAA controls with debug=1", async ({ page }) => {
     await expect(page.locator("[data-smaa-controls=true]")).toBeVisible();
     expect(loadedScripts.some((url) => url.includes("scene187-debug"))).toBe(true);
 
+    const withoutCornerDetection = PNG.sync.read(await canvas.screenshot());
+    await page.locator("[data-smaa-control=cornerDetection]").check();
+    await expect(canvas).toHaveAttribute("data-smaa-corner-detection", "true");
+    await page.waitForTimeout(100);
+    const withCornerDetection = PNG.sync.read(await canvas.screenshot());
+    const cornerDifference = compareImages(withoutCornerDetection, withCornerDetection, { xMin: 640, xMax: 1280, yMin: 0, yMax: 720 });
+    expect(cornerDifference.mad).toBeGreaterThan(0.001);
+    expect(cornerDifference.changedRatio).toBeGreaterThan(0.0001);
+
     const setRange = async (key: string, value: string): Promise<void> => {
         await page.locator(`[data-smaa-control=${key}]`).evaluate((element, nextValue) => {
             const input = element as HTMLInputElement;
@@ -105,6 +136,7 @@ test("Scene 187 exposes live SMAA controls with debug=1", async ({ page }) => {
     await expect(canvas).toHaveAttribute("data-smaa-max-search-steps", "96");
     await expect(canvas).toHaveAttribute("data-smaa-min-diagonal-run", "8");
     await expect(canvas).toHaveAttribute("data-smaa-diagonal-detection", "true");
+    await expect(canvas).toHaveAttribute("data-smaa-corner-detection", "true");
     await expect(canvas).toHaveAttribute("data-smaa-dominant-axis-blend", "false");
     await expect(canvas).toHaveAttribute("data-smaa-source-is-srgb", "true");
 
@@ -113,6 +145,7 @@ test("Scene 187 exposes live SMAA controls with debug=1", async ({ page }) => {
     await expect(canvas).toHaveAttribute("data-smaa-max-search-steps", "64");
     await expect(canvas).toHaveAttribute("data-smaa-diagonal-detection", "false");
     await expect(canvas).toHaveAttribute("data-smaa-min-diagonal-run", "4");
+    await expect(canvas).toHaveAttribute("data-smaa-corner-detection", "false");
     await expect(canvas).toHaveAttribute("data-smaa-dominant-axis-blend", "true");
     await expect(canvas).toHaveAttribute("data-smaa-source-is-srgb", "false");
 });
