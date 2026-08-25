@@ -257,6 +257,28 @@ or newly added there), **never in the compat package**:
   need different backing, reconcile them into the **single** BJS-named class via an
   `@internal` factory (e.g. `AnimationGroup._fromLite(...)`) — never a second public
   type. A divergent name is an API-parity bug even if the methods work.
+- **Confirm every public name against a real BJS source before you write it — always,
+  not just when you feel unsure.** A wrong name is a _confident_ error, so discretionary
+  "grep if in doubt" advice never fires; make the check unconditional for every exported
+  symbol and, above all, for every **method, property or accessor** hanging off an
+  otherwise correctly-named class. And **never name a member after the Lite function it
+  forwards to** — that is how `Bone.resetToRest()` shipped: it forwards to Lite's
+  `clearBoneOverride`, which reads as "reset to rest", while BJS declares only
+  `returnToRest()` — a name already checked into this repo at
+  `lab/lite/src/bjs/scene99.ts`. The Lite call is the implementation; BJS is the name.
+    ```
+    # 1. BJS oracle scenes — always checked in, no install needed
+    git grep -n "<memberName>" -- lab/lite/src/bjs
+    # 2. installed typings — exhaustive, but gitignored and often absent
+    grep -rn "\b<memberName>\b" lab/node_modules/@babylonjs/core
+    ```
+    Read the two results asymmetrically. The oracle scenes are hundreds of real
+    `@babylonjs/core` programs, so a hit **proves the name is real** — but they are a
+    sample, so a miss proves nothing. The typings are exhaustive, so zero hits there
+    **proves the name invented** (open the owning class's `.d.ts` and copy the real one
+    verbatim; add `@babylonjs/loaders` for loader symbols). If the typings aren't
+    installed, the name is **unverified — never "invented"**: keep looking, and never
+    ship a name no source confirmed.
 - Plain class wrappers that hold the Lite object as `_lite` (or `_node`). Mark the
   handle property with an `@internal` JSDoc tag (the repo's
   `babylon-lite/underscore-requires-internal` lint rule requires it).
