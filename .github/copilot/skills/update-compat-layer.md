@@ -268,17 +268,19 @@ or newly added there), **never in the compat package**:
   `lab/lite/src/bjs/scene99.ts`. The Lite call is the implementation; BJS is the name.
     ```
     # 1. BJS oracle scenes — always checked in, no install needed
-    git grep -n "<memberName>" -- lab/lite/src/bjs
+    git grep -nw "<memberName>" -- lab/lite/src/bjs
     # 2. installed typings — exhaustive, but gitignored and often absent
-    grep -rn "\b<memberName>\b" lab/node_modules/@babylonjs/core
+    grep -Rnw "<memberName>" lab/node_modules/@babylonjs/core
     ```
-    Read the two results asymmetrically. The oracle scenes are hundreds of real
-    `@babylonjs/core` programs, so a hit **proves the name is real** — but they are a
-    sample, so a miss proves nothing. The typings are exhaustive, so zero hits there
-    **proves the name invented** (open the owning class's `.d.ts` and copy the real one
-    verbatim; add `@babylonjs/loaders` for loader symbols). If the typings aren't
-    installed, the name is **unverified — never "invented"**: keep looking, and never
-    ship a name no source confirmed.
+    Keep `-w` in both — whole-word matching stops a near-miss like `returnToRes`
+    counting as a hit on `returnToRest`, and avoids `\b`, which is not portable across
+    grep implementations. Then read the two results asymmetrically. The oracle scenes
+    are hundreds of real `@babylonjs/core` programs, so a hit **proves the name is
+    real** — but they are a sample, so a miss proves nothing. The typings are
+    exhaustive, so zero hits there **proves the name invented** (open the owning class's
+    `.d.ts` and copy the real one verbatim; add `@babylonjs/loaders` for loader
+    symbols). If the typings aren't installed, the name is **unverified — never
+    "invented"**: keep looking, and never ship a name no source confirmed.
 - Plain class wrappers that hold the Lite object as `_lite` (or `_node`). Mark the
   handle property with an `@internal` JSDoc tag (the repo's
   `babylon-lite/underscore-requires-internal` lint rule requires it).
