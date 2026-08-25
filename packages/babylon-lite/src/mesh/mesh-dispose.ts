@@ -36,6 +36,7 @@ export function disposeMeshGpu(mesh: Mesh): void {
     }
     const sk = mesh.skeleton;
     if (sk && release(sk)) {
+        sk._disposed = true;
         sk.boneTexture.destroy();
         if (release(sk._skinBuffers)) {
             sk.jointsBuffer.destroy();
@@ -60,6 +61,7 @@ export function disposeMeshGpu(mesh: Mesh): void {
     }
     const mt = mesh.morphTargets;
     if (mt && release(mt)) {
+        mt._disposed = true;
         mt.deltasBuffer.destroy();
         mt.weightsBuffer.destroy();
     }

@@ -1,6 +1,6 @@
 {
   "rawKB": 97.7,
-  "rawBytes": 100080,
+  "rawBytes": 100067,
   "gzipKB": 40.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
@@ -9,7 +9,7 @@
     "scene34-gltf-ext-node-visibility-GovLAutL.js",
     "scene34-gltf-feature-animation-pointer-CpRqGjRm.js",
     "scene34-gltf-feature-animations-B5fXRLWO.js",
-    "scene34-gltf-feature-registry-D2uwQxAd.js",
+    "scene34-gltf-feature-registry-aHS-0W1n.js",
     "scene34-gltf-glb-parser-GWVsAeAH.js",
     "scene34-gltf-sampler-denorm-D8yicnFy.js",
     "scene34-gltf-share-DzepaHuU.js",
