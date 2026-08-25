@@ -47,6 +47,10 @@
     "rawKB": 84.3,
     "gzipKB": 30.1
   },
+  "calculator": {
+    "rawKB": 131.6,
+    "gzipKB": 55.4
+  },
   "sandblox": {
     "rawKB": 113.2,
     "gzipKB": 40.9

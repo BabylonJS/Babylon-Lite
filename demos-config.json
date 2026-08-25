@@ -88,6 +88,13 @@
         "mobile": true
     },
     {
+        "slug": "calculator",
+        "name": "Calculator (KHR_interactivity)",
+        "description": "Interactive glTF showcase: the Khronos \"Calculator\" sample driven by Babylon Lite's flow-graph runtime (glTF KHR_interactivity). On load the embedded interactivity graph runs — resetting the display to \"00\" by scrolling the digit materials' texture-transform offset, hiding the minus sign via KHR_node_visibility, and seeding scene variables — exercising the ported math, pointer and event blocks. KHR_interactivity is an unratified draft; the runtime tracks the current spec. Khronos glTF-Test-Assets-Interactivity (CC0).",
+        "tags": ["showcase", "interactivity", "gltf"],
+        "mobile": true
+    },
+    {
         "slug": "littlest-tokyo",
         "name": "Littlest Tokyo",
         "description": "Animated glTF showcase: Glen Fox's beloved \"Littlest Tokyo\" diorama rendered by Lite from a full-fidelity glTF, with PBR materials lit by an HDR environment (shared as both IBL and skybox) and looping animation driving the cars, train and drifting smoke. Orbit freely to explore the tiny city, or pause the auto-rotation. Model: \"Littlest Tokyo\" by Glen Fox (CC-BY 4.0).",
