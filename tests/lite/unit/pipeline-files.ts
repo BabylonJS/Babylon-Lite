@@ -31,6 +31,31 @@ export const repoRoot = join(__dirname, "..", "..", "..");
  * This is the same defect the module itself exists to prevent, one level up. A
  * scope reads complete because nothing compared it to reality; here the scope
  * is the set of tests the prober chose to run.
+ *
+ * The second half of that rule, and it is the one that survives the fix above.
+ * Once a mutation of shared code is run against every suite, the total is still
+ * not the answer: *which* suite catches it is, and the two are routinely
+ * different. Measured here, per file --
+ *
+ *   isWalkableDir widened to accept every directory:
+ *     pipeline-piped-steps-set-pipefail   10 failed
+ *     pipeline-master-gating               0 failed
+ *     pipeline-pr-comment-steps-guarded    0 failed
+ *
+ * A prober running the whole project reads "10 failed" and concludes the walk
+ * is guarded, which is true. A prober who *also* owns `pipeline-master-gating`
+ * reads the same number and concludes their file's subjects are guarded, which
+ * is false: that file consumes the walk and floors none of it. The dependency
+ * runs one way and is invisible from the depending end, because a green file
+ * looks the same whether it is safe or merely downstream of something safe.
+ *
+ * That matters most for the convergence this module is heading toward. Anyone
+ * merging these guards, or trimming what looks like overlap between them, has
+ * to attribute per suite before deleting: the floors on the walk live entirely
+ * in `pipeline-piped-steps-set-pipefail`, and `pipeline-master-gating` passing
+ * without them is not evidence that they are redundant. Duplicating them into
+ * the consuming file is the opposite error and is not the remedy -- coverage
+ * would grow while nothing new became covered.
  */
 
 /**
