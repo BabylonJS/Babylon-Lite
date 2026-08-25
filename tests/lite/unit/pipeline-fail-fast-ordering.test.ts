@@ -266,9 +266,27 @@ const PACKAGE_INVOCATION = /\b(?:pnpm|npm|npx)\s+(?:run\s+)?([A-Za-z0-9:_-]+)/g;
  * by the universal allowance clause, which has a documented hatch. Closing that
  * needs a cost model, which this file deliberately does not have.
  */
-function packageScriptWork(steps: string[]): string[] {
+/**
+ * The declared script names a step asks a package manager to run.
+ *
+ * Extracted from `packageScriptWork` so the tokens can be asserted rather than
+ * only their count. Measured, and the reason this is a separate function:
+ * dropping `:` from PACKAGE_INVOCATION's token class leaves
+ * `pnpm build:bundle-scenes` matching the token `build` -- which `package.json`
+ * also declares. The step is still returned, every floor over the derivation's
+ * output is still satisfied, and the derivation is matching for the wrong
+ * reason. A floor on what a derivation found cannot see why it found it.
+ */
+function invokedScripts(step: string): string[] {
     const declared = new Set(packageScripts());
-    return steps.filter((step) => commandLines(step).some((line) => [...line.matchAll(PACKAGE_INVOCATION)].some(([, token]) => token !== undefined && declared.has(token))));
+    return commandLines(step)
+        .flatMap((line) => [...line.matchAll(PACKAGE_INVOCATION)])
+        .map(([, token]) => token)
+        .filter((token): token is string => token !== undefined && declared.has(token));
+}
+
+function packageScriptWork(steps: string[]): string[] {
+    return steps.filter((step) => invokedScripts(step).length > 0);
 }
 
 /** Leading-whitespace width, used to compare YAML nesting levels. */
@@ -553,8 +571,8 @@ const NESTING_SPECIMENS: Array<{ label: string; yaml: string; parser: "accepts" 
  * parse rather than assumed: both report 9 steps in the same order for this
  * file, checkout first.
  */
-function pipelineSteps(): string[] {
-    const lines = readFileSync(join(repoRoot, pipelineFile), "utf8").split("\n");
+function pipelineSteps(source?: string): string[] {
+    const lines = (source ?? readFileSync(join(repoRoot, pipelineFile), "utf8")).split("\n");
     const stepsAt = lines.findIndex((l) => /^\s*steps:\s*$/.test(l));
     expect(stepsAt, `${pipelineFile} declares no \`steps:\` block — re-point this guard rather than deleting it`).toBeGreaterThanOrEqual(0);
 
@@ -568,7 +586,16 @@ function pipelineSteps(): string[] {
         if (line.trim() && indent <= parentIndent) {
             break;
         }
-        if (line.trim() && line.trimStart().startsWith("- ")) {
+        // `-(\s|$)` rather than `startsWith("- ")`: a bare dash is a legal empty
+        // sequence entry, and the old form folded it into the step above. That
+        // direction is pinned by a row. The looser `startsWith("-")` is NOT
+        // separable by any legal input and is the stated residual — a line at
+        // the item's own indent beginning with a dash but not a sequence entry
+        // is not legal YAML, so nothing well-formed reaches the difference. The
+        // flag-continuation row does not reach it either: a block-scalar body
+        // line is always deeper than the item indent, so it falls through to the
+        // accumulator before this decision is consulted.
+        if (line.trim() && /^-(\s|$)/.test(line.trimStart())) {
             itemIndent ??= indent;
             if (indent === itemIndent) {
                 if (current) {
@@ -751,7 +778,273 @@ function allowanceSection(): string {
     return start < 0 || end < 0 ? "" : doc.slice(start + ALLOWANCE_HEADING.length, end);
 }
 
+/**
+ * How the guard must read a step, one row per decision inside the projections.
+ *
+ * Why this exists: a mechanical sweep of the *predicates* (not the constants)
+ * mutated sixteen decisions in this file one at a time. Thirteen were silent.
+ * The three that fired were all inside `isMappingEntry`/`valueShape` — the only
+ * predicate in the file that already had a specimen table. Everything else was
+ * floored solely by "the guard still passes on the one real pipeline", which is
+ * a single input, and a single input cannot separate a predicate from a looser
+ * or tighter one that agrees with it on that input.
+ *
+ * The sharpest one, and the reason the table starts with comments: loosening
+ * `isCommentLine` from `/^\s*#/` to `/#/` — strip any line *containing* a hash —
+ * left 10 passed. A live command with a trailing comment then vanishes from
+ * `commandLines`, so `pnpm build:bundle-scenes # measures the bundles` is a step
+ * the cost clause cannot see. That helper was added one commit ago to kill a
+ * false positive, and it acquired a false-negative mode in the dangerous
+ * direction: when a predicate is written to suppress an over-report, every
+ * specimen you think of covers the over-reporting direction.
+ *
+ * No oracle. Unlike NESTING_SPECIMENS, whose verdicts come from PyYAML, these
+ * are design judgements about what this repository's pipelines mean, so the
+ * rows are the specification rather than a record of one. Both directions are
+ * required per decision: a row where the guard must see the command and a row
+ * where it must not.
+ */
+type StepReading = {
+    label: string;
+    step: string;
+    /** Exactly the lines `commandLines` must return, trimmed. */
+    runs: string[];
+    /** Substrings `withoutComments` must keep, because the name checks read them. */
+    prose: string[];
+    packageManager: boolean;
+    scripts: string[];
+    shellBody?: string[];
+    env?: string[];
+};
+
+const STEP_READINGS: StepReading[] = [
+    {
+        label: "a plain script step with a display name",
+        step: '                - script: pnpm build:bundle-scenes\n                  displayName: "Build bundle scenes"',
+        runs: ["- script: pnpm build:bundle-scenes"],
+        prose: ["Build bundle scenes"],
+        packageManager: true,
+        scripts: ["build:bundle-scenes"],
+    },
+    {
+        // The P1 row. Loosen isCommentLine to /#/ and this command disappears.
+        label: "a live command carrying a trailing comment",
+        step: "                - script: pnpm install --frozen-lockfile # the lockfile is pinned",
+        runs: ["- script: pnpm install --frozen-lockfile # the lockfile is pinned"],
+        prose: ["pnpm install"],
+        packageManager: true,
+        scripts: [],
+    },
+    {
+        // The P2 row. Tighten isCommentLine to /^#/ and this comment survives as
+        // a command, which is the false positive the helper was added to kill.
+        label: "an indented whole-line comment naming a command",
+        step: "                - checkout: self\n                  # pnpm install --frozen-lockfile\n                  # was: pnpm build:bundle-scenes",
+        runs: ["- checkout: self"],
+        prose: ["checkout: self"],
+        packageManager: false,
+        scripts: [],
+    },
+    {
+        // Pins the other end of the same decision: "strip only *indented*
+        // comments" fails here, so neither `/^#/` nor `/^\s+#/` survives.
+        label: "a whole-line comment at column zero",
+        step: "                - checkout: self\n# pnpm build:bundle-scenes",
+        runs: ["- checkout: self"],
+        prose: ["checkout: self"],
+        packageManager: false,
+        scripts: [],
+    },
+    {
+        label: "a display name that names a package manager",
+        step: '                - task: UseNode@1\n                  displayName: "Enable pnpm via corepack"',
+        runs: [],
+        prose: ["Enable pnpm via corepack"],
+        packageManager: false,
+        scripts: [],
+    },
+    {
+        label: "a condition that names a package manager",
+        step: "                - script: echo ready\n                  condition: eq(variables['pnpm install'], 'yes')",
+        runs: ["- script: echo ready"],
+        prose: ["pnpm install"],
+        packageManager: false,
+        scripts: [],
+    },
+    {
+        // The P8 row: drop `(?:run\s+)?` and the token becomes `run`.
+        label: "a script invoked through `pnpm run`",
+        step: "                - script: pnpm run build:bundle-scenes",
+        runs: ["- script: pnpm run build:bundle-scenes"],
+        prose: ["build:bundle-scenes"],
+        packageManager: true,
+        scripts: ["build:bundle-scenes"],
+    },
+    {
+        // The P6 row: drop the `\b` and `cpnpm` reads as `pnpm`.
+        label: "a word that merely ends in a package manager's name",
+        step: "                - script: echo cpnpm install",
+        runs: ["- script: echo cpnpm install"],
+        prose: ["cpnpm"],
+        packageManager: false,
+        scripts: [],
+    },
+    {
+        // The P7 row: drop the argument and a bare mention counts as work.
+        label: "a package manager named with no command after it",
+        step: "                - script: echo pnpm",
+        runs: ["- script: echo pnpm"],
+        prose: ["pnpm"],
+        packageManager: false,
+        scripts: [],
+    },
+    {
+        label: "a block scalar body with a comment in it",
+        step:
+            "                - script: |\n" +
+            "                    pnpm exec playwright install --with-deps\n" +
+            "                    # echo skipped\n" +
+            "                    echo done\n" +
+            '                  displayName: "Install Playwright browsers"\n' +
+            "                  env:\n" +
+            "                    PLAYWRIGHT_TOKEN: $(TOKEN)",
+        runs: ["- script: |", "pnpm exec playwright install --with-deps", "echo done", "env:", "PLAYWRIGHT_TOKEN: $(TOKEN)"],
+        prose: ["Install Playwright browsers"],
+        packageManager: true,
+        scripts: [],
+        shellBody: ["pnpm exec playwright install --with-deps", "echo done"],
+        env: ["PLAYWRIGHT_TOKEN"],
+    },
+    {
+        // The P14 row. A multi-line plain scalar is legal YAML and is not a
+        // block scalar; a `script:` test without the `|` reads its continuation
+        // line as shell the step runs.
+        label: "an inline script continued on the next line",
+        step: '                - script: pnpm exec playwright\n                    install --with-deps\n                  displayName: "Install Playwright browsers"',
+        runs: ["- script: pnpm exec playwright", "install --with-deps"],
+        prose: ["Install Playwright browsers"],
+        packageManager: true,
+        scripts: [],
+        shellBody: [],
+    },
+    {
+        // The P16 row: `env` inside a command is not an `env:` block.
+        label: "a command that mentions env, above a real env block",
+        step: '                - script: echo "env: production"\n                  env:\n                    TOKEN: $(TOKEN)',
+        runs: ['- script: echo "env: production"', "env:", "TOKEN: $(TOKEN)"],
+        prose: ["env: production"],
+        packageManager: false,
+        scripts: [],
+        env: ["TOKEN"],
+    },
+];
+
+/**
+ * Steps blocks whose parse is the assertion, for the one reader that takes a
+ * file rather than a step. The P15 row: splitting on `-` instead of `- ` cuts a
+ * step in half at a flag continuation, and no step in the real pipeline has one.
+ */
+const STEP_SPLITS: { label: string; yaml: string; count: number }[] = [
+    {
+        label: "a flag continuation line does not start a new step",
+        yaml: "            steps:\n                - script: |\n                    pnpm install\n                    --frozen-lockfile\n                - checkout: self",
+        count: 2,
+    },
+    {
+        label: "sibling keys stay with their step",
+        yaml: '            steps:\n                - script: pnpm install\n                  displayName: "Install"\n                - checkout: self',
+        count: 2,
+    },
+    {
+        // Separates `- ` from `-(\s|$)`. A bare dash is a legal empty sequence
+        // entry, and `startsWith("- ")` folds it into the step above. Found by
+        // asking what legal YAML could separate the two, after the flag-
+        // continuation row turned out not to: a body line starting with a dash
+        // is never at the item's own indent, so it never reached the decision.
+        label: "a bare dash is its own (empty) step",
+        yaml: "            steps:\n                - script: pnpm install\n                -\n                - checkout: self",
+        count: 3,
+    },
+];
+
+/**
+ * Content that is and is not a mapping entry, asserted directly.
+ *
+ * NESTING_SPECIMENS drives this predicate through `malformedNestingIn`, which
+ * skips comment lines and works on content with the indent already removed. So
+ * the `[^#\s]` at the start of the key was unreachable through that table: the
+ * caller guarantees both characters away. Measured — deleting it left every row
+ * passing. That is the "dead by the caller's guarantee" case, and the answer
+ * here is not to record it, because this predicate is going into a shared module
+ * where the guarantee will not travel with it. Pinned directly instead.
+ */
+const MAPPING_ENTRY_READINGS: { content: string; isEntry: boolean; why: string }[] = [
+    { content: "displayName: Build", isEntry: true, why: "a key with a value" },
+    { content: "env:", isEntry: true, why: "a key with an empty value" },
+    { content: "# displayName: Build", isEntry: false, why: "a comment is not a key, whatever it contains" },
+    { content: " displayName: Build", isEntry: false, why: "a key cannot start with whitespace once the indent is gone" },
+    { content: "echo two:three", isEntry: false, why: "a colon inside shell is not a key separator" },
+    { content: "- script: pnpm install", isEntry: true, why: "a sequence entry carrying a key" },
+];
+
 describe("the baseline pipeline validates its deploy configuration before doing expensive work", () => {
+    it("reads a step the way the pipeline means it, in both directions per decision", () => {
+        const problems: string[] = [];
+        for (const row of STEP_READINGS) {
+            const runs = commandLines(row.step)
+                .map((l) => l.trim())
+                .filter((l) => l !== "");
+            if (runs.join("\u0000") !== row.runs.join("\u0000")) {
+                problems.push(`"${row.label}": the guard reads [${runs.join(" | ")}] as what the step runs, not [${row.runs.join(" | ")}]`);
+            }
+            const kept = withoutComments(row.step);
+            for (const phrase of row.prose) {
+                if (!kept.includes(phrase)) {
+                    problems.push(`"${row.label}": "${phrase}" was dropped, and the name checks read it`);
+                }
+            }
+            if (packageManagerWork([row.step]).length > 0 !== row.packageManager) {
+                problems.push(`"${row.label}": counts as package-manager work: ${!row.packageManager}, and the cost clause acts on that`);
+            }
+            const scripts = invokedScripts(row.step);
+            if (scripts.join(",") !== row.scripts.join(",")) {
+                problems.push(`"${row.label}": reads the declared scripts as [${scripts.join(" | ")}], not [${row.scripts.join(" | ")}]`);
+            }
+            if (row.shellBody) {
+                const body = shellBodyOf(row.step)
+                    .split("\n")
+                    .map((l) => l.trim())
+                    .filter((l) => l !== "");
+                if (body.join("\u0000") !== row.shellBody.join("\u0000")) {
+                    problems.push(`"${row.label}": reads the shell body as [${body.join(" | ")}], not [${row.shellBody.join(" | ")}]`);
+                }
+            }
+            if (row.env && envKeys(row.step).join(",") !== row.env.join(",")) {
+                problems.push(`"${row.label}": reads the env keys as [${envKeys(row.step).join(" | ")}], not [${row.env.join(" | ")}]`);
+            }
+        }
+        for (const row of STEP_SPLITS) {
+            const found = pipelineSteps(row.yaml).length;
+            if (found !== row.count) {
+                problems.push(`"${row.label}": split into ${found} steps, not ${row.count}`);
+            }
+        }
+        for (const row of MAPPING_ENTRY_READINGS) {
+            if (isMappingEntry(row.content) !== row.isEntry) {
+                problems.push(`"${row.content}" reads as ${isMappingEntry(row.content) ? "a mapping entry" : "not a mapping entry"} — ${row.why}`);
+            }
+        }
+
+        // Both directions have to be present, or the table drifts into being a
+        // list of things the guard already does. The sweep that produced these
+        // rows found the *negative* direction missing in every predicate here.
+        expect(STEP_READINGS.filter((r) => r.packageManager).length, "no row asserts a step IS package-manager work").toBeGreaterThan(0);
+        expect(STEP_READINGS.filter((r) => !r.packageManager).length, "no row asserts a step is NOT package-manager work").toBeGreaterThan(0);
+        expect(STEP_READINGS.filter((r) => r.runs.length > 0).length, "no row asserts the guard sees a command").toBeGreaterThan(0);
+        expect(STEP_READINGS.filter((r) => r.scripts.length > 0).length, "no row pins a declared script name").toBeGreaterThan(0);
+        expect(problems, `the projections read a step differently than the pipeline means it:\n  ${problems.join("\n  ")}`).toEqual([]);
+    });
+
     it("grants the allowance to the steps it names and to nothing else", () => {
         // The name is not what exempts a step -- `matches` is. Everything else
         // binding this allowance compares names: the pin, the TESTING.md bullets,
