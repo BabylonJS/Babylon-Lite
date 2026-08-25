@@ -466,10 +466,26 @@ describe("pull-request jobs cannot run on a master build", () => {
         // on a correct tree gets deleted rather than fixed.
         const referenced = dualContextPipelines.flatMap((file) => file.jobs.flatMap((job) => templateReferencesIn(job.body)));
 
+        // The floor's own failure has two causes needing opposite repairs, and
+        // the partition between them is a property of the input rather than of
+        // what this check distinguishes: either the collector produced nothing
+        // at all, or it produced references and this particular one is not among
+        // them. Total by construction, so it cannot grow a third branch.
+        //
+        // One sentence covering both -- which is what this message was -- leaves
+        // whoever hits it with a diagnosis and no action, and the two actions are
+        // not variations of each other: one edits this constant, the other says
+        // the constant is fine and the code above it is broken.
         for (const path of KNOWN_TEMPLATE_REFERENCES) {
-            expect(referenced, `no dual-context job references ${path} any more; this clause is checking an empty set unless that reference was deliberately removed`).toContain(
-                path
-            );
+            expect(
+                referenced,
+                referenced.length === 0
+                    ? `no dual-context job references any template at all, so this clause is checking an empty set and the readability floor below it cannot fail.\n` +
+                          `The reference collector or the job splitter has stopped producing references. Fix that rather than editing KNOWN_TEMPLATE_REFERENCES -- the constant is not what broke, and shortening it here would hide the collector's failure permanently.`
+                    : `templates are still being collected (${[...new Set(referenced)].join(", ")}), but no dual-context job references ${path} any more.\n` +
+                          `If that include was deliberately removed, drop ${path} from KNOWN_TEMPLATE_REFERENCES -- the constant exists to make the removal visible, not to prevent it.\n` +
+                          `Then check the jobs that relied on it: pull-request context reaching them through that template is now gone, so a gate justified by it may no longer be justified at all.`
+            ).toContain(path);
         }
 
         const missing = [...new Set(referenced)].filter((path) => !existsSync(join(repoRoot, path)));
