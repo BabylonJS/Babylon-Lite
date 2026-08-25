@@ -482,16 +482,39 @@ function contentColumn(line: string): number {
  * and would be recorded as a finding. A guard's own floors are the tripwire for
  * the harness measuring it, and this file had none.
  *
- * The invariant is narrow on purpose -- a key that already has a scalar value
- * cannot have a more-indented line after it, because there is nothing for that
- * line to belong to. It is not a YAML validator and does not try to be; adding
- * a parser dependency to satisfy a test would be inventing infrastructure to be
- * tested about. Block scalars (`|`, `>`) are skipped, as their bodies are
- * legitimately deeper.
+ * The invariant is narrow on purpose, and its exact shape came from a parser
+ * rather than from me. The first version said "a key that already has a scalar
+ * value cannot have a more-indented line after it, because there is nothing for
+ * that line to belong to". That reasoning is wrong, and PyYAML says so:
+ *
+ *     value: "22.x" + deeper `c: 1`     REJECTS
+ *     value: "22.x" + deeper `more`     REJECTS
+ *     name: NODE_VERSION + deeper `c: 1`  REJECTS
+ *     name: NODE_VERSION + deeper `more`  ACCEPTS -> "NODE_VERSION more"
+ *
+ * A *plain* scalar legally continues onto deeper lines; a *quoted* one cannot.
+ * And the line that ends the continuation is not "starts with a key" but
+ * "contains a mapping colon": `echo two: three` and a trailing `echo two:` are
+ * both refused, while `echo two:three`, `http://x/y` and a deeper `- x` all fold
+ * into the value as text.
+ *
+ * So this reports two different things, because they need two different
+ * remedies. `illegal` is a file Azure DevOps will refuse. `folded` is legal YAML
+ * that silently swallows the deeper line into the value above -- not a parse
+ * error, but almost never what someone writing a pipeline step meant, and
+ * invisible in review precisely because it parses.
+ *
+ * It is still not a YAML validator and does not try to be; adding a parser
+ * dependency to satisfy a test would be inventing infrastructure to be tested
+ * about, and no YAML parser is resolvable from this project in any case. Block
+ * scalars (`|`, `>`) are skipped, as their bodies are legitimately deeper.
  */
-function structureProblems(text: string): string[] {
+const MAPPING_COLON = /:(?:\s|$)/;
+
+function structureProblems(text: string): { illegal: string[]; folded: string[] } {
     const lines = text.split("\n");
-    const problems: string[] = [];
+    const illegal: string[] = [];
+    const folded: string[] = [];
 
     for (let index = 0; index < lines.length; index++) {
         const line = lines[index] ?? "";
@@ -507,12 +530,16 @@ function structureProblems(text: string): string[] {
         while (next < lines.length && (!(lines[next] ?? "").trim() || (lines[next] ?? "").trim().startsWith("#"))) next++;
         if (next >= lines.length) continue;
 
-        if (contentColumn(lines[next] ?? "") > contentColumn(line)) {
-            problems.push(`line ${next + 1} is indented deeper than line ${index + 1} ("${line.trim().slice(0, 44)}"), which already has a value`);
-        }
+        if (contentColumn(lines[next] ?? "") <= contentColumn(line)) continue;
+
+        const quoted = value.startsWith('"') || value.startsWith("'");
+        const where = `line ${next + 1} is indented deeper than line ${index + 1} ("${line.trim().slice(0, 44)}"), which already has a value`;
+
+        if (quoted || MAPPING_COLON.test((lines[next] ?? "").trim())) illegal.push(where);
+        else folded.push(`${where}, and is legal YAML that folds into it`);
     }
 
-    return problems;
+    return { illegal, folded };
 }
 
 function jobsIn(text: string): PipelineJob[] {
@@ -993,11 +1020,25 @@ describe("pull-request jobs cannot run on a master build", () => {
         // stays red for unrelated reasons. A file-level red/green reading calls
         // that decoration; it is not.
 
-        const broken = subjects.flatMap((subject) => structureProblems(subject.text).map((problem) => `${subject.location}: ${problem}`));
+        const broken = subjects.flatMap((subject) => structureProblems(subject.text).illegal.map((problem) => `${subject.location}: ${problem}`));
 
         expect(
             broken,
             `these files cannot parse as YAML, so Azure DevOps would reject them and every other clause here is reading a file that never runs:\n${broken.join("\n")}`
+        ).toEqual([]);
+
+        // Separate assertion because it is a separate remedy, and because the
+        // message above would be a lie about it. A plain scalar legally
+        // continues onto deeper lines, so this shape parses, ADO runs it, and
+        // the deeper line is silently swallowed into the value above -- a
+        // `script:` body that quietly grew a word. Nothing rejects it and
+        // nothing shows it in review.
+        const swallowed = subjects.flatMap((subject) => structureProblems(subject.text).folded.map((problem) => `${subject.location}: ${problem}`));
+
+        expect(
+            swallowed,
+            `these lines are legal YAML and still almost certainly wrong -- each folds into the value on the line above instead of standing on its own:\n${swallowed.join("\n")}\n` +
+                `If the continuation is deliberate, make it explicit with a block scalar (\`|\` or \`>\`). If it was meant to be its own key, it is under-indented by mistake.`
         ).toEqual([]);
 
         // A specimen per skipped form, because the two block-scalar indicators
@@ -1007,14 +1048,27 @@ describe("pull-request jobs cannot run on a master build", () => {
         // `script: >` anybody writes would be reported as malformed YAML. A
         // guard that fires on correct code gets deleted, which is the failure
         // mode that matters more than the miss.
+        //
+        // Every `expect` column below is the verdict of an actual YAML parser
+        // (PyYAML) on that exact text, not my reading of the spec. The row that
+        // made this necessary is the fourth: it used to assert `broken: true`,
+        // and it is *accepted*. The fixture was pinning a false positive as
+        // correct behaviour, so the predicate could never be found wrong by the
+        // thing written to check it.
         const scalars = [
-            { what: "a literal block scalar, which the tree does use", text: "steps:\n  - script: |\n      echo one\n      echo two\n", broken: false },
-            { what: "a folded block scalar, which the tree does not", text: "steps:\n  - script: >\n      echo one\n      echo two\n", broken: false },
-            { what: "a key with a plain value and a deeper line after it", text: "steps:\n  - script: echo one\n      echo two\n", broken: true },
+            { what: "a literal block scalar, which the tree does use", text: "steps:\n  - script: |\n      echo one\n      echo two\n", illegal: false, folded: false },
+            { what: "a folded block scalar, which the tree does not", text: "steps:\n  - script: >\n      echo one\n      echo two\n", illegal: false, folded: false },
+            { what: "a quoted value with any deeper line at all", text: 'steps:\n  - script: "echo one"\n      echo two\n', illegal: true, folded: false },
+            { what: "a plain value with a deeper bare line, which YAML accepts", text: "steps:\n  - script: echo one\n      echo two\n", illegal: false, folded: true },
+            { what: "a plain value with a deeper mapping entry", text: "steps:\n  - script: echo one\n      name: x\n", illegal: true, folded: false },
+            { what: "a plain value with a deeper line whose colon is not a mapping colon", text: "steps:\n  - script: echo one\n      http://x/y\n", illegal: false, folded: true },
+            { what: "a plain value with a deeper trailing-colon line, which YAML refuses", text: "steps:\n  - script: echo one\n      echo two:\n", illegal: true, folded: false },
         ];
 
         for (const scalar of scalars) {
-            expect(structureProblems(scalar.text).length > 0, `${scalar.what}: structureProblems should report ${scalar.broken ? "a problem" : "nothing"}`).toBe(scalar.broken);
+            const result = structureProblems(scalar.text);
+            expect(result.illegal.length > 0, `${scalar.what}: should be reported as ${scalar.illegal ? "illegal" : "not illegal"}`).toBe(scalar.illegal);
+            expect(result.folded.length > 0, `${scalar.what}: should be reported as ${scalar.folded ? "a silent fold" : "not a fold"}`).toBe(scalar.folded);
         }
     });
 
