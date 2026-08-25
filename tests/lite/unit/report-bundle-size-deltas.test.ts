@@ -140,7 +140,7 @@ describe("report-bundle-size-deltas", () => {
             const comment = runReporter(headroomFixture).comment ?? "";
 
             expect(comment).toContain("### Ceiling headroom");
-            expect(comment).toContain("⚠️ **1 scene this PR moved sits under 1.0 KB of headroom.**");
+            expect(comment).toContain("⚠️ **1 scene this PR grew now sits under 1.0 KB of headroom.**");
             expect(comment).toContain("| Scene | Size | Ceiling | Headroom | Δ this PR |");
             expect(comment).toContain("Scene 2 - Sphere<br/>`scene2` | 49.90 KB | 50.00 KB | **100 B** | +400 B");
             // scene3 is tight too, but this PR did not touch it — it belongs in the collapsed
@@ -178,7 +178,7 @@ describe("report-bundle-size-deltas", () => {
                     ],
                 }).comment ?? "";
 
-            expect(comment).toContain("🚨 **1 scene this PR moved now exceeds its ceiling:** `scene2` (+312 B over its 50.00 KB ceiling)");
+            expect(comment).toContain("🚨 **1 scene this PR grew now exceeds its ceiling:** `scene2` (+312 B over its 50.00 KB ceiling)");
         });
 
         it("omits the headroom section for scenes that opt out of the ceiling check", () => {
@@ -217,7 +217,7 @@ describe("report-bundle-size-deltas", () => {
             expect(comment).not.toContain("### Increases");
             expect(comment).not.toContain("### Decreases");
             expect(comment).toContain("### Ceiling headroom");
-            expect(comment).toContain("⚠️ **1 scene this PR moved sits under 1.0 KB of headroom.**");
+            expect(comment).toContain("⚠️ **1 scene this PR grew now sits under 1.0 KB of headroom.**");
             expect(comment).toContain("Scene 2 - Sphere<br/>`scene2` | 49.90 KB | 50.00 KB | **100 B** | +400 B");
             // scene1 moved by 100 B too, but it has 2400 B of room — not a reason to warn.
             expect(comment).not.toContain("Scene 1 - BoomBox PBR<br/>`scene1` | 97.7 KB");
@@ -231,7 +231,7 @@ describe("report-bundle-size-deltas", () => {
             });
 
             expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]true");
-            expect(result.comment).toContain("🚨 **1 scene this PR moved now exceeds its ceiling:** `scene1` (+312 B over its 50.00 KB ceiling)");
+            expect(result.comment).toContain("🚨 **1 scene this PR grew now exceeds its ceiling:** `scene1` (+312 B over its 50.00 KB ceiling)");
         });
 
         it("never renders a compliant scene as if it were over its ceiling (precision monotonicity)", () => {
@@ -322,7 +322,7 @@ describe("report-bundle-size-deltas", () => {
             const comment = runReporter({ current, master, scenes }).comment ?? "";
             const actionable = comment.slice(comment.indexOf("### Ceiling headroom"), comment.indexOf("<details>"));
 
-            expect(comment).toContain("⚠️ **14 scenes this PR moved sit under 1.0 KB of headroom.**");
+            expect(comment).toContain("⚠️ **14 scenes this PR grew now sit under 1.0 KB of headroom.**");
             expect(actionable).toContain("…and 4 more, listed tightest first.");
             // 10 data rows plus the header and separator.
             expect(actionable.split("\n").filter((l) => l.startsWith("| ")).length).toBe(11);

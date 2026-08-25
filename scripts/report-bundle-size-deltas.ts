@@ -243,12 +243,12 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     if (movedAndOver.length > 0) {
         const named = movedAndOver.map((s) => `\`${s.scene}\` (+${formatBytes(s.headroomBytes)} over its ${formatCeilingKB(s.ceilingKB)} ceiling)`);
         const verb = movedAndOver.length === 1 ? "now exceeds its ceiling" : "now exceed their ceiling";
-        lines.push(`🚨 **${pluralizeScenes(movedAndOver.length)} this PR moved ${verb}:** ${named.join(", ")}`);
+        lines.push(`🚨 **${pluralizeScenes(movedAndOver.length)} this PR grew ${verb}:** ${named.join(", ")}`);
         lines.push("");
     }
 
     if (movedAndTight.length > 0) {
-        lines.push(`⚠️ **${pluralizeScenes(movedAndTight.length)} this PR moved ${movedAndTight.length === 1 ? "sits" : "sit"} under ${tightLabel} of headroom.**`);
+        lines.push(`⚠️ **${pluralizeScenes(movedAndTight.length)} this PR grew now ${movedAndTight.length === 1 ? "sits" : "sit"} under ${tightLabel} of headroom.**`);
         lines.push("");
         lines.push("| Scene | Size | Ceiling | Headroom | Δ this PR |");
         lines.push("|-------|------|---------|----------|-----------|");
