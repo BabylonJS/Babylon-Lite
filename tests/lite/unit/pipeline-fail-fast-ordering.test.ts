@@ -98,29 +98,104 @@ const COSTLY_COMMANDS = [
 ];
 
 /**
+ * A step's command lines, with the keys that merely describe it removed.
+ *
+ * Shared by both derivations below, deliberately. A step's `displayName` is
+ * prose: "Enable pnpm via corepack" made the corepack step read as
+ * package-manager work, which is how a `COSTLY_COMMANDS` entry re-pointed at
+ * `corepack` kept passing the check meant to catch it. A rule about what a step
+ * runs must not read the sentence describing it, and that applies to both
+ * derivations or the second one re-introduces the bug the first one fixed.
+ *
+ * The sharing is what makes a single edit here narrow both, so both callers
+ * floor their own output as non-empty; blinding this fires both floors.
+ */
+function commandLines(step: string): string[] {
+    return step.split("\n").filter((line) => !/^\s*(?:-\s*)?(?:displayName|name|condition|continueOnError|timeoutInMinutes|task|target):/.test(line));
+}
+
+/**
  * Steps that invoke a package manager, derived from the pipeline text.
  *
- * The one description of "expensive" that no edit to this file can narrow,
- * empty or re-point. A step that runs `pnpm`, `npm` or `npx` is fetching or
- * building something; the three commands the incident was about are all in
- * here, and so is the next one, without anybody naming it.
+ * The wider of this file's two descriptions of expensive work. A step that runs
+ * `pnpm`, `npm` or `npx` is fetching or building something; the three commands
+ * the incident was about are all in here, and so is the next one, without
+ * anybody naming it.
+ *
+ * It used to claim to be "the one description no edit to this file can narrow,
+ * empty or re-point". That was wrong in the first of the three: this is a regex
+ * in this file, and narrowing it to exactly the commands COSTLY_COMMANDS names
+ * satisfied every floor written over its output while a new build step sat
+ * permanently ahead of the check. `packageScriptWork` below is the second side,
+ * and the cost clause cross-checks the two.
  *
  * It is a proxy, not a measurement -- `pnpm --version` would be caught and is
  * not expensive. That direction is the safe one: it can demand the check move
  * earlier, never later.
  */
 function packageManagerWork(steps: string[]): string[] {
-    // Commands only. The first version tested the whole step, and a step's
-    // `displayName` is prose: "Enable pnpm via corepack" made the corepack step
-    // read as package-manager work, which is how a `COSTLY_COMMANDS` entry
-    // re-pointed at `corepack` kept passing the check meant to catch it. A rule
-    // about what a step runs must not read the sentence describing it.
-    return steps.filter((s) =>
-        s
-            .split("\n")
-            .filter((line) => !/^\s*(?:-\s*)?(?:displayName|name|condition|continueOnError|timeoutInMinutes|task|target):/.test(line))
-            .some((line) => /\b(?:pnpm|npm|npx)\s+[a-z@]/i.test(line))
-    );
+    return steps.filter((s) => commandLines(s).some((line) => /\b(?:pnpm|npm|npx)\s+[a-z@]/i.test(line)));
+}
+
+/**
+ * Every script name `package.json` declares.
+ *
+ * A foreign artifact, and that is its whole value here. `package.json` is
+ * written to make the repository work, not to satisfy this test; nobody edits
+ * it to buy silence, and deleting an entry to hide a step from this file breaks
+ * the step itself. It is the side of the comparison that is not an assertion.
+ */
+function packageScripts(): string[] {
+    const parsed: unknown = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+    const scripts = (parsed as { scripts?: Record<string, unknown> }).scripts;
+    return scripts ? Object.keys(scripts) : [];
+}
+
+/** `pnpm x`, `npm run x`, `npx x` -- the token a package manager is being asked to run. */
+const PACKAGE_INVOCATION = /\b(?:pnpm|npm|npx)\s+(?:run\s+)?([A-Za-z0-9:_-]+)/g;
+
+/**
+ * Steps that run one of this repository's own package scripts.
+ *
+ * `packageManagerWork` above calls itself the description of "expensive" that no
+ * edit to this file can narrow. That was false, and this exists because it was.
+ * Measured, cumulatively: add a `pnpm build:bundle-demos` step ahead of the
+ * check (2 clauses fire), take the repair its own failure message offers -- an
+ * allowance entry, the pin, a TESTING.md bullet -- and the cost clause is the
+ * single thing still standing, which is the design working. Then narrow
+ * `packageManagerWork` from `pnpm <anything>` to the three commands
+ * COSTLY_COMMANDS already names. **10 passed**, one edit, this file only, with a
+ * demo build permanently ahead of the check.
+ *
+ * Neither existing floor saw it. `packageManagerWork(steps).length > 0` was
+ * satisfied by the three surviving matches, and the `absent` cross-check asks
+ * only that each *named* command is still derived -- so a narrowing that keeps
+ * exactly the named ones passes both. Both floors are stated over the commands
+ * this file has heard of, and the derivation's entire purpose is the one it has
+ * not. A predicate every clause consumes sits between the assertions and the
+ * artifact: floors written over its output cannot see it move.
+ *
+ * So this reads the second side from `package.json`. A step invoking a declared
+ * script is doing this repository's own build work, whatever any regex in this
+ * file has been narrowed to, and a new expensive step is overwhelmingly a new
+ * `pnpm <script>`.
+ *
+ * The two share `commandLines` and nothing else, so a narrowing of either one is
+ * visible to the other. They are not independent: blinding `commandLines` blinds
+ * both, which is why both callers floor their own output as non-empty rather
+ * than trusting the pair. And the disagreement is not immediate -- narrowing
+ * `packageManagerWork` shows up here only once the pipeline runs a declared
+ * script the narrowing misses, which is precisely the case the capitulation
+ * needed and could not avoid.
+ *
+ * Residual, stated: a step expensive in neither vocabulary -- `./scripts/x.sh`,
+ * a bare `curl` of something enormous -- is seen by neither, and is covered only
+ * by the universal allowance clause, which has a documented hatch. Closing that
+ * needs a cost model, which this file deliberately does not have.
+ */
+function packageScriptWork(steps: string[]): string[] {
+    const declared = new Set(packageScripts());
+    return steps.filter((step) => commandLines(step).some((line) => [...line.matchAll(PACKAGE_INVOCATION)].some(([, token]) => token !== undefined && declared.has(token))));
 }
 
 /** Leading-whitespace width, used to compare YAML nesting levels. */
@@ -443,6 +518,15 @@ function pipelineSteps(): string[] {
     return steps;
 }
 
+/**
+ * A step's `displayName` if it has one, so a message can name a step the guard
+ * found rather than one a constant named.
+ */
+function stepLabel(step: string): string {
+    const named = /displayName:\s*"?([^"\n]+?)"?\s*$/m.exec(step);
+    return named?.[1]?.trim() ?? step.trim().split("\n")[0]?.trim() ?? "(unnamed step)";
+}
+
 /** The index of the single step carrying `displayName`, asserted to be unique. */
 function stepIndex(steps: string[], displayName: string): number {
     const matches = steps.map((s, i) => (s.includes(displayName) ? i : -1)).filter((i) => i !== -1);
@@ -652,6 +736,16 @@ describe("the baseline pipeline validates its deploy configuration before doing 
             // its command here -- and emptying or re-pointing COSTLY_COMMANDS,
             // both of which returned 10 passed before this line existed, cannot
             // take it out of the set.
+            //
+            // `packageScriptWork` deliberately has no branch here. It would only
+            // ever be reached for a step `packageManagerWork` missed, and every
+            // such step is already reported by the cross-check below -- measured,
+            // not assumed: with that branch present and the cross-check removed,
+            // and with the branch removed and the cross-check present, the same
+            // capitulation fails on the same clause either way. A branch whose
+            // reachable inputs are a subset of another assertion's is a branch
+            // nobody is checking, so the position it would have reported is
+            // folded into the cross-check's message instead.
             if (named.length > 0) return named;
             return packageManagerWork([step]).map(() => `a step invoking a package manager runs before "${PREFLIGHT_STEP}"`);
         });
@@ -669,6 +763,39 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         expect(
             packageManagerWork(steps).length,
             `no step in ${pipelineFile} invokes a package manager, so this clause has nothing to order and passes whatever the pipeline does. Either the file stopped building anything, or the derivation stopped matching it.`
+        ).toBeGreaterThan(0);
+
+        // The two derivations, cross-checked, and this is the assertion that
+        // makes the pair worth having. `packageScriptWork` reads its vocabulary
+        // from `package.json`, so taking a step out of it means deleting the
+        // script the step runs -- it is the side of the comparison that is not
+        // an assertion, and the one no edit here can narrow.
+        //
+        // What it does not do, measured rather than claimed: narrowing
+        // `packageManagerWork` on today's pipeline is silent here, because the
+        // narrowing that hid the capitulation kept `build:bundle-scenes` and
+        // that is the only declared script this pipeline runs. So this is not a
+        // report of the narrowing itself; it is a report of the narrowing having
+        // a witness. Its separating input -- the one place it fires and nothing
+        // else does -- is a step running an unnamed package script positioned
+        // *after* the check: `expensive` slices at the check and never sees it,
+        // `absent` only asks about the three commands COSTLY_COMMANDS names.
+        const unseen = packageScriptWork(steps).filter((s) => packageManagerWork([s]).length === 0);
+        expect(
+            unseen.map(
+                (s) =>
+                    `"${stepLabel(s)}" runs a script package.json declares, but packageManagerWork does not see it${steps.indexOf(s) < preflight ? ` — and it runs BEFORE "${PREFLIGHT_STEP}"` : ""}`
+            ),
+            `the two descriptions of expensive work disagree. packageManagerWork is meant to be the wider of the two -- a step running one of this repository's own scripts is package-manager work by construction -- so this means it has been narrowed. That edit was measured: restricting it to the commands COSTLY_COMMANDS already names left this file 10/10 green with a demo build permanently ahead of the check.`
+        ).toEqual([]);
+
+        // Vacuity floor for the side that reads package.json. If that read goes
+        // blind -- file moved, `scripts` renamed, the invocation pattern no
+        // longer matching how the pipeline spells a command -- the cross-check
+        // above compares an empty set against anything and always passes.
+        expect(
+            packageScriptWork(steps).length,
+            `no step in ${pipelineFile} was found to run a script declared in package.json, so the cross-check above has nothing to compare. The pipeline runs \`pnpm build:bundle-scenes\`, so this is far more likely to be the derivation going blind than the pipeline having stopped building.`
         ).toBeGreaterThan(0);
 
         // A rule that names nothing present in the pipeline floors nothing, so
