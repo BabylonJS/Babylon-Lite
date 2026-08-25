@@ -615,7 +615,38 @@ describe("the hygiene guards cover every pipeline in the repo", () => {
         // Guard the discovery itself. If the walk or the predicate breaks, an
         // empty set makes the coverage assertion below vacuously true -- the
         // exact defect this test exists to make impossible.
+        //
+        // A count floor catches *collapse* and not *shrinkage*, which is a
+        // weaker property than it looks. Today it happens to be tight -- 7 root
+        // + 2 config/templates + 1 .github/workflows = exactly 10, so losing any
+        // single descent trips it. That tightness is an accident of the current
+        // file count, not a property of the check: the floor is a total, so
+        // every pipeline added at the repo root raises it and buys exactly that
+        // much silence elsewhere. Two new root pipelines and the
+        // `.github/workflows` descent could vanish together at 10.
+        //
+        // Verified rather than reasoned: with the descent disabled the count
+        // floor does fire today (7 < 10). The named floors below are what keep
+        // it firing after the repo grows.
         expect(discovered.length, "no pipeline YAML discovered -- the walk or the step predicate is broken").toBeGreaterThanOrEqual(10);
+
+        // A floor per traversal step, by name. Not an exact set: that would need
+        // editing whenever any pipeline is added or renamed, which is drift, and
+        // it would rebuild by hand the inventory this walk exists to replace.
+        // Name what a broken descent would *remove*, not what the walk currently
+        // returns.
+        for (const [step, matches] of [
+            ["<repo root>", (file: string) => /^azure-pipelines[^/]*\.ya?ml$/.test(file)],
+            ["config/templates", (file: string) => file.startsWith("config/templates/")],
+            [".github/workflows", (file: string) => file.startsWith(".github/workflows/")],
+        ] as const) {
+            expect(
+                discovered.filter(matches),
+                `the walk returned nothing from ${step}. Either the descent into it broke, or its files stopped matching ` +
+                    `SUBJECT_PATTERNS. Both leave every guard downstream reporting success over a directory it never opened, ` +
+                    `and the total-count floor above cannot see it once the repo root grows.`
+            ).not.toHaveLength(0);
+        }
 
         // Compare full repo-relative paths, never basenames. A basename match
         // would treat `some-dir/azure-pipelines.yml` as covered because the
