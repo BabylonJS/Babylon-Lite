@@ -29,6 +29,24 @@ export function hasMaskedSecret(line: string): boolean {
     return /(?:^|[\s"'=:])\*{3,}(?=[\s"']|$)/.test(code.slice(separator + 1));
 }
 
+/**
+ * True when a line interpolates a variable in any CI dialect this repo uses.
+ *
+ * The scope of this suite was widened to `.github/workflows/` before this
+ * predicate was: it recognised the Azure macro `$(X)` and the shell forms `$X`
+ * and `${X}`, but not `${{ secrets.X }}`, which is the *canonical* GitHub
+ * Actions reference. So the guard would have rejected a correct Actions header
+ * -- a misfire, on the one file class that was just added to its subject.
+ *
+ * It passed only because `compat-sync-trigger.yml` happens to use the shell
+ * form. Widening a collector does not widen the predicate that reads it, and an
+ * all-pass result on newly covered files is exactly what a dialect-blind
+ * predicate produces.
+ */
+export function interpolatesAVariable(line: string): boolean {
+    return /\$\{\{[^}]*[A-Za-z_][^}]*\}\}|\$[({]?[A-Za-z_]\w*[)}]?/.test(line);
+}
+
 interface PipelineFile {
     /** Path relative to the repo root, used in failure messages. */
     location: string;
@@ -105,6 +123,22 @@ describe("mask detection accepts and rejects the right lines", () => {
     });
 });
 
+describe("variable interpolation is recognised in every CI dialect", () => {
+    // Pinned as a population, not a specimen. Each row is a dialect this repo
+    // can contain; a predicate fitted to one of them reports a plausible count
+    // while being blind to a whole file class.
+    it.each([
+        ['-H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN }}"', true],
+        ['-H "Authorization: Bearer ${{ env.TOKEN }}"', true],
+        ['-H "Authorization: Bearer $(DEPLOY_TOKEN)"', true],
+        ['-H "Authorization: Basic ${AUTH}"', true],
+        ['-H "Authorization: Bearer ******"', false],
+        ['-H "Authorization: Bearer hunter2"', false],
+    ])("%s -> interpolates=%s", (line, expected) => {
+        expect(interpolatesAVariable(line as string)).toBe(expected);
+    });
+});
+
 describe("pipeline secret hygiene", () => {
     // Azure masks secret values in build logs as a run of asterisks. Copying a
     // command out of a log therefore yields a literal mask where the secret
@@ -148,7 +182,7 @@ describe("pipeline secret hygiene", () => {
         // The universal property: the header must interpolate *something*. A
         // copied mask is a bare literal, so this catches the bug in any CI
         // dialect, including files that legitimately never touch DEPLOY_TOKEN.
-        const literal = headers.filter(({ line }) => !/\$[({]?[A-Za-z_]\w*[)}]?/.test(line)).map(({ location, number }) => `${location}:${number}`);
+        const literal = headers.filter(({ line }) => !interpolatesAVariable(line)).map(({ location, number }) => `${location}:${number}`);
 
         expect(literal, "Authorization header interpolates no variable at all — this looks copied from a build log.").toEqual([]);
 
