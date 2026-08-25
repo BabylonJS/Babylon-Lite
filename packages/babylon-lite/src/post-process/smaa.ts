@@ -533,6 +533,17 @@ function ensureTarget(rt: RenderTarget, engine: EngineContext, width: number, he
     rt._eager = true;
 }
 
+/** Resolve the current source size, including an unbuilt target's descriptor. */
+function resolveSourceSize(source: RenderTarget): { width: number; height: number } {
+    if (source._width > 0 && source._height > 0) {
+        return { width: source._width, height: source._height };
+    }
+    const size = source._descriptor.size;
+    const width = "canvas" in size ? size.canvas.width : size.width;
+    const height = "canvas" in size ? size.canvas.height : size.height;
+    return { width: Math.max(1, width), height: Math.max(1, height) };
+}
+
 /** Hard ceiling on the pattern search, matching reference SMAA's maximum. The shader's loops
  *  terminate against this value, so a non-finite or absurd one is not merely a bad setting: with
  *  clamp-to-edge sampling an edge texel at the border repeats forever, and the loop never exits. */
@@ -733,10 +744,8 @@ export function createSmaaPostProcessTask(config: SmaaPostProcessTaskConfig, eng
             neighbourhood.viewport = task.viewport;
             neighbourhood.clear = task.clear;
             neighbourhood.alphaMode = task.alphaMode;
-
             const src = task.sourceTexture;
-            const w = src._width > 0 ? src._width : 1;
-            const h = src._height > 0 ? src._height : 1;
+            const { width: w, height: h } = resolveSourceSize(src);
             ensureTarget(edges, engine, w, h);
             ensureTarget(weights, engine, w, h);
             edgeDetect.record();

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target.js";
 import { createSmaaPostProcessTask } from "../../../packages/babylon-lite/src/post-process/smaa.js";
@@ -10,6 +10,27 @@ function createSource() {
         samples: 1,
         size: { width: 64, height: 32 },
     });
+}
+
+function createEngine(): EngineContext {
+    const device = {
+        createTexture: vi.fn(
+            () =>
+                ({
+                    createView: vi.fn(() => ({})),
+                    destroy: vi.fn(),
+                }) as unknown as GPUTexture
+        ),
+        createBuffer: vi.fn(() => ({ destroy: vi.fn() }) as unknown as GPUBuffer),
+        createBindGroupLayout: vi.fn((descriptor) => descriptor as GPUBindGroupLayout),
+        createPipelineLayout: vi.fn((descriptor) => descriptor as GPUPipelineLayout),
+        createShaderModule: vi.fn((descriptor) => descriptor as GPUShaderModule),
+        createRenderPipeline: vi.fn((descriptor) => descriptor as GPURenderPipeline),
+        createBindGroup: vi.fn((descriptor) => descriptor as GPUBindGroup),
+        createSampler: vi.fn((descriptor) => descriptor as GPUSampler),
+        queue: { writeBuffer: vi.fn() },
+    } as unknown as GPUDevice;
+    return { _device: device } as unknown as EngineContext;
 }
 
 describe("createSmaaPostProcessTask", () => {
@@ -38,6 +59,21 @@ describe("createSmaaPostProcessTask", () => {
             samples: 1,
         });
 
+        task.dispose();
+    });
+
+    it("sizes first-record intermediates from an unbuilt source descriptor", () => {
+        const source = createSource();
+        source._colorTexture = { createView: vi.fn(), destroy: vi.fn() } as unknown as GPUTexture;
+        source._colorView = {} as GPUTextureView;
+        const task = createSmaaPostProcessTask({ sourceTexture: source }, createEngine());
+
+        task.record();
+
+        expect(task.edgesTexture._width).toBe(64);
+        expect(task.edgesTexture._height).toBe(32);
+        expect(task.weightsTexture._width).toBe(64);
+        expect(task.weightsTexture._height).toBe(32);
         task.dispose();
     });
 
