@@ -143,12 +143,12 @@ describe("gltf-interleave", () => {
     it("materializes zero-initialized colors when another attribute is interleaved", async () => {
         const { json, binChunk, primitive } = makeInterleavedAsset();
         const colorIndex = json.accessors.length;
-        json.accessors.push({ componentType: FLOAT, count: 2, type: "VEC4" });
+        json.accessors.push({ componentType: FLOAT, count: 2, type: "VEC3" });
         (primitive.attributes as Record<string, number>).COLOR_0 = colorIndex;
 
         const partial = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
 
-        expect(Array.from(partial._colors!)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+        expect(Array.from(partial._colors!)).toEqual([0, 0, 0, 1, 0, 0, 0, 1]);
     });
 
     it("materializes zero-initialized normalized UVs when another attribute is interleaved", async () => {
