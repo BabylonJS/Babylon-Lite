@@ -601,15 +601,86 @@ describe("the deploy-token exemption is granted for its reason", () => {
         ).toEqual([]);
     });
 
+    it("keeps both halves of the repo-root predicates doing work", () => {
+        // The repo root is the only root whose `match` and `atLeast` are
+        // compound, and the pair exists so the clause about near-misses can ask
+        // for files that *look* collected and are not: `atLeast` is loose on
+        // the name, `match` is strict. Every control before this one mutated a
+        // predicate whole, and per-conjunct arms found that on today's tree
+        // each conjunction is carried by one half -- in opposite halves:
+        //
+        //   match loses startsWith("azure-pipelines")   77 passed, and the root
+        //                                               silently began collecting
+        //                                               pnpm-lock.yaml
+        //   atLeast loses isYamlFile                    77 passed
+        //
+        // Neither is decorative by design; both are decorative against this
+        // tree, because it contains no near-miss. It has no reason to -- nobody
+        // adds `ci-azure-pipelines.yml` to prove a guard works. So the
+        // separating cases are specimens here rather than files in the tree.
+        const root = PIPELINE_ROOTS.find(({ label }) => label === "");
+        expect(root, "the repo root is no longer among PIPELINE_ROOTS, so this pins nothing").toBeDefined();
+
+        const { match, atLeast } = root ?? { match: () => false, atLeast: () => false };
+        const cases: Array<[string, boolean, boolean, string]> = [
+            ["azure-pipelines.yml", true, true, "a real pipeline: both halves of both predicates"],
+            ["ci-azure-pipelines.yml", false, true, "the near-miss the pair exists to expose: named like a pipeline, not collected"],
+            ["azure-pipelines-notes.txt", false, false, "prefix without the extension: only isYamlFile separates it"],
+            ["pnpm-lock.yaml", false, false, "yaml at the root that is not a pipeline: only the name test separates it"],
+        ];
+
+        for (const [name, expectedMatch, expectedAtLeast, why] of cases) {
+            expect(match(name), `${name}: ${why} (match)`).toBe(expectedMatch);
+            expect(atLeast(name), `${name}: ${why} (atLeast)`).toBe(expectedAtLeast);
+        }
+
+        // The pair's whole purpose, stated as a property rather than left to
+        // the rows: atLeast must be strictly looser, or the near-miss clause is
+        // comparing a set against itself.
+        const looser = cases.filter(([name]) => atLeast(name) && !match(name));
+        expect(
+            looser.length,
+            "no specimen is accepted by atLeast and refused by match, so the two predicates are interchangeable and the near-miss clause below can never report anything"
+        ).toBeGreaterThan(0);
+    });
+
     it("has an exempt header to say that about", () => {
         // Without this the clause above passes on zero headers, which is the
         // state it would be in if the exempt root were emptied or the flag
         // stopped selecting anything -- indistinguishable from compliance.
+        //
+        // That second condition is the one this used to claim and not deliver.
+        // A bare `length > 0` is a presence floor, and both halves of the
+        // filter feeding it only ever *widen* the set, so deleting either is
+        // invisible: dropping `!requiresDeployToken` admits every header in the
+        // repo, dropping `isAuthorizationHeader` admits every line of the
+        // exempt file, and both mutations left 77 passing. The floor could see
+        // its subject become empty and never see it become the wrong subject.
+        //
+        // So assert the members rather than the count. Each property below is
+        // the observable contribution of one conjunct, which is what makes
+        // deleting that conjunct fail here.
         const exempt = pipelineLines().filter(({ requiresDeployToken, line }) => !requiresDeployToken && isAuthorizationHeader(line));
 
         expect(
             exempt.length,
             "no exempt Authorization header remains, so the clause above is asserting nothing. If the last one is genuinely gone, delete the exemption and the requiresDeployToken flag with it rather than keeping a branch nothing travels."
+        ).toBeGreaterThan(0);
+
+        const notHeaders = exempt.filter(({ line }) => !isAuthorizationHeader(line)).map(({ location, number }) => `${location}:${number}`);
+        expect(notHeaders, "the exempt set contains lines that are not Authorization headers, so it is no longer the set the clause above reasons about").toEqual([]);
+
+        const tokenRequiring = exempt.filter(({ requiresDeployToken }) => requiresDeployToken).map(({ location, number }) => `${location}:${number}`);
+        expect(tokenRequiring, "the exempt set contains headers from a root that does require DEPLOY_TOKEN, so the exemption flag is not what selected them").toEqual([]);
+
+        // And the distinction has to distinguish. If every header in the repo
+        // were exempt, `!requiresDeployToken` would be selecting everything and
+        // the flag would carry no information -- non-empty, correct in every
+        // member, and still vacuous.
+        const governed = pipelineLines().filter(({ requiresDeployToken, line }) => requiresDeployToken && isAuthorizationHeader(line));
+        expect(
+            governed.length,
+            "every Authorization header in the repo is exempt, so the DEPLOY_TOKEN convention governs nothing and the clause above is comparing a set against itself"
         ).toBeGreaterThan(0);
     });
 
@@ -813,6 +884,12 @@ describe("the credential walk enters the right directories", () => {
     it.each([
         ["config", true],
         [".github", true],
+        // The repo root's label. `component !== ""` in the reachability clause
+        // guards against this being false; that guard is redundant only for as
+        // long as this row holds, and deleting the guard is invisible without
+        // it. Pinned so the redundancy is a stated fact rather than a
+        // coincidence nothing measures.
+        ["", true],
         ["packages", true],
         ["node_modules", false],
         ["dist", false],
@@ -907,6 +984,10 @@ describe("the walk recognises every file kind the enumeration collects", () => {
         const blocked = configured.flatMap((label) =>
             label
                 .split("/")
+                // The empty component is the repo root's own label, which is not a
+                // directory to descend into. Redundant while isWalkableDir("") is
+                // true -- pinned in the fixture table above, because a per-conjunct
+                // arm showed removing this guard changes nothing today.
                 .filter((component) => component !== "" && !isWalkableDir(component))
                 .map((component) => `${label} (the walk stops at "${component}")`)
         );
