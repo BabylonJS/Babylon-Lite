@@ -146,6 +146,48 @@ export function isAuthorizationHeader(line: string): boolean {
 const DOCUMENTATION_KEY = /^(\s*)(?:-\s*)?(description|displayName|label|placeholder|title|summary)\s*:(.*)$/;
 
 /**
+ * True when `text` contains the unescaped close of a quoted scalar.
+ *
+ * Used at both ends -- deciding whether the opening line closes, and whether a
+ * continuation line closes -- so the two cannot disagree about where a scalar
+ * ends. They previously did: the opening test asked whether the value *ended*
+ * with the quote, the continuation test whether the line *contained* one. Two
+ * questions about the same thing, in one function, four lines apart.
+ *
+ * YAML escapes a quote inside a single-quoted scalar by doubling it, so an
+ * apostrophe reads as a close to any containment test. That is not exotica:
+ * `description:` is where English lives, and an apostrophe is ordinary English.
+ * Earlier fixtures used prose without contractions -- not a decision, just how
+ * the examples came out, which is what kept the hole invisible.
+ */
+export function closesQuotedScalar(text: string, quote: string): boolean {
+    for (let index = 0; index < text.length; index++) {
+        const character = text[index];
+
+        if (quote === '"') {
+            if (character === "\\") {
+                index++;
+                continue;
+            }
+            if (character === '"') {
+                return true;
+            }
+            continue;
+        }
+
+        if (character === "'") {
+            if (text[index + 1] === "'") {
+                index++;
+                continue;
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * Blanks documentation text, including block scalar bodies, before either
  * predicate reads a line.
  *
@@ -186,7 +228,7 @@ export function stripDocumentationText(content: string): string {
             if (line.trim() !== "" && indent <= quoteIndent) {
                 openQuote = null;
             } else {
-                if (line.includes(openQuote)) {
+                if (closesQuotedScalar(line, openQuote)) {
                     openQuote = null;
                 }
                 out.push("");
@@ -199,7 +241,7 @@ export function stripDocumentationText(content: string): string {
             const value = match[3].trim();
             if (/^[|>]/.test(value)) {
                 blockIndent = match[1].length;
-            } else if (/^["']/.test(value) && !(value.length > 1 && value.endsWith(value[0]))) {
+            } else if (/^["']/.test(value) && !closesQuotedScalar(value.slice(1), value[0])) {
                 // A quoted scalar that does not close on its own line continues
                 // onto the next. YAML folds those lines into a single string, so
                 // a `run:` or an `Authorization:` header inside one is prose by
@@ -445,6 +487,26 @@ describe("documentation text is not read as configuration", () => {
         expect(stripDocumentationText(line)).toBe(line);
     });
 
+    it.each([
+        ["plain close", "abc'", "'", true],
+        ["no close", "abc", "'", false],
+        // A doubled quote is an escaped apostrophe, not the end of the scalar.
+        // Ordinary English in the one key that holds English.
+        ["doubled quote is an escape", "it''s here", "'", false],
+        ["escape then real close", "it''s here'", "'", true],
+        ["backslash escape in double quotes", String.raw`say \" more`, String.raw`"`, false],
+        ["real close in double quotes", String.raw`say \" more"`, String.raw`"`, true],
+    ])("closesQuotedScalar: %s", (_label, text, quote, expected) => {
+        expect(closesQuotedScalar(text as string, quote as string)).toBe(expected);
+    });
+
+    it("stops the strip at a genuine close so real configuration is not blanked", () => {
+        // The direction that would be worse than the misfire: running on past
+        // the end of the scalar blanks live configuration and the suite stays
+        // green, because every count here is computed after the strip.
+        const text = ["      description: 'prose", "        ends here'", '      script: curl -H "Authorization: Bearer ******"'].join("\n");
+        expect(stripDocumentationText(text).split("\n")[2]).toContain("Authorization");
+    });
     it("blanks a quoted scalar that continues onto the next line", () => {
         // Settled by the key plus the quote, with no block scalar marker to
         // signal it. YAML folds these lines into one string, so a header
