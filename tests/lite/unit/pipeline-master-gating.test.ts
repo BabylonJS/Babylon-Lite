@@ -361,6 +361,20 @@ function canBuildPullRequests(text: string): boolean {
     return declared !== null && declared[1] !== "none";
 }
 
+/**
+ * True when a pipeline builds both master and pull requests.
+ *
+ * Named rather than written inline in the filter below, and that is the whole
+ * reason it exists: as an inline conjunction, deleting `canRunOnMaster` from it
+ * left all thirteen clauses green, and no test could reach the selection to say
+ * otherwise -- a counterfactual written against the two predicates still passes,
+ * because the predicates are not what the mutation edits. A conjunction that
+ * nothing can call is a conjunction nothing can control.
+ */
+function isDualContext(text: string): boolean {
+    return canRunOnMaster(text) && canBuildPullRequests(text);
+}
+
 type PipelineJob = { name: string; body: string; gated: boolean; hasOwnCondition: boolean };
 
 /**
@@ -488,7 +502,7 @@ function jobsIn(text: string): PipelineJob[] {
  */
 const dualContextPipelines = pipelineYamlFiles()
     .map((file) => ({ location: file.location, text: readFileSync(file.path, "utf8") }))
-    .filter((file) => canRunOnMaster(file.text) && canBuildPullRequests(file.text))
+    .filter((file) => isDualContext(file.text))
     .map((file) => ({ ...file, jobs: jobsIn(file.text) }));
 
 describe("pull-request jobs cannot run on a master build", () => {
@@ -529,9 +543,38 @@ describe("pull-request jobs cannot run on a master build", () => {
         ).toBe(false);
         expect(selected, "azure-pipelines-npm-publish.yml builds master only and never a pull request").not.toContain("azure-pipelines-npm-publish.yml");
         expect(
-            canRunOnMaster(publish) && canBuildPullRequests(publish.replace(/^pr:\s*none\s*$/m, "pr:\n  branches:\n    include:\n      - master")),
+            isDualContext(publish.replace(/^pr:\s*none\s*$/m, "pr:\n  branches:\n    include:\n      - master")),
             "the same file with a pull-request trigger must enter the subject; if it does not, this exclusion is by name rather than by mechanism and a future dual-context publish pipeline goes unguarded"
         ).toBe(true);
+
+        // The mirror, and it is the half that was missing. The counterfactual
+        // above moves a file *into* the subject by giving it the pull-request
+        // trigger it lacks, which exercises `canBuildPullRequests` and leaves
+        // `canRunOnMaster` untouched. Measured: deleting `canRunOnMaster` from
+        // the filter entirely left all thirteen clauses green, because every
+        // pipeline in this repository that builds pull requests also builds
+        // master -- the two conjuncts select the same files, so one of them was
+        // decoration that nothing could see.
+        //
+        // The repository cannot supply the specimen: a pipeline that builds
+        // pull requests and never builds master does not exist here, and adding
+        // one to make a guard testable is inventing infrastructure. So the
+        // specimen is the real file with its master trigger taken away, which
+        // is the change somebody would actually make -- turning this pipeline
+        // pull-request-only again is exactly the regression this PR exists to
+        // prevent, and it has to leave the subject when it happens.
+        const dual = readFileSync(join(repoRoot, "azure-pipelines.yml"), "utf8");
+
+        expect(canRunOnMaster(dual), "azure-pipelines.yml must build master, or this PR's change has been reverted").toBe(true);
+
+        const withoutMasterTrigger = dual.replace(/^trigger:[ \t]*$/m, "trigger: none");
+
+        expect(withoutMasterTrigger, "the trigger declaration did not change, so the counterfactual below is measuring the unmodified file").not.toBe(dual);
+        expect(
+            isDualContext(withoutMasterTrigger),
+            "azure-pipelines.yml stops building master and is still selected as a dual-context pipeline. The master half of the selection is then decoration: " +
+                "every clause below would keep demanding master gates on a pipeline that no longer builds master."
+        ).toBe(false);
     });
 
     it("gates every job that reads pull-request context", () => {
@@ -584,13 +627,32 @@ describe("pull-request jobs cannot run on a master build", () => {
         // no `condition:` to add -- the gate has to go on the caller, or the
         // step has to leave the template. Population is zero today; the clause
         // costs nothing until that stops being true.
-        const ungatable = dualContextPipelines.filter((file) => file.jobs.length === 0 && readsPullRequestContext(file.text)).map((file) => file.location);
+        //
+        // Zero population is also why both halves of the predicate were
+        // unfalsifiable -- deleting `readsPullRequestContext` from it left all
+        // thirteen clauses green, because the filter runs over nothing either
+        // way. So the predicate is named and exercised over specimens below,
+        // which is the only way a conjunction guarding an empty set can be
+        // controlled at all.
+        const isUngatable = (file: { jobs: PipelineJob[]; text: string }) => file.jobs.length === 0 && readsPullRequestContext(file.text);
+        const ungatable = dualContextPipelines.filter(isUngatable).map((file) => file.location);
 
         expect(
             ungatable,
             `these files read pull-request context but declare no job, so there is nowhere to put a master gate:\n  ${ungatable.join("\n  ")}\n` +
                 `Do NOT add a condition here -- gate the job that includes the template, or move the step out of it.`
         ).toEqual([]);
+
+        const prContextText = '          - job: X\n            steps:\n                - script: echo "$(System.PullRequest.PullRequestNumber)"\n';
+        const cases = [
+            { what: "no jobs and pull-request context: the case this clause exists for", jobs: [], text: prContextText, ungatable: true },
+            { what: "no jobs and no pull-request context: an ordinary template", jobs: [], text: "steps:\n  - script: echo hi\n", ungatable: false },
+            { what: "pull-request context inside a job, which the gating clause owns instead", jobs: jobsIn(prContextText), text: prContextText, ungatable: false },
+        ];
+
+        for (const one of cases) {
+            expect(isUngatable(one), `${one.what}: isUngatable should be ${one.ungatable}`).toBe(one.ungatable);
+        }
     });
 
     it("follows a template chain to its end rather than to a budget", () => {
@@ -742,6 +804,21 @@ describe("pull-request jobs cannot run on a master build", () => {
             },
             { what: "master only: pr trigger explicitly disabled", text: "trigger:\n  branches:\n    include:\n      - master\n\npr: none\n", master: true, pullRequest: false },
             { what: "master only: no pr trigger at all", text: "trigger:\n  branches:\n    include:\n      - master\n", master: true, pullRequest: false },
+            {
+                // The blank-line half of the block-end test, which nothing
+                // reached. Measured: dropping `line.trim() !== ""` from that
+                // findIndex left all thirteen clauses green, because every
+                // blank line in the real pipelines happens to sit *after* the
+                // branch list, where truncating early changes no answer. Move
+                // one line up -- ordinary formatting, valid YAML -- and the
+                // block is cut before `- master` is ever seen, so a pipeline
+                // that plainly builds master reads as not building it and
+                // silently leaves the subject.
+                what: "dual-context: a blank line inside the trigger block, before the branch it names",
+                text: "trigger:\n  branches:\n    include:\n\n      - master\n\npr:\n  branches:\n    include:\n      - master\n",
+                master: true,
+                pullRequest: true,
+            },
         ];
 
         for (const specimen of specimens) {
@@ -830,6 +907,23 @@ describe("pull-request jobs cannot run on a master build", () => {
             broken,
             `these files cannot parse as YAML, so Azure DevOps would reject them and every other clause here is reading a file that never runs:\n${broken.join("\n")}`
         ).toEqual([]);
+
+        // A specimen per skipped form, because the two block-scalar indicators
+        // are a disjunction and the tree exercises only one. Measured: deleting
+        // the `>` half left every clause green -- no folded scalar exists in
+        // any pipeline here, so that half was unfalsifiable, and the first
+        // `script: >` anybody writes would be reported as malformed YAML. A
+        // guard that fires on correct code gets deleted, which is the failure
+        // mode that matters more than the miss.
+        const scalars = [
+            { what: "a literal block scalar, which the tree does use", text: "steps:\n  - script: |\n      echo one\n      echo two\n", broken: false },
+            { what: "a folded block scalar, which the tree does not", text: "steps:\n  - script: >\n      echo one\n      echo two\n", broken: false },
+            { what: "a key with a plain value and a deeper line after it", text: "steps:\n  - script: echo one\n      echo two\n", broken: true },
+        ];
+
+        for (const scalar of scalars) {
+            expect(structureProblems(scalar.text).length > 0, `${scalar.what}: structureProblems should report ${scalar.broken ? "a problem" : "nothing"}`).toBe(scalar.broken);
+        }
     });
 
     it("pins the post-merge job set to the sentence documenting it", () => {
@@ -944,10 +1038,28 @@ describe("pull-request jobs cannot run on a master build", () => {
         // terms of it, so the one clause that binds has to be phrased outside.
         const { block } = deliberatelyExcludedFromMaster();
         const jobsByName = new Map(dualContextPipelines.flatMap((file) => file.jobs).map((job) => [job.name, job]));
-        const undocumented = COST_GATED_JOBS.filter((name) => {
-            const label = displayNameOf(jobsByName.get(name));
-            return label === undefined || !block.includes(label);
-        });
+
+        // One definition, used by the real check and by the specimens below.
+        // Written twice, the specimens would exercise a copy and the live
+        // predicate would stay exactly as unmeasured as it was.
+        const undocumentedFor = (names: string[]) =>
+            names.filter((name) => {
+                const label = displayNameOf(jobsByName.get(name));
+                // The `label === undefined` half is a type guard, not a
+                // behavioural branch: with it removed both arms return the same
+                // answer for every input, so no runtime arm can separate them
+                // and vitest reports thirteen passed. `tsc` rejects it outright
+                // -- TS2345, string | undefined where string is required.
+                //
+                // Which is this PR's own argument, arriving inside its own
+                // guard: the check that catches this is the typechecker, master
+                // does not currently run one, and a clause whose only possible
+                // control is `tsc` is exactly the kind of thing that rots
+                // unnoticed on a branch nothing validates.
+                return label === undefined || !block.includes(label);
+            });
+
+        const undocumented = undocumentedFor(COST_GATED_JOBS);
 
         expect(
             undocumented,
@@ -955,6 +1067,27 @@ describe("pull-request jobs cannot run on a master build", () => {
                 `Add each one's displayName, exactly as the pipeline spells it, to the "Deliberately excluded from master" list with the reason it is too slow or too flaky to run post-merge. ` +
                 `A job can leave post-merge validation -- it just cannot leave quietly, and this constant on its own is quiet.`
         ).toEqual([]);
+
+        // The predicate above runs zero times today, because COST_GATED_JOBS is
+        // empty -- so both of its halves were unfalsifiable, and deleting
+        // either one left all thirteen clauses green. An empty constant makes
+        // the clause vacuously true, which is a fair state for the constant to
+        // be in and *not* a fair state for the logic that reads it: the first
+        // entry anybody adds is the moment this has to work, and that is the
+        // worst moment to discover it never ran.
+        //
+        // So the halves are exercised over specimens instead. They are not
+        // hypothetical entries -- they are the two ways an entry goes wrong: a
+        // name that no job answers to, and a real job nobody documented.
+        const documented = [...jobsByName.keys()].find((name) => block.includes(displayNameOf(jobsByName.get(name)) ?? "\u0000"));
+
+        expect(documented, "no job in the pipeline is named in the excluded list, so neither specimen below can distinguish the halves").toBeDefined();
+
+        expect(undocumentedFor(["NoSuchJob"]), "a COST_GATED_JOBS entry naming no job at all must be reported, not skipped as 'nothing to check'").toEqual(["NoSuchJob"]);
+        expect(undocumentedFor(KNOWN_MASTER_JOBS), `a job master still runs is not in the excluded list, so recording it as cost-gated must be reported`).toEqual(
+            KNOWN_MASTER_JOBS
+        );
+        expect(undocumentedFor([documented as string]), "a job whose displayName is in the excluded list is documented and must not be reported").toEqual([]);
     });
 
     it("keeps the gated set and the pull-request set identical", () => {
