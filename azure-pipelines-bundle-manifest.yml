@@ -109,11 +109,22 @@ stages:
 
                       missing=0
 
-                      # DEPLOY_TOKEN is only checked for presence: a token may
-                      # legitimately contain characters the resolution check below
-                      # would flag, and its value must never be echoed.
-                      if test -z "${DEPLOY_TOKEN-}"; then
-                        echo "Required deploy variable DEPLOY_TOKEN is empty."
+                      # Build the literal ADO leaves behind for an unresolved macro
+                      # without writing a dollar-paren sequence anywhere in this
+                      # file: ADO would expand that itself before bash ever saw it,
+                      # and the comparison would then always be true.
+                      dollar='$'
+
+                      # DEPLOY_TOKEN is a secret, so it is checked differently from
+                      # the rest: its value is never echoed, and it is not matched
+                      # on a bare '$' because a token may legitimately contain one.
+                      # Comparing against its own unresolved macro is exact, so it
+                      # cannot false-positive on a valid token while still catching
+                      # a missing or misnamed variable -- which ADO would otherwise
+                      # hand us as a non-empty string that sails past a -z test.
+                      if test -z "${DEPLOY_TOKEN-}" ||
+                         test "${DEPLOY_TOKEN-}" = "${dollar}(DEPLOY_TOKEN)"; then
+                        echo "Required deploy variable DEPLOY_TOKEN is missing or did not resolve."
                         missing=1
                       fi
 
