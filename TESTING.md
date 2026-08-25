@@ -363,10 +363,14 @@ unchanged and the remaining cause looking disproven.
 actually asserts before relying on it, because each clause is narrower than the
 obvious phrasing, deliberately:
 
-- It rejects a **whole token of three or more asterisks in value position** —
-  not any asterisk run. `echo "a***b"` and `dist/**/*` are legitimate and must
-  keep passing; a guard that fails on correct code gets deleted rather than
-  debugged, and this invariant is one whose violation is invisible.
+- It rejects a **mask in value position for a credential** — an all-asterisk
+  token following an auth header, `token=`, `password:` or similar. Not any
+  asterisk run, and not any asterisk token either: `echo "a***b"`,
+  `dist/**/*` and log banners such as `displayName: "*** Publish ***"` are
+  legitimate and must keep passing. A guard that fails on correct code gets
+  deleted rather than debugged, and this invariant is one whose violation is
+  invisible. Forms carrying a credential with no separator (`curl -u`) are a
+  known gap.
 - Every `Authorization:` header must **interpolate some variable**. This is the
   universal clause and it holds in any CI dialect. The mask passed every earlier
   check precisely because it still resembled a header.

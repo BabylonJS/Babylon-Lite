@@ -20,13 +20,32 @@ export function hasMaskedSecret(line: string): boolean {
         return false;
     }
 
-    // A *whole token* of three or more asterisks, anywhere in the value. The
-    // first version anchored the run directly to the separator, so it matched
-    // `Authorization: ***` but not `Authorization: Bearer ***` -- and `Bearer`
-    // is the form 9 of this repo's 10 headers use. The bug was caught only
-    // because that one instance happened to omit it. Requiring a delimited,
-    // all-asterisk token is what keeps `echo "a***b"` and `dist/**/*` out.
-    return /(?:^|[\s"'=:])\*{3,}(?=[\s"']|$)/.test(code.slice(separator + 1));
+    // A credential-bearing key whose value has been replaced by a mask.
+    //
+    // Two defects were found here, in opposite directions. The first version
+    // anchored the asterisk run to the separator, so it matched the bare form
+    // but missed the `Bearer` form that 9 of this repo's 10 headers use -- a
+    // miss, found by drawing the mutation from the shapes the *bug* takes
+    // rather than from the one specimen on hand.
+    //
+    // Widening that to "a delimited all-asterisk token anywhere in the value"
+    // then flagged five shapes of *correct* code, because a decorative banner
+    // is an asterisk token in value position too:
+    //
+    //     displayName: "****** Publish bundle-size baseline ******"
+    //     - script: echo "*** building ${SCENE} ***"
+    //
+    // Neither is a secret and both are ordinary CI. That is the error
+    // direction that gets a guard deleted rather than debugged, and no fixture
+    // drawn from the bug could have exposed it -- it needs the shapes that
+    // correct code takes. So the mask must sit in *value position for a
+    // credential*, which is the invariant this guard actually has: a token
+    // copied out of a build log lands after an auth header or a secret
+    // assignment, never inside a log banner.
+    //
+    // Known gap, stated rather than implied: forms carrying the credential
+    // with no separator (`curl -u ******`) are not detected, and were not before.
+    return /(?:authorization|authenticate|token|secret|passw(?:or)?d|credential|api[-_]?key)["']?\s*[:=]\s*["']?(?:(?:bearer|basic|token)\s+)?\*{3,}(?=["'\s]|$)/i.test(code);
 }
 
 /**
@@ -118,6 +137,17 @@ describe("mask detection accepts and rejects the right lines", () => {
         ['-H "Authorization: Bearer ******"', true],
         ['-F "token=*******"', true],
         ["  password: ***", true],
+        // Correct code that a delimited-token rule flagged. Decorative
+        // asterisks are ordinary in CI, and the comment banner already in this
+        // table passed only because comments are stripped -- never because the
+        // predicate rejected it. These are the uncommented forms.
+        [`    displayName: "***** Publish bundle-size baseline *****"`, false],
+        [`      - script: echo "*** building ${"$"}{SCENE} ***"`, false],
+        [`      - script: echo "*** done"`, false],
+        [`    banner: "**********"`, false],
+        // A masked response header pasted from a build log: not a credential
+        // in the file, but the shape that gets copied, so it still fails.
+        [`WWW-Authenticate: ******"BabylonDeploymentServer"`, true],
     ])("%s -> masked=%s", (line, expected) => {
         expect(hasMaskedSecret(line as string)).toBe(expected);
     });
