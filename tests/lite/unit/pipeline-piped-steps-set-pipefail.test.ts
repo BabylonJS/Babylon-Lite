@@ -628,6 +628,20 @@ describe("the hygiene guards cover every pipeline in the repo", () => {
         // Verified rather than reasoned: with the descent disabled the count
         // floor does fire today (7 < 10). The named floors below are what keep
         // it firing after the repo grows.
+        //
+        // Both are kept because they fail on genuinely different things, and it
+        // is worth being exact about which, since "we have two floors" is the
+        // kind of claim that stops the next reader looking:
+        //
+        //   total only    root 7 -> 5, every step still non-empty. The named
+        //                 floors pass -- they ask "any", not "how many" -- and
+        //                 only the total notices the subject shrank.
+        //   named only    root grows to 10 while a whole descent is lost. The
+        //                 total is satisfied by the growth; only the named
+        //                 floor for that step notices.
+        //
+        // Neither subsumes the other, and a true collapse to zero trips all of
+        // them, which is the one case where the redundancy is real.
         expect(discovered.length, "no pipeline YAML discovered -- the walk or the step predicate is broken").toBeGreaterThanOrEqual(10);
 
         // A floor per traversal step, by name. Not an exact set: that would need
