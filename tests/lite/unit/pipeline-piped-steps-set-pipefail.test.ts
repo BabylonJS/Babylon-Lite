@@ -7,17 +7,26 @@ const repoRoot = join(__dirname, "..", "..", "..");
 interface ShellScript {
     location: string;
     body: string;
+    kind: "block" | "inline";
 }
 
 /**
- * Every inline shell script across every Azure pipeline, located by
- * `file:line` so a failure points straight at the block.
+ * Every shell script across every Azure pipeline -- both `script: |` block
+ * scalars and single-line `script: cmd` values -- located by `file:line` so a
+ * failure points straight at it.
+ *
+ * Both forms are collected on purpose. An earlier version of this file read
+ * only block scalars, which meant it silently ignored 68 single-line steps
+ * while claiming to cover "every inline pipeline script". It ran, it could
+ * fail, it tested a real property -- on two thirds of its stated subject.
+ * Verified at the time by injecting `- script: tsc --noEmit | sed s/x/y/`:
+ * the check passed. A guard aimed at the wrong subject is as quiet as one
+ * that cannot fail, and neither the file glob nor the block-count assertion
+ * could see it, because block scalars were plentiful and present.
  *
  * Deliberately line-based rather than YAML-parsed: `yaml` is not a direct
  * dependency of this package, and pulling one in for a hygiene test would
- * touch the lockfile. Block scalars are simple enough to read directly --
- * find a `script: |` / `bash: |` key, then consume everything indented
- * deeper than that key.
+ * touch the lockfile.
  */
 function shellScripts(): ShellScript[] {
     const files = readdirSync(repoRoot).filter((f) => /^azure-pipelines.*\.ya?ml$/.test(f));
@@ -32,11 +41,24 @@ function shellScripts(): ShellScript[] {
     for (const file of files) {
         const lines = readFileSync(join(repoRoot, file), "utf8").split("\n");
         for (let i = 0; i < lines.length; i++) {
-            const opener = /^(\s*)(?:-\s+)?(?:script|bash):\s*[|>][-+]?\s*$/.exec(lines[i] ?? "");
-            if (!opener) {
+            const key = /^(\s*)(?:-\s+)?(?:script|bash):(.*)$/.exec(lines[i] ?? "");
+            if (!key) {
                 continue;
             }
-            const indent = (opener[1] ?? "").length;
+            const indent = (key[1] ?? "").length;
+            const rest = (key[2] ?? "").trim();
+
+            // Single-line form. It cannot be split across lines, so whatever
+            // follows the key is the whole script.
+            if (rest && !/^[|>][-+]?$/.test(rest)) {
+                scripts.push({ location: `${file}:${i + 1}`, body: rest.replace(/^["']|["']$/g, ""), kind: "inline" });
+                continue;
+            }
+            if (!rest) {
+                continue;
+            }
+
+            // Block scalar: consume everything indented deeper than the key.
             const body: string[] = [];
             let j = i + 1;
             for (; j < lines.length; j++) {
@@ -50,16 +72,19 @@ function shellScripts(): ShellScript[] {
                 }
                 body.push(line);
             }
-            scripts.push({ location: `${file}:${i + 1}`, body: body.join("\n") });
+            scripts.push({ location: `${file}:${i + 1}`, body: body.join("\n"), kind: "block" });
             i = j - 1;
         }
     }
 
-    // Second vacuity guard, stronger than "> 0": if the block reader stops
-    // matching because the formatting shifts, the count collapses long before
-    // it reaches zero, and a handful of surviving blocks would still let the
-    // real assertion pass.
-    expect(scripts.length, "suspiciously few shell scripts parsed").toBeGreaterThan(20);
+    // One vacuity guard per collector, not one for the function. The single
+    // -line reader is the collector that was missing entirely last time, so
+    // it gets its own floor: if either form stops being recognised, that
+    // assertion fails loudly instead of the check quietly narrowing its
+    // subject. Both counts are well above these floors today (block ~40,
+    // inline ~68), so they trip on breakage rather than on normal churn.
+    expect(scripts.filter((s) => s.kind === "block").length, "suspiciously few block-scalar scripts parsed").toBeGreaterThan(20);
+    expect(scripts.filter((s) => s.kind === "inline").length, "suspiciously few single-line scripts parsed").toBeGreaterThan(20);
     return scripts;
 }
 
