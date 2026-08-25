@@ -83,8 +83,11 @@ export interface NodeParticleSet {
 
 /** Options for building a node-particle set. */
 export interface BuildNodeParticleOptions {
+    /** Emitter world position (translation-only emitter). Ignored when {@link BuildNodeParticleOptions.emitterWorldMatrix} is set. */
     emitter?: Vec3;
+    /** Emitter world matrix (translation + rotation + scale). Takes precedence over {@link BuildNodeParticleOptions.emitter}. */
     emitterWorldMatrix?: Mat4;
+    /** Base URL used to resolve relative texture URLs in the graph (mirrors BJS texture-base resolution). */
     textureBaseUrl?: string;
     /** @internal */
     _setupEmitter?: (state: NpeBuildState) => void;

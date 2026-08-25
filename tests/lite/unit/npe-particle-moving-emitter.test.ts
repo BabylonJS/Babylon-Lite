@@ -8,6 +8,8 @@ import movingLocalStates from "./fixtures/emitter-moving-local-states.json";
 import { SCENE262_NPE_JSON } from "../../../lab/lite/src/shared/scene262-npe";
 import { SCENE263_NPE_JSON } from "../../../lab/lite/src/shared/scene263-npe";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
+import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../../packages/babylon-lite/src/math/_matrix-allocator";
+import { allocateF64Mat4 } from "../../../packages/babylon-lite/src/math/_mat4-storage-f64";
 import { animateParticleSystem, startParticleSystem, stopParticleSystem, type ParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import { createParticleBillboard } from "../../../packages/babylon-lite/src/particle/particle-billboard";
 import { buildNodeParticleGraph, snapshotParticles } from "./particle-test-utils";
@@ -512,7 +514,7 @@ describe("NPE moving emitter transforms", () => {
         expect(system.buffer.alive).toBe(0);
     });
 
-    it("uses one coherent provider snapshot per started call across a multi-system set", async () => {
+    it("samples the provider exactly once per started animation call in a multi-system set", async () => {
         let providerCalls = 0;
         const set = await buildNodeParticleSet(
             {} as EngineContext,
@@ -608,6 +610,35 @@ describe("NPE moving emitter transforms", () => {
         expect(second.buffer.posX[0]).toBeCloseTo(7);
         expect(first.buffer.posX[0]).toBeCloseTo(1);
         expect(Array.from(staticMatrix)).toEqual(staticMatrixSnapshot);
+    });
+
+    it("preserves the eager sample when wrapping before high-precision engine setup", async () => {
+        _resetMatrixAllocatorForTests();
+        try {
+            const preciseTranslation = 4_637_862.01;
+            const providerMatrix = new Float64Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, preciseTranslation, 0, 0, 1]) as unknown as Mat4;
+            let providerCalls = 0;
+            const options = withNodeParticleEmitterProvider(() => {
+                providerCalls++;
+                return providerMatrix;
+            });
+            const setupEmitter = options._setupEmitter!;
+            let buildState: NpeBuildState | undefined;
+            options._setupEmitter = (state) => {
+                setupEmitter(state);
+                buildState = state;
+            };
+
+            _setHpmAllocator(allocateF64Mat4);
+            await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()), options);
+
+            expect(providerCalls).toBe(1);
+            expect(buildState!.emitterWorldMatrix).toBeInstanceOf(Float64Array);
+            expect(buildState!.emitterWorldMatrix[12]).toBe(preciseTranslation);
+            expect(buildState!.emitter.x).toBe(preciseTranslation);
+        } finally {
+            _resetMatrixAllocatorForTests();
+        }
     });
 
     it.each([

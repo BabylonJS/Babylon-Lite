@@ -14,35 +14,36 @@ const INVALID_PROVIDER_RESULT = "NodeParticle: emitter provider must return a fi
 /** Pure-state source sampled for the emitter world transform. */
 export type NodeParticleEmitterProvider = () => Mat4;
 
-function copyMatrix(source: Mat4, target: Mat4): void {
+function copyMatrix(source: ArrayLike<number>, target: Mat4): void {
     const output = target as unknown as Mat4Storage;
     for (let index = 0; index < 16; index++) {
         output[index] = source[index]!;
     }
 }
 
-function sampleProvider(provider: NodeParticleEmitterProvider, target: Mat4): void {
+function sampleProvider(provider: NodeParticleEmitterProvider): Mat4 {
     const provided = provider() as Mat4 | null | undefined;
     if (!provided || provided.length !== 16) {
         throw new Error(INVALID_PROVIDER_RESULT);
     }
-    const output = target as unknown as Mat4Storage;
     for (let index = 0; index < 16; index++) {
         const value = provided[index];
         if (!Number.isFinite(value)) {
             throw new Error(INVALID_PROVIDER_RESULT);
         }
-        output[index] = value!;
     }
+    return provided;
 }
 
-/** Return a provider-backed copy of options while preserving builder-specific option fields. */
+/**
+ * Return a provider-backed copy of options while preserving builder-specific option fields.
+ * Samples and validates the provider once before returning. The provider takes precedence over any `emitter` or `emitterWorldMatrix` in `options`; provider errors and invalid matrices throw synchronously.
+ */
 export function withNodeParticleEmitterProvider<T extends object = BuildNodeParticleOptions>(
     provider: NodeParticleEmitterProvider,
     options?: T & BuildNodeParticleOptions
 ): T & BuildNodeParticleOptions {
-    const initialMatrix = allocateMat4();
-    sampleProvider(provider, initialMatrix);
+    const initialMatrix = Array.from(sampleProvider(provider));
     return {
         ...options,
         _setupEmitter: (state: NpeBuildState): void => {
@@ -53,13 +54,13 @@ export function withNodeParticleEmitterProvider<T extends object = BuildNodePart
             state.emitterWorldMatrix = emitterWorldMatrix;
             state.emitterInverseWorldMatrices = emitterInverseWorldMatrices;
             copyMatrix(initialMatrix, emitterWorldMatrix);
-            mat4GetTranslationToRef(initialMatrix, emitter);
+            mat4GetTranslationToRef(emitterWorldMatrix, emitter);
 
             const nextMatrix = allocateMat4();
             let inverseScratch: Mat4 | undefined;
             const prepareFrame = system._prepareFrame;
             system._prepareFrame = () => {
-                sampleProvider(provider, nextMatrix);
+                copyMatrix(sampleProvider(provider), nextMatrix);
                 if (emitterInverseWorldMatrices.length) {
                     inverseScratch ??= allocateMat4();
                     mat4InvertToRefOrIdentity(nextMatrix, inverseScratch);
