@@ -134,9 +134,65 @@ export function isAuthorizationHeader(line: string): boolean {
     return /\bauthorization\s*:/i.test(line.replace(/(^|\s)#.*$/, ""));
 }
 
+/**
+ * Keys whose value is text shown to a human: never executed, never sent.
+ *
+ * `value` is deliberately absent. In an Azure Pipelines `variables:` block it
+ * holds a real value that may be a real secret; in a GitHub issue form it holds
+ * prose. The same key carries opposite provenance depending on the file it sits
+ * in, which is why documentation keys alone cannot settle this and issue
+ * templates are excluded by category instead.
+ */
+const DOCUMENTATION_KEY = /^(\s*)(?:-\s*)?(description|displayName|label|placeholder|title|summary)\s*:(.*)$/;
+
+/**
+ * Blanks documentation text, including block scalar bodies, before either
+ * predicate reads a line.
+ *
+ * Both clauses were reading prose as configuration. A `description:` explaining
+ * that a token "appears as Authorization: Bearer ******" is correct content in
+ * a file the guard must read, and it tripped the mask clause and the header
+ * selector at once -- the line was in scope, was collected, and matched
+ * correctly; it simply was not a header. Scope was never wrong, provenance was.
+ *
+ * Applied once, above both questions, for the reason the union fix taught: two
+ * predicates learning separately about what counts as configuration is how they
+ * drift into disagreeing about it.
+ *
+ * Line count is preserved so reported line numbers stay true.
+ */
+export function stripDocumentationText(content: string): string {
+    const out: string[] = [];
+    let blockIndent: number | null = null;
+
+    for (const line of content.split("\n")) {
+        if (blockIndent !== null) {
+            const indent = line.search(/\S/);
+            if (line.trim() === "" || indent > blockIndent) {
+                out.push("");
+                continue;
+            }
+            blockIndent = null;
+        }
+
+        const match = DOCUMENTATION_KEY.exec(line);
+        if (match) {
+            if (/^[|>]/.test(match[3].trim())) {
+                blockIndent = match[1].length;
+            }
+            out.push(`${match[1]}${match[2]}:`);
+            continue;
+        }
+
+        out.push(line);
+    }
+
+    return out.join("\n");
+}
+
 function pipelineLines(): { location: string; line: string; number: number; requiresDeployToken: boolean }[] {
     return pipelineFiles().flatMap((file) =>
-        readFileSync(file.path, "utf8")
+        stripDocumentationText(readFileSync(file.path, "utf8"))
             .split("\n")
             .map((line, index) => ({ location: file.location, line, number: index + 1, requiresDeployToken: file.requiresDeployToken }))
     );
@@ -287,7 +343,7 @@ describe("pipeline secret hygiene", () => {
  * now and only ever excludes test data.
  */
 export function isWalkableDir(name: string): boolean {
-    return !new Set(["node_modules", ".git", "dist", "build", "coverage", "out", ".turbo", "tests"]).has(name);
+    return !new Set(["node_modules", ".git", "dist", "build", "coverage", "out", ".turbo", "tests", "ISSUE_TEMPLATE"]).has(name);
 }
 
 /**
@@ -320,7 +376,7 @@ function allYamlCarryingACredentialShape(): string[] {
                 }
             } else if (
                 /\.ya?ml$/.test(name) &&
-                readFileSync(full, "utf8")
+                stripDocumentationText(readFileSync(full, "utf8"))
                     .split("\n")
                     .some((l) => isAuthorizationHeader(l) || hasMaskedSecret(l))
             ) {
@@ -332,6 +388,40 @@ function allYamlCarryingACredentialShape(): string[] {
 
     return found;
 }
+
+describe("documentation text is not read as configuration", () => {
+    // Both directions. Stripping too much is the dangerous side here: it
+    // silences the guard on real credentials, and every count in this file is
+    // computed downstream of it, so the inventory would agree with the loss.
+    it("blanks a documentation value that mentions a header", () => {
+        expect(stripDocumentationText("        description: 'shown as Authorization: Bearer ******'")).toBe("        description:");
+    });
+
+    it("blanks a block scalar body under a documentation key", () => {
+        const stripped = stripDocumentationText(["  placeholder: |", '    curl -H "Authorization: Bearer ******" x', "  next: keep"].join("\n"));
+        expect(stripped.split("\n")).toEqual(["  placeholder:", "", "  next: keep"]);
+    });
+
+    it("preserves line count so reported numbers stay true", () => {
+        const input = ["a: 1", "  description: |", "    body", "b: 2"].join("\n");
+        expect(stripDocumentationText(input).split("\n")).toHaveLength(4);
+    });
+
+    it("leaves a real credential in a script line alone", () => {
+        const line = '    - script: curl -H "Authorization: Bearer ******" https://x';
+        expect(stripDocumentationText(line)).toBe(line);
+    });
+
+    it("leaves an ADO variables value alone, where the same key is not prose", () => {
+        const line = "      - name: token\n        value: $(DEPLOY_TOKEN)";
+        expect(stripDocumentationText(line)).toBe(line);
+    });
+
+    it("ends the block at a dedent", () => {
+        const input = ["  description: |", "    prose", "  script: curl -H 'Authorization: Bearer ******'"].join("\n");
+        expect(stripDocumentationText(input).split("\n")[2]).toContain("Authorization");
+    });
+});
 
 describe("the credential walk enters the right directories", () => {
     // Both directions on the collector itself. A walk that silently stops
