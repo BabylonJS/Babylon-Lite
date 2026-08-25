@@ -158,17 +158,7 @@ export function goToFrame(group: AnimationGroup, frame: number, engine?: EngineC
  *  Returns one group per animation clip. */
 export function createAnimationGroups(animData: GltfAnimationData): AnimationGroup[] {
     const { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, nodeNames, boneOverrides } = animData;
-    const hasPointer = clips.some((c) => c.channels.some((ch) => ch.path === PATH_POINTER));
-    const hasNodeWriteback = clips.some((c) =>
-        c.channels.some(
-            (ch) =>
-                (ch.path === PATH_TRANSLATION || ch.path === PATH_ROTATION || ch.path === PATH_SCALE) &&
-                ch.nodeIdx >= 0 &&
-                !excludedNodeIndices.has(ch.nodeIdx) &&
-                !!nodeTargets[ch.nodeIdx]
-        )
-    );
-    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && !hasPointer && !hasNodeWriteback)) {
+    if (clips.length === 0) {
         return [];
     }
 

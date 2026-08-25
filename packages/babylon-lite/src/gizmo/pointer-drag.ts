@@ -278,8 +278,8 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
         }
     };
 
-    // Capture phase so we beat arc-rotate-controls (which uses bubble phase)
-    // for events that hit a gizmo collider.
+    // Capture phase marks the async pick as pending before the bubble-phase
+    // camera controls decide how to handle this gesture.
     canvas.addEventListener("pointerdown", onPointerDown, { capture: true });
     canvas.addEventListener("pointermove", onPointerMove, { capture: true });
     canvas.addEventListener("pointerup", onPointerUp, { capture: true });
@@ -349,9 +349,6 @@ async function handlePointerDown(state: DispatcherState, event: PointerEvent): P
         return;
     }
 
-    // Stop the camera controls from grabbing this gesture.
-    event.stopImmediatePropagation();
-    event.preventDefault();
     if ("setPointerCapture" in state.canvas) {
         try {
             state.canvas.setPointerCapture(event.pointerId);
