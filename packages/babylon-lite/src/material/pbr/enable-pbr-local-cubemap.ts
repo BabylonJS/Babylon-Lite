@@ -435,7 +435,9 @@ function measureProbeTextures(probes: readonly PbrLocalEnvironmentProbe[]): Prob
     const format = textures[0]!.format;
     const sourceMipOffsets = textures.map((texture) => {
         if ((texture.usage & TU.COPY_SRC) === 0) {
-            throw new Error("[babylon-lite] local probe cubemaps must be created with COPY_SRC usage");
+            throw new Error(
+                "[babylon-lite] local probe cubemaps require COPY_SRC usage; call enablePbrLocalCubemap() before loading DDS or HDR probe environments, or create custom probe textures with COPY_SRC"
+            );
         }
         if (texture.width !== texture.height || texture.depthOrArrayLayers !== 6 || texture.format !== format) {
             throw new Error("[babylon-lite] local probe cubemaps must be square six-face textures with one shared format");
@@ -603,7 +605,8 @@ export function setPbrLocalEnvironmentProbeDebug(set: PbrLocalEnvironmentProbeSe
 
 let _enabled: Promise<void> | null = null;
 
-/** Enable bounded single-probe projection and initialize fragment-weighted probe arrays. */
+/** Enable bounded single-probe projection and initialize fragment-weighted probe arrays.
+ * Call before loading any DDS or HDR environment that will be used as a probe. */
 export function enablePbrLocalCubemap(options: PbrLocalCubemapInitOptions = {}): Promise<void> {
     _initializePbrLocalCubemapLimits(options.maxCandidates);
     _enableDdsEnvironmentCopySource();

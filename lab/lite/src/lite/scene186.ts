@@ -252,12 +252,12 @@ async function main(): Promise<void> {
     }
     addToScene(scene, createHemisphericLight([0, 1, 0], 1.25));
 
+    await enablePbrLocalCubemap({ maxCandidates: 2 });
     const leftEnvironment = await loadEnvironment(scene, LEFT_ENV_URL, {
         brdfUrl: "/brdf-lut.png",
         skipGround: true,
         skipSkybox: true,
     });
-    await enablePbrLocalCubemap({ maxCandidates: 2 });
     const rightEnvironment = await loadEnvironment(scene, RIGHT_ENV_URL, {
         brdfUrl: "/brdf-lut.png",
         skipGround: true,

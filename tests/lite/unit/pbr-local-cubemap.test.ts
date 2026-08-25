@@ -815,7 +815,7 @@ describe("PBR local cubemap projection", () => {
                 ],
                 voxelGrid: { minimum: [-1, -1, -1], maximum: [1, 1, 1], cellSize: 2 },
             })
-        ).toThrow(/COPY_SRC usage/);
+        ).toThrow(/COPY_SRC usage; call enablePbrLocalCubemap\(\) before loading DDS or HDR probe environments/);
     });
 
     it("voxelizes yaw-oriented outer boxes and fills empty cells with a nearest fallback", () => {

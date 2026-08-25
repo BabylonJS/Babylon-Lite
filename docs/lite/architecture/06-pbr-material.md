@@ -333,9 +333,9 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
 
 ### `local-cubemap-fragment.ts` — Per-material and bounded local IBL (opt-in)
 
-- **Opt-in/init**: call `await enablePbrLocalCubemap({ maxCandidates })` before creating probe
-  sets or registering the scene. `maxCandidates` defaults to 4, accepts 1–12, and is fixed after
-  the first call.
+- **Opt-in/init**: call `await enablePbrLocalCubemap({ maxCandidates })` before loading any DDS or
+  HDR environment that will be used as a probe, creating probe sets, or registering the scene.
+  `maxCandidates` defaults to 4, accepts 1–12, and is fixed after the first call.
 - **Zero-cost default**: state, WGSL, resource packing, and binding logic are reachable only from
   `enable-pbr-local-cubemap.ts` and its dynamic fragment import. Ordinary PBR materials retain the
   existing IBL shader and bindings.
@@ -375,8 +375,10 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
   The destination uses the smallest dimension; larger sources contribute matching lower mips, so
   no resampling pass is required. The array uses the engine's deduplicated trilinear sampler rather
   than depending on any source environment's sampler identity. Source cubemaps must include
-  `COPY_SRC` usage; the built-in `.env`, DDS, and HDR environment loaders do, and unsupported custom
-  environments are rejected synchronously.
+  `COPY_SRC` usage. The built-in `.env` loader always includes it; DDS and HDR loaders include it
+  only for environments loaded after `enablePbrLocalCubemap()` is called. Environments loaded earlier
+  must be reloaded, and unsupported custom environments are rejected synchronously with the same
+  ordering requirement in the error.
 - **Shared probe UBO**: each probe occupies seven `vec4`s: projection centre/layer,
   projection half-size/LOD scale, capture position/LOD bias, inner influence centre/yaw cosine,
   inner half-size/yaw sine, outer influence centre, and outer half-size/packed metadata. The last
