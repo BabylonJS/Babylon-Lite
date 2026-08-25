@@ -105,6 +105,40 @@ function shellScripts(): ShellScript[] {
 }
 
 /**
+ * True when a script turns on `pipefail`, in any of the spellings that
+ * actually do so.
+ *
+ * The predicate this replaced required the option bundle to sit immediately
+ * after `set` and the line to end at `pipefail`, which accepted exactly the
+ * shape this repo happens to use -- `set -euo pipefail` -- and rejected four
+ * correct alternatives: `set -e -o pipefail`, `set -o pipefail -o errexit`,
+ * `set -o errexit -o pipefail` and a trailing semicolon. Every fixture written
+ * for it was a variation on the one specimen in the tree, so the fixture table
+ * could not reveal that; it was found by generating the shapes a shell author
+ * might plausibly write instead of the shape already present.
+ *
+ * That direction is the expensive one. A guard that flags correct code is one
+ * somebody deletes rather than debugs, and this guard protects an invariant
+ * whose violation is invisible in review.
+ *
+ * `set +o pipefail` is rejected on purpose: `+` *disables* an option, so a
+ * naive "the line mentions pipefail" rule would read an explicit disabling as
+ * a guard -- inverting the check exactly where it matters.
+ */
+export function enablesPipefail(script: string): boolean {
+    return script.split("\n").some((line) => {
+        // Strip a trailing comment before matching, so `set -euo pipefail # why`
+        // is recognised while a commented-out or merely described `set` line is
+        // not.
+        const code = (line.split("#")[0] ?? "").trim();
+        if (!/^set\s/.test(code) || !/\bpipefail\b/.test(code)) {
+            return false;
+        }
+        return !/\+[a-zA-Z]*o?\s*pipefail\b|\+o\s+pipefail\b/.test(code);
+    });
+}
+
+/**
  * True when the script's exit status can be decided by a pipeline rather than
  * by its last command. `||` is excluded because it is a boolean operator, not
  * a pipe, and comment lines are excluded so prose *about* pipes -- of which
@@ -154,17 +188,15 @@ describe("piped pipeline steps enable pipefail", () => {
         // away.
         expect(piped.length, "no piped scripts detected -- pipe detection is broken").toBeGreaterThan(0);
 
-        // Anchored to the start of a line so a *comment* mentioning
-        // `set -euo pipefail` -- of which this repo has several, including in
-        // this very file -- cannot satisfy the check. Verified: replacing a
-        // real guard with prose about it still fails.
+        // Anchored to a `set` command at the start of a line so a *comment*
+        // mentioning `set -euo pipefail` -- of which this repo has several,
+        // including in this very file -- cannot satisfy the check. Verified:
+        // replacing a real guard with prose about it still fails.
         //
-        // The trailing `(?:#.*)?` matters for a duller reason. Without it,
-        // `set -euo pipefail  # fail the step if tsc fails` was reported as
-        // unguarded -- a false positive on a perfectly correct script. A guard
-        // that misfires on valid code is one somebody eventually deletes
-        // rather than fixes, so precision here is what keeps it alive.
-        const unguarded = piped.filter((script) => !/^\s*set\s+-\S*o\S*\s+pipefail\s*(?:#.*)?$/m.test(script.body)).map((script) => script.location);
+        // See `enablesPipefail` for why this is no longer a single regex
+        // anchored to one option spelling. Both directions are pinned by the
+        // fixture table below.
+        const unguarded = piped.filter((script) => !enablesPipefail(script.body)).map((script) => script.location);
 
         expect(
             unguarded,
@@ -217,5 +249,46 @@ describe("the hygiene guards cover every pipeline in the repo", () => {
             `these files declare pipeline steps but sit outside SCANNED_ROOTS, so the guards in this file and in ` +
                 `pipeline-pr-comment-steps-guarded.test.ts silently ignore them. Add their directory to both:\n  ${unscanned.join("\n  ")}\n`
         ).toEqual([]);
+    });
+});
+
+describe("enablesPipefail recognises pipefail however it is spelled", () => {
+    // Both directions, pinned on the same input shape.
+    //
+    // These fixtures are deliberately *not* variations on the string this repo
+    // uses. Every earlier fixture here was, which is why they all passed while
+    // four correct spellings were being rejected: a table generated from the
+    // one specimen in the tree certifies the predicate against itself. The
+    // accept list is what a shell author might plausibly write instead; the
+    // reject list is what merely resembles a guard.
+    it.each([
+        ["set -euo pipefail", true],
+        ["set -eo pipefail", true],
+        ["set -euxo pipefail", true],
+        ["set -o pipefail", true],
+        ["set -euo pipefail  # fail the step if tsc fails", true],
+        ["set -e -o pipefail", true],
+        ["set -o pipefail -o errexit", true],
+        ["set -o errexit -o pipefail", true],
+        ["set -euo pipefail;", true],
+        ["  set -euo pipefail", true],
+        // `+o` *disables* the option. A "line mentions pipefail" rule reads
+        // this as a guard and inverts the check at the only point it matters.
+        ["set +o pipefail", false],
+        // Prose about the guard is not the guard. This is the failure this
+        // file was written to prevent, so it is pinned rather than assumed.
+        ["# set -euo pipefail", false],
+        ["# we deliberately do not set -euo pipefail here", false],
+        ["echo set -euo pipefail", false],
+        ["unset -o pipefail", false],
+        ["set -euo errexit", false],
+        ["", false],
+    ])("%j -> %s", (line, expected) => {
+        expect(enablesPipefail(line)).toBe(expected);
+    });
+
+    it("finds the guard anywhere in a multi-line script", () => {
+        expect(enablesPipefail("#!/usr/bin/env bash\nset -euo pipefail\ntsc --noEmit | sed s/x/y/")).toBe(true);
+        expect(enablesPipefail("#!/usr/bin/env bash\ntsc --noEmit | sed s/x/y/")).toBe(false);
     });
 });
