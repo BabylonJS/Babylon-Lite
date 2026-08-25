@@ -52,15 +52,15 @@ describe("Scene.pickWithRay", () => {
         expect(box.isPickable).toBe(true);
         box.isPickable = false;
         expect(scene.pickWithRay(ray).hit).toBe(false);
-        expect(scene.pickWithRay(ray, () => true).hit).toBe(false);
+        expect(scene.pickWithRay(ray, () => true).pickedMesh).toBe(box);
         box.isPickable = true;
         box.isVisible = false;
         expect(scene.pickWithRay(ray).hit).toBe(false);
-        expect(scene.pickWithRay(ray, () => true).hit).toBe(false);
+        expect(scene.pickWithRay(ray, () => true).pickedMesh).toBe(box);
         box.isVisible = true;
         box.setEnabled(false);
         expect(scene.pickWithRay(ray).hit).toBe(false);
-        expect(scene.pickWithRay(ray, () => true).hit).toBe(false);
+        expect(scene.pickWithRay(ray, () => true).pickedMesh).toBe(box);
     });
 
     it("preserves native Lite visibility and pickable eligibility", () => {
@@ -76,6 +76,7 @@ describe("Scene.pickWithRay", () => {
         expect(litePickMeshesWithRay([native], ray).hit).toBe(true);
         native.pickable = false;
         expect(litePickMeshesWithRay([native], ray, { predicate: () => true }).hit).toBe(false);
+        expect(litePickMeshesWithRay([native], ray, { predicate: () => true, skipPickableCheck: true }).pickedMesh).toBe(native);
     });
 
     it("canonically wraps native Lite meshes for predicates and results", () => {

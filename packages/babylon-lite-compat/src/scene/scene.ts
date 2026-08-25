@@ -870,8 +870,9 @@ export class Scene extends AbstractScene {
             {
                 predicate: (mesh) => {
                     const wrapper = wrappers.get(mesh);
-                    return !!wrapper && wrapper.isEnabled() && wrapper.isVisible && wrapper.isPickable && (!predicate || predicate(wrapper));
+                    return !!wrapper && (predicate ? predicate(wrapper) : wrapper.isEnabled() && wrapper.isVisible && wrapper.isPickable);
                 },
+                skipPickableCheck: !!predicate,
             }
         );
         return PickingInfo._fromLite(info, info.pickedMesh ? (wrappers.get(info.pickedMesh) ?? null) : null, ray);
