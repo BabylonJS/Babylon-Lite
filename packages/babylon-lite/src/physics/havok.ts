@@ -1150,6 +1150,14 @@ export function getPhysicsBodyLinearVelocity(world: PhysicsWorld, body: PhysicsB
 }
 
 /**
+ * Get a body's current angular velocity (rad/s).
+ */
+export function getPhysicsBodyAngularVelocity(world: PhysicsWorld, body: PhysicsBody): Vec3 {
+    const v = world._hknp.HP_Body_GetAngularVelocity(body._hkBody)[1];
+    return { x: v[0], y: v[1], z: v[2] };
+}
+
+/**
  * Set a body's angular velocity (rad/s).
  */
 export function setPhysicsBodyAngularVelocity(world: PhysicsWorld, body: PhysicsBody, velocity: Vec3): void {

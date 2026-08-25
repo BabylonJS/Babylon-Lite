@@ -110,6 +110,17 @@ export interface PbrMaterialProps extends Material {
     /** Separate occlusion texture sampled with UV2 when occlusionTexCoord=1.
      *  R channel is occlusion. When set, ORM.r is NOT used for occlusion. */
     occlusionTexture?: Texture2D;
+    /** Baked lightmap texture. Added to the shaded color by default, or multiplied
+     *  when `useLightmapAsShadowmap` is true. Set via {@link setPbrLightmap}. */
+    lightmapTexture?: Texture2D;
+    /** Lightmap intensity multiplier (Babylon.js `lightmapTexture.level`). Default 1.0. */
+    lightmapLevel?: number;
+    /** UV set sampled by the lightmap: 0 = TEXCOORD_0, 1 = TEXCOORD_1. Default 1. */
+    lightmapCoordIndex?: 0 | 1;
+    /** Multiply the shaded color by the lightmap instead of adding it. Default false. */
+    useLightmapAsShadowmap?: boolean;
+    /** Decode the sampled lightmap from sRGB to linear before composition. Default false. */
+    gammaLightmap?: boolean;
     /** @internal Scales dielectric F0 (default 1.0). Maps to BJS metallicF0Factor.
      *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
     _metallicF0Factor?: number;
