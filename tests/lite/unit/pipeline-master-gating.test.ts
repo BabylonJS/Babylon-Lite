@@ -900,6 +900,13 @@ describe("pull-request jobs cannot run on a master build", () => {
         ];
 
         expect(subjects.length, "no pipeline or template was read, so this clause is asking nothing of anything").toBeGreaterThan(0);
+        // Reached by starving both sources at once: strip the master trigger so
+        // no pipeline is dual-context, and leave config/templates present but
+        // holding no YAML. Six other clauses also fire in that state, which is
+        // why this one's contribution only shows at clause granularity --
+        // removing it takes this clause from failing to passing while the file
+        // stays red for unrelated reasons. A file-level red/green reading calls
+        // that decoration; it is not.
 
         const broken = subjects.flatMap((subject) => structureProblems(subject.text).map((problem) => `${subject.location}: ${problem}`));
 
@@ -958,6 +965,22 @@ describe("pull-request jobs cannot run on a master build", () => {
             `every job in the dual-context pipeline is gated off master, so a master build runs nothing and is green for it. ` +
                 `That is precisely the gap this pipeline's master trigger exists to close.`
         ).toBeGreaterThan(0);
+        // This floor looks like decoration under every cheap mutation and is
+        // not. Gate all three jobs and it fires -- alongside two neighbours
+        // firing for better reasons, so deleting it still leaves that arm red
+        // and tells you nothing. Its actual case is the honest end state, where
+        // every neighbour is legitimately satisfied: gate all three, record them
+        // in COST_GATED_JOBS, document them as excluded, empty KNOWN_MASTER_JOBS
+        // and reword the post-merge sentence to match. Six edits, each one
+        // resolving a real failure, every artifact in agreement, master
+        // validating nothing.
+        //
+        // With this line: 1 failed, and it is this one, alone.
+        // Without it:     13 passed.
+        //
+        // So it is the terminal assertion of the file -- the only one that
+        // survives full capitulation -- and no cheap arm can show that, because
+        // a floor's contribution is invisible until its neighbours are quiet.
 
         const byName = new Map(dualContextPipelines.flatMap((file) => file.jobs).map((job) => [job.name, job]));
         const expected = KNOWN_MASTER_JOBS.map((name) => displayNameOf(byName.get(name))).filter((label): label is string => label !== undefined);
