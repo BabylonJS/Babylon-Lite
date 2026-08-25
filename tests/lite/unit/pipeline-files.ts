@@ -109,6 +109,36 @@ export const SHELL_STEP_KEY = /^(\s*)(?:-\s+)?(?:script|bash|run):(.*)$/i;
 export const GITHUB_COMMENT_TASK = /^(\s*)-\s+task:\s*GitHubComment@0\s*$/i;
 
 /**
+ * True when the tree walk should descend into a directory.
+ *
+ * Extracted and pinned because it is the one input to discovery that no
+ * assertion downstream can check. The discovered-file count, the per-root
+ * floors and the coverage comparison are all *computed after* this decision, so
+ * a walk that quietly stops entering a directory produces a smaller inventory
+ * and a set of diagnostics in perfect agreement with it. Same property as
+ * {@link SHELL_STEP_KEY}, and it arrived the same way: the list was inherited
+ * wholesale while fixing something else and never questioned.
+ *
+ * `tests` is the entry that matters and it fixes a live misfire. A YAML fixture
+ * under `tests/` is *test data*, not CI configuration, and a fixture holding a
+ * deliberately unguarded step is correct code doing its job. Before this, such
+ * a file was discovered, reported as outside SCANNED_ROOTS, and the remediation
+ * string told the reader to add its directory to the roots -- at which point
+ * the pipefail guard would scan test fixtures and fail on the very step the
+ * fixture exists to hold. A false positive whose own advice deepens it,
+ * printed in the string that only ever renders to someone already confused.
+ *
+ * Measured rather than predicted, since a skip list is a *silent* exclusion and
+ * therefore the most expensive kind to get wrong: across all tracked YAML in
+ * the repo, no file matched by {@link SUBJECT_PATTERNS} sits under any skipped
+ * directory, and `tests/` holds no tracked YAML at all. The narrowing excludes
+ * nothing that exists.
+ */
+export function isWalkableDir(name: string): boolean {
+    return !["node_modules", ".git", "dist", "build", "coverage", ".vite", "lab", "tests"].includes(name);
+}
+
+/**
  * Every pattern any guard in this directory reads, and therefore the definition
  * of "a file the guards must be able to see".
  *
@@ -187,17 +217,15 @@ function matchesAnyLine(pattern: RegExp, text: string): boolean {
  * category.
  */
 export function pipelineFilesInRepo(): string[] {
-    const skip = new Set(["node_modules", ".git", "dist", "build", "coverage", ".vite", "lab"]);
     const found: string[] = [];
 
     const walk = (dir: string): void => {
         for (const entry of readdirSync(dir)) {
-            if (skip.has(entry)) {
-                continue;
-            }
             const full = join(dir, entry);
             if (statSync(full).isDirectory()) {
-                walk(full);
+                if (isWalkableDir(entry)) {
+                    walk(full);
+                }
                 continue;
             }
             if (!/\.ya?ml$/.test(entry)) {

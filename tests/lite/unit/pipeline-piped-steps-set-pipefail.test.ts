@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
-import { pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS, SHELL_STEP_KEY } from "./pipeline-files";
+import { isWalkableDir, pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS, SHELL_STEP_KEY } from "./pipeline-files";
 
 interface ShellScript {
     location: string;
@@ -293,6 +293,31 @@ describe("piped pipeline steps enable pipefail", () => {
             unguarded,
             `these scripts pipe a command but never 'set -euo pipefail', so a failure on the left of the pipe is silently discarded:\n  ${unguarded.join("\n  ")}\n`
         ).toEqual([]);
+    });
+});
+
+describe("the walk descends where the guards' subjects can live", () => {
+    // Pinned because a skip list is the only input to discovery that produces
+    // no observable signal when it is wrong: every count and every diagnostic
+    // in this file is computed downstream of it, so an over-broad entry makes
+    // the inventory smaller and leaves every assertion about it agreeing.
+    const skipped = ["node_modules", ".git", "dist", "build", "coverage", ".vite", "lab", "tests"];
+    const walked = [".github", "config", "workflows", "actions", "scripts", "src", "templates"];
+
+    it.each(skipped)("does not descend into %s", (name) => {
+        expect(isWalkableDir(name)).toBe(false);
+    });
+
+    it.each(walked)("descends into %s", (name) => {
+        expect(isWalkableDir(name)).toBe(true);
+    });
+
+    it("skips tests/ so a fixture holding an unguarded step is not reported as an uncovered pipeline", () => {
+        // The case that motivated the entry: correct code -- test data -- was
+        // discovered, named as out of scope, and the remediation string then
+        // advised adding its directory to SCANNED_ROOTS, which would point the
+        // pipefail guard at fixtures written to be unguarded.
+        expect(isWalkableDir("tests")).toBe(false);
     });
 });
 
