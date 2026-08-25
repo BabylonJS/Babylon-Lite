@@ -1786,13 +1786,28 @@ describe("the baseline pipeline validates its deploy configuration before doing 
     it("publishes the baseline to the path the reader fetches it from", () => {
         // The clause that supplies this file's missing side.
         //
-        // Measured, and it is the whole thesis of this PR capitulating: replace
-        // the publish step's script with a single `echo` and every other clause
-        // here stays green. So does drifting `baselineDeployPath`, dropping the
-        // `-F path=` field, renaming the file inside the archive, and uploading
-        // an empty zip. Six edits, six passes, and the pipeline reproduces the
-        // incident this branch exists to fix — thirty minutes of measurement
-        // followed by no baseline at the other end.
+        // Measured, and it is the whole thesis of this PR capitulating: drift
+        // `baselineDeployPath`, drop the `-F path=` field, rename the file
+        // inside the archive, upload an empty zip, or drift the reader's URL,
+        // and every other clause in the repository stays green while the
+        // pipeline reproduces the incident this branch exists to fix — thirty
+        // minutes of measurement followed by no baseline at the other end.
+        //
+        // One correction, because the first version of this comment claimed
+        // six such edits and there are five. Replacing this step's script with
+        // an `echo` IS caught, by two clauses in pipeline-secret-hygiene.test.ts
+        // — and for an unrelated reason: the `curl` disappears, its
+        // `Authorization:` header goes with it, and a guard that requires every
+        // such header to reference the deploy token has nothing left to check.
+        // The overlap is exactly "the curl vanished" and nothing wider, which
+        // the empty-zip arm demonstrates: it keeps the curl and the header,
+        // uploads `/dev/null`, and secret hygiene stays silent.
+        //
+        // That correction is the finding, not a footnote. The original sweep
+        // ran only this file and reported the `echo` arm as silent, because a
+        // mutation of a shared subject is only meaningfully silent when it is
+        // silent across every suite that reads it. This pipeline is read by at
+        // least two test files, so "silent here" was never the claim being made.
         //
         // Every one of those was invisible for the same reason: the pipeline was
         // on both sides of every comparison. `env:` blocks, step order, gate
