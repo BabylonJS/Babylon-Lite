@@ -148,6 +148,10 @@ Task 3 gap implementable.
       packages/babylon-lite-compat/COMPAT-STATUS.md | grep -oE '[0-9a-f]{40}')
     NEW_LITE_SHA=$(git rev-parse HEAD)
 
+    # The marker must be present and resolvable before it is used as a range end.
+    test -n "$LAST_LITE_SHA" && git cat-file -e "$LAST_LITE_SHA^{commit}" 2>/dev/null \
+      || { echo "Last synced Lite commit marker missing or unresolvable"; exit 1; }
+
     git log --oneline $LAST_LITE_SHA..$NEW_LITE_SHA -- packages/babylon-lite/src
     git diff --stat $LAST_LITE_SHA..$NEW_LITE_SHA -- packages/babylon-lite/src/index.ts
     ```
@@ -157,6 +161,12 @@ Task 3 gap implementable.
     trigger:** if a new Lite capability clears a blocker on a previously-skipped lab
     scene, drive that scene to parity. If no new Lite capability lands, Task 2 stays
     dormant.
+
+    **If that check fails, stop the sync and report it.** Do not guess a starting
+    point and do not carry on without one. An empty `LAST_LITE_SHA` leaves the range
+    as `..$NEW_LITE_SHA`, which git reads as `HEAD..HEAD` and answers with silence and
+    exit code 0 — so every Lite change since the last sync would be skipped with
+    nothing at all to show it happened.
 
     Do **not** derive this watermark from the history of `COMPAT-STATUS.md` itself.
     It is recorded as a marker _inside_ that file precisely so that editing the file
