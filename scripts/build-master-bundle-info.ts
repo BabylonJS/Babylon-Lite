@@ -71,7 +71,7 @@ async function main(): Promise<void> {
     });
     console.log(`Building master bundle info for ${scenes.length} scene(s) from ${ref}`);
 
-    writeMasterBundleManifest([ref]);
+    await writeMasterBundleManifest([ref]);
     extractRef(ref);
     rmSync(INFO_DIR, { recursive: true, force: true });
     mkdirSync(INFO_DIR, { recursive: true });

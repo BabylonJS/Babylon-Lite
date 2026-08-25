@@ -1,5 +1,5 @@
 import type { EngineContext } from "./engine.js";
-import { resizeEngine, startEngine, stopEngine } from "./engine.js";
+import { _getAdapterOptions, resizeEngine, startEngine, stopEngine } from "./engine.js";
 import { disposeGpuResourceRetirements } from "./gpu-resource-retirement.js";
 import { TU } from "./gpu-flags.js";
 import { _refreshScRT } from "./surface.js";
@@ -38,7 +38,9 @@ export async function runDeviceLostRecovery(engine: EngineContext, state: Device
     // order 0) would otherwise rebuild textures before a later one (scenes, order 100) drained.
     disposeGpuResourceRetirements(engine);
 
-    const adapter = await runRecoveryStep("requesting a replacement adapter", () => navigator.gpu.requestAdapter({ powerPreference: "high-performance" }));
+    // Reapply any installed adapter options (e.g. `xrCompatible` from `enableXrCompatibleAdapter`)
+    // so a recovered adapter keeps the XR-compatibility the original engine was created with.
+    const adapter = await runRecoveryStep("requesting a replacement adapter", () => navigator.gpu.requestAdapter({ powerPreference: "high-performance", ..._getAdapterOptions() }));
     if (!adapter) {
         throw new Error("WebGPU adapter not available during device recovery");
     }

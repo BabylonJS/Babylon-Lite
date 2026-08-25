@@ -194,6 +194,11 @@ export async function buildNodeParticleSetWithTextureUpdateRuntime(
         };
 
         await buildBlock(systemId);
+        system._emitter = {
+            emitter: state.emitter,
+            emitterWorldMatrix: state.emitterWorldMatrix,
+            emitterInverseWorldMatrices: state.emitterInverseWorldMatrices,
+        };
         systems.push(system);
     }
 

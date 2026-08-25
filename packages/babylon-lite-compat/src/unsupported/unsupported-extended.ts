@@ -147,29 +147,6 @@ export class PointsCloudSystem {
     }
 }
 
-// ─── Physics ─────────────────────────────────────────────────────────
-// Babylon Lite ships a Havok-V2 subset via `createHavokWorld` /
-// `createPhysicsAggregate` etc. `HavokPlugin` is wrapped (see
-// `src/physics/physics.ts`); the aggregate/body/shape class model is not wrapped
-// 1:1 — use the native physics functions against `plugin.world`.
-export class PhysicsAggregate {
-    public constructor() {
-        unsupported("PhysicsAggregate", "Use the native `createPhysicsAggregate` API instead of the Babylon.js PhysicsAggregate class.");
-    }
-}
-
-export class PhysicsBody {
-    public constructor() {
-        unsupported("PhysicsBody", "Use the native `createPhysicsBody` API.");
-    }
-}
-
-export class PhysicsShape {
-    public constructor() {
-        unsupported("PhysicsShape", "Use the native `createPhysicsShape` API.");
-    }
-}
-
 export class CannonJSPlugin {
     public constructor() {
         unsupported("CannonJSPlugin", "Babylon Lite physics is Havok-V2 only.");
