@@ -189,7 +189,10 @@ export interface HeadroomReport {
     /** Rendered markdown lines, empty when no scene has a ceiling to report against. */
     lines: string[];
     /**
-     * Whether this PR moved a scene that is now tight, critical, or over its ceiling.
+     * Whether this PR grew a scene that is now tight, critical, or over its ceiling.
+     *
+     * Growth specifically, not movement: a scene this PR shrank gained headroom and cannot have
+     * been pushed toward its ceiling by this PR, so it is not a reason to post.
      *
      * This is the signal that makes the comment worth posting on its own. Repo-wide tightness
      * deliberately does not count: it is true on almost every PR, so triggering on it would put

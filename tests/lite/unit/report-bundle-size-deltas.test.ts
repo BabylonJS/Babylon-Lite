@@ -277,6 +277,33 @@ describe("report-bundle-size-deltas", () => {
             expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]false");
         });
 
+        it("does not treat a scene absent from master as having grown by its whole size", () => {
+            // A scene added by this PR has no baseline to move from. If the null guard in
+            // computeMovedBytes were dropped, its delta would come out as its entire size, which
+            // would then read as the largest growth in the PR and, if the scene were tight, flag it
+            // as freshly pushed into the danger zone. Both claims would be false: a new scene did
+            // not "move", and its size is whatever it was authored at.
+            //
+            // This is live rather than hypothetical — scene186 was added to scene-config.json by
+            // #610 while this PR was open, and appeared in the current manifest before any baseline
+            // contained it. The behaviour is already correct; this pins it.
+            const result = runReporter({
+                current: {
+                    scene1: { rawKB: 49.9, rawBytes: 51100 },
+                    scene2: { rawKB: 97.7, rawBytes: 100000 },
+                },
+                master: { scene1: { rawKB: 49.9, rawBytes: 51100 } },
+                scenes: [
+                    { id: 1, slug: "scene1", name: "Scene 1 - Sphere", maxRawKB: 50 },
+                    { id: 2, slug: "scene2", name: "Scene 2 - Brand New", maxRawKB: 98 },
+                ],
+            });
+
+            // scene2 is 355 B from its ceiling, but this PR did not move it there.
+            expect(result.comment ?? "").not.toContain("sits under 1.0 KB of headroom");
+            expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]false");
+        });
+
         it("caps the uncollapsed block so it cannot become a wall of rows", () => {
             // Length must be bounded by the limit, not by how many scenes happen to qualify. The
             // same real-baseline run that exposed the direction bug also printed every qualifying
