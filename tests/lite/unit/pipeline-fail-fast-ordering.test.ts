@@ -458,6 +458,49 @@ function stepIndex(steps: string[], displayName: string): number {
     return index;
 }
 
+/**
+ * The shell body of a step's `script: |` block, with none of the YAML keys
+ * around it.
+ *
+ * `env:` entries are excluded by construction and that is the entire point: an
+ * `env:` block names variables, it does not check them, and a step that has been
+ * hollowed out keeps its `env:` block because that is the part that looks like
+ * configuration rather than like work. Measured — replacing this pipeline's
+ * check script with a single `echo`, one edit, left this file 10/10 green while
+ * reproducing the incident it exists to prevent.
+ *
+ * The two sides of the terminator are measured separately and only one of them
+ * is load-bearing here. The key side must count the `- ` of `- script: |` as
+ * structure, or the block runs on and swallows `displayName` and the whole
+ * `env:` block underneath it — the exact text whose absence is what makes the
+ * caller's check mean anything, and the caller floors it. The line side uses the
+ * raw indent because inside a block scalar a leading `- ` is literal text rather
+ * than a sequence marker; no step in this pipeline has a body line beginning
+ * with `- ` at the key's column, so no input here separates that choice from the
+ * other one. Recorded rather than defended with a contrived arm.
+ *
+ * Literal `|` only, not `[|>]`. No step here uses a folded `script: >` and a
+ * branch no input reaches is a branch nobody has checked; the caller floors the
+ * empty return instead, which gives an accurate message on the day someone
+ * writes one rather than a misleading one about variables going unmentioned.
+ */
+function shellBodyOf(step: string): string {
+    const lines = step.split("\n");
+    const at = lines.findIndex((l) => /^\s*(?:-\s*)?script:\s*\|/.test(l));
+    if (at === -1) {
+        return "";
+    }
+    const keyColumn = contentColumn(lines[at] ?? "");
+    const body: string[] = [];
+    for (const line of lines.slice(at + 1)) {
+        if (line.trim() && indentOf(line) <= keyColumn) {
+            break;
+        }
+        body.push(line);
+    }
+    return body.join("\n");
+}
+
 /** The `env:` keys a step block declares. */
 function envKeys(step: string): string[] {
     const lines = step.split("\n");
@@ -1004,6 +1047,51 @@ describe("the baseline pipeline validates its deploy configuration before doing 
             needed.filter((k) => !checked.includes(k)),
             `variables read by "${PUBLISH_STEP}" that "${PREFLIGHT_STEP}" does not check in ${pipelineFile}. Add them to the check's \`env:\` block and to the names it validates, so a missing one fails in seconds rather than after the scenes are measured. If one of them is genuinely optional, wiring it into the check would make it required — say so where the check validates its names, and give this guard a reason to stop demanding it, rather than deleting the guard.`
         ).toEqual([]);
+
+        // Being first is not the same as checking. Every arm this file has ever
+        // run pushes the check later or the expensive work earlier, because that
+        // is the direction it was written to defend; nothing tested the check
+        // standing exactly where it belongs and validating nothing.
+        //
+        // Measured, and it is worse than a capitulation: replacing this step's
+        // script with a single `echo` is ONE edit, needs no other artifact to
+        // agree, and left this file 10/10 green while the pipeline reproduced
+        // the original incident — thirty minutes of scene measurement, then a
+        // publish failing on a variable that never resolved. Nothing else in the
+        // tree describes what this script does, so there was no second side to
+        // contradict it. The `env:` block above is not evidence of a check; it
+        // is what a check leaves behind when someone deletes the checking.
+        const script = shellBodyOf(steps[stepIndex(steps, PREFLIGHT_STEP)] ?? "");
+
+        // Floor the derived region from both ends. An empty body makes every
+        // variable read as unmentioned, and a body that ran past its block would
+        // swallow the `env:` declarations underneath it and make the check below
+        // vacuous in the other direction -- it would find every name, in the very
+        // lines whose presence proves nothing.
+        expect(
+            script.trim(),
+            `found no \`script: |\` body in "${PREFLIGHT_STEP}" — if it became a task or a folded block, re-point \`shellBodyOf\` rather than letting this clause read an empty string`
+        ).not.toBe("");
+        expect(
+            script,
+            `\`shellBodyOf\` ran past the end of the script block and pulled in the step's \`env:\` declarations, which would satisfy the check below with the wrong lines`
+        ).not.toMatch(/^\s*env:\s*$/m);
+
+        const unread = needed.filter((k) => !script.includes(k));
+
+        expect(
+            unread,
+            `"${PREFLIGHT_STEP}" declares these variables in its \`env:\` block but never mentions them in its script, so nothing establishes that they resolved: ${unread.join(", ")}. Listing a variable is not checking it — the failure this step exists to prevent is a name that arrives empty and is not noticed until "${PUBLISH_STEP}" uses it.`
+        ).toEqual([]);
+
+        // ...and the script has to be able to fail. The names check is satisfied
+        // by a script that merely logs each variable, which is the next
+        // simplification down and the one that looks most like diagnostics while
+        // being none.
+        expect(
+            /\bexit\s+[1-9]/.test(script),
+            `"${PREFLIGHT_STEP}" has no failing exit, so it cannot stop the build no matter what it finds. If the failure path is expressed some other way — \`set -e\` and a command that returns non-zero — re-point this assertion at that, but do not remove it: a check that cannot fail is the thirty-minute build this pipeline has already shipped once.`
+        ).toBe(true);
 
         // Residual, stated rather than implied. Every variable the publish step
         // reads today is required, so "checked" and "required" coincide and this
