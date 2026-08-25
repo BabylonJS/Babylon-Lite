@@ -155,8 +155,30 @@ function formatSignedBytes(bytes: number): string {
     return bytes > 0 ? `+${formatBytes(bytes)}` : formatBytes(bytes);
 }
 
+/**
+ * Decimal places shared by the size and ceiling columns of the headroom tables.
+ *
+ * These two columns MUST render at the same precision, and the reason is a correctness one rather
+ * than a cosmetic one. Ceilings are authored as free-form decimals in `scene-config.json` (`16.56`,
+ * `103.4`, `39.1`), so printing the ceiling verbatim while rounding the measured size to one decimal
+ * compares two numbers at different precisions — and rounding is only order-preserving between
+ * values rounded the *same* way. The real case that exposed it: `scene117` measures 16948 B against a
+ * 16.56 KB ceiling and is 9 B *under*, yet rendered as `16.6 KB` vs `16.56 KB`, which reads as
+ * already over. A reporter whose job is to flag scenes near their ceiling must never make a
+ * compliant scene look breaching; that is the one misread that would send an author chasing bytes
+ * they do not owe. Rounding both sides identically restores monotonicity — if size < ceiling then
+ * the rendered size can never exceed the rendered ceiling, at worst tying — and the exact remaining
+ * bytes live in their own column, so a tie is never ambiguous.
+ */
+const KB_DECIMALS = 2;
+
 function formatSizeKB(bytes: number): string {
-    return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024).toFixed(KB_DECIMALS)} KB`;
+}
+
+/** Ceilings come from config as raw decimals; render them at {@link KB_DECIMALS} to match sizes. */
+function formatCeilingKB(ceilingKB: number): string {
+    return `${ceilingKB.toFixed(KB_DECIMALS)} KB`;
 }
 
 function pluralizeScenes(count: number): string {
@@ -205,7 +227,7 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     const lines = ["### Ceiling headroom", ""];
 
     if (movedAndOver.length > 0) {
-        const named = movedAndOver.map((s) => `\`${s.scene}\` (+${formatBytes(s.headroomBytes)} over its ${s.ceilingKB} KB ceiling)`);
+        const named = movedAndOver.map((s) => `\`${s.scene}\` (+${formatBytes(s.headroomBytes)} over its ${formatCeilingKB(s.ceilingKB)} ceiling)`);
         const verb = movedAndOver.length === 1 ? "now exceeds its ceiling" : "now exceed their ceiling";
         lines.push(`🚨 **${pluralizeScenes(movedAndOver.length)} this PR moved ${verb}:** ${named.join(", ")}`);
         lines.push("");
@@ -218,7 +240,9 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
         lines.push("|-------|------|---------|----------|-----------|");
         for (const scene of movedAndTight) {
             const delta = formatSignedBytes(movedBytes.get(scene.scene) ?? 0);
-            lines.push(`| ${sceneLabel(scene)} | ${formatSizeKB(scene.measuredBytes)} | ${scene.ceilingKB} KB | **${formatBytes(scene.headroomBytes)}** | ${delta} |`);
+            lines.push(
+                `| ${sceneLabel(scene)} | ${formatSizeKB(scene.measuredBytes)} | ${formatCeilingKB(scene.ceilingKB)} | **${formatBytes(scene.headroomBytes)}** | ${delta} |`
+            );
         }
         lines.push("");
     }
@@ -231,7 +255,7 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     lines.push("|-------|------|---------|----------|");
     for (const scene of under.slice(0, HEADROOM_LIST_LIMIT)) {
         const moved = movedBytes.has(scene.scene) ? " ⬅ moved by this PR" : "";
-        lines.push(`| ${sceneLabel(scene)}${moved} | ${formatSizeKB(scene.measuredBytes)} | ${scene.ceilingKB} KB | ${formatBytes(scene.headroomBytes)} |`);
+        lines.push(`| ${sceneLabel(scene)}${moved} | ${formatSizeKB(scene.measuredBytes)} | ${formatCeilingKB(scene.ceilingKB)} | ${formatBytes(scene.headroomBytes)} |`);
     }
     lines.push("");
     lines.push("</details>");

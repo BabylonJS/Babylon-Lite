@@ -142,10 +142,10 @@ describe("report-bundle-size-deltas", () => {
             expect(comment).toContain("### Ceiling headroom");
             expect(comment).toContain("⚠️ **1 scene this PR moved sits under 1.0 KB of headroom.**");
             expect(comment).toContain("| Scene | Size | Ceiling | Headroom | Δ this PR |");
-            expect(comment).toContain("Scene 2 - Sphere<br/>`scene2` | 49.9 KB | 50 KB | **100 B** | +400 B");
+            expect(comment).toContain("Scene 2 - Sphere<br/>`scene2` | 49.90 KB | 50.00 KB | **100 B** | +400 B");
             // scene3 is tight too, but this PR did not touch it — it belongs in the collapsed
             // repo-wide list, not in the actionable block.
-            expect(comment).not.toContain("Scene 3 - Grid<br/>`scene3` | 39.6 KB | 40 KB | **460 B**");
+            expect(comment).not.toContain("Scene 3 - Grid<br/>`scene3` | 39.55 KB | 40.00 KB | **460 B**");
         });
 
         it("reports movement the rounded delta table cannot show", () => {
@@ -161,8 +161,8 @@ describe("report-bundle-size-deltas", () => {
 
             expect(comment).toContain("<details>");
             expect(comment).toContain("<summary>Tightest scenes repo-wide — 2 of 3 under 1.0 KB, 1 under 256 B</summary>");
-            expect(comment).toContain("Scene 2 - Sphere<br/>`scene2` ⬅ moved by this PR | 49.9 KB | 50 KB | 100 B |");
-            expect(comment).toContain("Scene 3 - Grid<br/>`scene3` | 39.6 KB | 40 KB | 460 B |");
+            expect(comment).toContain("Scene 2 - Sphere<br/>`scene2` ⬅ moved by this PR | 49.90 KB | 50.00 KB | 100 B |");
+            expect(comment).toContain("Scene 3 - Grid<br/>`scene3` | 39.55 KB | 40.00 KB | 460 B |");
             // Tightest first.
             expect(comment.indexOf("`scene2` ⬅")).toBeLessThan(comment.indexOf("`scene3` |"));
         });
@@ -178,7 +178,7 @@ describe("report-bundle-size-deltas", () => {
                     ],
                 }).comment ?? "";
 
-            expect(comment).toContain("🚨 **1 scene this PR moved now exceeds its ceiling:** `scene2` (+312 B over its 50 KB ceiling)");
+            expect(comment).toContain("🚨 **1 scene this PR moved now exceeds its ceiling:** `scene2` (+312 B over its 50.00 KB ceiling)");
         });
 
         it("omits the headroom section for scenes that opt out of the ceiling check", () => {
@@ -218,7 +218,7 @@ describe("report-bundle-size-deltas", () => {
             expect(comment).not.toContain("### Decreases");
             expect(comment).toContain("### Ceiling headroom");
             expect(comment).toContain("⚠️ **1 scene this PR moved sits under 1.0 KB of headroom.**");
-            expect(comment).toContain("Scene 2 - Sphere<br/>`scene2` | 49.9 KB | 50 KB | **100 B** | +400 B");
+            expect(comment).toContain("Scene 2 - Sphere<br/>`scene2` | 49.90 KB | 50.00 KB | **100 B** | +400 B");
             // scene1 moved by 100 B too, but it has 2400 B of room — not a reason to warn.
             expect(comment).not.toContain("Scene 1 - BoomBox PBR<br/>`scene1` | 97.7 KB");
         });
@@ -231,7 +231,28 @@ describe("report-bundle-size-deltas", () => {
             });
 
             expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]true");
-            expect(result.comment).toContain("🚨 **1 scene this PR moved now exceeds its ceiling:** `scene1` (+312 B over its 50 KB ceiling)");
+            expect(result.comment).toContain("🚨 **1 scene this PR moved now exceeds its ceiling:** `scene1` (+312 B over its 50.00 KB ceiling)");
+        });
+
+        it("never renders a compliant scene as if it were over its ceiling (precision monotonicity)", () => {
+            // Regression guard for a misread found by rendering the real published baseline rather
+            // than a fixture. `scene117` measures 16948 B against a 16.56 KB ceiling and is 9 B
+            // UNDER it, but the size column rounded to one decimal while the ceiling printed
+            // verbatim from config, giving "16.6 KB" vs "16.56 KB" — a scene that is passing,
+            // displayed as breaching.
+            //
+            // Comparing at two precisions is what breaks it: rounding only preserves order between
+            // values rounded the same way. This asserts the rendered pair, not the formatter, so it
+            // still fails if someone reintroduces the mismatch through a different code path.
+            const result = runReporter({
+                current: { scene117: { rawKB: 16.6, rawBytes: 16948 } },
+                master: { scene117: { rawKB: 16.4, rawBytes: 16800 } },
+                scenes: [{ id: 117, slug: "scene117", name: "Scene 117 — 2D Sprite Picking", maxRawKB: 16.56 }],
+            });
+
+            expect(result.comment).toContain("| 16.55 KB | 16.56 KB |");
+            expect(result.comment).toContain("**9 B**");
+            expect(result.comment).not.toContain("16.6 KB | 16.56 KB");
         });
 
         it("stays silent when tight scenes this PR did not move are the only tight scenes (noise bound — do not remove)", () => {
