@@ -29,7 +29,7 @@ function templateMatches(template: string): string[] {
 }
 
 function serializeValue(value: FgValue): string {
-    if (value === null || value === undefined) {
+    if (value === null) {
         return String(value);
     }
     if (typeof value === "object") {

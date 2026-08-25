@@ -105,7 +105,7 @@ export function coerceValue(value: FgValue, target: FgType): FgValue {
  *  glTF `useSlerp` targets force this so interpolation runs as slerp. */
 function toQuaternion(value: FgValue): FgValue {
     // A Vec4 already has x,y,z,w — reinterpret as a quaternion directly.
-    if (typeof value === "object" && value !== null && "w" in value && "x" in value && "y" in value && "z" in value) {
+    if (value && typeof value === "object" && "w" in value && "x" in value && "y" in value && "z" in value) {
         const v = value as Vec4;
         return { x: v.x, y: v.y, z: v.z, w: v.w } as Quat;
     }
