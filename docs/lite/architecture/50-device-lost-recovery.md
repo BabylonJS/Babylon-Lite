@@ -267,24 +267,27 @@ recovery. Both paths call the same tracking function.
 Ownership and release are two separate questions, and recovery asks them
 separately because the answers differ per kind.
 
-Ownership is restored exactly as the creator established it. `createTexture2D`,
-`createTexture2DFromPixels`, and `createRenderTexture2D` each `acquireTexture`
-the texture they return, and a replacement `GPUTexture` starts unowned, so
-recovery takes that reference again — without it the first consumer to bind and
-then unbind a rebuilt texture destroys it while the application still holds the
-wrapper. `createSolidTexture2D` and the glTF `uploadTex` path take no such
-reference and recovery takes none for them. `createDynamicTexture` does take
-one, but its own rebuild module restores it, so recovery re-acquiring as well
-would double it. Adopting wrappers take none either, exactly as `cloneTexture2D`
-takes none at creation: they share the reference held for the texture they now
-point at.
+Ownership is carried onto the replacement rather than re-established from the
+kind. A rebuilt `GPUTexture` starts unowned, so recovery reads how many owners
+the outgoing texture had and tops the replacement up to that number. Without it
+the first consumer to bind and then unbind a rebuilt texture destroys it while
+the application still holds the wrapper. It is a count rather than a single
+re-acquire for two reasons. A derived family can hold several references to one
+texture — `cloneTexture2D` leaves that pairing to the caller — and restoring
+only the creator's would bring the replacement back short, so the next release
+would destroy a texture a sibling still points at. And the dynamic-texture
+rebuild takes its own reference, which a top-up counts rather than doubles.
+Kinds whose creator never acquired, `createSolidTexture2D` and the glTF
+`uploadTex` path, have no ownership to carry and get none. Wrappers that adopt
+take none either, exactly as `cloneTexture2D` takes none at creation: they share
+the references held for the texture they now point at.
 
 Whether a texture has been *released* is asked of every kind, because every kind
 can reach that state — `releaseTexture` is public API, and its first call
 destroys a texture whose creator took no reference of its own. Rebuilding a
 destroyed texture hands a live one back to a wrapper the application has
-finished with, and for the kinds recovery re-owns, takes a reference nothing
-will ever release. Recovery therefore skips it.
+finished with, and for a texture that had owners, takes references nothing will
+ever release. Recovery therefore skips it.
 
 That question is answered by the ref-count map, which distinguishes three
 states: no entry means nothing ever took ownership, a positive count means the
@@ -364,8 +367,10 @@ module-level side effects; mutable caches remain null until an explicit call.
   own sampler), a single shared rebuild leaving every wrapper on the same
   texture/view/sampler, skipping a released texture across every recoverable
   kind — both a single wrapper and a family whose clone performed the final
-  release — still rebuilding an ownerless texture nothing has released, and each
-  creator-owned kind surviving one consumer acquire/release cycle.
+  release — still rebuilding an ownerless texture nothing has released, each
+  creator-owned kind surviving one consumer acquire/release cycle, a derived
+  family's second reference surviving the rebuild, and the dynamic rebuild's own
+  reference being counted rather than doubled.
 - Scene recovery unit tests replace the device under an ESM shadow generator
   and assert that its textures, sampler, UBOs, hidden blur resources, and nested
   render task are recreated while the generator identity remains stable and the

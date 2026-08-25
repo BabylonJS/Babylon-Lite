@@ -60,6 +60,14 @@ export function _isTextureReleased(tex: Texture2D): boolean {
     return texRefs().get(tex.texture) === 0;
 }
 
+/** How many owners hold a Texture2D's current GPUTexture; 0 when nothing does. Read by device-lost
+ *  recovery to carry the outgoing texture's ownership onto its replacement — the count, not just
+ *  the fact of it, because a derived family can hold several references to one texture.
+ *  @internal */
+export function _textureOwners(tex: Texture2D): number {
+    return texRefs().get(tex.texture) ?? 0;
+}
+
 /** Increment ref count on a raw GPUTexture (for env textures). */
 export function acquireGPUTexture(tex: GPUTexture): void {
     const m = texRefs();

@@ -706,6 +706,49 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         });
     }
 
+    it("carries every reference a derived family held onto the rebuilt texture", async () => {
+        // `cloneTexture2D` leaves acquire/release pairing to the caller, so a family can hold more
+        // than one reference to its single GPU texture. Restoring only the creator's would bring the
+        // replacement back short: the application still owes the releases it took out before the
+        // loss, and the first of them would destroy the texture while a sibling still points at it.
+        const engine = trackingEngine();
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const base = sourceTexture(true);
+        engine._dlr!.p(base, new Uint8Array([1, 2, 3, 4]), {});
+        const clone = cloneTexture2D(base, { uScale: 2 });
+        acquireTexture(clone);
+
+        const lost = base.texture;
+        expect((await recoverWithoutRebuilding(engine)).createTexture).toHaveBeenCalledTimes(1);
+        expect(base.texture).not.toBe(lost);
+        expect(clone.texture).toBe(base.texture);
+
+        // Both references survive the rebuild, so it takes both releases to destroy it — and the
+        // clone is still pointing at a live texture after the first.
+        expect(releaseTexture(base)).toBe(false);
+        expect(_isTextureReleased(clone)).toBe(false);
+        expect(releaseTexture(clone)).toBe(true);
+        recovery.disable();
+    });
+
+    it("counts the dynamic rebuild's own reference instead of doubling it", async () => {
+        // `dynamic` is the reason ownership is carried as a top-up rather than a flat re-acquire:
+        // its rebuild module restores the creator's reference itself, so adding another here would
+        // leave a reference nothing ever releases and the texture would outlive its wrapper.
+        const engine = trackingEngine();
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const texture = sourceTexture(true);
+        engine._dlr!.t(texture, { kind: "dynamic", width: 1, height: 1, format: "rgba8unorm", levels: 1, samplerDesc: {}, source: null, flipY: true, premultipliedAlpha: false });
+
+        const lost = texture.texture;
+        expect((await recoverWithoutRebuilding(engine)).createTexture).toHaveBeenCalledTimes(1);
+        expect(texture.texture).not.toBe(lost);
+
+        // One owner before the loss, so exactly one release destroys it afterwards.
+        expect(releaseTexture(texture)).toBe(true);
+        recovery.disable();
+    });
+
     it("rebuilds a texture no owner has released, including kinds whose creator takes no reference", async () => {
         // The mirror of the skip: a `solid` texture has no owner at all, and that has to keep
         // reading as live. Treating "no owner" as released would skip every glTF and solid texture

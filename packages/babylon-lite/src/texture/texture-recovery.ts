@@ -2,7 +2,7 @@ import { U8 } from "../engine/typed-arrays.js";
 import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "./texture-2d.js";
-import { getOrCreateSampler, acquireTexture, _isTextureReleased } from "../resource/gpu-pool.js";
+import { getOrCreateSampler, acquireTexture, _isTextureReleased, _textureOwners } from "../resource/gpu-pool.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
 /** The wrapper that rebuilt each recovery source and the device it rebuilt for, so any other
@@ -51,29 +51,25 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
         }
         return;
     }
+    // Read before the rebuild replaces the handle: this is the outgoing texture's ownership.
+    const owners = _textureOwners(tex);
     // Recorded before the first await so a wrapper visited while this rebuild is still running
     // finds it and waits, rather than starting a second one.
     const done = rebuildFromSource(engine, tex, source);
     _rebuiltOn.set(source, { device: engine._device, tex, done });
     await done;
-    // Restore the ownership reference the creator took. `createTexture2D`,
-    // `createTexture2DFromPixels` and `createRenderTexture2D` each `acquireTexture` the texture they
-    // hand back, and the replacement GPUTexture starts at ref-count 0 — without this the first
-    // consumer to bind and then unbind it destroys it while the application still holds the wrapper.
-    // `createSolidTexture2D` and the glTF `uploadTex` path take no such reference, and the dynamic
-    // rebuild restores its own. Wrappers that adopt take none either, exactly as `cloneTexture2D`
-    // takes none at creation: they share the reference held for the texture they now point at.
-    if (needsOwnershipRestore(source)) {
+    // Carry that ownership onto the replacement, which starts unowned. Without it the first
+    // consumer to bind and then unbind a rebuilt texture destroys it while the application still
+    // holds the wrapper. It is a top-up rather than a single `acquireTexture` for two reasons: a
+    // derived family can hold several references to one texture — `cloneTexture2D` leaves that
+    // pairing to the caller — and restoring only one would let the next release destroy a texture a
+    // sibling still points at. And the dynamic-texture rebuild takes its own reference, which this
+    // counts rather than doubles. Kinds whose creator never acquired have no ownership to carry, so
+    // this does nothing for them. Wrappers that adopt take none either, exactly as `cloneTexture2D`
+    // takes none at creation: they share the references held for the texture they now point at.
+    for (let held = _textureOwners(tex); held < owners; held++) {
         acquireTexture(tex);
     }
-}
-
-/** Kinds whose creator takes an ownership reference with `acquireTexture` that recovery has to
- *  restore, because the replacement GPUTexture starts unowned. Distinct from asking whether a
- *  texture has been released: `dynamic` is creator-owned too, but its own rebuild module restores
- *  its reference, so re-acquiring here would double it. */
-function needsOwnershipRestore(source: Texture2DRecoverySource): boolean {
-    return source.kind === "url" || source.kind === "pixels" || source.kind === "render";
 }
 
 /**
