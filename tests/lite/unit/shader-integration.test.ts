@@ -72,6 +72,16 @@ describe("PBR template + fragments integration", () => {
         expect(result._materialUboSpec).toBeDefined();
     });
 
+    it("only emits derivative roughness when specular AA is enabled", () => {
+        const disabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasSpecularAA: false }), []);
+        const enabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasSpecularAA: true }), []);
+
+        expect(disabled._fragmentWGSL).toContain("var AA_factor_x=0.0;");
+        expect(disabled._fragmentWGSL).not.toContain("nDfdx_AA=dpdx(N)");
+        expect(enabled._fragmentWGSL).toContain("nDfdx_AA=dpdx(N)");
+        expect(enabled._fragmentWGSL).toContain("alphaG+=AA_factor_y");
+    });
+
     it("composes PBR + emissive color", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasTonemap: true, _hasEmissiveColor: true });
         const result = composeShader(template, [createEmissiveColorFragment(false)]);

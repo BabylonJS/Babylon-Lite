@@ -36,6 +36,7 @@ import { _getPbrExts, type _PbrFragCtx } from "./pbr-flags.js";
 import type { AnisoTemplateHooks } from "./fragments/anisotropy-fragment.js";
 import type { GammaTemplateHooks } from "./fragments/gamma-fragment.js";
 import type { SkyboxTemplateHooks } from "./fragments/skybox-fragment.js";
+import type { ToneMapping } from "./tone-mapping.js";
 import {
     MSH_HAS_TANGENTS,
     MSH_HAS_MORPH_TARGETS,
@@ -52,8 +53,8 @@ interface PbrComposerDeps {
     readonly _getSingleLightBlock: ((type: string) => string) | null;
     readonly _multiLightWGSL: string;
     readonly _multiLightLoop: string;
-    readonly _toneMappingHelpers: string;
-    readonly _toneMappingCall: string;
+    /** Resolved scene tone mapping; compact key keeps this dependency bundle-neutral. */
+    readonly _tm?: ToneMapping;
     /** Fog WGSL (calcFogFactor helper + blend block), dynamically loaded by pbr-renderable only
      *  when scene.fog is set; "" otherwise so non-fog scenes bundle zero fog bytes. */
     readonly _fogHelper: string;
@@ -78,7 +79,8 @@ type PbrComposeFn = (
     _esmShadowDepthCode?: string,
     _vbStrides?: MeshVbLayout,
     _vbKey?: string,
-    _uv2Mask?: number
+    _uv2Mask?: number,
+    _pi?: number
 ) => ComposedShader;
 
 /** Create a memoized shader composer for a given scene's resolved PBR deps. */
@@ -89,8 +91,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _getSingleLightBlock,
         _multiLightWGSL,
         _multiLightLoop,
-        _toneMappingHelpers,
-        _toneMappingCall,
+        _tm,
         _fogHelper,
         _fogBlock,
         _createPbrTemplateExt,
@@ -110,9 +111,10 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _esmShadowDepthCode = "",
         vbStrides?: MeshVbLayout,
         vbKey = "",
-        uv2Mask = 0
+        uv2Mask = 0,
+        pluginIndex = 0
     ): ComposedShader {
-        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}:${uv2Mask}`;
+        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}:${uv2Mask}:${pluginIndex}`;
         const cached = cache.get(ckey);
         if (cached) {
             return cached;
@@ -171,8 +173,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _hasTonemap: hasScene(PBR_HAS_TONEMAP),
             _fogHelper: hasScene(PBR_HAS_FOG) ? _fogHelper : "",
             _fogBlock: hasScene(PBR_HAS_FOG) ? _fogBlock : "",
-            _toneMappingHelpers: _toneMappingHelpers,
-            _toneMappingCall: _toneMappingCall,
+            _toneMappingHelpers: _tm?.helpersWGSL,
+            _toneMappingCall: _tm?.callWGSL,
             _hasAlphaBlend: has(PBR_HAS_ALPHA_BLEND),
             _hasSpecularAA,
             _hasGammaAlbedo: has(PBR_HAS_GAMMA_ALBEDO),
@@ -197,6 +199,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const fragCtx: _PbrFragCtx = {
             _features: features,
             _features2: features2,
+            _pi: pluginIndex,
             _meshFeatures: meshFeatures,
             _uv2Mask: _hasUv2 ? uv2Mask : 0,
             _hasIbl: _hasIbl,
@@ -206,13 +209,11 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _iblSkyboxCalc: _skyboxHooks?._skyboxCalc ?? "",
         };
         // Registration order defines iteration order; callers register in composer-matching order.
-        let pc: ((composed: ComposedShader) => ComposedShader) | undefined;
         for (const regExt of _getPbrExts().values()) {
             if (regExt.frag) {
                 const fr = regExt.frag(fragCtx);
                 if (fr) {
                     frags.push(fr);
-                    pc ||= fr._pc;
                 }
             }
         }
@@ -224,8 +225,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             frags.push(_createThinInstanceFragment(hasMesh(MSH_HAS_INSTANCE_COLOR)));
         }
 
-        let composed = composeShader(template, frags);
-        pc && (composed = pc(composed));
+        const composed = frags.reduce((shader, fragment) => fragment._pc?.(shader) ?? shader, composeShader(template, frags));
         cache.set(ckey, composed);
         return composed;
     };
