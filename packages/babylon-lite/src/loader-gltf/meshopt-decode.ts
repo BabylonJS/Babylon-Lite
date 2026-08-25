@@ -29,7 +29,7 @@ function loadMeshoptScript(): Promise<MeshoptDecoderModule> {
     if (scriptLoadPromise) {
         return scriptLoadPromise;
     }
-    scriptLoadPromise = new Promise<MeshoptDecoderModule>((resolve, reject) => {
+    const promise = new Promise<MeshoptDecoderModule>((resolve, reject) => {
         const existing = (globalThis as { MeshoptDecoder?: MeshoptDecoderModule }).MeshoptDecoder;
         if (existing) {
             resolve(existing);
@@ -37,18 +37,34 @@ function loadMeshoptScript(): Promise<MeshoptDecoderModule> {
         }
         const script = document.createElement("script");
         script.src = meshoptBaseUrl + "meshopt_decoder.js";
+        const cleanup = (): void => {
+            script.onload = null;
+            script.onerror = null;
+            script.remove();
+        };
+        const fail = (message: string): void => {
+            cleanup();
+            reject(new Error(message));
+        };
         script.onload = () => {
             const mod = (globalThis as { MeshoptDecoder?: MeshoptDecoderModule }).MeshoptDecoder;
             if (!mod) {
-                reject(new Error("meshopt_decoder.js loaded but MeshoptDecoder is undefined"));
+                fail("meshopt_decoder.js loaded but MeshoptDecoder is undefined");
             } else {
+                cleanup();
                 resolve(mod);
             }
         };
-        script.onerror = () => reject(new Error("Failed to load meshopt_decoder.js from " + script.src));
+        script.onerror = () => fail("Failed to load meshopt_decoder.js from " + script.src);
         document.head.appendChild(script);
     });
-    return scriptLoadPromise;
+    scriptLoadPromise = promise;
+    void promise.catch(() => {
+        if (scriptLoadPromise === promise) {
+            scriptLoadPromise = null;
+        }
+    });
+    return promise;
 }
 
 /** Resolve the ready meshopt decoder module (WASM instantiated). */

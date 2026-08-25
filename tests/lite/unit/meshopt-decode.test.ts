@@ -11,6 +11,7 @@ describe("meshopt decoder loading", () => {
             src: "",
             onload: null as (() => void) | null,
             onerror: null as (() => void) | null,
+            remove: vi.fn(),
         };
         const decoder = {
             ready: Promise.resolve(),
