@@ -346,6 +346,15 @@ substitution, and the upload is posted with an empty account, which the
 deployment server rejects as an HTTP 401. Always map an explicit account
 variable, and validate it before doing expensive work.
 
+> **Do not trust `BabylonJS/Babylon.js/.azure-pipelines/VARIABLE-GROUPS.md` for
+> this repo.** It documents the same ADO organisation but a different group
+> layout — it places `DEPLOY_ENDPOINT_UPLOAD` in `BabylonJS-CI-Infrastructure`
+> and names the BrowserStack group `Browserstack-Opensource`, whereas here
+> `DEPLOY_ENDPOINT_UPLOAD` resolves from `BabylonJS-Deployment` (observed in
+> build `20260825.1`, which imported only that group) and the BrowserStack group
+> is `BabylonJS-BrowserStack`. The two repos have drifted; verify against an
+> actual build log rather than the sibling repo's documentation.
+
 ### Optional Pipeline Variables
 
 - `PERF_REGRESSION_PCT` — override regression threshold
