@@ -755,7 +755,7 @@ describe("the walk recognises every file kind the enumeration collects", () => {
         }
     });
 
-    it("the walk itself accepts both extensions, through the real walk", () => {
+    it("the walk accepts both extensions and reads only credential-bearing files, through the real walk", () => {
         // The property above pins `roots => isYamlFile`, which is silent about
         // whether the *walk* asks isYamlFile at all. A future edit inlining a
         // narrower literal at the call site satisfies every assertion above
@@ -771,6 +771,16 @@ describe("the walk recognises every file kind the enumeration collects", () => {
             // Discovery has to be wider than the guard reads, or the closure
             // check certifies a subject the risk does not stay inside.
             writeFileSync(join(dir, "d.sh"), 'curl -H "Authorization: ******" https://x\n');
+            // Discoverable, and deliberately carrying no credential shape.
+            //
+            // Without this file every fixture here satisfies *both* of the
+            // walk's predicates, so the expected list is reachable by extension
+            // alone: defeating the content check entirely left this test green
+            // and was caught by a neighbouring guard, for a reason -- files
+            // appearing outside the configured roots -- that has nothing to do
+            // with the property this test owns. A fixture set needs a negative
+            // per predicate, not one negative for the walk.
+            writeFileSync(join(dir, "e.yml"), "  - script: echo hello\n");
             expect(allYamlCarryingACredentialShape(dir).sort()).toEqual(["a.yaml", "b.yml", "d.sh"]);
         } finally {
             // Asserted more strictly than the check needs, because a delete is
