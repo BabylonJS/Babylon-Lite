@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -378,6 +378,74 @@ type PipelineJob = { name: string; body: string; gated: boolean; hasOwnCondition
  * so accepting any `condition:` in the body would let one guarded step certify
  * an unguarded job.
  */
+/**
+ * The column a line's content starts at. For a sequence item the mapping's
+ * keys begin *after* the dash, so `- name: NODE_VERSION` and the `value:`
+ * beneath it are siblings rather than parent and child. Measuring the dash
+ * instead reported all nine real pipelines as malformed on the first attempt.
+ */
+function contentColumn(line: string): number {
+    const indent = line.length - line.trimStart().length;
+    const dash = /^-\s+/.exec(line.slice(indent));
+    return indent + (dash ? dash[0].length : 0);
+}
+
+/**
+ * Lines that cannot be YAML, found without a YAML parser.
+ *
+ * Everything else in this file reads the pipeline as *text* -- `jobsIn` is a
+ * line regex, `readsPullRequestContext` is a substring scan. That is fine for
+ * what they ask, but it means well-formedness is not a property any of them can
+ * see, and a file that Azure DevOps would reject outright reads as a perfectly
+ * good pipeline with perfectly correct gating.
+ *
+ * Measured, and it is worse than an unchecked assumption: inserting a
+ * `condition:` two columns too deep under `- job: UnitTests` produces a file
+ * PyYAML refuses at line 277, and this suite reported **twelve passed**.
+ * `jobsIn` derives its key indent from the job line and simply found no
+ * condition there, so the job read as ungated -- the malformed file and a
+ * correct one are indistinguishable to every clause here.
+ *
+ * That matters twice over. For the repository it is bounded by the platform,
+ * since ADO rejects malformed YAML before running anything. For the *probes*
+ * that mutate this file it is not bounded at all: a mutation that corrupts the
+ * pipeline reports green, which reads exactly like "the guard is blind to this"
+ * and would be recorded as a finding. A guard's own floors are the tripwire for
+ * the harness measuring it, and this file had none.
+ *
+ * The invariant is narrow on purpose -- a key that already has a scalar value
+ * cannot have a more-indented line after it, because there is nothing for that
+ * line to belong to. It is not a YAML validator and does not try to be; adding
+ * a parser dependency to satisfy a test would be inventing infrastructure to be
+ * tested about. Block scalars (`|`, `>`) are skipped, as their bodies are
+ * legitimately deeper.
+ */
+function structureProblems(text: string): string[] {
+    const lines = text.split("\n");
+    const problems: string[] = [];
+
+    for (let index = 0; index < lines.length; index++) {
+        const line = lines[index] ?? "";
+        if (!line.trim() || line.trim().startsWith("#")) continue;
+
+        const scalar = /^(?:-\s+)?[A-Za-z_$][\w.$-]*:[ \t]+(\S.*)$/.exec(line.trimStart());
+        if (!scalar) continue;
+
+        const value = (scalar[1] ?? "").trim();
+        if (value.startsWith("|") || value.startsWith(">")) continue;
+
+        let next = index + 1;
+        while (next < lines.length && (!(lines[next] ?? "").trim() || (lines[next] ?? "").trim().startsWith("#"))) next++;
+        if (next >= lines.length) continue;
+
+        if (contentColumn(lines[next] ?? "") > contentColumn(line)) {
+            problems.push(`line ${next + 1} is indented deeper than line ${index + 1} ("${line.trim().slice(0, 44)}"), which already has a value`);
+        }
+    }
+
+    return problems;
+}
+
 function jobsIn(text: string): PipelineJob[] {
     const lines = text.split("\n");
     const starts: { name: string; line: number; keyIndent: number }[] = [];
@@ -738,6 +806,29 @@ describe("pull-request jobs cannot run on a master build", () => {
                 `Pull-request context reaches jobs through templates, so an include this guard cannot resolve is context it cannot see -- ` +
                 `the job then looks like it needs no pull request, and the advice attached to that failure is to record it as cost-gated, which would make the blindness permanent. ` +
                 `Fix the path, or if the template is genuinely gone, remove the include from the job.`
+        ).toEqual([]);
+    });
+
+    it("reads a subject that could actually run", () => {
+        // Every other clause here asks what the pipeline *says*. This one asks
+        // whether it is a pipeline at all, and it is the only clause a
+        // corrupting edit cannot pass. Without it, a probe that mutates this
+        // file into something ADO would reject gets twelve green clauses and
+        // the appearance of a finding.
+        const subjects = [
+            ...dualContextPipelines.map((file) => ({ location: file.location, text: file.text })),
+            ...readdirSync(join(repoRoot, "config", "templates"))
+                .filter((name) => /\.ya?ml$/.test(name))
+                .map((name) => ({ location: `config/templates/${name}`, text: readFileSync(join(repoRoot, "config", "templates", name), "utf8") })),
+        ];
+
+        expect(subjects.length, "no pipeline or template was read, so this clause is asking nothing of anything").toBeGreaterThan(0);
+
+        const broken = subjects.flatMap((subject) => structureProblems(subject.text).map((problem) => `${subject.location}: ${problem}`));
+
+        expect(
+            broken,
+            `these files cannot parse as YAML, so Azure DevOps would reject them and every other clause here is reading a file that never runs:\n${broken.join("\n")}`
         ).toEqual([]);
     });
 
