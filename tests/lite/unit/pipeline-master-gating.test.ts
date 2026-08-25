@@ -1936,15 +1936,38 @@ describe("pull-request jobs cannot run on a master build", () => {
 
                 const [deeper, parent] = [cited[0] ?? 0, cited[1] ?? 0];
 
-                // There was an in-range check here and it is deliberately gone.
-                // Measured at this end state: removing it while citing a line
-                // outside the subject still fails, because a citation that
-                // names a line the subject does not have cannot also quote that
-                // line's text, and the two checks below catch it on that route.
-                // No input separated it, so it was a conjunct that could only
-                // ever agree. It becomes load-bearing again the moment the
-                // message stops quoting the parent line -- then nothing else
-                // reads the subject's length, and it has to come back.
+                // The in-range check that used to live here was deleted as a
+                // subsumed conjunct: no input separated it, because a citation
+                // naming a line the subject does not have still failed the two
+                // checks below. That was measured, and it was measured on the
+                // wrong axis.
+                //
+                // Re-measured against what the survivors *report*. Citing a line
+                // ninety past the end of a four-line specimen fires, and says:
+                //
+                //   the report blames line 2 for line 93, but the line above
+                //   it is 3
+                //
+                // Line 93 does not exist. The accusation lands on the parent,
+                // which was correct, prescribes line 3, which is wrong, and
+                // never mentions that the other number is off the end of the
+                // subject. A reader following it edits the half that worked.
+                //
+                // So: subsumption is per-axis. A conjunct subsumed on detection
+                // can be the sole detector on attribution, and attribution is
+                // most of why a failing check is worth having -- detection only
+                // says something is wrong, in an ~880-line file. Resolve
+                // subsumption against both before deleting.
+                //
+                // Returns early rather than adding a note, because the inverted
+                // accusation below is exactly what this is here to prevent and
+                // printing it underneath would keep it in front of the reader.
+                if (deeper < 1 || deeper > lines.length || parent < 1 || parent > lines.length) {
+                    notes.push(
+                        `${scalar.what} -- the report cites lines ${deeper} and ${parent}, but this subject has ${lines.length}; at least one citation is off the end of the file it names`
+                    );
+                    return notes;
+                }
 
                 // Existence and ordering are not enough, and this is the arm
                 // that proved it: dropping the `+ 1` from the second number
