@@ -680,11 +680,43 @@ describe("the hygiene guards cover every pipeline in the repo", () => {
         const scanned = new Set(pipelineYamlFiles().map((file) => file.location));
         const unscanned = discovered.filter((file) => !scanned.has(file));
 
+        // A file can be missed two ways, and they need opposite repairs. The
+        // single message this replaced gave the remedy for one of them to both,
+        // which made it a false instruction in the case it fired on most easily.
+        //
+        // A file in a directory nobody listed needs the directory added. A file
+        // in a directory that IS listed was excluded by that root's
+        // `rootOnlyPattern` -- so the directory is already there, and "add the
+        // directory" is unfollowable. Taken literally it means appending a
+        // second entry for the same directory, which double-counts every file
+        // the existing entry already matched and pulls in the very files the
+        // pattern exists to keep out (`pnpm-lock.yaml` at the repo root). The
+        // guard would report success afterwards, so the reader gets no signal
+        // that the repair was the wrong one.
+        //
+        // This is the fixture-misfire shape one level up: a diagnostic whose
+        // advice, followed correctly, deepens the bug it reports. It appeared
+        // here because the subject widened -- discovery began matching comment
+        // tasks and descending into new roots -- while the remedy stayed the
+        // one written when every miss really was a missing directory.
+        const roots = new Set(SCANNED_ROOTS.map((root) => root.label));
+        const dirOf = (file: string) => (file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "");
+        const excludedByPattern = unscanned.filter((file) => roots.has(dirOf(file)));
+        const outsideTheRoots = unscanned.filter((file) => !roots.has(dirOf(file)));
+
         expect(
-            unscanned,
-            `these files hold something a guard in this directory reads -- a shell step or a GitHubComment@0 task -- ` +
-                `but sit outside SCANNED_ROOTS, so every guard built on it silently ignores them. ` +
-                `Add the directory to SCANNED_ROOTS in tests/lite/unit/pipeline-files.ts -- one list, shared, so no guard is left behind:\n  ${unscanned.join("\n  ")}\n`
+            excludedByPattern,
+            `these files hold something a guard reads -- a shell step or a GitHubComment@0 task -- and sit in a directory ` +
+                `that IS in SCANNED_ROOTS, but that root's rootOnlyPattern excludes them, so every guard silently ignores them. ` +
+                `Widen that root's rootOnlyPattern in tests/lite/unit/pipeline-files.ts. Do NOT add the directory again: it is ` +
+                `already listed, and a second entry duplicates every file the first one matches:\n  ${excludedByPattern.join("\n  ")}\n`
+        ).toEqual([]);
+
+        expect(
+            outsideTheRoots,
+            `these files hold something a guard reads -- a shell step or a GitHubComment@0 task -- ` +
+                `but sit in a directory outside SCANNED_ROOTS, so every guard built on it silently ignores them. ` +
+                `Add the directory to SCANNED_ROOTS in tests/lite/unit/pipeline-files.ts -- one list, shared, so no guard is left behind:\n  ${outsideTheRoots.join("\n  ")}\n`
         ).toEqual([]);
     });
 });
