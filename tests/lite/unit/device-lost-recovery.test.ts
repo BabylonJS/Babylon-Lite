@@ -13,6 +13,7 @@ import { makeSamplerFor } from "../../../packages/babylon-lite/src/loader-gltf/g
 import type { GltfMaterialData } from "../../../packages/babylon-lite/src/loader-gltf/gltf-material.js";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import type { Texture2D, Texture2DOptions } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
+import { _trackDerivedTexture2D, cloneTexture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/texture-recovery.js";
 
 function context(kind: string): RenderingContext {
@@ -462,6 +463,115 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
 
         expect(texture.texture).toBe(rebuilt);
         expect(replacement.createTexture).toHaveBeenCalledTimes(1);
+        vi.unstubAllGlobals();
+        recovery.disable();
+    });
+
+    it("carries the rebuilt texture across to a derived wrapper nothing references", async () => {
+        // `cloneTexture2D` spreads the base, so the clone inherits `_recoverySource` but owns its
+        // own `texture` field and never passes through the capture stamp. If it is outside every
+        // registered context at loss time a reachability walk never finds it, and it survives
+        // recovery still holding the lost device's texture — the same use-after-free, one hop
+        // removed. Deriving a wrapper tracks it like any other captured texture.
+        const engine = trackingEngine();
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const base = pixelsTexture();
+        engine._dlr!.p(base, new Uint8Array([1, 2, 3, 4]), {});
+        const clone = cloneTexture2D(base, { uScale: 2 });
+        const lost = clone.texture;
+        expect(lost).toBe(base.texture);
+
+        const replacement = device();
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
+        await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: vi.fn() }]);
+
+        expect(clone.texture).not.toBe(lost);
+        // Sharing one upload is the whole point of cloning, so the clone adopts the base's
+        // rebuilt texture rather than uploading a second copy of an identical image.
+        expect(clone.texture).toBe(base.texture);
+        expect(clone.view).toBe(base.view);
+        expect(replacement.createTexture).toHaveBeenCalledTimes(1);
+        expect(clone.uScale).toBe(2);
+        vi.unstubAllGlobals();
+        recovery.disable();
+    });
+
+    it("rebuilds a derived wrapper whose base was collected", async () => {
+        // A clone does not keep its base alive, so an app can hold one long after the base wrapper
+        // is gone. Reaching derived wrappers only by way of their base would strand the clone on
+        // the lost device in exactly that case, so each one is tracked in its own right.
+        const engine = trackingEngine();
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const base = pixelsTexture();
+        engine._dlr!.p(base, new Uint8Array([1, 2, 3, 4]), {});
+        const clone = cloneTexture2D(base, { uScale: 2 });
+        const lost = clone.texture;
+
+        // Stands in for the base being collected: its weak entry is gone, the clone's is not.
+        const tracked = engine._deviceLostRecovery!._textures;
+        for (const ref of tracked) {
+            if (ref.deref() === base) {
+                tracked.delete(ref);
+            }
+        }
+        expect(tracked.size).toBe(1);
+        expect(tracked.values().next().value!.deref()).toBe(clone);
+
+        const replacement = device();
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
+        await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: vi.fn() }]);
+
+        expect(clone.texture).not.toBe(lost);
+        expect(replacement.createTexture).toHaveBeenCalledTimes(1);
+        vi.unstubAllGlobals();
+        recovery.disable();
+    });
+
+    it("gives a derived wrapper back its own sampler rather than the base's", async () => {
+        // The glTF sampler path derives a wrapper that shares the base image but deliberately
+        // carries a different wrap/filter sampler. Samplers belong to the device too, so that one
+        // has to be rebuilt from its own captured descriptor — handing it the base's sampler would
+        // silently change how the asset renders after a recovery.
+        const engine = trackingEngine();
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const base = pixelsTexture();
+        engine._dlr!.p(base, new Uint8Array([1, 2, 3, 4]), {});
+        const ownSampler = {} as GPUSampler;
+        const ownDesc: GPUSamplerDescriptor = { addressModeU: "clamp-to-edge", addressModeV: "mirror-repeat" };
+        engine._deviceLostRecovery!._samplerDescriptors.set(ownSampler, ownDesc);
+        const derived = _trackDerivedTexture2D(base, { ...base, sampler: ownSampler });
+
+        const replacement = device();
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
+        await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: vi.fn() }]);
+
+        expect(derived.texture).toBe(base.texture);
+        expect(derived.sampler).not.toBe(ownSampler);
+        expect(derived.sampler).not.toBe(base.sampler);
+        expect(vi.mocked(replacement.createSampler).mock.calls.at(-1)?.[0]).toEqual(ownDesc);
+        // Re-registered under the rebuilt sampler so a second loss can resolve it the same way.
+        expect(engine._deviceLostRecovery!._samplerDescriptors.get(derived.sampler)).toBe(ownDesc);
+        vi.unstubAllGlobals();
+        recovery.disable();
+    });
+
+    it("uploads one texture when a handler walks a clone whose base was already rebuilt", async () => {
+        // Rebuilding is keyed on the shared recovery source, not the wrapper, so a per-kind walk
+        // reaching a clone after the tracked set rebuilt its base adopts that upload instead of
+        // making a second identical one (and, for a url source, re-fetching it over the network).
+        const engine = trackingEngine();
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const base = pixelsTexture();
+        engine._dlr!.p(base, new Uint8Array([1, 2, 3, 4]), {});
+        const clone = cloneTexture2D(base, { uScale: 2 });
+
+        const replacement = device();
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
+        await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: vi.fn() }]);
+        await rebuildTexture2D(engine, clone);
+
+        expect(replacement.createTexture).toHaveBeenCalledTimes(1);
+        expect(clone.texture).toBe(base.texture);
         vi.unstubAllGlobals();
         recovery.disable();
     });

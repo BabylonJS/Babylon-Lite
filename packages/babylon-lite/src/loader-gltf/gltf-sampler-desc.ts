@@ -3,6 +3,7 @@ import { uploadBaseColorFactorTexture, uploadOrmFactorTexture } from "./gltf-pbr
 import type { GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
+import { _trackDerivedTexture2D } from "../texture/texture-2d.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 
 /** Map a glTF textureInfo's sampler (wrapS/wrapT/magFilter/minFilter) to a WebGPU sampler
@@ -75,7 +76,7 @@ export function buildSampledPbrTextures(
     const cached = (bitmap: ImageBitmap, srgb: boolean, texInfo: any): Texture2D => {
         const s = samplerFor(texInfo);
         const tex = getCachedTex(bitmap, srgb);
-        return s === defaultSampler ? tex : { ...tex, sampler: s };
+        return s === defaultSampler ? tex : _trackDerivedTexture2D(tex, { ...tex, sampler: s });
     };
 
     const baseColorTexture = mat._baseColorImage

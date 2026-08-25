@@ -97,7 +97,38 @@ export function cloneTexture2D(
     base: Texture2D,
     transform: Partial<Pick<Texture2D, "uScale" | "vScale" | "uOffset" | "vOffset" | "uAng">> & { _texCoord?: 0 | 1; _hasTx?: true }
 ): Texture2D {
-    return { ...base, ...transform } as Texture2D;
+    return _trackDerivedTexture2D(base, { ...base, ...transform } as Texture2D);
+}
+
+/**
+ * Registers `derived` with device-lost recovery as another wrapper over `base`'s upload, and
+ * returns it.
+ *
+ * Recovery finds textures either by walking a registered rendering context's object graph or from
+ * the set of wrappers the capture stamp tracked. A derived wrapper is in neither: it is a plain
+ * spread of `base`, so it inherits `_recoverySource` without ever passing through the stamp. Left
+ * unregistered it survives recovery still holding the lost device's `GPUTexture`, which is exactly
+ * the use-after-free the tracked-texture pass exists to prevent — just reached one hop later.
+ *
+ * Registration goes through a hook because neither this function nor the glTF hooks that call it
+ * are given an engine, and because a scene that never enables recovery should carry none of the
+ * bookkeeping. The hook tracks `derived` alongside the stamped textures, so it is rebuilt even if
+ * `base` is collected first. Recovery rebuilds a source once and hands the result to every wrapper
+ * sharing it, so this costs one upload no matter how many wrappers exist.
+ * @internal
+ */
+export function _trackDerivedTexture2D(base: Texture2D, derived: Texture2D): Texture2D {
+    _derivedTextureHook?.(base, derived);
+    return derived;
+}
+
+/** Notified when a wrapper is derived from another, so device-lost recovery can carry a rebuilt
+ *  texture across to it. Installed by the recovery capture and null otherwise. */
+let _derivedTextureHook: ((base: Texture2D, derived: Texture2D) => void) | null = null;
+
+/** @internal Install the device-lost recovery hook for derived texture wrappers. */
+export function _setDerivedTexture2DHook(hook: (base: Texture2D, derived: Texture2D) => void): void {
+    _derivedTextureHook = hook;
 }
 
 /** Sampler, format, and decode options for `loadTexture2D()`. */
