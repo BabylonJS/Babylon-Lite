@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "fs";
-import { join } from "path";
-
-const repoRoot = join(__dirname, "..", "..", "..");
+import { readFileSync } from "fs";
+import { pipelineFilesInRepo, pipelineYamlFiles } from "./pipeline-files";
 
 interface ShellScript {
     location: string;
@@ -29,29 +27,7 @@ interface ShellScript {
  * touch the lockfile.
  */
 function shellScripts(): ShellScript[] {
-    const roots: { dir: string; label: string }[] = [
-        { dir: repoRoot, label: "" },
-        { dir: join(repoRoot, "config", "templates"), label: join("config", "templates") },
-    ];
-
-    // `config/templates/` is included because those files are not documentation
-    // -- azure-pipelines.yml pulls them in with `- template:`, so their steps
-    // run as part of these pipelines and are subject to the same invariant.
-    // They contain no pipes today, so widening the glob changes no result; it
-    // closes a latent hole rather than a live one. That is the point. This file
-    // has already narrowed its own subject once (block scalars only), and the
-    // lesson from that was that a collector aimed at less than its stated
-    // subject is invisible precisely while the uncovered region happens to be
-    // clean.
-    const files: { path: string; location: string }[] = [];
-    for (const { dir, label } of roots) {
-        for (const f of readdirSync(dir).filter((f) => /^azure-pipelines.*\.ya?ml$/.test(f) || label !== "")) {
-            if (!/\.ya?ml$/.test(f)) {
-                continue;
-            }
-            files.push({ path: join(dir, f), location: label ? `${label}/${f}` : f });
-        }
-    }
+    const files = pipelineYamlFiles();
 
     // Guard the guard. If this glob ever stops matching -- a rename, a move
     // into a subdirectory -- an empty set makes every assertion below
@@ -175,6 +151,53 @@ describe("piped pipeline steps enable pipefail", () => {
         expect(
             unguarded,
             `these scripts pipe a command but never 'set -euo pipefail', so a failure on the left of the pipe is silently discarded:\n  ${unguarded.join("\n  ")}\n`
+        ).toEqual([]);
+    });
+});
+
+describe("the hygiene guards cover every pipeline in the repo", () => {
+    /**
+     * The check that would have caught both collector-scope bugs found while
+     * writing these guards, without anyone having to notice.
+     *
+     * Twice now a guard here has run, passed, and covered less than the subject
+     * it claimed: once reading only block scalars while 68 single-line steps
+     * went unexamined, once reading only the repo root while two
+     * `config/templates/` files -- included by azure-pipelines.yml at four call
+     * sites, both containing a `curl` with an Authorization header -- sat
+     * outside the glob. Neither was visible from inside the guard: a collector
+     * cannot report a subject it never gathered, and every floor it does have
+     * reads normal while the uncovered region happens to be clean.
+     *
+     * A hardcoded root list is a copy with no closure check. This is the
+     * closure check -- discover the real subject independently, then assert the
+     * configured scope still covers it. A new pipeline in a new directory fails
+     * here by name, instead of the guards quietly narrowing.
+     */
+    it("scans every YAML file that declares pipeline steps", () => {
+        const discovered = pipelineFilesInRepo();
+
+        console.log(`pipeline files discovered: ${discovered.length}`);
+        for (const file of discovered) {
+            console.log(`  ${file}`);
+        }
+
+        // Guard the discovery itself. If the walk or the predicate breaks, an
+        // empty set makes the coverage assertion below vacuously true -- the
+        // exact defect this test exists to make impossible.
+        expect(discovered.length, "no pipeline YAML discovered -- the walk or the step predicate is broken").toBeGreaterThanOrEqual(9);
+
+        // Compare full repo-relative paths, never basenames. A basename match
+        // would treat `some-dir/azure-pipelines.yml` as covered because the
+        // root file of that name is scanned -- a false negative that hides
+        // exactly the case this test exists to catch.
+        const scanned = new Set(shellScripts().map((script) => script.location.split(":")[0]));
+        const unscanned = discovered.filter((file) => !scanned.has(file));
+
+        expect(
+            unscanned,
+            `these files declare pipeline steps but sit outside SCANNED_ROOTS, so the guards in this file and in ` +
+                `pipeline-pr-comment-steps-guarded.test.ts silently ignore them. Add their directory to both:\n  ${unscanned.join("\n  ")}\n`
         ).toEqual([]);
     });
 });

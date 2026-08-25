@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "fs";
-import { join } from "path";
-
-const repoRoot = join(__dirname, "..", "..", "..");
+import { readFileSync } from "fs";
+import { pipelineYamlFiles } from "./pipeline-files";
 
 interface CommentTask {
     location: string;
@@ -29,23 +27,10 @@ interface CommentTask {
  * protecting something it no longer protects.
  */
 function commentTasks(): CommentTask[] {
-    const roots = [
-        { dir: repoRoot, label: "" },
-        { dir: join(repoRoot, "config", "templates"), label: "config/templates" },
-    ];
-
-    const files: { path: string; location: string }[] = [];
-    for (const { dir, label } of roots) {
-        for (const name of readdirSync(dir)) {
-            if (!/\.ya?ml$/.test(name)) {
-                continue;
-            }
-            if (label === "" && !/^azure-pipelines.*\.ya?ml$/.test(name)) {
-                continue;
-            }
-            files.push({ path: join(dir, name), location: label ? `${label}/${name}` : name });
-        }
-    }
+    // Shared with the pipefail guard so the two scopes cannot drift apart, and
+    // asserted against a tree walk by the closure check in
+    // pipeline-piped-steps-set-pipefail.test.ts.
+    const files = pipelineYamlFiles();
 
     // Guard the collector, not the function. An empty file list would make
     // every assertion below vacuously true while still reporting success.
