@@ -138,7 +138,17 @@ describe("piped pipeline steps enable pipefail", () => {
         // away.
         expect(piped.length, "no piped scripts detected -- pipe detection is broken").toBeGreaterThan(0);
 
-        const unguarded = piped.filter((script) => !/^\s*set\s+-\S*o\S*\s+pipefail\s*$|^\s*set\s+-o\s+pipefail\s*$/m.test(script.body)).map((script) => script.location);
+        // Anchored to the start of a line so a *comment* mentioning
+        // `set -euo pipefail` -- of which this repo has several, including in
+        // this very file -- cannot satisfy the check. Verified: replacing a
+        // real guard with prose about it still fails.
+        //
+        // The trailing `(?:#.*)?` matters for a duller reason. Without it,
+        // `set -euo pipefail  # fail the step if tsc fails` was reported as
+        // unguarded -- a false positive on a perfectly correct script. A guard
+        // that misfires on valid code is one somebody eventually deletes
+        // rather than fixes, so precision here is what keeps it alive.
+        const unguarded = piped.filter((script) => !/^\s*set\s+-\S*o\S*\s+pipefail\s*(?:#.*)?$/m.test(script.body)).map((script) => script.location);
 
         expect(
             unguarded,
