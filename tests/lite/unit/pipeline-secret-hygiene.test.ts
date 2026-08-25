@@ -147,6 +147,17 @@ export const PIPELINE_ROOTS = [
     { dir: join(repoRoot, ".github", "workflows"), label: ".github/workflows", match: isYamlFile, requiresDeployToken: false },
 ];
 
+/**
+ * One collected file per root, each reachable only by a distinct traversal
+ * step: the repo root, a descent into `config/templates`, a descent into
+ * `.github/workflows`.
+ *
+ * Shared by the collector floor and the closure floor, which ask the same
+ * question of different sets and would otherwise hold two copies of this list
+ * -- the duplication class these guards keep finding elsewhere.
+ */
+export const ONE_FILE_PER_ROOT = ["azure-pipelines-bundle-manifest.yml", "config/templates/upload-static-site.yml", ".github/workflows/compat-sync-trigger.yml"];
+
 function pipelineFiles(): PipelineFile[] {
     const files: PipelineFile[] = [];
     for (const { dir, label, match, requiresDeployToken } of PIPELINE_ROOTS) {
@@ -408,6 +419,17 @@ describe("pipeline secret hygiene", () => {
     // rather than debugged, and this invariant is one whose violation is
     // invisible, so losing the guard costs everything it protects.
     it("has no log-redaction mask committed in place of a secret", () => {
+        // This clause had no floor at all: it asserts an empty offender list,
+        // which an empty *input* satisfies perfectly. Every collected file must
+        // contribute at least one line, or the strip has blanked a whole file
+        // and the assertion below reports success over something never read.
+        const contributing = new Set(pipelineLines().map(({ location }) => location));
+        const silent = pipelineFiles()
+            .map(({ location }) => location)
+            .filter((location) => !contributing.has(location))
+            .sort();
+        expect(silent, "these files were collected but contributed no line to scan — the assertion below would pass over a file it never read").toEqual([]);
+
         const offenders = pipelineLines()
             .filter(({ line }) => hasMaskedSecret(line))
             .map(({ location, number, line }) => `${location}:${number}: ${line.trim()}`);
@@ -431,6 +453,15 @@ describe("pipeline secret hygiene", () => {
             console.log(`  ${location}:${number}`);
         }
         expect(headers.length, "no Authorization headers found — the assertions below would be vacuous").toBeGreaterThan(0);
+
+        // `> 0` catches collapse and not shrinkage, which is the direction that
+        // matters: a strip that blanks one file too many, or a collector that
+        // stops reaching one root, leaves both assertions below passing over a
+        // subject that quietly lost a location. Name one file per root instead.
+        const locations = headers.map(({ location }) => location);
+        for (const required of ONE_FILE_PER_ROOT) {
+            expect(locations, `no Authorization header collected from ${required} — the assertions below cover less than they claim`).toContain(required);
+        }
 
         // The universal property: the header must interpolate *something*. A
         // copied mask is a bare literal, so this catches the bug in any CI
@@ -721,7 +752,7 @@ describe("the mask guard reads every file carrying anything its clauses examine"
         // would rebuild the hand-maintained inventory this walk exists to
         // replace. These three only need revisiting when a named file stops
         // carrying a credential shape at all, which is a deliberate act.
-        for (const required of ["azure-pipelines-bundle-manifest.yml", "config/templates/upload-static-site.yml", ".github/workflows/compat-sync-trigger.yml"]) {
+        for (const required of ONE_FILE_PER_ROOT) {
             expect(carrying, `the walk no longer reaches ${required}, so it is certifying a smaller subject than the guard reads`).toContain(required);
         }
 
