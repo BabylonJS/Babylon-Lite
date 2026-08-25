@@ -125,19 +125,43 @@ function envKeys(step: string): string[] {
     return keys;
 }
 
+/**
+ * Steps the configuration check itself depends on, and which may therefore run
+ * before it.
+ *
+ * This is the escape hatch, and it is a named constant rather than an inline
+ * pattern because the alternative was measured and is worse. With the allowance
+ * inlined, a step that legitimately precedes the check -- `UseNode@1` ahead of a
+ * check that had grown to need Node -- produced a failure offering two repairs,
+ * *both* of which break the check: move it below, or move the check above it.
+ * The true third state, "this is a prerequisite", had no reachable repair, and a
+ * guard whose advice cannot be followed gets deleted rather than obeyed.
+ *
+ * Widening this list is a real decision with a cost: anything named here runs
+ * before the build knows it can publish, so it must be cheap. Naming it forces
+ * that decision to be written down instead of resolved by moving the check.
+ */
+const CHECK_PREREQUISITES: { name: string; matches: (step: string) => boolean }[] = [{ name: "checkout", matches: (s) => /^\s*-\s*checkout:/m.test(s) }];
+
 describe("the baseline pipeline validates its deploy configuration before doing expensive work", () => {
-    it("runs nothing but checkout before the deploy configuration check", () => {
+    it("runs nothing but the check's own prerequisites before the deploy configuration check", () => {
         // Stated as a universal over the preceding steps rather than as a list
         // of the steps known to be expensive today. A named list would have to
         // grow every time the pipeline does, and would be silent in exactly the
         // case worth catching: a new expensive step inserted ahead of the check.
+        //
+        // The partition is over the input -- a preceding step either is one of
+        // the check's prerequisites or it is work the check exists to gate --
+        // rather than over what this guard happens to recognise. An acceptance
+        // set the guard defines drifts as the pipeline grows spellings; a
+        // property of the input does not.
         const steps = pipelineSteps();
         const preflight = stepIndex(steps, PREFLIGHT_STEP);
 
-        const before = steps.slice(0, preflight).filter((s) => !/^\s*-\s*checkout:/m.test(s));
+        const before = steps.slice(0, preflight).filter((s) => !CHECK_PREREQUISITES.some(({ matches }) => matches(s)));
         expect(
             before,
-            `steps run before "${PREFLIGHT_STEP}" in ${pipelineFile}. This pipeline measures 245 scenes, so anything ahead of the configuration check is time spent before the build knows it can publish — which is the failure this ordering was introduced to remove. Move the check above them, or move them below it.`
+            `steps run before "${PREFLIGHT_STEP}" in ${pipelineFile} that are not among its prerequisites (${CHECK_PREREQUISITES.map(({ name }) => name).join(", ")}). This pipeline measures 245 scenes, so anything ahead of the configuration check is time spent before the build knows it can publish. Two repairs, and which one applies depends on the step: if it is work the check exists to gate, move it below the check. If the check now depends on it, add it to CHECK_PREREQUISITES in this file — but only if it is cheap, because everything listed there runs before the build knows it can publish.`
         ).toEqual([]);
     });
 
@@ -159,7 +183,16 @@ describe("the baseline pipeline validates its deploy configuration before doing 
 
         expect(
             needed.filter((k) => !checked.includes(k)),
-            `variables read by "${PUBLISH_STEP}" that "${PREFLIGHT_STEP}" does not check in ${pipelineFile}. Add them to the check's \`env:\` block and to the names it validates, so a missing one fails in seconds rather than after the scenes are measured.`
+            `variables read by "${PUBLISH_STEP}" that "${PREFLIGHT_STEP}" does not check in ${pipelineFile}. Add them to the check's \`env:\` block and to the names it validates, so a missing one fails in seconds rather than after the scenes are measured. If one of them is genuinely optional, wiring it into the check would make it required — say so where the check validates its names, and give this guard a reason to stop demanding it, rather than deleting the guard.`
         ).toEqual([]);
+
+        // Residual, stated rather than implied. Every variable the publish step
+        // reads today is required, so "checked" and "required" coincide and this
+        // clause is exactly right. The first optional publish variable separates
+        // them, and at that point the subset assertion is too strong: following
+        // its advice would turn an optional variable into one whose absence
+        // fails the build. There is no exemption mechanism here because there is
+        // nothing to exempt; this comment is what the author of that variable
+        // needs, and it is cheaper than machinery for a case that may not come.
     });
 });
