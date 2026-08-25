@@ -155,7 +155,7 @@ function readsPullRequestContext(text: string): boolean {
  * directory every other clause scans.
  */
 function withTemplatesResolved(text: string, root: string = repoRoot, seen: ReadonlySet<string> = new Set()): string {
-    return text.replace(/^\s*-\s*template:\s*(\S+)\s*$/gm, (line, path: string) => {
+    return text.replace(TEMPLATE_REF, (line, path: string) => {
         if (seen.has(path)) {
             return line;
         }
@@ -454,17 +454,34 @@ function templateFilesOnDisk(): string[] {
 }
 
 /**
+ * A `- template:` reference line, with the referenced path captured.
+ *
+ * Spelled once because it was spelled twice: the inliner below and
+ * {@link templateReferencesIn} had identical copies, and the two are the
+ * substitution and the check that the substitution left nothing behind. Drift
+ * between them means the inliner resolves a hop the collector cannot see, or
+ * the reverse -- and either way the disagreement is between two things whose
+ * whole purpose is to agree. The same failure {@link SHELL_STEP_KEYS} exists
+ * to prevent, one file over.
+ */
+const TEMPLATE_REF = /^\s*-\s*template:\s*(\S+)\s*$/gm;
+
+/**
  * Every `- template:` path a resolved body still names, at any depth.
  *
  * Deliberately *not* given the comment projection the marker checks use. The
  * pattern anchors the dash at the start of the line, so `# - template: x.yml`
  * cannot match it and no input separates stripping from not stripping --
  * structurally unreachable rather than merely absent from today's tree.
- * Measured, not assumed. A pattern loose enough to match inside a comment would
- * be a different bug, and one this file would report elsewhere as over-selection.
+ *
+ * That argument is sound and it is entirely load-bearing on the anchor, which
+ * is why the anchor is now pinned by a specimen at the call site rather than
+ * left to this sentence. Unanchoring the pattern is invisible against every
+ * real pipeline; the reasoning for skipping one projection was resting on a
+ * property nothing tested.
  */
 function templateReferencesIn(text: string): string[] {
-    return [...text.matchAll(/^\s*-\s*template:\s*(\S+)\s*$/gm)].map((match) => match[1] ?? "");
+    return [...text.matchAll(TEMPLATE_REF)].map((match) => match[1] ?? "");
 }
 
 /**
@@ -896,6 +913,34 @@ const SETUP_WORK = /\binstall\b/;
  * healthy file.
  */
 const DIAGNOSTIC_ONLY = /(?:^|\s)(?:--version|--help|-v|-h)(?:\s|$)/;
+
+/**
+ * The tool each master job exists to run.
+ *
+ * Every floor above this one reads how *many* tools a job resolved to, and a
+ * count cannot see a derivation matching for the wrong reason. Measured: drop
+ * the anchors from {@link DIAGNOSTIC_ONLY} and `-v` starts matching inside
+ * `./scripts/eslint-vso-formatter.cjs`, so the lint step is discarded as a
+ * version query -- and the clause stays green, because `Lint & Type Check`
+ * still resolves `tsc` from its type-check loop. The job had stopped being
+ * checked for linting at all and nothing said so. The same shape hides a
+ * missing alias table: without it `tsc` resolves to `tsc`, which the manifest
+ * does not name, and `Compat` still passes on `vitest` alone.
+ *
+ * So this names the tools rather than counting them. There is no oracle for
+ * this list -- it is a design judgement about what each job is *for*, unlike
+ * the nesting specimens, which a real parser settles. `Lint & Type Check`
+ * carries both halves of its own name; `Compat` builds and type-checks the
+ * compat layer as well as running its suite. Additional tools are allowed and
+ * deliberately not enumerated: the assertion is that these are present, not
+ * that nothing else is, because pinning the full set would fail on every
+ * ordinary addition to a job.
+ */
+const REQUIRED_MASTER_TOOLS: Record<string, string[]> = {
+    UnitTests: ["vitest"],
+    Lint: ["eslint", "typescript"],
+    Compat: ["typescript", "vitest"],
+};
 
 function validationToolsIn(body: string, tooling: Set<string>): string[] {
     const found = commandsIn(body)
@@ -1544,6 +1589,29 @@ describe("pull-request jobs cannot run on a master build", () => {
         // on a correct tree gets deleted rather than fixed.
         const referenced = dualContextPipelines.flatMap((file) => file.jobs.flatMap((job) => templateReferencesIn(job.body)));
 
+        // The collector's anchor, pinned rather than described. The doc comment
+        // on `templateReferencesIn` argues it needs no comment projection
+        // because the pattern anchors the dash at the start of the line, so a
+        // commented-out reference cannot match it. That is true, and it was a
+        // claim about a regex that nothing tested: unanchoring the pattern is
+        // invisible against every real pipeline, because references are always
+        // written `- template: path` and nothing else on any line ends in a
+        // bare word after `template:`.
+        //
+        // So the reasoning explaining why one projection is unnecessary rested
+        // on a property with no specimen behind it. Both call sites suffer: the
+        // inliner would try to resolve a path out of a comment, and the check
+        // below would count it as a live reference.
+        expect(
+            templateReferencesIn("          - job: Lint\n            steps:\n                # - template: config/templates/upload-static-site.yml\n"),
+            "a commented-out template reference is being collected as a live one, so a hop nothing executes counts as executed"
+        ).toEqual([]);
+
+        expect(
+            templateReferencesIn("            steps:\n                - template: config/templates/upload-test-report.yml\n"),
+            "a real template reference is not being collected, which would make every template read as unreferenced"
+        ).toEqual(["config/templates/upload-test-report.yml"]);
+
         // The floor's own failure has two causes needing opposite repairs, and
         // the partition between them is a property of the input rather than of
         // what this check distinguishes: either the collector produced nothing
@@ -1892,6 +1960,35 @@ describe("pull-request jobs cannot run on a master build", () => {
             "installing a tool resolves as validation, so a job that only installs its dependencies reads as validated work"
         ).toEqual([]);
 
+        // The accepting side of the same three predicates. Each of these was a
+        // silent mutation before it was written down: the predicate could be
+        // loosened or dropped and every assertion above still passed, because
+        // all of them state what must *not* resolve and a widening only shows
+        // up on something that must.
+        expect(
+            validationToolsIn("steps:\n  - script: npx --yes vitest run\n", tooling),
+            "a runner flag is being read as the tool being invoked, so a real test run resolves to nothing and the job reads as hollow"
+        ).toEqual(["vitest"]);
+
+        // `install` as a substring rather than a word. Dropping the word
+        // boundaries from the setup pattern is invisible against today's
+        // commands -- every one of them says `install` on its own -- so the
+        // specimen has to supply the separating input the tree does not.
+        expect(
+            validationToolsIn("steps:\n  - script: npx vitest run --project installer\n", tooling),
+            "a real test run is being classified as setup because one of its arguments merely contains the word `install`"
+        ).toEqual(["vitest"]);
+
+        // A folded block scalar. `script: >` appears nowhere in this repository
+        // today, so the `>` half of the block-scalar test is dead against every
+        // real file and can be deleted without any assertion over the tree
+        // noticing. Dead by the corpus's shape rather than by structure, which
+        // is the case that earns a specimen instead of a note.
+        expect(
+            validationToolsIn("steps:\n  - script: >\n      npx vitest run --project unit\n", tooling),
+            "a folded block scalar is not being read as a script body, so every command written that way is invisible to this clause"
+        ).toEqual(["vitest"]);
+
         const hollow = jobsIn(pipeline)
             .filter((job) => !job.gated && KNOWN_MASTER_JOBS.includes(job.name))
             .filter((job) => validationToolsIn(job.body, tooling).length === 0)
@@ -1902,6 +1999,35 @@ describe("pull-request jobs cannot run on a master build", () => {
             `these jobs run on every push to master and invoke nothing the repository recognises as a tool: ${hollow.join(", ")}.\n` +
                 `A job that is present, ungated and running echoes reports success without validating anything, which is the failure this PR exists to prevent wearing the shape of the fix.`
         ).toEqual([]);
+
+        // Identity, not cardinality. See REQUIRED_MASTER_TOOLS: the check above
+        // is satisfied by any one recognised tool, so a job can lose the very
+        // thing it is named for and still report as tooled on the strength of
+        // whatever else it happens to run.
+        const missingTools = jobsIn(pipeline)
+            .filter((job) => !job.gated && KNOWN_MASTER_JOBS.includes(job.name))
+            .flatMap((job) => {
+                const resolved = validationToolsIn(job.body, tooling);
+                return (REQUIRED_MASTER_TOOLS[job.name] ?? []).filter((tool) => !resolved.includes(tool)).map((tool) => `${job.name} no longer invokes ${tool}`);
+            });
+
+        expect(
+            missingTools,
+            `${missingTools.join("; ")}.\n` +
+                `Each of these jobs still resolves to some recognised tool, so the emptiness check above stays green -- which is exactly how a job keeps its name and stops doing the work that name promises.`
+        ).toEqual([]);
+
+        // And the floor on the list itself: a name that matches no master job
+        // silently requires nothing, so emptying or re-pointing this table
+        // would disable the check above without failing anything.
+        const unmatchedRequirements = Object.keys(REQUIRED_MASTER_TOOLS).filter((name) => !KNOWN_MASTER_JOBS.includes(name));
+        expect(
+            unmatchedRequirements,
+            `these entries name jobs that do not run on master: ${unmatchedRequirements.join(", ")}. An entry matching no job imposes no requirement while looking like one.`
+        ).toEqual([]);
+        expect(Object.keys(REQUIRED_MASTER_TOOLS).sort(), "every job that runs on master needs a stated tool, or the check above skips it silently").toEqual(
+            [...KNOWN_MASTER_JOBS].sort()
+        );
 
         // Reachability: the filter above is only meaningful if it selected the
         // jobs at all. An empty selection satisfies the emptiness assertion
