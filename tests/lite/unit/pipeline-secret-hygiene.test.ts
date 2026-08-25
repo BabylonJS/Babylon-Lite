@@ -813,13 +813,29 @@ describe("the mask guard reads every file carrying anything its clauses examine"
 
         const unread = carrying.filter((file) => !scanned.has(file)).sort();
 
-        // Split, because one remediation is wrong for the other case and a
-        // false instruction is worse than none: telling a reader to add
-        // `scripts/` to the roots list would make pipelineFiles() read a shell
-        // script as pipeline YAML. That is the same shape as the fixture
-        // misfire whose advice, followed correctly, deepened the bug.
+        // Split three ways, because one remediation is wrong for the others and
+        // a false instruction is worse than none.
+        //
+        // Two different failures reach the YAML message, needing opposite
+        // repairs. A file under a directory nobody listed wants the directory
+        // added. A file under a directory that IS listed, excluded by that
+        // root's `match` -- the repo root only collects the `azure-pipelines`
+        // prefix -- is told to add a directory that is already entry #1.
+        // Measured: a root-level ci-checks.yml with a credential shape fired
+        // the add-the-directory advice, and following it literally widens the
+        // repo root and hands pnpm-lock.yaml to the pipeline parser. Advice
+        // that deepens the bug it reports.
+        const listedDirectories = new Set(PIPELINE_ROOTS.map(({ label }) => label));
+        const directoryOf = (file: string) => (file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "");
+        const unreadYaml = unread.filter((file) => isYamlFile(file));
+
         expect(
-            unread.filter((file) => isYamlFile(file)),
+            unreadYaml.filter((file) => listedDirectories.has(directoryOf(file))),
+            "these files carry a credential shape and sit in a directory the guard already collects, but that root's `match` excludes them. Widen that root's `match` and `atLeast` in PIPELINE_ROOTS — do NOT add the directory again, which would hand every unrelated YAML in it to the pipeline parser:"
+        ).toEqual([]);
+
+        expect(
+            unreadYaml.filter((file) => !listedDirectories.has(directoryOf(file))),
             "these files carry an Authorization header or a masked value, but the guard never reads them, so a credential in them is invisible. Add the directory to the roots list in pipelineFiles():"
         ).toEqual([]);
 
