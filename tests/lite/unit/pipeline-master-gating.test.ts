@@ -779,6 +779,104 @@ function expensiveWorkIn(body: string): string[] {
     return EXPENSIVE_WORK.filter((work) => commands.some((command) => command.toLowerCase().includes(work.command))).map((work) => work.command);
 }
 
+/**
+ * Tools a step actually invokes, resolved against `package.json`.
+ *
+ * This exists because every other clause in this file reads a *declaration* --
+ * whether a job is gated, what its `displayName` says, what its `condition:`
+ * evaluates to -- and a declaration is exactly what survives the deletion of
+ * the work it describes. Measured on the committed tree: replacing the script
+ * of Unit Tests, ESLint and the compat suite with `echo skipping`, all three
+ * at once and changing nothing else, left all fifteen clauses green. The whole
+ * post-merge run this PR exists to add reduced to three echoes, and the guard
+ * still certified master as validated.
+ *
+ * The reason it was invisible is worth stating, because it is a property of
+ * the subject rather than of the clauses: what these jobs *run* is described
+ * by exactly one artifact, the pipeline. The job set is cross-checked against
+ * TESTING.md, the gate conditions against the pipeline header's own
+ * prescriptions -- but nothing outside the pipeline says a word about the
+ * commands, so there was no second side for a hollowed-out step to have to
+ * agree with. A subject with one description cannot be contradicted.
+ *
+ * `package.json` is that second side, and it is the only honest one available:
+ * its `scripts` block and its `devDependencies` are what the repository itself
+ * says a real tool is. This does not make the arrangement uncapitulable -- a
+ * determined edit can add `"skipping": "echo"` to `scripts` -- but it moves the
+ * cost from one line inside a large pipeline to a visible edit in the file
+ * every developer in the repository reads first.
+ */
+/**
+ * Binaries whose package is named differently from the command that runs it.
+ *
+ * This table detects nothing, and that is deliberate -- it exists to stop the
+ * clause below firing on correct code. Measured both ways: delete the ESLint
+ * step while the type-check survives and the clause is correctly silent, since
+ * the job still validates; do the same with this table emptied and it reports
+ * a job that type-checks on every push as validating nothing. A guard that
+ * fires on a healthy pipeline gets deleted, which is worse than the miss.
+ *
+ * The `playwright` entry is currently unreachable, because the only playwright
+ * command here is an install and installs are excluded above. It stays because
+ * the first `playwright test` step anybody adds needs it, and its correctness
+ * is pinned to the manifest rather than to my memory.
+ */
+const TOOL_ALIASES: Record<string, string> = { tsc: "typescript", playwright: "@playwright/test" };
+
+function repoTooling(): Set<string> {
+    const manifest = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
+        scripts?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+    };
+
+    return new Set([...Object.keys(manifest.scripts ?? {}), ...Object.keys(manifest.devDependencies ?? {})]);
+}
+
+/**
+ * The first word of a command that is not a runner, a flag or a wrapper.
+ *
+ * `npx vitest run` resolves to `vitest`, `pnpm test:unit` to `test:unit`, and
+ * `echo skipping` to `echo` -- which is the point: `echo` is in neither the
+ * scripts block nor the devDependencies, so a hollowed step resolves to
+ * nothing the repository recognises as a tool.
+ */
+function toolInvokedBy(command: string): string | undefined {
+    const words = command.split(/\s+/).filter(Boolean);
+
+    for (const word of words) {
+        if (["npx", "pnpm", "npm", "exec", "run", "node", "sudo", "corepack"].includes(word) || word.startsWith("-")) continue;
+        return TOOL_ALIASES[word] ?? word;
+    }
+
+    return undefined;
+}
+
+/**
+ * Commands that put the tools on the machine rather than run them.
+ *
+ * Without this the clause below does not work, and it took a measurement to
+ * see why: hollowing out Unit Tests still left `pnpm exec playwright install
+ * chromium` in the job, which resolves to a real devDependency, so the job
+ * went on looking tooled while validating nothing. Installing a test runner is
+ * exactly what survives deleting the test run -- the same shape as a step that
+ * keeps its `env:` block after its script stops checking anything.
+ *
+ * Measured as the sole detector rather than assumed: re-pointing this pattern
+ * and hollowing Unit Tests together leaves every clause green, because that
+ * job installs a browser and the installer is a real devDependency. Nothing
+ * else in the file notices.
+ */
+const SETUP_WORK = /\binstall\b/;
+
+function validationToolsIn(body: string, tooling: Set<string>): string[] {
+    const found = commandsIn(body)
+        .filter((command) => !SETUP_WORK.test(command))
+        .map((command) => toolInvokedBy(command))
+        .filter((tool): tool is string => tool !== undefined && tooling.has(tool));
+
+    return [...new Set(found)];
+}
+
 function jobsIn(text: string): PipelineJob[] {
     const lines = text.split("\n");
     const starts: { name: string; line: number; keyIndent: number }[] = [];
@@ -1697,6 +1795,55 @@ describe("pull-request jobs cannot run on a master build", () => {
             twice.illegal.length,
             `a subject carrying two independent corruptions reports ${twice.illegal.length} of them.\nFixing the one it names and re-running would then report a file that is still broken as clean.`
         ).toBe(2);
+    });
+
+    it("requires every job that runs on master to invoke a tool the repository recognises", () => {
+        const pipeline = withTemplatesResolved(readFileSync(join(repoRoot, "azure-pipelines.yml"), "utf8"));
+        const tooling = repoTooling();
+
+        // Floor first, and from the side that is not this pipeline: if the
+        // manifest stops naming tools, every check below turns into "no job
+        // runs anything the repository recognises", which fires for the wrong
+        // reason, or -- worse, had this been written as a subset test -- passes
+        // against an empty set. Either way the clause would have stopped
+        // measuring the pipeline and started measuring a parse failure.
+        expect(tooling.size, "package.json names no scripts and no devDependencies, so nothing here can tell a real command from an echo").toBeGreaterThan(10);
+
+        // The alias table is the one authored thing in this clause, so it is
+        // pinned to the manifest rather than trusted: `tsc` is only a legitimate
+        // stand-in while `typescript` is actually a devDependency. A stale alias
+        // would otherwise quietly widen what counts as validation.
+        const staleAliases = Object.entries(TOOL_ALIASES).filter(([, packageName]) => !tooling.has(packageName));
+        expect(
+            staleAliases,
+            `these aliases name packages the manifest no longer has, so they admit a command nothing installs: ${staleAliases.map(([alias]) => alias).join(", ")}`
+        ).toEqual([]);
+
+        // And the discriminating half: the resolver has to reject something.
+        // `echo` is the exact shape a hollowed-out step takes -- it is a real
+        // command, it runs, it exits zero, and it validates nothing.
+        expect(
+            validationToolsIn("steps:\n  - script: echo skipping\n", tooling),
+            "a step that only echoes resolves as validation, so this clause cannot tell work from a no-op"
+        ).toEqual([]);
+
+        const hollow = jobsIn(pipeline)
+            .filter((job) => !job.gated && KNOWN_MASTER_JOBS.includes(job.name))
+            .filter((job) => validationToolsIn(job.body, tooling).length === 0)
+            .map((job) => job.name);
+
+        expect(
+            hollow,
+            `these jobs run on every push to master and invoke nothing the repository recognises as a tool: ${hollow.join(", ")}.\n` +
+                `A job that is present, ungated and running echoes reports success without validating anything, which is the failure this PR exists to prevent wearing the shape of the fix.`
+        ).toEqual([]);
+
+        // Reachability: the filter above is only meaningful if it selected the
+        // jobs at all. An empty selection satisfies the emptiness assertion
+        // above while measuring nothing -- the enumeration failure this file
+        // has hit twice before.
+        const measured = jobsIn(pipeline).filter((job) => !job.gated && KNOWN_MASTER_JOBS.includes(job.name));
+        expect(measured.length, "no ungated master job was found, so the assertion above compared an empty list against an empty list").toBe(KNOWN_MASTER_JOBS.length);
     });
 
     it("pins the post-merge job set to the sentence documenting it", () => {
