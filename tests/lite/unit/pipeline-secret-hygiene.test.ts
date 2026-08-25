@@ -164,6 +164,8 @@ const DOCUMENTATION_KEY = /^(\s*)(?:-\s*)?(description|displayName|label|placeho
 export function stripDocumentationText(content: string): string {
     const out: string[] = [];
     let blockIndent: number | null = null;
+    let openQuote: string | null = null;
+    let quoteIndent = 0;
 
     for (const line of content.split("\n")) {
         if (blockIndent !== null) {
@@ -175,10 +177,36 @@ export function stripDocumentationText(content: string): string {
             blockIndent = null;
         }
 
+        if (openQuote !== null) {
+            const indent = line.search(/\S/);
+            // A dedent always ends the region, even with the quote still open.
+            // Without this an unterminated quote blanks every line below it and
+            // silences the guard for the rest of the file -- silently, which is
+            // the direction that matters when extending a strip.
+            if (line.trim() !== "" && indent <= quoteIndent) {
+                openQuote = null;
+            } else {
+                if (line.includes(openQuote)) {
+                    openQuote = null;
+                }
+                out.push("");
+                continue;
+            }
+        }
+
         const match = DOCUMENTATION_KEY.exec(line);
         if (match) {
-            if (/^[|>]/.test(match[3].trim())) {
+            const value = match[3].trim();
+            if (/^[|>]/.test(value)) {
                 blockIndent = match[1].length;
+            } else if (/^["']/.test(value) && !(value.length > 1 && value.endsWith(value[0]))) {
+                // A quoted scalar that does not close on its own line continues
+                // onto the next. YAML folds those lines into a single string, so
+                // a `run:` or an `Authorization:` header inside one is prose by
+                // the grammar -- settled by the key plus the quote, with no
+                // block scalar marker anywhere to signal it.
+                openQuote = value[0];
+                quoteIndent = match[1].length;
             }
             out.push(`${match[1]}${match[2]}:`);
             continue;
@@ -415,6 +443,23 @@ describe("documentation text is not read as configuration", () => {
     it("leaves an ADO variables value alone, where the same key is not prose", () => {
         const line = "      - name: token\n        value: $(DEPLOY_TOKEN)";
         expect(stripDocumentationText(line)).toBe(line);
+    });
+
+    it("blanks a quoted scalar that continues onto the next line", () => {
+        // Settled by the key plus the quote, with no block scalar marker to
+        // signal it. YAML folds these lines into one string, so a header
+        // inside is prose by the grammar -- confirmed against a parser rather
+        // than reasoned about.
+        const prose = ["      description: 'redacted in logs as", "        Authorization: Bearer ******'", "      other: keep"].join("\n");
+        expect(stripDocumentationText(prose).split("\n")).toEqual(["      description:", "", "      other: keep"]);
+    });
+
+    it("stops an unterminated quote at a dedent instead of blanking the rest of the file", () => {
+        // The silent direction, and the only way extending this strip could be
+        // worse than the misfire it fixes: one stray quote would otherwise
+        // silence every clause below it for the remainder of the file.
+        const prose = ["      description: 'never closed", "      script: curl -H 'Authorization: Bearer ******'"].join("\n");
+        expect(stripDocumentationText(prose).split("\n")[1]).toContain("Authorization");
     });
 
     it("leaves a script block scalar body intact, which is where the real shell lives", () => {
