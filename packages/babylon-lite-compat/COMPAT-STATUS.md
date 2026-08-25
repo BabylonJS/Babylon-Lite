@@ -4,8 +4,11 @@ This file tracks the support status of each Babylon.js (BJS) feature area in the
 `@babylonjs/lite-compat` package. It is the single source of truth consulted and
 updated by the `update-compat-layer` skill.
 
-<!-- The three markers below are machine-read by the update-compat-layer skill.
-     Do not rename them. Update both SHAs and the date at the end of every sync. -->
+<!-- `Last synced BJS commit`, `Last synced Lite commit` and `Last sync date` are the
+     sync markers: machine-read by the update-compat-layer skill, and all three are
+     rewritten at the end of every sync. Do not rename them.
+     `Lite compat package version` is NOT a sync marker -- it tracks the published
+     package and changes only when that version changes. -->
 
 - **Last synced BJS commit:** `82d305cbb2603e16e9795fd311690ac96a358501`
 - **Last synced Lite commit:** `6b71be8339a0cacaf9c82271a77c62b387b5c1e8`

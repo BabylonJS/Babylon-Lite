@@ -139,14 +139,17 @@ Task 3 gap implementable.
 ## Task 1 — React to upstream BJS/Lite diffs
 
 1. **Find Lite changes since the previous sync.** Read `LAST_LITE_SHA` from the
-   `Last synced Lite commit` marker in `COMPAT-STATUS.md`, and record the Lite
-   `master` HEAD you are syncing against as `NEW_LITE_SHA`. Capture `NEW_LITE_SHA`
-   **before you commit anything**, or it will point at your own work:
+   `Last synced Lite commit` marker, and capture the commit you are syncing from as
+   `NEW_LITE_SHA`. Take it from `HEAD` **before you make any commits**, or it will
+   point at your own work instead of the Lite history you reviewed:
 
     ```
-    git rev-parse origin/master                 # -> NEW_LITE_SHA
-    git log --oneline LAST_LITE_SHA..NEW_LITE_SHA -- packages/babylon-lite/src
-    git diff --stat LAST_LITE_SHA..NEW_LITE_SHA -- packages/babylon-lite/src/index.ts
+    LAST_LITE_SHA=$(grep -m1 '^- \*\*Last synced Lite commit:' \
+      packages/babylon-lite-compat/COMPAT-STATUS.md | grep -oE '[0-9a-f]{40}')
+    NEW_LITE_SHA=$(git rev-parse HEAD)
+
+    git log --oneline $LAST_LITE_SHA..$NEW_LITE_SHA -- packages/babylon-lite/src
+    git diff --stat $LAST_LITE_SHA..$NEW_LITE_SHA -- packages/babylon-lite/src/index.ts
     ```
 
     New public exports in `index.ts` are new Lite capabilities — cross-reference them
