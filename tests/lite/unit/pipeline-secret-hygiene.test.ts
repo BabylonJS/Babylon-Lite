@@ -307,12 +307,17 @@ function allYamlCarryingACredentialShape(): string[] {
 
     const walk = (dir: string): void => {
         for (const name of readdirSync(dir)) {
-            if (!isWalkableDir(name)) {
-                continue;
-            }
             const full = join(dir, name);
             if (statSync(full).isDirectory()) {
-                walk(full);
+                // Asked only about directories, which is the sole thing the
+                // predicate is named for and reasons about. Testing it against
+                // every entry first also skipped *files* whose name matched --
+                // inert here, because no tracked file is named `build` or
+                // `dist`, but the fixtures below cannot see this either way:
+                // they pin what the predicate answers, never where it is asked.
+                if (isWalkableDir(name)) {
+                    walk(full);
+                }
             } else if (
                 /\.ya?ml$/.test(name) &&
                 readFileSync(full, "utf8")
