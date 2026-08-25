@@ -60,16 +60,29 @@ function loadDracoScript(): Promise<DracoFactory> {
         }
         const script = document.createElement("script");
         script.src = dracoBaseUrl + "draco_decoder.js";
+        const cleanup = (): void => {
+            script.onload = null;
+            script.onerror = null;
+            script.remove();
+        };
+        const fail = (message: string): void => {
+            cleanup();
+            reject(new Error(message));
+        };
         script.onload = () => {
             const factory = (globalThis as { DracoDecoderModule?: DracoFactory }).DracoDecoderModule;
             if (!factory) {
-                reject(new Error("draco_decoder.js loaded but DracoDecoderModule is undefined"));
+                fail("draco_decoder.js loaded but DracoDecoderModule is undefined");
             } else {
+                cleanup();
                 resolve(factory);
             }
         };
-        script.onerror = () => reject(new Error("Failed to load draco_decoder.js from " + script.src));
+        script.onerror = () => fail("Failed to load draco_decoder.js from " + script.src);
         document.head.appendChild(script);
+    });
+    void scriptLoadPromise.catch(() => {
+        scriptLoadPromise = null;
     });
     return scriptLoadPromise;
 }
@@ -82,6 +95,9 @@ async function getDracoModule(): Promise<DracoModule> {
         const factory = await loadDracoScript();
         return factory({ locateFile: (f: string) => dracoBaseUrl + f });
     })();
+    void modulePromise.catch(() => {
+        modulePromise = null;
+    });
     return modulePromise;
 }
 
