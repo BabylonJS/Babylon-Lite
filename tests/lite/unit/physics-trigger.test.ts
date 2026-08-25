@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PhysicsBody, PhysicsWorld } from "../../../packages/babylon-lite/src/physics/havok";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { createHavokWorld, onPhysicsAfterStep, type PhysicsBody, type PhysicsWorld } from "../../../packages/babylon-lite/src/physics/havok";
 import { onPhysicsTrigger, onPhysicsTriggerBodies } from "../../../packages/babylon-lite/src/physics/havok-trigger";
 
 function makeWorld(events: ReadonlyArray<{ type: number; bodyA: number; bodyB: number }>, bodies: PhysicsBody[] = []) {
@@ -62,5 +63,28 @@ describe("Havok trigger events", () => {
             { type: "ENTERED", bodyA, bodyB },
             { type: "EXITED", bodyA, bodyB: null },
         ]);
+    });
+
+    it("does not skip later after-step callbacks when a trigger subscription disposes itself", () => {
+        const triggerWorld = makeWorld([{ type: 8, bodyA: 1, bodyB: 2 }]);
+        const hknp = Object.assign(triggerWorld._hknp, {
+            HP_World_Create: vi.fn(() => [0, {}]),
+            HP_World_SetGravity: vi.fn(),
+            HP_World_Step: vi.fn(),
+        });
+        const scene = { _beforeRender: [], fixedDeltaMs: 0, surface: { engine: { _currentDelta: 16 } } } as unknown as SceneContext;
+        const world = createHavokWorld(scene, hknp);
+        const calls: string[] = [];
+        let dispose = (): void => undefined;
+        dispose = onPhysicsTrigger(world, () => {
+            calls.push("trigger");
+            dispose();
+        });
+        onPhysicsAfterStep(world, () => calls.push("other"));
+
+        scene._beforeRender[0]!(16);
+
+        expect(calls).toEqual(["trigger", "other"]);
+        expect(world._afterStep).toHaveLength(1);
     });
 });
