@@ -56,6 +56,23 @@ export const repoRoot = join(__dirname, "..", "..", "..");
  * without them is not evidence that they are redundant. Duplicating them into
  * the consuming file is the opposite error and is not the remedy -- coverage
  * would grow while nothing new became covered.
+ *
+ * Two notes on the instrument, both earned by getting them wrong. A mutation
+ * harness is itself a predicate about this code, and it fails in the same ways
+ * the code does.
+ *
+ * Assert what the arm matched, and assert the count. An arm that silently
+ * matches zero places reports "silent" for a mutation that never happened, and
+ * one that matches two places tests something wider than it claims. Both render
+ * as a verdict about the subject. Anything the harness *infers* about its own
+ * edit -- diffing before and after to work out what it replaced, say -- is a
+ * second unpinned derivation sitting underneath the first.
+ *
+ * Grade by reading the result, not by matching one spelling of it. A sweep here
+ * was once graded with `grep -c "1 failed"` and reported 10 of 13 arms firing;
+ * all 13 were firing, and the three it missed failed 2, 3 and 10 assertions
+ * rather than 1. The filter encoded an assumption about the shape of success,
+ * so the stronger result read as the weaker one.
  */
 
 /**

@@ -691,6 +691,20 @@ function structureProblems(text: string): { illegal: string[]; folded: string[] 
 
     for (let index = 0; index < lines.length; index++) {
         const line = lines[index] ?? "";
+        // Both halves of this skip detect nothing, and I wrote the opposite
+        // here before measuring it. Removing either one -- or the whole guard
+        // -- leaves the entire project green, because the scalar pattern three
+        // lines down requires the key to start with `[A-Za-z_$]`, which neither
+        // a blank line nor a `#` comment can do. Dead by a guarantee living
+        // inside this same function, so it is recorded rather than pinned: the
+        // guarantee travels with the code, which is the discriminator for when
+        // a guaranteed-dead branch is worth a specimen instead.
+        //
+        // The contrast is the near-identical skip in the terminator scan below,
+        // which looks past blanks and comments to find the *next* line. That one
+        // fires when removed. Two lines that read the same and are not the same:
+        // this one asks "is this a key", where the regex has already answered;
+        // that one asks "where does this value end", where nothing else has.
         if (!line.trim() || line.trim().startsWith("#")) continue;
 
         const scalar = /^(?:-\s+)?[A-Za-z_$][\w.$-]*:[ \t]+(\S.*)$/.exec(line.trimStart());
