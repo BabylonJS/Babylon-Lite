@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
-import { isWalkableDir, pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS, SHELL_STEP_KEY } from "./pipeline-files";
+import { isWalkableDir, pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS, SHELL_STEP_KEY, stripNonShellBlockScalars } from "./pipeline-files";
 
 interface ShellScript {
     location: string;
@@ -38,7 +38,11 @@ function shellScripts(): ShellScript[] {
 
     const scripts: ShellScript[] = [];
     for (const { path, location: file, root } of files) {
-        const lines = readFileSync(path, "utf8").split("\n");
+        // Documentation is stripped before collection: an example step inside a
+        // `description:` block is byte-identical to a real one, and the guard
+        // has no business demanding pipefail of a sentence. Line count is
+        // preserved by the strip, so `location` below stays accurate.
+        const lines = stripNonShellBlockScalars(readFileSync(path, "utf8")).split("\n");
         for (let i = 0; i < lines.length; i++) {
             // `run` is the GitHub Actions spelling of the same thing. Verified
             // that no Azure file in this repo uses the key, so accepting it
@@ -362,6 +366,50 @@ describe("piped pipeline steps enable pipefail", () => {
             unguarded,
             `these scripts pipe a command but never 'set -euo pipefail', so a failure on the left of the pipe is silently discarded:\n  ${unguarded.join("\n  ")}\n`
         ).toEqual([]);
+    });
+});
+
+describe("documentation is not configuration", () => {
+    // The silent-miss direction is the one that matters here. Blanking a real
+    // `script:` body would make every pipe in it invisible and leave the suite
+    // green, so these two fixtures are the load-bearing pair.
+    it("keeps a real shell step's body", () => {
+        const step = ["- script: |", "      npx tsc --noEmit | sed 's/^/[ts] /'"].join("\n");
+        expect(stripNonShellBlockScalars(step)).toBe(step);
+    });
+
+    it("blanks an example step quoted inside documentation", () => {
+        const doc = ["description: |", "      Example of a step this replaces:", "      run: npx tsc --noEmit | sed 's/^/[ts] /'"].join("\n");
+        expect(SHELL_STEP_KEY.test(stripNonShellBlockScalars(doc).split("\n")[2] ?? "")).toBe(false);
+    });
+
+    it("preserves line count so reported line numbers stay true", () => {
+        const doc = "description: |\n    run: a | b\n    more\nsteps:\n    - script: echo hi";
+        expect(stripNonShellBlockScalars(doc).split("\n")).toHaveLength(doc.split("\n").length);
+    });
+
+    it("resumes reading configuration after the block dedents", () => {
+        const text = ["description: |", "      run: a | b", "steps:", "    - run: npx tsc | sed 's/x/y/'"].join("\n");
+        const kept = stripNonShellBlockScalars(text).split("\n");
+        expect(SHELL_STEP_KEY.test(kept[1] ?? "")).toBe(false);
+        expect(SHELL_STEP_KEY.test(kept[3] ?? "")).toBe(true);
+    });
+
+    it.each([
+        ["folded scalars", "description: >\n      run: a | b"],
+        ["chomping indicators", "description: |-\n      run: a | b"],
+        ["a keep indicator", "description: |+\n      run: a | b"],
+        ["a sequence item key", "- description: |\n      run: a | b"],
+    ])("blanks a body opened with %s", (_label, text) => {
+        expect(SHELL_STEP_KEY.test(stripNonShellBlockScalars(text).split("\n")[1] ?? "")).toBe(false);
+    });
+
+    it("leaves single-line prose alone, which the key anchor already handles", () => {
+        // Pinned rather than assumed: the claim that only block scalars need
+        // this rests on SHELL_STEP_KEY seeing `description`, not `run`.
+        const line = "description: run: npx tsc | sed 's/x/y/'";
+        expect(stripNonShellBlockScalars(line)).toBe(line);
+        expect(SHELL_STEP_KEY.test(line)).toBe(false);
     });
 });
 
