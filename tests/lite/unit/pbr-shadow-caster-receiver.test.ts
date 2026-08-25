@@ -65,7 +65,7 @@ const shadowSignature = {
 } as unknown as RenderTargetSignature;
 
 describe("PBR shadow caster-receiver shader variants", () => {
-    it("declares the single-light uniform type used by the no-color shadow pass", async () => {
+    it("builds the no-color shadow pass without unused light declarations", async () => {
         clearPbrPipelineCache();
         clearSceneBGLCache();
         const { engine, createShaderModule } = makeEngine();
@@ -89,7 +89,8 @@ describe("PBR shadow caster-receiver shader variants", () => {
 
         const fragmentWgsl = createShaderModule.mock.calls
             .map((call) => (call[0] as GPUShaderModuleDescriptor).code)
-            .find((code) => code.includes("var<uniform> lights: lightsUniforms"));
-        expect(fragmentWgsl).toContain("struct lightsUniforms");
+            .find((code) => code.includes("@fragment fn main") && !code.includes("-> @location(0)"));
+        expect(fragmentWgsl).toContain("return;");
+        expect(fragmentWgsl).not.toContain("lightsUniforms");
     });
 });

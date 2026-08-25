@@ -233,7 +233,7 @@ export interface SceneContext extends RenderingContext {
     /** @internal */
     _frameGraph: FrameGraph;
 
-    /** @internal Optional clustered point-light container. Only populated by the clustered-light extension API. */
+    /** @internal Optional clustered point/spot-light container. Only populated by the clustered-light extension API. */
     _clusteredLightContainer?: ClusteredLightContainer;
     /** @internal Updates clustered light cells for the camera used by the current render pass. */
     _clusteredLightUpdater?: (camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void;

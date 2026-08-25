@@ -108,6 +108,7 @@ export async function buildNodeParticleSetWithTextureUpdateRuntime(
             scene,
             textureBaseUrl: options.textureBaseUrl,
         };
+        options._setupEmitter?.(state);
         const outputs = new Map<string, NpeGetter>();
         const built = new Set<number | ParsedParticleBlock>();
         const ctx: NpeBuildContext = {
@@ -194,11 +195,6 @@ export async function buildNodeParticleSetWithTextureUpdateRuntime(
         };
 
         await buildBlock(systemId);
-        system._emitter = {
-            emitter: state.emitter,
-            emitterWorldMatrix: state.emitterWorldMatrix,
-            emitterInverseWorldMatrices: state.emitterInverseWorldMatrices,
-        };
         systems.push(system);
     }
 

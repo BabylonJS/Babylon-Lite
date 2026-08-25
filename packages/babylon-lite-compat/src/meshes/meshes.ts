@@ -354,6 +354,13 @@ export class AbstractMesh extends TransformNode {
         this._syncVisibility(this.isEnabled());
     }
 
+    public get isPickable(): boolean {
+        return this._lite.pickable !== false;
+    }
+    public set isPickable(value: boolean) {
+        this._lite.pickable = value;
+    }
+
     public get receiveShadows(): boolean {
         return this._lite.receiveShadows;
     }
