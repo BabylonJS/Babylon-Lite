@@ -2074,11 +2074,42 @@ describe("pull-request jobs cannot run on a master build", () => {
             "installing a tool resolves as validation, so a job that only installs its dependencies reads as validated work"
         ).toEqual([]);
 
-        // The accepting side of the same three predicates. Each of these was a
+        // The accepting side of the same predicates. Each of these was a
         // silent mutation before it was written down: the predicate could be
         // loosened or dropped and every assertion above still passed, because
         // all of them state what must *not* resolve and a widening only shows
         // up on something that must.
+        //
+        // Three specimens for tool resolution, because `toolInvokedBy` skips two
+        // independent things on one line -- runner names and flags -- and a
+        // single command exercising both cannot say which one broke. Measured:
+        // against the combined
+        // `npx --yes vitest run` alone, dropping the runner list and dropping
+        // the flag test both failed here, and both reported *"a runner flag is
+        // being read as the tool"*. The runner mutation was diagnosed as a flag
+        // mutation, and the arm still looked like a clean catch because it was
+        // red. Detection was never the problem; the message was, and a message
+        // that names the wrong cause sends the next reader to the wrong line.
+        //
+        // The first attempt at this fix was itself measured wrong, and the
+        // correction is the point. A specimen reading `pnpm exec vitest run`
+        // separated the flag test cleanly but left `npx` still reporting as a
+        // flag, because the skip list is an *enumeration*: eight words, each
+        // separately deletable, and a specimen only attributes the members it
+        // actually names. So the runner witnesses below are flag-free and cover
+        // both spellings the tree uses -- dropping the flag test leaves both
+        // green, which is what makes them the runner list's own witnesses
+        // rather than second copies of the one beneath them.
+        expect(
+            validationToolsIn("steps:\n  - script: npx vitest run\n", tooling),
+            "a runner name is being read as the tool being invoked, so a real test run resolves to the runner and the job reads as untooled"
+        ).toEqual(["vitest"]);
+
+        expect(
+            validationToolsIn("steps:\n  - script: pnpm exec vitest run\n", tooling),
+            "a package-manager runner is being read as the tool being invoked, so a real test run resolves to the package manager and the job reads as untooled"
+        ).toEqual(["vitest"]);
+
         expect(
             validationToolsIn("steps:\n  - script: npx --yes vitest run\n", tooling),
             "a runner flag is being read as the tool being invoked, so a real test run resolves to nothing and the job reads as hollow"
