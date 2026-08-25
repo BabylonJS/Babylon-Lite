@@ -330,16 +330,21 @@ uploading failed Playwright HTML reports:
 The failed-test report upload template also expects these pipeline variables:
 
 - `DEPLOY_ENDPOINT_UPLOAD` — `BabylonJS-Deployment`
-- `STORAGE_ACCOUNT` — `BabylonJS-CI-Infrastructure`
-- `SERVE_DOMAIN` — `BabylonJS-CI-Infrastructure`
+- `SERVE_DOMAIN`
+- `STORAGE_ACCOUNT` — **not exported by any variable group.** This is the upload
+  template's own parameter name, and each pipeline maps its own account into it:
+  `azure-pipelines-playground.yml` uses `$(TOOLS_STORAGE_ACCOUNT)`,
+  `azure-pipelines-bundle-manifest.yml` uses `$(SNAPSHOTS_STORAGE_ACCOUNT)` (both
+  from `BabylonJS-CI-Infrastructure`), and `azure-pipelines-demos.yml` hardcodes
+  `babylonsnapshots`.
 
-`STORAGE_ACCOUNT` is **not** in `BabylonJS-Deployment`, despite sitting next to
-`DEPLOYMENT_SERVER`/`DEPLOY_TOKEN`/`DEPLOY_ENDPOINT_UPLOAD` in every upload call.
-Any pipeline that uploads to this storage (including
-`azure-pipelines-bundle-manifest.yml`) must therefore list **both** groups under
-`variables:` and have both authorized in the ADO UI. Listing only
-`BabylonJS-Deployment` leaves `$(STORAGE_ACCOUNT)` unexpanded and the deployment
-server rejects the upload with an HTTP 401.
+The `STORAGE_ACCOUNT` naming is a genuine trap: it reads like a group variable
+because it sits beside `DEPLOYMENT_SERVER`/`DEPLOY_TOKEN` in every upload call.
+Writing `$(STORAGE_ACCOUNT)` in a new pipeline does not fail loudly — ADO leaves
+the unresolved macro as literal text, bash evaluates it as a command
+substitution, and the upload is posted with an empty account, which the
+deployment server rejects as an HTTP 401. Always map an explicit account
+variable, and validate it before doing expensive work.
 
 ### Optional Pipeline Variables
 
