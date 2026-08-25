@@ -128,6 +128,25 @@ const KNOWN_PR_CONTEXT_JOBS = ["ReleaseMarkers", "ApiReport", "BundleSize", "Per
 const KNOWN_MASTER_JOBS = ["UnitTests", "Lint", "Compat"];
 
 /**
+ * Jobs deliberately held off master for a reason other than pull-request
+ * context -- cost, external flakiness, anything that is a judgement rather than
+ * a mechanical requirement.
+ *
+ * Empty today, and that is a real statement rather than a placeholder: every
+ * one of the six gated jobs needs a pull request, so the gated set and the
+ * PR-context set coincide exactly. `PerfRegression` and `ParityCloud` are the
+ * near misses -- both are excluded from master primarily because BrowserStack
+ * is slow and externally flaky -- but both also post a `GitHubComment@0`
+ * through `upload-test-report.yml`, so they qualify on mechanism too and do not
+ * need to be listed.
+ *
+ * The list exists so that the first genuinely cost-only gate has to be written
+ * down next to its reason, instead of arriving as one more `condition:` that
+ * nobody can distinguish from the mechanically required ones.
+ */
+const COST_GATED_JOBS: string[] = [];
+
+/**
  * True when this pipeline can produce a build of `master`.
  *
  * Absent or unrecognised trigger blocks are treated as **can run on master**,
@@ -313,5 +332,38 @@ describe("pull-request jobs cannot run on a master build", () => {
                     `which is the state the master trigger was added to end. Remove the condition, or move the job out of the post-merge set deliberately.`
             ).toBe(false);
         }
+    });
+
+    it("keeps the gated set and the pull-request set identical", () => {
+        // The named list above catches a post-merge job being removed. It is
+        // structurally blind to the opposite motion: a *new* job that arrives
+        // already gated is simply not in the list, so master quietly validates
+        // less and every existing check stays green. Measured -- deriving that
+        // list instead, then deleting the Lint job outright, removes 102 lines
+        // of master validation and passes 4/4.
+        //
+        // Neither direction subsumes the other, so this clause states the
+        // invariant the two sets actually satisfy today: a job is gated **if
+        // and only if** it needs a pull request. That is checkable without
+        // naming anything, which is what lets it cover jobs that do not exist
+        // yet -- and it is a genuine claim about this pipeline rather than a
+        // restatement, because "gated" and "needs a PR" are independently
+        // derived, one from a condition and one from job content.
+        const jobs = dualContextPipelines.flatMap((file) => file.jobs);
+        const gated = jobs
+            .filter((job) => job.gated)
+            .map((job) => job.name)
+            .sort();
+        const expected = [...new Set([...jobs.filter((job) => PR_CONTEXT_MARKERS.some((marker) => marker.test(job.body))).map((job) => job.name), ...COST_GATED_JOBS])].sort();
+
+        expect(
+            gated,
+            `the set of jobs held off master and the set that needs a pull request have diverged.\n` +
+                `  gated:      ${gated.join(", ")}\n` +
+                `  expected:   ${expected.join(", ")}\n` +
+                `A job gated without needing a pull request shrinks post-merge validation, which is a decision rather than a detail. ` +
+                `If it is deliberate -- gating something purely because it is slow or flaky -- add it to COST_GATED_JOBS with the reason, ` +
+                `so the next reader meets an argument instead of a bare condition. A job that needs a pull request and has no gate is the other clause's failure, not this one's.`
+        ).toEqual(expected);
     });
 });
