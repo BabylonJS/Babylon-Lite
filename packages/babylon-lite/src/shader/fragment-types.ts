@@ -128,6 +128,9 @@ export interface ShaderFragment {
     /** @internal Unique ID for dedup and dependency resolution (e.g. "clearcoat", "skeleton") */
     readonly _id: string;
 
+    /** @internal Whether this fragment supplies an alpha source that can require blending. */
+    readonly _alphaBlend?: boolean;
+
     /** @internal Fragment IDs that must be composed before this one */
     readonly _dependencies?: readonly string[];
 
@@ -219,6 +222,20 @@ export interface UboSpec {
 
 /** The output of composeShader() — everything needed to create a GPU pipeline */
 export interface ComposedShader {
+    /** @internal Primitive state overrides for the mesh this variant was composed for: non-triangle
+     *  topology, a strip's index format, and mirrored geometry's reversed `frontFace`. Absent for
+     *  the ordinary triangle list, which the pipeline path spells out inline.
+     *
+     *  Both the state and the channel exist for bundle size. Resolving these cases on the shared PBR
+     *  pipeline path cost the topology names and a winding branch in every PBR scene — including the
+     *  vast majority that draw neither — which pushed a dozen scenes past their ceilings; as data it
+     *  costs them only the spread that merges it. And it rides on the composed shader rather than
+     *  being threaded as its own parameter because the composed shader already reaches both pipeline
+     *  builders, so a separate channel cost ~54 bytes of extra parameters and fields.
+     *
+     *  The composition key folds in `meshFeatures`, whose topology and mirror bits this mirrors, so
+     *  a cached variant can never be shared between meshes that disagree about it. */
+    _prim?: GPUPrimitiveState;
     /** @internal Final vertex WGSL source */
     readonly _vertexWGSL: string;
     /** @internal Final fragment WGSL source */

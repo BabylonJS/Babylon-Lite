@@ -22,6 +22,8 @@ export interface BillboardBlendDescriptor {
     readonly _premultipliedOpacity?: boolean;
     /** @internal Depth/blend pipeline path this mode selects. */
     readonly _depthMode: BillboardDepthMode;
+    /** @internal Particle-only Multiply pass count; absent on ordinary billboard descriptors. */
+    readonly _particlePasses?: 1 | 2;
 }
 
 /** Straight-alpha "over" blending (the default) for transparent billboards. */
@@ -62,13 +64,7 @@ export const billboardBlendAdditive: BillboardBlendDescriptor = {
     _depthMode: "transparent",
 };
 
-/**
- * Pure additive blending (`src·1 + dst`), matching Babylon.js `BLENDMODE_ONEONE` / `ALPHA_ONEONE`:
- * the billboard's RGB is added at full strength with **no alpha weighting**, so a texture that
- * encodes its own falloff in the RGB channels (a flare, a glow) stacks exactly as Babylon.js draws
- * it. Contrast {@link billboardBlendAdditive}, which weights the source by its alpha (Babylon.js
- * `BLENDMODE_ADD`) — the two match only when the source alpha is 1 everywhere.
- */
+/** Pure additive blending (`src·1 + dst`), matching the legacy particle OneOne fallback. */
 export const billboardBlendOneOne: BillboardBlendDescriptor = {
     _key: "oneone",
     _descriptor: {

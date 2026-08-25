@@ -11,7 +11,7 @@
 import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_ALPHA_ONLY_MR, PBR2_HAS_REFLECTANCE_FACTORS } from "../pbr-flag-bits.js";
+import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_ALPHA_ONLY_MR, PBR2_HAS_REFLECTANCE_FACTORS, PBR2_HAS_UV_TRANSFORM } from "../pbr-flag-bits.js";
 
 // Reflectance-only features2 bit (reserved in pbr-flag-bits.ts). Defined here,
 // not in the shared flag module, for zero bundle movement on scenes that never
@@ -68,15 +68,15 @@ export function writeReflectanceUBO(data: Float32Array, material: PbrMaterialPro
     }
     const off = offsets.get("occlusionStrength")! / 4;
     data[off] = material.occlusionStrength ?? 1.0;
-    data[off + 1] = material.metallicF0Factor ?? 1.0;
-    data[off + 2] = material.specularWeight ?? material.metallicF0Factor ?? 1.0;
-    const mrc = material.metallicReflectanceColor;
+    data[off + 1] = material._metallicF0Factor ?? 1.0;
+    data[off + 2] = material._specularWeight ?? material._metallicF0Factor ?? 1.0;
+    const mrc = material._metallicReflectanceColor;
     data[off + 4] = mrc ? mrc[0]! : 1.0;
     data[off + 5] = mrc ? mrc[1]! : 1.0;
     data[off + 6] = mrc ? mrc[2]! : 1.0;
 
-    writeReflUvTransform(data, offsets, "reflUV", material.reflectanceTexture);
-    writeReflUvTransform(data, offsets, "mrReflUV", material.metallicReflectanceTexture);
+    writeReflUvTransform(data, offsets, "reflUV", material._reflectanceTexture);
+    writeReflUvTransform(data, offsets, "mrReflUV", material._metallicReflectanceTexture);
 }
 
 /**
@@ -90,8 +90,18 @@ export function createReflectanceFragment(
     hasReflectanceMap: boolean,
     useAlphaOnlyMR: boolean,
     hasOcclusionUv2: boolean = false,
-    hasUvTx: boolean = false
+    hasUvTx: boolean = false,
+    hasOcclusionSplit: boolean = false
 ): ShaderFragment {
+    // Every arm wraps the same `mix(1.0, _, occlusionStrength)`, so only the
+    // sampled expression varies. Mirrors createPbrTemplateExt's three-arm
+    // `occlusionOverride` — `occlUV` included, which this slot replaces.
+    const occlusionSample = hasOcclusionUv2
+        ? "textureSample(occlusionTexture, occlusionSampler_, input.uv2).r"
+        : hasOcclusionSplit
+          ? "textureSample(ormTexture,ormSampler,occlUV).r"
+          : "orm.r";
+
     const bindings: BindingDecl[] = [];
     if (hasMetallicReflectanceMap) {
         bindings.push(
@@ -167,9 +177,7 @@ let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surf
 
         _fragmentSlots: {
             MF: f0Code,
-            AT: hasOcclusionUv2
-                ? `let occlusion = mix(1.0, textureSample(occlusionTexture, occlusionSampler_, input.uv2).r, material.occlusionStrength);`
-                : `let occlusion = mix(1.0, orm.r, material.occlusionStrength);`,
+            AT: `let occlusion = mix(1.0, ${occlusionSample}, material.occlusionStrength);`,
         },
     };
 }
@@ -182,15 +190,15 @@ export const pbrExt: PbrExt = {
         const m = mat as PbrMaterialProps;
         let f = 0;
         let f2 = 0;
-        if (m.metallicReflectanceTexture) {
+        if (m._metallicReflectanceTexture) {
             f |= PBR_HAS_METALLIC_REFLECTANCE_MAP;
         }
-        if (m.reflectanceTexture) {
+        if (m._reflectanceTexture) {
             f |= PBR_HAS_REFLECTANCE_MAP;
         }
         if (f === 0) {
-            const hasNonDefaultF0 = m.metallicF0Factor != null && Math.abs(m.metallicF0Factor - 1) > 1e-6;
-            const mrc = m.metallicReflectanceColor;
+            const hasNonDefaultF0 = m._metallicF0Factor != null && Math.abs(m._metallicF0Factor - 1) > 1e-6;
+            const mrc = m._metallicReflectanceColor;
             const hasNonDefaultColor = mrc != null && (mrc[0] !== 1 || mrc[1] !== 1 || mrc[2] !== 1);
             // `_occlStrengthAnimated` (set lazily by the animation-pointer feature) routes an
             // animated occlusionTexture.strength through this ext's occlusion mix slot. Reflectance
@@ -200,11 +208,11 @@ export const pbrExt: PbrExt = {
                 f2 |= PBR2_HAS_REFLECTANCE_FACTORS;
             }
         }
-        if ((f !== 0 || f2 & PBR2_HAS_REFLECTANCE_FACTORS) && m.useOnlyMetallicFromMetallicReflectanceTexture) {
+        if ((f !== 0 || f2 & PBR2_HAS_REFLECTANCE_FACTORS) && m._useOnlyMetallicFromMetallicReflectanceTexture) {
             f |= PBR_HAS_USE_ALPHA_ONLY_MR;
         }
         const refHasTx = (t: { _hasTx?: boolean } | undefined): boolean => !!t?._hasTx;
-        if (f !== 0 && (refHasTx(m.reflectanceTexture as { _hasTx?: boolean } | undefined) || refHasTx(m.metallicReflectanceTexture as { _hasTx?: boolean } | undefined))) {
+        if (f !== 0 && (refHasTx(m._reflectanceTexture as { _hasTx?: boolean } | undefined) || refHasTx(m._metallicReflectanceTexture as { _hasTx?: boolean } | undefined))) {
             f2 |= PBR2_REFL_UV_TX;
         }
         return { f, f2 };
@@ -224,7 +232,12 @@ export const pbrExt: PbrExt = {
             // createPbrTemplateExt's _hasOcclusionUv2 so the occlusionTexture binding it declares
             // and this sample agree. ctx._uv2Mask is already zeroed when uv2 isn't present.
             ((ctx._uv2Mask ?? 0) & (1 << 5)) !== 0,
-            (ctx._features2 & PBR2_REFL_UV_TX) !== 0
+            (ctx._features2 & PBR2_REFL_UV_TX) !== 0,
+            // Occlusion sampling the ORM texture at its own transformed UV. Must match
+            // createPbrTemplateExt's `_hasOcclusionSplit`, `occlUV` included: this slot
+            // replaces the template's occlusion line, so dropping the arm silently drops
+            // occlusion's transform.
+            (ctx._features2 & PBR2_HAS_UV_TRANSFORM) !== 0 && (ctx._features2 & (1 << 28)) !== 0
         );
     },
     writeUbo: writeReflectanceUBO as PbrExt["writeUbo"],
@@ -233,23 +246,23 @@ export const pbrExt: PbrExt = {
             return b;
         }
         const m = ctx._material as PbrMaterialProps;
-        if (m.metallicReflectanceTexture) {
-            entries.push({ binding: b++, resource: m.metallicReflectanceTexture.view });
-            entries.push({ binding: b++, resource: m.metallicReflectanceTexture.sampler });
+        if (m._metallicReflectanceTexture) {
+            entries.push({ binding: b++, resource: m._metallicReflectanceTexture.view });
+            entries.push({ binding: b++, resource: m._metallicReflectanceTexture.sampler });
         }
-        if (m.reflectanceTexture) {
-            entries.push({ binding: b++, resource: m.reflectanceTexture.view });
-            entries.push({ binding: b++, resource: m.reflectanceTexture.sampler });
+        if (m._reflectanceTexture) {
+            entries.push({ binding: b++, resource: m._reflectanceTexture.view });
+            entries.push({ binding: b++, resource: m._reflectanceTexture.sampler });
         }
         return b;
     },
     textures(mat, t) {
         const m = mat as PbrMaterialProps;
-        if (m.metallicReflectanceTexture) {
-            t.push(m.metallicReflectanceTexture);
+        if (m._metallicReflectanceTexture) {
+            t.push(m._metallicReflectanceTexture);
         }
-        if (m.reflectanceTexture) {
-            t.push(m.reflectanceTexture);
+        if (m._reflectanceTexture) {
+            t.push(m._reflectanceTexture);
         }
     },
 };

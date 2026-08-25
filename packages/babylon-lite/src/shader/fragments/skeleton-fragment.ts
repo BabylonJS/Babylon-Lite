@@ -7,7 +7,9 @@ import type { ShaderFragment, VertexAttribute } from "../fragment-types.js";
 
 const STAGE_VERTEX = 0x1;
 
-const SKELETON_HELPERS = `
+/** Bone-matrix texture reader. Shared verbatim with the GPU picker's deformation projection so a pick
+ *  resolves bones exactly the way the render path does. */
+export const SKELETON_HELPERS = `
 fn readMatrixFromRawSampler(smp: texture_2d<f32>, index: f32) -> mat4x4<f32> {
 let offset = i32(index) * 4;
 let m0 = textureLoad(smp, vec2<i32>(offset + 0, 0), 0);
@@ -18,7 +20,11 @@ return mat4x4f(m0, m1, m2, m3);
 }
 `;
 
-function makeSkinningCode(has8Bones: boolean): string {
+/** Emit the bone-blend body. Assigns `finalWorld` from `worldExpr` and the accumulated influence, so
+ *  callers must have `finalWorld` in scope. `worldExpr` names the mesh world matrix in the consuming
+ *  shader — the render path and the picker's regular/detailed variants use `mesh.world`, while the
+ *  picker's thin-instance variant uses the per-instance `world`. */
+export function makeSkinningCode(has8Bones: boolean, worldExpr = "mesh.world"): string {
     let code = `var influence: mat4x4<f32> = readMatrixFromRawSampler(boneSampler, f32(joints[0])) * weights[0];
 influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints[1])) * weights[1];
 influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints[2])) * weights[2];
@@ -31,7 +37,7 @@ influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints1[2])) *
 influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints1[3])) * weights1[3];`;
     }
     return `${code}
-finalWorld = mesh.world * influence;`;
+finalWorld = ${worldExpr} * influence;`;
 }
 
 /** Create the shared skeletal skinning shader fragment. */

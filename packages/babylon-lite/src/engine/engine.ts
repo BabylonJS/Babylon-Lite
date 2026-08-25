@@ -4,22 +4,14 @@ import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
 import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
 import { _setHpmAllocator } from "../math/_matrix-allocator.js";
 import type { SurfaceContext, SurfaceOptions } from "./surface.js";
-import { _buildSurface, _refreshScRT, isDomCanvas, resizeSurface, setSurfaceSize } from "./surface.js";
+import { _buildSurface, _refreshScRT, resizeSurface, setSurfaceSize } from "./surface.js";
+import { _ENGINE_TAG } from "./version.js";
 import type { GpuFrameTimer } from "./gpu-timer.js";
 import type { GpuTaskTimer } from "./gpu-task-timer.js";
 import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
 import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import { disposeGpuResourceRetirements, flushGpuResourceRetirements } from "./gpu-resource-retirement.js";
-
-// `__BL_VERSION__` is replaced at build time with the resolved package version
-// by the lite Vite build (see `define` in packages/babylon-lite/vite.config.ts).
-// The release pipeline resolves the published npm version *before* `pnpm build`,
-// so the published bundle reports the version it actually ships as. When the
-// source is consumed directly (lab dev server, unit tests) the define is absent,
-// so the `typeof` guard falls back to the literal dev version below.
-declare const __BL_VERSION__: string;
-/** Babylon Lite version string. */
-export const VERSION: string = /* @__PURE__ */ (() => (typeof __BL_VERSION__ !== "undefined" ? __BL_VERSION__ : "0.1.0"))();
 
 // Module-scoped visibility epoch. setSubtreeVisible (scene/visibility.ts,
 // loaded only by KHR_node_visibility / KHR_animation_pointer features) bumps
@@ -134,8 +126,9 @@ export interface EngineContext extends SurfaceContext {
      *  A white ORM yields `metallic = metallicFactor`, `roughness = roughnessFactor`,
      *  matching the glTF/Babylon.js defaults. Lazily created on first use by the
      *  fallback resolver that `createPbrMaterial` installs into the PBR pipeline, so
-     *  loader-only PBR scenes pay zero bundle bytes. Device-lost recovery rebuilds it
-     *  in place via the solid-texture recovery path. */
+     *  loader-only PBR scenes pay zero bundle bytes. Device-lost recovery clears it
+     *  before rebuilding PBR groups so the resolver recreates it on the replacement
+     *  device. */
     _pbrFallbackTex?: Texture2D;
     /** @internal Stable cache cleanup callbacks used by scene material groups. */
     _pbrCleanup?: () => void;
@@ -254,6 +247,8 @@ interface DeviceLostRecoveryCapture {
         gpuIndices: Uint16Array | Uint32Array,
         indexFormat: GPUIndexFormat
     ): void;
+    e(scene: SceneContext, url: string, brdfUrl: string): void;
+    h(scene: SceneContext, url: string, faceSize: number): void;
 }
 
 /** @internal Return true if `context` is already registered on `surface`. */
@@ -316,6 +311,22 @@ export interface EngineOptions extends SurfaceOptions {
     useFloatingOrigin?: boolean;
 }
 
+/** Extra `requestAdapter` options contributor, installed only by the WebXR helper
+ *  `enableXrCompatibleAdapter()`. Lets an XR app request an `xrCompatible` GPU adapter without
+ *  every non-XR engine paying for the option: non-XR bundles never call the setter, the bundler
+ *  proves this is always null, and the `_adapterOptionsHook ? … : {}` spread below folds to `{}`,
+ *  so `createEngine`'s adapter request stays byte-identical. */
+let _adapterOptionsHook: (() => GPURequestAdapterOptions) | null = null;
+/** @internal Install extra `requestAdapter` options (called by `enableXrCompatibleAdapter`). */
+export function _installAdapterOptions(hook: () => GPURequestAdapterOptions): void {
+    _adapterOptionsHook = hook;
+}
+/** @internal Resolve the extra adapter options (empty when no hook is installed). Used by
+ *  device-lost recovery so a recovered adapter keeps any XR-compatibility that was requested. */
+export function _getAdapterOptions(): GPURequestAdapterOptions {
+    return _adapterOptionsHook ? _adapterOptionsHook() : {};
+}
+
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
  *  configures the canvas's WebGPU context, and returns an `EngineContext` that *is also*
  *  the primary `SurfaceContext` — i.e. the returned engine is itself the surface for the
@@ -326,7 +337,7 @@ export interface EngineOptions extends SurfaceOptions {
  *  Accepts either a DOM canvas (main thread) or an `OffscreenCanvas` (e.g. transferred
  *  to a Web Worker) — see {@link RenderCanvas}. */
 export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext> {
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance", ...(_adapterOptionsHook ? _adapterOptionsHook() : {}) });
     if (!adapter) {
         throw new Error("WebGPU adapter not available");
     }
@@ -348,12 +359,8 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     }
     const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: options?.requiredLimits });
 
-    const versionToLog = `Babylon Lite v${VERSION}`;
     // eslint-disable-next-line no-console
-    console.log(`${versionToLog} - WebGPU engine`);
-    if (isDomCanvas(canvas)) {
-        canvas.setAttribute("data-engine", versionToLog);
-    }
+    console.log(`${_ENGINE_TAG} - WebGPU engine`);
 
     const useHpm = !!options?.useHighPrecisionMatrix;
     const useFO = !!options?.useFloatingOrigin;
@@ -498,6 +505,13 @@ export function startEngine(engine: EngineContext): Promise<void> {
     });
 }
 
+/** Resolve when every GPU command submitted before this call has completed.
+ *  This is a synchronization boundary for infrequent lifecycle transitions such as revealing a fully
+ *  prepared scene; frame loops should not await it during steady rendering. */
+export function waitForGpuIdle(engine: EngineContext): Promise<void> {
+    return engine._device.queue.onSubmittedWorkDone();
+}
+
 /** Stop the render loop. */
 export function stopEngine(engine: EngineContext): void {
     if (engine._animFrameId) {
@@ -523,6 +537,7 @@ export function disposeEngine(engine: EngineContext): void {
     const surfaces = engine._surfaces;
     for (const s of surfaces) {
         s._renderingContexts.length = 0;
+        s._ro?.disconnect();
         s._context.unconfigure();
     }
     surfaces.length = 0;

@@ -8,11 +8,12 @@
  *
  *   - Fast path: `GPUCommandEncoder.copyTextureToTexture`. Requires:
  *       * No viewport.
- *       * Source and target have the same format and same sampleCount.
+ *       * Source and target have the same format and are single-sampled.
  *       * Source mip(`lodLevel`) dimensions match the target's mip-0 dimensions.
  *       * Target is not the engine scRT (its color texture is re-acquired
  *         per frame, so a copy-destination handle captured at build time would go stale).
  *       * Target owns a color GPU texture (offscreen / MSAA-color).
+ *       * Source and target textures declare `COPY_SRC` and `COPY_DST` respectively.
  *
  *   - Blit path: a full-screen triangle samples the source texture and writes
  *     it into the target. Lod level is applied with `textureSampleLevel`;
@@ -38,11 +39,11 @@
  * target or resolve target).
  */
 
-import { SS } from "../engine/gpu-flags.js";
+import { SS, TU } from "../engine/gpu-flags.js";
 import type { NormalizedViewport } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
-import { buildRenderTarget } from "../engine/render-target.js";
+import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { getBilinearSampler, getTrilinearSampler } from "../resource/samplers.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
@@ -50,11 +51,15 @@ import type { Task } from "./task.js";
 /** Options used to create a copy-to-texture frame-graph task. Selects the source render target, the target or resolve target, and optional viewport / mip-level settings for blit and copy paths. */
 export interface CopyToTextureTaskConfig {
     name?: string;
+    /** Source render target. The engine swapchain render target is not supported because its GPU texture changes every frame. */
     sourceTexture: RenderTarget;
     /** Target attachment that receives the blit. Required UNLESS `resolveTexture`
      *  is set, in which case the task does a resolve-only operation and writes
      *  directly into `resolveTexture`. */
     targetTexture?: RenderTarget;
+    /** When true, this task owns `targetTexture`: it rebuilds the target on every frame-graph build (including
+     *  canvas resize) and disposes it with the task. Leave false for externally owned or eager targets. */
+    ownsTargetTexture?: boolean;
     /** Viewport applied to the target before the blit. When undefined (default),
      *  the whole target is overwritten and the encoder-copy fast path becomes
      *  available. When set, the blit path is used. */
@@ -84,6 +89,7 @@ export interface CopyToTextureTask extends Task {
     readonly name: string;
     sourceTexture: RenderTarget;
     targetTexture: RenderTarget | undefined;
+    ownsTargetTexture: boolean;
     resolveTexture: RenderTarget | undefined;
     viewport: NormalizedViewport | null | undefined;
     lodLevel: number;
@@ -116,6 +122,7 @@ interface ResolveState {
 }
 
 interface CopyToTextureTaskInternal extends CopyToTextureTask {
+    _ownedTarget: RenderTarget | null;
     _fast: FastPathState | null;
     _blit: BlitState | null;
     _resolve: ResolveState | null;
@@ -203,12 +210,14 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
         _passes: [],
         sourceTexture: config.sourceTexture,
         targetTexture: config.targetTexture,
+        ownsTargetTexture: config.ownsTargetTexture === true,
         resolveTexture: config.resolveTexture,
         viewport: config.viewport,
         lodLevel: config.lodLevel ?? 0,
         get outputTexture(): RenderTarget {
             return (this.resolveTexture ?? this.targetTexture)!;
         },
+        _ownedTarget: null,
         _fast: null,
         _blit: null,
         _resolve: null,
@@ -219,6 +228,9 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
             task._blit = null;
             task._resolve = null;
             const source = task.sourceTexture;
+            if (source === eng.scRT) {
+                throw new Error(`CopyToTextureTask "${task.name}": sourceTexture cannot be the engine scRT because its GPU texture changes every frame.`);
+            }
             if (!source._colorTexture) {
                 throw new Error(`CopyToTextureTask "${task.name}": sourceTexture has no color texture. The source must be built before this task records.`);
             }
@@ -229,8 +241,17 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
             // (e.g. an SS staging texture between an MSAA resolve and the final swap blit)
             // from requiring the caller to pre-build them.
             const needsBuild = (rt: RenderTarget) => !rt._colorTexture;
-            if (task.targetTexture && needsBuild(task.targetTexture)) {
-                buildRenderTarget(task.targetTexture, eng);
+            if (task._ownedTarget && (!task.ownsTargetTexture || task._ownedTarget !== task.targetTexture)) {
+                disposeRenderTarget(task._ownedTarget);
+                task._ownedTarget = null;
+            }
+            if (task.targetTexture) {
+                if (task.ownsTargetTexture) {
+                    buildRenderTarget(task.targetTexture, eng);
+                    task._ownedTarget = task.targetTexture;
+                } else if (needsBuild(task.targetTexture)) {
+                    buildRenderTarget(task.targetTexture, eng);
+                }
             }
             if (task.resolveTexture && needsBuild(task.resolveTexture)) {
                 buildRenderTarget(task.resolveTexture, eng);
@@ -283,6 +304,11 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
         },
         dispose(): void {
             task._passes.length = 0;
+            disposeRenderTarget(task._ownedTarget);
+            if (task.ownsTargetTexture && task.targetTexture !== task._ownedTarget) {
+                disposeRenderTarget(task.targetTexture);
+            }
+            task._ownedTarget = null;
             task._fast = null;
             task._blit = null;
             task._resolve = null;
@@ -338,6 +364,9 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     if (!sourceTexture) {
         return false;
     }
+    if ((sourceTexture.usage & TU.COPY_SRC) === 0 || (targetTexture.usage & TU.COPY_DST) === 0) {
+        return false;
+    }
     const srcDesc = source._descriptor;
     const dstDesc = target._descriptor;
     const srcFormat = srcDesc.format;
@@ -347,7 +376,7 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     }
     const srcSamples = srcDesc.samples ?? 1;
     const dstSamples = dstDesc.samples ?? 1;
-    if (srcSamples !== dstSamples) {
+    if (srcSamples !== 1 || dstSamples !== 1) {
         return false;
     }
     const lod = task.lodLevel;

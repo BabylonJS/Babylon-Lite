@@ -37,6 +37,14 @@ export function clearShaderPipelineCache(): void {
     _generation++;
 }
 
+/** @internal Move an installed cross-material cache to the current GPU device before async preparation. */
+export function retargetShaderPipelineCache(material: ShaderMaterial, device: GPUDevice): void {
+    const state = material as CacheMaterial;
+    if (state._shaderPipelineCache) {
+        state._shaderPipelineCache = getDeviceCache(device);
+    }
+}
+
 function getDeviceCache(device: GPUDevice): DeviceCache {
     _deviceCaches ??= new WeakMap();
     let cache = _deviceCaches.get(device);
@@ -91,6 +99,7 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
                 material.backFaceCulling,
                 material.depthBias,
                 material.depthBiasSlopeScale,
+                material._topology,
                 stencilKey,
             ]);
         },

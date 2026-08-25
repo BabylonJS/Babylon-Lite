@@ -25,16 +25,17 @@ export const stdSpecularExt: StdExt = {
     _id: "std-specular",
     _phase: "mesh",
     _feature: HAS_SPECULAR_TEXTURE,
+    _detect: (mat: StandardMaterialProps): number => (mat._specularTexture ? HAS_SPECULAR_TEXTURE | (mat.specularCoordIndex === 1 ? SPECULAR_USES_UV2 : 0) : 0),
     _frag: (features) => createStdSpecularFragment((features & SPECULAR_USES_UV2) !== 0),
     _bind(mat, entries, b) {
-        const tex = mat.specularTexture!;
+        const tex = mat._specularTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
     _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
-        if (mat.specularTexture) {
-            out.push(mat.specularTexture);
+        if (mat._specularTexture) {
+            out.push(mat._specularTexture);
         }
     },
 };

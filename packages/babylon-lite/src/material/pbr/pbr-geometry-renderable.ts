@@ -10,7 +10,7 @@
  *  Per-(view, mesh-feature-variant) shared state — composed shader, mesh
  *  BGL, pipeline cache — is cached on `view._geometry` keyed by the
  *  shader-relevant mesh-feature bits + (features, features2, sceneFeatures,
- *  lightMode, singleLightType). Per-mesh state (UBOs, bind group, sort
+ *  lightMode, singleLightType, pluginIndex). Per-mesh state (UBOs, bind group, sort
  *  centre) lives in the closure returned by {@link buildPbrGeometryRenderable}.
  *
  *  This module is imported only by {@link createPbrGeometryMaterialView} —
@@ -51,19 +51,6 @@ import { _setActivePbrGeometryAttachments } from "./pbr-geometry-view.js";
  *  tree-shakes away. */
 let _pbrGeometryGroupBuilder: MeshGroupBuilder | null = null;
 
-/** Mirrored-mesh front-face resolution for the geometry pass. Installed by the lazy
- *  `pbr-primitive-resolver` module — which the glTF primitive feature loads for assets containing a
- *  negative-scale node, and which the `enableMirroredMeshes()` opt-in also pulls in. Module-local
- *  with a single exported setter: when neither path is present the setter tree-shakes, the bundler
- *  proves this is always null, and the `frontFace` ternary below folds to the plain `"ccw"` literal
- *  — unmirrored geometry scenes stay byte-identical.
- *  @internal */
-let _geometryWinding: ((meshFeatures: number) => GPUFrontFace) | null = null;
-/** @internal Install geometry-pass winding resolution. */
-export function _installPbrGeometryWinding(resolve: (meshFeatures: number) => GPUFrontFace): void {
-    _geometryWinding = resolve;
-}
-
 export function getPbrGeometryGroupBuilder(): MeshGroupBuilder {
     if (_pbrGeometryGroupBuilder) {
         return _pbrGeometryGroupBuilder;
@@ -94,8 +81,8 @@ interface PbrGeometryViewResources {
     _alphaBlend: boolean;
 }
 
-function _variantKey(meshFeatures: number, lightMode: number, singleLightType: string): string {
-    return `${meshFeatures}:${lightMode}:${singleLightType}`;
+function _variantKey(meshFeatures: number, lightMode: number, singleLightType: string, pluginIndex: number): string {
+    return `${meshFeatures}:${lightMode}:${singleLightType}:${pluginIndex}`;
 }
 
 /** Build a {@link Renderable} for one mesh drawn through a PBR geometry view. */
@@ -151,10 +138,17 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const receiveShadows = mesh.receiveShadows && hasSomeShadows && !(view._camera && engine.useFloatingOrigin);
     const lightMode: 0 | 1 | 2 = lightCount === 0 ? 0 : lightCount === 1 && !receiveShadows ? 1 : 2;
     const singleLightType = lightMode === 1 ? _getPackedSingleLightType(scene.lights, lr - 1) : "";
-    const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
+    // Same fold as the forward pass (see pbr-renderable.ts): these bits key the composed variant, so
+    // the Standard path must not pay to read them.
+    const meshFeatures = _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
+    const pluginIndex = source._pi ?? 0;
 
-    const variantKey = _variantKey(meshFeatures, lightMode, singleLightType);
-    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, variantKey);
+    const variantKey = _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex);
+    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, pluginIndex, variantKey);
+    // The geometry pass composes its OWN variant, so it needs the mesh's exotic primitive state
+    // stamped on separately (see ComposedShader._prim). `variantKey` folds in meshFeatures, whose
+    // topology bits this mirrors, so a cached variant only ever sees one value here.
+    (res._composed as { _prim?: GPUPrimitiveState })._prim = (mesh as Mesh & { _primitive?: GPUPrimitiveState })._primitive;
 
     const features = res._features;
     const features2 = res._features2;
@@ -356,6 +350,7 @@ function _ensureViewResources(
     meshFeatures: number,
     lightMode: 0 | 1 | 2,
     singleLightType: string,
+    pluginIndex: number,
     variantKey: string
 ): PbrGeometryViewResources {
     let cache = view._geometry as Map<string, PbrGeometryViewResources> | undefined;
@@ -396,7 +391,8 @@ function _ensureViewResources(
             vbKey,
             view._geometryAttachments,
             view._emitColor,
-            uv2Mask
+            uv2Mask,
+            pluginIndex
         );
     } finally {
         _setActivePbrGeometryAttachments(prev);
@@ -476,7 +472,14 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
     const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState ? { format: fmt, blend: blendState } : { format: fmt }));
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;
-    const cullMode = hasDoubleSided ? "none" : view._reverseCulling ? "front" : "back";
+    // Match the forward pass: `topology`/`frontFace` left to their WebGPU defaults ("triangle-list",
+    // "ccw"), with anything exotic (topology, strip index format, mirrored winding) overriding
+    // through `_prim`. The variant key includes meshFeatures, so every primitive-state combination
+    // gets its own pipeline.
+    const primitive: GPUPrimitiveState = {
+        cullMode: hasDoubleSided ? "none" : view._reverseCulling ? "front" : "back",
+        ...res._composed._prim,
+    };
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,
         vertex: { module: res._vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
@@ -492,11 +495,8 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
               }
             : undefined,
         multisample: { count: sig._sampleCount },
-        // A mirrored mesh has reversed triangle winding, exactly as in the forward pass — without
-        // this its depth/normal/velocity output would be culled away. Resolution goes through the
-        // opt-in hook so unmirrored bundles fold the whole thing to the plain "ccw" literal. The
-        // variant key already includes meshFeatures, so a winding change gets its own pipeline.
-        primitive: { topology: "triangle-list", cullMode, frontFace: _geometryWinding ? _geometryWinding(res._meshFeatures) : "ccw" },
+        // Match the forward pass's topology, strip index format, culling, and mirrored winding.
+        primitive,
     });
     res._pipelines.set(key, pipeline);
     return pipeline;

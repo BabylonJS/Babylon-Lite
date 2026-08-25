@@ -28,16 +28,22 @@ export const stdEmissiveExt: StdExt = {
     _id: "std-emissive",
     _phase: "mesh",
     _feature: HAS_EMISSIVE_TEXTURE,
+    _detect(mat: StandardMaterialProps): number {
+        if (!mat._emissiveTexture) {
+            return 0;
+        }
+        return HAS_EMISSIVE_TEXTURE | (mat._emissiveTexture._sampleType === "depth" ? HAS_DEPTH_EMISSIVE_TEXTURE : 0);
+    },
     _frag: (features) => createStdEmissiveFragment((features & HAS_DEPTH_EMISSIVE_TEXTURE) !== 0),
     _bind(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number {
-        const tex = mat.emissiveTexture!;
+        const tex = mat._emissiveTexture!;
         entries.push({ binding: b++, resource: tex.view });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
     _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
-        if (mat.emissiveTexture) {
-            out.push(mat.emissiveTexture);
+        if (mat._emissiveTexture) {
+            out.push(mat._emissiveTexture);
         }
     },
 };

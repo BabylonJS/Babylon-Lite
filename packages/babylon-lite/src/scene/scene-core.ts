@@ -15,6 +15,7 @@ import type { Renderable, PrePassRenderable, SceneUniformUpdater, MeshGroupBuild
 import type { TransformNode } from "./transform-node.js";
 import type { SceneNode } from "./scene-node.js";
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
+import type { EnvironmentRecoverySource } from "../loader-env/environment-recovery.js";
 import type { FrameGraph } from "../frame-graph/frame-graph.js";
 import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
 import { createRenderTask } from "../frame-graph/render-task.js";
@@ -44,6 +45,21 @@ export interface ImageProcessingConfig {
 
 /** A clipping plane expressed as the coefficients `[a, b, c, d]` of `a·x + b·y + c·z + d`. */
 export type ClipPlane = readonly [number, number, number, number];
+
+/** @internal Visible-environment skybox source type. */
+export type EnvironmentSkyboxKind = "dds" | "hdr";
+
+/** @internal One feature-owned transformation of a visible-environment skybox shader. */
+export interface EnvironmentSkyboxShaderPatch {
+    /** @internal */
+    _apply(fragment: string, kind: EnvironmentSkyboxKind): string;
+}
+
+/** @internal Lazy access to one feature-owned visible-environment shader patch. */
+export type EnvironmentSkyboxShaderPatchLoader = () => EnvironmentSkyboxShaderPatch | Promise<EnvironmentSkyboxShaderPatch>;
+
+/** @internal Scene-local composition hook installed only by environment feature setters. */
+export type EnvironmentSkyboxShaderComposer = (fragment: string, kind: EnvironmentSkyboxKind) => Promise<string>;
 
 /** @internal Runtime mesh-build hooks installed only after a material group must widen its capabilities. */
 export interface RuntimeSceneBuildHooks {
@@ -116,8 +132,17 @@ export interface SceneContext extends RenderingContext {
     /** Background material primaryColor (linear RGB). Default from Babylon createDefaultEnvironment. */
     environmentPrimaryColor?: [number, number, number];
 
-    /** Environment cubemap Y rotation in radians. */
-    envRotationY?: number;
+    /** @internal Environment cubemap Y rotation in radians. Set through `setEnvironmentRotation`. */
+    _environmentRotation?: number;
+
+    /** @internal Optional visible-environment blur amount. */
+    _environmentBlur?: number;
+
+    /** @internal Feature-owned visible-environment shader patch loaders, indexed by composition order. */
+    _environmentSkyboxShaderPatchLoaders?: EnvironmentSkyboxShaderPatchLoader[];
+
+    /** @internal Scene-local visible-environment shader composer installed by feature setters. */
+    _environmentSkyboxShaderComposer?: EnvironmentSkyboxShaderComposer;
 
     /** Fixed delta time in ms for deterministic animation. 0 = use real rAF delta. */
     fixedDeltaMs: number;
@@ -136,7 +161,7 @@ export interface SceneContext extends RenderingContext {
     _pickSources: PickSource[];
     /** @internal Scene uniform updaters (one per shared UBO). */
     _uniformUpdaters: SceneUniformUpdater[];
-    /** @internal Opt-in feature writers for the SceneUniforms UBO (fog, clip plane, env SH).
+    /** @internal Opt-in feature writers for the SceneUniforms UBO (fog, clip plane, environment).
      *  Populated lazily via the scene-ubo-extras seam; run by the render task. */
     _sceneUboContributors?: ((data: Float32Array, scene: SceneContext) => void)[];
     /** @internal Per-frame callbacks run before rendering (animation, physics, etc.). */
@@ -196,6 +221,8 @@ export interface SceneContext extends RenderingContext {
     // ─── Stashed internal state (typed to avoid `as any` casts) ────
     /** @internal */
     _envTextures?: EnvironmentTextures;
+    /** @internal Loader metadata retained only while Scene recovery capture is enabled. */
+    _envRecoverySource?: EnvironmentRecoverySource;
     /** @internal Scene-owned shared LightsUniforms UBO state (group 0 binding 1). */
     _lightGpuState?: SceneLightGpuState;
 
@@ -206,7 +233,7 @@ export interface SceneContext extends RenderingContext {
     /** @internal */
     _frameGraph: FrameGraph;
 
-    /** @internal Optional clustered point-light container. Only populated by the clustered-light extension API. */
+    /** @internal Optional clustered point/spot-light container. Only populated by the clustered-light extension API. */
     _clusteredLightContainer?: ClusteredLightContainer;
     /** @internal Updates clustered light cells for the camera used by the current render pass. */
     _clusteredLightUpdater?: (camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void;
@@ -393,10 +420,9 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             result._beforeRenderHook = hook;
             ctx._beforeRender.push(hook);
         }
-        // Feature-owned scene wiring (e.g. EXT_lights_image_based installs its IBL
-        // environment). Runs synchronously so the environment is registered before
-        // registerScene() builds the scene UBO / PBR renderables.
-        result._sceneSetup?.(ctx);
+        // Feature-owned scene wiring runs synchronously before registerScene() builds
+        // renderables. Lazy features also own any cleanup registration they require.
+        result._sceneSetup?.(ctx, result);
         return;
     }
     if ("_gpu" in entity && "material" in entity) {
@@ -516,12 +542,14 @@ export function disposeScene(scene: SceneContext): void {
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */
 export async function buildScene(scene: SceneContext): Promise<void> {
     const ctx = scene as SceneContext;
-    // Discard material-swap requests enqueued during scene SETUP — a mesh added, then re-materialed before boot
-    // via the mesh.material setter (e.g. scene12 assigns each row's material AFTER addToScene). The deferred
+    // Discard material-swap requests enqueued during INITIAL scene setup — a mesh added, then re-materialed before
+    // boot via the mesh.material setter (e.g. scene12 assigns each row's material AFTER addToScene). The deferred
     // builders below build every group's meshes fresh with their FINAL material, so those swaps are redundant;
-    // processing them would insert a SECOND renderable per mesh (double-draw). Only swaps enqueued DURING the
-    // drain below — an async mesh that joins an already-built group (see addToScene/group.r) — must survive.
-    ctx._materialSwapQueue.length = 0;
+    // processing them would insert a SECOND renderable per mesh (double-draw). On re-registration the queued swaps
+    // are real runtime changes and must survive so a newly introduced material group can be built below.
+    if (!ctx._built) {
+        ctx._materialSwapQueue.length = 0;
+    }
     while (ctx._deferredBuilders.length) {
         const builders = ctx._deferredBuilders.splice(0);
         // Promise.all treats synchronous void results as already resolved.
@@ -535,6 +563,12 @@ export async function buildScene(scene: SceneContext): Promise<void> {
     // Light/shadow topology changed since the last build (hook installed by `removeFromScene`): re-run the
     // group builders so the baked light indices, light-count permutation and shadow bind groups match.
     await ctx._rebuildHook?.(ctx);
+}
+
+let _prepareShaderPipelines: ((scene: SceneContext) => Promise<void>) | null = null;
+/** @internal Install the optional async ShaderMaterial preparation boundary. */
+export function _installAsyncShaderPipelinePreparation(prepare: (scene: SceneContext) => Promise<void>): void {
+    _prepareShaderPipelines = prepare;
 }
 
 /**
@@ -554,6 +588,9 @@ export async function registerScene(scene: SceneContext): Promise<void> {
     // Promise.all treats tasks without a preload hook as already resolved.
     // eslint-disable-next-line @typescript-eslint/await-thenable
     await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()));
+    if (_prepareShaderPipelines) {
+        await _prepareShaderPipelines(ctx);
+    }
     ctx._frameGraph.build();
     if (surface._renderingContexts[0]) {
         const overlay = await import("./swapchain-overlay.js");
@@ -579,6 +616,9 @@ export async function registerSceneWithShadowSupport(scene: SceneContext): Promi
     // Promise.all treats tasks without a preload hook as already resolved.
     // eslint-disable-next-line @typescript-eslint/await-thenable
     await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()));
+    if (_prepareShaderPipelines) {
+        await _prepareShaderPipelines(ctx);
+    }
     ctx._frameGraph.build();
     if (surface._renderingContexts[0]) {
         const overlay = await import("./swapchain-overlay.js");

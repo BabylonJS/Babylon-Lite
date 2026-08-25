@@ -58,7 +58,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | Double-Sided Rendering                     |  ✅  | ✅  |                                                                                                                                                                                        |
 | Opacity Textures                           |  ✅  | ✅  | With depth-write disabled for transparent                                                                                                                                              |
 | Bump / Height Mapping                      |  ✅  | ✅  |                                                                                                                                                                                        |
-| Lightmap Textures                          |  ✅  | ✅  | Standard material UV2                                                                                                                                                                  |
+| Lightmap Textures                          |  ✅  | ✅  | Standard material UV2; PBR via opt-in enablePbrLightmap() + setPbrLightmap()                                                                                                           |
 | Ambient Textures                           |  ✅  | ✅  |                                                                                                                                                                                        |
 | Reflection Textures                        |  ✅  | ✅  | Spherical + planar coord modes                                                                                                                                                         |
 | UV Scaling / Offset                        |  ✅  | ✅  |                                                                                                                                                                                        |
@@ -167,6 +167,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | Ground + Skybox Background |  ✅  | ✅  | Fresnel ground opacity, premultiplied alpha |
 | Fog (Linear / Exp / Exp²)  |  ✅  | ✅  |                                             |
 | Environment Rotation       |  ✅  | ✅  |                                             |
+| Environment Skybox Blur    |  ✅  | ✅  | Continuous fractional cubemap LOD           |
 | Reflection Probes          |  —   | ✅  |                                             |
 
 ---

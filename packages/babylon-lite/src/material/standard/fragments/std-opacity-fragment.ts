@@ -27,16 +27,17 @@ export const stdOpacityExt: StdExt = {
     _id: "std-opacity",
     _phase: "mesh",
     _feature: HAS_OPACITY_TEXTURE,
+    _detect: (mat: StandardMaterialProps): number => (mat._opacityTexture ? HAS_OPACITY_TEXTURE | (mat.opacityFromRGB ? OPACITY_FROM_RGB : 0) : 0),
     _frag: (features) => createStdOpacityFragment((features & OPACITY_FROM_RGB) !== 0),
     _bind(mat, entries, b) {
-        const tex = mat.opacityTexture!;
+        const tex = mat._opacityTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
     _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
-        if (mat.opacityTexture) {
-            out.push(mat.opacityTexture);
+        if (mat._opacityTexture) {
+            out.push(mat._opacityTexture);
         }
     },
 };

@@ -130,15 +130,22 @@ function emitPackageJson(): Plugin {
                 //   - @webgpu/types: the public `index.d.ts` references ambient WebGPU globals
                 //     (`GPUDevice`, `GPUTexture`, `GPUSampler`, ...). TypeScript consumers need
                 //     these types on their compile path.
+                //   - @types/webxr: the public WebXR API (`XrSessionContext`, input/hand/teleport
+                //     helpers) references ambient WebXR globals (`XRSession`, `XRFrame`, `XRView`,
+                //     `XRReferenceSpace`, `XRProjectionLayer`, `XRSubImage`, ...). These have a
+                //     shipping `@types` package (unlike the draft `XRGPUBinding`, which Lite owns
+                //     and inlines), so the rollup treats them as a consumer-provided peer.
                 // Keep this in sync with the allowlist in
                 // tests/lite/build/public-api-types.test.ts.
                 peerDependencies: {
                     "@babylonjs/havok": "^1.3.0",
                     "@webgpu/types": "^0.1.52",
+                    "@types/webxr": "^0.5.0",
                 },
                 peerDependenciesMeta: {
                     "@babylonjs/havok": { optional: true },
                     "@webgpu/types": { optional: true },
+                    "@types/webxr": { optional: true },
                 },
                 ...(provenance ? { babylonLiteRelease: provenance } : {}),
             };
@@ -512,6 +519,13 @@ export default defineConfig(({ mode }) => {
     const isDist = mode === "dist";
     const isWatch = process.argv.includes("--watch");
 
+    // Bake the resolved version into the `VERSION` export (engine/version.ts reads
+    // `__BL_VERSION__`). Shared by BOTH passes so every published artifact — the
+    // module-granular `lib/` tree and the single-file `dist/` bundle alike — reports
+    // the npm version it actually ships as. esbuild constant-folds the `typeof`
+    // guard, so the fallback literal never reaches the output.
+    const versionDefine = { __BL_VERSION__: JSON.stringify(resolveReleaseVersion()) };
+
     if (isDist) {
         // Prebundled, minified, browser/CDN-ready build emitted into `build/dist/`: a
         // TRUE single-file `dist/index.js` containing ALL of Lite, including vendor
@@ -525,6 +539,7 @@ export default defineConfig(({ mode }) => {
         // `lib` pass is multi-entry (one per source module) and would instead emit ~560
         // per-module `.d.ts` files.
         return {
+            define: versionDefine,
             build: {
                 outDir: DIST_OUT_DIR,
                 emptyOutDir: true,
@@ -589,12 +604,7 @@ export default defineConfig(({ mode }) => {
     // `dist` pass above). `build:lib` and `build:dist` write to disjoint subdirs +
     // non-conflicting root files, so they can run in either order after a clean.
     return {
-        // Bake the resolved version into the `VERSION` export (engine.ts reads
-        // `__BL_VERSION__`). esbuild constant-folds the `typeof` guard so the
-        // published bundle reports the npm version it ships as.
-        define: {
-            __BL_VERSION__: JSON.stringify(resolveReleaseVersion()),
-        },
+        define: versionDefine,
         build: {
             outDir: LIB_OUT_DIR,
             emptyOutDir: true,

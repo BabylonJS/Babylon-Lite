@@ -30,6 +30,11 @@ import type { Pass } from "./pass.js";
 export interface Task {
     readonly name: string;
 
+    /** Runtime frame-graph execution gate, default true. When false, the frame graph keeps the task recorded
+     *  and its resources alive but skips every pass or built-in `execute()` call for that frame. This is
+     *  independent from any task-specific `enabled` state whose disabled transition may still execute work. */
+    executionEnabled?: boolean;
+
     /** Engine captured at task creation. */
     readonly engine: EngineContext;
     /** Owning scene for scene-bound tasks. Undefined for scene-less standalone frame graphs. */
@@ -49,6 +54,9 @@ export interface Task {
 
     /** @internal Optional scene-mutation hook for tasks that retain per-mesh bindings. */
     _removeMesh?(mesh: object): void;
+
+    /** @internal Optional change-detection key for tasks that cache scene-UBO writes. */
+    _sceneUboCacheKey?: unknown[];
 
     /** Optional fast path for built-in tasks that execute without recorded Pass objects. */
     execute?(): number;

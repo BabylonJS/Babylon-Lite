@@ -142,6 +142,7 @@ export function buildSolidSkyboxRenderable(
             };
         },
     };
+    r._rebuild = () => buildSolidSkyboxRenderable(scene, envTextures, skyHalfSize, rootPosition, primaryColor);
     return r;
 }
 

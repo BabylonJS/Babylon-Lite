@@ -14,7 +14,7 @@ import type { PbrTemplateExt } from "./pbr-template-ext.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
 
-type PbrGammaTemplate = typeof import("./pbr-template-gamma.js");
+type GammaBaseColorFn = (baseColorFactorRgb: string, baseColorFactorAlpha: string, vertexColorMod: string) => string;
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -133,8 +133,9 @@ export interface PbrTemplateConfig {
      *  When undefined, base template defaults to master-like behavior (no feature strings). */
     /** @internal */
     readonly _ext?: PbrTemplateExt;
-    /** @internal */
-    readonly _gammaTemplate?: PbrGammaTemplate | null;
+    /** @internal Produce the sRGB base-color decode block (only present when gamma-albedo
+     *  is registered). Sourced by the composer from the gamma extension's template hook. */
+    readonly _gammaBaseColor?: GammaBaseColorFn | null;
     /** Generate a fragment stage that runs discard/alpha-test logic and writes no color. */
     /** @internal */
     readonly _noColorOutput?: boolean;
@@ -186,7 +187,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _anisoBrdfFunctions = "",
         _anisoTBBlock = "",
         _ext,
-        _gammaTemplate,
+        _gammaBaseColor,
         _noColorOutput = false,
         _esmShadowOutput = false,
         _esmShadowDepthCode = "",
@@ -371,7 +372,7 @@ var N=N_geom;`;
     const baseColorFactorRgb = _hasBaseColorFactor ? "*material.baseColorFactor.rgb" : "";
     const baseColorFactorAlpha = _hasBaseColorFactor ? "*material.baseColorFactor.a" : "";
     const baseColorDecode = _hasGammaAlbedo
-        ? _gammaTemplate!.gammaBaseColor(baseColorFactorRgb, baseColorFactorAlpha, vertexColorMod)
+        ? _gammaBaseColor!(baseColorFactorRgb, baseColorFactorAlpha, vertexColorMod)
         : `var baseColor=baseColorSample.rgb${baseColorFactorRgb};
 var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`;
 
@@ -406,20 +407,19 @@ let surfaceAlbedo=baseColor*(1.0-dielectricF0)*(1.0-metallic);`;
     // Specular AA + geometric-curvature roughness factors (BJS getAARoughnessFactors).
     // AA_factor_x is the direct-light roughness floor (matches BJS `computeSheenLighting`
     // which clamps info.roughness upward). AA_factor_y is the IBL/alphaG additive bump.
-    // Emitted unconditionally as var so sheen/other fragments can reference them
-    // without needing a define; zero on the no-curvature path makes them a no-op.
-    const specularAABlock =
-        _hasSpecularAA || hasAnyNormal
-            ? `var AA_factor_x=0.0;
-var AA_factor_y=0.0;
-{let nDfdx_AA=dpdx(N);
+    // Emitted unconditionally as vars so sheen/other fragments can reference them
+    // without needing a define; when SPECULARAA is disabled they remain zero.
+    const specularAABlock = `var AA_factor_x=0.0;
+var AA_factor_y=0.0;${
+        _hasSpecularAA
+            ? `{let nDfdx_AA=dpdx(N);
 let nDfdy_AA=dpdy(N);
 let slopeSquare_AA=max(dot(nDfdx_AA,nDfdx_AA),dot(nDfdy_AA,nDfdy_AA));
 AA_factor_x=pow(saturate(slopeSquare_AA),0.333);
 AA_factor_y=sqrt(slopeSquare_AA)*0.75;
 alphaG+=AA_factor_y;}`
-            : `var AA_factor_x=0.0;
-var AA_factor_y=0.0;`;
+            : ""
+    }`;
 
     // Direct lighting block — use the compact non-looping shader for one non-shadow light,
     // and the generic multi-light loop for multiple lights or shadow receivers.
@@ -469,9 +469,14 @@ return vec4<f32>(color,finalAlpha);`
     const doubleSidedGeomFlip = _flatGeometricNormal ? "" : " N_geom = -N_geom;";
     const doubleSidedFlip = _hasDoubleSided ? `if (!frontFacing) { N = -N;${doubleSidedGeomFlip} }` : "";
 
-    const lightDecls = _hasMultiLight ? _multiLightWGSL : _hasSingleLight ? _singleLightWGSL : "";
-    const lightBindingDecl = _hasSingleLight || _hasMultiLight ? `@group(0) @binding(1) var<uniform> lights: lightsUniforms;` : "";
-    const meshLightIndexHelper = _hasSingleLight || _hasMultiLight ? meshLightIndexWGSL("mesh") : "";
+    // Depth-only casters read no light data. Keeping declarations and binding together also
+    // prevents a binding from referencing lightsUniforms when no light block defines it.
+    const lightBlock =
+        (_hasSingleLight || _hasMultiLight) && !_noColorOutput
+            ? `${_hasMultiLight ? _multiLightWGSL : _singleLightWGSL}
+@group(0) @binding(1) var<uniform> lights: lightsUniforms;
+${meshLightIndexWGSL("mesh")}`
+            : "";
 
     const anisoBrdfBlock = _hasAnisotropy ? _anisoBrdfFunctions : "";
 
@@ -491,9 +496,7 @@ ${BRDF_FUNCTIONS}
 ${toneMappingHelpersBlock}
 ${fogHelper}
 ${anisoBrdfBlock}
-${lightDecls}
-${lightBindingDecl}
-${meshLightIndexHelper}
+${lightBlock}
 ${fragmentHelpers}
 ${doubleSidedEntry}
 ${fragmentPrelude}/*SV*/

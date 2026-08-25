@@ -1,6 +1,7 @@
 import type { EngineContext, RenderCanvas, RenderingContext } from "./engine.js";
 import type { RenderTarget } from "./render-target.js";
 import { createRenderTarget } from "./render-target.js";
+import { _ENGINE_TAG } from "./version.js";
 
 /** @internal Type guard: true for a DOM canvas (has layout + attributes). */
 export function isDomCanvas(canvas: RenderCanvas): canvas is HTMLCanvasElement {
@@ -83,6 +84,13 @@ export interface SurfaceContext {
     /** @internal Registered rendering contexts in render order for this surface
      *  (first clears; subsequent overlay). */
     _renderingContexts: RenderingContext[];
+
+    /** @internal Layout observer and its cached CSS dimensions. */
+    _ro?: ResizeObserver;
+    /** @internal */
+    _w?: number;
+    /** @internal */
+    _h?: number;
 
     /** @internal Pending `captureScreenshot` requests for this surface. Serviced by
      *  `renderFrame` on a subsequent frame (one shared copy of the surface's swapchain
@@ -176,6 +184,13 @@ export function _buildSurface(engine: EngineContext, canvas: RenderCanvas, optio
     if (!context) {
         throw new Error("WebGPU context not available");
     }
+    // Tag the canvas so devtools, page scripts, and tests can identify a canvas Babylon Lite
+    // renders into. Tagging happens here — the single place that binds a canvas to a WebGPU
+    // context — so the engine's primary canvas and every auxiliary `createSurface` canvas are
+    // marked alike. An `OffscreenCanvas` has no attributes, hence the DOM-canvas guard.
+    if (isDomCanvas(canvas)) {
+        canvas.setAttribute("data-engine", _ENGINE_TAG);
+    }
     const configureFormat = options?.format ?? navigator.gpu.getPreferredCanvasFormat();
     // sRGB swapchain: WebGPU rejects a `*-srgb` format in `configure()`, so configure the
     // base format and render through the `*-srgb` view (set as `surface.format`, which
@@ -245,8 +260,9 @@ export function resizeSurface(surface: SurfaceContext): void {
     if (!isDomCanvas(canvas)) {
         return;
     }
-    const clientWidth = canvas.clientWidth;
-    const clientHeight = canvas.clientHeight;
+    // Prefer the optional observer cache; otherwise read the DOM layout directly.
+    const clientWidth = surface._w ?? canvas.clientWidth;
+    const clientHeight = surface._h ?? canvas.clientHeight;
     if (!(clientWidth > 0 && clientHeight > 0)) {
         return;
     }
@@ -294,6 +310,7 @@ export function disposeSurface(surface: SurfaceContext): void {
         throw new Error("Babylon Lite: disposeSurface cannot dispose the engine's primary surface — use disposeEngine instead.");
     }
     surface._renderingContexts.length = 0;
+    surface._ro?.disconnect();
     surface._context.unconfigure();
     const list = surface.engine._surfaces;
     const i = list.indexOf(surface);

@@ -1,4 +1,17 @@
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadGltf, createHemisphericLight, attachControl, goToFrame, pauseAnimation, registerScene } from "babylon-lite";
+import {
+    onBeforeRender,
+    addToScene,
+    startEngine,
+    createEngine,
+    createSceneContext,
+    createArcRotateCamera,
+    loadGltf,
+    createHemisphericLight,
+    attachControl,
+    goToFrame,
+    pauseAnimation,
+    registerScene,
+} from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -9,11 +22,8 @@ async function main(): Promise<void> {
 
     addToScene(scene, await loadGltf(engine, "https://playground.babylonjs.com/scenes/Alien/Alien.gltf"));
 
-    const cam = createDefaultCamera(scene);
-    cam.alpha = Math.PI / 2;
-    cam.beta = Math.PI / 2;
-    cam.radius = 2;
-    cam.target = { x: 0, y: 0, z: 0 };
+    const cam = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 2, { x: 0, y: 0, z: 0 });
+    scene.camera = cam;
     attachControl(cam, canvas, scene);
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));

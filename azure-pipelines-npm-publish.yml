@@ -254,15 +254,21 @@ stages:
                 # served same-origin as nightly (its self-hosted engine is built
                 # from — and stamped with — the published version via PACKAGE_VERSION).
                 # PLAYGROUND_BASE matches the public sub-path so assets, the runner,
-                # the engine, and SPA snippet routes resolve under it. Compile-time
-                # gated on dryRun so dry runs never upload.
-                - ${{ if eq(parameters.dryRun, false) }}:
-                      - script: pnpm build:playground
-                        displayName: "Build versioned playground"
-                        env:
-                            PACKAGE_VERSION: $(PACKAGE_VERSION)
-                            PLAYGROUND_BASE: /v/$(PACKAGE_VERSION)/
+                # the engine, and SPA snippet routes resolve under it.
+                #
+                # The build itself runs unconditionally. It is the heaviest step in
+                # this pipeline and the only one that has broken a release so far (a
+                # Node OOM, which struck *after* npm publish had already succeeded),
+                # so a dry run has to exercise it to be worth running. Only the steps
+                # with external side effects — the upload and the shared versions
+                # manifest — are compile-time gated on dryRun.
+                - script: pnpm build:playground
+                  displayName: "Build versioned playground"
+                  env:
+                      PACKAGE_VERSION: $(PACKAGE_VERSION)
+                      PLAYGROUND_BASE: /v/$(PACKAGE_VERSION)/
 
+                - ${{ if eq(parameters.dryRun, false) }}:
                       - template: config/templates/upload-static-site.yml
                         parameters:
                             siteDir: $(System.DefaultWorkingDirectory)/playground/dist

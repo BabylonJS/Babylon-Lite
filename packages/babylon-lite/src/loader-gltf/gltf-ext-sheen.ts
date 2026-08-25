@@ -4,6 +4,8 @@
  *  from `texture` directly. Distinct sheenRoughnessTexture images are not
  *  currently supported. */
 import type { GltfFeature } from "./gltf-feature.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import { setPbrSheen } from "../material/pbr/set-sheen.js";
 
 const ext: GltfFeature = {
     id: "KHR_materials_sheen",
@@ -23,17 +25,20 @@ const ext: GltfFeature = {
             roughInfo.index === s.sheenColorTexture.index &&
             roughInfo.extensions?.KHR_texture_transform === s.sheenColorTexture.extensions?.KHR_texture_transform;
         const roughnessTexture = roughInfo && !sameAsColor ? await ctx._texture(roughInfo, false) : undefined;
-        return {
-            sheen: {
-                isEnabled: true,
-                color: s.sheenColorFactor ?? [0, 0, 0],
-                roughness: s.sheenRoughnessFactor ?? 0,
-                intensity: 1,
-                texture: tex,
-                ...(roughnessTexture ? { roughnessTexture } : undefined),
-                albedoScaling: true,
-            },
-        };
+        // setPbrSheen writes the prop and registers the sheen ext (fragment statically
+        // imported by the setter). This handler is only dynamic-imported when the asset
+        // declares KHR_materials_sheen, so the fragment stays out of the base chunk.
+        const out: Partial<PbrMaterialProps> = {};
+        setPbrSheen(out, {
+            isEnabled: true,
+            color: s.sheenColorFactor ?? [0, 0, 0],
+            roughness: s.sheenRoughnessFactor ?? 0,
+            intensity: 1,
+            texture: tex,
+            ...(roughnessTexture ? { roughnessTexture } : undefined),
+            albedoScaling: true,
+        });
+        return out;
     },
 };
 export default ext;

@@ -1,5 +1,7 @@
 /** Babylon.js-compatible curve/path helpers: `Angle`, `Curve3`, `Path3D` (pure JS). */
 
+import { sampleCatmullRomSpline, sampleHermiteSpline } from "babylon-lite";
+
 import { Vector3 } from "./vector.js";
 
 export class Angle {
@@ -78,6 +80,14 @@ export class Curve3 {
             points.push(new Vector3(w0 * v0.x + w1 * v1.x + w2 * v2.x + w3 * v3.x, w0 * v0.y + w1 * v1.y + w2 * v2.y + w3 * v3.y, w0 * v0.z + w1 * v1.z + w2 * v2.z + w3 * v3.z));
         }
         return new Curve3(points);
+    }
+
+    public static CreateHermiteSpline(p1: Vector3, t1: Vector3, p2: Vector3, t2: Vector3, nSeg: number): Curve3 {
+        return new Curve3(sampleHermiteSpline(p1, t1, p2, t2, nSeg).map(({ x, y, z }) => new Vector3(x, y, z)));
+    }
+
+    public static CreateCatmullRomSpline(points: readonly Vector3[], nbPoints: number, closed: boolean = false): Curve3 {
+        return new Curve3(sampleCatmullRomSpline(points, nbPoints, closed).map(({ x, y, z }) => new Vector3(x, y, z)));
     }
 }
 

@@ -11,11 +11,29 @@
 import type { Mesh } from "../../mesh/mesh.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { Mat4 } from "../../math/types.js";
-import { _installWindingRule, _resolvePrimitive, _windingFrontFace } from "../pbr/pbr-primitive-resolver.js";
+import { _installMeshFeatureExtra } from "../mesh-features.js";
 import { _installStdPrimitiveResolver } from "./standard-pipeline.js";
 import { _installStdGeometryWinding } from "./standard-geometry-renderable.js";
 import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
 import { mat4Determinant3 } from "../../math/mat4-determinant3.js";
+
+/** Front-face winding for a mirrored mesh's geometry-pass pipeline.
+ *
+ *  Deliberately declared HERE rather than exported from `pbr-pipeline.ts`: this opt-in module is
+ *  its only consumer, and an export on the shared PBR pipeline path is retained in every PBR
+ *  scene's chunk (this module is a lazy chunk in the same build, so the import is reachable and
+ *  cannot be tree-shaken). One line duplicated buys back those bytes for every scene that never
+ *  calls `enableMirroredMeshes`. */
+function _windingFrontFace(meshFeatures: number): GPUFrontFace {
+    return meshFeatures & (1 << 11) ? "cw" : "ccw";
+}
+
+/** Primitive state for the Standard pipeline, which has no winding reversal of its own. Declared
+ *  here for the same reason as `_windingFrontFace`: the PBR path spells its equivalent out inline,
+ *  precisely so no shared export survives in scenes that never opt in. */
+function _stdPrimitive(meshFeatures: number, hasDoubleSided: boolean): GPUPrimitiveState {
+    return { topology: "triangle-list", cullMode: hasDoubleSided ? "none" : "back", frontFace: _windingFrontFace(meshFeatures) };
+}
 
 /** Sign of the upper-left 3x3 determinant. Negative means the transform mirrors the geometry. */
 function detSign(m: Mat4): number {
@@ -55,10 +73,31 @@ let _watchers: WeakMap<SceneContext, (deltaMs: number) => void> | null = null;
 export function installMirroredMeshSupport(scene: SceneContext): void {
     if (!_installed) {
         _installed = true;
-        _installWindingRule(isMirrored);
+        _installMeshFeatureExtra((mesh) => {
+            const mirrored = isMirrored(mesh);
+            // The PBR pipeline reads winding from the mesh's primitive partial rather than from this
+            // bit (see ComposedShader._prim), so keep that partial in step with the live determinant
+            // here — this runs immediately before the renderable composes its variant. Merged into
+            // any existing partial, never replacing it: a glTF mesh may already carry a non-triangle
+            // topology and its strip index format.
+            const prim = ((mesh as Mesh & { _primitive?: GPUPrimitiveState })._primitive ??= {});
+            prim.frontFace = mirrored ? "cw" : "ccw";
+            // Take ownership of the loader's mirror bit. Its `_primitiveFeatures` is only a snapshot
+            // of the determinant at load time, and the renderables OR it into the variant key; a glTF
+            // mesh that was mirrored at load and is later un-mirrored (re-parented, scale sign
+            // flipped) would otherwise stay keyed as mirrored while the state above says it is not,
+            // letting it share a variant with a genuinely mirrored mesh. Clearing it here — rather
+            // than masking it on the shared path — keeps that cost in this opt-in module. The
+            // loader's topology bits are untouched.
+            const bits = (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures;
+            if (bits) {
+                (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures = bits & ~(1 << 11);
+            }
+            return mirrored ? 1 << 11 : 0;
+        });
         // A procedural Standard mesh given a negative scale is mirrored just like a glTF one;
         // without this its back faces would be culled and it would render inside-out.
-        _installStdPrimitiveResolver(_resolvePrimitive);
+        _installStdPrimitiveResolver(_stdPrimitive);
         _installStdGeometryWinding(_windingFrontFace);
     }
 

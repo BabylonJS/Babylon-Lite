@@ -3,6 +3,8 @@
 > Package paths:
 > `packages/babylon-lite/src/shadow/csm-directional-shadow-generator.ts`
 > `packages/babylon-lite/src/shadow/csm-shadow-task-hooks.ts`
+> `packages/babylon-lite/src/shadow/csm-shadow-cache.ts`
+> `packages/babylon-lite/src/shadow/csm-refit-gate.ts`
 > `packages/babylon-lite/src/shader/fragments/csm-shadow-fragment-core.ts`
 > `packages/babylon-lite/src/material/standard/fragments/std-csm-shadow-fragment.ts`
 
@@ -38,11 +40,52 @@ interface CsmDirectionalShadowGeneratorConfig {
 
 function createCsmDirectionalShadowGenerator(engine: EngineContext, light: DirectionalLight, cfg?: CsmDirectionalShadowGeneratorConfig): ShadowGenerator;
 
+interface CsmStaticCacheOptions {
+    refitAngle: number;
+    refitMaxIntervalMs?: number;
+}
+
+function enableCsmStaticCache(engine: EngineContext, shadowGenerator: ShadowGenerator, options: CsmStaticCacheOptions): Promise<void>;
+
 function getCsmReceiverTexture(shadowGenerator: ShadowGenerator): Texture2D;
 
 function onCsmReceiverUpdate(shadowGenerator: ShadowGenerator, callback: (data: Float32Array) => void): () => void;
 
 function setShadowCasterMaxCascade(mesh: Mesh, maxCascade: number): void;
+
+interface CsmRefitCaster {
+    readonly worldMatrixVersion: number;
+    readonly thinInstances?: { readonly _version: number } | null;
+}
+
+interface CsmRefitGateOptions {
+    refitAngle: number;
+    refitMaxIntervalMs: number;
+    demoteQuietFrames?: number;
+}
+
+interface CsmRefitDecision {
+    refit: boolean;
+    renderDynamic: boolean;
+}
+
+interface CsmRefitGate<M extends CsmRefitCaster> {
+    syncCasters(casters: readonly M[]): void;
+    markDynamic(caster: M): void;
+    isDynamic(caster: M): boolean;
+    update(
+        lightDirX: number,
+        lightDirY: number,
+        lightDirZ: number,
+        nowMs: number,
+        cameraChanged: boolean,
+        force: boolean,
+        onPromote: (caster: M) => void,
+        onDemote: (caster: M) => void
+    ): CsmRefitDecision;
+}
+
+function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGateOptions): CsmRefitGate<M>;
 ```
 
 Usage mirrors the other directional generators:
@@ -97,6 +140,23 @@ lifetime and must not be released or disposed independently.
   texture reference so ShaderMaterial acquire/release cycles cannot destroy the
   shared shadow map.
 
+### Static cache and refit gate
+
+Awaiting `enableCsmStaticCache(engine, generator, options)` enables the static
+shadow cache before scene registration or receiver-texture access. Casters begin in the dynamic
+overlay, become static after 120 quiet frames, and return to the dynamic set
+immediately when their world or thin-instance version changes. A refit recomputes
+the cascades and refreshes the private static depth array after the light drifts by
+`options.refitAngle`, the camera changes, caster membership changes, a static caster
+moves, or `options.refitMaxIntervalMs` expires. The interval remains active while the
+light is paused so GPU-clock-animated static casters continue refreshing. Generators
+that are not explicitly enabled preserve the original single-task path, allocate no
+cache texture, and do not load the cache implementation.
+
+`createCsmRefitGate` exposes the CPU-only partition/refit state machine for consumers
+that need the same policy without engine or WebGPU dependencies. Re-supplying a new
+array with identical caster membership does not invalidate the cache.
+
 ### Receiver UBO layout (`_shadowUBO`, 320 bytes / 80 f32)
 
 | offset (f32) | field               | type                                                           |
@@ -114,7 +174,9 @@ the baked cascade count.
 ### Shadow map texture
 
 `depth32float`, size `mapSize × mapSize × numCascades`,
-`RENDER_ATTACHMENT | TEXTURE_BINDING`. Receiver view: `dimension:"2d-array"`. Per-cascade
+`RENDER_ATTACHMENT | TEXTURE_BINDING` plus `COPY_DST` when static caching is enabled.
+The private static cache uses `RENDER_ATTACHMENT | COPY_SRC`. Receiver view:
+`dimension:"2d-array"`. Per-cascade
 caster render targets use a single-layer view
 (`createView({dimension:"2d", baseArrayLayer:i, arrayLayerCount:1})`). Comparison
 sampler `compare:"less"`, linear filtering.
@@ -136,6 +198,12 @@ borrowed `Texture2D` only through `getCsmReceiverTexture`; raw `GPUTexture`,
   `worldSpaceBias / (paddedFar-near)`. The physical separation stays constant while a
   moving light or caster changes the fitted cascade depth range, and far-bound casters
   remain inside the clip volume after the offset.
+- **Static-cache caster passes:** after `enableCsmStaticCache`, every cascade owns a clearing
+  static task targeting the private cache and a non-clearing dynamic task targeting the
+  live map. Refit frames render static tasks, copy the complete cache array to the live
+  map, then depth-test the dynamic overlay against that copy. Overlay-only frames repeat
+  the copy before drawing dynamic casters so moved shadows cannot leave stale depth.
+  Frames with no refit and no dynamic change issue neither passes nor copies.
 - **Receiver pass:** group-2 bind group per CSM light = `[arrayDepthView,
 comparisonSampler, csmUBO]` (binding order 0,1,2). The 2d-array view dimension is
   produced by the shader composer (`bglEntry` maps `_textureType` containing `"array"`
@@ -237,6 +305,16 @@ For `p = (i+1)/N`: `log = minZ*ratio^p`, `uniform = minZ + range*p`,
 cameraVersion`; recomputes splits + matrices, writes the 320-byte UBO (bumping
 `_version`), updates each cascade camera, executes all cascade tasks.
 
+With static caching enabled, the dynamically imported `csm-shadow-cache.ts` owns the
+GPU task split and `csm-refit-gate.ts` owns the caster partition and refit decision.
+Cascade matrices, the receiver UBO, and shadow-camera versions change only on refit
+frames; dynamic-only frames reuse the last refit's cameras so cached and overlay
+depth stay in the same coordinate system. Quiet dynamic casters demote only during a
+refit. A changed static caster promotes immediately and forces that refit. Resolved
+renderables transfer between task sets without rebuilding their per-mesh packets.
+The gate survives GPU task rebuilds, while the replacement state's initial camera key
+forces the new cache texture to be populated before use.
+
 The custom-receiver texture wrapper is lazy and generator-scoped. The first
 `getCsmReceiverTexture` call validates the CSM technique, creates the array view, and
 caches the wrapper. It also anchors the generator's texture ownership in the shared
@@ -245,6 +323,10 @@ destroying the generator-owned depth array. Later calls preserve object/view ide
 Shadow-map recreation is not supported by the current fixed generator configuration;
 therefore the wrapper remains valid until the generator's GPU resources are disposed
 with the scene.
+
+`onCsmReceiverUpdate` immediately replays the most recently published 80-float UBO to
+a late subscriber once at least one cascade update has completed. This is required in
+cache mode because the next refit may be far in the future.
 
 Each CSM task state also snapshots every caster's maximum cascade. When a new caster
 array is supplied without material changes, the incremental diff removes and re-adds
@@ -283,12 +365,17 @@ Shared edits are byte-minimal:
 All cascade math + WGSL live in the four new modules, dynamically imported only by
 scenes that create a CSM generator.
 
+The static-cache orchestration and refit gate live behind the dynamic import performed
+by `enableCsmStaticCache`. Default CSM scenes therefore do not fetch the cache task
+split, transfer helper, or gate.
+
 ## Dependencies
 
 `shadow-base` (`buildLightViewMatrix`, `multiply4x4`, `createShadowCamera`,
 `updateShadowCameraBase`, `createShadowParamsUBO`, `casterVersionSum`),
 `pcf-shadow-task-hooks` (`getNoColorView`, `preloadPcfShadowTaskState`),
-`math/mat4-invert`, `camera` (`getViewProjectionMatrix`), `frame-graph/render-task`.
+`math/mat4-invert`, `camera` (`getViewProjectionMatrix`), `frame-graph/render-task`,
+`csm-refit-gate`.
 
 ## Test Specification
 
@@ -311,11 +398,19 @@ survives a ShaderMaterial acquire/release cycle, and rejects ESM/PCF generators.
 reset behavior, and incremental reassignment of an existing caster across cascade
 tasks after a live cap change.
 
+`tests/lite/unit/csm-refit-gate.test.ts` validates stable re-supply, version-sum
+collision handling, promotion/demotion timing, angular drift, and interval refits.
+
+`tests/lite/unit/light-version.test.ts` validates that direct scalar light mutations
+can bump the light UBO version without dirtying the world matrix.
+
 ## File Manifest
 
 - `shadow/csm-directional-shadow-generator.ts` — public factory, custom-receiver
   `Texture2D` adapter, update subscription, and texture/UBO/sampler ownership.
 - `shadow/csm-shadow-task-hooks.ts` — cascade math + N-layer caster render hooks.
+- `shadow/csm-shadow-cache.ts` — dynamically loaded static-cache GPU orchestration.
+- `shadow/csm-refit-gate.ts` — GPU-free static/dynamic partition and refit policy.
 - `shader/fragments/csm-shadow-fragment-core.ts` — receiver WGSL codegen.
 - `material/standard/fragments/std-csm-shadow-fragment.ts` — Standard-family wrapper.
 - `lab/lite/src/lite/scene214.ts`, `lab/lite/scene214.html` — Lite demo scene.

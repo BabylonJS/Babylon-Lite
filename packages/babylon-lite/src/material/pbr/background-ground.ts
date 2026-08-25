@@ -82,6 +82,8 @@ export async function buildGroundRenderable(
             };
         },
     };
+    // The preloaded bitmap is closed once uploaded, so recovery refetches from the URL instead.
+    r._rebuild = () => buildGroundRenderable(engine, groundSize, rootPosition, primaryColor, groundTextureUrl, undefined, enableNoise);
     return r;
 }
 

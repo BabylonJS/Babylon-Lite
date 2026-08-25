@@ -29,6 +29,12 @@ const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-in
 const BUNDLE_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/manifest.json");
 const MASTER_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/master-manifest.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+/** Scenes whose glTF contains a negative-determinant (mirrored) node — see the primitive-state
+ *  assertions at the end of the per-scene test. */
+const MIRRORED_NODE_IDS = new Set([168, 257, 266, 269]);
+/** Scenes whose glTF draws a non-triangle-list topology, keyed to the value they must retain. */
+const EXOTIC_TOPOLOGY_SCENES = new Map([[260, "triangle-strip"]]);
+
 const SCENES = allScenes.filter((s) => {
     // Scene 114 opts out because WebGPU's optional "primitive-index" feature
     // changes which picking chunks the browser fetches across machines.
@@ -170,6 +176,16 @@ for (const scene of SCENES) {
                 /\/(scene\/scene-core|scene\/scene-camera|scene\/scene-node|asset-container|render\/scene-helpers|sprite\/sprite-renderable|sprite\/sprite-2d-handle|sprite\/billboard-(sprite|scene|renderable|pipeline|sprite-handle))\.[jt]s$/;
             const moduleOffenders = runtimeModules.filter((id) => forbiddenModules.test(id));
             expect(moduleOffenders, `pure-2D ${scene.slug} must not load scene/* modules; found: ${moduleOffenders.join(", ")}`).toEqual([]);
+            if (scene.slug === "scene50-sprite-grid") {
+                const optionalBlendOffenders = runtimeModules.filter((id) =>
+                    /\/(particle\/(particle-sprite-2d-blend-modes|particle-blend|particle-billboard-renderable|particle-billboard-scene)|sprite\/sprite-custom-shader)\.[jt]s$/.test(
+                        id
+                    )
+                );
+                expect(optionalBlendOffenders, `scene50 must not load optional particle Sprite2D blend modules; found: ${optionalBlendOffenders.join(", ")}`).toEqual([]);
+                const ySortOffenders = runtimeModules.filter((id) => /\/sprite\/sprite-2d-(?:y-sort(?:-hook)?|handle-y-sort)\.[jt]s$/.test(id));
+                expect(ySortOffenders, `scene50 must not load optional Sprite2D Y-sort modules; found: ${ySortOffenders.join(", ")}`).toEqual([]);
+            }
         }
 
         // Scene 52 — HUD on 3D — uses SpriteRenderer for the HUD overlay; the
@@ -179,6 +195,78 @@ for (const scene of SCENES) {
         if (scene.slug === "scene52-hud-on-3d") {
             const offenders = runtimeModules.filter((id) => /\/sprite\/(sprite-renderable|billboard-(sprite|scene|renderable|pipeline))\.[jt]s$/.test(id));
             expect(offenders, `scene52 HUD must not load depth-hosted sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
+        // Scene 300 builds an NPE graph but renders it only through the native Sprite2D bridge.
+        // Require that bridge and reject the camera-facing billboard / scene registration paths.
+        if (scene.slug === "scene300-npe-sprite2d") {
+            expect(
+                runtimeModules.some((id) => /\/particle\/particle-sprite-2d\.[jt]s$/.test(id)),
+                `scene300 MUST include particle-sprite-2d; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
+            expect(
+                runtimeModules.some((id) => /\/sprite\/sprite-renderer\.[jt]s$/.test(id)),
+                `scene300 MUST include sprite-renderer; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
+            const offenders = runtimeModules.filter((id) =>
+                /\/(particle\/(particle-sprite-2d-blend-modes|particle-blend|particle-billboard|particle-billboard-renderable|particle-billboard-scene|particle-scene)|sprite\/(sprite-custom-shader|sprite-renderable|billboard-(sprite|scene|renderable|pipeline)))\.[jt]s$/.test(
+                    id
+                )
+            );
+            expect(offenders, `scene300 must not load exact-blend, custom-shader, or 3D sprite paths; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
+        if (scene.slug === "scene301-npe-sprite2d-blend-modes") {
+            for (const required of [
+                /\/particle\/particle-sprite-2d-blend-modes\.[jt]s$/,
+                /\/particle\/particle-blend\.[jt]s$/,
+                /\/sprite\/sprite-custom-shader\.[jt]s$/,
+                /\/sprite\/sprite-renderer\.[jt]s$/,
+            ]) {
+                expect(
+                    runtimeModules.some((id) => required.test(id)),
+                    `scene301 is missing required exact Sprite2D module ${required}; loaded modules: ${runtimeModules.join(", ")}`
+                ).toBe(true);
+            }
+            const offenders = runtimeModules.filter((id) =>
+                /\/(particle\/(particle-billboard|particle-billboard-renderable|particle-billboard-scene|particle-scene)|sprite\/(sprite-renderable|billboard-(sprite|scene|renderable|pipeline)))\.[jt]s$/.test(
+                    id
+                )
+            );
+            expect(offenders, `scene301 must not load billboard or scene-rendered sprite paths; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
+        if (scene.slug === "scene302-npe-moving-emitter") {
+            for (const required of [
+                /\/particle\/node\/npe-emitter-provider\.[jt]s$/,
+                /\/math\/mat4-invert-to-ref\.[jt]s$/,
+                /\/particle\/particle-scene\.[jt]s$/,
+                /\/particle\/particle-billboard\.[jt]s$/,
+                /\/sprite\/billboard-scene\.[jt]s$/,
+                /\/sprite\/billboard-renderable\.[jt]s$/,
+            ]) {
+                expect(
+                    runtimeModules.some((id) => required.test(id)),
+                    `scene302 is missing required moving-emitter billboard module ${required}; loaded modules: ${runtimeModules.join(", ")}`
+                ).toBe(true);
+            }
+            const offenders = runtimeModules.filter((id) =>
+                /\/(math\/mat4-invert|particle\/(particle-(blend|billboard-renderable|billboard-scene|sprite-2d|sprite-2d-blend-modes)|node\/(npe-(blend-modes|flow-map-runtime|live-emitter|noise-runtime|texture-update-runtime|texture-content)|blocks\/(cpu-texture-source-block|update-(flow-map|noise)-block)))|sprite\/(sprite-renderer|sprite-custom-shader|sprite-renderable))\.[jt]s$/.test(
+                    id
+                )
+            );
+            expect(offenders, `scene302 must not load ordinary inversion, flow/noise, exact-blend, or Sprite2D paths; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
+        if (scene.slug === "scene303-sprite2d-y-sort") {
+            for (const required of [/\/sprite\/sprite-2d-y-sort\.[jt]s$/, /\/sprite\/sprite-renderer\.[jt]s$/, /\/sprite\/picking\/pick-sprite-2d\.[jt]s$/]) {
+                expect(
+                    runtimeModules.some((id) => required.test(id)),
+                    `scene303 is missing required Sprite2D Y-sort module ${required}; loaded modules: ${runtimeModules.join(", ")}`
+                ).toBe(true);
+            }
+            const offenders = runtimeModules.filter((id) => /\/sprite\/(?:sprite-renderable|billboard-(?:sprite|scene|renderable|pipeline))\.[jt]s$/.test(id));
+            expect(offenders, `scene303 must remain pure SpriteRenderer with no depth-hosted or billboard paths; found: ${offenders.join(", ")}`).toEqual([]);
         }
 
         // Scene 53 — depth-hosted sprites — MUST load sprite-renderable.js
@@ -221,11 +309,37 @@ for (const scene of SCENES) {
         // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
         // List excludes the sprite-using scenes (50-59, the 92-98 custom-shader scenes, and the
         // 117/118 sprite-picking scenes). 60-series are NME demos with no sprites; 1-40 are core 3D.
-        // 262/263/264/276/277 are NPE particle scenes (particles render as billboards).
-        const SPRITE_USING_IDS = new Set([50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277]);
+        // 262/263/264/276/277/280/281/283/284/302 are NPE billboard scenes; 300/301/303 use Sprite2D.
+        const SPRITE_USING_IDS = new Set([
+            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, 303,
+        ]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));
             expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
+        // A scene containing a mirrored (negative-determinant) glTF node must keep the reversed
+        // winding in the bytes it actually fetches, and a scene drawing a non-triangle topology must
+        // keep that topology. These are TREE-SHAKING regression guards, and they have to live here
+        // rather than in a parity spec: both were once installed by importing a module purely for
+        // its side effect, and a bundler drops such an import because nothing reads a binding from
+        // it. Source builds therefore looked correct while every BUNDLED build rendered these scenes
+        // wrong — scene257's mirrored crate black and inside-out, scene260's triangle strip as a
+        // single triangle instead of a quad. A parity spec loads the source page and cannot see it.
+        // Both values are WebGPU enum strings, so they survive minification verbatim.
+        if (MIRRORED_NODE_IDS.has(scene.id)) {
+            const hasReversedWinding = jsPayloads.some(({ body }) => body.includes('"cw"'));
+            expect(hasReversedWinding, `${scene.slug} contains a mirrored glTF node, so its fetched bundle MUST retain the reversed winding ("cw"); it was tree-shaken away`).toBe(
+                true
+            );
+        }
+        const topology = EXOTIC_TOPOLOGY_SCENES.get(scene.id);
+        if (topology) {
+            const hasTopology = jsPayloads.some(({ body }) => body.includes(`"${topology}"`));
+            expect(
+                hasTopology,
+                `${scene.slug} draws a ${topology}, so its fetched bundle MUST retain that topology; it was tree-shaken away and the mesh renders as a triangle list`
+            ).toBe(true);
         }
     });
 }

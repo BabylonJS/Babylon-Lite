@@ -221,12 +221,37 @@ PERF_WARMUP=120 PERF_FRAMES=500 pnpm test:perf-cloud
 **Location:** `tests/lite/parity/bundle-size.spec.ts`
 
 Each scene bundle must stay under `maxRawKB` defined in `scene-config.json`
-(gzip size is shown for reference but not enforced).
+(gzip size is shown for reference but not enforced). This ceiling is the gate for
+bundle-size regressions in CI.
 
 ```sh
 pnpm build:bundle-scenes
 pnpm test:bundle-size
 ```
+
+The master baseline used for the "how did this change move sizes" report is not
+tracked in git. `azure-pipelines-bundle-manifest.yml` re-measures every scene
+after each merge and publishes the aggregate manifest to a stable public URL:
+
+```
+https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json
+```
+
+`pnpm build:bundle-scenes` fetches it automatically and writes
+`lab/public/bundle/master-manifest.json`, which the bundle-size spec and the PR
+comment read. Everything under `lab/public/bundle/` is generated and gitignored,
+so there is nothing to commit and nothing to conflict on.
+
+If you need to point at a different baseline — an offline run, or comparing
+against a specific build — override the source:
+
+```sh
+BUNDLE_MASTER_MANIFEST_URL=  pnpm build:bundle-scenes          # skip the fetch entirely
+BUNDLE_MASTER_MANIFEST_FILE=/path/to/manifest.json pnpm build:bundle-scenes
+```
+
+A missing baseline is not an error: the delta report is skipped and the
+`maxRawKB` ceilings above still gate the build.
 
 ---
 

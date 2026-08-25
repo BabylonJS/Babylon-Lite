@@ -82,6 +82,24 @@ export interface Renderable {
      *  the geometry-renderer path so its owning task can retire per-mesh resources
      *  on re-record/dispose. Idempotent. */
     _geometryDispose?: () => void;
+    /** @internal Rebuilds this renderable on a replacement device after device loss.
+     *
+     *  Stamped by whichever builder created the renderable, closing over the arguments it was
+     *  built from. Recovery restores renderables by traversing `scene._renderables` and calling
+     *  this, so it never needs to know what kind of renderable it is holding — the same way
+     *  material textures already recover through `Texture2D._recoverySource`. Keeping the thunk
+     *  here rather than a per-subsystem descriptor keeps `render/` free of any dependency on the
+     *  loaders that build renderables, and keeps those loaders free of recovery-specific code.
+     *
+     *  Only for renderables that no retained structure owns — currently the loader-built
+     *  backgrounds, which their loaders push here and then discard the values they were built
+     *  from. Renderables produced by a material group builder must NOT set this: recovery already
+     *  rebuilds them by re-running the build through `scene._groups`, which one call at a time
+     *  also restores that group's `rebuildSingle` closure, its `o` output list, and its uniform
+     *  updater — none of which a `Renderable`-returning thunk can express, and a group can emit
+     *  several renderables or merge its meshes into one. Setting both would rebuild them twice
+     *  and leave duplicates in `scene._renderables`. */
+    _rebuild?: () => Renderable | Promise<Renderable>;
     /**
      * Resolve target-specific GPU state (pipeline) and return a `DrawBinding` whose
      * `draw` closure captures that state. Called by the render pass task at build/insert
@@ -135,4 +153,6 @@ export type MeshGroupBuilder = ((scene: SceneContext, meshes: Mesh[]) => Promise
     _rebuildSingle?: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
     /** @internal */
     _materialFamily?: "standard" | "pbr" | "node" | "shader";
+    /** @internal Pending opt-in feature preload required before this builder runs. */
+    _preload?: Promise<void>;
 };

@@ -6,7 +6,7 @@ import { SCENE_UBO_WGSL } from "../shader/scene-uniforms.js";
 import type { BillboardDepthMode, BillboardOrientation, BillboardSpriteSystem } from "./billboard-sprite.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getBillboardFxHook } from "./sprite-fx-hook.js";
-import { BILLBOARD_INSTANCE_FLOATS_PER_SPRITE, BILLBOARD_INSTANCE_STRIDE_BYTES } from "./billboard-sprite.js";
+import { BILLBOARD_ANCHOR_FLOATS_PER_SPRITE, BILLBOARD_INSTANCE_FLOATS_PER_SPRITE, BILLBOARD_INSTANCE_STRIDE_BYTES } from "./billboard-sprite.js";
 import { _getAlphaToCoverageResolver } from "../render/alpha-to-coverage-hook.js";
 
 export interface BillboardPipelineDeviceCache {
@@ -221,21 +221,28 @@ export function uploadSortedBillboardInstances(
     // anchor so the GPU receives eye-relative positions that match the eye-relative
     // view-projection. The sort depth is computed from the same eye-relative anchor.
     // With a zero offset this is identical to the raw-anchor path.
+    //
+    // The subtraction reads `_anchor` (F64) rather than the F32 `_instanceData`:
+    // at world scale the F32 store would have already quantized the position, and
+    // subtracting afterwards recovers nothing. See `_anchor`'s declaration.
+    const anchors = system._anchor;
     for (let index = 0; index < count; index++) {
-        const base = index * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
-        const anchorX = sourceData[base]! - foX;
-        const anchorY = sourceData[base + 1]! - foY;
-        const anchorZ = sourceData[base + 2]! - foZ;
+        const anchorBase = index * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE;
+        const anchorX = anchors[anchorBase]! - foX;
+        const anchorY = anchors[anchorBase + 1]! - foY;
+        const anchorZ = anchors[anchorBase + 2]! - foZ;
         indices[index] = index;
         depths[index] = cameraViewMatrix[2]! * anchorX + cameraViewMatrix[6]! * anchorY + cameraViewMatrix[10]! * anchorZ + cameraViewMatrix[14]!;
     }
     indices.subarray(0, count).sort((left, right) => depths[right]! - depths[left]! || left - right);
     for (let outIndex = 0; outIndex < count; outIndex++) {
-        const sourceBase = indices[outIndex]! * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
+        const sourceIndex = indices[outIndex]!;
+        const sourceBase = sourceIndex * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
+        const sourceAnchorBase = sourceIndex * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE;
         const destBase = outIndex * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
-        sortedData[destBase] = sourceData[sourceBase]! - foX;
-        sortedData[destBase + 1] = sourceData[sourceBase + 1]! - foY;
-        sortedData[destBase + 2] = sourceData[sourceBase + 2]! - foZ;
+        sortedData[destBase] = anchors[sourceAnchorBase]! - foX;
+        sortedData[destBase + 1] = anchors[sourceAnchorBase + 1]! - foY;
+        sortedData[destBase + 2] = anchors[sourceAnchorBase + 2]! - foZ;
         for (let field = 3; field < BILLBOARD_INSTANCE_FLOATS_PER_SPRITE; field++) {
             sortedData[destBase + field] = sourceData[sourceBase + field]!;
         }
@@ -285,12 +292,15 @@ export function uploadBillboardInstances(
         const count = system.count;
         ensureBillboardInstanceSortScratch(foScratch, count);
         const sourceData = system._instanceData;
+        // F64 anchors, for the reason given on the sorted path above.
+        const anchors = system._anchor;
         const dest = foScratch._sortedInstanceData;
         for (let index = 0; index < count; index++) {
             const base = index * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
-            dest[base] = sourceData[base]! - foX;
-            dest[base + 1] = sourceData[base + 1]! - foY;
-            dest[base + 2] = sourceData[base + 2]! - foZ;
+            const anchorBase = index * BILLBOARD_ANCHOR_FLOATS_PER_SPRITE;
+            dest[base] = anchors[anchorBase]! - foX;
+            dest[base + 1] = anchors[anchorBase + 1]! - foY;
+            dest[base + 2] = anchors[anchorBase + 2]! - foZ;
             for (let field = 3; field < BILLBOARD_INSTANCE_FLOATS_PER_SPRITE; field++) {
                 dest[base + field] = sourceData[base + field]!;
             }

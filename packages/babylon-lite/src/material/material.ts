@@ -21,6 +21,8 @@ export interface Material {
     metadata?: LiteMetadata;
     /** @internal Material-owned render feature bits. Mesh-owned bits are computed per renderable. */
     _renderFeatures?: MaterialRenderFeatures;
+    /** @internal PBR material-plugin shader variant, kept outside native feature bitfields. */
+    _pi?: number;
     /** @internal Monotonic material UBO version. Renderables track their last seen value independently. */
     _uboVersion: number;
     /** @internal Monotonic CSM material-view generation. */

@@ -117,15 +117,13 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
     rt._height = height;
 
     const device = engine._device;
-    const allocColor = !!desc.format;
-
-    if (allocColor) {
+    if (desc.format) {
         rt._colorTexture = device.createTexture({
             label: desc.lbl,
             size: { width, height },
-            format: desc.format!,
+            format: desc.format,
             sampleCount: desc.samples,
-            usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC,
+            usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC | TU.COPY_DST,
         });
         rt._colorView = rt._colorTexture.createView();
     }

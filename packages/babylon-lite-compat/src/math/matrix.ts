@@ -6,8 +6,12 @@
  * (`v' = v · M`). `multiply(other)` applies `this` first, then `other`.
  */
 
+import { maximizeMat4InPlace } from "babylon-lite";
+
 import { Vector3 } from "./vector.js";
 import { Quaternion } from "./quaternion.js";
+
+let matrixMaximizeValues: Float32Array | undefined;
 
 export class Matrix {
     public readonly m: Float32Array;
@@ -24,6 +28,50 @@ export class Matrix {
     public copyFrom(source: Matrix): this {
         this.m.set(source.m);
         return this;
+    }
+
+    public maximizeInPlace(other: Matrix): this {
+        maximizeMat4InPlace(this.m, other.m);
+        return this.markAsUpdated();
+    }
+
+    public maximizeInPlaceFromFloats(
+        m0: number,
+        m1: number,
+        m2: number,
+        m3: number,
+        m4: number,
+        m5: number,
+        m6: number,
+        m7: number,
+        m8: number,
+        m9: number,
+        m10: number,
+        m11: number,
+        m12: number,
+        m13: number,
+        m14: number,
+        m15: number
+    ): this {
+        const values = (matrixMaximizeValues ??= new Float32Array(16));
+        values[0] = m0;
+        values[1] = m1;
+        values[2] = m2;
+        values[3] = m3;
+        values[4] = m4;
+        values[5] = m5;
+        values[6] = m6;
+        values[7] = m7;
+        values[8] = m8;
+        values[9] = m9;
+        values[10] = m10;
+        values[11] = m11;
+        values[12] = m12;
+        values[13] = m13;
+        values[14] = m14;
+        values[15] = m15;
+        maximizeMat4InPlace(this.m, values);
+        return this.markAsUpdated();
     }
 
     public clone(): Matrix {

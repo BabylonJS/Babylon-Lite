@@ -3,7 +3,6 @@
 import type { EngineContext } from "../../engine/engine.js";
 import vertSrc from "../shaders/slug.vert.wgsl?raw";
 import fragSrc from "../shaders/slug.frag.wgsl?raw";
-import a2cFragSrc from "../shaders/slug-a2c.frag.wgsl?raw";
 import { TEXT_INSTANCE_BYTES } from "../text-data.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 
@@ -11,7 +10,6 @@ export interface TextPipelineDeviceCache {
     bindGroupLayout: GPUBindGroupLayout;
     vertModule: GPUShaderModule;
     fragModule: GPUShaderModule;
-    a2cFragModule?: GPUShaderModule;
     quadVertexBuffer: GPUBuffer;
     pipelines: Map<string, GPURenderPipeline>;
 }
@@ -25,6 +23,16 @@ export function clearTextPipelineCache(engine: EngineContext): void {
 
 /** Shared 4-vertex unit quad: corner signs (-1,-1), (1,-1), (1,1), (-1,1). */
 const QUAD_CORNERS = [-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1] as const;
+
+/**
+ * Pipeline-constant ID of the `a2c` override in slug.frag.wgsl, declared there as `@id(0)`.
+ *
+ * Deliberately keyed by number, not by name: the shader is an opaque string to JS minifiers,
+ * so an unquoted `{ a2c: 1 }` key would be property-mangled by Closure ADVANCED while the WGSL
+ * text kept `a2c`, and A2C pipeline creation would fail in those builds. Numeric keys survive
+ * mangling, and WebGPU requires the numeric key once `@id` is specified.
+ */
+const A2C_CONSTANT_ID = 0;
 
 function getOrCreateDeviceCache(engine: EngineContext): TextPipelineDeviceCache {
     _cache ??= new WeakMap();
@@ -79,7 +87,6 @@ export function getOrCreateTextPipeline(
         return { pipeline, cache };
     }
     const device = engine._device;
-    const fragModule = alphaToCoverage ? (cache.a2cFragModule ??= device.createShaderModule({ label: "text-a2c-frag", code: a2cFragSrc })) : cache.fragModule;
     const descriptor: GPURenderPipelineDescriptor = {
         label: "text-pipeline",
         layout: device.createPipelineLayout({ bindGroupLayouts: [cache.bindGroupLayout] }),
@@ -106,8 +113,12 @@ export function getOrCreateTextPipeline(
             ],
         },
         fragment: {
-            module: fragModule,
+            module: cache.fragModule,
             entryPoint: "main",
+            // `a2c` is a pipeline-overridable constant in slug.frag.wgsl; setting it switches the
+            // fragment to straight-alpha output. Specialising one module beats shipping a second
+            // near-identical shader, whose text every consumer would pay for even unused.
+            ...(alphaToCoverage ? { constants: { [A2C_CONSTANT_ID]: 1 } } : {}),
             targets: [
                 {
                     format,
