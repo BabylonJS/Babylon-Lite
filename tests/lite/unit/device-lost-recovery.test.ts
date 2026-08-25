@@ -12,9 +12,9 @@ import { buildSampledPbrTextures } from "../../../packages/babylon-lite/src/load
 import { makeSamplerFor } from "../../../packages/babylon-lite/src/loader-gltf/gltf-sampler-desc.js";
 import type { GltfMaterialData } from "../../../packages/babylon-lite/src/loader-gltf/gltf-material.js";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
-import { acquireTexture, releaseTexture } from "../../../packages/babylon-lite/src/resource/gpu-pool.js";
+import { acquireTexture, releaseTexture, _textureRefCount } from "../../../packages/babylon-lite/src/resource/gpu-pool.js";
 import type { Texture2D, Texture2DOptions } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
-import { _trackDerivedTexture2D, cloneTexture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
+import { cloneTexture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/texture-recovery.js";
 
 function context(kind: string): RenderingContext {
@@ -370,8 +370,13 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         } as unknown as EngineContext;
     }
 
+    /** Stands in for a texture from `createTexture2DFromPixels`, which takes an ownership reference
+     *  on what it returns — recovery reads that reference to tell a live texture from a released
+     *  one, so a fixture without it does not model a texture the application still owns. */
     function pixelsTexture(): Texture2D {
-        return { texture: { destroy: vi.fn() } as unknown as GPUTexture, view: {} as GPUTextureView, sampler: {} as GPUSampler, width: 1, height: 1 } as Texture2D;
+        const tex = { texture: { destroy: vi.fn() } as unknown as GPUTexture, view: {} as GPUTextureView, sampler: {} as GPUSampler, width: 1, height: 1 } as Texture2D;
+        acquireTexture(tex);
+        return tex;
     }
 
     it("tracks captured textures weakly so tracking never keeps an app texture alive", () => {
@@ -540,7 +545,8 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         const ownSampler = {} as GPUSampler;
         const ownDesc: GPUSamplerDescriptor = { addressModeU: "clamp-to-edge", addressModeV: "mirror-repeat" };
         engine._deviceLostRecovery!._samplerDescriptors.set(ownSampler, ownDesc);
-        const derived = _trackDerivedTexture2D(base, { ...base, sampler: ownSampler });
+        const derived = { ...base, sampler: ownSampler };
+        engine._dlr!.d(base, derived);
 
         const replacement = device();
         vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
@@ -613,12 +619,11 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         const recovery = enableDeviceLostSpriteRecovery(engine);
         const texture = pixelsTexture();
         engine._dlr!.p(texture, new Uint8Array([1, 2, 3, 4]), {});
-        acquireTexture(texture); // the reference `createTexture2DFromPixels` takes before returning
 
         const disposed = texture.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
         expect(releaseTexture(texture)).toBe(true);
         expect(disposed.destroy).toHaveBeenCalled();
-        expect(texture._recoverySource).toBeUndefined();
+        expect(_textureRefCount(texture)).toBe(0);
 
         const replacement = device();
         vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
@@ -646,7 +651,6 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
             const recovery = enableDeviceLostSpriteRecovery(engine);
             const texture = pixelsTexture();
             capture(engine, texture);
-            acquireTexture(texture); // the reference the creator takes before returning the wrapper
 
             const replacement = device();
             vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });

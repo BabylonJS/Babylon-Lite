@@ -38,14 +38,19 @@ export function releaseTexture(tex: Texture2D): boolean {
     if (c <= 0) {
         tex.texture.destroy();
         m.delete(tex.texture);
-        // The last owner has given the texture up, so device-lost recovery must not rebuild it:
-        // that would allocate a replacement, take a creation-time reference nothing will ever
-        // release, and hand a live texture back to a wrapper the application has already disposed.
-        tex._recoverySource = undefined;
         return true;
     }
     m.set(tex.texture, c);
     return false;
+}
+
+/** Live owner count for a Texture2D's current GPUTexture; 0 once every owner has released it and
+ *  the texture has been destroyed. Read by device-lost recovery to tell a texture the application
+ *  still owns from one it has already given up. Lives here rather than as a flag written by
+ *  `releaseTexture` so scenes that never enable recovery carry none of the bookkeeping.
+ *  @internal */
+export function _textureRefCount(tex: Texture2D): number {
+    return texRefs().get(tex.texture) ?? 0;
 }
 
 /** Increment ref count on a raw GPUTexture (for env textures). */

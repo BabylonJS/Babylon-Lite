@@ -12,11 +12,11 @@ const TEXTURE_PRUNE_FLOOR = 64;
 /** The recovery state that captured each source.
  *
  *  A wrapper derived from a captured texture has to be tracked by the engine that captured it, and
- *  neither `cloneTexture2D` nor the glTF hooks calling it are handed an engine. Keyed by source
- *  rather than by base wrapper because that is what every wrapper in a family has in common — a
- *  clone does not keep its base alive, so the base may well be collected first. The state is held
- *  weakly so an app holding a texture past its engine does not pin that engine's registrations,
- *  and through them its whole scene graph. */
+ *  `cloneTexture2D` — public API, reached from glTF through `GltfFeature.wrapTexture` — is handed
+ *  no engine. Keyed by source rather than by base wrapper because that is what every wrapper in a
+ *  family has in common — a clone does not keep its base alive, so the base may well be collected
+ *  first. The state is held weakly so an app holding a texture past its engine does not pin that
+ *  engine's registrations, and through them its whole scene graph. */
 let _sourceOwners: WeakMap<Texture2DRecoverySource, WeakRef<DeviceLostRecoveryState>> | null = null;
 
 /**
@@ -78,6 +78,7 @@ function attachRecoveryCapture(engine: EngineContext): void {
     _setDerivedTexture2DHook(trackDerivedTexture);
     engine._dlr = {
         t: stamp,
+        d: trackDerivedTexture,
         u(tex: Texture2D, url: string, opts: Texture2DOptions): void {
             stamp(tex, { kind: "url", url, opts: { ...opts } });
         },

@@ -243,15 +243,26 @@ weak set is compacted when it doubles, never below a floor.
 Wrappers derived from another wrapper are tracked in that same set. Both
 `cloneTexture2D` and the glTF sampler path spread a base wrapper, so the result
 inherits `_recoverySource` without passing through the stamp while owning its
-own `texture` field. Deriving a wrapper notifies a hook the capture module
-installs, which finds the recovery state that captured the base's source — held
-weakly, so an application texture outliving its engine cannot pin that engine's
-registrations — and tracks the derived wrapper too. Tracking each one in its own
-right, rather than reaching them by way of their base, is what recovers a clone
-whose base has already been collected. The first wrapper reached rebuilds and
-the rest adopt its texture, view, and size; a wrapper carrying its own captured
-sampler descriptor gets that sampler rebuilt instead of the base's, so the glTF
-sampler wrapper keeps its own wrap and filter settings.
+own `texture` field. Deriving a wrapper notifies the capture module, which finds
+the recovery state that captured the base's source — held weakly, so an
+application texture outliving its engine cannot pin that engine's registrations
+— and tracks the derived wrapper too. Tracking each one in its own right, rather
+than reaching them by way of their base, is what recovers a clone whose base has
+already been collected. The first wrapper reached rebuilds and the rest adopt
+its texture, view, and size; a wrapper carrying its own captured sampler
+descriptor gets that sampler rebuilt instead of the base's, so the glTF sampler
+wrapper keeps its own wrap and filter settings.
+
+Call sites reach that tracking two ways, for bundle-size reasons rather than
+behavioural ones. Sites holding an engine use the `engine._dlr` capture seam
+directly, which costs a property access and adds no module dependency. The glTF
+sampler path is one of these: giving `gltf-sampler-desc` a runtime import of
+`texture-2d` pulls that module into bundles that otherwise load it lazily or not
+at all, which measured far larger than the feature itself. `cloneTexture2D` has
+no engine — it is public API and glTF reaches it through
+`GltfFeature.wrapTexture` — so it calls a module-level hook that the capture
+installs and that stays null, and tree-shaken, in scenes that never enable
+recovery. Both paths call the same tracking function.
 
 Ownership is restored exactly as the creator established it. `createTexture2D`,
 `createTexture2DFromPixels`, and `createRenderTexture2D` each `acquireTexture`
@@ -261,9 +272,14 @@ bind and then unbind a rebuilt texture destroys it while the application still
 holds the wrapper. `createSolidTexture2D` and the glTF `uploadTex` path take no
 such reference and recovery takes none for them, the dynamic-texture rebuild
 restores its own, and adopting wrappers take none exactly as `cloneTexture2D`
-takes none at creation. Conversely, `releaseTexture` clearing the last reference
-drops that wrapper's recovery source, so a texture the application has disposed
-is not rebuilt and re-owned behind its back.
+takes none at creation. That same reference count is how recovery tells a live
+texture from one the application has finished with: for those three kinds a
+count of zero means the last `releaseTexture` already destroyed it, so it is
+skipped rather than rebuilt and re-owned behind the application's back. The
+count is read on the recovery path rather than recorded by `releaseTexture`,
+which would put the bookkeeping in every scene whether or not it recovers. Kinds
+whose creator takes no reference are exempt from the check, because zero is
+their steady state and says nothing about whether they are still in use.
 
 ### TextRenderer
 
