@@ -29,7 +29,29 @@ interface ShellScript {
  * touch the lockfile.
  */
 function shellScripts(): ShellScript[] {
-    const files = readdirSync(repoRoot).filter((f) => /^azure-pipelines.*\.ya?ml$/.test(f));
+    const roots: { dir: string; label: string }[] = [
+        { dir: repoRoot, label: "" },
+        { dir: join(repoRoot, "config", "templates"), label: join("config", "templates") },
+    ];
+
+    // `config/templates/` is included because those files are not documentation
+    // -- azure-pipelines.yml pulls them in with `- template:`, so their steps
+    // run as part of these pipelines and are subject to the same invariant.
+    // They contain no pipes today, so widening the glob changes no result; it
+    // closes a latent hole rather than a live one. That is the point. This file
+    // has already narrowed its own subject once (block scalars only), and the
+    // lesson from that was that a collector aimed at less than its stated
+    // subject is invisible precisely while the uncovered region happens to be
+    // clean.
+    const files: { path: string; location: string }[] = [];
+    for (const { dir, label } of roots) {
+        for (const f of readdirSync(dir).filter((f) => /^azure-pipelines.*\.ya?ml$/.test(f) || label !== "")) {
+            if (!/\.ya?ml$/.test(f)) {
+                continue;
+            }
+            files.push({ path: join(dir, f), location: label ? `${label}/${f}` : f });
+        }
+    }
 
     // Guard the guard. If this glob ever stops matching -- a rename, a move
     // into a subdirectory -- an empty set makes every assertion below
@@ -38,8 +60,8 @@ function shellScripts(): ShellScript[] {
     expect(files.length, "no azure-pipelines*.yml files found").toBeGreaterThan(0);
 
     const scripts: ShellScript[] = [];
-    for (const file of files) {
-        const lines = readFileSync(join(repoRoot, file), "utf8").split("\n");
+    for (const { path, location: file } of files) {
+        const lines = readFileSync(path, "utf8").split("\n");
         for (let i = 0; i < lines.length; i++) {
             const key = /^(\s*)(?:-\s+)?(?:script|bash):(.*)$/.exec(lines[i] ?? "");
             if (!key) {
