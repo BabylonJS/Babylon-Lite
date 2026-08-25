@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { GITHUB_COMMENT_TASK, matchesAnyLine, pipelineYamlFiles, repoRoot } from "./pipeline-files";
+import { GITHUB_COMMENT_TASK, SHELL_STEP_KEY, matchesAnyLine, pipelineYamlFiles, repoRoot } from "./pipeline-files";
 
 /**
  * Guards the claim this repository's post-merge validation rests on: **no job
@@ -598,6 +598,113 @@ function structureProblems(text: string): { illegal: string[]; folded: string[] 
     return { illegal, folded };
 }
 
+/**
+ * The work a job actually runs, as opposed to the work its comments discuss.
+ *
+ * Read through {@link SHELL_STEP_KEY} rather than a fresh regex, for the reason
+ * that constant's own comment gives: this file previously asked "is this a
+ * shell step" in two places and got two answers. A second spelling here would
+ * be a third.
+ *
+ * Comments are dropped, and that is the whole point of extracting commands at
+ * all. `UnitTests` names `build:bundle-scenes`, `test:parity` and `test:perf`
+ * inside the block comment explaining what it deliberately does *not* do, so a
+ * check that searched the job body would fail on an unmodified tree -- and a
+ * guard that is red on arrival gets deleted rather than obeyed.
+ *
+ * The block-scalar body ends at the step's own content column, past the `- `,
+ * which is why {@link contentColumn} is reused instead of the raw indent.
+ * Measuring the dash instead pulls the step's sibling keys (`displayName`,
+ * `env`) in as if they were shell text -- harmless for the markers below, and
+ * exactly the kind of imprecision that stops being harmless when somebody adds
+ * a marker that happens to appear in a display name.
+ */
+function commandsIn(body: string): string[] {
+    const lines = body.split("\n");
+    const commands: string[] = [];
+
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index] ?? "";
+        const match = SHELL_STEP_KEY.exec(line);
+        if (!match) {
+            continue;
+        }
+
+        const column = contentColumn(line);
+        const inline = (match[2] ?? "").trim();
+
+        if (inline.startsWith("|") || inline.startsWith(">")) {
+            for (index += 1; index < lines.length; index += 1) {
+                const scalar = lines[index] ?? "";
+                if (scalar.trim() !== "" && contentColumn(scalar) <= column) {
+                    index -= 1;
+                    break;
+                }
+                commands.push(scalar.trim());
+            }
+        } else {
+            commands.push(inline);
+        }
+    }
+
+    return commands.filter((command) => command !== "" && !command.startsWith("#"));
+}
+
+/**
+ * Work that master is deliberately not asked to do, named by the command that
+ * does it.
+ *
+ * Every other check in this file compares one hand-written artifact against
+ * another -- a constant against the pipeline, the pipeline against
+ * `TESTING.md`, `TESTING.md` against itself. That lattice is strong against a
+ * partial edit and worth nothing against a complete one, because an author who
+ * edits every side leaves every side in agreement. Measured: un-gating
+ * `BundleSize`, dropping its PR comment step and its static-site template so it
+ * genuinely stops reading pull-request context, moving it from
+ * `KNOWN_PR_CONTEXT_JOBS` to `KNOWN_MASTER_JOBS`, naming it in the post-merge
+ * sentence, deleting its bullet from the excluded list and re-pointing the
+ * anchor that bullet carried. **Eight edits, every artifact consistent, and
+ * this file went 13 passed** -- with master now running the ~42-minute
+ * all-scene build on every merge, duplicating
+ * `azure-pipelines-bundle-manifest.yml` and quadrupling the ~11 minutes the
+ * design promises.
+ *
+ * With the clause below: 1 failed, and it is that one, alone.
+ * Without it:            13 passed.
+ *
+ * The deletion test was run at that end state rather than at the cheap arm,
+ * which is the only place it says anything -- un-gate `BundleSize` and stop
+ * there and four clauses fire, so removing this one still leaves the arm red
+ * and proves nothing about it.
+ *
+ * So this is taken from the side that is not an assertion: what the job *runs*.
+ * `pnpm build:bundle-scenes` is expensive because it builds every scene, and
+ * `browserstack` is flaky because it is somebody else's cloud. No edit to this
+ * file revokes either, which is the property the constants above lack.
+ *
+ * These two are also the reasons `TESTING.md` gives, so the floor and the
+ * document fail together rather than the floor inventing a third rationale
+ * nobody agreed to.
+ */
+const EXPENSIVE_WORK = [
+    { command: "build:bundle-scenes", why: "builds every scene (~42 min) and master already gets it from azure-pipelines-bundle-manifest.yml" },
+    { command: "browserstack", why: "runs on an external cloud that fails for reasons unrelated to the code" },
+];
+
+/**
+ * The excluded work a job's commands name, if any.
+ *
+ * Split out so the matcher has one definition that both the real-pipeline check
+ * and the specimens above it exercise. Spelling the `.toLowerCase().includes()`
+ * twice -- once for the offenders and once for the reachability arm -- would
+ * mean the specimens control one copy and the other drifts, which is the
+ * two-lists failure {@link SHELL_STEP_KEYS} exists to prevent.
+ */
+function expensiveWorkIn(body: string): string[] {
+    const commands = commandsIn(body);
+    return EXPENSIVE_WORK.filter((work) => commands.some((command) => command.toLowerCase().includes(work.command))).map((work) => work.command);
+}
+
 function jobsIn(text: string): PipelineJob[] {
     const lines = text.split("\n");
     const starts: { name: string; line: number; keyIndent: number }[] = [];
@@ -781,7 +888,7 @@ describe("pull-request jobs cannot run on a master build", () => {
 
         expect(
             ineffective,
-            `these jobs read pull-request context and DO carry a job-level condition, but it does not keep them off master:\n  ${ineffective.join("\n  ")}\n` +
+            `a job-level condition is present on these but does not keep them off master, and they read pull-request context:\n  ${ineffective.join("\n  ")}\n` +
                 `Do NOT add a second condition -- a job accepts only one. Widen the existing one, keeping its current clauses, ` +
                 `so that it also excludes master: ne(variables['Build.SourceBranch'], 'refs/heads/master') or ` +
                 `startsWith(variables['Build.SourceBranch'], 'refs/pull/').`
@@ -929,6 +1036,76 @@ describe("pull-request jobs cannot run on a master build", () => {
                     `which is the state the master trigger was added to end. Remove the condition, or move the job out of the post-merge set deliberately.`
             ).toBe(false);
         }
+    });
+
+    it("keeps master off the work it deliberately excluded", () => {
+        // The terminal assertion for the *cost* direction, and the file went
+        // without one for nine rounds because every arm anybody runs at a gate
+        // pushes the other way -- gate too much, and master validates nothing.
+        // The neighbours all catch that. Un-gate something expensive and they
+        // catch it too, right up until the author finishes the job: the eight
+        // edits in EXPENSIVE_WORK's comment leave every constant, the pipeline
+        // and TESTING.md in agreement, and nothing above this line objects.
+        //
+        // Nothing above it can, because they all compare authored text to
+        // authored text. This one compares the ungated jobs to the commands
+        // they run.
+        // Specimens first, because every branch of the matcher below is
+        // unreached by the repository. All four real invocations are lowercase
+        // and inline, so the case fold and the block-scalar body would both be
+        // dead code that no arm can distinguish from working code -- the shape
+        // this file has now hit four times. The pipeline cannot supply the
+        // missing inputs, so they are written here.
+        const detected = (body: string) => expensiveWorkIn(body);
+
+        expect(detected("steps:\n  - script: pnpm build:bundle-scenes\n"), "an inline command naming excluded work is not detected").toEqual(["build:bundle-scenes"]);
+        expect(detected("steps:\n  - script: pnpm BUILD:BUNDLE-SCENES\n"), "the match is case-sensitive, so a rename that only changes case walks past it").toEqual([
+            "build:bundle-scenes",
+        ]);
+        expect(detected("steps:\n  - script: |\n      pnpm build:bundle-scenes\n"), "a command inside a block scalar is not read, so multi-line steps are invisible").toEqual([
+            "build:bundle-scenes",
+        ]);
+        expect(detected("steps:\n  - script: |\n      # pnpm build:bundle-scenes\n      echo hi\n"), "a commented-out command counts as work the job does").toEqual([]);
+        expect(
+            detected('steps:\n  - script: |\n      echo hi\n    displayName: "pnpm build:bundle-scenes"\n'),
+            "the block scalar swallowed its step's sibling keys, so a display name can trip this check"
+        ).toEqual([]);
+        expect(detected("steps:\n  - script: echo hi\n"), "a job doing none of this excluded work is reported anyway").toEqual([]);
+
+        const offenders = dualContextPipelines.flatMap((file) =>
+            file.jobs
+                .filter((job) => !job.gated)
+                .flatMap((job) =>
+                    expensiveWorkIn(job.body).map((command) => {
+                        const work = EXPENSIVE_WORK.find((candidate) => candidate.command === command);
+                        return `${file.location}: ${job.name} runs \`${command}\` on master -- it ${work?.why ?? ""}`;
+                    })
+                )
+        );
+
+        expect(
+            offenders,
+            `a job that runs on every master push does work this design excluded from master:\n${offenders.join("\n")}\n` +
+                `Post-merge validation is budgeted at roughly 11 minutes so that a merge is checked before the next one lands. ` +
+                `If the budget is genuinely being renegotiated, that is a decision to argue for in TESTING.md and in the pull request, ` +
+                `not something to arrive by deleting a condition.`
+        ).toEqual([]);
+
+        // The floor's own vacuity arm, and it is not decoration: the check
+        // above passes trivially if these commands stop appearing anywhere. A
+        // rename of the bundle script, or moving BrowserStack behind a variable,
+        // leaves a marker naming work nobody does -- silent, green, and
+        // measuring nothing. Asserted separately so it reports in its own words
+        // rather than as an absence somewhere else.
+        const unreachable = EXPENSIVE_WORK.map((work) => work.command).filter(
+            (command) => !dualContextPipelines.some((file) => file.jobs.some((job) => expensiveWorkIn(job.body).includes(command)))
+        );
+
+        expect(
+            unreachable,
+            `these markers name work no job in the dual-context pipeline runs, so the check above is asking a question nothing can answer: ${unreachable.join(", ")}.\n` +
+                `Re-point them at whatever replaced the command, or drop them -- a marker kept for a command that no longer exists is a gate that reports success because it never opened.`
+        ).toEqual([]);
     });
 
     it("distinguishes a pull-request-only pipeline from a dual-context one", () => {
@@ -1281,7 +1458,7 @@ describe("pull-request jobs cannot run on a master build", () => {
 
         expect(
             alsoExcluded,
-            `TESTING.md says master re-runs ${alsoExcluded.join(", ")} and also lists it as deliberately excluded from master. Both cannot be true.\n` +
+            `TESTING.md contradicts itself about ${alsoExcluded.join(", ")}: the post-merge sentence re-runs it and the excluded list says master stopped. Both cannot be true.\n` +
                 `Whichever is stale, the other one is what somebody will read when deciding whether post-merge validation still covers this.`
         ).toEqual([]);
     });
