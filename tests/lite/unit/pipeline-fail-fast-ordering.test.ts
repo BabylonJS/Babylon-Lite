@@ -51,6 +51,40 @@ const PUBLISH_STEP = "Publish bundle-size baseline";
  */
 const GATED_STEPS = ["Build bundle scenes", PUBLISH_STEP];
 
+/**
+ * Commands that make a step expensive because of what they do, not because a
+ * list says so.
+ *
+ * This is the floor under everything else here, and it exists because the rest
+ * of the file can be honestly satisfied while the pipeline does exactly what
+ * this PR was written to stop. Measured: move the check to just before the
+ * publish step, add the seven steps that now precede it to the allowance,
+ * update the pin, document all seven in TESTING.md, and drop the build from
+ * `GATED_STEPS` because a step you have called a prerequisite is not one you
+ * are still gating. Eight edits, each resolving a real failure, every artifact
+ * agreeing with every other -- and every clause in this file green while the
+ * pipeline spends half an hour before discovering it cannot publish.
+ *
+ * No clause had to be deleted to get there. That is the difference between a
+ * guard with a weak floor and one with no terminal assertion at all, and it is
+ * why this cannot be another hand-maintained list: the allowance, the pin,
+ * `GATED_STEPS` and the documentation are all things a person writes, so a
+ * capitulation can satisfy them by writing agreement everywhere. What a step
+ * *runs* is not an assertion. Installing dependencies, downloading a browser
+ * and building 245 scenes are expensive whatever any constant calls them, so
+ * the check has to precede them for a reason no edit to this file can revoke.
+ *
+ * Deliberately narrow: these are the commands whose cost is the reason the
+ * check exists, not a general notion of expense. A new expensive command is
+ * not caught until it is named here -- but naming it is a decision made in the
+ * open, and the universal clause above still refuses anything unlisted.
+ */
+const COSTLY_COMMANDS = [
+    { pattern: /\bpnpm\s+install\b/, why: "installs the dependency tree" },
+    { pattern: /playwright\s+install\b/, why: "downloads a browser" },
+    { pattern: /\bbuild:bundle-scenes\b/, why: "measures every bundle scene" },
+];
+
 /** Leading-whitespace width, used to compare YAML nesting levels. */
 function indentOf(line: string): number {
     return line.length - line.trimStart().length;
@@ -316,6 +350,30 @@ function allowanceSection(): string {
 }
 
 describe("the baseline pipeline validates its deploy configuration before doing expensive work", () => {
+    it("keeps the check ahead of every step whose cost is the reason it exists", () => {
+        const steps = pipelineSteps();
+        const preflight = stepIndex(steps, PREFLIGHT_STEP);
+
+        const expensive = steps
+            .slice(0, preflight)
+            .flatMap((step) => COSTLY_COMMANDS.filter(({ pattern }) => pattern.test(step)).map(({ why }) => `a step that ${why} runs before "${PREFLIGHT_STEP}"`));
+
+        expect(
+            expensive,
+            `${expensive.join("\n  ")}\n\n` +
+                `This cannot be resolved by widening the allowance, and that is the point — the allowance, the pin, GATED_STEPS and TESTING.md are all written by hand, so a capitulation can satisfy them all by writing agreement everywhere. What a step runs is not an assertion. Move the check back above this work.`
+        ).toEqual([]);
+
+        // A rule that names nothing present in the pipeline floors nothing, so
+        // pin that these commands are real: every one of them must appear
+        // somewhere in the file, or this clause has quietly stopped applying.
+        const absent = COSTLY_COMMANDS.filter(({ pattern }) => !steps.some((s) => pattern.test(s)));
+        expect(
+            absent.map(({ why }) => `no step ${why}`),
+            `${pipelineFile} no longer runs commands this clause was written about, so it now floors nothing. Re-point it at what the pipeline actually does rather than deleting it.`
+        ).toEqual([]);
+    });
+
     it("agrees with a real parser about what is nested and what is merely indented", () => {
         const wrong = NESTING_SPECIMENS.filter(({ yaml, illegal }) => malformedNestingIn(yaml).length > 0 !== illegal).map(
             ({ label, illegal }) => `${illegal ? "missed" : "wrongly flagged"}: ${label}`
