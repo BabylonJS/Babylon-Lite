@@ -83,9 +83,14 @@ export interface NodeParticleSet {
 
 /** Options for building a node-particle set. */
 export interface BuildNodeParticleOptions {
+    /** Emitter world position (translation-only emitter). Ignored when {@link BuildNodeParticleOptions.emitterWorldMatrix} is set. */
     emitter?: Vec3;
+    /** Emitter world matrix (translation + rotation + scale). Takes precedence over {@link BuildNodeParticleOptions.emitter}. */
     emitterWorldMatrix?: Mat4;
+    /** Base URL used to resolve relative texture URLs in the graph (mirrors BJS texture-base resolution). */
     textureBaseUrl?: string;
+    /** @internal */
+    _setupEmitter?: (state: NpeBuildState) => void;
 }
 
 /** Build data-oriented particle systems from a parsed graph. */
@@ -124,6 +129,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             scene,
             textureBaseUrl: options.textureBaseUrl,
         };
+        options._setupEmitter?.(state);
 
         const outputs = new Map<string, NpeGetter>();
         const built = new Set<number>();
@@ -204,12 +210,6 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
         };
 
         await buildBlock(systemId);
-
-        system._emitter = {
-            emitter: state.emitter,
-            emitterWorldMatrix: state.emitterWorldMatrix,
-            emitterInverseWorldMatrices: state.emitterInverseWorldMatrices,
-        };
         systems.push(system);
     }
 

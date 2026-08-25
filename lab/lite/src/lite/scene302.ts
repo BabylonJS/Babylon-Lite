@@ -1,7 +1,7 @@
 import {
     animateParticleSystem,
     attachControl,
-    buildNodeParticleSetWithEmitterProvider,
+    buildNodeParticleSet,
     createArcRotateCamera,
     createEngine,
     createSceneContext,
@@ -12,6 +12,7 @@ import {
     registerScene,
     startEngine,
     startParticleSystem,
+    withNodeParticleEmitterProvider,
 } from "babylon-lite";
 import {
     buildScene302TexturePixels,
@@ -81,11 +82,14 @@ async function main(): Promise<void> {
     writeScene302EmitterMatrix(mutableEmitterMatrix, pose);
     const originalRandom = Math.random;
 
-    let set: Awaited<ReturnType<typeof buildNodeParticleSetWithEmitterProvider>>;
+    let set: Awaited<ReturnType<typeof buildNodeParticleSet>>;
     try {
-        set = await buildNodeParticleSetWithEmitterProvider(engine, scene, parseNodeParticleSource(createScene302NpeGraph()), provider, {
-            emitter: { x: 0, y: 0, z: 0 },
-        });
+        set = await buildNodeParticleSet(
+            engine,
+            scene,
+            parseNodeParticleSource(createScene302NpeGraph()),
+            withNodeParticleEmitterProvider(provider, { emitter: { x: 0, y: 0, z: 0 } })
+        );
         const system = set.systems[0];
         if (!system) {
             throw new Error("Scene 302 requires one NPE particle system");

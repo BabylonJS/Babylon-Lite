@@ -39,8 +39,11 @@ function buildNodeParticleSetWithEmitterProvider(
     provider: NodeParticleEmitterProvider,
     options?: BuildNodeParticleOptions
 ): Promise<NodeParticleSet>;
+function withNodeParticleEmitterProvider<T extends object = BuildNodeParticleOptions>(
+    provider: NodeParticleEmitterProvider,
+    options?: T & BuildNodeParticleOptions
+): T & BuildNodeParticleOptions;
 function enableNodeParticleBlendModes(set: NodeParticleSet): NodeParticleSet;
-function enableNodeParticleEmitterProvider(set: NodeParticleSet, provider: NodeParticleEmitterProvider): Promise<NodeParticleSet>;
 
 function parseNodeParticleSetFromSnippet(engine: EngineContext, scene: SceneContext, snippetId: string, options?: ParseNodeParticleOptions): Promise<NodeParticleSet>;
 
@@ -64,7 +67,7 @@ function registerNodeParticleSet2DWithBlendModes(renderer: SpriteRenderer, set: 
 function disposeNodeParticleSet2DBlendModesBinding(binding: NodeParticleSet2DBlendModesBinding): void;
 ```
 
-All twenty-four functions listed above, including both enablers, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted by the graph-build functions above, but it is not a named node-particle type export from the package root.
+All twenty-four functions listed above, including the build-options helper and blend-mode enabler, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted by the graph-build functions above, but it is not a named node-particle type export from the package root.
 
 ### 2.2 Types
 
@@ -75,12 +78,9 @@ interface BuildNodeParticleOptions {
     textureBaseUrl?: string;
 }
 
-interface ParseNodeParticleOptions {
+interface ParseNodeParticleOptions extends BuildNodeParticleOptions {
     json?: string | object;
     snippetServer?: string;
-    emitter?: Vec3;
-    emitterWorldMatrix?: Mat4;
-    textureBaseUrl?: string;
 }
 
 type NodeParticleEmitterProvider = () => Mat4;
@@ -148,7 +148,21 @@ interface NodeParticleSet2DBlendModesBinding {
 
 `ParticleSystem` is the tenth exported type and is specified in section 5. `ParticleSprite2DBlendModesBridge` and `NodeParticleSet2DBlendModesBinding` are the eleventh and twelfth exported types. `NodeParticleEmitterProvider` is a pure state source: it accepts no runtime objects and returns only a matrix value. `NodeParticleSet.systems` is a mutable array behind a readonly property, and each system and its typed arrays are mutable. Both bridge families expose readonly system/layer references while keeping `pixelsPerUnit`, `originPx`, and `invertY` mutable. Both binding families expose a readonly bridge list and mutable `active` state. Every public type is pure state; behavior remains in standalone functions.
 
-### 2.3 Internal APIs
+### 2.3 Breaking migration
+
+The post-build `enableNodeParticleEmitterProvider` API is removed with no deprecated compatibility shim. Move provider selection into the builder options:
+
+```ts
+// Removed
+await enableNodeParticleEmitterProvider(await builder(engine, scene, graph, options), provider);
+
+// Replacement for every node-particle builder, including snippet parsing
+await builder(engine, scene, graph, withNodeParticleEmitterProvider(provider, options));
+```
+
+The default-builder convenience remains `buildNodeParticleSetWithEmitterProvider(engine, scene, graph, provider, options)`. The options helper returns a shallow copy, preserves extension-specific fields such as `ParseNodeParticleOptions.json` and `snippetServer`, and gives the provider precedence over static `emitterWorldMatrix` and `emitter` values.
+
+### 2.4 Internal APIs
 
 The following symbols are implementation APIs and are not node-particle package-root exports:
 
@@ -174,9 +188,9 @@ serialized value or snippet response
          or buildNodeParticleSetWithFlowMaps for UpdateFlowMapBlock graphs
          or buildNodeParticleSetWithNoiseTextures for UpdateNoiseBlock graphs
          or buildNodeParticleSetWithTextureUpdates for graphs containing both
-     -> optional enableNodeParticleBlendModes for exact billboard blending on a set from any builder
-     -> optional enableNodeParticleEmitterProvider for a live emitter matrix on a set from any builder
+         with options from withNodeParticleEmitterProvider for a live emitter matrix on any builder
          or buildNodeParticleSetWithEmitterProvider as the default-builder convenience form
+     -> optional enableNodeParticleBlendModes for exact billboard blending on a set from any builder
     -> NodeParticleSet { systems }
     -> startParticleSystem / stopParticleSystem / animateParticleSystem
         -> billboard target:
@@ -212,8 +226,7 @@ node/npe-types.ts        readonly TypeScript graph shapes
 node/npe-build.ts        root-reachable DFS and system construction
 node/npe-blend-modes.ts  explicit Multiply/MultiplyAdd rendering enabler
 node/npe-emitter-provider.ts
-                         thin public live-emitter enabler and convenience builder
-node/npe-live-emitter.ts dynamically loaded provider validation, copy, inverse refresh, and callback composition
+                         build-options helper, provider validation/copy/inverse refresh, and convenience builder
 node/npe-value.ts        indexed getter and step contracts
 node/npe-texture-content.ts
                          pay-for-use CPU RGBA texture decoding
@@ -377,8 +390,6 @@ interface ParticleSystem {
     _writeColorDead?: (i: number, color: Color4) => void;
     _suppressInitialDirectionCapture?: boolean;
     _seedLocalPosition?: ParticleStep;
-    _emitter?: ParticleEmitterState;
-    _emitterProvider?: ParticleEmitterProviderState;
     _registerBillboard?: (scene: SceneContext, billboard: FacingBillboardSpriteSystem) => void;
 }
 ```
@@ -417,13 +428,17 @@ Starting a stopped system resets simulated time and permits emission while retai
 
 The base particle system has no camera or target-size preparation API. Camera-dependent optional features own their preparation behind their enabler. UpdateFlowMap appends a scene callback that snapshots the current view-projection matrix after camera-control callbacks and before live particle simulation. Manual simulation can use the build-time snapshot when the camera is static, or invoke the registered scene callback after changing the camera or target size.
 
-`enableNodeParticleEmitterProvider(set, provider)` dynamically imports `npe-live-emitter.ts`, samples the provider once, mutates every system in the same set, and resolves to that identical set object. It does not replace systems, matrices, emitter vectors, inverse matrices, or the `systems` array. A provider may return a new matrix object on every sample or mutate and return the same object; every accepted sample is copied into the stable builder-owned references.
+`withNodeParticleEmitterProvider(provider, options)` is the build-time opt-in. It samples and validates the provider immediately, returns a shallow copy of the supplied options with one internal `_setupEmitter` callback, and preserves extension-specific option fields through its generic intersection return type. The result can be passed to every node-particle builder or to `parseNodeParticleSetFromSnippet`. Each builder calls the callback with its temporary `NpeBuildState` immediately after constructing that state and before evaluator traversal. The callback replaces any caller-owned static matrix reference with a fresh provider-owned stable matrix, copies the initial matrix and translation into stable evaluator references, assigns a fresh provider-owned inverse list, and installs frame preparation on that system. Provider setup does not mutate the original options or their `emitterWorldMatrix`.
 
-The provider result must be a finite 16-element matrix. Validation copies into private scratch storage first. Every implicit-cylinder inverse is then computed into private scratch storage. Only after the complete sample and every inverse succeed does refresh commit the stable emitter matrices, translation vectors, and inverse matrices. Provider exceptions propagate unchanged; structural or finite-value errors use the explicit provider error. Either failure leaves all stable references and particle simulation state unchanged.
+Provider setup is the sole owner of `_prepareFrame` on a provider-backed NPE system: it installs the hook before evaluator traversal, and block evaluators must neither assign nor replace that field.
 
-The initial enablement sample establishes provider precedence over any static `emitterWorldMatrix` or `emitter` supplied during build. When a static matrix was supplied, that same retained matrix reference is updated in place. Calling the enabler again on a consistently enabled set samples the replacement once and updates the existing provider handle without stacking callbacks. A rejected replacement restores the previous provider, which remains active for later animation calls.
+Setup copies the stable emitter vector, emitter matrix, and inverse-list references into local variables immediately. The installed `_prepareFrame` closure retains only those references, the provider, one private next-matrix scratch, one lazily allocated inverse scratch, and any prior frame hook. It does not retain `NpeBuildState`, `SceneContext`, `ParticleSystem`, its buffer, the options object, or graph-build data, and it does not point back to the owning system. The wrapped options object retains only the provider, validated initial matrix, and setup callback; it never accumulates references to systems or builds. Static systems allocate no provider array, inverse-list collection, object, closure, scratch matrix, or provider field.
 
-All systems in one enabled set share one provider handle. Each started `animateParticleSystem(system, ratio)` call samples exactly once and commits that snapshot to every system in the set before simulating the selected system. Animating two systems therefore produces two samples, one per animation call; after the second sample all set systems expose the second snapshot. An unstarted call returns without sampling. A stopped-but-started system still samples before its drain update because `stopParticleSystem` does not clear `_started`.
+The provider result must be a finite 16-element matrix. Validation copies into private scratch storage before touching builder-owned references. Initial implicit-cylinder inverses are computed during traversal from the already-copied provider matrix. On a started frame, that system's refresh checks its own inverse list, lazily allocates one private inverse scratch when needed, and computes the sampled inverse with identity fallback for singular matrices. Only after the complete sample succeeds does refresh commit that system's stable emitter matrix, translation vector, and collected inverse matrices. Provider exceptions propagate unchanged; structural or finite-value errors use the explicit provider error. Either failure leaves stable references and particle simulation state unchanged.
+
+The initial helper sample establishes provider precedence over any static `emitterWorldMatrix` or `emitter` supplied in the wrapped options. A provider may return a new matrix object on every sample or mutate and return the same object; every accepted sample is copied into stable builder-owned references. There is no post-build provider replacement path and no provider handle on a system.
+
+One wrapped options object may be reused across builds without coupling them. Its single validated helper-time snapshot seeds every system built from that object; setup itself does not sample again. Each installed frame hook then samples the current provider exactly once and updates only its own system before simulation. A fresh wrapper is required only when a later build must use a new build-time snapshot before it starts. Animating two systems produces two independent samples, one per animation call. An unstarted call returns without sampling. A stopped-but-started system still samples before its drain update because `stopParticleSystem` does not clear `_started`.
 
 ### 5.4 One animation call
 
@@ -568,17 +583,17 @@ For each root:
 - Capacity is `systemBlock.serialized.capacity` when it is a number, otherwise `1000`.
 - `createParticleSystem(capacity)` runs before any block evaluator.
 - `isLocal` is true only when `systemBlock.serialized.isLocal === true`.
-- `options.emitterWorldMatrix` has precedence over `options.emitter`. Ordinary build options contain no provider field, provider branch, or provider dynamic-import edge.
+- `options.emitterWorldMatrix` has precedence over `options.emitter`. The public build options contain no provider field. Their one internal extension point is an optional `_setupEmitter(state)` callback whose declaration is trimmed from the public package types.
 - With a static matrix, the matrix reference is retained and its indices 12, 13, and 14 are copied into a fresh emitter `Vec3` exactly once, preserving the existing static contract.
 - Without a matrix, the emitter option or an explicit zero vector is copied into the stable emitter value and a translation matrix.
-- After the graph walk, the newly created system receives a fresh `ParticleEmitterState` containing exactly `emitter`, `emitterWorldMatrix`, and `emitterInverseWorldMatrices`. Those values share the stable references captured by evaluator closures, but the system never retains the containing `NpeBuildState`, its `SceneContext`, its system reference, or any unrelated build field.
-- Every implicit Cylinder evaluator computes its static inverse normally and appends its stable `{ inverse }` state to `emitterInverseWorldMatrices`. Explicit-direction cylinders append nothing. Every retained inverse belongs to the system's one stable `emitterWorldMatrix`, so a live refresh inverts the provider's next matrix directly. The list supports every reachable implicit cylinder in one system; no evaluator branches on provider state or imports the live module.
+- Immediately after constructing `NpeBuildState`, the builder calls `options._setupEmitter?.(state)` and then begins the graph walk. With ordinary options this call does nothing and the system retains no emitter state or provider handle. Provider setup copies its validated initial sample before any evaluator captures the stable emitter references.
+- Every implicit Cylinder evaluator computes its static inverse normally and optionally appends its stable `{ inverse }` state through `state.emitterInverseWorldMatrices?.push(...)`. Explicit-direction cylinders append nothing. A static build leaves the field absent and allocates no collection array. Provider setup installs the fresh list before traversal, so it collects every reachable implicit cylinder in one system without evaluator imports or provider-specific branching.
 - `scene` and `textureBaseUrl` are carried only during the graph walk in `NpeBuildState`.
-- The ordinary, flow-map, noise-texture, and combined texture-update builders retain synchronous object-literal state construction. Their specialized walks publish the same emitter-only state shape, so the post-build enabler composes with every family without creating a reverse scene reference or system cycle.
+- The ordinary, flow-map, noise-texture, and combined texture-update walks make the same pre-traversal optional setup call. They do not allocate a containing emitter-state object, import provider code, branch on provider behavior, or retain `NpeBuildState` after the walk.
 - Each standard-builder root gets its own output map and block-id set. Every standard `ParticleTextureSourceBlock` stays on the base registry; its existing evaluator prefers a nonempty string `url` and otherwise accepts a string `textureDataUrl`, without importing an optional evaluator. The flow-map, noise-texture, and combined texture-update builders dynamically import feature runtimes only through their explicit public functions. Their shared specialized walk additionally keys dependency overrides by parsed block object, allowing one texture source to be evaluated once for billboard upload and once for CPU decoding.
-- `enableNodeParticleBlendModes(set)` installs an `_registerBillboard` callback on every system in any already-built set and returns that same set. The callback reads the system's current mutable `blendMode` when registration occurs, applies the exact Babylon.js descriptor, attaches the private Multiply shader for modes `3` and `4`, and selects one or two passes. It composes with the emitter-provider enabler and the flow-map, noise-texture, and combined texture-update builders without changing their evaluator walks.
+- `enableNodeParticleBlendModes(set)` installs an `_registerBillboard` callback on every system in any already-built set and returns that same set. The callback reads the system's current mutable `blendMode` when registration occurs, applies the exact Babylon.js descriptor, attaches the private Multiply shader for modes `3` and `4`, and selects one or two passes. `buildNodeParticleSetWithBlendModes` accepts provider-wrapped options, so both opt-ins compose without changing the evaluator walk.
 - `buildNodeParticleSetWithBlendModes` is the convenience form `enableNodeParticleBlendModes(await buildNodeParticleSet(...))`. Importing either public enabler is the opt-in boundary for exact particle blend state and advanced rendering; ordinary builders have no runtime import edge to the optional modules.
-- `enableNodeParticleEmitterProvider(set, provider)` is asynchronous only because its implementation is dynamically imported. It requires a nonempty built set whose systems either all have no provider handle or all share the same installed handle. Empty sets, partially enabled sets, and sets assembled from different enabled handles are rejected before provider sampling or mutation. A consistently enabled set atomically replaces its provider and keeps its existing frame hooks; a failed replacement restores the previous provider. The function mutates and returns the same set. `buildNodeParticleSetWithEmitterProvider` is the convenience form `enableNodeParticleEmitterProvider(await buildNodeParticleSet(...), provider)` for the default builder. Sets from snippet, flow-map, noise-texture, combined texture-update, and exact blend-mode builders use the enabler directly.
+- `withNodeParticleEmitterProvider(provider, options)` is synchronous and validates its initial provider sample before building. It returns options carrying the provider-owned setup callback. `buildNodeParticleSetWithEmitterProvider` is the default-builder convenience form `buildNodeParticleSet(engine, scene, graph, withNodeParticleEmitterProvider(provider, options))`. Snippet, flow-map, noise-texture, combined texture-update, and exact blend-mode composition pass the wrapped options to their existing builder entry points. There is no post-build enabler or replacement path.
 - Build promises are accumulated for the whole set and awaited together after all roots have been traversed.
 
 `CreateParticleBlock` does not create the system. `SystemBlock` does not set capacity or locality; the builder consumes those serialized fields before DFS.
@@ -725,17 +740,17 @@ For a valid read, `step = 0` when `age[i] === 0`; otherwise `step = system._scal
 
 ### 8.4 System sources and timing
 
-| Id  | Name    | Return                                                                                                      |
-| --- | ------- | ----------------------------------------------------------------------------------------------------------- |
-| `1` | Time    | `system._actualFrame`                                                                                       |
-| `2` | Delta   | `system._scaledUpdateSpeed`                                                                                 |
-| `3` | Emitter | the stable build-state emitter `Vec3`, refreshed by an enabled provider before each started simulation call |
+| Id  | Name    | Return                                                                                                         |
+| --- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `1` | Time    | `system._actualFrame`                                                                                          |
+| `2` | Delta   | `system._scaledUpdateSpeed`                                                                                    |
+| `3` | Emitter | the stable build-state emitter `Vec3`, refreshed in provider-backed builds before each started simulation call |
 
 Other ids throw `NodeParticle: unsupported system source <decimal id>` during build.
 
 Time has three observable phases in an animation call. A dynamic emit-rate getter sees the value before increment. Update steps and creation getters see the incremented value when the system was emitting at call entry. A call that was already stopped does not increment it.
 
-Emitter is stable by reference. Static builds retain their build-time value. Enabling a provider mutates its components before emit-rate evaluation, existing-particle updates, and births, so every contextual read in one simulation call observes the committed set snapshot.
+Emitter is stable by reference. Static builds retain their build-time value. A provider-backed frame mutates its components before emit-rate evaluation, existing-particle updates, and births, so every contextual read in one simulation call observes that system's committed snapshot.
 
 Delta is assigned before emit-rate evaluation and remains the full `updateSpeed * scaledRatio` throughout the call. DirectionScale is assigned immediately before each live particle's `updateSteps`; it can be shortened on that particle's death boundary. Outside an existing-particle update, it retains its initialized value or the value from the most recently processed particle.
 
@@ -841,7 +856,7 @@ direction = (
 
 World shape modules transform birth position and direction. Local shape modules store emitter-local direction and use `finishLocalPosition` for birth position. Sphere and Cone implicit local directions are computed from the transformed birth point and emitter translation and are therefore world-oriented values. Box, Point, explicit Sphere/Cone/Cylinder, and Mesh directions remain emitter-local. Cylinder's implicit local algorithm converts its radial vector through the inverse matrix before writing direction.
 
-All shape closures retain only stable build-state matrix, emitter, and shape-local values. After provider enablement, world-shape births use the current stable matrix, every local shape's `finishLocalPosition` uses that matrix, `LocalPositionUpdated` transforms existing local positions with it, and implicit Sphere/Cone/Cylinder direction calculations read the current stable emitter translation. Provider replacement never rebuilds evaluator closures.
+All shape closures retain only stable build-state matrix, emitter, and shape-local values. In a provider-backed build, world-shape births use the current stable matrix, every local shape's `finishLocalPosition` uses that matrix, `LocalPositionUpdated` transforms existing local positions with it, and implicit Sphere/Cone/Cylinder direction calculations read the current stable emitter translation. Frame refresh mutates those stable references in place, so evaluator closures never need rebuilding.
 
 For Sphere, Cone, and Cylinder, explicit direction mode is selected only when both `direction1` and `direction2` satisfy the two-field connected criterion. One connected direction port does not select explicit mode.
 
@@ -914,7 +929,7 @@ z = sampleRadius * sin(angle)
 
 Explicit direction uses component ranges and avoids matrix inversion. The world module transforms it; the local module writes it directly.
 
-For implicit direction, each evaluator computes `mat4Invert(emitterWorldMatrix)` during build and substitutes a new identity matrix when the determinant magnitude is below `1e-10`. It appends stable `{ inverse }` state to `emitterInverseWorldMatrices`. The provider runtime refreshes every listed inverse in place before each started simulation call, again substituting identity for a singular current matrix. Per birth it:
+For implicit direction, each evaluator computes `mat4Invert(emitterWorldMatrix)` during build and substitutes a new identity matrix when the determinant magnitude is below `1e-10`. It appends stable `{ inverse }` state to `emitterInverseWorldMatrices`. The opt-in provider refreshes every listed inverse in place before each started simulation call, again substituting identity for a singular current matrix. Per birth it:
 
 1. Forms transformed birth position minus emitter translation and conditionally normalizes it.
 2. Applies `transformNormal` with the inverse matrix into scratch.
@@ -1392,10 +1407,7 @@ The implementation preserves these explicit failures:
 - Unsupported system source: `NodeParticle: unsupported system source <decimal id>`.
 - Invalid local source use: `NodeParticle: LocalPositionUpdated requires SystemBlock.isLocal`.
 - Invalid local source timing or recycled slot: `NodeParticle: LocalPositionUpdated read before local shape position creation`.
-- Empty live emitter target set: `NodeParticle: emitter provider requires a non-empty built set`.
-- Inconsistently enabled live emitter target set: `NodeParticle: emitter provider requires consistently enabled systems`.
-- Invalid live emitter target state: `NodeParticle: emitter provider requires a set produced by a node-particle builder`.
-- Invalid live emitter provider result: `NodeParticle: emitter provider must return a finite 16-element matrix`.
+- Invalid emitter provider result: `NodeParticle: emitter provider must return a finite 16-element matrix`.
 - Sprite update without setup: `NodeParticle: BasicSpriteUpdateBlock requires SetupSpriteSheetBlock`.
 - Billboard creation without texture: `createParticleBillboard: the particle system has no texture`.
 - Sprite2D bridge creation without texture: `createParticleSprite2DBridge: the particle system has no texture`.
@@ -1415,8 +1427,7 @@ Additional behavior is observable:
 - A dangling target block id is marked built and skipped. It fails only if a consumer requests its absent getter; a flow-only edge can remain silent.
 - Detached unsupported blocks are ignored because they are unreachable.
 - Dynamic-import failures for reachable evaluator or registry modules propagate from the asynchronous build.
-- Empty and inconsistently enabled sets are rejected before the provider is called. Their provider handles, hooks, matrices, translations, and inverse state remain unchanged, so a later re-enable of either original set cannot be affected by an orphaned refresh.
-- Exceptions thrown by a `NodeParticleEmitterProvider` propagate unchanged from the enablement or animation call. A structurally invalid or non-finite result throws the explicit provider error before any stable matrix, translation, inverse, or simulation field is modified. A failed provider replacement also preserves the previously installed provider.
+- Exceptions thrown by a `NodeParticleEmitterProvider` propagate unchanged from helper creation, the default convenience build, or animation. A structurally invalid or non-finite result throws the explicit provider error before any stable matrix, translation, inverse, or simulation field is modified. The next valid frame sample can continue normally.
 - Missing mesh positions or indices silently leave the system without mesh creation slots. Malformed or empty arrays can produce `undefined`, `NaN`, out-of-range access, or native errors during creation.
 - Particle texture fetch, decode, and upload failures are caught inside `ParticleTextureSourceBlock`; build resolves with `texture` unchanged. Rendering then fails at billboard or Sprite2D bridge creation when no other texture was assigned.
 - `registerNodeParticleSet2D` creates and synchronizes every bridge before attachment. Creation or synchronization failure leaves renderer membership unchanged; an attachment failure removes layers already attached by that call and then propagates.
@@ -1471,7 +1482,7 @@ The current unit categories are:
 - Canonical graph state: scenes 262, 263, 264, and 276; full Basic Properties; Size; Sphere; and deterministic/random-start sprite variants.
 - Change graphs: Size, Color, Speed, Angular Speed, multi-stop Angular Speed, Drag, Emit Rate, Lifetime, Start Size, and Speed Limit.
 - Emitters: Point, Box, Sphere, directed Sphere, Hemisphere, Cone, directed Cone, Cylinder, directed Cylinder, Mesh, rotated Cylinder, all six transformed local shapes, mesh vertex color, mesh InitialDirection, shared volatile bounds, and local source build/read guards.
-- Moving emitters: translating and rotating provider snapshots, returned-matrix replacement and in-place mutation, repeated enabler replacement, static-matrix precedence, world births, all six world/local shape paths, `LocalPositionUpdated`, contextual Emitter, every implicit Cylinder inverse in one system, all builder families, inline snippet composition, unstarted and stopped-but-started calls, multi-system sampling, and provider exception/invalid-result atomicity across matrix, translation, inverse, and particle state.
+- Moving emitters: translating and rotating provider snapshots, newly returned matrices and in-place mutation, static-option precedence and immutability, world births, all six world/local shape paths, `LocalPositionUpdated`, contextual Emitter, every implicit Cylinder inverse in one system, all builder families, Parse-option preservation, unstarted and stopped-but-started calls, independent multi-system sampling, wrapped-options reuse isolation, and provider exception/invalid-result atomicity across matrix, translation, inverse, and particle state.
 - Value correctness: shared-scratch Math, Lerp/Gradient endpoints, Random min/max aliasing, lock modes, Uint32 id edge cases, and capacity-bounded OncePerParticle caches.
 - Attractors: softened inverse-square attraction, negative-strength repulsion, defaults, coincident-point handling, lifetime-clamped step scaling, and lazy evaluator isolation.
 - Flow maps: projected nearest-neighbor sampling including non-zero row stride, vertical screen mapping, RGBA force decoding, alpha and bounds handling, per-particle strength evaluation, lifetime-clamped step scaling, allocator-selected F32/F64 matrix snapshots, and lazy texture/evaluator isolation.
@@ -1479,6 +1490,7 @@ The current unit categories are:
 - Feature isolation: runtime chunk manifests and, when bundle-info exists, fetched module contents.
 - Baseline Sprite2D bridge: texture and mapping validation, exact XY/+Y conversion, blend mapping including the additive fallback for modes 3, 4, and unknown values, sprite-sheet mapping and its out-of-range cell error, Handle-API ownership rejection, full-range packed synchronization, stale saved-size clearing, single dirty updates, transactional multi-system registration, auto-start control, idempotent disposal, and renderer-disposal cleanup.
 - Exact Sprite2D blend bridge: descriptors for modes 0 through 4 and default, mode-3 custom shader structure and opacity formula, mode-4 `[Multiply, Add]` layers and stable order, one animation per system/update, byte-equivalent pass synchronization under mutable mapping/presentation, all-pass Handle ownership rejection, transactional creation/attachment rollback, manual and renderer disposal, and baseline isolation.
+- Public declarations: the removed post-build API is absent, both build-time provider helpers are present, the generic options intersection preserves extended builder options, and `_setupEmitter` plus provider internals are trimmed from the emitted package declaration.
 - Path ownership: the `particle/soa` source directory and `particle-soa*.test.ts` unit-test names must not exist. TypeScript compilation validates all source and test imports.
 
 ### 13.2 Oracle fixture procedure
@@ -1495,7 +1507,7 @@ For reproducible Babylon.js equivalence data:
 
 Use conversion for graph extraction. The oracle's direct parse path does not preserve every Color4 input needed by these fixtures. Babylon.js is used only as the compatibility oracle for this procedure.
 
-Moving-emitter fixtures additionally assign the oracle emitter's translation/rotation schedule immediately before each explicit animation call, force its world matrix current, and record that matrix with the resulting particle state. Lite first builds the static set, enables a provider, and replays the same schedule by returning the recorded matrix before each matching call. Fixtures include translation and rotation changes that distinguish current translation, upper-3x3 direction transforms, local-position reprojection, and inverse-dependent Cylinder direction.
+Moving-emitter fixtures additionally assign the oracle emitter's translation/rotation schedule immediately before each explicit animation call, force its world matrix current, and record that matrix with the resulting particle state. Lite builds with provider-wrapped options and replays the same schedule by returning the recorded matrix before each matching call. Fixtures include translation and rotation changes that distinguish current translation, upper-3x3 direction transforms, local-position reprojection, and inverse-dependent Cylinder direction.
 
 ### 13.3 Visual scenes
 
@@ -1532,11 +1544,11 @@ multiplyAddResult = multiplyResult + tint.rgb * 0.75
 
 Scene 302 (`scene302-npe-moving-emitter`) is the Phase 2 moving-emitter visual and bundle fixture. Both engines parse one shared compact graph containing an `isLocal` SystemBlock, PointShapeBlock, UpdatePositionBlock, and contextual `LocalPositionUpdated` source `0x18`. They use the same generated 64 by 64 nearest-filtered radial RGBA texture, camera, clear color, seeded generator, 60 Hz step count, and looping XYZ-translation plus Z-rotation pose function. The graph has no external texture or network asset.
 
-The default Lite URL is continuously live. A stable matrix is mutated in place by a `NodeParticleEmitterProvider`, the set is built through `buildNodeParticleSetWithEmitterProvider`, and `registerNodeParticleSet` owns automatic start, per-frame simulation, and ordinary 3D billboard synchronization. Camera controls remain attached. Telemetry publishes emitter X/Y/Z, Z angle, provider-call count, active-particle count, draw calls, ready state, and errors. The live Playwright test samples two frames, requires finite X/Y telemetry, angle and provider calls to change, active-particle count to be nonzero, and canvas pixels to be nonblank and changed; it does not open Babylon.js. X/Y use no strict per-axis inequality because either sinusoid can repeat at an extremum after floating-point rounding.
+The default Lite URL is continuously live. A stable matrix is mutated in place by a `NodeParticleEmitterProvider`, and the set is built through `buildNodeParticleSet(..., withNodeParticleEmitterProvider(provider, options))`. `registerNodeParticleSet` owns automatic start, per-frame simulation, and ordinary 3D billboard synchronization. Camera controls remain attached. Telemetry publishes emitter X/Y/Z, Z angle, provider-call count, active-particle count, draw calls, ready state, and errors. The live Playwright test samples two frames, requires finite X/Y telemetry, angle and provider calls to change, active-particle count to be nonzero, and canvas pixels to be nonblank and changed; it does not open Babylon.js. X/Y use no strict per-axis inequality because either sinusoid can repeat at an extremum after floating-point rounding.
 
 Any finite nonnegative `?seekTime=T` selects deterministic frozen mode. Both engines install the same seeded generator, apply the initial pose, and replay poses for steps `1...round(T * 60)` immediately before matching explicit simulation calls. For the committed capture `T=2`, this is exactly 120 calls. Lite manually calls `animateParticleSystem(system, 1)`, sets `updateSpeed = 0`, leaves the provider returning the final stable matrix, and registers with `autoStart: false`. Babylon.js assigns a hidden concrete `AbstractMesh` emitter to `set.systemBlocks[0].emitter` before `buildAsync`, updates its position and `rotation.z`, forces `computeWorldMatrix(true)`, and calls the real `ParticleSystem.animate(true)` path. Its native update therefore refreshes `_emitterWorldMatrix`; no particle position is emulated manually. Both pages stamp `data-animation-frozen="true"` only in seek mode.
 
-The Babylon.js page is a manual golden oracle only. The committed `reference/lite/scene302-npe-moving-emitter/babylon-ref-golden.png` is captured once from `babylon-ref-scene302.html?seekTime=2`; the automated frozen test loads only `scene302.html?seekTime=2`, verifies telemetry, and compares the resulting canvas to that golden. The initial ceiling is `MAD <= 0.01`; changing it requires measured parity evidence and approval. Scene 302 adds no package API: the public count remains twenty-four functions and twelve types, and the particle implementation counts remain 11 root files, 28 node infrastructure/registry files, and 45 evaluator/helper files.
+The Babylon.js page is a manual golden oracle only. The committed `reference/lite/scene302-npe-moving-emitter/babylon-ref-golden.png` is captured once from `babylon-ref-scene302.html?seekTime=2`; the automated frozen test loads only `scene302.html?seekTime=2`, verifies telemetry, and compares the resulting canvas to that golden. The initial ceiling is `MAD <= 0.01`; changing it requires measured parity evidence and approval. Scene 302 adds no package API: the public count remains twenty-four functions and twelve types, and the particle implementation counts are 11 root files, 27 node infrastructure/registry files, and 45 evaluator/helper files.
 
 ### 13.4 Bundle manifests and conditional content
 
@@ -1555,19 +1567,23 @@ Current tracked measurements are:
 | 284   |   `41.4 KB` |    `24.1 KB` |                 `28.6 KB` | `45.0 KB` |
 | 300   |   `33.8 KB` |    `21.6 KB` |                 `28.6 KB` | `35.5 KB` |
 | 301   |   `37.5 KB` |    `22.2 KB` |                 `28.6 KB` | `40.0 KB` |
-| 302   |   `56.7 KB` |    `22.9 KB` |                  `0.0 KB` | `61.5 KB` |
+| 302   |   `55.5 KB` |    `22.3 KB` |                  `0.0 KB` | `61.5 KB` |
+
+Exact reporting anchors are Scene 12 at `105,866` raw / `43,509` gzip bytes, Scene 281 at `42,405` / `26,757`, Scene 284 at `42,426` / `24,671`, and Scene 302 at `56,796` / `22,799`.
 
 Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, and 302 as sprite users. Scenes 262 through 284 and 302 in that list render through billboard sprite modules. Scene 300 requires `particle-sprite-2d.ts` and `sprite-renderer.ts` while rejecting the exact Sprite2D module, custom-shader path, particle billboard, particle scene-registration, depth-hosted Sprite2D, and billboard rendering paths. Scene 301 requires `particle-sprite-2d-blend-modes.ts`, `particle-blend.ts`, `sprite-custom-shader.ts`, and `sprite-renderer.ts` while rejecting `particle-billboard-renderable.ts`, `particle-billboard-scene.ts`, and the scene-rendered sprite path. Representative unrelated Sprite2D scene 50 also rejects every particle exact-blend and custom-shader module. Scene 50 and Scene 300 must remain byte-identical to their pre-feature logical modules; their tracked manifests are not regenerated unless a measured runtime change proves otherwise.
 
-Scene 302 is the positive moving-emitter bundle fixture. Its fetched module list must contain `npe-emitter-provider.ts`, `npe-live-emitter.ts`, `particle-scene.ts`, `particle-billboard.ts`, `billboard-scene.ts`, and `billboard-renderable.ts`. It must not contain the flow-map/noise/texture-update runtimes, CPU texture updates, advanced particle blend modules, or either Sprite2D bridge/render path. The measured filtered bundle is `58,015` raw bytes (`56.7 KB`) and `22.9 KB` gzip, with a new-scene ceiling of `61.5 KB` providing approximately 4.8 KB normal headroom. The shared fixture and scene entry do not match the `*-npe.ts` payload exclusion and are intentionally counted, so this measurement is conservative and not directly comparable to sibling payload-excluded scenes.
+Scene 302 is the positive moving-emitter bundle fixture. Its fetched module list must contain `npe-emitter-provider.ts`, `mat4-invert-to-ref.ts`, `particle-scene.ts`, `particle-billboard.ts`, `billboard-scene.ts`, and `billboard-renderable.ts`. It must not contain the deleted `npe-live-emitter.ts`, ordinary allocating `mat4-invert.ts`, the flow-map/noise/texture-update runtimes, CPU texture updates, advanced particle blend modules, or either Sprite2D bridge/render path. The filtered build measures `56,783` raw bytes (`55.5 KB`) and `22,800` gzip bytes (`22.3 KB`), `1,008` raw bytes below latest upstream/master `bab23c43`. Scene 302 has no pre-feature `476317dd` counterpart. The shared fixture and scene entry do not match the `*-npe.ts` payload exclusion and are intentionally counted, so this measurement is conservative and not directly comparable to sibling payload-excluded scenes.
 
 The particle bundle-content test applies the general unused-feature rejection list to the nine canonical billboard parity scenes. Each canonical scene must have a nonempty runtime chunk list, and its fetched chunks are rejected when they match unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/noise/direction/angle update, CPU or embedded texture source, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, or optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, only scene 280 may fetch `npe-flow-map-runtime`, and only scene 281 may fetch `npe-noise-runtime` and `embedded-texture-source-block`. Each specialized texture runtime contains its evaluator, CPU texture decoder, and the shared texture-update builder after bundling.
 
 When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, `embedded-texture-source-block` outside scene 281, and `math/mat4-invert.ts`. It requires scenes 283 and 284 to fetch `particle-blend`, `npe-blend-modes`, `particle-billboard-scene`, and `particle-billboard-renderable`, whether Rollup emits named chunks or folds them into the scene entry, while rejecting all four modules in every ordinary particle scene. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
 
-`npe-emitter-provider.ts` and `npe-live-emitter.ts` are optional content. A separate provider-isolation check requires a nonempty runtime chunk list for every tracked particle scene. It requires scene 302 to fetch the live runtime and, when bundle-info exists, both provider modules. Every other tracked particle scene (262, 263, 264, 276, 277, 280, 281, 283, 284, 300, and 301) rejects them. Filtered bundle builds and the authoritative Bundle Size job measure actual output; the committed per-scene manifests and provider chunk/module isolation are the regression guards, without a unit assertion that compares a manifest byte value to a duplicated constant.
+`npe-emitter-provider.ts` is optional content. A separate provider-isolation check requires a nonempty runtime chunk list for scene 12 and every tracked particle scene. When bundle-info exists, scene 302 must fetch the provider module. Scene 12 and every other tracked particle scene (262, 263, 264, 276, 277, 280, 281, 283, 284, 300, and 301) reject both provider and live-emitter module/chunk names. Filtered bundle builds and the authoritative Bundle Size job measure actual output; the committed per-scene manifests and provider module isolation are the regression guards, without a unit assertion that compares a manifest byte value to a duplicated constant.
 
-A temporary standalone Vite entry importing `buildNodeParticleSetWithEmitterProvider` measured a distinct `npe-live-emitter` chunk at `1,393 B` raw / `661 B` gzip. The temporary entry, output, and benchmark files are not retained. A Node 24 headless microbenchmark used capacity-zero started systems, `scaledRatio = 0`, a stable F32 provider matrix, 100,000 warm-up calls, and seven alternating 500,000-call rounds. Median subtraction measured approximately `18.0 ns` per generic provider refresh and `50.7 ns` for provider refresh with one implicit-cylinder inverse. These timings document local implementation cost rather than a cross-machine performance ceiling.
+Against latest upstream/master `bab23c43`, the filtered build removes `107` to `116` raw bytes from every static NPE scene. Against pre-feature `476317dd`, those scenes remain only `16` to `22` bytes larger. Scene 12 remains byte-identical to upstream at `105,866` raw bytes and is `5` bytes smaller than the pre-feature reference. Refreshed module data confirms that no provider or live-emitter module is present in any static scene: the measured residual is local to the required `_prepareFrame?.()` call in `particle-system.ts` and one `_setupEmitter?.(state)` call in the owning `npe-build.ts`, `npe-flow-map-runtime.ts`, or `npe-texture-update-runtime.ts` walk. Implicit-cylinder evaluator modules retain one optional `emitterInverseWorldMatrices?.push(...)` collection call, but static builds leave the field absent and allocate no inverse-list array; none of the measured static fixture chunks contains those cylinder modules.
+
+The provider implementation is synchronous because its public options helper must install the callback before a builder starts. Tree shaking removes the entire module, including its matrix validation and inverse-refresh dependencies, from non-provider scenes.
 
 At module level, scene 281 reciprocally rejects `texture-source-block`, ensuring its specialized path never fetches the base texture evaluator. The Sprite2D loop for scenes 50, 300, and 301 applies the same embedded-texture isolation at both levels: it rejects named `embedded-texture-source` runtime chunks and, when bundle-info exists, fetched `embedded-texture-source-block` modules.
 
@@ -1616,7 +1632,7 @@ packages/babylon-lite/src/particle/sprite-columns-random.ts
 packages/babylon-lite/src/particle/sprite-columns.ts
 ```
 
-### 14.2 Node infrastructure and registries: 28 files
+### 14.2 Node infrastructure and registries: 27 files
 
 ```text
 packages/babylon-lite/src/particle/node/node-particle.ts
@@ -1625,7 +1641,6 @@ packages/babylon-lite/src/particle/node/npe-build.ts
 packages/babylon-lite/src/particle/node/npe-emitter-provider.ts
 packages/babylon-lite/src/particle/node/npe-flow-map-runtime.ts
 packages/babylon-lite/src/particle/node/npe-flow-map.ts
-packages/babylon-lite/src/particle/node/npe-live-emitter.ts
 packages/babylon-lite/src/particle/node/npe-noise-runtime.ts
 packages/babylon-lite/src/particle/node/npe-noise.ts
 packages/babylon-lite/src/particle/node/npe-contextual-extra.ts
@@ -1730,7 +1745,7 @@ packages/babylon-lite/src/index.ts
 
 The billboard subsystem owns its additional rendering, picking, GPU, and blend-descriptor dependencies. The Sprite2D subsystem owns its packed layer layout, dirty tracking, renderer, GPU upload, and blend descriptors. They are outside the particle implementation boundary; the particle package owns only conversion and registration policy.
 
-### 14.5 Scene, configuration, and manifest anchors
+### 14.5 Scene and configuration anchors
 
 ```text
 demos-config.json
@@ -1760,19 +1775,6 @@ lab/lite/src/shared/scene283-npe-multiply-blend.ts
 lab/lite/src/shared/scene284-npe-multiply-add-blend.ts
 lab/lite/src/shared/scene302-npe-moving-emitter.ts
 lab/lite/src/shared/npe-sprite2d-fixture.ts
-lab/public/bundle/demos-manifest.json
-lab/public/bundle/manifest/scene262.json
-lab/public/bundle/manifest/scene263.json
-lab/public/bundle/manifest/scene264.json
-lab/public/bundle/manifest/scene276.json
-lab/public/bundle/manifest/scene277.json
-lab/public/bundle/manifest/scene280.json
-lab/public/bundle/manifest/scene281.json
-lab/public/bundle/manifest/scene283.json
-lab/public/bundle/manifest/scene284.json
-lab/public/bundle/manifest/scene300.json
-lab/public/bundle/manifest/scene301.json
-lab/public/bundle/manifest/scene302.json
 lab/public/thumbnails/scene301.jpg
 lab/public/thumbnails/scene302.jpg
 lab/lite/bundle-scene301.html
