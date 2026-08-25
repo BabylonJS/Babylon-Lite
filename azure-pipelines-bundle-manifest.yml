@@ -40,11 +40,17 @@ trigger:
 pr: none
 
 variables:
-    # DEPLOYMENT_SERVER / DEPLOY_TOKEN / DEPLOY_ENDPOINT_UPLOAD and STORAGE_ACCOUNT
-    # come from this group — the same upload path the failed-Playwright-report and
-    # static-lab-site templates use. It needs to be authorized for this pipeline
-    # once, in the ADO UI.
+    # DEPLOYMENT_SERVER / DEPLOY_TOKEN / DEPLOY_ENDPOINT_UPLOAD come from this
+    # group — the same upload path the failed-Playwright-report and
+    # static-lab-site templates use.
     - group: BabylonJS-Deployment
+    # STORAGE_ACCOUNT (and SERVE_DOMAIN) live here, NOT in BabylonJS-Deployment.
+    # Omitting this group is what broke the first master run (build 20260825.1):
+    # ADO leaves an unknown $(VAR) as literal text, bash then evaluated it as a
+    # command substitution ("STORAGE_ACCOUNT: command not found"), the upload was
+    # posted with an empty storageAccount, and the deployment server answered 401
+    # — after 28 minutes of scene measurement had already succeeded.
+    - group: BabylonJS-CI-Infrastructure
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
@@ -106,6 +112,61 @@ stages:
                           bundle-assets | v1
                       path: $(System.DefaultWorkingDirectory)/.bundle-asset-cache
 
+                # Fail fast on a deploy misconfiguration BEFORE spending ~28
+                # minutes measuring scenes. The first master run did all that work
+                # and then lost it in a 2-second publish step.
+                #
+                # Variables are read through env: rather than inline $(VAR) so an
+                # unresolved one arrives as the harmless literal string "$(VAR)"
+                # instead of being evaluated by bash as a command substitution.
+                # That is what turned a missing variable into an opaque HTTP 401
+                # rather than a named error.
+                - script: |
+                      set -euo pipefail
+
+                      missing=0
+
+                      # DEPLOY_TOKEN is only checked for presence: a token may
+                      # legitimately contain characters the resolution check below
+                      # would flag, and its value must never be echoed.
+                      if test -z "${DEPLOY_TOKEN-}"; then
+                        echo "Required deploy variable DEPLOY_TOKEN is empty."
+                        missing=1
+                      fi
+
+                      for name in DEPLOYMENT_SERVER DEPLOY_ENDPOINT_UPLOAD STORAGE_ACCOUNT; do
+                        value="${!name-}"
+                        case "$value" in
+                          "")
+                            echo "Required deploy variable $name is empty."
+                            missing=1
+                            ;;
+                          *'$'*)
+                            # ADO leaves an unknown variable as literal text, so a
+                            # surviving '$' means the variable was never defined.
+                            echo "Required deploy variable $name did not resolve (got: '$value')."
+                            missing=1
+                            ;;
+                        esac
+                      done
+
+                      if test "$missing" -ne 0; then
+                        echo ""
+                        echo "DEPLOYMENT_SERVER/DEPLOY_ENDPOINT_UPLOAD/DEPLOY_TOKEN come from the"
+                        echo "BabylonJS-Deployment variable group; STORAGE_ACCOUNT comes from"
+                        echo "BabylonJS-CI-Infrastructure. Both must be listed under variables:"
+                        echo "in this file AND authorized for this pipeline in the ADO UI."
+                        exit 1
+                      fi
+
+                      echo "Deploy configuration present; publishing to storage account '$STORAGE_ACCOUNT'."
+                  displayName: "Check deploy configuration"
+                  env:
+                      DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
+                      DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
+                      DEPLOY_TOKEN: $(DEPLOY_TOKEN)
+                      STORAGE_ACCOUNT: $(STORAGE_ACCOUNT)
+
                 # Enforces the per-scene maxRawKB ceilings byte-exactly and fails
                 # the job when one is exceeded, so a breach can never be published
                 # as the new baseline by the step below.
@@ -126,6 +187,11 @@ stages:
                 #
                 # --fail-with-body so an upload rejection fails the step instead of
                 # silently leaving the baseline stale.
+                #
+                # DEPLOYMENT_SERVER/DEPLOY_ENDPOINT_UPLOAD/STORAGE_ACCOUNT are read
+                # from env: (see the preflight step above for why). DEPLOY_TOKEN
+                # stays inline: ADO does not auto-map secret variables into env, so
+                # macro substitution is the supported way to reference it.
                 - script: |
                       set -euo pipefail
 
@@ -144,10 +210,14 @@ stages:
                       cp "$MANIFEST" "$WORK/manifest.json"
                       (cd "$WORK" && zip -j baseline.zip manifest.json)
 
-                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
+                      curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body -i -X POST \
                         -H "Content-Type: multipart/form-data" \
                         -H "Authorization: ******" \
                         -F "path=$(baselineDeployPath)" \
-                        -F "storageAccount=$(STORAGE_ACCOUNT)" \
+                        -F "storageAccount=${STORAGE_ACCOUNT}" \
                         -F "zip=@$WORK/baseline.zip"
                   displayName: "Publish bundle-size baseline"
+                  env:
+                      DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
+                      DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
+                      STORAGE_ACCOUNT: $(STORAGE_ACCOUNT)

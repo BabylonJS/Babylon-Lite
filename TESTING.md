@@ -329,9 +329,17 @@ uploading failed Playwright HTML reports:
 
 The failed-test report upload template also expects these pipeline variables:
 
-- `DEPLOY_ENDPOINT_UPLOAD`
-- `STORAGE_ACCOUNT`
-- `SERVE_DOMAIN`
+- `DEPLOY_ENDPOINT_UPLOAD` — `BabylonJS-Deployment`
+- `STORAGE_ACCOUNT` — `BabylonJS-CI-Infrastructure`
+- `SERVE_DOMAIN` — `BabylonJS-CI-Infrastructure`
+
+`STORAGE_ACCOUNT` is **not** in `BabylonJS-Deployment`, despite sitting next to
+`DEPLOYMENT_SERVER`/`DEPLOY_TOKEN`/`DEPLOY_ENDPOINT_UPLOAD` in every upload call.
+Any pipeline that uploads to this storage (including
+`azure-pipelines-bundle-manifest.yml`) must therefore list **both** groups under
+`variables:` and have both authorized in the ADO UI. Listing only
+`BabylonJS-Deployment` leaves `$(STORAGE_ACCOUNT)` unexpanded and the deployment
+server rejects the upload with an HTTP 401.
 
 ### Optional Pipeline Variables
 
