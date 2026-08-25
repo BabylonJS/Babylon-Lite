@@ -37,8 +37,8 @@ export interface RayPickSnapshot {
 
 /** Options for {@link pickWithRay}. */
 export interface RayPickOptions {
-    /** Return `true` for a mesh that may be picked. When omitted, hidden and
-     *  `pickable === false` meshes are skipped. */
+    /** Return `true` for a mesh that may be picked. `pickable === false` meshes
+     *  are always skipped; visibility does not affect native Lite picking. */
     predicate?: (mesh: Mesh) => boolean;
 }
 
@@ -51,7 +51,7 @@ export function createRayPickSnapshotFromMeshes(meshes: Iterable<Mesh>, options?
     const candidates: RayPickCandidate[] = [];
     const predicate = options?.predicate;
     for (const mesh of meshes) {
-        if (predicate ? !predicate(mesh) : mesh.pickable === false || mesh.visible === false) {
+        if (mesh.pickable === false || (predicate && !predicate(mesh))) {
             continue;
         }
         const aabb = localAabb(mesh);

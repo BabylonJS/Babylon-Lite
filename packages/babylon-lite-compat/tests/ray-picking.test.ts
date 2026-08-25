@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addToScene, createBox as createLiteBox } from "babylon-lite";
+import { addToScene, createBox as createLiteBox, pickMeshesWithRay as litePickMeshesWithRay } from "babylon-lite";
 
 import { LiteCompatError, MeshBuilder, NullEngine, Ray, Scene, Vector3 } from "../src/index";
 
@@ -52,12 +52,30 @@ describe("Scene.pickWithRay", () => {
         expect(box.isPickable).toBe(true);
         box.isPickable = false;
         expect(scene.pickWithRay(ray).hit).toBe(false);
+        expect(scene.pickWithRay(ray, () => true).hit).toBe(false);
         box.isPickable = true;
         box.isVisible = false;
         expect(scene.pickWithRay(ray).hit).toBe(false);
+        expect(scene.pickWithRay(ray, () => true).hit).toBe(false);
         box.isVisible = true;
         box.setEnabled(false);
         expect(scene.pickWithRay(ray).hit).toBe(false);
+        expect(scene.pickWithRay(ray, () => true).hit).toBe(false);
+    });
+
+    it("preserves native Lite visibility and pickable eligibility", () => {
+        const { engine } = createPickScene();
+        const native = createLiteBox(engine._lite, 2);
+        native.visible = false;
+        const ray = {
+            origin: [0, 0, -5] as [number, number, number],
+            direction: [0, 0, 1] as [number, number, number],
+            length: Number.MAX_VALUE,
+        };
+
+        expect(litePickMeshesWithRay([native], ray).hit).toBe(true);
+        native.pickable = false;
+        expect(litePickMeshesWithRay([native], ray, { predicate: () => true }).hit).toBe(false);
     });
 
     it("canonically wraps native Lite meshes for predicates and results", () => {

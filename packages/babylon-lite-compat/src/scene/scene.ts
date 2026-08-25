@@ -867,13 +867,12 @@ export class Scene extends AbstractScene {
                 direction: ray.direction.asArray(),
                 length: ray.length,
             },
-            predicate
-                ? {
-                      predicate: (mesh) => {
-                          return predicate(wrappers.get(mesh)!);
-                      },
-                  }
-                : undefined
+            {
+                predicate: (mesh) => {
+                    const wrapper = wrappers.get(mesh);
+                    return !!wrapper && wrapper.isEnabled() && wrapper.isVisible && wrapper.isPickable && (!predicate || predicate(wrapper));
+                },
+            }
         );
         return PickingInfo._fromLite(info, info.pickedMesh ? (wrappers.get(info.pickedMesh) ?? null) : null, ray);
     }
