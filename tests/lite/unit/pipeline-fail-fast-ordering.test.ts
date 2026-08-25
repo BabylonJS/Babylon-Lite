@@ -774,6 +774,17 @@ interface PublishedBaseline {
 
 /** Where the publish step actually puts the baseline, read out of what it runs. */
 function publishedBaseline(step: string, source: string): PublishedBaseline {
+    // Reads through `shellBodyOf`, which drops comment lines. That is load-
+    // bearing here and not incidental: commenting out this step's work leaves
+    // every pattern below still present in the file, so a raw read would report
+    // a pipeline that publishes correctly while it publishes nothing.
+    //
+    // Measured both halves. Comment out all 18 command lines and the path floor
+    // fires, correctly. Remove the comment skip from `shellBodyOf` and the
+    // specimen table fires instead -- the projection is pinned by
+    // STEP_READINGS, not merely present. Anything re-pointing this function at
+    // the raw step inherits the defect and nothing else in the file would say
+    // so, which is why this note is here rather than in a commit message.
     const script = shellBodyOf(step);
     // The archive token stops at `)` as well as at whitespace. The zip runs
     // inside a `( cd … && zip … )` subshell, so with no files listed the token
