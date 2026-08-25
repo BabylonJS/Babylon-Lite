@@ -67,6 +67,27 @@ function copiedScriptList(): string[] {
 }
 
 describe("perf baseline script copy list", () => {
+    it("walks a non-empty import closure (vacuity bound — do not remove)", () => {
+        // The assertion below is "nothing required is missing", which an empty closure
+        // satisfies trivially. So the walk itself has to be pinned, or this suite degrades
+        // into a test that cannot fail: narrow the specifier regex — a `.js` extension
+        // convention change, a switch to single quotes, a move to `import(...)` — and the
+        // closure silently returns nothing, `missing` is empty, and the guard reports green
+        // while blind. That is the failure mode it exists to prevent, reproduced inside the
+        // guard itself.
+        //
+        // Pinned as a floor rather than an exact set on purpose. Asserting the full closure
+        // would make this a second hand-maintained mirror of the import graph — the very
+        // coupling the suite was written to kill — and it would need editing every time a
+        // helper is added. A floor only ever needs revisiting if a named file stops being a
+        // real dependency, which is a deliberate act.
+        const required = importClosureOf(ENTRY);
+        expect(required.size, "import closure came back empty; the specifier regex has stopped matching").toBeGreaterThan(0);
+        // The specimen the suite was written for: extracting this helper out of
+        // bundle-scenes-core.ts is what broke the perf job in the first place.
+        expect([...required], "the known extracted helper is missing from the walked closure").toContain("bundle-ceiling-headroom.ts");
+    });
+
     it("includes every scripts/ module that the bundle builder imports", () => {
         const copied = copiedScriptList();
         const required = importClosureOf(ENTRY);
