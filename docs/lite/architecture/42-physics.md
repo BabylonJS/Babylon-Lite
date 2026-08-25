@@ -192,13 +192,17 @@ steps matches the animation and sprite managers.
 
 - **Collision events** (`havok-collision.ts`): `setPhysicsBodyCollisionEventsEnabled`
   + `onPhysicsCollision` register an after-step drain on `world._afterStep`.
-- **Triggers** (`havok-trigger.ts`): `setPhysicsShapeIsTrigger` + `onPhysicsTrigger`.
+- **Triggers** (`havok-trigger.ts`): `setPhysicsShapeIsTrigger`, `onPhysicsTrigger`,
+  and body-aware `onPhysicsTriggerBodies`; both subscriptions return a disposer.
 - **Queries** (`havok-queries.ts`): `physicsRaycast`, `shapeCast`, `shapeProximity`.
+  Shape casts accept `ignoreBodies` so callers can sweep a body's own shape without
+  immediately hitting that body.
 - **Heightfield** (`havok-heightfield.ts`): `createHeightFieldShape`.
 - **Character controller** (`character-controller.ts`): kinematic cast-and-slide
   movement; `moveWithCollisions` uses `worldStepSeconds(world)` (the world's step, or
   the scene's per-frame delta when no fixed step is set) to convert a requested
-  displacement into a velocity.
+  displacement into a velocity. `getPhysicsCharacterControllerBody` exposes the
+  backing body for queries and event matching.
 - **Floating origin** (`havok-floating-origin.ts`): `enableHavokFloatingOrigin`
   opts a world into multi-region simulation for Large World Rendering
   (see [35-large-world-rendering.md](35-large-world-rendering.md)).

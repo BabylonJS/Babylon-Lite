@@ -53,6 +53,8 @@ export interface ShapeCastQuery {
     endPosition: Vec3;
     /** Whether trigger volumes count as hits. Default `false`. */
     shouldHitTriggers?: boolean;
+    /** Bodies to exclude, such as the body whose own shape is being swept. */
+    ignoreBodies?: readonly PhysicsBody[];
 }
 
 /** Result of a {@link shapeProximity} query. */
@@ -180,7 +182,8 @@ export function shapeCast(world: PhysicsWorld, query: ShapeCastQuery): ShapeCast
     const hknp = world._hknp;
     const collector = getCollector(world);
     const { rotation: r, startPosition: s, endPosition: e } = query;
-    const hkQuery = [query.shape._hkShape, [r.x, r.y, r.z, r.w], [s.x, s.y, s.z], [e.x, e.y, e.z], query.shouldHitTriggers ?? false, ignoreNone()];
+    const ignoredBodies = query.ignoreBodies?.length ? query.ignoreBodies.map((body) => body._hkBody[0]) : ignoreNone();
+    const hkQuery = [query.shape._hkShape, [r.x, r.y, r.z, r.w], [s.x, s.y, s.z], [e.x, e.y, e.z], query.shouldHitTriggers ?? false, ignoredBodies];
     hknp.HP_World_ShapeCastWithCollector(world._hkWorld, collector, hkQuery);
 
     if (hknp.HP_QueryCollector_GetNumHits(collector)[1] > 0) {
