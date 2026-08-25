@@ -34,7 +34,18 @@
 # service), which matters more than coverage here: a post-merge failure has no
 # author to nudge and no PR to block, so it is only useful if a red run reliably
 # means "master is broken" rather than "BrowserStack was busy". They finish in
-# parallel in roughly 11 minutes, dominated by Unit Tests.
+# parallel in roughly 11 minutes of execution, dominated by Unit Tests.
+#
+# That 11 minutes is agent time, not a promise about wall time. Every job here
+# runs on Microsoft-hosted ubuntu-latest, so concurrency comes from an
+# allocation shared across the whole babylonjs organisation. When that pool is
+# contended, builds sit in notStarted first: on cf2cbe95 the bundle-manifest
+# and playground builds both queued 19+ minutes, on a commit where playground
+# had completed within minutes on each of the five preceding master pushes.
+# The cost that does not vary is ~15.5 agent-minutes per push (10m37s + 2m27s
+# + 2m26s). For scale, one PR run of this pipeline is 150+ agent-minutes, so
+# post-merge validation is about a tenth of a single PR build — which is the
+# number any future argument about trimming this should start from.
 #
 # The expensive, externally-dependent suites (Bundle Size, Perf, Parity) stay
 # PR-only. They cost 40-55 minutes each and are flaky in ways that would make a
@@ -73,7 +84,7 @@
 #
 # The trigger below deliberately has no `paths:` filter, so master validation
 # also runs on doc-only and comment-only commits. That is mildly wasteful —
-# ~11 minutes across three agents — and the waste is accepted on purpose.
+# ~15.5 agent-minutes — and the waste is accepted on purpose.
 #
 # A path filter is precisely the optimisation that lets a real break slip
 # through unvalidated. The failure mode is not hypothetical: the filter has to
@@ -226,8 +237,8 @@ stages:
           # no cloud browser, no external service), so a red run here means the
           # code is broken rather than that an outside service was having a bad
           # day — the property a post-merge gate needs to be actionable. At
-          # ~11 minutes it is the longest of the three master jobs and therefore
-          # sets the post-merge wall time.
+          # ~10m37s it is the longest of the three master jobs and therefore
+          # sets the post-merge signal time once an agent is available.
           #
           # It also carries the package build: `--project build` runs
           # `vite build --mode lib` and `--mode dist`, which is why the API

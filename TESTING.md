@@ -323,8 +323,13 @@ a master run, that surfaces on the _next_ PR's build, which goes red for
 something it did not do.
 
 Every push to `master` therefore re-runs **Unit Tests**, **Lint & Type Check**,
-and **Compat Layer**. They run in parallel, so the post-merge signal arrives in
-roughly **11 minutes** (Unit Tests dominates). All three are hermetic — no cloud
+and **Compat Layer**. They run in parallel, so the post-merge signal arrives
+roughly **11 minutes** after an agent picks the build up (Unit Tests dominates).
+That is execution time, not wall time — these are Microsoft-hosted agents drawn
+from an allocation shared across the whole `babylonjs` organisation, so a
+contended pool adds queue time in front of it. The cost that does not vary is
+about **15.5 agent-minutes per push**, roughly a tenth of one PR run of the same
+pipeline. All three are hermetic — no cloud
 browser, no external service — which is the point: a post-merge failure has no
 author to nudge and no PR to block, so it is only useful if red reliably means
 "master is broken".
