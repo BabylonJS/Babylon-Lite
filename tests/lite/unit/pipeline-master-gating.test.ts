@@ -498,6 +498,25 @@ function contentColumn(line: string): number {
  * both refused, while `echo two:three`, `http://x/y` and a deeper `- x` all fold
  * into the value as text.
  *
+ * Three more shapes were found only by enumerating candidates for the *legal*
+ * direction, because every specimen written first was a corruption. All are
+ * accepted, and the first two versions of this predicate called them broken:
+ *
+ *     script: # note   + deeper `c: 1`   ACCEPTS -> script is the mapping {c: 1}
+ *     script: {a: 1,   + deeper `b: 2}`  ACCEPTS -> a flow collection may span lines
+ *     script: "x       + deeper `y"`     ACCEPTS -> so may a quoted scalar
+ *
+ * A value that is only a comment is not a value at all -- the key is empty and
+ * deeper lines legally belong to it. An unterminated quote or an unbalanced
+ * flow collection is a value still being written, and the deeper line finishes
+ * it. So the flag is raised only for a value that is *self-contained*: nothing
+ * about it can be continued, therefore nothing deeper can belong to it.
+ *
+ * Being wrong in this direction is the expensive one. A guard that fires on
+ * correct code gets deleted, so an unrecognised shape is skipped rather than
+ * reported, and every branch below is pinned by a specimen carrying an actual
+ * parser verdict.
+ *
  * So this reports two different things, because they need two different
  * remedies. `illegal` is a file Azure DevOps will refuse. `folded` is legal YAML
  * that silently swallows the deeper line into the value above -- not a parse
@@ -510,6 +529,44 @@ function contentColumn(line: string): number {
  * scalars (`|`, `>`) are skipped, as their bodies are legitimately deeper.
  */
 const MAPPING_COLON = /:(?:\s|$)/;
+const CLOSED_DOUBLE_QUOTE = /^"(?:[^"\\]|\\.)*"/;
+const CLOSED_SINGLE_QUOTE = /^'(?:[^']|'')*'(?!')/;
+
+/**
+ * Whether a flow collection opened in `value` is also closed in it. Quoted
+ * spans are stepped over so a brace inside a string does not count, and an
+ * unquoted `#` at depth zero starts a comment.
+ */
+function flowIsClosed(value: string): boolean {
+    let depth = 0;
+    let quote = "";
+
+    for (let index = 0; index < value.length; index++) {
+        const character = value[index] ?? "";
+        if (quote) {
+            if (character === "\\" && quote === '"') index++;
+            else if (character === quote) quote = "";
+            continue;
+        }
+        if (character === '"' || character === "'") quote = character;
+        else if (character === "{" || character === "[") depth++;
+        else if (character === "}" || character === "]") depth--;
+        else if (character === "#" && depth === 0) break;
+    }
+
+    return depth === 0;
+}
+
+type ValueShape = "block" | "empty" | "continuable" | "self-contained" | "plain";
+
+function valueShape(value: string): ValueShape {
+    if (value.startsWith("|") || value.startsWith(">")) return "block";
+    if (value.startsWith("#")) return "empty";
+    if (value.startsWith('"')) return CLOSED_DOUBLE_QUOTE.test(value) ? "self-contained" : "continuable";
+    if (value.startsWith("'")) return CLOSED_SINGLE_QUOTE.test(value) ? "self-contained" : "continuable";
+    if (value.startsWith("{") || value.startsWith("[")) return flowIsClosed(value) ? "self-contained" : "continuable";
+    return "plain";
+}
 
 function structureProblems(text: string): { illegal: string[]; folded: string[] } {
     const lines = text.split("\n");
@@ -523,8 +580,8 @@ function structureProblems(text: string): { illegal: string[]; folded: string[] 
         const scalar = /^(?:-\s+)?[A-Za-z_$][\w.$-]*:[ \t]+(\S.*)$/.exec(line.trimStart());
         if (!scalar) continue;
 
-        const value = (scalar[1] ?? "").trim();
-        if (value.startsWith("|") || value.startsWith(">")) continue;
+        const shape = valueShape((scalar[1] ?? "").trim());
+        if (shape === "block" || shape === "empty" || shape === "continuable") continue;
 
         let next = index + 1;
         while (next < lines.length && (!(lines[next] ?? "").trim() || (lines[next] ?? "").trim().startsWith("#"))) next++;
@@ -532,10 +589,9 @@ function structureProblems(text: string): { illegal: string[]; folded: string[] 
 
         if (contentColumn(lines[next] ?? "") <= contentColumn(line)) continue;
 
-        const quoted = value.startsWith('"') || value.startsWith("'");
         const where = `line ${next + 1} is indented deeper than line ${index + 1} ("${line.trim().slice(0, 44)}"), which already has a value`;
 
-        if (quoted || MAPPING_COLON.test((lines[next] ?? "").trim())) illegal.push(where);
+        if (shape === "self-contained" || MAPPING_COLON.test((lines[next] ?? "").trim())) illegal.push(where);
         else folded.push(`${where}, and is legal YAML that folds into it`);
     }
 
@@ -1055,21 +1111,101 @@ describe("pull-request jobs cannot run on a master build", () => {
         // and it is *accepted*. The fixture was pinning a false positive as
         // correct behaviour, so the predicate could never be found wrong by the
         // thing written to check it.
+        // Every `rejected` below is the verdict of an actual YAML parser
+        // (PyYAML) on that exact text, not my reading of the spec. Two earlier
+        // versions of this table were the reason the predicate stayed wrong: a
+        // row asserting `broken: true` for a shape the parser *accepts*, and
+        // then a set of rows that were all corruptions. Specimens written only
+        // for the illegal direction cannot find a predicate that is too strict,
+        // and too strict is the direction that gets a guard deleted.
+        //
+        // Eighteen of the twenty-nine are accepted by the parser, and that ratio
+        // is asserted below rather than left to drift. Every branch in
+        // `valueShape` and `flowIsClosed` was silent under mutation until a row
+        // here reached it: the comment-only skip, both quote-termination tests,
+        // the flow balance scan, its quote handling, its comment break, its
+        // escape skip, and the lookahead that stops a doubled apostrophe from
+        // being read as a terminator. Eleven arms, all firing, and every one of
+        // them was silent before its specimen existed -- the branches were
+        // reachable and correctly asserted, they simply had no input.
         const scalars = [
-            { what: "a literal block scalar, which the tree does use", text: "steps:\n  - script: |\n      echo one\n      echo two\n", illegal: false, folded: false },
-            { what: "a folded block scalar, which the tree does not", text: "steps:\n  - script: >\n      echo one\n      echo two\n", illegal: false, folded: false },
-            { what: "a quoted value with any deeper line at all", text: 'steps:\n  - script: "echo one"\n      echo two\n', illegal: true, folded: false },
-            { what: "a plain value with a deeper bare line, which YAML accepts", text: "steps:\n  - script: echo one\n      echo two\n", illegal: false, folded: true },
-            { what: "a plain value with a deeper mapping entry", text: "steps:\n  - script: echo one\n      name: x\n", illegal: true, folded: false },
-            { what: "a plain value with a deeper line whose colon is not a mapping colon", text: "steps:\n  - script: echo one\n      http://x/y\n", illegal: false, folded: true },
-            { what: "a plain value with a deeper trailing-colon line, which YAML refuses", text: "steps:\n  - script: echo one\n      echo two:\n", illegal: true, folded: false },
+            { what: "comment-only value + deeper mapping entry", text: "steps:\n  - script: # note\n      c: 1\n", rejected: false, folded: false },
+            { what: "comment-only value + deeper bare line", text: "steps:\n  - script: # note\n      more\n", rejected: false, folded: false },
+            { what: "literal block whose body looks like a mapping", text: "steps:\n  - script: |\n      c: 1\n", rejected: false, folded: false },
+            { what: "a strip-chomped block scalar", text: "steps:\n  - script: |-\n      echo one\n", rejected: false, folded: false },
+            { what: "a folded strip-chomped block scalar", text: "steps:\n  - script: >-\n      echo one\n", rejected: false, folded: false },
+            { what: "a block scalar with an explicit indent indicator", text: "steps:\n  - script: |2\n      echo one\n", rejected: false, folded: false },
+            { what: "a blank line between a value and its sibling", text: 'steps:\n  - script: "x"\n    \n    name: y\n', rejected: false, folded: false },
+            { what: "a comment line between a value and its sibling", text: 'steps:\n  - script: "x"\n      # c\n    name: y\n', rejected: false, folded: false },
+            { what: "an anchored plain value with a deeper bare line", text: "steps:\n  - script: &a echo one\n      more\n", rejected: false, folded: true },
+            { what: "a flow mapping value with a deeper bare line", text: "steps:\n  - script: {a: 1}\n      more\n", rejected: true, folded: false },
+            { what: "a flow sequence value with a deeper bare line", text: "steps:\n  - script: [1, 2]\n      more\n", rejected: true, folded: false },
+            { what: "a plain value that ends the file", text: "steps:\n  - script: echo one\n", rejected: false, folded: false },
+            { what: "an unclosed flow mapping finished on the deeper line", text: "steps:\n  - script: {a: 1,\n      b: 2}\n", rejected: false, folded: false },
+            { what: "an unclosed flow sequence finished on the deeper line", text: "steps:\n  - script: [1,\n      2]\n", rejected: false, folded: false },
+            { what: "an unterminated double quote finished on the deeper line", text: 'steps:\n  - script: "x\n      y"\n', rejected: false, folded: false },
+            { what: "an unterminated single quote finished on the deeper line", text: "steps:\n  - script: 'x\n      y'\n", rejected: false, folded: false },
+            { what: "a brace inside a quoted value, not a flow collection", text: 'steps:\n  - script: "{a"\n      more\n', rejected: true, folded: false },
+            { what: "a quoted value ending in an escaped quote", text: 'steps:\n  - script: "a\\""\n      more\n', rejected: true, folded: false },
+            { what: "a quoted value with a deeper quoted line", text: 'steps:\n  - script: "x"\n      "y"\n', rejected: true, folded: false },
+            { what: "a closed flow mapping whose brace is inside a quote", text: 'steps:\n  - script: {a: "}"}\n      more\n', rejected: true, folded: false },
+            { what: "a closed flow sequence whose bracket is inside a quote", text: 'steps:\n  - script: [a, "]"]\n      more\n', rejected: true, folded: false },
+            { what: "an unclosed flow mapping whose brace is inside a quote", text: 'steps:\n  - script: {a: "}",\n      b: 2}\n', rejected: false, folded: false },
+            { what: "a closed flow collection whose trailing comment holds a brace", text: "steps:\n  - script: {a: 1} # note {\n      more\n", rejected: true, folded: false },
+            { what: "a double quote closed by an escaped quote", text: 'steps:\n  - script: "a\\""\n      more\n', rejected: true, folded: false },
+            { what: "a double quote ended by an escaped quote, so it continues", text: 'steps:\n  - script: "a\\"\n      b"\n', rejected: false, folded: false },
+            { what: "a single quote holding a doubled apostrophe", text: "steps:\n  - script: 'it''s'\n      more\n", rejected: true, folded: false },
+            { what: "a single quote with a doubled apostrophe, continuing", text: "steps:\n  - script: 'it''s\n      b'\n", rejected: false, folded: false },
+            { what: "a closed flow mapping holding an escaped quote", text: 'steps:\n  - script: {a: "x\\""}\n      more\n', rejected: true, folded: false },
+            { what: "an unclosed flow mapping holding an escaped quote", text: 'steps:\n  - script: {a: "x\\"",\n      b: 2}\n', rejected: false, folded: false },
         ];
 
-        for (const scalar of scalars) {
-            const result = structureProblems(scalar.text);
-            expect(result.illegal.length > 0, `${scalar.what}: should be reported as ${scalar.illegal ? "illegal" : "not illegal"}`).toBe(scalar.illegal);
-            expect(result.folded.length > 0, `${scalar.what}: should be reported as ${scalar.folded ? "a silent fold" : "not a fold"}`).toBe(scalar.folded);
-        }
+        // Two columns, and they are not the same kind of claim. `rejected` is
+        // the parser's verdict, taken from PyYAML and not from anybody's
+        // reading of the spec. `folded` is a design judgement: of the shapes
+        // the parser *accepts*, which ones should this predicate report as a
+        // silent fold rather than pass over in silence. No parser can settle
+        // that -- an accepted file is accepted -- so the column restates, per
+        // row, the rule the comment above states in prose: a fold is expected
+        // exactly when a complete plain scalar is followed by a deeper line
+        // that is not a mapping entry.
+        //
+        // It is pinned anyway, and the reason is worth the space. Before this
+        // column existed the table asserted only the legal/illegal axis, so
+        // deleting the `>` half of the block-scalar test changed nothing that
+        // any row could see: `>-` stopped being a block scalar, became a plain
+        // one, and got reported as a silent fold -- a guard firing on correct
+        // YAML, which is the failure mode that gets a guard deleted rather
+        // than fixed. The mutation was invisible because the verdict it
+        // corrupted was never read.
+        const disagreements = scalars.flatMap((scalar) => {
+            const problems = structureProblems(scalar.text);
+            const notes: string[] = [];
+            if (problems.illegal.length > 0 !== scalar.rejected) {
+                notes.push(`${scalar.what} -- the parser ${scalar.rejected ? "rejects" : "accepts"} it and this predicate says the opposite`);
+            }
+            if (problems.folded.length > 0 !== scalar.folded) {
+                notes.push(`${scalar.what} -- this predicate ${problems.folded.length > 0 ? "reports" : "does not report"} a silent fold and the table says the opposite`);
+            }
+            return notes;
+        });
+
+        // Collected rather than asserted per row: when this was a loop of
+        // `expect`s, the first failing shape threw and the remaining twelve
+        // never ran, so a three-defect result reported as one.
+        expect(disagreements, `structureProblems disagrees with a real YAML parser:\n${disagreements.join("\n")}`).toEqual([]);
+
+        expect(
+            scalars.filter((scalar) => !scalar.rejected).length,
+            "every specimen here is a corruption, so nothing measures whether this predicate is too strict"
+        ).toBeGreaterThan(scalars.filter((scalar) => scalar.rejected).length);
+
+        // The fold verdict has one witness in this table, and one witness is
+        // how the `>` deletion above stayed invisible for a round. Stated as a
+        // floor so that a future edit which drops that row has to notice the
+        // whole verdict is going unmeasured, rather than discovering it the
+        // next time somebody mutates the branch it protects.
+        expect(scalars.filter((scalar) => scalar.folded).length, "no specimen exercises the silent-fold verdict, so nothing here can tell it from silence").toBeGreaterThan(0);
     });
 
     it("pins the post-merge job set to the sentence documenting it", () => {
