@@ -15,7 +15,7 @@ import {
     getDataValue,
     startFlowGraph,
 } from "../../../packages/babylon-lite/src/index";
-import { dispatchFlowGraphPointerPick } from "../../../packages/babylon-lite/src/flow-graph/scene-flow-graph-pointer";
+import { dispatchFlowGraphPointerPick, isFlowGraphMeshSelectable } from "../../../packages/babylon-lite/src/flow-graph/scene-flow-graph-pointer";
 import { createEmptyPickingInfo } from "../../../packages/babylon-lite/src/picking/picking-info";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 
@@ -192,7 +192,7 @@ describe("flow-graph coordinator — imperative build + run", () => {
         expect(ticks).toBe(1);
     });
 
-    it("dispatches a pointer pick once per event bus and respects node selectability", async () => {
+    it("dispatches a pointer pick to matching runtimes and respects node selectability", async () => {
         const log: { label: string; value: FgValue }[] = [];
         const bus = createFgEventBus();
         const graph = await buildFgGraph(
@@ -230,6 +230,60 @@ describe("flow-graph coordinator — imperative build + run", () => {
         pick.hit = false;
         dispatchFlowGraphPointerPick(scene, pick);
         expect(log).toHaveLength(2);
+    });
+
+    it("isolates pointer dispatch and selectability for assets that reuse node indices", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const bus = createFgEventBus();
+        const graphFor = async (label: string) =>
+            buildFgGraph(
+                [
+                    {
+                        id: "select",
+                        type: "OnSelect",
+                        config: { nodeIndex: 7 },
+                        signalTargets: { out: [{ blockId: "rec", socket: "in" }] },
+                    },
+                    { id: "rec", type: RECORD, config: { label } },
+                ],
+                { defs: { [RECORD]: recorderDef(log) } }
+            );
+        const firstScope = {};
+        const secondScope = {};
+        const first = await createFgRuntime(await graphFor("first"), {
+            events: bus,
+            defs: { [RECORD]: recorderDef(log) },
+            _assetScope: firstScope,
+        });
+        const second = await createFgRuntime(await graphFor("second"), {
+            events: bus,
+            defs: { [RECORD]: recorderDef(log) },
+            _assetScope: secondScope,
+            accessors: {
+                "/nodes/7/extensions/KHR_node_selectability/selectable": {
+                    type: FgType.Boolean,
+                    get: () => false,
+                },
+            },
+        });
+        startFlowGraph(first);
+        startFlowGraph(second);
+        const scene = fakeScene();
+        scene._flowGraphs = [first, second];
+        const firstMesh = { _gltfNodeIndex: 7, _flowGraphAssetScope: firstScope } as unknown as Mesh;
+        const secondMesh = { _gltfNodeIndex: 7, _flowGraphAssetScope: secondScope } as unknown as Mesh;
+        const pick = createEmptyPickingInfo();
+        pick.hit = true;
+        pick.pickedMesh = firstMesh;
+
+        expect(isFlowGraphMeshSelectable(scene, firstMesh)).toBe(true);
+        dispatchFlowGraphPointerPick(scene, pick);
+        expect(log.map(({ label }) => label)).toEqual(["first"]);
+
+        expect(isFlowGraphMeshSelectable(scene, secondMesh)).toBe(false);
+        pick.pickedMesh = secondMesh;
+        dispatchFlowGraphPointerPick(scene, pick);
+        expect(log.map(({ label }) => label)).toEqual(["first"]);
     });
 
     it("subscribes every graph before start flows dispatch cross-graph events", async () => {

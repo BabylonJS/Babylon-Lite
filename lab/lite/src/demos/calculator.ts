@@ -23,6 +23,7 @@ import {
     createArcRotateCamera,
     createEngine,
     createSceneContext,
+    enableFlowGraphPointerPicking,
     loadGltf,
     onBeforeRender,
     registerScene,
@@ -89,8 +90,8 @@ async function main(): Promise<void> {
     ]);
     addToScene(scene, asset);
 
-    // addToScene wires the embedded graph and its pointer-selection bridge.
     await asset.flowGraphRuntimes;
+    await enableFlowGraphPointerPicking(scene);
 
     // Slow continuous orbit, paused during/after user interaction so it never
     // fights a manual orbit or zoom.

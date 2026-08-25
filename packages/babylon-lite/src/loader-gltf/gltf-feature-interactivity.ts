@@ -29,6 +29,8 @@ interface IKHRInteractivity {
 interface InteractivityMesh extends Mesh {
     /** glTF node owning this primitive, used by the Flow Graph selection bridge. */
     _gltfNodeIndex?: number;
+    /** Opaque identity of the asset that owns this primitive. */
+    _flowGraphAssetScope?: object;
 }
 
 /** Build a glTF-material-index → runtime-material map by walking the node→mesh→
@@ -36,7 +38,11 @@ interface InteractivityMesh extends Mesh {
  *  (mirrors KHR_animation_pointer's `materialMap`). Lets a `pointer/{get,set}` on
  *  a material's UV transform reach the live PBR material. The same walk records
  *  each primitive's source node for `event/onSelect`. */
-function buildMaterialMap(json: { nodes?: { mesh?: number }[]; meshes?: { primitives?: { material?: number }[] }[] }, meshes: readonly Mesh[]): (PointerMaterial | undefined)[] {
+function buildMaterialMap(
+    json: { nodes?: { mesh?: number }[]; meshes?: { primitives?: { material?: number }[] }[] },
+    meshes: readonly Mesh[],
+    assetScope: object
+): (PointerMaterial | undefined)[] {
     const map: (PointerMaterial | undefined)[] = [];
     const nodes = json.nodes ?? [];
     let gpuIdx = 0;
@@ -51,6 +57,7 @@ function buildMaterialMap(json: { nodes?: { mesh?: number }[]; meshes?: { primit
             const mesh = meshes[gpuIdx++];
             if (mesh) {
                 (mesh as InteractivityMesh)._gltfNodeIndex = ni;
+                (mesh as InteractivityMesh)._flowGraphAssetScope = assetScope;
             }
             if (matIdx !== undefined && mesh) {
                 map[matIdx] = mesh.material as unknown as PointerMaterial;
@@ -66,7 +73,8 @@ const feature: GltfFeature = {
         const ext = ctx._json.extensions?.KHR_interactivity as IKHRInteractivity | undefined;
         const graphs = ext?.graphs ?? [];
         const nodeMap = ctx._nodeMap ?? [];
-        const materials = buildMaterialMap(ctx._json, _meshes);
+        const assetScope = {};
+        const materials = buildMaterialMap(ctx._json, _meshes, assetScope);
         const resolveCtx: PointerResolveContext = { nodeMap, materials, json: ctx._json };
 
         const flowGraphs: LoadedFlowGraph[] = [];
@@ -85,6 +93,7 @@ const feature: GltfFeature = {
                     rightHanded: true,
                     accessors,
                     resolveAccessor: (pointer, scene, animations) => resolvePointerAccessor(pointer, { ...resolveCtx, scene, animations }),
+                    _assetScope: assetScope,
                 });
             } catch (error) {
                 console.warn(`KHR_interactivity: rejected graph ${graphIndex}:`, error);
@@ -100,7 +109,7 @@ const feature: GltfFeature = {
                         return nodeMap.find((node) => node && (((node as TransformNode & { id?: string }).id ?? node.name) === id || node.name === id));
                     },
                 });
-                parsed.graphs.forEach((graph, index) => flowGraphs.push({ graph, rightHanded: parsed.rightHanded[index], accessors: {} }));
+                parsed.graphs.forEach((graph, index) => flowGraphs.push({ graph, rightHanded: parsed.rightHanded[index], accessors: {}, _assetScope: assetScope }));
             } catch (error) {
                 console.warn("BABYLON_flow_graph: rejected editor graph JSON:", error);
             }
@@ -121,13 +130,16 @@ const feature: GltfFeature = {
                     active.forEach((runtime) => detachFlowGraph(scene, runtime));
                     active = [];
                 });
-                void runtimes.then((loaded) => {
-                    if (removed) {
-                        loaded.forEach((runtime) => detachFlowGraph(scene, runtime));
-                    } else {
-                        active = loaded;
-                    }
-                });
+                void runtimes.then(
+                    (loaded) => {
+                        if (removed) {
+                            loaded.forEach((runtime) => detachFlowGraph(scene, runtime));
+                        } else {
+                            active = loaded;
+                        }
+                    },
+                    () => undefined
+                );
             },
         };
     },

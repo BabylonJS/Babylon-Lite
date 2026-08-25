@@ -486,7 +486,8 @@ Pointer/key events are fed into `env.events` by the picking/input layer; event
 blocks simply subscribe to the corresponding bus channel. Pointer selection is
 an explicit capability: call `enableFlowGraphPointerPicking(scene)` when a scene
 uses pointer-event blocks. This keeps the GPU picker out of non-interactive glTF
-bundles.
+bundles. Pick dispatch and selectability are scoped to the glTF asset that owns
+the picked mesh, so assets may safely reuse the same node indices in one scene.
 
 ### Custom math & types live IN the subsystem (bundle discipline)
 

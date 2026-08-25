@@ -186,11 +186,22 @@ export async function runFlowGraphs(scene: SceneContext, loaded: readonly Loaded
     const caps = sceneAnimationCaps();
     const events = flowGraphBus(scene);
     const runtimes: FgRuntime[] = [];
-    for (const lg of loaded) {
-        const resolveAccessor = lg.resolveAccessor ? (pointer: string) => lg.resolveAccessor!(pointer, scene, animations) : undefined;
-        const rt = await createFgRuntime(lg.graph, { accessors: { ...lg.accessors }, resolveAccessor, animations, caps, events }, { rightHanded: lg.rightHanded ?? true });
-        attachFlowGraph(scene, rt);
-        runtimes.push(rt);
+    try {
+        for (const lg of loaded) {
+            const resolveAccessor = lg.resolveAccessor ? (pointer: string) => lg.resolveAccessor!(pointer, scene, animations) : undefined;
+            const rt = await createFgRuntime(
+                lg.graph,
+                { accessors: { ...lg.accessors }, resolveAccessor, animations, caps, events, _assetScope: lg._assetScope },
+                { rightHanded: lg.rightHanded ?? true }
+            );
+            attachFlowGraph(scene, rt);
+            runtimes.push(rt);
+        }
+        return runtimes;
+    } catch (error) {
+        for (let i = runtimes.length - 1; i >= 0; i--) {
+            detachFlowGraph(scene, runtimes[i]!);
+        }
+        throw error;
     }
-    return runtimes;
 }

@@ -209,6 +209,7 @@ export async function createFgEnv(graph: FgGraph, wiring: FgWiring = {}): Promis
         animations: wiring.animations ?? [],
         caps: wiring.caps ?? {},
         events: wiring.events ?? createFgEventBus(),
+        _assetScope: wiring._assetScope,
     };
 }
 
@@ -311,6 +312,13 @@ function pumpFlowGraphLifecycle(rt: FgRuntime, event: FgEventType, payload: FgEv
             env.defs[block.type]?.execute?.(block, ctx, env, event);
         });
     pumpFgEventHandlers(env.events, handlers, payload);
+}
+
+/** @internal Pump an externally sourced event into one started runtime only. */
+export function pumpFlowGraphEvent(rt: FgRuntime, event: FgEventType, payload: FgEventPayload): void {
+    if (rt.started) {
+        pumpFlowGraphLifecycle(rt, event, payload);
+    }
 }
 
 /** Pump one graph-scoped scene-tick event without advancing pending tasks. */

@@ -1,38 +1,43 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { PickingInfo } from "../picking/picking-info.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import type { FgRuntime } from "./runtime.js";
-import { pumpFgEvent } from "./event-bus.js";
+import { pumpFlowGraphEvent, type FgRuntime } from "./runtime.js";
 import { FgEventType } from "./types.js";
 
 interface PickedInteractivityMesh extends Mesh {
     _gltfNodeIndex?: number;
+    _flowGraphAssetScope?: object;
 }
 
 function graphUsesPointerEvent(runtime: FgRuntime): boolean {
     return runtime.graph.blocks.some((block) => block.event === FgEventType.Pointer);
 }
 
-function isFlowGraphMeshSelectable(scene: SceneContext, mesh: Mesh): boolean {
-    const nodeIndex = (mesh as PickedInteractivityMesh)._gltfNodeIndex;
+function runtimesForMesh(scene: SceneContext, mesh: PickedInteractivityMesh): FgRuntime[] {
+    return (scene._flowGraphs?.filter(graphUsesPointerEvent) ?? []).filter((runtime) => runtime.env._assetScope === mesh._flowGraphAssetScope);
+}
+
+/** @internal */
+export function isFlowGraphMeshSelectable(scene: SceneContext, mesh: Mesh): boolean {
+    const interactivityMesh = mesh as PickedInteractivityMesh;
+    const nodeIndex = interactivityMesh._gltfNodeIndex;
     if (nodeIndex === undefined) {
         return false;
     }
     const selectablePointer = `/nodes/${nodeIndex}/extensions/KHR_node_selectability/selectable`;
-    return !(scene._flowGraphs?.filter(graphUsesPointerEvent) ?? []).some((runtime) => runtime.env.accessors[selectablePointer]?.get() === false);
+    const runtimes = runtimesForMesh(scene, interactivityMesh);
+    return runtimes.length > 0 && !runtimes.some((runtime) => runtime.env.accessors[selectablePointer]?.get() === false);
 }
 
-/** Dispatch one successful scene pick to every distinct Flow Graph event bus. */
+/** Dispatch one successful scene pick to the Flow Graph runtimes owned by its asset. */
 export function dispatchFlowGraphPointerPick(scene: SceneContext, pick: PickingInfo): void {
-    const nodeIndex = (pick.pickedMesh as PickedInteractivityMesh | null)?._gltfNodeIndex;
-    const runtimes = scene._flowGraphs?.filter(graphUsesPointerEvent) ?? [];
-    const selectablePointer = `/nodes/${nodeIndex}/extensions/KHR_node_selectability/selectable`;
-    if (!pick.hit || nodeIndex === undefined || runtimes.some((runtime) => runtime.env.accessors[selectablePointer]?.get() === false)) {
+    const mesh = pick.pickedMesh as PickedInteractivityMesh | null;
+    const nodeIndex = mesh?._gltfNodeIndex;
+    if (!pick.hit || !mesh || nodeIndex === undefined || !isFlowGraphMeshSelectable(scene, mesh)) {
         return;
     }
-    const buses = new Set(runtimes.map((runtime) => runtime.env.events));
-    for (const bus of buses) {
-        pumpFgEvent(bus, FgEventType.Pointer, {
+    for (const runtime of runtimesForMesh(scene, mesh)) {
+        pumpFlowGraphEvent(runtime, FgEventType.Pointer, {
             nodeIndex,
             controllerIndex: 0,
             event: "/extensions/KHR_interactivity/events/pointer",

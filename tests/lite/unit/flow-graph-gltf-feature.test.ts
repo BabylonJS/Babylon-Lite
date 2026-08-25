@@ -7,6 +7,8 @@ import interactivityFeature from "../../../packages/babylon-lite/src/loader-gltf
 import { createFgRuntime, startFlowGraph } from "../../../packages/babylon-lite/src/flow-graph/index";
 import type { GltfLoadCtx } from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import type { AssetContainer } from "../../../packages/babylon-lite/src/asset-container";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 
 const worldPointerExtension = {
     graphs: [
@@ -127,9 +129,14 @@ describe("gltf-feature-interactivity applyAsset", () => {
             _nodeMap: [node] as (TransformNode | undefined)[],
         } as unknown as GltfLoadCtx;
 
-        await interactivityFeature.applyAsset!([mesh], node, ctx);
+        const result = await interactivityFeature.applyAsset!([mesh], node, ctx);
+        const otherMesh = {} as Mesh;
+        const other = await interactivityFeature.applyAsset!([otherMesh], node, ctx);
 
         expect((mesh as Mesh & { _gltfNodeIndex?: number })._gltfNodeIndex).toBe(0);
+        expect((mesh as Mesh & { _flowGraphAssetScope?: object })._flowGraphAssetScope).toBe(result.flowGraphs?.[0]?._assetScope);
+        expect((otherMesh as Mesh & { _flowGraphAssetScope?: object })._flowGraphAssetScope).toBe(other.flowGraphs?.[0]?._assetScope);
+        expect(result.flowGraphs?.[0]?._assetScope).not.toBe(other.flowGraphs?.[0]?._assetScope);
     });
 
     it("parses graphs and resolves pointers into the container", async () => {
@@ -187,6 +194,28 @@ describe("gltf-feature-interactivity applyAsset", () => {
         const ctx = { _json: { extensions: {} }, _nodeMap: [] as (TransformNode | undefined)[] } as unknown as GltfLoadCtx;
         const result = await interactivityFeature.applyAsset!([], createTransformNode("x"), ctx);
         expect(result.flowGraphs).toBeUndefined();
+    });
+
+    it("rejects scene setup transactionally without leaving attached runtimes", async () => {
+        const node = createTransformNode("n0");
+        const ctx = { _json: { extensions: { KHR_interactivity: worldPointerExtension } }, _nodeMap: [node] as (TransformNode | undefined)[] } as unknown as GltfLoadCtx;
+        const container = (await interactivityFeature.applyAsset!([], node, ctx)) as AssetContainer;
+        const sourceGraph = container.flowGraphs![0]!.graph;
+        container.flowGraphs!.push({
+            graph: {
+                ...sourceGraph,
+                blocks: [{ ...sourceGraph.blocks[0]!, type: "MissingBlockType" }],
+            },
+            accessors: {},
+        });
+        const scene = { _beforeRender: [], _disposables: [], animationGroups: [] } as unknown as SceneContext;
+
+        container._sceneSetup!(scene, container);
+
+        await expect(container.flowGraphRuntimes).rejects.toThrow(/MissingBlockType/);
+        await Promise.resolve();
+        expect(scene._flowGraphs ?? []).toHaveLength(0);
+        expect(scene._beforeRender).toHaveLength(0);
     });
 });
 

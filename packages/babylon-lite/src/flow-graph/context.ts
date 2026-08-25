@@ -70,6 +70,8 @@ export interface FgEnv {
     readonly caps: FgCapabilities;
     /** Event bus the scene driver feeds (shared across graphs in a scene). */
     readonly events: FgEventBus;
+    /** @internal Opaque identity of the loaded asset that owns this graph. */
+    readonly _assetScope?: object;
 }
 
 /** A resolved JSON-pointer accessor onto a scene object property. */
@@ -90,6 +92,8 @@ export interface FgWiring {
     caps?: FgCapabilities;
     /** Shared scene/coordinator bus. A fresh one is created if omitted. */
     events?: FgEventBus;
+    /** @internal Opaque identity of the loaded asset that owns this graph. */
+    _assetScope?: object;
     /** Pre-supplied defs by type — bypasses the dynamic-import registry. Used by
      *  tests (hand-built defs) and to override/extend the registry. */
     defs?: Record<string, FgBlockDef>;
@@ -106,4 +110,6 @@ export interface LoadedFlowGraph {
     /** JSON-pointer-string → resolved scene-object accessor. */
     readonly accessors: Record<string, FgAccessor>;
     readonly resolveAccessor?: (pointer: string, scene?: SceneContext, animations?: readonly AnimationGroup[]) => FgAccessor | null;
+    /** @internal Opaque identity shared with meshes loaded from the same asset. */
+    readonly _assetScope?: object;
 }
