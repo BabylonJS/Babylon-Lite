@@ -14,16 +14,73 @@ const repoRoot = join(__dirname, "..", "..", "..");
  * everything the guard was protecting.
  */
 export function hasMaskedSecret(line: string): boolean {
-    return /(?:[:=]\s*"?)\*{3,}/.test(line.replace(/(^|\s)#.*$/, ""));
+    const code = line.replace(/(^|\s)#.*$/, "");
+    const separator = code.search(/[:=]/);
+    if (separator === -1) {
+        return false;
+    }
+
+    // A *whole token* of three or more asterisks, anywhere in the value. The
+    // first version anchored the run directly to the separator, so it matched
+    // `Authorization: ***` but not `Authorization: Bearer ***` -- and `Bearer`
+    // is the form 9 of this repo's 10 headers use. The bug was caught only
+    // because that one instance happened to omit it. Requiring a delimited,
+    // all-asterisk token is what keeps `echo "a***b"` and `dist/**/*` out.
+    return /(?:^|[\s"'=:])\*{3,}(?=[\s"']|$)/.test(code.slice(separator + 1));
 }
 
-function pipelineFiles(): string[] {
-    const files = readdirSync(repoRoot).filter((f) => /^azure-pipelines.*\.ya?ml$/.test(f));
+interface PipelineFile {
+    /** Path relative to the repo root, used in failure messages. */
+    location: string;
+    /** Absolute path, for reading. */
+    path: string;
+    /**
+     * True for Azure DevOps pipelines and the step templates they include,
+     * where `DEPLOY_TOKEN` is the established convention. GitHub Actions
+     * workflows authenticate differently, so requiring `DEPLOY_TOKEN` of them
+     * would fail on correct code.
+     */
+    requiresDeployToken: boolean;
+}
 
-    // A zero-match case must never be indistinguishable from an all-pass case,
-    // or this file becomes a check that runs and cannot fail.
-    expect(files.length, "no azure-pipelines files matched — this suite would be vacuous").toBeGreaterThan(0);
+function pipelineFiles(): PipelineFile[] {
+    // A mask copied out of a build log is wrong in any CI file, so the subject
+    // is every file that can carry one. The original glob read the repo root
+    // alone: 7 of the repo's 10 `Authorization` headers, while its own doc
+    // comment claimed to cover the pipelines. The three it missed are `curl`
+    // uploads in the two shared templates -- included by azure-pipelines.yml at
+    // four call sites, so they run on every PR -- and one workflow. That is
+    // precisely the shape this bug takes.
+    const roots = [
+        { dir: repoRoot, label: "", match: /^azure-pipelines.*\.ya?ml$/, requiresDeployToken: true },
+        { dir: join(repoRoot, "config", "templates"), label: "config/templates", match: /\.ya?ml$/, requiresDeployToken: true },
+        { dir: join(repoRoot, ".github", "workflows"), label: ".github/workflows", match: /\.ya?ml$/, requiresDeployToken: false },
+    ];
+
+    const files: PipelineFile[] = [];
+    for (const { dir, label, match, requiresDeployToken } of roots) {
+        const names = readdirSync(dir).filter((f) => match.test(f));
+
+        // A floor per collector, not one for the function. A per-function floor
+        // cannot detect a single root that stops matching, because the others
+        // keep the total comfortably above zero -- yielding a check that is
+        // non-vacuous and narrower than its stated subject at the same time.
+        expect(names.length, `no YAML matched under ${label || "the repo root"} — that collector would contribute nothing`).toBeGreaterThan(0);
+
+        for (const name of names) {
+            files.push({ location: label ? `${label}/${name}` : name, path: join(dir, name), requiresDeployToken });
+        }
+    }
     return files;
+}
+
+/** Every line of every collected file, tagged with its origin. */
+function pipelineLines(): { location: string; line: string; number: number; requiresDeployToken: boolean }[] {
+    return pipelineFiles().flatMap((file) =>
+        readFileSync(file.path, "utf8")
+            .split("\n")
+            .map((line, index) => ({ location: file.location, line, number: index + 1, requiresDeployToken: file.requiresDeployToken }))
+    );
 }
 
 describe("mask detection accepts and rejects the right lines", () => {
@@ -39,6 +96,8 @@ describe("mask detection accepts and rejects the right lines", () => {
         ['-H "Authorization: Bearer $(DEPLOY_TOKEN)"', false],
         ['-H "Authorization: Bearer ${DEPLOY_TOKEN}"', false],
         ['-H "Authorization: ******"', true],
+        ['-H "Authorization: Basic ${AUTH}"', false],
+        ['-H "Authorization: Bearer ******"', true],
         ['-F "token=*******"', true],
         ["  password: ***", true],
     ])("%s -> masked=%s", (line, expected) => {
@@ -62,13 +121,9 @@ describe("pipeline secret hygiene", () => {
     // rather than debugged, and this invariant is one whose violation is
     // invisible, so losing the guard costs everything it protects.
     it("has no log-redaction mask committed in place of a secret", () => {
-        const offenders = pipelineFiles().flatMap((file) =>
-            readFileSync(join(repoRoot, file), "utf8")
-                .split("\n")
-                .map((line, index) => ({ file, line, number: index + 1 }))
-                .filter(({ line }) => hasMaskedSecret(line))
-                .map(({ file: f, number, line }) => `${f}:${number}: ${line.trim()}`)
-        );
+        const offenders = pipelineLines()
+            .filter(({ line }) => hasMaskedSecret(line))
+            .map(({ location, number, line }) => `${location}:${number}: ${line.trim()}`);
 
         expect(offenders, "A run of asterisks in value position is how Azure prints a masked secret. This looks copied from a build log.").toEqual([]);
     });
@@ -78,19 +133,35 @@ describe("pipeline secret hygiene", () => {
     // header must actually reference the token, in either the ADO macro form
     // or the shell form used when the secret is passed through `env:`.
     it("references the deploy token in every Authorization header", () => {
-        const headers = pipelineFiles().flatMap((file) =>
-            readFileSync(join(repoRoot, file), "utf8")
-                .split("\n")
-                .map((line, index) => ({ file, line, number: index + 1 }))
-                .filter(({ line }) => /Authorization:/.test(line))
-        );
+        const headers = pipelineLines().filter(({ line }) => /Authorization:/.test(line));
 
-        // Print N. An assertion of the form "N things, all correct" is only
-        // meaningful if someone can see that N is not zero.
-        expect(headers.length, "no Authorization headers found — the assertion below would be vacuous").toBeGreaterThan(0);
+        // Print N, and where. An assertion of the form "N things, all correct"
+        // is only meaningful if someone can see what N was and that the set is
+        // the one intended. Locations only -- never the line, which holds the
+        // value under test.
+        console.log(`Authorization headers: ${headers.length}`);
+        for (const { location, number } of headers) {
+            console.log(`  ${location}:${number}`);
+        }
+        expect(headers.length, "no Authorization headers found — the assertions below would be vacuous").toBeGreaterThan(0);
 
-        const tokenless = headers.filter(({ line }) => !/\$[({]DEPLOY_TOKEN[)}]/.test(line)).map(({ file, number }) => `${file}:${number}`);
+        // The universal property: the header must interpolate *something*. A
+        // copied mask is a bare literal, so this catches the bug in any CI
+        // dialect, including files that legitimately never touch DEPLOY_TOKEN.
+        const literal = headers.filter(({ line }) => !/\$[({]?[A-Za-z_]\w*[)}]?/.test(line)).map(({ location, number }) => `${location}:${number}`);
 
-        expect(tokenless, "Authorization header does not reference DEPLOY_TOKEN.").toEqual([]);
+        expect(literal, "Authorization header interpolates no variable at all — this looks copied from a build log.").toEqual([]);
+
+        // The stronger property, only where it is actually the convention.
+        // Applying it repo-wide would fail the Actions workflow's correct
+        // `Basic ${AUTH}` -- and a guard that rejects correct code gets deleted
+        // rather than debugged, which for an invariant whose violation is
+        // invisible costs everything the guard protects.
+        const tokenless = headers
+            .filter(({ requiresDeployToken }) => requiresDeployToken)
+            .filter(({ line }) => !/\$[({]DEPLOY_TOKEN[)}]/.test(line))
+            .map(({ location, number }) => `${location}:${number}`);
+
+        expect(tokenless, "Authorization header in an Azure pipeline does not reference DEPLOY_TOKEN.").toEqual([]);
     });
 });
