@@ -133,16 +133,23 @@ function shellScripts(): ShellScript[] {
  * a guard -- inverting the check exactly where it matters.
  */
 export function enablesPipefail(script: string): boolean {
-    return script.split("\n").some((line) => {
-        // Strip a trailing comment before matching, so `set -euo pipefail # why`
-        // is recognised while a commented-out or merely described `set` line is
-        // not.
-        const code = (line.split("#")[0] ?? "").trim();
-        if (!/^set\s/.test(code) || !/\bpipefail\b/.test(code)) {
-            return false;
-        }
-        return !/\+[a-zA-Z]*o?\s*pipefail\b|\+o\s+pipefail\b/.test(code);
-    });
+    // Here-doc bodies are stripped first: a `set -euo pipefail` being written
+    // into a generated script is data, not a guard on this shell. See
+    // stripHeredocBodies -- this was a live silent miss, and no fixture for
+    // this function could have found it, because the defect was in what the
+    // function was asked about rather than in what it answered.
+    return stripHeredocBodies(script)
+        .split("\n")
+        .some((line) => {
+            // Strip a trailing comment before matching, so `set -euo pipefail # why`
+            // is recognised while a commented-out or merely described `set` line is
+            // not.
+            const code = (line.split("#")[0] ?? "").trim();
+            if (!/^set\s/.test(code) || !/\bpipefail\b/.test(code)) {
+                return false;
+            }
+            return !/\+[a-zA-Z]*o?\s*pipefail\b|\+o\s+pipefail\b/.test(code);
+        });
 }
 
 /**
@@ -218,14 +225,76 @@ function stripQuotedSpans(line: string): string {
  * demands a harmless `set -euo pipefail`, so the failure is legible rather than
  * absurd -- but it is a false positive and belongs on this list.
  */
-function containsPipe(script: string): boolean {
-    return script.split("\n").some((line) => {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) {
-            return false;
+/**
+ * Remove the *bodies* of here-documents, leaving the line that opens them.
+ *
+ * This exists because of a defect neither the fixtures for `enablesPipefail`
+ * nor those for `containsPipe` could ever have caught: both predicates were
+ * correct, pinned in both directions, and asked the wrong question, because the
+ * text they were handed includes lines that the shell never executes. A
+ * here-doc body is *data* -- it is being written into another file -- and it
+ * had authority over both of this guard's decisions.
+ *
+ * The dangerous direction is a silent one. A step generating a script:
+ *
+ *     cat > run.sh <<'EOF'
+ *     set -euo pipefail
+ *     EOF
+ *     npx tsc --noEmit | sed 's/^/[ts] /'
+ *
+ * has a genuinely unguarded pipe on its last line, and `set -euo pipefail`
+ * appears at the start of a line -- so `enablesPipefail` cleared the step and
+ * the guard reported success. Verified by injection, with the control: the same
+ * step whose here-doc says `echo hello` instead *does* fail, so the difference
+ * is the here-doc line alone and not a step that was never collected.
+ *
+ * It runs the other way too, which is why one function serves both call sites:
+ * a `|` inside a here-doc body is no more a pipe than one inside quotes, so
+ * `containsPipe` would over-flag a step that writes a pipeline into a file it
+ * never runs. Stripping once, before either question is asked, keeps the two
+ * predicates from disagreeing about what counts as shell code.
+ *
+ * The opening line is deliberately kept: `cat <<EOF | tee out` both starts a
+ * here-doc and contains a real pipe. Closing delimiters are matched on the
+ * trimmed line, because the script arrives still carrying its YAML block
+ * indentation, which the shell would have stripped before ever seeing it.
+ */
+export function stripHeredocBodies(script: string): string {
+    const lines = script.split("\n");
+    const kept: string[] = [];
+    let delimiter: string | null = null;
+
+    for (const line of lines) {
+        if (delimiter !== null) {
+            if (line.trim() === delimiter) {
+                delimiter = null;
+            }
+            continue;
         }
-        return stripQuotedSpans(trimmed).replace(/\|\|/g, "").includes("|");
-    });
+
+        kept.push(line);
+
+        // `<<-` strips leading tabs; the quoting style only decides whether the
+        // body is expanded, which is irrelevant to both questions asked here.
+        const opener = /<<-?\s*(?:'([^']+)'|"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))/.exec(line);
+        if (opener) {
+            delimiter = opener[1] ?? opener[2] ?? opener[3] ?? null;
+        }
+    }
+
+    return kept.join("\n");
+}
+
+function containsPipe(script: string): boolean {
+    return stripHeredocBodies(script)
+        .split("\n")
+        .some((line) => {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith("#")) {
+                return false;
+            }
+            return stripQuotedSpans(trimmed).replace(/\|\|/g, "").includes("|");
+        });
 }
 
 describe("piped pipeline steps enable pipefail", () => {
@@ -293,6 +362,68 @@ describe("piped pipeline steps enable pipefail", () => {
             unguarded,
             `these scripts pipe a command but never 'set -euo pipefail', so a failure on the left of the pipe is silently discarded:\n  ${unguarded.join("\n  ")}\n`
         ).toEqual([]);
+    });
+});
+
+describe("here-doc bodies are not shell code", () => {
+    // Pinned because this predicate decides what BOTH other predicates are
+    // shown, and neither of their fixture tables can see a defect in it: they
+    // verify what those functions answer, never what they are asked about.
+    const generatesAGuardedScript = ["cat > run.sh <<'EOF'", "set -euo pipefail", "EOF", "npx tsc --noEmit | sed 's/^/[ts] /'"].join("\n");
+
+    it("does not let a generated script's set line guard the step that writes it", () => {
+        // The live silent miss: a real unguarded pipe on the last line, cleared
+        // because `set -euo pipefail` appears at the start of a line.
+        expect(enablesPipefail(generatesAGuardedScript)).toBe(false);
+    });
+
+    it("still sees the pipe that follows the here-doc", () => {
+        // The other half. Were the body stripped too greedily -- to the end of
+        // the script rather than to the delimiter -- this would go quiet and
+        // the guard would report success for the opposite reason.
+        expect(containsPipe(generatesAGuardedScript)).toBe(true);
+    });
+
+    it.each([
+        ["unquoted delimiter", "cat <<EOF\nset -euo pipefail\nEOF"],
+        ["single-quoted delimiter", "cat <<'EOF'\nset -euo pipefail\nEOF"],
+        ["double-quoted delimiter", 'cat <<"EOF"\nset -euo pipefail\nEOF'],
+        ["tab-stripping <<-", "cat <<-EOF\nset -euo pipefail\nEOF"],
+        ["indented closing delimiter", "cat <<EOF\n    set -euo pipefail\n    EOF"],
+        ["custom delimiter name", "cat <<SCRIPT\nset -euo pipefail\nSCRIPT"],
+    ])("strips a body opened with a %s", (_label, script) => {
+        expect(enablesPipefail(script)).toBe(false);
+    });
+
+    it("treats a pipe inside a here-doc body as data, not an operator", () => {
+        // Correct code: the step writes a pipeline into a file it never runs,
+        // so demanding pipefail of it would be a false positive.
+        expect(containsPipe("cat > run.sh <<'EOF'\na | b\nEOF")).toBe(false);
+    });
+
+    it("keeps the opening line, which can itself carry a real pipe", () => {
+        expect(containsPipe("cat <<EOF | tee out.txt\nhello\nEOF")).toBe(true);
+    });
+
+    it("leaves a script with no here-doc exactly as it was", () => {
+        const plain = "set -euo pipefail\nnpx tsc | sed 's/x/y/'";
+        expect(stripHeredocBodies(plain)).toBe(plain);
+    });
+
+    it("resumes reading real shell code after the delimiter", () => {
+        expect(enablesPipefail("cat <<EOF\nhello\nEOF\nset -euo pipefail\nnpx tsc | sed 's/x/y/'")).toBe(true);
+    });
+
+    // Residuals, stated rather than papered over. An arithmetic left-shift
+    // (`$((1 << n))`) looks like a here-doc opener to this lexer and would
+    // swallow the rest of the script, and an unclosed here-doc strips to the
+    // end. Both need real grammar to separate, both fail toward demanding a
+    // harmless `set -euo pipefail` or ignoring code, and -- measured rather
+    // than assumed -- no tracked CI file in the repo contains `<<` at all
+    // today, so neither is reachable. This whole function is preventive: the
+    // silent miss above is latent, not an active break.
+    it("is documented to mistake an arithmetic shift for a here-doc", () => {
+        expect(enablesPipefail("x=$((1 << n))\nset -euo pipefail")).toBe(false);
     });
 });
 
