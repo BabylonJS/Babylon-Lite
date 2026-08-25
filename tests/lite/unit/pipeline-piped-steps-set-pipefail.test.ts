@@ -694,14 +694,33 @@ describe("the hygiene guards cover every pipeline in the repo", () => {
         // it would rebuild by hand the inventory this walk exists to replace.
         // Name what a broken descent would *remove*, not what the walk currently
         // returns.
-        for (const [step, matches] of [
-            ["<repo root>", (file: string) => /^azure-pipelines[^/]*\.ya?ml$/.test(file)],
-            ["config/templates", (file: string) => file.startsWith("config/templates/")],
-            [".github/workflows", (file: string) => file.startsWith(".github/workflows/")],
-        ] as const) {
+        //
+        // Derived from SCANNED_ROOTS rather than written out, because a fixed
+        // list of floors under a growing list of things to floor has the same
+        // asymmetry as a total under a growing subject: it fixes the shrinkage
+        // direction and leaves the growth direction wide open. Spelled as a
+        // literal, these three names covered three roots -- and a fourth root
+        // added tomorrow would be floored by nothing at all, while every count
+        // in this test stayed healthy on the strength of the roots that still
+        // work. That is the same silence the named floors were introduced to
+        // end, one level up, in the list doing the flooring.
+        //
+        // It was also a third spelling of SCANNED_ROOTS -- directory plus
+        // pattern, restated -- in a file that has twice had to unify duplicated
+        // predicates. Deriving it removes the copy and the cardinality hole in
+        // one move.
+        //
+        // Membership is an exact directory match, never a prefix. A prefix would
+        // let `config/templates/upload-static-site.yml` satisfy a root at
+        // `config/`, so a new root would read as floored on the strength of a
+        // file belonging to a different one -- a floor answering "yes, covered"
+        // by pointing somewhere else, which is precisely the failure it exists
+        // to report.
+        const directoryOf = (file: string) => (file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "");
+        for (const { label } of SCANNED_ROOTS) {
             expect(
-                discovered.filter(matches),
-                `the walk returned nothing from ${step}. Either the descent into it broke, or its files stopped matching ` +
+                discovered.filter((file) => directoryOf(file) === label),
+                `the walk returned nothing from ${label || "<repo root>"}. Either the descent into it broke, or its files stopped matching ` +
                     `SUBJECT_PATTERNS. Both leave every guard downstream reporting success over a directory it never opened, ` +
                     `and the total-count floor above cannot see it once the repo root grows.`
             ).not.toHaveLength(0);
