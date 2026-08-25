@@ -272,10 +272,18 @@ describe("pipeline secret hygiene", () => {
 });
 
 /**
- * Walks the repo for YAML that carries an `Authorization:` header, so the
+ * Walks the repo for YAML carrying anything the clauses examine, so the
  * collector above can be compared against reality rather than against itself.
+ *
+ * Keyed on the union of the clause predicates, not on file shape. The first
+ * version discovered `Authorization` headers only -- but the mask clause reads
+ * *every line* of a collected file, so its subject is strictly larger. A
+ * masked credential with no Authorization header, in a directory outside the
+ * roots, was invisible: 33 passed, nothing named. Discovering by a narrower
+ * category than the guards read is a closure check that certifies part of its
+ * subject and reports on all of it.
  */
-function allYamlCarryingAnAuthorizationHeader(): string[] {
+function allYamlCarryingACredentialShape(): string[] {
     const skip = new Set(["node_modules", ".git", "dist", "build", "coverage", "out", ".turbo"]);
     const found: string[] = [];
 
@@ -287,7 +295,12 @@ function allYamlCarryingAnAuthorizationHeader(): string[] {
             const full = join(dir, name);
             if (statSync(full).isDirectory()) {
                 walk(full);
-            } else if (/\.ya?ml$/.test(name) && readFileSync(full, "utf8").split("\n").some(isAuthorizationHeader)) {
+            } else if (
+                /\.ya?ml$/.test(name) &&
+                readFileSync(full, "utf8")
+                    .split("\n")
+                    .some((l) => isAuthorizationHeader(l) || hasMaskedSecret(l))
+            ) {
                 found.push(relative(repoRoot, full).split(sep).join("/"));
             }
         }
@@ -297,7 +310,7 @@ function allYamlCarryingAnAuthorizationHeader(): string[] {
     return found;
 }
 
-describe("the mask guard reads every file that carries an Authorization header", () => {
+describe("the mask guard reads every file carrying anything its clauses examine", () => {
     // The sibling variable-groups guard got a closure check and this one did
     // not, on the reasoning that its three roots were already known correct.
     // That is coverage by *placement*: true of the tree as it stands, and with
@@ -313,14 +326,17 @@ describe("the mask guard reads every file that carries an Authorization header",
     // instruction that a reader follows correctly and is still wrong afterwards
     // cannot be fixed by rewording it -- so the enforcement is a test that
     // names the offending file, which stays true however many lists exist.
-    it("has no Authorization header outside its configured roots", () => {
+    it("has no credential-shaped line outside its configured roots", () => {
         const scanned = new Set(pipelineFiles().map(({ location }) => location));
-        const carrying = allYamlCarryingAnAuthorizationHeader();
+        const carrying = allYamlCarryingACredentialShape();
 
-        expect(carrying.length, "walked the repo and found no Authorization header at all — the assertion below would compare two empty sets").toBeGreaterThan(0);
+        expect(carrying.length, "walked the repo and found no credential-shaped line at all — the assertion below would compare two empty sets").toBeGreaterThan(0);
 
         const unread = carrying.filter((file) => !scanned.has(file)).sort();
 
-        expect(unread, "these files carry an Authorization header but the mask guard never reads them, so a masked credential in them is invisible:").toEqual([]);
+        expect(
+            unread,
+            "these files carry an Authorization header or a masked value, but the guard never reads them, so a credential in them is invisible. Add the directory to the roots list in pipelineFiles():"
+        ).toEqual([]);
     });
 });
