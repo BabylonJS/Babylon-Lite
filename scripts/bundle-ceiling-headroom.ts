@@ -11,15 +11,18 @@
  * ## Why headroom is worth reporting at all
  *
  * The ceilings are, in practice, ratchets pinned to whatever each scene measured when it
- * was last touched, not budgets with slack. Measured across the 224 scenes on master that
- * have both a tracked manifest and a ceiling:
+ * was last touched, not budgets with slack. Measured across the 241 scenes that have both a
+ * size and a ceiling, from ADO build 58227 — the first run to measure every scene at a single
+ * master commit rather than relying on per-scene manifests each author regenerated at a
+ * different time:
  *
- *   median headroom   1251 B      p25   103 B      p10   56 B
- *   under  256 B       87 scenes (39%)
- *   under 1024 B      104 scenes (46%)
- *   under 2048 B      122 scenes (54%)
+ *   median headroom   1536 B      p25   205 B      p10   113 B
+ *   under  256 B       71 scenes (29%)
+ *   under 1024 B      105 scenes (44%)
+ *   under 2048 B      131 scenes (54%)
  *
- * That distribution is what makes concurrent PRs dangerous. Two PRs can each measure under
+ * The tightest scene on master sits 9 bytes below its ceiling.
+ * * That distribution is what makes concurrent PRs dangerous. Two PRs can each measure under
  * a ceiling — each was built against a master that did not contain the other — and breach
  * it together once both land. Azure DevOps builds the *merge commit* for a PR, so once
  * master is over a ceiling, every subsequent PR's Bundle Size job fails until the bytes are
@@ -38,11 +41,11 @@
  * `0 KB` or `+1 KB`. Below this line an author cannot see the risk from the numbers they are
  * shown, which is precisely where a warning earns its place.
  *
- * It is also where the population splits: median headroom is 1251 B, so 1 KB flags the tight
- * ~46% and stays quiet about the roomy half. The previous value of 256 B was not a "quiet"
- * threshold — it already flagged 87 scenes — it was just an arbitrary point well inside the
+ * It is also where the population splits: median headroom is 1536 B, so 1 KB flags the tight
+ * ~44% and stays quiet about the roomy half. The previous value of 256 B was not a "quiet"
+ * threshold — it already flagged 71 scenes — it was just an arbitrary point well inside the
  * risk band, and it said nothing about the ~1 KB range where most near-ceiling scenes
- * actually sit. Raising further was rejected: 2 KB flags 54% of scenes and 4 KB flags 71%,
+ * actually sit. Raising further was rejected: 2 KB flags 54% of scenes and 4 KB flags 72%,
  * at which point the warning is wallpaper nobody reads.
  *
  * This is a WARNING threshold. It is not a ceiling and it never fails a build.
@@ -62,10 +65,13 @@ export const CRITICAL_HEADROOM_BYTES = 256;
 /**
  * How many scenes to name explicitly before collapsing the rest into a count.
  *
- * The tight set is ~104 scenes on master and would swamp both a build log and a PR comment
+ * The tight set is ~105 scenes on master and would swamp both a build log and a PR comment
  * if listed in full. Naming a fixed handful of the tightest and counting the remainder keeps
  * the output a constant size no matter how the flagged set grows, so widening the threshold
  * changes the numbers in the report without changing how much of it there is to read.
+ *
+ * Build 58227 shows the failure this avoids: at the old 256 B threshold its log already had to
+ * truncate, printing ten scenes and then "… and 61 more under 256 B".
  */
 export const HEADROOM_LIST_LIMIT = 10;
 
@@ -144,7 +150,12 @@ export function computeSceneHeadroom(inputs: readonly SceneHeadroomInput[]): Sce
     return { over, under };
 }
 
-/** Scenes at or below a headroom threshold, preserving the tightest-first order. */
+/**
+ * Scenes strictly below a headroom threshold, preserving the tightest-first order.
+ *
+ * Strict rather than inclusive, so the predicate reads the way the reports word it — "under
+ * 1.0 KB" — and a scene sitting exactly on the boundary is not counted as having crossed it.
+ */
 export function scenesUnderHeadroom(under: readonly SceneHeadroom[], thresholdBytes: number): SceneHeadroom[] {
     return under.filter((s) => s.headroomBytes < thresholdBytes);
 }

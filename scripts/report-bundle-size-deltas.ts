@@ -98,12 +98,17 @@ export function computeDeltas(current: Manifest, master: Manifest, sceneConfigs:
 }
 
 /**
- * Exact byte movement per scene, keyed by manifest key.
+ * Byte-level movement per scene, keyed by manifest key.
  *
  * Deliberately not derived from `computeDeltas`: that rounds to whole KB and drops anything
  * that rounds to zero, which is exactly the movement that matters here. A +400 B change shows
  * up in the delta table as nothing at all, yet it is enough to push a scene with 300 B of
  * headroom over its ceiling.
+ *
+ * Resolution is whatever `measuredBytesOf` can supply: byte-exact when both manifests recorded
+ * `rawBytes`, which is what the current measurement writes, and quantised to 0.1 KB (~±51 B)
+ * only for older entries that predate that field. So the values below are reported in whole
+ * bytes without promising that every input was measured to the byte.
  */
 export function computeMovedBytes(current: Manifest, master: Manifest): Map<string, number> {
     const moved = new Map<string, number>();
@@ -232,7 +237,7 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     lines.push("</details>");
     lines.push("");
     lines.push(
-        "*Headroom is the exact distance to a scene's `maxRawKB` ceiling in `scene-config.json`. " +
+        "*Headroom is the distance to a scene's `maxRawKB` ceiling in `scene-config.json`. " +
             "Two PRs can each measure under a ceiling and still breach it together once both land — and because CI builds the merge commit, " +
             "every later PR's Bundle Size job then fails until the bytes are recovered. If a scene you touched is near zero, consider landing separately.*"
     );
@@ -246,7 +251,7 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
  * A headroom-only comment is a real case, not a degenerate one. The delta tables round to whole
  * KB, so a PR whose only effect is a few hundred bytes produces no rows at all — and that is
  * exactly the change this feature exists to catch, because a few hundred bytes is enough to
- * consume the headroom of the ~46% of scenes that have under 1 KB of it. Suppressing the comment
+ * consume the headroom of the ~44% of scenes that have under 1 KB of it. Suppressing the comment
  * whenever the tables are empty would make the report inert in its most important case.
  */
 export function formatComment(deltas: BundleDelta[], headroom: HeadroomReport = { lines: [], movedIntoDangerZone: false }): string {
