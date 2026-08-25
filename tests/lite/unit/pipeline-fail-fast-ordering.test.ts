@@ -182,6 +182,25 @@ const CHECK_PREREQUISITES: { name: string; why: string; matches: (step: string) 
  */
 const PINNED_PREREQUISITES = ["checkout"];
 
+/** Heading of the TESTING.md section the allowance is bound to. */
+const ALLOWANCE_HEADING = "### Fail-Fast Ordering in the Bundle-Manifest Pipeline";
+
+/**
+ * The allowance section's body, bounded by the next heading.
+ *
+ * Every caller depends on this slice being the right region, and nothing a
+ * caller asserts can tell that it is not -- they all ask whether some string is
+ * present, and a slice that has grown contains strictly more strings. The
+ * region is floored once, by its own clause, rather than by each reader.
+ */
+function allowanceSection(): string {
+    const doc = readFileSync(join(repoRoot, "TESTING.md"), "utf8");
+    const start = doc.indexOf(ALLOWANCE_HEADING);
+    const end = doc.indexOf("\n### ", start + ALLOWANCE_HEADING.length);
+
+    return start < 0 || end < 0 ? "" : doc.slice(start + ALLOWANCE_HEADING.length, end);
+}
+
 describe("the baseline pipeline validates its deploy configuration before doing expensive work", () => {
     it("runs nothing but the check's own prerequisites before the deploy configuration check", () => {
         // Stated as a universal over the preceding steps rather than as a list
@@ -248,43 +267,87 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         ).toEqual([]);
     });
 
-    it("documents the allowance in a file the constant cannot edit", () => {
-        // The pin above makes widening cost three edits -- but all three are in
-        // this file, so one diff in one artifact carries the whole decision.
-        // The mechanical test for whether a binding binds is "can one edit
-        // reach both sides", and constant-plus-its-own-comment fails it: the
-        // reason travels with the change that needs justifying.
+    it("can locate a bounded allowance section in TESTING.md", () => {
+        // Split from the binding below, which used to be one test carrying five
+        // assertions. Two questions -- *can this check see its subject* and *is
+        // the allowance justified* -- and a control could only ever name the
+        // test, never which of them had answered.
         //
-        // TESTING.md cannot be edited by editing this constant, which is the
-        // entire point. Widening the allowance now has to land in prose, in the
-        // same review, next to the paragraph explaining why the check exists.
+        // Everything here is about the region, because the region was the
+        // defect. The binding located the section with indexOf and a split on
+        // the next heading, and every assertion it made was a `contains`: each
+        // one gets *easier* as the slice grows. Measured -- change the following
+        // heading from `###` to `####`, an edit about a different section, and
+        // the slice runs to end of file; a prerequisite named `PERF_FRAMES` was
+        // then "documented" by the variable list two sections further down.
+        // Five passed.
         //
-        // A deliberately low bar: it asks that the step be named there, not
-        // that the reason be good. It cannot judge cost -- nothing here can --
-        // it just refuses to let the exemption be granted silently in a file
-        // only this test reads.
+        // A presence floor is monotone in the wrong direction: it can see the
+        // region become empty and never see it become wrong.
         const doc = readFileSync(join(repoRoot, "TESTING.md"), "utf8");
-        const heading = "### Fail-Fast Ordering in the Bundle-Manifest Pipeline";
-        const start = doc.indexOf(heading);
+        const occurrences = doc.split(ALLOWANCE_HEADING).length - 1;
 
         expect(
-            start,
-            `${heading} is missing from TESTING.md. It is the second half of the prerequisite allowance: without it, widening CHECK_PREREQUISITES becomes a one-file decision again and this clause silently stops asking anything.`
-        ).toBeGreaterThanOrEqual(0);
+            occurrences,
+            `TESTING.md contains ${occurrences} copies of "${ALLOWANCE_HEADING}". The binding below reads the first, so a second one makes which text is authoritative depend on document order.`
+        ).toBe(1);
 
-        const body = doc.slice(start + heading.length).split("\n### ")[0] ?? "";
+        const start = doc.indexOf(ALLOWANCE_HEADING);
+        const end = doc.indexOf("\n### ", start + ALLOWANCE_HEADING.length);
 
-        // Floors the section itself, not just its presence. A heading left in
-        // place over an emptied body would satisfy every check below by
-        // containing nothing to disagree with.
-        expect(body.trim().length, `${heading} is present but empty, so the checks below would pass on an absent list`).toBeGreaterThan(200);
-        expect(body, `${heading} no longer names the check it is about, so it is documenting something else`).toContain(PREFLIGHT_STEP);
+        expect(
+            end,
+            `"${ALLOWANCE_HEADING}" is not followed by another \`###\` heading, so its section is bounded only by the end of the file and absorbs everything after it. That makes the binding below satisfiable by text with nothing to do with the allowance. Restore the following heading rather than relaxing this.`
+        ).toBeGreaterThan(start);
+
+        const body = doc.slice(start + ALLOWANCE_HEADING.length, end);
+
+        // The upper bound, and it is a property rather than a length: a section
+        // that has swallowed its neighbour contains that neighbour's heading. It
+        // tightens exactly as the region widens, which is what the `contains`
+        // assertions below cannot do.
+        expect(
+            body.match(/^#{1,6} /m) ?? [],
+            `the allowance section contains a further markdown heading, so the slice has grown past the section it names and the checks below are reading someone else's text.`
+        ).toEqual([]);
+
+        expect(body.trim().length, `"${ALLOWANCE_HEADING}" is present but empty, so the binding below would pass on an absent list`).toBeGreaterThan(200);
+        expect(body, `"${ALLOWANCE_HEADING}" no longer names the check it is about, so it is documenting something else`).toContain(PREFLIGHT_STEP);
+    });
+
+    it("documents the allowance in a file the constant cannot edit", () => {
+        // The pin above makes widening CHECK_PREREQUISITES cost three edits --
+        // but all three are in this file, so one diff in one artifact carries
+        // the whole decision. The mechanical test for whether a binding binds is
+        // "can one edit reach both sides", and constant-plus-its-own-comment
+        // fails it: the reason travels with the change that needs justifying.
+        //
+        // TESTING.md cannot be edited by editing this constant, which is the
+        // entire point. Widening the allowance has to land in prose, in the same
+        // review, next to the paragraph explaining why the check exists.
+        //
+        // A deliberately low bar: it asks that the step be named there, not that
+        // the reason be good. It cannot judge cost -- nothing here can -- it
+        // just refuses to let the exemption be granted silently in a file only
+        // this test reads. The clause above is what keeps this one honest.
+        const body = allowanceSection();
 
         const undocumented = CHECK_PREREQUISITES.filter(({ name }) => !body.includes(name)).map(({ name }) => name);
 
         expect(
             undocumented,
-            `steps allowed to run before "${PREFLIGHT_STEP}" that TESTING.md does not mention under ${heading}. Add them there, with the reason, in this same change — the allowance is meant to be readable by someone who is reviewing the pipeline rather than this test.`
+            `steps allowed to run before "${PREFLIGHT_STEP}" that TESTING.md does not mention under ${ALLOWANCE_HEADING}. Add them there, with the reason, in this same change -- the allowance is meant to be readable by someone reviewing the pipeline rather than this test.`
+        ).toEqual([]);
+
+        // A step cannot be both the work the check stands in front of and a
+        // thing permitted to run before it. Independent of the region checks:
+        // this one fails on a section that is the right size and says the wrong
+        // thing.
+        const contradicted = GATED_STEPS.filter((name) => body.includes(name));
+
+        expect(
+            contradicted,
+            `the allowance section names work that "${PREFLIGHT_STEP}" exists to stand in front of. A step cannot be both gated and permitted ahead of the gate; one of the two claims is wrong.`
         ).toEqual([]);
     });
 
