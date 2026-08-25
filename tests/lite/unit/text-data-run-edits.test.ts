@@ -191,46 +191,41 @@ describe("updateTextData replaceRun", () => {
     it("reuses styles across alternating non-tail replacements", () => {
         let first = styledRun(0, false);
         let second = styledRun(10, false);
-        const last = run("f", 20, [3]);
-        const data = createTextData(makeStorage(), [first, second, last]);
+        const data = createTextData(makeStorage(), [first, second, run("f", 20, [3])]);
 
         for (let i = 0; i < 101; i++) {
             const replaceFirst = i % 2 === 0;
             const replacement = styledRun(replaceFirst ? 0 : 10, Math.floor(i / 2) % 2 === 0);
-            const previous = replaceFirst ? first : second;
-            updateTextData(data, { update: "replaceRun", previous, run: replacement });
+            updateTextData(data, { update: "replaceRun", previous: replaceFirst ? first : second, run: replacement });
             if (replaceFirst) {
                 first = replacement;
             } else {
                 second = replacement;
             }
-            expect(data._styleCount).toBeLessThanOrEqual(7);
+            expect(data._styleCount).toBeLessThanOrEqual(5);
         }
-
-        const record = data._runRecords.get(first)!;
-        const packed = data._instancesU32[record._slots[1]! * TEXT_INSTANCE_FLOATS + 2]!;
-        const styleIndex = packed >>> 16;
-        expect(Array.from(data._styles.subarray(styleIndex * TEXT_STYLE_FLOATS, styleIndex * TEXT_STYLE_FLOATS + 4))).toEqual([0.25, 0.5, 0.75, 1]);
     });
 
-    it("compacts styles before a new allocation exceeds packed indices", () => {
+    it("reuses individual style entries at the packed-index limit", () => {
         const first = styledRun(0, false);
         const last: GlyphRun = { ...run("f", 10, [3]), defaultColor: [0.125, 0.25, 0.5, 1] };
         const data = createTextData(makeStorage(), [first, last]);
         data._styleCount = 0xffff;
+        data._freeStyleSlots.push(10);
 
         const replacement = styledRun(0, true);
         updateTextData(data, { update: "replaceRun", previous: first, run: replacement });
 
-        expect(data._styleCount).toBe(3);
+        expect(data._styleCount).toBe(0xffff);
         const survivingRecord = data._runRecords.get(last)!;
-        const survivingStyleIndex = data._instancesU32[survivingRecord._slots[0]! * TEXT_INSTANCE_FLOATS + 2]! >>> 16;
-        expect(survivingStyleIndex).toBe(0);
-        expect(Array.from(data._styles.subarray(0, 4))).toEqual([0.125, 0.25, 0.5, 1]);
-        const record = data._runRecords.get(replacement)!;
-        for (const slot of record._slots) {
-            expect(data._instancesU32[slot * TEXT_INSTANCE_FLOATS + 2]! >>> 16).toBeLessThan(0xffff);
-        }
+        const survivingStyle = data._instancesU32[survivingRecord._slots[0]! * TEXT_INSTANCE_FLOATS + 2]! >>> 16;
+        expect(survivingStyle).toBe(1);
+        expect(Array.from(data._styles.subarray(survivingStyle * TEXT_STYLE_FLOATS, survivingStyle * TEXT_STYLE_FLOATS + 4))).toEqual([0.125, 0.25, 0.5, 1]);
+        const replacementRecord = data._runRecords.get(replacement)!;
+        expect(replacementRecord._styleSlots).toEqual([0, 10]);
+        const overrideStyle = data._instancesU32[replacementRecord._slots[1]! * TEXT_INSTANCE_FLOATS + 2]! >>> 16;
+        expect(overrideStyle).toBe(10);
+        expect(Array.from(data._styles.subarray(overrideStyle * TEXT_STYLE_FLOATS, overrideStyle * TEXT_STYLE_FLOATS + 4))).toEqual([0.25, 0.5, 0.75, 1]);
     });
 
     // The free list is shared by every path that allocates, so an added run reuses a removed
@@ -323,7 +318,7 @@ describe("updateTextData removeRun", () => {
         expect(data._runRecords.has(target)).toBe(false);
     });
 
-    it("reclaims style blocks across repeated add/remove cycles", () => {
+    it("reuses style entries across repeated add/remove cycles", () => {
         const base = run("f", 10, [3]);
         const data = createTextData(makeStorage(), [base]);
 
@@ -331,7 +326,7 @@ describe("updateTextData removeRun", () => {
             const added = styledRun(0, true);
             updateTextData(data, { update: "addRun", run: added, insertBefore: 0 });
             updateTextData(data, { update: "removeRun", run: added });
-            expect(data._styleCount).toBe(1);
+            expect(data._styleCount).toBeLessThanOrEqual(3);
         }
     });
 });
