@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join, relative, sep } from "path";
 
 const repoRoot = join(__dirname, "..", "..", "..");
@@ -80,23 +81,55 @@ interface PipelineFile {
     requiresDeployToken: boolean;
 }
 
-function pipelineFiles(): PipelineFile[] {
-    // A mask copied out of a build log is wrong in any CI file, so the subject
-    // is every file that can carry one. The original glob read the repo root
-    // alone: 7 of the repo's 10 `Authorization` headers, while its own doc
-    // comment claimed to cover the pipelines. The three it missed are `curl`
-    // uploads in the two shared templates -- included by azure-pipelines.yml at
-    // four call sites, so they run on every PR -- and one workflow. That is
-    // precisely the shape this bug takes.
-    const roots = [
-        { dir: repoRoot, label: "", match: /^azure-pipelines.*\.ya?ml$/, requiresDeployToken: true },
-        { dir: join(repoRoot, "config", "templates"), label: "config/templates", match: /\.ya?ml$/, requiresDeployToken: true },
-        { dir: join(repoRoot, ".github", "workflows"), label: ".github/workflows", match: /\.ya?ml$/, requiresDeployToken: false },
-    ];
+/**
+ * Whether a filename is YAML, asked by the enumeration below *and* by the
+ * closure walk that certifies it.
+ *
+ * It was spelled four times as `/\.ya?ml$/`. Identical, so no bug -- but those
+ * sites exist precisely to be compared, and a drift between them is the one
+ * disagreement nothing downstream can catch, because the comparison *is* the
+ * check.
+ *
+ * The asymmetry is what makes this worth unifying rather than merely tidying.
+ * The walk must never recognise *fewer* file kinds than the enumeration:
+ *
+ *   walk wider than enumeration  -> flags a file the guard never reads: loud.
+ *   walk narrower                -> the closure check stops looking at exactly
+ *                                   the files it exists to find, passes, and
+ *                                   reports on a subject it no longer covers.
+ *
+ * One ordering is harmless and the other is silent, and until now nothing here
+ * recorded which one we had. Sharing the predicate removes the choice; the
+ * property below pins the direction.
+ */
+export function isYamlFile(name: string): boolean {
+    return /\.ya?ml$/.test(name);
+}
 
+/**
+ * The directories the guard reads, and what it accepts in each.
+ *
+ * At module scope so the closure check below can assert its own predicate
+ * against these rather than against a copy of them.
+ *
+ * A mask copied out of a build log is wrong in any CI file, so the subject
+ * is every file that can carry one. The original glob read the repo root
+ * alone: 7 of the repo's 10 `Authorization` headers, while its own doc
+ * comment claimed to cover the pipelines. The three it missed are `curl`
+ * uploads in the two shared templates -- included by azure-pipelines.yml at
+ * four call sites, so they run on every PR -- and one workflow. That is
+ * precisely the shape this bug takes.
+ */
+export const PIPELINE_ROOTS = [
+    { dir: repoRoot, label: "", match: (n: string) => n.startsWith("azure-pipelines") && isYamlFile(n), requiresDeployToken: true },
+    { dir: join(repoRoot, "config", "templates"), label: "config/templates", match: isYamlFile, requiresDeployToken: true },
+    { dir: join(repoRoot, ".github", "workflows"), label: ".github/workflows", match: isYamlFile, requiresDeployToken: false },
+];
+
+function pipelineFiles(): PipelineFile[] {
     const files: PipelineFile[] = [];
-    for (const { dir, label, match, requiresDeployToken } of roots) {
-        const names = readdirSync(dir).filter((f) => match.test(f));
+    for (const { dir, label, match, requiresDeployToken } of PIPELINE_ROOTS) {
+        const names = readdirSync(dir).filter((f) => match(f));
 
         // A floor per collector, not one for the function. A per-function floor
         // cannot detect a single root that stops matching, because the others
@@ -428,7 +461,7 @@ export function isWalkableDir(name: string): boolean {
  * category than the guards read is a closure check that certifies part of its
  * subject and reports on all of it.
  */
-function allYamlCarryingACredentialShape(): string[] {
+function allYamlCarryingACredentialShape(root: string = repoRoot): string[] {
     const found: string[] = [];
 
     const walk = (dir: string): void => {
@@ -445,16 +478,16 @@ function allYamlCarryingACredentialShape(): string[] {
                     walk(full);
                 }
             } else if (
-                /\.ya?ml$/.test(name) &&
+                isYamlFile(name) &&
                 stripDocumentationText(readFileSync(full, "utf8"))
                     .split("\n")
                     .some((l) => isAuthorizationHeader(l) || hasMaskedSecret(l))
             ) {
-                found.push(relative(repoRoot, full).split(sep).join("/"));
+                found.push(relative(root, full).split(sep).join("/"));
             }
         }
     };
-    walk(repoRoot);
+    walk(root);
 
     return found;
 }
@@ -559,6 +592,67 @@ describe("the credential walk enters the right directories", () => {
         ["tests", false],
     ])("isWalkableDir(%s) -> %s", (name, expected) => {
         expect(isWalkableDir(name as string)).toBe(expected);
+    });
+});
+
+describe("the walk recognises every file kind the enumeration collects", () => {
+    // The relation, not the members. A fixture list would need me to guess
+    // which extension drifts next, and the drift is by definition the one
+    // nobody thought of -- so this asserts the containment that must hold for
+    // *any* name, over candidates chosen to straddle the boundary.
+    //
+    // Direction matters and is the whole point: a walk narrower than the
+    // enumeration stops discovering exactly the files it exists to find, and
+    // then passes. Only `enumeration => walk` is asserted; the converse is
+    // deliberately free, because the walk is meant to be the wider of the two.
+    it.each([
+        "azure-pipelines.yml",
+        "azure-pipelines-demos.yaml",
+        "upload-static-site.yml",
+        "compat-sync-trigger.yaml",
+        "azure-pipelines.txt",
+        "notes.md",
+        "azure-pipelines",
+        "Dockerfile",
+    ])("any root that collects %s is a file the walk would also read", (name) => {
+        for (const { label, match } of PIPELINE_ROOTS) {
+            if (match(name)) {
+                expect(
+                    isYamlFile(name),
+                    `${label || "the repo root"} collects ${name}, but the closure walk would skip it — the walk would then certify a subject it no longer covers`
+                ).toBe(true);
+            }
+        }
+    });
+
+    it("the walk itself accepts both extensions, through the real walk", () => {
+        // The property above pins `roots => isYamlFile`, which is silent about
+        // whether the *walk* asks isYamlFile at all. A future edit inlining a
+        // narrower literal at the call site satisfies every assertion above
+        // while discovering less -- the call site is itself an untested
+        // predicate. This runs the real walk over a fixture tree instead.
+        const dir = mkdtempSync(join(tmpdir(), "hygiene-walk-"));
+        try {
+            writeFileSync(join(dir, "a.yaml"), '  - script: curl -H "Authorization: ******" https://x\n');
+            writeFileSync(join(dir, "b.yml"), "  password: ******\n");
+            writeFileSync(join(dir, "c.txt"), "  password: ******\n");
+            expect(allYamlCarryingACredentialShape(dir).sort()).toEqual(["a.yaml", "b.yml"]);
+        } finally {
+            // Asserted more strictly than the check needs, because a delete is
+            // the one step whose failure re-running cannot undo -- an earlier
+            // probe here removed 47 tracked fixtures through a path it had not
+            // established was its own.
+            expect(dir.startsWith(tmpdir()) && dir.includes("hygiene-walk-")).toBe(true);
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it("the candidates actually exercise both sides of the boundary", () => {
+        // Without this the block above passes vacuously if every candidate is
+        // rejected by every root -- the same empty-subject failure the
+        // per-collector floors exist to catch.
+        const collected = ["azure-pipelines.yml", "azure-pipelines-demos.yaml", "azure-pipelines.txt", "notes.md"].filter((n) => PIPELINE_ROOTS.some(({ match }) => match(n)));
+        expect(collected).toEqual(["azure-pipelines.yml", "azure-pipelines-demos.yaml"]);
     });
 });
 
