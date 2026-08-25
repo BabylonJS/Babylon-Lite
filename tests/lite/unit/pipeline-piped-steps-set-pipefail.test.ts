@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
-import { isShellKey, isWalkableDir, isYamlFile, pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS, SHELL_STEP_KEY, stripNonShellMultilineScalars } from "./pipeline-files";
+import { join } from "path";
+import {
+    isShellKey,
+    isWalkableDir,
+    isYamlFile,
+    pipelineFilesInRepo,
+    pipelineYamlFiles,
+    repoRoot,
+    SCANNED_ROOTS,
+    SHELL_STEP_KEY,
+    stripNonShellMultilineScalars,
+} from "./pipeline-files";
 
 interface ShellScript {
     location: string;
@@ -723,6 +734,37 @@ describe("containsPipe distinguishes a pipe from the character", () => {
     // should flip with it -- deliberately, not silently.
     it("still over-flags a case alternation, which needs grammar rather than lexing", () => {
         expect(containsPipe('case "$1" in a|b) echo hi ;; esac')).toBe(true);
+    });
+});
+
+describe("the pipe that lives outside the YAML", () => {
+    // This guard's subject is inline pipeline scripts. A step that invokes a
+    // *file* which pipes has the identical failure mode one level down, and
+    // nothing above would see it: the step is `bash scripts/foo.sh`, which
+    // contains no pipe at all.
+    //
+    // Measured rather than assumed: one tracked `.sh` file in the repo, invoked
+    // from azure-pipelines.yml, and it does pipe. So the boundary is real and
+    // has exactly one inhabitant -- which makes pinning that inhabitant cheaper
+    // and more honest than growing the scanner to a second file format for a
+    // population of one.
+    //
+    // It is correct today, and correct in the interesting way: `${PIPESTATUS[0]}`
+    // rather than `$?`, deliberately, because `$?` after a pipeline is the
+    // *last* stage's status -- `tee` here, which always succeeds. That is the
+    // same defect this whole file exists to prevent, and the only place in the
+    // repo where someone met it and handled it explicitly. Rewriting it to `$?`
+    // would silently discard every BrowserStack parity failure and report the
+    // most expensive job in CI as green.
+    it("captures the piped command's status, not the reporter's", () => {
+        const script = readFileSync(join(repoRoot, "scripts/browserstack-wait.sh"), "utf8");
+        const piped = script.split("\n").filter((line) => containsPipe(line) && !line.trim().startsWith("#"));
+
+        expect(piped.length, "expected the piped invocation to still be here; if it moved, re-point this guard rather than deleting it").toBeGreaterThan(0);
+
+        // `$?` on the line after a pipe is the defect. PIPESTATUS[0] is the fix.
+        expect(script).toContain("${PIPESTATUS[0]}");
+        expect(script).not.toMatch(/\|[^\n]*\n\s*(?:local\s+)?exit_code=\$\?/);
     });
 });
 
