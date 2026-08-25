@@ -750,6 +750,13 @@ stages:
                 # pipelines in this repo (bundle-manifest, compat-sync, npm-publish).
                 # Do not remove it, and keep it on any new step that pipes a real command
                 # into a formatter.
+                #
+                # This is enforced, not merely advised:
+                # tests/lite/unit/pipeline-piped-steps-set-pipefail.test.ts fails on any
+                # piped step that omits it, across `azure-pipelines*.yml`,
+                # `config/templates/` and `.github/workflows/` — the Actions workflows
+                # included because `run:` steps execute under `bash -e`, which sets
+                # errexit but not pipefail, so they have exactly this blind spot.
                 - script: |
                       set -euo pipefail
                       npx tsc -p packages/babylon-lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
-import { pipelineFilesInRepo, pipelineYamlFiles } from "./pipeline-files";
+import { pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS } from "./pipeline-files";
 
 interface ShellScript {
     location: string;
+    root: string;
     body: string;
     kind: "block" | "inline";
 }
@@ -36,10 +37,13 @@ function shellScripts(): ShellScript[] {
     expect(files.length, "no azure-pipelines*.yml files found").toBeGreaterThan(0);
 
     const scripts: ShellScript[] = [];
-    for (const { path, location: file } of files) {
+    for (const { path, location: file, root } of files) {
         const lines = readFileSync(path, "utf8").split("\n");
         for (let i = 0; i < lines.length; i++) {
-            const key = /^(\s*)(?:-\s+)?(?:script|bash):(.*)$/.exec(lines[i] ?? "");
+            // `run` is the GitHub Actions spelling of the same thing. Verified
+            // that no Azure file in this repo uses the key, so accepting it
+            // here cannot misfire on them.
+            const key = /^(\s*)(?:-\s+)?(?:script|bash|run):(.*)$/.exec(lines[i] ?? "");
             if (!key) {
                 continue;
             }
@@ -49,7 +53,7 @@ function shellScripts(): ShellScript[] {
             // Single-line form. It cannot be split across lines, so whatever
             // follows the key is the whole script.
             if (rest && !/^[|>][-+]?$/.test(rest)) {
-                scripts.push({ location: `${file}:${i + 1}`, body: rest.replace(/^["']|["']$/g, ""), kind: "inline" });
+                scripts.push({ location: `${file}:${i + 1}`, root, body: rest.replace(/^["']|["']$/g, ""), kind: "inline" });
                 continue;
             }
             if (!rest) {
@@ -70,7 +74,7 @@ function shellScripts(): ShellScript[] {
                 }
                 body.push(line);
             }
-            scripts.push({ location: `${file}:${i + 1}`, body: body.join("\n"), kind: "block" });
+            scripts.push({ location: `${file}:${i + 1}`, root, body: body.join("\n"), kind: "block" });
             i = j - 1;
         }
     }
@@ -83,6 +87,20 @@ function shellScripts(): ShellScript[] {
     // inline ~68), so they trip on breakage rather than on normal churn.
     expect(scripts.filter((s) => s.kind === "block").length, "suspiciously few block-scalar scripts parsed").toBeGreaterThan(20);
     expect(scripts.filter((s) => s.kind === "inline").length, "suspiciously few single-line scripts parsed").toBeGreaterThan(20);
+
+    // And a floor per *root*, which the two above cannot substitute for. The
+    // repository root supplies scripts by the dozen, so a total-count floor
+    // stays comfortably satisfied while an entire directory contributes
+    // nothing -- non-vacuous and narrower than its stated subject at the same
+    // time. That is precisely how `config/templates/` and `.github/workflows/`
+    // each went unread while every existing assertion reported success.
+    for (const { label } of SCANNED_ROOTS) {
+        const root = label || "<repo root>";
+        expect(
+            scripts.filter((s) => s.root === root).length,
+            `no shell scripts parsed from ${root} -- it is listed in SCANNED_ROOTS but contributed nothing, so the invariant is unenforced there`
+        ).toBeGreaterThan(0);
+    }
     return scripts;
 }
 
@@ -185,7 +203,7 @@ describe("the hygiene guards cover every pipeline in the repo", () => {
         // Guard the discovery itself. If the walk or the predicate breaks, an
         // empty set makes the coverage assertion below vacuously true -- the
         // exact defect this test exists to make impossible.
-        expect(discovered.length, "no pipeline YAML discovered -- the walk or the step predicate is broken").toBeGreaterThanOrEqual(9);
+        expect(discovered.length, "no pipeline YAML discovered -- the walk or the step predicate is broken").toBeGreaterThanOrEqual(10);
 
         // Compare full repo-relative paths, never basenames. A basename match
         // would treat `some-dir/azure-pipelines.yml` as covered because the
