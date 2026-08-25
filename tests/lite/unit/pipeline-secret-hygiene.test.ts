@@ -481,6 +481,22 @@ describe("pipeline secret hygiene", () => {
             expect(locations, `no Authorization header collected from ${required} — the assertions below cover less than they claim`).toContain(required);
         }
 
+        // Named floors ask "any", never "how many", so within-file loss is
+        // invisible to them: measured, headers 10 -> 3 with the three named
+        // files intact passes 68/68. The floor that sees it cannot be a count,
+        // which would be a hand-maintained inventory, so compare the *same*
+        // predicate across two substrates -- raw text and stripped text. The
+        // difference is exactly what the strip removed.
+        for (const file of pipelineFiles()) {
+            const raw = readFileSync(file.path, "utf8").split("\n").filter(isAuthorizationHeader).length;
+            const kept = headers.filter(({ location }) => location === file.location).length;
+
+            expect(
+                kept,
+                `the strip removed ${raw - kept} Authorization header line(s) from ${file.location} before the assertions below ran. A header inside a documentation block is where a copied mask hides, so this needs reading rather than silencing`
+            ).toBe(raw);
+        }
+
         // The universal property: the header must interpolate *something*. A
         // copied mask is a bare literal, so this catches the bug in any CI
         // dialect, including files that legitimately never touch DEPLOY_TOKEN.
