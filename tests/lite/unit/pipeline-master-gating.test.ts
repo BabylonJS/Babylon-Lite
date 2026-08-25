@@ -816,10 +816,12 @@ function expensiveWorkIn(body: string): string[] {
  * a job that type-checks on every push as validating nothing. A guard that
  * fires on a healthy pipeline gets deleted, which is worse than the miss.
  *
- * The `playwright` entry is currently unreachable, because the only playwright
- * command here is an install and installs are excluded above. It stays because
- * the first `playwright test` step anybody adds needs it, and its correctness
- * is pinned to the manifest rather than to my memory.
+ * A claim retracted here rather than left standing: I wrote that the
+ * `playwright` entry was unreachable because every playwright command in this
+ * repository is an install. That was reasoning, and it is wrong -- `npx
+ * playwright test` appears five times across these pipelines. The entry is
+ * reachable, and its correctness is pinned to the manifest rather than to my
+ * memory of the file.
  */
 const TOOL_ALIASES: Record<string, string> = { tsc: "typescript", playwright: "@playwright/test" };
 
@@ -868,9 +870,27 @@ function toolInvokedBy(command: string): string | undefined {
  */
 const SETUP_WORK = /\binstall\b/;
 
+/**
+ * Invocations that name a tool and ask it nothing.
+ *
+ * The clause below used to be satisfied by the *name* of a command, which is
+ * one level below a declaration and still not work. Measured on the committed
+ * tree: rewriting every step of all three master jobs to `npx vitest --version`
+ * and `npx eslint --version` left all sixteen clauses green. Each job invokes a
+ * real devDependency, exits zero and validates nothing -- the same shape as a
+ * step that keeps its `env:` block after its script stops checking anything,
+ * one level further in.
+ *
+ * The four flags are excluded on measurement rather than on taste: none of
+ * `--version`, `--help`, or a standalone `-v` / `-h` appears in any pipeline in
+ * this repository today, so excluding them cannot make this clause fire on a
+ * healthy file.
+ */
+const DIAGNOSTIC_ONLY = /(?:^|\s)(?:--version|--help|-v|-h)(?:\s|$)/;
+
 function validationToolsIn(body: string, tooling: Set<string>): string[] {
     const found = commandsIn(body)
-        .filter((command) => !SETUP_WORK.test(command))
+        .filter((command) => !SETUP_WORK.test(command) && !DIAGNOSTIC_ONLY.test(command))
         .map((command) => toolInvokedBy(command))
         .filter((tool): tool is string => tool !== undefined && tooling.has(tool));
 
@@ -1825,6 +1845,27 @@ describe("pull-request jobs cannot run on a master build", () => {
         expect(
             validationToolsIn("steps:\n  - script: echo skipping\n", tooling),
             "a step that only echoes resolves as validation, so this clause cannot tell work from a no-op"
+        ).toEqual([]);
+
+        // The same floor one level in, and it is the one that was missing: this
+        // step names a tool the manifest recognises, so every check above is
+        // satisfied by it. Stated over the input rather than over the output,
+        // because what needs pinning is the next inert step nobody named --
+        // not the commands this file has already thought of.
+        expect(
+            validationToolsIn("steps:\n  - script: npx vitest --version\n", tooling),
+            "asking a real tool for its version resolves as validation, so a job can invoke recognised tooling on every push and check nothing"
+        ).toEqual([]);
+
+        // And the third, which closes an asymmetry rather than a hole: the two
+        // exclusions above are both pinned by a specimen stating what must not
+        // resolve, so re-pointing either one fails here on its own. Before this
+        // line, re-pointing the setup pattern was silent until it was paired
+        // with a hollowed job -- a widening whose consequence arrives in
+        // somebody else's pull request rather than in the one that opens it.
+        expect(
+            validationToolsIn("steps:\n  - script: pnpm exec playwright install chromium\n", tooling),
+            "installing a tool resolves as validation, so a job that only installs its dependencies reads as validated work"
         ).toEqual([]);
 
         const hollow = jobsIn(pipeline)
