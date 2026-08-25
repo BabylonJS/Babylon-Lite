@@ -207,6 +207,7 @@ describe("PhysicsEngine", () => {
             const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
 
             expect(body.getMotionType()).toBe(PhysicsMotionType.STATIC);
+            expect(body.disablePreStep).toBe(true);
             body.setMotionType(PhysicsMotionType.ANIMATED);
             expect(body.getMotionType()).toBe(PhysicsMotionType.ANIMATED);
             body.setMotionType(PhysicsMotionType.DYNAMIC);
@@ -317,6 +318,7 @@ describe("PhysicsEngine", () => {
             const aggregate = new PhysicsAggregate(node, PhysicsShapeType.BOX, { mass: 0 }, scene);
 
             expect(aggregate.body.getClassName()).toBe("PhysicsBody");
+            expect(aggregate.body.disablePreStep).toBe(true);
             expect(aggregate.shape.getClassName()).toBe("PhysicsShape");
             expect(aggregate.body.shape).toBe(aggregate.shape);
             expect(aggregate.shape.type).toBe(PhysicsShapeType.BOX);
@@ -381,16 +383,16 @@ describe("PhysicsEngine", () => {
             };
 
             new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.BOX, { mass: 0 });
-            expect(hknp.HP_Shape_CreateBox).toHaveBeenLastCalledWith([2, 3, 0.5], [0, 0, 0, 1], [8, 18, 4]);
+            expect(hknp.HP_Shape_CreateBox).toHaveBeenLastCalledWith([2, -3, 0.5], [0, 0, 0, 1], [8, 18, 4]);
 
             new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.SPHERE, { mass: 0 });
-            expect(hknp.HP_Shape_CreateSphere).toHaveBeenLastCalledWith([2, 3, 0.5], 9);
+            expect(hknp.HP_Shape_CreateSphere).toHaveBeenLastCalledWith([2, -3, 0.5], 9);
 
             new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.CAPSULE, { mass: 0 });
-            expect(hknp.HP_Shape_CreateCapsule).toHaveBeenLastCalledWith([0, -2, 0], [0, 8, 0], 4);
+            expect(hknp.HP_Shape_CreateCapsule).toHaveBeenLastCalledWith([0, 10, 0], [0, 20, 0], 4);
 
             new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.CYLINDER, { mass: 0 });
-            expect(hknp.HP_Shape_CreateCylinder).toHaveBeenLastCalledWith([0, -6, 0], [0, 12, 0], 4);
+            expect(hknp.HP_Shape_CreateCylinder).toHaveBeenLastCalledWith([0, 6, 0], [0, 24, 0], 4);
         });
 
         it("rejects an invalid shape enum value before calling Lite", () => {

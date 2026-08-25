@@ -1269,13 +1269,14 @@ export function createPhysicsAggregate(world: PhysicsWorld, node: Mesh, type: Ph
 function _buildShapeParams(node: Mesh, type: PhysicsShapeType, options: PhysicsAggregateOptions): PhysicsShapeParameters {
     const params: PhysicsShapeParameters = {};
     const scaleX = Math.abs(node.scaling.x);
-    const scaleY = Math.abs(node.scaling.y);
+    const scaleYMagnitude = Math.abs(node.scaling.y);
     const scaleZ = Math.abs(node.scaling.z);
+    const scaleY = node.scaling.x * node.scaling.y * node.scaling.z < 0 ? -scaleYMagnitude : scaleYMagnitude;
     const min = node.boundMin ?? [-0.5, -0.5, -0.5];
     const max = node.boundMax ?? [0.5, 0.5, 0.5];
     const extents = {
         x: (max[0] - min[0]) * scaleX,
-        y: (max[1] - min[1]) * scaleY,
+        y: (max[1] - min[1]) * scaleYMagnitude,
         z: (max[2] - min[2]) * scaleZ,
     };
 

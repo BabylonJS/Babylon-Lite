@@ -328,6 +328,7 @@ export class PhysicsBody {
         this.startAsleep = startsAsleep;
         this._world = requirePhysicsWorld(scene);
         this._lite = createPhysicsBody(this._world, transformNode._node, liteMotionType(motionType), startsAsleep);
+        setPhysicsBodyPrestepType(this._lite, LitePhysicsPrestepType.DISABLED);
         this._attachToNode();
     }
 
@@ -344,6 +345,7 @@ export class PhysicsBody {
             _disableSync: { value: false, writable: true },
             startAsleep: { value: startsAsleep, enumerable: true },
         });
+        setPhysicsBodyPrestepType(wrapper._lite, LitePhysicsPrestepType.DISABLED);
         wrapper._attachToNode();
         return wrapper;
     }
