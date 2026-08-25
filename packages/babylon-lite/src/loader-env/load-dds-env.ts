@@ -42,6 +42,12 @@ const SH_COS_KERNEL = [PI, (2 * PI) / 3, (2 * PI) / 3, (2 * PI) / 3, PI / 4, PI 
 
 const MAX_HDRI = 4096;
 
+let _ddsEnvironmentExtraUsage = 0;
+/** @internal Enable copying DDS environments into opt-in local probe arrays. */
+export function _enableDdsEnvironmentCopySource(): void {
+    _ddsEnvironmentExtraUsage = TU.COPY_SRC;
+}
+
 // Face orientations matching BJS _FileFaces: +X, -X, +Y, -Y, +Z, -Z
 // [normalX, normalY, normalZ, fileXx, fileXy, fileXz, fileYx, fileYy, fileYz]
 const FACES: readonly (readonly number[])[] = [
@@ -215,7 +221,7 @@ export async function loadDdsEnvironment(scene: SceneContext, url: string, optio
         size: [width, height, 6],
         format: "rgba16float",
         mipLevelCount: mipCount,
-        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST | _ddsEnvironmentExtraUsage,
         dimension: "2d",
     });
 
