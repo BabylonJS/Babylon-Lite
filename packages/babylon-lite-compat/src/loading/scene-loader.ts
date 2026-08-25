@@ -9,7 +9,7 @@
  * mesh list is not reconstructed in this initial pass.
  */
 
-import { addToScene, enableBoneControl, loadGltf, loadBabylon } from "babylon-lite";
+import { addToScene, enableBoneControlForSkinnedAssets, loadGltf, loadBabylon } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, AnimationGroup } from "babylon-lite";
 
 import { unsupported } from "../error.js";
@@ -125,7 +125,7 @@ async function load(rootUrl: string, fileName: string, scene: Scene): Promise<As
     // Detect the format from the path (ignoring query/hash), but hand the full URL
     // to the loader so any query string is preserved.
     if (!isBabylonUrl(url)) {
-        enableBoneControl();
+        enableBoneControlForSkinnedAssets();
     }
     const lite = isBabylonUrl(url) ? await loadBabylon(engine, url) : await loadGltf(engine, url);
     return new AssetContainer(lite);
@@ -220,7 +220,7 @@ async function loadFromSource(source: string, scene: Scene): Promise<AssetContai
     // Detect the format from the path (ignoring query/hash), but pass the full URL
     // to the loader so any query string is preserved.
     if (!isBabylonUrl(source)) {
-        enableBoneControl();
+        enableBoneControlForSkinnedAssets();
     }
     const lite = isBabylonUrl(source) ? await loadBabylon(engine, source) : await loadGltf(engine, source);
     return new AssetContainer(lite);

@@ -41,13 +41,15 @@ describe("loader-produced Skeleton and Bone wrappers", () => {
         expect(bake).toHaveBeenCalledTimes(3);
     });
 
-    it("forwards visibility and rest reset", () => {
+    it("tracks enabled state without deforming the skeleton and returns to rest", () => {
         const { skeleton, bake, overrides } = createSkeleton();
         const hand = skeleton.bones[1]!;
 
         hand.setEnabled(false);
-        expect(overrides.has(1)).toBe(true);
-        hand.resetToRest();
+        expect(hand.isEnabled()).toBe(false);
+        expect(overrides.has(1)).toBe(false);
+        hand.setPosition(new Vector3(1, 2, 3));
+        hand.returnToRest();
         expect(overrides.has(1)).toBe(false);
         expect(bake).toHaveBeenCalledTimes(2);
     });

@@ -26,6 +26,7 @@ export { Ray } from "./math/ray.js";
 export { Frustum } from "./math/frustum.js";
 export { Size, Viewport } from "./math/size.js";
 export { Polar } from "./math/polar.js";
+export { Spherical } from "./math/spherical.js";
 export { Angle, Curve3, Path3D } from "./math/curve.js";
 
 // ─── Culling ─────────────────────────────────────────────────────────

@@ -27,9 +27,17 @@ import {
     addAnimationGroup,
     enableAnimationBlending,
     updateAnimationManager,
-    pickWithRay as litePickWithRay,
+    pickMeshesWithRay as litePickWithRay,
 } from "babylon-lite";
-import type { SceneContext, Camera as LiteCamera, ArcRotateCamera as LiteArcRotateCamera, FreeCamera as LiteFreeCamera, AnimationManager, Mesh as LiteMesh } from "babylon-lite";
+import type {
+    SceneContext,
+    Camera as LiteCamera,
+    ArcRotateCamera as LiteArcRotateCamera,
+    FreeCamera as LiteFreeCamera,
+    AnimationManager,
+    Mesh as LiteMesh,
+    PickingInfo as LitePickingInfo,
+} from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
 import type { Plane } from "../math/plane.js";
@@ -49,6 +57,7 @@ import { Logger } from "../misc/misc-utils.js";
 import type { Ray } from "../math/ray.js";
 import type { Vector3 } from "../math/vector.js";
 import { PickingInfo } from "../culling/picking-info.js";
+import { AbstractMesh, Mesh } from "../meshes/meshes.js";
 import type { TransformNode } from "../meshes/meshes.js";
 
 /** Babylon.js EnvironmentHelper default skybox/ground assets (match the Lite ports). */
@@ -831,8 +840,28 @@ export class Scene extends AbstractScene {
                 "Babylon Lite's synchronous picker returns the nearest bounding-box hit and does not expose fast-first-hit or per-triangle predicate modes."
             );
         }
+        const candidates = new Set<LiteMesh>(this._lite.meshes);
+        for (const wrapper of this.meshes) {
+            if (wrapper instanceof AbstractMesh) {
+                candidates.add(wrapper._lite);
+            }
+        }
+
+        const wrappers = new Map<NonNullable<LitePickingInfo["pickedMesh"]>, AbstractMesh>();
+        for (const candidate of candidates) {
+            if (candidate.thinInstances && candidate.thinInstances.count > 0) {
+                return unsupported(
+                    "Scene.pickWithRay",
+                    "Thin-instance transforms are not represented by Lite's AABB ray picker; pick the source mesh before adding thin instances or use Lite's GPU picker."
+                );
+            }
+            const registered = this._meshWrappers.get(candidate);
+            const wrapper = registered instanceof AbstractMesh ? registered : Mesh._fromLite(candidate, undefined, this);
+            wrappers.set(candidate, wrapper);
+        }
+
         const info = litePickWithRay(
-            this._lite,
+            candidates,
             {
                 origin: ray.origin.asArray(),
                 direction: ray.direction.asArray(),
@@ -841,13 +870,12 @@ export class Scene extends AbstractScene {
             predicate
                 ? {
                       predicate: (mesh) => {
-                          const wrapper = this._meshWrappers.get(mesh);
-                          return wrapper ? predicate(wrapper) : false;
+                          return predicate(wrappers.get(mesh)!);
                       },
                   }
                 : undefined
         );
-        return PickingInfo._fromLite(info, info.pickedMesh ? (this._meshWrappers.get(info.pickedMesh as LiteMesh) ?? null) : null, ray);
+        return PickingInfo._fromLite(info, info.pickedMesh ? (wrappers.get(info.pickedMesh) ?? null) : null, ray);
     }
 
     /** @internal The active Physics V2 engine, once `enablePhysics` has wired one. */

@@ -429,6 +429,7 @@ export {
     clearBoneOverride,
 } from "./skeleton/bone-control.js";
 export type { Skeleton, Bone } from "./skeleton/bone-control.js";
+export { enableBoneControlForSkinnedAssets } from "./skeleton/bone-control-hooks.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
 export { runFrameInterpolation } from "./animation/frame-interpolation.js";
 export type { FrameInterpolationStep } from "./animation/frame-interpolation.js";
@@ -509,6 +510,16 @@ export type { DecomposedTransform } from "./math/mat4-decompose.js";
 export { maximizeMat4InPlace } from "./math/maximize-mat4-in-place.js";
 export { polarFromVec2ToRef, polarToVec2ToRef, addPolarToRef, subtractPolarToRef, multiplyPolarToRef, dividePolarToRef, scalePolarToRef } from "./math/polar.js";
 export type { PolarCoordinates } from "./math/polar.js";
+export {
+    sphericalFromVec3ToRef,
+    sphericalToVec3ToRef,
+    addSphericalToRef,
+    subtractSphericalToRef,
+    multiplySphericalToRef,
+    divideSphericalToRef,
+    scaleSphericalToRef,
+} from "./math/spherical.js";
+export type { SphericalCoordinates } from "./math/spherical.js";
 export { scaleBoundsFromCenterToRef } from "./math/scale-bounds-from-center-to-ref.js";
 export type { Vec2, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
@@ -636,7 +647,7 @@ export type { GpuPicker, PickDiscardRule, PickIgnore, PickOptions, PickVertexDat
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
-export { pickWithRay } from "./picking/ray-pick.js";
+export { pickWithRay, pickMeshesWithRay } from "./picking/ray-pick.js";
 export type { RayPickOptions } from "./picking/ray-pick.js";
 export type { Ray } from "./picking/ray.js";
 export { computeDeformedPositionToRef } from "./picking/deformed-vertex.js";

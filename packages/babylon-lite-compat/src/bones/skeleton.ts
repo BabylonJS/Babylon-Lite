@@ -1,4 +1,4 @@
-import { clearBoneOverride, getBoneByName as getLiteBoneByName, setBonePosition, setBoneRotationQuaternion, setBoneScaling, setBoneVisible } from "babylon-lite";
+import { clearBoneOverride, getBoneByName as getLiteBoneByName, setBonePosition, setBoneRotationQuaternion, setBoneScaling } from "babylon-lite";
 import type { Bone as LiteBone, Skeleton as LiteSkeleton } from "babylon-lite";
 
 import { unsupported } from "../error.js";
@@ -45,6 +45,8 @@ export class Skeleton {
 }
 
 export class Bone {
+    private _enabled = true;
+
     public readonly name!: string;
 
     /** @internal Underlying loader-produced Babylon Lite bone. */
@@ -100,10 +102,14 @@ export class Bone {
     }
 
     public setEnabled(value: boolean): void {
-        setBoneVisible(this._skeleton._lite, this._lite, value);
+        this._enabled = value;
     }
 
-    public resetToRest(): void {
+    public isEnabled(): boolean {
+        return this._enabled;
+    }
+
+    public returnToRest(): void {
         clearBoneOverride(this._skeleton._lite, this._lite);
     }
 }

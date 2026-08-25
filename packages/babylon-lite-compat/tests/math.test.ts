@@ -8,6 +8,7 @@ import { Matrix } from "../src/math/matrix";
 import { Scalar } from "../src/math/scalar";
 import { Axis, Space } from "../src/math/constants";
 import { Polar } from "../src/math/polar";
+import { Spherical } from "../src/math/spherical";
 
 describe("Vector3", () => {
     it("adds, subtracts, and scales", () => {
@@ -256,6 +257,29 @@ describe("Polar", () => {
         expect(polar.theta).toBeCloseTo((-3 * Math.PI) / 4);
         expect(polar.toVector2().x).toBeCloseTo(-1);
         expect(polar.toVector2().y).toBeCloseTo(-1);
+    });
+
+    describe("Spherical", () => {
+        it("round-trips vectors using Babylon.js spherical conventions", () => {
+            const spherical = Spherical.FromVector3(new Vector3(-1, 2, -3));
+            const vector = spherical.toVector3();
+
+            expect(spherical.radius).toBeCloseTo(Math.sqrt(14));
+            expect(spherical.theta).toBeCloseTo(Math.acos(2 / Math.sqrt(14)));
+            expect(spherical.phi).toBeCloseTo(Math.atan2(-3, -1));
+            expect(vector.x).toBeCloseTo(-1);
+            expect(vector.y).toBeCloseTo(2);
+            expect(vector.z).toBeCloseTo(-3);
+        });
+
+        it("supports the Babylon.js component-wise value operations", () => {
+            const value = new Spherical(2, 3, 4);
+            expect(value.add(new Spherical(4, 5, 6)).asArray()).toEqual([6, 8, 10]);
+            expect(value.subtractFromFloats(1, 2, 3).asArray()).toEqual([1, 1, 1]);
+            expect(value.multiply(new Spherical(3, 4, 5)).asArray()).toEqual([6, 12, 20]);
+            expect(value.divide(new Spherical(2, 3, 4)).asArray()).toEqual([1, 1, 1]);
+            expect(value.scale(2).asArray()).toEqual([4, 6, 8]);
+        });
     });
 
     it("supports the Babylon.js component-wise value operations", () => {

@@ -4,6 +4,7 @@ import type { TransformNode } from "../meshes/meshes.js";
 import { Vector3 } from "../math/vector.js";
 import type { Vector2 } from "../math/vector.js";
 import type { Ray } from "../math/ray.js";
+import { unsupported } from "../error.js";
 
 /** Babylon.js-compatible result of a scene pick. */
 export class PickingInfo {
@@ -29,10 +30,10 @@ export class PickingInfo {
     /** @internal Create a compat result from Lite's synchronous CPU-picking result. */
     public static _fromLite(info: LitePickingInfo, pickedMesh: TransformNode | null, ray: Ray): PickingInfo {
         const result = new PickingInfo();
-        result.hit = info.hit;
+        result.hit = info.hit && pickedMesh !== null;
         result.distance = info.distance;
-        result.pickedPoint = info.pickedPoint ? Vector3.FromArray(info.pickedPoint) : null;
-        result.pickedMesh = pickedMesh;
+        result.pickedPoint = result.hit && info.pickedPoint ? Vector3.FromArray(info.pickedPoint) : null;
+        result.pickedMesh = result.hit ? pickedMesh : null;
         result.bu = info.bu;
         result.bv = info.bv;
         result.faceId = info.faceId;
@@ -50,6 +51,6 @@ export class PickingInfo {
     }
 
     public getTextureCoordinates(_uvSet?: string): Vector2 | null {
-        return null;
+        return unsupported("PickingInfo.getTextureCoordinates", "Lite's synchronous CPU picker currently exposes AABB intersections only, so barycentric UV coordinates are unavailable.");
     }
 }
