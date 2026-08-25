@@ -57,6 +57,86 @@ function indentOf(line: string): number {
 }
 
 /**
+ * The column a line's content starts at, counting `- ` sequence markers as
+ * structure rather than as content.
+ *
+ * This distinction is the whole difficulty. In
+ *
+ *     - name: NODE_VERSION
+ *       value: "20"
+ *
+ * the two keys are siblings, and measuring from the first non-space character
+ * says the second is nested under the first. Measuring the dash as structure
+ * puts them in the same column, which is what the parser does.
+ */
+function contentColumn(line: string): number {
+    const m = /^(\s*)((?:-\s+)*)/.exec(line);
+    return (m?.[1]?.length ?? 0) + (m?.[2]?.length ?? 0);
+}
+
+/** True for `key:` or `key: value` — a mapping entry rather than bare text. */
+function isMappingEntry(content: string): boolean {
+    return /^[^#\s][^:]*:(\s|$)/.test(content);
+}
+
+/**
+ * Lines that open a nesting level the parser will refuse: a key whose scalar
+ * value is already complete, followed by something indented under it.
+ *
+ * Every other clause in this file reads the pipeline as text, so a corruption
+ * that leaves the step boundaries intact is invisible to all of them — the bad
+ * line is simply absorbed into the surrounding step's body and the step list
+ * comes back unchanged. Measured: inserting one over-indented key inside a step
+ * leaves this file's six clauses green on a document PyYAML refuses to load.
+ * The parse floors do not help; they catch a file that yielded *nothing*, and
+ * this one yields exactly what it did before.
+ *
+ * The repo has no YAML parser to depend on and adding one to be checked against
+ * would be a heavier commitment than the check earns, so this is deliberately
+ * not a validator. It decides one class, and the boundaries come from a real
+ * parser rather than from what looked right:
+ *
+ *     b: "x"  +  deeper `c: 1`   rejected      b: x  +  deeper `c: 1`   rejected
+ *     b: "x"  +  deeper `more`   rejected      b: x  +  deeper `more`   ACCEPTED
+ *     b: |    +  deeper `more`   accepted      b:    +  deeper `c: 1`   ACCEPTED
+ *
+ * A plain scalar may legally continue onto a deeper line; a quoted one may not,
+ * and neither may take a mapping entry. An empty value and a block scalar both
+ * open a level on purpose. Flagging only what the parser flags is the point —
+ * a hand-rolled well-formedness rule that merely agrees with its author is the
+ * thing this exists to catch.
+ */
+function malformedNestingIn(text: string): string[] {
+    const lines = text.split("\n");
+    const bad: string[] = [];
+
+    for (const [i, line] of lines.entries()) {
+        const content = line.slice(contentColumn(line));
+        if (!content.trim() || content.startsWith("#")) {
+            continue;
+        }
+        const entry = /^([^:]+):(?:\s+(.*))?$/.exec(content);
+        const value = entry?.[2]?.trim() ?? "";
+        if (!entry || !value || value.startsWith("#") || /^[|>]/.test(value)) {
+            continue;
+        }
+
+        const next = lines.slice(i + 1).find((l) => {
+            const c = l.slice(contentColumn(l));
+            return c.trim() !== "" && !c.startsWith("#");
+        });
+        if (next === undefined || contentColumn(next) <= contentColumn(line)) {
+            continue;
+        }
+        const quoted = /^["']/.test(value);
+        if (quoted || isMappingEntry(next.slice(contentColumn(next)))) {
+            bad.push(`line ${i + 1}: \`${line.trim()}\` is followed by the more-indented \`${next.trim()}\``);
+        }
+    }
+    return bad;
+}
+
+/**
  * The `steps:` list of the pipeline, in order, each entry as its raw block.
  *
  * The repo has no YAML parser among its dependencies and its sibling pipeline
@@ -202,6 +282,17 @@ function allowanceSection(): string {
 }
 
 describe("the baseline pipeline validates its deploy configuration before doing expensive work", () => {
+    it("reads a pipeline the parser would accept, not merely one that splits into steps", () => {
+        const text = readFileSync(join(repoRoot, pipelineFile), "utf8");
+        const bad = malformedNestingIn(text);
+
+        expect(
+            bad,
+            `${pipelineFile} nests a line under a key that already holds a scalar, so Azure DevOps will refuse to queue it:\n  ${bad.join("\n  ")}\n\n` +
+                `Every other clause here reads this file as text and would pass anyway — the bad line is absorbed into a step body and the step list comes back unchanged. Fix the indentation; do not relax this to make a probe green.`
+        ).toEqual([]);
+    });
+
     it("runs nothing but the check's own prerequisites before the deploy configuration check", () => {
         // Stated as a universal over the preceding steps rather than as a list
         // of the steps known to be expensive today. A named list would have to
