@@ -453,7 +453,16 @@ function templateFilesOnDisk(): string[] {
         .sort();
 }
 
-/** Every `- template:` path a resolved body still names, at any depth. */
+/**
+ * Every `- template:` path a resolved body still names, at any depth.
+ *
+ * Deliberately *not* given the comment projection the marker checks use. The
+ * pattern anchors the dash at the start of the line, so `# - template: x.yml`
+ * cannot match it and no input separates stripping from not stripping --
+ * structurally unreachable rather than merely absent from today's tree.
+ * Measured, not assumed. A pattern loose enough to match inside a comment would
+ * be a different bug, and one this file would report elsewhere as over-selection.
+ */
 function templateReferencesIn(text: string): string[] {
     return [...text.matchAll(/^\s*-\s*template:\s*(\S+)\s*$/gm)].map((match) => match[1] ?? "");
 }
@@ -1350,9 +1359,24 @@ describe("pull-request jobs cannot run on a master build", () => {
                 `A form nothing documents is a widening with no author to answer for it, and it is the cheapest place to admit master.`
         ).toEqual([]);
 
-        const deadMarkers = PR_CONTEXT_MARKERS.filter((marker) => !dualContextPipelines.some((file) => file.jobs.some((job) => matchesAnyLine(marker, job.body)))).map(
-            (marker) => marker.source
-        );
+        // Asked with the same projection the selector uses. `readsPullRequestContext`
+        // strips whole-line comments, so a marker whose only occurrence in a job is
+        // a comment selects nothing -- and a floor that reads the raw body would
+        // certify such a marker as live while the selector can never fire on it.
+        // Two readers of one question, and the floor was the less projected of the
+        // pair, which is the direction that always favours the floor passing.
+        //
+        // Measured: aligning the projection changes no verdict on today's tree, so
+        // this is not a repair of a live vacuity. It is separable in principle
+        // rather than structurally -- and the separating input is one this tree
+        // actively invites, because the pipeline header discusses
+        // `System.PullRequest.*` at length and the natural place to note that a job
+        // does not use it is a comment inside that job. Left aligned rather than
+        // left silent for that reason: the day someone writes that sentence, the
+        // raw version starts covering for a marker that has genuinely died.
+        const deadMarkers = PR_CONTEXT_MARKERS.filter(
+            (marker) => !dualContextPipelines.some((file) => file.jobs.some((job) => matchesAnyLine(marker, stripCommentLines(job.body))))
+        ).map((marker) => marker.source);
         expect(
             deadMarkers,
             `these pull-request markers select no job at all: ${deadMarkers.join(", ")}.\n` +
