@@ -2,7 +2,7 @@ import { U8 } from "../engine/typed-arrays.js";
 import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "./texture-2d.js";
-import { getOrCreateSampler, acquireTexture, _textureRefCount } from "../resource/gpu-pool.js";
+import { getOrCreateSampler, acquireTexture, _isTextureReleased } from "../resource/gpu-pool.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
 /** The wrapper that rebuilt each recovery source and the device it rebuilt for, so any other
@@ -27,11 +27,11 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
         return;
     }
     // A texture every owner has released is already destroyed. Rebuilding it would allocate a
-    // replacement and take a creation-time reference nothing will ever release, handing a live
-    // texture back to a wrapper the application has finished with. Only creator-owned kinds are
-    // checked: nothing acquires a `solid` or glTF-uploaded texture, so a zero count is their
-    // steady state and says nothing about whether they are still in use.
-    if (isCreatorOwned(source) && _textureRefCount(tex) === 0) {
+    // replacement and hand a live texture back to a wrapper the application has finished with —
+    // and for the kinds recovery re-owns, take a reference nothing will ever release. This asks
+    // only whether the texture is gone, which holds for every kind: a texture nothing ever owned
+    // is not released, it simply has no owner.
+    if (_isTextureReleased(tex)) {
         return;
     }
     // Several wrappers can share one source. The tracked set and the per-kind reachability walks
@@ -63,14 +63,16 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     // `createSolidTexture2D` and the glTF `uploadTex` path take no such reference, and the dynamic
     // rebuild restores its own. Wrappers that adopt take none either, exactly as `cloneTexture2D`
     // takes none at creation: they share the reference held for the texture they now point at.
-    if (isCreatorOwned(source)) {
+    if (needsOwnershipRestore(source)) {
         acquireTexture(tex);
     }
 }
 
-/** Kinds whose creator takes an ownership reference with `acquireTexture`, so recovery must both
- *  restore that reference on rebuild and treat a zero count as "the application released it". */
-function isCreatorOwned(source: Texture2DRecoverySource): boolean {
+/** Kinds whose creator takes an ownership reference with `acquireTexture` that recovery has to
+ *  restore, because the replacement GPUTexture starts unowned. Distinct from asking whether a
+ *  texture has been released: `dynamic` is creator-owned too, but its own rebuild module restores
+ *  its reference, so re-acquiring here would double it. */
+function needsOwnershipRestore(source: Texture2DRecoverySource): boolean {
     return source.kind === "url" || source.kind === "pixels" || source.kind === "render";
 }
 

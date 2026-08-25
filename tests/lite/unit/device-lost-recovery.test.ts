@@ -12,7 +12,7 @@ import { buildSampledPbrTextures } from "../../../packages/babylon-lite/src/load
 import { makeSamplerFor } from "../../../packages/babylon-lite/src/loader-gltf/gltf-sampler-desc.js";
 import type { GltfMaterialData } from "../../../packages/babylon-lite/src/loader-gltf/gltf-material.js";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
-import { acquireTexture, releaseTexture, _textureRefCount } from "../../../packages/babylon-lite/src/resource/gpu-pool.js";
+import { acquireTexture, releaseTexture, _isTextureReleased } from "../../../packages/babylon-lite/src/resource/gpu-pool.js";
 import type { Texture2D, Texture2DOptions } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { cloneTexture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/texture-recovery.js";
@@ -611,59 +611,114 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         recovery.disable();
     });
 
-    it("does not rebuild a texture the application has already released", async () => {
-        // The last `releaseTexture` destroying the GPU texture is the application saying it is done
-        // with it. Rebuilding it anyway would allocate a replacement, take a creation-time reference
-        // nothing will ever release, and hand a live texture back to a wrapper already disposed.
-        const engine = trackingEngine();
-        const recovery = enableDeviceLostSpriteRecovery(engine);
-        const texture = pixelsTexture();
-        engine._dlr!.p(texture, new Uint8Array([1, 2, 3, 4]), {});
+    // A destroyed texture is one the application has said it is done with. Rebuilding it would
+    // allocate a replacement and hand a live texture back to a disposed wrapper — and for the kinds
+    // recovery re-owns, take a reference nothing will ever release. Every recoverable kind can
+    // reach that state: `releaseTexture` is public API, and its first call destroys a texture whose
+    // creator took no reference of its own, which is how `solid` and glTF-uploaded textures start.
+    const recoverableKinds: ReadonlyArray<readonly [string, boolean, (engine: EngineContext, tex: Texture2D) => void]> = [
+        ["url", true, (engine, tex) => engine._dlr!.u(tex, "atlas.png", { mipMaps: false })],
+        ["raw-pixel", true, (engine, tex) => engine._dlr!.p(tex, new Uint8Array([1, 2, 3, 4]), {})],
+        ["render-target", true, (engine, tex) => engine._dlr!.r(tex, 1, 1, "rgba8unorm", {})],
+        [
+            "dynamic",
+            true,
+            (engine, tex) =>
+                engine._dlr!.t(tex, {
+                    kind: "dynamic",
+                    width: 1,
+                    height: 1,
+                    format: "rgba8unorm",
+                    levels: 1,
+                    samplerDesc: {},
+                    source: null,
+                    flipY: true,
+                    premultipliedAlpha: false,
+                }),
+        ],
+        ["solid", false, (engine, tex) => engine._dlr!.s(tex, 1, 0, 0, 1)],
+        ["bitmap", false, (engine, tex) => engine._dlr!.b(tex, null, false, false, new Uint8Array([1, 2, 3, 4]))],
+    ];
 
-        const disposed = texture.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
-        expect(releaseTexture(texture)).toBe(true);
-        expect(disposed.destroy).toHaveBeenCalled();
-        expect(_textureRefCount(texture)).toBe(0);
+    /** A texture as its creator hands it out: `owned` kinds arrive with the creator's reference
+     *  already taken, the rest with no owner at all. */
+    function sourceTexture(owned: boolean): Texture2D {
+        const tex = { texture: { destroy: vi.fn() } as unknown as GPUTexture, view: {} as GPUTextureView, sampler: {} as GPUSampler, width: 1, height: 1 } as Texture2D;
+        if (owned) {
+            acquireTexture(tex);
+        }
+        return tex;
+    }
 
+    async function recoverWithoutRebuilding(engine: EngineContext): Promise<GPUDevice> {
         const replacement = device();
         vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
         await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: vi.fn() }]);
-
-        expect(replacement.createTexture).not.toHaveBeenCalled();
         vi.unstubAllGlobals();
-        recovery.disable();
-    });
+        return replacement;
+    }
 
-    it("does not rebuild for a sibling wrapper when a clone performs the final release", async () => {
-        // Every wrapper in a derived family is tracked separately but shares one GPU texture, so
-        // whichever wrapper happens to release last destroys it for all of them. Recovery has to
-        // treat the family as released no matter which wrapper it visits first, or the sibling
-        // rebuilds a texture the application has finished with.
+    for (const [kind, owned, capture] of recoverableKinds) {
+        it(`does not rebuild a ${kind} texture the application has already released`, async () => {
+            const engine = trackingEngine();
+            const recovery = enableDeviceLostSpriteRecovery(engine);
+            const texture = sourceTexture(owned);
+            capture(engine, texture);
+
+            const disposed = texture.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
+            expect(releaseTexture(texture)).toBe(true);
+            expect(disposed.destroy).toHaveBeenCalled();
+            expect(_isTextureReleased(texture)).toBe(true);
+
+            expect((await recoverWithoutRebuilding(engine)).createTexture).not.toHaveBeenCalled();
+            recovery.disable();
+        });
+
+        it(`does not rebuild a ${kind} texture for a sibling wrapper when a clone performs the final release`, async () => {
+            // Every wrapper in a derived family is tracked separately but shares one GPU texture, so
+            // whichever wrapper releases last destroys it for all of them. Recovery has to read the
+            // family as released whichever wrapper it visits first, or the sibling rebuilds a
+            // texture the application has finished with. Two owners here: for creator-owned kinds
+            // the creator's plus one the application took for the clone, otherwise one per wrapper.
+            const engine = trackingEngine();
+            const recovery = enableDeviceLostSpriteRecovery(engine);
+            const base = sourceTexture(owned);
+            capture(engine, base);
+            const clone = cloneTexture2D(base, { uScale: 2 });
+            if (!owned) {
+                acquireTexture(base);
+            }
+            acquireTexture(clone);
+            expect(Array.from(engine._deviceLostRecovery!._textures)).toHaveLength(2);
+
+            const shared = base.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
+            expect(releaseTexture(base)).toBe(false);
+            expect(releaseTexture(clone)).toBe(true);
+            expect(shared.destroy).toHaveBeenCalled();
+            // Release is tracked on the shared GPU texture, so it reads the same from either wrapper.
+            expect(_isTextureReleased(base)).toBe(true);
+            expect(_isTextureReleased(clone)).toBe(true);
+
+            expect((await recoverWithoutRebuilding(engine)).createTexture).not.toHaveBeenCalled();
+            expect(base.texture).toBe(shared);
+            expect(clone.texture).toBe(shared);
+            recovery.disable();
+        });
+    }
+
+    it("rebuilds a texture no owner has released, including kinds whose creator takes no reference", async () => {
+        // The mirror of the skip: a `solid` texture has no owner at all, and that has to keep
+        // reading as live. Treating "no owner" as released would skip every glTF and solid texture
+        // in a scene and leave them on the lost device — the use-after-free this all exists to stop.
         const engine = trackingEngine();
         const recovery = enableDeviceLostSpriteRecovery(engine);
-        const base = pixelsTexture();
-        engine._dlr!.p(base, new Uint8Array([1, 2, 3, 4]), {});
-        const clone = cloneTexture2D(base, { uScale: 2 });
-        acquireTexture(clone);
-        expect(Array.from(engine._deviceLostRecovery!._textures)).toHaveLength(2);
+        const texture = sourceTexture(false);
+        engine._dlr!.s(texture, 1, 0, 0, 1);
+        expect(_isTextureReleased(texture)).toBe(false);
 
-        const shared = base.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
-        expect(releaseTexture(base)).toBe(false);
-        expect(releaseTexture(clone)).toBe(true);
-        expect(shared.destroy).toHaveBeenCalled();
-        // The count is read through the shared GPU texture, so releasing the family reads as
-        // released from either wrapper.
-        expect(_textureRefCount(base)).toBe(0);
-        expect(_textureRefCount(clone)).toBe(0);
-
-        const replacement = device();
-        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
-        await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: vi.fn() }]);
-
-        expect(replacement.createTexture).not.toHaveBeenCalled();
-        expect(base.texture).toBe(shared);
-        expect(clone.texture).toBe(shared);
-        vi.unstubAllGlobals();
+        const lost = texture.texture;
+        expect((await recoverWithoutRebuilding(engine)).createTexture).toHaveBeenCalledTimes(1);
+        expect(texture.texture).not.toBe(lost);
         recovery.disable();
     });
 
