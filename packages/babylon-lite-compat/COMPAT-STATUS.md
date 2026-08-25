@@ -4,17 +4,27 @@ This file tracks the support status of each Babylon.js (BJS) feature area in the
 `@babylonjs/lite-compat` package. It is the single source of truth consulted and
 updated by the `update-compat-layer` skill.
 
-<!-- The two markers below are machine-read by the update-compat-layer skill.
-     Do not rename them. Update the SHA after re-syncing against BJS master. -->
+<!-- `Last synced BJS commit`, `Last synced Lite commit` and `Last sync date` are the
+     sync markers: machine-read by the update-compat-layer skill, and all three are
+     rewritten at the end of every sync. Do not rename them.
+     `Lite compat package version` is NOT a sync marker -- it tracks the published
+     package and changes only when that version changes. -->
 
 - **Last synced BJS commit:** `82d305cbb2603e16e9795fd311690ac96a358501`
+- **Last synced Lite commit:** `6b71be8339a0cacaf9c82271a77c62b387b5c1e8`
 - **Last sync date:** 2026-08-24
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
-> compat surface was last reconciled against. The skill diffs BJS history since
-> this SHA (and Lite history since the last commit that touched this file) to find
-> new work, then updates the SHA.
+> compat surface was last reconciled against; the "Last synced Lite commit" is the
+> `BabylonJS/Babylon-Lite` `master` HEAD at that same moment. The skill diffs both
+> histories forward from these SHAs to find new work, then updates them.
+
+> **Why the Lite watermark is a field.** It used to be inferred from _the commit that
+> last modified this file_, which made every edit here load-bearing: correcting a
+> single status row also advanced the watermark, silently skipping any Lite change in
+> between, with nothing to report the gap. Recording it explicitly makes this an
+> ordinary document again — edit it freely; only the marker moves the watermark.
 
 **Scope:** the compat layer (and the `update-compat-layer` skill that maintains it)
 covers **only the public API of `@babylonjs/core` and `@babylonjs/loaders`**. The
@@ -29,8 +39,9 @@ for reader context but are not part of the audited surface.
 The `update-compat-layer` skill advances the compat layer on three fronts; this
 file is the live status record for each:
 
-1. **Upstream sync (Task 1 — diffs).** The `Last synced BJS commit` / `Last sync
-date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
+1. **Upstream sync (Task 1 — diffs).** The `Last synced BJS commit`,
+   `Last synced Lite commit` and `Last sync date` markers above record the
+   `BabylonJS/Babylon.js` and `BabylonJS/Babylon-Lite` `master` HEADs the surface
    was last reconciled against.
 2. **Lab-scene coverage (Task 2).** The [Lab scene coverage](#lab-scene-coverage)
    section records which Babylon.js oracle scenes render at parity through the
