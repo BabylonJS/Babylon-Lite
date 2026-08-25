@@ -147,6 +147,22 @@ function contentColumn(line: string): number {
 }
 
 /** True for `key:` or `key: value` — a mapping entry rather than bare text. */
+/**
+ * Whether a line's content opens a mapping entry — a key, then `:`, then a
+ * space or end of line.
+ *
+ * The space is load-bearing: `echo two:three` and `http://x/y` contain colons
+ * and are plain text to the parser, and both occur in script bodies. Relaxing
+ * this to "a colon anywhere" makes the nesting rule reject legal pipelines;
+ * there are specimens for both, taken from PyYAML.
+ *
+ * The `#` in the character class is unreachable from the sole call site, which
+ * skips comment lines when choosing the following line, so no specimen exercises
+ * it and none is manufactured to look as though one does. It stays because this
+ * predicate is a general one — a comment is genuinely not a mapping entry — and
+ * dropping it would quietly change the answer for any future caller that does
+ * not filter first.
+ */
 function isMappingEntry(content: string): boolean {
     return /^[^#\s][^:]*:(\s|$)/.test(content);
 }
@@ -218,7 +234,13 @@ function malformedNestingIn(text: string): string[] {
  * Shapes this predicate has to agree with the parser about, in both directions.
  *
  * Every verdict here was taken from PyYAML rather than from what looked right,
- * and the legal ones matter more than the illegal ones: they are the only thing
+ * and re-derived rather than recalled: each row's `illegal` is the parser's
+ * answer for that exact string, re-checked against `python3 -c "import yaml;
+ * yaml.safe_load(...)"` when the table changes. A specimen whose expected value
+ * is the author's reading is the author's belief wearing the costume of a test,
+ * and it certifies the defect it was written to catch.
+ *
+ * The legal ones matter more than the illegal ones: they are the only thing
  * standing between this and a rule that flags valid pipelines. A mechanical
  * conjunct sweep found three of them missing — with no specimen for a
  * comment-only value, a block scalar holding `key: value` text, or a
@@ -240,6 +262,18 @@ const NESTING_SPECIMENS: Array<{ label: string; yaml: string; illegal: boolean }
     { label: "sequence entry and its sibling key", yaml: "a:\n  - name: N\n    value: V\n", illegal: false },
     { label: "a whitespace-only line before a sibling", yaml: 'a:\n  b: "x"\n    \n  c: 1\n', illegal: false },
     { label: "a scalar key as the final line", yaml: 'a:\n  b: "x"\n', illegal: false },
+
+    // Command-shaped deeper lines. Every illegal row above uses a clean `c: 1`,
+    // so nothing here reached the part of `isMappingEntry` that decides *what
+    // counts as a key* -- and script bodies are where over-indentation actually
+    // happens in this pipeline. Measured: relaxing that predicate to "a colon
+    // anywhere" left all thirteen rows above green while the last two of these
+    // became false positives on legal YAML.
+    { label: "deeper line is a command containing `key: value`", yaml: "a:\n  b: echo one\n    echo two: three\n", illegal: true },
+    { label: "deeper line is a command ending in a colon", yaml: "a:\n  b: echo one\n    echo two:\n", illegal: true },
+    { label: "deeper line has a colon with no space after it", yaml: "a:\n  b: echo one\n    echo two:three\n", illegal: false },
+    { label: "deeper line is a URL", yaml: "a:\n  b: echo one\n    http://x/y\n", illegal: false },
+    { label: "deeper line is a sequence dash", yaml: "a:\n  b: echo one\n    - x\n", illegal: false },
 ];
 
 /**
