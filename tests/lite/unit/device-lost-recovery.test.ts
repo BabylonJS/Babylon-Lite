@@ -634,6 +634,39 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         recovery.disable();
     });
 
+    it("does not rebuild for a sibling wrapper when a clone performs the final release", async () => {
+        // Every wrapper in a derived family is tracked separately but shares one GPU texture, so
+        // whichever wrapper happens to release last destroys it for all of them. Recovery has to
+        // treat the family as released no matter which wrapper it visits first, or the sibling
+        // rebuilds a texture the application has finished with.
+        const engine = trackingEngine();
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const base = pixelsTexture();
+        engine._dlr!.p(base, new Uint8Array([1, 2, 3, 4]), {});
+        const clone = cloneTexture2D(base, { uScale: 2 });
+        acquireTexture(clone);
+        expect(Array.from(engine._deviceLostRecovery!._textures)).toHaveLength(2);
+
+        const shared = base.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
+        expect(releaseTexture(base)).toBe(false);
+        expect(releaseTexture(clone)).toBe(true);
+        expect(shared.destroy).toHaveBeenCalled();
+        // The count is read through the shared GPU texture, so releasing the family reads as
+        // released from either wrapper.
+        expect(_textureRefCount(base)).toBe(0);
+        expect(_textureRefCount(clone)).toBe(0);
+
+        const replacement = device();
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
+        await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: vi.fn() }]);
+
+        expect(replacement.createTexture).not.toHaveBeenCalled();
+        expect(base.texture).toBe(shared);
+        expect(clone.texture).toBe(shared);
+        vi.unstubAllGlobals();
+        recovery.disable();
+    });
+
     // `createTexture2D`, `createTexture2DFromPixels` and `createRenderTexture2D` each take an
     // ownership reference on the GPU texture they hand back, and that reference is what keeps it
     // alive for as long as the application holds the wrapper. A replacement GPUTexture starts at

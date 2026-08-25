@@ -277,7 +277,10 @@ texture from one the application has finished with: for those three kinds a
 count of zero means the last `releaseTexture` already destroyed it, so it is
 skipped rather than rebuilt and re-owned behind the application's back. The
 count is read on the recovery path rather than recorded by `releaseTexture`,
-which would put the bookkeeping in every scene whether or not it recovers. Kinds
+which would put the bookkeeping in every scene whether or not it recovers. It is
+keyed on the `GPUTexture`, not the wrapper, so a derived family shares one count
+and reads as released from whichever wrapper recovery visits first — whichever
+one performed the final release, no sibling rebuilds a destroyed texture. Kinds
 whose creator takes no reference are exempt from the check, because zero is
 their steady state and says nothing about whether they are still in use.
 
@@ -340,8 +343,9 @@ module-level side effects; mutable caches remain null until an explicit call.
   the wrapper the application still holds, one rebuild per source per device,
   derived wrappers (including one whose base was collected, and one carrying its
   own sampler), a single shared rebuild leaving every wrapper on the same
-  texture/view/sampler, skipping a released texture, and each creator-owned kind
-  surviving one consumer acquire/release cycle.
+  texture/view/sampler, skipping a released texture (including a family whose
+  clone performed the final release, so no sibling rebuilds it), and each
+  creator-owned kind surviving one consumer acquire/release cycle.
 - Scene recovery unit tests replace the device under an ESM shadow generator
   and assert that its textures, sampler, UBOs, hidden blur resources, and nested
   render task are recreated while the generator identity remains stable and the
