@@ -12,6 +12,7 @@ import { buildSampledPbrTextures } from "../../../packages/babylon-lite/src/load
 import { makeSamplerFor } from "../../../packages/babylon-lite/src/loader-gltf/gltf-sampler-desc.js";
 import type { GltfMaterialData } from "../../../packages/babylon-lite/src/loader-gltf/gltf-material.js";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
+import { acquireTexture, releaseTexture } from "../../../packages/babylon-lite/src/resource/gpu-pool.js";
 import type { Texture2D, Texture2DOptions } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { _trackDerivedTexture2D, cloneTexture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/texture-recovery.js";
@@ -353,9 +354,9 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         return {
             features: new Set<GPUFeatureName>(),
             lost: new Promise<GPUDeviceLostInfo>(() => undefined),
-            createTexture: vi.fn(() => ({ createView: vi.fn(() => ({})) })),
+            createTexture: vi.fn(() => ({ createView: vi.fn(() => ({})), destroy: vi.fn() })),
             createSampler: vi.fn(() => ({})),
-            queue: { writeTexture: vi.fn() },
+            queue: { writeTexture: vi.fn(), copyExternalImageToTexture: vi.fn() },
         } as unknown as GPUDevice;
     }
 
@@ -370,7 +371,7 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
     }
 
     function pixelsTexture(): Texture2D {
-        return { texture: {} as GPUTexture, view: {} as GPUTextureView, sampler: {} as GPUSampler, width: 1, height: 1 } as Texture2D;
+        return { texture: { destroy: vi.fn() } as unknown as GPUTexture, view: {} as GPUTextureView, sampler: {} as GPUSampler, width: 1, height: 1 } as Texture2D;
     }
 
     it("tracks captured textures weakly so tracking never keeps an app texture alive", () => {
@@ -575,4 +576,99 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         vi.unstubAllGlobals();
         recovery.disable();
     });
+
+    it("rebuilds a shared upload once and leaves every wrapper pointing at the same resources", async () => {
+        // `cloneTexture2D` exists so several wrappers can share one upload under different UV
+        // transforms. Recovery has to preserve that: rebuilding per wrapper would put N identical
+        // images in VRAM and re-fetch url sources N times, and letting the wrappers drift onto
+        // different textures, views or samplers would break the sharing the loader depends on.
+        const engine = trackingEngine();
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const base = pixelsTexture();
+        engine._dlr!.p(base, new Uint8Array([1, 2, 3, 4]), {});
+        const first = cloneTexture2D(base, { uScale: 2 });
+        const second = cloneTexture2D(base, { vScale: 3 });
+
+        const replacement = device();
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
+        await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: vi.fn() }]);
+
+        expect(replacement.createTexture).toHaveBeenCalledTimes(1);
+        for (const clone of [first, second]) {
+            expect(clone.texture).toBe(base.texture);
+            expect(clone.view).toBe(base.view);
+            expect(clone.sampler).toBe(base.sampler);
+        }
+        expect(first.uScale).toBe(2);
+        expect(second.vScale).toBe(3);
+        vi.unstubAllGlobals();
+        recovery.disable();
+    });
+
+    it("does not rebuild a texture the application has already released", async () => {
+        // The last `releaseTexture` destroying the GPU texture is the application saying it is done
+        // with it. Rebuilding it anyway would allocate a replacement, take a creation-time reference
+        // nothing will ever release, and hand a live texture back to a wrapper already disposed.
+        const engine = trackingEngine();
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const texture = pixelsTexture();
+        engine._dlr!.p(texture, new Uint8Array([1, 2, 3, 4]), {});
+        acquireTexture(texture); // the reference `createTexture2DFromPixels` takes before returning
+
+        const disposed = texture.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
+        expect(releaseTexture(texture)).toBe(true);
+        expect(disposed.destroy).toHaveBeenCalled();
+        expect(texture._recoverySource).toBeUndefined();
+
+        const replacement = device();
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
+        await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: vi.fn() }]);
+
+        expect(replacement.createTexture).not.toHaveBeenCalled();
+        vi.unstubAllGlobals();
+        recovery.disable();
+    });
+
+    // `createTexture2D`, `createTexture2DFromPixels` and `createRenderTexture2D` each take an
+    // ownership reference on the GPU texture they hand back, and that reference is what keeps it
+    // alive for as long as the application holds the wrapper. A replacement GPUTexture starts at
+    // ref-count 0, so recovery has to take it again — otherwise the first consumer to bind and then
+    // unbind the rebuilt texture drops it to zero and destroys it out from under the application.
+    const creatorOwned: ReadonlyArray<readonly [string, (engine: EngineContext, tex: Texture2D) => void]> = [
+        ["url", (engine, tex) => engine._dlr!.u(tex, "atlas.png", { mipMaps: false })],
+        ["raw-pixel", (engine, tex) => engine._dlr!.p(tex, new Uint8Array([1, 2, 3, 4]), {})],
+        ["render-target", (engine, tex) => engine._dlr!.r(tex, 1, 1, "rgba8unorm", {})],
+    ];
+
+    for (const [kind, capture] of creatorOwned) {
+        it(`keeps a rebuilt ${kind} texture alive through one consumer acquire and release cycle`, async () => {
+            const engine = trackingEngine();
+            const recovery = enableDeviceLostSpriteRecovery(engine);
+            const texture = pixelsTexture();
+            capture(engine, texture);
+            acquireTexture(texture); // the reference the creator takes before returning the wrapper
+
+            const replacement = device();
+            vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
+            vi.stubGlobal(
+                "fetch",
+                vi.fn(async () => ({ blob: vi.fn(async () => ({})) }))
+            );
+            vi.stubGlobal(
+                "createImageBitmap",
+                vi.fn(async () => ({ width: 1, height: 1, close: vi.fn() }))
+            );
+            await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: vi.fn() }]);
+
+            const rebuilt = texture.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
+            // A material binds the texture and later unbinds it.
+            acquireTexture(texture);
+
+            expect(releaseTexture(texture)).toBe(false);
+            expect(rebuilt.destroy).not.toHaveBeenCalled();
+            expect(texture._recoverySource).toBeDefined();
+            vi.unstubAllGlobals();
+            recovery.disable();
+        });
+    }
 });

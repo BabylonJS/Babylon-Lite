@@ -38,6 +38,10 @@ export function releaseTexture(tex: Texture2D): boolean {
     if (c <= 0) {
         tex.texture.destroy();
         m.delete(tex.texture);
+        // The last owner has given the texture up, so device-lost recovery must not rebuild it:
+        // that would allocate a replacement, take a creation-time reference nothing will ever
+        // release, and hand a live texture back to a wrapper the application has already disposed.
+        tex._recoverySource = undefined;
         return true;
     }
     m.set(tex.texture, c);

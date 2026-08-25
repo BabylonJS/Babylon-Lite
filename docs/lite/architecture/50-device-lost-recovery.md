@@ -11,9 +11,10 @@
 Device-lost recovery is an opt-in, engine-wide replacement-device workflow.
 Each public enabler registers exactly one rendering-context kind with the shared
 internal coordinator. The coordinator reacquires the `GPUDevice`, reconfigures
-all surfaces, and then dispatches only to enabled kind handlers. Context kinds
-without an enabled handler are intentionally skipped; no context is cast to
-another kind.
+all surfaces, rebuilds every captured texture, and then dispatches to the
+enabled kind handlers. A registered context whose kind has no enabled handler
+cannot be recovered, so the coordinator fails the recovery rather than resuming
+with it; no context is cast to another kind.
 
 ## Public API Surface
 
@@ -48,13 +49,18 @@ exported from the package root.
 | Text    | `text-renderer`   | `TextRenderer`      |
 
 On loss, the coordinator snapshots active registrations and collapses them to
-one handler per kind. It stops the engine, requests one replacement device with
-the original features and storage limits, rebuilds engine storage buffers,
-reconfigures every surface, refreshes swapchain render targets, resizes
-contexts, invokes each registered kind handler, and restarts the engine only if
-it had been running. Context kinds without a registered recovery handler are
-left untouched; this permits applications to intentionally recover only a
-subset of independent rendering contexts. Callback order is `onLost` before
+one handler per kind. It stops the engine, verifies that every registered
+context's kind has a handler, requests one replacement device with the original
+features and storage limits, rebuilds engine storage buffers, reconfigures every
+surface, refreshes swapchain render targets, resizes contexts, rebuilds every
+captured texture, invokes each registered kind handler, and restarts the engine
+only if it had been running. A registered context of a kind with no handler
+fails the recovery: leaving it on the lost device would let the application
+resume and encode draws against freed native objects, which kills the browser's
+renderer process rather than producing a catchable error. The check runs after
+the engine stops but before anything is disposed or a replacement device is
+requested, so `onRecoveryFailed` fires with the engine intact and the
+application can discard it deliberately. Callback order is `onLost` before
 replacement, `onRecovered` after rebuild and the first resumed frame, or
 `onRecoveryFailed` if any registered recovery step rejects.
 Standalone renderer handlers run before Scene rebuilding so a texture or glyph
@@ -219,6 +225,46 @@ Applications must enable recovery before creating/loading recoverable sprite
 textures. Disabling the last capture-using handle stops retaining sources for
 new resources; existing source records remain on their owning textures.
 
+### Captured textures
+
+Reachability is not sufficient to find them. A capture-stamped texture that no
+registered context references at loss time — a sprite atlas page populated in
+one render mode and idle in another — is invisible to the per-kind walks, and
+would survive recovery still holding the lost device's `GPUTexture`. The capture
+stamp therefore also tracks every texture it stamps, weakly, on the owning
+recovery state, and the coordinator rebuilds that set once per loss after
+surfaces are reconfigured and before any kind handler runs, so handlers bind
+textures that are already current. The per-kind walks remain, for textures that
+were never captured. Rebuilding is deduplicated on the recovery source and keyed
+by device, so a source is uploaded once per loss however many wrappers or walks
+reach it, a `url` source is fetched once, and a later loss rebuilds again. The
+weak set is compacted when it doubles, never below a floor.
+
+Wrappers derived from another wrapper are tracked in that same set. Both
+`cloneTexture2D` and the glTF sampler path spread a base wrapper, so the result
+inherits `_recoverySource` without passing through the stamp while owning its
+own `texture` field. Deriving a wrapper notifies a hook the capture module
+installs, which finds the recovery state that captured the base's source — held
+weakly, so an application texture outliving its engine cannot pin that engine's
+registrations — and tracks the derived wrapper too. Tracking each one in its own
+right, rather than reaching them by way of their base, is what recovers a clone
+whose base has already been collected. The first wrapper reached rebuilds and
+the rest adopt its texture, view, and size; a wrapper carrying its own captured
+sampler descriptor gets that sampler rebuilt instead of the base's, so the glTF
+sampler wrapper keeps its own wrap and filter settings.
+
+Ownership is restored exactly as the creator established it. `createTexture2D`,
+`createTexture2DFromPixels`, and `createRenderTexture2D` each `acquireTexture`
+the texture they return, and a replacement `GPUTexture` starts at ref-count
+zero, so recovery takes that reference again — without it the first consumer to
+bind and then unbind a rebuilt texture destroys it while the application still
+holds the wrapper. `createSolidTexture2D` and the glTF `uploadTex` path take no
+such reference and recovery takes none for them, the dynamic-texture rebuild
+restores its own, and adopting wrappers take none exactly as `cloneTexture2D`
+takes none at creation. Conversely, `releaseTexture` clearing the last reference
+drops that wrapper's recovery source, so a texture the application has disposed
+is not rebuilt and re-owned behind its back.
+
 ### TextRenderer
 
 Text recovery enumerates only registered `text-renderer` contexts. It recreates
@@ -267,9 +313,19 @@ module-level side effects; mutable caches remain null until an explicit call.
 
 ## Test Specification
 
-- Coordinator unit tests cover mixed Scene/Sprite/Text registration, skipped
-  unregistered kinds, repeated registrations, safe idempotent disable, and
-  shared capture lifetime.
+- Coordinator unit tests cover mixed Scene/Sprite/Text registration, repeated
+  registrations, safe idempotent disable, and shared capture lifetime.
+- Fail-fast unit tests cover a registered context whose kind has no enabled
+  handler: the error names the offending kinds, deduplicated and stably ordered,
+  and is thrown before any resource is disposed or a replacement device is
+  requested.
+- Captured-texture unit tests cover weak tracking, rebuilding a texture no
+  registered context references, restoring bytes appended after creation into
+  the wrapper the application still holds, one rebuild per source per device,
+  derived wrappers (including one whose base was collected, and one carrying its
+  own sampler), a single shared rebuild leaving every wrapper on the same
+  texture/view/sampler, skipping a released texture, and each creator-owned kind
+  surviving one consumer acquire/release cycle.
 - Scene recovery unit tests replace the device under an ESM shadow generator
   and assert that its textures, sampler, UBOs, hidden blur resources, and nested
   render task are recreated while the generator identity remains stable and the

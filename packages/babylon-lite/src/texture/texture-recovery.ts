@@ -2,7 +2,7 @@ import { U8 } from "../engine/typed-arrays.js";
 import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "./texture-2d.js";
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getOrCreateSampler, acquireTexture } from "../resource/gpu-pool.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
 /** The wrapper that rebuilt each recovery source and the device it rebuilt for, so any other
@@ -48,6 +48,16 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     const done = rebuildFromSource(engine, tex, source);
     _rebuiltOn.set(source, { device: engine._device, tex, done });
     await done;
+    // Restore the ownership reference the creator took. `createTexture2D`,
+    // `createTexture2DFromPixels` and `createRenderTexture2D` each `acquireTexture` the texture they
+    // hand back, and the replacement GPUTexture starts at ref-count 0 — without this the first
+    // consumer to bind and then unbind it destroys it while the application still holds the wrapper.
+    // `createSolidTexture2D` and the glTF `uploadTex` path take no such reference, and the dynamic
+    // rebuild restores its own. Wrappers that adopt take none either, exactly as `cloneTexture2D`
+    // takes none at creation: they share the reference held for the texture they now point at.
+    if (source.kind === "url" || source.kind === "pixels" || source.kind === "render") {
+        acquireTexture(tex);
+    }
 }
 
 /**
