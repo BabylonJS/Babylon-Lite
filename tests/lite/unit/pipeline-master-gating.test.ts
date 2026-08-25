@@ -159,6 +159,36 @@ const KNOWN_MASTER_JOBS = ["UnitTests", "Lint", "Compat"];
 const COST_GATED_JOBS: string[] = [];
 
 /**
+ * The prose promise `COST_GATED_JOBS` makes, turned into a check.
+ *
+ * The hatch was added so that gating a job for cost becomes "a reviewed
+ * decision rather than a bare condition". Measured immediately afterwards, that
+ * was worth exactly nothing: adding a deterministic job, gating it off master
+ * and writing its name into the constant takes the file from one failure to
+ * seven passed. The job leaves post-merge validation in silence, *through the
+ * escape hatch added to make leaving deliberate* -- the repair and the
+ * regression in one commit.
+ *
+ * Every clause that could have seen it is phrased in terms of the hatch, and a
+ * hatch reaches all of those by construction. So the binding has to sit
+ * somewhere the hatch cannot edit, and `TESTING.md` is that place: it already
+ * carries the excluded list with a reason per entry, and no edit to this
+ * constant changes a word of it.
+ *
+ * Deliberately a low bar -- the job's display name has to appear in that one
+ * section. It is not a proof that the reason is good. It forces the exclusion
+ * into a second file in the same diff, written in prose, where the person
+ * reviewing decides. That is all the original comment claimed and more than it
+ * delivered.
+ */
+function deliberatelyExcludedFromMaster(): string {
+    const doc = readFileSync(join(repoRoot, "TESTING.md"), "utf8");
+    const start = doc.indexOf("Deliberately excluded from");
+    const end = doc.indexOf("Those jobs are gated", start + 1);
+    return start === -1 || end === -1 ? "" : doc.slice(start, end);
+}
+
+/**
  * The template references this guard's marker detection currently rests on.
  *
  * Named rather than counted, for the reason the other floors are: a count drifts
@@ -496,6 +526,34 @@ describe("pull-request jobs cannot run on a master build", () => {
                 `Pull-request context reaches jobs through templates, so an include this guard cannot resolve is context it cannot see -- ` +
                 `the job then looks like it needs no pull request, and the advice attached to that failure is to record it as cost-gated, which would make the blindness permanent. ` +
                 `Fix the path, or if the template is genuinely gone, remove the include from the job.`
+        ).toEqual([]);
+    });
+
+    it("makes a cost gate argue for itself where the hatch cannot reach", () => {
+        // This clause never consults COST_GATED_JOBS to decide whether something
+        // is acceptable -- it consults it only to find what must be justified,
+        // and reads the justification from a file the constant cannot edit. That
+        // asymmetry is the whole point: a hatch silences every clause phrased in
+        // terms of it, so the one clause that binds has to be phrased outside.
+        const excluded = deliberatelyExcludedFromMaster();
+
+        expect(
+            excluded,
+            "TESTING.md's 'Deliberately excluded from master' section could not be located, so this clause would accept any cost gate at all. " +
+                "Its anchors moved -- re-point them here rather than removing this check, which is the only one a COST_GATED_JOBS entry cannot silence."
+        ).toContain("Bundle Size");
+
+        const jobsByName = new Map(dualContextPipelines.flatMap((file) => file.jobs).map((job) => [job.name, job]));
+        const undocumented = COST_GATED_JOBS.filter((name) => {
+            const label = /^\s+displayName:\s*"([^"]+)"\s*$/m.exec(jobsByName.get(name)?.body ?? "")?.[1];
+            return label === undefined || !excluded.includes(label);
+        });
+
+        expect(
+            undocumented,
+            `these jobs are recorded in COST_GATED_JOBS but nothing in TESTING.md says master stopped validating them: ${undocumented.join(", ")}.\n` +
+                `Add each one's displayName, exactly as the pipeline spells it, to the "Deliberately excluded from master" list with the reason it is too slow or too flaky to run post-merge. ` +
+                `A job can leave post-merge validation -- it just cannot leave quietly, and this constant on its own is quiet.`
         ).toEqual([]);
     });
 
