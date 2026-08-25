@@ -236,7 +236,7 @@ stages:
 
                       curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body -i -X POST \
                         -H "Content-Type: multipart/form-data" \
-                        -H "Authorization: ******" \
+                        -H "Authorization: Bearer ${DEPLOY_TOKEN}" \
                         -F "path=$(baselineDeployPath)" \
                         -F "storageAccount=${STORAGE_ACCOUNT}" \
                         -F "zip=@$WORK/baseline.zip"
@@ -245,3 +245,4 @@ stages:
                       DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
                       DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
                       STORAGE_ACCOUNT: $(storageAccount)
+                      DEPLOY_TOKEN: $(DEPLOY_TOKEN)

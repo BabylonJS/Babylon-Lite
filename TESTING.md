@@ -341,6 +341,29 @@ three been importing it all along. A pipeline that needs a storage account and
 declares only the first two groups will not fail at parse time — see the trap
 described below.
 
+### Never copy a command out of a build log
+
+Azure masks secret values in build logs as a run of asterisks. If you copy a
+`curl` line out of a log to reproduce it, you copy the mask, and pasting it back
+into a pipeline produces a header that still _looks_ like a header while
+carrying no credential at all.
+
+This is not hypothetical. The bundle-manifest publish step shipped with a
+literal asterisk run where the bearer token belonged, and it survived review for
+weeks, because it is close to invisible: a code-review diff redacts the value of
+an `Authorization` header to asterisks whether the file holds a real token
+reference or a mask, so both render identically. It reads as correct in every
+view except the raw bytes.
+
+It was also a _second_, independent cause of the same 401 that the storage
+account produced — so fixing one of the two would have left the symptom
+unchanged and the remaining cause looking disproven.
+
+`tests/lite/unit/pipeline-secret-hygiene.test.ts` now rejects any asterisk run
+in a pipeline file, and separately requires every `Authorization:` header to
+reference `DEPLOY_TOKEN` — the mask passed the first kind of scrutiny precisely
+because it still resembled a header.
+
 This list is no longer maintained by hand:
 `tests/lite/unit/pipeline-variable-groups-documented.test.ts` parses every
 `- group:` declaration out of the `azure-pipelines*.yml` files and asserts this

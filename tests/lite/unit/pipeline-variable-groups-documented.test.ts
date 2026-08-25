@@ -28,6 +28,14 @@ function declaredGroups(): Map<string, string[]> {
             byGroup.set(group, [...(byGroup.get(group) ?? []), file]);
         }
     }
+
+    // And guard it one level deeper. Finding the files is not the same as
+    // parsing them: if the `- group:` pattern ever stops matching, the map is
+    // empty, "every declared group is documented" is trivially satisfied, and
+    // the primary assertion reports success having checked nothing. Verified by
+    // breaking the pattern on purpose -- without this line that test passes.
+    expect(byGroup.size, "parsed no `- group:` declarations — the assertions would be vacuous").toBeGreaterThan(0);
+
     return byGroup;
 }
 
