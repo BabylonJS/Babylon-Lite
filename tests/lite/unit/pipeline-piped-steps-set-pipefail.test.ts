@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
-import { isWalkableDir, pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS, SHELL_STEP_KEY, stripNonShellMultilineScalars } from "./pipeline-files";
+import { isShellKey, isWalkableDir, isYamlFile, pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS, SHELL_STEP_KEY, stripNonShellMultilineScalars } from "./pipeline-files";
 
 interface ShellScript {
     location: string;
@@ -366,6 +366,28 @@ describe("piped pipeline steps enable pipefail", () => {
             unguarded,
             `these scripts pipe a command but never 'set -euo pipefail', so a failure on the left of the pipe is silently discarded:\n  ${unguarded.join("\n  ")}\n`
         ).toEqual([]);
+    });
+});
+
+describe("one question, one answer", () => {
+    // The structural guarantee replacing an accident. These two predicates were
+    // written in different commits and disagreed -- three keys in the regex,
+    // five in the strip's helper. Harmless only because the helper's list was
+    // the larger one; the reverse costs a blanked script body and a green
+    // suite. This fails the moment they diverge again, whichever way.
+    it.each(["script", "bash", "run", "Script", "RUN", "powershell", "pwsh", "description", "displayName", "value"])("agrees on whether %s introduces a shell step", (key) => {
+        expect(isShellKey(key)).toBe(SHELL_STEP_KEY.test(`${key}: echo hi`));
+    });
+
+    it.each([
+        ["a.yml", true],
+        ["a.yaml", true],
+        ["a.YML", true],
+        ["a.yml.bak", false],
+        ["yaml", false],
+        ["a.json", false],
+    ])("decides %s is a YAML file: %s", (name, expected) => {
+        expect(isYamlFile(name)).toBe(expected);
     });
 });
 

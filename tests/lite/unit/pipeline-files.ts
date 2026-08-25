@@ -58,7 +58,7 @@ export function pipelineYamlFiles(): { path: string; location: string; root: str
     const files: { path: string; location: string; root: string }[] = [];
     for (const { dir, label, rootOnlyPattern } of SCANNED_ROOTS) {
         for (const name of readdirSync(dir)) {
-            if (!/\.ya?ml$/.test(name)) {
+            if (!isYamlFile(name)) {
                 continue;
             }
             if (rootOnlyPattern && !rootOnlyPattern.test(name)) {
@@ -94,8 +94,19 @@ export function pipelineYamlFiles(): { path: string; location: string; root: str
  * through. Building `new RegExp(source, "m")` drops the `i` and quietly
  * restores the case-sensitive behaviour at one call site while the exported
  * constant still looks correct.
+ *
+ * Built from {@link SHELL_STEP_KEYS} rather than spelling the keys again,
+ * because this file previously asked "is this a shell step key" in two places
+ * with two different answers -- three keys here, five in the strip's helper.
+ * That was safe only by accident: the helper's list was the larger one, so the
+ * strip never blanked a body the collector wanted. Reversed by one edit -- a
+ * key added here and not there -- and the strip blanks a real script body,
+ * every pipe inside it disappears, and the suite stays green. One list, so the
+ * two cannot disagree, and a property test below asserts they never do.
  */
-export const SHELL_STEP_KEY = /^(\s*)(?:-\s+)?(?:script|bash|run):(.*)$/i;
+export const SHELL_STEP_KEYS = ["script", "bash", "run"] as const;
+
+export const SHELL_STEP_KEY = new RegExp(`^(\\s*)(?:-\\s+)?(?:${SHELL_STEP_KEYS.join("|")}):(.*)$`, "i");
 
 /**
  * The task that posts a comment on a pull request.
@@ -262,8 +273,31 @@ export function stripNonShellMultilineScalars(text: string): string {
     return out.join("\n");
 }
 
-function isShellKey(key: string | undefined): boolean {
-    return /^(?:script|bash|run|powershell|pwsh)$/i.test(key ?? "");
+/**
+ * True when a filename is a YAML file.
+ *
+ * Spelled once because it was previously spelled twice -- once for the scanned
+ * roots and once for the closure walk. Identical then, and the two are the
+ * enumeration and the check that certifies the enumeration is complete: if
+ * they ever drifted, the walk would decline to consider a file the collector
+ * reads, or claim one it never could, and either way the disagreement is
+ * between two things whose whole purpose is to be compared.
+ */
+export function isYamlFile(name: string): boolean {
+    return /\.ya?ml$/i.test(name);
+}
+
+/**
+ * True when a mapping key introduces a shell step this guard reads.
+ *
+ * Derived from {@link SHELL_STEP_KEYS}, the same list the collector's regex is
+ * built from. `powershell`/`pwsh` are deliberately absent: `pipefail` is a
+ * bash option and means nothing there, so a PowerShell body is not shell code
+ * *for this guard's purposes*. Measured -- the repo contains no such step
+ * today, so the narrowing is inert.
+ */
+export function isShellKey(key: string | undefined): boolean {
+    return (SHELL_STEP_KEYS as readonly string[]).includes((key ?? "").toLowerCase());
 }
 
 /**
@@ -356,7 +390,7 @@ export function pipelineFilesInRepo(): string[] {
                 }
                 continue;
             }
-            if (!/\.ya?ml$/.test(entry)) {
+            if (!isYamlFile(entry)) {
                 continue;
             }
             const text = stripNonShellMultilineScalars(readFileSync(full, "utf8"));
