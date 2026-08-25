@@ -1,16 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { enableMaterialPlugins } from "../../../packages/babylon-lite/src/material/plugin/enable-material-plugins";
 import type { MaterialPlugin } from "../../../packages/babylon-lite/src/material/plugin/material-plugin";
 import { bakeStdPluginMaterial, refreshStdPluginUbos, registerStdPlugins } from "../../../packages/babylon-lite/src/material/plugin/std-plugin-bridge";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
 import type { StandardMaterialProps } from "../../../packages/babylon-lite/src/material/standard/standard-material";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { StdExt } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
+import { onBeforeRender, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 
-function makeEngine(): { engine: EngineContext; createBuffer: ReturnType<typeof vi.fn>; writeBuffer: ReturnType<typeof vi.fn>; uploadedValues: number[] } {
+function makeEngine(onWrite?: () => void): { engine: EngineContext; createBuffer: ReturnType<typeof vi.fn>; writeBuffer: ReturnType<typeof vi.fn>; uploadedValues: number[] } {
     const uploadedValues: number[] = [];
     const writeBuffer = vi.fn((_target: GPUBuffer, _targetOffset: number, source: ArrayBuffer, sourceOffset: number) => {
+        onWrite?.();
         uploadedValues.push(new Float32Array(source, sourceOffset, 1)[0]!);
     });
     let bufferId = 0;
@@ -99,5 +102,38 @@ describe("dynamic Standard material plugins", () => {
         });
 
         expect(createBuffer).toHaveBeenCalledTimes(1);
+    });
+
+    it("refreshes after public before-render value updates regardless of enable order", () => {
+        const order: string[] = [];
+        const { engine, uploadedValues } = makeEngine(() => order.push("refresh"));
+        const value = { current: 1 };
+        const material = createStandardMaterial();
+        material.plugins = [valuePlugin(value)];
+        const scene = {
+            surface: { engine },
+            meshes: [mesh(material)],
+            _beforeRender: [
+                () => {
+                    order.push("existing");
+                    value.current = 2;
+                },
+            ],
+        } as unknown as SceneContext;
+
+        enableMaterialPlugins(scene);
+        uploadedValues.length = 0;
+        order.length = 0;
+        onBeforeRender(scene, () => {
+            order.push("future");
+            value.current = 3;
+        });
+
+        for (const callback of scene._beforeRender) {
+            callback(0);
+        }
+
+        expect(order).toEqual(["future", "existing", "refresh"]);
+        expect(uploadedValues).toEqual([2]);
     });
 });
