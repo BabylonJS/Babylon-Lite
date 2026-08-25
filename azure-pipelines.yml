@@ -240,24 +240,27 @@ stages:
                           bundle-assets | v1
                       path: $(System.DefaultWorkingDirectory)/.bundle-asset-cache
 
-                - script: |
-                      TARGET_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-refs/heads/master}"
-                      TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
-                      git fetch origin "$TARGET_BRANCH:refs/remotes/origin/$TARGET_BRANCH" --depth=1
-                  displayName: "Fetch master bundle baseline"
-
+                # The master baseline for the delta report is published by
+                # azure-pipelines-bundle-manifest.yml to public storage, so it is
+                # fetched over plain HTTPS rather than read out of git. Nothing is
+                # tracked, so there is nothing for branches to conflict on and
+                # nothing that can go stale and turn this job red.
+                #
+                # build:bundle-scenes fetches it itself (see
+                # writeMasterBundleManifest); a missing baseline is not an error —
+                # the delta report is skipped and the ceiling checks below, which
+                # are what actually gate size, are unaffected.
                 - script: pnpm build:bundle-scenes
                   displayName: "Build bundle scenes"
                   env:
                       SKIP_BJS: "true"
 
-                # Enforce that any PR which moves per-scene bundle sizes also
-                # commits the regenerated per-scene manifest files. The build step
-                # above rewrites the working-tree per-scene manifest with fresh
-                # measurements; this compares them (rounded to whole KB) against the
-                # versions committed at HEAD.
-                - script: pnpm validate:bundle-manifest
-                  displayName: "Validate bundle manifest is committed"
+                # Bundle-content unit specs read the per-scene manifests under
+                # lab/public/bundle/manifest/. Those are build output rather than
+                # tracked source, so the Unit Tests job (which runs vitest before any
+                # build) self-skips them — run them here, where the build exists.
+                - script: npx vitest run --project unit tests/lite/unit/bundle-content-no-f64.test.ts tests/lite/unit/npe-particle-bundle-content.test.ts
+                  displayName: "Bundle content unit tests"
 
                 # Absolute ceiling checks (scene-config.json maxRawKB)
                 - script: npx playwright test tests/lite/parity/bundle-size.spec.ts --reporter=junit
