@@ -4,10 +4,9 @@
 // bytes for scenes without interactivity. Mirrors BJS `blockFactory` and Lite's
 // `gltf-feature-registry`.
 //
-// Phase 2 lands the vertical-slice blocks (events, control-flow, one math op,
-// property/variable data, animation). Add one `case` per block as more land
-// (Phase 3+). The `switch` body stays pure (no module-level allocation),
-// keeping this module fully tree-shakable.
+// The switch body stays pure (no module-level allocation), keeping this module
+// fully tree-shakable. Unknown editor/runtime block types fail loudly; the KHR
+// parser explicitly maps unsupported declarations to typed no-op blocks.
 //
 // Unknown-op policy lives in the CALLER: `createFgEnv` (KHR_interactivity path)
 // fails loudly on `null`; a permissive editor path (post-MVP) may substitute a
@@ -18,6 +17,8 @@ import { FgBlockType } from "./block-type.js";
 
 export function getBlockDef(type: string): (() => Promise<FgBlockDef>) | null {
     switch (type) {
+        case FgBlockType.NoOp:
+            return async () => (await import("./blocks/no-op.js")).noOpDef;
         // ─── Events ───────────────────────────────────────────────
         case FgBlockType.SceneStart:
             return async () => (await import("./blocks/events/scene-start.js")).sceneStartDef;
@@ -29,6 +30,8 @@ export function getBlockDef(type: string): (() => Promise<FgBlockDef>) | null {
             return async () => (await import("./blocks/events/send-custom-event.js")).sendCustomEventDef;
         case FgBlockType.ReceiveCustomEvent:
             return async () => (await import("./blocks/events/receive-custom-event.js")).receiveCustomEventDef;
+        case FgBlockType.StopEventPropagation:
+            return async () => (await import("./blocks/events/stop-event-propagation.js")).stopEventPropagationDef;
 
         // ─── Control flow ─────────────────────────────────────────
         case FgBlockType.Branch:
@@ -185,6 +188,16 @@ export function getBlockDef(type: string): (() => Promise<FgBlockDef>) | null {
             return async () => (await import("./blocks/math/rotate3d.js")).rotate3DDef;
         case FgBlockType.MathInterpolation:
             return async () => (await import("./blocks/math/mix.js")).mathInterpolationDef;
+        case FgBlockType.MathSlerp:
+            return async () => (await import("./blocks/math/quaternion-slerp.js")).mathSlerpDef;
+        case FgBlockType.SmoothStep:
+            return async () => (await import("./blocks/math/smooth-step.js")).smoothStepDef;
+        case FgBlockType.RGBToOkLCh:
+            return async () => (await import("./blocks/math/rgb-to-oklch.js")).rgbToOkLChDef;
+        case FgBlockType.RGBFromOkLCh:
+            return async () => (await import("./blocks/math/rgb-from-oklch.js")).rgbFromOkLChDef;
+        case FgBlockType.VectorSlerp:
+            return async () => (await import("./blocks/math/vector-slerp.js")).vectorSlerpDef;
         case FgBlockType.CombineVector3:
             return async () => (await import("./blocks/math/combine3.js")).combine3Def;
         case FgBlockType.CombineVector4:
@@ -197,6 +210,8 @@ export function getBlockDef(type: string): (() => Promise<FgBlockDef>) | null {
             return async () => (await import("./blocks/math/constant-e.js")).eDef;
         case FgBlockType.PI:
             return async () => (await import("./blocks/math/constant-pi.js")).piDef;
+        case FgBlockType.Tau:
+            return async () => (await import("./blocks/math/constant-tau.js")).tauDef;
         case FgBlockType.Inf:
             return async () => (await import("./blocks/math/constant-inf.js")).infDef;
         case FgBlockType.NaN:
@@ -245,6 +260,10 @@ export function getBlockDef(type: string): (() => Promise<FgBlockDef>) | null {
             return async () => (await import("./blocks/math/axis-angle-from-quaternion.js")).axisAngleFromQuaternionDef;
         case FgBlockType.QuaternionFromDirections:
             return async () => (await import("./blocks/math/quaternion-from-directions.js")).quaternionFromDirectionsDef;
+        case FgBlockType.QuaternionFromUpForward:
+            return async () => (await import("./blocks/math/quaternion-from-up-forward.js")).quaternionFromUpForwardDef;
+        case FgBlockType.QuaternionFromAngles:
+            return async () => (await import("./blocks/math/quaternion-from-angles.js")).quaternionFromAnglesDef;
         case FgBlockType.QuaternionMultiplication:
             return async () => (await import("./blocks/math/quaternion-multiplication.js")).quaternionMultiplicationDef;
         case FgBlockType.BooleanToFloat:

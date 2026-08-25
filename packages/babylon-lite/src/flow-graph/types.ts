@@ -3,16 +3,10 @@
 // FgBlockDef records (block-def.ts) and standalone runtime functions
 // (runtime.ts). See docs/lite/architecture/51-flow-graph.md.
 
-import type { Color3, Color4, Mat4, Quat, Vec3, Vec4 } from "../math/types.js";
+import type { Color3, Color4, Mat4, Quat, Vec2, Vec3, Vec4 } from "../math/types.js";
+export type { Vec2 } from "../math/types.js";
 import type { FgInteger } from "./custom-types/fg-integer.js";
 import type { FgMatrix2D, FgMatrix3D } from "./custom-types/fg-matrix.js";
-
-/** 2-component vector. Core math/ is Vec3-centric and has no Vec2, so the
- *  flow-graph subsystem owns its own (glTF `float2` maps to this). */
-export interface Vec2 {
-    x: number;
-    y: number;
-}
 
 /** A value that can flow along a data edge. */
 export type FgValue = number | boolean | string | Vec2 | Vec3 | Vec4 | Quat | Mat4 | FgInteger | FgMatrix2D | FgMatrix3D | Color3 | Color4 | null | undefined;
@@ -35,6 +29,8 @@ export const enum FgType {
     Matrix3D = "Matrix3D",
     Color3 = "Color3",
     Color4 = "Color4",
+    /** Opaque host reference. KHR uses canonical JSON Pointer strings; "" is null. */
+    Reference = "ref",
 }
 
 /** A data input/output port — plain data. */
@@ -42,7 +38,7 @@ export interface FgDataSocket {
     readonly name: string;
     readonly type: FgType;
     /** Wired source (for inputs): producing block id + its output socket name. */
-    source?: { blockId: string; socket: string };
+    source?: { blockId: string; socket: string; scale?: number };
     /** Literal fallback used when `source` is undefined. */
     defaultValue?: FgValue;
 }

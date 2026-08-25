@@ -2,7 +2,7 @@
 
 > Package path: `packages/babylon-lite/src/flow-graph/`
 >
-> Status: **IMPLEMENTED / COMPATIBILITY REFRESH IN PROGRESS**. This document is
+> Status: **IMPLEMENTED / CURRENT COMPATIBILITY BASELINE COMPLETE**. This document is
 > the formal specification for Babylon Lite's `FlowGraph` runtime, stable glTF
 > `KHR_interactivity` support, and Babylon.js Flow Graph Editor JSON compatibility.
 
@@ -17,27 +17,29 @@ real-world consumer is the glTF **`KHR_interactivity`** extension, which embeds
 an interactivity graph inside a `.glb` and expects the engine to execute it at
 runtime.
 
-**Goal of this port (phase priority, locked):** load and run interactive glTF
-assets. The plan therefore phases:
+**Goal of this port:** load and run interactive glTF assets and execute JSON
+saved by the Babylon.js Flow Graph Editor. The two formats are separate parser
+front-ends over the same pure-state runtime:
 
 1. a minimal **pure-state runtime** (graph + context + connection model),
-2. the **subset of blocks** that `KHR_interactivity` actually maps to, and
+2. the **blocks** that `KHR_interactivity` maps to,
 3. the **`loader-gltf` extension** that parses the interactivity JSON into a
-   Lite graph and resolves JSON pointers to scene accessors.
+   Lite graph and resolves JSON pointers to scene accessors, and
+4. an **editor-JSON adapter** that translates Babylon.js serialized block
+   graphs into the same Lite graph representation.
 
-Full editor-authored parity (all ~170 BJS blocks, the BJS snippet/serialization
-format, the debugger, multi-context coordinators) is explicitly **out of scope
-for the MVP** and is listed as later phases.
+Debugger parity and editor-only blocks outside Lite's supported block registry
+remain later work. Loading the editor's coordinator and legacy single-graph JSON
+formats is in scope; unsupported editor-only block classes fail with a precise
+diagnostic rather than being silently discarded.
 
-> **⚠️ Spec stability caveat (read before touching `flow-graph/gltf/`):**
-> `KHR_interactivity` is **not yet ratified** and is actively changing; Babylon.js
-> is reworking its implementation to the newer spec draft in
-> **[PR #18455 "KHR_interactivity rework"](https://github.com/BabylonJS/Babylon.js/pull/18455)**
-> (currently closed-for-age, expected to be reopened/merged soon). This port
-> therefore **isolates all spec-dependent code in `flow-graph/gltf/`** and keeps
-> the runtime core spec-agnostic, so future spec revisions are cheap, localized
-> edits. See "The spec is NOT ratified" under the loader section and the risks at
-> the end.
+> **Spec stability caveat (read before touching `flow-graph/gltf/`):**
+> `KHR_interactivity` reached Khronos release-candidate status and was submitted
+> for ratification in July 2026, but the checked sources do not yet establish
+> final ratification. Babylon.js has replaced the implementation that this port
+> originally mirrored. This port therefore continues to isolate all
+> spec-dependent code in `flow-graph/gltf/` and records exact reference commits
+> so future revisions remain localized.
 
 ---
 
@@ -146,6 +148,8 @@ export const enum FgType {
     Matrix3D = "Matrix3D",
     Color3 = "Color3",
     Color4 = "Color4",
+    /** glTF JSON Pointer string. The empty string is the null reference. */
+    Reference = "ref",
 }
 
 /** A data input/output port — plain data. */
@@ -293,7 +297,8 @@ export function activateSignal(ctx: FgContext, env: FgEnv, block: FgBlock, socke
 /** Instantiate runtime state for a parsed graph. */
 export function createFgContext(graph: FgGraph, opts?: { rightHanded?: boolean }): FgContext;
 /** Build the resolved env (await needed defs, attach accessors/animations/bus).
- *  FAILS LOUDLY (throws) on an unsupported block type — see registry note. */
+ *  Editor-authored unknown block types fail loudly. KHR unsupported operations
+ *  are translated to registered typed no-op blocks before this boundary. */
 export function createFgEnv(graph: FgGraph, wiring?: FgWiring): Promise<FgEnv>;
 
 /** One graph runtime = graph + context + env, owned by the scene. */
@@ -383,13 +388,14 @@ export function getBlockDef(type: string): () => Promise<FgBlockDef> {
 > **Note on side effects:** the `switch` function body is pure (no module-level
 > allocation), so the registry module is fully tree-shakable.
 >
-> **Unknown ops:** `getBlockDef` returns `null` for unknown types; the **caller**
-> chooses the policy. The **glTF interactivity parser fails loudly** (collects a
-> structured `unsupportedOp` diagnostic and aborts/flags that graph) so a
-> `KHR_interactivity` asset can't silently render a broken interaction. A
-> permissive editor/snippet path (post-MVP) may instead substitute an explicit
-> `noopDef`. Never silently swallow an unknown op on the KHR path — it makes
-> parity failures undiagnosable.
+> **Unknown ops:** `getBlockDef` returns `null`; each parser chooses the policy.
+> Stable `KHR_interactivity` requires an unsupported declaration to become an
+> explicit **typed no-op** so the rest of that graph can still execute. The
+> parser reports the unsupported operation and preserves the declaration's
+> declared sockets on the no-op. Invalid graph structure is different: reject
+> only that graph and continue loading the other graphs in the asset. Editor JSON
+> is authored specifically for Babylon blocks, so an unknown `className` fails
+> loudly with its block id and class name.
 
 ---
 
@@ -530,15 +536,18 @@ and its module-scope instances.
 > Package path: `packages/babylon-lite/src/loader-gltf/gltf-feature-interactivity.ts`
 > plus `flow-graph/gltf/` for the parser + declaration mapper.
 
-### ⚠️ The spec is NOT ratified — isolate everything spec-dependent
+### Release-candidate spec — keep the translation layer isolated
 
-`KHR_interactivity` is **still a draft / not ratified**; the op set, type system,
-JSON pointer semantics, and node/declaration shapes **will change**. Babylon.js
-is reworking its implementation to the newer spec draft in
-**[PR #18455 "KHR_interactivity rework"](https://github.com/BabylonJS/Babylon.js/pull/18455)**
-— currently **closed** (it was auto-closed for age) but **expected to be
-reopened/merged soon**. So even BJS is a moving target here, and our mapping
-tables must track that PR as it lands.
+The port originally targeted Babylon.js commit `8f728b23ea` while
+**[PR #18455](https://github.com/BabylonJS/Babylon.js/pull/18455)** was still
+open. That target is obsolete. The compatibility refresh targets:
+
+- Khronos glTF repository commit `fdb8ce0e2e0b7ecf3466f8dacb9f1385257b8276`.
+- Babylon.js commit `bd3837eed0890e590fdd6aeb6cc4d605e4eb8ac7`.
+
+The release candidate was submitted for ratification in July 2026; final
+ratification was not confirmed when these commits were recorded. The op set,
+object model, and validation rules can therefore still evolve.
 
 **Design rule (mandatory):** the spec-volatile surface must be **quarantined in
 `flow-graph/gltf/`** and depend on the runtime, never the reverse. The runtime
@@ -549,21 +558,19 @@ only the `gltf/` translation layer:
 - `interactivity-parser.ts` — JSON shape of nodes/declarations/variables/flows.
 - `declaration-mapper.ts` — the op→block table (the part most likely to churn).
 - `path-converter.ts` + `object-model-mapping.ts` — JSON-pointer semantics.
-- a `gltf/spec-version.ts` constant + a place to branch behaviour if we must
-  support more than one draft simultaneously.
+- a recorded Khronos/Babylon.js reference commit in the mapper header and tests.
 
 **Practical guardrails so future spec changes are cheap:**
 - Keep the op→block mapping a **plain-data table**, not code, so edits are diffs
   to data (and so a future "import the BJS table" step stays mechanical).
-- Treat the **BJS rework PR ([#18455 "KHR_interactivity rework"](https://github.com/BabylonJS/Babylon.js/pull/18455),
-  closed-for-age, to be reopened)** as the reference target; when it lands,
-  re-diff our `declaration-mapper.ts` against it. Record which BJS commit/PR our
-  table mirrors in a header comment so drift is auditable.
-- **Version-tag** parser/mapper behaviour; if Khronos bumps the draft, add a
-  branch keyed on the asset's declared spec version rather than mutating the
-  existing path.
-- Unknown/changed ops already **fail loudly** with a structured diagnostic (see
-  registry note) — that is the early-warning signal that the spec moved.
+- Re-diff `declaration-mapper.ts` against the recorded Babylon.js commit when
+  updating either reference. Keep an operation-coverage test that compares all
+  known native operations with registered mappings.
+- Do not invent an asset-level version switch: the release-candidate extension
+  has no such discriminator. If a future revision adds one, branch at this
+  translation boundary.
+- Unknown operations produce structured diagnostics and typed no-op blocks.
+  Structural/schema violations reject only the affected graph.
 - The companion skill (`port-flow-graph-block.md`) is the routine for absorbing
   new/changed ops as the spec and the BJS PR evolve.
 
@@ -577,24 +584,28 @@ Add one tuple to `gltf-feature-registry.ts`, identical to every other feature:
 
 The feature implements `GltfFeature.applyAsset(meshes, root, ctx)`:
 
-1. Read `ctx._json.extensions.KHR_interactivity.graphs`.
+1. Read `ctx._json.extensions.KHR_interactivity`. `graphs` is required; optional
+   `graph` selects the default graph.
 2. For each graph, run the **interactivity parser** → `FgGraph` (plain data).
+   Catch parse/validation errors per graph so one invalid graph cannot invalidate
+   the asset.
 3. **Resolve JSON pointers** in the graph to `FgAccessor`s over the already-built
    Lite scene objects (nodes/meshes/cameras/materials/animations) via a path
    converter (Lite analogue of BJS `gltfPathToObjectConverter` +
    `objectModelMapping`).
 4. Build `FgEnv` (await needed block defs, attach accessors/animations/event bus).
-5. Return `{ flowGraphs: [FgRuntime] }` merged into the `AssetContainer`.
-   `addToScene` pushes them onto `scene._flowGraphs` and registers the
-   `_beforeRender` driver + disposer.
+5. Return the successfully parsed graphs in the `AssetContainer` and contribute
+   a deferred `_sceneSetup` hook. `addToScene` resolves runtimes with the target
+   scene's shared event bus, pushes them onto `scene._flowGraphs`, and registers
+   paired cleanup. Callers do not need to invoke `runFlowGraphs` manually.
 
 > The loader sets the equivalent of BJS's `_skipStartAnimationStep` — animations
 > referenced by interactivity must **not** auto-play; the graph controls them.
 
 ### Interactivity parser (`flow-graph/gltf/interactivity-parser.ts`)
 
-Pure translation of the glTF interactivity JSON
-(`types`, `declarations`, `variables`, `events`, `nodes`, `flows`) into an
+Pure translation of each glTF interactivity graph
+(`types`, `declarations`, `variables`, `events`, and `nodes`) into an
 `FgGraph`. Stages mirror BJS `InteractivityGraphToFlowGraphParser`:
 `parseTypes → parseDeclarations → parseVariables → parseEvents → parseNodes →
 parseConnections`. Output is plain data — **no block instances, no class registry**.
@@ -612,10 +623,28 @@ glTF→Lite type table (from BJS, kept verbatim):
 | `float2x2` | 4 | Matrix2D | number |
 | `float3x3` | 9 | Matrix3D | number |
 | `float4x4` | 16 | Matrix | number |
+| `ref` | 1 | Reference | JSON Pointer string (`""` = null) |
+
+Release-candidate parser semantics:
+
+- Type/default validation follows the Khronos schemas. Numeric, vector, and
+  matrix defaults preserve the spec's NaN defaults where specified.
+- `events` declares custom-event ids and typed payload fields. Send/receive
+  blocks use those declarations for socket types and defaults.
+- Event receivers expose an opaque event reference. `event/stopPropagation`
+  consumes it and prevents later receivers in the same dispatch from running.
+- glTF custom-event delivery is asynchronous by default. The coordinator's
+  editor-JSON `dispatchEventsSynchronously` option remains independently
+  configurable.
+- A connected animation-time input is converted from seconds to frames at
+  runtime; constants may be pre-transformed.
+- Pointer templates validate all placeholders and support dynamic segments.
+  Virtual/object-model pointers include the release-candidate active-camera,
+  capability/limit, event-reference, delay, and animation-state surfaces.
 
 ### Declaration mapper (`flow-graph/gltf/declaration-mapper.ts`)
 
-The largest single artefact (BJS = ~1,851 lines, **168 ops**). It is a **data
+The largest single artefact (current BJS = **135 native ops**). It is a **data
 table** mapping each glTF op (`"math/add"`, `"flow/branch"`, `"pointer/set"`, …)
 to: target Lite block type(s), socket renames, config translation, value
 transformers (e.g. seconds→frames for animation time), and multi-block expansions
@@ -638,10 +667,14 @@ export function getMappingForOp(op: string, extension?: string): FgDeclMapping |
 
 ---
 
-## Block coverage for the MVP (KHR_interactivity subset)
+## Block coverage (`KHR_interactivity`)
 
-`KHR_interactivity` maps to ~60 distinct Lite block types (the 168 ops collapse
-onto fewer blocks via config). MVP target set, by category:
+`KHR_interactivity` maps 135 native operations onto fewer Lite block types via
+configuration. The refresh adds the ten operations absent from the original
+126-operation target: `event/stopPropagation`, `math/Tau`,
+`math/smoothStep`, `math/rgbToOkLCh`, `math/rgbFromOkLCh`,
+`math/quatSlerp`, `math/slerp`, `ref/eq`, `math/quatFromUpForward`, and
+`math/quatFromAngles`.
 
 - **Events (4):** `onStart`→SceneStart, `onTick`→SceneTick, `event/send`→SendCustomEvent, `event/receive`→ReceiveCustomEvent.
 - **Flow control (11):** branch, sequence, switch, while, for, doN, multiGate, waitAll, throttle, setDelay, cancelDelay.
@@ -652,7 +685,9 @@ onto fewer blocks via config). MVP target set, by category:
 - **Variables (3):** get, set, interpolate.
 - **Pointers (3):** get, set, interpolate (+ JsonPointerParser).
 - **Animation (3):** start, stop, stopAt (+ ArrayIndex / data provider).
-- **Debug (1):** log.
+- `flow/log` is a Babylon extension operation rather than a native KHR
+  operation. `event/onSelect` remains extension-namespaced through
+  `KHR_node_selectability`.
 
 Each block is one small file under `flow-graph/blocks/<category>/<name>.ts`
 exporting a `FgBlockDef`. See the skill doc for the exact file template.
@@ -736,8 +771,13 @@ dispose
 - **Coercion tests:** `Vector4`/`Matrix` → `Quaternion` via `coerceValue`;
   `animationTypeForFgType` picks slerp for quaternion targets.
 - **Parser unit tests:** representative interactivity JSON → expected `FgGraph`
-  topology; declaration-mapper entries → expected blocks/sockets/config; an
-  **unknown op fails loudly** with a structured diagnostic (not a silent no-op).
+  topology; declaration-mapper entries → expected blocks/sockets/config;
+  unsupported op → typed no-op + diagnostic; malformed graph → only that graph
+  rejected.
+- **Editor JSON tests:** coordinator and legacy single-graph fixtures saved by
+  the current Babylon.js Flow Graph Editor; rich-value/default/context restore;
+  connection reconstruction by connection-point id; execute the parsed graph;
+  unknown editor block → precise diagnostic.
 - **Integration / parity:** a `KHR_interactivity` sample `.glb` (e.g. a
   Khronos sample like a button that animates on click, or `onStart`→rotate)
   loaded in Lite; assert the driven property changes over frames. Where a visual
@@ -764,6 +804,8 @@ packages/babylon-lite/src/flow-graph/
   fg-math.ts                     # Vec2 + quaternion/matrix/bitwise helpers (lazy)
   rich-type.ts                   # defaultForType(), coerceValue(), animationTypeForFgType()
   scene-flow-graph.ts            # attachFlowGraph/detachFlowGraph (onBeforeRender/onSceneDispose seams)
+  graph-builder.ts               # imperative builder shared by parser adapters
+  editor-serialization.ts        # coordinator/single-graph editor JSON → FgGraph
   custom-types/
     fg-integer.ts
     fg-matrix.ts
@@ -774,7 +816,7 @@ packages/babylon-lite/src/flow-graph/
     data/{constant,get-variable,set-variable,get-property,set-property,json-pointer-parser}.ts
     animation/{play-animation,stop-animation,value-interpolation}.ts
     debug/console-log.ts
-    noop.ts
+    no-op.ts
   gltf/
     interactivity-parser.ts
     declaration-mapper.ts
@@ -826,46 +868,60 @@ whole block library is written.
 variables, interpolation, control-flow remainder) + `fg-math.ts` +
 `custom-types/**`; register each in `block-registry.ts`. Unit-test each def.
 
-**Phase 4 — Complete the declaration mapper + more scenes.** Extend `gltf/`
-mapper/parser to the full 168-op surface; add further `KHR_interactivity` parity
-scenes, `scene-config.json` entries, bundle ceilings. Run full `pnpm test`.
+**Phase 4 — Complete the original declaration mapper.** ✅ DONE for the old
+126-operation target. Additional parity scenes remain optional coverage work.
 
-**Phase 5+ (post-MVP, out of MVP scope):** remaining blocks toward full parity;
-multi-context coordinator; debugger hooks; physics/audio interactivity ops; and
-**BJS-native FlowGraph serialization parsing** (the editor / `FlowGraphCoordinator.serialize()`
-JSON — `{ allBlocks: [{ className, config, dataInputs/Outputs, signalInputs/Outputs }],
-executionContexts: [...] }`). The pure-data runtime already consumes any `FgGraph`,
-so this is a **second parser front-end** alongside `gltf/interactivity-parser.ts`,
-producing the same `FgGraph`. Concrete sub-tasks: (1) a parser reading
-`allBlocks` + the connection-point graph; (2) a `className → FgBlockType` map for
-the registry; (3) rich-type value de/serialization (Vec2/3, quaternion, matrix,
-integer); (4) a scene-object-reference binding layer (BJS serializes mesh/node/
-material refs by Babylon className + id/name — analogous to the glTF path-converter
-but for BJS's asset-ref scheme). Gated on actually needing BJS-editor interop, and
-on the format settling after #18455 (it is a BJS-*internal*, higher-churn format
-than the standardized glTF draft).
+**Phase 5a — Imperative builder and scene coordinator.** ✅ DONE. Builder creates the
+same `FgGraph` plain data as parser front-ends. The coordinator owns multiple
+graphs, one scene event bus, and synchronous/asynchronous custom-event policy.
+
+**Phase 5b — Release-candidate KHR refresh.** ✅ DONE for the current Lite host
+surface. Rebase parser/mapper behavior on
+the recorded Khronos and Babylon.js commits. Add the ten operation gaps, `ref`,
+declared events/payloads, event references and propagation, typed no-ops,
+per-graph isolation, asynchronous event dispatch, dynamic pointer segments,
+expanded object-model pointers, and runtime animation-time conversion.
+
+**Phase 5c — Babylon.js Flow Graph Editor JSON.** ✅ DONE for serialized block
+classes ported to Lite. Add a second parser front-end
+alongside `gltf/interactivity-parser.ts`. Supported input forms:
+
+```typescript
+// Coordinator form
+{ _flowGraphs: SerializedFlowGraph[], activeGraphIndex,
+  dispatchEventsSynchronously, sceneSnippetId?, flowGraphSnippetId? }
+
+// Legacy form
+{ allBlocks: SerializedBlock[], executionContexts: SerializedContext[],
+  name?, uniqueId?, rightHanded?, editorData? }
+```
+
+`SerializedBlock` contains `className`, `type`, `config`, `uniqueId`,
+data/signal inputs and outputs, and metadata. Connections are reconstructed from
+connection-point `uniqueId`/`connectedPointIds`. Values may come from a
+connection's `defaultValue` or a context's `_connectionValues`; rich values use
+`{ value, className }`. The adapter maps Babylon block class names to Lite
+`FgBlockType`, restores user variables, and returns one graph/context record per
+serialized execution context. It also recognizes serialized JSON embedded in
+the Babylon-specific `BABYLON_flow_graph` glTF extension. Unsupported
+editor-only blocks fail clearly; they are not typed no-ops.
+
+**Phase 6+ — Editor-only block parity and debugger hooks.** Port blocks as
+needed using the companion skill. Current editor-only gaps include input,
+interpolation-animation construction, debounce/flip-flop, coordinate
+transforms, easing/context/array/code, physics, and audio blocks.
 
 ---
 
 ## Open Questions / Risks
 
-- **⚠️ Unratified spec (highest-churn risk).** `KHR_interactivity` is a draft; the
-  op set/types/pointer semantics will change, and BJS is reworking its
-  implementation to the newer draft in
-  **[PR #18455](https://github.com/BabylonJS/Babylon.js/pull/18455)** (closed for
-  age, to be reopened) — so even BJS is a moving target. Mitigation is
-  structural — all spec-dependent code is quarantined in `flow-graph/gltf/`
-  (parser, mapper, path-converter), version-tagged, and mirrored against a
-  recorded BJS commit; the runtime core stays spec-agnostic so revisions never
-  touch the engine. Re-sync the mapper when #18455 lands. See the loader
-  section's "spec is NOT ratified" subsection.
-- **Event bus surface.** Exact channels (tick/start/pointer/key/custom) and how
-  the picking/input layer forwards pointer & key events need a small design pass
-  in Phase 1; the bus must stay pure data + standalone subscribe/pump fns.
-- **`ValueInterpolation` reuse.** Decide how much of `src/animation/` easing the
-  interpolation block can reuse vs. a subsystem-local easing helper.
-- **Right-handedness.** glTF graphs are right-handed; confirm where Z/quaternion
-  coercion happens on accessor read/write to match Lite's LH convention.
-- **Parser scale.** The declaration mapper is large; Phases 3–4 should land an
-  initial subset (events + flow + core math + pointer get/set) before the long
-  tail of math ops, so an end-to-end scene works early.
+- **Release-candidate churn.** Final ratification was not confirmed at the
+  recorded reference commits. Mitigation remains structural: all
+  spec-dependent code is quarantined in `flow-graph/gltf/` and mirrored against
+  exact Khronos/Babylon.js commits; the runtime core remains spec-agnostic.
+- **Editor format churn.** Editor JSON is a Babylon.js serialization contract,
+  not the Khronos format. Keep it isolated in `flow-graph/editor-serialization.ts`, test
+  current official fixtures, and fail loudly when a serialized class is unknown.
+- **Host object-model breadth.** Pointer support is limited to concepts exposed
+  by Lite. Add accessors in `path-converter.ts` as Lite gains more glTF host
+  objects; unsupported pointers remain runtime-invalid rather than crashing.

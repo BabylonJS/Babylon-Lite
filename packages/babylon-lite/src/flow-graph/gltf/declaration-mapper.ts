@@ -1,7 +1,7 @@
-// ⚠️ SPEC-VOLATILE — KHR_interactivity is an UNRATIFIED glTF draft. Quarantined
-// here so the runtime core never changes when the spec churns. Mirrored against
-// Babylon.js commit 8f728b23ea (2026-06-24). Re-sync against BJS PR #18455
-// ("KHR_interactivity rework") when it lands.
+// SPEC-VOLATILE — KHR_interactivity release candidate. Quarantined here so the
+// runtime core never changes when the spec churns. Mirrored against Khronos
+// commit fdb8ce0e2e0b7ecf3466f8dacb9f1385257b8276 and Babylon.js commit
+// bd3837eed0890e590fdd6aeb6cc4d605e4eb8ac7 (2026-08-25).
 // See docs/lite/architecture/51-flow-graph.md → glTF KHR_interactivity Loader.
 //
 // declaration-mapper: maps each glTF interactivity `op` string to the Lite block
@@ -30,6 +30,8 @@ export interface FgOpMapping {
     /** Per-input numeric transform applied to a literal value array before
      *  coercion (e.g. animation seconds → frames). Keyed by glTF input name. */
     readonly valueTransform?: Readonly<Record<string, (arr: number[]) => number[]>>;
+    /** Runtime scale applied when an input is connected instead of literal. */
+    readonly connectedValueScale?: Readonly<Record<string, number>>;
     /** glTF value-OUTPUT socket name → Lite data-output name (for data references
      *  that read this block). Default output `value` passes through. */
     readonly outputValues?: Readonly<Record<string, string>>;
@@ -51,14 +53,14 @@ export interface FgOpMapping {
      * glTF `configuration` keys to copy as SCALAR values into block config.
      * Parser copies `node.configuration[gltfKey].value[0]` → `config[liteName]`.
      * Use for booleans, numbers, counts, and other single-element values.
-     * ⚠️ SPEC-VOLATILE: quarantined here; re-sync against BJS PR #18455.
+     * SPEC-VOLATILE: quarantined here and pinned in the architecture document.
      */
     readonly configKeys?: Readonly<Record<string, string>>;
     /**
      * glTF `configuration` keys to copy as ARRAY values into block config.
      * Parser copies `node.configuration[gltfKey].value` (full array) →
      * `config[liteName]`. Use for `cases` arrays and other multi-element lists.
-     * ⚠️ SPEC-VOLATILE: quarantined here; re-sync against BJS PR #18455.
+     * SPEC-VOLATILE: quarantined here and pinned in the architecture document.
      */
     readonly configArrayKeys?: Readonly<Record<string, string>>;
     /**
@@ -95,8 +97,8 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     "flow/waitAll": { block: FgBlockType.WaitAll, configKeys: { inputFlows: "inputSignalCount" } },
     // flow/throttle, flow/setDelay: `err` glTF output → `error` Lite signal.
     "flow/throttle": { block: FgBlockType.Throttle, flowOutputs: { err: "error" } },
-    "flow/setDelay": { block: FgBlockType.SetDelay, flowOutputs: { err: "error" } },
-    "flow/cancelDelay": { block: FgBlockType.CancelDelay },
+    "flow/setDelay": { block: FgBlockType.SetDelay, flowOutputs: { err: "error" }, outputValues: { lastDelay: "lastDelayIndex" } },
+    "flow/cancelDelay": { block: FgBlockType.CancelDelay, valueInputs: { delay: "delayIndex" } },
 
     "math/add": { block: FgBlockType.Add, valueInputs: { a: "a", b: "b" } },
     "math/sub": { block: FgBlockType.Subtract, valueInputs: { a: "a", b: "b" } },
@@ -162,10 +164,24 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     "math/cross": { block: FgBlockType.Cross },
     "math/rotate3D": { block: FgBlockType.Rotate3D },
     "math/mix": { block: FgBlockType.MathInterpolation },
+    "math/smoothStep": { block: FgBlockType.SmoothStep },
+    "math/rgbToOkLCh": {
+        block: FgBlockType.RGBToOkLCh,
+        valueInputs: { r: "r", g: "g", b: "b" },
+        outputValues: { l: "l", c: "c", h: "h" },
+    },
+    "math/rgbFromOkLCh": {
+        block: FgBlockType.RGBFromOkLCh,
+        valueInputs: { l: "l", c: "c", h: "h" },
+        outputValues: { r: "r", g: "g", b: "b" },
+    },
+    "math/quatSlerp": { block: FgBlockType.MathSlerp },
+    "math/slerp": { block: FgBlockType.VectorSlerp },
     "math/combine3": { block: FgBlockType.CombineVector3 },
     "math/combine4": { block: FgBlockType.CombineVector4 },
     "math/E": { block: FgBlockType.E },
     "math/Pi": { block: FgBlockType.PI },
+    "math/Tau": { block: FgBlockType.Tau },
     "math/Inf": { block: FgBlockType.Inf },
     "math/NaN": { block: FgBlockType.NaN },
     "math/random": { block: FgBlockType.Random },
@@ -264,13 +280,22 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     "math/quatFromAxisAngle": { block: FgBlockType.QuaternionFromAxisAngle, valueInputs: { axis: "a", angle: "b" } },
     "math/quatToAxisAngle": { block: FgBlockType.AxisAngleFromQuaternion },
     "math/quatFromDirections": { block: FgBlockType.QuaternionFromDirections },
+    "math/quatFromUpForward": {
+        block: FgBlockType.QuaternionFromUpForward,
+        valueInputs: { up: "a", forward: "b" },
+    },
+    "math/quatFromAngles": {
+        block: FgBlockType.QuaternionFromAngles,
+        valueInputs: { x: "a", y: "b", z: "c" },
+        configKeys: { order: "order" },
+    },
     // math/quatMul: BJS reuses the generic Multiply with config.type=Quaternion;
     // Lite has a dedicated Hamilton-product block (generic Multiply is component-
     // wise). glTF inputs `a`/`b` map to identically named sockets.
     "math/quatMul": { block: FgBlockType.QuaternionMultiplication },
 
     "variable/get": { block: FgBlockType.GetVariable, variableConfigKey: "variable" },
-    "variable/set": { block: FgBlockType.SetVariable, variableConfigKey: "variables", valueInputs: { value: "value" } },
+    "variable/set": { block: FgBlockType.SetVariable, configArrayKeys: { variables: "variables" } },
 
     "pointer/get": { block: FgBlockType.GetProperty, pointer: true },
     "pointer/set": { block: FgBlockType.SetProperty, pointer: true, valueInputs: { value: "value" }, flowOutputs: { err: "error" } },
@@ -279,6 +304,7 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
         block: FgBlockType.PlayAnimation,
         valueInputs: { animation: "animation", speed: "speed", startTime: "from", endTime: "to" },
         valueTransform: { startTime: FPS, endTime: FPS },
+        connectedValueScale: { startTime: 60, endTime: 60 },
         flowOutputs: { err: "error" },
     },
     "animation/stop": { block: FgBlockType.StopAnimation, valueInputs: { animation: "animation" }, flowOutputs: { err: "error" } },
@@ -288,6 +314,7 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
         block: FgBlockType.StopAnimation,
         valueInputs: { animation: "animation", stopTime: "stopAtFrame" },
         valueTransform: { stopTime: FPS },
+        connectedValueScale: { stopTime: 60 },
         flowOutputs: { err: "error" },
     },
 
@@ -296,33 +323,28 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     "debug/log": { block: FgBlockType.ConsoleLog, configKeys: { message: "messageTemplate" } },
 
     // ─── Phase 3i event ops ────────────────────────────────────────────────────
-    // event/send: `configuration["event"]` holds the integer event-table index,
-    // copied into `config.eventId` as a scalar.  Value parameters from the glTF
-    // events table are a deferred Phase 3i+ item (parser doesn't yet read
-    // `json.events`, so sockets beyond the eventId are not wired from glTF).
+    // The parser resolves each event-table index to its id, payload socket types,
+    // and defaults after applying this block mapping.
     "event/send": { block: FgBlockType.SendCustomEvent, configKeys: { event: "eventId" } },
-    // event/receive: same index → eventId mapping; glTF flow key `out` maps to
-    // the Lite `done` signal (BJS convention for event blocks).
+    // glTF flow key `out` maps to the Lite `done` signal (BJS convention).
     "event/receive": { block: FgBlockType.ReceiveCustomEvent, configKeys: { event: "eventId" }, flowOutputs: { out: "done" } },
+    "event/stopPropagation": { block: FgBlockType.StopEventPropagation, valueInputs: { event: "event", stopImmediate: "stopImmediate" } },
+    "ref/eq": { block: FgBlockType.Equality, valueInputs: { a: "a", b: "b" } },
 
     // ─── Phase 3i interpolation ops ───────────────────────────────────────────
-    // variable/interpolate: glTF `value` input → Lite `endValue`; `duration`
-    // passes through.  `useSlerp` config → `config.useSlerp` (boolean).
-    // Easing control points `p1`/`p2` (BezierCurveEasing) are deferred.
-    // Pointer/variable target wiring (SetProperty after done) is also deferred.
+    // Interpolation blocks write directly to their variable/pointer target on
+    // each runtime tick and use p1/p2 cubic-Bezier control points.
     "variable/interpolate": {
         block: FgBlockType.ValueInterpolation,
-        valueInputs: { value: "endValue", duration: "duration" },
+        variableConfigKey: "variable",
+        valueInputs: { value: "endValue", duration: "duration", p1: "p1", p2: "p2" },
         configKeys: { useSlerp: "useSlerp" },
         flowOutputs: { err: "error" },
     },
-    // pointer/interpolate: same inputs; adds accessor resolution from the pointer
-    // configuration so the block can eventually write its `value` to a property.
     "pointer/interpolate": {
         block: FgBlockType.ValueInterpolation,
         pointer: true,
-        valueInputs: { value: "endValue", duration: "duration" },
-        configKeys: { useSlerp: "useSlerp" },
+        valueInputs: { value: "endValue", duration: "duration", p1: "p1", p2: "p2" },
         flowOutputs: { err: "error" },
     },
 };

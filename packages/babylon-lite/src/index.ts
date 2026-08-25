@@ -1003,18 +1003,29 @@ export type { AudioSignal } from "./audio/audio-signal.js";
 export type { AudioRampShape, RampOptions } from "./audio/audio-param.js";
 
 // ─── Flow graph (visual scripting / glTF KHR_interactivity runtime) ───
-export type { FgBlock, FgDataSocket, FgGraph, FgSignalSocket, FgValue, Vec2 } from "./flow-graph/index.js";
+export type { FgBlock, FgDataSocket, FgGraph, FgSignalSocket, FgValue } from "./flow-graph/index.js";
 export { FgEventType, FgType } from "./flow-graph/index.js";
 export type { FgBlockDef, FgBlockShape } from "./flow-graph/index.js";
 export { FgBlockType } from "./flow-graph/index.js";
 export type { FgAccessor, FgCapabilities, FgContext, FgEnv, FgPendingTask, FgWiring } from "./flow-graph/index.js";
 export type { FgEventBus, FgEventHandler, FgEventPayload } from "./flow-graph/index.js";
-export { clearFgEventBus, createFgEventBus, pumpFgEvent, subscribeFgEvent } from "./flow-graph/index.js";
+export { clearFgEventBus, createFgEventBus, flushFgEvents, pumpFgEvent, queueFgEvent, stopFgEventPropagation, subscribeFgEvent } from "./flow-graph/index.js";
 export { animationTypeForFgType, coerceValue, defaultForType, FgAnimationValueType } from "./flow-graph/index.js";
 export type { FgInteger, FgMatrix2D, FgMatrix3D } from "./flow-graph/index.js";
 export { fgInt, fgMatrix2D, fgMatrix3D, isFgInt, isFgMatrix2D, isFgMatrix3D } from "./flow-graph/index.js";
 export { getBlockDef } from "./flow-graph/index.js";
-export { attachFlowGraph, detachFlowGraph, runFlowGraphs } from "./flow-graph/index.js";
+export { attachFlowGraph, detachFlowGraph, runFlowGraphs, addFlowGraph, dispatchFlowGraphEvent, flowGraphBus, flowGraphRuntimes } from "./flow-graph/index.js";
+export type { FgNodeSpec, FgVariableSpec } from "./flow-graph/index.js";
+export { buildFgGraph } from "./flow-graph/index.js";
+export type {
+    EditorValueParseOptions,
+    ParsedEditorFlowGraphs,
+    SerializedEditorBlock,
+    SerializedEditorConnection,
+    SerializedEditorContext,
+    SerializedEditorGraph,
+} from "./flow-graph/index.js";
+export { addFlowGraphEditorJson, parseFlowGraphEditorJson } from "./flow-graph/index.js";
 export type { FgRuntime } from "./flow-graph/index.js";
 export {
     activateSignal,

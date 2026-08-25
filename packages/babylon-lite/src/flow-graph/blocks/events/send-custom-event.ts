@@ -6,11 +6,10 @@
 //   `eventId`    — string identifier for the event channel (required).
 //   `valueNames` — optional string[] of data-input socket names whose values
 //                  are bundled into `payload.values`. Derived from the glTF
-//                  events table (deferred wiring — see report).
+//                  events table.
 //
-// glTF: `event/send`. The `configuration["event"]` integer index is mapped to
-// `config.eventId` by declaration-mapper (configKeys). Full value-parameter
-// sockets from the glTF events table are a deferred Phase 3i+ item.
+// glTF: `event/send`. The parser resolves `configuration["event"]` through the
+// event table and builds all typed value inputs.
 
 import type { FgBlockDef } from "../../block-def.js";
 import { FgBlockType } from "../../block-type.js";
@@ -18,15 +17,17 @@ import { FgEventType } from "../../event-bus.js";
 import { FgType } from "../../types.js";
 import type { FgValue } from "../../types.js";
 import { activateSignal, getDataValue } from "../../runtime.js";
-import { pumpFgEvent } from "../../event-bus.js";
+import { pumpFgEvent, queueFgEvent } from "../../event-bus.js";
 import { sigIn, sigOut, sockIn } from "../../sockets.js";
 
 export const sendCustomEventDef: FgBlockDef = {
     type: FgBlockType.SendCustomEvent,
     build(config) {
         const valueNames = (config?.valueNames as string[] | undefined) ?? [];
+        const valueTypes = (config?.valueTypes as FgType[] | undefined) ?? [];
+        const valueDefaults = (config?.valueDefaults as Record<string, FgValue> | undefined) ?? {};
         return {
-            dataIn: valueNames.map((name) => sockIn(name, FgType.Any)),
+            dataIn: valueNames.map((name, index) => sockIn(name, valueTypes[index] ?? FgType.Any, valueDefaults[name])),
             signalIn: [sigIn("in")],
             signalOut: [sigOut("out")],
         };
@@ -40,7 +41,8 @@ export const sendCustomEventDef: FgBlockDef = {
             values[name] = getDataValue(ctx, env, block, name);
         }
 
-        pumpFgEvent(env.events, FgEventType.CustomEvent, { eventName: eventId, values });
+        const dispatch = block.config?.dispatchEventsSynchronously === false ? queueFgEvent : pumpFgEvent;
+        dispatch(env.events, FgEventType.CustomEvent, { eventName: eventId, values });
         activateSignal(ctx, env, block, "out");
     },
 };

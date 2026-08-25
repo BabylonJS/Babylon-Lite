@@ -11,11 +11,10 @@
 // Config:
 //   `eventId`    — string identifier that must match the sender's (required).
 //   `valueNames` — optional string[] of data-output socket names populated from
-//                  `payload.values`. Derived from the glTF events table (deferred
-//                  wiring — see report).
+//                  `payload.values`. Derived from the glTF events table.
 //
-// glTF: `event/receive`. `configuration["event"]` index → `config.eventId`
-// (configKeys). Value outputs from the events table are a deferred Phase 3i+ item.
+// glTF: `event/receive`. The parser resolves `configuration["event"]` through
+// the event table and builds all typed value outputs.
 
 import type { FgBlockDef } from "../../block-def.js";
 import { FgBlockType } from "../../block-type.js";
@@ -29,8 +28,9 @@ export const receiveCustomEventDef: FgBlockDef = {
     type: FgBlockType.ReceiveCustomEvent,
     build(config) {
         const valueNames = (config?.valueNames as string[] | undefined) ?? [];
+        const valueTypes = (config?.valueTypes as FgType[] | undefined) ?? [];
         return {
-            dataOut: valueNames.map((name) => sockOut(name, FgType.Any)),
+            dataOut: [sockOut("event", FgType.Reference), ...valueNames.map((name, index) => sockOut(name, valueTypes[index] ?? FgType.Any))],
             signalOut: [sigOut("out"), sigOut("done")],
             event: FgEventType.CustomEvent,
         };
@@ -39,12 +39,14 @@ export const receiveCustomEventDef: FgBlockDef = {
         const eventId = (block.config?.eventId as string | undefined) ?? "";
         const valueNames = (block.config?.valueNames as string[] | undefined) ?? [];
 
-        const payload = getExecVar<{ eventName?: string; values?: Record<string, FgValue> } | undefined>(ctx, block, "lastEvent", undefined);
+        const payload = getExecVar<{ eventName?: string; event?: string; values?: Record<string, FgValue> } | undefined>(ctx, block, "lastEvent", undefined);
 
         // Filter: only react to events that match this block's eventId.
         if (!payload || payload.eventName !== eventId) {
             return;
         }
+
+        setDataValue(ctx, block, "event", payload.event ?? "");
 
         // Write named values from the payload into data outputs.
         for (const name of valueNames) {

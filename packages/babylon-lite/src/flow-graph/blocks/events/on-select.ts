@@ -5,9 +5,8 @@
 // node matches its own. With no picking wired (e.g. an onStart-only demo) it
 // stays inert.
 //
-// ⚠️ SPEC-VOLATILE — KHR_node_selectability is an UNRATIFIED draft; re-sync the
-// output sockets against BJS PR #18455 when it lands. The Calculator sample
-// reads none of onSelect's value outputs, so they are best-effort.
+// KHR_node_selectability remains extension-scoped; the event reference uses the
+// same opaque reference namespace as core KHR_interactivity events.
 
 import type { FgBlockDef } from "../../block-def.js";
 import { FgBlockType } from "../../block-type.js";
@@ -20,12 +19,13 @@ import { sigOut, sockOut } from "../../sockets.js";
 interface SelectPayload {
     nodeIndex?: number;
     controllerIndex?: number;
+    event?: string;
 }
 
 export const onSelectDef: FgBlockDef = {
     type: FgBlockType.OnSelect,
     build: () => ({
-        dataOut: [sockOut("selectedNodeIndex", FgType.Integer), sockOut("controllerIndex", FgType.Integer)],
+        dataOut: [sockOut("selectedNodeIndex", FgType.Integer), sockOut("controllerIndex", FgType.Integer), sockOut("event", FgType.Reference)],
         signalOut: [sigOut("out"), sigOut("done")],
         event: FgEventType.Pointer,
     }),
@@ -37,6 +37,7 @@ export const onSelectDef: FgBlockDef = {
         }
         setDataValue(ctx, block, "selectedNodeIndex", fgInt(payload.nodeIndex ?? -1));
         setDataValue(ctx, block, "controllerIndex", fgInt(payload.controllerIndex ?? 0));
+        setDataValue(ctx, block, "event", payload.event ?? "/extensions/KHR_interactivity/events/pointer");
         activateSignal(ctx, env, block, "done");
         activateSignal(ctx, env, block, "out");
     },

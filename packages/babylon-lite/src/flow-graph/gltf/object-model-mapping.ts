@@ -1,12 +1,13 @@
-// ⚠️ SPEC-VOLATILE — KHR_interactivity is an UNRATIFIED glTF draft. All code in
+// SPEC-VOLATILE — KHR_interactivity release candidate. All code in
 // flow-graph/gltf/ is quarantined here so the runtime core never changes when
-// the spec churns. Mirrored against Babylon.js commit 8f728b23ea (2026-06-24).
-// Re-sync against BJS PR #18455 ("KHR_interactivity rework") when it lands.
+// the spec churns. Mirrored against Khronos commit
+// fdb8ce0e2e0b7ecf3466f8dacb9f1385257b8276 and Babylon.js commit
+// bd3837eed0890e590fdd6aeb6cc4d605e4eb8ac7.
 // See docs/lite/architecture/51-flow-graph.md → glTF KHR_interactivity Loader.
 //
 // object-model-mapping: maps glTF JSON-pointer object-model paths to the Lite
-// scene property they address + the FgType of that property. Phase 2 covers the
-// node TRS triplet (the vertical-slice surface). Broaden in Phase 3+ (materials,
+// scene property they address + the FgType of that property. This static table
+// covers node TRS; path-converter.ts owns the broader runtime-resolved surface.
 // cameras, lights, extensions) — mirror BJS `objectModelMapping.ts`.
 
 import { FgType } from "../types.js";

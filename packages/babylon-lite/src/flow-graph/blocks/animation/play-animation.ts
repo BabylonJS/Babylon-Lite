@@ -20,7 +20,7 @@ export const playAnimationDef: FgBlockDef = {
     type: FgBlockType.PlayAnimation,
     build: () => ({
         dataIn: [
-            sockIn("animation", FgType.Integer),
+            sockIn("animation", FgType.Reference),
             sockIn("speed", FgType.Number, 1),
             sockIn("loop", FgType.Boolean, false),
             sockIn("from", FgType.Number, 0),
@@ -71,6 +71,10 @@ export const playAnimationDef: FgBlockDef = {
 };
 
 function toIndex(value: unknown): number | undefined {
+    if (typeof value === "string") {
+        const match = /^\/animations\/(\d+)\/?$/.exec(value);
+        return match ? Number(match[1]) : undefined;
+    }
     if (typeof value === "number") {
         return value | 0;
     }

@@ -26,7 +26,7 @@ const DEFAULT_FRAME_RATE = 60;
 export const stopAnimationDef: FgBlockDef = {
     type: FgBlockType.StopAnimation,
     build: () => ({
-        dataIn: [sockIn("animation", FgType.Integer), sockIn("stopAtFrame", FgType.Number)],
+        dataIn: [sockIn("animation", FgType.Reference), sockIn("stopAtFrame", FgType.Number)],
         signalIn: [sigIn("in")],
         signalOut: [sigOut("out"), sigOut("error")],
     }),
@@ -72,6 +72,10 @@ export const stopAnimationDef: FgBlockDef = {
 };
 
 function toIndex(value: unknown): number | undefined {
+    if (typeof value === "string") {
+        const match = /^\/animations\/(\d+)\/?$/.exec(value);
+        return match ? Number(match[1]) : undefined;
+    }
     if (typeof value === "number") {
         return value | 0;
     }

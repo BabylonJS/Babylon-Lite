@@ -40,6 +40,8 @@ export interface AssetContainer {
     /** Flow graphs parsed from the file (glTF KHR_interactivity). addToScene()
      *  binds and runs them via the scene's frame loop. */
     flowGraphs?: import("./flow-graph/context.js").LoadedFlowGraph[];
+    /** Resolves after `addToScene()` has instantiated all loaded flow graphs. */
+    flowGraphRuntimes?: Promise<readonly import("./flow-graph/runtime.js").FgRuntime[]>;
     /** @internal Per-frame animation tick closure pushed onto `scene._beforeRender` by
      *  `addToScene(scene, container)`. Stored so `removeFromScene(scene, container)` can
      *  splice it back out, keeping the two calls symmetric. */

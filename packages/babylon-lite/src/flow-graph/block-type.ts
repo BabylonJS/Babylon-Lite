@@ -5,12 +5,14 @@
 // that block-registry.ts and the gltf mapper resolve against as blocks land.
 
 export const enum FgBlockType {
+    NoOp = "NoOp",
     // ─── Events ───────────────────────────────────────────────
     SceneStart = "SceneReadyEvent",
     SceneTick = "SceneTickEvent",
     OnSelect = "OnSelect",
     SendCustomEvent = "SendCustomEvent",
     ReceiveCustomEvent = "ReceiveCustomEvent",
+    StopEventPropagation = "StopEventPropagation",
 
     // ─── Control flow ─────────────────────────────────────────
     Branch = "Branch",
@@ -85,6 +87,7 @@ export const enum FgBlockType {
     // ─── Data / math: constants ───────────────────────────────
     E = "E",
     PI = "PI",
+    Tau = "Tau",
     Inf = "Inf",
     NaN = "NaN",
     Random = "Random",
@@ -110,6 +113,11 @@ export const enum FgBlockType {
     Dot = "Dot",
     Cross = "Cross",
     MathInterpolation = "MathInterpolation",
+    MathSlerp = "MathSlerp",
+    SmoothStep = "SmoothStep",
+    RGBToOkLCh = "RGBToOkLCh",
+    RGBFromOkLCh = "RGBFromOkLCh",
+    VectorSlerp = "VectorSlerp",
     Rotate2D = "Rotate2D",
     Rotate3D = "Rotate3D",
     TransformVector = "TransformVector",
@@ -142,6 +150,8 @@ export const enum FgBlockType {
     QuaternionFromAxisAngle = "QuaternionFromAxisAngle",
     AxisAngleFromQuaternion = "AxisAngleFromQuaternion",
     QuaternionFromDirections = "QuaternionFromDirections",
+    QuaternionFromUpForward = "QuaternionFromUpForward",
+    QuaternionFromAngles = "QuaternionFromAngles",
     QuaternionMultiplication = "QuaternionMultiplication",
 
     // ─── Data / type conversion ───────────────────────────────

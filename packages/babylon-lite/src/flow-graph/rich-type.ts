@@ -34,6 +34,7 @@ export function defaultForType(type: FgType): FgValue {
         case FgType.Boolean:
             return false;
         case FgType.String:
+        case FgType.Reference:
             return "";
         case FgType.Vector2:
             return { x: 0, y: 0 } as Vec2;

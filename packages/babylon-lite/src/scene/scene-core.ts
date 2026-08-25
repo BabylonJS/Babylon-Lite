@@ -26,6 +26,7 @@ import type { ClusteredLightContainer } from "../light/clustered.js";
 import type { FgRuntime } from "../flow-graph/runtime.js";
 import type { PickSource } from "../picking/pick-contributor.js";
 import type { ToneMapping } from "../material/pbr/tone-mapping.js";
+import type { FgEventBus } from "../flow-graph/event-bus.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -244,6 +245,15 @@ export interface SceneContext extends RenderingContext {
      *  undefined for non-interactivity scenes so core stays byte-identical.
      *  Driven via the generic `onBeforeRender` seam, not a hardcoded core loop. */
     _flowGraphs?: FgRuntime[];
+
+    /** @internal Scene-scoped flow-graph event bus shared by all graphs attached
+     *  to this scene, so multiple graphs exchange custom events. Lazily created
+     *  by `flowGraphBus`; undefined for non-interactivity scenes. */
+    _flowGraphBus?: FgEventBus;
+    /** @internal Scene-wide Flow Graph frame callback, registered lazily. */
+    _flowGraphTick?: (deltaMs: number) => void;
+    /** @internal Scene-wide Flow Graph disposal callback, registered lazily. */
+    _flowGraphDispose?: () => void;
 }
 
 /** Options passed to the scene-context factory. */

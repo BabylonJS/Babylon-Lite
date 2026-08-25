@@ -1,11 +1,9 @@
 // ValueInterpolation (BJS FlowGraphInterpolationBlock + PlayAnimation chain,
 // glTF ops `variable/interpolate` / `pointer/interpolate`).
 //
-// Self-contained async execution block: when `in` fires, it snapshots the
-// start and end values, fires `out` immediately, then interpolates the value
-// over `duration` seconds via `onTick`, writing the current result to the
-// `value` data output. Fires `done` once when elapsed time reaches the duration.
-// A new `in` signal cancels any in-progress interpolation on this block.
+// Self-contained async execution block. Editor blocks expose the interpolated
+// value output. KHR variable/pointer operations additionally read and write the
+// target on every tick, coordinating ownership by variable/pointer identity.
 //
 // Supported interpolation per animation type:
 //   Float / Integer: scalar linear lerp.
@@ -20,8 +18,8 @@
 //                uses slerp regardless of the `type` field.
 //
 // glTF: `variable/interpolate` maps `value` → `endValue`, `duration` →
-// `duration`. `pointer/interpolate` adds an accessor config. Easing control
-// points (`p1`/`p2`) and bezier curves are deferred (linear only for now).
+// `duration`. Both KHR operations use CSS-style cubic Bezier easing from `p1`
+// and `p2`; pointer quaternion accessors automatically use slerp.
 
 import type { FgBlockDef } from "../../block-def.js";
 import type { FgPendingTask } from "../../context.js";
@@ -32,6 +30,7 @@ import type { Color3, Color4, Quat, Vec3, Vec4 } from "../../../math/types.js";
 import { FgAnimationValueType, animationTypeForFgType } from "../../rich-type.js";
 import { activateSignal, addPending, cancelPendingForBlock, getDataValue, setDataValue, setExecVar } from "../../runtime.js";
 import { sigIn, sigOut, sockIn, sockOut } from "../../sockets.js";
+import { pointerTypesCompatible, resolveBlockPointer } from "../../pointer-template.js";
 
 // ─── Interpolation math ───────────────────────────────────────────────────────
 
@@ -73,6 +72,7 @@ function lerpFgValue(a: FgValue, b: FgValue, t: number, animType: FgAnimationVal
             const nb = typeof b === "number" ? b : 0;
             return na + t * (nb - na);
         }
+
         case FgAnimationValueType.Vector2: {
             const va = a as Vec2;
             const vb = b as Vec2;
@@ -104,6 +104,47 @@ function lerpFgValue(a: FgValue, b: FgValue, t: number, animType: FgAnimationVal
             // Matrix types: snap to end (no interpolation defined in BJS for matrices).
             return b;
     }
+}
+
+function cubicBezier(t: number, p1: Vec2, p2: Vec2): number {
+    const sample = (u: number, a: number, b: number) => ((3 * a - 3 * b + 1) * u + (-6 * a + 3 * b)) * u * u + 3 * a * u;
+    const derivative = (u: number) => 3 * (3 * p1.x - 3 * p2.x + 1) * u * u + 2 * (-6 * p1.x + 3 * p2.x) * u + 3 * p1.x;
+    let u = t;
+    for (let i = 0; i < 8; i++) {
+        const error = sample(u, p1.x, p2.x) - t;
+        if (Math.abs(error) < 1e-7) {
+            return sample(u, p1.y, p2.y);
+        }
+        const slope = derivative(u);
+        if (Math.abs(slope) < 1e-7) {
+            break;
+        }
+        u -= error / slope;
+    }
+    let low = 0;
+    let high = 1;
+    for (let i = 0; i < 24; i++) {
+        u = (low + high) / 2;
+        if (sample(u, p1.x, p2.x) < t) {
+            low = u;
+        } else {
+            high = u;
+        }
+    }
+    return sample(u, p1.y, p2.y);
+}
+
+function validControlPoint(value: FgValue): value is Vec2 {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        "x" in value &&
+        "y" in value &&
+        typeof value.x === "number" &&
+        typeof value.y === "number" &&
+        isFinite(value.x) &&
+        isFinite(value.y)
+    );
 }
 
 /** Derive the `FgAnimationValueType` from config and/or the runtime start value. */
@@ -146,8 +187,15 @@ function resolveAnimType(startValue: FgValue, config: Readonly<Record<string, un
 
 export const valueInterpolationDef: FgBlockDef = {
     type: FgBlockType.ValueInterpolation,
-    build: () => ({
-        dataIn: [sockIn("startValue", FgType.Any), sockIn("endValue", FgType.Any), sockIn("duration", FgType.Number, 0)],
+    build: (config) => ({
+        dataIn: [
+            sockIn("startValue", FgType.Any),
+            sockIn("endValue", FgType.Any),
+            sockIn("duration", FgType.Number, 0),
+            sockIn("p1", FgType.Vector2, { x: 0, y: 0 }),
+            sockIn("p2", FgType.Vector2, { x: 1, y: 1 }),
+            ...((config?.pointerSegments as string[] | undefined) ?? []).map((name) => sockIn(name, FgType.Any)),
+        ],
         dataOut: [sockOut("value", FgType.Any)],
         signalIn: [sigIn("in")],
         signalOut: [sigOut("out"), sigOut("done"), sigOut("error")],
@@ -165,23 +213,60 @@ export const valueInterpolationDef: FgBlockDef = {
         }
 
         const duration = getDataValue(ctx, env, block, "duration") as number;
-        if (!isFinite(duration) || isNaN(duration) || duration < 0) {
+        const p1 = getDataValue(ctx, env, block, "p1");
+        const p2 = getDataValue(ctx, env, block, "p2");
+        if (!isFinite(duration) || isNaN(duration) || duration < 0 || !validControlPoint(p1) || !validControlPoint(p2) || p1.x < 0 || p1.x > 1 || p2.x < 0 || p2.x > 1) {
             activateSignal(ctx, env, block, "error");
             return;
         }
 
-        // Cancel any prior interpolation on this block.
-        cancelPendingForBlock(ctx, block);
-
-        const startValue = getDataValue(ctx, env, block, "startValue");
+        let targetKey = `block:${block.id}`;
+        let startValue = getDataValue(ctx, env, block, "startValue");
+        let writeTarget: ((value: FgValue) => void) | undefined;
+        let targetType: FgType | undefined;
+        const variable = block.config?.variable as string | undefined;
+        if (variable !== undefined) {
+            if (!(variable in ctx.userVariables)) {
+                activateSignal(ctx, env, block, "error");
+                return;
+            }
+            targetKey = `variable:${variable}`;
+            startValue = ctx.userVariables[variable]!;
+            writeTarget = (value) => {
+                ctx.userVariables[variable] = value;
+            };
+        } else if (block.config?.accessor || block.config?.pointerTemplate) {
+            const resolved = resolveBlockPointer(block, ctx, env);
+            if (!resolved?.accessor.set) {
+                activateSignal(ctx, env, block, "error");
+                return;
+            }
+            targetKey = `pointer:${resolved.pointer}`;
+            startValue = resolved.accessor.get();
+            writeTarget = resolved.accessor.set;
+            targetType = resolved.accessor.type;
+            const declaredType = block.config?.type as FgType | undefined;
+            if (!pointerTypesCompatible(declaredType, targetType)) {
+                activateSignal(ctx, env, block, "error");
+                return;
+            }
+        }
         const endValue = getDataValue(ctx, env, block, "endValue");
-        const animType = resolveAnimType(startValue, block.config);
+        const animType = resolveAnimType(startValue, targetType ? { ...block.config, type: targetType, useSlerp: targetType === FgType.Quaternion } : block.config);
+
+        // Validation succeeded: replace any interpolation owning this target.
+        for (const task of ctx.pending) {
+            if (task.state.targetKey === targetKey) {
+                task.canceled = true;
+            }
+        }
+        cancelPendingForBlock(ctx, block);
 
         // Seed the data output with the start value immediately.
         setExecVar(ctx, block, "currentValue", startValue);
         setDataValue(ctx, block, "value", startValue);
 
-        if (duration <= 0) {
+        if (duration <= 0 && variable === undefined && !block.config?.accessor && !block.config?.pointerTemplate) {
             // Zero-duration: snap straight to end, fire done synchronously.
             setExecVar(ctx, block, "currentValue", endValue);
             setDataValue(ctx, block, "value", endValue);
@@ -190,7 +275,7 @@ export const valueInterpolationDef: FgBlockDef = {
             return;
         }
 
-        addPending(ctx, block, { startValue, endValue, duration, elapsed: 0, animType });
+        addPending(ctx, block, { startValue, endValue, duration, elapsed: 0, animType, p1, p2, targetKey, writeTarget });
         activateSignal(ctx, env, block, "out");
     },
     onTick(block, ctx, env, deltaMs, task: FgPendingTask) {
@@ -199,18 +284,24 @@ export const valueInterpolationDef: FgBlockDef = {
         const startValue = task.state.startValue as FgValue;
         const endValue = task.state.endValue as FgValue;
         const animType = task.state.animType as FgAnimationValueType;
+        const writeTarget = task.state.writeTarget as ((value: FgValue) => void) | undefined;
 
         if (elapsed >= duration) {
             task.done = true;
             setExecVar(ctx, block, "currentValue", endValue);
             setDataValue(ctx, block, "value", endValue);
+            writeTarget?.(endValue);
             activateSignal(ctx, env, block, "done");
         } else {
             task.state.elapsed = elapsed;
             const t = elapsed / duration;
-            const current = lerpFgValue(startValue, endValue, t, animType);
+            if (t <= 0) {
+                return;
+            }
+            const current = lerpFgValue(startValue, endValue, cubicBezier(t, task.state.p1 as Vec2, task.state.p2 as Vec2), animType);
             setExecVar(ctx, block, "currentValue", current);
             setDataValue(ctx, block, "value", current);
+            writeTarget?.(current);
         }
     },
     cancelPending(_block, _ctx, _env) {

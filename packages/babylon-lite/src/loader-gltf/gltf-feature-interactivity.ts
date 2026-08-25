@@ -1,7 +1,7 @@
-// ⚠️ SPEC-VOLATILE — KHR_interactivity is an UNRATIFIED glTF draft. This feature
-// is the ONLY loader-side entrypoint for it; all spec-dependent parsing lives
-// under flow-graph/gltf/. Mirrored against Babylon.js commit 8f728b23ea. Re-sync
-// against BJS PR #18455 ("KHR_interactivity rework") when it lands.
+// SPEC-VOLATILE — KHR_interactivity release candidate. This feature is the only
+// loader-side entrypoint; all spec-dependent parsing lives under
+// flow-graph/gltf/. Mirrored against Babylon.js commit
+// bd3837eed0890e590fdd6aeb6cc4d605e4eb8ac7.
 //
 // gltf-feature-interactivity: a per-asset glTF feature. At applyAsset time the
 // node hierarchy (`ctx._nodeMap`) is built but animation groups are NOT yet
@@ -17,7 +17,10 @@ import type { AssetContainer } from "../asset-container.js";
 import type { FgAccessor, LoadedFlowGraph } from "../flow-graph/context.js";
 import type { PointerMaterial } from "./animation-pointer.js";
 import { parseInteractivityGraph, type GltfInteractivityGraph } from "../flow-graph/gltf/interactivity-parser.js";
-import { resolvePointerAccessor } from "../flow-graph/gltf/path-converter.js";
+import { resolvePointerAccessor, type PointerResolveContext } from "../flow-graph/gltf/path-converter.js";
+import { detachFlowGraph, runFlowGraphs } from "../flow-graph/scene-flow-graph.js";
+import { _registerAssetContainerSceneCleanup } from "./gltf-scene-cleanup.js";
+import { parseFlowGraphEditorJson } from "../flow-graph/editor-serialization.js";
 
 interface IKHRInteractivity {
     graphs?: GltfInteractivityGraph[];
@@ -55,23 +58,69 @@ const feature: GltfFeature = {
         const graphs = ext?.graphs ?? [];
         const nodeMap = ctx._nodeMap ?? [];
         const materials = buildMaterialMap(ctx._json, _meshes);
-        const resolveCtx = { nodeMap, materials, json: ctx._json };
+        const resolveCtx: PointerResolveContext = { nodeMap, materials, json: ctx._json };
 
         const flowGraphs: LoadedFlowGraph[] = [];
-        for (const graphJson of graphs) {
-            const { graph, pointers } = await parseInteractivityGraph(graphJson);
-            const accessors: Record<string, FgAccessor> = {};
-            for (const pointer of pointers) {
-                const accessor = resolvePointerAccessor(pointer, resolveCtx);
-                if (!accessor) {
-                    throw new Error(`KHR_interactivity: cannot resolve pointer ${JSON.stringify(pointer)} (unsupported path or unreachable node)`);
+        for (let graphIndex = 0; graphIndex < graphs.length; graphIndex++) {
+            try {
+                const { graph, pointers } = await parseInteractivityGraph(graphs[graphIndex]!);
+                const accessors: Record<string, FgAccessor> = {};
+                for (const pointer of pointers) {
+                    const accessor = resolvePointerAccessor(pointer, resolveCtx);
+                    if (accessor) {
+                        accessors[pointer] = accessor;
+                    }
                 }
-                accessors[pointer] = accessor;
+                flowGraphs.push({
+                    graph,
+                    rightHanded: true,
+                    accessors,
+                    resolveAccessor: (pointer, scene, animations) => resolvePointerAccessor(pointer, { ...resolveCtx, scene, animations }),
+                });
+            } catch (error) {
+                console.warn(`KHR_interactivity: rejected graph ${graphIndex}:`, error);
             }
-            flowGraphs.push({ graph, accessors });
         }
 
-        return flowGraphs.length > 0 ? { flowGraphs } : {};
+        const editorJson = (ctx._json.extensions?.BABYLON_flow_graph as { flowGraph?: unknown } | undefined)?.flowGraph;
+        if (editorJson) {
+            try {
+                const parsed = await parseFlowGraphEditorJson(editorJson, {
+                    resolveReference(value) {
+                        const id = value.id ?? value.name;
+                        return nodeMap.find((node) => node && (((node as TransformNode & { id?: string }).id ?? node.name) === id || node.name === id));
+                    },
+                });
+                parsed.graphs.forEach((graph, index) => flowGraphs.push({ graph, rightHanded: parsed.rightHanded[index], accessors: {} }));
+            } catch (error) {
+                console.warn("BABYLON_flow_graph: rejected editor graph JSON:", error);
+            }
+        }
+
+        if (flowGraphs.length === 0) {
+            return {};
+        }
+        return {
+            flowGraphs,
+            _sceneSetup(scene, container) {
+                let removed = false;
+                let active: Awaited<ReturnType<typeof runFlowGraphs>> = [];
+                const runtimes = runFlowGraphs(scene, flowGraphs, container.animationGroups);
+                container.flowGraphRuntimes = runtimes;
+                _registerAssetContainerSceneCleanup(container, scene, () => {
+                    removed = true;
+                    active.forEach((runtime) => detachFlowGraph(scene, runtime));
+                    active = [];
+                });
+                void runtimes.then((loaded) => {
+                    if (removed) {
+                        loaded.forEach((runtime) => detachFlowGraph(scene, runtime));
+                    } else {
+                        active = loaded;
+                    }
+                });
+            },
+        };
     },
 };
 

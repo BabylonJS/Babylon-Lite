@@ -14,7 +14,7 @@ export type { FgAccessor, FgCapabilities, FgContext, FgEnv, FgPendingTask, FgWir
 
 // Event bus
 export type { FgEventBus, FgEventHandler, FgEventPayload } from "./event-bus.js";
-export { clearFgEventBus, createFgEventBus, pumpFgEvent, subscribeFgEvent } from "./event-bus.js";
+export { clearFgEventBus, createFgEventBus, flushFgEvents, pumpFgEvent, queueFgEvent, stopFgEventPropagation, subscribeFgEvent } from "./event-bus.js";
 
 // Rich-type pure functions
 export { animationTypeForFgType, coerceValue, defaultForType, FgAnimationValueType } from "./rich-type.js";
@@ -29,7 +29,21 @@ export { fgMatrix2D, fgMatrix3D, isFgMatrix2D, isFgMatrix3D } from "./custom-typ
 export { getBlockDef } from "./block-registry.js";
 
 // Scene attachment
-export { attachFlowGraph, detachFlowGraph, runFlowGraphs } from "./scene-flow-graph.js";
+export { attachFlowGraph, detachFlowGraph, runFlowGraphs, addFlowGraph, dispatchFlowGraphEvent, flowGraphBus, flowGraphRuntimes } from "./scene-flow-graph.js";
+
+export type { FgNodeSpec, FgVariableSpec } from "./graph-builder.js";
+export { buildFgGraph } from "./graph-builder.js";
+
+// Babylon.js Flow Graph Editor serialization
+export type {
+    EditorValueParseOptions,
+    ParsedEditorFlowGraphs,
+    SerializedEditorBlock,
+    SerializedEditorConnection,
+    SerializedEditorContext,
+    SerializedEditorGraph,
+} from "./editor-serialization.js";
+export { addFlowGraphEditorJson, parseFlowGraphEditorJson } from "./editor-serialization.js";
 
 // Runtime functions + FgRuntime
 export type { FgRuntime } from "./runtime.js";

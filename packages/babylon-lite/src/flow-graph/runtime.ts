@@ -6,7 +6,7 @@
 
 import type { FgBlockDef } from "./block-def.js";
 import type { FgContext, FgEnv, FgPendingTask, FgWiring } from "./context.js";
-import { createFgEventBus, pumpFgEvent, subscribeFgEvent } from "./event-bus.js";
+import { createFgEventBus, flushFgEvents, isFgEventTransitivePropagationStopped, pumpFgEventHandlers, subscribeFgEvent, type FgEventPayload } from "./event-bus.js";
 import { getBlockDef } from "./block-registry.js";
 import { coerceValue, defaultForType } from "./rich-type.js";
 import type { FgBlock, FgGraph, FgValue } from "./types.js";
@@ -44,6 +44,9 @@ export function getDataValue(ctx: FgContext, env: FgEnv, block: FgBlock, socket:
                 }
                 const slot = `${producer.id}:${input.source.socket}`;
                 raw = slot in ctx.connectionValues ? ctx.connectionValues[slot] : (input.defaultValue ?? defaultForType(input.type));
+                if (input.source.scale !== undefined && typeof raw === "number") {
+                    raw *= input.source.scale;
+                }
             }
         } else {
             raw = input.defaultValue ?? defaultForType(input.type);
@@ -85,7 +88,7 @@ export function setExecVar(ctx: FgContext, block: FgBlock, key: string, value: u
  *  block's `def.execute`, passing the target's incoming signal name. */
 export function activateSignal(ctx: FgContext, env: FgEnv, block: FgBlock, socket: string): void {
     const output = block.signalOut.find((s) => s.name === socket);
-    if (!output) {
+    if (!output || isFgEventTransitivePropagationStopped(env.events)) {
         return;
     }
     for (const target of output.targets) {
@@ -94,6 +97,9 @@ export function activateSignal(ctx: FgContext, env: FgEnv, block: FgBlock, socke
             continue;
         }
         env.defs[targetBlock.type]?.execute?.(targetBlock, ctx, env, target.socket);
+        if (isFgEventTransitivePropagationStopped(env.events)) {
+            break;
+        }
     }
 }
 
@@ -199,6 +205,7 @@ export async function createFgEnv(graph: FgGraph, wiring: FgWiring = {}): Promis
         graph,
         defs,
         accessors: wiring.accessors ?? {},
+        resolveAccessor: wiring.resolveAccessor,
         animations: wiring.animations ?? [],
         caps: wiring.caps ?? {},
         events: wiring.events ?? createFgEventBus(),
@@ -247,48 +254,89 @@ function eventInitPriority(event: FgEventType): number {
 /** Subscribe every non-start event block to the bus, in init-priority order,
  *  then fire the `Start` blocks once. Idempotent: a started runtime is skipped. */
 export function startFlowGraph(rt: FgRuntime): void {
+    if (subscribeFlowGraph(rt)) {
+        fireFlowGraphStart(rt);
+    }
+}
+
+/** Subscribe all runtimes before firing any start blocks so graphs sharing a bus
+ * can receive events emitted by another graph's onStart flow. */
+export function startFlowGraphs(runtimes: readonly FgRuntime[], isActive: (runtime: FgRuntime) => boolean = () => true): void {
+    const pendingStart = runtimes.filter(subscribeFlowGraph);
+    pendingStart.filter(isActive).forEach(fireFlowGraphStart);
+}
+
+function subscribeFlowGraph(rt: FgRuntime): boolean {
     if (rt.started) {
-        return;
+        return false;
     }
     const { context: ctx, env } = rt;
 
     const eventBlocks = rt.graph.blocks.filter((b): b is FgBlock & { event: FgEventType } => b.event !== undefined);
     eventBlocks.sort((a, b) => eventInitPriority(a.event) - eventInitPriority(b.event));
 
-    // 1. Subscribe ALL non-start receivers first (custom-event before start-like).
+    // Lifecycle events are dispatched per runtime so stopImmediate never crosses
+    // behavior-graph boundaries. Subscribe only externally pumped event blocks.
     for (const block of eventBlocks) {
-        if (block.event === FgEventType.Start) {
+        if (block.event === FgEventType.Start || block.event === FgEventType.Tick) {
             continue;
         }
         const def = env.defs[block.type];
-        const unsub = subscribeFgEvent(env.events, block.event, (payload) => {
-            ctx.executionVariables[`${block.id}:lastEvent`] = payload;
-            def?.execute?.(block, ctx, env, block.event);
-        });
+        const unsub = subscribeFgEvent(
+            env.events,
+            block.event,
+            (payload) => {
+                ctx.executionVariables[`${block.id}:lastEvent`] = payload;
+                def?.execute?.(block, ctx, env, block.event);
+            },
+            rt
+        );
         rt._unsub.push(unsub);
     }
 
     rt.started = true;
+    return true;
+}
 
-    // 2. THEN fire onStart blocks once (receivers are now listening).
-    for (const block of eventBlocks) {
-        if (block.event !== FgEventType.Start) {
-            continue;
-        }
-        env.defs[block.type]?.execute?.(block, ctx, env, FgEventType.Start);
-    }
+function fireFlowGraphStart(rt: FgRuntime): void {
+    pumpFlowGraphLifecycle(rt, FgEventType.Start, { event: "/extensions/KHR_interactivity/events/sceneReady" });
+}
+
+function pumpFlowGraphLifecycle(rt: FgRuntime, event: FgEventType, payload: FgEventPayload): void {
+    const { context: ctx, env } = rt;
+    const handlers = rt.graph.blocks
+        .filter((block) => block.event === event)
+        .map((block) => (eventPayload: FgEventPayload) => {
+            ctx.executionVariables[`${block.id}:lastEvent`] = eventPayload;
+            env.defs[block.type]?.execute?.(block, ctx, env, event);
+        });
+    pumpFgEventHandlers(env.events, handlers, payload);
+}
+
+/** Pump one graph-scoped scene-tick event without advancing pending tasks. */
+export function pumpFlowGraphTick(rt: FgRuntime, deltaMs: number): void {
+    pumpFlowGraphLifecycle(rt, FgEventType.Tick, {
+        deltaMs,
+        deltaTime: deltaMs / 1000,
+        event: "/extensions/KHR_interactivity/events/sceneTick",
+    });
 }
 
 /** Per-frame drive: pump the tick event, then advance pending async tasks in a
  *  cancellation-safe loop (a task may be canceled / a new one added mid-loop). */
 export function tickFlowGraph(rt: FgRuntime, deltaMs: number): void {
+    flushFgEvents(rt.env.events);
     if (!rt.started) {
         startFlowGraph(rt);
     }
+    pumpFlowGraphTick(rt, deltaMs);
+    advanceFlowGraphTasks(rt, deltaMs);
+}
+
+/** Advance pending work without pumping shared lifecycle events. The scene
+ * coordinator invokes this once per runtime after one scene-wide tick event. */
+export function advanceFlowGraphTasks(rt: FgRuntime, deltaMs: number): void {
     const { context: ctx, env } = rt;
-
-    pumpFgEvent(env.events, FgEventType.Tick, { deltaMs, deltaTime: deltaMs / 1000 });
-
     // Snapshot: tasks added during the loop are picked up next frame (not retro-ticked).
     const snapshot = ctx.pending.slice();
     for (const task of snapshot) {

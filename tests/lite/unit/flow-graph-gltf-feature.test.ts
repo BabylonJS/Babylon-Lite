@@ -87,6 +87,30 @@ describe("path-converter resolvePointerAccessor", () => {
         expect(accessor.get()).toBe(false);
         expect(node.visible).toBeUndefined(); // selectability never touches visibility
     });
+
+    it("reads release-candidate animation and active-camera state", () => {
+        const animation = { isPlaying: true, duration: 4, currentTime: 1.5 };
+        const scene = {
+            camera: {
+                worldMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 3, 4, 1],
+                nearPlane: 0.1,
+                farPlane: 100,
+                fov: 0.8,
+            },
+            surface: { canvas: { width: 800, height: 400 } },
+        };
+        expect(resolvePointerAccessor("/animations/0/extensions/KHR_interactivity/isPlaying", { nodeMap: [], animations: [animation] as never })!.get()).toBe(true);
+        expect(resolvePointerAccessor("/animations/0/extensions/KHR_interactivity/playhead", { nodeMap: [], animations: [animation] as never })!.get()).toBe(1.5);
+        expect(resolvePointerAccessor("/extensions/KHR_interactivity/activeCamera/perspective/aspectRatio", { nodeMap: [], scene: scene as never })!.get()).toBe(2);
+        expect(resolvePointerAccessor("/extensions/KHR_interactivity/activeCamera/position", { nodeMap: [], scene: scene as never })!.get()).toEqual({
+            x: -2,
+            y: 3,
+            z: 4,
+        });
+        const json = { extensionsUsed: ["KHR_texture_transform", "VENDOR_not_supported"] };
+        expect(resolvePointerAccessor("/extensions/KHR_interactivity/asset/extensions/KHR_texture_transform/enabled", { nodeMap: [], json })!.get()).toBe(true);
+        expect(resolvePointerAccessor("/extensions/KHR_interactivity/asset/extensions/VENDOR_not_supported/enabled", { nodeMap: [], json })!.get()).toBe(false);
+    });
 });
 
 describe("gltf-feature-interactivity applyAsset", () => {
@@ -107,9 +131,38 @@ describe("gltf-feature-interactivity applyAsset", () => {
         expect(node.position.z).toBe(3);
     });
 
-    it("throws when a pointer cannot be resolved against the node map", async () => {
+    it("keeps an unresolved pointer so pointer/get can report isValid=false at runtime", async () => {
         const ctx = { _json: { extensions: { KHR_interactivity: worldPointerExtension } }, _nodeMap: [] as (TransformNode | undefined)[] } as unknown as GltfLoadCtx;
-        await expect(interactivityFeature.applyAsset!([], createTransformNode("x"), ctx)).rejects.toThrow(/cannot resolve pointer/);
+        const result = await interactivityFeature.applyAsset!([], createTransformNode("x"), ctx);
+        expect(result.flowGraphs).toHaveLength(1);
+        expect(result.flowGraphs![0]!.accessors).toEqual({});
+    });
+
+    it("loads Flow Graph Editor JSON embedded in BABYLON_flow_graph", async () => {
+        const editorGraph = {
+            rightHanded: false,
+            allBlocks: [
+                {
+                    className: "FlowGraphConstantBlock",
+                    uniqueId: "constant",
+                    config: { value: 7 },
+                    dataInputs: [],
+                    dataOutputs: [{ uniqueId: "value", name: "value", connectedPointIds: [] }],
+                    signalInputs: [],
+                    signalOutputs: [],
+                },
+            ],
+            executionContexts: [{ uniqueId: "ctx", _userVariables: {}, _connectionValues: {} }],
+        };
+        const node = createTransformNode("x");
+        const ctx = {
+            _json: { extensions: { BABYLON_flow_graph: { flowGraph: { _flowGraphs: [editorGraph], activeGraphIndex: 0 } } } },
+            _nodeMap: [node],
+        } as unknown as GltfLoadCtx;
+        const result = await interactivityFeature.applyAsset!([], node, ctx);
+        expect(result.flowGraphs?.[0]?.graph.blocks[0]).toMatchObject({ id: "constant", type: "Constant", config: { value: 7 } });
+        expect(result.flowGraphs?.[0]?.rightHanded).toBe(false);
+        expect(result._sceneSetup).toBeTypeOf("function");
     });
 
     it("returns an empty fragment when the asset has no interactivity extension", async () => {

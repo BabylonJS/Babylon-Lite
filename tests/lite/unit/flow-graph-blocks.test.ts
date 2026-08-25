@@ -92,13 +92,14 @@ describe("flow-graph blocks — events", () => {
         const rt = await makeRuntime(
             [
                 { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "rec", socket: "in" }] } },
-                { id: "rec", type: RECORD, config: { label: "started" } },
+                { id: "rec", type: RECORD, config: { label: "started" }, dataSources: { value: { blockId: "start", socket: "event" } } },
             ],
             { defs: { [RECORD]: recorderDef(log) } }
         );
         startFlowGraph(rt);
         startFlowGraph(rt); // idempotent
         expect(log.map((e) => e.label)).toEqual(["started"]);
+        expect(log[0]!.value).toBe("/extensions/KHR_interactivity/events/sceneReady");
     });
 
     it("SceneTick accumulates timeSinceStart and exposes deltaTime", async () => {
@@ -114,6 +115,38 @@ describe("flow-graph blocks — events", () => {
         tickFlowGraph(rt, 1000); // +1s
         tickFlowGraph(rt, 500); // +0.5s
         expect(log.map((e) => e.value)).toEqual([1, 1.5]);
+        expect(rt.context.connectionValues["tick:event"]).toBe("/extensions/KHR_interactivity/events/sceneTick");
+    });
+
+    it.each([
+        { eventType: "SceneReadyEvent", stopImmediate: false, expected: ["stop-out", "second"] },
+        { eventType: "SceneReadyEvent", stopImmediate: true, expected: ["stop-out"] },
+        { eventType: "SceneTickEvent", stopImmediate: false, expected: ["stop-out", "second"] },
+        { eventType: "SceneTickEvent", stopImmediate: true, expected: ["stop-out"] },
+    ])("scopes lifecycle stopPropagation to one graph", async ({ eventType, stopImmediate, expected }) => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                { id: "first", type: eventType, signalTargets: { out: [{ blockId: "stop", socket: "in" }] } },
+                {
+                    id: "stop",
+                    type: "StopEventPropagation",
+                    dataDefaults: { stopImmediate },
+                    dataSources: { event: { blockId: "first", socket: "event" } },
+                    signalTargets: { out: [{ blockId: "stopOut", socket: "in" }] },
+                },
+                { id: "stopOut", type: RECORD, config: { label: "stop-out" } },
+                { id: "secondEvent", type: eventType, signalTargets: { out: [{ blockId: "second", socket: "in" }] } },
+                { id: "second", type: RECORD, config: { label: "second" } },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        if (eventType === "SceneTickEvent") {
+            tickFlowGraph(rt, 16);
+        }
+        expect(log.map((entry) => entry.label)).toEqual(expected);
     });
 
     it("OnSelect fires only when its configured node is picked", async () => {
@@ -131,6 +164,39 @@ describe("flow-graph blocks — events", () => {
         pumpFgEvent(rt.env.events, FgEventType.Pointer, { nodeIndex: 14 });
         expect(log).toHaveLength(1);
         expect(log[0]!.value).toEqual({ value: 14, __fgInt: true });
+    });
+
+    it("StopEventPropagation skips remaining immediate custom-event receivers", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "first",
+                    type: "ReceiveCustomEvent",
+                    config: { eventId: "event-a" },
+                    signalTargets: { done: [{ blockId: "stop", socket: "in" }] },
+                },
+                {
+                    id: "second",
+                    type: "ReceiveCustomEvent",
+                    config: { eventId: "event-a" },
+                    signalTargets: { done: [{ blockId: "rec", socket: "in" }] },
+                },
+                { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "send", socket: "in" }] } },
+                { id: "send", type: "SendCustomEvent", config: { eventId: "event-a" } },
+                {
+                    id: "stop",
+                    type: "StopEventPropagation",
+                    dataSources: { event: { blockId: "first", socket: "event" } },
+                    dataDefaults: { stopImmediate: true },
+                },
+                { id: "rec", type: RECORD },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        expect(log).toEqual([]);
     });
 });
 
@@ -536,6 +602,7 @@ describe("flow-graph blocks — math Phase 3", () => {
     it.each([
         ["E", Math.E],
         ["PI", Math.PI],
+        ["Tau", 2 * Math.PI],
     ])("constant %s emits its value", async (type, expected) => {
         expect(await evalOp(type, {})).toBeCloseTo(expected as number, 12);
     });
@@ -547,6 +614,28 @@ describe("flow-graph blocks — math Phase 3", () => {
 
     it("MathInterpolation mixes a→b by t = (1-t)a + t·b", async () => {
         expect(await evalOp("MathInterpolation", { a: 0, b: 10, c: 0.25 })).toBeCloseTo(2.5, 10);
+    });
+
+    it("SmoothStep computes the Hermite coefficient component-wise", async () => {
+        expect(await evalOp("SmoothStep", { a: 0, b: 10, c: 5 })).toBeCloseTo(0.5, 10);
+        expect(await evalOp("SmoothStep", { a: 2, b: 2, c: 1 })).toBe(0);
+        expect(await evalOp("SmoothStep", { a: 2, b: 2, c: 2 })).toBeNaN();
+    });
+
+    it("VectorSlerp rotates a float2 while interpolating length", async () => {
+        const result = (await evalOp("VectorSlerp", { a: { x: 1, y: 0 }, b: { x: 0, y: 1 }, c: 0.5 })) as { x: number; y: number };
+        expect(result.x).toBeCloseTo(Math.SQRT1_2, 8);
+        expect(result.y).toBeCloseTo(Math.SQRT1_2, 8);
+    });
+
+    it("RGBToOkLCh and RGBFromOkLCh round-trip linear RGB", async () => {
+        const input = { r: 0.2, g: 0.4, b: 0.7 };
+        const l = (await evalOp("RGBToOkLCh", input, { outSocket: "l" })) as number;
+        const c = (await evalOp("RGBToOkLCh", input, { outSocket: "c" })) as number;
+        const h = (await evalOp("RGBToOkLCh", input, { outSocket: "h" })) as number;
+        expect(await evalOp("RGBFromOkLCh", { l, c, h }, { outSocket: "r" })).toBeCloseTo(input.r, 6);
+        expect(await evalOp("RGBFromOkLCh", { l, c, h }, { outSocket: "g" })).toBeCloseTo(input.g, 6);
+        expect(await evalOp("RGBFromOkLCh", { l, c, h }, { outSocket: "b" })).toBeCloseTo(input.b, 6);
     });
 
     it("Conditional (select) picks onTrue/onFalse from condition", async () => {
@@ -655,6 +744,68 @@ describe("flow-graph blocks — property accessors", () => {
         startFlowGraph(rt);
         expect(log[0]!.value).toEqual({ x: 7, y: 8, z: 9 });
     });
+
+    it("rejects accessors whose resolved type conflicts with the declared pointer type", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const { acc, box } = vec3Accessor({ x: 1, y: 2, z: 3 });
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "start",
+                    type: "SceneReadyEvent",
+                    signalTargets: {
+                        out: [
+                            { blockId: "set", socket: "in" },
+                            { blockId: "value", socket: "in" },
+                            { blockId: "valid", socket: "in" },
+                        ],
+                    },
+                },
+                {
+                    id: "set",
+                    type: "SetProperty",
+                    config: { accessor: "p", type: FgType.Boolean },
+                    dataDefaults: { value: true },
+                    signalTargets: { error: [{ blockId: "error", socket: "in" }] },
+                },
+                { id: "get", type: "GetProperty", config: { accessor: "p", type: FgType.Boolean } },
+                { id: "error", type: RECORD, config: { label: "error" } },
+                { id: "value", type: RECORD, config: { label: "value" }, dataSources: { value: { blockId: "get", socket: "value" } } },
+                { id: "valid", type: RECORD, config: { label: "valid" }, dataSources: { value: { blockId: "get", socket: "isValid" } } },
+            ],
+            { wiring: { accessors: { p: acc } }, defs: { [RECORD]: recorderDef(log) } }
+        );
+        startFlowGraph(rt);
+        expect(box.v).toEqual({ x: 1, y: 2, z: 3 });
+        expect(log).toEqual([
+            { label: "error", value: null },
+            { label: "value", value: false },
+            { label: "valid", value: false },
+        ]);
+    });
+
+    it("fires error when an editor property cannot be written", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const target = Object.freeze({ value: 1 });
+        const rt = await makeRuntime(
+            [
+                { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "set", socket: "in" }] } },
+                {
+                    id: "set",
+                    type: "SetProperty",
+                    config: { editorPropertyAccess: true },
+                    dataDefaults: { object: target as unknown as FgValue, propertyName: "value", value: 2 },
+                    signalTargets: { error: [{ blockId: "error", socket: "in" }] },
+                },
+                { id: "error", type: RECORD, config: { label: "error" } },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        expect(target.value).toBe(1);
+        expect(log.map((entry) => entry.label)).toEqual(["error"]);
+    });
 });
 
 describe("flow-graph blocks — animation", () => {
@@ -699,7 +850,7 @@ describe("flow-graph blocks — animation", () => {
                 {
                     id: "play",
                     type: "PlayAnimation",
-                    dataDefaults: { animation: 0, speed: 2 },
+                    dataDefaults: { animation: "/animations/0", speed: 2 },
                     signalTargets: { out: [{ blockId: "o", socket: "in" }], done: [{ blockId: "d", socket: "in" }] },
                 },
                 { id: "o", type: RECORD, config: { label: "out" } },
@@ -721,7 +872,7 @@ describe("flow-graph blocks — animation", () => {
         const rt = await makeRuntime(
             [
                 { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "stop", socket: "in" }] } },
-                { id: "stop", type: "StopAnimation", dataDefaults: { animation: 0 } },
+                { id: "stop", type: "StopAnimation", dataDefaults: { animation: "/animations/0" } },
             ],
             { wiring: { animations: [group], caps: { stopAnimation: stop } } }
         );
@@ -1042,6 +1193,37 @@ describe("flow-graph blocks — matrix/quaternion", () => {
         expect(r.y).toBeCloseTo(1, 8);
         expect(r.z).toBeCloseTo(0, 8);
         expect(r.w).toBeCloseTo(0, 8);
+    });
+
+    it("MathSlerp interpolates identity to a 180° Y rotation", async () => {
+        const result = (await evalOp("MathSlerp", {
+            a: { x: 0, y: 0, z: 0, w: 1 },
+            b: { x: 0, y: 1, z: 0, w: 0 },
+            c: 0.5,
+        })) as { x: number; y: number; z: number; w: number };
+        expect(result.x).toBeCloseTo(0, 8);
+        expect(result.y).toBeCloseTo(Math.SQRT1_2, 8);
+        expect(result.z).toBeCloseTo(0, 8);
+        expect(result.w).toBeCloseTo(Math.SQRT1_2, 8);
+    });
+
+    it("QuaternionFromUpForward emits identity for the default basis", async () => {
+        const result = (await evalOp("QuaternionFromUpForward", {
+            a: { x: 0, y: 1, z: 0 },
+            b: { x: 0, y: 0, z: 1 },
+        })) as { x: number; y: number; z: number; w: number };
+        expect(result.x).toBeCloseTo(0, 8);
+        expect(result.y).toBeCloseTo(0, 8);
+        expect(result.z).toBeCloseTo(0, 8);
+        expect(result.w).toBeCloseTo(1, 8);
+    });
+
+    it("QuaternionFromAngles honors the configured intrinsic order", async () => {
+        const result = (await evalOp("QuaternionFromAngles", { a: 0, b: Math.PI / 2, c: 0 }, { config: { order: "xyz" } })) as { x: number; y: number; z: number; w: number };
+        expect(result.x).toBeCloseTo(0, 8);
+        expect(result.y).toBeCloseTo(Math.SQRT1_2, 8);
+        expect(result.z).toBeCloseTo(0, 8);
+        expect(result.w).toBeCloseTo(Math.SQRT1_2, 8);
     });
 });
 
@@ -1516,19 +1698,26 @@ describe("flow-graph blocks — control flow Phase 3h", () => {
                         done: [{ blockId: "done", socket: "in" }],
                     },
                 },
-                { id: "out", type: RECORD, config: { label: "out" } },
+                { id: "delayRef", type: "GetProperty", config: { accessor: "/extensions/KHR_interactivity/delays/0" } },
+                { id: "out", type: RECORD, config: { label: "out" }, dataSources: { value: { blockId: "sd", socket: "lastDelayIndex" } } },
                 { id: "done", type: RECORD, config: { label: "done" } },
             ],
             { defs: { [RECORD]: recorderDef(log) } }
         );
         startFlowGraph(rt);
         expect(log.map((e) => e.label)).toEqual(["out"]); // immediate
+        expect(log[0]!.value).toEqual({ value: 0, __fgInt: true });
+        const delayRef = rt.env.graph.blocks.find((block) => block.id === "delayRef")!;
+        rt.env.defs[delayRef.type]!.updateOutputs!(delayRef, rt.context, rt.env);
+        expect(rt.context.connectionValues["delayRef:isValid"]).toBe(true);
 
         tickFlowGraph(rt, 500); // 500 ms — not done yet
         expect(log.map((e) => e.label)).toEqual(["out"]);
 
         tickFlowGraph(rt, 600); // total 1100 ms > 1000 ms → done fires
         expect(log.map((e) => e.label)).toEqual(["out", "done"]);
+        rt.env.defs[delayRef.type]!.updateOutputs!(delayRef, rt.context, rt.env);
+        expect(rt.context.connectionValues["delayRef:isValid"]).toBe(false);
     });
 
     it("CancelDelay prevents done from firing", async () => {
@@ -1776,6 +1965,50 @@ describe("flow-graph blocks — events + interpolation Phase 3i", () => {
         startFlowGraph(rt);
         expect(log.map((e) => e.label)).toContain("out");
         expect(log.map((e) => e.label)).toContain("done");
+    });
+
+    it.each([
+        { stopImmediate: false, expected: ["stop-out", "second-handler"] },
+        { stopImmediate: true, expected: ["stop-out"] },
+    ])("StopEventPropagation controls transitive and immediate event handling", async ({ stopImmediate, expected }) => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "send", socket: "in" }] } },
+                { id: "send", type: "SendCustomEvent", config: { eventId: "halt" } },
+                {
+                    id: "first",
+                    type: "ReceiveCustomEvent",
+                    config: { eventId: "halt" },
+                    signalTargets: {
+                        out: [
+                            { blockId: "stop", socket: "in" },
+                            { blockId: "transitive", socket: "in" },
+                        ],
+                    },
+                },
+                {
+                    id: "stop",
+                    type: "StopEventPropagation",
+                    dataDefaults: { stopImmediate },
+                    dataSources: { event: { blockId: "first", socket: "event" } },
+                    signalTargets: { out: [{ blockId: "stopOut", socket: "in" }] },
+                },
+                { id: "stopOut", type: RECORD, config: { label: "stop-out" } },
+                { id: "transitive", type: RECORD, config: { label: "transitive" } },
+                {
+                    id: "second",
+                    type: "ReceiveCustomEvent",
+                    config: { eventId: "halt" },
+                    signalTargets: { out: [{ blockId: "secondHandler", socket: "in" }] },
+                },
+                { id: "secondHandler", type: RECORD, config: { label: "second-handler" } },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        expect(log.map((entry) => entry.label)).toEqual(expected);
     });
 
     // ── ValueInterpolation ────────────────────────────────────────────────────

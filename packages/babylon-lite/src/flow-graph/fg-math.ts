@@ -325,6 +325,7 @@ export function fgMix(a: FgValue, b: FgValue, t: FgValue): FgValue {
     if (Number.isNaN(tv)) {
         return a;
     }
+
     const lerp = (x: number, y: number): number => (1 - tv) * x + tv * y;
     if (isVec4(a) && isVec4(b)) {
         return { x: lerp(a.x, b.x), y: lerp(a.y, b.y), z: lerp(a.z, b.z), w: lerp(a.w, b.w) };
@@ -340,6 +341,47 @@ export function fgMix(a: FgValue, b: FgValue, t: FgValue): FgValue {
         return isFgInt(a) && isFgInt(b) ? fgInt(r) : r;
     }
     return ternary(a, b, t, (x, y, z) => (1 - z) * x + z * y);
+}
+
+/** Component-wise Hermite smooth-step coefficient (glTF `math/smoothStep`). */
+export function fgSmoothStep(a: FgValue, b: FgValue, c: FgValue): FgValue {
+    return ternary(a, b, c, (edge0, edge1, value) => {
+        const t = Math.min(Math.max((value - Math.min(edge0, edge1)) / Math.abs(edge1 - edge0), 0), 1);
+        return t * t * (3 - 2 * t);
+    });
+}
+
+/** Quaternion spherical interpolation (glTF `math/quatSlerp`). */
+export function fgQuatSlerp(a: FgValue, b: FgValue, amount: FgValue): Quat {
+    if (!isVec4(a) || !isVec4(b) || typeof amount !== "number") {
+        return { x: 0, y: 0, z: 0, w: 1 };
+    }
+    let bx = b.x;
+    let by = b.y;
+    let bz = b.z;
+    let bw = b.w;
+    let dot = a.x * bx + a.y * by + a.z * bz + a.w * bw;
+    if (dot < 0) {
+        dot = -dot;
+        bx = -bx;
+        by = -by;
+        bz = -bz;
+        bw = -bw;
+    }
+    let left = 1 - amount;
+    let right = amount;
+    if (dot < 0.999999) {
+        const omega = Math.acos(Math.min(1, Math.max(-1, dot)));
+        const invSin = 1 / Math.sin(omega);
+        left = Math.sin((1 - amount) * omega) * invSin;
+        right = Math.sin(amount * omega) * invSin;
+    }
+    return {
+        x: left * a.x + right * bx,
+        y: left * a.y + right * by,
+        z: left * a.z + right * bz,
+        w: left * a.w + right * bw,
+    };
 }
 
 // ─── Comparison (→ boolean) ─────────────────────────────────────────────────
@@ -526,6 +568,79 @@ export function fgCross(a: FgValue, b: FgValue): FgValue {
     }
     return a;
 }
+
+const SLERP_EPSILON = 1e-6;
+
+function perpendicular(v: Vec3): Vec3 {
+    const axis =
+        Math.abs(v.x) <= Math.abs(v.y) && Math.abs(v.x) <= Math.abs(v.z) ? { x: 1, y: 0, z: 0 } : Math.abs(v.y) <= Math.abs(v.z) ? { x: 0, y: 1, z: 0 } : { x: 0, y: 0, z: 1 };
+    const cross = crossVec3(v, axis);
+    const invLength = 1 / Math.hypot(cross.x, cross.y, cross.z);
+    return { x: cross.x * invLength, y: cross.y * invLength, z: cross.z * invLength };
+}
+
+/** Spherical interpolation for float2/float3 vectors (glTF `math/slerp`). */
+export function fgVectorSlerp(a: FgValue, b: FgValue, amount: FgValue): FgValue {
+    if (typeof amount !== "number") {
+        return a;
+    }
+    if (isVec2(a) && isVec2(b)) {
+        const lengthA = Math.hypot(a.x, a.y);
+        const lengthB = Math.hypot(b.x, b.y);
+        if (lengthA < SLERP_EPSILON || lengthB < SLERP_EPSILON) {
+            return { x: (1 - amount) * a.x + amount * b.x, y: (1 - amount) * a.y + amount * b.y };
+        }
+        const ax = a.x / lengthA;
+        const ay = a.y / lengthA;
+        const bx = b.x / lengthB;
+        const by = b.y / lengthB;
+        let angle = Math.acos(Math.min(1, Math.max(-1, ax * bx + ay * by)));
+        if (ax * by - ay * bx < 0) {
+            angle = -angle;
+        }
+        const length = (1 - amount) * lengthA + amount * lengthB;
+        const cos = Math.cos(amount * angle);
+        const sin = Math.sin(amount * angle);
+        return { x: (ax * cos - ay * sin) * length, y: (ax * sin + ay * cos) * length };
+    }
+    if (isVec3(a) && isVec3(b)) {
+        const lengthA = Math.hypot(a.x, a.y, a.z);
+        const lengthB = Math.hypot(b.x, b.y, b.z);
+        const lerp = (): Vec3 => ({
+            x: (1 - amount) * a.x + amount * b.x,
+            y: (1 - amount) * a.y + amount * b.y,
+            z: (1 - amount) * a.z + amount * b.z,
+        });
+        if (lengthA < SLERP_EPSILON || lengthB < SLERP_EPSILON) {
+            return lerp();
+        }
+        const unitA = { x: a.x / lengthA, y: a.y / lengthA, z: a.z / lengthA };
+        const unitB = { x: b.x / lengthB, y: b.y / lengthB, z: b.z / lengthB };
+        const dot = dotVec3(unitA, unitB);
+        if (dot > 1 - SLERP_EPSILON) {
+            return lerp();
+        }
+        const axis =
+            dot < -1 + SLERP_EPSILON
+                ? perpendicular(unitA)
+                : (() => {
+                      const cross = crossVec3(unitA, unitB);
+                      const invLength = 1 / Math.hypot(cross.x, cross.y, cross.z);
+                      return { x: cross.x * invLength, y: cross.y * invLength, z: cross.z * invLength };
+                  })();
+        const angle = amount * Math.acos(Math.min(1, Math.max(-1, dot)));
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const axisCrossA = crossVec3(axis, unitA);
+        const length = (1 - amount) * lengthA + amount * lengthB;
+        return {
+            x: (unitA.x * cos + axisCrossA.x * sin) * length,
+            y: (unitA.y * cos + axisCrossA.y * sin) * length,
+            z: (unitA.z * cos + axisCrossA.z * sin) * length,
+        };
+    }
+    return a;
+}
 /** Rotate a Vector2 by `angle` radians, CCW (glTF `math/rotate2D`). */
 export function fgRotate2D(a: FgValue, angle: FgValue): FgValue {
     if (isVec2(a) && typeof angle === "number") {
@@ -591,14 +706,18 @@ export function fgConjugate(a: FgValue): FgValue {
  * (`a.multiply(b)`). Non-quaternion inputs return `a` unchanged. */
 export function fgQuatMul(a: FgValue, b: FgValue): FgValue {
     if (isVec4(a) && isVec4(b)) {
-        return {
-            x: a.x * b.w + a.w * b.x + a.y * b.z - a.z * b.y,
-            y: a.y * b.w + a.w * b.y + a.z * b.x - a.x * b.z,
-            z: a.z * b.w + a.w * b.z + a.x * b.y - a.y * b.x,
-            w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
-        } as Quat;
+        return quatMul(a, b);
     }
     return a;
+}
+
+function quatMul(a: Quat, b: Quat): Quat {
+    return {
+        x: a.x * b.w + a.w * b.x + a.y * b.z - a.z * b.y,
+        y: a.y * b.w + a.w * b.y + a.z * b.x - a.x * b.z,
+        z: a.z * b.w + a.w * b.z + a.x * b.y - a.y * b.x,
+        w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+    };
 }
 
 // ─── Matrix ops (Phase 3f) ────────────────────────────────────────────────────
@@ -1089,10 +1208,114 @@ export function fgQuaternionFromDirections(a: FgValue, b: FgValue): Quat {
     if (!isVec3(a) || !isVec3(b)) {
         return { x: 0, y: 0, z: 0, w: 1 };
     }
-    const axis = crossVec3(a, b);
-    const dot = Math.min(1, Math.max(-1, dotVec3(a, b)));
-    const angle = Math.acos(dot);
-    const half = angle / 2;
-    const s = Math.sin(half);
-    return { x: axis.x * s, y: axis.y * s, z: axis.z * s, w: Math.cos(half) };
+    const dot = dotVec3(a, b);
+    if (Number.isFinite(dot) && dot > 1 - SLERP_EPSILON) {
+        return { x: 0, y: 0, z: 0, w: 1 };
+    }
+    if (Number.isFinite(dot) && dot < -1 + SLERP_EPSILON) {
+        const axis = perpendicular(a);
+        return { x: axis.x, y: axis.y, z: axis.z, w: 0 };
+    }
+    const cross = crossVec3(a, b);
+    const invLength = 1 / Math.hypot(cross.x, cross.y, cross.z);
+    const axisScale = Math.sqrt(0.5 - 0.5 * dot);
+    return {
+        x: cross.x * invLength * axisScale,
+        y: cross.y * invLength * axisScale,
+        z: cross.z * invLength * axisScale,
+        w: Math.sqrt(0.5 + 0.5 * dot),
+    };
+}
+
+function quaternionFromBasis(m11: number, m12: number, m13: number, m21: number, m22: number, m23: number, m31: number, m32: number, m33: number): Quat {
+    const trace = m11 + m22 + m33;
+    let s: number;
+    if (trace > 0) {
+        s = 0.5 / Math.sqrt(trace + 1);
+        return { x: (m32 - m23) * s, y: (m13 - m31) * s, z: (m21 - m12) * s, w: 0.25 / s };
+    }
+    if (m11 > m22 && m11 > m33) {
+        s = 2 * Math.sqrt(1 + m11 - m22 - m33);
+        return { x: 0.25 * s, y: (m12 + m21) / s, z: (m13 + m31) / s, w: (m32 - m23) / s };
+    }
+    if (m22 > m33) {
+        s = 2 * Math.sqrt(1 + m22 - m11 - m33);
+        return { x: (m12 + m21) / s, y: 0.25 * s, z: (m23 + m32) / s, w: (m13 - m31) / s };
+    }
+    s = 2 * Math.sqrt(1 + m33 - m11 - m22);
+    return { x: (m13 + m31) / s, y: (m23 + m32) / s, z: 0.25 * s, w: (m21 - m12) / s };
+}
+
+/** Quaternion whose local up/forward directions match the provided unit vectors. */
+export function fgQuaternionFromUpForward(up: FgValue, forward: FgValue): Quat {
+    if (!isVec3(up) || !isVec3(forward)) {
+        return { x: 0, y: 0, z: 0, w: 1 };
+    }
+    let side = crossVec3(up, forward);
+    const sideLength = Math.hypot(side.x, side.y, side.z);
+    if (sideLength < SLERP_EPSILON) {
+        side = perpendicular(forward);
+    } else {
+        side = { x: side.x / sideLength, y: side.y / sideLength, z: side.z / sideLength };
+    }
+    const correctedUp = crossVec3(forward, side);
+    return quaternionFromBasis(side.x, correctedUp.x, forward.x, side.y, correctedUp.y, forward.y, side.z, correctedUp.z, forward.z);
+}
+
+const QUATERNION_ANGLE_ORDERS = ["xyz", "xzy", "yxz", "yzx", "zxy", "zyx"] as const;
+
+/** Quaternion from intrinsic Tait-Bryan Euler angles (glTF `math/quatFromAngles`). */
+export function fgQuaternionFromAngles(x: FgValue, y: FgValue, z: FgValue, order: unknown): Quat {
+    const angleX = num(x);
+    const angleY = num(y);
+    const angleZ = num(z);
+    if (Number.isNaN(angleX) || Number.isNaN(angleY) || Number.isNaN(angleZ)) {
+        return { x: NaN, y: NaN, z: NaN, w: NaN };
+    }
+    const qx = fgQuaternionFromAxisAngle({ x: 1, y: 0, z: 0 }, angleX);
+    const qy = fgQuaternionFromAxisAngle({ x: 0, y: 1, z: 0 }, angleY);
+    const qz = fgQuaternionFromAxisAngle({ x: 0, y: 0, z: 1 }, angleZ);
+    const rotationOrder = typeof order === "string" && (QUATERNION_ANGLE_ORDERS as readonly string[]).includes(order) ? order : "yxz";
+    const quaternions = { x: qx, y: qy, z: qz };
+    return quatMul(
+        quatMul(quaternions[rotationOrder[0] as keyof typeof quaternions], quaternions[rotationOrder[1] as keyof typeof quaternions]),
+        quaternions[rotationOrder[2] as keyof typeof quaternions]
+    );
+}
+
+/** Convert linear sRGB scalar components to OkLCh. Hue is in radians. */
+export function fgRgbToOkLCh(r: FgValue, g: FgValue, b: FgValue): { l: number; c: number; h: number } {
+    const red = num(r);
+    const green = num(g);
+    const blue = num(b);
+    const long = 0.4122214708 * red + 0.5363325363 * green + 0.0514459929 * blue;
+    const medium = 0.2119034982 * red + 0.6806995451 * green + 0.1073969566 * blue;
+    const short = 0.0883024619 * red + 0.2817188376 * green + 0.6299787005 * blue;
+    const lRoot = Math.cbrt(long);
+    const mRoot = Math.cbrt(medium);
+    const sRoot = Math.cbrt(short);
+    const okL = 0.2104542553 * lRoot + 0.793617785 * mRoot - 0.0040720468 * sRoot;
+    const okA = 1.9779984951 * lRoot - 2.428592205 * mRoot + 0.4505937099 * sRoot;
+    const okB = 0.0259040371 * lRoot + 0.7827717662 * mRoot - 0.808675766 * sRoot;
+    return { l: okL, c: Math.hypot(okA, okB), h: Math.atan2(okB, okA) };
+}
+
+/** Convert OkLCh scalar components to linear sRGB. Hue is in radians. */
+export function fgRgbFromOkLCh(l: FgValue, c: FgValue, h: FgValue): { r: number; g: number; b: number } {
+    const lightness = num(l);
+    const chroma = num(c);
+    const hue = num(h);
+    const okA = chroma * Math.cos(hue);
+    const okB = chroma * Math.sin(hue);
+    const lPrime = lightness + 0.3963377774 * okA + 0.2158037573 * okB;
+    const mPrime = lightness - 0.1055613458 * okA - 0.0638541728 * okB;
+    const sPrime = lightness - 0.0894841775 * okA - 1.291485548 * okB;
+    const long = lPrime * lPrime * lPrime;
+    const medium = mPrime * mPrime * mPrime;
+    const short = sPrime * sPrime * sPrime;
+    return {
+        r: 4.0767416621 * long - 3.3077115913 * medium + 0.2309699292 * short,
+        g: -1.2684380046 * long + 2.6097574011 * medium - 0.3413193965 * short,
+        b: -0.0041960863 * long - 0.7034186147 * medium + 1.707614701 * short,
+    };
 }

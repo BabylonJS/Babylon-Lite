@@ -4,6 +4,7 @@
 // before the graph runs so blocks never touch the scene directly.
 
 import type { AnimationGroup } from "../animation/animation-group.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { FgBlockDef } from "./block-def.js";
 import type { FgEventBus } from "./event-bus.js";
 import type { FgGraph, FgType, FgValue } from "./types.js";
@@ -61,6 +62,8 @@ export interface FgEnv {
     readonly defs: Record<string, FgBlockDef>;
     /** Scene-object accessors resolved from JSON pointers, keyed by pointer id. */
     readonly accessors: Record<string, FgAccessor>;
+    /** Resolve a JSON pointer whose effective path depends on live graph data. */
+    readonly resolveAccessor?: (pointer: string) => FgAccessor | null;
     /** Animation handles by glTF animation index. */
     readonly animations: readonly AnimationGroup[];
     /** Scene-owned capabilities blocks may invoke without a scene reference. */
@@ -82,6 +85,7 @@ export interface FgAccessor {
  *  registry. */
 export interface FgWiring {
     accessors?: Record<string, FgAccessor>;
+    resolveAccessor?: (pointer: string) => FgAccessor | null;
     animations?: readonly AnimationGroup[];
     caps?: FgCapabilities;
     /** Shared scene/coordinator bus. A fresh one is created if omitted. */
@@ -97,6 +101,9 @@ export interface FgWiring {
  *  and capabilities are bound at attach time from the scene/container. */
 export interface LoadedFlowGraph {
     readonly graph: FgGraph;
+    /** glTF KHR graphs are right-handed; editor graphs preserve their serialized setting. */
+    readonly rightHanded?: boolean;
     /** JSON-pointer-string → resolved scene-object accessor. */
     readonly accessors: Record<string, FgAccessor>;
+    readonly resolveAccessor?: (pointer: string, scene?: SceneContext, animations?: readonly AnimationGroup[]) => FgAccessor | null;
 }
