@@ -338,6 +338,26 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         // entire point. Widening the allowance has to land in prose, in the same
         // review, next to the paragraph explaining why the check exists.
         //
+        // Claimed more than that once, and the archaeology withdrew it: on
+        // origin/master TESTING.md says nothing about ordering or cost, and the
+        // pipeline has no "Check deploy configuration" step at all. Both sides
+        // of this binding were written in this PR, and `bd71f2a7` touched both
+        // in one commit. So one *edit* cannot reach both sides, but one *commit*
+        // can. What this buys is that the justification lands on a surface
+        // contributors read for CI behaviour -- not that the second artifact is
+        // independent testimony, which it is not.
+        //
+        // What does hold, and it is structural rather than a property of the
+        // wording: this constant is an *allowance*, not an enumeration. It
+        // exempts steps from a rule stated over the pipeline, so emptying both
+        // sides of the correspondence cannot make it vacuous the way emptying
+        // two enumerated lists would -- the complement is real, and the
+        // universal clause reads it off the YAML. Measured, both sides emptied:
+        // the universal fires because `checkout` is no longer permitted, and
+        // the parse floor fires because the list is gone. Taken to its end, the
+        // chain has to delete `checkout` from the pipeline as well, and then
+        // dies at the parse floor with no repair that is not visibly false.
+        //
         // A deliberately low bar: it asks that the step be named there, not that
         // the reason be good. It cannot judge cost -- nothing here can -- it
         // just refuses to let the exemption be granted silently in a file only
