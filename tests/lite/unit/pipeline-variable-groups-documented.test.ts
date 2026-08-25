@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "fs";
-import { join } from "path";
+import { readFileSync, readdirSync, statSync } from "fs";
+import { join, relative, sep } from "path";
 
 const repoRoot = join(__dirname, "..", "..", "..");
 const docPath = join(repoRoot, "TESTING.md");
@@ -37,6 +37,48 @@ function declaredGroups(): Map<string, string[]> {
     expect(byGroup.size, "parsed no `- group:` declarations — the assertions would be vacuous").toBeGreaterThan(0);
 
     return byGroup;
+}
+
+/** Repo-relative paths of the files `declaredGroups()` actually reads. */
+function scannedFiles(): string[] {
+    return readdirSync(repoRoot).filter((f) => /^azure-pipelines.*\.ya?ml$/.test(f));
+}
+
+/**
+ * Every YAML file in the repository, as repo-relative paths.
+ *
+ * Discovered by walking rather than listed, because a list is the thing under
+ * test. `scannedFiles()` reads the repo root only, which is correct today for a
+ * reason that is easy to mistake for luck: variable groups are valid solely in a
+ * pipeline/stage/job `variables:` block, and both files under `config/templates`
+ * are pure step templates, so they *cannot* declare one. That is a structural
+ * argument, not a placement one -- but it stops holding the moment someone
+ * converts a step template into a job template, or adds a pipeline in a new
+ * directory, and nothing about that change would look like it touched this test.
+ */
+function allYamlFiles(): string[] {
+    const skip = new Set(["node_modules", ".git", "dist", "build", "coverage", "out", ".turbo"]);
+    const found: string[] = [];
+
+    const walk = (dir: string): void => {
+        for (const name of readdirSync(dir)) {
+            if (skip.has(name)) {
+                continue;
+            }
+            const full = join(dir, name);
+            if (statSync(full).isDirectory()) {
+                walk(full);
+            } else if (/\.ya?ml$/.test(name)) {
+                found.push(relative(repoRoot, full).split(sep).join("/"));
+            }
+        }
+    };
+    walk(repoRoot);
+
+    // Guard the collector. A walk that silently returns nothing would make the
+    // closure assertion below pass having compared two empty sets.
+    expect(found.length, "walked the repo and found no YAML at all").toBeGreaterThan(0);
+    return found;
 }
 
 /**
@@ -82,5 +124,31 @@ describe("pipeline variable groups are documented", () => {
             .filter((group) => !declared.has(group));
 
         expect(stale, `Documented but unused variable group(s).`).toEqual([]);
+    });
+
+    // Coverage by placement is not coverage. The two assertions above are only
+    // as wide as `scannedFiles()`, and nothing in them compares that list to
+    // reality -- which is the same shape as the hand-maintained group list that
+    // caused the 401 this PR fixes. Discover the subject, then assert the
+    // configured scope covers it.
+    //
+    // Compared as repo-relative paths, never basenames: a future `ci/azure-
+    // pipelines.yml` shares a basename with the root file and would read as
+    // covered, a false negative hiding exactly the case this exists to catch.
+    it("reads every file that declares a variable group", () => {
+        const scanned = new Set(scannedFiles());
+        const declaring = allYamlFiles().filter((file) => /^\s*-\s*group:/m.test(readFileSync(join(repoRoot, file), "utf8")));
+
+        // Print N and the subject. "N things, all correct" means nothing if the
+        // set silently emptied.
+        console.log(`files declaring a variable group: ${declaring.length}`);
+        for (const file of declaring) {
+            console.log(`  ${file}`);
+        }
+        expect(declaring.length, "no file declares a `- group:` — the assertion below would be vacuous").toBeGreaterThan(0);
+
+        const unscanned = declaring.filter((file) => !scanned.has(file));
+
+        expect(unscanned, "these files declare a variable group but the guard never reads them, so a group they require can go undocumented:").toEqual([]);
     });
 });
