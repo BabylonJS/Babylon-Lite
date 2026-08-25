@@ -221,6 +221,35 @@ const KNOWN_MASTER_JOBS = ["UnitTests", "Lint", "Compat"];
  */
 const COST_GATED_JOBS: string[] = [];
 
+type DocSection = { block: string; starts: number; ends: number };
+
+/**
+ * A named region of `TESTING.md`, with each anchor's occurrence count.
+ *
+ * The counts are returned rather than resolved here because both anchors are
+ * `indexOf` -- first match. An earlier version asserted only that the section
+ * was *findable*, and that floor is satisfied more easily as the section gets
+ * wider, not less. Measured: adding one earlier line containing "Deliberately
+ * excluded from" moved `start` backwards over the sentence naming the three
+ * jobs master runs, and gating `UnitTests` off master then went from a named
+ * failure to silence -- the widened block "documented" it. A floor that a
+ * degrading artifact satisfies more easily is not a floor, so the caller
+ * asserts uniqueness as well as presence.
+ */
+function docSection(startAnchor: string, endAnchor: string): DocSection {
+    const doc = readFileSync(join(repoRoot, "TESTING.md"), "utf8");
+    const starts = doc.split(startAnchor).length - 1;
+    const ends = doc.split(endAnchor).length - 1;
+    const start = doc.indexOf(startAnchor);
+    const end = doc.indexOf(endAnchor, start + 1);
+    return { block: start === -1 || end === -1 ? "" : doc.slice(start, end), starts, ends };
+}
+
+/** Every job name `TESTING.md` sets in bold inside `section`. */
+function boldNamesIn(section: string): string[] {
+    return [...section.matchAll(/\*\*([^*]+)\*\*/g)].map((match) => (match[1] ?? "").trim());
+}
+
 /**
  * The prose promise `COST_GATED_JOBS` makes, turned into a check.
  *
@@ -243,26 +272,39 @@ const COST_GATED_JOBS: string[] = [];
  * into a second file in the same diff, written in prose, where the person
  * reviewing decides. That is all the original comment claimed and more than it
  * delivered.
- *
- * The occurrence counts are returned rather than resolved here because both
- * anchors are `indexOf` -- first match. The first version of this asserted only
- * that the section was *findable*, and that floor is satisfied more easily as
- * the section gets wider, not less. Measured: adding one earlier line
- * containing "Deliberately excluded from" moves `start` backwards over the
- * sentence that names the three jobs master runs, and gating `UnitTests` off
- * master then goes from a named failure to silence -- the widened block
- * "documents" it. A floor that a degrading artifact satisfies more easily is
- * not a floor, so the caller asserts uniqueness as well as presence.
  */
-type ExcludedSection = { block: string; starts: number; ends: number };
+function deliberatelyExcludedFromMaster(): DocSection {
+    return docSection("Deliberately excluded from", "Those jobs are gated");
+}
 
-function deliberatelyExcludedFromMaster(): ExcludedSection {
-    const doc = readFileSync(join(repoRoot, "TESTING.md"), "utf8");
-    const starts = doc.split("Deliberately excluded from").length - 1;
-    const ends = doc.split("Those jobs are gated").length - 1;
-    const start = doc.indexOf("Deliberately excluded from");
-    const end = doc.indexOf("Those jobs are gated", start + 1);
-    return { block: start === -1 || end === -1 ? "" : doc.slice(start, end), starts, ends };
+/**
+ * The sentence stating which jobs master re-runs after a merge.
+ *
+ * This exists because `KNOWN_MASTER_JOBS` is hand-maintained and, until now,
+ * nothing pinned its *contents* -- only clauses that consumed them. A consumed
+ * constant is defeated by editing the constant, and that edit is an absence: a
+ * name disappears from a TypeScript array and the diff looks like test
+ * bookkeeping. Measured as a chain, each step taking the cheapest repair the
+ * previous failure suggests:
+ *
+ * 1. gate `UnitTests` off master -- two clauses fire;
+ * 2. delete `"UnitTests"` from `KNOWN_MASTER_JOBS` -- the named clause goes
+ *    quiet;
+ * 3. add it to `COST_GATED_JOBS` -- the hatch clause fires;
+ * 4. add a bullet to the excluded list -- **eleven passed**.
+ *
+ * Four edits, a third of post-merge validation gone, every step resolving a
+ * real failure, and `TESTING.md` left contradicting itself: the sentence below
+ * still said master re-runs Unit Tests while the list above it said Unit Tests
+ * was excluded. Nothing read both.
+ *
+ * Pinning the constant against this sentence makes step 2 a prose edit in a
+ * file describing what CI does, rather than a deletion in an array. It does not
+ * make the chain impossible -- nothing here can -- it makes the cheapest
+ * repair a *statement* about coverage instead of the absence of one.
+ */
+function postMergeJobsInDoc(): DocSection {
+    return docSection("Every push to `master` therefore re-runs", "They run in parallel");
 }
 
 /** A job's `displayName`, which is the string `TESTING.md` refers to it by. */
@@ -696,6 +738,40 @@ describe("pull-request jobs cannot run on a master build", () => {
                 `Pull-request context reaches jobs through templates, so an include this guard cannot resolve is context it cannot see -- ` +
                 `the job then looks like it needs no pull request, and the advice attached to that failure is to record it as cost-gated, which would make the blindness permanent. ` +
                 `Fix the path, or if the template is genuinely gone, remove the include from the job.`
+        ).toEqual([]);
+    });
+
+    it("pins the post-merge job set to the sentence documenting it", () => {
+        const { block, starts, ends } = postMergeJobsInDoc();
+
+        expect(
+            starts,
+            `"Every push to \`master\` therefore re-runs" appears ${starts} times in TESTING.md; the slice takes the first, so a second one re-points it silently.`
+        ).toBe(1);
+        expect(ends, `"They run in parallel" appears ${ends} times in TESTING.md, so the sentence's end is whichever comes first.`).toBe(1);
+
+        const byName = new Map(dualContextPipelines.flatMap((file) => file.jobs).map((job) => [job.name, job]));
+        const expected = KNOWN_MASTER_JOBS.map((name) => displayNameOf(byName.get(name))).filter((label): label is string => label !== undefined);
+
+        expect(
+            boldNamesIn(block).sort(),
+            `TESTING.md says master re-runs ${boldNamesIn(block).join(", ")}, but KNOWN_MASTER_JOBS resolves to ${expected.join(", ")}.\n` +
+                `These have to move together. If a job is genuinely leaving post-merge validation, say so here in the same diff -- that sentence is what a reader ` +
+                `checks, and a name quietly leaving a TypeScript array is not a statement anybody reviews.`
+        ).toEqual([...expected].sort());
+
+        // Constant-free on purpose. The two clauses above both read
+        // KNOWN_MASTER_JOBS, so editing it moves them together; this one
+        // compares TESTING.md against itself and cannot be reached from any
+        // constant in this file. It is what catches the end state of the
+        // four-edit chain, where the document claimed a job was both re-run on
+        // every push and deliberately excluded.
+        const alsoExcluded = boldNamesIn(block).filter((name) => deliberatelyExcludedFromMaster().block.includes(name));
+
+        expect(
+            alsoExcluded,
+            `TESTING.md says master re-runs ${alsoExcluded.join(", ")} and also lists it as deliberately excluded from master. Both cannot be true.\n` +
+                `Whichever is stale, the other one is what somebody will read when deciding whether post-merge validation still covers this.`
         ).toEqual([]);
     });
 
