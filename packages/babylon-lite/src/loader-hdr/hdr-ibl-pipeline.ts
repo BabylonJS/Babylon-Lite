@@ -18,6 +18,12 @@ import brdfLutWGSL from "../../shaders/hdr-brdf-lut.compute.wgsl?raw";
 /** Babylon.js' default mapping from GGX alpha to prefiltered cubemap LOD. */
 export const HDR_LOD_GENERATION_SCALE = 0.8;
 
+let _prefilteredEnvironmentExtraUsage = 0;
+/** @internal Enable copying HDR environments into opt-in local probe arrays. */
+export function _enableHdrEnvironmentCopySource(): void {
+    _prefilteredEnvironmentExtraUsage = TU.COPY_SRC;
+}
+
 export function equirectToCubemapGPU(engine: EngineContext, hdr: HdrImage, faceSize: number): GPUTexture {
     const device = engine._device;
     // Upload equirect as a 2D texture
@@ -84,7 +90,7 @@ export function prefilterCubemapGPU(engine: EngineContext, srcCube: GPUTexture, 
         size: { width: faceSize, height: faceSize, depthOrArrayLayers: 6 },
         mipLevelCount: mipCount,
         format: "rgba16float",
-        usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_DST | TU.COPY_SRC,
+        usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_DST | _prefilteredEnvironmentExtraUsage,
     });
 
     const srcCubeView = srcCube.createView({ dimension: "cube" });

@@ -493,6 +493,17 @@ function writeLocalSphericalHarmonics(data: Float32Array, offsets: ReadonlyMap<s
     }
 }
 
+/** @internal */
+export function _isPbrLocalCubemapIblVariant(features: number, features2: number): boolean {
+    return (features & PBR_HAS_LOCAL_ENVIRONMENT) !== 0 && (features & PBR_HAS_SKYBOX) === 0 && (features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) === 0;
+}
+
+/** @internal */
+export function _getPbrLocalCubemapIblFallback(material: unknown): ReturnType<typeof localEnvironmentForState> | null {
+    const state = _getPbrLocalEnvironment(material);
+    return state ? localEnvironmentForState(state) : null;
+}
+
 export const pbrExt: PbrExt = {
     id: "local-cubemap",
     phase: "fragment",
@@ -501,12 +512,7 @@ export const pbrExt: PbrExt = {
         return { f: state ? PBR_HAS_LOCAL_ENVIRONMENT : 0, f2: 0 };
     },
     frag(ctx) {
-        const unsupportedVariant = (ctx._features & PBR_HAS_SKYBOX) !== 0 || (ctx._features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) !== 0;
-        return (ctx._features & PBR_HAS_LOCAL_ENVIRONMENT) !== 0 && !unsupportedVariant ? createLocalEnvironmentFragment(ctx._hasSceneIbl ?? false) : null;
-    },
-    iblFallback(material) {
-        const state = _getPbrLocalEnvironment(material);
-        return state ? localEnvironmentForState(state) : null;
+        return _isPbrLocalCubemapIblVariant(ctx._features, ctx._features2) ? createLocalEnvironmentFragment(ctx._hasSceneIbl ?? false) : null;
     },
     writeUbo(data, material, offsets) {
         const state = _getPbrLocalEnvironment(material);

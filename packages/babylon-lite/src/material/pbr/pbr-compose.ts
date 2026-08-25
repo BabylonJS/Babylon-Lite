@@ -83,6 +83,14 @@ type PbrComposeFn = (
     _pi?: number
 ) => ComposedShader;
 
+/** Local-IBL resolver installed only by `enablePbrLocalCubemap`, keeping extension
+ * detection behind the opt-in feature seam instead of scanning every PBR extension. */
+let _extensionIblResolver: ((features: number, features2: number) => boolean) | null = null;
+/** @internal */
+export function _installPbrExtensionIblResolver(resolve: (features: number, features2: number) => boolean): void {
+    _extensionIblResolver = resolve;
+}
+
 /** Create a memoized shader composer for a given scene's resolved PBR deps. */
 export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
     const cache = new Map<string, ComposedShader>();
@@ -127,10 +135,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const hasCotangent = has(PBR_HAS_NORMAL_MAP) && !hasMesh(MSH_HAS_TANGENTS);
         const _hasAnyNormal = hasNormal || hasCotangent;
         const _hasReflectanceExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP) || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
-        // The opt-in local-environment extension reserves bit 31, making the signed mask negative.
-        // Pass-only and skybox variants do not contain the ordinary IBL rewrite targets.
-        const supportsLocalIbl = !has(PBR_HAS_SKYBOX) && (features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) === 0;
-        const _hasIbl = hasScene(PBR_HAS_ENV) || (features < 0 && supportsLocalIbl);
+        const extensionIbl = _extensionIblResolver?.(features, features2) ?? false;
+        const _hasIbl = hasScene(PBR_HAS_ENV) || extensionIbl;
         const _hasMorph = hasMesh(MSH_HAS_MORPH_TARGETS);
         const hasShadow = hasMesh(MSH_RECEIVE_SHADOWS);
         const _hasAnisotropy = has(PBR_HAS_ANISOTROPY);
@@ -188,10 +194,10 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _hasReflectanceExt,
             _hasIbl,
             _hasAnisotropy,
-            _anisoBrdfFunctions: _hasAnisotropy && _anisoHooks ? _anisoHooks._anisoBrdf : "",
-            _anisoTBBlock: _hasAnisotropy && _anisoHooks ? _anisoHooks._anisoTB(hasNormal, (features2 & _anisoHooks._anisoTexBit) !== 0) : "",
+            _anisoBrdfFunctions: _anisoHooks?._anisoBrdf,
+            _anisoTBBlock: _anisoHooks?._anisoTB(hasNormal, (features2 & _anisoHooks._anisoTexBit) !== 0),
             _ext,
-            _gammaBaseColor: _gammaHooks?._gammaBaseColor ?? null,
+            _gammaBaseColor: _gammaHooks?._gammaBaseColor,
             _noColorOutput: (features2 & PBR2_NO_COLOR_OUTPUT) !== 0,
             _esmShadowOutput: (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0,
             _esmShadowDepthCode,
@@ -206,12 +212,14 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _meshFeatures: meshFeatures,
             _uv2Mask: _hasUv2 ? uv2Mask : 0,
             _hasIbl: _hasIbl,
-            _hasSceneIbl: hasScene(PBR_HAS_ENV),
             _hasAnyNormal,
             _hasSpecularAA,
-            _anisoBentNormalCode: _hasAnisotropy && _anisoHooks ? _anisoHooks._anisoBentNormal : "",
-            _iblSkyboxCalc: _skyboxHooks?._skyboxCalc ?? "",
+            _anisoBentNormalCode: _anisoHooks?._anisoBentNormal,
+            _iblSkyboxCalc: _skyboxHooks?._skyboxCalc,
         };
+        if (extensionIbl) {
+            (fragCtx as { _hasSceneIbl?: boolean })._hasSceneIbl = hasScene(PBR_HAS_ENV);
+        }
         // Registration order defines iteration order; callers register in composer-matching order.
         for (const regExt of _getPbrExts().values()) {
             if (regExt.frag) {

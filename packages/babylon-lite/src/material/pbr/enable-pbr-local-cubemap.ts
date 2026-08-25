@@ -11,6 +11,10 @@ import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buff
 import { getTrilinearSampler } from "../../resource/samplers.js";
 import type { SceneContext } from "../../scene/scene.js";
 import { _registerPbrExt } from "./pbr-flags.js";
+import { _installPbrExtensionIblResolver } from "./pbr-compose.js";
+import { _installPbrIblFallbackResolver } from "./pbr-pipeline.js";
+import { _enableDdsEnvironmentCopySource } from "../../loader-env/load-dds-env.js";
+import { _enableHdrEnvironmentCopySource } from "../../loader-hdr/hdr-ibl-pipeline.js";
 import {
     _initializePbrLocalCubemapLimits,
     _PBR_LOCAL_ENVIRONMENT_CANDIDATE_CAPACITY,
@@ -602,7 +606,11 @@ let _enabled: Promise<void> | null = null;
 /** Enable bounded single-probe projection and initialize fragment-weighted probe arrays. */
 export function enablePbrLocalCubemap(options: PbrLocalCubemapInitOptions = {}): Promise<void> {
     _initializePbrLocalCubemapLimits(options.maxCandidates);
+    _enableDdsEnvironmentCopySource();
+    _enableHdrEnvironmentCopySource();
     return (_enabled ??= Promise.all([import("./fragments/local-cubemap-fragment.js"), import("./fragments/ibl-fragment.js")]).then(([local, ibl]) => {
+        _installPbrExtensionIblResolver(local._isPbrLocalCubemapIblVariant);
+        _installPbrIblFallbackResolver(local._getPbrLocalCubemapIblFallback);
         local.registerPbrLocalCubemapExt(_registerPbrExt);
         _registerPbrExt(ibl.pbrExt);
     }));

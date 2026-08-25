@@ -78,8 +78,6 @@ export interface PbrExt {
     writeUbo?(data: Float32Array, mat: unknown, offsets: ReadonlyMap<string, number>): void;
     /** Push group-1 bind entries starting at binding `b`; return new b. */
     bind?(ctx: _PbrBindCtx, entries: GPUBindGroupEntry[], b: number): number;
-    /** Supply IBL resources when the active material has IBL but the scene has no environment. */
-    iblFallback?(mat: unknown): _PbrBindCtx["_env"];
     /** Enumerate textures for acquire/release. */
     textures?(mat: unknown, out: Texture2D[]): void;
 }
