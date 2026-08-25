@@ -350,6 +350,59 @@ function allowanceSection(): string {
 }
 
 describe("the baseline pipeline validates its deploy configuration before doing expensive work", () => {
+    it("grants the allowance to the steps it names and to nothing else", () => {
+        // The name is not what exempts a step -- `matches` is. Everything else
+        // binding this allowance compares names: the pin, the TESTING.md bullets,
+        // the contradiction check below. All of them are satisfied by an entry
+        // called `checkout` whose predicate quietly selects half the pipeline.
+        //
+        // Measured, at the committed parent: widen this one predicate to
+        // /pnpm|checkout:/ and touch nothing else -- no doc edit, no new name,
+        // no reordering -- and the file returns 9 passed. Every gated step is
+        // then exempt from the universal clause, and the widening PR shows a
+        // reviewer a green run. The damage surfaces only when someone later
+        // moves work ahead of the check, and only for the three commands the
+        // cost floor knows by name (verified: that state fails here, by name).
+        // So the exploit was bounded and the widening was not visible at all.
+        //
+        // This clause asks what the predicate actually selects out of the real
+        // steps, which is the one side of the allowance nobody writes.
+        const steps = pipelineSteps();
+
+        const problems = CHECK_PREREQUISITES.flatMap(({ name, matches }) => {
+            const selected = steps.filter((s) => matches(s));
+
+            // A predicate matching nothing exempts nothing, so every clause
+            // about it passes forever while the entry sits here looking live.
+            if (selected.length === 0) {
+                return [`\`${name}\` matches no step in ${pipelineFile}, so the entry is dead and the name pins nothing`];
+            }
+
+            return selected.flatMap((step) => {
+                const label =
+                    /displayName:\s*(.+)/
+                        .exec(step)?.[1]
+                        ?.trim()
+                        .replace(/^["']|["']$/g, "") ??
+                    step.split("\n")[0]?.trim() ??
+                    "?";
+                const gated = GATED_STEPS.filter((g) => step.includes(g)).map(
+                    () => `\`${name}\` exempts "${label}", which is work "${PREFLIGHT_STEP}" exists to stand in front of`
+                );
+                const costly = COSTLY_COMMANDS.filter(({ pattern }) => pattern.test(step)).map(
+                    ({ why }) => `\`${name}\` exempts "${label}", which ${why} — the allowance is for cheap steps`
+                );
+                return [...gated, ...costly];
+            });
+        });
+
+        expect(
+            problems,
+            `${problems.join("\n  ")}\n\n` +
+                `A step is exempted by the predicate, not by the name beside it, so widening a predicate opens the hatch without touching any name this file or TESTING.md pins. Narrow it to the step it is named for.`
+        ).toEqual([]);
+    });
+
     it("keeps the check ahead of every step whose cost is the reason it exists", () => {
         const steps = pipelineSteps();
         const preflight = stepIndex(steps, PREFLIGHT_STEP);
@@ -592,9 +645,28 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         // as a residual: this measures that a reason was written, never that it
         // is a good one. That judgement is the reviewer's, which is the whole
         // reason the allowance was pushed into prose in the first place.
+        // The bullet, taken from the parse rather than found by substring. This
+        // used to be `body.split("\n").find((l) => l.includes(name))`, which
+        // returns the *first* line mentioning the name -- and prose in this
+        // section mentions these steps by name too. Measured: put a sentence
+        // above the list that mentions `checkout`, reduce the bullet to a bare
+        // `- \`checkout\``, and the reason check reads the prose line, finds
+        // plenty of words, and passes. 9 passed with an undocumented entry.
+        //
+        // Same defect as the `listed` parse two assertions up, left in place
+        // because I fixed the direction I was thinking about and not the
+        // lookup feeding it.
+        // The continuation is indented lines only. A first attempt took every
+        // following line that did not start with `-` or `#`, which swallowed the
+        // blank line and the paragraph *after* the list -- the bare-bullet arm
+        // stayed green and I nearly filed the fix as working. A bullet body ends
+        // at the first unindented line; anything looser reads the section's prose
+        // as the entry's reason, which is the defect being fixed.
+        const bulletBodies = new Map([...body.matchAll(/^- `([^`]+)`([^\n]*(?:\n[ \t]+\S[^\n]*)*)/gm)].map(([, name, rest]) => [name ?? "", rest ?? ""]));
+
         const unreasoned = CHECK_PREREQUISITES.filter(({ name }) => {
-            const bullet = body.split("\n").find((l) => l.includes(name)) ?? "";
-            return bullet.replace(name, "").replace(/[^A-Za-z]+/g, "").length < name.replace(/[^A-Za-z]+/g, "").length;
+            const reason = bulletBodies.get(name) ?? "";
+            return reason.replace(/[^A-Za-z]+/g, "").length < name.replace(/[^A-Za-z]+/g, "").length;
         }).map(({ name }) => name);
 
         expect(
@@ -621,9 +693,23 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         ).toEqual([]);
 
         // A step cannot be both the work the check stands in front of and a
-        // thing permitted to run before it. Independent of the region checks:
-        // this one fails on a section that is the right size and says the wrong
-        // thing.
+        // thing permitted to run before it.
+        //
+        // Residual, stated because the comment here used to claim more: this is
+        // a lexical coincidence detector, not a reading of the section. It
+        // compares ADO display names against prose that does not use them --
+        // TESTING.md calls this work "the expensive work", "measures 245
+        // scenes", "the publish step". Measured: a sentence granting the gated
+        // build a place ahead of the check, written in the document's own
+        // vocabulary, is 9 passed; the same sentence using the literal string
+        // "Build bundle scenes" fires this assertion. So it catches the copy of
+        // the name and misses the meaning, and the two artifacts' name spaces
+        // are exactly why.
+        //
+        // Kept, because a bullet is where a real exemption goes and a bullet
+        // does carry the literal name. The clause that does not depend on
+        // anyone's vocabulary is the allowance-grant clause above, which asks
+        // what the predicate selects out of the pipeline.
         const contradicted = GATED_STEPS.filter((name) => body.includes(name));
 
         expect(
