@@ -9,9 +9,8 @@
 // blocks (add/sub/mul/div/rem/abs/floor/lt/clamp + combine2/extract2) and the
 // pointer get/set accessors are all exercised by this graph.
 //
-// ⚠️ KHR_interactivity is an UNRATIFIED glTF draft; this demo (and the runtime
-// behind it) tracks the current draft and will be re-synced when the spec and
-// Babylon.js PR #18455 land.
+// KHR_interactivity is still evolving; the loader keeps its spec-dependent
+// parser and pointer mapping isolated so future Khronos revisions stay local.
 //
 // Model: "Calculator" from the Khronos glTF-Test-Assets-Interactivity repo
 //   https://github.com/KhronosGroup/glTF-Test-Assets-Interactivity (CC0 / public
@@ -27,7 +26,6 @@ import {
     loadGltf,
     onBeforeRender,
     registerScene,
-    runFlowGraphs,
     setCameraLimits,
     startEngine,
 } from "babylon-lite";
@@ -91,11 +89,8 @@ async function main(): Promise<void> {
     ]);
     addToScene(scene, asset);
 
-    // Drive the embedded KHR_interactivity graph(s). The runtime starts on the
-    // first frame and runs the onStart chain → display resets to "00".
-    if (asset.flowGraphs?.length) {
-        await runFlowGraphs(scene, asset.flowGraphs, asset.animationGroups);
-    }
+    // addToScene wires the embedded graph and its pointer-selection bridge.
+    await asset.flowGraphRuntimes;
 
     // Slow continuous orbit, paused during/after user interaction so it never
     // fights a manual orbit or zoom.

@@ -5,6 +5,7 @@ import {
     addFlowGraph,
     buildFgGraph,
     createFgEventBus,
+    createFgRuntime,
     detachFlowGraph,
     dispatchFlowGraphEvent,
     FgEventType,
@@ -14,6 +15,9 @@ import {
     getDataValue,
     startFlowGraph,
 } from "../../../packages/babylon-lite/src/index";
+import { dispatchFlowGraphPointerPick } from "../../../packages/babylon-lite/src/flow-graph/scene-flow-graph";
+import { createEmptyPickingInfo } from "../../../packages/babylon-lite/src/picking/picking-info";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 
 // Minimal fake scene exposing only the seams the flow-graph driver uses
 // (onBeforeRender pushes to `_beforeRender`, onSceneDispose to `_disposables`).
@@ -186,6 +190,46 @@ describe("flow-graph coordinator — imperative build + run", () => {
 
         driveFrame(scene, 16);
         expect(ticks).toBe(1);
+    });
+
+    it("dispatches a pointer pick once per event bus and respects node selectability", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const bus = createFgEventBus();
+        const graph = await buildFgGraph(
+            [
+                {
+                    id: "select",
+                    type: "OnSelect",
+                    config: { nodeIndex: 7 },
+                    signalTargets: { out: [{ blockId: "rec", socket: "in" }] },
+                },
+                { id: "rec", type: RECORD },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+        const first = await createFgRuntime(graph, { events: bus, defs: { [RECORD]: recorderDef(log) } });
+        const second = await createFgRuntime(graph, { events: bus, defs: { [RECORD]: recorderDef(log) } });
+        startFlowGraph(first);
+        startFlowGraph(second);
+        const scene = fakeScene();
+        scene._flowGraphs = [first, second];
+        const pick = createEmptyPickingInfo();
+        pick.hit = true;
+        pick.pickedMesh = { _gltfNodeIndex: 7 } as Mesh;
+
+        dispatchFlowGraphPointerPick(scene, pick);
+        expect(log).toHaveLength(2);
+
+        first.env.accessors["/nodes/7/extensions/KHR_node_selectability/selectable"] = {
+            type: FgType.Boolean,
+            get: () => false,
+        };
+        dispatchFlowGraphPointerPick(scene, pick);
+        expect(log).toHaveLength(2);
+
+        pick.hit = false;
+        dispatchFlowGraphPointerPick(scene, pick);
+        expect(log).toHaveLength(2);
     });
 
     it("subscribes every graph before start flows dispatch cross-graph events", async () => {

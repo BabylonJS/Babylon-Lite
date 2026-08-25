@@ -350,8 +350,8 @@ function resolveVisibility(pointer: string, nodeIndex: number, ctx: PointerResol
     };
 }
 
-/** `KHR_node_selectability/selectable` (boolean). Lite has no picking gate, so
- *  this is a no-op accessor: the value round-trips but has no visual effect. */
+/** `KHR_node_selectability/selectable` (boolean). The value round-trips here;
+ *  the scene Flow Graph picking bridge reads it to exclude disabled nodes. */
 function resolveSelectability(nodeIndex: number, ctx: PointerResolveContext): FgAccessor | null {
     const node = ctx.nodeMap[nodeIndex];
     if (!node) {

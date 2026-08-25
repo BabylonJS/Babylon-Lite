@@ -2610,5 +2610,16 @@
         "skipParity": true,
         "skipParityReason": "Lite-native renderer Y-sort extension; Babylon.js has no equivalent pure-2D GPU-order staging API to use as a pixel oracle.",
         "skipPerf": true
+    },
+    {
+        "id": 304,
+        "slug": "scene304-khr-interactivity-calculator",
+        "name": "Scene 304 — KHR Interactivity Calculator",
+        "maxRawKB": 207.1,
+        "description": "Loads Khronos' Calculator GLB, executes its embedded KHR_interactivity behavior graph, and verifies onStart initialization, event/onSelect dispatch, variable updates, and pointer/set writes to the display materials.",
+        "tags": ["gltf", "khr-interactivity", "flow-graph", "interaction"],
+        "skipParity": true,
+        "skipParityReason": "Behavioral browser test validates the embedded Khronos graph directly; no immutable visual golden is needed for interaction-state assertions.",
+        "skipPerf": true
     }
 ]

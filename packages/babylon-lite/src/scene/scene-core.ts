@@ -254,6 +254,10 @@ export interface SceneContext extends RenderingContext {
     _flowGraphTick?: (deltaMs: number) => void;
     /** @internal Scene-wide Flow Graph disposal callback, registered lazily. */
     _flowGraphDispose?: () => void;
+    /** @internal In-flight lazy setup for the Flow Graph pointer-selection bridge. */
+    _flowGraphPointerInit?: Promise<void>;
+    /** @internal Removes the Flow Graph pointer listener and disposes its picker. */
+    _flowGraphPointerCleanup?: () => void;
 }
 
 /** Options passed to the scene-context factory. */

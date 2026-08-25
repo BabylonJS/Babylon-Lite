@@ -26,10 +26,16 @@ interface IKHRInteractivity {
     graphs?: GltfInteractivityGraph[];
 }
 
+interface InteractivityMesh extends Mesh {
+    /** glTF node owning this primitive, used by the Flow Graph selection bridge. */
+    _gltfNodeIndex?: number;
+}
+
 /** Build a glTF-material-index → runtime-material map by walking the node→mesh→
  *  primitive hierarchy in the same order the loader instantiates GPU meshes
  *  (mirrors KHR_animation_pointer's `materialMap`). Lets a `pointer/{get,set}` on
- *  a material's UV transform reach the live PBR material. */
+ *  a material's UV transform reach the live PBR material. The same walk records
+ *  each primitive's source node for `event/onSelect`. */
 function buildMaterialMap(json: { nodes?: { mesh?: number }[]; meshes?: { primitives?: { material?: number }[] }[] }, meshes: readonly Mesh[]): (PointerMaterial | undefined)[] {
     const map: (PointerMaterial | undefined)[] = [];
     const nodes = json.nodes ?? [];
@@ -43,6 +49,9 @@ function buildMaterialMap(json: { nodes?: { mesh?: number }[]; meshes?: { primit
         for (let p = 0; p < prims.length; p++) {
             const matIdx = prims[p]?.material;
             const mesh = meshes[gpuIdx++];
+            if (mesh) {
+                (mesh as InteractivityMesh)._gltfNodeIndex = ni;
+            }
             if (matIdx !== undefined && mesh) {
                 map[matIdx] = mesh.material as unknown as PointerMaterial;
             }

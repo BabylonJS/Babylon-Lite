@@ -6,6 +6,7 @@ import { resolvePointerAccessor } from "../../../packages/babylon-lite/src/flow-
 import interactivityFeature from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature-interactivity";
 import { createFgRuntime, startFlowGraph } from "../../../packages/babylon-lite/src/flow-graph/index";
 import type { GltfLoadCtx } from "../../../packages/babylon-lite/src/loader-gltf/gltf-feature";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 
 const worldPointerExtension = {
     graphs: [
@@ -114,6 +115,23 @@ describe("path-converter resolvePointerAccessor", () => {
 });
 
 describe("gltf-feature-interactivity applyAsset", () => {
+    it("records each primitive's source glTF node for pointer selection", async () => {
+        const node = createTransformNode("n0");
+        const mesh = {} as Mesh;
+        const ctx = {
+            _json: {
+                extensions: { KHR_interactivity: worldPointerExtension },
+                nodes: [{ mesh: 0 }],
+                meshes: [{ primitives: [{}] }],
+            },
+            _nodeMap: [node] as (TransformNode | undefined)[],
+        } as unknown as GltfLoadCtx;
+
+        await interactivityFeature.applyAsset!([mesh], node, ctx);
+
+        expect((mesh as Mesh & { _gltfNodeIndex?: number })._gltfNodeIndex).toBe(0);
+    });
+
     it("parses graphs and resolves pointers into the container", async () => {
         const node = createTransformNode("n0");
         const ctx = { _json: { extensions: { KHR_interactivity: worldPointerExtension } }, _nodeMap: [node] as (TransformNode | undefined)[] } as unknown as GltfLoadCtx;
