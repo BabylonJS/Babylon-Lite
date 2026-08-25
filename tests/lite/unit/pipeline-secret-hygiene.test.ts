@@ -107,13 +107,34 @@ export function isYamlFile(name: string): boolean {
 }
 
 /**
+ * What the closure walk below opens: every file kind that can carry a
+ * credential, which is deliberately wider than the YAML the guard reads.
+ *
+ * A mask copied out of a build log is wrong in any CI file, and a shell script
+ * invoked by a pipeline step is a CI file -- `azure-pipelines.yml` calls
+ * `scripts/browserstack-wait.sh` directly. Discovery keyed on YAML alone was
+ * narrower than the risk while the comment above claimed otherwise, which is
+ * the same overclaim that caused the bug this suite exists for: TESTING.md
+ * listed a subset of the variable groups and read as exhaustive.
+ *
+ * Measured before widening rather than predicted: one tracked `.sh`, six
+ * `package.json`, and **zero** non-YAML files carrying a credential shape
+ * today. So this costs nothing now and fails the moment that stops being
+ * true -- which is the only point at which anyone would want to know.
+ */
+export function isDiscoverableFile(name: string): boolean {
+    return isYamlFile(name) || name.endsWith(".sh");
+}
+
+/**
  * The directories the guard reads, and what it accepts in each.
  *
  * At module scope so the closure check below can assert its own predicate
  * against these rather than against a copy of them.
  *
  * A mask copied out of a build log is wrong in any CI file, so the subject
- * is every file that can carry one. The original glob read the repo root
+ * is every YAML file that can carry one -- the walk below is wider still, and
+ * flags anything outside these roots. The original glob read the repo root
  * alone: 7 of the repo's 10 `Authorization` headers, while its own doc
  * comment claimed to cover the pipelines. The three it missed are `curl`
  * uploads in the two shared templates -- included by azure-pipelines.yml at
@@ -480,7 +501,7 @@ function allYamlCarryingACredentialShape(root: string = repoRoot): string[] {
                     walk(full);
                 }
             } else if (
-                isYamlFile(name) &&
+                isDiscoverableFile(name) &&
                 stripDocumentationText(readFileSync(full, "utf8"))
                     .split("\n")
                     .some((l) => isAuthorizationHeader(l) || hasMaskedSecret(l))
@@ -620,7 +641,7 @@ describe("the walk recognises every file kind the enumeration collects", () => {
         for (const { label, match } of PIPELINE_ROOTS) {
             if (match(name)) {
                 expect(
-                    isYamlFile(name),
+                    isDiscoverableFile(name),
                     `${label || "the repo root"} collects ${name}, but the closure walk would skip it — the walk would then certify a subject it no longer covers`
                 ).toBe(true);
             }
@@ -638,7 +659,12 @@ describe("the walk recognises every file kind the enumeration collects", () => {
             writeFileSync(join(dir, "a.yaml"), '  - script: curl -H "Authorization: ******" https://x\n');
             writeFileSync(join(dir, "b.yml"), "  password: ******\n");
             writeFileSync(join(dir, "c.txt"), "  password: ******\n");
-            expect(allYamlCarryingACredentialShape(dir).sort()).toEqual(["a.yaml", "b.yml"]);
+            // A pipeline step invokes scripts/browserstack-wait.sh directly, so
+            // a shell script is CI configuration and can carry a credential.
+            // Discovery has to be wider than the guard reads, or the closure
+            // check certifies a subject the risk does not stay inside.
+            writeFileSync(join(dir, "d.sh"), 'curl -H "Authorization: ******" https://x\n');
+            expect(allYamlCarryingACredentialShape(dir).sort()).toEqual(["a.yaml", "b.yml", "d.sh"]);
         } finally {
             // Asserted more strictly than the check needs, because a delete is
             // the one step whose failure re-running cannot undo -- an earlier
@@ -701,9 +727,19 @@ describe("the mask guard reads every file carrying anything its clauses examine"
 
         const unread = carrying.filter((file) => !scanned.has(file)).sort();
 
+        // Split, because one remediation is wrong for the other case and a
+        // false instruction is worse than none: telling a reader to add
+        // `scripts/` to the roots list would make pipelineFiles() read a shell
+        // script as pipeline YAML. That is the same shape as the fixture
+        // misfire whose advice, followed correctly, deepened the bug.
         expect(
-            unread,
+            unread.filter((file) => isYamlFile(file)),
             "these files carry an Authorization header or a masked value, but the guard never reads them, so a credential in them is invisible. Add the directory to the roots list in pipelineFiles():"
+        ).toEqual([]);
+
+        expect(
+            unread.filter((file) => !isYamlFile(file)),
+            "these non-YAML files carry a credential shape. The guard parses pipeline YAML, so do NOT add them to the roots list — remove the credential instead, or mask it at the source rather than pasting a redacted build log:"
         ).toEqual([]);
     });
 });
