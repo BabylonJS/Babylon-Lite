@@ -139,61 +139,95 @@ export function isWalkableDir(name: string): boolean {
 }
 
 /**
- * Blank the bodies of block scalars belonging to keys that are not shell steps,
- * preserving line count so reported line numbers stay true.
+ * Blank the bodies of multi-line scalars belonging to keys that are not shell
+ * steps, preserving line count so reported line numbers stay true.
  *
  * This is the *provenance* problem rather than a scope problem, and no choice
  * of file set reaches it. {@link SHELL_STEP_KEY} is anchored after leading
  * whitespace, which is correct -- a step is indented under `steps:`. But a line
- * inside a documentation block scalar is indented too, so an example step in
- * prose is byte-identical to the thing it describes:
+ * inside a multi-line scalar is indented too, so an example step quoted in
+ * prose is byte-identical to the thing it describes.
  *
- *     description: |
- *         Example of a step this workflow replaces:
- *         run: npx tsc --noEmit | sed 's/^/[ts] /'
+ * Two shapes, settled by different things, which is why the fix needs both and
+ * why neither alone would have looked incomplete:
  *
- * Verified by injection into `.github/workflows/compat-sync-trigger.yml` -- a
- * file the guard *must* read, so there is no root list that excludes it. The
- * guard collected line 57 and demanded `set -euo pipefail` of a sentence. A
- * false positive aimed squarely at whoever documents the thing being guarded.
+ *     description: |                    <- settled by SYNTAX: a block scalar
+ *         run: npx tsc | sed 's/x/y/'      body is data in every dialect.
+ *
+ *     description: 'Example step:       <- settled by the KEY: an open quoted
+ *         run: npx tsc | sed s/x/y/'       scalar folds into one string, and
+ *                                          only the key says it is prose.
+ *
+ * Both verified by injection into `.github/workflows/compat-sync-trigger.yml`
+ * -- a file the guard *must* read, so there is no root list that excludes it.
+ * The guard collected the prose line and demanded `set -euo pipefail` of a
+ * sentence. The second was confirmed against a real YAML parser first, which
+ * folds it into a single scalar string: the `run:` is prose by the grammar, not
+ * merely by intent. The false positive is aimed squarely at whoever documents
+ * the thing being guarded.
  *
  * Fixed above both questions rather than inside either, for the same reason
  * here-doc bodies are: prose is prose for the collector *and* for discovery,
  * and two readers learning separately about what counts as configuration is
  * exactly how they drift. Applied at both sites that read raw file text.
  *
- * Only block scalars need this. A single-line `description: run: x | y` is
- * already immune, because the key regex is anchored to the start of the line
- * and sees `description`, not `run` -- pinned rather than assumed.
+ * A single-line `description: run: x | y` needs nothing: the key regex is
+ * anchored to the start of the line and sees `description`, not `run` -- pinned
+ * rather than assumed.
  *
- * Failure direction is deliberate: an opener this does not recognise (a trailing
- * comment after the `|`, say) is left alone, so an unrecognised shape costs a
- * false positive that names a line, never a silent miss.
+ * Failure direction is deliberate throughout. An opener this does not recognise
+ * is left alone, and a dedent always ends a body -- so an unterminated quote
+ * stops at the next key rather than blanking the rest of the file. Every
+ * unrecognised shape costs a false positive that names a line, never a silent
+ * miss.
  */
-export function stripNonShellBlockScalars(text: string): string {
+export function stripNonShellMultilineScalars(text: string): string {
     const lines = text.split("\n");
     const out: string[] = [];
     let bodyIndent: number | null = null;
+    let closingQuote: string | null = null;
 
     for (const line of lines) {
         if (bodyIndent !== null) {
             const indent = line.length - line.trimStart().length;
+            // A dedent ends the body in both cases. This is the safety
+            // property for quoted scalars: an unterminated quote can never
+            // blank the rest of the file, it stops at the next key.
             if (line.trim() === "" || indent > bodyIndent) {
                 out.push("");
+                if (closingQuote !== null && line.includes(closingQuote)) {
+                    bodyIndent = null;
+                    closingQuote = null;
+                }
                 continue;
             }
             bodyIndent = null;
+            closingQuote = null;
         }
 
         out.push(line);
 
-        const opener = /^(\s*)(?:-\s+)?([A-Za-z0-9_.-]+):\s*[|>][-+0-9]*\s*$/.exec(line);
-        if (opener && !/^(?:script|bash|run|powershell|pwsh)$/i.test(opener[2] ?? "")) {
-            bodyIndent = (opener[1] ?? "").length;
+        const block = /^(\s*)(?:-\s+)?([A-Za-z0-9_.-]+):\s*[|>][-+0-9]*\s*$/.exec(line);
+        if (block && !isShellKey(block[2])) {
+            bodyIndent = (block[1] ?? "").length;
+            continue;
+        }
+
+        // A quoted scalar left open at end of line continues on the following
+        // lines, and YAML folds them into one string -- so a `run:` sitting
+        // there is prose, exactly as if it were in a block scalar.
+        const quoted = /^(\s*)(?:-\s+)?([A-Za-z0-9_.-]+):\s*(['"])(.*)$/.exec(line);
+        if (quoted && !isShellKey(quoted[2]) && !(quoted[4] ?? "").includes(quoted[3] ?? "")) {
+            bodyIndent = (quoted[1] ?? "").length;
+            closingQuote = quoted[3] ?? null;
         }
     }
 
     return out.join("\n");
+}
+
+function isShellKey(key: string | undefined): boolean {
+    return /^(?:script|bash|run|powershell|pwsh)$/i.test(key ?? "");
 }
 
 /**
@@ -289,7 +323,7 @@ export function pipelineFilesInRepo(): string[] {
             if (!/\.ya?ml$/.test(entry)) {
                 continue;
             }
-            const text = stripNonShellBlockScalars(readFileSync(full, "utf8"));
+            const text = stripNonShellMultilineScalars(readFileSync(full, "utf8"));
             if (SUBJECT_PATTERNS.some((pattern) => matchesAnyLine(pattern, text))) {
                 found.push(relative(repoRoot, full));
             }

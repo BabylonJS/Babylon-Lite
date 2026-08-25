@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
-import { isWalkableDir, pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS, SHELL_STEP_KEY, stripNonShellBlockScalars } from "./pipeline-files";
+import { isWalkableDir, pipelineFilesInRepo, pipelineYamlFiles, SCANNED_ROOTS, SHELL_STEP_KEY, stripNonShellMultilineScalars } from "./pipeline-files";
 
 interface ShellScript {
     location: string;
@@ -42,7 +42,7 @@ function shellScripts(): ShellScript[] {
         // `description:` block is byte-identical to a real one, and the guard
         // has no business demanding pipefail of a sentence. Line count is
         // preserved by the strip, so `location` below stays accurate.
-        const lines = stripNonShellBlockScalars(readFileSync(path, "utf8")).split("\n");
+        const lines = stripNonShellMultilineScalars(readFileSync(path, "utf8")).split("\n");
         for (let i = 0; i < lines.length; i++) {
             // `run` is the GitHub Actions spelling of the same thing. Verified
             // that no Azure file in this repo uses the key, so accepting it
@@ -372,25 +372,51 @@ describe("piped pipeline steps enable pipefail", () => {
 describe("documentation is not configuration", () => {
     // The silent-miss direction is the one that matters here. Blanking a real
     // `script:` body would make every pipe in it invisible and leave the suite
-    // green, so these two fixtures are the load-bearing pair.
-    it("keeps a real shell step's body", () => {
-        const step = ["- script: |", "      npx tsc --noEmit | sed 's/^/[ts] /'"].join("\n");
-        expect(stripNonShellBlockScalars(step)).toBe(step);
+    // green, so these fixtures are the load-bearing ones -- and they stand in
+    // for a lot: the ten pipeline files hold 41 block-scalar shell bodies
+    // between them, which is the dominant shape, not a corner.
+    it("keeps a real single-line shell step", () => {
+        const step = "- script: npx tsc --noEmit | sed 's/^/[ts] /'";
+        expect(stripNonShellMultilineScalars(step)).toBe(step);
     });
 
-    it("blanks an example step quoted inside documentation", () => {
+    it("keeps a real block-scalar shell body, the shape 41 real steps use", () => {
+        const step = ["- script: |", "      set -euo pipefail", "      npx tsc --noEmit | sed 's/^/[ts] /'"].join("\n");
+        expect(stripNonShellMultilineScalars(step)).toBe(step);
+    });
+
+    it("blanks an example step quoted inside a documentation block scalar", () => {
         const doc = ["description: |", "      Example of a step this replaces:", "      run: npx tsc --noEmit | sed 's/^/[ts] /'"].join("\n");
-        expect(SHELL_STEP_KEY.test(stripNonShellBlockScalars(doc).split("\n")[2] ?? "")).toBe(false);
+        expect(SHELL_STEP_KEY.test(stripNonShellMultilineScalars(doc).split("\n")[2] ?? "")).toBe(false);
+    });
+
+    it("blanks an example step inside an open quoted scalar, which YAML folds into prose", () => {
+        // Settled by the key rather than by syntax: an inline scalar is just a
+        // value, and only `description` says the fold is documentation.
+        const doc = ["description: 'Example of a step this replaces:", "      run: npx tsc --noEmit | sed s/x/y/'"].join("\n");
+        expect(SHELL_STEP_KEY.test(stripNonShellMultilineScalars(doc).split("\n")[1] ?? "")).toBe(false);
+    });
+
+    it("does not treat a closed quoted value as an open scalar", () => {
+        const text = ["displayName: 'build'", "- run: npx tsc | sed 's/x/y/'"].join("\n");
+        expect(SHELL_STEP_KEY.test(stripNonShellMultilineScalars(text).split("\n")[1] ?? "")).toBe(true);
+    });
+
+    it("stops an unterminated quote at the next key rather than blanking the file", () => {
+        // The safety property. Without the dedent rule, one stray quote would
+        // silence every guard for the rest of the file.
+        const text = ["description: 'unterminated", "      folded prose", "steps:", "    - run: npx tsc | sed 's/x/y/'"].join("\n");
+        expect(SHELL_STEP_KEY.test(stripNonShellMultilineScalars(text).split("\n")[3] ?? "")).toBe(true);
     });
 
     it("preserves line count so reported line numbers stay true", () => {
         const doc = "description: |\n    run: a | b\n    more\nsteps:\n    - script: echo hi";
-        expect(stripNonShellBlockScalars(doc).split("\n")).toHaveLength(doc.split("\n").length);
+        expect(stripNonShellMultilineScalars(doc).split("\n")).toHaveLength(doc.split("\n").length);
     });
 
     it("resumes reading configuration after the block dedents", () => {
         const text = ["description: |", "      run: a | b", "steps:", "    - run: npx tsc | sed 's/x/y/'"].join("\n");
-        const kept = stripNonShellBlockScalars(text).split("\n");
+        const kept = stripNonShellMultilineScalars(text).split("\n");
         expect(SHELL_STEP_KEY.test(kept[1] ?? "")).toBe(false);
         expect(SHELL_STEP_KEY.test(kept[3] ?? "")).toBe(true);
     });
@@ -401,14 +427,14 @@ describe("documentation is not configuration", () => {
         ["a keep indicator", "description: |+\n      run: a | b"],
         ["a sequence item key", "- description: |\n      run: a | b"],
     ])("blanks a body opened with %s", (_label, text) => {
-        expect(SHELL_STEP_KEY.test(stripNonShellBlockScalars(text).split("\n")[1] ?? "")).toBe(false);
+        expect(SHELL_STEP_KEY.test(stripNonShellMultilineScalars(text).split("\n")[1] ?? "")).toBe(false);
     });
 
     it("leaves single-line prose alone, which the key anchor already handles", () => {
-        // Pinned rather than assumed: the claim that only block scalars need
-        // this rests on SHELL_STEP_KEY seeing `description`, not `run`.
+        // Pinned rather than assumed: the claim that only multi-line scalars
+        // need this rests on SHELL_STEP_KEY seeing `description`, not `run`.
         const line = "description: run: npx tsc | sed 's/x/y/'";
-        expect(stripNonShellBlockScalars(line)).toBe(line);
+        expect(stripNonShellMultilineScalars(line)).toBe(line);
         expect(SHELL_STEP_KEY.test(line)).toBe(false);
     });
 });
