@@ -319,8 +319,15 @@ export const SUBJECT_PATTERNS = [SHELL_STEP_KEY, GITHUB_COMMENT_TASK];
  * Spelled once because the obvious inline form -- `new RegExp(p.source, "m")`
  * -- silently drops the `i`, restoring case-sensitive matching at one call site
  * while the exported constant still reads as case-insensitive.
+ *
+ * Exported because the failure it prevents is not hypothetical and not local:
+ * `pipeline-master-gating.test.ts` matched `GITHUB_COMMENT_TASK` with a bare
+ * `.test(body)`, and since the constant is anchored `^...$` with no `m`, it
+ * could not match any body longer than that single line. The marker was dead
+ * for the whole of that file's life. Any consumer of an anchored pattern from
+ * here needs this, so it travels with them.
  */
-function matchesAnyLine(pattern: RegExp, text: string): boolean {
+export function matchesAnyLine(pattern: RegExp, text: string): boolean {
     return new RegExp(pattern.source, `${pattern.flags.replace("m", "")}m`).test(text);
 }
 

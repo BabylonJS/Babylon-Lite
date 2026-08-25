@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { GITHUB_COMMENT_TASK, pipelineYamlFiles, repoRoot } from "./pipeline-files";
+import { GITHUB_COMMENT_TASK, matchesAnyLine, pipelineYamlFiles, repoRoot } from "./pipeline-files";
 
 /**
  * Guards the claim this repository's post-merge validation rests on: **no job
@@ -54,6 +54,27 @@ import { GITHUB_COMMENT_TASK, pipelineYamlFiles, repoRoot } from "./pipeline-fil
 const PR_CONTEXT_MARKERS = [/System\.PullRequest\./, GITHUB_COMMENT_TASK];
 
 /**
+ * True when a job body carries either marker.
+ *
+ * Spelled once, and matched line-by-line, because the two markers are not the
+ * same shape: `System.PullRequest.` is a substring that can appear anywhere,
+ * while `GITHUB_COMMENT_TASK` is anchored `^...$`. Testing an anchored pattern
+ * against a whole job body with a bare `.test()` asks whether the body *is*
+ * that line, not whether it *contains* it -- so the second marker matched
+ * nothing at all, for the whole life of this file.
+ *
+ * It went unseen because a disjunction only needs one true disjunct: every job
+ * that posts a `GitHubComment@0` here also names
+ * `$(System.PullRequest.PullRequestNumber)`, so the live marker covered for the
+ * dead one. Deleting the dead marker outright left this file at nine passed.
+ * The specimens below are what a per-disjunct control needs and the repository
+ * does not contain.
+ */
+function readsPullRequestContext(text: string): boolean {
+    return PR_CONTEXT_MARKERS.some((marker) => matchesAnyLine(marker, text));
+}
+
+/**
  * Pull-request context reaches a job through `- template:` as readily as
  * through its own steps, and the job body then says only `- template: ...`.
  *
@@ -64,6 +85,12 @@ const PR_CONTEXT_MARKERS = [/System\.PullRequest\./, GITHUB_COMMENT_TASK];
  * `$(System.PullRequest.PullRequestNumber)`. Their gates are load-bearing in
  * both senses, and a future "this job is cheap now, ungate it" would have been
  * waved through by a guard whose whole purpose is to stop exactly that.
+ *
+ * Note which marker actually catches them, because an earlier version of this
+ * comment claimed the wrong one: it is the `System.PullRequest.` substring in
+ * the template's `id:` input, not the `GitHubComment@0` task line. Template
+ * resolution is what those two jobs need; the comment marker contributes
+ * nothing to them and never did.
  *
  * Resolution is bounded rather than recursive-until-fixpoint: a cycle in
  * pipeline templates is an ADO error long before it is this guard's problem,
@@ -363,7 +390,7 @@ describe("pull-request jobs cannot run on a master build", () => {
 
     it("gates every job that reads pull-request context", () => {
         const prContextJobs = dualContextPipelines.flatMap((file) =>
-            file.jobs.filter((job) => PR_CONTEXT_MARKERS.some((marker) => marker.test(job.body))).map((job) => ({ ...job, location: file.location }))
+            file.jobs.filter((job) => readsPullRequestContext(job.body)).map((job) => ({ ...job, location: file.location }))
         );
 
         for (const name of KNOWN_PR_CONTEXT_JOBS) {
@@ -411,13 +438,59 @@ describe("pull-request jobs cannot run on a master build", () => {
         // no `condition:` to add -- the gate has to go on the caller, or the
         // step has to leave the template. Population is zero today; the clause
         // costs nothing until that stops being true.
-        const ungatable = dualContextPipelines.filter((file) => file.jobs.length === 0 && PR_CONTEXT_MARKERS.some((marker) => marker.test(file.text))).map((file) => file.location);
+        const ungatable = dualContextPipelines.filter((file) => file.jobs.length === 0 && readsPullRequestContext(file.text)).map((file) => file.location);
 
         expect(
             ungatable,
             `these files read pull-request context but declare no job, so there is nowhere to put a master gate:\n  ${ungatable.join("\n  ")}\n` +
                 `Do NOT add a condition here -- gate the job that includes the template, or move the step out of it.`
         ).toEqual([]);
+    });
+
+    it("classifies each pull-request marker on its own", () => {
+        // A negative per *predicate*, not per assertion -- and the predicate
+        // count here is two, taken from the logic rather than from the name.
+        // `readsPullRequestContext` reads as one thing and is a disjunction, so
+        // every control that mutated it whole was measuring whichever disjunct
+        // happened to be stronger on this repository. That was always the same
+        // one: no job in the tree posts a `GitHubComment@0` without also naming
+        // `$(System.PullRequest.PullRequestNumber)`, so the marker meant to
+        // catch the ones that don't was free to be broken, and was.
+        //
+        // These are specimens rather than fixture pipelines because the file
+        // that would separate the disjuncts is one the repository has no reason
+        // to contain -- a job that comments on a pull request while leaving the
+        // task's `id` to default. Adding it to the tree to satisfy a test would
+        // be inventing a job to be tested about.
+        const specimens = [
+            {
+                what: "a task line with the id left to default, which is the case the second marker exists for",
+                body: '          - job: Snapshot\n            steps:\n                - task: GitHubComment@0\n                  inputs:\n                      comment: "hi"\n',
+                marker: "comment task",
+            },
+            {
+                what: "a variable read with no comment task anywhere",
+                body: '          - job: Snapshot\n            steps:\n                - script: echo "$(System.PullRequest.PullRequestNumber)"\n',
+                marker: "variable",
+            },
+        ];
+
+        for (const specimen of specimens) {
+            expect(
+                readsPullRequestContext(specimen.body),
+                `a job body carrying only the ${specimen.marker} marker -- ${specimen.what} -- is not being recognised as pull-request context.\n` +
+                    `It would be reported as a job master can safely run, and on a master build the thing it depends on is empty. ` +
+                    `Each marker has to hold up alone: the other one covering for it in today's tree is what let this one stay broken.`
+            ).toBe(true);
+        }
+
+        // The disjunction is only meaningful if a body carrying neither is
+        // rejected -- without this the clause above passes on a predicate hard-
+        // wired to true.
+        expect(
+            readsPullRequestContext("          - job: Docs\n            steps:\n                - script: pnpm run docs\n"),
+            "a job that reads no pull-request context at all is being classified as if it did, which would gate the deterministic jobs off master one by one"
+        ).toBe(false);
     });
 
     it("leaves the deterministic jobs ungated so master still validates something", () => {
@@ -631,7 +704,7 @@ describe("pull-request jobs cannot run on a master build", () => {
             .filter((job) => job.gated)
             .map((job) => job.name)
             .sort();
-        const expected = [...new Set([...jobs.filter((job) => PR_CONTEXT_MARKERS.some((marker) => marker.test(job.body))).map((job) => job.name), ...COST_GATED_JOBS])].sort();
+        const expected = [...new Set([...jobs.filter((job) => readsPullRequestContext(job.body)).map((job) => job.name), ...COST_GATED_JOBS])].sort();
 
         // Two different failures reach this assertion, and they need opposite
         // repairs. A job may be gated because someone decided it was too slow --
