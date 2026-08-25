@@ -142,9 +142,15 @@ export function isDiscoverableFile(name: string): boolean {
  * precisely the shape this bug takes.
  */
 export const PIPELINE_ROOTS = [
-    { dir: repoRoot, label: "", match: (n: string) => n.startsWith("azure-pipelines") && isYamlFile(n), requiresDeployToken: true },
-    { dir: join(repoRoot, "config", "templates"), label: "config/templates", match: isYamlFile, requiresDeployToken: true },
-    { dir: join(repoRoot, ".github", "workflows"), label: ".github/workflows", match: isYamlFile, requiresDeployToken: false },
+    {
+        dir: repoRoot,
+        label: "",
+        match: (n: string) => n.startsWith("azure-pipelines") && isYamlFile(n),
+        atLeast: (n: string) => n.includes("azure-pipelines") && isYamlFile(n),
+        requiresDeployToken: true,
+    },
+    { dir: join(repoRoot, "config", "templates"), label: "config/templates", match: isYamlFile, atLeast: isYamlFile, requiresDeployToken: true },
+    { dir: join(repoRoot, ".github", "workflows"), label: ".github/workflows", match: isYamlFile, atLeast: isYamlFile, requiresDeployToken: false },
 ];
 
 /**
@@ -452,12 +458,16 @@ describe("pipeline secret hygiene", () => {
         for (const { location, number } of headers) {
             console.log(`  ${location}:${number}`);
         }
+        // This floor catches nothing the named floors below miss: a named floor
+        // requires a member, so it fires on collapse first. Measured -- delete
+        // this line, collapse the collector, and the named floors still fail.
+        // It is kept for the clearer message on that path, not for coverage.
         expect(headers.length, "no Authorization headers found — the assertions below would be vacuous").toBeGreaterThan(0);
 
-        // `> 0` catches collapse and not shrinkage, which is the direction that
-        // matters: a strip that blanks one file too many, or a collector that
-        // stops reaching one root, leaves both assertions below passing over a
-        // subject that quietly lost a location. Name one file per root instead.
+        // Shrinkage, not collapse, is the direction that matters: a strip that
+        // blanks one file too many, or a collector that stops reaching one
+        // root, leaves both assertions below passing over a subject that
+        // quietly lost a location. Name one file per root.
         const locations = headers.map(({ location }) => location);
         for (const required of ONE_FILE_PER_ROOT) {
             expect(locations, `no Authorization header collected from ${required} — the assertions below cover less than they claim`).toContain(required);
@@ -659,6 +669,28 @@ describe("the walk recognises every file kind the enumeration collects", () => {
     // enumeration stops discovering exactly the files it exists to find, and
     // then passes. Only `enumeration => walk` is asserted; the converse is
     // deliberately free, because the walk is meant to be the wider of the two.
+    it("collects every file a deliberately wider predicate finds under each root", () => {
+        // Named floors ask "any", never "how many", so they cannot see a root
+        // that keeps working while losing a file. Measured: narrowing the root
+        // matcher to require a dash drops azure-pipelines.yml -- the largest
+        // pipeline in the repo -- and every assertion in this file passes,
+        // because that file carries neither an Authorization header nor a
+        // credential shape, so neither the header clause nor the closure walk
+        // is positioned to notice.
+        //
+        // `atLeast` is deliberately wider than `match` and exists only to be
+        // compared against it. Narrowing both together defeats this, which is
+        // stated rather than prevented: the point is that one edit can no
+        // longer shrink the subject in silence.
+        for (const { dir, label, match, atLeast } of PIPELINE_ROOTS) {
+            const lost = readdirSync(dir)
+                .filter((name) => atLeast(name) && !match(name))
+                .sort();
+
+            expect(lost, `${label || "the repo root"} stopped collecting these files — the clauses above would report success over a subject that quietly lost them`).toEqual([]);
+        }
+    });
+
     it("names a floor file for every root, so a root added later cannot arrive unfloored", () => {
         // ONE_FILE_PER_ROOT is a fixed-cardinality list checked against a set
         // of roots that grows. Adding a fourth root leaves the floors covering
@@ -755,6 +787,9 @@ describe("the mask guard reads every file carrying anything its clauses examine"
         const scanned = new Set(pipelineFiles().map(({ location }) => location));
         const carrying = allYamlCarryingACredentialShape();
 
+        // As with the header floor: this catches nothing the named floor below
+        // misses, since a named floor fires on collapse first. Kept for the
+        // clearer message, not for coverage.
         expect(carrying.length, "walked the repo and found no credential-shaped line at all — the assertion below would compare two empty sets").toBeGreaterThan(0);
 
         // A bare non-empty floor is not enough, and the mutation proving it is
