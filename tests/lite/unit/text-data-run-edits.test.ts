@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GlyphCurves } from "../../../packages/babylon-lite/src/text/glyph-storage";
 import type { GlyphRun } from "../../../packages/babylon-lite/src/text/text-data";
-import { createTextData, TEXT_INSTANCE_FLOATS, updateTextData } from "../../../packages/babylon-lite/src/text/text-data";
+import { createTextData, TEXT_INSTANCE_FLOATS, TEXT_STYLE_FLOATS, updateTextData } from "../../../packages/babylon-lite/src/text/text-data";
 import { createGlyphStorage } from "../../../packages/babylon-lite/src/text/glyph-storage";
 
 function makeGlyph(glyphId: number): GlyphCurves {
@@ -42,6 +42,14 @@ function run(curveSet: string, x: number, glyphIds: number[] = [1, 2]): GlyphRun
     return {
         curveSet,
         glyphs: glyphIds.map((glyphId, i) => ({ glyphId, x: x + i, y: 0 })),
+        pixelsPerFontUnit: 1,
+    };
+}
+
+function styledRun(x: number, withOverride: boolean): GlyphRun {
+    return {
+        curveSet: "f",
+        glyphs: [{ glyphId: 1, x, y: 0 }, withOverride ? { glyphId: 2, x: x + 1, y: 0, color: [0.25, 0.5, 0.75, 1] } : { glyphId: 2, x: x + 1, y: 0 }],
         pixelsPerFontUnit: 1,
     };
 }
@@ -180,6 +188,47 @@ describe("updateTextData replaceRun", () => {
         }
     });
 
+    it("reuses styles across alternating non-tail replacements", () => {
+        let first = styledRun(0, false);
+        let second = styledRun(10, false);
+        const last = run("f", 20, [3]);
+        const data = createTextData(makeStorage(), [first, second, last]);
+
+        for (let i = 0; i < 101; i++) {
+            const replaceFirst = i % 2 === 0;
+            const replacement = styledRun(replaceFirst ? 0 : 10, Math.floor(i / 2) % 2 === 0);
+            const previous = replaceFirst ? first : second;
+            updateTextData(data, { update: "replaceRun", previous, run: replacement });
+            if (replaceFirst) {
+                first = replacement;
+            } else {
+                second = replacement;
+            }
+            expect(data._styleCount).toBeLessThanOrEqual(7);
+        }
+
+        const record = data._runRecords.get(first)!;
+        const packed = data._instancesU32[record._slots[1]! * TEXT_INSTANCE_FLOATS + 2]!;
+        const styleIndex = packed >>> 16;
+        expect(Array.from(data._styles.subarray(styleIndex * TEXT_STYLE_FLOATS, styleIndex * TEXT_STYLE_FLOATS + 4))).toEqual([0.25, 0.5, 0.75, 1]);
+    });
+
+    it("compacts styles before a new allocation exceeds packed indices", () => {
+        const first = styledRun(0, false);
+        const last = run("f", 10, [3]);
+        const data = createTextData(makeStorage(), [first, last]);
+        data._styleCount = 0xffff;
+
+        const replacement = styledRun(0, true);
+        updateTextData(data, { update: "replaceRun", previous: first, run: replacement });
+
+        expect(data._styleCount).toBe(3);
+        const record = data._runRecords.get(replacement)!;
+        for (const slot of record._slots) {
+            expect(data._instancesU32[slot * TEXT_INSTANCE_FLOATS + 2]! >>> 16).toBeLessThan(0xffff);
+        }
+    });
+
     // The free list is shared by every path that allocates, so an added run reuses a removed
     // run's slots through the same LIFO pop that reverses a resize.
     it("keeps an added run's glyphs in ascending slot order when it reuses freed slots", () => {
@@ -268,6 +317,18 @@ describe("updateTextData removeRun", () => {
 
         expect(data.runs).toEqual([first, last]);
         expect(data._runRecords.has(target)).toBe(false);
+    });
+
+    it("reclaims style blocks across repeated add/remove cycles", () => {
+        const base = run("f", 10, [3]);
+        const data = createTextData(makeStorage(), [base]);
+
+        for (let i = 0; i < 100; i++) {
+            const added = styledRun(0, true);
+            updateTextData(data, { update: "addRun", run: added, insertBefore: 0 });
+            updateTextData(data, { update: "removeRun", run: added });
+            expect(data._styleCount).toBe(1);
+        }
     });
 });
 
