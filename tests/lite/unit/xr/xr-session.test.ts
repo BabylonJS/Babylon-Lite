@@ -588,7 +588,7 @@ describe("xr-session lifecycle", () => {
             _captureRefs: 0,
             _meshCaptureRefs: 0,
             _textures: new Set(),
-            _texturesPruneAt: 0,
+            _texturesPruneAt: 64,
         };
         const scene = createSceneContext(engine);
         const ctx = await enterXr(scene, { input: false });
