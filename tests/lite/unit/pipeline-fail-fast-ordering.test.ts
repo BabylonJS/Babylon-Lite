@@ -112,12 +112,12 @@ function malformedNestingIn(text: string): string[] {
 
     for (const [i, line] of lines.entries()) {
         const content = line.slice(contentColumn(line));
-        if (!content.trim() || content.startsWith("#")) {
+        if (content.startsWith("#")) {
             continue;
         }
         const entry = /^([^:]+):(?:\s+(.*))?$/.exec(content);
         const value = entry?.[2]?.trim() ?? "";
-        if (!entry || !value || value.startsWith("#") || /^[|>]/.test(value)) {
+        if (!value || value.startsWith("#") || /^[|>]/.test(value)) {
             continue;
         }
 
@@ -125,6 +125,12 @@ function malformedNestingIn(text: string): string[] {
             const c = l.slice(contentColumn(l));
             return c.trim() !== "" && !c.startsWith("#");
         });
+        // `next === undefined` is unreachable at runtime -- a key with a scalar
+        // value that ends the file falls out on the column comparison instead,
+        // and the specimen for that is in the table. It is kept because the
+        // compiler requires it: removing it needs an `as string` to build, and
+        // a conjunct with no separating input is a type obligation rather than
+        // a branch. Pinned by tsc, stated here, not faked with a contrived arm.
         if (next === undefined || contentColumn(next) <= contentColumn(line)) {
             continue;
         }
@@ -135,6 +141,34 @@ function malformedNestingIn(text: string): string[] {
     }
     return bad;
 }
+
+/**
+ * Shapes this predicate has to agree with the parser about, in both directions.
+ *
+ * Every verdict here was taken from PyYAML rather than from what looked right,
+ * and the legal ones matter more than the illegal ones: they are the only thing
+ * standing between this and a rule that flags valid pipelines. A mechanical
+ * conjunct sweep found three of them missing — with no specimen for a
+ * comment-only value, a block scalar holding `key: value` text, or a
+ * whitespace-only line, the corresponding tests could each be deleted with
+ * nothing failing, because no input reached them.
+ */
+const NESTING_SPECIMENS: Array<{ label: string; yaml: string; illegal: boolean }> = [
+    { label: "quoted value, then a deeper mapping entry", yaml: 'a:\n  b: "x"\n    c: 1\n', illegal: true },
+    { label: "plain value, then a deeper mapping entry", yaml: "a:\n  b: x\n    c: 1\n", illegal: true },
+    { label: "quoted value, then a deeper bare word", yaml: 'a:\n  b: "x"\n    more\n', illegal: true },
+    { label: "sequence entry, then an over-indented sibling", yaml: "a:\n  - name: N\n      value: V\n", illegal: true },
+    { label: "quoted value, a comment, then a deeper entry", yaml: 'a:\n  b: "x"\n  # note\n    c: 1\n', illegal: true },
+
+    { label: "plain value continued on a deeper line", yaml: "a:\n  b: x\n    more\n", illegal: false },
+    { label: "block scalar holding deeper text", yaml: "a:\n  b: |\n    more\n", illegal: false },
+    { label: "block scalar holding `key: value` text", yaml: "a:\n  b: |\n    c: 1\n", illegal: false },
+    { label: "empty value opening a nested mapping", yaml: "a:\n  b:\n    c: 1\n", illegal: false },
+    { label: "comment-only value opening a mapping", yaml: "a:\n  b: # note\n    c: 1\n", illegal: false },
+    { label: "sequence entry and its sibling key", yaml: "a:\n  - name: N\n    value: V\n", illegal: false },
+    { label: "a whitespace-only line before a sibling", yaml: 'a:\n  b: "x"\n    \n  c: 1\n', illegal: false },
+    { label: "a scalar key as the final line", yaml: 'a:\n  b: "x"\n', illegal: false },
+];
 
 /**
  * The `steps:` list of the pipeline, in order, each entry as its raw block.
@@ -282,6 +316,23 @@ function allowanceSection(): string {
 }
 
 describe("the baseline pipeline validates its deploy configuration before doing expensive work", () => {
+    it("agrees with a real parser about what is nested and what is merely indented", () => {
+        const wrong = NESTING_SPECIMENS.filter(({ yaml, illegal }) => malformedNestingIn(yaml).length > 0 !== illegal).map(
+            ({ label, illegal }) => `${illegal ? "missed" : "wrongly flagged"}: ${label}`
+        );
+
+        expect(
+            wrong,
+            `the nesting rule disagrees with the parser on:\n  ${wrong.join("\n  ")}\n\n` +
+                `The legal specimens are the load-bearing half — without them this rule can be tightened into one that rejects valid pipelines and nothing here would notice.`
+        ).toEqual([]);
+
+        // A rule that only ever refuses is trivially "safe" and useless, so pin
+        // that both verdicts are actually reachable from this table.
+        expect(NESTING_SPECIMENS.some(({ illegal }) => illegal)).toBe(true);
+        expect(NESTING_SPECIMENS.some(({ illegal }) => !illegal)).toBe(true);
+    });
+
     it("reads a pipeline the parser would accept, not merely one that splits into steps", () => {
         const text = readFileSync(join(repoRoot, pipelineFile), "utf8");
         const bad = malformedNestingIn(text);
