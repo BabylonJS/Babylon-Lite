@@ -2,15 +2,14 @@
  * PBR material-plugin bridge (dynamically imported only when a PBR material in
  * the scene carries `plugins`). Turns `MaterialPlugin[]` into a single `PbrExt`
  * registered through `_registerPbrExt`, hooking every lifecycle stage:
- *   detect   → encodes a per-signature index into features2 high bits so the
- *              compose/pipeline caches rebuild on any plugin change.
+ *   detect   → provides a per-signature shader variant outside the native
+ *              feature bitfields so plugin and extension flags cannot collide.
  *   frag     → returns the composed plugin ShaderFragment for that signature.
  *   writeUbo → routes plugin UBO writes into the material UBO.
  *   bind     → appends plugin texture/sampler bind entries (fragment phase).
  *   textures → enumerates plugin textures for acquire/release.
  *
- * The plugin signature index lives in features2 bits 24..31 (unused by the
- * native PBR flag set, which only reaches bit 20).
+ * The plugin signature index is carried by Material._pi.
  */
 
 import type { PbrExt } from "../pbr/pbr-flags.js";
@@ -18,8 +17,6 @@ import type { PbrMaterialProps } from "../pbr/pbr-material.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { MaterialPlugin } from "./material-plugin.js";
 import { bindPluginTextures, buildPluginFragment, enabledPlugins, pluginSignature, writePluginUbo } from "./plugin-bridge-shared.js";
-
-const PLUGIN_INDEX_SHIFT = 24;
 
 interface PluginEntry {
     readonly _plugins: readonly MaterialPlugin[];
@@ -54,14 +51,13 @@ const pbrPluginExt: PbrExt = {
     id: "plugin",
     phase: "fragment",
     detect(mat) {
-        const plugins = (mat as PbrMaterialProps & { plugins?: MaterialPlugin[] }).plugins;
-        if (!plugins?.length) {
-            return { f: 0, f2: 0 };
-        }
-        return { f: 0, f2: _indexFor(plugins) << PLUGIN_INDEX_SHIFT };
+        const material = mat as PbrMaterialProps & { plugins?: MaterialPlugin[] };
+        const plugins = material.plugins;
+        material._pi = plugins?.length ? _indexFor(plugins) : 0;
+        return { f: 0, f2: 0 };
     },
     frag(ctx) {
-        const idx = (ctx._features2 >>> PLUGIN_INDEX_SHIFT) & 0xff;
+        const idx = ctx._pi ?? 0;
         if (!idx) {
             return null;
         }

@@ -7,10 +7,32 @@ import type { EnvironmentRecoverySource } from "../../../packages/babylon-lite/s
 import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
 
+const hdrMocks = vi.hoisted(() => ({
+    parseRGBE: vi.fn(() => ({ width: 1, height: 1, data: new Float32Array(3) })),
+    computeSHFromEquirect: vi.fn(() => new Float32Array(27)),
+    equirectToCubemapGPU: vi.fn(() => makeTexture("hdr-source")),
+    prefilterCubemapGPU: vi.fn(() => makeTexture("hdr-specular")),
+    generateBrdfLut: vi.fn(() => makeTexture("hdr-brdf")),
+}));
+
 vi.mock("../../../packages/babylon-lite/src/loader-env/rgbd-decode.js", () => ({
     uploadCubemapRGBD: vi.fn(() => makeTexture("specular")),
     decodeBrdfPng: vi.fn(() => makeTexture("brdf")),
 }));
+
+vi.mock("../../../packages/babylon-lite/src/loader-hdr/hdr-parser.js", () => ({
+    parseRGBE: hdrMocks.parseRGBE,
+    computeSHFromEquirect: hdrMocks.computeSHFromEquirect,
+}));
+
+vi.mock("../../../packages/babylon-lite/src/loader-hdr/hdr-ibl-pipeline.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../../../packages/babylon-lite/src/loader-hdr/hdr-ibl-pipeline.js")>()),
+    equirectToCubemapGPU: hdrMocks.equirectToCubemapGPU,
+    prefilterCubemapGPU: hdrMocks.prefilterCubemapGPU,
+    generateBrdfLut: hdrMocks.generateBrdfLut,
+}));
+
+import { HDR_LOD_GENERATION_SCALE } from "../../../packages/babylon-lite/src/loader-hdr/hdr-ibl-pipeline.js";
 
 /** The subset of the fake texture the ref-count assertions need. */
 type FakeTexture = { destroy: ReturnType<typeof vi.fn> };
@@ -205,6 +227,27 @@ describe("rebuildSceneEnvironment", () => {
         // pre-scaled array rather than allocating a fresh one the scene UBO would have to re-read.
         expect(textures.sphericalHarmonics).toBe(originalHarmonics);
         expect(textures.specularCube).not.toBe(originalCube);
+    });
+
+    it("preserves Babylon.js' HDR LOD generation scale across recovery", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => new Response(new ArrayBuffer(0)))
+        );
+        const textures = makeEnvironmentTextures();
+        textures.lodGenerationScale = 1;
+        const source: EnvironmentRecoverySource = {
+            kind: "hdr",
+            url: "/assets/studio.hdr",
+            faceSize: 128,
+        };
+        const scene = makeScene(textures, source);
+
+        await rebuildSceneEnvironment(makeEngine(), scene);
+
+        expect(HDR_LOD_GENERATION_SCALE).toBe(0.8);
+        expect(textures.lodGenerationScale).toBe(HDR_LOD_GENERATION_SCALE);
+        expect(hdrMocks.prefilterCubemapGPU).toHaveBeenCalledWith(expect.anything(), hdrMocks.equirectToCubemapGPU.mock.results[0]!.value, source.faceSize, 8);
     });
 
     it("releases every generation of replacement textures, not just the most recent one", async () => {
